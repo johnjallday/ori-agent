@@ -1,3 +1,10 @@
+import {
+  assistantSetupMilestoneView,
+  assistantSetupMilestoneViews,
+  createPresentation,
+  requestedMilestones
+} from './assistant-led-setup-presentation.js';
+
 const API_ROOT = '/api/personal-assistant/setup/file-janitor';
 const EXPLICIT_STATES = new Set(['needs_hq', 'provisioning_hq', 'active', 'paused']);
 const PROACTIVE_STATES = new Set(['needs_hq', 'provisioning_hq', 'active']);
@@ -38,39 +45,19 @@ export function assistantSetupModelLabel(role) {
   return `${action} ${name} · ${model || 'Configured; chat needs a model'}`;
 }
 
-const MILESTONE_STATUS_LABELS = {
-  pending: 'Waiting',
-  creating: 'Creating',
-  reusing: 'Reusing',
-  created: 'Created',
-  reused: 'Reused',
-  failed: 'Failed',
-  needs_review: 'Needs review'
-};
+export { assistantSetupMilestoneView, assistantSetupMilestoneViews };
 
-// Turns one server milestone into display data. Identity is the server's `id`;
-// the display name is never read as an identifier. A status the client does not
-// know is shown as "Needs review", never as success.
-export function assistantSetupMilestoneView(milestone) {
-  const status = Object.hasOwn(MILESTONE_STATUS_LABELS, milestone?.status)
-    ? milestone.status
-    : 'needs_review';
-  const fallbackName = milestone?.kind === 'workspace' ? 'File Janitor' : 'Team member';
-  const details = [];
-  if (milestone?.needs_model) details.push('Configured; chat needs a model');
-  return {
-    key: String(milestone?.id || ''),
-    kind: String(milestone?.kind || ''),
-    name: String(milestone?.name || fallbackName),
-    status,
-    statusLabel: MILESTONE_STATUS_LABELS[status],
-    details,
-    resourceID: String(milestone?.resource_id || '')
-  };
-}
+// Read-only refresh while the server reports preparation in flight. The timer
+// only re-reads; it never decides a status.
+const REFRESH_INTERVAL_MS = 1500;
+const REFRESH_MAX_ATTEMPTS = 20;
 
-export function assistantSetupMilestoneViews(milestones) {
-  return Array.isArray(milestones) ? milestones.map(assistantSetupMilestoneView) : [];
+export function assistantSetupNeedsRefresh(projection) {
+  if (!projection) return false;
+  if (projection.view_state === 'setting_up') return true;
+  return (projection.milestones || []).some(
+    milestone => milestone?.status === 'creating' || milestone?.status === 'reusing'
+  );
 }
 
 export function safeAssistantSetupRoute(route) {
@@ -179,6 +166,8 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     target: doc.getElementById('assistantLedSetupTarget'),
     team: doc.getElementById('assistantLedSetupTeam'),
     milestones: doc.getElementById('assistantLedSetupMilestones'),
+    replay: doc.getElementById('assistantLedSetupReplay'),
+    refresh: doc.getElementById('assistantLedSetupRefresh'),
     details: doc.getElementById('assistantLedSetupDetails'),
     metadata: doc.getElementById('assistantLedSetupMetadata'),
     folder: doc.getElementById('assistantLedSetupFolder'),
@@ -194,7 +183,69 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     error: doc.getElementById('assistantLedSetupError'),
     actions: doc.getElementById('assistantLedSetupActions')
   };
-  const state = { projection: null, pending: false, explicit: false, relationshipState: '' };
+  const state = {
+    projection: null,
+    pending: false,
+    picking: false,
+    explicit: false,
+    relationshipState: '',
+    refreshTimer: null,
+    refreshAttempts: 0
+  };
+
+  function firstEnabledAction() {
+    return els.actions.querySelector?.('button:not([disabled]), a[href]') || null;
+  }
+
+  // Continue moves focus to the card's Choose folder control without pressing
+  // it: the native picker only opens from its own explicit click.
+  function focusChooseFolder() {
+    const target =
+      els.actions.querySelector?.('[data-setup-action="choose_folder"]:not([disabled])') ||
+      firstEnabledAction() ||
+      els.title;
+    target?.focus?.();
+  }
+
+  const presentation = createPresentation({
+    document: doc,
+    window: win,
+    canOpen: () => !state.picking,
+    onContinue: focusChooseFolder,
+    onClosed: invoker => {
+      if (invoker?.isConnected && !invoker.disabled) invoker.focus();
+      else (firstEnabledAction() || els.title)?.focus?.();
+    }
+  });
+
+  function clearRefresh() {
+    if (state.refreshTimer !== null) win.clearTimeout(state.refreshTimer);
+    state.refreshTimer = null;
+  }
+
+  // Bounded, read-only refresh while the server reports an in-flight step. It
+  // stops on a terminal state, a hidden card, or a hidden tab, and after the cap
+  // hands control to a manual Refresh button.
+  function scheduleRefresh() {
+    clearRefresh();
+    const needs = assistantSetupNeedsRefresh(state.projection);
+    if (!needs) {
+      state.refreshAttempts = 0;
+      els.refresh.hidden = true;
+      return;
+    }
+    if (root.hidden || doc.hidden || state.pending) return;
+    if (state.refreshAttempts >= REFRESH_MAX_ATTEMPTS) {
+      els.refresh.hidden = false;
+      return;
+    }
+    els.refresh.hidden = true;
+    state.refreshTimer = win.setTimeout(() => {
+      state.refreshTimer = null;
+      state.refreshAttempts += 1;
+      void load('');
+    }, REFRESH_INTERVAL_MS);
+  }
 
   function setError(message, repairRoute = '') {
     els.error.textContent = String(message || '');
@@ -345,6 +396,11 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       els.details.hidden = true;
     }
     els.milestones.hidden = !els.milestones.childElementCount;
+    const anyReceipt = assistantSetupMilestoneViews(projection.milestones).some(
+      view => view.status === 'created' || view.status === 'reused'
+    );
+    els.replay.hidden = !anyReceipt || !presentation;
+    presentation?.update(projection.milestones);
 
     const monitoring = projection.monitoring_review || null;
     els.monitoring.hidden = !monitoring;
@@ -386,8 +442,12 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     if (announce) setError('');
     if (projection.view_state === 'recommendation_deferred' && !state.explicit) {
       root.hidden = true;
+      scheduleRefresh();
       return;
     }
+    scheduleRefresh();
+    // The modal presentation owns focus while it is open.
+    if (presentation?.isOpen()) return;
     const replacement = focusedAction
       ? els.actions.querySelector?.(`[data-setup-action="${focusedAction}"]`)
       : null;
@@ -431,6 +491,9 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     if (state.pending || !state.projection?.run) return false;
     const run = state.projection.run;
     const workspaceID = run.target_workspace_id;
+    // Never stack the read-only presentation over the native folder picker.
+    state.picking = true;
+    presentation?.close({ restoreFocus: false });
     const trigger = doc.activeElement;
     state.pending = true;
     setError('');
@@ -489,6 +552,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       return false;
     } finally {
       state.pending = false;
+      state.picking = false;
       render(state.projection, { announce: false });
     }
   }
@@ -498,6 +562,13 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     if (actionID === 'choose_folder') return chooseFolder();
     const request = assistantSetupRequest(actionID, state.projection);
     if (!request) return false;
+    const accepting = actionID === 'accept';
+    if (accepting) {
+      // Show the reviewed values at once; statuses arrive only from the server.
+      presentation?.open(requestedMilestones(state.projection?.proposal), {
+        invoker: doc.activeElement
+      });
+    }
     state.pending = true;
     setError('');
     render(state.projection, { announce: false });
@@ -519,6 +590,8 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       }
       return true;
     } catch (error) {
+      // A refused accept has nothing to show: close the requested view first.
+      if (accepting) presentation?.close();
       if (error.setup) render(error.setup, { announce: false });
       setError(error.message || 'Setup could not continue. Nothing else was changed.');
       return false;
@@ -551,8 +624,20 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     void load('', { focus: false });
   }
 
+  els.replay?.addEventListener('click', () => {
+    presentation?.open(state.projection?.milestones, { invoker: els.replay });
+  });
+  els.refresh?.addEventListener('click', () => {
+    state.refreshAttempts = 0;
+    els.refresh.hidden = true;
+    void load('');
+  });
+  doc.addEventListener('visibilitychange', () => {
+    if (!doc.hidden) scheduleRefresh();
+    else clearRefresh();
+  });
   doc.addEventListener('personal-assistant:status', onRelationship);
-  return { load, act, render, startFromMission, state, els };
+  return { load, act, render, startFromMission, state, els, presentation };
 }
 
 let controller = null;

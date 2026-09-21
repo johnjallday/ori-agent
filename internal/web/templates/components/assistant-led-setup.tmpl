@@ -14,6 +14,10 @@
   <div id="assistantLedSetupPlan" class="assistant-led-setup__plan" hidden>
     <p id="assistantLedSetupTarget" class="assistant-led-setup__target"></p>
     <ul id="assistantLedSetupMilestones" class="assistant-led-setup__milestones" aria-label="Workspace and team setup" hidden></ul>
+    <p class="assistant-led-setup__sequence-controls">
+      <button type="button" id="assistantLedSetupReplay" class="assistant-led-setup__secondary" hidden>View setup walkthrough</button>
+      <button type="button" id="assistantLedSetupRefresh" class="assistant-led-setup__secondary" hidden>Refresh</button>
+    </p>
     <ul id="assistantLedSetupTeam"class="assistant-led-setup__team" aria-label="Reviewed File Janitor team"></ul>
     <details id="assistantLedSetupDetails" class="assistant-led-setup__details">
       <summary>What this setup will do</summary>
@@ -40,4 +44,29 @@
   <p id="assistantLedSetupError" class="assistant-led-setup__error" role="alert" hidden></p>
   <div id="assistantLedSetupActions" class="assistant-led-setup__actions"></div>
 </section>
+{{/* Read-only presentation of the reviewed workspace/team preparation. It holds
+     no form, no submit control, and no named inputs: it only displays server
+     milestones and closes. Text is filled with textContent by
+     assistant-led-setup-presentation.js. */}}
+<dialog id="assistantLedSetupDialog" class="assistant-led-setup-dialog" data-mode="requested"
+        aria-labelledby="assistantLedSetupDialogTitle" aria-describedby="assistantLedSetupDialogNote">
+  <div class="assistant-led-setup-dialog__frame">
+    <header class="assistant-led-setup-dialog__header">
+      <span class="assistant-led-setup-dialog__badge">Assistant setup · read-only</span>
+      <h4 id="assistantLedSetupDialogTitle" class="assistant-led-setup-dialog__title" tabindex="-1">Setting up File Janitor</h4>
+      <p id="assistantLedSetupDialogMode" class="assistant-led-setup-dialog__mode"></p>
+      <p id="assistantLedSetupDialogNote" class="assistant-led-setup-dialog__note"></p>
+      <p id="assistantLedSetupDialogStep" class="assistant-led-setup-dialog__step"></p>
+    </header>
+    <div id="assistantLedSetupDialogPanels" class="assistant-led-setup-dialog__panels"></div>
+    <p id="assistantLedSetupDialogLive" class="assistant-led-setup-dialog__live" role="status" aria-live="polite"></p>
+    <footer class="assistant-led-setup-dialog__footer">
+      <button type="button" id="assistantLedSetupDialogSkip" class="assistant-led-setup__secondary">Skip</button>
+      <button type="button" id="assistantLedSetupDialogBack" class="assistant-led-setup__secondary" hidden>Back</button>
+      <button type="button" id="assistantLedSetupDialogNext" class="assistant-led-setup__primary">Next</button>
+      <button type="button" id="assistantLedSetupDialogContinue" class="assistant-led-setup__primary" hidden>Continue</button>
+      <button type="button" id="assistantLedSetupDialogClose" class="assistant-led-setup__secondary">Close</button>
+    </footer>
+  </div>
+</dialog>
 {{end}}

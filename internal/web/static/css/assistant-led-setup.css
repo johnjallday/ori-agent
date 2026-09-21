@@ -225,7 +225,240 @@
   opacity: 0.62;
 }
 
+.assistant-led-setup__sequence-controls {
+  margin: 0.55rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.assistant-led-setup__sequence-controls button {
+  min-height: 2.25rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 65%, transparent);
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font-weight: 650;
+}
+
+.assistant-led-setup__sequence-controls button[hidden] {
+  display: none;
+}
+
+/* Read-only presentation. A native modal dialog sits in the top layer, above
+   the assistant drawer's stacking context and every page modal. */
+.assistant-led-setup-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 58%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card-bg, #fff) 96%, #8b5cf6 4%);
+  color: var(--text-primary, #172033);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 38%);
+  overflow: hidden;
+}
+
+.assistant-led-setup-dialog::backdrop {
+  background: rgb(15 10 30 / 55%);
+}
+
+.assistant-led-setup-dialog__frame {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 2rem);
+  padding: 1rem;
+  gap: 0.6rem;
+  overflow-y: auto;
+}
+
+.assistant-led-setup-dialog__badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #8b5cf6 18%, transparent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.assistant-led-setup-dialog__title {
+  margin: 0.35rem 0 0;
+  font-size: 1.1rem;
+}
+
+.assistant-led-setup-dialog__title:focus-visible {
+  outline: 3px solid color-mix(in srgb, #7c3aed 55%, transparent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.assistant-led-setup-dialog__mode {
+  margin: 0.3rem 0 0;
+  font-weight: 700;
+}
+
+.assistant-led-setup-dialog__note,
+.assistant-led-setup-dialog__step {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary, #5b6475);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.assistant-led-setup-dialog__panels {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.assistant-led-setup-dialog__panel[hidden] {
+  display: none;
+}
+
+.assistant-led-setup-dialog__panel h5 {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+}
+
+.assistant-led-setup-dialog__entry {
+  margin: 0 0 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 45%, transparent);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+
+.assistant-led-setup-dialog__chip {
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary, #5b6475) 16%, transparent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.assistant-led-setup-dialog__entry[data-status="created"] .assistant-led-setup-dialog__chip,
+.assistant-led-setup-dialog__entry[data-status="reused"] .assistant-led-setup-dialog__chip {
+  background: color-mix(in srgb, #16a34a 20%, transparent);
+}
+
+.assistant-led-setup-dialog__entry[data-status="creating"] .assistant-led-setup-dialog__chip,
+.assistant-led-setup-dialog__entry[data-status="reusing"] .assistant-led-setup-dialog__chip {
+  background: color-mix(in srgb, #8b5cf6 22%, transparent);
+}
+
+.assistant-led-setup-dialog__entry[data-status="failed"] .assistant-led-setup-dialog__chip,
+.assistant-led-setup-dialog__entry[data-status="needs_review"] .assistant-led-setup-dialog__chip {
+  background: color-mix(in srgb, var(--danger-color, #b42318) 20%, transparent);
+}
+
+.assistant-led-setup-dialog__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.15rem 0.75rem;
+  margin: 0.45rem 0 0;
+  font-size: 0.84rem;
+}
+
+.assistant-led-setup-dialog__facts dt {
+  color: var(--text-secondary, #5b6475);
+}
+
+.assistant-led-setup-dialog__facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.assistant-led-setup-dialog__empty {
+  margin: 0;
+  color: var(--text-secondary, #5b6475);
+  font-size: 0.84rem;
+}
+
+.assistant-led-setup-dialog__live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.assistant-led-setup-dialog__footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.assistant-led-setup-dialog__footer button {
+  min-height: 2.5rem;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 65%, transparent);
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font-weight: 650;
+}
+
+.assistant-led-setup-dialog__footer button[hidden] {
+  display: none;
+}
+
+.assistant-led-setup-dialog__footer .assistant-led-setup__primary {
+  border-color: transparent;
+  background: #6d28d9;
+  color: #fff;
+  font-weight: 700;
+}
+
+.assistant-led-setup-dialog__footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .assistant-led-setup-dialog__panel:not([hidden]) {
+    animation: assistant-led-setup-panel-in 0.18s ease-out;
+  }
+}
+
+@keyframes assistant-led-setup-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @media (max-width: 420px) {
+  .assistant-led-setup-dialog {
+    width: calc(100vw - 1rem);
+  }
+
+  .assistant-led-setup-dialog__frame {
+    padding: 0.85rem;
+  }
+
+  .assistant-led-setup-dialog__footer {
+    flex-direction: column;
+  }
+
+  .assistant-led-setup-dialog__footer button {
+    width: 100%;
+  }
+
+  .assistant-led-setup-dialog__facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .assistant-led-setup {
     padding: 0.85rem;
     border-radius: 12px;
@@ -244,8 +477,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .assistant-led-setup * {
+  .assistant-led-setup *,
+  .assistant-led-setup-dialog * {
     scroll-behavior: auto !important;
     transition: none !important;
+    animation: none !important;
   }
 }

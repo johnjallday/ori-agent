@@ -6,6 +6,7 @@ import {
   assistantSetupMilestoneView,
   assistantSetupMilestoneViews,
   assistantSetupModelLabel,
+  assistantSetupNeedsRefresh,
   assistantSetupRequest,
   safeAssistantSetupRoute
 } from './assistant-led-setup.js';
@@ -90,6 +91,33 @@ test('milestone views are list-driven for several roles and keep long names inta
   assert.equal(views[1].name, long);
   assert.equal(views[1].statusLabel, 'Reused');
   assert.deepEqual(assistantSetupMilestoneViews(undefined), []);
+});
+
+test('refresh is requested only while the server reports preparation in flight', () => {
+  assert.equal(assistantSetupNeedsRefresh(null), false);
+  assert.equal(assistantSetupNeedsRefresh({ view_state: 'needs_permission' }), false);
+  assert.equal(assistantSetupNeedsRefresh({ view_state: 'setting_up' }), true);
+  assert.equal(
+    assistantSetupNeedsRefresh({
+      view_state: 'needs_permission',
+      milestones: [{ status: 'creating' }]
+    }),
+    true
+  );
+  assert.equal(
+    assistantSetupNeedsRefresh({
+      view_state: 'needs_permission',
+      milestones: [{ status: 'created' }]
+    }),
+    false
+  );
+  assert.equal(
+    assistantSetupNeedsRefresh({
+      view_state: 'needs_attention',
+      milestones: [{ status: 'needs_review' }]
+    }),
+    false
+  );
 });
 
 test('mutation requests carry only closed revisions and server-selected target', () => {

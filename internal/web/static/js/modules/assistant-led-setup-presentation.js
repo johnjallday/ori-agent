@@ -1,0 +1,468 @@
+// Read-only "Assistant setup" presentation for the File Janitor workspace/team
+// preparation. Everything shown comes from the server's `milestones`; timers
+// here may only change which already-receipted panel is in view, never a status.
+
+const STATUS_LABELS = {
+  pending: 'Waiting',
+  creating: 'Creating',
+  reusing: 'Reusing',
+  created: 'Created',
+  reused: 'Reused',
+  failed: 'Failed',
+  needs_review: 'Needs review'
+};
+const RECEIPTED = new Set(['created', 'reused']);
+const IN_FLIGHT = new Set(['creating', 'reusing']);
+const STOPPED = new Set(['failed', 'needs_review']);
+
+export const MODE_LABELS = {
+  requested: 'Requested — waiting for Ori',
+  live: 'Live — Ori is preparing this now',
+  walkthrough: 'Receipt walkthrough',
+  stopped: 'Stopped — needs your attention'
+};
+
+const MODE_NOTES = {
+  requested: 'Showing what you reviewed. Nothing is recorded yet.',
+  live: 'Ori reported this step in progress. The status updates only from what Ori records.',
+  walkthrough:
+    'This replays what Ori already recorded. Nothing is being created now, and closing it changes nothing.',
+  stopped:
+    'Ori stopped at this step. What was already recorded is kept; nothing is retried for you.'
+};
+
+// Turns one server milestone into display data. Identity is the server's `id`;
+// the display name is never read as an identifier. A status the client does not
+// know is shown as "Needs review", never as success.
+export function assistantSetupMilestoneView(milestone) {
+  const status = Object.hasOwn(STATUS_LABELS, milestone?.status)
+    ? milestone.status
+    : 'needs_review';
+  const fallbackName = milestone?.kind === 'workspace' ? 'File Janitor' : 'Team member';
+  const details = [];
+  if (milestone?.needs_model) details.push('Configured; chat needs a model');
+  const blueprint = milestone?.blueprint_id
+    ? `${milestone.blueprint_id}${milestone.blueprint_version ? ` v${milestone.blueprint_version}` : ''}`
+    : '';
+  return {
+    key: String(milestone?.id || ''),
+    kind: String(milestone?.kind || ''),
+    name: String(milestone?.name || fallbackName),
+    roleID: String(milestone?.role_id || ''),
+    action: milestone?.action === 'reuse' ? 'reuse' : 'create',
+    status,
+    statusLabel: STATUS_LABELS[status],
+    details,
+    blueprint,
+    ownership: String(milestone?.ownership || ''),
+    recordedAt: String(milestone?.recorded_at || ''),
+    errorCode: String(milestone?.error_code || ''),
+    resourceID: String(milestone?.resource_id || '')
+  };
+}
+
+export function assistantSetupMilestoneViews(milestones) {
+  return Array.isArray(milestones) ? milestones.map(assistantSetupMilestoneView) : [];
+}
+
+// The reviewed values shown before Ori has reported anything. Every entry is
+// `pending`: this is what was approved, never a claim that it happened.
+export function requestedMilestones(proposal) {
+  if (!proposal) return [];
+  const blueprint = {
+    blueprint_id: proposal.blueprint_id,
+    blueprint_version: proposal.blueprint_version
+  };
+  if (proposal.mode === 'adopt') {
+    return [
+      {
+        id: 'workspace',
+        kind: 'workspace',
+        name: 'File Janitor',
+        action: 'reuse',
+        status: 'pending'
+      },
+      {
+        id: 'existing_team',
+        kind: 'existing_team',
+        name: 'Existing team kept as is',
+        action: 'reuse',
+        status: 'pending'
+      }
+    ];
+  }
+  const roles = (proposal.team || []).map(role => ({
+    id: `role:${role?.role_id || ''}`,
+    kind: 'agent_role',
+    name: role?.name,
+    role_id: role?.role_id,
+    action: role?.action,
+    status: 'pending',
+    needs_model: role?.model_configured === false,
+    ...blueprint
+  }));
+  return [
+    {
+      id: 'workspace',
+      kind: 'workspace',
+      name: 'File Janitor',
+      action: 'create',
+      status: 'pending',
+      ...blueprint
+    },
+    ...roles
+  ];
+}
+
+// requested: nothing reported yet; live: the server reports an attempt in
+// flight; stopped: a failed/needs-review step; walkthrough: everything is
+// receipted (the normal case, because preparation takes milliseconds).
+export function presentationMode(milestones) {
+  const views = assistantSetupMilestoneViews(milestones);
+  if (!views.length) return 'requested';
+  if (views.some(view => IN_FLIGHT.has(view.status))) return 'live';
+  if (views.some(view => STOPPED.has(view.status))) return 'stopped';
+  if (views.every(view => RECEIPTED.has(view.status))) return 'walkthrough';
+  return 'requested';
+}
+
+export function panelStatus(entries) {
+  if (!entries.length) return 'pending';
+  const statuses = entries.map(entry => entry.status);
+  for (const status of ['failed', 'needs_review', 'creating', 'reusing', 'pending']) {
+    if (statuses.includes(status)) return status;
+  }
+  return statuses.includes('created') ? 'created' : 'reused';
+}
+
+function plural(count, one, many) {
+  return count === 1 ? one : many;
+}
+
+// Three panels, list-driven so several roles need no code change: the
+// workspace, every agent (or the adopted team), and a receipt summary of what
+// was actually recorded.
+export function buildPanels(milestones) {
+  const views = assistantSetupMilestoneViews(milestones);
+  const workspaces = views.filter(view => view.kind === 'workspace');
+  const agents = views.filter(view => view.kind !== 'workspace');
+  const receipted = views.filter(view => RECEIPTED.has(view.status));
+  const reuseAll = agents.length > 0 && agents.every(view => view.action === 'reuse');
+  const adopted = agents.some(view => view.kind === 'existing_team');
+  const workspaceTitle = workspaces.some(view => view.action === 'reuse')
+    ? 'Reuse Workspace'
+    : 'Create Workspace';
+  let agentTitle = plural(agents.length, 'Create Agent', 'Create Agents');
+  if (adopted) agentTitle = 'Existing team';
+  else if (reuseAll) agentTitle = plural(agents.length, 'Reuse Agent', 'Reuse Agents');
+  return [
+    {
+      id: 'workspace',
+      title: workspaceTitle,
+      entries: workspaces,
+      status: panelStatus(workspaces)
+    },
+    { id: 'agents', title: agentTitle, entries: agents, status: panelStatus(agents) },
+    { id: 'receipt', title: 'Receipt summary', entries: receipted, status: panelStatus(receipted) }
+  ];
+}
+
+// How many panels may be viewed. In walkthrough mode every panel; otherwise a
+// panel opens only once its own entries are receipted or are stopping/live, and
+// the receipt summary needs at least one receipt. The first panel always shows.
+export function availablePanelCount(mode, panels) {
+  if (mode === 'walkthrough') return panels.length;
+  let count = 1;
+  for (let index = 1; index < panels.length; index += 1) {
+    const panel = panels[index];
+    const reachable =
+      panel.id === 'receipt' ? panel.entries.length > 0 : panel.status !== 'pending';
+    if (!reachable) break;
+    count = index + 1;
+  }
+  return count;
+}
+
+export function receiptTime(milestones) {
+  const stamps = assistantSetupMilestoneViews(milestones)
+    .filter(view => RECEIPTED.has(view.status) && view.recordedAt)
+    .map(view => new Date(view.recordedAt))
+    .filter(date => !Number.isNaN(date.getTime()))
+    .sort((a, b) => b - a);
+  return stamps.length ? stamps[0] : null;
+}
+
+export function modeLine(mode, milestones, locale) {
+  const label = MODE_LABELS[mode] || MODE_LABELS.requested;
+  const when = mode === 'walkthrough' ? receiptTime(milestones) : null;
+  return when ? `${label} · recorded ${when.toLocaleString(locale)}` : label;
+}
+
+export function modeNote(mode) {
+  return MODE_NOTES[mode] || MODE_NOTES.requested;
+}
+
+// One short message per status change: the panel's title and its status.
+export function announcementFor(mode, panels) {
+  const parts = panels
+    .filter(panel => panel.entries.length)
+    .map(panel => `${panel.title}: ${STATUS_LABELS[panel.status] || 'Needs review'}`);
+  return `${MODE_LABELS[mode] || MODE_LABELS.requested}. ${parts.join('. ')}`.trim();
+}
+
+// Auto-advance across already-available panels. The timer only calls
+// onAdvance(index); it cannot read or change a milestone. Inert under reduced
+// motion. Timers are injected so tests never wait.
+export function createStepScheduler({
+  setTimer = (fn, ms) => globalThis.setTimeout(fn, ms),
+  clearTimer = id => globalThis.clearTimeout(id),
+  intervalMs = 1800,
+  reducedMotion = false,
+  onAdvance = () => {}
+} = {}) {
+  let handle = null;
+  function stop() {
+    if (handle !== null) clearTimer(handle);
+    handle = null;
+  }
+  function start({ current, available }) {
+    stop();
+    if (reducedMotion || current + 1 >= available) return false;
+    handle = setTimer(() => {
+      handle = null;
+      onAdvance(current + 1);
+    }, intervalMs);
+    return true;
+  }
+  return {
+    start,
+    stop,
+    get pending() {
+      return handle !== null;
+    }
+  };
+}
+
+function actionLabel(action) {
+  return action === 'reuse' ? 'Reuse' : 'Create';
+}
+
+function ownershipLabel(ownership) {
+  if (ownership === 'created') return 'Created by this setup';
+  if (ownership === 'adopted' || ownership === 'updated') return 'Existing, kept as is';
+  return '';
+}
+
+export function entryFacts(view, locale) {
+  const facts = [['Reviewed action', actionLabel(view.action)]];
+  if (view.roleID) facts.push(['Role', view.roleID]);
+  if (view.blueprint) facts.push(['Blueprint', view.blueprint]);
+  const ownership = ownershipLabel(view.ownership);
+  if (ownership) facts.push(['Ownership', ownership]);
+  if (view.recordedAt) {
+    const when = new Date(view.recordedAt);
+    if (!Number.isNaN(when.getTime())) facts.push(['Recorded', when.toLocaleString(locale)]);
+  }
+  if (view.resourceID) facts.push(['ID', view.resourceID]);
+  if (view.errorCode) facts.push(['Reason code', view.errorCode]);
+  return facts;
+}
+
+// The dialog controller. It sends no request of its own: every button either
+// changes which panel is in view or closes the dialog.
+export function createPresentation({
+  document: doc,
+  window: win,
+  canOpen = () => true,
+  onContinue = () => {},
+  onClosed = () => {}
+}) {
+  const dialog = doc?.getElementById?.('assistantLedSetupDialog');
+  if (!dialog) return null;
+  const els = {
+    title: doc.getElementById('assistantLedSetupDialogTitle'),
+    mode: doc.getElementById('assistantLedSetupDialogMode'),
+    note: doc.getElementById('assistantLedSetupDialogNote'),
+    step: doc.getElementById('assistantLedSetupDialogStep'),
+    panels: doc.getElementById('assistantLedSetupDialogPanels'),
+    live: doc.getElementById('assistantLedSetupDialogLive'),
+    skip: doc.getElementById('assistantLedSetupDialogSkip'),
+    back: doc.getElementById('assistantLedSetupDialogBack'),
+    next: doc.getElementById('assistantLedSetupDialogNext'),
+    proceed: doc.getElementById('assistantLedSetupDialogContinue'),
+    close: doc.getElementById('assistantLedSetupDialogClose')
+  };
+  const state = {
+    milestones: [],
+    index: 0,
+    invoker: null,
+    announced: '',
+    mode: 'requested',
+    suppressRestore: false
+  };
+  const reduced = () => Boolean(win?.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
+  const scheduler = createStepScheduler({
+    reducedMotion: false,
+    setTimer: (fn, ms) => win.setTimeout(fn, ms),
+    clearTimer: id => win.clearTimeout(id),
+    onAdvance: index => {
+      state.index = index;
+      render({ announce: true });
+    }
+  });
+
+  const isOpen = () => dialog.open === true || dialog.hasAttribute('open');
+
+  function entryNode(view) {
+    const node = doc.createElement('div');
+    node.className = 'assistant-led-setup-dialog__entry';
+    node.dataset.milestoneId = view.key;
+    node.dataset.status = view.status;
+    const head = doc.createElement('div');
+    head.className = 'assistant-led-setup-dialog__entry-head';
+    const name = doc.createElement('strong');
+    name.textContent = view.name;
+    const chip = doc.createElement('span');
+    chip.className = 'assistant-led-setup-dialog__chip';
+    chip.textContent = view.statusLabel;
+    head.append(name, ' ', chip);
+    node.append(head);
+    const list = doc.createElement('dl');
+    list.className = 'assistant-led-setup-dialog__facts';
+    entryFacts(view, undefined).forEach(([term, value]) => {
+      const dt = doc.createElement('dt');
+      dt.textContent = term;
+      const dd = doc.createElement('dd');
+      dd.textContent = value;
+      list.append(dt, dd);
+    });
+    view.details.forEach(detail => {
+      const dt = doc.createElement('dt');
+      dt.textContent = 'Model';
+      const dd = doc.createElement('dd');
+      dd.textContent = detail;
+      list.append(dt, dd);
+    });
+    node.append(list);
+    return node;
+  }
+
+  function render({ announce = false } = {}) {
+    const mode = presentationMode(state.milestones);
+    state.mode = mode;
+    const panels = buildPanels(state.milestones);
+    const available = availablePanelCount(mode, panels);
+    const reducedMotion = reduced();
+    scheduler.stop();
+    state.index = Math.max(0, Math.min(state.index, available - 1));
+    dialog.dataset.mode = mode;
+    dialog.dataset.motion = reducedMotion ? 'reduced' : 'full';
+    els.mode.textContent = modeLine(mode, state.milestones);
+    els.note.textContent = modeNote(mode);
+    els.panels.replaceChildren();
+    panels.forEach((panel, index) => {
+      const section = doc.createElement('section');
+      section.className = 'assistant-led-setup-dialog__panel';
+      section.dataset.panelId = panel.id;
+      section.dataset.status = panel.status;
+      const visible = reducedMotion ? index < available : index === state.index;
+      section.hidden = !visible;
+      const heading = doc.createElement('h5');
+      heading.textContent = panel.title;
+      section.append(heading);
+      if (!panel.entries.length) {
+        const empty = doc.createElement('p');
+        empty.className = 'assistant-led-setup-dialog__empty';
+        empty.textContent = 'Nothing has been recorded for this step yet.';
+        section.append(empty);
+      }
+      panel.entries.forEach(view => section.append(entryNode(view)));
+      els.panels.append(section);
+    });
+    els.step.textContent = reducedMotion
+      ? `${available} of ${panels.length} steps available`
+      : `Step ${state.index + 1} of ${panels.length}`;
+    const last = state.index >= panels.length - 1;
+    els.back.hidden = reducedMotion || state.index === 0;
+    els.next.hidden = reducedMotion || last || state.index + 1 >= available;
+    els.skip.hidden = last || reducedMotion;
+    els.proceed.hidden = !(reducedMotion || last);
+    els.proceed.disabled = mode === 'requested' || mode === 'live';
+    if (!reducedMotion) {
+      scheduler.start({ current: state.index, available });
+    }
+    const message = announcementFor(mode, panels);
+    if (announce && message !== state.announced) els.live.textContent = message;
+    state.announced = message;
+  }
+
+  function open(milestones, { invoker = null } = {}) {
+    if (!canOpen()) return false;
+    state.milestones = Array.isArray(milestones) ? milestones : [];
+    state.index = 0;
+    state.invoker = invoker || doc.activeElement || null;
+    state.announced = '';
+    render({ announce: true });
+    if (!isOpen()) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+    }
+    els.title?.focus();
+    return true;
+  }
+
+  // Server projections replace what is shown; the dialog never invents status.
+  function update(milestones) {
+    state.milestones = Array.isArray(milestones) ? milestones : [];
+    if (isOpen()) render({ announce: true });
+  }
+
+  // Focus is restored in exactly one place, when the dialog has closed, so Esc,
+  // Close, and Skip behave the same. Continue suppresses it: it moves focus to
+  // the card's next control itself.
+  function finishClose() {
+    scheduler.stop();
+    const invoker = state.invoker;
+    const suppress = state.suppressRestore;
+    state.invoker = null;
+    state.suppressRestore = false;
+    if (!suppress) onClosed(invoker);
+  }
+
+  function close({ restoreFocus = true } = {}) {
+    scheduler.stop();
+    state.suppressRestore = !restoreFocus;
+    if (!isOpen()) {
+      state.suppressRestore = false;
+      return;
+    }
+    if (typeof dialog.close === 'function') dialog.close();
+    else {
+      dialog.removeAttribute('open');
+      finishClose();
+    }
+  }
+
+  function step(delta) {
+    const panels = buildPanels(state.milestones);
+    const available = availablePanelCount(state.mode, panels);
+    state.index = Math.max(0, Math.min(state.index + delta, available - 1));
+    render({ announce: true });
+  }
+
+  els.skip?.addEventListener('click', () => close());
+  els.close?.addEventListener('click', () => close());
+  els.back?.addEventListener('click', () => step(-1));
+  els.next?.addEventListener('click', () => step(1));
+  els.proceed?.addEventListener('click', () => {
+    close({ restoreFocus: false });
+    onContinue();
+  });
+  // Esc raises `cancel`; let the dialog close, then restore focus like Close.
+  dialog.addEventListener('cancel', () => {
+    scheduler.stop();
+  });
+  dialog.addEventListener('close', finishClose);
+
+  return { open, update, close, isOpen, state };
+}

@@ -294,6 +294,15 @@ Rules the derivation guarantees:
 - **The list is for reading, not an execution claim.** It is ordered workspace, then roles. Actual execution order is agents seeded first, then the workspace persisted (see [Strict reviewed team creation](#strict-reviewed-team-creation)); statuses come only from receipts.
 - **List-driven.** Consumers must not assume a role count. Known limit: the run row stores one role (`team_role_*`) and `validateTeamPlan` requires exactly one, so multi-role receipts (a `role_id` on each resource) are out of scope; the list shape and identity scheme do not change if that lands.
 
+#### Presentation layer (read-only dialog)
+
+The card shows the milestones inline and offers a read-only **Assistant setup** dialog (Create Workspace → Create Agent per role → Receipt summary). It is its own markup, not the real Create Workspace / Create Agent modals: no `<form>`, no submit control, no named inputs, and no System Prompt field (the reviewed `TeamRole` deliberately excludes prompts).
+
+- **Mount and layer.** One native `<dialog>` in the shared card partial, opened with `showModal()`. Top-layer rendering places it above the assistant drawer's stacking context (`.ori-guide` z-index 1040) and every page modal (10100); the browser also supplies the focus trap, inert background, and Esc handling. The drawer stays open beneath it.
+- **Honesty.** Preparation takes milliseconds, so the normal viewing is a labelled **Receipt walkthrough** with the receipt time; a live "Creating" appears only when the server reports an in-flight step (second tab, reload during preparation, slow storage). Before any projection arrives the dialog shows the reviewed values as `Requested — waiting for Ori` with every entry `pending`. Timers may only change which already-receipted panel is in view; a timer, a close, or a skip is never evidence and sends no request.
+- **Refresh.** While the server reports `setting_up` or an in-flight milestone the card re-`GET`s the same route on a fixed interval with a hard attempt cap, stopping on a terminal state, a hidden card, or a hidden tab; after the cap a manual **Refresh** control appears. No new route.
+- **Focus and pickers.** **Continue** closes the dialog and focuses **Choose folder** without activating it. `chooseFolder()` closes the dialog first, and the dialog refuses to open while a folder selection is pending, so it is never stacked over the native picker. Under `prefers-reduced-motion: reduce` there is no auto-advance or transition and every available panel is shown at once.
+
 ### Safe failures
 
 Errors use the existing structured API envelope with a stable code, user-safe message, and optional `retryable`/fresh `setup` projection. Raw paths, filenames, tokens, store errors, provider details, and foreign IDs are never returned.
