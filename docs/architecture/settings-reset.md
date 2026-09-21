@@ -711,13 +711,21 @@ The production builder shares one gate across this initial set of entry points:
 | Covered entry | Permit boundary |
 | --- | --- |
 | Build / Server.Start | Synchronous construction and startup, including task boot reconciliation; this does not account for every service started there |
-| Ordinary HTTP | Through handler return, including GET handlers, which are not assumed read-only; detached work needs its own permit before the response |
+| Ordinary HTTP | Through handler return, including GET handlers, which are not assumed read-only, except for the classified event streams below; detached work needs its own permit before the response |
+| Event streams (SSE) | Revocable stream permit through handler return; does not block the fence; every successful fence cancels the stream context, and Drain waits for zero streams before closing stores |
 | Task polling/execution | Before owner discovery and claims; child registration before dispatch; through final status, result storage and event publication |
 | Step polling/workflows | Before dependency/status changes and claims; through task results and workflow completion rollup |
 | Workspace orchestrator | Mission planning, synchronous task execution, sequential execution and its own mission-to-goroutine handoff |
 | Task scheduler | Before workspace/schedule/wake inspection and changes; mission/reflection child permits registered before the poll returns |
 | CLI executor and CLI HTTP create | Before adapter/provider discovery; through usage/event persistence; HTTP registers detached work before acknowledging 202 |
 | EventBus publication/subscribers | Before history/filter processing; each callback registers before Publish returns and retains admission through its save/panic recovery |
+
+Six read-only SSE routes use a separate exact-pattern, GET-only classifier.
+They remain tracked because their handlers can read stores for the life of the
+connection, but they are observers rather than active work: a successful fence
+cancels them and Drain verifies that every handler has released its permit before
+closing shared stores. Non-GET requests and look-alike paths keep ordinary finite
+permits.
 
 The reset APIs use a separate, explicitly registered control mux inside the
 existing security/recovery/CORS chain. They do not count themselves as ordinary
