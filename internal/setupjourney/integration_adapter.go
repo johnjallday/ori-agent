@@ -246,6 +246,38 @@ func (adapter *ReviewedIntegrationAdapter) offerRelease(ctx context.Context, ent
 	return lastUnsupported
 }
 
+// InspectedReleaseReason decides whether this build can load one inspected
+// reviewed release, given what Inspect returned for it: "" when it can.
+//
+// ReasonIntegrationUnsupported means the release asks for more than this build
+// offers — a host feature, protocol, program schema, blueprint version or
+// platform it does not have. It is the only refusal a caller may step over to
+// try an older release. Every other reason says something is wrong with the
+// release or with reading it (an unreachable source, a bad clone, a malformed
+// manifest, an identity or trust mismatch) and must stop the caller instead of
+// sliding quietly to an older release.
+//
+// Guided setup and the Plugins page update check share this rule, so they can
+// never disagree about which reviewed releases this build can load.
+func InspectedReleaseReason(
+	entry reviewedintegration.Entry, version, source string,
+	descriptor plugin.PluginDescriptor, report plugin.TrustReport, inspectErr error, platform string,
+) ReasonCode {
+	if inspectErr != nil {
+		// A release whose manifest names a host feature or protocol this build
+		// does not have is refused while it is being read, before any
+		// descriptor exists to validate. That is the same "cannot load this
+		// release" answer as a failed contribution check, and it is the case
+		// the newest reviewed release hits first after a plugin adopts a new
+		// host feature.
+		if releaseNeedsANewerHost(inspectErr) {
+			return ReasonIntegrationUnsupported
+		}
+		return ReasonOwnerUnavailable
+	}
+	return validateReviewedDescriptor(entry, version, source, descriptor, report, platform)
+}
+
 // releaseNeedsANewerHost reports whether an inspection was refused because the
 // release asks for more than this build offers, rather than because something
 // went wrong reading it.
@@ -301,27 +333,18 @@ func (adapter *ReviewedIntegrationAdapter) offerOneRelease(
 		}
 	}
 	descriptor, report, inspectErr := adapter.manager.Inspect(target.Source, entry.SourceFormat)
+	reason := InspectedReleaseReason(entry, target.Version, target.Source, descriptor, report, inspectErr, adapter.platform)
+	outcome := releaseSettled
+	if reason == ReasonIntegrationUnsupported {
+		outcome = releaseUnsupported
+	}
 	if inspectErr != nil {
 		projection.StateRevision = integrationStateDigest(entry, &target, current, nil, newestUnsupported)
-		// A release whose manifest names a host feature or protocol this build
-		// does not have is refused while it is being read, before any
-		// descriptor exists to validate. That is the same "cannot load this
-		// release" answer as a failed contribution check, and it is the case
-		// the newest reviewed release hits first after a plugin adopts a new
-		// host feature. Everything else — an unreachable source, a bad clone,
-		// a malformed manifest — is a real failure and still blocks.
-		if releaseNeedsANewerHost(inspectErr) {
-			return CanonicalStepRead{BlockedReason: ReasonIntegrationUnsupported, Integration: projection, Result: result}, releaseUnsupported
-		}
-		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable, Integration: projection, Result: result}, releaseSettled
+		return CanonicalStepRead{BlockedReason: reason, Integration: projection, Result: result}, outcome
 	}
 	projection.Trust = cloneTrustReport(&report)
 	projection.StateRevision = integrationStateDigest(entry, &target, current, &report, newestUnsupported)
-	if reason := validateReviewedDescriptor(entry, target.Version, target.Source, descriptor, report, adapter.platform); reason != "" {
-		outcome := releaseSettled
-		if reason == ReasonIntegrationUnsupported {
-			outcome = releaseUnsupported
-		}
+	if reason != "" {
 		return CanonicalStepRead{BlockedReason: reason, Integration: projection, Result: result}, outcome
 	}
 	projection.reviewedSource = target.Source

@@ -322,7 +322,7 @@ func (h *Handler) MarketplaceInstallHandler(w http.ResponseWriter, r *http.Reque
 // recorded source. confirm=false returns the trust disclosure plus whether the
 // registered component set changed; confirm=true updates. A plugin the host
 // refuses to update (a reviewed install recorded against a mutable source with
-// nothing newer published) answers 409 reviewed_release_current for both, before
+// no newer reviewed release it can offer) answers 409 reviewed_release_current for both, before
 // any source is read, and its cached availability is left as it was.
 func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -348,7 +348,7 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if replacement.Refuse {
 		if err := orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError(
 			ReviewedReleaseCurrentCode,
-			"This plugin is already on the latest reviewed release. There is nothing newer to install.",
+			"No newer reviewed release is available to install. Ori does not update this plugin from its development branch.",
 		)); err != nil {
 			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
