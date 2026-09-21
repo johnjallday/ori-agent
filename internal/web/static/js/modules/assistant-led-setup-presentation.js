@@ -240,7 +240,7 @@ export function announcementFor(mode, panels) {
 export function createStepScheduler({
   setTimer = (fn, ms) => globalThis.setTimeout(fn, ms),
   clearTimer = id => globalThis.clearTimeout(id),
-  intervalMs = 1800,
+  intervalMs = 5200,
   reducedMotion = false,
   onAdvance = () => {}
 } = {}) {
@@ -295,6 +295,54 @@ export function entryFacts(view, locale) {
   return facts;
 }
 
+// What the read-only "window" for one milestone shows: a title bar, the fields
+// the reviewed setup filled in, and the button the creator pressed. Every value
+// is a reviewed or receipted fact (no path, no prompt, no digest). The window is
+// a picture of what Ori recorded, not a form: it has no input to type into.
+export function windowSpec(view, agents = []) {
+  const reuse = view.action === 'reuse';
+  if (view.kind === 'workspace') {
+    const team = agents.length
+      ? agents
+          .map(agent => `${reuse ? 'Keep' : actionLabel(agent.action)} ${agent.name}`)
+          .join(', ')
+      : 'Reviewed team';
+    return {
+      title: reuse ? 'Reuse Workspace' : 'Create Workspace',
+      steps: ['Blueprint', 'Details', 'Team', 'Review'],
+      fields: [
+        ['Blueprint', view.blueprint || 'file-janitor'],
+        ['Name', view.name],
+        ['Team', team],
+        ['Location', 'Your Ori Workspaces folder']
+      ],
+      button: reuse ? 'Use workspace' : 'Create Workspace'
+    };
+  }
+  if (view.kind === 'existing_team') {
+    return {
+      title: 'Existing team',
+      steps: [],
+      fields: [
+        ['Team', view.name],
+        ['Reviewed action', 'Reuse']
+      ],
+      button: 'Keep team'
+    };
+  }
+  return {
+    title: reuse ? 'Reuse Agent' : 'Create Agent',
+    steps: [],
+    fields: [
+      ['Name', view.name],
+      ['Role', view.roleID || 'Team member'],
+      ['Source', reuse ? 'Existing agent in your roster' : 'New agent in your roster'],
+      ['Model', view.details[0] || 'Configured']
+    ],
+    button: reuse ? 'Reuse Agent' : 'Create Agent'
+  };
+}
+
 // The dialog controller. It sends no request of its own: every button either
 // changes which panel is in view or closes the dialog.
 export function createPresentation({
@@ -311,6 +359,7 @@ export function createPresentation({
     mode: doc.getElementById('assistantLedSetupDialogMode'),
     note: doc.getElementById('assistantLedSetupDialogNote'),
     step: doc.getElementById('assistantLedSetupDialogStep'),
+    progress: doc.getElementById('assistantLedSetupDialogProgress'),
     panels: doc.getElementById('assistantLedSetupDialogPanels'),
     live: doc.getElementById('assistantLedSetupDialogLive'),
     skip: doc.getElementById('assistantLedSetupDialogSkip'),
@@ -374,6 +423,79 @@ export function createPresentation({
     return node;
   }
 
+  // A picture of the reviewed window being filled in and its button pressed.
+  // CSS plays the fill (staggered wipes) only under full motion; the data
+  // attributes carry the truth (`status`), so a screenshot or reduced motion
+  // shows the finished window at once. Nothing here is an input.
+  function windowNode(view, agents) {
+    const spec = windowSpec(view, agents);
+    const node = doc.createElement('div');
+    node.className = 'assistant-led-setup-dialog__window';
+    node.dataset.milestoneId = view.key;
+    node.dataset.status = view.status;
+    node.setAttribute('role', 'group');
+    node.setAttribute('aria-label', `${spec.title} (read-only preview)`);
+    node.style.setProperty('--fields', String(spec.fields.length));
+    const bar = doc.createElement('div');
+    bar.className = 'assistant-led-setup-dialog__window-bar';
+    const title = doc.createElement('strong');
+    title.textContent = spec.title;
+    const hint = doc.createElement('span');
+    hint.textContent = 'preview';
+    bar.append(title, hint);
+    node.append(bar);
+    if (spec.steps.length) {
+      const steps = doc.createElement('ol');
+      steps.className = 'assistant-led-setup-dialog__window-steps';
+      spec.steps.forEach((label, index) => {
+        const item = doc.createElement('li');
+        item.style.setProperty('--n', String(index));
+        item.textContent = label;
+        steps.append(item);
+      });
+      node.append(steps);
+    }
+    const body = doc.createElement('div');
+    body.className = 'assistant-led-setup-dialog__window-body';
+    spec.fields.forEach(([label, value], index) => {
+      const row = doc.createElement('div');
+      row.className = 'assistant-led-setup-dialog__field';
+      row.style.setProperty('--i', String(index));
+      const name = doc.createElement('span');
+      name.className = 'assistant-led-setup-dialog__field-label';
+      name.textContent = label;
+      const box = doc.createElement('span');
+      box.className = 'assistant-led-setup-dialog__field-value';
+      box.textContent = value;
+      row.append(name, box);
+      body.append(row);
+    });
+    node.append(body);
+    const footer = doc.createElement('div');
+    footer.className = 'assistant-led-setup-dialog__window-footer';
+    const button = doc.createElement('span');
+    button.className = 'assistant-led-setup-dialog__window-button';
+    button.textContent = spec.button;
+    const chip = doc.createElement('span');
+    chip.className = 'assistant-led-setup-dialog__chip';
+    chip.textContent = view.statusLabel;
+    footer.append(button, chip);
+    node.append(footer);
+    const receipt = doc.createElement('dl');
+    receipt.className = 'assistant-led-setup-dialog__facts assistant-led-setup-dialog__receipt';
+    entryFacts(view, undefined)
+      .filter(([term]) => term !== 'Reviewed action' && term !== 'Role' && term !== 'Blueprint')
+      .forEach(([term, value]) => {
+        const dt = doc.createElement('dt');
+        dt.textContent = term;
+        const dd = doc.createElement('dd');
+        dd.textContent = value;
+        receipt.append(dt, dd);
+      });
+    if (receipt.childElementCount) node.append(receipt);
+    return node;
+  }
+
   function render({ announce = false } = {}) {
     const mode = presentationMode(state.milestones);
     state.mode = mode;
@@ -403,8 +525,21 @@ export function createPresentation({
         empty.textContent = 'Nothing has been recorded for this step yet.';
         section.append(empty);
       }
-      panel.entries.forEach(view => section.append(entryNode(view)));
+      const agents = panels[1].entries;
+      panel.entries.forEach(view =>
+        section.append(panel.id === 'receipt' ? entryNode(view) : windowNode(view, agents))
+      );
       els.panels.append(section);
+    });
+    // A visual progress rail: one node per panel, lit as far as is reachable.
+    els.progress?.replaceChildren();
+    panels.forEach((panel, index) => {
+      const node = doc.createElement('li');
+      node.textContent = panel.title;
+      node.dataset.state =
+        index < state.index ? 'done' : index === state.index ? 'current' : 'later';
+      node.dataset.status = panel.status;
+      els.progress?.append(node);
     });
     els.step.textContent = reducedMotion
       ? `${available} of ${panels.length} steps available`
@@ -444,8 +579,12 @@ export function createPresentation({
 
   // Server projections replace what is shown; the dialog never invents status.
   function update(milestones) {
-    state.milestones = Array.isArray(milestones) ? milestones : [];
-    if (isOpen()) render({ announce: true });
+    const next = Array.isArray(milestones) ? milestones : [];
+    // Re-render only on a real change, so a card refresh does not restart the
+    // fill animation the viewer is watching.
+    const changed = JSON.stringify(next) !== JSON.stringify(state.milestones);
+    state.milestones = next;
+    if (isOpen() && changed) render({ announce: true });
   }
 
   // Focus is restored in exactly one place, when the dialog has closed, so Esc,

@@ -370,6 +370,280 @@
   min-width: 0;
 }
 
+/* Progress rail across the three panels. */
+.assistant-led-setup-dialog__progress {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assistant-led-setup-dialog__progress li {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-top: 0.45rem;
+  border-top: 3px solid color-mix(in srgb, var(--text-secondary, #5b6475) 30%, transparent);
+  color: var(--text-secondary, #5b6475);
+  font-size: 0.72rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+  transition: border-color 0.3s;
+}
+
+.assistant-led-setup-dialog__progress li[data-state="done"],
+.assistant-led-setup-dialog__progress li[data-state="current"] {
+  border-top-color: #7c3aed;
+  color: var(--text-primary, #172033);
+}
+
+.assistant-led-setup-dialog__progress li[data-state="current"][data-status="failed"],
+.assistant-led-setup-dialog__progress li[data-state="current"][data-status="needs_review"] {
+  border-top-color: var(--danger-color, #b42318);
+}
+
+/* A read-only picture of the reviewed window: title bar, fields, button. */
+.assistant-led-setup-dialog__window {
+  margin: 0 0 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 55%, transparent);
+  border-radius: 12px;
+  background: var(--card-bg, #fff);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 14%);
+}
+
+.assistant-led-setup-dialog__window-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color, #64748b) 45%, transparent);
+  background: color-mix(in srgb, #8b5cf6 9%, transparent);
+}
+
+.assistant-led-setup-dialog__window-bar span {
+  color: var(--text-secondary, #5b6475);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.assistant-led-setup-dialog__window-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem 0;
+  list-style: none;
+  counter-reset: window-step;
+  font-size: 0.75rem;
+}
+
+.assistant-led-setup-dialog__window-steps li {
+  counter-increment: window-step;
+  color: #7c3aed;
+  font-weight: 700;
+}
+
+.assistant-led-setup-dialog__window-steps li::before {
+  content: counter(window-step);
+  display: inline-block;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 0.68rem;
+  line-height: 1.15rem;
+  text-align: center;
+}
+
+.assistant-led-setup-dialog__window-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.assistant-led-setup-dialog__field {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.assistant-led-setup-dialog__field-label {
+  color: var(--text-secondary, #5b6475);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.assistant-led-setup-dialog__field-value {
+  display: block;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 60%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--card-bg, #fff) 88%, var(--text-secondary, #5b6475) 12%);
+  font-size: 0.86rem;
+}
+
+.assistant-led-setup-dialog__window-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.75rem 0.7rem;
+}
+
+.assistant-led-setup-dialog__window-button {
+  padding: 0.4rem 0.85rem;
+  border-radius: 9px;
+  background: #6d28d9;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+/* A step that stopped: the button was never pressed. */
+.assistant-led-setup-dialog__window[data-status="failed"]
+  .assistant-led-setup-dialog__window-button,
+.assistant-led-setup-dialog__window[data-status="needs_review"]
+  .assistant-led-setup-dialog__window-button,
+.assistant-led-setup-dialog__window[data-status="pending"]
+  .assistant-led-setup-dialog__window-button {
+  background: color-mix(in srgb, var(--text-secondary, #5b6475) 45%, transparent);
+}
+
+.assistant-led-setup-dialog__window[data-status="created"]
+  .assistant-led-setup-dialog__window-button,
+.assistant-led-setup-dialog__window[data-status="reused"]
+  .assistant-led-setup-dialog__window-button {
+  background: #15803d;
+}
+
+.assistant-led-setup-dialog__window[data-status="creating"]
+  .assistant-led-setup-dialog__window-button::after,
+.assistant-led-setup-dialog__window[data-status="reusing"]
+  .assistant-led-setup-dialog__window-button::after {
+  content: " …";
+}
+
+.assistant-led-setup-dialog__window[data-status="created"] .assistant-led-setup-dialog__chip,
+.assistant-led-setup-dialog__window[data-status="reused"] .assistant-led-setup-dialog__chip {
+  background: color-mix(in srgb, #16a34a 20%, transparent);
+}
+
+.assistant-led-setup-dialog__window[data-status="creating"] .assistant-led-setup-dialog__chip,
+.assistant-led-setup-dialog__window[data-status="reusing"] .assistant-led-setup-dialog__chip {
+  background: color-mix(in srgb, #8b5cf6 22%, transparent);
+}
+
+.assistant-led-setup-dialog__window[data-status="failed"] .assistant-led-setup-dialog__chip,
+.assistant-led-setup-dialog__window[data-status="needs_review"] .assistant-led-setup-dialog__chip {
+  background: color-mix(in srgb, var(--danger-color, #b42318) 20%, transparent);
+}
+
+.assistant-led-setup-dialog__receipt {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-top: 1px dashed color-mix(in srgb, var(--border-color, #64748b) 55%, transparent);
+  background: color-mix(in srgb, #16a34a 7%, transparent);
+}
+
+.assistant-led-setup-dialog__window[data-status="failed"] .assistant-led-setup-dialog__receipt,
+.assistant-led-setup-dialog__window[data-status="needs_review"]
+  .assistant-led-setup-dialog__receipt {
+  background: color-mix(in srgb, var(--danger-color, #b42318) 8%, transparent);
+}
+
+/* The fill. Each field wipes in one after another, the step markers light up
+   as their field lands, the button is pressed, then the chip and the receipt
+   appear. Only the finished state exists under reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .assistant-led-setup-dialog__field-value {
+    animation: assistant-led-setup-fill 0.55s steps(18, end) both;
+    animation-delay: calc(0.35s + var(--i) * 0.7s);
+  }
+
+  .assistant-led-setup-dialog__field-label {
+    animation: assistant-led-setup-fade 0.2s ease-out both;
+    animation-delay: calc(0.25s + var(--i) * 0.7s);
+  }
+
+  .assistant-led-setup-dialog__window-steps li {
+    animation: assistant-led-setup-fade 0.3s ease-out both;
+    animation-delay: calc(0.35s + var(--n) * 0.7s);
+  }
+
+  .assistant-led-setup-dialog__window[data-status="created"]
+    .assistant-led-setup-dialog__window-button,
+  .assistant-led-setup-dialog__window[data-status="reused"]
+    .assistant-led-setup-dialog__window-button {
+    animation: assistant-led-setup-press 0.5s ease-out both;
+    animation-delay: calc(0.55s + var(--fields) * 0.7s);
+  }
+
+  .assistant-led-setup-dialog__window[data-status="created"] .assistant-led-setup-dialog__chip,
+  .assistant-led-setup-dialog__window[data-status="reused"] .assistant-led-setup-dialog__chip,
+  .assistant-led-setup-dialog__window[data-status="created"] .assistant-led-setup-dialog__receipt,
+  .assistant-led-setup-dialog__window[data-status="reused"] .assistant-led-setup-dialog__receipt {
+    animation: assistant-led-setup-fade 0.4s ease-out both;
+    animation-delay: calc(1.05s + var(--fields) * 0.7s);
+  }
+
+  .assistant-led-setup-dialog__window[data-status="creating"]
+    .assistant-led-setup-dialog__window-button,
+  .assistant-led-setup-dialog__window[data-status="reusing"]
+    .assistant-led-setup-dialog__window-button {
+    animation: assistant-led-setup-pulse 1.1s ease-in-out infinite;
+  }
+}
+
+@keyframes assistant-led-setup-fill {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes assistant-led-setup-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes assistant-led-setup-press {
+  0% {
+    background: #6d28d9;
+    transform: scale(1);
+  }
+
+  45% {
+    background: #6d28d9;
+    transform: scale(0.94);
+  }
+
+  100% {
+    background: #15803d;
+    transform: scale(1);
+  }
+}
+
+@keyframes assistant-led-setup-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
 .assistant-led-setup-dialog__empty {
   margin: 0;
   color: var(--text-secondary, #5b6475);
@@ -439,6 +713,10 @@
 }
 
 @media (max-width: 420px) {
+  .assistant-led-setup-dialog__window-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .assistant-led-setup-dialog {
     width: calc(100vw - 1rem);
   }

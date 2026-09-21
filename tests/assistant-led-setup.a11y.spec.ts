@@ -370,7 +370,7 @@ test('a stopped setup walkthrough stops at the failed step and keeps earlier rec
   );
   // The timer walks to the stopped step and stops there; it never runs past it.
   await expect(page.locator('#assistantLedSetupDialogStep')).toHaveText('Step 2 of 3', {
-    timeout: 5000
+    timeout: 10000
   });
   const agentPanel = dialog.locator('[data-panel-id="agents"]');
   await expect(agentPanel).toBeVisible();

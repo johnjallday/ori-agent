@@ -12,7 +12,8 @@ import {
   presentationMode,
   receiptTime,
   requestedMilestones,
-  stopMessage
+  stopMessage,
+  windowSpec
 } from './assistant-led-setup-presentation.js';
 
 const RECORDED = '2026-09-21T10:00:00Z';
@@ -222,6 +223,55 @@ test('every server stop code has a plain explanation and unknown codes stay neut
   for (const code of ['', 'constructor', '__proto__', 'made_up']) {
     assert.equal(stopMessage(code), neutral);
   }
+});
+
+test('windows show only reviewed facts: no path, prompt, digest, or input', () => {
+  const views = assistantSetupMilestoneViews(receipted());
+  const workspace = windowSpec(views[0], [views[1]]);
+  assert.equal(workspace.title, 'Create Workspace');
+  assert.deepEqual(workspace.steps, ['Blueprint', 'Details', 'Team', 'Review']);
+  assert.deepEqual(
+    workspace.fields.map(([label]) => label),
+    ['Blueprint', 'Name', 'Team', 'Location']
+  );
+  assert.equal(workspace.fields[0][1], 'file-janitor v2');
+  assert.equal(workspace.fields[2][1], 'Create File Curator');
+  assert.equal(workspace.button, 'Create Workspace');
+
+  const agent = windowSpec(views[1]);
+  assert.equal(agent.title, 'Create Agent');
+  assert.deepEqual(
+    agent.fields.map(([label]) => label),
+    ['Name', 'Role', 'Source', 'Model']
+  );
+  assert.equal(agent.fields[3][1], 'Configured; chat needs a model');
+  assert.equal(agent.button, 'Create Agent');
+
+  const everything = JSON.stringify([workspace, agent]);
+  assert.doesNotMatch(everything, /prompt|digest|provenance|\/Users|\\\\/i);
+});
+
+test('reuse and adopt windows say Reuse, never Create', () => {
+  const reuseAgent = windowSpec(
+    assistantSetupMilestoneViews([
+      { id: 'role:a', kind: 'agent_role', name: 'My Curator', role_id: 'a', action: 'reuse' }
+    ])[0]
+  );
+  assert.equal(reuseAgent.title, 'Reuse Agent');
+  assert.equal(reuseAgent.button, 'Reuse Agent');
+  assert.equal(reuseAgent.fields[2][1], 'Existing agent in your roster');
+
+  const [adoptedWorkspace, team] = assistantSetupMilestoneViews(
+    requestedMilestones({ mode: 'adopt' })
+  );
+  const workspace = windowSpec(adoptedWorkspace, [team]);
+  assert.equal(workspace.title, 'Reuse Workspace');
+  assert.equal(workspace.button, 'Use workspace');
+  assert.equal(workspace.fields[2][1], 'Keep Existing team kept as is');
+  const existing = windowSpec(team);
+  assert.equal(existing.title, 'Existing team');
+  assert.equal(existing.button, 'Keep team');
+  assert.doesNotMatch(JSON.stringify([workspace, existing, reuseAgent]), /Create/);
 });
 
 test('timers only move the view: advancing them never changes a status', () => {
