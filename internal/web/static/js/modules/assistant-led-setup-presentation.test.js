@@ -11,7 +11,8 @@ import {
   modeLine,
   presentationMode,
   receiptTime,
-  requestedMilestones
+  requestedMilestones,
+  stopMessage
 } from './assistant-led-setup-presentation.js';
 
 const RECORDED = '2026-09-21T10:00:00Z';
@@ -155,17 +156,72 @@ test('a panel opens only after its own step is reported; walkthrough opens all',
   });
   assert.equal(availablePanelCount('requested', buildPanels(pending)), 1);
   assert.equal(availablePanelCount('walkthrough', buildPanels(receipted())), 3);
-  const stoppedAtRole = receipted({
-    role: { status: 'needs_review', resource_id: '', ownership: '' }
-  });
-  // The workspace is receipted, the role needs review: both step panels and the
-  // receipt summary of what was kept are viewable.
-  assert.equal(availablePanelCount('stopped', buildPanels(stoppedAtRole)), 3);
   const workspaceOnly = [
     { id: 'workspace', kind: 'workspace', status: 'needs_review' },
     { id: 'role:a', kind: 'agent_role', status: 'pending' }
   ];
   assert.equal(availablePanelCount('stopped', buildPanels(workspaceOnly)), 1);
+});
+
+test('a stopped walkthrough ends on the step that stopped and keeps earlier receipts', () => {
+  const stoppedAtRole = receipted({
+    role: {
+      status: 'needs_review',
+      resource_id: '',
+      ownership: '',
+      recorded_at: '',
+      error_code: 'agent_not_attached'
+    }
+  });
+  const mode = presentationMode(stoppedAtRole);
+  const panels = buildPanels(stoppedAtRole);
+  assert.equal(mode, 'stopped');
+  // Create Workspace (receipted) and Create Agent (stopped) are reachable; the
+  // walkthrough ends on the stopped panel instead of running past it.
+  assert.equal(availablePanelCount(mode, panels), 2);
+  assert.equal(panels[0].status, 'created');
+  assert.equal(panels[0].entries[0].resourceID, 'workspace-1');
+  assert.equal(panels[1].status, 'needs_review');
+  assert.equal(panels[1].entries[0].resourceID, '', 'an unproven role has no id');
+
+  const facts = Object.fromEntries(entryFacts(panels[1].entries[0]));
+  assert.equal(facts['Reason code'], 'agent_not_attached');
+  assert.equal(
+    facts['What happened'],
+    'The File Curator profile exists but is not attached to the workspace.'
+  );
+  const reachable = panels.slice(0, availablePanelCount(mode, panels));
+  assert.equal(
+    announcementFor(mode, reachable),
+    'Stopped — needs your attention. Create Workspace: Created. Create Agent: Needs review'
+  );
+
+  const failedFirst = [
+    {
+      id: 'workspace',
+      kind: 'workspace',
+      status: 'failed',
+      error_code: 'agent_root_unavailable'
+    },
+    { id: 'role:file-curator', kind: 'agent_role', status: 'pending' }
+  ];
+  assert.equal(availablePanelCount('stopped', buildPanels(failedFirst)), 1);
+});
+
+test('every server stop code has a plain explanation and unknown codes stay neutral', () => {
+  const neutral = 'Ori stopped at this step, so it will not retry it for you.';
+  for (const code of [
+    'agent_root_unavailable',
+    'team_plan_changed',
+    'preparation_interrupted',
+    'workspace_outcome_unresolved',
+    'agent_not_attached'
+  ]) {
+    assert.notEqual(stopMessage(code), neutral, code);
+  }
+  for (const code of ['', 'constructor', '__proto__', 'made_up']) {
+    assert.equal(stopMessage(code), neutral);
+  }
 });
 
 test('timers only move the view: advancing them never changes a status', () => {

@@ -31,6 +31,24 @@ const MODE_NOTES = {
     'Ori stopped at this step. What was already recorded is kept; nothing is retried for you.'
 };
 
+// User-safe explanations for the closed set of server error codes.
+const STOP_MESSAGES = {
+  agent_root_unavailable: 'Ori could not reach your agents folder, so nothing was created.',
+  team_plan_changed:
+    'The File Curator setup changed after your review, so Ori stopped before creating anything.',
+  preparation_interrupted:
+    'Ori stopped before it finished. Continuing checks what already exists first, so nothing is created twice.',
+  workspace_outcome_unresolved:
+    'Ori could not prove whether this step finished, so it will not retry it for you.',
+  agent_not_attached: 'The File Curator profile exists but is not attached to the workspace.'
+};
+
+export function stopMessage(code) {
+  return Object.hasOwn(STOP_MESSAGES, code)
+    ? STOP_MESSAGES[code]
+    : 'Ori stopped at this step, so it will not retry it for you.';
+}
+
 // Turns one server milestone into display data. Identity is the server's `id`;
 // the display name is never read as an identifier. A status the client does not
 // know is shown as "Needs review", never as success.
@@ -167,11 +185,17 @@ export function buildPanels(milestones) {
   ];
 }
 
-// How many panels may be viewed. In walkthrough mode every panel; otherwise a
-// panel opens only once its own entries are receipted or are stopping/live, and
-// the receipt summary needs at least one receipt. The first panel always shows.
+// How many panels may be viewed. In walkthrough mode every panel. A stopped
+// walkthrough ends on the panel that stopped, with the panels before it (and
+// their receipts) still reachable. Otherwise a panel opens only once its own
+// entries are receipted or live, and the receipt summary needs at least one
+// receipt. The first panel always shows.
 export function availablePanelCount(mode, panels) {
   if (mode === 'walkthrough') return panels.length;
+  if (mode === 'stopped') {
+    const stoppedAt = panels.findIndex(panel => STOPPED.has(panel.status));
+    if (stoppedAt >= 0) return stoppedAt + 1;
+  }
   let count = 1;
   for (let index = 1; index < panels.length; index += 1) {
     const panel = panels[index];
@@ -264,7 +288,10 @@ export function entryFacts(view, locale) {
     if (!Number.isNaN(when.getTime())) facts.push(['Recorded', when.toLocaleString(locale)]);
   }
   if (view.resourceID) facts.push(['ID', view.resourceID]);
-  if (view.errorCode) facts.push(['Reason code', view.errorCode]);
+  if (view.errorCode) {
+    facts.push(['What happened', stopMessage(view.errorCode)]);
+    facts.push(['Reason code', view.errorCode]);
+  }
   return facts;
 }
 
@@ -382,16 +409,20 @@ export function createPresentation({
     els.step.textContent = reducedMotion
       ? `${available} of ${panels.length} steps available`
       : `Step ${state.index + 1} of ${panels.length}`;
-    const last = state.index >= panels.length - 1;
+    // The end is the last panel the server's state allows, which for a stopped
+    // run is the panel that stopped. Continue then hands focus to the card,
+    // where only the server-projected retry or manual action is offered.
+    const atEnd = state.index >= available - 1;
     els.back.hidden = reducedMotion || state.index === 0;
-    els.next.hidden = reducedMotion || last || state.index + 1 >= available;
-    els.skip.hidden = last || reducedMotion;
-    els.proceed.hidden = !(reducedMotion || last);
+    els.next.hidden = reducedMotion || atEnd;
+    els.skip.hidden = atEnd || reducedMotion;
+    els.proceed.hidden = !(reducedMotion || atEnd);
     els.proceed.disabled = mode === 'requested' || mode === 'live';
     if (!reducedMotion) {
       scheduler.start({ current: state.index, available });
     }
-    const message = announcementFor(mode, panels);
+    // Announce only what the viewer can reach from here.
+    const message = announcementFor(mode, panels.slice(0, available));
     if (announce && message !== state.announced) els.live.textContent = message;
     state.announced = message;
   }

@@ -3,6 +3,7 @@ package personalassistanthttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,24 +40,87 @@ func (milestonePlans) ReviewFileJanitorPlan(context.Context, string) (assistants
 	}, nil
 }
 
-type milestonePreparer struct{ calls int }
+type milestonePreparer struct {
+	calls int
+	err   error
+}
 
 func (p *milestonePreparer) PrepareFileJanitor(_ context.Context, request assistantsetup.PrepareRequest) (assistantsetup.WorkspaceResult, error) {
 	p.calls++
+	if p.err != nil {
+		return assistantsetup.WorkspaceResult{}, p.err
+	}
 	return assistantsetup.WorkspaceResult{
 		WorkspaceID: request.WorkspaceID, AgentInstanceID: "instance-1", ProfileProvenanceID: request.ProfileProvenanceID,
 		ProfileStoreOrigin: "roster", ProfileCreated: true, ConfigurationDigest: "config-digest-value",
 	}, nil
 }
 
-func TestAssistantSetupProjectionCarriesSafeMilestonesAndGetsWriteNothing(t *testing.T) {
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
+type emptyObserver struct{}
+
+func (emptyObserver) ObserveFileJanitor(context.Context, assistantsetup.PrepareRequest) (assistantsetup.WorkspaceObservation, error) {
+	return assistantsetup.WorkspaceObservation{}, nil
+}
+
+func openMilestoneStore(t *testing.T) *assistantsetup.SQLiteStore {
+	t.Helper()
+	db, err := database.Open(context.Background(), &database.Config{InMemory: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	store := assistantsetup.NewSQLiteStore(db)
+	return assistantsetup.NewSQLiteStore(db)
+}
+
+// A refused preparation answers with the safe code and the stopped setup
+// projection, so the card and walkthrough can stop at the exact step. The raw
+// creator error never reaches the body.
+func TestStoppedAcceptCarriesTheStoppedProjectionAndNoRawError(t *testing.T) {
+	ctx := context.Background()
+	store := openMilestoneStore(t)
+	preparer := &milestonePreparer{err: fmt.Errorf("/Users/someone/Ori Workspaces/Agents unreadable: %w", assistantsetup.ErrAgentRootUnavailable)}
+	service := assistantsetup.NewService(store, milestoneRelationships{}, milestoneResolver{}, milestonePlans{}, preparer)
+	service.SetObserver(emptyObserver{})
+	proposal, err := service.Get(ctx, "owner-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := assistantSetupHTTPHandler(service)
+	recorder := httptest.NewRecorder()
+	body := `{"proposal_revision":"` + proposal.Proposal.Revision + `"}`
+	handler.AcceptAssistantSetup(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/setup/file-janitor/accept", strings.NewReader(body)))
+	if recorder.Code != http.StatusServiceUnavailable || strings.Contains(recorder.Body.String(), "/Users") || strings.Contains(recorder.Body.String(), "unreadable") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+		Setup     struct {
+			ViewState  string `json:"view_state"`
+			Milestones []struct {
+				ID        string `json:"id"`
+				Status    string `json:"status"`
+				ErrorCode string `json:"error_code"`
+			} `json:"milestones"`
+			Actions []struct {
+				ID string `json:"id"`
+			} `json:"actions"`
+		} `json:"setup"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Code != "agent_root_unavailable" || !envelope.Retryable || envelope.Setup.ViewState != "needs_attention" ||
+		len(envelope.Setup.Milestones) != 2 || envelope.Setup.Milestones[0].Status != "failed" ||
+		envelope.Setup.Milestones[0].ErrorCode != "agent_root_unavailable" || envelope.Setup.Milestones[1].Status != "pending" ||
+		len(envelope.Setup.Actions) == 0 || envelope.Setup.Actions[0].ID != "resume" {
+		t.Fatalf("envelope = %+v", envelope)
+	}
+}
+
+func TestAssistantSetupProjectionCarriesSafeMilestonesAndGetsWriteNothing(t *testing.T) {
+	ctx := context.Background()
+	store := openMilestoneStore(t)
 	preparer := &milestonePreparer{}
 	service := assistantsetup.NewService(store, milestoneRelationships{}, milestoneResolver{}, milestonePlans{}, preparer)
 

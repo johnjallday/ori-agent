@@ -2,6 +2,7 @@ package sessionhttp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -124,8 +125,8 @@ func TestReviewedFileJanitorCreationRejectsPlanDriftBeforeWrites(t *testing.T) {
 		ConfigDigest: "changed",
 	}
 	_, err = handler.CreateReviewedFileJanitor(context.Background(), ReviewedTemplateCreationRequest{Name: "File Janitor", Plan: plan, Descriptor: descriptor})
-	if err == nil {
-		t.Fatal("changed plan was accepted")
+	if !errors.Is(err, ErrReviewedPlanChanged) {
+		t.Fatalf("changed plan err = %v, want the typed pre-write refusal", err)
 	}
 	if _, found := agents.GetAgent("File Curator"); found {
 		t.Fatal("drift created a profile")
@@ -154,7 +155,66 @@ func TestReviewedFileJanitorCreationFailsClosedWithoutRootAgentStorage(t *testin
 	}
 	handler.SetAgentStore(agents)
 	handler.SetTemplatesRootResolver(func() string { return filepath.Join("..", "projecttemplates", "starter") })
-	if _, err := handler.ReviewFileJanitorCreation(context.Background()); err == nil {
-		t.Fatal("missing root agent storage produced a creatable plan")
+	if _, err := handler.ReviewFileJanitorCreation(context.Background()); !errors.Is(err, agentstore.ErrAgentRootUnavailable) {
+		t.Fatalf("missing root agent storage err = %v, want the typed pre-write refusal", err)
+	}
+}
+
+func reviewedCreationFixture(t *testing.T, handler *Handler) ReviewedTemplateCreationRequest {
+	t.Helper()
+	plan, err := handler.ReviewFileJanitorCreation(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ReviewedTemplateCreationRequest{Name: "File Janitor", Plan: plan, Descriptor: AssistantSetupCreationDescriptor{
+		OwnerUserID: "local", RunID: uuid.NewString(), OperationID: uuid.NewString(),
+		ReviewDigest: "review-digest", WorkspaceID: uuid.NewString(),
+		ProfileProvenanceID: uuid.NewString(), ConfigDigest: plan.Roles[0].ConfigDigest,
+	}}
+}
+
+func TestObserveReviewedFileJanitorReportsExactlyWhatTheClaimLeftAndWritesNothing(t *testing.T) {
+	handler, agents, workspaces, cleanup := reviewedFileJanitorHandler(t)
+	defer cleanup()
+	request := reviewedCreationFixture(t, handler)
+
+	before, err := handler.ObserveReviewedFileJanitor(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != (ReviewedFileJanitorObservation{}) {
+		t.Fatalf("nothing exists yet, observation = %+v", before)
+	}
+
+	result, err := handler.CreateReviewedFileJanitor(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idsBefore, _ := workspaces.List()
+	agentsBefore := len(agents.ListAgents())
+	observed, err := handler.ObserveReviewedFileJanitor(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !observed.WorkspacePresent || !observed.WorkspaceProven || observed.AgentInstanceID != result.AgentInstanceID ||
+		!observed.ProfileCreated || observed.ProfileProvenanceID != request.Descriptor.ProfileProvenanceID || observed.ProfileStoreOrigin == "" {
+		t.Fatalf("observation = %+v, result = %+v", observed, result)
+	}
+	idsAfter, _ := workspaces.List()
+	if len(idsAfter) != len(idsBefore) || len(agents.ListAgents()) != agentsBefore {
+		t.Fatalf("observing wrote state: workspaces %d→%d agents %d→%d", len(idsBefore), len(idsAfter), agentsBefore, len(agents.ListAgents()))
+	}
+
+	// Another claim at the same reserved workspace ID finds something there but
+	// cannot prove it; the same-name profile without its markers is unrelated.
+	other := request
+	other.Descriptor.OperationID = uuid.NewString()
+	other.Descriptor.ProfileProvenanceID = uuid.NewString()
+	foreign, err := handler.ObserveReviewedFileJanitor(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !foreign.WorkspacePresent || foreign.WorkspaceProven || foreign.AgentInstanceID != "" || foreign.ProfileCreated {
+		t.Fatalf("foreign observation = %+v", foreign)
 	}
 }

@@ -234,6 +234,13 @@ type blockingPreparer struct {
 	inside    int
 	maxInside int
 	total     int
+	seen      []PrepareRequest
+}
+
+func (b *blockingPreparer) firstRequest() PrepareRequest {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.seen[0]
 }
 
 func newBlockingPreparer() *blockingPreparer {
@@ -243,6 +250,7 @@ func newBlockingPreparer() *blockingPreparer {
 func (b *blockingPreparer) PrepareFileJanitor(_ context.Context, request PrepareRequest) (WorkspaceResult, error) {
 	b.mu.Lock()
 	b.total++
+	b.seen = append(b.seen, request)
 	b.inside++
 	if b.inside > b.maxInside {
 		b.maxInside = b.inside
@@ -391,5 +399,78 @@ func TestBlockedPreparationShowsCreatingAndConcurrentAcceptEntersPreparerOnce(t 
 	}
 	if preparer.total != 1 || preparer.maxInside != 1 {
 		t.Fatalf("preparer entered %d times, max concurrent %d", preparer.total, preparer.maxInside)
+	}
+}
+
+func TestReusedRoleIsReusedNeverCreatedAndLeavesNoProfileReceipt(t *testing.T) {
+	store := openTestStore(t)
+	plan := testPlan()
+	plan.Roles[0].Action = "reuse"
+	plan.Roles[0].ModelConfigured = true
+	plan.Roles[0].Model = "gpt-test"
+	// An existing profile is reused: the creator reports no profile creation.
+	preparer := &fakePreparer{result: WorkspaceResult{
+		AgentInstanceID: "existing-instance", ProfileCreated: false, ConfigurationDigest: "config-digest",
+	}}
+	service := NewService(store, &fakeRelationshipReader{projection: eligibleRelationship(personalassistant.APIStateActive)},
+		&fakeResolver{}, &fakePlanSource{plan: plan}, preparer)
+
+	proposal, err := service.Get(context.Background(), "local", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proposal.Proposal.Team[0].Action != "reuse" {
+		t.Fatalf("review must say Reuse: %+v", proposal.Proposal.Team)
+	}
+	accepted, _, err := service.Accept(context.Background(), "local", proposal.Proposal.Revision, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, role := accepted.Milestones[0], accepted.Milestones[1]
+	if workspace.Status != MilestoneCreated {
+		t.Fatalf("the workspace is still created: %+v", workspace)
+	}
+	if role.Status != MilestoneReused || role.Ownership != OwnershipAdopted || role.ResourceID != "existing-instance" ||
+		role.Action != "reuse" || role.NeedsModel {
+		t.Fatalf("reused role = %+v", role)
+	}
+	receipts, err := store.ListResources(context.Background(), "local", accepted.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, receipt := range receipts {
+		if receipt.Kind == ResourceAgentProfile {
+			t.Fatalf("reusing a profile must not record a profile creation receipt: %+v", receipt)
+		}
+	}
+}
+
+func TestAdoptedWorkspaceProjectsReusedEntriesNeverCreated(t *testing.T) {
+	store := openTestStore(t)
+	preparer := &fakePreparer{}
+	// Folder access is not yet granted, so the run stops at the folder step.
+	progressor := &fakeProgressor{facts: FileJanitorFacts{Readiness: "needs_setup", PrivacyMode: "metadata_only"}}
+	service := NewService(store, &fakeRelationshipReader{projection: eligibleRelationship(personalassistant.APIStateActive)},
+		&fakeResolver{targets: []Target{{WorkspaceID: "workspace-1", Name: "Existing Janitor", Supported: true, Route: "/workspaces/workspace-1"}}},
+		&fakePlanSource{plan: testPlan()}, preparer)
+	service.SetProgressor(progressor)
+
+	accepted := acceptedFolderRun(t, service)
+	if accepted.Run.TargetMode != TargetAdopt || len(accepted.Milestones) != 2 {
+		t.Fatalf("run=%+v milestones=%+v", accepted.Run, accepted.Milestones)
+	}
+	workspace, team := accepted.Milestones[0], accepted.Milestones[1]
+	if workspace.ID != "workspace" || workspace.Status != MilestoneReused || workspace.Ownership != OwnershipAdopted ||
+		workspace.Name != "Existing Janitor" || workspace.Action != "reuse" {
+		t.Fatalf("workspace = %+v", workspace)
+	}
+	if team.ID != "existing_team" || team.Kind != MilestoneExistingTeam || team.Status != MilestoneReused ||
+		team.Name != "Existing team kept as is" || team.RoleID != "" || team.NeedsModel {
+		t.Fatalf("team = %+v (an adopted run has no reviewed role, so no name may be invented)", team)
+	}
+	for _, milestone := range accepted.Milestones {
+		if milestone.Status == MilestoneCreated || milestone.Status == MilestoneCreating {
+			t.Fatalf("adopt mode must never read as created: %+v", milestone)
+		}
 	}
 }

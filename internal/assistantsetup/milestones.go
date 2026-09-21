@@ -3,9 +3,8 @@ package assistantsetup
 import "strings"
 
 const (
-	existingTeamMilestoneID    = "existing_team"
-	existingTeamMilestoneName  = "Existing team kept as is"
-	codePreparationInterrupted = "preparation_interrupted"
+	existingTeamMilestoneID   = "existing_team"
+	existingTeamMilestoneName = "Existing team kept as is"
 )
 
 // milestoneInput is everything the derivation may read. It is a snapshot of
@@ -53,12 +52,21 @@ func deriveMilestones(in milestoneInput) []Milestone {
 	}
 
 	receipts := receiptsByKind(in)
+	_, profileReceipted := receipts[ResourceAgentProfile]
 	unreceipted := false
 	for index := range milestones {
 		milestone := &milestones[index]
 		receipt := receiptFor(milestone.Kind, receipts)
 		if receipt != nil {
 			applyReceipt(milestone, receipt, in)
+			continue
+		}
+		if milestone.Kind == MilestoneAgentRole && profileReceipted && !in.InFlight {
+			// The profile provably exists but is not attached to the workspace:
+			// that is never Created.
+			milestone.Status = MilestoneNeedsReview
+			milestone.ErrorCode = codeAgentNotAttached
+			unreceipted = true
 			continue
 		}
 		milestone.Status = pendingStatus(milestone, in, !unreceipted)
@@ -91,7 +99,7 @@ func receiptsByKind(in milestoneInput) map[string]Resource {
 			continue
 		}
 		switch resource.Kind {
-		case ResourceWorkspace, ResourceAgentInstance:
+		case ResourceWorkspace, ResourceAgentInstance, ResourceAgentProfile:
 			if _, exists := receipts[resource.Kind]; !exists {
 				receipts[resource.Kind] = resource
 			}
@@ -155,23 +163,25 @@ func pendingStatus(milestone *Milestone, in milestoneInput, first bool) Mileston
 	case operation.Status == OperationSucceeded:
 		// A succeeded operation whose receipt is missing cannot be proven.
 		return MilestoneNeedsReview
-	case operation.Status == OperationRunning && run.Status == RunActive && run.CurrentStep == StepWorkspace:
+	case operation.Status == OperationRunning:
 		// Running with no live attempt in this process: the process stopped
 		// mid-preparation. The work is unproven, not lost and not repeated.
+		// (A claimed operation was never started, so it provably did nothing
+		// and stays pending.)
 		return MilestoneNeedsReview
 	}
 	return MilestonePending
 }
 
 func milestoneErrorCode(in milestoneInput) string {
+	if in.Operation != nil && in.Operation.Status == OperationRunning {
+		return codePreparationInterrupted
+	}
 	if in.Operation != nil && strings.TrimSpace(in.Operation.SafeErrorCode) != "" {
 		return in.Operation.SafeErrorCode
 	}
 	if in.Run != nil && strings.TrimSpace(in.Run.LastErrorCode) != "" {
 		return in.Run.LastErrorCode
-	}
-	if in.Operation != nil && in.Operation.Status == OperationRunning {
-		return codePreparationInterrupted
 	}
 	return ""
 }

@@ -256,7 +256,9 @@ func writeAssistantSetupServiceError(w http.ResponseWriter, err error, projectio
 		writeAssistantSetupError(w, http.StatusConflict, "privacy_review_required", "Review File Janitor privacy settings before continuing.", false, projection)
 	case errors.Is(err, assistantsetup.ErrFolderChanged), errors.Is(err, assistantsetup.ErrFolderConflict):
 		writeAssistantSetupError(w, http.StatusConflict, "folder_changed", "The File Janitor folder changed. Review it before continuing.", false, projection)
-	case errors.Is(err, assistantsetup.ErrTeamConflict), errors.Is(err, assistantsetup.ErrAgentRootUnavailable):
+	case errors.Is(err, assistantsetup.ErrAgentRootUnavailable):
+		writeAssistantSetupError(w, http.StatusServiceUnavailable, "agent_root_unavailable", "Ori could not reach your agents folder, so nothing was created.", true, projection)
+	case errors.Is(err, assistantsetup.ErrTeamConflict):
 		writeAssistantSetupError(w, http.StatusConflict, "team_conflict", "The reviewed File Curator setup is no longer available.", false, projection)
 	case errors.Is(err, assistantsetup.ErrReconcileRequired):
 		writeAssistantSetupError(w, http.StatusConflict, "reconcile_required", "Ori cannot safely prove the last setup result. Review the saved workspace before retrying.", false, projection)

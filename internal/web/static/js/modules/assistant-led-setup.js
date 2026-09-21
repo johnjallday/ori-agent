@@ -16,6 +16,7 @@ const SAFE_ACTIONS = new Set([
   'prepare_review',
   'finish_later',
   'resume',
+  'review_again',
   'retry',
   'manual',
   'manual_takeover',
@@ -560,6 +561,8 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
   async function act(actionID) {
     if (state.pending) return false;
     if (actionID === 'choose_folder') return chooseFolder();
+    // Reviewing the updated plan is a read: it re-loads the fresh proposal.
+    if (actionID === 'review_again') return Boolean(await load('', { focus: true }));
     const request = assistantSetupRequest(actionID, state.projection);
     if (!request) return false;
     const accepting = actionID === 'accept';
@@ -590,9 +593,12 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       }
       return true;
     } catch (error) {
-      // A refused accept has nothing to show: close the requested view first.
-      if (accepting) presentation?.close();
+      // A stopped accept carries the stopped projection: the walkthrough stays
+      // open and stops at that step. A refusal with no run has nothing to show.
       if (error.setup) render(error.setup, { announce: false });
+      if (accepting && !assistantSetupMilestoneViews(error.setup?.milestones).length) {
+        presentation?.close();
+      }
       setError(error.message || 'Setup could not continue. Nothing else was changed.');
       return false;
     } finally {
