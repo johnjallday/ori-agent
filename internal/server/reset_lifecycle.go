@@ -10,10 +10,11 @@ import (
 
 var (
 	errResetDrainNotFenced = errors.New("reset drain requires an idle fenced runtime")
+	errResetStreamsRemain  = errors.New("reset drain could not verify every event stream stopped")
 	errResetOwnersRemain   = errors.New("reset drain could not verify every lifetime owner stopped")
 )
 
-// serverResetLifecycle is the concrete non-cancelling fence/drain mechanism.
+// serverResetLifecycle is the concrete finite-work-preserving fence/drain mechanism.
 // Production reset remains intentionally unwired until pre-start apply and
 // recovery can consume the resulting receipt; tests construct this directly.
 const resetDrainTimeout = 30 * time.Second
@@ -53,6 +54,19 @@ func (l *serverResetLifecycle) Drain(ctx context.Context) error {
 		return err
 	}
 
+	// Streams read stores but do not own background loops. Wait for fence
+	// cancellation to unwind them before stopping unrelated background work and,
+	// most importantly, before resetCloseOnce closes any store they may read.
+	streamTicker := time.NewTicker(time.Millisecond)
+	defer streamTicker.Stop()
+	for l.server.resetWork.Snapshot().Streams != 0 {
+		select {
+		case <-ctx.Done():
+			return errors.Join(ctx.Err(), errResetStreamsRemain)
+		case <-streamTicker.C:
+		}
+	}
+
 	var drainErr error
 	drainErr = errors.Join(drainErr, l.server.shutdownBackground(ctx))
 	if l.server.Integration != nil && l.server.Integration.MCPRegistry != nil {
@@ -77,13 +91,13 @@ func (l *serverResetLifecycle) Drain(ctx context.Context) error {
 	// A channel's Stop may return just before its Start loop unwinds and drops
 	// the lifetime permit. Wait boundedly for that ownership proof; no data is
 	// deleted while it remains ambiguous.
-	ticker := time.NewTicker(time.Millisecond)
-	defer ticker.Stop()
+	ownerTicker := time.NewTicker(time.Millisecond)
+	defer ownerTicker.Stop()
 	for l.server.resetWork.Snapshot().Owners != 0 {
 		select {
 		case <-ctx.Done():
 			return errors.Join(drainErr, ctx.Err(), errResetOwnersRemain)
-		case <-ticker.C:
+		case <-ownerTicker.C:
 		}
 	}
 	return drainErr
