@@ -18,6 +18,8 @@ type Store interface {
 	FindActiveRun(ctx context.Context, ownerUserID, capabilityID string) (*Run, error)
 	GetRun(ctx context.Context, ownerUserID, runID string) (*Run, error)
 	ListOperations(ctx context.Context, ownerUserID, runID string) ([]Operation, error)
+	ListResources(ctx context.Context, ownerUserID, runID string) ([]Resource, error)
+	StartWorkspace(ctx context.Context, ownerUserID, runID, operationID string) error
 	Accept(ctx context.Context, acceptance Acceptance) (*Run, *Operation, bool, error)
 	CompleteWorkspace(ctx context.Context, ownerUserID, runID, operationID string, result WorkspaceResult) (*Run, error)
 	ClaimFolderIntent(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*Run, *Operation, error)
@@ -103,6 +105,64 @@ func (s *SQLiteStore) ListOperations(ctx context.Context, ownerUserID, runID str
 		operations = append(operations, *op)
 	}
 	return operations, rows.Err()
+}
+
+// ListResources returns the durable receipts of one run, owner-scoped and in a
+// stable order. It is read-only; receipts are written only by the operations
+// that own them.
+func (s *SQLiteStore) ListResources(ctx context.Context, ownerUserID, runID string) ([]Resource, error) {
+	if err := s.configured(); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT r.operation_id, r.run_id, r.workspace_id, r.resource_kind,
+			r.resource_id, r.ownership, r.store_origin, r.version_digest, r.created_at
+		FROM assistant_setup_resources r
+		JOIN assistant_setup_runs run ON run.id = r.run_id
+		WHERE run.owner_user_id = ? AND r.run_id = ?
+		ORDER BY r.created_at, r.resource_kind, r.resource_id`, strings.TrimSpace(ownerUserID), strings.TrimSpace(runID))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	resources := make([]Resource, 0)
+	for rows.Next() {
+		var resource Resource
+		if scanErr := rows.Scan(&resource.OperationID, &resource.RunID, &resource.WorkspaceID, &resource.Kind,
+			&resource.ResourceID, &resource.Ownership, &resource.StoreOrigin, &resource.VersionDigest, &resource.CreatedAt); scanErr != nil {
+			return nil, scanErr
+		}
+		resources = append(resources, resource)
+	}
+	return resources, rows.Err()
+}
+
+// StartWorkspace records that preparation is being attempted: a claimed or
+// previously failed workspace operation becomes running, counts the attempt,
+// and keeps its first start time. An operation that is already running,
+// unresolved, or succeeded is left untouched, so replay is idempotent.
+func (s *SQLiteStore) StartWorkspace(ctx context.Context, ownerUserID, runID, operationID string) error {
+	if err := s.configured(); err != nil {
+		return err
+	}
+	now := s.now().UTC()
+	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		op, err := getOperationWith(ctx, tx, strings.TrimSpace(ownerUserID), strings.TrimSpace(runID), OperationWorkspace)
+		if err != nil {
+			return err
+		}
+		if op.ID != strings.TrimSpace(operationID) {
+			return ErrConflict
+		}
+		if op.Status != OperationClaimed && op.Status != OperationFailed {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE assistant_setup_operations
+			SET status = 'running', attempt_count = attempt_count + 1,
+				started_at = COALESCE(started_at, ?), updated_at = ?
+			WHERE id = ? AND owner_user_id = ? AND status IN ('claimed','failed')`,
+			now, now, op.ID, op.OwnerUserID)
+		return err
+	})
 }
 
 // Accept creates the accepted run and its preallocated workspace operation in

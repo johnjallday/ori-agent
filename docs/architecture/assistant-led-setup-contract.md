@@ -264,10 +264,35 @@ Every successful coordinator response wraps one `setup` projection. Fields are t
 - `relationship`: Assistant stable ID/display name/state and setup eligibility only—no prompt/model secret;
 - optional `proposal`: opaque revision; `create|adopt|choose` mode; blueprint ID/version/digest; exact workspace candidate IDs/names/routes; normalized team-plan revision and each role's create/reuse/configured-model status; fixed metadata/folder/monitoring/file-review disclosures;
 - optional `run`: run ID/revision/lifecycle/current step, target workspace ID/name/route, operation rows with kind/status/attempt count/safe timestamps, saved-success summaries, deferral/failure code, and whether work is in flight;
+- optional `milestones`: the list-shaped workspace/team preparation sequence described under [Setup milestones](#setup-milestones) (present for every run projection, absent from proposal-only and `current_status` projections);
 - optional `health`: fresh/stale canonical File Janitor readiness, paused/monitoring/privacy summaries, local schedule/timezone, bounded first-result counts/time, exact batch ID, and safe review/settings/history routes;
 - `actions`: a server-derived closed list from `accept`, `defer_recommendation`, `choose_target`, `choose_folder`, `prepare_review`, `finish_later`, `resume`, `manual`, `manual_takeover`, `open_workspace`, `review_batch`, `pause_monitoring`, `manage_access`, and `history`. Each has only ID, label, enabled, and optional reason/route.
 
 The browser renders these values as text, never HTML, and does not infer permission from a label. A write returns HTTP 200 for replay/adoption and 201 only when acceptance creates a new run; both return the same projection shape. HTTP success is not itself a domain receipt—the projection identifies the observed canonical receipt.
+
+### Setup milestones
+
+`projection.milestones[]` is the read-only, server-derived record of the reviewed workspace/team preparation (issue #529). It is additive within `schema_version` 1 and is derived on every projection from durable rows only: the run, its workspace operation, and `assistant_setup_resources` receipts, plus one in-process fact (a preparation attempt currently executing in this server process). It writes nothing; repeated `GET`s return identical milestones.
+
+| Field | Meaning |
+|---|---|
+| `id` | Stable identity: `workspace`, `role:<role_id>`, or `existing_team` (adopt mode). Clients key on `id`, never on `name`. |
+| `kind` | `workspace`, `agent_role`, or `existing_team`. |
+| `name` | Safe display name. Create mode: the reviewed workspace name (`assistantsetup.WorkspaceName`, shared with the creator adapter) and the reviewed role name; after receipt the resolved target name is preferred. Adopt mode carries no reviewed role, so the entry is the generic "Existing team kept as is" and no name is invented. |
+| `action` | The reviewed action: `create` or `reuse`. |
+| `status` | `pending`, `creating`, `reusing`, `created`, `reused`, `failed`, `needs_review`. |
+| `needs_model` | Orthogonal flag on a receipted role whose reviewed profile has no model ("Configured; chat needs a model"). |
+| `resource_id`, `ownership`, `recorded_at`, `placement` | Only once receipted: the canonical resource ID from the receipt, its `created`/`adopted`/`updated` ownership, the receipt time, and a closed placement code (`workspace_directory`, `agent_roster`). Never a path. |
+| `blueprint_id`, `blueprint_version` | The reviewed blueprint the run was accepted against. |
+| `error_code` | A safe code on the first un-receipted milestone when `failed` or `needs_review`. |
+
+Rules the derivation guarantees:
+
+- **Receipts are the only proof.** `created`/`reused` require a matching receipt written by the workspace operation (`workspace` for the workspace, `agent_instance` for the team). `created` follows `created` ownership; `adopted` ownership is always `reused`, so reusing an existing `File Curator` (or adopting an existing workspace) can never read "Created".
+- **`creating`/`reusing` come only from a live attempt in this process.** A timer, a client clock, or a status string is never evidence.
+- **Only the first un-receipted milestone carries a stop state.** An `unresolved` operation (or a `reconcile_required` run) is `needs_review`; a `failed` operation is `failed`; later milestones stay `pending`. A `running` operation with no live attempt (the process stopped mid-preparation) is `needs_review` with `preparation_interrupted`; a succeeded operation with no receipt is also `needs_review`.
+- **The list is for reading, not an execution claim.** It is ordered workspace, then roles. Actual execution order is agents seeded first, then the workspace persisted (see [Strict reviewed team creation](#strict-reviewed-team-creation)); statuses come only from receipts.
+- **List-driven.** Consumers must not assume a role count. Known limit: the run row stores one role (`team_role_*`) and `validateTeamPlan` requires exactly one, so multi-role receipts (a `role_id` on each resource) are out of scope; the list shape and identity scheme do not change if that lands.
 
 ### Safe failures
 
@@ -333,6 +358,8 @@ Every consequential step follows the same protocol:
 3. Call exactly one canonical domain owner. Never hold an assistant-setup SQL transaction while waiting on an agent store, workspace store, filesystem, trigger store, Setup Wizard adapter, or scan.
 4. Observe the canonical result by stable ID/marker and expected version. Then record the resource receipt and advance the run with a compare-and-swap on its revision.
 5. If the final coordinator write or HTTP response is lost, replay starts at observation, not at mutation.
+
+The workspace operation enters `running` when preparation is attempted: `StartWorkspace` moves a `claimed` or `failed` operation to `running`, counts the attempt, and keeps its first `started_at`; an operation that is already `running`, `unresolved`, or `succeeded` is left untouched, so replay is idempotent. Database state is for display and recovery. Mutual exclusion is an in-process single-flight guard keyed by run ID: the preparer is entered at most once concurrently per run. A second `Accept` (another tab) or `Resume` for the same run joins the in-flight attempt, bounded by its own request context, then projects what the first attempt durably recorded. A `GET` never starts, joins, or continues preparation.
 
 The lock/admission order is therefore `WorkGate permit -> assistantsetup claim transaction -> domain lock/write -> assistantsetup receipt transaction`. A domain may take its own workspace/File Janitor/trigger locks, but it must never call back into an open assistant-setup transaction. Two tabs racing the same step load the same operation claim; only one receives the claimed run revision, and both eventually project the same observed result.
 

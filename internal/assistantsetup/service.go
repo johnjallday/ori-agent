@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -66,6 +67,40 @@ type Service struct {
 	progressor      FileJanitorProgressor
 	folderIntents   *folderIntentStore
 	gate            *resetstate.WorkGate
+
+	flightMu sync.Mutex
+	flights  map[string]chan struct{}
+}
+
+// beginFlight registers a preparation attempt for one run. The first caller
+// becomes the leader and must call the returned finish function; every other
+// caller receives the leader's completion channel and must not enter the
+// preparer. In-process state is for mutual exclusion and for reporting a live
+// attempt; durable state remains the record of what happened.
+func (s *Service) beginFlight(runID string) (finish func(), joined <-chan struct{}) {
+	s.flightMu.Lock()
+	defer s.flightMu.Unlock()
+	if existing, ok := s.flights[runID]; ok {
+		return nil, existing
+	}
+	if s.flights == nil {
+		s.flights = map[string]chan struct{}{}
+	}
+	done := make(chan struct{})
+	s.flights[runID] = done
+	return func() {
+		s.flightMu.Lock()
+		delete(s.flights, runID)
+		s.flightMu.Unlock()
+		close(done)
+	}, nil
+}
+
+func (s *Service) inFlight(runID string) bool {
+	s.flightMu.Lock()
+	defer s.flightMu.Unlock()
+	_, ok := s.flights[runID]
+	return ok
 }
 
 func NewService(store Store, relationships RelationshipReader, resolver CandidateResolver, plans PlanSource, preparer WorkspacePreparer) *Service {
@@ -503,6 +538,29 @@ func (s *Service) prepareClaim(ctx context.Context, run *Run, plan TeamPlan, tar
 		}
 		return s.projectRun(ctx, base, run)
 	}
+	finish, joined := s.beginFlight(run.ID)
+	if joined != nil {
+		// Another request in this process is already preparing this run. Wait
+		// for it (bounded by this request) and project what it durably recorded.
+		select {
+		case <-joined:
+		case <-ctx.Done():
+			return nil, ErrUnavailable
+		}
+		current, getErr := s.store.GetRun(ctx, run.OwnerUserID, run.ID)
+		if getErr != nil {
+			return nil, ErrUnavailable
+		}
+		base, baseErr := s.baseProjection(ctx, run.OwnerUserID)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return s.projectRun(ctx, base, current)
+	}
+	defer finish()
+	if startErr := s.store.StartWorkspace(ctx, run.OwnerUserID, run.ID, operation.ID); startErr != nil {
+		return nil, ErrUnavailable
+	}
 	result, prepareErr := s.preparer.PrepareFileJanitor(ctx, PrepareRequest{
 		OwnerUserID: run.OwnerUserID, RunID: run.ID, OperationID: operation.ID,
 		ReviewDigest: operation.ReviewDigest, WorkspaceID: run.TargetWorkspaceID,
@@ -596,7 +654,44 @@ func (s *Service) baseProjection(ctx context.Context, owner string) (*Projection
 	return &Projection{SchemaVersion: SchemaVersion, CapabilityID: CapabilityID, Relationship: relationship, Actions: []Action{}}, nil
 }
 
+// projectRun projects one run and attaches its server-derived milestones. The
+// milestones are derived from the run as finally projected, after any
+// reconciliation inside projectRunState.
 func (s *Service) projectRun(ctx context.Context, projection *Projection, run *Run) (*Projection, error) {
+	projected, err := s.projectRunState(ctx, projection, run)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.attachMilestones(ctx, projected); err != nil {
+		return nil, err
+	}
+	return projected, nil
+}
+
+func (s *Service) attachMilestones(ctx context.Context, projection *Projection) error {
+	run := projection.Run
+	if run == nil {
+		return nil
+	}
+	resources, err := s.store.ListResources(ctx, run.OwnerUserID, run.ID)
+	if err != nil {
+		return ErrUnavailable
+	}
+	input := milestoneInput{Run: run, Resources: resources, InFlight: s.inFlight(run.ID)}
+	for index := range projection.Operations {
+		if projection.Operations[index].Kind == OperationWorkspace {
+			input.Operation = &projection.Operations[index]
+			break
+		}
+	}
+	if projection.Target != nil {
+		input.WorkspaceName = projection.Target.Name
+	}
+	projection.Milestones = deriveMilestones(input)
+	return nil
+}
+
+func (s *Service) projectRunState(ctx context.Context, projection *Projection, run *Run) (*Projection, error) {
 	operations, err := s.store.ListOperations(ctx, run.OwnerUserID, run.ID)
 	if err != nil {
 		return nil, ErrUnavailable

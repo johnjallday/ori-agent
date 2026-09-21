@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   assistantSetupEligible,
+  assistantSetupMilestoneView,
+  assistantSetupMilestoneViews,
   assistantSetupModelLabel,
   assistantSetupRequest,
   safeAssistantSetupRoute
@@ -30,6 +32,64 @@ test('team copy reports exact create or reuse and model availability', () => {
     assistantSetupModelLabel({ action: 'reuse', name: 'My Curator', model: 'gpt-test' }),
     'Reuse My Curator · gpt-test'
   );
+});
+
+test('milestone view keys on the server id and maps every status to a label', () => {
+  const view = assistantSetupMilestoneView({
+    id: 'role:file-curator',
+    kind: 'agent_role',
+    name: 'Renamed Curator',
+    status: 'created',
+    needs_model: true,
+    resource_id: 'instance-1'
+  });
+  assert.equal(view.key, 'role:file-curator');
+  assert.equal(view.name, 'Renamed Curator');
+  assert.equal(view.statusLabel, 'Created');
+  assert.deepEqual(view.details, ['Configured; chat needs a model']);
+  assert.equal(view.resourceID, 'instance-1');
+  const labels = [
+    'pending',
+    'creating',
+    'reusing',
+    'created',
+    'reused',
+    'failed',
+    'needs_review'
+  ].map(status => assistantSetupMilestoneView({ id: 'workspace', status }).statusLabel);
+  assert.deepEqual(labels, [
+    'Waiting',
+    'Creating',
+    'Reusing',
+    'Created',
+    'Reused',
+    'Failed',
+    'Needs review'
+  ]);
+});
+
+test('an unknown milestone status is never shown as success', () => {
+  for (const status of ['done', 'ok', '', undefined, 'constructor', '__proto__']) {
+    const view = assistantSetupMilestoneView({ id: 'workspace', status });
+    assert.equal(view.status, 'needs_review', String(status));
+    assert.equal(view.statusLabel, 'Needs review', String(status));
+  }
+});
+
+test('milestone views are list-driven for several roles and keep long names intact', () => {
+  const long = 'A very long reviewed role name '.repeat(12).trim();
+  const views = assistantSetupMilestoneViews([
+    { id: 'workspace', kind: 'workspace', name: 'File Janitor', status: 'created' },
+    { id: 'role:one', kind: 'agent_role', name: long, status: 'reused' },
+    { id: 'role:two', kind: 'agent_role', name: 'Second', status: 'pending' }
+  ]);
+  assert.deepEqual(
+    views.map(view => view.key),
+    ['workspace', 'role:one', 'role:two']
+  );
+  assert.equal(views[1].name, long);
+  assert.equal(views[1].statusLabel, 'Reused');
+  assert.deepEqual(assistantSetupMilestoneViews(undefined), []);
 });
 
 test('mutation requests carry only closed revisions and server-selected target', () => {

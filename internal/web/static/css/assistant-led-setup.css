@@ -88,6 +88,60 @@
   margin: 0.35rem 0;
 }
 
+.assistant-led-setup__milestones {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assistant-led-setup__milestone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--border-color, #64748b) 45%, transparent);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+
+.assistant-led-setup__milestone-name {
+  min-width: 0;
+  font-weight: 650;
+}
+
+.assistant-led-setup__milestone-status {
+  flex: 0 0 auto;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary, #5b6475) 16%, transparent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.assistant-led-setup__milestone[data-status="created"] .assistant-led-setup__milestone-status,
+.assistant-led-setup__milestone[data-status="reused"] .assistant-led-setup__milestone-status {
+  background: color-mix(in srgb, #16a34a 20%, transparent);
+}
+
+.assistant-led-setup__milestone[data-status="creating"] .assistant-led-setup__milestone-status,
+.assistant-led-setup__milestone[data-status="reusing"] .assistant-led-setup__milestone-status {
+  background: color-mix(in srgb, #8b5cf6 22%, transparent);
+}
+
+.assistant-led-setup__milestone[data-status="failed"] .assistant-led-setup__milestone-status,
+.assistant-led-setup__milestone[data-status="needs_review"] .assistant-led-setup__milestone-status {
+  background: color-mix(in srgb, var(--danger-color, #b42318) 20%, transparent);
+}
+
+.assistant-led-setup__milestone-detail {
+  flex-basis: 100%;
+  color: var(--text-secondary, #5b6475);
+  font-size: 0.82rem;
+}
+
 .assistant-led-setup__details,
 .assistant-led-setup__monitoring {
   margin-top: 0.7rem;

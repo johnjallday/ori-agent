@@ -78,7 +78,7 @@ func (a assistantSetupSessionAdapter) PrepareFileJanitor(ctx context.Context, re
 		configDigest = roles[0].ConfigDigest
 	}
 	result, err := a.sessions.CreateReviewedFileJanitor(ctx, sessionhttp.ReviewedTemplateCreationRequest{
-		Name: "File Janitor", Plan: plan,
+		Name: assistantsetup.WorkspaceName, Plan: plan,
 		Descriptor: sessionhttp.AssistantSetupCreationDescriptor{
 			OwnerUserID: request.OwnerUserID, RunID: request.RunID, OperationID: request.OperationID,
 			ReviewDigest: request.ReviewDigest, WorkspaceID: request.WorkspaceID,

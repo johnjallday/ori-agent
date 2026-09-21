@@ -38,6 +38,41 @@ export function assistantSetupModelLabel(role) {
   return `${action} ${name} · ${model || 'Configured; chat needs a model'}`;
 }
 
+const MILESTONE_STATUS_LABELS = {
+  pending: 'Waiting',
+  creating: 'Creating',
+  reusing: 'Reusing',
+  created: 'Created',
+  reused: 'Reused',
+  failed: 'Failed',
+  needs_review: 'Needs review'
+};
+
+// Turns one server milestone into display data. Identity is the server's `id`;
+// the display name is never read as an identifier. A status the client does not
+// know is shown as "Needs review", never as success.
+export function assistantSetupMilestoneView(milestone) {
+  const status = Object.hasOwn(MILESTONE_STATUS_LABELS, milestone?.status)
+    ? milestone.status
+    : 'needs_review';
+  const fallbackName = milestone?.kind === 'workspace' ? 'File Janitor' : 'Team member';
+  const details = [];
+  if (milestone?.needs_model) details.push('Configured; chat needs a model');
+  return {
+    key: String(milestone?.id || ''),
+    kind: String(milestone?.kind || ''),
+    name: String(milestone?.name || fallbackName),
+    status,
+    statusLabel: MILESTONE_STATUS_LABELS[status],
+    details,
+    resourceID: String(milestone?.resource_id || '')
+  };
+}
+
+export function assistantSetupMilestoneViews(milestones) {
+  return Array.isArray(milestones) ? milestones.map(assistantSetupMilestoneView) : [];
+}
+
 export function safeAssistantSetupRoute(route) {
   const value = String(route || '').trim();
   if (
@@ -143,6 +178,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     plan: doc.getElementById('assistantLedSetupPlan'),
     target: doc.getElementById('assistantLedSetupTarget'),
     team: doc.getElementById('assistantLedSetupTeam'),
+    milestones: doc.getElementById('assistantLedSetupMilestones'),
     details: doc.getElementById('assistantLedSetupDetails'),
     metadata: doc.getElementById('assistantLedSetupMetadata'),
     folder: doc.getElementById('assistantLedSetupFolder'),
@@ -212,6 +248,28 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     return button;
   }
 
+  function milestoneItem(view) {
+    const item = doc.createElement('li');
+    item.className = 'assistant-led-setup__milestone';
+    item.dataset.milestoneId = view.key;
+    item.dataset.status = view.status;
+    if (view.resourceID) item.dataset.resourceId = view.resourceID;
+    const name = doc.createElement('span');
+    name.className = 'assistant-led-setup__milestone-name';
+    name.textContent = view.name;
+    const chip = doc.createElement('span');
+    chip.className = 'assistant-led-setup__milestone-status';
+    chip.textContent = view.statusLabel;
+    item.append(name, ' ', chip);
+    view.details.forEach(detail => {
+      const note = doc.createElement('span');
+      note.className = 'assistant-led-setup__milestone-detail';
+      note.textContent = detail;
+      item.append(note);
+    });
+    return item;
+  }
+
   function renderChoices(proposal) {
     els.choices.replaceChildren();
     const choose = proposal?.mode === 'choose' && Array.isArray(proposal.targets);
@@ -253,6 +311,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     renderChoices(proposal);
     els.plan.hidden = !proposal && !run;
     els.team.replaceChildren();
+    els.milestones.replaceChildren();
     if (proposal) {
       if (proposal.mode === 'create') {
         els.target.textContent = 'Workspace: create one File Janitor workspace after this review.';
@@ -273,16 +332,19 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       els.monitoringDisclosure.textContent = String(proposal.monitoring_disclosure || '');
       els.review.textContent = String(proposal.file_review_disclosure || '');
     } else if (run) {
-      const targetName = projection.target?.name || 'File Janitor';
-      const targetMode = run.target_mode === 'create' ? 'created' : 'reused';
-      els.target.textContent = `Workspace: ${targetName} ${targetMode} from the reviewed setup.`;
-      if (run.team_role?.role_id) {
+      // Statuses come only from server milestones (receipts), never from the
+      // plan's target_mode.
+      els.target.textContent = 'Workspace and team from the reviewed setup';
+      const views = assistantSetupMilestoneViews(projection.milestones);
+      views.forEach(view => els.milestones.append(milestoneItem(view)));
+      if (!views.length && run.team_role?.role_id) {
         const item = doc.createElement('li');
         item.textContent = assistantSetupModelLabel(run.team_role);
         els.team.append(item);
       }
       els.details.hidden = true;
     }
+    els.milestones.hidden = !els.milestones.childElementCount;
 
     const monitoring = projection.monitoring_review || null;
     els.monitoring.hidden = !monitoring;
