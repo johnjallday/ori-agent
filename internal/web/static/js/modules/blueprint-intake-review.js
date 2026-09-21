@@ -37,7 +37,8 @@
         skill: null,
         bundledSkill: null,
         skillChoice: '',
-        selections: new Map()
+        selections: new Map(),
+        showUnchanged: false
       };
       states.set(key(ctx), state);
     }
@@ -78,11 +79,16 @@
     state.proposal.items.forEach(item => {
       state.selections.set(item.key, {
         key: item.key,
-        selected: !item.unusable_reason && !item.disabled_reason,
+        selected:
+          !item.unusable_reason &&
+          !item.disabled_reason &&
+          item.classification !== 'unchanged' &&
+          item.classification !== 'no_longer_found',
         title: item.title,
         due_at: item.due_input || (item.due_at ? toLocalInput(item.due_at) : ''),
         start: item.all_day ? item.start?.slice(0, 10) || '' : toLocalInput(item.start),
-        end: item.all_day ? item.end?.slice(0, 10) || '' : toLocalInput(item.end)
+        end: item.all_day ? item.end?.slice(0, 10) || '' : toLocalInput(item.end),
+        conflict_resolution: item.conflict ? 'keep_current' : ''
       });
     });
   }
@@ -226,6 +232,21 @@
     };
     proposal.items.forEach(item => (counts[item.kind] = (counts[item.kind] || 0) + 1));
     const summary = node('div', 'blueprint-intake-proposal-counts');
+    const classified = proposal.items.some(item => item.classification);
+    if (classified) {
+      const newCount = proposal.items.filter(item => item.classification === 'new').length;
+      const changedCount = proposal.items.filter(item => item.classification === 'changed').length;
+      summary.appendChild(
+        node(
+          'strong',
+          'blueprint-intake-proposal-count',
+          `${newCount} new item${newCount === 1 ? '' : 's'}`
+        )
+      );
+      summary.appendChild(
+        node('strong', 'blueprint-intake-proposal-count', `${changedCount} changed`)
+      );
+    }
     Object.entries(counts).forEach(([kind, count]) => {
       const labels = countLabels[kind] || [kind, `${kind}s`];
       summary.appendChild(
@@ -248,6 +269,23 @@
         )
       );
 
+    const unchangedCount = proposal.items.filter(
+      item => item.classification === 'unchanged'
+    ).length;
+    if (unchangedCount) {
+      const unchanged = node(
+        'button',
+        'modern-btn modern-btn-secondary blueprint-intake-show-unchanged',
+        state.showUnchanged ? 'Hide unchanged' : `Show ${unchangedCount} unchanged`
+      );
+      unchanged.type = 'button';
+      unchanged.addEventListener('click', () => {
+        state.showUnchanged = !state.showUnchanged;
+        draw(container, ctx, state);
+      });
+      container.appendChild(unchanged);
+    }
+
     const groupLabels = {
       ticket: 'Tickets',
       memory: 'Memory entries',
@@ -255,7 +293,9 @@
       calendar_event: 'Calendar events'
     };
     Object.keys(groupLabels).forEach(kind => {
-      const groupItems = proposal.items.filter(item => item.kind === kind);
+      const groupItems = proposal.items.filter(
+        item => item.kind === kind && (state.showUnchanged || item.classification !== 'unchanged')
+      );
       if (!groupItems.length) return;
       container.appendChild(node('h4', 'blueprint-intake-proposal-group', groupLabels[kind]));
       groupItems.forEach(item => {
@@ -266,13 +306,60 @@
         checkbox.type = 'checkbox';
         checkbox.checked = Boolean(choice?.selected);
         checkbox.disabled =
-          proposal.status !== 'pending' || Boolean(item.unusable_reason || item.disabled_reason);
+          proposal.status !== 'pending' ||
+          item.classification === 'unchanged' ||
+          item.classification === 'no_longer_found' ||
+          Boolean(item.unusable_reason || item.disabled_reason);
         checkbox.addEventListener('change', () => (choice.selected = checkbox.checked));
+        const actionLabel =
+          item.classification === 'changed'
+            ? 'Update'
+            : item.classification === 'no_longer_found'
+              ? 'Information only:'
+              : 'Add';
         selectLabel.append(
           checkbox,
-          document.createTextNode(` Add ${(countLabels[item.kind] || [item.kind])[0]}`)
+          document.createTextNode(` ${actionLabel} ${(countLabels[item.kind] || [item.kind])[0]}`)
         );
         card.appendChild(selectLabel);
+        if (item.classification)
+          card.appendChild(
+            node(
+              'strong',
+              'blueprint-intake-classification',
+              item.classification.replaceAll('_', ' ')
+            )
+          );
+        (item.changes || []).forEach(change => {
+          card.appendChild(
+            node(
+              'p',
+              'blueprint-intake-change',
+              `${change.field} was ${change.before || 'not set'}, now ${change.after || 'not set'}`
+            )
+          );
+        });
+        if (item.conflict) {
+          const conflict = node('fieldset', 'blueprint-intake-conflict');
+          conflict.appendChild(
+            node('legend', '', 'This record was edited after intake. Choose which value to keep.')
+          );
+          [
+            ['keep_current', `Keep current: ${item.conflict.current}`],
+            ['use_proposed', `Use proposal: ${item.conflict.proposed}`]
+          ].forEach(([value, text]) => {
+            const label = node('label', '', text);
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = `conflict-${item.key}`;
+            radio.value = value;
+            radio.checked = choice?.conflict_resolution === value;
+            radio.addEventListener('change', () => (choice.conflict_resolution = value));
+            label.prepend(radio);
+            conflict.appendChild(label);
+          });
+          card.appendChild(conflict);
+        }
 
         if (item.kind !== 'memory') {
           const titleLabel = node('label', '', 'Title');
@@ -482,6 +569,9 @@
 
   const renderer = {
     render,
+    reset(ctx) {
+      states.delete(key(ctx));
+    },
     primaryLabel(ctx) {
       const state = getState(ctx);
       if (!state.proposal) return state.run?.state === 'failed' ? 'Retry intake' : 'Run intake';

@@ -13,6 +13,31 @@ func ticketRequirement() workspace.IntakeRequirement {
 	return workspace.IntakeRequirement{Key: "materials", ProposalKinds: []string{"ticket"}}
 }
 
+func TestPendingProposalForSameIntakeIsReplacedRatherThanStacked(t *testing.T) {
+	store := NewProposalStore(proposalFolder{root: t.TempDir()})
+	first, err := finalizeProposal("ws", "materials", []ProposalItem{{Kind: ProposalKindTicket, Key: "first", Title: "First"}}, ProposalNotice{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := finalizeProposal("ws", "materials", []ProposalItem{{Kind: ProposalKindTicket, Key: "second", Title: "Second"}}, ProposalNotice{}, time.Now().Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(second); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.Pending("ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].Hash != second.Hash || pending[0].Items[0].Key != "second" {
+		t.Fatalf("pending = %+v", pending)
+	}
+}
+
 func TestParseProposalOutputFiltersUnsupportedAndDisallowedItems(t *testing.T) {
 	raw := `{"items":[
 		{"kind":"ticket","key":"quiz-1","title":"Quiz 1","due_at":"2026-03-08","source":{"source_id":"source-1","quote":"Quiz 1 is due March 8"}},

@@ -208,3 +208,50 @@
   gap: 0.4rem;
   align-items: center;
 }
+
+.blueprint-intake-pending {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-primary, #4f46e5) 9%, white);
+  border: 1px solid color-mix(in srgb, var(--color-primary, #4f46e5) 30%, transparent);
+  border-radius: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 1rem;
+  padding: 0.8rem 1rem;
+}
+
+.blueprint-intake-pending[hidden] {
+  display: none;
+}
+.blueprint-intake-pending button {
+  font-weight: 600;
+}
+.blueprint-intake-pending-modal {
+  align-items: center;
+  background: rgb(15 23 42 / 55%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: 10020;
+}
+.blueprint-intake-pending-dialog {
+  background: var(--bg-primary, white);
+  border-radius: 1rem;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 30%);
+  max-height: min(90vh, 840px);
+  max-width: 760px;
+  overflow: auto;
+  padding: 1.25rem;
+  width: 100%;
+}
+.blueprint-intake-pending-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+.blueprint-intake-pending-error {
+  color: var(--color-error, #b91c1c);
+}

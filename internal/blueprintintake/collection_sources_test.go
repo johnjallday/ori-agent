@@ -122,6 +122,73 @@ func TestAddFolderReportsImmediateFilesLeftOutByCap(t *testing.T) {
 	}
 }
 
+func TestRefreshSourcesReturnsOnlyNewChangedAndRemovedFolderFiles(t *testing.T) {
+	service, _, ws := newCollectionService(t)
+	acceptCollectionConsent(t, service, ws)
+	folder := t.TempDir()
+	if err := os.WriteFile(filepath.Join(folder, "kept.txt"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "removed.txt"), []byte("remove me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service.SetPathSelections(fixedSelection{path: folder})
+	initial, err := service.AddFolder(context.Background(), ws.ID, "materials", "trusted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keptID := ""
+	for _, file := range initial.Files {
+		if file.Name == "kept.txt" {
+			keptID = file.ID
+		}
+	}
+	if refresh, err := service.RefreshSources(context.Background(), ws.ID, "materials", RefreshMode{Folders: true}); err != nil || len(refresh.Changed) != 0 || len(refresh.Removed) != 0 {
+		t.Fatalf("unchanged refresh = %+v, %v", refresh, err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "kept.txt"), []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(folder, "removed.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "added.txt"), []byte("added"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refresh, err := service.RefreshSources(context.Background(), ws.ID, "materials", RefreshMode{Folders: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refresh.Changed) != 2 || len(refresh.Removed) != 1 || refresh.Removed[0].Name != "removed.txt" {
+		t.Fatalf("refresh = %+v", refresh)
+	}
+	for _, source := range refresh.Changed {
+		if source.Name == "kept.txt" && source.ID != keptID {
+			t.Fatalf("changed source ID = %q, want stable %q", source.ID, keptID)
+		}
+	}
+}
+
+func TestRefreshSourcesRefetchesLinksAndSkipsUnchangedText(t *testing.T) {
+	service, _, ws := newCollectionService(t)
+	acceptCollectionConsent(t, service, ws)
+	fetcher := &cannedLinkFetcher{snapshot: LinkSnapshot{URL: "https://example.com/syllabus", Title: "Syllabus", Content: "Quiz 1", Body: []byte("Quiz 1")}}
+	service.SetLinkFetcher(fetcher)
+	if _, err := service.AddLink(context.Background(), ws.ID, "materials", "https://example.com/syllabus"); err != nil {
+		t.Fatal(err)
+	}
+	refresh, err := service.RefreshSources(context.Background(), ws.ID, "materials", RefreshMode{Links: true})
+	if err != nil || len(refresh.Changed) != 0 {
+		t.Fatalf("unchanged link refresh = %+v, %v", refresh, err)
+	}
+	fetcher.snapshot.Content = "Quiz 1 moved"
+	fetcher.snapshot.Body = []byte("Quiz 1 moved")
+	refresh, err = service.RefreshSources(context.Background(), ws.ID, "materials", RefreshMode{Links: true})
+	if err != nil || len(refresh.Changed) != 1 || refresh.Changed[0].ContentHash == "" {
+		t.Fatalf("changed link refresh = %+v, %v", refresh, err)
+	}
+}
+
 func TestAddFolderReadsOnlyImmediateContainedFiles(t *testing.T) {
 	service, store, ws := newCollectionService(t)
 	acceptCollectionConsent(t, service, ws)

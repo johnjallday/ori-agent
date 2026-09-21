@@ -15,8 +15,10 @@ type proposalFolder struct{ root string }
 func (f proposalFolder) GetFolderPath(string) (string, error) { return f.root, nil }
 
 type recordingTicketCreator struct {
-	calls  []workspace.TicketCreateInput
-	failID string
+	calls   []workspace.TicketCreateInput
+	updates []workspace.TicketUpdateInput
+	tickets map[string]*workspace.Ticket
+	failID  string
 }
 
 func (c *recordingTicketCreator) CreateIdempotent(input workspace.TicketCreateInput) (*workspace.Ticket, bool, error) {
@@ -24,7 +26,39 @@ func (c *recordingTicketCreator) CreateIdempotent(input workspace.TicketCreateIn
 	if input.SourceID == c.failID {
 		return nil, false, errors.New("ticket refused")
 	}
-	return &workspace.Ticket{ID: "ticket-" + input.SourceID}, true, nil
+	ticket := &workspace.Ticket{ID: "ticket-" + input.SourceID, Title: input.Title, Description: input.Description, DueDate: input.DueDate}
+	if c.tickets == nil {
+		c.tickets = make(map[string]*workspace.Ticket)
+	}
+	c.tickets[ticket.ID] = ticket
+	return ticket, true, nil
+}
+
+func (c *recordingTicketCreator) Get(_ string, ticketID string) (*workspace.Ticket, error) {
+	if ticket := c.tickets[ticketID]; ticket != nil {
+		copy := *ticket
+		return &copy, nil
+	}
+	return nil, errors.New("not found")
+}
+
+func (c *recordingTicketCreator) Update(_ string, ticketID string, input workspace.TicketUpdateInput) (*workspace.Ticket, error) {
+	ticket := c.tickets[ticketID]
+	if ticket == nil {
+		return nil, errors.New("not found")
+	}
+	c.updates = append(c.updates, input)
+	if input.Title != nil {
+		ticket.Title = *input.Title
+	}
+	if input.Description != nil {
+		ticket.Description = *input.Description
+	}
+	if input.DueDate != nil {
+		ticket.DueDate = *input.DueDate
+	}
+	copy := *ticket
+	return &copy, nil
 }
 
 type recordingMemoryWriter struct{ entries []workspace.MemoryEntry }
@@ -186,6 +220,69 @@ func TestPrepareProposalDisablesCalendarWithoutAReadyConnector(t *testing.T) {
 	}
 	if proposal.Items[0].DisabledReason == "" || proposal.Items[1].DisabledReason != "" {
 		t.Fatalf("proposal = %+v", proposal)
+	}
+}
+
+func TestApplyChangedTicketUpdatesExistingRecordWithoutDuplicate(t *testing.T) {
+	store := NewProposalStore(proposalFolder{root: t.TempDir()})
+	creator := &recordingTicketCreator{}
+	service := NewApplyService(store, creator)
+	oldDate := time.Date(2026, 10, 10, 17, 0, 0, 0, time.UTC)
+	initial, err := finalizeProposal("ws", "materials", []ProposalItem{{Kind: ProposalKindTicket, Key: "quiz-2", Title: "Quiz 2", DueAt: &oldDate, Source: ProposalSource{SourceID: "syllabus", Quote: "old"}}}, ProposalNotice{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(initial); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Apply("ws", "materials", ApplyRequest{ProposalHash: initial.Hash, Items: []ApplyChoice{{Key: "quiz-2", Selected: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	newDate := oldDate.AddDate(0, 0, 1)
+	changed, err := finalizeProposal("ws", "materials", []ProposalItem{{Kind: ProposalKindTicket, Key: "quiz-2", Title: "Quiz 2", DueAt: &newDate, Classification: ProposalClassificationChanged, Changes: []ProposalChange{{Field: "due date"}}, Source: ProposalSource{SourceID: "syllabus", Quote: "new"}}}, ProposalNotice{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PrepareProposal(context.Background(), &changed); err != nil {
+		t.Fatal(err)
+	}
+	if err := rehashProposal(&changed); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(changed); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := service.Apply("ws", "materials", ApplyRequest{ProposalHash: changed.Hash, Items: []ApplyChoice{{Key: "quiz-2", Selected: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(creator.calls) != 1 || len(creator.updates) != 1 || applied.Results[0].Status != "updated" {
+		t.Fatalf("creates=%d updates=%d result=%+v", len(creator.calls), len(creator.updates), applied.Results)
+	}
+}
+
+func TestPrepareChangedTicketConflictShowsBothValues(t *testing.T) {
+	store := NewProposalStore(proposalFolder{root: t.TempDir()})
+	creator := &recordingTicketCreator{}
+	service := NewApplyService(store, creator)
+	initial := pendingProposal(t, store)
+	if _, err := service.Apply("ws", "materials", ApplyRequest{ProposalHash: initial.Hash, Items: []ApplyChoice{{Key: "one", Selected: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := store.Ledger("ws", "materials")
+	if err != nil {
+		t.Fatal(err)
+	}
+	creator.tickets[ledger[0].RecordID].Title = "User edited title"
+	changed, err := finalizeProposal("ws", "materials", []ProposalItem{{Kind: ProposalKindTicket, Key: "one", Title: "Source title", Classification: ProposalClassificationChanged}}, ProposalNotice{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PrepareProposal(context.Background(), &changed); err != nil {
+		t.Fatal(err)
+	}
+	if changed.Items[0].Conflict == nil || changed.Items[0].Conflict.Current == "" || changed.Items[0].Conflict.Proposed == "" {
+		t.Fatalf("conflict = %+v", changed.Items[0].Conflict)
 	}
 }
 

@@ -7,7 +7,7 @@
   "capability_requirements": [
     {
       "key": "calendar",
-      "optional_operations": ["create_event"]
+      "optional_operations": ["create_event", "update_event"]
     }
   ],
   "directory_requirements": [
@@ -16,6 +16,18 @@
       "label": "Course materials folder",
       "suggested_path": "~/Documents",
       "access_disclosure": "Ori reads the contents of supported files directly inside this folder after you consent. It does not read subfolders, and it does not copy the source files into the workspace."
+    }
+  ],
+  "automation_recipes": [
+    {
+      "directory_key": "course-materials-folder",
+      "watch": {
+        "events": ["create", "modify", "remove", "rename"],
+        "debounce_seconds": 5
+      },
+      "daily_scan": {
+        "local_time": "09:00"
+      }
     }
   ],
   "intake_requirements": [
@@ -43,6 +55,15 @@
         "required": true,
         "title": "Add course materials",
         "description": "Add the files Ori should read for this course."
+      },
+      {
+        "id": "watch-materials",
+        "kind": "automation_review",
+        "requirement_key": "course-materials-folder",
+        "adapter": "blueprint_intake",
+        "required": true,
+        "title": "Keep course materials up to date",
+        "description": "Ori watches the chosen folder and checks saved links daily. Changes create a proposal for your review; Ori never changes course records automatically."
       },
       {
         "id": "review-materials",

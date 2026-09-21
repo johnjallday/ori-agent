@@ -225,6 +225,13 @@ func (s *Service) Cancel(workspaceID, intakeKey string) (RunStatus, error) {
 	return status, nil
 }
 
+func (s *Service) Pending(workspaceID string) ([]Proposal, error) {
+	if s == nil || s.proposals == nil {
+		return nil, ErrProposalNotFound
+	}
+	return s.proposals.Pending(workspaceID)
+}
+
 func (s *Service) Proposal(workspaceID, intakeKey string) (Proposal, error) {
 	return s.proposals.Get(workspaceID, intakeKey)
 }

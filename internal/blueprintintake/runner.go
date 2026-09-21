@@ -260,6 +260,15 @@ func bundledSkillSnapshot(ws *workspace.Workspace, name string) (workspace.Bundl
 }
 
 func (r *IntakeRunner) Run(ctx context.Context, workspaceID, intakeKey string, progress func(SourceRunProgress)) ([]SourceRunResult, error) {
+	return r.runSources(ctx, workspaceID, intakeKey, nil, progress)
+}
+
+// RunSources executes only the changed source snapshots selected by re-intake.
+func (r *IntakeRunner) RunSources(ctx context.Context, workspaceID, intakeKey string, sources []SourceRecord, progress func(SourceRunProgress)) ([]SourceRunResult, error) {
+	return r.runSources(ctx, workspaceID, intakeKey, sources, progress)
+}
+
+func (r *IntakeRunner) runSources(ctx context.Context, workspaceID, intakeKey string, selected []SourceRecord, progress func(SourceRunProgress)) ([]SourceRunResult, error) {
 	if r == nil || r.executor == nil {
 		return nil, errors.New("intake task executor is unavailable")
 	}
@@ -282,9 +291,12 @@ func (r *IntakeRunner) Run(ctx context.Context, workspaceID, intakeKey string, p
 	if err != nil || !found || skill == nil || strings.TrimSpace(skill.Prompt) == "" {
 		return nil, fmt.Errorf("%w: skill text is missing", ErrSkillUnavailable)
 	}
-	sources, err := r.sources.ListSources(workspaceID, intakeKey)
-	if err != nil {
-		return nil, err
+	sources := selected
+	if sources == nil {
+		sources, err = r.sources.ListSources(workspaceID, intakeKey)
+		if err != nil {
+			return nil, err
+		}
 	}
 	parsed := make([]SourceRecord, 0, len(sources))
 	for _, source := range sources {

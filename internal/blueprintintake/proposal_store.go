@@ -61,6 +61,22 @@ func (s *ProposalStore) Get(workspaceID, intakeKey string) (Proposal, error) {
 	return proposal, nil
 }
 
+func (s *ProposalStore) Pending(workspaceID string) ([]Proposal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, _, err := s.load(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	pending := make([]Proposal, 0, len(state.Proposals))
+	for _, proposal := range state.Proposals {
+		if proposal.Status == "pending" {
+			pending = append(pending, proposal)
+		}
+	}
+	return pending, nil
+}
+
 func (s *ProposalStore) Ledger(workspaceID, intakeKey string) ([]LedgerEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

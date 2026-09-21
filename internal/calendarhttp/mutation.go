@@ -276,6 +276,7 @@ func (h *Handler) previewMutation(gw *gatewayContext, payload normalizedMutation
 }
 
 type ReviewedEventInput struct {
+	EventID     string
 	Title       string
 	Start       time.Time
 	End         time.Time
@@ -307,14 +308,18 @@ func (h *Handler) PreviewAndConfirmReviewedEvent(ctx context.Context, workspaceI
 	if selected := calendar.ReadBindingSettings(gw.Binding.Config).SelectedCalendarIDs; len(selected) > 0 {
 		calendarID = selected[0]
 	}
-	req := mutationRequest{WorkspaceID: workspaceID, Operation: calendar.OpCreateEvent, CalendarID: calendarID, Title: input.Title, StartTime: input.Start.Format(time.RFC3339), EndTime: input.End.Format(time.RFC3339), TimeZone: input.TimeZone, Location: input.Location, Description: input.Description}
+	operation := calendar.OpCreateEvent
+	if strings.TrimSpace(input.EventID) != "" {
+		operation = calendar.OpUpdateEvent
+	}
+	req := mutationRequest{WorkspaceID: workspaceID, Operation: operation, CalendarID: calendarID, EventID: strings.TrimSpace(input.EventID), Title: input.Title, StartTime: input.Start.Format(time.RFC3339), EndTime: input.End.Format(time.RFC3339), TimeZone: input.TimeZone, Location: input.Location, Description: input.Description}
 	payload, validationErrs := validateAndNormalizeMutation(req)
 	if len(validationErrs) > 0 {
 		return "", fmt.Errorf("calendar event is invalid: %s", strings.Join(validationErrs, "; "))
 	}
 	op, mapped := gw.Mapping.Operation(payload.Operation)
 	if !mapped {
-		return "", fmt.Errorf("the create_event operation is not mapped for this connector")
+		return "", fmt.Errorf("the %s operation is not mapped for this connector", payload.Operation)
 	}
 	preview := h.previewMutation(gw, payload)
 	hash := hashMutationPayload(payload)

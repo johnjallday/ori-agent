@@ -931,6 +931,7 @@ func (b *ServerBuilder) initializeTriggerService(opportunityStore workspace.Oppo
 	// The Janitor's watcher and daily catch-up need the trigger service, so
 	// they are wired here rather than at handler-construction time.
 	b.wireFileJanitorAutomation()
+	b.wireBlueprintReintake()
 	// Note: b.server.Handlers is rebuilt after this phase, so the handler is
 	// attached to the facade in finalizeHandlers (alongside ActionCenter),
 	// not here.

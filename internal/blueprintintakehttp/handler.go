@@ -318,6 +318,23 @@ func (h *Handler) CancelRun(w http.ResponseWriter, r *http.Request) {
 	_ = orihttp.RespondSuccess(w, map[string]any{"run": run})
 }
 
+func (h *Handler) GetPending(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.workflow == nil {
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "Blueprint intake is unavailable.")
+		return
+	}
+	workspaceID, _, ok := h.resolveWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	proposals, err := h.workflow.Pending(workspaceID)
+	if err != nil {
+		_ = orihttp.RespondError(w, http.StatusInternalServerError, "Pending intake proposals could not be read.")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"proposals": proposals})
+}
+
 func (h *Handler) GetProposal(w http.ResponseWriter, r *http.Request) {
 	workspaceID, _, ok := h.resolveWorkflowWorkspace(r.Context(), w, r)
 	if !ok {

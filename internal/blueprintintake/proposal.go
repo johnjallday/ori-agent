@@ -23,25 +23,46 @@ type ProposalSource struct {
 	Quote    string `json:"quote"`
 }
 
+type ProposalChange struct {
+	Field  string `json:"field"`
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+}
+
+type ProposalConflict struct {
+	Current  string `json:"current"`
+	Proposed string `json:"proposed"`
+}
+
+const (
+	ProposalClassificationNew           = "new"
+	ProposalClassificationChanged       = "changed"
+	ProposalClassificationUnchanged     = "unchanged"
+	ProposalClassificationNoLongerFound = "no_longer_found"
+)
+
 type ProposalItem struct {
-	Kind           string         `json:"kind"`
-	Key            string         `json:"key"`
-	Title          string         `json:"title,omitempty"`
-	Description    string         `json:"description,omitempty"`
-	Text           string         `json:"text,omitempty"`
-	MemoryType     string         `json:"memory_type,omitempty"`
-	Body           string         `json:"body,omitempty"`
-	DueAt          *time.Time     `json:"due_at,omitempty"`
-	DueInput       string         `json:"due_input,omitempty"`
-	Start          *time.Time     `json:"start,omitempty"`
-	End            *time.Time     `json:"end,omitempty"`
-	AllDay         bool           `json:"all_day,omitempty"`
-	Location       string         `json:"location,omitempty"`
-	NoTimeGiven    bool           `json:"no_time_given,omitempty"`
-	PartlyRead     bool           `json:"partly_read,omitempty"`
-	UnusableReason string         `json:"unusable_reason,omitempty"`
-	DisabledReason string         `json:"disabled_reason,omitempty"`
-	Source         ProposalSource `json:"source"`
+	Kind           string            `json:"kind"`
+	Key            string            `json:"key"`
+	Title          string            `json:"title,omitempty"`
+	Description    string            `json:"description,omitempty"`
+	Text           string            `json:"text,omitempty"`
+	MemoryType     string            `json:"memory_type,omitempty"`
+	Body           string            `json:"body,omitempty"`
+	DueAt          *time.Time        `json:"due_at,omitempty"`
+	DueInput       string            `json:"due_input,omitempty"`
+	Start          *time.Time        `json:"start,omitempty"`
+	End            *time.Time        `json:"end,omitempty"`
+	AllDay         bool              `json:"all_day,omitempty"`
+	Location       string            `json:"location,omitempty"`
+	NoTimeGiven    bool              `json:"no_time_given,omitempty"`
+	PartlyRead     bool              `json:"partly_read,omitempty"`
+	UnusableReason string            `json:"unusable_reason,omitempty"`
+	DisabledReason string            `json:"disabled_reason,omitempty"`
+	Classification string            `json:"classification,omitempty"`
+	Changes        []ProposalChange  `json:"changes,omitempty"`
+	Conflict       *ProposalConflict `json:"conflict,omitempty"`
+	Source         ProposalSource    `json:"source"`
 }
 
 type ProposalNotice struct {

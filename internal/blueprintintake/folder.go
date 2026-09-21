@@ -117,13 +117,21 @@ func (s *SourceService) AddFolder(ctx context.Context, workspaceID, intakeKey, s
 }
 
 func (s *SourceService) readFolderFile(ctx context.Context, stateDir, root, resolved, name, folderID string, requirement workspace.IntakeRequirement) (SourceRecord, string, error) {
+	return s.readFolderFileWithID(ctx, stateDir, root, resolved, name, folderID, "", requirement)
+}
+
+func (s *SourceService) readFolderFileWithID(ctx context.Context, stateDir, root, resolved, name, folderID, sourceID string, requirement workspace.IntakeRequirement) (SourceRecord, string, error) {
 	if err := ctx.Err(); err != nil {
 		return SourceRecord{}, "", err
 	}
 	record := SourceRecord{IntakeKey: requirement.Key, Kind: "folder_file", Name: name, FolderPath: root, ParentID: folderID, Status: SourceStatusSkipped, AddedAt: s.now().UTC()}
-	id, err := newSourceID()
-	if err != nil {
-		return SourceRecord{}, "", err
+	id := strings.TrimSpace(sourceID)
+	if id == "" {
+		var err error
+		id, err = newSourceID()
+		if err != nil {
+			return SourceRecord{}, "", err
+		}
 	}
 	record.ID = id
 	if !pathContained(root, resolved) {

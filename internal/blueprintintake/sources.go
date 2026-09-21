@@ -92,6 +92,7 @@ type sourceState struct {
 	Sources               []SourceRecord           `json:"sources,omitempty"`
 	Consents              map[string]ConsentRecord `json:"consents,omitempty"`
 	BundledSkillDecisions map[string]string        `json:"bundled_skill_decisions,omitempty"`
+	AutomationApprovals   map[string]time.Time     `json:"automation_approvals,omitempty"`
 }
 
 // SourceService owns workspace-scoped intake source storage.
@@ -136,6 +137,22 @@ func (s *SourceService) lockFor(workspaceID, intakeKey string) *sync.Mutex {
 		s.locks[key] = lock
 	}
 	return lock
+}
+
+func (s *SourceService) RequirementForDirectory(workspaceID, directoryKey string) (workspace.IntakeRequirement, error) {
+	ws, err := s.workspaces.GetFolderWorkspace(strings.TrimSpace(workspaceID))
+	if err != nil || ws == nil {
+		return workspace.IntakeRequirement{}, fmt.Errorf("workspace is unavailable: %w", err)
+	}
+	provenance := ws.GetTemplateProvenance()
+	if provenance != nil {
+		for _, requirement := range provenance.IntakeRequirements {
+			if strings.EqualFold(strings.TrimSpace(requirement.Sources.DirectoryKey), strings.TrimSpace(directoryKey)) {
+				return requirement, nil
+			}
+		}
+	}
+	return workspace.IntakeRequirement{}, ErrIntakeNotFound
 }
 
 func (s *SourceService) Requirement(workspaceID, intakeKey string) (workspace.IntakeRequirement, error) {
@@ -331,6 +348,34 @@ func (s *SourceService) SetBundledSkillDecision(workspaceID, skillName, choice s
 		state.BundledSkillDecisions = make(map[string]string)
 	}
 	state.BundledSkillDecisions[skillName] = choice
+	return saveSourceState(stateDir, state)
+}
+
+func (s *SourceService) AutomationApproved(workspaceID, intakeKey string) (bool, error) {
+	state, _, _, err := s.loadState(workspaceID)
+	if err != nil {
+		return false, err
+	}
+	_, approved := state.AutomationApprovals[strings.TrimSpace(intakeKey)]
+	return approved, nil
+}
+
+func (s *SourceService) ApproveAutomation(workspaceID, intakeKey string) error {
+	intakeKey = strings.TrimSpace(intakeKey)
+	if intakeKey == "" {
+		return ErrIntakeNotFound
+	}
+	lock := s.lockFor(workspaceID, intakeKey)
+	lock.Lock()
+	defer lock.Unlock()
+	state, stateDir, _, err := s.loadState(workspaceID)
+	if err != nil {
+		return err
+	}
+	if state.AutomationApprovals == nil {
+		state.AutomationApprovals = make(map[string]time.Time)
+	}
+	state.AutomationApprovals[intakeKey] = s.now().UTC()
 	return saveSourceState(stateDir, state)
 }
 

@@ -1164,6 +1164,7 @@ func (b *ServerBuilder) wireSetupWizard() {
 			applyService.SetCalendarWriter(calendarIntakeWriter{handler: b.calendarOpsHandler})
 		}
 		workflow := blueprintintake.NewService(intakeService, runner, proposalStore, applyService)
+		b.blueprintReintakeService = blueprintintake.NewReintakeService(intakeService, runner, proposalStore, applyService)
 		b.blueprintIntakeWorkflow = workflow
 		b.blueprintIntakeHandler = blueprintintakehttp.NewHandler(intakeService, b.workspaceStore, b.userProvider)
 		b.blueprintIntakeHandler.SetWorkflow(workflow)
@@ -1171,7 +1172,8 @@ func (b *ServerBuilder) wireSetupWizard() {
 		intakeSources = intakeService
 		intakeWorkflow = workflow
 	}
-	if err := registry.Register(blueprintintakewizard.NewSetupAdapter(intakeSources, intakeWorkflow)); err != nil {
+	b.blueprintIntakeSetupAdapter = blueprintintakewizard.NewSetupAdapter(intakeSources, intakeWorkflow)
+	if err := registry.Register(b.blueprintIntakeSetupAdapter); err != nil {
 		logger.Warn("Blueprint Intake setup adapter not registered", logger.Fields{"error": err})
 	}
 	if b.calendarOpsHandler != nil {
@@ -1609,6 +1611,10 @@ func (w calendarIntakeWriter) Availability(ctx context.Context, workspaceID stri
 
 func (w calendarIntakeWriter) Create(ctx context.Context, workspaceID string, input blueprintintake.CalendarEventInput) (string, error) {
 	return w.handler.PreviewAndConfirmReviewedEvent(ctx, workspaceID, calendarhttp.ReviewedEventInput{Title: input.Title, Start: input.Start, End: input.End, TimeZone: input.Start.Location().String(), Location: input.Location, Description: input.Description})
+}
+
+func (w calendarIntakeWriter) Update(ctx context.Context, workspaceID, eventID string, input blueprintintake.CalendarEventInput) (string, error) {
+	return w.handler.PreviewAndConfirmReviewedEvent(ctx, workspaceID, calendarhttp.ReviewedEventInput{EventID: eventID, Title: input.Title, Start: input.Start, End: input.End, TimeZone: input.Start.Location().String(), Location: input.Location, Description: input.Description})
 }
 
 func detectDefaultBraveExecutablePath() string {

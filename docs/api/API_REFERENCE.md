@@ -840,10 +840,11 @@ Get current version information.
 Blueprint Intake routes are workspace-scoped. `{intakeKey}` must name an intake
 copied into the workspace's template provenance. File text and skill output are
 untrusted input; only a reviewed proposal hash can authorize record creation.
-Proposals may contain `ticket`, `memory`, `note`, and `calendar_event` items. Invalid memory entries remain visible as unusable. Calendar items remain visible but disabled when the workspace has no connected calendar with `create_event` mapped. Applying selected items returns an independent `created`, `failed`, or `skipped` result for each item.
+Proposals may contain `ticket`, `memory`, `note`, and `calendar_event` items. Invalid memory entries remain visible as unusable. Calendar items remain visible but disabled when the workspace has no connected calendar with `create_event` mapped. Re-intake proposals classify items as `new`, `changed`, `unchanged`, or `no_longer_found`; changed records may require an explicit `conflict_resolution` of `keep_current` or `use_proposed`. Applying selected items returns an independent `created`, `updated`, `failed`, or `skipped` result for each item.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
+| `GET` | `/workspaces/{workspaceID}/blueprint-intakes/pending` | List pending proposals for the Command-view review banner. |
 | `GET` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}` | Read sources, consent, skill readiness, run progress, and the current proposal. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/files` | Add one multipart file source. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/links` | Fetch and snapshot one consented public HTTP(S) page. Body: `{"url":"https://…"}`. |

@@ -8,6 +8,7 @@ type LedgerEntry struct {
 	Key         string     `json:"key"`
 	Kind        string     `json:"kind"`
 	RecordID    string     `json:"record_id"`
+	SourceID    string     `json:"source_id,omitempty"`
 	Title       string     `json:"title,omitempty"`
 	Description string     `json:"description,omitempty"`
 	Text        string     `json:"text,omitempty"`

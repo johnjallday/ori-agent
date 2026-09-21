@@ -111,6 +111,8 @@
              Details and Map modes — a workspace that still needs setup says so
              wherever the user actually is. -->
         {{template "components/workspaces/setup-wizard-modal.tmpl" .}}
+        <!-- Reviewed re-intake proposals are inert until opened and applied. -->
+        <div id="blueprintIntakePending" class="blueprint-intake-pending" role="status" aria-live="polite" hidden></div>
         <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->
         <div id="workspaceCommandView" class="ws-cmd" role="region" aria-label="Workspace command view" hidden></div>
         <!--
