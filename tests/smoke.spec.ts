@@ -955,6 +955,54 @@ test.describe('Home First Run', () => {
     await captureImplementationScreenshot(page, 'home-plugin-updates-narrow.png');
   });
 
+  test('labels a reviewed release update apart from a source update (Issue #530)', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1512, height: 805 });
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route(/\/api\/workspaces\?tree=true$/, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ workspaces: [], folders: [] })
+      });
+    });
+    await page.route('**/api/plugins/updates', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          checking: false,
+          last_successful_check_at: '2026-08-31T12:00:00Z',
+          updates: [
+            {
+              name: 'reviewed-demo',
+              installed_version: '1.0.0',
+              available_version: '2.0.0',
+              components_changed: false,
+              available: true,
+              reviewed_release: true
+            }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#cockpitRailToggle').click();
+    const notice = page.locator('#homePluginUpdates');
+    await expect(notice).toBeVisible();
+    await expect(notice.locator('.home-plugin-update-detail')).toHaveText(
+      'Reviewed release 2.0.0 is available.'
+    );
+  });
+
   test('Quests starts compact and opens/collapses without persisting an open state (Issue #334)', async ({
     page
   }) => {

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -384,9 +385,12 @@ func TestUpdateHandlerUsesTheReviewedReplacementSource(t *testing.T) {
 	mustWrite(t, filepath.Join(replacement, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.3.0"}`)
 	mustWrite(t, filepath.Join(replacement, ".mcp.json"), `{"ori-reaper":{"command":"/usr/bin/false"}}`)
 	var hookCalls []plugin.InstalledPlugin
-	h.SetReviewedReplacement(func(_ context.Context, installed plugin.InstalledPlugin) (string, plugin.SourceFormat, bool) {
+	h.SetReviewedReplacement(func(_ context.Context, installed plugin.InstalledPlugin) ReviewedUpdate {
 		hookCalls = append(hookCalls, installed)
-		return replacement, plugin.FormatClaude, installed.Name == "reaper"
+		if installed.Name != "reaper" {
+			return ReviewedUpdate{}
+		}
+		return ReviewedUpdate{Source: replacement, Format: plugin.FormatClaude}
 	})
 
 	preview := postUpdate(t, h, false)
@@ -416,11 +420,17 @@ func TestUpdateHandlerUsesTheReviewedReplacementSource(t *testing.T) {
 func TestUpdateHandlerFollowsTheRecordedSourceWithoutAReviewedReplacement(t *testing.T) {
 	for name, hook := range map[string]ReviewedReplacement{
 		"nil hook": nil,
-		"hook declines": func(context.Context, plugin.InstalledPlugin) (string, plugin.SourceFormat, bool) {
-			return "", "", false
+		"hook declines": func(context.Context, plugin.InstalledPlugin) ReviewedUpdate {
+			return ReviewedUpdate{}
 		},
-		"hook for another plugin": func(_ context.Context, installed plugin.InstalledPlugin) (string, plugin.SourceFormat, bool) {
-			return "/does/not/exist", plugin.FormatClaude, installed.Name == "other"
+		"hook for another plugin": func(_ context.Context, installed plugin.InstalledPlugin) ReviewedUpdate {
+			if installed.Name != "other" {
+				return ReviewedUpdate{}
+			}
+			return ReviewedUpdate{Source: "/does/not/exist", Format: plugin.FormatClaude}
+		},
+		"replacement without a source": func(context.Context, plugin.InstalledPlugin) ReviewedUpdate {
+			return ReviewedUpdate{Format: plugin.FormatClaude}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -441,6 +451,56 @@ func TestUpdateHandlerFollowsTheRecordedSourceWithoutAReviewedReplacement(t *tes
 				t.Fatalf("update left the recorded source: %+v", installed)
 			}
 		})
+	}
+}
+
+// A refusal is the reviewed-install-on-a-mutable-source outcome: the recorded
+// source is the development branch, so it must not be previewed or installed,
+// and the recorded source must never be read.
+func TestUpdateHandlerRefusesWithoutReadingTheRecordedSource(t *testing.T) {
+	h := testHandler(t)
+	recorded := claudeBundle(t)
+	if rr := postInstall(t, h, recorded, true); rr.Code != http.StatusOK {
+		t.Fatalf("install: %d %s", rr.Code, rr.Body.String())
+	}
+	primeAvailableUpdate(t, h, recorded)
+	// The recorded source now holds a 0.2.0 whose command would appear in any
+	// disclosure built from it.
+	mustWrite(t, filepath.Join(recorded, ".mcp.json"), `{"ori-reaper":{"command":"/usr/bin/mutable-head"}}`)
+	before, err := h.Manager().List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cachedBefore := cachedUpdates(t, h)
+	h.SetReviewedReplacement(func(context.Context, plugin.InstalledPlugin) ReviewedUpdate {
+		return ReviewedUpdate{Refuse: true, Source: recorded, Format: plugin.FormatClaude}
+	})
+
+	for _, confirm := range []bool{false, true} {
+		rr := postUpdate(t, h, confirm)
+		var body struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatalf("confirm=%v: undecodable body %q: %v", confirm, rr.Body.String(), err)
+		}
+		if rr.Code != http.StatusConflict || body.Code != ReviewedReleaseCurrentCode || body.Message == "" {
+			t.Fatalf("confirm=%v: %d %s", confirm, rr.Code, rr.Body.String())
+		}
+		if strings.Contains(rr.Body.String(), "mutable-head") || strings.Contains(rr.Body.String(), recorded) {
+			t.Fatalf("confirm=%v: refusal disclosed the recorded source: %s", confirm, rr.Body.String())
+		}
+	}
+	after, err := h.Manager().List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("a refusal changed the installed record:\nbefore %+v\nafter  %+v", before, after)
+	}
+	if got := cachedUpdates(t, h); !reflect.DeepEqual(cachedBefore, got) {
+		t.Fatalf("a refusal invalidated the cached update: %+v -> %+v", cachedBefore, got)
 	}
 }
 

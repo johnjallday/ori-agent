@@ -21,6 +21,21 @@ test('homePluginUpdatesView exposes only available cached plugin updates', () =>
   assert.deepEqual(view.updates, [first]);
 });
 
+test('homePluginUpdatesView passes the reviewed release flag through to the flyout', () => {
+  const reviewed = {
+    name: 'reaper-plugin',
+    available: true,
+    installedVersion: '0.6.1',
+    availableVersion: '0.7.0',
+    reviewedRelease: true
+  };
+  const view = homePluginUpdatesView({ updates: [reviewed] });
+  // The flyout renders pluginNotice(update).detail from these rows, so the flag
+  // must survive the view unchanged.
+  assert.equal(view.updates[0].reviewedRelease, true);
+  assert.deepEqual(view.updates, [reviewed]);
+});
+
 test('homePluginUpdatesView hides an empty or malformed snapshot', () => {
   assert.deepEqual(homePluginUpdatesView(null), {
     count: 0,

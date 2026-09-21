@@ -8,15 +8,33 @@ import (
 	"sync"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 )
 
-// ReviewedReplacement maps an installed plugin to the exact source a
-// host-reviewed update replaces it with. ok is false for plugins the host does
-// not review, or when it has nothing newer; those keep following their recorded
-// source.
-type ReviewedReplacement func(ctx context.Context, installed plugin.InstalledPlugin) (source string, format plugin.SourceFormat, ok bool)
+// ReviewedUpdate is the host's answer for one installed plugin's Update. It has
+// three outcomes, and only the zero value is the ordinary one:
+//
+//   - zero value: the host has no opinion. The plugin follows its recorded
+//     source, as every unreviewed plugin does. An exact-commit install with
+//     nothing newer also answers this way: its recorded source is an immutable
+//     commit, so following it is harmless.
+//   - Source (and Format) set: replace from exactly that source.
+//   - Refuse set: the plugin is reviewed and its recorded source is mutable, so
+//     following it would install an unreviewed branch head. The update is
+//     refused. Refuse wins over Source, and nothing may read the recorded source.
+type ReviewedUpdate struct {
+	Source string
+	Format plugin.SourceFormat
+	Refuse bool
+}
+
+// ReviewedReplacement maps an installed plugin to the host's ReviewedUpdate.
+type ReviewedReplacement func(ctx context.Context, installed plugin.InstalledPlugin) ReviewedUpdate
+
+// ReviewedReleaseCurrentCode is the stable error code of a refused update.
+const ReviewedReleaseCurrentCode = "reviewed_release_current"
 
 // Handler serves plugin operations and owns the plugin Manager wired to Ori's
 // live MCP config/registry and skills directory.
@@ -77,26 +95,32 @@ func (h *Handler) SetReviewedReplacement(hook ReviewedReplacement) {
 	h.reviewedReplacement = hook
 }
 
-// replacementFor reports the reviewed replacement source for one installed
-// plugin, if the host supplies one.
-func (h *Handler) replacementFor(ctx context.Context, name string) (string, plugin.SourceFormat, bool, error) {
+// replacementFor reports the host's ReviewedUpdate for one installed plugin. A
+// missing hook or plugin, or a replacement with no source, is the zero value.
+func (h *Handler) replacementFor(ctx context.Context, name string) (ReviewedUpdate, error) {
 	h.replacementMu.RLock()
 	hook := h.reviewedReplacement
 	h.replacementMu.RUnlock()
 	if hook == nil {
-		return "", "", false, nil
+		return ReviewedUpdate{}, nil
 	}
 	installed, err := h.mgr.List()
 	if err != nil {
-		return "", "", false, err
+		return ReviewedUpdate{}, err
 	}
 	for _, candidate := range installed {
 		if candidate.Name == name {
-			source, format, ok := hook(ctx, candidate)
-			return source, format, ok && source != "", nil
+			update := hook(ctx, candidate)
+			if update.Refuse {
+				return ReviewedUpdate{Refuse: true}, nil
+			}
+			if update.Source == "" {
+				return ReviewedUpdate{}, nil
+			}
+			return update, nil
 		}
 	}
-	return "", "", false, nil
+	return ReviewedUpdate{}, nil
 }
 
 // UpdateStatusHandler returns only the cached availability snapshot. It never
@@ -296,7 +320,10 @@ func (h *Handler) MarketplaceInstallHandler(w http.ResponseWriter, r *http.Reque
 // UpdateHandler updates a plugin at POST /api/plugins/{name}/update, from the
 // host's reviewed replacement source when one is offered and otherwise from its
 // recorded source. confirm=false returns the trust disclosure plus whether the
-// registered component set changed; confirm=true updates.
+// registered component set changed; confirm=true updates. A plugin the host
+// refuses to update (a reviewed install recorded against a mutable source with
+// no newer reviewed release it can offer) answers 409 reviewed_release_current for both, before
+// any source is read, and its cached availability is left as it was.
 func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
@@ -313,11 +340,22 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
-	source, format, reviewed, err := h.replacementFor(r.Context(), name)
+	replacement, err := h.replacementFor(r.Context(), name)
 	if err != nil {
 		orihttp.InternalError(w, err.Error())
 		return
 	}
+	if replacement.Refuse {
+		if err := orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError(
+			ReviewedReleaseCurrentCode,
+			"No newer reviewed release is available to install. Ori does not update this plugin from its development branch.",
+		)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
+		return
+	}
+	reviewed := replacement.Source != ""
+	source, format := replacement.Source, replacement.Format
 	if !req.Confirm {
 		var report plugin.TrustReport
 		var changed bool

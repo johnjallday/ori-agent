@@ -174,6 +174,52 @@ func TestForPluginAndPinnedSourceIdentifyOnlyExactOfficialCommits(t *testing.T) 
 	}
 }
 
+// Guided setup and the Plugins page update check share this predicate, so the
+// boundary rows below hold for both: only the two exact legacy spellings count.
+func TestIsUnpinnedOfficialSourceMatchesOnlyTheLegacyOfficialURLs(t *testing.T) {
+	entry, ok := Get("ori_reaper")
+	if !ok {
+		t.Fatal("reviewed REAPER integration is missing")
+	}
+	repository := entry.SourceRepository
+	path := strings.TrimPrefix(repository, "https://github.com/")
+	cases := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{"bare URL", repository, true},
+		{".git URL", repository + ".git", true},
+		{"exact pinned commit", entry.PinnedSource(strings.Repeat("a", 40)), false},
+		{"fallback source", entry.FallbackSource(), false},
+		{"local path", "/Users/example/reaper-plugin", false},
+		{"another repository", "https://github.com/attacker/reaper-plugin", false},
+		{"another repository .git", "https://github.com/attacker/reaper-plugin.git", false},
+		{"empty", "", false},
+		// Known boundary: other spellings of the official repository stay
+		// unrecognized, as they are in guided setup.
+		{"branch ref", repository + "#ref=main", false},
+		{"subdirectory encoding", repository + "#subdir=plugin", false},
+		{"ssh", "git@github.com:" + path + ".git", false},
+		{"http", "http://github.com/" + path, false},
+		{"trailing slash", repository + "/", false},
+		{"different letter case", strings.ToUpper(repository), false},
+		{"surrounding space", " " + repository + " ", false},
+	}
+	for _, item := range cases {
+		if got := entry.IsUnpinnedOfficialSource(item.source); got != item.want {
+			t.Errorf("%s: IsUnpinnedOfficialSource(%q) = %v, want %v", item.name, item.source, got, item.want)
+		}
+	}
+	unset := entry.Clone()
+	unset.SourceRepository = ""
+	for _, source := range []string{"", ".git"} {
+		if unset.IsUnpinnedOfficialSource(source) {
+			t.Errorf("an entry without a repository recognized %q", source)
+		}
+	}
+}
+
 func TestRegistryReturnsIndependentCopies(t *testing.T) {
 	first, _ := Get("ori_reaper")
 	first.RequiredHostFeatures[0] = "changed"
