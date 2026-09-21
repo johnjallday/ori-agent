@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/integrationrelease"
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 )
 
@@ -51,9 +52,8 @@ func TestReviewedIntegrationUpdatesOfferOnlyANewerReleaseForExactOfficialCommits
 	}) {
 		t.Fatalf("availability = %+v ok=%v err=%v", availability, ok, err)
 	}
-	source, format, ok := updates.replacement(context.Background(), older)
-	if !ok || source != releases.resolution.Source || format != entry.SourceFormat {
-		t.Fatalf("replacement = %q %q %v", source, format, ok)
+	if got := updates.replacement(context.Background(), older); got != (pluginhttp.ReviewedUpdate{Source: releases.resolution.Source, Format: entry.SourceFormat}) {
+		t.Fatalf("replacement = %+v", got)
 	}
 
 	// Same or newer installed versions are reviewed but have nothing to offer,
@@ -64,8 +64,10 @@ func TestReviewedIntegrationUpdatesOfferOnlyANewerReleaseForExactOfficialCommits
 		if err != nil || !ok || availability.Available || availability.AvailableVersion != version {
 			t.Fatalf("installed %s availability = %+v ok=%v err=%v", version, availability, ok, err)
 		}
-		if _, _, replace := updates.replacement(context.Background(), installed); replace {
-			t.Fatalf("installed %s was offered a replacement that is not newer", version)
+		// An exact-commit install with nothing newer keeps its recorded source: it
+		// is immutable, so following it is harmless. It is never refused.
+		if got := updates.replacement(context.Background(), installed); got != (pluginhttp.ReviewedUpdate{}) {
+			t.Fatalf("installed %s pinned answer = %+v, want the zero value", version, got)
 		}
 	}
 }
@@ -84,9 +86,9 @@ func TestReviewedIntegrationUpdatesOfferTheReleaseToUnpinnedOfficialURLs(t *test
 			}) {
 				t.Fatalf("availability = %+v ok=%v err=%v", availability, ok, err)
 			}
-			source, format, ok := updates.replacement(context.Background(), installed)
-			if !ok || source != releases.resolution.Source || !entry.IsPinnedSource(source) || format != entry.SourceFormat {
-				t.Fatalf("replacement = %q %q %v, want the resolver's exact commit", source, format, ok)
+			got := updates.replacement(context.Background(), installed)
+			if got != (pluginhttp.ReviewedUpdate{Source: releases.resolution.Source, Format: entry.SourceFormat}) || !entry.IsPinnedSource(got.Source) {
+				t.Fatalf("replacement = %+v, want the resolver's exact commit", got)
 			}
 		})
 	}
@@ -139,12 +141,12 @@ func TestReviewedIntegrationUpdatesAnswerUnpinnedOfficialInstallsFromReleasesOnl
 			if err != nil || !ok || availability != want {
 				t.Fatalf("availability = %+v ok=%v err=%v, want terminal %+v", availability, ok, err, want)
 			}
-			source, _, replace := updates.replacement(context.Background(), installed)
+			got := updates.replacement(context.Background(), installed)
 			switch {
-			case item.wantSource == nil && replace:
-				t.Fatalf("replacement offered %q with nothing newer", source)
-			case item.wantSource != nil && (!replace || source != item.wantSource(entry)):
-				t.Fatalf("replacement = %q %v, want %q", source, replace, item.wantSource(entry))
+			case item.wantSource == nil && got != (pluginhttp.ReviewedUpdate{Refuse: true}):
+				t.Fatalf("replacement = %+v with nothing newer, want a refusal", got)
+			case item.wantSource != nil && (got.Refuse || got.Source != item.wantSource(entry)):
+				t.Fatalf("replacement = %+v, want %q", got, item.wantSource(entry))
 			}
 		})
 	}
@@ -209,8 +211,10 @@ func TestReviewedIntegrationUpdatesLeaveOtherInstallsToTheirRecordedSource(t *te
 			if _, ok, err := updates.availability(installed); ok || err != nil {
 				t.Fatalf("availability override claimed %s (err=%v)", name, err)
 			}
-			if _, _, ok := updates.replacement(context.Background(), installed); ok {
-				t.Fatalf("replacement hook claimed %s", name)
+			// Local copies and other repositories follow their recorded source:
+			// neither a replacement nor a refusal.
+			if got := updates.replacement(context.Background(), installed); got != (pluginhttp.ReviewedUpdate{}) {
+				t.Fatalf("replacement hook claimed %s: %+v", name, got)
 			}
 		})
 	}
@@ -226,7 +230,7 @@ func TestReviewedIntegrationUpdatesRejectAResolverSourceOutsideTheRepository(t *
 	if availability, _, _ := updates.availability(installed); availability.Available {
 		t.Fatalf("untrusted resolver source was offered: %+v", availability)
 	}
-	if _, _, ok := updates.replacement(context.Background(), installed); ok {
-		t.Fatal("untrusted resolver source became the replacement")
+	if got := updates.replacement(context.Background(), installed); got.Source != "" {
+		t.Fatalf("untrusted resolver source became the replacement: %+v", got)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 )
@@ -73,15 +74,22 @@ func (u reviewedIntegrationUpdates) availability(installed plugin.InstalledPlugi
 	return result, true, nil
 }
 
-// replacement is the Plugins update handler hook for reviewed installs.
-func (u reviewedIntegrationUpdates) replacement(ctx context.Context, installed plugin.InstalledPlugin) (string, plugin.SourceFormat, bool) {
+// replacement is the Plugins update handler hook for reviewed installs. A newer
+// release is installed from its exact commit. With nothing newer, an install
+// recorded against the mutable official URL is refused — its recorded source is
+// the development branch, which is never installed — while an exact-commit
+// install keeps following its recorded source, an immutable commit that changes
+// nothing. Anything the host does not review answers the zero value.
+func (u reviewedIntegrationUpdates) replacement(ctx context.Context, installed plugin.InstalledPlugin) pluginhttp.ReviewedUpdate {
 	entry, ok := u.reviewedEntry(installed)
 	if !ok {
-		return "", "", false
+		return pluginhttp.ReviewedUpdate{}
 	}
-	_, source, newer := u.newerRelease(ctx, entry, installed)
-	if !newer {
-		return "", "", false
+	if _, source, newer := u.newerRelease(ctx, entry, installed); newer {
+		return pluginhttp.ReviewedUpdate{Source: source, Format: entry.SourceFormat}
 	}
-	return source, entry.SourceFormat, true
+	if entry.IsUnpinnedOfficialSource(installed.Source) {
+		return pluginhttp.ReviewedUpdate{Refuse: true}
+	}
+	return pluginhttp.ReviewedUpdate{}
 }
