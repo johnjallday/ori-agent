@@ -107,6 +107,39 @@ test('registers intake_review and renders counts, dates, markers, and source tex
   assert.equal(renderer.primaryLabel(context), 'Apply selected');
 });
 
+test('shows bundled skill text as text and trusts it before a run', async () => {
+  let trustBody;
+  let trusted = false;
+  globalThis.fetch = async (url, options = {}) => {
+    if (url.endsWith('/skill/trust')) {
+      trustBody = JSON.parse(options.body);
+      trusted = true;
+      return response({ bundled_skill: { ready: true } });
+    }
+    return response({
+      skill: { name: 'syllabus-intake', agent: 'Manager', ready: trusted, missing: 'not trusted' },
+      bundled_skill: {
+        name: 'syllabus-intake',
+        description: 'Read dates',
+        bundled_text: '<script>not markup</script>\nReturn JSON.',
+        collision: false
+      }
+    });
+  };
+  const context = ctx('review-skill');
+  const host = new FakeElement('div');
+  renderer.render(host, context);
+  await tick();
+  await tick();
+
+  assert.match(host.textContent, /<script>not markup<\/script>/);
+  const trust = host.all().find(element => element.textContent === 'Trust and enable');
+  assert.ok(trust);
+  await trust._listeners.click[0]();
+  assert.equal(trustBody.choice, 'bundled');
+  assert.match(host.textContent, /sources are ready/i);
+});
+
 test('Apply sends the reviewed hash and selected edits before confirming', async () => {
   let appliedBody;
   globalThis.fetch = async (url, options = {}) => {

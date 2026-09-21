@@ -13,8 +13,11 @@ import (
 // NewDemoIntakeRunner returns a deterministic provider-free runner for isolated
 // demos only. Server wiring requires ORI_DEV_BLUEPRINT_INTAKE_STUB=1; normal
 // builds never select it.
-func NewDemoIntakeRunner(workspaces WorkspaceReader, sources *SourceService) *IntakeRunner {
-	return NewIntakeRunner(workspaces, sources, demoSkillCatalog{}, demoTaskExecutor{})
+func NewDemoIntakeRunner(workspaces WorkspaceReader, sources *SourceService, skillCatalog SkillCatalog) *IntakeRunner {
+	if skillCatalog == nil {
+		skillCatalog = demoSkillCatalog{}
+	}
+	return NewIntakeRunner(workspaces, sources, skillCatalog, demoTaskExecutor{})
 }
 
 type demoSkillCatalog struct{}

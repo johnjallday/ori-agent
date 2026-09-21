@@ -30,7 +30,15 @@
   function getState(ctx) {
     let state = states.get(key(ctx));
     if (!state) {
-      state = { loading: false, proposal: null, run: null, skill: null, selections: new Map() };
+      state = {
+        loading: false,
+        proposal: null,
+        run: null,
+        skill: null,
+        bundledSkill: null,
+        skillChoice: '',
+        selections: new Map()
+      };
       states.set(key(ctx), state);
     }
     return state;
@@ -51,6 +59,8 @@
       state.proposal = payload.proposal || null;
       state.run = payload.run || null;
       state.skill = payload.skill || null;
+      state.bundledSkill = payload.bundled_skill || null;
+      state.skillChoice = state.bundledSkill?.collision ? '' : 'bundled';
       seedSelections(state);
       draw(container, ctx, state);
       if (state.run?.state === 'running') void poll(container, ctx, state);
@@ -58,7 +68,8 @@
       ctx.setError(error.message);
     } finally {
       state.loading = false;
-      ctx.setBusy(false);
+      ctx.setBusy(false, '');
+      draw(container, ctx, state);
     }
   }
 
@@ -89,6 +100,10 @@
 
   function drawRunState(container, ctx, state) {
     if (state.skill && !state.skill.ready) {
+      if (state.bundledSkill) {
+        drawSkillReview(container, ctx, state);
+        return;
+      }
       const message = state.skill.missing
         ? `${state.skill.name} is ${state.skill.missing}. Review and enable it for ${state.skill.agent || 'the workspace entry agent'} before running.`
         : 'The required intake skill is not ready.';
@@ -129,6 +144,72 @@
       cancel.type = 'button';
       cancel.addEventListener('click', () => cancelRun(container, ctx, state));
       container.appendChild(cancel);
+    }
+  }
+
+  function drawSkillReview(container, ctx, state) {
+    const review = state.bundledSkill;
+    container.appendChild(node('h4', '', `Review ${review.name}`));
+    container.appendChild(node('p', '', review.description));
+    const bundled = document.createElement('details');
+    bundled.open = true;
+    bundled.appendChild(node('summary', '', 'Bundled skill instructions'));
+    bundled.appendChild(node('pre', 'blueprint-intake-skill-text', review.bundled_text));
+    container.appendChild(bundled);
+    if (review.collision) {
+      container.appendChild(
+        node(
+          'p',
+          'blueprint-intake-skill-missing',
+          'A different skill with this name already exists. Compare both and choose which one this workspace should use.'
+        )
+      );
+      const existing = document.createElement('details');
+      existing.appendChild(node('summary', '', 'Existing skill instructions'));
+      existing.appendChild(node('pre', 'blueprint-intake-skill-text', review.existing_text));
+      container.appendChild(existing);
+      const choices = node('div', 'blueprint-intake-skill-choices');
+      for (const [value, labelText] of [
+        ['existing', 'Use the existing skill'],
+        ['bundled', 'Replace it with the bundled skill']
+      ]) {
+        const label = node('label', '');
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = `blueprint-intake-skill-${key(ctx)}`;
+        radio.value = value;
+        radio.checked = state.skillChoice === value;
+        radio.addEventListener('change', () => (state.skillChoice = value));
+        label.append(radio, document.createTextNode(labelText));
+        choices.appendChild(label);
+      }
+      container.appendChild(choices);
+    }
+    const trust = node('button', 'modern-btn modern-btn-primary', 'Trust and enable');
+    trust.type = 'button';
+    trust.disabled = review.collision && !state.skillChoice;
+    trust.addEventListener('click', () => trustSkill(container, ctx, state));
+    container.appendChild(trust);
+  }
+
+  async function trustSkill(container, ctx, state) {
+    ctx.setBusy(true, 'Trusting skill…');
+    try {
+      const payload = await request(ctx, '/skill/trust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choice: state.skillChoice })
+      });
+      state.bundledSkill = payload.bundled_skill;
+      const refreshed = await request(ctx, '', { method: 'GET' });
+      state.skill = refreshed.skill || null;
+      state.bundledSkill = refreshed.bundled_skill || state.bundledSkill;
+      draw(container, ctx, state);
+      ctx.announce(`${state.skill.name} is trusted and enabled.`);
+    } catch (error) {
+      ctx.setError(error.message);
+    } finally {
+      ctx.setBusy(false, '');
     }
   }
 
@@ -251,7 +332,7 @@
     } catch (error) {
       ctx.setError(error.message);
     } finally {
-      ctx.setBusy(false);
+      ctx.setBusy(false, '');
     }
   }
 
@@ -271,7 +352,7 @@
         return;
       }
     }
-    ctx.setBusy(false);
+    ctx.setBusy(false, '');
   }
 
   async function cancelRun(container, ctx, state) {
@@ -307,7 +388,7 @@
     } catch (error) {
       ctx.setError(error.message);
     } finally {
-      ctx.setBusy(false);
+      ctx.setBusy(false, '');
     }
   }
 
@@ -325,7 +406,7 @@
     } catch (error) {
       ctx.setError(error.message);
     } finally {
-      ctx.setBusy(false);
+      ctx.setBusy(false, '');
     }
   }
 

@@ -20,6 +20,28 @@ type SkillCatalog interface {
 	GetSkill(agentName, skillName string) (*skills.Skill, bool, error)
 }
 
+type BundledSkillManager interface {
+	SkillCatalog
+	BundledSkillMatches(agentName, skillName, text string) (bool, error)
+	GetSkillMarkdown(agentName, skillName string) (string, bool, error)
+	InstallBundledSkill(agentName, skillName, text string, replace bool) error
+	SetSkillTrusted(agentName, skillName string, trusted bool) error
+	SetSkillEnabled(agentName, skillName string, enabled bool) error
+}
+
+type BundledSkillReview struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	BundledText  string `json:"bundled_text"`
+	ExistingText string `json:"existing_text,omitempty"`
+	Collision    bool   `json:"collision"`
+	Decision     string `json:"decision,omitempty"`
+	Installed    bool   `json:"installed"`
+	Trusted      bool   `json:"trusted"`
+	Enabled      bool   `json:"enabled"`
+	Ready        bool   `json:"ready"`
+}
+
 // TaskExecutor is implemented by workspace.LLMTaskHandler. Keeping the seam
 // narrow lets tests and provider-free demos return canned JSON.
 type TaskExecutor interface {
@@ -109,6 +131,22 @@ func (r *IntakeRunner) SkillReadiness(workspaceID, intakeKey string) (SkillReadi
 	}
 	status.Trusted = skill.Trusted
 	status.Enabled = skill.Enabled
+	if manager, ok := r.skills.(BundledSkillManager); ok {
+		if bundled, exists := bundledSkillSnapshot(ws, requirement.Skill); exists {
+			matches, matchErr := manager.BundledSkillMatches(agentName, requirement.Skill, bundled.Text)
+			if matchErr != nil {
+				return SkillReadiness{}, matchErr
+			}
+			decision, decisionErr := r.sources.BundledSkillDecision(workspaceID, requirement.Skill)
+			if decisionErr != nil {
+				return SkillReadiness{}, decisionErr
+			}
+			if !matches && decision != "existing" {
+				status.Missing = "skill conflict"
+				return status, nil
+			}
+		}
+	}
 	switch {
 	case !status.Trusted:
 		status.Missing = "not trusted"
@@ -118,6 +156,100 @@ func (r *IntakeRunner) SkillReadiness(workspaceID, intakeKey string) (SkillReadi
 		status.Ready = true
 	}
 	return status, nil
+}
+
+func (r *IntakeRunner) BundledSkillReview(workspaceID, intakeKey string) (BundledSkillReview, bool, error) {
+	requirement, err := r.sources.Requirement(workspaceID, intakeKey)
+	if err != nil {
+		return BundledSkillReview{}, false, err
+	}
+	ws, err := r.workspaces.GetFolderWorkspace(workspaceID)
+	if err != nil || ws == nil {
+		return BundledSkillReview{}, false, errors.New("workspace is unavailable")
+	}
+	bundled, exists := bundledSkillSnapshot(ws, requirement.Skill)
+	if !exists {
+		return BundledSkillReview{}, false, nil
+	}
+	manager, ok := r.skills.(BundledSkillManager)
+	if !ok {
+		return BundledSkillReview{}, false, nil
+	}
+	agentName := strings.TrimSpace(ws.EntryAgentName())
+	review := BundledSkillReview{Name: bundled.Name, Description: bundled.Description, BundledText: bundled.Text}
+	current, found, getErr := manager.GetSkill(agentName, bundled.Name)
+	if getErr != nil {
+		return BundledSkillReview{}, false, getErr
+	}
+	review.Installed = found && current != nil
+	if review.Installed {
+		review.Trusted, review.Enabled = current.Trusted, current.Enabled
+		review.ExistingText, _, err = manager.GetSkillMarkdown(agentName, bundled.Name)
+		if err != nil {
+			return BundledSkillReview{}, false, err
+		}
+		matches, matchErr := manager.BundledSkillMatches(agentName, bundled.Name, bundled.Text)
+		if matchErr != nil {
+			return BundledSkillReview{}, false, matchErr
+		}
+		review.Collision = !matches
+	}
+	review.Decision, err = r.sources.BundledSkillDecision(workspaceID, bundled.Name)
+	if err != nil {
+		return BundledSkillReview{}, false, err
+	}
+	review.Ready = review.Installed && review.Trusted && review.Enabled && (!review.Collision || review.Decision == "existing")
+	return review, true, nil
+}
+
+func (r *IntakeRunner) TrustBundledSkill(workspaceID, intakeKey, choice string) (BundledSkillReview, error) {
+	review, exists, err := r.BundledSkillReview(workspaceID, intakeKey)
+	if err != nil || !exists {
+		return BundledSkillReview{}, errors.New("bundled intake skill is unavailable")
+	}
+	ws, err := r.workspaces.GetFolderWorkspace(workspaceID)
+	if err != nil || ws == nil {
+		return BundledSkillReview{}, errors.New("workspace is unavailable")
+	}
+	manager := r.skills.(BundledSkillManager)
+	choice = strings.TrimSpace(choice)
+	if review.Collision && choice != "existing" && choice != "bundled" {
+		return BundledSkillReview{}, errors.New("choose the existing or bundled skill")
+	}
+	if !review.Collision {
+		choice = "bundled"
+	}
+	agentName := ws.EntryAgentName()
+	if choice == "bundled" && (!review.Installed || review.Collision) {
+		bundled, _ := bundledSkillSnapshot(ws, review.Name)
+		if err := manager.InstallBundledSkill(agentName, review.Name, bundled.Text, review.Collision); err != nil {
+			return BundledSkillReview{}, err
+		}
+	}
+	if err := r.sources.SetBundledSkillDecision(workspaceID, review.Name, choice); err != nil {
+		return BundledSkillReview{}, err
+	}
+	if err := manager.SetSkillTrusted(agentName, review.Name, true); err != nil {
+		return BundledSkillReview{}, err
+	}
+	if err := manager.SetSkillEnabled(agentName, review.Name, true); err != nil {
+		return BundledSkillReview{}, err
+	}
+	updated, _, err := r.BundledSkillReview(workspaceID, intakeKey)
+	return updated, err
+}
+
+func bundledSkillSnapshot(ws *workspace.Workspace, name string) (workspace.BundledSkillSnapshot, bool) {
+	provenance := ws.GetTemplateProvenance()
+	if provenance == nil {
+		return workspace.BundledSkillSnapshot{}, false
+	}
+	for _, bundled := range provenance.BundledSkills {
+		if bundled.Name == name {
+			return bundled, true
+		}
+	}
+	return workspace.BundledSkillSnapshot{}, false
 }
 
 func (r *IntakeRunner) Run(ctx context.Context, workspaceID, intakeKey string, progress func(SourceRunProgress)) ([]SourceRunResult, error) {

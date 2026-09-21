@@ -90,6 +90,9 @@ func respondBlueprintReadinessConflict(w http.ResponseWriter, template projectte
 			if template.HasInvalidIntakeRequirements() {
 				body["intake_requirements_error"] = template.IntakeRequirementsError
 			}
+			if template.HasInvalidBundledSkills() {
+				body["bundled_skills_error"] = template.BundledSkillsError
+			}
 			if template.HasInvalidAssistantProgram() {
 				body["assistant_program_error"] = template.AssistantProgramError
 			}
@@ -117,6 +120,9 @@ func conflictMessage(template projecttemplates.Template, readiness blueprintread
 		}
 		if template.HasInvalidIntakeRequirements() {
 			return fmt.Sprintf("This blueprint's intake requirements are unusable, so no workspace was created. Fix its template.json: %s", template.IntakeRequirementsError)
+		}
+		if template.HasInvalidBundledSkills() {
+			return fmt.Sprintf("This blueprint's bundled skills are unusable, so no workspace was created. Fix its skills folder: %s", template.BundledSkillsError)
 		}
 		if template.HasInvalidAssistantProgram() {
 			return fmt.Sprintf("This blueprint's assistant program is unusable, so no workspace was created. Fix its template.json: %s", template.AssistantProgramError)

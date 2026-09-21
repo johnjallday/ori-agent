@@ -41,6 +41,20 @@ func NewService(sources *SourceService, runner *IntakeRunner, proposals *Proposa
 	return &Service{sources: sources, runner: runner, proposals: proposals, apply: apply, now: time.Now, runs: make(map[string]*activeRun)}
 }
 
+func (s *Service) BundledSkillReview(workspaceID, intakeKey string) (BundledSkillReview, bool, error) {
+	if s == nil || s.runner == nil {
+		return BundledSkillReview{}, false, errors.New("intake service is unavailable")
+	}
+	return s.runner.BundledSkillReview(workspaceID, intakeKey)
+}
+
+func (s *Service) TrustBundledSkill(workspaceID, intakeKey, choice string) (BundledSkillReview, error) {
+	if s == nil || s.runner == nil {
+		return BundledSkillReview{}, errors.New("intake service is unavailable")
+	}
+	return s.runner.TrustBundledSkill(workspaceID, intakeKey, choice)
+}
+
 func (s *Service) SkillReadiness(workspaceID, intakeKey string) (SkillReadiness, error) {
 	if s == nil || s.runner == nil {
 		return SkillReadiness{}, errors.New("intake service is unavailable")

@@ -846,6 +846,7 @@ untrusted input; only a reviewed proposal hash can authorize record creation.
 | `GET` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}` | Read sources, consent, skill readiness, run progress, and the current proposal. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/files` | Add one multipart file source. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/consent` | Accept the host-authored provider disclosure. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/skill/trust` | Trust and enable the reviewed bundled skill, with an explicit `existing` or `bundled` choice on collision. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run` | Start one tool-less entry-agent task per parsed source. |
 | `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run/cancel` | Cancel unfinished source runs while preserving returned results. |
 | `GET` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/proposal` | Read the current pending, applied, or skipped proposal. |

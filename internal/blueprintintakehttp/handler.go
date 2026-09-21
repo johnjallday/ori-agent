@@ -2,6 +2,7 @@ package blueprintintakehttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -152,6 +153,9 @@ func (h *Handler) GetIntake(w http.ResponseWriter, r *http.Request) {
 		if skill, skillErr := h.workflow.SkillReadiness(workspaceID, intakeKey); skillErr == nil {
 			payload["skill"] = skill
 		}
+		if bundled, exists, bundledErr := h.workflow.BundledSkillReview(workspaceID, intakeKey); bundledErr == nil && exists {
+			payload["bundled_skill"] = bundled
+		}
 		if run, runErr := h.workflow.Status(workspaceID, intakeKey); runErr == nil {
 			payload["run"] = run
 		}
@@ -177,6 +181,29 @@ func (h *Handler) AcceptConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"consent": status})
+}
+
+func (h *Handler) TrustBundledSkill(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.resolveWorkflowWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		Choice string `json:"choice"`
+	}
+	if r.Body != nil {
+		decoder := json.NewDecoder(io.LimitReader(r.Body, 4096))
+		if err := decoder.Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+			_ = orihttp.RespondError(w, http.StatusBadRequest, "The skill choice could not be read.")
+			return
+		}
+	}
+	review, err := h.workflow.TrustBundledSkill(workspaceID, strings.TrimSpace(r.PathValue("intakeKey")), request.Choice)
+	if err != nil {
+		_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"bundled_skill": review})
 }
 
 func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {

@@ -697,6 +697,11 @@ func (b *ServerBuilder) initializeHandlers() {
 		}
 		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))
 		b.sessionHandler.SetAgentToolApplier(makeAgentToolApplier(b))
+		if b.skillsManager != nil {
+			b.sessionHandler.SetBundledSkillInstaller(func(agentName string, bundled []projecttemplates.BundledSkill) error {
+				return projecttemplates.InstallBundledSkills(b.skillsManager, agentName, bundled)
+			})
+		}
 	}
 }
 
@@ -1149,7 +1154,7 @@ func (b *ServerBuilder) wireSetupWizard() {
 		proposalStore := blueprintintake.NewProposalStore(b.workspaceFileStore)
 		runner := blueprintintake.NewIntakeRunner(folders, intakeService, b.skillsManager, b.taskHandler)
 		if os.Getenv("ORI_DEV_BLUEPRINT_INTAKE_STUB") == "1" {
-			runner = blueprintintake.NewDemoIntakeRunner(folders, intakeService)
+			runner = blueprintintake.NewDemoIntakeRunner(folders, intakeService, b.skillsManager)
 		}
 		applyService := blueprintintake.NewApplyService(proposalStore, workspace.NewTicketService(b.workspaceStore))
 		workflow := blueprintintake.NewService(intakeService, runner, proposalStore, applyService)

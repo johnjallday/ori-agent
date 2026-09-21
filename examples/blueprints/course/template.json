@@ -1,0 +1,50 @@
+{
+  "name": "Course",
+  "description": "Turn reviewed course materials into proposed dates and tasks.",
+  "tools": {
+    "skills": [
+      "syllabus-intake"
+    ]
+  },
+  "intake_requirements": [
+    {
+      "key": "course-materials",
+      "label": "Course materials",
+      "skill": "syllabus-intake",
+      "sources": {
+        "files": true
+      },
+      "accepted_extensions": [
+        ".pdf",
+        ".docx",
+        ".txt",
+        ".md"
+      ],
+      "proposal_kinds": [
+        "ticket"
+      ]
+    }
+  ],
+  "setup_wizard": {
+    "version": 1,
+    "title": "Set up this course",
+    "steps": [
+      {
+        "id": "materials",
+        "kind": "intake",
+        "requirement_key": "course-materials",
+        "required": true,
+        "title": "Add course materials",
+        "description": "Add the files Ori should read for this course."
+      },
+      {
+        "id": "review-materials",
+        "kind": "intake_review",
+        "requirement_key": "course-materials",
+        "required": true,
+        "title": "Review course dates",
+        "description": "Review the bundled skill, then review every proposed ticket before anything is created."
+      }
+    ]
+  }
+}

@@ -71,7 +71,8 @@ type Handler struct {
 	// agent and workspace exist: skills are enabled on the agent (apply-if-
 	// present); MCP servers — which have no per-agent scope — bind at the
 	// workspace level. Injected by the server, which holds the skills manager.
-	applyAgentTools func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) (applied, missing []string)
+	applyAgentTools      func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) (applied, missing []string)
+	installBundledSkills func(agentName string, bundled []projecttemplates.BundledSkill) error
 	// templateSetupStarter starts a task through the same execution path as the
 	// manual execute endpoint. Injected by the server (backed by the
 	// orchestration task handler); used by the template-setup first-open
@@ -171,6 +172,10 @@ func (h *Handler) SetTemplateToolApplier(fn func(workspaceID string, tools proje
 // per-agent tools (skills enabled on the agent; MCP servers on the workspace).
 func (h *Handler) SetAgentToolApplier(fn func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) (applied, missing []string)) {
 	h.applyAgentTools = fn
+}
+
+func (h *Handler) SetBundledSkillInstaller(fn func(agentName string, bundled []projecttemplates.BundledSkill) error) {
+	h.installBundledSkills = fn
 }
 
 // SetPersonalHQDesignator injects the Personal HQ designation capability used

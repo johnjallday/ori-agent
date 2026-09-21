@@ -380,6 +380,10 @@ type Template struct {
 	// this template binds (apply-if-present). Names only — bound in the
 	// workspace-creation layer, not here.
 	Tools ToolDefaults `json:"tools"`
+	// BundledSkills are declared tools.skills entries supplied by this template's
+	// skills/<name>/SKILL.md. Text stays server-side until trust review.
+	BundledSkills      []BundledSkill `json:"bundled_skills,omitempty"`
+	BundledSkillsError string         `json:"bundled_skills_error,omitempty"`
 	// Agents is the ordered set of reusable agents a workspace attaches from
 	// this template. The first becomes that workspace's primary routing agent;
 	// the rest are workspace specialists. Carried as data only; global agent
@@ -527,6 +531,10 @@ func (t Template) HasInvalidSetupWizard() bool {
 // that could not be understood or resolved against this manifest.
 func (t Template) HasInvalidIntakeRequirements() bool {
 	return strings.TrimSpace(t.IntakeRequirementsError) != ""
+}
+
+func (t Template) HasInvalidBundledSkills() bool {
+	return strings.TrimSpace(t.BundledSkillsError) != ""
 }
 
 // HasAssistantProgram reports whether the template carries a usable declaration.
@@ -713,6 +721,12 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if m.Tools != nil {
 		t.Tools = normalizeToolDefaults(*m.Tools)
 	}
+	bundledSkills, bundledSkillsErr := loadBundledSkills(t.Path, t.Tools.Skills)
+	t.BundledSkills = bundledSkills
+	if bundledSkillsErr != nil {
+		t.BundledSkills = nil
+		t.BundledSkillsError = bundledSkillsErr.Error()
+	}
 	t.Agents = normalizeAgentSpecs(m.Agents)
 	t.CapabilityRequirements = normalizeCapabilityRequirements(m.CapabilityRequirements)
 	capabilities, capabilityWarnings := normalizeCapabilityInstallsWithCatalog(m.Capabilities, catalog)
@@ -824,6 +838,9 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if intakeRequirementsErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json intake_requirements is unusable and blocks workspace creation: %v", intakeRequirementsErr))
 	}
+	if bundledSkillsErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("bundled skills are unusable and block workspace creation: %v", bundledSkillsErr))
+	}
 	if assistantProgramErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json assistant_program is unusable and blocks workspace creation: %v", assistantProgramErr))
 	}
@@ -930,7 +947,7 @@ func hasSkeletonFiles(dir string) bool {
 		// not scaffolded as project content. A template carrying only a
 		// dashboard is still metadata-only, and must not start creating an
 		// otherwise empty project folder.
-		if entry.Name() == DashboardDirName && entry.IsDir() {
+		if (entry.Name() == DashboardDirName || entry.Name() == "skills") && entry.IsDir() {
 			continue
 		}
 		return true

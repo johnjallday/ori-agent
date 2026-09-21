@@ -9,6 +9,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}", h.GetIntake)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/files", h.UploadFiles)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/consent", h.AcceptConsent)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/skill/trust", h.TrustBundledSkill)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run", h.StartRun)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run", h.GetRun)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run/cancel", h.CancelRun)

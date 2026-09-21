@@ -69,10 +69,11 @@ type FileResult struct {
 }
 
 type sourceState struct {
-	Version     int                      `json:"version"`
-	WorkspaceID string                   `json:"workspace_id"`
-	Sources     []SourceRecord           `json:"sources,omitempty"`
-	Consents    map[string]ConsentRecord `json:"consents,omitempty"`
+	Version               int                      `json:"version"`
+	WorkspaceID           string                   `json:"workspace_id"`
+	Sources               []SourceRecord           `json:"sources,omitempty"`
+	Consents              map[string]ConsentRecord `json:"consents,omitempty"`
+	BundledSkillDecisions map[string]string        `json:"bundled_skill_decisions,omitempty"`
 }
 
 // SourceService owns workspace-scoped intake source storage.
@@ -273,6 +274,34 @@ func (s *SourceService) ReadParsedText(workspaceID string, requested SourceRecor
 		return string(data), nil
 	}
 	return "", errors.New("intake source not found")
+}
+
+func (s *SourceService) BundledSkillDecision(workspaceID, skillName string) (string, error) {
+	state, _, _, err := s.loadState(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(state.BundledSkillDecisions[strings.TrimSpace(skillName)]), nil
+}
+
+func (s *SourceService) SetBundledSkillDecision(workspaceID, skillName, choice string) error {
+	skillName = strings.TrimSpace(skillName)
+	choice = strings.TrimSpace(choice)
+	if skillName == "" || (choice != "existing" && choice != "bundled") {
+		return errors.New("invalid bundled skill decision")
+	}
+	lock := s.lockFor(workspaceID, "bundled-skill-"+skillName)
+	lock.Lock()
+	defer lock.Unlock()
+	state, stateDir, _, err := s.loadState(workspaceID)
+	if err != nil {
+		return err
+	}
+	if state.BundledSkillDecisions == nil {
+		state.BundledSkillDecisions = make(map[string]string)
+	}
+	state.BundledSkillDecisions[skillName] = choice
+	return saveSourceState(stateDir, state)
 }
 
 func (s *SourceService) loadState(workspaceID string) (sourceState, string, string, error) {

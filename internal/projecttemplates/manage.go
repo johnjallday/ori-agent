@@ -48,6 +48,9 @@ func ImportFolder(libDir, srcPath, displayName string) (Template, error) {
 	if src.HasInvalidRuntimeRequirements() {
 		return Template{}, fmt.Errorf("%w: imported blueprint runtime_requirements is unusable: %s", ErrInvalidRuntimeRequirements, src.RuntimeRequirementsError)
 	}
+	if src.HasInvalidBundledSkills() {
+		return Template{}, fmt.Errorf("imported blueprint bundled skills are unusable: %s", src.BundledSkillsError)
+	}
 	if src.HasInvalidProjectConnection() {
 		return Template{}, fmt.Errorf("%w: imported blueprint project_connection is unusable: %s", ErrInvalidProjectConnection, src.ProjectConnectionError)
 	}
@@ -175,6 +178,9 @@ func Duplicate(libDir, id, newName string) (Template, error) {
 	}
 	if src.HasInvalidRuntimeRequirements() {
 		return Template{}, fmt.Errorf("%w: source blueprint runtime_requirements is unusable: %s", ErrInvalidRuntimeRequirements, src.RuntimeRequirementsError)
+	}
+	if src.HasInvalidBundledSkills() {
+		return Template{}, fmt.Errorf("source blueprint bundled skills are unusable: %s", src.BundledSkillsError)
 	}
 	if src.HasInvalidProjectConnection() {
 		return Template{}, fmt.Errorf("%w: source blueprint project_connection is unusable: %s", ErrInvalidProjectConnection, src.ProjectConnectionError)
@@ -314,6 +320,12 @@ func copyFolderVerbatim(srcRoot, destRoot string) error {
 		}
 		if !filepath.IsLocal(filepath.FromSlash(relPath)) {
 			return fmt.Errorf("entry %q escapes the source folder", relPath)
+		}
+		if !copyTemplateEntryAllowed(relPath, d.IsDir()) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		target := filepath.Join(destRoot, filepath.FromSlash(relPath))
 		info, err := d.Info()

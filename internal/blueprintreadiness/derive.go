@@ -523,6 +523,9 @@ func manifestDiagnostic(template projecttemplates.Template) string {
 	if template.HasInvalidIntakeRequirements() {
 		return template.IntakeRequirementsError
 	}
+	if template.HasInvalidBundledSkills() {
+		return template.BundledSkillsError
+	}
 	if template.HasInvalidAssistantProgram() {
 		return template.AssistantProgramError
 	}
