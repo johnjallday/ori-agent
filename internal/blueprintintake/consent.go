@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
-	"github.com/johnjallday/ori-agent/internal/setupwizard"
 )
 
 type ModelProvider struct {
@@ -114,38 +113,4 @@ func (s *SourceService) resolveProvider(ctx context.Context, workspaceID string)
 	}
 	provider.Local = provider.Local || llm.IsLocalProviderName(provider.Name)
 	return provider, nil
-}
-
-// EvaluateSetup makes consent and at least one captured source authoritative
-// prerequisites for completing an intake wizard step.
-func (s *SourceService) EvaluateSetup(ctx context.Context, req setupwizard.StepRequest) (setupwizard.StepReadiness, error) {
-	if req.Intake == nil {
-		return setupwizard.StepReadiness{}, errors.New("intake requirement is missing from the workspace snapshot")
-	}
-	sources, err := s.ListSources(req.WorkspaceID, req.Intake.Key)
-	if err != nil {
-		return setupwizard.StepReadiness{}, err
-	}
-	if len(sources) == 0 {
-		return setupwizard.StepReadiness{Summary: "Add at least one source before continuing.", ErrorCategory: setupwizard.ErrorCategoryNotConfigured}, nil
-	}
-	consent, err := s.ConsentStatus(ctx, req.WorkspaceID, req.Intake.Key)
-	if err != nil {
-		return setupwizard.StepReadiness{Blocked: true, Summary: "Ori could not determine this workspace's model provider.", ErrorCategory: setupwizard.ErrorCategoryUnavailable}, nil
-	}
-	if !consent.Accepted {
-		return setupwizard.StepReadiness{Summary: "Review and accept the content-reading statement before continuing.", ErrorCategory: setupwizard.ErrorCategoryPermissionRequired}, nil
-	}
-	return setupwizard.StepReadiness{Ready: true, Summary: "Sources added and content reading accepted."}, nil
-}
-
-func (s *SourceService) ConfirmSetup(ctx context.Context, req setupwizard.StepRequest, _ setupwizard.StepAction) (setupwizard.StepReadiness, error) {
-	readiness, err := s.EvaluateSetup(ctx, req)
-	if err != nil {
-		return readiness, err
-	}
-	if !readiness.Ready {
-		return readiness, fmt.Errorf("%w: %s", setupwizard.ErrStepRejected, readiness.Summary)
-	}
-	return readiness, nil
 }

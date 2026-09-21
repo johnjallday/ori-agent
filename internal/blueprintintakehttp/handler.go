@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/blueprintintake"
 	"github.com/johnjallday/ori-agent/internal/fileparser"
@@ -22,9 +23,11 @@ type WorkspaceLookup interface {
 }
 
 type Handler struct {
-	sources  *blueprintintake.SourceService
-	lookup   WorkspaceLookup
-	provider userprofile.UserProvider
+	sources      *blueprintintake.SourceService
+	lookup       WorkspaceLookup
+	provider     userprofile.UserProvider
+	profileStore userprofile.UserStore
+	workflow     *blueprintintake.Service
 }
 
 func NewHandler(sources *blueprintintake.SourceService, lookup WorkspaceLookup, provider userprofile.UserProvider) *Handler {
@@ -32,6 +35,18 @@ func NewHandler(sources *blueprintintake.SourceService, lookup WorkspaceLookup, 
 		provider = userprofile.LocalUserProvider{}
 	}
 	return &Handler{sources: sources, lookup: lookup, provider: provider}
+}
+
+func (h *Handler) SetWorkflow(workflow *blueprintintake.Service) {
+	if h != nil {
+		h.workflow = workflow
+	}
+}
+
+func (h *Handler) SetUserStore(store userprofile.UserStore) {
+	if h != nil {
+		h.profileStore = store
+	}
 }
 
 // UploadFiles accepts one multipart request containing one or more "files"
@@ -132,7 +147,19 @@ func (h *Handler) GetIntake(w http.ResponseWriter, r *http.Request) {
 	for _, source := range sources {
 		files = append(files, blueprintintake.FileResult{ID: source.ID, Name: source.Name, Status: source.Status, Size: source.Size, ContentHash: source.ContentHash})
 	}
-	_ = orihttp.RespondSuccess(w, map[string]any{"requirement": requirement, "files": files, "consent": consent})
+	payload := map[string]any{"requirement": requirement, "files": files, "consent": consent}
+	if h.workflow != nil {
+		if skill, skillErr := h.workflow.SkillReadiness(workspaceID, intakeKey); skillErr == nil {
+			payload["skill"] = skill
+		}
+		if run, runErr := h.workflow.Status(workspaceID, intakeKey); runErr == nil {
+			payload["run"] = run
+		}
+		if proposal, proposalErr := h.workflow.Proposal(workspaceID, intakeKey); proposalErr == nil {
+			payload["proposal"] = proposal
+		}
+	}
+	_ = orihttp.RespondSuccess(w, payload)
 }
 
 func (h *Handler) AcceptConsent(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +177,126 @@ func (h *Handler) AcceptConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"consent": status})
+}
+
+func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
+	workspaceID, actor, ok := h.resolveWorkflowWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	intakeKey := strings.TrimSpace(r.PathValue("intakeKey"))
+	readiness, err := h.workflow.SkillReadiness(workspaceID, intakeKey)
+	if err != nil {
+		_ = orihttp.RespondError(w, http.StatusBadRequest, "The intake skill could not be checked.")
+		return
+	}
+	if !readiness.Ready {
+		w.WriteHeader(http.StatusConflict)
+		orihttp.WriteJSON(w, map[string]any{"success": false, "message": "The intake skill is not ready.", "skill": readiness})
+		return
+	}
+	location := time.Local
+	if h.profileStore != nil {
+		if profile, profileErr := h.profileStore.Get(r.Context(), actor); profileErr == nil && profile != nil && strings.TrimSpace(profile.Timezone) != "" {
+			if configured, zoneErr := time.LoadLocation(strings.TrimSpace(profile.Timezone)); zoneErr == nil {
+				location = configured
+			}
+		}
+	}
+	run, err := h.workflow.Start(workspaceID, intakeKey, location)
+	if err != nil {
+		_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"run": run})
+}
+
+func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.resolveWorkflowWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	run, err := h.workflow.Status(workspaceID, strings.TrimSpace(r.PathValue("intakeKey")))
+	if err != nil {
+		_ = orihttp.RespondError(w, http.StatusNotFound, "No intake run has started.")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"run": run})
+}
+
+func (h *Handler) CancelRun(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.resolveWorkflowWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	run, err := h.workflow.Cancel(workspaceID, strings.TrimSpace(r.PathValue("intakeKey")))
+	if err != nil {
+		_ = orihttp.RespondError(w, http.StatusConflict, "No intake run is active.")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"run": run})
+}
+
+func (h *Handler) GetProposal(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.resolveWorkflowWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	proposal, err := h.workflow.Proposal(workspaceID, strings.TrimSpace(r.PathValue("intakeKey")))
+	if err != nil {
+		_ = orihttp.RespondError(w, http.StatusNotFound, "No intake proposal is ready.")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"proposal": proposal})
+}
+
+func (h *Handler) ApplyProposal(w http.ResponseWriter, r *http.Request) {
+	workspaceID, actor, ok := h.resolveWorkflowWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	var request blueprintintake.ApplyRequest
+	if !orihttp.ParseJSONBody(w, r, &request) {
+		return
+	}
+	request.Actor = actor
+	proposal, err := h.workflow.Apply(workspaceID, strings.TrimSpace(r.PathValue("intakeKey")), request)
+	if err != nil {
+		status := http.StatusUnprocessableEntity
+		if errors.Is(err, blueprintintake.ErrProposalStale) {
+			status = http.StatusConflict
+		}
+		_ = orihttp.RespondError(w, status, err.Error())
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"proposal": proposal})
+}
+
+func (h *Handler) SkipProposal(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.resolveWorkflowWorkspace(r.Context(), w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		ProposalHash string `json:"proposal_hash"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &request) {
+		return
+	}
+	proposal, err := h.workflow.Skip(workspaceID, strings.TrimSpace(r.PathValue("intakeKey")), request.ProposalHash)
+	if err != nil {
+		_ = orihttp.RespondError(w, http.StatusConflict, err.Error())
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"proposal": proposal})
+}
+
+func (h *Handler) resolveWorkflowWorkspace(ctx context.Context, w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	if h == nil || h.workflow == nil {
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "Blueprint intake runs are unavailable.")
+		return "", "", false
+	}
+	return h.resolveWorkspace(ctx, w, r)
 }
 
 func (h *Handler) resolveWorkspace(ctx context.Context, w http.ResponseWriter, r *http.Request) (string, string, bool) {

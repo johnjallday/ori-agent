@@ -25,6 +25,7 @@ http://localhost:8765/api
 - [Scheduler Nodes API](#scheduler-nodes-api)
 - [Workspace Map Activity API](#workspace-map-activity-api)
 - [Custom Workflows API](#custom-workflows-api)
+- [Blueprint Intake API](#blueprint-intake-api)
 - [Examples](#examples)
 
 ## Authentication
@@ -833,6 +834,23 @@ Get current version information.
   "git_commit": "abc123def456"
 }
 ```
+
+## Blueprint Intake API
+
+Blueprint Intake routes are workspace-scoped. `{intakeKey}` must name an intake
+copied into the workspace's template provenance. File text and skill output are
+untrusted input; only a reviewed proposal hash can authorize record creation.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}` | Read sources, consent, skill readiness, run progress, and the current proposal. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/files` | Add one multipart file source. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/consent` | Accept the host-authored provider disclosure. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run` | Start one tool-less entry-agent task per parsed source. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run/cancel` | Cancel unfinished source runs while preserving returned results. |
+| `GET` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/proposal` | Read the current pending, applied, or skipped proposal. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/proposal/apply` | Apply selected reviewed items. Requires `proposal_hash` and an `items` array. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/proposal/skip` | Explicitly skip the reviewed proposal. Requires `proposal_hash`. |
 
 ## Examples
 

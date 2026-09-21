@@ -95,3 +95,62 @@
   align-items: flex-start;
   font-weight: 600;
 }
+
+.blueprint-intake-proposal-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.blueprint-intake-proposal-count {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: var(--surface-secondary, #f6f7f8);
+}
+
+.blueprint-intake-proposal-item {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border-color, #d7dbe0);
+  border-radius: 0.75rem;
+}
+
+.blueprint-intake-proposal-item label:not(.blueprint-intake-proposal-select) {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.blueprint-intake-proposal-item input[type="text"],
+.blueprint-intake-proposal-item input[type="date"],
+.blueprint-intake-proposal-item input[type="datetime-local"] {
+  width: 100%;
+  padding: 0.5rem;
+}
+
+.blueprint-intake-proposal-select {
+  font-weight: 700;
+}
+
+.blueprint-intake-weekday,
+.blueprint-intake-marker,
+.blueprint-intake-notice {
+  color: var(--text-secondary, #69717d);
+  font-size: 0.82rem;
+}
+
+.blueprint-intake-marker {
+  font-weight: 700;
+}
+
+.blueprint-intake-progress {
+  padding-left: 1.2rem;
+}
+
+.blueprint-intake-skip {
+  margin-top: 0.5rem;
+}

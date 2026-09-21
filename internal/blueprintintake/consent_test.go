@@ -1,13 +1,9 @@
 package blueprintintake
 
 import (
-	"bytes"
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/johnjallday/ori-agent/internal/setupwizard"
-	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestConsentStatementNamesCloudProviderOrLocalHandling(t *testing.T) {
@@ -42,36 +38,5 @@ func TestConsentIsStoredForActorAndCurrentProvider(t *testing.T) {
 	status, err = service.ConsentStatus(context.Background(), ws.ID, "materials")
 	if err != nil || status.Accepted || !strings.Contains(status.Statement, "stays on this computer") {
 		t.Fatalf("provider change reused consent: %+v, %v", status, err)
-	}
-}
-
-func TestIntakeSetupCannotCompleteWithoutSourcesAndConsent(t *testing.T) {
-	service, _, ws := newSourceTestService(t, []string{".txt"})
-	service.SetProviderResolver(func(context.Context, string) (ModelProvider, error) {
-		return ModelProvider{Name: "openai"}, nil
-	})
-	requirement, _ := ws.TemplateIntakeRequirement("materials")
-	req := setupwizard.StepRequest{WorkspaceID: ws.ID, Intake: &requirement, Step: workspace.SetupWizardStep{Kind: workspace.SetupStepKindIntake}}
-
-	readiness, err := service.EvaluateSetup(context.Background(), req)
-	if err != nil || readiness.Ready || readiness.ErrorCategory != setupwizard.ErrorCategoryNotConfigured {
-		t.Fatalf("empty readiness = %+v, %v", readiness, err)
-	}
-	if _, err := service.AddFile(context.Background(), ws.ID, "materials", "notes.txt", bytes.NewBufferString("hello")); err != nil {
-		t.Fatal(err)
-	}
-	readiness, err = service.EvaluateSetup(context.Background(), req)
-	if err != nil || readiness.Ready || readiness.ErrorCategory != setupwizard.ErrorCategoryPermissionRequired {
-		t.Fatalf("unconsented readiness = %+v, %v", readiness, err)
-	}
-	if _, err := service.ConfirmSetup(context.Background(), req, setupwizard.StepAction{Type: setupwizard.ActionConfirm}); err == nil {
-		t.Fatal("ConfirmSetup completed without consent")
-	}
-	if _, err := service.AcceptConsent(context.Background(), ws.ID, "materials", "local-user"); err != nil {
-		t.Fatal(err)
-	}
-	readiness, err = service.ConfirmSetup(context.Background(), req, setupwizard.StepAction{Type: setupwizard.ActionConfirm})
-	if err != nil || !readiness.Ready {
-		t.Fatalf("consented readiness = %+v, %v", readiness, err)
 	}
 }

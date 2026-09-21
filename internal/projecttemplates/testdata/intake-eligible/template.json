@@ -36,6 +36,14 @@
         "required": true,
         "title": "Add course materials",
         "description": "Add the files Ori should read for this course."
+      },
+      {
+        "id": "review-materials",
+        "kind": "intake_review",
+        "requirement_key": "course-materials",
+        "required": true,
+        "title": "Review course dates",
+        "description": "Review every proposed ticket before anything is created."
       }
     ]
   }

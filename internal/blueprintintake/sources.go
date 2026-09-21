@@ -247,6 +247,34 @@ func (s *SourceService) ListSources(workspaceID, intakeKey string) ([]SourceReco
 	return out, nil
 }
 
+// ReadParsedText returns host-stored text for a record that still belongs to
+// this workspace and intake state. Request data can never choose the path.
+func (s *SourceService) ReadParsedText(workspaceID string, requested SourceRecord) (string, error) {
+	state, stateDir, _, err := s.loadState(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	for _, source := range state.Sources {
+		if source.ID != requested.ID || source.IntakeKey != requested.IntakeKey {
+			continue
+		}
+		if source.Status != SourceStatusParsed || source.ParsedTextFile == "" {
+			return "", errors.New("source has no parsed text")
+		}
+		path := filepath.Clean(filepath.Join(stateDir, filepath.FromSlash(source.ParsedTextFile)))
+		textRoot := filepath.Clean(filepath.Join(stateDir, "text"))
+		if path != textRoot && !strings.HasPrefix(path, textRoot+string(filepath.Separator)) {
+			return "", errors.New("parsed text path leaves the intake state directory")
+		}
+		data, err := os.ReadFile(path) // #nosec G304 -- path comes only from host-generated state and is contained above
+		if err != nil {
+			return "", fmt.Errorf("read parsed intake text: %w", err)
+		}
+		return string(data), nil
+	}
+	return "", errors.New("intake source not found")
+}
+
 func (s *SourceService) loadState(workspaceID string) (sourceState, string, string, error) {
 	if s == nil || s.folders == nil {
 		return sourceState{}, "", "", errors.New("blueprint intake folder store is unavailable")

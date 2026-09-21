@@ -46,6 +46,8 @@ const (
 	// SetupStepKindIntake collects material for one intake_requirements entry
 	// through compiled host-owned source collectors.
 	SetupStepKindIntake = "intake"
+	// SetupStepKindIntakeReview presents and applies the host-validated proposal.
+	SetupStepKindIntakeReview = "intake_review"
 	// SetupStepKindAutomationReview discloses the watcher and daily run declared
 	// in automation_recipes for a directory, before either is activated.
 	SetupStepKindAutomationReview = "automation_review"
@@ -130,6 +132,7 @@ type SetupStepKindSpec struct {
 var setupStepKindSpecs = []SetupStepKindSpec{
 	{Kind: SetupStepKindDirectory, ReferenceScope: SetupStepReferenceDirectory, RequiresReference: true},
 	{Kind: SetupStepKindIntake, ReferenceScope: SetupStepReferenceIntake, RequiresReference: true, DefaultAdapter: "blueprint_intake"},
+	{Kind: SetupStepKindIntakeReview, ReferenceScope: SetupStepReferenceIntake, RequiresReference: true, DefaultAdapter: "blueprint_intake"},
 	{Kind: SetupStepKindAutomationReview, ReferenceScope: SetupStepReferenceDirectory, RequiresReference: true},
 	{Kind: SetupStepKindCapabilityConnect, ReferenceScope: SetupStepReferenceCapability, RequiresReference: true, RequiresAdapter: true},
 	{Kind: SetupStepKindCapabilityConfigure, ReferenceScope: SetupStepReferenceCapability, RequiresReference: true, RequiresAdapter: true},

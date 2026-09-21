@@ -495,6 +495,13 @@ type Task struct {
 	// JSON or persisted. CLI providers use its staging root instead of the real
 	// workspace, which lets Ori promote exactly one verified project-file change.
 	RuntimeExecution *TaskRuntimeExecution `json:"-"`
+	// DisableTools is a host-only execution policy for bounded read/transform
+	// jobs such as Blueprint Intake. It cannot be decoded or persisted, and
+	// removes every workspace, MCP, runtime and utility tool from this run.
+	DisableTools bool `json:"-"`
+	// RuntimeSkillPrompts pins the reviewed skill text a host-owned run requires.
+	// It is process-local so a request cannot inject arbitrary system prompts.
+	RuntimeSkillPrompts []ResolvedSkill `json:"-"`
 
 	// --- Backlog lifecycle (tasks/prd-workspace-backlog.md) ---
 

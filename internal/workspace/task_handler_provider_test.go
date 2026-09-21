@@ -354,6 +354,32 @@ func TestExecuteTask_PublicInfoUsesWebSearchUtilityFallback(t *testing.T) {
 	}
 }
 
+func TestExecuteTask_HostOwnedToollessRunPinsSkillAndExposesNoTools(t *testing.T) {
+	provider := &scriptedProviderStub{name: "openai", responses: []llm.ChatResponse{{Content: `{"items":[]}`}}}
+	factory := llm.NewFactory()
+	factory.Register("openai", provider)
+	agentStore := &resolverAgentStoreStub{agents: map[string]*agent.Agent{
+		"Ori": {Settings: types.Settings{Provider: "openai", Model: "gpt-test"}},
+	}}
+	handler := &LLMTaskHandler{agentStore: agentStore, llmFactory: factory}
+	handler.SetUtilityToolProvider(taskUtilityProviderStub{tools: map[string]toolapi.Tool{
+		"web_search": &taskHandlerToolFunc{name: "web_search", result: `{}`},
+	}})
+	_, err := handler.ExecuteTask(context.Background(), "Ori", Task{
+		ID: "intake", To: "Ori", Description: "read source", DisableTools: true,
+		RuntimeSkillPrompts: []ResolvedSkill{{Name: "syllabus-intake", Prompt: "PINNED INTAKE SKILL", Enabled: true, Trusted: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 1 || len(provider.requests[0].Tools) != 0 {
+		t.Fatalf("tool-less host run exposed tools: %+v", provider.requests)
+	}
+	if len(provider.requests[0].Messages) == 0 || !strings.Contains(provider.requests[0].Messages[0].Content, "PINNED INTAKE SKILL") {
+		t.Fatalf("pinned skill text did not reach the task system prompt: %+v", provider.requests[0].Messages)
+	}
+}
+
 func TestExecuteTask_FollowsUpWhenModelReturnsEmptyAfterToolResult(t *testing.T) {
 	provider := &scriptedProviderStub{
 		name: "openai",

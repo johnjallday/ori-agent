@@ -12,6 +12,7 @@ func TestValidSetupStepKinds_IsTheVersion1Allowlist(t *testing.T) {
 	want := []string{
 		"directory",
 		"intake",
+		"intake_review",
 		"automation_review",
 		"capability_connect",
 		"capability_configure",
@@ -67,6 +68,7 @@ func TestSetupStepKindSpecs_ReferenceAndAdapterRules(t *testing.T) {
 	}{
 		{SetupStepKindDirectory, SetupStepReferenceDirectory, true, false},
 		{SetupStepKindIntake, SetupStepReferenceIntake, true, false},
+		{SetupStepKindIntakeReview, SetupStepReferenceIntake, true, false},
 		{SetupStepKindAutomationReview, SetupStepReferenceDirectory, true, false},
 		{SetupStepKindCapabilityConnect, SetupStepReferenceCapability, true, true},
 		{SetupStepKindCapabilityConfigure, SetupStepReferenceCapability, true, true},

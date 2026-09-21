@@ -400,11 +400,12 @@ type ServerBuilder struct {
 	// Shared blueprint Setup Wizard: one lifecycle service over a compiled
 	// adapter registry, plus its workspace-scoped HTTP handler. The registry is
 	// held so each domain can register its adapter as it is wired.
-	setupWizardService     *setupwizard.Service
-	setupWizardRegistry    *setupwizard.Registry
-	setupWizardHandler     *setupwizardhttp.Handler
-	blueprintIntakeService *blueprintintake.SourceService
-	blueprintIntakeHandler *blueprintintakehttp.Handler
+	setupWizardService      *setupwizard.Service
+	setupWizardRegistry     *setupwizard.Registry
+	setupWizardHandler      *setupwizardhttp.Handler
+	blueprintIntakeService  *blueprintintake.SourceService
+	blueprintIntakeWorkflow *blueprintintake.Service
+	blueprintIntakeHandler  *blueprintintakehttp.Handler
 
 	// Generalized blueprint runtime requirements: one compiled adapter registry,
 	// one canonical workspace service, one HTTP surface, and the composite gate

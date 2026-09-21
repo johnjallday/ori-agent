@@ -17,6 +17,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
 	"github.com/johnjallday/ori-agent/internal/blueprintintake"
 	"github.com/johnjallday/ori-agent/internal/blueprintintakehttp"
+	"github.com/johnjallday/ori-agent/internal/blueprintintakewizard"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -1114,7 +1115,8 @@ func (b *ServerBuilder) wireSetupWizard() {
 	b.setupWizardRegistry = registry
 	// Domain adapters are registered from code, never from configuration: a
 	// manifest's adapter name is a key into this registry and nothing else.
-	var intakeState blueprintintake.SetupState
+	var intakeSources *blueprintintake.SourceService
+	var intakeWorkflow *blueprintintake.Service
 	if b.workspaceFileStore != nil {
 		intakeService := blueprintintake.NewSourceService(folders, b.workspaceFileStore)
 		intakeService.SetProviderResolver(func(ctx context.Context, workspaceID string) (blueprintintake.ModelProvider, error) {
@@ -1144,10 +1146,21 @@ func (b *ServerBuilder) wireSetupWizard() {
 			return blueprintintake.ModelProvider{Name: provider, Local: llm.IsLocalProviderName(provider)}, nil
 		})
 		b.blueprintIntakeService = intakeService
+		proposalStore := blueprintintake.NewProposalStore(b.workspaceFileStore)
+		runner := blueprintintake.NewIntakeRunner(folders, intakeService, b.skillsManager, b.taskHandler)
+		if os.Getenv("ORI_DEV_BLUEPRINT_INTAKE_STUB") == "1" {
+			runner = blueprintintake.NewDemoIntakeRunner(folders, intakeService)
+		}
+		applyService := blueprintintake.NewApplyService(proposalStore, workspace.NewTicketService(b.workspaceStore))
+		workflow := blueprintintake.NewService(intakeService, runner, proposalStore, applyService)
+		b.blueprintIntakeWorkflow = workflow
 		b.blueprintIntakeHandler = blueprintintakehttp.NewHandler(intakeService, b.workspaceStore, b.userProvider)
-		intakeState = intakeService
+		b.blueprintIntakeHandler.SetWorkflow(workflow)
+		b.blueprintIntakeHandler.SetUserStore(b.userStore)
+		intakeSources = intakeService
+		intakeWorkflow = workflow
 	}
-	if err := registry.Register(blueprintintake.NewSetupAdapter(intakeState)); err != nil {
+	if err := registry.Register(blueprintintakewizard.NewSetupAdapter(intakeSources, intakeWorkflow)); err != nil {
 		logger.Warn("Blueprint Intake setup adapter not registered", logger.Fields{"error": err})
 	}
 	if b.calendarOpsHandler != nil {

@@ -336,6 +336,7 @@ func TestValidateSetupWizard_AcceptsEveryAllowlistedKind(t *testing.T) {
 	steps := []setupWizardStepDecl{
 		{ID: "directory", Kind: "directory", RequirementKey: "downloads-root", Required: &required},
 		{ID: "intake", Kind: "intake", RequirementKey: "course-materials", Required: &required},
+		{ID: "intake-review", Kind: "intake_review", RequirementKey: "course-materials", Required: &required},
 		{ID: "automation", Kind: "automation_review", RequirementKey: "downloads-root", Required: &required},
 		{ID: "connect", Kind: "capability_connect", RequirementKey: "calendar", Adapter: "calendar_ops", Required: &required},
 		{ID: "configure", Kind: "capability_configure", RequirementKey: "calendar", Adapter: "calendar_ops", Required: &required},
