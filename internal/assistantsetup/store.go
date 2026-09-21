@@ -18,6 +18,10 @@ type Store interface {
 	FindActiveRun(ctx context.Context, ownerUserID, capabilityID string) (*Run, error)
 	GetRun(ctx context.Context, ownerUserID, runID string) (*Run, error)
 	ListOperations(ctx context.Context, ownerUserID, runID string) ([]Operation, error)
+	ListResources(ctx context.Context, ownerUserID, runID string) ([]Resource, error)
+	StartWorkspace(ctx context.Context, ownerUserID, runID, operationID string) error
+	FailWorkspace(ctx context.Context, ownerUserID, runID, operationID, safeCode string, invalidate bool) (*Run, error)
+	RecordWorkspaceObservation(ctx context.Context, ownerUserID, runID, operationID string, observation WorkspaceObservation) error
 	Accept(ctx context.Context, acceptance Acceptance) (*Run, *Operation, bool, error)
 	CompleteWorkspace(ctx context.Context, ownerUserID, runID, operationID string, result WorkspaceResult) (*Run, error)
 	ClaimFolderIntent(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*Run, *Operation, error)
@@ -103,6 +107,193 @@ func (s *SQLiteStore) ListOperations(ctx context.Context, ownerUserID, runID str
 		operations = append(operations, *op)
 	}
 	return operations, rows.Err()
+}
+
+// ListResources returns the durable receipts of one run, owner-scoped and in a
+// stable order. It is read-only; receipts are written only by the operations
+// that own them.
+func (s *SQLiteStore) ListResources(ctx context.Context, ownerUserID, runID string) ([]Resource, error) {
+	if err := s.configured(); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT r.operation_id, r.run_id, r.workspace_id, r.resource_kind,
+			r.resource_id, r.ownership, r.store_origin, r.version_digest, r.created_at
+		FROM assistant_setup_resources r
+		JOIN assistant_setup_runs run ON run.id = r.run_id
+		WHERE run.owner_user_id = ? AND r.run_id = ?
+		ORDER BY r.created_at, r.resource_kind, r.resource_id`, strings.TrimSpace(ownerUserID), strings.TrimSpace(runID))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	resources := make([]Resource, 0)
+	for rows.Next() {
+		var resource Resource
+		if scanErr := rows.Scan(&resource.OperationID, &resource.RunID, &resource.WorkspaceID, &resource.Kind,
+			&resource.ResourceID, &resource.Ownership, &resource.StoreOrigin, &resource.VersionDigest, &resource.CreatedAt); scanErr != nil {
+			return nil, scanErr
+		}
+		resources = append(resources, resource)
+	}
+	return resources, rows.Err()
+}
+
+// StartWorkspace records that preparation is being attempted: a claimed or
+// previously failed workspace operation becomes running, counts the attempt,
+// keeps its first start time, and clears the superseded failure code. An
+// operation that is already running, unresolved, or succeeded is left
+// untouched, so replay is idempotent.
+func (s *SQLiteStore) StartWorkspace(ctx context.Context, ownerUserID, runID, operationID string) error {
+	if err := s.configured(); err != nil {
+		return err
+	}
+	now := s.now().UTC()
+	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		op, err := getOperationWith(ctx, tx, strings.TrimSpace(ownerUserID), strings.TrimSpace(runID), OperationWorkspace)
+		if err != nil {
+			return err
+		}
+		if op.ID != strings.TrimSpace(operationID) {
+			return ErrConflict
+		}
+		if op.Status != OperationClaimed && op.Status != OperationFailed {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE assistant_setup_operations
+			SET status = 'running', attempt_count = attempt_count + 1, safe_error_code = '',
+				started_at = COALESCE(started_at, ?), updated_at = ?
+			WHERE id = ? AND owner_user_id = ? AND status IN ('claimed','failed')`,
+			now, now, op.ID, op.OwnerUserID)
+		return err
+	})
+}
+
+// FailWorkspace records a refusal that provably happened before anything was
+// written: the unsettled workspace operation becomes failed with a safe code,
+// and the run stays at the workspace step. A retryable refusal keeps the run
+// active on the same claim; otherwise the run is invalidated, because the same
+// claim can never succeed.
+func (s *SQLiteStore) FailWorkspace(ctx context.Context, ownerUserID, runID, operationID, safeCode string, invalidate bool) (*Run, error) {
+	if err := s.configured(); err != nil {
+		return nil, err
+	}
+	safeCode = strings.TrimSpace(safeCode)
+	if safeCode == "" {
+		return nil, ErrInvalid
+	}
+	ownerUserID, runID = strings.TrimSpace(ownerUserID), strings.TrimSpace(runID)
+	status := RunActive
+	if invalidate {
+		status = RunInvalidated
+	}
+	now := s.now().UTC()
+	var updated *Run
+	err := s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		run, err := getRunWith(ctx, tx, ownerUserID, runID)
+		if err != nil {
+			return err
+		}
+		op, err := getOperationWith(ctx, tx, ownerUserID, runID, OperationWorkspace)
+		if err != nil {
+			return err
+		}
+		if op.ID != strings.TrimSpace(operationID) || run.Status != RunActive || run.CurrentStep != StepWorkspace ||
+			(op.Status != OperationClaimed && op.Status != OperationRunning) {
+			return ErrConflict
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE assistant_setup_operations SET status='failed',
+			attempt_count = CASE WHEN attempt_count < 1 THEN 1 ELSE attempt_count END,
+			safe_error_code=?, updated_at=? WHERE id=? AND owner_user_id=? AND status IN ('claimed','running')`,
+			safeCode, now, op.ID, ownerUserID); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE assistant_setup_runs SET status=?, last_error_code=?,
+			failed_step='workspace', retry_after=NULL, revision=revision+1, updated_at=?
+			WHERE id=? AND owner_user_id=? AND revision=? AND status='active' AND current_step='workspace'`,
+			status, safeCode, now, run.ID, ownerUserID, run.Revision)
+		if err != nil {
+			return err
+		}
+		if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
+			if rowsErr != nil {
+				return rowsErr
+			}
+			return ErrStaleRun
+		}
+		updated, err = getRunWith(ctx, tx, ownerUserID, run.ID)
+		return err
+	})
+	return updated, err
+}
+
+// RecordWorkspaceObservation writes receipts for exactly what an observer
+// proved exists after a failed preparation. It never advances the run, never
+// replaces a receipt, and records an agent instance only when its ownership is
+// provable: a reused profile, or a profile this operation created.
+func (s *SQLiteStore) RecordWorkspaceObservation(ctx context.Context, ownerUserID, runID, operationID string, observation WorkspaceObservation) error {
+	if err := s.configured(); err != nil {
+		return err
+	}
+	ownerUserID, runID = strings.TrimSpace(ownerUserID), strings.TrimSpace(runID)
+	now := s.now().UTC()
+	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		run, err := getRunWith(ctx, tx, ownerUserID, runID)
+		if err != nil {
+			return err
+		}
+		op, err := getOperationWith(ctx, tx, ownerUserID, runID, OperationWorkspace)
+		if err != nil {
+			return err
+		}
+		if op.ID != strings.TrimSpace(operationID) || run.TargetMode != TargetCreate {
+			return ErrConflict
+		}
+		role := run.TeamRole
+		resources := []Resource{}
+		base := Resource{OperationID: op.ID, RunID: run.ID, WorkspaceID: run.TargetWorkspaceID, CreatedAt: now}
+		if observation.WorkspaceProven {
+			resource := base
+			resource.Kind, resource.ResourceID, resource.Ownership, resource.VersionDigest = ResourceWorkspace, run.TargetWorkspaceID, OwnershipCreated, run.BlueprintDigest
+			resources = append(resources, resource)
+		}
+		if observation.WorkspaceProven && strings.TrimSpace(observation.AgentInstanceID) != "" {
+			ownership := ResourceOwnership("")
+			switch {
+			case role.Action == "reuse":
+				ownership = OwnershipAdopted
+			case observation.ProfileCreated:
+				ownership = OwnershipCreated
+			}
+			if ownership != "" {
+				resource := base
+				resource.Kind, resource.ResourceID, resource.Ownership, resource.VersionDigest = ResourceAgentInstance, observation.AgentInstanceID, ownership, role.ConfigDigest
+				resources = append(resources, resource)
+			}
+		}
+		if observation.ProfileCreated && role.Action == "create" && observation.ProfileProvenanceID == op.ProfileProvenanceID &&
+			strings.TrimSpace(observation.ProfileProvenanceID) != "" && strings.TrimSpace(observation.ProfileStoreOrigin) != "" {
+			resource := base
+			resource.Kind, resource.ResourceID, resource.Ownership = ResourceAgentProfile, observation.ProfileProvenanceID, OwnershipCreated
+			resource.StoreOrigin, resource.VersionDigest = observation.ProfileStoreOrigin, role.ConfigDigest
+			resources = append(resources, resource)
+		}
+		return insertResources(ctx, tx, resources)
+	})
+}
+
+func insertResources(ctx context.Context, tx *sql.Tx, resources []Resource) error {
+	for _, resource := range resources {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO assistant_setup_resources(
+			operation_id, run_id, workspace_id, resource_kind, resource_id, ownership,
+			store_origin, version_digest, created_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(operation_id, resource_kind, resource_id) DO NOTHING`,
+			resource.OperationID, resource.RunID, resource.WorkspaceID, resource.Kind,
+			resource.ResourceID, resource.Ownership, resource.StoreOrigin, resource.VersionDigest, resource.CreatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Accept creates the accepted run and its preallocated workspace operation in
@@ -258,16 +449,8 @@ func (s *SQLiteStore) CompleteWorkspace(ctx context.Context, ownerUserID, runID,
 			}
 			resources = append(resources, Resource{OperationID: op.ID, RunID: run.ID, WorkspaceID: result.WorkspaceID, Kind: ResourceAgentProfile, ResourceID: result.ProfileProvenanceID, Ownership: OwnershipCreated, StoreOrigin: result.ProfileStoreOrigin, VersionDigest: result.ConfigurationDigest, CreatedAt: now})
 		}
-		for _, resource := range resources {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO assistant_setup_resources(
-				operation_id, run_id, workspace_id, resource_kind, resource_id, ownership,
-				store_origin, version_digest, created_at
-			) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(operation_id, resource_kind, resource_id) DO NOTHING`,
-				resource.OperationID, resource.RunID, resource.WorkspaceID, resource.Kind,
-				resource.ResourceID, resource.Ownership, resource.StoreOrigin, resource.VersionDigest, resource.CreatedAt); err != nil {
-				return err
-			}
+		if err := insertResources(ctx, tx, resources); err != nil {
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE assistant_setup_operations
 			SET status = 'succeeded', attempt_count = CASE WHEN attempt_count < 1 THEN 1 ELSE attempt_count END,

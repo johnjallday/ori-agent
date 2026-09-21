@@ -435,6 +435,9 @@ func TestReadyExistingWorkspaceIsReadOnlyCurrentStatus(t *testing.T) {
 	if len(projection.Actions) != 1 || projection.Actions[0].ID != "open_workspace" || preparer.calls != 0 || progressor.prepareCalls != 0 {
 		t.Fatalf("actions=%+v preparer=%d scans=%d", projection.Actions, preparer.calls, progressor.prepareCalls)
 	}
+	if len(projection.Milestones) != 0 {
+		t.Fatalf("a ready existing workspace has no setup sequence to present: %+v", projection.Milestones)
+	}
 }
 
 func TestCustomizedPrivacyRoutesToManualReviewWithoutResettingIt(t *testing.T) {
