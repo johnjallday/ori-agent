@@ -5,12 +5,15 @@
 # run it as a tracked background process (see "Smoke Testing" in CLAUDE.md).
 #
 # Usage:
-#   ./scripts/demo-server.sh [--rev REV] [port] [sandbox_dir]
+#   ./scripts/demo-server.sh [--rev REV] [--open] [port] [sandbox_dir]
 #
 # --rev REV serves a build of another commit instead of the working tree, so a
 # failing browser test can be checked against its baseline (for example the
 # branch's merge base) without creating a Git worktree. The commit is exported
 # with `git archive` and built once under $TMPDIR/ori-rev-<sha>/.
+#
+# Demo servers do not open a browser by default. Pass --open or set
+# ORI_DEMO_OPEN=1 to opt in.
 #
 # Both HOME and ORI_DATA_DIR are redirected into the sandbox, and the server is
 # started from INSIDE it so the plugin store is isolated too. Nothing is ever
@@ -22,14 +25,27 @@
 set -euo pipefail
 
 rev=""
-if [[ "${1:-}" == "--rev" ]]; then
-	rev="${2:-}"
-	[[ -n "$rev" ]] || {
-		echo "--rev needs a commit" >&2
+open_browser="${ORI_DEMO_OPEN:-0}"
+while [[ "${1:-}" == --* ]]; do
+	case "$1" in
+	--rev)
+		rev="${2:-}"
+		[[ -n "$rev" ]] || {
+			echo "--rev needs a commit" >&2
+			exit 2
+		}
+		shift 2
+		;;
+	--open)
+		open_browser=1
+		shift
+		;;
+	*)
+		echo "unknown option: $1" >&2
 		exit 2
-	}
-	shift 2
-fi
+		;;
+	esac
+done
 
 port="${1:-8931}"
 sandbox="${2:-}"
@@ -74,4 +90,7 @@ echo "BRANCH=$label"
 echo "URL=http://localhost:$port"
 
 cd "$sandbox"
-exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" "$binary"
+if [[ "$open_browser" == "1" ]]; then
+	exec env -u NO_BROWSER HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" "$binary"
+fi
+exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 "$binary"

@@ -170,19 +170,145 @@ func TestResetAdmissionControlMuxCannotBypassIntoOrdinaryRoutes(t *testing.T) {
 	}
 }
 
-func TestResetAdmissionHTTPPanicReleasesPermit(t *testing.T) {
-	g := &resetstate.WorkGate{}
-	s := &Server{resetWork: g}
-	handler := s.resetAdmissionMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("owned handler failure") }))
-	func() {
-		defer func() {
-			if recover() == nil {
-				t.Error("test handler did not panic")
+func TestResetAdmissionClassifiedStreamsDoNotBlockFence(t *testing.T) {
+	for _, pattern := range resetStreamPatterns {
+		t.Run(pattern, func(t *testing.T) {
+			g := &resetstate.WorkGate{}
+			s := &Server{resetWork: g}
+			started := make(chan struct{})
+			handler := s.resetAdmissionMiddleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				close(started)
+				<-r.Context().Done()
+			}))
+			returned := make(chan struct{})
+			go func() {
+				defer close(returned)
+				handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, concreteResetStreamPath(pattern), nil))
+			}()
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("stream handler did not start")
 			}
-		}()
-		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/save", nil))
-	}()
+			if got := g.Snapshot(); got.Active != 0 || got.Streams != 1 {
+				t.Fatalf("open stream = %+v", got)
+			}
+			requireResetNoError(t, g.TryFence(t.Context()))
+			select {
+			case <-returned:
+			case <-time.After(5 * time.Second):
+				t.Fatal("fence did not end stream handler")
+			}
+			if got := g.Snapshot(); got.Active != 0 || got.Streams != 0 {
+				t.Fatalf("released stream = %+v", got)
+			}
+		})
+	}
+}
+
+func TestResetAdmissionStreamLookalikesRemainFiniteWork(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "non-GET", method: http.MethodPost, path: "/api/orchestration/workflow/stream"},
+		{name: "path suffix", method: http.MethodGet, path: "/api/orchestration/workflow/stream/x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &resetstate.WorkGate{}
+			s := &Server{resetWork: g}
+			started := make(chan struct{})
+			finish := make(chan struct{})
+			handler := s.resetAdmissionMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				close(started)
+				<-finish
+			}))
+			returned := make(chan struct{})
+			go func() {
+				defer close(returned)
+				handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(tt.method, tt.path, nil))
+			}()
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("finite handler did not start")
+			}
+			if got := g.Snapshot(); got.Active != 1 || got.Streams != 0 {
+				t.Fatalf("lookalike admission = %+v", got)
+			}
+			if err := g.TryFence(t.Context()); !errors.Is(err, resetstate.ErrWorkActive) {
+				t.Fatalf("finite work fence = %v", err)
+			}
+			close(finish)
+			<-returned
+		})
+	}
+}
+
+func TestResetAdmissionStreamAfterFenceGetsResetPending(t *testing.T) {
+	g := &resetstate.WorkGate{}
 	requireResetNoError(t, g.TryFence(t.Context()))
+	s := &Server{resetWork: g}
+	handler := s.resetAdmissionMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("fenced stream reached ordinary handler")
+	}))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/workspace-map/activity/stream", nil))
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Body.String(), "reset_pending") {
+		t.Fatalf("fenced stream response = %d %q", w.Code, w.Body.String())
+	}
+}
+
+func TestResetAdmissionStreamPatternsExistOnProductionMux(t *testing.T) {
+	s := newRoutesTestServer(t)
+	mux := http.NewServeMux()
+	registerRoutes(mux, s)
+	for _, classifierPattern := range resetStreamPatterns {
+		req := httptest.NewRequest(http.MethodGet, concreteResetStreamPath(classifierPattern), nil)
+		_, productionPattern := mux.Handler(req)
+		pathPattern := strings.TrimPrefix(classifierPattern, http.MethodGet+" ")
+		if productionPattern != classifierPattern && productionPattern != pathPattern {
+			t.Errorf("classifier pattern %q resolved to production pattern %q", classifierPattern, productionPattern)
+		}
+	}
+}
+
+func concreteResetStreamPath(pattern string) string {
+	path := strings.TrimPrefix(pattern, http.MethodGet+" ")
+	path = strings.ReplaceAll(path, "{workspaceID}", "workspace-1")
+	return strings.ReplaceAll(path, "{id}", "session-1")
+}
+
+func TestResetAdmissionHTTPPanicReleasesPermit(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "finite", method: http.MethodPost, path: "/save"},
+		{name: "stream", method: http.MethodGet, path: "/api/orchestration/workflow/stream"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &resetstate.WorkGate{}
+			s := &Server{resetWork: g}
+			handler := s.resetAdmissionMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("owned handler failure") }))
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Error("test handler did not panic")
+					}
+				}()
+				handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(tt.method, tt.path, nil))
+			}()
+			if got := g.Snapshot(); got.Active != 0 || got.Streams != 0 {
+				t.Fatalf("panic leaked permit: %+v", got)
+			}
+			requireResetNoError(t, g.TryFence(t.Context()))
+		})
+	}
 }
 
 func TestResetAdmissionBuilderInstrumentationDoesNotAdvertiseReadiness(t *testing.T) {
