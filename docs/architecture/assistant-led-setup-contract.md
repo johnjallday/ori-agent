@@ -107,7 +107,7 @@ Measured local API durations from a separate fresh one-file sandbox fixture were
 
 From an already selected File Janitor blueprint, the existing manual path requires at least three post-creation user decisions before a useful review: native folder selection/grant, automation approval, and a separate **Scan now**. Creating the workspace itself remains the creator's reviewed decision and route. The observed app-surface sequence is creator → workspace wizard → File Janitor review console (one page navigation to the workspace and one in-page handoff); native selection is a nested OS surface. The assisted target still has three consent moments overall—reviewed setup, folder selection, monitoring plus initial scan—but removes the separate manual scan action and avoids a required app-page navigation before reporting the first result.
 
-Sanitized existing-behavior evidence is stored at:
+Sanitized existing-behavior evidence is stored under the gitignored `tasks/screenshots/` (local development evidence only):
 
 - `tasks/screenshots/assistant-led-setup/existing-manual-file-janitor-review.png` — real sandbox batch, cropped to exclude the raw local path;
 - `tasks/screenshots/assistant-led-setup/existing-native-picker-unavailable.png` — real server/helper-unavailable error;
