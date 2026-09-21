@@ -270,6 +270,9 @@
 /api/workspaces/x/agents/x
 /api/workspaces/x/attachments
 /api/workspaces/x/attachments/x
+/api/workspaces/x/blueprint-intakes/materials
+/api/workspaces/x/blueprint-intakes/materials/consent
+/api/workspaces/x/blueprint-intakes/materials/sources/files
 /api/workspaces/x/canvas/store-nodes
 /api/workspaces/x/canvas/store-nodes/x
 /api/workspaces/x/directories

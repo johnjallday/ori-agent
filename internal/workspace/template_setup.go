@@ -39,6 +39,29 @@ type CapabilityRequirement struct {
 	OptionalOperations []string `json:"optional_operations,omitempty"`
 }
 
+// IntakeSources declares which host-owned source collectors an intake offers.
+// It is inert: the manifest may enable a collector or reference one of its own
+// directory requirements, but it cannot provide a URL, path, request, command,
+// or renderer.
+type IntakeSources struct {
+	Files        bool   `json:"files,omitempty"`
+	URL          bool   `json:"url,omitempty"`
+	DirectoryKey string `json:"directory_key,omitempty"`
+}
+
+// IntakeRequirement declares material a blueprint asks the user to provide and
+// the already-declared skill that interprets it. The declaration selects no
+// behavior: collection, parsing, consent, model execution, validation, review,
+// and apply are all compiled host code.
+type IntakeRequirement struct {
+	Key                string        `json:"key"`
+	Label              string        `json:"label"`
+	Skill              string        `json:"skill"`
+	Sources            IntakeSources `json:"sources"`
+	AcceptedExtensions []string      `json:"accepted_extensions,omitempty"`
+	ProposalKinds      []string      `json:"proposal_kinds"`
+}
+
 // DirectoryRequirement declares one local directory a template needs the user
 // to choose during guided setup.
 type DirectoryRequirement struct {
@@ -117,6 +140,22 @@ func NormalizeLocalTimeOfDay(value string) (string, error) {
 	return fmt.Sprintf("%02d:%02d", hour, minute), nil
 }
 
+// cloneIntakeRequirements returns a defensive copy, including each intake's
+// extension and proposal-kind lists.
+func cloneIntakeRequirements(requirements []IntakeRequirement) []IntakeRequirement {
+	if len(requirements) == 0 {
+		return nil
+	}
+	out := make([]IntakeRequirement, 0, len(requirements))
+	for _, requirement := range requirements {
+		copy := requirement
+		copy.AcceptedExtensions = append([]string(nil), requirement.AcceptedExtensions...)
+		copy.ProposalKinds = append([]string(nil), requirement.ProposalKinds...)
+		out = append(out, copy)
+	}
+	return out
+}
+
 // cloneDirectoryRequirements returns a defensive copy.
 func cloneDirectoryRequirements(reqs []DirectoryRequirement) []DirectoryRequirement {
 	if len(reqs) == 0 {
@@ -150,6 +189,27 @@ func cloneAutomationRecipes(recipes []AutomationRecipe) []AutomationRecipe {
 		out = append(out, cp)
 	}
 	return out
+}
+
+// TemplateIntakeRequirements returns the immutable intake declarations captured
+// when this workspace was created.
+func (w *Workspace) TemplateIntakeRequirements() []IntakeRequirement {
+	p := w.GetTemplateProvenance()
+	if p == nil {
+		return nil
+	}
+	return p.IntakeRequirements
+}
+
+// TemplateIntakeRequirement returns one snapshotted intake by normalized key.
+func (w *Workspace) TemplateIntakeRequirement(key string) (IntakeRequirement, bool) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, requirement := range w.TemplateIntakeRequirements() {
+		if requirement.Key == key {
+			return requirement, true
+		}
+	}
+	return IntakeRequirement{}, false
 }
 
 // PendingDirectoryRequirements returns the local directories the workspace's

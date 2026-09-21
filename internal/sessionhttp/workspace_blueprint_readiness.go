@@ -87,6 +87,9 @@ func respondBlueprintReadinessConflict(w http.ResponseWriter, template projectte
 			if template.HasInvalidSetupWizard() {
 				body["setup_wizard_error"] = template.SetupWizardError
 			}
+			if template.HasInvalidIntakeRequirements() {
+				body["intake_requirements_error"] = template.IntakeRequirementsError
+			}
 			if template.HasInvalidAssistantProgram() {
 				body["assistant_program_error"] = template.AssistantProgramError
 			}
@@ -111,6 +114,9 @@ func conflictMessage(template projecttemplates.Template, readiness blueprintread
 		}
 		if template.HasInvalidSetupWizard() {
 			return fmt.Sprintf("This blueprint's setup wizard is unusable, so no workspace was created. Fix its template.json: %s", template.SetupWizardError)
+		}
+		if template.HasInvalidIntakeRequirements() {
+			return fmt.Sprintf("This blueprint's intake requirements are unusable, so no workspace was created. Fix its template.json: %s", template.IntakeRequirementsError)
 		}
 		if template.HasInvalidAssistantProgram() {
 			return fmt.Sprintf("This blueprint's assistant program is unusable, so no workspace was created. Fix its template.json: %s", template.AssistantProgramError)

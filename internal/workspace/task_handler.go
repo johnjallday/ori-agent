@@ -956,6 +956,16 @@ func buildToolResultsSummary(content string, toolResults []toolCallResult) strin
 	return strings.TrimSpace(resultBuilder.String())
 }
 
+// ResolveProviderName returns the provider the ordinary task path would use
+// for one configured provider/model pair. Host-owned consent surfaces use it
+// so the provider they name matches the one task execution will contact.
+func (h *LLMTaskHandler) ResolveProviderName(configuredProvider, model string) string {
+	if h == nil {
+		return ""
+	}
+	return h.getProviderForAgent(configuredProvider, model)
+}
+
 // Provider-selection helpers (normalizeProviderName, isClaudeFamilyModel,
 // isGeminiFamilyModel, isCodexFamilyModel, normalizeModelForProvider,
 // getProviderForAgent, getProviderForModel) live in

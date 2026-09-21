@@ -138,6 +138,8 @@ type StepRequest struct {
 	// Automation is the automation the blueprint requested for that directory,
 	// when it requested any.
 	Automation *workspace.AutomationRecipe
+	// Intake is the intake requirement this step references.
+	Intake *workspace.IntakeRequirement
 	// Capability is the connector capability requirement the step references,
 	// when its kind resolves in the legacy capability namespace.
 	Capability *workspace.CapabilityRequirement

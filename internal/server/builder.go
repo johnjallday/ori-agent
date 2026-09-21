@@ -13,6 +13,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentmap"
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
 	"github.com/johnjallday/ori-agent/internal/assistantsetup"
+	"github.com/johnjallday/ori-agent/internal/blueprintintake"
+	"github.com/johnjallday/ori-agent/internal/blueprintintakehttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -398,9 +400,11 @@ type ServerBuilder struct {
 	// Shared blueprint Setup Wizard: one lifecycle service over a compiled
 	// adapter registry, plus its workspace-scoped HTTP handler. The registry is
 	// held so each domain can register its adapter as it is wired.
-	setupWizardService  *setupwizard.Service
-	setupWizardRegistry *setupwizard.Registry
-	setupWizardHandler  *setupwizardhttp.Handler
+	setupWizardService     *setupwizard.Service
+	setupWizardRegistry    *setupwizard.Registry
+	setupWizardHandler     *setupwizardhttp.Handler
+	blueprintIntakeService *blueprintintake.SourceService
+	blueprintIntakeHandler *blueprintintakehttp.Handler
 
 	// Generalized blueprint runtime requirements: one compiled adapter registry,
 	// one canonical workspace service, one HTTP surface, and the composite gate
@@ -719,6 +723,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		WorkspaceMap:          b.workspaceMapHandler,
 		AgentMap:              b.agentMapHandler,
 		SetupWizard:           b.setupWizardHandler,
+		BlueprintIntake:       b.blueprintIntakeHandler,
 		RuntimeCapabilities:   b.runtimeCapabilityHandler,
 		CLIAgents:             b.cliAgentHandler,
 		CLIAgentRegistry:      b.cliAgentRegistry,

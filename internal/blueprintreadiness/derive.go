@@ -520,6 +520,9 @@ func manifestDiagnostic(template projecttemplates.Template) string {
 	if template.HasInvalidSetupWizard() {
 		return template.SetupWizardError
 	}
+	if template.HasInvalidIntakeRequirements() {
+		return template.IntakeRequirementsError
+	}
 	if template.HasInvalidAssistantProgram() {
 		return template.AssistantProgramError
 	}

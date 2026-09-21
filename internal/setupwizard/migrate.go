@@ -30,6 +30,7 @@ type Blueprint struct {
 
 	DirectoryRequirements  []workspace.DirectoryRequirement
 	AutomationRecipes      []workspace.AutomationRecipe
+	IntakeRequirements     []workspace.IntakeRequirement
 	CapabilityRequirements []workspace.CapabilityRequirement
 	Plugins                []string
 	PluginSources          map[string]string
@@ -318,6 +319,9 @@ func mergeBlueprintSnapshot(provenance *workspace.TemplateProvenance, blueprint 
 	}
 	if len(provenance.AutomationRecipes) == 0 {
 		provenance.AutomationRecipes = blueprint.AutomationRecipes
+	}
+	if len(provenance.IntakeRequirements) == 0 {
+		provenance.IntakeRequirements = blueprint.IntakeRequirements
 	}
 	if len(provenance.CapabilityRequirements) == 0 {
 		provenance.CapabilityRequirements = blueprint.CapabilityRequirements

@@ -1,0 +1,42 @@
+{
+  "name": "Intake Eligible Course",
+  "description": "A test fixture for the generic blueprint intake flow.",
+  "tools": {
+    "skills": [
+      "syllabus-intake"
+    ]
+  },
+  "intake_requirements": [
+    {
+      "key": "course-materials",
+      "label": "Course materials",
+      "skill": "syllabus-intake",
+      "sources": {
+        "files": true
+      },
+      "accepted_extensions": [
+        ".pdf",
+        ".docx",
+        ".txt",
+        ".md"
+      ],
+      "proposal_kinds": [
+        "ticket"
+      ]
+    }
+  ],
+  "setup_wizard": {
+    "version": 1,
+    "title": "Set up course materials",
+    "steps": [
+      {
+        "id": "materials",
+        "kind": "intake",
+        "requirement_key": "course-materials",
+        "required": true,
+        "title": "Add course materials",
+        "description": "Add the files Ori should read for this course."
+      }
+    ]
+  }
+}

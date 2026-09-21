@@ -130,6 +130,17 @@ func TestDeriveInvalidManifestGuidanceFollowsOwnership(t *testing.T) {
 	}
 }
 
+func TestDeriveInvalidIntakeRequirementsBlockCreation(t *testing.T) {
+	got := Derive(projecttemplates.Template{
+		ID: "course", Name: "Course",
+		IntakeRequirementsError: "invalid intake requirements: skill is not declared in tools.skills",
+	}, Sources{})
+	assertReadiness(t, got, StateUnavailable, OwnershipUser, ReasonManifestInvalid)
+	if got.Creatable() || !strings.Contains(got.Diagnostic, "intake requirements") {
+		t.Fatalf("invalid intake readiness = %+v", got)
+	}
+}
+
 func TestDeriveGroupAndVariantStatesFailClosed(t *testing.T) {
 	invalid := Derive(projecttemplates.Template{
 		ID: "invalid-group", Name: "Invalid group",

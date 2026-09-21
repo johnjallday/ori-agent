@@ -307,7 +307,7 @@ func TestNewTemplate_InvalidWizardFailsClosed(t *testing.T) {
 }
 
 func TestValidateSetupWizard_ErrorsAreIdentifiable(t *testing.T) {
-	scope := templateSetupWizardScope(nil, nil, nil, nil)
+	scope := templateSetupWizardScope(nil, nil, nil, nil, nil)
 	err := validateSetupWizard(&setupWizardDecl{Version: 9, Title: "T"}, scope)
 	if !errors.Is(err, ErrInvalidSetupWizard) {
 		t.Fatalf("error %v should wrap ErrInvalidSetupWizard", err)
@@ -325,6 +325,7 @@ func TestValidateSetupWizard_AcceptsEveryAllowlistedKind(t *testing.T) {
 		[]AutomationRecipe{{DirectoryKey: "downloads-root", Watch: &WatchRecipe{Events: []string{"create"}}}},
 		[]CapabilityRequirement{{Key: "calendar"}, {Key: "email"}},
 		[]string{"reaper-plugin"},
+		[]IntakeRequirement{{Key: "course-materials", Sources: workspace.IntakeSources{Files: true}}},
 		&RuntimeRequirementsContract{
 			SchemaVersion:  RuntimeRequirementsSchemaVersion,
 			OperatingModes: []RuntimeOperatingMode{{ID: "assisted", Label: "Assisted", Description: "Use runtime.", Requires: []string{"test_runtime"}}},
@@ -334,6 +335,7 @@ func TestValidateSetupWizard_AcceptsEveryAllowlistedKind(t *testing.T) {
 	required := true
 	steps := []setupWizardStepDecl{
 		{ID: "directory", Kind: "directory", RequirementKey: "downloads-root", Required: &required},
+		{ID: "intake", Kind: "intake", RequirementKey: "course-materials", Required: &required},
 		{ID: "automation", Kind: "automation_review", RequirementKey: "downloads-root", Required: &required},
 		{ID: "connect", Kind: "capability_connect", RequirementKey: "calendar", Adapter: "calendar_ops", Required: &required},
 		{ID: "configure", Kind: "capability_configure", RequirementKey: "calendar", Adapter: "calendar_ops", Required: &required},
@@ -542,7 +544,10 @@ func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
 		}
 	}
 	for _, adapter := range ValidSetupWizardAdapters {
-		if adapter == "calendar_ops" {
+		// calendar_ops is available to plugin/user blueprints. blueprint_intake
+		// is the compiled default for the generic intake kind and is deliberately
+		// not named by a shipped manifest.
+		if adapter == "calendar_ops" || adapter == "blueprint_intake" {
 			continue
 		}
 		if !used[adapter] {

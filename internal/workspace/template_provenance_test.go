@@ -66,6 +66,7 @@ func wizardProvenance() *TemplateProvenance {
 		Version:                2,
 		DirectoryRequirements:  []DirectoryRequirement{{Key: "downloads-root", Label: "Downloads folder"}},
 		AutomationRecipes:      []AutomationRecipe{{DirectoryKey: "downloads-root", Watch: &WatchRecipe{Events: []string{"create"}}}},
+		IntakeRequirements:     []IntakeRequirement{{Key: "materials", Label: "Materials", Skill: "syllabus", Sources: IntakeSources{Files: true}, AcceptedExtensions: []string{".pdf"}, ProposalKinds: []string{"ticket"}}},
 		CapabilityRequirements: []CapabilityRequirement{{Key: "calendar", RequiredOperations: []string{"list_events"}}},
 		Plugins:                []string{"reaper-plugin"},
 		PluginSources:          map[string]string{"reaper-plugin": "https://example.test/reaper-plugin.git"},
@@ -95,6 +96,8 @@ func TestTemplateProvenance_SetupWizardSnapshotIsIsolated(t *testing.T) {
 	source.PluginSources["reaper-plugin"] = "https://evil.test/x.git"
 	source.DirectoryRequirements[0].Key = "elsewhere"
 	source.AutomationRecipes[0].Watch.Events[0] = "remove"
+	source.IntakeRequirements[0].Label = "Rewritten materials"
+	source.IntakeRequirements[0].AcceptedExtensions[0] = ".exe"
 
 	stored := ws.GetTemplateProvenance()
 	if stored.SetupWizard.Title != "Set up Downloads Janitor" || stored.SetupWizard.Steps[0].RequirementKey != "downloads-root" {
@@ -109,18 +112,25 @@ func TestTemplateProvenance_SetupWizardSnapshotIsIsolated(t *testing.T) {
 	if stored.DirectoryRequirements[0].Key != "downloads-root" || stored.AutomationRecipes[0].Watch.Events[0] != "create" {
 		t.Fatalf("setup requirements were shared, not copied: %+v", stored)
 	}
+	if stored.IntakeRequirements[0].Label != "Materials" || stored.IntakeRequirements[0].AcceptedExtensions[0] != ".pdf" {
+		t.Fatalf("intake requirements were shared, not copied: %+v", stored.IntakeRequirements)
+	}
 
 	// Reads are copies too: mutating what Get returned must not change the next
 	// read.
 	stored.SetupWizard.Steps[1].Adapter = "evil"
 	stored.PluginSources["reaper-plugin"] = "https://evil.test/x.git"
 	stored.CapabilityRequirements[0].Key = "mutated"
+	stored.IntakeRequirements[0].ProposalKinds[0] = "command"
 	again := ws.GetTemplateProvenance()
 	if again.SetupWizard.Steps[1].Adapter != "downloads_janitor" {
 		t.Fatalf("GetTemplateProvenance handed out the stored wizard: %+v", again.SetupWizard)
 	}
 	if again.PluginSources["reaper-plugin"] != "https://example.test/reaper-plugin.git" || again.CapabilityRequirements[0].Key != "calendar" {
 		t.Fatalf("GetTemplateProvenance handed out stored requirements: %+v", again)
+	}
+	if again.IntakeRequirements[0].ProposalKinds[0] != "ticket" {
+		t.Fatalf("GetTemplateProvenance handed out stored intake requirements: %+v", again.IntakeRequirements)
 	}
 }
 

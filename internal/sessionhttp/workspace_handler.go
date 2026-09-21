@@ -1465,7 +1465,7 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 	// Built-ins always record provenance. A user template records it too when it
 	// declares a setup/runtime/program/group contract: without provenance those
 	// reviewed requirements would silently disappear after creation.
-	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && !hasManagedAssistantTeam(tmpl) && snapshot == nil {
+	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && len(tmpl.IntakeRequirements) == 0 && !hasManagedAssistantTeam(tmpl) && snapshot == nil {
 		return ""
 	}
 	prov := newTemplateProvenance(tmpl, snapshot)
@@ -1558,6 +1558,7 @@ func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworksp
 		// registers no watcher, enables no schedule, and grants no capability.
 		DirectoryRequirements:  tmpl.DirectoryRequirements,
 		AutomationRecipes:      tmpl.AutomationRecipes,
+		IntakeRequirements:     tmpl.IntakeRequirements,
 		CapabilityRequirements: tmpl.CapabilityRequirements,
 		Plugins:                tmpl.Tools.Plugins, PluginSources: tmpl.Tools.PluginSources,
 		RuntimeRequirements: tmpl.RuntimeRequirements, SetupWizard: tmpl.SetupWizard,

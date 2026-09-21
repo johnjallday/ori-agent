@@ -15,6 +15,8 @@ import (
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/agentmap"
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
+	"github.com/johnjallday/ori-agent/internal/blueprintintake"
+	"github.com/johnjallday/ori-agent/internal/blueprintintakehttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -35,6 +37,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/macwake"
@@ -1111,6 +1114,42 @@ func (b *ServerBuilder) wireSetupWizard() {
 	b.setupWizardRegistry = registry
 	// Domain adapters are registered from code, never from configuration: a
 	// manifest's adapter name is a key into this registry and nothing else.
+	var intakeState blueprintintake.SetupState
+	if b.workspaceFileStore != nil {
+		intakeService := blueprintintake.NewSourceService(folders, b.workspaceFileStore)
+		intakeService.SetProviderResolver(func(ctx context.Context, workspaceID string) (blueprintintake.ModelProvider, error) {
+			if b.runtimeResolver == nil {
+				return blueprintintake.ModelProvider{}, fmt.Errorf("agent runtime resolver is unavailable")
+			}
+			ws, err := folders.GetFolderWorkspace(workspaceID)
+			if err != nil || ws == nil {
+				return blueprintintake.ModelProvider{}, fmt.Errorf("workspace is unavailable")
+			}
+			agentName := ws.EntryAgentName()
+			nodeID := ""
+			for _, instance := range ws.AgentInstances {
+				if strings.EqualFold(strings.TrimSpace(instance.Name), agentName) {
+					nodeID = instance.NodeID
+					break
+				}
+			}
+			resolved, err := b.runtimeResolver.ResolveAgentForWorkspace(agentName, workspaceID, nodeID)
+			if err != nil || resolved == nil || resolved.Agent == nil {
+				return blueprintintake.ModelProvider{}, fmt.Errorf("workspace entry agent is unavailable")
+			}
+			provider := strings.TrimSpace(resolved.Agent.Settings.Provider)
+			if b.taskHandler != nil {
+				provider = b.taskHandler.ResolveProviderName(provider, resolved.Agent.Settings.Model)
+			}
+			return blueprintintake.ModelProvider{Name: provider, Local: llm.IsLocalProviderName(provider)}, nil
+		})
+		b.blueprintIntakeService = intakeService
+		b.blueprintIntakeHandler = blueprintintakehttp.NewHandler(intakeService, b.workspaceStore, b.userProvider)
+		intakeState = intakeService
+	}
+	if err := registry.Register(blueprintintake.NewSetupAdapter(intakeState)); err != nil {
+		logger.Warn("Blueprint Intake setup adapter not registered", logger.Fields{"error": err})
+	}
 	if b.calendarOpsHandler != nil {
 		if folders, ok := b.workspaceStore.(calendarhttp.FolderStore); ok {
 			adapter := calendarhttp.NewSetupAdapter(b.calendarOpsHandler, folders)
@@ -1187,6 +1226,7 @@ func (b *ServerBuilder) blueprintWizardLookup() setupwizard.BlueprintLookup {
 			RuntimeRequirements:    tpl.RuntimeRequirements,
 			DirectoryRequirements:  tpl.DirectoryRequirements,
 			AutomationRecipes:      tpl.AutomationRecipes,
+			IntakeRequirements:     tpl.IntakeRequirements,
 			CapabilityRequirements: tpl.CapabilityRequirements,
 			Plugins:                tpl.Tools.Plugins,
 			PluginSources:          tpl.Tools.PluginSources,

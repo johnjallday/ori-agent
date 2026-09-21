@@ -174,6 +174,7 @@ func TemplateDefinitionDigest(template Template, skeletonDigest string) string {
 		CapabilityRequirements []CapabilityRequirement                `json:"capability_requirements,omitempty"`
 		DirectoryRequirements  []DirectoryRequirement                 `json:"directory_requirements,omitempty"`
 		AutomationRecipes      []AutomationRecipe                     `json:"automation_recipes,omitempty"`
+		IntakeRequirements     []IntakeRequirement                    `json:"intake_requirements,omitempty"`
 		RuntimeRequirements    *RuntimeRequirementsContract           `json:"runtime_requirements,omitempty"`
 		SetupWizard            *workspace.SetupWizard                 `json:"setup_wizard,omitempty"`
 		SetupQuestID           string                                 `json:"setup_quest,omitempty"`
@@ -189,7 +190,7 @@ func TemplateDefinitionDigest(template Template, skeletonDigest string) string {
 		StarterTasks:    template.StarterTasks, ProjectEntry: template.ProjectEntry, ProjectConnection: template.ProjectConnection,
 		Tools: template.Tools, Agents: template.Agents, Capabilities: template.Capabilities,
 		CapabilityRequirements: template.CapabilityRequirements, DirectoryRequirements: template.DirectoryRequirements,
-		AutomationRecipes: template.AutomationRecipes, RuntimeRequirements: template.RuntimeRequirements,
+		AutomationRecipes: template.AutomationRecipes, IntakeRequirements: template.IntakeRequirements, RuntimeRequirements: template.RuntimeRequirements,
 		SetupWizard: template.SetupWizard, SetupQuestID: template.SetupQuestID, AssistantProgram: template.AssistantProgram,
 		AssistantProject: template.AssistantProject, GroupRequirement: template.GroupRequirement, StandaloneComposition: template.StandaloneComposition,
 	}

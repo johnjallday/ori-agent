@@ -350,6 +350,27 @@ func ParseXLSX(data []byte) (string, error) {
 	return text.String(), nil
 }
 
+// SupportedExtensions lists the filename extensions ParseFile understands.
+// The returned slice is a copy so callers may sort or filter it safely.
+func SupportedExtensions() []string {
+	return []string{".pdf", ".docx", ".pptx", ".xlsx", ".txt", ".md", ".json", ".xml", ".html", ".csv"}
+}
+
+// SupportsExtension reports whether ParseFile understands extension. Both
+// "pdf" and ".pdf" forms are accepted.
+func SupportsExtension(extension string) bool {
+	extension = strings.ToLower(strings.TrimSpace(extension))
+	if extension != "" && !strings.HasPrefix(extension, ".") {
+		extension = "." + extension
+	}
+	for _, supported := range SupportedExtensions() {
+		if extension == supported {
+			return true
+		}
+	}
+	return false
+}
+
 // ParseFile parses a file based on its type and returns the text content
 func ParseFile(filename string, data []byte) (string, error) {
 	lower := strings.ToLower(filename)
@@ -375,11 +396,13 @@ func ParseFile(filename string, data []byte) (string, error) {
 	return "", fmt.Errorf("unsupported file type: %s", filename)
 }
 
+// MaxFileSize is the largest file ParseFile callers may accept.
+const MaxFileSize int64 = 10 * 1024 * 1024
+
 // ValidateFileSize checks if file size is within limits (10MB)
 func ValidateFileSize(size int64) error {
-	const maxSize = 10 * 1024 * 1024 // 10MB
-	if size > maxSize {
-		return fmt.Errorf("file size %d bytes exceeds maximum allowed size of %d bytes", size, maxSize)
+	if size > MaxFileSize {
+		return fmt.Errorf("file size %d bytes exceeds maximum allowed size of %d bytes", size, MaxFileSize)
 	}
 	return nil
 }

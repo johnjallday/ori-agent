@@ -11,6 +11,7 @@ import (
 func TestValidSetupStepKinds_IsTheVersion1Allowlist(t *testing.T) {
 	want := []string{
 		"directory",
+		"intake",
 		"automation_review",
 		"capability_connect",
 		"capability_configure",
@@ -65,6 +66,7 @@ func TestSetupStepKindSpecs_ReferenceAndAdapterRules(t *testing.T) {
 		adapter   bool
 	}{
 		{SetupStepKindDirectory, SetupStepReferenceDirectory, true, false},
+		{SetupStepKindIntake, SetupStepReferenceIntake, true, false},
 		{SetupStepKindAutomationReview, SetupStepReferenceDirectory, true, false},
 		{SetupStepKindCapabilityConnect, SetupStepReferenceCapability, true, true},
 		{SetupStepKindCapabilityConfigure, SetupStepReferenceCapability, true, true},
@@ -108,6 +110,11 @@ func TestSetupWizardStep_ReferenceScopeComesFromKind(t *testing.T) {
 	}
 	if ref.Scope != SetupStepReferenceDirectory || ref.Key != "downloads-root" {
 		t.Fatalf("reference = %+v, want {directory downloads-root}", ref)
+	}
+
+	ref, ok = SetupWizardStep{Kind: SetupStepKindIntake, RequirementKey: " Course-Materials "}.Reference()
+	if !ok || ref.Scope != SetupStepReferenceIntake || ref.Key != "course-materials" {
+		t.Fatalf("intake reference = %+v, ok=%v; want intake/course-materials", ref, ok)
 	}
 
 	// automation_review resolves in the directory namespace: its recipe is keyed

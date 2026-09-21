@@ -69,6 +69,9 @@ type TemplateProvenance struct {
 	// install once the matching directory is confirmed. Recording one installs
 	// nothing: no watcher is registered and no schedule is enabled here.
 	AutomationRecipes []AutomationRecipe `json:"automation_recipes,omitempty"`
+	// IntakeRequirements are the normalized intake declarations captured at
+	// creation. Later edits to the source template cannot change them.
+	IntakeRequirements []IntakeRequirement `json:"intake_requirements,omitempty"`
 	// CapabilityRequirements are the abstract capabilities (e.g. "calendar")
 	// the template needs connected. Recorded unresolved: no connector is
 	// chosen, authorized, or bound here.
@@ -146,6 +149,7 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 	}
 	dst.DirectoryRequirements = cloneDirectoryRequirements(src.DirectoryRequirements)
 	dst.AutomationRecipes = cloneAutomationRecipes(src.AutomationRecipes)
+	dst.IntakeRequirements = cloneIntakeRequirements(src.IntakeRequirements)
 	dst.CapabilityRequirements = cloneCapabilityRequirements(src.CapabilityRequirements)
 	dst.Plugins = append([]string(nil), src.Plugins...)
 	dst.PluginSources = clonePluginSources(src.PluginSources)

@@ -6,6 +6,7 @@ import (
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/agentmap"
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
+	"github.com/johnjallday/ori-agent/internal/blueprintintakehttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -204,6 +205,9 @@ type HandlerFacade struct {
 	// SetupWizard serves the shared blueprint Setup Wizard for every
 	// wizard-enabled workspace, whichever blueprint it came from.
 	SetupWizard *setupwizardhttp.Handler
+	// BlueprintIntake serves source collection and host-authored consent for
+	// intake-enabled workspaces.
+	BlueprintIntake *blueprintintakehttp.Handler
 	// RuntimeCapabilities serves operating modes, durable/live status, exact
 	// actions, verification, and capability-scoped grant delegation.
 	RuntimeCapabilities *runtimecapabilityhttp.Handler
