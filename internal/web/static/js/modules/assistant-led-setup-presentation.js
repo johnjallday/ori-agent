@@ -2,6 +2,8 @@
 // preparation. Everything shown comes from the server's `milestones`; timers
 // here may only change which already-receipted panel is in view, never a status.
 
+import { createModalReplay, replaySources } from './assistant-led-setup-replay.js';
+
 const STATUS_LABELS = {
   pending: 'Waiting',
   creating: 'Creating',
@@ -249,13 +251,13 @@ export function createStepScheduler({
     if (handle !== null) clearTimer(handle);
     handle = null;
   }
-  function start({ current, available }) {
+  function start({ current, available, delay }) {
     stop();
     if (reducedMotion || current + 1 >= available) return false;
     handle = setTimer(() => {
       handle = null;
       onAdvance(current + 1);
-    }, intervalMs);
+    }, delay ?? intervalMs);
     return true;
   }
   return {
@@ -348,6 +350,7 @@ export function windowSpec(view, agents = []) {
 export function createPresentation({
   document: doc,
   window: win,
+  fetch,
   canOpen = () => true,
   onContinue = () => {},
   onClosed = () => {}
@@ -374,8 +377,12 @@ export function createPresentation({
     invoker: null,
     announced: '',
     mode: 'requested',
-    suppressRestore: false
+    suppressRestore: false,
+    replays: [],
+    pendingStarts: [],
+    token: 0
   };
+  const fetchImpl = fetch || win?.fetch?.bind(win);
   const reduced = () => Boolean(win?.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
   const scheduler = createStepScheduler({
     reducedMotion: false,
@@ -496,7 +503,99 @@ export function createPresentation({
     return node;
   }
 
+  // Only a receipted create step with exactly one entry replays the real
+  // modal, and only when that modal is present on this page. Everything else
+  // (pending, stopped, reuse, adopt, several roles) keeps the plain windows,
+  // so a step that did not finish never plays a click-through it did not have.
+  function replaySpecFor(panel, panels, mode) {
+    if (mode !== 'walkthrough' || panel.status !== 'created') return null;
+    if (panel.id !== 'workspace' && panel.id !== 'agents') return null;
+    if (panel.entries.length !== 1 || panel.entries[0].action !== 'create') return null;
+    const sources = replaySources(doc);
+    const view = panel.entries[0];
+    const recorded = view.recordedAt ? new Date(view.recordedAt).toLocaleString() : '';
+    if (panel.id === 'workspace') {
+      const team = panels[1].entries;
+      if (!sources.workspace || !team.length) return null;
+      return {
+        kind: 'workspace',
+        sources,
+        spec: {
+          summary: `Replay of the Create Workspace window: blueprint ${view.name}, name ${view.name}, team ${team.map(member => member.name).join(', ')}.`,
+          blueprintLabel: view.name,
+          blueprintNote: view.blueprint,
+          workspaceName: view.name,
+          team: team.map(member => ({
+            name: member.name,
+            action: member.action,
+            note: member.details[0] || ''
+          })),
+          createdButton: 'Created ✓',
+          createdLine: recorded ? `Workspace created · ${recorded}` : 'Workspace created'
+        }
+      };
+    }
+    if (!sources.agent || !sources.agentForm) return null;
+    return {
+      kind: 'agent',
+      sources,
+      spec: {
+        summary: `Replay of the Create Agent window: name ${view.name}.`,
+        agentName: view.name,
+        modelText: view.details[0] || 'Ori default model',
+        createdButton: 'Created ✓',
+        createdLine: recorded ? `Agent created · ${recorded}` : 'Agent created'
+      }
+    };
+  }
+
+  function stopReplays() {
+    state.token += 1;
+    state.replays.forEach(replay => replay.stop());
+    state.replays = [];
+    state.pendingStarts = [];
+    dialog.dataset.stage = 'plain';
+  }
+
+  function startReplays(panels, mode, reducedMotion, available) {
+    const token = state.token;
+    els.panels.querySelectorAll('.assistant-led-setup-dialog__stage').forEach(host => {
+      const section = host.closest('.assistant-led-setup-dialog__panel');
+      const panel = panels.find(item => item.id === section?.dataset.panelId);
+      const plan = panel && replaySpecFor(panel, panels, mode);
+      if (!plan || section.hidden) return;
+      const replay = createModalReplay({
+        doc,
+        win,
+        host,
+        kind: plan.kind,
+        spec: plan.spec,
+        sources: plan.sources,
+        fetchImpl
+      });
+      state.replays.push(replay);
+      dialog.dataset.stage = 'modal';
+      // The panel must be on screen to be measured, so this runs after the
+      // dialog is open; render() is called again from open().
+      const run = () => (reducedMotion ? replay.showFinal() : replay.play());
+      if (isOpen()) {
+        void run().then(() => {
+          if (reducedMotion || state.token !== token) return;
+          scheduler.start({ current: state.index, available, delay: 1600 });
+        });
+      } else {
+        state.pendingStarts.push(() =>
+          run().then(() => {
+            if (reducedMotion || state.token !== token) return;
+            scheduler.start({ current: state.index, available, delay: 1600 });
+          })
+        );
+      }
+    });
+  }
+
   function render({ announce = false } = {}) {
+    stopReplays();
     const mode = presentationMode(state.milestones);
     state.mode = mode;
     const panels = buildPanels(state.milestones);
@@ -526,11 +625,19 @@ export function createPresentation({
         section.append(empty);
       }
       const agents = panels[1].entries;
-      panel.entries.forEach(view =>
-        section.append(panel.id === 'receipt' ? entryNode(view) : windowNode(view, agents))
-      );
+      if (replaySpecFor(panel, panels, mode)) {
+        // The real modal, clicked through (built after the panel is attached).
+        const host = doc.createElement('div');
+        host.className = 'assistant-led-setup-dialog__stage';
+        section.append(host);
+      } else {
+        panel.entries.forEach(view =>
+          section.append(panel.id === 'receipt' ? entryNode(view) : windowNode(view, agents))
+        );
+      }
       els.panels.append(section);
     });
+    startReplays(panels, mode, reducedMotion, available);
     // A visual progress rail: one node per panel, lit as far as is reachable.
     els.progress?.replaceChildren();
     panels.forEach((panel, index) => {
@@ -553,7 +660,9 @@ export function createPresentation({
     els.skip.hidden = atEnd || reducedMotion;
     els.proceed.hidden = !(reducedMotion || atEnd);
     els.proceed.disabled = mode === 'requested' || mode === 'live';
-    if (!reducedMotion) {
+    // A panel that replays the real modal advances when the replay ends; the
+    // others advance on the plain timer.
+    if (!reducedMotion && !state.replays.length) {
       scheduler.start({ current: state.index, available });
     }
     // Announce only what the viewer can reach from here.
@@ -574,6 +683,10 @@ export function createPresentation({
       else dialog.setAttribute('open', '');
     }
     els.title?.focus();
+    // Replays need the dialog on screen to be measured, so they start now.
+    const starts = state.pendingStarts;
+    state.pendingStarts = [];
+    starts.forEach(start => void start());
     return true;
   }
 
@@ -591,7 +704,15 @@ export function createPresentation({
   // Close, and Skip behave the same. Continue suppresses it: it moves focus to
   // the card's next control itself.
   function finishClose() {
+    // The `close` event is asynchronous. If the dialog was reopened before it
+    // arrived, this is a stale event for the previous viewing: leave the new
+    // one (its replay, its timers, its focus) alone.
+    if (isOpen()) {
+      state.suppressRestore = false;
+      return;
+    }
     scheduler.stop();
+    stopReplays();
     const invoker = state.invoker;
     const suppress = state.suppressRestore;
     state.invoker = null;

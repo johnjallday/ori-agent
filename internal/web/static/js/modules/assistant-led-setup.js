@@ -211,6 +211,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
   const presentation = createPresentation({
     document: doc,
     window: win,
+    fetch: fetchImpl,
     canOpen: () => !state.picking,
     onContinue: focusChooseFolder,
     onClosed: invoker => {
