@@ -115,7 +115,13 @@ A replacement or install is never applied from a status read or a review alone. 
 
 ### Updates on the Plugins page
 
-For an installation from an exact official commit, the plugin update check reports the latest release as an update when it is newer than the installed version. **Update** on the Plugins page discloses the new release’s trust report and replaces the plugin from that release’s exact commit, keeping its enabled state. Every other plugin keeps following its recorded source.
+An installation from an exact official commit **or** from the official repository’s unpinned URL (`https://github.com/johnjallday/reaper-plugin`, with or without `.git`) follows the newest published stable release that this build can load. The update check never reads the repository’s development branch for these installations, so a version that `main` declares but that has no published release is never advertised. A release that needs a newer Ori (a host feature, protocol, program schema or platform this build lacks) is skipped in favour of the next one down; a release that cannot be verified for any other reason offers nothing rather than an older release, and the last result is kept.
+
+The notice reads “Reviewed release X is available.” for these installations, and “Source version X is available.” for every other plugin.
+
+**Update** on the Plugins page discloses the release’s trust report and replaces the plugin from that release’s exact commit, keeping its enabled state. It never downgrades. An unpinned installation with no newer loadable release is refused with a message (HTTP 409, `reviewed_release_current`) instead of being updated from the development branch; an exact-commit installation with nothing newer keeps following its own recorded commit, which changes nothing.
+
+Local copies, other spellings of the official URL (a `#ref=` branch, SSH, `http`, a trailing slash, different letter case) and every other plugin keep following their recorded source and are never labelled as reviewed releases. Guided setup treats those spellings the same way: it blocks them with **Manage integration**.
 
 ### When the latest release cannot be checked
 

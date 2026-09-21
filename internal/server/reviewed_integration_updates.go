@@ -60,7 +60,7 @@ func (u reviewedIntegrationUpdates) reviewedEntry(installed plugin.InstalledPlug
 	entry, ok := u.entryFor(installed.Name)
 	if !ok || entry.PluginID != installed.Name || entry.FallbackSource() == "" ||
 		installed.Format != entry.SourceFormat ||
-		!(entry.IsPinnedSource(installed.Source) || entry.IsUnpinnedOfficialSource(installed.Source)) {
+		(!entry.IsPinnedSource(installed.Source) && !entry.IsUnpinnedOfficialSource(installed.Source)) {
 		return reviewedintegration.Entry{}, false
 	}
 	return entry, true
