@@ -266,7 +266,7 @@ The `Server` struct in `internal/server/server.go` holds all dependencies:
 
 **Always isolate smoke servers from real app data.** `DefaultWorkspaceRoot()` resolves to `$HOME/Ori Workspaces` and does NOT respect `ORI_DATA_DIR` (which only scopes the database, vaults, and templates). A smoke server started without isolation will write workspaces into the user's real tree — **and agents too**: the user's agents live in `<workspace root>/Agents/`, so a smoke server without a `HOME` override reads, edits, migrates into, and (on an Agents reset) deletes the real `~/Ori Workspaces/Agents/` folder.
 
-**Prefer `wt demo [port]`** (from `scripts/wt.sh`, default port 8931). It builds the current worktree and launches the isolated recipe for you — sandboxed temp `HOME`/`ORI_DATA_DIR`, started from *inside* the sandbox so the plugin store is isolated too. Use it for the per-group **Demo:** checkpoint (see the manual-test protocol): drive every new user-visible surface in a real browser before its PR opens.
+**Prefer `wt demo [port]`** (from `scripts/wt.sh`, default port 8931). It builds the current worktree and launches the isolated recipe for you — sandboxed temp `HOME`/`ORI_DATA_DIR`, started from *inside* the sandbox so the plugin store is isolated too. Demo servers do not open a browser tab by default; open the printed URL yourself, set `ORI_DEMO_OPEN=1` for `wt demo`, or pass `--open` to `scripts/demo-server.sh` to opt in. Use it for the per-group **Demo:** checkpoint (see the manual-test protocol): drive every new user-visible surface in a real browser before its PR opens.
 
 By hand, when you need a second sandbox or a non-default port:
 

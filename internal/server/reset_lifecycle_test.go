@@ -128,6 +128,82 @@ func TestResetLifecycleDrainFlushesFencedSessionBeforeClose(t *testing.T) {
 	}
 }
 
+func TestResetLifecycleDrainWaitsForCancelledStreamToUnwind(t *testing.T) {
+	gate := &resetstate.WorkGate{}
+	streamCtx, release, err := gate.EnterStream(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unwound := make(chan struct{})
+	go func() {
+		<-streamCtx.Done()
+		release()
+		close(unwound)
+	}()
+
+	lifecycle := newServerResetLifecycle(&Server{resetWork: gate})
+	if err := lifecycle.TryFence(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := lifecycle.Drain(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-unwound:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not unwind")
+	}
+}
+
+func TestResetLifecycleDrainRefusesToCloseStoresUnderLiveStream(t *testing.T) {
+	f := resetfixture.NewSeeded(t)
+	db, err := database.Open(t.Context(), &database.Config{
+		Path: filepath.Join(f.Paths().DataDir, "sessions.db"), WALMode: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := session.NewHybridStoreWithDB(db, 10)
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			if err := cached.Close(); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+
+	gate := &resetstate.WorkGate{}
+	streamCtx, release, err := gate.EnterStream(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	lifecycle := newServerResetLifecycle(&Server{
+		resetWork: gate,
+		Storage:   &StorageSystemFacade{SessionStore: cached},
+	})
+	if err := lifecycle.TryFence(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(streamCtx.Err(), context.Canceled) {
+		t.Fatalf("fence did not cancel stream: %v", streamCtx.Err())
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if err := lifecycle.Drain(ctx); !errors.Is(err, errResetStreamsRemain) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("live stream drain = %v", err)
+	}
+	if err := db.PingContext(t.Context()); err != nil {
+		t.Fatalf("drain closed session store under live stream: %v", err)
+	}
+	release()
+	if err := cached.Close(); err != nil {
+		t.Fatal(err)
+	}
+	closed = true
+}
+
 func TestResetLifecycleDrainRejectsUnreleasedLifetimeOwner(t *testing.T) {
 	gate := &resetstate.WorkGate{}
 	release, err := gate.EnterLifetime()

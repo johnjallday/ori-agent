@@ -20,6 +20,11 @@ func (discardDesktopOpener) RevealInFileManager(string) error { return nil }
 
 func newRoutesTestHandler(t *testing.T) http.Handler {
 	t.Helper()
+	return newRoutesTestServer(t).Handler()
+}
+
+func newRoutesTestServer(t *testing.T) *Server {
+	t.Helper()
 
 	originalWD, err := os.Getwd()
 	if err != nil {
@@ -50,7 +55,7 @@ func newRoutesTestHandler(t *testing.T) http.Handler {
 		t.Fatalf("Build failed: %v", err)
 	}
 
-	return srv.Handler()
+	return srv
 }
 
 type routeTestWorkspace struct {

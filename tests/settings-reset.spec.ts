@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page, type Request } from '@playwright/test';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -54,6 +54,32 @@ test.describe.serial('Settings reset on an owned installation', () => {
     throw new Error(
       `owned reset server did not become ready: ${String(lastError || output.slice(-1000))}`
     );
+  }
+
+  function waitForRequestEnd(page: Page, request: Request): Promise<'finished' | 'failed'> {
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        page.off('requestfinished', onFinished);
+        page.off('requestfailed', onFailed);
+      };
+      const onFinished = (candidate: Request) => {
+        if (candidate !== request) return;
+        cleanup();
+        resolve('finished');
+      };
+      const onFailed = (candidate: Request) => {
+        if (candidate !== request) return;
+        cleanup();
+        resolve('failed');
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`stream request did not end after reset fence: ${request.url()}`));
+      }, 15_000);
+      page.on('requestfinished', onFinished);
+      page.on('requestfailed', onFailed);
+    });
   }
 
   async function startServer() {
@@ -145,7 +171,11 @@ test.describe.serial('Settings reset on an owned installation', () => {
   test.beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'ori-settings-reset-e2e-'));
     dataDir = join(root, 'data');
-    binary = join(root, 'ori-agent');
+    const suppliedBinary = process.env.ORI_SETTINGS_RESET_TEST_BINARY;
+    binary = suppliedBinary || join(root, 'ori-agent');
+    if (suppliedBinary && (!isAbsolute(suppliedBinary) || !existsSync(suppliedBinary))) {
+      throw new Error('ORI_SETTINGS_RESET_TEST_BINARY must name an existing absolute path');
+    }
     for (const dir of [
       dataDir,
       join(root, 'home'),
@@ -154,10 +184,12 @@ test.describe.serial('Settings reset on an owned installation', () => {
     ]) {
       mkdirSync(dir, { recursive: true, mode: 0o750 });
     }
-    execFileSync('go', ['build', '-o', binary, './cmd/server'], {
-      cwd: process.cwd(),
-      stdio: 'pipe'
-    });
+    if (!suppliedBinary) {
+      execFileSync('go', ['build', '-o', binary, './cmd/server'], {
+        cwd: process.cwd(),
+        stdio: 'pipe'
+      });
+    }
     origin = `http://127.0.0.1:${await freePort()}`;
     await startServer();
   });
@@ -429,5 +461,62 @@ test.describe.serial('Settings reset on an owned installation', () => {
     expect(digest(sourceSentinel)).toBe(beforeSource);
     const marketplacesAfter = await request.get(origin + '/api/plugins/marketplaces');
     expect((await marketplacesAfter.json())?.marketplaces?.length ?? 0).toBe(marketplaceCount);
+  });
+
+  test('resets setup steps while a second Home tab has open event streams', async ({
+    page,
+    request,
+    context
+  }) => {
+    await completeOnboarding(request);
+    const created = await request.post(origin + '/api/workspaces', {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      data: { name: 'Idle Stream Reset' }
+    });
+    expect(created.status()).toBe(201);
+    const workspaceID = String((await created.json()).folder.id);
+
+    const idlePage = await context.newPage();
+    await idlePage.goto(origin + '/', { waitUntil: 'domcontentloaded' });
+    const mapResponsePromise = idlePage.waitForResponse(
+      response =>
+        response.url().endsWith('/api/workspace-map/activity/stream') && response.status() === 200
+    );
+    const workflowResponsePromise = idlePage.waitForResponse(
+      response =>
+        response.url().includes('/api/orchestration/workflow/stream?') && response.status() === 200
+    );
+    await idlePage.evaluate(id => {
+      (window as any).__resetTestStreams = [
+        new EventSource('/api/workspace-map/activity/stream'),
+        new EventSource(`/api/orchestration/workflow/stream?workspace_id=${encodeURIComponent(id)}`)
+      ];
+    }, workspaceID);
+    const streamResponses = await Promise.all([mapResponsePromise, workflowResponsePromise]);
+    const streamEnds = streamResponses.map(response =>
+      waitForRequestEnd(idlePage, response.request())
+    );
+
+    await openSettings(page, request);
+    await page.locator('#resetOnboarding').check();
+    await page.locator('#resetAppBtn').click();
+    await reviewDialogReady(page);
+    await page.locator('#resetConfirmInput').fill('RESET');
+    await expect(page.locator('#confirmResetBtn')).toBeEnabled();
+    await page.locator('#confirmResetBtn').click();
+
+    await expect(page.locator('#resetOperationStatus')).toContainText('Restart required');
+    await expect(page.locator('#resetOperationStatus')).not.toContainText(
+      'active or unowned work prevents reset'
+    );
+    await Promise.all(streamEnds);
+
+    const fenced = await idlePage.evaluate(async () => {
+      const response = await fetch('/api/workspace-map/activity/stream');
+      return { status: response.status, body: await response.text() };
+    });
+    expect(fenced.status).toBe(503);
+    expect(fenced.body).toContain('reset_pending');
+    await idlePage.close();
   });
 });

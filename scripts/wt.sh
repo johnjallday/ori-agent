@@ -18,7 +18,7 @@
 #   wt status               # Feature-first overview of every feature in the repo
 #   wt status --worktrees   # Show ahead/behind/merged vs dev for all worktrees
 #   wt cd <name>            # Navigate to a worktree
-#   wt demo [port]          # Build current worktree + serve an ISOLATED demo sandbox (default port 8931)
+#   wt demo [port]          # Serve an isolated demo without opening a browser (ORI_DEMO_OPEN=1 opts in)
 #
 # The backlog left this file for scripts/devops.sh, a direct GitHub Issue REPL
 # with all, needs-decision, backlog, and feature-proposal label views.
@@ -2160,6 +2160,7 @@ function wt_dispatch {
     #   - the server is launched from INSIDE the sandbox because the plugin
     #     store resolves relative to the launch directory
     # Foreground process: Ctrl-C stops it. The sandbox is a throwaway temp dir.
+    # It does not open a browser unless ORI_DEMO_OPEN=1 is set.
     local demo_root
     demo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
     if [[ -z "$demo_root" ]]; then
@@ -2181,7 +2182,11 @@ function wt_dispatch {
     echo "URL:          http://localhost:$demo_port   (Ctrl-C to stop)"
     local demo_status=0
     {
-      (cd "$demo_dir" && HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" "$demo_root/bin/ori-agent") || demo_status=$?
+      if [[ "${ORI_DEMO_OPEN:-0}" == "1" ]]; then
+        (cd "$demo_dir" && env -u NO_BROWSER HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" "$demo_root/bin/ori-agent") || demo_status=$?
+      else
+        (cd "$demo_dir" && env HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" NO_BROWSER=1 "$demo_root/bin/ori-agent") || demo_status=$?
+      fi
     } always {
       if [[ "${ORI_KEEP_DEMO_SANDBOX:-0}" == "1" ]]; then
         echo "Demo sandbox preserved: $demo_dir"
@@ -2318,7 +2323,7 @@ function wt_dispatch {
     echo "  wt status        - Feature-first overview (--feature/--json/--no-color/--watch)"
     echo "  wt status --worktrees - Show ahead/behind/merged vs $BASE_BRANCH for all worktrees"
     echo "  wt cd <name>     - Navigate to worktree"
-    echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
+    echo "  wt demo [port]   - Build + serve an isolated demo without opening a browser (ORI_DEMO_OPEN=1 opts in)"
     echo "  wt herd <sub>    - Manage the opt-in Ori-to-Herdr devflow bridge (setup, doctor, ...)"
     echo "  ./scripts/devops.sh - Open GitHub Issues and curated workflow-label filters"
     echo "                     A standalone executable; no shell or Herdr setup required."
