@@ -109,6 +109,17 @@
   background: var(--surface-secondary, #f6f7f8);
 }
 
+.blueprint-intake-proposal-group {
+  margin: 1.1rem 0 0.55rem;
+  font-size: 1rem;
+}
+
+.blueprint-intake-proposal-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .blueprint-intake-proposal-item {
   display: grid;
   gap: 0.65rem;

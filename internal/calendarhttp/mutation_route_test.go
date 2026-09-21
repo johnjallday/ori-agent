@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/calendar"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -145,6 +146,25 @@ func decodeSuccess[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 		t.Fatalf("decode response %s: %v", w.Body.String(), err)
 	}
 	return data
+}
+
+func TestReviewedIntakeEventUsesPreviewConfirmationPathAndOneToolCall(t *testing.T) {
+	h, _, rec := newMutableGatewayHandler(t, "user-1")
+	start := time.Date(2026, 4, 3, 10, 0, 0, 0, time.UTC)
+	available, reason, err := h.IntakeCreateAvailability(context.Background(), "ws-cal")
+	if err != nil || !available || reason != "" {
+		t.Fatalf("availability = %v %q %v", available, reason, err)
+	}
+	_, err = h.PreviewAndConfirmReviewedEvent(context.Background(), "ws-cal", ReviewedEventInput{Title: "Seminar", Start: start, End: start.Add(time.Hour), TimeZone: "UTC", Location: "Room 2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.callCount() != 1 {
+		t.Fatalf("tool calls = %d", rec.callCount())
+	}
+	if got := rec.calls[0].Args["summary"]; got != "Seminar" {
+		t.Fatalf("title argument = %#v", got)
+	}
 }
 
 func TestPreview_PerformsZeroToolCalls(t *testing.T) {

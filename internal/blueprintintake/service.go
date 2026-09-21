@@ -137,6 +137,12 @@ func (s *Service) executeRequirement(ctx context.Context, key string, run *activ
 		notice.Truncated = true
 	}
 	proposal, err := finalizeProposal(run.status.WorkspaceID, requirement.Key, items, notice, s.now())
+	if err == nil && s.apply != nil {
+		err = s.apply.PrepareProposal(ctx, &proposal)
+		if err == nil {
+			err = rehashProposal(&proposal)
+		}
+	}
 	if err == nil {
 		err = s.proposals.Save(proposal)
 	}
@@ -217,6 +223,10 @@ func (s *Service) Proposal(workspaceID, intakeKey string) (Proposal, error) {
 
 func (s *Service) Apply(workspaceID, intakeKey string, request ApplyRequest) (Proposal, error) {
 	return s.apply.Apply(workspaceID, intakeKey, request)
+}
+
+func (s *Service) ApplyContext(ctx context.Context, workspaceID, intakeKey string, request ApplyRequest) (Proposal, error) {
+	return s.apply.ApplyContext(ctx, workspaceID, intakeKey, request)
 }
 
 func (s *Service) Skip(workspaceID, intakeKey, hash string) (Proposal, error) {

@@ -840,6 +840,7 @@ Get current version information.
 Blueprint Intake routes are workspace-scoped. `{intakeKey}` must name an intake
 copied into the workspace's template provenance. File text and skill output are
 untrusted input; only a reviewed proposal hash can authorize record creation.
+Proposals may contain `ticket`, `memory`, `note`, and `calendar_event` items. Invalid memory entries remain visible as unusable. Calendar items remain visible but disabled when the workspace has no connected calendar with `create_event` mapped. Applying selected items returns an independent `created`, `failed`, or `skipped` result for each item.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |

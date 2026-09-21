@@ -61,6 +61,16 @@ func (s *ProposalStore) Get(workspaceID, intakeKey string) (Proposal, error) {
 	return proposal, nil
 }
 
+func (s *ProposalStore) Ledger(workspaceID, intakeKey string) ([]LedgerEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, _, err := s.load(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]LedgerEntry(nil), state.Ledger[strings.TrimSpace(intakeKey)]...), nil
+}
+
 func (s *ProposalStore) BeginApply(workspaceID, intakeKey, hash string) (Proposal, error) {
 	var proposal Proposal
 	err := s.update(workspaceID, func(state *proposalFile) error {

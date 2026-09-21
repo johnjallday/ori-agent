@@ -287,7 +287,7 @@ func (h *Handler) ApplyProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request.Actor = actor
-	proposal, err := h.workflow.Apply(workspaceID, strings.TrimSpace(r.PathValue("intakeKey")), request)
+	proposal, err := h.workflow.ApplyContext(r.Context(), workspaceID, strings.TrimSpace(r.PathValue("intakeKey")), request)
 	if err != nil {
 		status := http.StatusUnprocessableEntity
 		if errors.Is(err, blueprintintake.ErrProposalStale) {

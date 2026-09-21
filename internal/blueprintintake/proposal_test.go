@@ -45,11 +45,39 @@ func TestParseProposalOutputRejectsUnreadableOrUnboundedJSON(t *testing.T) {
 		`{"items":[],"commands":["create tickets"]}`,
 		`{"items":[{"kind":"ticket","key":"x","title":"` + strings.Repeat("x", 241) + `","source":{"source_id":"s","quote":"q"}}]}`,
 		`{"items":[{"kind":"ticket","key":"x","title":"X","due_at":"next friday","source":{"source_id":"s","quote":"q"}}]}`,
+		`{"items":[{"kind":"ticket","key":"x","title":"X","recurrence":"weekly","source":{"source_id":"s","quote":"q"}}]}`,
 	}
 	for index, raw := range cases {
 		if _, _, err := ParseProposalOutput(raw, ticketRequirement(), "s", time.UTC, false); err == nil {
 			t.Fatalf("case %d was accepted", index)
 		}
+	}
+}
+
+func TestParseProposalOutputValidatesMemoryNotesAndCalendarEvents(t *testing.T) {
+	requirement := workspace.IntakeRequirement{Key: "materials", ProposalKinds: []string{"memory", "note", "calendar_event"}}
+	raw := `{"items":[
+		{"kind":"memory","key":"memory-good","text":"Office hours are Tuesdays","memory_type":"fact","source":{"source_id":"s","quote":"Office hours Tuesdays"}},
+		{"kind":"memory","key":"memory-bad","text":"","source":{"source_id":"s","quote":"empty"}},
+		{"kind":"note","key":"note","title":"Reading list","body":"Read chapters 1-3","source":{"source_id":"s","quote":"chapters 1-3"}},
+		{"kind":"calendar_event","key":"event","title":"Seminar","start":"2026-04-03T10:00:00-04:00","end":"2026-04-03T11:00:00-04:00","location":"Room 2","source":{"source_id":"s","quote":"Seminar 10-11"}},
+		{"kind":"calendar_event","key":"holiday","title":"Holiday","all_day":"2026-04-04","source":{"source_id":"s","quote":"Holiday April 4"}}
+	]}`
+	items, _, err := ParseProposalOutput(raw, requirement, "s", time.UTC, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 5 || items[0].Text != "Office hours are Tuesdays" || items[0].UnusableReason != "" {
+		t.Fatalf("memory items = %+v", items)
+	}
+	if items[1].UnusableReason == "" || items[2].Body != "Read chapters 1-3" {
+		t.Fatalf("memory/note validation = %+v", items)
+	}
+	if items[3].Start == nil || items[3].End == nil || items[3].Location != "Room 2" {
+		t.Fatalf("calendar event = %+v", items[3])
+	}
+	if !items[4].AllDay || items[4].End.Sub(*items[4].Start) != 24*time.Hour {
+		t.Fatalf("all-day event = %+v", items[4])
 	}
 }
 

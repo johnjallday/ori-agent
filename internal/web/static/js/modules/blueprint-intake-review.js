@@ -78,9 +78,11 @@
     state.proposal.items.forEach(item => {
       state.selections.set(item.key, {
         key: item.key,
-        selected: true,
+        selected: !item.unusable_reason && !item.disabled_reason,
         title: item.title,
-        due_at: item.due_input || (item.due_at ? item.due_at.slice(0, 16) : '')
+        due_at: item.due_input || (item.due_at ? toLocalInput(item.due_at) : ''),
+        start: item.all_day ? item.start?.slice(0, 10) || '' : toLocalInput(item.start),
+        end: item.all_day ? item.end?.slice(0, 10) || '' : toLocalInput(item.end)
       });
     });
   }
@@ -216,15 +218,18 @@
   function drawProposal(container, ctx, state) {
     const proposal = state.proposal;
     const counts = {};
+    const countLabels = {
+      ticket: ['ticket', 'tickets'],
+      memory: ['memory entry', 'memory entries'],
+      note: ['note', 'notes'],
+      calendar_event: ['calendar event', 'calendar events']
+    };
     proposal.items.forEach(item => (counts[item.kind] = (counts[item.kind] || 0) + 1));
     const summary = node('div', 'blueprint-intake-proposal-counts');
     Object.entries(counts).forEach(([kind, count]) => {
+      const labels = countLabels[kind] || [kind, `${kind}s`];
       summary.appendChild(
-        node(
-          'strong',
-          'blueprint-intake-proposal-count',
-          `${count} ${kind}${count === 1 ? '' : 's'}`
-        )
+        node('strong', 'blueprint-intake-proposal-count', `${count} ${labels[count === 1 ? 0 : 1]}`)
       );
     });
     if (!proposal.items.length)
@@ -243,58 +248,110 @@
         )
       );
 
-    proposal.items.forEach(item => {
-      const choice = state.selections.get(item.key);
-      const card = node('article', 'blueprint-intake-proposal-item');
-      const selectLabel = node('label', 'blueprint-intake-proposal-select');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = Boolean(choice?.selected);
-      checkbox.disabled = proposal.status !== 'pending';
-      checkbox.addEventListener('change', () => (choice.selected = checkbox.checked));
-      selectLabel.append(checkbox, document.createTextNode(` Add ${item.kind}`));
-      card.appendChild(selectLabel);
-
-      const titleLabel = node('label', '', 'Title');
-      const title = document.createElement('input');
-      title.type = 'text';
-      title.value = choice?.title || item.title;
-      title.maxLength = 240;
-      title.disabled = proposal.status !== 'pending';
-      title.addEventListener('input', () => (choice.title = title.value));
-      titleLabel.appendChild(title);
-      card.appendChild(titleLabel);
-
-      if (item.kind === 'ticket') {
-        const dateLabel = node('label', '', 'Due date');
-        const date = document.createElement('input');
-        date.type = item.no_time_given ? 'date' : 'datetime-local';
-        date.value = choice?.due_at || '';
-        date.disabled = proposal.status !== 'pending';
-        date.addEventListener('input', () => (choice.due_at = date.value));
-        dateLabel.appendChild(date);
-        if (item.due_at)
-          dateLabel.appendChild(node('span', 'blueprint-intake-weekday', formatDate(item.due_at)));
-        if (item.no_time_given)
-          dateLabel.appendChild(node('span', 'blueprint-intake-marker', 'No time given'));
-        card.appendChild(dateLabel);
-      }
-      if (item.partly_read)
-        card.appendChild(node('span', 'blueprint-intake-marker', 'Source partly read'));
-      const evidence = document.createElement('details');
-      evidence.appendChild(node('summary', '', 'Show source quote'));
-      evidence.appendChild(node('blockquote', '', item.source?.quote || 'No supporting quote.'));
-      card.appendChild(evidence);
-      const result = (proposal.results || []).find(entry => entry.key === item.key);
-      if (result)
-        card.appendChild(
-          node(
-            'p',
-            `blueprint-intake-apply-${result.status}`,
-            result.reason ? `${result.status}: ${result.reason}` : result.status
-          )
+    const groupLabels = {
+      ticket: 'Tickets',
+      memory: 'Memory entries',
+      note: 'Notes',
+      calendar_event: 'Calendar events'
+    };
+    Object.keys(groupLabels).forEach(kind => {
+      const groupItems = proposal.items.filter(item => item.kind === kind);
+      if (!groupItems.length) return;
+      container.appendChild(node('h4', 'blueprint-intake-proposal-group', groupLabels[kind]));
+      groupItems.forEach(item => {
+        const choice = state.selections.get(item.key);
+        const card = node('article', 'blueprint-intake-proposal-item');
+        const selectLabel = node('label', 'blueprint-intake-proposal-select');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = Boolean(choice?.selected);
+        checkbox.disabled =
+          proposal.status !== 'pending' || Boolean(item.unusable_reason || item.disabled_reason);
+        checkbox.addEventListener('change', () => (choice.selected = checkbox.checked));
+        selectLabel.append(
+          checkbox,
+          document.createTextNode(` Add ${(countLabels[item.kind] || [item.kind])[0]}`)
         );
-      container.appendChild(card);
+        card.appendChild(selectLabel);
+
+        if (item.kind !== 'memory') {
+          const titleLabel = node('label', '', 'Title');
+          const title = document.createElement('input');
+          title.type = 'text';
+          title.value = choice?.title || item.title;
+          title.maxLength = 240;
+          title.disabled =
+            proposal.status !== 'pending' || Boolean(item.unusable_reason || item.disabled_reason);
+          title.addEventListener('input', () => (choice.title = title.value));
+          titleLabel.appendChild(title);
+          card.appendChild(titleLabel);
+        }
+
+        if (item.kind === 'memory')
+          card.appendChild(node('p', 'blueprint-intake-proposal-text', item.text));
+        if (item.kind === 'note')
+          card.appendChild(node('pre', 'blueprint-intake-proposal-text', item.body));
+        if (item.kind === 'calendar_event') {
+          const startLabel = node('label', '', item.all_day ? 'Date' : 'Starts');
+          const start = document.createElement('input');
+          start.type = item.all_day ? 'date' : 'datetime-local';
+          start.value = choice?.start || '';
+          start.disabled =
+            proposal.status !== 'pending' || Boolean(item.unusable_reason || item.disabled_reason);
+          start.addEventListener('input', () => (choice.start = start.value));
+          startLabel.appendChild(start);
+          card.appendChild(startLabel);
+          if (!item.all_day) {
+            const endLabel = node('label', '', 'Ends');
+            const end = document.createElement('input');
+            end.type = 'datetime-local';
+            end.value = choice?.end || '';
+            end.disabled = start.disabled;
+            end.addEventListener('input', () => (choice.end = end.value));
+            endLabel.appendChild(end);
+            card.appendChild(endLabel);
+          }
+          if (item.location)
+            card.appendChild(node('p', 'blueprint-intake-proposal-text', item.location));
+        }
+        if (item.unusable_reason || item.disabled_reason)
+          card.appendChild(
+            node('p', 'blueprint-intake-notice', item.unusable_reason || item.disabled_reason)
+          );
+
+        if (item.kind === 'ticket') {
+          const dateLabel = node('label', '', 'Due date');
+          const date = document.createElement('input');
+          date.type = item.no_time_given ? 'date' : 'datetime-local';
+          date.value = choice?.due_at || '';
+          date.disabled = proposal.status !== 'pending';
+          date.addEventListener('input', () => (choice.due_at = date.value));
+          dateLabel.appendChild(date);
+          if (item.due_at)
+            dateLabel.appendChild(
+              node('span', 'blueprint-intake-weekday', formatDate(item.due_at))
+            );
+          if (item.no_time_given)
+            dateLabel.appendChild(node('span', 'blueprint-intake-marker', 'No time given'));
+          card.appendChild(dateLabel);
+        }
+        if (item.partly_read)
+          card.appendChild(node('span', 'blueprint-intake-marker', 'Source partly read'));
+        const evidence = document.createElement('details');
+        evidence.appendChild(node('summary', '', 'Show source quote'));
+        evidence.appendChild(node('blockquote', '', item.source?.quote || 'No supporting quote.'));
+        card.appendChild(evidence);
+        const result = (proposal.results || []).find(entry => entry.key === item.key);
+        if (result)
+          card.appendChild(
+            node(
+              'p',
+              `blueprint-intake-apply-${result.status}`,
+              result.reason ? `${result.status}: ${result.reason}` : result.status
+            )
+          );
+        container.appendChild(card);
+      });
     });
 
     if (proposal.status === 'pending') {
@@ -307,6 +364,14 @@
       skip.addEventListener('click', () => skipProposal(container, ctx, state));
       container.appendChild(skip);
     }
+  }
+
+  function toLocalInput(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const offset = date.getTimezoneOffset() * 60_000;
+    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
   }
 
   function formatDate(value) {
@@ -378,7 +443,12 @@
             due_at:
               item.due_at && item.due_at.includes('T')
                 ? new Date(item.due_at).toISOString()
-                : item.due_at
+                : item.due_at,
+            start:
+              item.start && item.start.includes('T')
+                ? new Date(item.start).toISOString()
+                : item.start,
+            end: item.end && item.end.includes('T') ? new Date(item.end).toISOString() : item.end
           }))
         })
       });

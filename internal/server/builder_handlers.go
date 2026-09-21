@@ -1157,6 +1157,11 @@ func (b *ServerBuilder) wireSetupWizard() {
 			runner = blueprintintake.NewDemoIntakeRunner(folders, intakeService, b.skillsManager)
 		}
 		applyService := blueprintintake.NewApplyService(proposalStore, workspace.NewTicketService(b.workspaceStore))
+		applyService.SetMemoryWriter(workspace.NewMemoryStore(b.workspaceFileStore))
+		applyService.SetNoteWriter(b.sessionStore)
+		if b.calendarOpsHandler != nil {
+			applyService.SetCalendarWriter(calendarIntakeWriter{handler: b.calendarOpsHandler})
+		}
 		workflow := blueprintintake.NewService(intakeService, runner, proposalStore, applyService)
 		b.blueprintIntakeWorkflow = workflow
 		b.blueprintIntakeHandler = blueprintintakehttp.NewHandler(intakeService, b.workspaceStore, b.userProvider)
@@ -1591,6 +1596,18 @@ func normalizePlaywrightBrowserChoice(raw string) string {
 	default:
 		return "auto"
 	}
+}
+
+type calendarIntakeWriter struct {
+	handler *calendarhttp.Handler
+}
+
+func (w calendarIntakeWriter) Availability(ctx context.Context, workspaceID string) (bool, string, error) {
+	return w.handler.IntakeCreateAvailability(ctx, workspaceID)
+}
+
+func (w calendarIntakeWriter) Create(ctx context.Context, workspaceID string, input blueprintintake.CalendarEventInput) (string, error) {
+	return w.handler.PreviewAndConfirmReviewedEvent(ctx, workspaceID, calendarhttp.ReviewedEventInput{Title: input.Title, Start: input.Start, End: input.End, TimeZone: input.Start.Location().String(), Location: input.Location, Description: input.Description})
 }
 
 func detectDefaultBraveExecutablePath() string {

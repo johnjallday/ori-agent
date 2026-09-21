@@ -107,6 +107,51 @@ test('registers intake_review and renders counts, dates, markers, and source tex
   assert.equal(renderer.primaryLabel(context), 'Apply selected');
 });
 
+test('renders memory, note, and unavailable calendar proposals as safe review text', async () => {
+  const mixed = {
+    hash: 'mixed-hash',
+    status: 'pending',
+    items: [
+      {
+        kind: 'memory',
+        key: 'memory',
+        text: '<img src=x> Office hours Tuesday',
+        source: { source_id: 's', quote: 'Office hours Tuesday' }
+      },
+      {
+        kind: 'note',
+        key: 'note',
+        title: 'Reading list',
+        body: '<script>Read chapter 1</script>',
+        source: { source_id: 's', quote: 'chapter 1' }
+      },
+      {
+        kind: 'calendar_event',
+        key: 'event',
+        title: 'Seminar',
+        start: '2026-04-03T10:00:00Z',
+        end: '2026-04-03T11:00:00Z',
+        disabled_reason: 'Connect a calendar in this workspace to add these.',
+        source: { source_id: 's', quote: 'seminar' }
+      }
+    ]
+  };
+  globalThis.fetch = async () => response({ proposal: mixed, skill: { ready: true } });
+  const host = new FakeElement('div');
+  renderer.render(host, ctx('review-mixed'));
+  await tick();
+  await tick();
+
+  assert.match(host.textContent, /<img src=x> Office hours Tuesday/);
+  assert.match(host.textContent, /<script>Read chapter 1<\/script>/);
+  assert.match(host.textContent, /Connect a calendar/);
+  const checkboxes = host.all().filter(element => element.type === 'checkbox');
+  assert.equal(checkboxes.length, 3);
+  assert.equal(checkboxes[2].disabled, true);
+  assert.equal(checkboxes[2].checked, false);
+  assert.equal('innerHTML' in host, false);
+});
+
 test('shows bundled skill text as text and trusts it before a run', async () => {
   let trustBody;
   let trusted = false;
