@@ -24,7 +24,10 @@
         availableVersion: text(candidate.available_version ?? candidate.availableVersion),
         componentsChanged:
           candidate.components_changed === true || candidate.componentsChanged === true,
-        available: candidate.available === true
+        available: candidate.available === true,
+        // Only the literal true means the host's reviewed release resolver
+        // answered; anything else keeps the source wording.
+        reviewedRelease: (candidate.reviewed_release ?? candidate.reviewedRelease) === true
       });
     });
     return {
@@ -55,7 +58,9 @@
     if (hasVersionChange(update)) {
       return {
         label: 'Update available · ' + update.availableVersion,
-        detail: 'Source version ' + update.availableVersion + ' is available.'
+        detail: update.reviewedRelease
+          ? 'Reviewed release ' + update.availableVersion + ' is available.'
+          : 'Source version ' + update.availableVersion + ' is available.'
       };
     }
     if (update.componentsChanged) {
@@ -113,7 +118,8 @@
         update.name,
         update.installedVersion,
         update.availableVersion,
-        update.componentsChanged
+        update.componentsChanged,
+        update.reviewedRelease
       ])
     });
     return { state, title, detail, count, signature };

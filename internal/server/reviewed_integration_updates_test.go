@@ -48,7 +48,7 @@ func TestReviewedIntegrationUpdatesOfferOnlyANewerReleaseForExactOfficialCommits
 
 	availability, ok, err := updates.availability(older)
 	if err != nil || !ok || availability != (plugin.UpdateAvailability{
-		Name: entry.PluginID, InstalledVersion: "0.6.0", AvailableVersion: "0.6.2", Available: true,
+		Name: entry.PluginID, InstalledVersion: "0.6.0", AvailableVersion: "0.6.2", Available: true, ReviewedRelease: true,
 	}) {
 		t.Fatalf("availability = %+v ok=%v err=%v", availability, ok, err)
 	}
@@ -82,7 +82,7 @@ func TestReviewedIntegrationUpdatesOfferTheReleaseToUnpinnedOfficialURLs(t *test
 
 			availability, ok, err := updates.availability(installed)
 			if err != nil || !ok || availability != (plugin.UpdateAvailability{
-				Name: entry.PluginID, InstalledVersion: "0.6.1", AvailableVersion: "0.7.0", Available: true,
+				Name: entry.PluginID, InstalledVersion: "0.6.1", AvailableVersion: "0.7.0", Available: true, ReviewedRelease: true,
 			}) {
 				t.Fatalf("availability = %+v ok=%v err=%v", availability, ok, err)
 			}
@@ -133,7 +133,9 @@ func TestReviewedIntegrationUpdatesAnswerUnpinnedOfficialInstallsFromReleasesOnl
 			}
 			installed := reviewedInstall(entry, item.installed, entry.SourceRepository+".git")
 
-			want := plugin.UpdateAvailability{Name: entry.PluginID, InstalledVersion: item.installed, AvailableVersion: item.installed}
+			want := plugin.UpdateAvailability{
+				Name: entry.PluginID, InstalledVersion: item.installed, AvailableVersion: item.installed, ReviewedRelease: true,
+			}
 			if item.wantAvailable != "" {
 				want.AvailableVersion, want.Available = item.wantAvailable, true
 			}

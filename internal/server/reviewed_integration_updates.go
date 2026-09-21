@@ -66,6 +66,7 @@ func (u reviewedIntegrationUpdates) availability(installed plugin.InstalledPlugi
 	}
 	result := plugin.UpdateAvailability{
 		Name: installed.Name, InstalledVersion: installed.Version, AvailableVersion: installed.Version,
+		ReviewedRelease: true,
 	}
 	if version, _, newer := u.newerRelease(context.Background(), entry, installed); newer {
 		result.AvailableVersion = version
