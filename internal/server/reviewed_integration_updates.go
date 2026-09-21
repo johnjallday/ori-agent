@@ -28,15 +28,19 @@ func (b *ServerBuilder) installReviewedIntegrationUpdates() {
 }
 
 // reviewedEntry returns the registry entry for an installed plugin recorded
-// against an exact official commit of a release-ready entry. Mutable URLs,
-// local copies and other plugins keep their recorded-source updates.
+// against the official repository of a release-ready entry — an exact commit or
+// one of its legacy unpinned URLs. Such an install follows the entry's published
+// releases only; its recorded source is never read, because an unpinned one
+// names the mutable default branch. Local copies, other spellings of the
+// repository and other plugins keep their recorded-source updates.
 func (u reviewedIntegrationUpdates) reviewedEntry(installed plugin.InstalledPlugin) (reviewedintegration.Entry, bool) {
 	if u.releases == nil || u.entryFor == nil {
 		return reviewedintegration.Entry{}, false
 	}
 	entry, ok := u.entryFor(installed.Name)
 	if !ok || entry.PluginID != installed.Name || entry.FallbackSource() == "" ||
-		installed.Format != entry.SourceFormat || !entry.IsPinnedSource(installed.Source) {
+		installed.Format != entry.SourceFormat ||
+		!(entry.IsPinnedSource(installed.Source) || entry.IsUnpinnedOfficialSource(installed.Source)) {
 		return reviewedintegration.Entry{}, false
 	}
 	return entry, true

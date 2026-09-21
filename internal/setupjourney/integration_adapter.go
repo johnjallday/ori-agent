@@ -105,7 +105,7 @@ func (adapter *ReviewedIntegrationAdapter) classifyInstalledSource(entry reviewe
 		return installedSourceLocal
 	case acceptedPinnedSource(entry, source):
 		return installedSourceOfficialPinned
-	case source == entry.SourceRepository || source == entry.SourceRepository+".git":
+	case entry.IsUnpinnedOfficialSource(source):
 		// The official repository's legacy unpinned URLs permit a review of the
 		// host-selected replacement; they never prove the installed bytes.
 		return installedSourceOfficialMutable
