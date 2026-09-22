@@ -2,7 +2,11 @@
 
 A manifest step kind is accepted only when `workspace.setupStepKindSpecs` defines its fixed reference scope and adapter requirement.
 The project-template validator resolves that reference against declarations in the same manifest and rejects unknown kinds, references, and adapter keys.
-At runtime the setup service reads the persisted workspace snapshot and resolves any adapter key through the compiled registry wired by `ServerBuilder.wireSetupWizard`.
+At runtime the setup service reads the persisted workspace snapshot and resolves any adapter key through the compiled registry wired by `ServerBuilder.wireSetupWizard`. The manifest never chooses behavior: it can select only host-defined declarations, while collection, parsing, consent, execution, validation, review, application, and automation stay compiled host code.
+
+## Create Workspace inputs
+
+Blueprint inputs may be bounded numbers/selects, one-line text, or HTTP(S) URLs. Only numbers and selects can be substituted into explicitly declared scaffold files. Text and link answers are stored with workspace provenance and never reach scaffolded files under any circumstances. A URL may name a URL-enabled intake key to prefill that intake step; it is not fetched until the user accepts the host-authored consent statement.
 
 ## Bundled skills
 

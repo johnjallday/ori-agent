@@ -295,8 +295,10 @@ func normalizeInputField(declared rawInputField) (InputField, error) {
 			return InputField{}, fmt.Errorf("%w: url field %q needs an http or https default of at most 2000 characters", ErrInvalidInputs, id)
 		}
 		if declared.IntakeKey != nil {
-			intakeKey := strings.TrimSpace(*declared.IntakeKey)
-			if !inputFieldIDPattern.MatchString(intakeKey) {
+			// Intake keys use the intake declaration's normalization, not input-ID
+			// syntax: established keys such as "course-materials" contain hyphens.
+			intakeKey := strings.ToLower(strings.TrimSpace(*declared.IntakeKey))
+			if intakeKey == "" {
 				return InputField{}, fmt.Errorf("%w: url field %q has an invalid intake_key", ErrInvalidInputs, id)
 			}
 			field.IntakeKey = intakeKey

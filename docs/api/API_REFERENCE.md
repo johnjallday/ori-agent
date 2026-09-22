@@ -838,8 +838,13 @@ Get current version information.
 ## Blueprint Intake API
 
 Blueprint Intake routes are workspace-scoped. `{intakeKey}` must name an intake
-copied into the workspace's template provenance. File text and skill output are
-untrusted input; only a reviewed proposal hash can authorize record creation.
+copied into the workspace's template provenance. A manifest selects no runtime
+behavior: collection, parsing, consent, execution, validation, review, and
+application are host-owned. File text, skill output, and labelled text/link
+setup answers are untrusted input; only a reviewed proposal hash can authorize
+record creation. Text and link setup answers never reach scaffolded files. A
+URL setup answer that names this intake appears as a prefilled link but is not
+fetched until consent.
 Proposals may contain `ticket`, `memory`, `note`, and `calendar_event` items. Invalid memory entries remain visible as unusable. Calendar items remain visible but disabled when the workspace has no connected calendar with `create_event` mapped. Re-intake proposals classify items as `new`, `changed`, `unchanged`, or `no_longer_found`; changed records may require an explicit `conflict_resolution` of `keep_current` or `use_proposed`. Applying selected items returns an independent `created`, `updated`, `failed`, or `skipped` result for each item.
 
 | Method | Endpoint | Purpose |

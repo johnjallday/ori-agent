@@ -1,0 +1,50 @@
+{
+  "name": "Lease",
+  "description": "Turn reviewed lease materials into renewal, notice, and rent-review reminders.",
+  "tools": {
+    "skills": ["lease-intake"]
+  },
+  "directory_requirements": [
+    {
+      "key": "lease-folder",
+      "label": "Lease folder",
+      "suggested_path": "~/Documents",
+      "access_disclosure": "Ori reads supported files immediately inside this folder after you consent. It does not read subfolders or copy the source files."
+    }
+  ],
+  "intake_requirements": [
+    {
+      "key": "lease-materials",
+      "label": "Lease materials",
+      "skill": "lease-intake",
+      "sources": {
+        "files": true,
+        "directory_key": "lease-folder"
+      },
+      "accepted_extensions": [".pdf", ".docx", ".txt", ".md"],
+      "proposal_kinds": ["ticket", "memory", "note"]
+    }
+  ],
+  "setup_wizard": {
+    "version": 1,
+    "title": "Set up this lease",
+    "steps": [
+      {
+        "id": "materials",
+        "kind": "intake",
+        "requirement_key": "lease-materials",
+        "required": true,
+        "title": "Add lease materials",
+        "description": "Add the lease and related notices Ori should read."
+      },
+      {
+        "id": "review-materials",
+        "kind": "intake_review",
+        "requirement_key": "lease-materials",
+        "required": true,
+        "title": "Review lease reminders",
+        "description": "Review the bundled skill and every proposed reminder before anything is created."
+      }
+    ]
+  }
+}

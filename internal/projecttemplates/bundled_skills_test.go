@@ -50,8 +50,24 @@ func TestCourseExampleLoadsItsDeclaredBundledSkill(t *testing.T) {
 	if tpl.HasInvalidBundledSkills() || len(tpl.BundledSkills) != 1 || tpl.BundledSkills[0].Name != "syllabus-intake" {
 		t.Fatalf("course bundled skills = %+v / %q", tpl.BundledSkills, tpl.BundledSkillsError)
 	}
+	if tpl.InputsError != "" || tpl.Inputs == nil || len(tpl.Inputs.Fields) != 2 || tpl.Inputs.Fields[0].IntakeKey != "course-materials" {
+		t.Fatalf("course inputs = %+v / %q", tpl.Inputs, tpl.InputsError)
+	}
 	if !tpl.HasSkeleton {
 		t.Fatal("course example must include a skeleton")
+	}
+	if tpl.Builtin || IsBuiltinStarterID(tpl.ID) {
+		t.Fatal("course example must remain import-only, not an embedded starter")
+	}
+}
+
+func TestLeaseExampleUsesOnlyTheGenericIntakeMechanism(t *testing.T) {
+	tpl := newTemplate(filepath.Join("..", "..", "examples", "blueprints", "lease"))
+	if tpl.IntakeRequirementsError != "" || tpl.SetupWizardError != "" || tpl.HasInvalidBundledSkills() {
+		t.Fatalf("lease example errors: intake=%q wizard=%q skill=%q", tpl.IntakeRequirementsError, tpl.SetupWizardError, tpl.BundledSkillsError)
+	}
+	if len(tpl.IntakeRequirements) != 1 || tpl.IntakeRequirements[0].Skill != "lease-intake" || len(tpl.BundledSkills) != 1 {
+		t.Fatalf("lease example declarations = intake:%+v skills:%+v", tpl.IntakeRequirements, tpl.BundledSkills)
 	}
 }
 

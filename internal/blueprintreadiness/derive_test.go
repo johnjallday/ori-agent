@@ -212,6 +212,18 @@ func TestDeriveRechecksHostReferencesAgainstTheRunningRegistries(t *testing.T) {
 	assertReadiness(t, present, StateReady, OwnershipUser, ReasonNone)
 }
 
+func TestDerivePluginIntakeRequiresDeclaredHostFeature(t *testing.T) {
+	installed := withBlueprint(installedPlugin("course-plugin", true), "course")
+	template := pluginOwnedTemplate("course-plugin", "course")
+	template.IntakeRequirements = []workspace.IntakeRequirement{{Key: "materials"}}
+	sources := Sources{Installed: []plugin.InstalledPlugin{installed}, ShippedBuiltin: shippedIDs()}
+	got := Derive(template, sources)
+	assertReadiness(t, got, StateActionRequired, OwnershipPlugin, ReasonPluginUpdateRequired)
+	installed.WorkspaceSurfaces.RequiresHostFeatures = []string{plugin.HostFeatureBlueprintIntakeV1}
+	got = Derive(template, Sources{Installed: []plugin.InstalledPlugin{installed}, ShippedBuiltin: shippedIDs()})
+	assertReadiness(t, got, StateReady, OwnershipPlugin, ReasonNone)
+}
+
 func TestDeriveDeclaredPluginDependencyStates(t *testing.T) {
 	template := projecttemplates.Template{
 		ID: "needs-plugin", Name: "Needs Plugin",

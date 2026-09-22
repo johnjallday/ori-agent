@@ -34,7 +34,7 @@ func TestCreationAcceptsEveryHostFeatureInstallDoes(t *testing.T) {
 	if !pluginHostFeaturesAvailable([]string{
 		plugin.HostFeatureAssistantProgramV1, plugin.HostFeatureSpecialistSetupJourneyV1,
 		plugin.HostFeatureSetupQuestsV2, plugin.HostFeatureTemplateGroupRequirementsV1,
-		plugin.HostFeatureBlueprintInputsV1,
+		plugin.HostFeatureBlueprintInputsV1, plugin.HostFeatureBlueprintIntakeV1,
 	}) {
 		t.Error("creation refuses a plugin that declares inputs, so its blueprints would be inactive")
 	}

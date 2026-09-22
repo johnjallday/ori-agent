@@ -231,6 +231,12 @@ func derivePluginOwned(template projecttemplates.Template, sources Sources) Read
 			Generation: installed.Generation,
 		}
 	}
+	if len(template.IntakeRequirements) != 0 && !hasHostFeature(installed, plugin.HostFeatureBlueprintIntakeV1) {
+		return Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginUpdateRequired,
+			Summary:    "This blueprint's intake declaration needs a newer plugin version.",
+			Detail:     "Review the plugin update before Ori accepts its intake sources or bundled skill.",
+			Dependency: dependency, Actions: []Action{ActionReviewPluginUpdate, ActionManagePlugins}, Generation: installed.Generation}
+	}
 	if template.AssistantProject != nil {
 		if independent := independentHomeReadiness(template, installed, sources); independent != nil {
 			return independentHomeOutcome(template, *independent)
