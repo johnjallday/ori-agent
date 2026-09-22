@@ -69,6 +69,9 @@ Thumbs.db
 !.env.example
 
 # Runtime/cache directories
+# Installation reset metadata and per-agent runtime state (local only)
+/.ori-reset/
+/agent_state/
 marketplace_cache_*.json
 # Local installed-plugins store (installed.json + downloaded src); machine-local state
 /plugins/
