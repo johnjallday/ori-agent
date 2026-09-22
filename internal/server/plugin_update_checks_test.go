@@ -45,11 +45,11 @@ func TestServerOwnsPluginUpdateCheckerLifecycle(t *testing.T) {
 // release, and stays read-only while doing so: the installed record is not
 // touched by the check or by reading the route.
 func TestPluginUpdateStatusRouteMarksReviewedReleaseAnswers(t *testing.T) {
-	updates, _, entry := reviewedUpdatesFixture("0.7.0")
+	updates, _, entry := reviewedUpdatesFixture("0.9.0")
 	pluginsDir := t.TempDir()
 	handler := pluginhttp.NewHandler(nil, nil, filepath.Join(pluginsDir, "skills"), pluginsDir)
 	record, err := json.Marshal([]plugin.InstalledPlugin{
-		reviewedInstall(entry, "0.6.1", entry.SourceRepository+".git"),
+		reviewedInstall(entry, "0.8.0", entry.SourceRepository+".git"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestPluginUpdateStatusRouteMarksReviewedReleaseAnswers(t *testing.T) {
 		t.Fatalf("snapshot = %s (err=%v)", rr.Body.String(), err)
 	}
 	row := body.Updates[0]
-	if row["available_version"] != "0.7.0" || row["available"] != true || row["reviewed_release"] != true {
+	if row["available_version"] != "0.9.0" || row["available"] != true || row["reviewed_release"] != true {
 		t.Fatalf("reviewed row = %#v", row)
 	}
 	if after, err := os.ReadFile(storePath); err != nil || string(after) != string(record) {
