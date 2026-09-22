@@ -22,8 +22,11 @@ const BlueprintInputsSharedDataKey = "blueprint_inputs"
 // too and accepts either the struct that was written or the decoded map.
 type blueprintInputsRecord struct {
 	Fields []struct {
-		Label   string `json:"label"`
-		Display string `json:"display"`
+		Label     string `json:"label"`
+		Display   string `json:"display"`
+		Value     string `json:"value"`
+		Type      string `json:"type"`
+		IntakeKey string `json:"intake_key"`
 	} `json:"fields"`
 }
 
@@ -54,4 +57,55 @@ func BlueprintInputsSummary(sharedData map[string]any) string {
 		parts = append(parts, label+": "+display)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// BlueprintIntakeInputSummary returns only text and URL setup answers. Intake
+// prompts place this host-recorded data inside the same untrusted boundary as a
+// source; number/select answers remain a scaffolding concern.
+func BlueprintIntakeURLs(sharedData map[string]any, intakeKey string) []string {
+	raw, ok := sharedData[BlueprintInputsSharedDataKey]
+	if !ok || raw == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var record blueprintInputsRecord
+	if json.Unmarshal(encoded, &record) != nil {
+		return nil
+	}
+	urls := make([]string, 0)
+	for _, field := range record.Fields {
+		if field.Type == "url" && field.IntakeKey == intakeKey && strings.TrimSpace(field.Value) != "" {
+			urls = append(urls, field.Value)
+		}
+	}
+	return urls
+}
+
+func BlueprintIntakeInputSummary(sharedData map[string]any) string {
+	raw, ok := sharedData[BlueprintInputsSharedDataKey]
+	if !ok || raw == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return ""
+	}
+	var record blueprintInputsRecord
+	if err := json.Unmarshal(encoded, &record); err != nil {
+		return ""
+	}
+	parts := make([]string, 0, len(record.Fields))
+	for _, field := range record.Fields {
+		if field.Type != "text" && field.Type != "url" {
+			continue
+		}
+		label, value := strings.TrimSpace(field.Label), strings.TrimSpace(field.Value)
+		if label != "" && value != "" {
+			parts = append(parts, label+": "+value)
+		}
+	}
+	return strings.Join(parts, "\n")
 }

@@ -10293,12 +10293,23 @@ const sessionManager = {
       }
     } else {
       control = document.createElement('input');
-      control.type = 'number';
-      if (Number.isFinite(field?.min)) control.min = String(field.min);
-      if (Number.isFinite(field?.max)) control.max = String(field.max);
-      if (Number.isFinite(field?.step)) control.step = String(field.step);
-      if (Number.isFinite(field?.min) && Number.isFinite(field?.max)) {
-        hintText = `${field.min}–${field.max}`;
+      if (field?.type === 'url') {
+        control.type = 'url';
+        control.maxLength = 2000;
+        control.placeholder = 'https://example.com';
+        hintText = 'HTTP or HTTPS link';
+      } else if (field?.type === 'text') {
+        control.type = 'text';
+        control.maxLength = 200;
+        hintText = 'One line, up to 200 characters';
+      } else {
+        control.type = 'number';
+        if (Number.isFinite(field?.min)) control.min = String(field.min);
+        if (Number.isFinite(field?.max)) control.max = String(field.max);
+        if (Number.isFinite(field?.step)) control.step = String(field.step);
+        if (Number.isFinite(field?.min) && Number.isFinite(field?.max)) {
+          hintText = `${field.min}–${field.max}`;
+        }
       }
     }
     control.id = controlID;
@@ -10368,6 +10379,25 @@ const sessionManager = {
         : `Choose a ${label.toLowerCase()}.`;
     }
     if (raw === '') return `${label} is required.`;
+    if (field.type === 'text') {
+      const hasControl = Array.from(raw).some(character => {
+        const code = character.charCodeAt(0);
+        return code < 32 || code === 127;
+      });
+      return raw.length <= 200 && !hasControl
+        ? ''
+        : `${label} must be one line of at most 200 characters.`;
+    }
+    if (field.type === 'url') {
+      try {
+        const parsed = new URL(raw);
+        return raw.length <= 2000 && (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+          ? ''
+          : `${label} must be an HTTP or HTTPS URL of at most 2000 characters.`;
+      } catch (_) {
+        return `${label} must be an HTTP or HTTPS URL of at most 2000 characters.`;
+      }
+    }
     const value = Number(raw);
     if (!Number.isFinite(value)) return `${label} must be a number.`;
     if (
@@ -10426,7 +10456,10 @@ const sessionManager = {
       const id = String(field?.id || '');
       const raw = String(draft.values[id] ?? '').trim();
       if (!id || raw === '') continue;
-      payload[id] = field.type === 'select' ? raw : Number(raw);
+      payload[id] =
+        field.type === 'select' || field.type === 'text' || field.type === 'url'
+          ? raw
+          : Number(raw);
     }
     return Object.keys(payload).length ? payload : null;
   },

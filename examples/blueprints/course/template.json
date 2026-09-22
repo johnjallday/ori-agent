@@ -4,6 +4,25 @@
   "tools": {
     "skills": ["syllabus-intake"]
   },
+  "inputs": {
+    "schema_version": 1,
+    "title": "Course details",
+    "fields": [
+      {
+        "id": "syllabus_link",
+        "label": "Syllabus link",
+        "type": "url",
+        "default": "https://example.edu/syllabus",
+        "intake_key": "course-materials"
+      },
+      {
+        "id": "term",
+        "label": "Term",
+        "type": "text",
+        "default": "Fall term"
+      }
+    ]
+  },
   "capability_requirements": [
     {
       "key": "calendar",

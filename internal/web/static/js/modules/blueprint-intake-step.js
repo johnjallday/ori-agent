@@ -25,7 +25,14 @@
     const key = stateKey(ctx);
     let state = states.get(key);
     if (!state) {
-      state = { loaded: false, loading: false, uploading: false, sources: [], consent: null };
+      state = {
+        loaded: false,
+        loading: false,
+        uploading: false,
+        sources: [],
+        consent: null,
+        prefilledLinks: []
+      };
       states.set(key, state);
     }
     return state;
@@ -52,6 +59,7 @@
           ? payload.files
           : [];
       state.consent = payload.consent || null;
+      state.prefilledLinks = Array.isArray(payload.prefilled_links) ? payload.prefilled_links : [];
       state.loaded = true;
       draw(container, ctx, state);
     } catch (error) {
@@ -97,6 +105,7 @@
       const linkInput = document.createElement('input');
       linkInput.type = 'url';
       linkInput.placeholder = 'https://example.com/page';
+      linkInput.value = state.prefilledLinks[0] || '';
       linkInput.className = 'blueprint-intake-link-input';
       linkInput.disabled = state.uploading || !state.consent?.accepted;
       const addLink = el('button', 'modern-btn modern-btn-secondary', 'Add a link');
@@ -104,6 +113,17 @@
       addLink.disabled = linkInput.disabled;
       addLink.addEventListener('click', () => addLinkSource(container, ctx, state, linkInput));
       actions.append(linkInput, addLink);
+      if (state.prefilledLinks.length) {
+        actions.appendChild(
+          el(
+            'p',
+            'blueprint-intake-hint',
+            state.consent?.accepted
+              ? 'Your setup link is ready to add.'
+              : 'Your setup link is pre-filled. Ori will fetch it only after you accept the statement below.'
+          )
+        );
+      }
     }
     if (ctx.step.intake_directory_key) {
       const chooseFolder = el('button', 'modern-btn modern-btn-secondary', 'Choose a folder');
@@ -199,6 +219,7 @@
         body: JSON.stringify({ url })
       });
       if (payload.source) state.sources.push(payload.source);
+      state.prefilledLinks = state.prefilledLinks.filter(link => link !== url);
       input.value = '';
       ctx.announce('Page added. Review its status before continuing.');
     } catch (error) {

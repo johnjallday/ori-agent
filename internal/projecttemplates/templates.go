@@ -738,6 +738,11 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if intakeRequirementsErr != nil {
 		t.IntakeRequirements = nil
 		t.IntakeRequirementsError = intakeRequirementsErr.Error()
+	} else if inputsErr == nil {
+		if err := ValidateURLInputIntakes(t.Inputs, intakeRequirements); err != nil {
+			t.Inputs = nil
+			t.InputsError = err.Error()
+		}
 	}
 	runtimeRequirements, runtimeRequirementsErr := normalizeRuntimeRequirementsWithCatalog(m.RuntimeRequirements, catalog)
 	if runtimeRequirementsErr == nil {

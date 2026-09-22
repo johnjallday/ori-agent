@@ -203,6 +203,9 @@ func (h *Handler) GetIntake(w http.ResponseWriter, r *http.Request) {
 		results = append(results, blueprintintake.FileResult{ID: source.ID, Kind: source.Kind, Name: source.Name, Title: source.Title, URL: source.URL, Status: source.Status, Size: source.Size, Omitted: source.Omitted, ContentHash: source.ContentHash, Message: source.Message})
 	}
 	payload := map[string]any{"requirement": requirement, "files": results, "sources": results, "consent": consent}
+	if ws, workspaceErr := h.lookup.Get(workspaceID); workspaceErr == nil && ws != nil {
+		payload["prefilled_links"] = workspace.BlueprintIntakeURLs(ws.SharedData, intakeKey)
+	}
 	if h.workflow != nil {
 		if skill, skillErr := h.workflow.SkillReadiness(workspaceID, intakeKey); skillErr == nil {
 			payload["skill"] = skill

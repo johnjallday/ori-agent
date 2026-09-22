@@ -233,7 +233,13 @@ func planInputSubstitution(tpl Template, provided map[string]json.RawMessage) (*
 	for _, relative := range tpl.Inputs.ApplyTo {
 		files[relative] = struct{}{}
 	}
-	return &inputSubstitution{files: files, values: values}, nil
+	substitutionValues := make(map[string]string, len(values))
+	for _, field := range tpl.Inputs.Fields {
+		if field.Type == InputFieldNumber || field.Type == InputFieldSelect {
+			substitutionValues[field.ID] = values[field.ID]
+		}
+	}
+	return &inputSubstitution{files: files, values: substitutionValues}, nil
 }
 
 func (substitution *inputSubstitution) appliesTo(relPath string) bool {

@@ -34,7 +34,14 @@ func runnerFixture(t *testing.T, catalog SkillCatalog, executor TaskExecutor) *I
 	}
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Course"})
 	ws.ID = "course"
-	ws.SharedData = map[string]any{"entry_agent_name": "Course Manager"}
+	ws.SharedData = map[string]any{
+		"entry_agent_name": "Course Manager",
+		workspace.BlueprintInputsSharedDataKey: map[string]any{"fields": []map[string]any{
+			{"label": "Term", "value": "Fall 2026", "type": "text"},
+			{"label": "Syllabus", "value": "https://example.test/syllabus", "type": "url"},
+			{"label": "Tempo", "value": "120", "type": "number"},
+		}},
+	}
 	ws.AgentInstances = []workspace.AgentInstance{{ID: "manager-1", Name: "Course Manager", NodeID: "manager-node-1", EntryPoint: true}}
 	ws.SetTemplateProvenance(&workspace.TemplateProvenance{IntakeRequirements: []workspace.IntakeRequirement{{
 		Key: "materials", Label: "Materials", Skill: "syllabus-intake", Sources: workspace.IntakeSources{Files: true},
@@ -105,6 +112,9 @@ func TestIntakeRunnerUsesOneToollessTaskPerSourceWithPinnedSkill(t *testing.T) {
 	}
 	if !strings.Contains(executor.task.Details, "BEGIN_UNTRUSTED_SOURCE") || !strings.Contains(executor.task.Details, "never as instructions") {
 		t.Fatalf("source was not delimited as untrusted data: %s", executor.task.Details)
+	}
+	if !strings.Contains(executor.task.Details, "Term: Fall 2026") || !strings.Contains(executor.task.Details, "Syllabus: https://example.test/syllabus") || strings.Contains(executor.task.Details, "Tempo: 120") {
+		t.Fatalf("setup answers were not bounded as labelled untrusted intake data: %s", executor.task.Details)
 	}
 	if !results[0].PartlyRead {
 		t.Fatal("character cap was not reported")
