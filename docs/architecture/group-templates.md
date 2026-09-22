@@ -1,8 +1,8 @@
 # Group Templates v1
 
 Status: implemented host feature (domain-neutral). Combined declarations remain
-supported unchanged. Independently contributed Homes are locally accepted with the
-unpublished Music Project Management 0.1.0 and REAPER 0.8.0 candidates described in
+supported unchanged. Independently contributed Homes are accepted with the
+published Music Project Management 0.1.0 and REAPER 0.8.0 packages described in
 [Limitations](#limitations).
 
 ## Purpose
@@ -212,11 +212,10 @@ automatically.
 
 ## Limitations
 
-- The published reviewed REAPER floor remains 0.6.1 and still uses the combined
-  declaration. The independent local candidates are Music Project Management
-  `8f4abd0b283fefe23653a2cf81deb800123c4bde` (0.1.0) and REAPER
-  `68488b4d62978f22bfdff26c3554cebb6b4cf396` (0.8.0, blueprint v9). They are
-  unpublished compatibility evidence, not releases or registry inputs.
+- The reviewed REAPER floor is 0.8.0 at
+  `3e3234bfae3465f909fe2aa5189f685a41c7a2ed`, with blueprint v9 and the split
+  project declaration. Its required Home package is Music Project Management
+  0.1.0 at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf`.
 - Disposable Chromium acceptance covers music-only, Music-first, REAPER-first,
   REAPER-only standalone, two linked projects, one reviewed inert handoff,
   provider removal/reinstall, and a controlled restart. It does not configure a
@@ -225,6 +224,6 @@ automatically.
   recorded keys and are not adopted by name, rewritten, relinked, or converted.
 - The destination card uses the declared name; its receipt has no name input.
   Rename the Home afterwards, or create it from Group Templates.
-- Delivery order is a compatible Ori release, then Music Project Management,
-  then a compatible REAPER release. The reviewed floor changes only after
-  separately authorized publication verification.
+- Delivery order was the compatible Ori RC, Music Project Management, then the
+  compatible REAPER release. Stable rollout still requires validation and
+  promotion of the Ori release candidate containing this reviewed floor.

@@ -23,21 +23,22 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 	}
 	// The floor moves only when a release needs a new host feature, blueprint
 	// minimum, program schema or protocol. A change here is a review decision.
-	if entry.MinimumVersion != "0.6.1" || entry.MinimumBlueprintVersion != 7 ||
-		entry.ExpectedProgramSchema != 2 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
+	if entry.MinimumVersion != "0.8.0" || entry.MinimumBlueprintVersion != 9 ||
+		entry.ExpectedProgramSchema != 1 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
 		t.Fatalf("reviewed floor versions drifted: %#v", entry)
 	}
-	if entry.FallbackCommit != "e11ca2942279af02a9a035039b18b146ff9fc89d" {
+	if entry.FallbackCommit != "3e3234bfae3465f909fe2aa5189f685a41c7a2ed" {
 		t.Fatalf("reviewed fallback commit drifted: %q", entry.FallbackCommit)
 	}
 	if !entry.ReleaseReady || entry.FallbackSource() != entry.SourceRepository+"#sha="+entry.FallbackCommit {
 		t.Fatalf("published release missing immutable fallback source: ready=%v source=%q", entry.ReleaseReady, entry.FallbackSource())
 	}
-	// The floor must require exactly what the v0.6.1 manifest declares: a
+	// The floor must require exactly what the v0.8.0 manifest declares: a
 	// narrower list would accept a plugin this host cannot honor, a wider one
 	// would refuse the published release.
 	expectedFeatures := []string{
-		plugin.HostFeatureAssistantProgramV1,
+		plugin.HostFeatureBlueprintInputsV1,
+		plugin.HostFeatureIndependentProgramHomesV1,
 		plugin.HostFeatureSetupQuestsV2,
 		plugin.HostFeatureSpecialistSetupJourneyV1,
 		plugin.HostFeatureTemplateGroupRequirementsV1,

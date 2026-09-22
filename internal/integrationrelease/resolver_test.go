@@ -383,7 +383,7 @@ func TestCandidatesAreOrderedNewestFirstAndEndAtTheFloor(t *testing.T) {
 	want := []Resolution{
 		{Version: "0.7.0", Tag: "0.7.0", Commit: commit070, Source: entry.PinnedSource(commit070), CheckedAt: clock.Now()},
 		{Version: "0.6.2", Tag: "v0.6.2", Commit: commit062, Source: entry.PinnedSource(commit062), CheckedAt: clock.Now()},
-		Floor(entry),
+		{Version: "0.6.1", Tag: "v0.6.1", Commit: floorCommit, Source: entry.PinnedSource(floorCommit), CheckedAt: clock.Now()},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("candidates = %#v, want %#v", got, want)
@@ -393,10 +393,10 @@ func TestCandidatesAreOrderedNewestFirstAndEndAtTheFloor(t *testing.T) {
 			t.Fatalf("candidate %d = %#v, want %#v", index, got[index], want[index])
 		}
 	}
-	// v0.6.1 is the floor's own version: offering it twice would spend an
-	// inspection to learn the same thing.
-	if got[len(got)-1].Version != entry.MinimumVersion || !got[len(got)-1].Fallback {
-		t.Fatalf("the list does not end at the floor: %#v", got)
+	// v0.6.1 is the floor's own version: it is offered once, at the end, while
+	// retaining proof that the live release lookup found it.
+	if got[len(got)-1].Version != entry.MinimumVersion || got[len(got)-1].Fallback {
+		t.Fatalf("the list does not end at the checked floor: %#v", got)
 	}
 }
 
