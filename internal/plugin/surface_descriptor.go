@@ -57,7 +57,10 @@ const (
 	// decodes such a manifest strictly and rejects the whole blueprint, so a
 	// plugin release that uses inputs declares this feature and is refused
 	// before install rather than landing as an unusable blueprint.
-	HostFeatureBlueprintInputsV1         = "blueprint_inputs_v1"
+	HostFeatureBlueprintInputsV1 = "blueprint_inputs_v1"
+	// HostFeatureBlueprintIntakeV1 gates the inert intake declaration and its
+	// bundled skill/source-review contract for plugin blueprints.
+	HostFeatureBlueprintIntakeV1         = "blueprint_intake_v1"
 	HostFeatureIndependentProgramHomesV1 = "independent_program_homes_v1"
 )
 
@@ -72,6 +75,7 @@ var hostFeatures = []string{
 	HostFeatureSetupQuestsV2,
 	HostFeatureTemplateGroupRequirementsV1,
 	HostFeatureBlueprintInputsV1,
+	HostFeatureBlueprintIntakeV1,
 	HostFeatureIndependentProgramHomesV1,
 }
 

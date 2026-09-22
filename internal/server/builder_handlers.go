@@ -15,6 +15,9 @@ import (
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/agentmap"
 	"github.com/johnjallday/ori-agent/internal/agentmaphttp"
+	"github.com/johnjallday/ori-agent/internal/blueprintintake"
+	"github.com/johnjallday/ori-agent/internal/blueprintintakehttp"
+	"github.com/johnjallday/ori-agent/internal/blueprintintakewizard"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -35,6 +38,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/macwake"
@@ -693,6 +697,11 @@ func (b *ServerBuilder) initializeHandlers() {
 		}
 		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))
 		b.sessionHandler.SetAgentToolApplier(makeAgentToolApplier(b))
+		if b.skillsManager != nil {
+			b.sessionHandler.SetBundledSkillInstaller(func(agentName string, bundled []projecttemplates.BundledSkill) error {
+				return projecttemplates.InstallBundledSkills(b.skillsManager, agentName, bundled)
+			})
+		}
 	}
 }
 
@@ -1111,6 +1120,62 @@ func (b *ServerBuilder) wireSetupWizard() {
 	b.setupWizardRegistry = registry
 	// Domain adapters are registered from code, never from configuration: a
 	// manifest's adapter name is a key into this registry and nothing else.
+	var intakeSources *blueprintintake.SourceService
+	var intakeWorkflow *blueprintintake.Service
+	if b.workspaceFileStore != nil {
+		intakeService := blueprintintake.NewSourceService(folders, b.workspaceFileStore)
+		intakeService.SetProviderResolver(func(ctx context.Context, workspaceID string) (blueprintintake.ModelProvider, error) {
+			if b.runtimeResolver == nil {
+				return blueprintintake.ModelProvider{}, fmt.Errorf("agent runtime resolver is unavailable")
+			}
+			ws, err := folders.GetFolderWorkspace(workspaceID)
+			if err != nil || ws == nil {
+				return blueprintintake.ModelProvider{}, fmt.Errorf("workspace is unavailable")
+			}
+			agentName := ws.EntryAgentName()
+			nodeID := ""
+			for _, instance := range ws.AgentInstances {
+				if strings.EqualFold(strings.TrimSpace(instance.Name), agentName) {
+					nodeID = instance.NodeID
+					break
+				}
+			}
+			resolved, err := b.runtimeResolver.ResolveAgentForWorkspace(agentName, workspaceID, nodeID)
+			if err != nil || resolved == nil || resolved.Agent == nil {
+				return blueprintintake.ModelProvider{}, fmt.Errorf("workspace entry agent is unavailable")
+			}
+			provider := strings.TrimSpace(resolved.Agent.Settings.Provider)
+			if b.taskHandler != nil {
+				provider = b.taskHandler.ResolveProviderName(provider, resolved.Agent.Settings.Model)
+			}
+			return blueprintintake.ModelProvider{Name: provider, Local: llm.IsLocalProviderName(provider)}, nil
+		})
+		intakeService.SetPathSelections(b.pathSelectionStore)
+		b.blueprintIntakeService = intakeService
+		proposalStore := blueprintintake.NewProposalStore(b.workspaceFileStore)
+		runner := blueprintintake.NewIntakeRunner(folders, intakeService, b.skillsManager, b.taskHandler)
+		if os.Getenv("ORI_DEV_BLUEPRINT_INTAKE_STUB") == "1" {
+			runner = blueprintintake.NewDemoIntakeRunner(folders, intakeService, b.skillsManager)
+		}
+		applyService := blueprintintake.NewApplyService(proposalStore, workspace.NewTicketService(b.workspaceStore))
+		applyService.SetMemoryWriter(workspace.NewMemoryStore(b.workspaceFileStore))
+		applyService.SetNoteWriter(b.sessionStore)
+		if b.calendarOpsHandler != nil {
+			applyService.SetCalendarWriter(calendarIntakeWriter{handler: b.calendarOpsHandler})
+		}
+		workflow := blueprintintake.NewService(intakeService, runner, proposalStore, applyService)
+		b.blueprintReintakeService = blueprintintake.NewReintakeService(intakeService, runner, proposalStore, applyService)
+		b.blueprintIntakeWorkflow = workflow
+		b.blueprintIntakeHandler = blueprintintakehttp.NewHandler(intakeService, b.workspaceStore, b.userProvider)
+		b.blueprintIntakeHandler.SetWorkflow(workflow)
+		b.blueprintIntakeHandler.SetUserStore(b.userStore)
+		intakeSources = intakeService
+		intakeWorkflow = workflow
+	}
+	b.blueprintIntakeSetupAdapter = blueprintintakewizard.NewSetupAdapter(intakeSources, intakeWorkflow)
+	if err := registry.Register(b.blueprintIntakeSetupAdapter); err != nil {
+		logger.Warn("Blueprint Intake setup adapter not registered", logger.Fields{"error": err})
+	}
 	if b.calendarOpsHandler != nil {
 		if folders, ok := b.workspaceStore.(calendarhttp.FolderStore); ok {
 			adapter := calendarhttp.NewSetupAdapter(b.calendarOpsHandler, folders)
@@ -1187,6 +1252,7 @@ func (b *ServerBuilder) blueprintWizardLookup() setupwizard.BlueprintLookup {
 			RuntimeRequirements:    tpl.RuntimeRequirements,
 			DirectoryRequirements:  tpl.DirectoryRequirements,
 			AutomationRecipes:      tpl.AutomationRecipes,
+			IntakeRequirements:     tpl.IntakeRequirements,
 			CapabilityRequirements: tpl.CapabilityRequirements,
 			Plugins:                tpl.Tools.Plugins,
 			PluginSources:          tpl.Tools.PluginSources,
@@ -1533,6 +1599,22 @@ func normalizePlaywrightBrowserChoice(raw string) string {
 	default:
 		return "auto"
 	}
+}
+
+type calendarIntakeWriter struct {
+	handler *calendarhttp.Handler
+}
+
+func (w calendarIntakeWriter) Availability(ctx context.Context, workspaceID string) (bool, string, error) {
+	return w.handler.IntakeCreateAvailability(ctx, workspaceID)
+}
+
+func (w calendarIntakeWriter) Create(ctx context.Context, workspaceID string, input blueprintintake.CalendarEventInput) (string, error) {
+	return w.handler.PreviewAndConfirmReviewedEvent(ctx, workspaceID, calendarhttp.ReviewedEventInput{Title: input.Title, Start: input.Start, End: input.End, TimeZone: input.Start.Location().String(), Location: input.Location, Description: input.Description})
+}
+
+func (w calendarIntakeWriter) Update(ctx context.Context, workspaceID, eventID string, input blueprintintake.CalendarEventInput) (string, error) {
+	return w.handler.PreviewAndConfirmReviewedEvent(ctx, workspaceID, calendarhttp.ReviewedEventInput{EventID: eventID, Title: input.Title, Start: input.Start, End: input.End, TimeZone: input.Start.Location().String(), Location: input.Location, Description: input.Description})
 }
 
 func detectDefaultBraveExecutablePath() string {

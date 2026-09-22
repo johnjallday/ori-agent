@@ -51,6 +51,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerAgentMapRoutes(mux, s)
 	registerRuntimeCapabilityRoutes(mux, s)
 	registerSetupWizardRoutes(mux, s)
+	registerBlueprintIntakeRoutes(mux, s)
 	registerExternalAgentRoutes(mux, s)
 	registerSkillsRoutes(mux, s)
 	registerPluginRoutes(mux, s)
@@ -1329,6 +1330,15 @@ func registerSetupWizardRoutes(mux *http.ServeMux, s *Server) {
 	// Blueprint Setup Wizard Endpoints
 	// =============================================================================
 	s.Handlers.SetupWizard.Register(mux)
+}
+
+// registerBlueprintIntakeRoutes registers workspace-scoped source collection
+// and consent endpoints for the generic blueprint intake flow.
+func registerBlueprintIntakeRoutes(mux *http.ServeMux, s *Server) {
+	if s.Handlers.BlueprintIntake == nil {
+		return
+	}
+	s.Handlers.BlueprintIntake.Register(mux)
 }
 
 // registerExternalAgentRoutes registers external agent (Claude Code / Codex) endpoints.

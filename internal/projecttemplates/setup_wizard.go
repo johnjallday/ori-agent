@@ -50,6 +50,7 @@ type SetupWizardStep = workspace.SetupWizardStep
 // names the canonical `file_janitor`. One compiled adapter serves both — see
 // filejanitor.SetupAdapter.Aliases.
 var ValidSetupWizardAdapters = []string{
+	"blueprint_intake",
 	"downloads_janitor",
 	"file_janitor",
 	"calendar_ops",
@@ -100,6 +101,8 @@ type setupWizardStepDecl struct {
 type setupWizardScope struct {
 	directories         map[string]bool
 	automated           map[string]bool
+	intakes             map[string]bool
+	intakeDirectories   map[string]string
 	capabilities        map[string]bool
 	plugins             map[string]bool
 	runtimeRequirements map[string]bool
@@ -108,10 +111,12 @@ type setupWizardScope struct {
 // templateSetupWizardScope builds the reference scope from a template's other
 // declarations. Callers pass the *normalized* requirements so key casing
 // matches what a step's reference resolves to.
-func templateSetupWizardScope(dirs []DirectoryRequirement, recipes []AutomationRecipe, caps []CapabilityRequirement, plugins []string, runtimeContracts ...*RuntimeRequirementsContract) setupWizardScope {
+func templateSetupWizardScope(dirs []DirectoryRequirement, recipes []AutomationRecipe, caps []CapabilityRequirement, plugins []string, intakes []IntakeRequirement, runtimeContracts ...*RuntimeRequirementsContract) setupWizardScope {
 	scope := setupWizardScope{
 		directories:         make(map[string]bool, len(dirs)),
 		automated:           make(map[string]bool, len(recipes)),
+		intakes:             make(map[string]bool, len(intakes)),
+		intakeDirectories:   make(map[string]string, len(intakes)),
 		capabilities:        make(map[string]bool, len(caps)),
 		plugins:             make(map[string]bool, len(plugins)),
 		runtimeRequirements: make(map[string]bool),
@@ -121,6 +126,13 @@ func templateSetupWizardScope(dirs []DirectoryRequirement, recipes []AutomationR
 	}
 	for _, recipe := range recipes {
 		scope.automated[strings.ToLower(strings.TrimSpace(recipe.DirectoryKey))] = true
+	}
+	for _, intake := range intakes {
+		key := strings.ToLower(strings.TrimSpace(intake.Key))
+		scope.intakes[key] = true
+		if directoryKey := strings.ToLower(strings.TrimSpace(intake.Sources.DirectoryKey)); directoryKey != "" {
+			scope.intakeDirectories[key] = directoryKey
+		}
 	}
 	for _, req := range caps {
 		scope.capabilities[strings.ToLower(strings.TrimSpace(req.Key))] = true
@@ -147,6 +159,8 @@ func (s setupWizardScope) has(scope workspace.SetupStepReferenceScope, key strin
 	switch scope {
 	case workspace.SetupStepReferenceDirectory:
 		return s.directories[key]
+	case workspace.SetupStepReferenceIntake:
+		return s.intakes[key]
 	case workspace.SetupStepReferenceCapability:
 		return s.capabilities[key]
 	case workspace.SetupStepReferencePlugin:
@@ -164,6 +178,8 @@ func referenceNoun(scope workspace.SetupStepReferenceScope) string {
 	switch scope {
 	case workspace.SetupStepReferenceDirectory:
 		return "directory_requirements"
+	case workspace.SetupStepReferenceIntake:
+		return "intake_requirements"
 	case workspace.SetupStepReferenceCapability:
 		return "capability_requirements"
 	case workspace.SetupStepReferencePlugin:
@@ -274,6 +290,8 @@ func validateSetupWizard(decl *setupWizardDecl, scope setupWizardScope) error {
 	}
 
 	seen := make(map[string]bool, len(decl.Steps))
+	directorySteps := make(map[string]string)
+	intakeDirectorySteps := make(map[string]string)
 	for i, step := range decl.Steps {
 		id, err := validateSetupStepID(i, step.ID)
 		if err != nil {
@@ -285,6 +303,21 @@ func validateSetupWizard(decl *setupWizardDecl, scope setupWizardScope) error {
 		seen[id] = true
 		if err := validateSetupStepDecl(id, step, scope); err != nil {
 			return err
+		}
+		key := strings.ToLower(strings.TrimSpace(step.RequirementKey))
+		spec, _ := workspace.LookupSetupStepKind(step.Kind)
+		switch spec.Kind {
+		case workspace.SetupStepKindDirectory:
+			directorySteps[key] = id
+		case workspace.SetupStepKindIntake:
+			if directoryKey := scope.intakeDirectories[key]; directoryKey != "" {
+				intakeDirectorySteps[directoryKey] = id
+			}
+		}
+	}
+	for directoryKey, directoryStepID := range directorySteps {
+		if intakeStepID := intakeDirectorySteps[directoryKey]; intakeStepID != "" {
+			return fmt.Errorf("%w: directory %q is collected by both directory step %q and intake step %q", ErrInvalidSetupWizard, directoryKey, directoryStepID, intakeStepID)
 		}
 	}
 	return nil
@@ -349,6 +382,9 @@ func validateSetupStepDecl(id string, step setupWizardStepDecl, scope setupWizar
 	}
 
 	adapter := strings.ToLower(strings.TrimSpace(step.Adapter))
+	if spec.DefaultAdapter != "" && adapter != "" {
+		return fmt.Errorf("%w: step %q of kind %q takes no adapter; the kind is served by compiled adapter %q", ErrInvalidSetupWizard, id, spec.Kind, spec.DefaultAdapter)
+	}
 	if spec.ReferenceScope == workspace.SetupStepReferenceRuntimeRequirement && adapter != "" {
 		return fmt.Errorf("%w: step %q of kind %q takes no adapter; its runtime requirement owns the compiled adapter key", ErrInvalidSetupWizard, id, spec.Kind)
 	}

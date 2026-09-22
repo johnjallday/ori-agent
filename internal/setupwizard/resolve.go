@@ -82,6 +82,12 @@ func referenceResolves(provenance *workspace.TemplateProvenance, ref workspace.S
 				return true
 			}
 		}
+	case workspace.SetupStepReferenceIntake:
+		for _, intake := range provenance.IntakeRequirements {
+			if strings.EqualFold(strings.TrimSpace(intake.Key), ref.Key) {
+				return true
+			}
+		}
 	case workspace.SetupStepReferenceCapability:
 		for _, req := range provenance.CapabilityRequirements {
 			if strings.EqualFold(strings.TrimSpace(req.Key), ref.Key) {
@@ -128,6 +134,14 @@ func (r resolvedWizard) request(workspaceID string, step workspace.SetupWizardSt
 				break
 			}
 		}
+	case workspace.SetupStepReferenceIntake:
+		for _, intake := range r.provenance.IntakeRequirements {
+			if strings.EqualFold(strings.TrimSpace(intake.Key), ref.Key) {
+				requirement := intake
+				req.Intake = &requirement
+				break
+			}
+		}
 	case workspace.SetupStepReferenceCapability:
 		for _, capability := range r.provenance.CapabilityRequirements {
 			if strings.EqualFold(strings.TrimSpace(capability.Key), ref.Key) {
@@ -171,10 +185,13 @@ func (s *Service) adapterFor(step workspace.SetupWizardStep) (Adapter, error) {
 	name := strings.TrimSpace(step.Adapter)
 	if name == "" {
 		spec, known := step.KindSpec()
-		if known && spec.RequiresAdapter {
+		if known && spec.DefaultAdapter != "" {
+			name = spec.DefaultAdapter
+		} else if known && spec.RequiresAdapter {
 			return nil, fmt.Errorf("%w: step %q of kind %q records no adapter", ErrUnknownAdapter, step.ID, spec.Kind)
+		} else {
+			return nil, nil
 		}
-		return nil, nil
 	}
 	adapter, ok := s.registry.Lookup(name)
 	if !ok {

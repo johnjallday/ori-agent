@@ -686,7 +686,7 @@ func templateProvenance(template projecttemplates.Template, now time.Time, snaps
 	return &workspace.TemplateProvenance{
 		TemplateID: template.ID, TemplateName: template.Name, Builtin: template.Builtin, Version: version, AppliedAt: now,
 		PluginOwner: template.PluginOwner, UserTemplateOwner: userOwner, DirectoryRequirements: template.DirectoryRequirements,
-		AutomationRecipes: template.AutomationRecipes, CapabilityRequirements: template.CapabilityRequirements,
+		AutomationRecipes: template.AutomationRecipes, IntakeRequirements: template.IntakeRequirements, CapabilityRequirements: template.CapabilityRequirements,
 		Plugins: template.Tools.Plugins, PluginSources: template.Tools.PluginSources,
 		RuntimeRequirements: template.RuntimeRequirements, SetupWizard: template.SetupWizard,
 		AssistantProgram: template.AssistantProgram, GroupRequirement: snapshot,

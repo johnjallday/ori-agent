@@ -1465,7 +1465,7 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 	// Built-ins always record provenance. A user template records it too when it
 	// declares a setup/runtime/program/group contract: without provenance those
 	// reviewed requirements would silently disappear after creation.
-	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && !hasManagedAssistantTeam(tmpl) && snapshot == nil {
+	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && len(tmpl.IntakeRequirements) == 0 && !hasManagedAssistantTeam(tmpl) && snapshot == nil {
 		return ""
 	}
 	prov := newTemplateProvenance(tmpl, snapshot)
@@ -1491,8 +1491,10 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 	if h.templateCapabilityService != nil {
 		registry = h.templateCapabilityService.Registry()
 	}
+	entryAgentName := ""
 	if err := h.workspaceTaskStore.Update(wsID, func(w *agentworkspace.Workspace) error {
 		w.SetTemplateProvenance(prov)
+		entryAgentName = w.EntryAgentName()
 		for _, capability := range tmpl.Capabilities {
 			if registry == nil {
 				return fmt.Errorf("capability registry is unavailable")
@@ -1520,6 +1522,15 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 	}); err != nil {
 		logger.Warn("Failed to persist template provenance and capabilities", logger.Fields{"id": wsID, "template": tmpl.ID, "error": err})
 		return "workspace was created, but blueprint setup is incomplete; retry setup after restoring the capability provider"
+	}
+	if len(tmpl.BundledSkills) > 0 {
+		if h.installBundledSkills == nil || strings.TrimSpace(entryAgentName) == "" {
+			return "workspace was created, but bundled skills could not be installed; review setup after restoring the entry agent"
+		}
+		if err := h.installBundledSkills(entryAgentName, tmpl.BundledSkills); err != nil {
+			logger.Warn("Bundled template skills were not installed", logger.Fields{"id": wsID, "template": tmpl.ID, "error": err})
+			return "workspace was created, but bundled skills need review before setup can continue"
+		}
 	}
 	for _, capability := range tmpl.Capabilities {
 		if _, err := h.templateCapabilityService.Install(workspacecapability.InstallRequest{
@@ -1551,6 +1562,10 @@ func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworksp
 	} else if snapshot != nil && snapshot.SourcePlugin != nil {
 		version = snapshot.SourcePlugin.BlueprintVersion
 	}
+	bundledSkills := make([]agentworkspace.BundledSkillSnapshot, 0, len(tmpl.BundledSkills))
+	for _, skill := range tmpl.BundledSkills {
+		bundledSkills = append(bundledSkills, agentworkspace.BundledSkillSnapshot{Name: skill.Name, Description: skill.Description, Digest: skill.Digest, Text: skill.Text})
+	}
 	provenance := &agentworkspace.TemplateProvenance{
 		TemplateID: tmpl.ID, TemplateName: tmpl.Name, Builtin: tmpl.Builtin, Version: version,
 		AppliedAt: time.Now(), PluginOwner: tmpl.PluginOwner,
@@ -1558,6 +1573,8 @@ func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworksp
 		// registers no watcher, enables no schedule, and grants no capability.
 		DirectoryRequirements:  tmpl.DirectoryRequirements,
 		AutomationRecipes:      tmpl.AutomationRecipes,
+		IntakeRequirements:     tmpl.IntakeRequirements,
+		BundledSkills:          bundledSkills,
 		CapabilityRequirements: tmpl.CapabilityRequirements,
 		Plugins:                tmpl.Tools.Plugins, PluginSources: tmpl.Tools.PluginSources,
 		RuntimeRequirements: tmpl.RuntimeRequirements, SetupWizard: tmpl.SetupWizard,

@@ -1,6 +1,8 @@
 package calendarhttp
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/mail"
@@ -250,11 +252,14 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash := hashMutationPayload(payload)
-	c := h.confirmations.create(gw.UserID, gw.Workspace.ID, gw.Binding.ID, payload.Operation, hash)
+	_ = orihttp.RespondSuccess(w, h.previewMutation(gw, payload))
+}
 
-	_ = orihttp.RespondSuccess(w, mutationPreviewResponse{
-		ConfirmationID:    c.ID,
+func (h *Handler) previewMutation(gw *gatewayContext, payload normalizedMutationPayload) mutationPreviewResponse {
+	hash := hashMutationPayload(payload)
+	confirmation := h.confirmations.create(gw.UserID, gw.Workspace.ID, gw.Binding.ID, payload.Operation, hash)
+	return mutationPreviewResponse{
+		ConfirmationID:    confirmation.ID,
 		Operation:         payload.Operation,
 		CalendarID:        payload.CalendarID,
 		EventID:           payload.EventID,
@@ -266,8 +271,69 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 		Description:       payload.Description,
 		Attendees:         payload.Attendees,
 		NotifiesAttendees: len(payload.Attendees) > 0,
-		ExpiresAt:         c.ExpiresAt,
-	})
+		ExpiresAt:         confirmation.ExpiresAt,
+	}
+}
+
+type ReviewedEventInput struct {
+	EventID     string
+	Title       string
+	Start       time.Time
+	End         time.Time
+	TimeZone    string
+	Location    string
+	Description string
+}
+
+func (h *Handler) IntakeCreateAvailability(ctx context.Context, workspaceID string) (bool, string, error) {
+	gw, err := h.resolveGateway(ctx, strings.TrimSpace(workspaceID))
+	if err != nil {
+		return false, "Connect a calendar in this workspace to add these.", nil
+	}
+	if _, mapped := gw.Mapping.Operation(calendar.OpCreateEvent); !mapped {
+		return false, "Connect a calendar in this workspace to add these.", nil
+	}
+	return true, "", nil
+}
+
+// PreviewAndConfirmReviewedEvent sends one already-reviewed intake event
+// through the same preview hash, single-use confirmation, mapping, and tool
+// invocation path as the Calendar Ops HTTP flow.
+func (h *Handler) PreviewAndConfirmReviewedEvent(ctx context.Context, workspaceID string, input ReviewedEventInput) (string, error) {
+	gw, err := h.resolveGateway(ctx, strings.TrimSpace(workspaceID))
+	if err != nil {
+		return "", err
+	}
+	calendarID := "primary"
+	if selected := calendar.ReadBindingSettings(gw.Binding.Config).SelectedCalendarIDs; len(selected) > 0 {
+		calendarID = selected[0]
+	}
+	operation := calendar.OpCreateEvent
+	if strings.TrimSpace(input.EventID) != "" {
+		operation = calendar.OpUpdateEvent
+	}
+	req := mutationRequest{WorkspaceID: workspaceID, Operation: operation, CalendarID: calendarID, EventID: strings.TrimSpace(input.EventID), Title: input.Title, StartTime: input.Start.Format(time.RFC3339), EndTime: input.End.Format(time.RFC3339), TimeZone: input.TimeZone, Location: input.Location, Description: input.Description}
+	payload, validationErrs := validateAndNormalizeMutation(req)
+	if len(validationErrs) > 0 {
+		return "", fmt.Errorf("calendar event is invalid: %s", strings.Join(validationErrs, "; "))
+	}
+	op, mapped := gw.Mapping.Operation(payload.Operation)
+	if !mapped {
+		return "", fmt.Errorf("the %s operation is not mapped for this connector", payload.Operation)
+	}
+	preview := h.previewMutation(gw, payload)
+	hash := hashMutationPayload(payload)
+	if _, err := h.confirmations.consume(preview.ConfirmationID, gw.UserID, gw.Workspace.ID, gw.Binding.ID, payload.Operation, hash); err != nil {
+		return "", err
+	}
+	response, invokeErr := h.invokeConfirmedMutation(ctx, gw, payload, op)
+	if invokeErr != nil {
+		return "", invokeErr
+	}
+	if !response.Success {
+		return "", errors.New(response.Error)
+	}
+	return response.EventID, nil
 }
 
 type mutationConfirmResponse struct {
@@ -324,27 +390,28 @@ func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = c // validated; the invocation below uses gw/payload/op directly.
 
-	args, err := buildMutationArguments(payload, op)
+	resp, err := h.invokeConfirmedMutation(r.Context(), gw, payload, op)
 	if err != nil {
 		orihttp.InternalError(w, "failed to build connector arguments: "+err.Error())
 		return
 	}
+	_ = orihttp.RespondSuccess(w, resp)
+}
 
-	call := h.toolCallerFor(gw.Binding.ServerName)
-	result, callErr := call(r.Context(), op.Tool, args)
+// invokeConfirmedMutation is the one calendar write path used after a
+// confirmation has been consumed, by both the HTTP Confirm endpoint and the
+// reviewed Blueprint Intake adapter.
+func (h *Handler) invokeConfirmedMutation(ctx context.Context, gw *gatewayContext, payload normalizedMutationPayload, op agentworkspace.OperationMapping) (mutationConfirmResponse, error) {
+	args, err := buildMutationArguments(payload, op)
+	if err != nil {
+		return mutationConfirmResponse{}, err
+	}
+	result, callErr := h.toolCallerFor(gw.Binding.ServerName)(ctx, op.Tool, args)
 	h.cache.invalidateBinding(gw.Binding.ID)
 	if callErr != nil {
-		_ = orihttp.RespondSuccess(w, mutationConfirmResponse{Success: false, Error: callErr.Error()})
-		return
+		return mutationConfirmResponse{Success: false, Error: callErr.Error()}, nil
 	}
-
 	resp := mutationConfirmResponse{Success: true, EventID: payload.EventID}
-	// Best-effort: if the mapping declares Fields for this write operation
-	// (not required -- see calendar.ValidateMapping, which only requires
-	// Arguments for writes), extract the connector's response so the
-	// frontend can open the created/updated event directly (task 5.7,
-	// "open the returned/updated event when possible") instead of forcing a
-	// fresh fetch.
 	if len(op.Fields) > 0 {
 		evt := calendar.SanitizeEvent(calendar.ApplyEvent(result, op))
 		if evt.ID != "" {
@@ -354,7 +421,7 @@ func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	_ = orihttp.RespondSuccess(w, resp)
+	return resp, nil
 }
 
 // buildMutationArguments maps a normalized mutation payload onto the mapped

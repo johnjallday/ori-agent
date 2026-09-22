@@ -793,6 +793,13 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { status: { applies: false } });
       return;
     }
+    // Blueprint Intake's Command-view status check also mounts on every
+    // workspace page. This fixture has no intake provenance or pending proposal,
+    // so its canonical empty response keeps the screenshot unchanged.
+    if (/^\/api\/workspaces\/[^/]+\/blueprint-intakes\/pending$/.test(url.pathname)) {
+      await json(route, { proposals: [] });
+      return;
+    }
     // Generic plugin capability and surface catalogs are likewise asked for
     // on every workspace page. This fixture has neither, so both stay empty.
     if (/^\/api\/workspaces\/[^/]+\/capabilities$/.test(url.pathname)) {

@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/blueprintintake"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -94,6 +95,24 @@ var ErrInvalidCapabilityRequirements = errors.New("invalid capability requiremen
 // drift apart. This file owns the authoring rules: see
 // normalizeCapabilityRequirements / validateCapabilityRequirements.
 type CapabilityRequirement = workspace.CapabilityRequirement
+
+// IntakeRequirement is the inert intake declaration shared with the workspace
+// snapshot. Its fail-closed authoring rules live in internal/blueprintintake.
+type IntakeRequirement = workspace.IntakeRequirement
+
+func cloneIntakeRequirements(requirements []IntakeRequirement) []IntakeRequirement {
+	if len(requirements) == 0 {
+		return nil
+	}
+	out := make([]IntakeRequirement, 0, len(requirements))
+	for _, requirement := range requirements {
+		copy := requirement
+		copy.AcceptedExtensions = append([]string(nil), requirement.AcceptedExtensions...)
+		copy.ProposalKinds = append([]string(nil), requirement.ProposalKinds...)
+		out = append(out, copy)
+	}
+	return out
+}
 
 // validateCapabilityRequirements enforces authoring-save invariants on a raw
 // (pre-normalization) edit: every key must be non-blank and unique, and every
@@ -361,6 +380,10 @@ type Template struct {
 	// this template binds (apply-if-present). Names only — bound in the
 	// workspace-creation layer, not here.
 	Tools ToolDefaults `json:"tools"`
+	// BundledSkills are declared tools.skills entries supplied by this template's
+	// skills/<name>/SKILL.md. Text stays server-side until trust review.
+	BundledSkills      []BundledSkill `json:"bundled_skills,omitempty"`
+	BundledSkillsError string         `json:"bundled_skills_error,omitempty"`
 	// Agents is the ordered set of reusable agents a workspace attaches from
 	// this template. The first becomes that workspace's primary routing agent;
 	// the rest are workspace specialists. Carried as data only; global agent
@@ -382,6 +405,10 @@ type Template struct {
 	// AutomationRecipes are the watchers/daily runs to install once the matching
 	// directory requirement has been confirmed. Inert until setup completes.
 	AutomationRecipes []AutomationRecipe `json:"automation_recipes,omitempty"`
+	// IntakeRequirements declare material the user may provide and the already
+	// declared skill that interprets it. Invalid declarations fail closed.
+	IntakeRequirements      []IntakeRequirement `json:"intake_requirements,omitempty"`
+	IntakeRequirementsError string              `json:"intake_requirements_error,omitempty"`
 	// RuntimeRequirements is the optional, versioned operating-mode/runtime
 	// contract this blueprint declares. It contains inert labels, stable keys,
 	// references, and compiled adapter IDs only. An unusable declaration yields
@@ -500,6 +527,16 @@ func (t Template) HasInvalidSetupWizard() bool {
 	return strings.TrimSpace(t.SetupWizardError) != ""
 }
 
+// HasInvalidIntakeRequirements reports a declared intake_requirements block
+// that could not be understood or resolved against this manifest.
+func (t Template) HasInvalidIntakeRequirements() bool {
+	return strings.TrimSpace(t.IntakeRequirementsError) != ""
+}
+
+func (t Template) HasInvalidBundledSkills() bool {
+	return strings.TrimSpace(t.BundledSkillsError) != ""
+}
+
 // HasAssistantProgram reports whether the template carries a usable declaration.
 func (t Template) HasAssistantProgram() bool {
 	return t.AssistantProgram != nil
@@ -593,6 +630,9 @@ type manifest struct {
 	Capabilities           []CapabilityInstall     `json:"capabilities,omitempty"`
 	DirectoryRequirements  []DirectoryRequirement  `json:"directory_requirements,omitempty"`
 	AutomationRecipes      []AutomationRecipe      `json:"automation_recipes,omitempty"`
+	// IntakeRequirements is isolated so one malformed block leaves the
+	// blueprint visible with a diagnostic while creation remains blocked.
+	IntakeRequirements json.RawMessage `json:"intake_requirements,omitempty"`
 	// RuntimeRequirements is raw for the same fail-closed isolation as the
 	// setup wizard below: one malformed runtime block must not erase unrelated
 	// blueprint identity, files, tasks, or agents.
@@ -681,12 +721,29 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if m.Tools != nil {
 		t.Tools = normalizeToolDefaults(*m.Tools)
 	}
+	bundledSkills, bundledSkillsErr := loadBundledSkills(t.Path, t.Tools.Skills)
+	t.BundledSkills = bundledSkills
+	if bundledSkillsErr != nil {
+		t.BundledSkills = nil
+		t.BundledSkillsError = bundledSkillsErr.Error()
+	}
 	t.Agents = normalizeAgentSpecs(m.Agents)
 	t.CapabilityRequirements = normalizeCapabilityRequirements(m.CapabilityRequirements)
 	capabilities, capabilityWarnings := normalizeCapabilityInstallsWithCatalog(m.Capabilities, catalog)
 	t.Capabilities = capabilities
 	t.DirectoryRequirements = normalizeDirectoryRequirements(m.DirectoryRequirements)
 	t.AutomationRecipes = normalizeAutomationRecipes(m.AutomationRecipes, t.DirectoryRequirements)
+	intakeRequirements, intakeRequirementsErr := blueprintintake.ParseRequirements(m.IntakeRequirements, t.Tools.Skills, t.DirectoryRequirements)
+	t.IntakeRequirements = intakeRequirements
+	if intakeRequirementsErr != nil {
+		t.IntakeRequirements = nil
+		t.IntakeRequirementsError = intakeRequirementsErr.Error()
+	} else if inputsErr == nil {
+		if err := ValidateURLInputIntakes(t.Inputs, intakeRequirements); err != nil {
+			t.Inputs = nil
+			t.InputsError = err.Error()
+		}
+	}
 	runtimeRequirements, runtimeRequirementsErr := normalizeRuntimeRequirementsWithCatalog(m.RuntimeRequirements, catalog)
 	if runtimeRequirementsErr == nil {
 		runtimeRequirementsErr = validateRuntimeStarterTaskReferences(t.StarterTasks, runtimeRequirements)
@@ -700,7 +757,7 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	// The wizard is resolved last: its steps may only reference requirements
 	// this same manifest declares, so every other declaration must be
 	// normalized first.
-	setupWizard, setupWizardErr := normalizeSetupWizard(m.SetupWizard, templateSetupWizardScope(t.DirectoryRequirements, t.AutomationRecipes, t.CapabilityRequirements, t.Tools.Plugins, t.RuntimeRequirements))
+	setupWizard, setupWizardErr := normalizeSetupWizard(m.SetupWizard, templateSetupWizardScope(t.DirectoryRequirements, t.AutomationRecipes, t.CapabilityRequirements, t.Tools.Plugins, t.IntakeRequirements, t.RuntimeRequirements))
 	t.SetupWizard = setupWizard
 	t.SetupQuestID = strings.TrimSpace(m.SetupQuestID)
 	assistantProgram, assistantProgramErr := normalizeAssistantProgram(m.AssistantProgram)
@@ -782,6 +839,12 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if setupWizardErr != nil {
 		t.SetupWizardError = setupWizardErr.Error()
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json setup_wizard is unusable and blocks workspace creation: %v", setupWizardErr))
+	}
+	if intakeRequirementsErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json intake_requirements is unusable and blocks workspace creation: %v", intakeRequirementsErr))
+	}
+	if bundledSkillsErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("bundled skills are unusable and block workspace creation: %v", bundledSkillsErr))
 	}
 	if assistantProgramErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json assistant_program is unusable and blocks workspace creation: %v", assistantProgramErr))
@@ -889,7 +952,7 @@ func hasSkeletonFiles(dir string) bool {
 		// not scaffolded as project content. A template carrying only a
 		// dashboard is still metadata-only, and must not start creating an
 		// otherwise empty project folder.
-		if entry.Name() == DashboardDirName && entry.IsDir() {
+		if (entry.Name() == DashboardDirName || entry.Name() == "skills") && entry.IsDir() {
 			continue
 		}
 		return true

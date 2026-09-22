@@ -33,6 +33,13 @@ func (o UserTemplateOwner) Clone() UserTemplateOwner { return o }
 
 // AssistantSetupCreation records the reviewed coordinator operation that
 // created this workspace. It is portable inert identity evidence only.
+type BundledSkillSnapshot struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Digest      string `json:"digest"`
+	Text        string `json:"text"`
+}
+
 type AssistantSetupCreation struct {
 	RunID        string `json:"run_id"`
 	OperationID  string `json:"operation_id"`
@@ -69,6 +76,12 @@ type TemplateProvenance struct {
 	// install once the matching directory is confirmed. Recording one installs
 	// nothing: no watcher is registered and no schedule is enabled here.
 	AutomationRecipes []AutomationRecipe `json:"automation_recipes,omitempty"`
+	// IntakeRequirements are the normalized intake declarations captured at
+	// creation. Later edits to the source template cannot change them.
+	IntakeRequirements []IntakeRequirement `json:"intake_requirements,omitempty"`
+	// BundledSkills are inert exact-text snapshots awaiting entry-agent trust
+	// review. Recording them neither trusts nor enables a skill.
+	BundledSkills []BundledSkillSnapshot `json:"bundled_skills,omitempty"`
 	// CapabilityRequirements are the abstract capabilities (e.g. "calendar")
 	// the template needs connected. Recorded unresolved: no connector is
 	// chosen, authorized, or bound here.
@@ -146,6 +159,8 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 	}
 	dst.DirectoryRequirements = cloneDirectoryRequirements(src.DirectoryRequirements)
 	dst.AutomationRecipes = cloneAutomationRecipes(src.AutomationRecipes)
+	dst.IntakeRequirements = cloneIntakeRequirements(src.IntakeRequirements)
+	dst.BundledSkills = append([]BundledSkillSnapshot(nil), src.BundledSkills...)
 	dst.CapabilityRequirements = cloneCapabilityRequirements(src.CapabilityRequirements)
 	dst.Plugins = append([]string(nil), src.Plugins...)
 	dst.PluginSources = clonePluginSources(src.PluginSources)

@@ -301,6 +301,10 @@
     switch (step?.kind) {
       case 'directory':
         return 'Choose a folder';
+      case 'intake':
+        return 'Add materials';
+      case 'intake_review':
+        return 'Review proposed items';
       case 'automation_review':
         return 'Review automation';
       case 'capability_connect':

@@ -157,12 +157,18 @@ type StepStatus struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	// Directory/Capability/Plugin echo the requirement the step references, so
 	// the dialog can label it without re-reading the template.
-	DirectoryLabel        string `json:"directory_label,omitempty"`
-	DirectorySuggest      string `json:"directory_suggested_path,omitempty"`
-	DirectoryAccess       string `json:"directory_access_disclosure,omitempty"`
-	CapabilityKey         string `json:"capability_key,omitempty"`
-	RuntimeRequirementKey string `json:"runtime_requirement_key,omitempty"`
-	PluginName            string `json:"plugin_name,omitempty"`
+	DirectoryLabel        string   `json:"directory_label,omitempty"`
+	DirectorySuggest      string   `json:"directory_suggested_path,omitempty"`
+	DirectoryAccess       string   `json:"directory_access_disclosure,omitempty"`
+	IntakeKey             string   `json:"intake_key,omitempty"`
+	IntakeLabel           string   `json:"intake_label,omitempty"`
+	IntakeAccept          []string `json:"intake_accepted_extensions,omitempty"`
+	IntakeFiles           bool     `json:"intake_files,omitempty"`
+	IntakeURL             bool     `json:"intake_url,omitempty"`
+	IntakeDirectoryKey    string   `json:"intake_directory_key,omitempty"`
+	CapabilityKey         string   `json:"capability_key,omitempty"`
+	RuntimeRequirementKey string   `json:"runtime_requirement_key,omitempty"`
+	PluginName            string   `json:"plugin_name,omitempty"`
 }
 
 // Ready reports whether every required step currently passes.
@@ -845,6 +851,14 @@ func (s *Service) status(workspaceID string, resolved resolvedWizard, progress *
 			projected.DirectoryLabel = request.Directory.Label
 			projected.DirectorySuggest = request.Directory.SuggestedPath
 			projected.DirectoryAccess = request.Directory.AccessDisclosure
+		}
+		if request.Intake != nil {
+			projected.IntakeKey = request.Intake.Key
+			projected.IntakeLabel = request.Intake.Label
+			projected.IntakeAccept = append([]string(nil), request.Intake.AcceptedExtensions...)
+			projected.IntakeFiles = request.Intake.Sources.Files
+			projected.IntakeURL = request.Intake.Sources.URL
+			projected.IntakeDirectoryKey = request.Intake.Sources.DirectoryKey
 		}
 		if request.Capability != nil {
 			projected.CapabilityKey = request.Capability.Key

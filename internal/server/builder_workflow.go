@@ -554,6 +554,9 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	if fn := b.buildRuntimeTaskToolFactory(); fn != nil {
 		b.taskHandler.SetRuntimeTaskToolFactory(fn)
 	}
+	if b.blueprintIntakeWorkflow != nil {
+		b.blueprintIntakeWorkflow.SetTaskExecutor(b.taskHandler)
+	}
 
 	taskRunner := b.directTaskRunner()
 	taskExecutionHandler := taskRunner
@@ -928,6 +931,7 @@ func (b *ServerBuilder) initializeTriggerService(opportunityStore workspace.Oppo
 	// The Janitor's watcher and daily catch-up need the trigger service, so
 	// they are wired here rather than at handler-construction time.
 	b.wireFileJanitorAutomation()
+	b.wireBlueprintReintake()
 	// Note: b.server.Handlers is rebuilt after this phase, so the handler is
 	// attached to the facade in finalizeHandlers (alongside ActionCenter),
 	// not here.

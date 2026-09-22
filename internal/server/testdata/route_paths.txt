@@ -270,6 +270,17 @@
 /api/workspaces/x/agents/x
 /api/workspaces/x/attachments
 /api/workspaces/x/attachments/x
+/api/workspaces/x/blueprint-intakes/materials
+/api/workspaces/x/blueprint-intakes/materials/consent
+/api/workspaces/x/blueprint-intakes/materials/proposal
+/api/workspaces/x/blueprint-intakes/materials/proposal/apply
+/api/workspaces/x/blueprint-intakes/materials/proposal/skip
+/api/workspaces/x/blueprint-intakes/materials/run
+/api/workspaces/x/blueprint-intakes/materials/run/cancel
+/api/workspaces/x/blueprint-intakes/materials/skill/trust
+/api/workspaces/x/blueprint-intakes/materials/sources/files
+/api/workspaces/x/blueprint-intakes/materials/sources/folder
+/api/workspaces/x/blueprint-intakes/materials/sources/links
 /api/workspaces/x/canvas/store-nodes
 /api/workspaces/x/canvas/store-nodes/x
 /api/workspaces/x/directories

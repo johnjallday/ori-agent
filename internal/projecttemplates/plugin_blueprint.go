@@ -65,7 +65,7 @@ func LoadPluginBlueprint(manifestPath, skeletonRoot string, catalog RuntimeCatal
 	template.Builtin = false
 	template.BuiltinVersion = 0
 	template.HasSkeleton = files > 0
-	if template.RuntimeRequirementsError != "" || template.SetupWizardError != "" ||
+	if template.RuntimeRequirementsError != "" || template.SetupWizardError != "" || template.IntakeRequirementsError != "" ||
 		template.AssistantProgramError != "" || template.AssistantProjectError != "" || template.ProjectConnectionError != "" ||
 		template.GroupRequirementError != "" || template.StandaloneCompositionError != "" ||
 		template.InputsError != "" ||

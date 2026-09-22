@@ -341,7 +341,11 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 	// nothing).
 	compactPrompt := provider.Type() == llm.ProviderTypeLocal
 	taskSystemPrompt := h.buildTaskSystemPrompt(compactPrompt)
-	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, ag.EffectiveSkills)
+	effectiveSkills := ag.EffectiveSkills
+	if len(task.RuntimeSkillPrompts) > 0 {
+		effectiveSkills = task.RuntimeSkillPrompts
+	}
+	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, effectiveSkills)
 	if resolvedBase, hadVars := h.resolveTaskAgentBasePrompt(ctx, ag, agentName, task); hadVars {
 		// The author wrote a variable-bearing base prompt, so a parametric persona
 		// is meant to apply here too: lead the task prompt with the resolved
@@ -359,6 +363,10 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 	// Convert agent tools (MCP + workspace) to LLM format. Needed before budgeting
 	// because tool schemas consume the context window too.
 	tools := h.convertAgentToolsToLLMTools(ag, task)
+	if task.DisableTools {
+		tools = nil
+		taskSystemPrompt += "\n\nThis is a host-owned read-and-transform run. No tools are available. Return only the requested structured result and do not claim to have changed any record."
+	}
 	if task.RuntimeExecution != nil && task.RuntimeExecution.DisableTools {
 		tools = nil
 		taskSystemPrompt += "\n\nThis run is an explicitly confirmed file-only fallback. The current directory is a confined staging folder containing only the authoritative project file. Edit only that existing file, create no other files, and describe the result as a project-file change—not a verified live-session change."
@@ -471,7 +479,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	tools []llm.Tool,
 ) (string, error) {
 	conversation := append([]llm.Message(nil), messages...)
-	if task.RuntimeExecution != nil && task.RuntimeExecution.DisableTools {
+	if task.DisableTools || (task.RuntimeExecution != nil && task.RuntimeExecution.DisableTools) {
 		tools = nil
 	}
 	var lastToolSummary string
@@ -954,6 +962,16 @@ func buildToolResultsSummary(content string, toolResults []toolCallResult) strin
 	}
 
 	return strings.TrimSpace(resultBuilder.String())
+}
+
+// ResolveProviderName returns the provider the ordinary task path would use
+// for one configured provider/model pair. Host-owned consent surfaces use it
+// so the provider they name matches the one task execution will contact.
+func (h *LLMTaskHandler) ResolveProviderName(configuredProvider, model string) string {
+	if h == nil {
+		return ""
+	}
+	return h.getProviderForAgent(configuredProvider, model)
 }
 
 // Provider-selection helpers (normalizeProviderName, isClaudeFamilyModel,

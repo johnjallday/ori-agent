@@ -457,6 +457,7 @@ func cloneTemplate(source Template) Template {
 	clone.Capabilities = append([]CapabilityInstall(nil), source.Capabilities...)
 	clone.DirectoryRequirements = normalizeDirectoryRequirements(source.DirectoryRequirements)
 	clone.AutomationRecipes = normalizeAutomationRecipes(source.AutomationRecipes, clone.DirectoryRequirements)
+	clone.IntakeRequirements = cloneIntakeRequirements(source.IntakeRequirements)
 	clone.RuntimeRequirements = workspace.CloneRuntimeRequirementsContract(source.RuntimeRequirements)
 	clone.SetupWizard = workspace.CloneSetupWizard(source.SetupWizard)
 	clone.AssistantProgram = workspace.CloneAssistantProgramDeclaration(source.AssistantProgram)

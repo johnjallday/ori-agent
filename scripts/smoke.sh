@@ -2451,6 +2451,91 @@ print(json.dumps({
 }, indent=2))'
 }
 
+# smoke_blueprint_intake imports the repository's eligible fixture through the
+# public API, creates a workspace from it, and verifies both the immutable
+# declaration snapshot and the compiled setup-wizard step. It intentionally
+# remains provider-independent. When given a folder, it drives the real native
+# picker and verifies immediate-file collection through a scoped token.
+smoke_blueprint_intake() {
+  local folder="${1:-}" root fixture imported template_id created ws status name
+  root="$(cd "$(dirname "$0")/.." && pwd -P)"
+  fixture="$root/examples/blueprints/course"
+  [[ -f "$fixture/template.json" ]] || fail "blueprint intake fixture is missing: $fixture"
+  name="Blueprint Intake Smoke $(date +%s)-$$"
+
+  echo "--- Blueprint Intake declaration smoke ($BASE_URL) ---"
+  imported=$(curl -sf -X POST "$BASE_URL/api/project-templates/import" \
+    -H 'Content-Type: application/json' -H "Origin: $BASE_URL" \
+    -d "$(FIXTURE="$fixture" NAME="$name" python3 -c 'import json,os; print(json.dumps({"path":os.environ["FIXTURE"],"name":os.environ["NAME"]}))')") ||
+    fail "could not import the intake-eligible fixture"
+  template_id=$(echo "$imported" | json_field template.id)
+  [[ -n "$template_id" ]] || fail "template import returned no id: $imported"
+  echo "ok   imported fixture as $template_id"
+
+  created=$(curl -sf -X POST "$BASE_URL/api/workspaces" \
+    -H 'Content-Type: application/json' -H "Origin: $BASE_URL" \
+    -d "$(TEMPLATE_ID="$template_id" NAME="$name" python3 -c 'import json,os; print(json.dumps({"name":os.environ["NAME"],"template_id":os.environ["TEMPLATE_ID"],"create_template_agents":True}))')") ||
+    fail "could not create a workspace from $template_id"
+  ws=$(echo "$created" | workspace_id)
+  [[ -n "$ws" ]] || fail "workspace creation returned no id: $created"
+  echo "ok   created workspace $ws"
+
+  status=$(curl -sf "$BASE_URL/api/workspaces/$ws/setup-wizard") || fail "could not read setup wizard for $ws"
+  STATUS="$status" python3 - "$fixture/template.json" <<'PY'
+import json, os, sys
+with open(sys.argv[1]) as f:
+    expected = json.load(f)["intake_requirements"][0]
+status = json.loads(os.environ["STATUS"])
+status = status.get("setup", status)
+steps = [step for step in status.get("steps", []) if step.get("id") == "materials"]
+if len(steps) != 1:
+    raise SystemExit("FAIL: expected exactly one materials wizard step")
+step = steps[0]
+checks = {
+    "kind": "intake",
+    "intake_key": expected["key"],
+    "intake_label": expected["label"],
+    "intake_files": expected["sources"]["files"],
+    "intake_url": expected["sources"]["url"],
+    "intake_directory_key": expected["sources"]["directory_key"],
+    "intake_accepted_extensions": expected["accepted_extensions"],
+}
+for key, want in checks.items():
+    if step.get(key) != want:
+        raise SystemExit(f"FAIL: wizard step {key}={step.get(key)!r}, want {want!r}")
+print("ok   setup wizard compiled the intake step with the workspace's copied declaration")
+PY
+
+  if [[ -n "$folder" ]]; then
+    [[ -d "$folder" ]] || fail "blueprint intake folder does not exist: $folder"
+    local picker_result picker_pid token added
+    curl -sf -X POST "$BASE_URL/api/workspaces/$ws/blueprint-intakes/course-materials/consent" \
+      -H 'Content-Type: application/json' -H "Origin: $BASE_URL" >/dev/null || fail "could not accept intake consent"
+    picker_result=$(mktemp "${TMPDIR:-/tmp}/ori-intake-picker.XXXXXX")
+    curl -sf -X POST "$BASE_URL/api/folder-picker/select-path" \
+      -H 'Content-Type: application/json' \
+      -d "$(WS="$ws" python3 -c 'import json,os; print(json.dumps({"workspace_id":os.environ["WS"],"title":"Choose course materials"}))')" \
+      >"$picker_result" &
+    picker_pid=$!
+    smoke_pick_folder pick-folder "$folder" || { kill "$picker_pid" 2>/dev/null || true; fail "could not drive the native folder picker"; }
+    wait "$picker_pid" || fail "folder picker request failed"
+    token=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("selection_token", ""))' "$picker_result")
+    rm -f "$picker_result"
+    [[ -n "$token" ]] || fail "folder picker returned no scoped selection token"
+    added=$(curl -sf -X POST "$BASE_URL/api/workspaces/$ws/blueprint-intakes/course-materials/sources/folder" \
+      -H 'Content-Type: application/json' -H "Origin: $BASE_URL" \
+      -d "$(TOKEN="$token" python3 -c 'import json,os; print(json.dumps({"selection_token":os.environ["TOKEN"]}))')") || fail "could not add selected intake folder"
+    ADDED="$added" python3 - <<'PY'
+import json, os
+result = json.loads(os.environ["ADDED"])
+if not result.get("folder"):
+    raise SystemExit("FAIL: folder source response is missing its folder")
+print(f"ok   selected folder added with {len(result.get('files', []))} immediate file result(s); {result.get('omitted', 0)} omitted")
+PY
+  fi
+  echo "PASS blueprint intake declaration smoke"
+}
+
 # smoke_agent_files prints, for one agent in a demo sandbox, the modification
 # time and a short sha256 of its definition file and of its runtime state file,
 # so a before/after pair shows exactly which of the two a step rewrote. The
@@ -2671,6 +2756,7 @@ folder-checksum) smoke_folder_checksum "$@" ;;
 pick-folder) smoke_pick_folder "$@" ;;
 import-folder) smoke_import_folder "$@" ;;
 blueprint-details) smoke_blueprint_details "$@" ;;
+blueprintintake | blueprint-intake) smoke_blueprint_intake "${3:-}" ;;
 starter) smoke_starter "$@" ;;
 meetassistant) smoke_meet_assistant "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
@@ -2719,6 +2805,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 meetassistant <base-url> <stage>      # Mission 01: onboard | status | hire [name] | demo <stage>" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
   echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2
+  echo "  $0 blueprintintake <base-url> [folder]   # import Course; verify intake, optionally choose a folder via native picker" >&2
   echo "  $0 agent-type-api <base-url>             # retired agent type: API accepts and never echoes it" >&2
   echo "  $0 agent-type-strip [port]               # retired agent type: boot strips it from a seeded sandbox" >&2
   echo "  $0 agentseed <base-url> [sandbox-name]   # fill a sandbox with a demo agent roster" >&2

@@ -130,6 +130,17 @@ func TestDeriveInvalidManifestGuidanceFollowsOwnership(t *testing.T) {
 	}
 }
 
+func TestDeriveInvalidIntakeRequirementsBlockCreation(t *testing.T) {
+	got := Derive(projecttemplates.Template{
+		ID: "course", Name: "Course",
+		IntakeRequirementsError: "invalid intake requirements: skill is not declared in tools.skills",
+	}, Sources{})
+	assertReadiness(t, got, StateUnavailable, OwnershipUser, ReasonManifestInvalid)
+	if got.Creatable() || !strings.Contains(got.Diagnostic, "intake requirements") {
+		t.Fatalf("invalid intake readiness = %+v", got)
+	}
+}
+
 func TestDeriveGroupAndVariantStatesFailClosed(t *testing.T) {
 	invalid := Derive(projecttemplates.Template{
 		ID: "invalid-group", Name: "Invalid group",
@@ -199,6 +210,18 @@ func TestDeriveRechecksHostReferencesAgainstTheRunningRegistries(t *testing.T) {
 
 	present := Derive(template, Sources{Catalog: stubCatalog{capabilities: map[string]bool{"file-janitor": true}}})
 	assertReadiness(t, present, StateReady, OwnershipUser, ReasonNone)
+}
+
+func TestDerivePluginIntakeRequiresDeclaredHostFeature(t *testing.T) {
+	installed := withBlueprint(installedPlugin("course-plugin", true), "course")
+	template := pluginOwnedTemplate("course-plugin", "course")
+	template.IntakeRequirements = []workspace.IntakeRequirement{{Key: "materials"}}
+	sources := Sources{Installed: []plugin.InstalledPlugin{installed}, ShippedBuiltin: shippedIDs()}
+	got := Derive(template, sources)
+	assertReadiness(t, got, StateActionRequired, OwnershipPlugin, ReasonPluginUpdateRequired)
+	installed.WorkspaceSurfaces.RequiresHostFeatures = []string{plugin.HostFeatureBlueprintIntakeV1}
+	got = Derive(template, Sources{Installed: []plugin.InstalledPlugin{installed}, ShippedBuiltin: shippedIDs()})
+	assertReadiness(t, got, StateReady, OwnershipPlugin, ReasonNone)
 }
 
 func TestDeriveDeclaredPluginDependencyStates(t *testing.T) {

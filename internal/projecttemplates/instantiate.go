@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/skills"
 	workspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -101,6 +102,34 @@ func (values templateTokenValues) substitute(name string) string {
 // InstantiationResult carries the fatal scaffold result separately from the
 // optional project-entry warning. A project can be fully created even when its
 // declared entry file cannot be verified.
+type BundledSkillInstaller interface {
+	BundledSkillMatches(agentName, skillName, text string) (bool, error)
+	GetSkill(agentName, skillName string) (*skills.Skill, bool, error)
+	InstallBundledSkill(agentName, skillName, text string, replace bool) error
+}
+
+// InstallBundledSkills installs non-colliding template skills into the entry
+// agent as disabled and untrusted. Same-content skills are reused; different
+// content stays untouched for the explicit collision review.
+func InstallBundledSkills(installer BundledSkillInstaller, agentName string, bundled []BundledSkill) error {
+	for _, candidate := range bundled {
+		if matches, err := installer.BundledSkillMatches(agentName, candidate.Name, candidate.Text); err != nil {
+			return err
+		} else if matches {
+			continue
+		}
+		if _, found, err := installer.GetSkill(agentName, candidate.Name); err != nil {
+			return err
+		} else if found {
+			continue
+		}
+		if err := installer.InstallBundledSkill(agentName, candidate.Name, candidate.Text, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type InstantiationResult struct {
 	ProjectPath      string
 	ProjectEntryPath string
@@ -124,7 +153,7 @@ func PreviewInstantiation(template Template, projectName string) ([]string, erro
 		if relative == "." || relative == ManifestFileName {
 			return nil
 		}
-		if relative == DashboardDirName && entry.IsDir() {
+		if (relative == DashboardDirName || relative == "skills") && entry.IsDir() {
 			return fs.SkipDir
 		}
 		if entry.Type()&fs.ModeSymlink != 0 || entry.IsDir() {
@@ -204,7 +233,13 @@ func planInputSubstitution(tpl Template, provided map[string]json.RawMessage) (*
 	for _, relative := range tpl.Inputs.ApplyTo {
 		files[relative] = struct{}{}
 	}
-	return &inputSubstitution{files: files, values: values}, nil
+	substitutionValues := make(map[string]string, len(values))
+	for _, field := range tpl.Inputs.Fields {
+		if field.Type == InputFieldNumber || field.Type == InputFieldSelect {
+			substitutionValues[field.ID] = values[field.ID]
+		}
+	}
+	return &inputSubstitution{files: files, values: substitutionValues}, nil
 }
 
 func (substitution *inputSubstitution) appliesTo(relPath string) bool {
@@ -299,7 +334,7 @@ func copyTemplateTree(templatePath, destRoot string, values templateTokenValues,
 		// The dashboard is installed into the workspace folder's .ori sidecar
 		// by InstallDashboard. Copying it here as well would put a second,
 		// unreachable copy inside the project folder.
-		if relPath == DashboardDirName && d.IsDir() {
+		if (relPath == DashboardDirName || relPath == "skills") && d.IsDir() {
 			return fs.SkipDir
 		}
 		// Symlinks are skipped in v1: copying the pointer would smuggle in

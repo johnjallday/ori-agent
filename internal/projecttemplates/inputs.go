@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -19,20 +20,12 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-// The inputs declaration lets a blueprint ask the user for a handful of typed
-// values at creation time and place them into files it already ships.
-//
-// Two properties keep it safe, and both are enforced here rather than at the
-// point of use:
-//
-//   - There is no free-text field type. Every value a user can supply is either
-//     a number inside a declared range or one of a fixed list of option values,
-//     so no user input can ever introduce arbitrary bytes into a scaffolded
-//     file.
-//   - Substitution reaches only the files the blueprint listed in apply_to, and
-//     only the exact token {{input.<id>}} for an id the blueprint declared.
-//     Every other file in the scaffold stays a byte-for-byte copy, and file and
-//     folder names keep using {{name}}/{{date}} alone.
+// The inputs declaration lets a blueprint ask typed questions at creation.
+// Number and select answers may be substituted only into declared apply_to
+// files. Text and URL answers are setup data: they are never substituted into
+// scaffolded files under any circumstances, even when a manifest lists a file
+// in apply_to. Every other scaffold file stays a byte-for-byte copy, and file
+// and folder names keep using {{name}}/{{date}} alone.
 const (
 	// InputsSchemaVersion is the only declaration version v1 understands.
 	InputsSchemaVersion = 1
@@ -59,12 +52,14 @@ type InputFieldType string
 const (
 	InputFieldNumber InputFieldType = "number"
 	InputFieldSelect InputFieldType = "select"
+	InputFieldText   InputFieldType = "text"
+	InputFieldURL    InputFieldType = "url"
 )
 
 // ErrInvalidInputs reports a declaration that could not be understood. A
-// blueprint carrying one offers no inputs and cannot create a workspace: the
-// author asked for values to be placed into project files, and Ori would
-// otherwise scaffold those files with the tokens still in them.
+// blueprint carrying one offers no inputs and cannot create a workspace.
+// This includes text or URL tokens in apply_to files: those answers are never
+// written into scaffolded files under any circumstances.
 var ErrInvalidInputs = errors.New("invalid inputs declaration")
 
 // ErrInputValue reports a supplied value that the declaration does not allow.
@@ -82,18 +77,20 @@ type InputsDeclaration struct {
 }
 
 // InputField is one question. Number fields carry Min/Max/Step/Unit; select
-// fields carry Options. Default is a float64 for a number and a string for a
-// select, so the API projection is the same shape the manifest declared.
+// fields carry Options; URL fields may name the URL-capable intake they prefill.
+// Defaults are float64 for numbers and strings for the other field types, so
+// the API projection is the same shape the manifest declared.
 type InputField struct {
-	ID      string         `json:"id"`
-	Label   string         `json:"label"`
-	Type    InputFieldType `json:"type"`
-	Unit    string         `json:"unit,omitempty"`
-	Min     float64        `json:"min,omitempty"`
-	Max     float64        `json:"max,omitempty"`
-	Step    float64        `json:"step,omitempty"`
-	Default any            `json:"default"`
-	Options []InputOption  `json:"options,omitempty"`
+	ID        string         `json:"id"`
+	Label     string         `json:"label"`
+	Type      InputFieldType `json:"type"`
+	Unit      string         `json:"unit,omitempty"`
+	Min       float64        `json:"min,omitempty"`
+	Max       float64        `json:"max,omitempty"`
+	Step      float64        `json:"step,omitempty"`
+	Default   any            `json:"default"`
+	Options   []InputOption  `json:"options,omitempty"`
+	IntakeKey string         `json:"intake_key,omitempty"`
 }
 
 // InputOption is one choice of a select field. Value is what reaches the file;
@@ -114,15 +111,16 @@ type rawInputsDeclaration struct {
 }
 
 type rawInputField struct {
-	ID      string           `json:"id"`
-	Label   string           `json:"label"`
-	Type    string           `json:"type"`
-	Unit    *string          `json:"unit,omitempty"`
-	Min     *float64         `json:"min,omitempty"`
-	Max     *float64         `json:"max,omitempty"`
-	Step    *float64         `json:"step,omitempty"`
-	Default json.RawMessage  `json:"default"`
-	Options []rawInputOption `json:"options,omitempty"`
+	ID        string           `json:"id"`
+	Label     string           `json:"label"`
+	Type      string           `json:"type"`
+	Unit      *string          `json:"unit,omitempty"`
+	Min       *float64         `json:"min,omitempty"`
+	Max       *float64         `json:"max,omitempty"`
+	Step      *float64         `json:"step,omitempty"`
+	Default   json.RawMessage  `json:"default"`
+	Options   []rawInputOption `json:"options,omitempty"`
+	IntakeKey *string          `json:"intake_key,omitempty"`
 }
 
 type rawInputOption struct {
@@ -175,7 +173,7 @@ func normalizeInputs(raw json.RawMessage, scaffoldRoot string) (*InputsDeclarati
 	if err != nil {
 		return nil, err
 	}
-	applyTo, err := normalizeInputApplyTo(declared.ApplyTo, scaffoldRoot)
+	applyTo, err := normalizeInputApplyTo(declared.ApplyTo, scaffoldRoot, fields)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +222,9 @@ func normalizeInputField(declared rawInputField) (InputField, error) {
 	field := InputField{ID: id, Label: label, Type: InputFieldType(strings.TrimSpace(declared.Type))}
 	switch field.Type {
 	case InputFieldNumber:
+		if declared.IntakeKey != nil {
+			return InputField{}, fmt.Errorf("%w: number field %q cannot declare intake_key", ErrInvalidInputs, id)
+		}
 		if len(declared.Options) != 0 {
 			return InputField{}, fmt.Errorf("%w: number field %q cannot declare options", ErrInvalidInputs, id)
 		}
@@ -261,7 +262,7 @@ func normalizeInputField(declared rawInputField) (InputField, error) {
 		}
 		field.Min, field.Max, field.Step, field.Default = min, max, step, defaultValue
 	case InputFieldSelect:
-		if declared.Min != nil || declared.Max != nil || declared.Step != nil || declared.Unit != nil {
+		if declared.Min != nil || declared.Max != nil || declared.Step != nil || declared.Unit != nil || declared.IntakeKey != nil {
 			return InputField{}, fmt.Errorf("%w: select field %q cannot declare number bounds or a unit", ErrInvalidInputs, id)
 		}
 		options, err := normalizeInputOptions(id, declared.Options)
@@ -276,6 +277,33 @@ func normalizeInputField(declared rawInputField) (InputField, error) {
 			return InputField{}, fmt.Errorf("%w: select field %q has a default that is not one of its options", ErrInvalidInputs, id)
 		}
 		field.Options, field.Default = options, defaultValue
+	case InputFieldText:
+		if declared.Min != nil || declared.Max != nil || declared.Step != nil || declared.Unit != nil || len(declared.Options) != 0 || declared.IntakeKey != nil {
+			return InputField{}, fmt.Errorf("%w: text field %q can only declare a string default", ErrInvalidInputs, id)
+		}
+		var defaultValue string
+		if err := json.Unmarshal(bytes.TrimSpace(declared.Default), &defaultValue); err != nil || !validInputText(defaultValue) {
+			return InputField{}, fmt.Errorf("%w: text field %q needs a one-line default of at most 200 characters", ErrInvalidInputs, id)
+		}
+		field.Default = defaultValue
+	case InputFieldURL:
+		if declared.Min != nil || declared.Max != nil || declared.Step != nil || declared.Unit != nil || len(declared.Options) != 0 {
+			return InputField{}, fmt.Errorf("%w: url field %q can only declare a string default and optional intake_key", ErrInvalidInputs, id)
+		}
+		var defaultValue string
+		if err := json.Unmarshal(bytes.TrimSpace(declared.Default), &defaultValue); err != nil || !validInputURL(defaultValue) {
+			return InputField{}, fmt.Errorf("%w: url field %q needs an http or https default of at most 2000 characters", ErrInvalidInputs, id)
+		}
+		if declared.IntakeKey != nil {
+			// Intake keys use the intake declaration's normalization, not input-ID
+			// syntax: established keys such as "course-materials" contain hyphens.
+			intakeKey := strings.ToLower(strings.TrimSpace(*declared.IntakeKey))
+			if intakeKey == "" {
+				return InputField{}, fmt.Errorf("%w: url field %q has an invalid intake_key", ErrInvalidInputs, id)
+			}
+			field.IntakeKey = intakeKey
+		}
+		field.Default = defaultValue
 	default:
 		return InputField{}, fmt.Errorf("%w: field %q has unsupported type %q", ErrInvalidInputs, id, declared.Type)
 	}
@@ -313,9 +341,16 @@ func normalizeInputOptions(fieldID string, declared []rawInputOption) ([]InputOp
 // must name an existing regular file inside the scaffold that is small enough
 // and textual enough to rewrite safely; a path that does not is a load error
 // rather than a file quietly skipped at creation time.
-func normalizeInputApplyTo(declared []string, scaffoldRoot string) ([]string, error) {
+func normalizeInputApplyTo(declared []string, scaffoldRoot string, fields []InputField) ([]string, error) {
+	requiresApplyTo := false
+	for _, field := range fields {
+		requiresApplyTo = requiresApplyTo || field.Type == InputFieldNumber || field.Type == InputFieldSelect
+	}
+	if len(declared) == 0 && !requiresApplyTo {
+		return nil, nil
+	}
 	if len(declared) == 0 || len(declared) > maxInputApplyToPaths {
-		return nil, fmt.Errorf("%w: apply_to needs 1-%d paths", ErrInvalidInputs, maxInputApplyToPaths)
+		return nil, fmt.Errorf("%w: apply_to needs 1-%d paths when a number or select field is declared", ErrInvalidInputs, maxInputApplyToPaths)
 	}
 	root := strings.TrimSpace(scaffoldRoot)
 	if root == "" {
@@ -367,9 +402,9 @@ func validateInputApplyToFile(scaffoldRoot, relative string) error {
 // preparing one — but a token no field backs would survive into the created
 // project, so it fails the load and names both the file and the token.
 func validateInputTokens(declaration *InputsDeclaration, scaffoldRoot string) error {
-	declared := make(map[string]struct{}, len(declaration.Fields))
+	declared := make(map[string]InputField, len(declaration.Fields))
 	for _, field := range declaration.Fields {
-		declared[field.ID] = struct{}{}
+		declared[field.ID] = field
 	}
 	for _, relative := range declaration.ApplyTo {
 		absolute := filepath.Join(scaffoldRoot, filepath.FromSlash(relative))
@@ -384,7 +419,7 @@ func validateInputTokens(declaration *InputsDeclaration, scaffoldRoot string) er
 	return validateScaffoldNamesCarryNoInputTokens(scaffoldRoot)
 }
 
-func validateInputTokensIn(content, relative string, declared map[string]struct{}) error {
+func validateInputTokensIn(content, relative string, declared map[string]InputField) error {
 	for offset := 0; ; {
 		index := strings.Index(content[offset:], inputTokenPrefix)
 		if index < 0 {
@@ -395,8 +430,12 @@ func validateInputTokensIn(content, relative string, declared map[string]struct{
 		if match == nil {
 			return fmt.Errorf("%w: %q contains a malformed token at byte %d", ErrInvalidInputs, relative, offset+index)
 		}
-		if _, ok := declared[match[1]]; !ok {
+		field, ok := declared[match[1]]
+		if !ok {
 			return fmt.Errorf("%w: %q uses {{input.%s}}, which no field declares", ErrInvalidInputs, relative, match[1])
+		}
+		if field.Type == InputFieldText || field.Type == InputFieldURL {
+			return fmt.Errorf("%w: %q uses {{input.%s}}, but %s answers are never written into scaffolded files", ErrInvalidInputs, relative, match[1], field.Type)
 		}
 		offset = start + len(match[0])
 	}
@@ -505,6 +544,18 @@ func (field InputField) resolveValue(raw json.RawMessage) (string, error) {
 			return "", fmt.Errorf("%w: %s must be one of %s", ErrInputValue, field.Label, strings.Join(field.optionValues(), ", "))
 		}
 		return value, nil
+	case InputFieldText:
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil || !validInputText(value) {
+			return "", fmt.Errorf("%w: %s must be one line of at most 200 characters", ErrInputValue, field.Label)
+		}
+		return value, nil
+	case InputFieldURL:
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil || !validInputURL(value) {
+			return "", fmt.Errorf("%w: %s must be an http or https URL of at most 2000 characters", ErrInputValue, field.Label)
+		}
+		return value, nil
 	default:
 		return "", fmt.Errorf("%w: %s has an unsupported type", ErrInputValue, field.Label)
 	}
@@ -578,11 +629,13 @@ type StoredBlueprintInputs struct {
 // StoredBlueprintInputValue is one recorded value with the display text that
 // went with it.
 type StoredBlueprintInputValue struct {
-	ID      string `json:"id"`
-	Label   string `json:"label"`
-	Value   string `json:"value"`
-	Unit    string `json:"unit,omitempty"`
-	Display string `json:"display"`
+	ID        string         `json:"id"`
+	Label     string         `json:"label"`
+	Value     string         `json:"value"`
+	Type      InputFieldType `json:"type"`
+	IntakeKey string         `json:"intake_key,omitempty"`
+	Unit      string         `json:"unit,omitempty"`
+	Display   string         `json:"display"`
 }
 
 // BuildStoredBlueprintInputs pairs resolved values with the declaration that
@@ -605,7 +658,7 @@ func BuildStoredBlueprintInputs(declaration *InputsDeclaration, values map[strin
 		}
 		stored.Values[field.ID] = value
 		stored.Fields = append(stored.Fields, StoredBlueprintInputValue{
-			ID: field.ID, Label: field.Label, Value: value, Unit: field.Unit,
+			ID: field.ID, Label: field.Label, Value: value, Type: field.Type, IntakeKey: field.IntakeKey, Unit: field.Unit,
 			Display: field.displayText(value),
 		})
 	}
@@ -632,6 +685,42 @@ func (field InputField) displayText(value string) string {
 		}
 	}
 	return value
+}
+
+func validInputText(value string) bool {
+	return len(value) <= 200 && !strings.ContainsAny(value, "\r\n") && !strings.ContainsFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
+// ValidateURLInputIntakes ensures a URL answer can only prefill an intake that
+// exists in the same immutable template snapshot and explicitly permits links.
+func ValidateURLInputIntakes(declaration *InputsDeclaration, requirements []workspace.IntakeRequirement) error {
+	if declaration == nil {
+		return nil
+	}
+	for _, field := range declaration.Fields {
+		if field.Type != InputFieldURL || field.IntakeKey == "" {
+			continue
+		}
+		found := false
+		for _, requirement := range requirements {
+			if requirement.Key == field.IntakeKey && requirement.Sources.URL {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%w: url field %q names intake_key %q, which must declare a URL source", ErrInvalidInputs, field.ID, field.IntakeKey)
+		}
+	}
+	return nil
+}
+
+func validInputURL(value string) bool {
+	if len(value) > 2000 || strings.ContainsFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return false
+	}
+	parsed, err := url.ParseRequestURI(value)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
 // SetBlueprintInputs records the values on a workspace's shared data. An empty

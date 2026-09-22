@@ -25,6 +25,19 @@ func TestValidateSkillName(t *testing.T) {
 	}
 }
 
+func TestValidateSkillMarkdownBoundsAndChecksFolderName(t *testing.T) {
+	valid := "---\nname: demo-skill\ndescription: Demo\n---\nPrompt"
+	if _, err := ValidateSkillMarkdown(valid, "demo-skill"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateSkillMarkdown(valid, "other-skill"); err == nil {
+		t.Fatal("mismatched folder name was accepted")
+	}
+	if err := validateSkillPrompt(string(make([]byte, MaxSkillFileBytes+1))); err == nil {
+		t.Fatal("oversized prompt was accepted")
+	}
+}
+
 func TestValidateSkillDescription(t *testing.T) {
 	if err := validateSkillDescription("A short description."); err != nil {
 		t.Fatalf("expected description to pass: %v", err)

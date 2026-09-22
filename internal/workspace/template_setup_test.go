@@ -20,6 +20,9 @@ func janitorLikeProvenance() *TemplateProvenance {
 			Watch:        &WatchRecipe{Events: []string{"create", "rename"}, DebounceSeconds: 300, ExcludeSubdirectories: []string{"Filed"}},
 			DailyScan:    &DailyScanRecipe{LocalTime: "09:00"},
 		}},
+		IntakeRequirements: []IntakeRequirement{{
+			Key: "materials", Label: "Materials", Skill: "syllabus", Sources: IntakeSources{Files: true}, ProposalKinds: []string{"ticket"},
+		}},
 	}
 }
 
@@ -35,6 +38,11 @@ func TestTemplateSetupRequirements_CarriedUnresolvedAndSurviveJSON(t *testing.T)
 	// expand "~" or otherwise select a path on the user's behalf.
 	if reqs[0].SuggestedPath != "~/Downloads" {
 		t.Fatalf("suggested path was resolved at creation time: %q", reqs[0].SuggestedPath)
+	}
+
+	intake, ok := ws.TemplateIntakeRequirement(" Materials ")
+	if !ok || intake.Skill != "syllabus" {
+		t.Fatalf("intake requirement not carried: %+v, %v", intake, ok)
 	}
 
 	recipe, ok := ws.TemplateAutomationRecipeFor("Downloads-Root")
@@ -56,8 +64,8 @@ func TestTemplateSetupRequirements_CarriedUnresolvedAndSurviveJSON(t *testing.T)
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if len(back.PendingDirectoryRequirements()) != 1 {
-		t.Fatalf("directory requirements did not survive JSON round-trip: %+v", back.TemplateProvenance)
+	if len(back.PendingDirectoryRequirements()) != 1 || len(back.TemplateIntakeRequirements()) != 1 {
+		t.Fatalf("setup requirements did not survive JSON round-trip: %+v", back.TemplateProvenance)
 	}
 	restored, ok := back.TemplateAutomationRecipeFor("downloads-root")
 	if !ok || restored.Watch == nil || len(restored.Watch.Events) != 2 || restored.DailyScan == nil {

@@ -39,6 +39,12 @@
        Every agent form reads it — the shared Create form, the agent page
        editor, and the legacy create page — so it loads before all of them. -->
   <script defer src="/js/modules/reasoning-effort.js"></script>
+  <!-- Blueprint Intake registers at DOMContentLoaded when the workspace page's
+       setup-wizard controller is loaded later in the document. Keep this a
+       deferred classic script: type=module would register after wizard init. -->
+  <script defer src="/js/modules/blueprint-intake-step.js"></script>
+  <script defer src="/js/modules/blueprint-intake-review.js"></script>
+  <script defer src="/js/modules/blueprint-intake-pending.js"></script>
   <script defer src="/js/modules/update-checker.js"></script>
   <script defer src="/js/modules/vault-modal.js"></script>
   <script defer src="/js/modules/keyboard-navigation.js"></script>
@@ -113,6 +119,7 @@
   <link href="/css/character-picker.css" rel="stylesheet">
   <link href="/css/file-janitor.css" rel="stylesheet">
   <link href="/css/setup-wizard.css" rel="stylesheet">
+  <link href="/css/blueprint-intake.css" rel="stylesheet">
   {{if index .Extra "HomeCommandBridge"}}<link href="/css/home-command.css" rel="stylesheet">
   <link href="/css/home-workspace-cockpit.css" rel="stylesheet">{{end}}
   <link href="/css/settings.css" rel="stylesheet">

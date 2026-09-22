@@ -25,6 +25,7 @@ http://localhost:8765/api
 - [Scheduler Nodes API](#scheduler-nodes-api)
 - [Workspace Map Activity API](#workspace-map-activity-api)
 - [Custom Workflows API](#custom-workflows-api)
+- [Blueprint Intake API](#blueprint-intake-api)
 - [Examples](#examples)
 
 ## Authentication
@@ -833,6 +834,33 @@ Get current version information.
   "git_commit": "abc123def456"
 }
 ```
+
+## Blueprint Intake API
+
+Blueprint Intake routes are workspace-scoped. `{intakeKey}` must name an intake
+copied into the workspace's template provenance. A manifest selects no runtime
+behavior: collection, parsing, consent, execution, validation, review, and
+application are host-owned. File text, skill output, and labelled text/link
+setup answers are untrusted input; only a reviewed proposal hash can authorize
+record creation. Text and link setup answers never reach scaffolded files. A
+URL setup answer that names this intake appears as a prefilled link but is not
+fetched until consent.
+Proposals may contain `ticket`, `memory`, `note`, and `calendar_event` items. Invalid memory entries remain visible as unusable. Calendar items remain visible but disabled when the workspace has no connected calendar with `create_event` mapped. Re-intake proposals classify items as `new`, `changed`, `unchanged`, or `no_longer_found`; changed records may require an explicit `conflict_resolution` of `keep_current` or `use_proposed`. Applying selected items returns an independent `created`, `updated`, `failed`, or `skipped` result for each item.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/workspaces/{workspaceID}/blueprint-intakes/pending` | List pending proposals for the Command-view review banner. |
+| `GET` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}` | Read sources, consent, skill readiness, run progress, and the current proposal. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/files` | Add one multipart file source. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/links` | Fetch and snapshot one consented public HTTP(S) page. Body: `{"url":"https://…"}`. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/sources/folder` | Read supported immediate files from a consented native-picker selection. Body: `{"selection_token":"…"}`. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/consent` | Accept the host-authored provider disclosure. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/skill/trust` | Trust and enable the reviewed bundled skill, with an explicit `existing` or `bundled` choice on collision. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run` | Start one tool-less entry-agent task per parsed source. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/run/cancel` | Cancel unfinished source runs while preserving returned results. |
+| `GET` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/proposal` | Read the current pending, applied, or skipped proposal. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/proposal/apply` | Apply selected reviewed items. Requires `proposal_hash` and an `items` array. |
+| `POST` | `/workspaces/{workspaceID}/blueprint-intakes/{intakeKey}/proposal/skip` | Explicitly skip the reviewed proposal. Requires `proposal_hash`. |
 
 ## Examples
 

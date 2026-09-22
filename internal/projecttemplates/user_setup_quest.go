@@ -430,6 +430,7 @@ func UserSetupQuestExecutionDigest(template Template) string {
 		StarterTasks           []StarterTask                          `json:"starter_tasks,omitempty"`
 		DirectoryRequirements  []DirectoryRequirement                 `json:"directory_requirements,omitempty"`
 		AutomationRecipes      []AutomationRecipe                     `json:"automation_recipes,omitempty"`
+		IntakeRequirements     []IntakeRequirement                    `json:"intake_requirements,omitempty"`
 		CapabilityRequirements []CapabilityRequirement                `json:"capability_requirements,omitempty"`
 		Tools                  ToolDefaults                           `json:"tools"`
 		Capabilities           []CapabilityInstall                    `json:"capabilities,omitempty"`
@@ -448,7 +449,7 @@ func UserSetupQuestExecutionDigest(template Template) string {
 		ProjectEntry: template.ProjectEntry, ProjectConnection: template.ProjectConnection,
 		RuntimeRequirements: template.RuntimeRequirements, SetupWizard: template.SetupWizard,
 		StarterTasks: template.StarterTasks, DirectoryRequirements: template.DirectoryRequirements,
-		AutomationRecipes: template.AutomationRecipes, CapabilityRequirements: template.CapabilityRequirements,
+		AutomationRecipes: template.AutomationRecipes, IntakeRequirements: template.IntakeRequirements, CapabilityRequirements: template.CapabilityRequirements,
 		Tools: template.Tools, Capabilities: template.Capabilities,
 		GroupRequirement: template.GroupRequirement, StandaloneComposition: template.StandaloneComposition,
 		TemplateVariant: template.TemplateVariant, VariantRevision: template.VariantRevision,

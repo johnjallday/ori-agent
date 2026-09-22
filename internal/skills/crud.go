@@ -24,8 +24,8 @@ func (m *Manager) CreateSkill(agentName string, input SkillInput) (Skill, error)
 	if err := validateSkillDescription(input.Description); err != nil {
 		return Skill{}, err
 	}
-	if strings.TrimSpace(input.Prompt) == "" {
-		return Skill{}, fmt.Errorf("prompt is required")
+	if err := validateSkillPrompt(input.Prompt); err != nil {
+		return Skill{}, err
 	}
 
 	if existing, found, err := m.GetSkill(agentName, input.Name); err != nil {
@@ -77,8 +77,8 @@ func (m *Manager) UpdateSkill(agentName, skillName string, input SkillInput) (Sk
 	if err := validateSkillDescription(input.Description); err != nil {
 		return Skill{}, err
 	}
-	if strings.TrimSpace(input.Prompt) == "" {
-		return Skill{}, fmt.Errorf("prompt is required")
+	if err := validateSkillPrompt(input.Prompt); err != nil {
+		return Skill{}, err
 	}
 
 	skillDir, err := m.agentSkillDir(agentName, skillName)
@@ -122,8 +122,8 @@ func (m *Manager) updateSkillAtPath(skillPath, skillDir, skillName, source strin
 	if err := validateSkillDescription(input.Description); err != nil {
 		return Skill{}, err
 	}
-	if strings.TrimSpace(input.Prompt) == "" {
-		return Skill{}, fmt.Errorf("prompt is required")
+	if err := validateSkillPrompt(input.Prompt); err != nil {
+		return Skill{}, err
 	}
 
 	if _, err := os.Stat(skillPath); err != nil {

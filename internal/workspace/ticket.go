@@ -232,6 +232,8 @@ const (
 	// TicketSourceNote records a Ticket created from a Note (FR-73). The
 	// source ID is the originating Note's ID.
 	TicketSourceNote = "note"
+	// TicketSourceBlueprintIntake records a reviewed blueprint material proposal.
+	TicketSourceBlueprintIntake = "blueprint_intake"
 	// TicketSourceMigration marks records that predate provenance tracking.
 	TicketSourceMigration = "migration"
 )
@@ -239,12 +241,13 @@ const (
 // validTicketSources gates the provenance field so an arbitrary caller
 // string cannot become a permanent, unfilterable value.
 var validTicketSources = map[string]struct{}{
-	TicketSourceManual:       {},
-	TicketSourceAssistant:    {},
-	TicketSourceActionCenter: {},
-	TicketSourceMarkdown:     {},
-	TicketSourceNote:         {},
-	TicketSourceMigration:    {},
+	TicketSourceManual:          {},
+	TicketSourceAssistant:       {},
+	TicketSourceActionCenter:    {},
+	TicketSourceMarkdown:        {},
+	TicketSourceNote:            {},
+	TicketSourceBlueprintIntake: {},
+	TicketSourceMigration:       {},
 }
 
 // NormalizeTicketSource validates provenance, defaulting empty to manual.

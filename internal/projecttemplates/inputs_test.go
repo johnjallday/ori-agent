@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // inputsManifest is the acceptance-shaped declaration used across these tests:
@@ -107,7 +109,7 @@ func TestInputsDeclarationRejections(t *testing.T) {
 			{"id":"tempo","label":"A","type":"number","min":1,"max":2,"step":1,"default":1},
 			{"id":"tempo","label":"B","type":"number","min":1,"max":2,"step":1,"default":1}]}`, "declared twice"},
 		{"blank label", `{"schema_version":1,"title":"T","apply_to":["{{name}}.cfg"],"fields":[{"id":"tempo","label":"","type":"number","min":1,"max":2,"step":1,"default":1}]}`, "needs a label"},
-		{"unsupported type", `{"schema_version":1,"title":"T","apply_to":["{{name}}.cfg"],"fields":[{"id":"tempo","label":"Tempo","type":"text","default":"anything"}]}`, "unsupported type"},
+		{"text token is never substituted", `{"schema_version":1,"title":"T","apply_to":["{{name}}.cfg"],"fields":[{"id":"tempo","label":"Tempo","type":"text","default":"anything"}]}`, "never written into scaffolded files"},
 		{"number without bounds", `{"schema_version":1,"title":"T","apply_to":["{{name}}.cfg"],"fields":[{"id":"tempo","label":"Tempo","type":"number","default":1}]}`, "needs min, max, and step"},
 		{"zero step", `{"schema_version":1,"title":"T","apply_to":["{{name}}.cfg"],"fields":[{"id":"tempo","label":"Tempo","type":"number","min":1,"max":2,"step":0,"default":1}]}`, "step greater than zero"},
 		{"negative step", `{"schema_version":1,"title":"T","apply_to":["{{name}}.cfg"],"fields":[{"id":"tempo","label":"Tempo","type":"number","min":1,"max":2,"step":-1,"default":1}]}`, "step greater than zero"},
@@ -221,6 +223,53 @@ func TestInputsTokenScanAtLoad(t *testing.T) {
 			t.Fatalf("InputsError = %q, want the file-name rejection", got)
 		}
 	})
+}
+
+func TestTextAndURLInputsNeverReachScaffoldFiles(t *testing.T) {
+	manifest := `{"name":"Course","inputs":{"schema_version":1,"title":"Course details","fields":[{"id":"term","label":"Term","type":"text","default":"Fall term"},{"id":"syllabus","label":"Syllabus link","type":"url","default":"https://example.test/syllabus"}]}}`
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ManifestFileName), manifest)
+	writeFile(t, filepath.Join(dir, "course.txt"), "Term: {{input.term}}\nLink: {{input.syllabus}}\n")
+	tpl := newTemplate(dir)
+	if tpl.InputsError != "" {
+		t.Fatalf("text/url fields without apply_to should load: %s", tpl.InputsError)
+	}
+	wsDir := t.TempDir()
+	result, err := InstantiateTemplateWithInputs(tpl, wsDir, "Course", map[string]json.RawMessage{"term": json.RawMessage(`"Spring"`), "syllabus": json.RawMessage(`"https://example.test/spring"`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(wsDir, result.ProjectPath, "course.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); !strings.Contains(got, "{{input.term}}") || !strings.Contains(got, "{{input.syllabus}}") {
+		t.Fatalf("text/url answer reached scaffold: %q", got)
+	}
+}
+
+func TestURLInputRequiresURLCapableIntake(t *testing.T) {
+	declaration := &InputsDeclaration{Fields: []InputField{{ID: "syllabus", Type: InputFieldURL, IntakeKey: "materials"}}}
+	if err := ValidateURLInputIntakes(declaration, []workspace.IntakeRequirement{{Key: "materials", Sources: workspace.IntakeSources{URL: true}}}); err != nil {
+		t.Fatalf("ValidateURLInputIntakes() = %v", err)
+	}
+	if err := ValidateURLInputIntakes(declaration, []workspace.IntakeRequirement{{Key: "materials"}}); !errors.Is(err, ErrInvalidInputs) {
+		t.Fatalf("ValidateURLInputIntakes() error = %v, want ErrInvalidInputs", err)
+	}
+}
+
+func TestTextAndURLInputValidation(t *testing.T) {
+	declaration := &InputsDeclaration{Fields: []InputField{{ID: "term", Label: "Term", Type: InputFieldText, Default: "Fall"}, {ID: "link", Label: "Link", Type: InputFieldURL, Default: "https://example.test"}}}
+	for name, values := range map[string]map[string]json.RawMessage{
+		"javascript URL": {"link": json.RawMessage(`"javascript:alert(1)"`)},
+		"long term":      {"term": json.RawMessage(`"` + strings.Repeat("x", 201) + `"`)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ResolveInputValues(declaration, values); !errors.Is(err, ErrInputValue) {
+				t.Fatalf("ResolveInputValues error = %v", err)
+			}
+		})
+	}
 }
 
 func TestResolveInputValues(t *testing.T) {

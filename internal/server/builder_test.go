@@ -215,6 +215,9 @@ func TestSetupWizardRegistry_MatchesTheAuthorableAdapters(t *testing.T) {
 	if builder.setupWizardRegistry == nil {
 		t.Fatal("Setup Wizard registry not wired")
 	}
+	if builder.blueprintIntakeService == nil || builder.blueprintIntakeHandler == nil {
+		t.Fatal("Blueprint Intake service and handler not wired")
+	}
 
 	authorable := map[string]bool{}
 	for _, id := range projecttemplates.ValidSetupWizardAdapters {

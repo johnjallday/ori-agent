@@ -3,6 +3,7 @@ package plugin
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,23 @@ func TestResolvePluginBlueprintsRequiresGroupRequirementHostFeature(t *testing.T
 	}
 	if len(resolved) != 1 || resolved[0].Template.GroupRequirement == nil {
 		t.Fatalf("group declaration was not resolved: %#v", resolved)
+	}
+}
+
+func TestResolvePluginBlueprintsRequiresBlueprintIntakeHostFeature(t *testing.T) {
+	descriptor := blueprintDescriptorFixture(t)
+	writeFile(t, filepath.Join(descriptor.InstallDir, "blueprints", "demo", "template.json"), `{
+		"name":"Demo Workspace", "tools":{"skills":["syllabus-intake"]},
+		"capabilities":[{"id":"demo-tools","source":"plugin-blueprint"}],
+		"intake_requirements":[{"key":"materials","label":"Materials","skill":"syllabus-intake","sources":{"files":true},"accepted_extensions":[".txt"],"proposal_kinds":["ticket"]}]
+	}`)
+	writeFile(t, filepath.Join(descriptor.InstallDir, "blueprints", "demo", "project", "skills", "syllabus-intake", "SKILL.md"), "---\nname: syllabus-intake\ndescription: Read course dates\n---\n\nExtract dates.")
+	if _, err := ResolvePluginBlueprints(descriptor); err == nil || !strings.Contains(err.Error(), HostFeatureBlueprintIntakeV1) {
+		t.Fatalf("plugin intake loaded without host feature: %v", err)
+	}
+	descriptor.WorkspaceSurfaces.RequiresHostFeatures = []string{HostFeatureBlueprintIntakeV1}
+	if _, err := ResolvePluginBlueprints(descriptor); err != nil {
+		t.Fatalf("plugin intake with host feature: %v", err)
 	}
 }
 

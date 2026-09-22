@@ -47,11 +47,14 @@ func ResolvePluginBlueprints(descriptor PluginDescriptor) ([]ResolvedBlueprint, 
 	}
 
 	declaresGroupRequirements := false
+	declaresBlueprintIntake := false
 	declaresIndependentHomes := false
 	for _, feature := range contribution.RequiresHostFeatures {
 		switch feature {
 		case HostFeatureTemplateGroupRequirementsV1:
 			declaresGroupRequirements = true
+		case HostFeatureBlueprintIntakeV1:
+			declaresBlueprintIntake = true
 		case HostFeatureIndependentProgramHomesV1:
 			declaresIndependentHomes = true
 		}
@@ -75,6 +78,9 @@ func ResolvePluginBlueprints(descriptor PluginDescriptor) ([]ResolvedBlueprint, 
 		}
 		if (template.GroupRequirement != nil || template.StandaloneComposition != nil) && !declaresGroupRequirements {
 			return nil, fmt.Errorf("plugin blueprint %q group declarations require %s", blueprint.ID, HostFeatureTemplateGroupRequirementsV1)
+		}
+		if len(template.IntakeRequirements) != 0 && !declaresBlueprintIntake {
+			return nil, fmt.Errorf("plugin blueprint %q intake declarations require %s", blueprint.ID, HostFeatureBlueprintIntakeV1)
 		}
 		if template.AssistantProject != nil && !declaresIndependentHomes {
 			return nil, fmt.Errorf("plugin blueprint %q assistant_project requires %s", blueprint.ID, HostFeatureIndependentProgramHomesV1)

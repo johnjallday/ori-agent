@@ -43,6 +43,11 @@ const (
 	// SetupStepKindDirectory asks the user to choose one local folder declared
 	// in directory_requirements, through the native picker.
 	SetupStepKindDirectory = "directory"
+	// SetupStepKindIntake collects material for one intake_requirements entry
+	// through compiled host-owned source collectors.
+	SetupStepKindIntake = "intake"
+	// SetupStepKindIntakeReview presents and applies the host-validated proposal.
+	SetupStepKindIntakeReview = "intake_review"
 	// SetupStepKindAutomationReview discloses the watcher and daily run declared
 	// in automation_recipes for a directory, before either is activated.
 	SetupStepKindAutomationReview = "automation_review"
@@ -88,6 +93,8 @@ const (
 	// (and, for automation_review, the automation_recipes entry keyed by that
 	// same directory).
 	SetupStepReferenceDirectory SetupStepReferenceScope = "directory"
+	// SetupStepReferenceIntake resolves against intake_requirements keys.
+	SetupStepReferenceIntake SetupStepReferenceScope = "intake"
 	// SetupStepReferenceCapability resolves against capability_requirements keys.
 	SetupStepReferenceCapability SetupStepReferenceScope = "capability"
 	// SetupStepReferencePlugin resolves against the template's declared plugin
@@ -111,17 +118,21 @@ type SetupStepKindSpec struct {
 	ReferenceScope SetupStepReferenceScope
 	// RequiresReference reports whether requirement_key must be present.
 	RequiresReference bool
-	// RequiresAdapter reports whether the step must name a registered adapter.
-	// Kinds backed by a generic service (a folder picker, an automation
-	// disclosure, a summary) may omit one; kinds that ask a domain whether it is
-	// ready cannot.
+	// RequiresAdapter reports whether the manifest must name a registered
+	// adapter. Kinds backed by a generic service may omit one.
 	RequiresAdapter bool
+	// DefaultAdapter is a compiled adapter key fixed by the kind itself. It lets
+	// a generic host-owned kind reach behavior without allowing the manifest to
+	// select that behavior.
+	DefaultAdapter string
 }
 
 // setupStepKindSpecs is the version 1 kind allowlist, in declaration order.
 // Adding a kind here is the only way to add one: unknown kinds fail closed.
 var setupStepKindSpecs = []SetupStepKindSpec{
 	{Kind: SetupStepKindDirectory, ReferenceScope: SetupStepReferenceDirectory, RequiresReference: true},
+	{Kind: SetupStepKindIntake, ReferenceScope: SetupStepReferenceIntake, RequiresReference: true, DefaultAdapter: "blueprint_intake"},
+	{Kind: SetupStepKindIntakeReview, ReferenceScope: SetupStepReferenceIntake, RequiresReference: true, DefaultAdapter: "blueprint_intake"},
 	{Kind: SetupStepKindAutomationReview, ReferenceScope: SetupStepReferenceDirectory, RequiresReference: true},
 	{Kind: SetupStepKindCapabilityConnect, ReferenceScope: SetupStepReferenceCapability, RequiresReference: true, RequiresAdapter: true},
 	{Kind: SetupStepKindCapabilityConfigure, ReferenceScope: SetupStepReferenceCapability, RequiresReference: true, RequiresAdapter: true},
