@@ -1,3 +1,10 @@
+import {
+  assistantSetupMilestoneView,
+  assistantSetupMilestoneViews,
+  createPresentation,
+  requestedMilestones
+} from './assistant-led-setup-presentation.js';
+
 const API_ROOT = '/api/personal-assistant/setup/file-janitor';
 const EXPLICIT_STATES = new Set(['needs_hq', 'provisioning_hq', 'active', 'paused']);
 const PROACTIVE_STATES = new Set(['needs_hq', 'provisioning_hq', 'active']);
@@ -9,6 +16,7 @@ const SAFE_ACTIONS = new Set([
   'prepare_review',
   'finish_later',
   'resume',
+  'review_again',
   'retry',
   'manual',
   'manual_takeover',
@@ -36,6 +44,21 @@ export function assistantSetupModelLabel(role) {
   const name = String(role?.name || 'File Curator');
   const model = String(role?.model || '').trim();
   return `${action} ${name} · ${model || 'Configured; chat needs a model'}`;
+}
+
+export { assistantSetupMilestoneView, assistantSetupMilestoneViews };
+
+// Read-only refresh while the server reports preparation in flight. The timer
+// only re-reads; it never decides a status.
+const REFRESH_INTERVAL_MS = 1500;
+const REFRESH_MAX_ATTEMPTS = 20;
+
+export function assistantSetupNeedsRefresh(projection) {
+  if (!projection) return false;
+  if (projection.view_state === 'setting_up') return true;
+  return (projection.milestones || []).some(
+    milestone => milestone?.status === 'creating' || milestone?.status === 'reusing'
+  );
 }
 
 export function safeAssistantSetupRoute(route) {
@@ -143,6 +166,9 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     plan: doc.getElementById('assistantLedSetupPlan'),
     target: doc.getElementById('assistantLedSetupTarget'),
     team: doc.getElementById('assistantLedSetupTeam'),
+    milestones: doc.getElementById('assistantLedSetupMilestones'),
+    replay: doc.getElementById('assistantLedSetupReplay'),
+    refresh: doc.getElementById('assistantLedSetupRefresh'),
     details: doc.getElementById('assistantLedSetupDetails'),
     metadata: doc.getElementById('assistantLedSetupMetadata'),
     folder: doc.getElementById('assistantLedSetupFolder'),
@@ -158,7 +184,70 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     error: doc.getElementById('assistantLedSetupError'),
     actions: doc.getElementById('assistantLedSetupActions')
   };
-  const state = { projection: null, pending: false, explicit: false, relationshipState: '' };
+  const state = {
+    projection: null,
+    pending: false,
+    picking: false,
+    explicit: false,
+    relationshipState: '',
+    refreshTimer: null,
+    refreshAttempts: 0
+  };
+
+  function firstEnabledAction() {
+    return els.actions.querySelector?.('button:not([disabled]), a[href]') || null;
+  }
+
+  // Continue moves focus to the card's Choose folder control without pressing
+  // it: the native picker only opens from its own explicit click.
+  function focusChooseFolder() {
+    const target =
+      els.actions.querySelector?.('[data-setup-action="choose_folder"]:not([disabled])') ||
+      firstEnabledAction() ||
+      els.title;
+    target?.focus?.();
+  }
+
+  const presentation = createPresentation({
+    document: doc,
+    window: win,
+    fetch: fetchImpl,
+    canOpen: () => !state.picking,
+    onContinue: focusChooseFolder,
+    onClosed: invoker => {
+      if (invoker?.isConnected && !invoker.disabled) invoker.focus();
+      else (firstEnabledAction() || els.title)?.focus?.();
+    }
+  });
+
+  function clearRefresh() {
+    if (state.refreshTimer !== null) win.clearTimeout(state.refreshTimer);
+    state.refreshTimer = null;
+  }
+
+  // Bounded, read-only refresh while the server reports an in-flight step. It
+  // stops on a terminal state, a hidden card, or a hidden tab, and after the cap
+  // hands control to a manual Refresh button.
+  function scheduleRefresh() {
+    clearRefresh();
+    const needs = assistantSetupNeedsRefresh(state.projection);
+    if (!needs) {
+      state.refreshAttempts = 0;
+      els.refresh.hidden = true;
+      return;
+    }
+    if (root.hidden || doc.hidden || state.pending) return;
+    if (state.refreshAttempts >= REFRESH_MAX_ATTEMPTS) {
+      els.refresh.hidden = false;
+      return;
+    }
+    els.refresh.hidden = true;
+    state.refreshTimer = win.setTimeout(() => {
+      state.refreshTimer = null;
+      state.refreshAttempts += 1;
+      void load('');
+    }, REFRESH_INTERVAL_MS);
+  }
 
   function setError(message, repairRoute = '') {
     els.error.textContent = String(message || '');
@@ -212,6 +301,28 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     return button;
   }
 
+  function milestoneItem(view) {
+    const item = doc.createElement('li');
+    item.className = 'assistant-led-setup__milestone';
+    item.dataset.milestoneId = view.key;
+    item.dataset.status = view.status;
+    if (view.resourceID) item.dataset.resourceId = view.resourceID;
+    const name = doc.createElement('span');
+    name.className = 'assistant-led-setup__milestone-name';
+    name.textContent = view.name;
+    const chip = doc.createElement('span');
+    chip.className = 'assistant-led-setup__milestone-status';
+    chip.textContent = view.statusLabel;
+    item.append(name, ' ', chip);
+    view.details.forEach(detail => {
+      const note = doc.createElement('span');
+      note.className = 'assistant-led-setup__milestone-detail';
+      note.textContent = detail;
+      item.append(note);
+    });
+    return item;
+  }
+
   function renderChoices(proposal) {
     els.choices.replaceChildren();
     const choose = proposal?.mode === 'choose' && Array.isArray(proposal.targets);
@@ -253,6 +364,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     renderChoices(proposal);
     els.plan.hidden = !proposal && !run;
     els.team.replaceChildren();
+    els.milestones.replaceChildren();
     if (proposal) {
       if (proposal.mode === 'create') {
         els.target.textContent = 'Workspace: create one File Janitor workspace after this review.';
@@ -273,16 +385,24 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       els.monitoringDisclosure.textContent = String(proposal.monitoring_disclosure || '');
       els.review.textContent = String(proposal.file_review_disclosure || '');
     } else if (run) {
-      const targetName = projection.target?.name || 'File Janitor';
-      const targetMode = run.target_mode === 'create' ? 'created' : 'reused';
-      els.target.textContent = `Workspace: ${targetName} ${targetMode} from the reviewed setup.`;
-      if (run.team_role?.role_id) {
+      // Statuses come only from server milestones (receipts), never from the
+      // plan's target_mode.
+      els.target.textContent = 'Workspace and team from the reviewed setup';
+      const views = assistantSetupMilestoneViews(projection.milestones);
+      views.forEach(view => els.milestones.append(milestoneItem(view)));
+      if (!views.length && run.team_role?.role_id) {
         const item = doc.createElement('li');
         item.textContent = assistantSetupModelLabel(run.team_role);
         els.team.append(item);
       }
       els.details.hidden = true;
     }
+    els.milestones.hidden = !els.milestones.childElementCount;
+    const anyReceipt = assistantSetupMilestoneViews(projection.milestones).some(
+      view => view.status === 'created' || view.status === 'reused'
+    );
+    els.replay.hidden = !anyReceipt || !presentation;
+    presentation?.update(projection.milestones);
 
     const monitoring = projection.monitoring_review || null;
     els.monitoring.hidden = !monitoring;
@@ -324,8 +444,12 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     if (announce) setError('');
     if (projection.view_state === 'recommendation_deferred' && !state.explicit) {
       root.hidden = true;
+      scheduleRefresh();
       return;
     }
+    scheduleRefresh();
+    // The modal presentation owns focus while it is open.
+    if (presentation?.isOpen()) return;
     const replacement = focusedAction
       ? els.actions.querySelector?.(`[data-setup-action="${focusedAction}"]`)
       : null;
@@ -369,6 +493,9 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     if (state.pending || !state.projection?.run) return false;
     const run = state.projection.run;
     const workspaceID = run.target_workspace_id;
+    // Never stack the read-only presentation over the native folder picker.
+    state.picking = true;
+    presentation?.close({ restoreFocus: false });
     const trigger = doc.activeElement;
     state.pending = true;
     setError('');
@@ -427,6 +554,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       return false;
     } finally {
       state.pending = false;
+      state.picking = false;
       render(state.projection, { announce: false });
     }
   }
@@ -434,8 +562,17 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
   async function act(actionID) {
     if (state.pending) return false;
     if (actionID === 'choose_folder') return chooseFolder();
+    // Reviewing the updated plan is a read: it re-loads the fresh proposal.
+    if (actionID === 'review_again') return Boolean(await load('', { focus: true }));
     const request = assistantSetupRequest(actionID, state.projection);
     if (!request) return false;
+    const accepting = actionID === 'accept';
+    if (accepting) {
+      // Show the reviewed values at once; statuses arrive only from the server.
+      presentation?.open(requestedMilestones(state.projection?.proposal), {
+        invoker: doc.activeElement
+      });
+    }
     state.pending = true;
     setError('');
     render(state.projection, { announce: false });
@@ -457,7 +594,12 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       }
       return true;
     } catch (error) {
+      // A stopped accept carries the stopped projection: the walkthrough stays
+      // open and stops at that step. A refusal with no run has nothing to show.
       if (error.setup) render(error.setup, { announce: false });
+      if (accepting && !assistantSetupMilestoneViews(error.setup?.milestones).length) {
+        presentation?.close();
+      }
       setError(error.message || 'Setup could not continue. Nothing else was changed.');
       return false;
     } finally {
@@ -489,8 +631,20 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     void load('', { focus: false });
   }
 
+  els.replay?.addEventListener('click', () => {
+    presentation?.open(state.projection?.milestones, { invoker: els.replay });
+  });
+  els.refresh?.addEventListener('click', () => {
+    state.refreshAttempts = 0;
+    els.refresh.hidden = true;
+    void load('');
+  });
+  doc.addEventListener('visibilitychange', () => {
+    if (!doc.hidden) scheduleRefresh();
+    else clearRefresh();
+  });
   doc.addEventListener('personal-assistant:status', onRelationship);
-  return { load, act, render, startFromMission, state, els };
+  return { load, act, render, startFromMission, state, els, presentation };
 }
 
 let controller = null;

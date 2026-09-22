@@ -299,12 +299,18 @@ type updatePreviewResolution struct {
 // UpdateAvailability is the notification-safe result of checking one installed
 // plugin against its recorded source. Available is based on source differences,
 // not semver ordering: a version or trusted-component change is enough.
+//
+// ReviewedRelease marks an answer that came from the host's reviewed release
+// resolver rather than from the recorded source, so AvailableVersion names a
+// published release and not whatever the source currently declares. CheckUpdate
+// never sets it; only the host's availability override does.
 type UpdateAvailability struct {
 	Name              string `json:"name"`
 	InstalledVersion  string `json:"installed_version,omitempty"`
 	AvailableVersion  string `json:"available_version,omitempty"`
 	ComponentsChanged bool   `json:"components_changed"`
 	Available         bool   `json:"available"`
+	ReviewedRelease   bool   `json:"reviewed_release,omitempty"`
 }
 
 // CheckUpdate resolves one installed plugin's source and derives the small

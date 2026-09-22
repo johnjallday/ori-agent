@@ -28,10 +28,12 @@ type UpdateSnapshot struct {
 }
 
 // AvailabilityOverride answers one installed plugin's update availability
-// instead of its recorded source. ok false falls through to the recorded-source
-// check; an error retains the last result, like a source failure. Host wiring
-// installs it so this package needs no knowledge of the host's reviewed
-// integrations.
+// instead of its recorded source. ok true is terminal: the recorded source is not
+// read for that plugin, even when the answer is that nothing is available, so a
+// host can keep a plugin off a source it must not follow (a mutable branch). ok
+// false falls through to the recorded-source check; an error retains the last
+// result, like a source failure, and never falls through. Host wiring installs
+// it so this package needs no knowledge of the host's reviewed integrations.
 type AvailabilityOverride func(InstalledPlugin) (result UpdateAvailability, ok bool, err error)
 
 // UpdateChecker periodically refreshes a process-local snapshot of plugin

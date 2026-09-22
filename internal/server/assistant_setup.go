@@ -61,6 +61,18 @@ func (a assistantSetupSessionAdapter) PrepareFileJanitor(ctx context.Context, re
 	if request.Mode == assistantsetup.TargetAdopt {
 		return a.observeAdoptedFileJanitor(request)
 	}
+	result, err := a.sessions.CreateReviewedFileJanitor(ctx, reviewedCreationRequest(request))
+	if err != nil {
+		return assistantsetup.WorkspaceResult{}, mapAssistantSetupSessionError(err)
+	}
+	return assistantsetup.WorkspaceResult{
+		WorkspaceID: result.WorkspaceID, AgentInstanceID: result.AgentInstanceID,
+		ProfileProvenanceID: result.ProfileProvenanceID, ProfileStoreOrigin: result.ProfileStoreOrigin,
+		ProfileCreated: result.ProfileCreated, ConfigurationDigest: result.ConfigurationDigest,
+	}, nil
+}
+
+func reviewedCreationRequest(request assistantsetup.PrepareRequest) sessionhttp.ReviewedTemplateCreationRequest {
 	roles := make([]sessionhttp.ReviewedTemplateRole, 0, len(request.Plan.Roles))
 	for _, role := range request.Plan.Roles {
 		roles = append(roles, sessionhttp.ReviewedTemplateRole{
@@ -69,29 +81,42 @@ func (a assistantSetupSessionAdapter) PrepareFileJanitor(ctx context.Context, re
 			ConfigDigest: role.ConfigDigest, Warning: role.Warning,
 		})
 	}
-	plan := sessionhttp.ReviewedTemplateCreationPlan{
-		BlueprintID: request.Plan.BlueprintID, BlueprintVersion: request.Plan.BlueprintVersion,
-		BlueprintDigest: request.Plan.BlueprintDigest, PlanRevision: request.Plan.PlanRevision, Roles: roles,
-	}
 	configDigest := ""
 	if len(roles) == 1 {
 		configDigest = roles[0].ConfigDigest
 	}
-	result, err := a.sessions.CreateReviewedFileJanitor(ctx, sessionhttp.ReviewedTemplateCreationRequest{
-		Name: "File Janitor", Plan: plan,
+	return sessionhttp.ReviewedTemplateCreationRequest{
+		Name: assistantsetup.WorkspaceName,
+		Plan: sessionhttp.ReviewedTemplateCreationPlan{
+			BlueprintID: request.Plan.BlueprintID, BlueprintVersion: request.Plan.BlueprintVersion,
+			BlueprintDigest: request.Plan.BlueprintDigest, PlanRevision: request.Plan.PlanRevision, Roles: roles,
+		},
 		Descriptor: sessionhttp.AssistantSetupCreationDescriptor{
 			OwnerUserID: request.OwnerUserID, RunID: request.RunID, OperationID: request.OperationID,
 			ReviewDigest: request.ReviewDigest, WorkspaceID: request.WorkspaceID,
 			ProfileProvenanceID: request.ProfileProvenanceID, ConfigDigest: configDigest,
 		},
-	})
-	if err != nil {
-		return assistantsetup.WorkspaceResult{}, mapAssistantSetupSessionError(err)
 	}
-	return assistantsetup.WorkspaceResult{
-		WorkspaceID: result.WorkspaceID, AgentInstanceID: result.AgentInstanceID,
-		ProfileProvenanceID: result.ProfileProvenanceID, ProfileStoreOrigin: result.ProfileStoreOrigin,
-		ProfileCreated: result.ProfileCreated, ConfigurationDigest: result.ConfigurationDigest,
+}
+
+// ObserveFileJanitor reads what a failed create-mode claim left behind. Adopt
+// mode only observes an existing workspace and never writes, so there is
+// nothing to report.
+func (a assistantSetupSessionAdapter) ObserveFileJanitor(_ context.Context, request assistantsetup.PrepareRequest) (assistantsetup.WorkspaceObservation, error) {
+	if a.sessions == nil {
+		return assistantsetup.WorkspaceObservation{}, assistantsetup.ErrUnavailable
+	}
+	if request.Mode != assistantsetup.TargetCreate {
+		return assistantsetup.WorkspaceObservation{}, nil
+	}
+	observed, err := a.sessions.ObserveReviewedFileJanitor(reviewedCreationRequest(request))
+	if err != nil {
+		return assistantsetup.WorkspaceObservation{}, assistantsetup.ErrUnavailable
+	}
+	return assistantsetup.WorkspaceObservation{
+		WorkspacePresent: observed.WorkspacePresent, WorkspaceProven: observed.WorkspaceProven,
+		AgentInstanceID: observed.AgentInstanceID, ProfileCreated: observed.ProfileCreated,
+		ProfileProvenanceID: observed.ProfileProvenanceID, ProfileStoreOrigin: observed.ProfileStoreOrigin,
 	}, nil
 }
 
@@ -352,21 +377,16 @@ func mapAssistantSetupJanitorError(err error) error {
 	return err
 }
 
+// mapAssistantSetupSessionError turns the reviewed creator's typed refusals
+// into coordinator errors. Only these sentinels are classified; anything else
+// passes through unchanged and is treated as an unproven outcome.
 func mapAssistantSetupSessionError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, store.ErrAgentRootUnavailable) {
-		return assistantsetup.ErrAgentRootUnavailable
-	}
-	if errors.Is(err, assistantsetup.ErrNoLongerAvailable) || errors.Is(err, assistantsetup.ErrUnsupportedTarget) {
-		return err
-	}
-	message := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(message, "root") && strings.Contains(message, "unavailable"):
+	case err == nil:
+		return nil
+	case errors.Is(err, store.ErrAgentRootUnavailable):
 		return assistantsetup.ErrAgentRootUnavailable
-	case strings.Contains(message, "plan changed"), strings.Contains(message, "team plan"):
+	case errors.Is(err, sessionhttp.ErrReviewedPlanChanged), errors.Is(err, sessionhttp.ErrReviewedPlanUnsupported):
 		return assistantsetup.ErrTeamConflict
 	default:
 		return err
@@ -409,6 +429,7 @@ func (b *ServerBuilder) wireAssistantSetup() {
 	service := assistantsetup.NewService(store, b.personalAssistantService, resolver, adapter, adapter)
 	service.SetAdmissionGate(b.resetWork)
 	service.SetProgressor(adapter)
+	service.SetObserver(adapter)
 	if b.progressionEngine != nil {
 		service.SetRecommendationService(progressionFileJanitorRecommendations{engine: b.progressionEngine})
 	}

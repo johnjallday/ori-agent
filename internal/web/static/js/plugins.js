@@ -495,10 +495,24 @@
     const url = '/api/plugins/' + encodeURIComponent(name) + '/update';
     const prev = installedCache.find(p => p.name === name);
     const oldVersion = (prev && prev.version) || '';
+    // A reviewed install already on its latest release is refused with a coded
+    // 409. That is information, not a failure, so it is matched on the code and
+    // never on the message text. Every other failure still throws.
+    const update = async confirm => {
+      const result = await window.PluginLifecycle.request('POST', url, { confirm });
+      if (result.ok) return result.data;
+      if (result.status === 409 && result.data && result.data.code === 'reviewed_release_current') {
+        notify(result.error, 'info');
+        return null;
+      }
+      throw new Error(result.error);
+    };
     try {
-      const data = await api('POST', url, { confirm: false });
+      const data = await update(false);
+      if (!data) return;
       const doUpdate = async () => {
-        const res = await api('POST', url, { confirm: true });
+        const res = await update(true);
+        if (!res) return;
         await window.refreshPluginsPage();
         const newVersion = (res && res.plugin && res.plugin.version) || '';
         if (newVersion && oldVersion && newVersion !== oldVersion) {

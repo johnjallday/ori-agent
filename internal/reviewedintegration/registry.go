@@ -81,6 +81,17 @@ func (entry Entry) IsPinnedSource(source string) bool {
 	return found && entry.SourceRepository != "" && ValidCommit(commit)
 }
 
+// IsUnpinnedOfficialSource reports whether source is one of the reviewed
+// repository's legacy unpinned URLs: the repository itself or its ".git" form.
+// Such a source names the official repository but not any bytes in it, so it
+// may be replaced by a reviewed release and never proves what is installed.
+// Every other spelling — a branch ref, SSH, http, a trailing slash, another
+// letter case — is deliberately not recognized.
+func (entry Entry) IsUnpinnedOfficialSource(source string) bool {
+	return entry.SourceRepository != "" &&
+		(source == entry.SourceRepository || source == entry.SourceRepository+".git")
+}
+
 // InstallQuestPrefix prefixes an integration key to form the ID of the install
 // quest Ori generates for it.
 const InstallQuestPrefix = "install_"

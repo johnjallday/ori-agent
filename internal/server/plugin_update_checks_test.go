@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +39,60 @@ func TestServerOwnsPluginUpdateCheckerLifecycle(t *testing.T) {
 
 	server.Shutdown()
 	server.Shutdown()
+}
+
+// The cached snapshot route tells the page which answers came from a reviewed
+// release, and stays read-only while doing so: the installed record is not
+// touched by the check or by reading the route.
+func TestPluginUpdateStatusRouteMarksReviewedReleaseAnswers(t *testing.T) {
+	updates, _, entry := reviewedUpdatesFixture("0.7.0")
+	pluginsDir := t.TempDir()
+	handler := pluginhttp.NewHandler(nil, nil, filepath.Join(pluginsDir, "skills"), pluginsDir)
+	record, err := json.Marshal([]plugin.InstalledPlugin{
+		reviewedInstall(entry, "0.6.1", entry.SourceRepository+".git"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storePath := filepath.Join(pluginsDir, "installed.json")
+	if err := os.WriteFile(storePath, record, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler.UpdateChecker().SetAvailabilityOverride(updates.availability)
+	handler.UpdateChecker().Start(time.Hour)
+	defer handler.UpdateChecker().Stop()
+	deadline := time.Now().Add(2 * time.Second)
+	for handler.UpdateChecker().Snapshot().LastSuccessfulCheckAt == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	mux := http.NewServeMux()
+	registerPluginRoutes(mux, &Server{Handlers: &HandlerFacade{Plugin: handler}})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/plugins/updates", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /api/plugins/updates = %d: %s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Updates []map[string]any `json:"updates"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil || len(body.Updates) != 1 {
+		t.Fatalf("snapshot = %s (err=%v)", rr.Body.String(), err)
+	}
+	row := body.Updates[0]
+	if row["available_version"] != "0.7.0" || row["available"] != true || row["reviewed_release"] != true {
+		t.Fatalf("reviewed row = %#v", row)
+	}
+	if after, err := os.ReadFile(storePath); err != nil || string(after) != string(record) {
+		t.Fatalf("the update check rewrote the installed record (err=%v)", err)
+	}
+
+	// A recorded-source result omits the key entirely, so every existing payload
+	// keeps the source wording.
+	plain, err := json.Marshal(plugin.UpdateAvailability{Name: "local", InstalledVersion: "1", AvailableVersion: "2", Available: true})
+	if err != nil || strings.Contains(string(plain), "reviewed_release") {
+		t.Fatalf("a recorded-source result carried the reviewed flag: %s (err=%v)", plain, err)
+	}
 }
 
 func TestPluginUpdateStatusRouteIsReadOnly(t *testing.T) {

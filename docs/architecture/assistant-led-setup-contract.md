@@ -1,6 +1,6 @@
 # Assistant-led File Janitor setup contract
 
-**Status:** Implemented on `feature/assistant-led-setup`; final repository gates and foreground native-picker evidence remain pending. This document records both the findings baseline and the delivered contract. Native selection, cancellation, and nested-focus claims remain explicitly NOT RUN where noted.
+**Status:** Implemented on `feature/assistant-led-setup` (#528); final repository gates and foreground native-picker evidence remain pending. The workspace/team presentation (#529: `milestones`, the workspace-step outcomes and failure classification, and the read-only walkthrough) is implemented on `feature/529-show-the-assistant-creating-workspaces-and-agents-step-by-step`; its Playwright specs are written but were NOT RUN by the implementing agent (Chromium could not launch), so they are unverified until run on a desktop. This document records both the findings baseline and the delivered contract. Native selection, cancellation, and nested-focus claims remain explicitly NOT RUN where noted.
 
 ## Evidence baseline and preflight
 
@@ -107,7 +107,7 @@ Measured local API durations from a separate fresh one-file sandbox fixture were
 
 From an already selected File Janitor blueprint, the existing manual path requires at least three post-creation user decisions before a useful review: native folder selection/grant, automation approval, and a separate **Scan now**. Creating the workspace itself remains the creator's reviewed decision and route. The observed app-surface sequence is creator → workspace wizard → File Janitor review console (one page navigation to the workspace and one in-page handoff); native selection is a nested OS surface. The assisted target still has three consent moments overall—reviewed setup, folder selection, monitoring plus initial scan—but removes the separate manual scan action and avoids a required app-page navigation before reporting the first result.
 
-Sanitized existing-behavior evidence is stored at:
+Sanitized existing-behavior evidence is stored under the gitignored `tasks/screenshots/` (local development evidence only):
 
 - `tasks/screenshots/assistant-led-setup/existing-manual-file-janitor-review.png` — real sandbox batch, cropped to exclude the raw local path;
 - `tasks/screenshots/assistant-led-setup/existing-native-picker-unavailable.png` — real server/helper-unavailable error;
@@ -264,10 +264,50 @@ Every successful coordinator response wraps one `setup` projection. Fields are t
 - `relationship`: Assistant stable ID/display name/state and setup eligibility only—no prompt/model secret;
 - optional `proposal`: opaque revision; `create|adopt|choose` mode; blueprint ID/version/digest; exact workspace candidate IDs/names/routes; normalized team-plan revision and each role's create/reuse/configured-model status; fixed metadata/folder/monitoring/file-review disclosures;
 - optional `run`: run ID/revision/lifecycle/current step, target workspace ID/name/route, operation rows with kind/status/attempt count/safe timestamps, saved-success summaries, deferral/failure code, and whether work is in flight;
+- optional `milestones`: the list-shaped workspace/team preparation sequence described under [Setup milestones](#setup-milestones) (present for every run projection, absent from proposal-only and `current_status` projections);
 - optional `health`: fresh/stale canonical File Janitor readiness, paused/monitoring/privacy summaries, local schedule/timezone, bounded first-result counts/time, exact batch ID, and safe review/settings/history routes;
-- `actions`: a server-derived closed list from `accept`, `defer_recommendation`, `choose_target`, `choose_folder`, `prepare_review`, `finish_later`, `resume`, `manual`, `manual_takeover`, `open_workspace`, `review_batch`, `pause_monitoring`, `manage_access`, and `history`. Each has only ID, label, enabled, and optional reason/route.
+- `actions`: a server-derived closed list from `accept`, `defer_recommendation`, `choose_target`, `choose_folder`, `prepare_review`, `finish_later`, `resume`, `review_again`, `manual`, `manual_takeover`, `open_workspace`, `review_batch`, `pause_monitoring`, `manage_access`, and `history`. Each has only ID, label, enabled, and optional reason/route. `review_again` is a read: the client re-`GET`s the setup and sends no mutation.
 
 The browser renders these values as text, never HTML, and does not infer permission from a label. A write returns HTTP 200 for replay/adoption and 201 only when acceptance creates a new run; both return the same projection shape. HTTP success is not itself a domain receipt—the projection identifies the observed canonical receipt.
+
+### Setup milestones
+
+`projection.milestones[]` is the read-only, server-derived record of the reviewed workspace/team preparation (issue #529). It is additive within `schema_version` 1 and is derived on every projection from durable rows only: the run, its workspace operation, and `assistant_setup_resources` receipts, plus one in-process fact (a preparation attempt currently executing in this server process). It writes nothing; repeated `GET`s return identical milestones.
+
+| Field | Meaning |
+|---|---|
+| `id` | Stable identity: `workspace`, `role:<role_id>`, or `existing_team` (adopt mode). Clients key on `id`, never on `name`. |
+| `kind` | `workspace`, `agent_role`, or `existing_team`. |
+| `name` | Safe display name. Create mode: the reviewed workspace name (`assistantsetup.WorkspaceName`, shared with the creator adapter) and the reviewed role name; after receipt the resolved target name is preferred. Adopt mode carries no reviewed role, so the entry is the generic "Existing team kept as is" and no name is invented. |
+| `action` | The reviewed action: `create` or `reuse`. |
+| `status` | `pending`, `creating`, `reusing`, `created`, `reused`, `failed`, `needs_review`. |
+| `needs_model` | Orthogonal flag on a receipted role whose reviewed profile has no model ("Configured; chat needs a model"). |
+| `resource_id`, `ownership`, `recorded_at`, `placement` | Only once receipted: the canonical resource ID from the receipt, its `created`/`adopted`/`updated` ownership, the receipt time, and a closed placement code (`workspace_directory`, `agent_roster`). Never a path. |
+| `blueprint_id`, `blueprint_version` | The reviewed blueprint the run was accepted against. |
+| `error_code` | A safe code on the first un-receipted milestone when `failed` or `needs_review`. |
+
+Rules the derivation guarantees:
+
+- **Receipts are the only proof.** `created`/`reused` require a matching receipt written by the workspace operation (`workspace` for the workspace, `agent_instance` for the team). `created` follows `created` ownership; `adopted` ownership is always `reused`, so reusing an existing `File Curator` (or adopting an existing workspace) can never read "Created".
+- **`creating`/`reusing` come only from a live attempt in this process.** A timer, a client clock, or a status string is never evidence.
+- **Only the first un-receipted milestone carries a stop state.** An `unresolved` operation (or a `reconcile_required` run) is `needs_review`; a `failed` operation is `failed`; later milestones stay `pending`. A `running` operation with no live attempt (the process stopped mid-preparation) is `needs_review` with `preparation_interrupted`. A `claimed` operation with no live attempt was never started (`StartWorkspace` precedes the preparer), so it provably did nothing and stays `pending`. A succeeded operation with no receipt is `needs_review`.
+- **A profile is not a team member until it is attached.** A role with an `agent_profile` receipt but no `agent_instance` receipt is `needs_review` with `agent_not_attached`, never `created`.
+- **Failed means provably nothing was written.** See [Workspace-step failure classification](#workspace-step-failure-classification).
+- **The list is for reading, not an execution claim.** It is ordered workspace, then roles. Actual execution order is agents seeded first, then the workspace persisted (see [Strict reviewed team creation](#strict-reviewed-team-creation)); statuses come only from receipts.
+- **List-driven.** Consumers must not assume a role count. Known limit: the run row stores one role (`team_role_*`) and `validateTeamPlan` requires exactly one, so multi-role receipts (a `role_id` on each resource) are out of scope; the list shape and identity scheme do not change if that lands.
+
+#### Presentation layer (read-only dialog)
+
+The card shows the milestones inline and offers a read-only **Assistant setup** dialog (Create Workspace → Create Agent per role → Receipt summary). It is its own markup, not the real Create Workspace / Create Agent modals: no `<form>`, no submit control, no named inputs, and no System Prompt field (the reviewed `TeamRole` deliberately excludes prompts).
+
+- **Mount and layer.** One native `<dialog>` in the shared card partial, opened with `showModal()`. Top-layer rendering places it above the assistant drawer's stacking context (`.ori-guide` z-index 1040) and every page modal (10100); the browser also supplies the focus trap, inert background, and Esc handling. The drawer stays open beneath it.
+- **Honesty.** Preparation takes milliseconds, so the normal viewing is a labelled **Receipt walkthrough** with the receipt time; a live "Creating" appears only when the server reports an in-flight step (second tab, reload during preparation, slow storage). Before any projection arrives the dialog shows the reviewed values as `Requested — waiting for Ori` with every entry `pending`. Timers may only change which already-receipted panel is in view; a timer, a close, or a skip is never evidence and sends no request.
+- **Modal replay.** For a receipted **create** step the walkthrough replays the actual Create Workspace modal, then the Create New Agent modal, being clicked through: the modal pops in, a cursor moves to the File Janitor blueprint card and clicks it, clicks **Next**, the recap and workspace name fill in, **Next** to Team (File Curator, Create), **Next** to Review, then **Create Workspace** is clicked and the button turns to "Created ✓" with the recorded time; the agent modal then pops in, the name and model fill in, and **Create Agent** is clicked the same way. The picture is copied from the live modals in the page (`#addFolderModal`, `#addAgentModal`, and the inert `#agentCreateFormTemplate`), so it matches the real chrome, theme, stepper, and blueprint art (the card grid is filled from the read-only `GET /api/project-templates`). It is never the real modal being driven: `cloneNode` copies no handlers, every id, `for`, and `data-bs-*` attribute is stripped, every `input`, `select`, `textarea`, and `button` is replaced by inert text, and the copy is `inert` and `aria-hidden` with a visually hidden summary. Nothing in it is submittable, and driving the real modal would have created a second workspace through the browser, which the coordinator's reviewed creator seam exists to prevent. The System Prompt field of the real agent form is removed from the copy (prompts are never disclosed). A page without the real modals, and any step that is not a single receipted create (pending, stopped, reuse, adopt, several roles), keeps the plain windows below. Auto-advance waits for the replay to finish; **Next**, **Back**, and **Skip** cut it short, and `window.__oriReplaySlow = 5` stretches every pause for recording. Under `prefers-reduced-motion` the finished picture is shown at once with no cursor.
+- **Visual replay (plain windows).** Steps that do not replay the modal are drawn as a read-only window that resembles it: a title bar, a Blueprint → Details → Team → Review marker row for the workspace, labelled value boxes (no `<input>`), and the button the creator pressed. Under full motion the boxes wipe in one after another, the markers light up, the button presses, then the status chip and receipt strip appear (about 4 s, with auto-advance at 5.2 s). This is a picture of values Ori already recorded: the fields hold only reviewed or receipted facts (name, blueprint, team, role, source, model availability, ownership, time, ID), never a path, prompt, or digest, and the animation is CSS keyed on the milestone `status`, so a `pending`, `creating`, `failed`, or `needs_review` window never plays the press or shows a receipt it does not have. Under `prefers-reduced-motion: reduce` only the finished window exists. The card refreshing does not restart the animation; the dialog re-renders only when the milestones change.
+- **Stopped.** When a milestone is `failed` or `needs_review`, the walkthrough is labelled `Stopped — needs your attention` and ends on the panel that stopped. Earlier panels and their receipts stay reachable with Back, and each stopped entry names the safe code's plain explanation. A refused **Set up for me** keeps the dialog open because the error envelope carries the stopped projection. **Continue** then hands focus to the card, which offers only the server-projected action: **Continue setup**, **Try again**, **Review updated setup**, or a manual route.
+- **Refresh.** While the server reports `setting_up` or an in-flight milestone the card re-`GET`s the same route on a fixed interval with a hard attempt cap, stopping on a terminal state, a hidden card, or a hidden tab; after the cap a manual **Refresh** control appears. No new route.
+- **Known limits.** The run row stores one role (`team_role_*`) and `validateTeamPlan` requires exactly one, so multi-role receipts (a `role_id` on each resource) are out of scope; the milestone list and the walkthrough are list-driven and need no change if that lands. Adopt runs carry no reviewed role, so they show the generic "Existing team kept as is" entry. `DeferRun` (**Finish later**) does not take the preparation lock, so pressing it during the ~10 ms preparation can defer the run while the creator finishes; the receipt write is then refused (the run is no longer `active`) and the claim stays `running`. The run reads "Saved for later" and the existing **Resume setup** completes it observation-first on the same reserved IDs. Nothing is created twice.
+- **Focus and pickers.** **Continue** closes the dialog and focuses **Choose folder** without activating it. `chooseFolder()` closes the dialog first, and the dialog refuses to open while a folder selection is pending, so it is never stacked over the native picker. Under `prefers-reduced-motion: reduce` there is no auto-advance or transition and every available panel is shown at once.
 
 ### Safe failures
 
@@ -283,7 +323,8 @@ Errors use the existing structured API envelope with a stable code, user-safe me
 | `unsupported_target` | 409 | Capability/wizard/provenance/privacy cannot be safely automated; manual/repair route only. |
 | `stale_proposal` / `stale_run` / `stale_monitoring_review` | 409 | Canonical revision changed; return fresh projection and require review where consent changed. |
 | `invalid_action` | 409 | The requested route is not allowed at the run's current step. |
-| `team_conflict` | 409 | Current create/reuse plan differs or a custom-name collision exists; no write from the stale plan. |
+| `team_conflict` | 409 | Current create/reuse plan differs or a custom-name collision exists; no write from the stale plan. At the workspace step this invalidates the run (`team_plan_changed`) and the next read offers a fresh review. |
+| `agent_root_unavailable` | 503 | The Workspace Directory holding the user's agents is unreachable. Refused before any write; `retryable`, and at the workspace step the same claim can be tried again through `resume`. |
 | `folder_conflict` / `folder_changed` | 409 | File Janitor root ownership/identity check refused; choose/repair explicitly. |
 | `privacy_review_required` | 409 | Current mode is not the reviewed metadata-only mode; no reset or scan. |
 | `monitoring_registration_failed` | 503 | Approval may be saved but fresh watcher health failed; retry registration only when still bound. |
@@ -334,6 +375,28 @@ Every consequential step follows the same protocol:
 4. Observe the canonical result by stable ID/marker and expected version. Then record the resource receipt and advance the run with a compare-and-swap on its revision.
 5. If the final coordinator write or HTTP response is lost, replay starts at observation, not at mutation.
 
+The workspace operation enters `running` when preparation is attempted: `StartWorkspace` moves a `claimed` or `failed` operation to `running`, counts the attempt, keeps its first `started_at`, and clears the superseded failure code; an operation that is already `running`, `unresolved`, or `succeeded` is left untouched, so replay is idempotent. Database state is for display and recovery.
+
+Mutual exclusion is an in-process **per-owner preparation lock** held across the whole of `Accept` and `Resume`. An owner has at most one active run, so this is the single-flight guard: the preparer is entered at most once concurrently per run. A second tab's `Accept` or `Resume` waits for the lock (bounded by its own request context), then takes the ordinary replay path and projects what the first attempt durably recorded. Holding it across `Accept` also covers two tabs that both press **Set up for me** before any run exists: the second replays the first's run instead of losing an insert race. A `GET` never takes the lock and never starts, joins, or continues preparation.
+
+The lock is also how a projection tells a live attempt from an interrupted one. It samples the lock before and after its durable read and treats the claim as live if either sample holds it. A finished attempt always leaves its operation `succeeded`, `failed`, or `unresolved`, so an attempt that ends during the read is never mistaken for an interrupted one.
+
+#### Workspace-step outcomes
+
+| Workspace claim | Run | `view_state` | Actions | Milestones |
+|---|---|---|---|---|
+| `claimed`/`running`, attempt live in this process | `active` | `setting_up` | `finish_later` | `creating`/`reusing` |
+| `claimed`, no live attempt (stopped before starting) | `active` | `needs_attention` | `resume` "Continue setup", `finish_later` | `pending` |
+| `running`, no live attempt (stopped mid-preparation) | `active` | `needs_attention` | `resume` "Continue setup", `finish_later` | first un-receipted `needs_review` `preparation_interrupted` |
+| `failed` `agent_root_unavailable` | `active`, `failed_step=workspace` | `needs_attention` | `resume` "Try again", `finish_later` | first `failed` |
+| `failed` `team_plan_changed` | `invalidated`, `failed_step=workspace` | `plan_changed` | `review_again` (a read), `manual` | first `failed` |
+| `unresolved` | `reconcile_required` | `needs_attention` | `manual` | receipts kept; first unproven `needs_review` |
+| `succeeded` | `active` at `folder` or later | step view | step actions | `created`/`reused` from receipts |
+
+**Extended `resume` precondition.** `resume` keeps its existing meaning for a `deferred` run. It now also accepts an `active` run at the `workspace` step whose claim is `claimed`, `running`, or `failed` with a retryable code (`agent_root_unavailable`), provided the run revision matches. Because `resume` holds the preparation lock, no attempt can be live in this process. It re-enters preparation on the same claim, which is observation-first by the reserved workspace ID, so nothing is created twice. There is no new route, no startup sweep, and no automatic continuation: only the user's explicit **Continue setup** or **Try again** continues the claim. An `unresolved` claim is never resumed.
+
+A run invalidated with `team_plan_changed` and no receipts no longer blocks review. `Get` and `Accept` treat it as absent, so the next read shows a fresh proposal and a new acceptance creates a new run. Other invalidated runs keep today's terminal `no_longer_available` behaviour.
+
 The lock/admission order is therefore `WorkGate permit -> assistantsetup claim transaction -> domain lock/write -> assistantsetup receipt transaction`. A domain may take its own workspace/File Janitor/trigger locks, but it must never call back into an open assistant-setup transaction. Two tabs racing the same step load the same operation claim; only one receives the claimed run revision, and both eventually project the same observed result.
 
 The coordinator's retry scheduler is a server-owned background service. The runner owns only its cancel/join lifecycle; every consequential retry enters the shared finite `WorkGate` inside `PrepareReview` before revalidation or mutation. `Close` cancels future polling and joins the runner. `Server.shutdownBackground` stops it before File Janitor automation. Reset fencing therefore refuses a retry before mutation or waits for an already admitted finite operation, while normal shutdown joins the polling loop.
@@ -375,9 +438,20 @@ Recovery is deterministic:
 
 Before enumerating, the operation-aware scan checks the current scan state for a pending batch on the current root. If one already supplies the promised result (including one produced by a watcher that won the scan lock), it records an `adopted_batch` receipt and does not scan again. Otherwise all scans still serialize through the existing scan-state lock, eligibility, settling, and active-fingerprint deduplication. The operation method refuses any content-enabled mode, so no classifier provider is called even if a model exists.
 
+### Workspace-step failure classification
+
+A failed workspace preparation is classified in one place (`Service.settleFailedPreparation`). Creation logic is unchanged; the additions are typed errors, a read-only observer, and receipt/lifecycle bookkeeping.
+
+1. **Typed pre-write refusals.** The reviewed creator returns only these sentinels, and only before it writes anything: `sessionhttp.ErrReviewedPlanChanged` (the current effective plan differs from the reviewed one, detected by `reviewedTemplatePlansEqual`), `sessionhttp.ErrReviewedPlanUnsupported` (the built-in no longer resolves into a supported one-role plan), and `store.ErrAgentRootUnavailable`. The server adapter maps them with `errors.Is` to `ErrTeamConflict` / `ErrAgentRootUnavailable`; every other creator error passes through unchanged and is an unproven outcome. No error text is matched.
+2. **The observer confirms.** An earlier, interrupted attempt of the same claim may already have written something, so a typed refusal alone does not prove "nothing written". `ObserveReviewedFileJanitor` reports, without writing, what the claim left behind. It checks whether anything is at the reserved workspace ID (from the store's ID list, so an unreadable workspace is an error, never "absent"), whether that workspace carries this operation's assistant-setup provenance and File Janitor, the reviewed role's attached instance, and whether a profile carries this operation's provenance ID, operation ID, and config digest. A same-name agent without those markers is unrelated.
+3. **Failed.** A typed refusal plus an observer report of nothing is `FailWorkspace`. The operation becomes `failed` with the safe code, the run keeps `current_step=workspace` with `failed_step=workspace`, and the milestone is `failed`. `agent_root_unavailable` keeps the run `active` so the same claim can be retried through `resume`. `team_plan_changed` can never succeed on the same claim, so the run is invalidated and a fresh review is offered.
+4. **Unproven.** Anything else (an untyped error, an observer error, or a typed refusal with leftover state) records receipts for exactly what the observer proves through `RecordWorkspaceObservation`. That call uses `ON CONFLICT DO NOTHING` and never advances the run. An `agent_instance` receipt is recorded only when its ownership is provable: `adopted` for a reused profile, `created` only alongside this operation's created profile. The claim then stops as today: operation `unresolved`, run `reconcile_required`.
+
+Error responses for both classes carry the fresh `setup` projection, so the card and the walkthrough stop at the exact step. The raw creator error never reaches the body.
+
 ### Safe unresolved-outcome stop
 
-`reconcile_required` is not a generic retry state. It is mandatory when an expected stable resource exists but its operation marker, owner, version, or reviewed configuration cannot be proved; when a persisted record is unreadable; or when both completion and absence cannot be established from the atomic domain contract. The card names saved successes and offers a bounded repair/manual route. It does not delete, recreate, attach by name, grant again, unpause, or scan.
+`reconcile_required` is not a generic retry state. It is mandatory when an expected stable resource exists but its operation marker, owner, version, or reviewed configuration cannot be proved; when a persisted record is unreadable; or when both completion and absence cannot be established from the atomic domain contract. The card names saved successes as receipted milestones (for example workspace **Created**, File Curator **Needs review**) and offers a bounded repair/manual route. It does not delete, recreate, attach by name, grant again, unpause, or scan.
 
 In particular:
 

@@ -366,7 +366,10 @@ func TestResolveSendsTokenOnlyWhenSetAndOnlyOverHTTPS(t *testing.T) {
 // cannot load one, so the order, the floor at the end, and the cap are the
 // contract — not just the first entry.
 func TestCandidatesAreOrderedNewestFirstAndEndAtTheFloor(t *testing.T) {
+	// The draft, the prerelease and the below-floor release never reach a
+	// caller's walk, so the update check never inspects or offers them.
 	fake := newReleasesServer(t, `[
+		{"tag_name":"v0.9.0","draft":true,"prerelease":false},
 		{"tag_name":"v0.6.2","draft":false,"prerelease":false},
 		{"tag_name":"0.7.0","draft":false,"prerelease":false},
 		{"tag_name":"v0.6.1","draft":false,"prerelease":false},

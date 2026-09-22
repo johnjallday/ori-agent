@@ -278,6 +278,60 @@ type FirstResult struct {
 	ReviewRoute     string    `json:"review_route,omitempty"`
 }
 
+// WorkspaceName is the reviewed name of the File Janitor workspace the setup
+// creates. The creator adapter and the milestone list both read this constant so
+// the name the user reviewed is the name the sequence shows.
+const WorkspaceName = "File Janitor"
+
+type MilestoneKind string
+
+const (
+	MilestoneWorkspace    MilestoneKind = "workspace"
+	MilestoneAgentRole    MilestoneKind = "agent_role"
+	MilestoneExistingTeam MilestoneKind = "existing_team"
+)
+
+type MilestoneStatus string
+
+const (
+	MilestonePending     MilestoneStatus = "pending"
+	MilestoneCreating    MilestoneStatus = "creating"
+	MilestoneReusing     MilestoneStatus = "reusing"
+	MilestoneCreated     MilestoneStatus = "created"
+	MilestoneReused      MilestoneStatus = "reused"
+	MilestoneFailed      MilestoneStatus = "failed"
+	MilestoneNeedsReview MilestoneStatus = "needs_review"
+)
+
+// Closed placement codes. They describe where a receipted resource lives
+// without ever carrying a filesystem path.
+const (
+	PlacementWorkspaceDirectory = "workspace_directory"
+	PlacementAgentRoster        = "agent_roster"
+)
+
+// Milestone is one step of the reviewed workspace/team preparation as the
+// server can prove it. Identity is ID (`workspace`, `role:<role_id>`,
+// `existing_team`), never the display Name. Created and Reused exist only when a
+// matching resource receipt exists; list order is for reading, not an execution
+// claim.
+type Milestone struct {
+	ID               string            `json:"id"`
+	Kind             MilestoneKind     `json:"kind"`
+	Name             string            `json:"name"`
+	RoleID           string            `json:"role_id,omitempty"`
+	Action           string            `json:"action"` // reviewed action: create or reuse
+	Status           MilestoneStatus   `json:"status"`
+	NeedsModel       bool              `json:"needs_model,omitempty"`
+	BlueprintID      string            `json:"blueprint_id,omitempty"`
+	BlueprintVersion int               `json:"blueprint_version,omitempty"`
+	Placement        string            `json:"placement,omitempty"`
+	ResourceID       string            `json:"resource_id,omitempty"`
+	Ownership        ResourceOwnership `json:"ownership,omitempty"`
+	RecordedAt       *time.Time        `json:"recorded_at,omitempty"`
+	ErrorCode        string            `json:"error_code,omitempty"`
+}
+
 type Projection struct {
 	SchemaVersion int               `json:"schema_version"`
 	CapabilityID  string            `json:"capability_id"`
@@ -288,6 +342,7 @@ type Projection struct {
 	Proposal      *Proposal         `json:"proposal,omitempty"`
 	Run           *Run              `json:"run,omitempty"`
 	Operations    []Operation       `json:"operations,omitempty"`
+	Milestones    []Milestone       `json:"milestones,omitempty"`
 	Target        *Target           `json:"target,omitempty"`
 	Health        *Health           `json:"health,omitempty"`
 	Monitoring    *MonitoringReview `json:"monitoring_review,omitempty"`

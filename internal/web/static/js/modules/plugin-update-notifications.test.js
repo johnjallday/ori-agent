@@ -114,6 +114,70 @@ test('plugin notices distinguish source versions from footprint-only changes', (
   assert.equal(updates.pluginNotice({ available: false }), null);
 });
 
+test('reviewed release wording is distinct from source wording for the same version', () => {
+  const updates = loadModule();
+  const row = extra => ({
+    name: 'reaper-plugin',
+    installed_version: '0.6.1',
+    available_version: '0.7.0',
+    available: true,
+    ...extra
+  });
+  const noticeFor = extra => {
+    // The Plugins page and the Home flyout both read a normalized row.
+    const [update] = updates.normalize({ updates: [row(extra)] }).updates;
+    return updates.pluginNotice(update);
+  };
+
+  const reviewed = noticeFor({ reviewed_release: true });
+  assert.equal(reviewed.label, 'Update available · 0.7.0');
+  assert.equal(reviewed.detail, 'Reviewed release 0.7.0 is available.');
+  assert.equal(
+    updates.pluginNotice({
+      installedVersion: '0.6.1',
+      availableVersion: '0.7.0',
+      available: true,
+      reviewedRelease: true
+    }).detail,
+    'Reviewed release 0.7.0 is available.'
+  );
+  assert.equal(noticeFor({}).detail, 'Source version 0.7.0 is available.');
+  assert.equal(noticeFor({ reviewed_release: false }).detail, 'Source version 0.7.0 is available.');
+
+  // Only the literal true is provenance; anything truthier is not.
+  for (const value of ['true', 1, {}, [], 'yes']) {
+    assert.equal(
+      noticeFor({ reviewed_release: value }).detail,
+      'Source version 0.7.0 is available.',
+      `reviewed_release ${JSON.stringify(value)} must not switch the wording`
+    );
+  }
+
+  // A provenance change re-renders even when every version is unchanged.
+  assert.notEqual(
+    updates.presentation({ updates: [row({ reviewed_release: true })] }).signature,
+    updates.presentation({ updates: [row({})] }).signature
+  );
+});
+
+test('a reviewed release keeps untrusted version text inert', () => {
+  const updates = loadModule();
+  const [update] = updates.normalize({
+    updates: [
+      {
+        name: 'demo',
+        installed_version: '1',
+        available_version: '<img src=x onerror=alert(1)>',
+        available: true,
+        reviewed_release: true
+      }
+    ]
+  }).updates;
+  const notice = updates.pluginNotice(update);
+  assert.match(notice.detail, /^Reviewed release <img/);
+  assert.doesNotMatch(updates.escapeHTML(notice.detail), /<img/);
+});
+
 test('untrusted plugin names and versions remain inert presentation text', () => {
   const updates = loadModule();
   const hostile = `"><img src=x onerror=alert('x')>`;

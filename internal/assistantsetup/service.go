@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -66,6 +66,44 @@ type Service struct {
 	progressor      FileJanitorProgressor
 	folderIntents   *folderIntentStore
 	gate            *resetstate.WorkGate
+	observer        WorkspaceObserver
+
+	preparationMu sync.Mutex
+	preparations  map[string]chan struct{}
+}
+
+// lockPreparation serializes Accept and Resume for one owner. An owner has at
+// most one active run, so this is the single-flight guard for workspace
+// preparation: the preparer is entered at most once concurrently per run, and a
+// second tab waits (bounded by its own request) and then replays from what the
+// first attempt durably recorded. The lock is in-process state for mutual
+// exclusion and for reporting a live attempt; the database remains the record.
+func (s *Service) lockPreparation(ctx context.Context, ownerUserID string) (func(), error) {
+	s.preparationMu.Lock()
+	if s.preparations == nil {
+		s.preparations = map[string]chan struct{}{}
+	}
+	slot, ok := s.preparations[ownerUserID]
+	if !ok {
+		slot = make(chan struct{}, 1)
+		s.preparations[ownerUserID] = slot
+	}
+	s.preparationMu.Unlock()
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ErrUnavailable
+	}
+}
+
+// preparing reports whether an Accept or Resume for this owner is executing in
+// this process right now.
+func (s *Service) preparing(ownerUserID string) bool {
+	s.preparationMu.Lock()
+	slot := s.preparations[ownerUserID]
+	s.preparationMu.Unlock()
+	return len(slot) > 0
 }
 
 func NewService(store Store, relationships RelationshipReader, resolver CandidateResolver, plans PlanSource, preparer WorkspacePreparer) *Service {
@@ -95,6 +133,9 @@ func (s *Service) Get(ctx context.Context, ownerUserID, selectedWorkspaceID stri
 		return nil, ErrUnavailable
 	}
 	active, activeErr := s.store.FindActiveRun(ctx, ownerUserID, CapabilityID)
+	if activeErr == nil && s.reviewableAgain(ctx, active) {
+		active, activeErr = nil, ErrNotFound
+	}
 	relationship, err := s.relationship(ctx, ownerUserID)
 	if err != nil {
 		if activeErr == nil && active.Status != RunInvalidated &&
@@ -389,10 +430,20 @@ func (s *Service) Accept(ctx context.Context, ownerUserID, proposalRevisionValue
 		return nil, false, err
 	}
 	defer release()
+	unlock, err := s.lockPreparation(ctx, ownerUserID)
+	if err != nil {
+		return nil, false, err
+	}
+	defer unlock()
 
 	// A lost response or second tab reuses the accepted claim before allocating
 	// any new identifier. The proposal must still name the exact accepted review.
-	if active, activeErr := s.store.FindActiveRun(ctx, ownerUserID, CapabilityID); activeErr == nil {
+	// A run stopped by a changed plan before any write no longer blocks review.
+	active, activeErr := s.store.FindActiveRun(ctx, ownerUserID, CapabilityID)
+	if activeErr == nil && s.reviewableAgain(ctx, active) {
+		active, activeErr = nil, ErrNotFound
+	}
+	if activeErr == nil {
 		if active.ProposalRevision != strings.TrimSpace(proposalRevisionValue) {
 			return nil, false, ErrConflict
 		}
@@ -503,15 +554,20 @@ func (s *Service) prepareClaim(ctx context.Context, run *Run, plan TeamPlan, tar
 		}
 		return s.projectRun(ctx, base, run)
 	}
-	result, prepareErr := s.preparer.PrepareFileJanitor(ctx, PrepareRequest{
+	// The caller holds lockPreparation for this owner, so no other attempt at
+	// this run is executing in this process.
+	if startErr := s.store.StartWorkspace(ctx, run.OwnerUserID, run.ID, operation.ID); startErr != nil {
+		return nil, ErrUnavailable
+	}
+	request := PrepareRequest{
 		OwnerUserID: run.OwnerUserID, RunID: run.ID, OperationID: operation.ID,
 		ReviewDigest: operation.ReviewDigest, WorkspaceID: run.TargetWorkspaceID,
 		ProfileProvenanceID: operation.ProfileProvenanceID, Mode: run.TargetMode,
 		Plan: plan, ExpectedTarget: target,
-	})
+	}
+	result, prepareErr := s.preparer.PrepareFileJanitor(ctx, request)
 	if prepareErr != nil {
-		_, _ = s.store.MarkWorkspaceUnresolved(ctx, run.OwnerUserID, run.ID, operation.ID, "workspace_outcome_unresolved")
-		return nil, fmt.Errorf("%w: %v", ErrReconcileRequired, prepareErr)
+		return s.settleFailedPreparation(ctx, run, operation, request, prepareErr)
 	}
 	updated, err := s.store.CompleteWorkspace(ctx, run.OwnerUserID, run.ID, operation.ID, result)
 	if err != nil {
@@ -581,11 +637,70 @@ func (s *Service) ResumeRun(ctx context.Context, ownerUserID, runID string, ifVe
 		return nil, err
 	}
 	defer release()
+	unlock, err := s.lockPreparation(ctx, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	// An active run stopped at the workspace step (interrupted, or failed with a
+	// retryable code) continues on its own claim. Holding the preparation lock
+	// proves no other attempt is executing in this process, and preparation is
+	// observation-first by the reserved IDs, so nothing is created twice.
+	current, err := s.store.GetRun(ctx, ownerUserID, runID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Status == RunActive && current.CurrentStep == StepWorkspace {
+		if current.Revision != ifVersion {
+			return nil, ErrStaleRun
+		}
+		operation, opErr := s.workspaceOperation(ctx, current)
+		if opErr != nil {
+			return nil, opErr
+		}
+		if !workspaceResumable(operation) {
+			return nil, ErrInvalidAction
+		}
+		return s.resumeWorkspaceClaim(ctx, ownerUserID, current)
+	}
 	run, err := s.store.ResumeRun(ctx, ownerUserID, runID, ifVersion)
 	if err != nil {
 		return nil, err
 	}
 	return s.resumeWorkspaceClaim(ctx, ownerUserID, run)
+}
+
+func (s *Service) workspaceOperation(ctx context.Context, run *Run) (*Operation, error) {
+	operations, err := s.store.ListOperations(ctx, run.OwnerUserID, run.ID)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	return findWorkspaceOperation(operations), nil
+}
+
+func findWorkspaceOperation(operations []Operation) *Operation {
+	for index := range operations {
+		if operations[index].Kind == OperationWorkspace {
+			return &operations[index]
+		}
+	}
+	return nil
+}
+
+// workspaceResumable reports a workspace claim that may continue: never
+// started, started by a process that stopped, or refused before any write for
+// a reason that can clear on its own.
+func workspaceResumable(operation *Operation) bool {
+	if operation == nil {
+		return false
+	}
+	switch operation.Status {
+	case OperationClaimed, OperationRunning:
+		return true
+	case OperationFailed:
+		return retryableWorkspaceCode(operation.SafeErrorCode)
+	}
+	return false
 }
 
 func (s *Service) baseProjection(ctx context.Context, owner string) (*Projection, error) {
@@ -596,7 +711,54 @@ func (s *Service) baseProjection(ctx context.Context, owner string) (*Projection
 	return &Projection{SchemaVersion: SchemaVersion, CapabilityID: CapabilityID, Relationship: relationship, Actions: []Action{}}, nil
 }
 
+// projectRun projects one run and attaches its server-derived milestones. The
+// milestones are derived from the run as finally projected, after any
+// reconciliation inside projectRunState.
+//
+// A preparation is live when this owner's lock is held before or after the
+// durable read. Sampling both sides means an attempt that finishes during the
+// read is never mistaken for an interrupted one: a finished attempt leaves its
+// operation succeeded, failed, or unresolved.
 func (s *Service) projectRun(ctx context.Context, projection *Projection, run *Run) (*Projection, error) {
+	return s.projectRunAfter(ctx, projection, run, false)
+}
+
+// projectRunAfter projects a run; attemptEnded tells it that the caller holds
+// the preparation lock but its own attempt has already finished, so nothing
+// is live even though the lock is held.
+func (s *Service) projectRunAfter(ctx context.Context, projection *Projection, run *Run, attemptEnded bool) (*Projection, error) {
+	liveBefore := !attemptEnded && s.preparing(run.OwnerUserID)
+	projected, err := s.projectRunState(ctx, projection, run)
+	if err != nil {
+		return nil, err
+	}
+	live := liveBefore || (!attemptEnded && s.preparing(run.OwnerUserID))
+	operation := findWorkspaceOperation(projected.Operations)
+	if err := s.attachMilestones(ctx, projected, operation, live); err != nil {
+		return nil, err
+	}
+	applyWorkspaceStop(projected, operation, live)
+	return projected, nil
+}
+
+func (s *Service) attachMilestones(ctx context.Context, projection *Projection, operation *Operation, live bool) error {
+	run := projection.Run
+	if run == nil {
+		return nil
+	}
+	resources, err := s.store.ListResources(ctx, run.OwnerUserID, run.ID)
+	if err != nil {
+		return ErrUnavailable
+	}
+	input := milestoneInput{Run: run, Operation: operation, Resources: resources, InFlight: live && workspaceUnsettled(operation)}
+	if projection.Target != nil {
+		input.WorkspaceName = projection.Target.Name
+	}
+	projection.Milestones = deriveMilestones(input)
+	return nil
+}
+
+func (s *Service) projectRunState(ctx context.Context, projection *Projection, run *Run) (*Projection, error) {
 	operations, err := s.store.ListOperations(ctx, run.OwnerUserID, run.ID)
 	if err != nil {
 		return nil, ErrUnavailable
