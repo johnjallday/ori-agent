@@ -104,6 +104,7 @@ function brNormalize(raw) {
     raw.dependency && typeof raw.dependency === 'object'
       ? {
           pluginName: brText(raw.dependency.plugin_name ?? raw.dependency.pluginName),
+          displayName: brText(raw.dependency.display_name ?? raw.dependency.displayName),
           pluginVersion: brText(raw.dependency.plugin_version ?? raw.dependency.pluginVersion),
           installed: Boolean(raw.dependency.installed),
           enabled: Boolean(raw.dependency.enabled),
@@ -173,7 +174,11 @@ function brDescribe(readiness) {
   return label;
 }
 
-function brActionLabel(action) {
+// A reviewed plugin's display name makes the install button say what it
+// installs. Every other label is fixed.
+function brActionLabel(action, readiness) {
+  const displayName = readiness?.dependency?.displayName || '';
+  if (action === 'install_plugin' && displayName) return `Install ${displayName}…`;
   return BR_ACTION_LABELS[action] || '';
 }
 
@@ -215,7 +220,7 @@ function brRenderBadge(readiness) {
 function brDependencyLine(readiness) {
   const dependency = readiness.dependency;
   if (!dependency || !dependency.pluginName) return '';
-  const name = dependency.pluginName;
+  const name = dependency.displayName || dependency.pluginName;
   if (!dependency.installed) return `${name} — not installed`;
   const version = dependency.pluginVersion ? ` ${dependency.pluginVersion}` : '';
   return dependency.enabled
@@ -287,7 +292,7 @@ function brRenderPanel(readiness, options) {
   if (normalized.actions.length > 0) {
     const actions = brCreateElement('div', 'workspace-blueprint-readiness-actions');
     normalized.actions.forEach((action, index) => {
-      const label = brActionLabel(action);
+      const label = brActionLabel(action, normalized);
       if (!label) return;
       const button = brCreateElement(
         'button',

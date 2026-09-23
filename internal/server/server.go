@@ -62,6 +62,9 @@ type Server struct {
 	workspaceFileStore       *workspace.FileStore
 	projectTemplateCatalog   projecttemplates.RuntimeCatalog
 	setupJourneyStore        *setupjourney.SQLiteStore
+	// reviewedReleases finds and verifies reviewed releases. Blueprint recovery
+	// uses it to install a reviewed Home provider; nil when plugins are off.
+	reviewedReleases *reviewedIntegrationUpdates
 
 	shutdownOnce   sync.Once
 	shutdownErr    error

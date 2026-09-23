@@ -28,3 +28,22 @@ var builtInEntries = mustRegistry([]Entry{
 		ReleaseReady: true,
 	},
 })
+
+// builtInHomeProviders are reviewed plugins that contribute only an independent
+// Assistant Program Home. Same floor rule as above; a content-only release has
+// no platform asset, so its fallback commit is verified against the published
+// tag alone. See docs/architecture/independent-program-homes.md for the v0.1.0
+// evidence.
+var builtInHomeProviders = mustHomeProviders([]HomeProvider{
+	{
+		Key: "music_project_management", PluginID: "music-project-management", MinimumVersion: "0.1.0",
+		DisplayName:      "Music Project Management",
+		SourceRepository: "https://github.com/johnjallday/music-project-management",
+		FallbackCommit:   "5f748d2de4457ac9dd02ea1ec31e34e1493744cf", SourceFormat: reviewedClaudeFormat,
+		PublisherLabel: "Ori", SourceLabel: "johnjallday/music-project-management",
+		ProgramID: "music-producer-assistant", HomeSchemaVersion: 1,
+		RequiredHostFeatures: []string{"independent_program_homes_v1"},
+		ExpectedProtocol:     1,
+		ReleaseReady:         true,
+	},
+}, builtInEntries)

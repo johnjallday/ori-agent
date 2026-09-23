@@ -269,7 +269,8 @@ Ori derives the Home provider/program solely through the normalized
 provider is installed, enabled, and compatible." It never authorizes dependency
 installation or a fallback declaration. When the provider is missing, the host
 shows a reviewed host-owned install destination if one exists, otherwise safe
-manual installation guidance with no guessed URL.
+manual installation guidance with no guessed URL. See §5.1 for the reviewed
+destination.
 
 `standalone_composition` schema 1 keeps its current combined-v2 meaning. Split
 blueprints use schema 2, whose `project_roles` must exactly cover the local
@@ -372,6 +373,56 @@ consequences:
 
 Metadata reads perform none of those consequences.
 
+### 5.1 Reviewed Home providers
+
+`internal/reviewedintegration/entries.go` holds a second, separate allowlist,
+`builtInHomeProviders`, next to the project integrations. An entry names a
+plugin that contributes exactly one Assistant Program Home and nothing a
+project runs. It records the plugin ID, display name, repository, reviewed
+floor and fallback commit, the Home program ID and schema, the surface
+protocol, and the required host features. It has no blueprint, platform, or
+install quest. A plugin can be reviewed as a project integration or as a Home
+provider, never both.
+
+When a split project blueprint's Home provider is missing and is on this list,
+the blueprint's readiness card names it and offers **Install
+&lt;display name&gt;…** as its primary action. That action uses the existing
+in-wizard recovery endpoint. The blueprint only names the provider; the source
+comes from the allowlist.
+
+1. The preview resolves the provider's stable GitHub releases at or above the
+   floor, newest first, using the same resolver as project integrations, with
+   the fallback commit used when the lookup fails. It inspects each candidate
+   and settles on the newest release this build can load. It discloses that
+   release's trust report, exact `#sha=` source, and version.
+2. A candidate is loadable only if it is exactly the resolved plugin, version,
+   source, and format, and its surface protocol covers this build. It must
+   declare every required host feature and contribute exactly one Home with the
+   reviewed program ID and schema. It must contribute no blueprint, service,
+   capability, setup quest, MCP server, or unsupported component. A newer
+   protocol or missing host feature steps down to an older release. Anything
+   else refuses the install outright.
+3. The confirmation must echo the disclosed version. If a newer release has
+   become the answer since the preview, the confirmation is refused and nothing
+   is installed.
+4. Install and enable are then reported as separate steps.
+
+An install recorded against an exact commit, or the official unpinned URL, of a
+reviewed Home provider follows its published releases on the Plugins page,
+just as a reviewed project integration does. A provider that is not on the list
+keeps the manual guidance: install it from the Plugins page, then return.
+
+The reviewed Home provider is Music Project Management with a floor of
+`0.1.0` and fallback commit `5f748d2de4457ac9dd02ea1ec31e34e1493744cf`, the
+resolved commit of the `v0.1.0` tag, published 2026-09-22. The release is
+content-only and has no platform artifact. The fallback commit was checked by
+loading that exact commit and passing it through the same release check:
+
+```bash
+ORI_REVIEWED_HOME_PROVIDER_CANDIDATE=1 go test ./internal/reviewedintegration \
+  -run TestReviewedHomeProviderPublishedRelease -count=1 -v
+```
+
 ## 6. Fresh-setup persistence rule
 
 New Homes snapshot the independent Home provider identity, declaration
@@ -464,7 +515,7 @@ removing, or preserving the independent copy outside the reviewed operation.
 | State | Catalog / setup result | Mutation rule |
 | --- | --- | --- |
 | Music only | Independent Home Group Template is available; Home can be created and staffed; no project or REAPER readiness is claimed. | Install, enable, Home create and each role fill remain separate confirmations. |
-| REAPER first | Reaper Song remains installable; grouped creation reports the exact missing Home provider/program. Standalone remains available under its declared path. | Show a configured reviewed install destination if one exists, otherwise manual package-name guidance; never guess a URL or auto-install. |
+| REAPER first | Reaper Song remains installable; grouped creation names the missing Home and its provider. Standalone remains available under its declared path. | Music Project Management is a reviewed Home provider (§5.1), so the card offers a trust-reviewed install of its latest reviewed release. An unreviewed provider gets manual package-name guidance. Ori never guesses a URL or installs on its own. |
 | Music first | Home is available before any project integration. Later REAPER setup resolves/reuses it by exact key. | No duplicate Home or manager is created. |
 | Companion disabled or removed | Snapshots and data remain readable; actions needing that provider are unavailable with provider-specific status. | Re-enable/reinstall is explicit; no relink, schedule restart, or grant revival occurs from reads. |
 | Companion incompatible or ambiguous | Grouped setup fails closed with version/conflict detail safe for display. | No fallback declaration, partial role merge, or arbitrary candidate selection. |
@@ -561,7 +612,7 @@ and the executable reported `0.8.0`.
 | Source | Published identity | Compatibility identity | Remaining gate |
 | --- | --- | --- | --- |
 | Ori | `v0.0.115-rc.1` at `3f9805ada6ba5dce8886c4a0f215a4e2949e6989` | adds `independent_program_homes_v1`; Home/project contribution schema 1; preserves combined Assistant Program schema 1/2 | RC2 validation and explicit stable promotion |
-| Music Project Management | `v0.1.0` at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf` | package 0.1.0; Home schema/version 1; embedded Assistant Program schema 2; one canonical managed skill | production installation remains user-reviewed |
+| Music Project Management | `v0.1.0` at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf` | package 0.1.0; Home schema/version 1; embedded Assistant Program schema 2; one canonical managed skill | reviewed Home provider floor 0.1.0 (§5.1); each install remains user-reviewed |
 | REAPER Plugin | `v0.8.0` at `3e3234bfae3465f909fe2aa5189f685a41c7a2ed` | plugin/service 0.8.0; blueprint 9; project team schema/version 1; setup quest 3; `independent_program_homes_v1` | reviewed through the Ori 0.8.0 floor in RC2 |
 | Reviewed integration registry/floor | 0.8.0 floor and immutable fallback commit | published REAPER tag/commit and verified release artifact | RC2 validation and stable promotion |
 

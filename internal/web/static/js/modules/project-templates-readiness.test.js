@@ -1173,6 +1173,48 @@ test('the confirmed request carries the generation the disclosure was read at', 
   assert.equal(applied.body.generation, 7);
 });
 
+// A reviewed release is confirmed by the version its disclosure showed, so the
+// server can refuse a release published after the user read it.
+test('a reviewed install names the plugin and confirms the release it disclosed', async () => {
+  const reviewed = disabledPluginTemplate({
+    readiness: {
+      state: 'action_required',
+      ownership: 'plugin',
+      reason: 'plugin_install_required',
+      summary: 'Song needs Studio Home, which comes from a separate plugin.',
+      dependency: { plugin_name: 'music', display_name: 'Music Manager', installed: false },
+      actions: ['install_plugin', 'manage_plugins'],
+      generation: 0
+    }
+  });
+  await setup([reviewed]);
+  optionById('needs-plugin').click();
+  fetchQueue = [
+    { trust: TRUST_REPORT, source: 'https://example.test/music#sha=abc', release: '0.2.0' }
+  ];
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  const preview = requests[requests.length - 1];
+  assert.equal('release' in preview.body, false, 'the preview named a release');
+  assert.match(recoveryHost().textContent, /Install Music Manager/);
+
+  fetchQueue = [
+    {
+      outcome: { action: 'install_plugin', completed: true, summary: 'Installed and enabled.' },
+      blueprint_id: 'needs-plugin'
+    },
+    catalog([reviewed])
+  ];
+  recoveryButton('Install and enable').fire('click');
+  await flush();
+
+  const applied = requests.find(r => r.body && r.body.confirm === true);
+  assert.ok(applied, 'nothing was confirmed');
+  assert.equal(applied.body.release, '0.2.0');
+  assert.equal('source' in applied.body, false, 'the client sent a source');
+});
+
 test('recheckSelection re-reads the catalog and reports the current state', async () => {
   const Picker = await setup([disabledPluginTemplate()]);
   optionById('needs-plugin').click();
