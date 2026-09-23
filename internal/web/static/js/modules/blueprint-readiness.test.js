@@ -240,6 +240,31 @@ test('dependencyLine distinguishes not installed, disabled, and enabled', () => 
   );
 });
 
+test('a reviewed display name names the plugin in the line and the install button', () => {
+  const reviewed = projection({
+    reason: 'plugin_install_required',
+    summary: 'Song needs Studio Home, which comes from a separate plugin.',
+    detail: 'Install Music Manager to add it.',
+    dependency: { plugin_name: 'music', display_name: 'Music Manager', installed: false },
+    actions: ['install_plugin', 'manage_plugins', 'change_blueprint']
+  });
+  assert.equal(BR.dependencyLine(BR.normalize(reviewed)), 'Music Manager — not installed');
+  const buttons = actionButtons(BR.renderPanel(reviewed, { blueprintName: 'Song' }));
+  assert.equal(buttons[0].textContent, 'Install Music Manager…');
+  assert.equal(buttons[0].getAttribute('aria-label'), 'Install Music Manager… for Song');
+  assert.ok(buttons[0].hasClass('modern-btn-primary'));
+  // normalize stays idempotent with the new field.
+  assert.deepEqual(BR.normalize(BR.normalize(reviewed)), BR.normalize(reviewed));
+
+  // Without a reviewed name the button keeps its generic label.
+  const unreviewed = projection({
+    reason: 'plugin_install_required',
+    dependency: { plugin_name: 'music', installed: false },
+    actions: ['install_plugin']
+  });
+  assert.equal(actionButtons(BR.renderPanel(unreviewed, {}))[0].textContent, 'Install plugin…');
+});
+
 test('the panel is focusable and is not a live region', () => {
   const panel = BR.renderPanel(projection(), {});
   assert.equal(panel.getAttribute('tabindex'), '-1');

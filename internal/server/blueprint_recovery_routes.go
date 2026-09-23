@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 )
 
 // Blueprint dependency recovery.
@@ -41,6 +43,10 @@ type blueprintRecoveryRequest struct {
 	// derived from. A confirmation carrying a stale generation is refused: the
 	// plugin changed after the disclosure the user actually read.
 	Generation uint64 `json:"generation,omitempty"`
+	// Release is the reviewed release version a preview disclosed, echoed back
+	// on confirmation. A confirmation for any other release is refused: a
+	// newer one was published after the disclosure the user read.
+	Release string `json:"release,omitempty"`
 }
 
 type blueprintRecoveryResponse struct {
@@ -61,6 +67,9 @@ type blueprintRecoveryResponse struct {
 	// would be the opposite failure: asking someone to trust a thing without
 	// telling them where it came from.
 	Source string `json:"source,omitempty"`
+	// Release is the version of a reviewed release being previewed, disclosed
+	// only alongside its trust report. The client echoes it on confirmation.
+	Release string `json:"release,omitempty"`
 	// Changed reports whether an update alters the registered component set,
 	// which is what decides whether trust must be re-confirmed.
 	Changed bool `json:"changed,omitempty"`
@@ -146,6 +155,10 @@ func (s *Server) handleBlueprintPluginRecovery(w http.ResponseWriter, r *http.Re
 
 	switch action {
 	case blueprintreadiness.ActionInstallPlugin:
+		if provider, ok := reviewedHomeProviderFor(template, dependency); ok {
+			s.recoverByInstallingHomeProvider(r.Context(), w, template, provider, req.Release, req.Confirm)
+			return
+		}
 		s.recoverByInstalling(w, template, dependency, req.Confirm)
 	case blueprintreadiness.ActionEnablePlugin:
 		s.recoverByEnabling(w, template, dependency)
@@ -195,7 +208,8 @@ func (s *Server) resolveRecoveryBlueprint(templateID string) (projecttemplates.T
 }
 
 // blueprintDeclaresPlugin reports whether the blueprint depends on this plugin
-// — either by declaring it in tools.plugins, or by being contributed by it.
+// — by declaring it in tools.plugins, by being contributed by it, or by naming
+// it as the provider of the Home its project joins.
 func blueprintDeclaresPlugin(template projecttemplates.Template, name string) bool {
 	want := strings.ToLower(strings.TrimSpace(name))
 	if want == "" {
@@ -203,6 +217,11 @@ func blueprintDeclaresPlugin(template projecttemplates.Template, name string) bo
 	}
 	if owner := template.PluginOwner; owner != nil {
 		if strings.ToLower(strings.TrimSpace(owner.PluginID)) == want {
+			return true
+		}
+	}
+	if project := template.AssistantProject; project != nil {
+		if strings.ToLower(strings.TrimSpace(project.Home.ProviderPluginID)) == want {
 			return true
 		}
 	}
@@ -274,16 +293,27 @@ func (s *Server) respondRecovery(w http.ResponseWriter, status int, template pro
 }
 
 func (s *Server) respondRecoveryWithSource(w http.ResponseWriter, status int, template projecttemplates.Template, outcome *blueprintreadiness.Outcome, trust *plugin.TrustReport, changed bool, source string) {
-	// The source travels only with a disclosure. Without a trust report there
-	// is no context to read it in, so it is dropped rather than echoed.
+	s.writeRecovery(w, status, template, outcome, trust, changed, source, "")
+}
+
+// respondRecoveryDisclosure previews one reviewed release: its trust report,
+// its exact source, and the version the confirmation must echo.
+func (s *Server) respondRecoveryDisclosure(w http.ResponseWriter, template projecttemplates.Template, trust *plugin.TrustReport, source, release string) {
+	s.writeRecovery(w, http.StatusOK, template, nil, trust, false, source, release)
+}
+
+func (s *Server) writeRecovery(w http.ResponseWriter, status int, template projecttemplates.Template, outcome *blueprintreadiness.Outcome, trust *plugin.TrustReport, changed bool, source, release string) {
+	// The source and release travel only with a disclosure. Without a trust
+	// report there is no context to read them in, so they are dropped.
 	if trust == nil {
-		source = ""
+		source, release = "", ""
 	}
 	_ = orihttp.RespondJSON(w, status, blueprintRecoveryResponse{
 		Readiness:   s.deriveRecoveryReadiness(template),
 		Outcome:     outcome,
 		Trust:       trust,
 		Source:      source,
+		Release:     release,
 		Changed:     changed,
 		BlueprintID: s.currentBlueprintID(template),
 	})
@@ -332,8 +362,63 @@ func (s *Server) recoverByInstalling(w http.ResponseWriter, template projecttemp
 		return
 	}
 
+	s.installAndEnableForRecovery(w, template, name, source, "")
+}
+
+// reviewedHomeProviderFor returns the host-reviewed provider when name is the
+// provider of the Home this blueprint's project joins. Only that pairing
+// installs from a reviewed release; the blueprint never supplies the source.
+func reviewedHomeProviderFor(template projecttemplates.Template, name string) (reviewedintegration.HomeProvider, bool) {
+	project := template.AssistantProject
+	if project == nil || !strings.EqualFold(strings.TrimSpace(project.Home.ProviderPluginID), strings.TrimSpace(name)) {
+		return reviewedintegration.HomeProvider{}, false
+	}
+	return reviewedintegration.HomeProviderFor(name)
+}
+
+// recoverByInstallingHomeProvider installs a blueprint's Home provider from the
+// newest reviewed release this build can load. The preview discloses that
+// exact release; the confirmation must name the same release, or it is
+// refused as stale rather than installing something the user did not review.
+func (s *Server) recoverByInstallingHomeProvider(ctx context.Context, w http.ResponseWriter, template projecttemplates.Template, provider reviewedintegration.HomeProvider, previewed string, confirm bool) {
+	release, ok, err := s.reviewedReleases.homeProviderInstall(ctx, provider)
+	if err != nil || !ok {
+		if err != nil {
+			logger.Warn("Reviewed Home provider release could not be verified", logger.Fields{"plugin": provider.PluginID, "error": err.Error()})
+		}
+		s.respondRecovery(w, http.StatusConflict, template, (&blueprintreadiness.Outcome{
+			Action: blueprintreadiness.ActionInstallPlugin,
+			Steps: []blueprintreadiness.OutcomeStep{{
+				Name: blueprintreadiness.StepPreview, Succeeded: false,
+				Message: "Ori could not verify a release of " + provider.DisplayName + " that this version can use.",
+			}},
+			Summary: "Ori could not find a release of " + provider.DisplayName + " to install.",
+			Detail:  "Nothing was installed. Try again later, or update Ori.",
+		}).NormalizePtr(), nil, false)
+		return
+	}
+	if !confirm {
+		report := release.report
+		s.respondRecoveryDisclosure(w, template, &report, release.source, release.version)
+		return
+	}
+	if strings.TrimSpace(previewed) != release.version {
+		s.respondRecovery(w, http.StatusConflict, template, (&blueprintreadiness.Outcome{
+			Action:  blueprintreadiness.ActionInstallPlugin,
+			Summary: "A newer release of " + provider.DisplayName + " appeared while you were reviewing.",
+			Detail:  "Nothing was installed. Review the current release and confirm again.",
+		}).NormalizePtr(), nil, false)
+		return
+	}
+	s.installAndEnableForRecovery(w, template, provider.PluginID, release.source, provider.SourceFormat)
+}
+
+// installAndEnableForRecovery installs from a source the user just reviewed,
+// then enables the plugin, reporting the two steps separately.
+func (s *Server) installAndEnableForRecovery(w http.ResponseWriter, template projecttemplates.Template, name, source string, format plugin.SourceFormat) {
+	manager := s.Handlers.Plugin.Manager()
 	steps := []blueprintreadiness.OutcomeStep{}
-	if _, err := manager.Install(source, "", func(plugin.TrustReport) bool { return true }); err != nil {
+	if _, err := manager.Install(source, format, func(plugin.TrustReport) bool { return true }); err != nil {
 		steps = append(steps, blueprintreadiness.OutcomeStep{
 			Name: blueprintreadiness.StepInstall, Succeeded: false, Message: recoveryFailureMessage(err),
 		})

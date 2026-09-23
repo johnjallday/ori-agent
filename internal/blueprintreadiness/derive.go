@@ -5,6 +5,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -33,6 +34,11 @@ type Sources struct {
 	// starter catalog. Injected rather than called directly so the retired
 	// classification is testable without editing the embedded templates.
 	ShippedBuiltin func(id string) bool
+	// ReviewedHomeProvider reports the display name of a Home provider plugin
+	// the host has reviewed, which is what makes installing it from the wizard
+	// an offer rather than a guess. Injected for the same reason as
+	// ShippedBuiltin; nil selects the built-in allowlist.
+	ReviewedHomeProvider func(pluginID string) (displayName string, ok bool)
 }
 
 func (s Sources) shipped(id string) bool {
@@ -40,6 +46,14 @@ func (s Sources) shipped(id string) bool {
 		return projecttemplates.IsBuiltinStarterID(id)
 	}
 	return s.ShippedBuiltin(id)
+}
+
+func (s Sources) reviewedHomeProvider(pluginID string) (string, bool) {
+	if s.ReviewedHomeProvider != nil {
+		return s.ReviewedHomeProvider(pluginID)
+	}
+	provider, ok := reviewedintegration.HomeProviderFor(pluginID)
+	return provider.DisplayName, ok
 }
 
 func (s Sources) lookup(name string) (plugin.InstalledPlugin, bool) {
@@ -253,11 +267,44 @@ func independentHomeOutcome(template projecttemplates.Template, blocked Readines
 	if template.StandaloneComposition == nil || template.GroupRequirement == nil || template.GroupRequirement.Policy == projecttemplates.GroupPolicyRequired {
 		return blocked
 	}
+	names := homeNamesFor(template, blocked.Dependency)
 	return Readiness{
 		State: StateReady, Ownership: OwnershipPlugin,
-		Summary: "Standalone creation is available; grouped creation still needs the independent Home provider.",
+		Summary: "You can create this on its own now. Adding it to " + names.home + " needs " + names.provider + ".",
 		Detail:  blocked.Summary, Dependency: blocked.Dependency, Generation: blocked.Generation,
 	}
+}
+
+// homeNames is the wording for a split project's Home: the blueprint, the Home
+// it joins, and the plugin that provides that Home. Each comes from a trusted
+// declaration or the host's reviewed allowlist, with a plain fallback, so the
+// copy stays domain-neutral here.
+type homeNames struct {
+	// blueprint starts a sentence; inBlueprint continues one.
+	blueprint   string
+	inBlueprint string
+	home        string
+	provider    string
+}
+
+func homeNamesFor(template projecttemplates.Template, dependency *Dependency) homeNames {
+	names := homeNames{blueprint: "This blueprint", inBlueprint: "this blueprint", home: "its Home", provider: "the Home's plugin"}
+	if name := strings.TrimSpace(template.Name); name != "" {
+		names.blueprint, names.inBlueprint = name, name
+	}
+	if template.GroupRequirement != nil {
+		if home := strings.TrimSpace(template.GroupRequirement.DefaultHomeName); home != "" {
+			names.home = home
+		}
+	}
+	if dependency != nil {
+		if provider := strings.TrimSpace(dependency.DisplayName); provider != "" {
+			names.provider = provider
+		} else if provider := strings.TrimSpace(dependency.PluginName); provider != "" {
+			names.provider = provider
+		}
+	}
+	return names
 }
 
 // independentHomeReadiness verifies the second provider of a split project
@@ -269,12 +316,24 @@ func independentHomeReadiness(template projecttemplates.Template, projectPlugin 
 		return nil
 	}
 	dependency := &Dependency{PluginName: project.Home.ProviderPluginID}
+	displayName, reviewed := sources.reviewedHomeProvider(project.Home.ProviderPluginID)
+	if reviewed {
+		dependency.DisplayName = displayName
+	}
+	names := homeNamesFor(template, dependency)
 	homePlugin, present := sources.lookup(project.Home.ProviderPluginID)
 	if !present {
+		// The provider is a separate plugin the project plugin never installs.
+		// Only a host-reviewed provider can be installed from here; any other is
+		// named, and the user is sent to install it themselves.
 		result := Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginInstallRequired,
-			Summary:    "Install the Home provider before using this project blueprint.",
-			Detail:     "The project plugin does not own or install its independent Assistant Program Home.",
+			Summary:    names.blueprint + " needs " + names.home + ", which comes from a separate plugin.",
+			Detail:     "Install and enable " + names.provider + " from the Plugins page, then come back. Installing this blueprint's plugin did not add it.",
 			Dependency: dependency, Actions: []Action{ActionManagePlugins, ActionChangeBlueprint}}
+		if reviewed {
+			result.Detail = "Install " + names.provider + " to add it. Installing this blueprint's plugin did not add it."
+			result.Actions = []Action{ActionInstallPlugin, ActionManagePlugins, ActionChangeBlueprint}
+		}
 		return &result
 	}
 	dependency.Installed = true
@@ -286,15 +345,16 @@ func independentHomeReadiness(template projecttemplates.Template, projectPlugin 
 	}
 	if !homePlugin.Enabled {
 		result := Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginEnableRequired,
-			Summary:    "This project needs its independent Home provider enabled.",
-			Detail:     "Enable the Home provider first; this read does not change either plugin.",
+			Summary:    names.provider + " is installed but switched off.",
+			Detail:     "Enable it so " + names.inBlueprint + " can use " + names.home + ".",
 			Dependency: dependency, Actions: []Action{ActionEnablePlugin, ActionManagePlugins}, Generation: homePlugin.Generation}
 		return &result
 	}
 	if !hasHostFeature(projectPlugin, plugin.HostFeatureIndependentProgramHomesV1) || !hasHostFeature(homePlugin, plugin.HostFeatureIndependentProgramHomesV1) ||
 		!rolesPackaged(projectPlugin.Skills, project.ProgramRoles()) {
 		result := Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginUpdateRequired,
-			Summary:    "The project and Home providers do not expose a compatible independent-team contract.",
+			Summary:    names.provider + " and this blueprint's plugin do not work together yet.",
+			Detail:     "One of them needs an update. Reviewing an update shows what it changes before anything is applied.",
 			Dependency: dependency, Actions: []Action{ActionReviewPluginUpdate, ActionManagePlugins}, Generation: homePlugin.Generation}
 		return &result
 	}
@@ -325,8 +385,8 @@ func independentHomeReadiness(template projecttemplates.Template, projectPlugin 
 	}
 	if matches != 1 {
 		result := Readiness{State: StateActionRequired, Ownership: OwnershipPlugin, Reason: ReasonPluginUpdateRequired,
-			Summary:    "The installed Home provider does not authorize this exact project team.",
-			Detail:     "Update or change providers; Ori will not infer authorization from matching names.",
+			Summary:    names.provider + " does not accept " + names.inBlueprint + " projects yet.",
+			Detail:     "Updating it or this blueprint's plugin may add that. Ori never assumes it from matching names.",
 			Dependency: dependency, Actions: []Action{ActionReviewPluginUpdate, ActionManagePlugins}, Generation: homePlugin.Generation}
 		return &result
 	}

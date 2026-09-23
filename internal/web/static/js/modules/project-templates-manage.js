@@ -976,6 +976,20 @@ const PTC_RECOVERY_COPY = {
   }
 };
 
+// ptcRecoveryCopy names the plugin in the heading when the server supplied a
+// host-reviewed display name; otherwise it keeps the generic wording.
+function ptcRecoveryCopy(action, displayName) {
+  const copy = PTC_RECOVERY_COPY[action] || PTC_RECOVERY_COPY.install_plugin;
+  const name = String(displayName || '').trim();
+  if (!name) return copy;
+  const headings = {
+    install_plugin: `Install ${name}`,
+    enable_plugin: `Enable ${name}`,
+    review_plugin_update: `Review the ${name} update`
+  };
+  return { ...copy, heading: headings[action] || copy.heading };
+}
+
 function ptcRecoveryHost() {
   return document.getElementById('blueprintRecoveryPanel');
 }
@@ -1050,13 +1064,21 @@ async function ptcStartRecovery(action, template, readiness) {
 
   const url = ptcRecoveryEndpoint(template);
   const generation = Number(readiness?.generation) || 0;
-  const copy = PTC_RECOVERY_COPY[action] || PTC_RECOVERY_COPY.install_plugin;
+  const copy = ptcRecoveryCopy(action, readiness?.dependency?.displayName);
 
   const flow = lifecycle.createFlow({
     preview: () =>
       lifecycle.request('POST', url, { action, plugin: pluginName, confirm: false, generation }),
-    apply: () =>
-      lifecycle.request('POST', url, { action, plugin: pluginName, confirm: true, generation }),
+    // A reviewed release is confirmed by the version the preview disclosed, so
+    // a release published in between is refused rather than installed unseen.
+    apply: preview =>
+      lifecycle.request('POST', url, {
+        action,
+        plugin: pluginName,
+        confirm: true,
+        generation,
+        release: String(preview?.release || '') || undefined
+      }),
     onState: (state, payload) =>
       ptcRenderRecovery(state, payload, { action, template, copy, pluginName })
   });

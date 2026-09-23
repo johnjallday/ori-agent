@@ -123,6 +123,8 @@ const (
 	MaxSummaryLen    = 160
 	MaxDetailLen     = 400
 	MaxDiagnosticLen = 600
+	// MaxDisplayNameLen bounds a dependency's reviewed display name.
+	MaxDisplayNameLen = 100
 	// MaxActions bounds the action list so a descriptor stays a single next
 	// step plus escape routes, never a menu.
 	MaxActions = 4
@@ -137,6 +139,9 @@ const (
 // before the user confirms acting on it.
 type Dependency struct {
 	PluginName string `json:"plugin_name"`
+	// DisplayName is the host-reviewed name of the plugin, when the host has
+	// reviewed it. It never comes from a template.
+	DisplayName string `json:"display_name,omitempty"`
 	// PluginVersion is the version already recorded in the installed-plugin
 	// store, or empty when the plugin is not installed.
 	PluginVersion string `json:"plugin_version,omitempty"`
@@ -246,6 +251,11 @@ func (r Readiness) Normalize() Readiness {
 	r.Summary = SanitizeCopy(r.Summary, MaxSummaryLen)
 	r.Detail = SanitizeCopy(r.Detail, MaxDetailLen)
 	r.Diagnostic = SanitizeCopy(r.Diagnostic, MaxDiagnosticLen)
+	if r.Dependency != nil && r.Dependency.DisplayName != "" {
+		dependency := *r.Dependency
+		dependency.DisplayName = SanitizeCopy(dependency.DisplayName, MaxDisplayNameLen)
+		r.Dependency = &dependency
+	}
 	if r.Ownership != OwnershipUser {
 		// Nobody but the template's author can act on a parser message, and
 		// showing one for a shipped or plugin-owned manifest reads as an

@@ -133,7 +133,8 @@ The endpoint is `POST /api/project-templates/{templateID}/plugin-recovery`:
 
 ```
 {"action": "install_plugin" | "enable_plugin" | "review_plugin_update",
- "plugin": "<name>", "confirm": false | true, "generation": <uint64>}
+ "plugin": "<name>", "confirm": false | true, "generation": <uint64>,
+ "release": "<version>"}
 ```
 
 The client sends an action name and a plugin name — **never a source, a path,
@@ -145,6 +146,16 @@ stale generation is refused with `409`, so a captured/replayed confirmation
 can never be applied after the plugin has moved on. The response always
 carries the freshly re-derived readiness and, on success, the blueprint's
 current qualified ID.
+
+A split project blueprint also depends on the plugin that provides the Home
+its project joins. When that plugin is a reviewed Home provider (see
+[Independent Program Homes §5.1](architecture/independent-program-homes.md#51-reviewed-home-providers)),
+the readiness card names it and offers **Install &lt;name&gt;…**. The
+blueprint names only the provider; the source is the newest reviewed release
+this build can load, never a template hint. The preview response adds
+`release`, that release's version. The confirmation must send it back as
+`release`. If a newer release has become the answer in between, the
+confirmation is refused with `409` and nothing is installed.
 
 ### Unsupported and incompatible states
 

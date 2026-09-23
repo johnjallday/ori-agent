@@ -128,6 +128,7 @@ function plTrustModel(report) {
       sha256: field(entry, 'SHA256', 'sha256')
     })),
     blueprints: list(raw.Blueprints || raw.blueprints).map(String),
+    homes: list(raw.AssistantProgramHomes || raw.assistant_program_homes).map(String),
     unsupported: list(raw.Unsupported || raw.unsupported).map(entry => ({
       kind: field(entry, 'kind', 'Kind'),
       detail: field(entry, 'detail', 'Detail')
@@ -146,6 +147,7 @@ function plIsEmptyTrust(model) {
     model.scopes.length === 0 &&
     model.artifacts.length === 0 &&
     model.blueprints.length === 0 &&
+    model.homes.length === 0 &&
     model.unsupported.length === 0 &&
     model.warnings.length === 0
   );
@@ -272,6 +274,14 @@ function plRenderTrustReport(report) {
     const section = plSection('Adds these blueprints', 'plugin-trust-section');
     const value = plCreate('p', 'plugin-trust-value');
     value.textContent = model.blueprints.join(', ');
+    section.appendChild(value);
+    root.appendChild(section);
+  }
+
+  if (model.homes.length > 0) {
+    const section = plSection('Adds these Homes', 'plugin-trust-section');
+    const value = plCreate('p', 'plugin-trust-value');
+    value.textContent = model.homes.join(', ');
     section.appendChild(value);
     root.appendChild(section);
   }
