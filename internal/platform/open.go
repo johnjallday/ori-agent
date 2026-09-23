@@ -16,10 +16,10 @@ import (
 // launch in this package into a logged no-op when set to a true value.
 //
 // Sandboxed servers (demo, smoke, e2e, RC checks) run with a disposable HOME,
-// and the launched application inherits it. REAPER, for one, then cannot find
-// ~/Library/Application Support/REAPER and falls back to a portable config
-// written next to REAPER.app in /Applications, which it keeps using on every
-// later launch.
+// and the launched application inherits it. An application that cannot find
+// its folder under ~/Library/Application Support may fall back to a portable
+// config written next to its bundle in /Applications, which it then keeps
+// using on every later launch.
 const NoDesktopOpenEnv = "ORI_NO_DESKTOP_OPEN"
 
 // desktopOpenDisabled reports whether desktop launches are switched off, and
