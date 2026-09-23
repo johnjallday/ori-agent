@@ -469,6 +469,84 @@ func TestIndependentHomeReadinessRequiresHomeProviderFirstAndReciprocalAuthoriza
 	}
 }
 
+func splitProjectTemplate(homeProviderID string) (projecttemplates.Template, plugin.InstalledPlugin) {
+	projectPlugin := withBlueprint(installedPlugin("reaper", true), "song")
+	projectPlugin.Skills = []string{"reaper-project"}
+	projectPlugin.WorkspaceSurfaces.RequiresHostFeatures = []string{plugin.HostFeatureIndependentProgramHomesV1}
+	template := pluginOwnedTemplate("reaper", "song")
+	template.Name = "Song"
+	template.GroupRequirement = &projecttemplates.GroupRequirement{Policy: projecttemplates.GroupPolicyRequired, DefaultHomeName: "Studio Home"}
+	template.AssistantProject = &projecttemplates.AssistantProjectDeclaration{
+		SchemaVersion: 1, Version: 3, ID: "reaper_team",
+		Home:  projecttemplates.AssistantProjectHomeReference{ProviderPluginID: homeProviderID, ProgramID: "music_home", HomeSchemaVersion: 1, MinHomeVersion: 2, MaxHomeVersion: 2},
+		Roles: []projecttemplates.AssistantProjectRole{{ID: "engineer", Label: "Engineer", Required: true, Primary: true, SystemPrompt: "Operate this project.", Skills: []string{"reaper-project"}}},
+	}
+	return template, projectPlugin
+}
+
+func TestMissingHomeProviderIsNamedAndInstallableOnlyWhenReviewed(t *testing.T) {
+	template, projectPlugin := splitProjectTemplate("music")
+	reviewed := func(pluginID string) (string, bool) { return "Music Manager", pluginID == "music" }
+	unreviewed := func(string) (string, bool) { return "", false }
+
+	got := Derive(template, Sources{Installed: []plugin.InstalledPlugin{projectPlugin}, ReviewedHomeProvider: reviewed})
+	assertReadiness(t, got, StateActionRequired, OwnershipPlugin, ReasonPluginInstallRequired)
+	if got.Summary != "Song needs Studio Home, which comes from a separate plugin." {
+		t.Fatalf("summary = %q", got.Summary)
+	}
+	if got.Detail != "Install Music Manager to add it. Installing this blueprint's plugin did not add it." {
+		t.Fatalf("detail = %q", got.Detail)
+	}
+	if got.Dependency == nil || got.Dependency.PluginName != "music" || got.Dependency.DisplayName != "Music Manager" || got.Dependency.Installed {
+		t.Fatalf("dependency = %#v", got.Dependency)
+	}
+	if len(got.Actions) == 0 || got.Actions[0] != ActionInstallPlugin {
+		t.Fatalf("a reviewed provider must be installable from here: %v", got.Actions)
+	}
+
+	got = Derive(template, Sources{Installed: []plugin.InstalledPlugin{projectPlugin}, ReviewedHomeProvider: unreviewed})
+	assertReadiness(t, got, StateActionRequired, OwnershipPlugin, ReasonPluginInstallRequired)
+	for _, action := range got.Actions {
+		if action == ActionInstallPlugin {
+			t.Fatalf("an unreviewed provider was offered for install: %v", got.Actions)
+		}
+	}
+	if got.Dependency.DisplayName != "" || !strings.Contains(got.Detail, "Install and enable music from the Plugins page") {
+		t.Fatalf("unreviewed provider copy = %q / %#v", got.Detail, got.Dependency)
+	}
+
+	homePlugin := installedPlugin("music", false)
+	got = Derive(template, Sources{Installed: []plugin.InstalledPlugin{projectPlugin, homePlugin}, ReviewedHomeProvider: reviewed})
+	assertReadiness(t, got, StateActionRequired, OwnershipPlugin, ReasonPluginEnableRequired)
+	if got.Summary != "Music Manager is installed but switched off." || got.Detail != "Enable it so Song can use Studio Home." {
+		t.Fatalf("disabled provider copy = %q / %q", got.Summary, got.Detail)
+	}
+
+	// None of the provider states may fall back to architecture vocabulary.
+	for _, sources := range []Sources{
+		{Installed: []plugin.InstalledPlugin{projectPlugin}, ReviewedHomeProvider: reviewed},
+		{Installed: []plugin.InstalledPlugin{projectPlugin, homePlugin}, ReviewedHomeProvider: reviewed},
+		{Installed: []plugin.InstalledPlugin{projectPlugin, installedPlugin("music", true)}, ReviewedHomeProvider: reviewed},
+	} {
+		got := Derive(template, sources)
+		copy := strings.ToLower(got.Summary + " " + got.Detail)
+		for _, jargon := range []string{"independent", "assistant program", "contract", "provider"} {
+			if strings.Contains(copy, jargon) {
+				t.Errorf("readiness copy uses %q: %q", jargon, copy)
+			}
+		}
+	}
+}
+
+func TestMissingHomeProviderDefaultsToTheBuiltInReviewedAllowlist(t *testing.T) {
+	template, projectPlugin := splitProjectTemplate("music-project-management")
+	got := Derive(template, Sources{Installed: []plugin.InstalledPlugin{projectPlugin}})
+	if got.Dependency == nil || got.Dependency.DisplayName != "Music Project Management" ||
+		len(got.Actions) == 0 || got.Actions[0] != ActionInstallPlugin {
+		t.Fatalf("built-in reviewed Home provider is not installable: %#v", got)
+	}
+}
+
 // TestDeriveAlwaysReturnsANormalizedProjection guards the promise callers rely
 // on: whatever Derive returns is safe to serialize as-is.
 func TestDeriveAlwaysReturnsANormalizedProjection(t *testing.T) {

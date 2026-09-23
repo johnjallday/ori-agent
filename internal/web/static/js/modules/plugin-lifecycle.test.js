@@ -190,6 +190,20 @@ test('the disclosure covers services, artifacts, permissions, and surfaces', () 
   assert.match(text, /demo-workspace/);
 });
 
+// A content-only Home provider adds a Home and a skill. The Home is the thing
+// the user is installing it for, so it is disclosed rather than dropped.
+test('the disclosure names the Homes a plugin adds', () => {
+  const PL = load(async () => jsonResponse(200, {}));
+  const report = {
+    AssistantProgramHomes: ['music-home — Studio Home'],
+    Skills: ['music-home-skill']
+  };
+  const text = PL.renderTrustReport(report).textContent;
+  assert.match(text, /Adds these Homes/);
+  assert.match(text, /music-home — Studio Home/);
+  assert.equal(PL.isEmptyTrust(PL.trustModel({ AssistantProgramHomes: ['home'] })), false);
+});
+
 test('a report carrying only surfaces is not treated as empty', () => {
   const PL = load(async () => jsonResponse(200, {}));
   const model = PL.trustModel({ SymbolicScopes: ['network.outbound'] });
