@@ -31,7 +31,9 @@ const (
 // and the minimum release; later stable releases from the same repository are
 // accepted once the identity, contribution and artifact checks pass.
 // ExpectedProgramSchema and ExpectedProtocol are exact: they describe what this
-// Ori build can run, not a property of one release.
+// Ori build can run, not a property of one release. The program schema is the
+// combined declaration schema or, for an independent project, its referenced
+// Home declaration schema.
 type Entry struct {
 	Key      string
 	PluginID string

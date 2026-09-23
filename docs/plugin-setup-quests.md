@@ -185,11 +185,13 @@ update. The earlier v0.5.0 declared no quest: it installed, and its install
 quest offered only **Open Plugins**.
 
 The reviewed registry entry is a floor, not an exact pin: minimum version
-0.6.1 with blueprint version 7 or later. The install quest installs the latest
-stable release at or above that floor, recorded against its exact commit, and
-falls back to the floor's commit when the latest release cannot be checked. It
-hands off into the plugin's four-step quest once the plugin is installed,
-enabled and verified. Any installation from an exact official commit at or
+0.8.0 with blueprint version 9 or later. That release owns project team
+`reaper-song-team`, references the separately published Music Project
+Management 0.1.0 Home, and declares `reaper_setup` version 3. The install quest
+installs the latest stable release at or above that floor, recorded against its
+exact commit, and falls back to the floor's commit when the latest release
+cannot be checked. It hands off into the plugin's four-step quest once the
+plugin is installed, enabled and verified. Any installation from an exact official commit at or
 above the floor is verified; an installation from the official unpinned Git URL
 is offered **Review verified replacement** first, and nothing rewrites an
 installed plugin without that confirmation. A newer release shows as an update

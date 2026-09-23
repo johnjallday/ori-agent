@@ -552,10 +552,12 @@ and blueprint v4; it was not changed from local evidence. The pin has since
 moved to the published `0.6.0` release, commit
 `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9`, blueprint v7, after the release
 artifact's URL, digest, size, mode and binary version were verified against
-that exact commit. It then moved to `0.6.1`, which keeps blueprint v7, and the
-entry has since become a reviewed floor: Ori installs the latest stable release
-at or above `0.6.1` with blueprint v7 or later, recorded against its exact
-commit. See [REAPER integration](../reaper-integration.md) for the floor.
+that exact commit. It then moved to `0.6.1`, which kept blueprint v7, and the entry became a
+reviewed floor. The floor is now the published `0.8.0` release at
+`3e3234bfae3465f909fe2aa5189f685a41c7a2ed`, with blueprint v9 and independent
+Home/project declarations. Ori installs the latest compatible stable release at
+or above that floor, recorded against its exact commit. See
+[REAPER integration](../reaper-integration.md) for the floor.
 
 A local build/staged demo is development evidence only. Publishing, tagging,
 pushing, installing into a user's current store, resetting user data, and

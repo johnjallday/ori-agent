@@ -139,8 +139,10 @@ func (r *Resolver) Resolve(ctx context.Context, entry reviewedintegration.Entry)
 
 // Candidates returns the releases a caller may try, newest first. Every entry
 // is at or above the entry's floor, and the list always ends with the floor
-// itself, so a caller that rejects everything newer still has the one release
-// this build was reviewed against.
+// source, so a caller that rejects everything newer still has the one release
+// this build was reviewed against. When the published floor release was found,
+// that final candidate retains its checked-release evidence rather than being
+// mislabeled as a fallback.
 //
 // It exists because "the newest release" and "the newest release this build can
 // load" are not the same thing. A release may require a host feature, protocol,
@@ -154,18 +156,19 @@ func (r *Resolver) Candidates(ctx context.Context, entry reviewedintegration.Ent
 	floor := Floor(entry)
 	resolved := r.resolved(ctx, entry, floor)
 	candidates := make([]Resolution, 0, MaxCandidates)
+	floorCandidate := floor
 	for _, candidate := range resolved {
-		if len(candidates)+1 >= MaxCandidates {
-			break
-		}
 		if candidate.Source == floor.Source {
-			// The floor is already the last entry; inspecting it twice would
-			// spend a fetch to learn the same thing.
+			// Keep the live release evidence, but put the floor last so callers
+			// can continue trying newer compatible releases first.
+			floorCandidate = candidate
 			continue
 		}
-		candidates = append(candidates, candidate)
+		if len(candidates)+1 < MaxCandidates {
+			candidates = append(candidates, candidate)
+		}
 	}
-	return append(candidates, floor)
+	return append(candidates, floorCandidate)
 }
 
 // resolved returns the cached or freshly looked-up candidate list, newest
