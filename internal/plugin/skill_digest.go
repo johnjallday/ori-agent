@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 )
 
@@ -20,12 +19,13 @@ var ErrSkillTreeNotPlain = errors.New("skill folder is not a plain tree of files
 // bytes, without following symlinks, leaving out a receipt file. Its output
 // must never change, or every installed plugin would look modified.
 func SkillTreeDigest(root string) (string, error) {
-	return TreeDigest(root, legacySkillReceiptFileName)
+	return TreeDigest(root, func(rel string) bool { return rel == legacySkillReceiptFileName })
 }
 
 // TreeDigest hashes relative paths, file modes, and bytes under root without
-// following symlinks. Top-level entries named in excluded are left out.
-func TreeDigest(root string, excluded ...string) (string, error) {
+// following symlinks. Entries for which skip reports true (given their
+// slash-separated path relative to root) are left out, with their contents.
+func TreeDigest(root string, skip func(rel string) bool) (string, error) {
 	rootInfo, err := os.Lstat(root)
 	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
 		return "", ErrSkillTreeNotPlain
@@ -44,7 +44,7 @@ func TreeDigest(root string, excluded ...string) (string, error) {
 			return relErr
 		}
 		rel = filepath.ToSlash(rel)
-		if slices.Contains(excluded, rel) {
+		if skip != nil && skip(rel) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

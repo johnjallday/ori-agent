@@ -934,7 +934,7 @@ function renderInstalledMarketplaceSkills(skills) {
   if (!container) return;
 
   if (!Array.isArray(skills) || skills.length === 0) {
-    setMarketplaceInstalledMessage('No global skills are installed yet.');
+    setMarketplaceInstalledMessage('No marketplace skills are in your Skills folder yet.');
     return;
   }
 
@@ -944,21 +944,19 @@ function renderInstalledMarketplaceSkills(skills) {
   container.innerHTML = skills
     .map(skill => {
       const name = skill?.name || '';
-      const path = skill?.path || '';
-      const agents = skill?.agents || '';
-      const scope = skill?.scope || '';
+      const location = skill?.location || '';
+      const packageSpec = skill?.package || '';
 
       return `
       <div class="plugin-item" style="display: flex; flex-direction: column; gap: 10px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
           <div style="min-width: 0;">
             <div style="font-weight: 600; color: var(--text-primary); word-break: break-word;">${safeText(name)}</div>
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.85; word-break: break-all;">${safeText(path)}</div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.85; word-break: break-all;">${safeText(location)}</div>
           </div>
-          ${scope ? `<span class="badge bg-secondary" style="font-size: 10px;">${safeText(scope)}</span>` : ''}
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-          <small style="color: var(--text-secondary);">Agents: ${safeText(agents || 'unknown')}</small>
+          <small style="color: var(--text-secondary); word-break: break-all;">${safeText(packageSpec)}</small>
           <button class="modern-btn modern-btn-secondary btn-sm" data-market-remove="${safeText(name)}" ${anyMarketplaceBusy ? 'disabled' : ''}>
             Remove
           </button>
@@ -1091,7 +1089,9 @@ async function removeMarketplaceSkill(skillName) {
   }
   if (marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy) return;
 
-  const confirmed = window.confirm(`Remove skill "${normalized}" from global skills?`);
+  const confirmed = window.confirm(
+    `Move the skill "${normalized}" from your Skills folder to the Trash?`
+  );
   if (!confirmed) return;
 
   marketplaceManageBusy = true;
@@ -1113,6 +1113,10 @@ async function removeMarketplaceSkill(skillName) {
       throw new Error((data?.error || 'Failed to remove skill.') + details);
     }
 
+    await loadInstalledMarketplaceSkills(true);
+    await loadSkills(selectedAgentName);
+
+    // The outcome is shown last, so the list reload does not replace it.
     const status = data?.status || '';
     if (status === 'not_found') {
       setMarketplaceStatus(`No installed skill matched "${normalized}".`, true);
@@ -1120,15 +1124,11 @@ async function removeMarketplaceSkill(skillName) {
         showToast(`No installed skill matched "${normalized}"`, 'error');
       }
     } else {
-      const summary = data?.summary || `Removed ${normalized}.`;
-      setMarketplaceStatus(summary, false);
+      setMarketplaceStatus(`${normalized}: Moved to Trash.`, false);
       if (typeof showToast === 'function') {
-        showToast(`Removed ${normalized}`, 'success');
+        showToast(`${normalized}: Moved to Trash`, 'success');
       }
     }
-
-    await loadInstalledMarketplaceSkills(true);
-    await loadSkills(selectedAgentName);
   } catch (error) {
     console.error('Failed to remove marketplace skill:', error);
     setMarketplaceStatus(error?.message || 'Failed to remove skill.', true);
@@ -1215,12 +1215,14 @@ async function installMarketplacePackage(packageSpec) {
       throw new Error((data?.error || 'Failed to install skill package.') + details);
     }
 
-    setMarketplaceStatus(`Installed ${normalized}. Refreshing your skills list...`, false);
+    const where = data?.location ? ` to ${data.location}` : '';
+    setMarketplaceStatus(`Installed ${normalized}${where}. Refreshing your skills list...`, false);
     if (typeof showToast === 'function') {
       showToast(`Installed ${normalized}`, 'success');
     }
     await loadSkills(selectedAgentName);
     await loadInstalledMarketplaceSkills(true);
+    setMarketplaceStatus(`Installed ${normalized}${where}.`, false);
   } catch (error) {
     console.error('Failed to install marketplace skill package:', error);
     setMarketplaceStatus(error?.message || 'Failed to install skill package.', true);
