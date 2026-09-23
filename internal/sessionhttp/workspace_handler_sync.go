@@ -416,8 +416,8 @@ func (h *Handler) handleWorkspaceRescan(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// MoveStagedContent moves the agents and workspaces a new user created before
-// choosing a Workspace Directory out of the staging folder into root, then
+// MoveStagedContent moves the agents, skills, and workspaces a new user created
+// before choosing a Workspace Directory out of the staging folder into root, then
 // rebases the moved workspaces' folder references in the session store, the
 // way a workspace move does. It runs on the first confirmation only, before
 // ApplyWorkspaceRoot, so the reconcile finds the workspaces at their new
@@ -428,9 +428,10 @@ func (h *Handler) MoveStagedContent(ctx context.Context, staging, root string) [
 		// nil self: every moved workspace is loaded, rebased, and saved.
 		h.applyMoveReferenceUpdates(ctx, nil, result.Moved)
 	}
-	if result.AgentsMoved || len(result.Moved) > 0 {
-		logger.Info("Moved staged agents and workspaces into the confirmed Workspace Directory", logger.Fields{
+	if result.AgentsMoved || result.SkillsMoved || len(result.Moved) > 0 {
+		logger.Info("Moved staged agents, skills, and workspaces into the confirmed Workspace Directory", logger.Fields{
 			"agents_moved": result.AgentsMoved,
+			"skills_moved": result.SkillsMoved,
 			"workspaces":   len(result.Moved),
 			"root":         root,
 		})

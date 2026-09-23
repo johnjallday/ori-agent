@@ -589,6 +589,13 @@ func resolveWorkspaceRoot(configManager *config.Manager) string {
 	return config.UnconfirmedWorkspaceRoot()
 }
 
+// workspaceSkillsDir is <current Workspace Directory>/Skills, where installed
+// skills live: the staging folder's until a root is confirmed. It is resolved
+// at call time, so a root switch takes effect at once.
+func workspaceSkillsDir(configManager *config.Manager) string {
+	return config.RootSkillsDir(resolveWorkspaceRoot(configManager))
+}
+
 // shouldRunWorkspaceStartupMaintenance reports whether startup may reconcile
 // or mutate the folder-backed workspace tree. A configured WORKSPACE_DIR is an
 // explicit operator decision; otherwise first-run staging stays inert until the

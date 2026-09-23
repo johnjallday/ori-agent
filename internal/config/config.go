@@ -284,6 +284,16 @@ func RootAgentsDir(root string) string {
 	return filepath.Join(root, AgentsFolderName)
 }
 
+// SkillsFolderName is the folder inside the workspace root that holds the
+// skills Ori installed, one folder per skill. Like Agents, the name is
+// reserved as a top-level workspace slug.
+const SkillsFolderName = "Skills"
+
+// RootSkillsDir returns <root>/Skills for a workspace root.
+func RootSkillsDir(root string) string {
+	return filepath.Join(root, SkillsFolderName)
+}
+
 // AgentAvatarsDirName is the shared data-dir folder of uploaded agent images.
 const AgentAvatarsDirName = "agent_avatars"
 

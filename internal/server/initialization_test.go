@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/config"
@@ -234,6 +235,33 @@ func TestResolveWorkspaceRoot_UsesStagingUntilDirectoryIsConfirmed(t *testing.T)
 	}
 	if got := resolveWorkspaceRoot(manager); got != selected {
 		t.Fatalf("resolveWorkspaceRoot(confirmed) = %q, want %q", got, selected)
+	}
+}
+
+func TestWorkspaceSkillsDir_FollowsTheWorkspaceDirectoryNotHome(t *testing.T) {
+	homeDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("ORI_DATA_DIR", dataDir)
+	t.Setenv("WORKSPACE_DIR", "")
+
+	manager := config.NewManager(filepath.Join(dataDir, "settings.json"))
+	if err := manager.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := workspaceSkillsDir(manager), filepath.Join(config.UnconfirmedWorkspaceRoot(), "Skills"); got != want {
+		t.Fatalf("workspaceSkillsDir(unconfirmed) = %q, want %q", got, want)
+	}
+
+	selected := filepath.Join(t.TempDir(), "selected-workspaces")
+	if err := manager.SetWorkspaceRoot(selected); err != nil {
+		t.Fatalf("SetWorkspaceRoot: %v", err)
+	}
+	if got, want := workspaceSkillsDir(manager), filepath.Join(selected, "Skills"); got != want {
+		t.Fatalf("workspaceSkillsDir(confirmed) = %q, want %q", got, want)
+	}
+	if strings.HasPrefix(workspaceSkillsDir(manager), filepath.Join(homeDir, ".agents")) {
+		t.Fatal("the skills folder is still under ~/.agents")
 	}
 }
 

@@ -11119,7 +11119,7 @@ const sessionManager = {
               ? result.conflict.suggested_slug.trim()
               : '';
           if (!suggestedSlug) {
-            throw new Error(result.error || 'Failed to create workspace');
+            throw new Error(result.error || result.message || 'Failed to create workspace');
           }
 
           const confirmed = window.confirm(buildSlugConflictMessage(result.conflict));
@@ -11296,7 +11296,7 @@ const sessionManager = {
           : ordinaryGroup
             ? 'Failed to create group'
             : 'Failed to create workspace';
-        throw new Error(result.error || fallbackMessage);
+        throw new Error(result.error || result.message || fallbackMessage);
       }
 
       if (ordinaryGroup) {

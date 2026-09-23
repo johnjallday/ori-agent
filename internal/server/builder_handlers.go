@@ -583,20 +583,23 @@ func (b *ServerBuilder) initializeHandlers() {
 
 	// Initialize skills manager and handler (local + external).
 	//
-	// The personal skills root is resolved through plugin.DefaultPersonalSkillsRoot
-	// rather than composed here, because staged reset must resolve the very same
-	// location independently at the pre-store boundary. Two copies of this join
-	// would let a divergence delete, or fail to delete, the wrong directory.
+	// Installed skills live in <Workspace Directory>/Skills. The folder is
+	// resolved on every read, through the same resolver the agent store uses,
+	// so switching the Workspace Directory switches the skills with it.
+	b.skillsManager = skills.NewManager(skills.ManagerConfig{
+		AgentStorePath: b.agentStorePath,
+		PersonalSkillsDirResolver: func() string {
+			return workspaceSkillsDir(b.configManager)
+		},
+		ExternalAgents: b.externalAgentsCache,
+		ConfigManager:  b.configManager,
+	})
+	// Plugins still copy their skills into the shared personal folder until
+	// they are read from the plugin's own install folder.
 	personalSkillsDir := ""
 	if resolved, err := plugin.DefaultPersonalSkillsRoot(); err == nil {
 		personalSkillsDir = resolved
 	}
-	b.skillsManager = skills.NewManager(skills.ManagerConfig{
-		AgentStorePath:    b.agentStorePath,
-		PersonalSkillsDir: personalSkillsDir,
-		ExternalAgents:    b.externalAgentsCache,
-		ConfigManager:     b.configManager,
-	})
 	// Enforce stage-based active-skill slot caps (PRD section C). Reads the
 	// agent's stage + expert flag through the store on each check, no caching.
 	b.skillsManager.SetLoadoutResolver(newLoadoutResolverAdapter(b.st))

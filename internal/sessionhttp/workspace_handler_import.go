@@ -133,7 +133,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	}
 	if strings.TrimSpace(req.ParentID) == "" && !workspaceImportHasConfig(normalizedPath) &&
 		agentworkspace.IsReservedTopLevelSlug(firstNonEmptyString(req.FolderSlug, workspaceName)) {
-		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedTopLevelSlugMessage(firstNonEmptyString(req.FolderSlug, workspaceName)))
 		return
 	}
 
@@ -150,7 +150,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 				"reason":      "workspace_restore_failed",
 			})
 			if errors.Is(err, agentworkspace.ErrReservedWorkspaceSlug) {
-				_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+				_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage(err))
 				return
 			}
 			var slugConflict *agentworkspace.FolderSlugConflictError

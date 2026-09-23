@@ -22,10 +22,14 @@ const (
 )
 
 type ManagerConfig struct {
-	AgentStorePath    string
-	PersonalSkillsDir string
-	ExternalAgents    *externalagents.Cache
-	ConfigManager     *config.Manager
+	AgentStorePath string
+	// PersonalSkillsDir is a fixed folder of installed skills (source
+	// "personal"). PersonalSkillsDirResolver, when set, wins: it is asked on
+	// every read, so the folder follows the current Workspace Directory.
+	PersonalSkillsDir         string
+	PersonalSkillsDirResolver func() string
+	ExternalAgents            *externalagents.Cache
+	ConfigManager             *config.Manager
 }
 
 // AgentLoadout describes an agent's active-skill slot budget for cap
@@ -67,7 +71,7 @@ var (
 
 type Manager struct {
 	agentStorePath    string
-	personalSkillsDir string
+	personalSkillsDir func() string
 	externalAgents    *externalagents.Cache
 	configManager     *config.Manager
 	loadoutResolver   LoadoutResolver
@@ -106,12 +110,26 @@ func (m *Manager) agentDir(agentName string) (string, error) {
 }
 
 func NewManager(cfg ManagerConfig) *Manager {
+	personalSkillsDir := cfg.PersonalSkillsDirResolver
+	if personalSkillsDir == nil {
+		fixed := cfg.PersonalSkillsDir
+		personalSkillsDir = func() string { return fixed }
+	}
 	return &Manager{
 		agentStorePath:    cfg.AgentStorePath,
-		personalSkillsDir: cfg.PersonalSkillsDir,
+		personalSkillsDir: personalSkillsDir,
 		externalAgents:    cfg.ExternalAgents,
 		configManager:     cfg.ConfigManager,
 	}
+}
+
+// PersonalSkillsDir is the folder installed skills are read from right now:
+// <Workspace Directory>/Skills in the server, so it follows a root switch.
+func (m *Manager) PersonalSkillsDir() string {
+	if m == nil || m.personalSkillsDir == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.personalSkillsDir())
 }
 
 // SetLoadoutResolver wires stage-based slot-cap enforcement for the per-agent
@@ -519,7 +537,7 @@ func (m *Manager) loadCompatSkills(includePrompt bool) ([]Skill, error) {
 }
 
 func (m *Manager) loadPersonalSkills(includePrompt bool) ([]Skill, error) {
-	skillsDir := strings.TrimSpace(m.personalSkillsDir)
+	skillsDir := m.PersonalSkillsDir()
 	if skillsDir == "" {
 		return []Skill{}, nil
 	}

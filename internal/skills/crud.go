@@ -169,7 +169,7 @@ func (m *Manager) isEditableSkillPath(source, skillPath string) bool {
 	var roots []string
 	switch source {
 	case SourcePersonal:
-		root = strings.TrimSpace(m.personalSkillsDir)
+		root = m.PersonalSkillsDir()
 		if root != "" {
 			roots = append(roots, root)
 		}
