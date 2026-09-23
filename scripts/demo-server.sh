@@ -91,6 +91,6 @@ echo "URL=http://localhost:$port"
 
 cd "$sandbox"
 if [[ "$open_browser" == "1" ]]; then
-	exec env -u NO_BROWSER HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" "$binary"
+	exec env -u NO_BROWSER HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1 "$binary"
 fi
-exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 "$binary"
+exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 "$binary"

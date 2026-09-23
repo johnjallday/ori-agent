@@ -3,10 +3,35 @@ package platform
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
+
+// NoDesktopOpenEnv names the environment variable that turns every desktop
+// launch in this package into a logged no-op when set to a true value.
+//
+// Sandboxed servers (demo, smoke, e2e, RC checks) run with a disposable HOME,
+// and the launched application inherits it. An application that cannot find
+// its folder under ~/Library/Application Support may fall back to a portable
+// config written next to its bundle in /Applications, which it then keeps
+// using on every later launch.
+const NoDesktopOpenEnv = "ORI_NO_DESKTOP_OPEN"
+
+// desktopOpenDisabled reports whether desktop launches are switched off, and
+// logs the launch that was skipped so the intent is still visible.
+func desktopOpenDisabled(action, target string) bool {
+	disabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(NoDesktopOpenEnv)))
+	if err != nil || !disabled {
+		return false
+	}
+	logger.Info("Skipped desktop launch", logger.Fields{"action": action, "target": target, "env": NoDesktopOpenEnv})
+	return true
+}
 
 // DesktopOpener is the injectable boundary for operations that launch native
 // desktop applications. Production uses NativeDesktopOpener; tests should
@@ -43,6 +68,9 @@ func OpenFolder(path string) error {
 	if path == "" {
 		return fmt.Errorf("path cannot be empty")
 	}
+	if desktopOpenDisabled("open_folder", path) {
+		return nil
+	}
 
 	var cmd *exec.Cmd
 
@@ -77,6 +105,9 @@ func OpenFile(path string) error {
 	if path == "" {
 		return fmt.Errorf("path cannot be empty")
 	}
+	if desktopOpenDisabled("open_file", path) {
+		return nil
+	}
 
 	var cmd *exec.Cmd
 
@@ -109,6 +140,9 @@ func OpenURL(url string) error {
 	if url == "" {
 		return fmt.Errorf("URL cannot be empty")
 	}
+	if desktopOpenDisabled("open_url", url) {
+		return nil
+	}
 
 	var cmd *exec.Cmd
 
@@ -140,6 +174,9 @@ func OpenApplication(appName string) error {
 	appName = strings.TrimSpace(appName)
 	if appName == "" {
 		return fmt.Errorf("application name cannot be empty")
+	}
+	if desktopOpenDisabled("open_application", appName) {
+		return nil
 	}
 
 	var cmd *exec.Cmd
@@ -175,6 +212,9 @@ func OpenApplication(appName string) error {
 func RevealInFileManager(path string) error {
 	if path == "" {
 		return fmt.Errorf("path cannot be empty")
+	}
+	if desktopOpenDisabled("reveal_in_file_manager", path) {
+		return nil
 	}
 
 	var cmd *exec.Cmd

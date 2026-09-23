@@ -31,7 +31,7 @@ echo "Sandbox: $ROOT"
 SERVER_PID=""
 boot() {
   local label="$1"
-  ( cd "$ROOT" && HOME="$ROOT" ORI_DATA_DIR="$ROOT" PORT="$PORT" exec "$BIN" ) \
+  ( cd "$ROOT" && HOME="$ROOT" ORI_DATA_DIR="$ROOT" PORT="$PORT" ORI_NO_DESKTOP_OPEN=1 exec "$BIN" ) \
     > "$ROOT/server-$label.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 80); do

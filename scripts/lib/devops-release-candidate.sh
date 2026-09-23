@@ -308,7 +308,7 @@ rc_launch_server() {
   (
     cd "$sandbox/work" || exit 1
     exec env -i PATH="$PATH" LANG="${LANG:-en_US.UTF-8}" TMPDIR="${TMPDIR:-/tmp}" USER="${USER:-}" \
-      HOME="$sandbox/home" ORI_DATA_DIR="$sandbox/data" NO_BROWSER=1 \
+      HOME="$sandbox/home" ORI_DATA_DIR="$sandbox/data" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 \
       "$binary" --port="$port" --no-browser
   ) > "$sandbox/server.log" 2>&1 &
   rc_server_pid=$!

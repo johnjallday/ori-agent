@@ -125,7 +125,7 @@ func (f *Fixture) isolateProcess(t testing.TB) {
 		"AGENT_STORE_PATH":                "",
 		"ORI_TEMPLATES_DIR":               f.paths.Templates,
 		"WORKFLOW_TEMPLATES_DIR":          filepath.Join(f.paths.Root, "workflow-templates"),
-		"ORI_DISABLE_EXTERNAL_MCP_IMPORT": "true", "NO_BROWSER": "1",
+		"ORI_DISABLE_EXTERNAL_MCP_IMPORT": "true", "NO_BROWSER": "1", "ORI_NO_DESKTOP_OPEN": "1",
 		// Config owns these roots by default. Tests of operator roots must
 		// explicitly set them to fixture paths, never inherited directories.
 		"WORKSPACE_DIR": "", "ORI_VAULT_DIR": "",

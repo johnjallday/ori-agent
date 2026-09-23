@@ -26,7 +26,7 @@ def probe(command, version, timeout=45):
         env.update(HOME=str(home), USERPROFILE=str(home), ORI_DATA_DIR=str(root / "data"),
                    XDG_CONFIG_HOME=str(home / "config"), XDG_DATA_HOME=str(home / "data"),
                    XDG_CACHE_HOME=str(home / "cache"), APPDATA=str(home / "appdata"),
-                   LOCALAPPDATA=str(home / "localappdata"))
+                   LOCALAPPDATA=str(home / "localappdata"), ORI_NO_DESKTOP_OPEN="1")
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]

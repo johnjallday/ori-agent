@@ -176,7 +176,7 @@ go build -o bin/ori-agent ./cmd/server
 
 (
 	cd "$sandbox"
-	exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" \
+	exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1 \
 		"$repo_root/bin/ori-agent"
 ) >"$server_log" 2>&1 &
 server_pid=$!
