@@ -1364,7 +1364,7 @@ serve_isolated() {
   echo "sandbox: $dir"
   echo "url:     http://localhost:${port}"
   cd "$dir" || fail "could not enter $dir"
-  HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" exec "$binary"
+  HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" ORI_NO_DESKTOP_OPEN=1 exec "$binary"
 }
 
 # smoke_starter waits for a running isolated server, then runs one stage of the
@@ -1970,7 +1970,7 @@ smoke_agent_type_strip() {
     >"$dir/agents/manager/agent_settings.json"
 
   local base="http://localhost:$port" pid
-  (cd "$dir" && HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" exec "$binary" >"$dir/server.log" 2>&1) &
+  (cd "$dir" && HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" ORI_NO_DESKTOP_OPEN=1 exec "$binary" >"$dir/server.log" 2>&1) &
   pid=$!
   trap 'kill "$pid" 2>/dev/null || true' EXIT
   local i

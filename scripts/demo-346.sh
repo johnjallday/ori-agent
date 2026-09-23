@@ -47,4 +47,4 @@ done
 echo "Sandbox: ${SANDBOX}"
 echo "URL:     http://localhost:${PORT}"
 cd "${SANDBOX}"
-exec env HOME="${SANDBOX}" ORI_DATA_DIR="${SANDBOX}" PORT="${PORT}" "${ROOT}/bin/ori-agent"
+exec env HOME="${SANDBOX}" ORI_DATA_DIR="${SANDBOX}" PORT="${PORT}" ORI_NO_DESKTOP_OPEN=1 "${ROOT}/bin/ori-agent"

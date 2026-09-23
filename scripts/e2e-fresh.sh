@@ -125,7 +125,7 @@ for spec in "${specs[@]}"; do
 	}
 	echo "== $spec"
 	echo "   sandbox $sandbox"
-	(cd "$sandbox" && exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 "$binary") \
+	(cd "$sandbox" && exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 "$binary") \
 		>"$sandbox/server.log" 2>&1 &
 	server_pid=$!
 

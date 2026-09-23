@@ -2183,9 +2183,9 @@ function wt_dispatch {
     local demo_status=0
     {
       if [[ "${ORI_DEMO_OPEN:-0}" == "1" ]]; then
-        (cd "$demo_dir" && env -u NO_BROWSER HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" "$demo_root/bin/ori-agent") || demo_status=$?
+        (cd "$demo_dir" && env -u NO_BROWSER HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" ORI_NO_DESKTOP_OPEN=1 "$demo_root/bin/ori-agent") || demo_status=$?
       else
-        (cd "$demo_dir" && env HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" NO_BROWSER=1 "$demo_root/bin/ori-agent") || demo_status=$?
+        (cd "$demo_dir" && env HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 "$demo_root/bin/ori-agent") || demo_status=$?
       fi
     } always {
       if [[ "${ORI_KEEP_DEMO_SANDBOX:-0}" == "1" ]]; then

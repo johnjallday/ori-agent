@@ -105,7 +105,7 @@ scripts every vault state and never contacts Google:
 ./scripts/build-server.sh
 SMOKE_DIR="$TMPDIR/smoke-oauth-$$"
 mkdir -p "$SMOKE_DIR"
-cd "$SMOKE_DIR" && HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 \
+cd "$SMOKE_DIR" && HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 ORI_NO_DESKTOP_OPEN=1 \
   /path/to/bin/ori-agent &
 ./scripts/e2e.sh --port 8931 tests/google-account-email-ops.spec.ts
 ```

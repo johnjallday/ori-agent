@@ -81,7 +81,7 @@ boot() {
   local dir="$1" port="$2" label="$3"
   (
     cd "$dir" || exit 1
-    HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" "$BIN" > "$dir/server-$label.log" 2>&1 &
+    HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" ORI_NO_DESKTOP_OPEN=1 "$BIN" > "$dir/server-$label.log" 2>&1 &
     echo $! > "$dir/server.pid"
     wait
   ) &

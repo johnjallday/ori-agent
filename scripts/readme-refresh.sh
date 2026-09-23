@@ -196,6 +196,7 @@ capture() {
       ORI_DATA_DIR="${SANDBOX}/ori-data" \
       PORT="${requested_port}" \
       NO_BROWSER=1 \
+      ORI_NO_DESKTOP_OPEN=1 \
       LANG=C.UTF-8 \
       LC_ALL=C.UTF-8 \
       TZ=UTC \

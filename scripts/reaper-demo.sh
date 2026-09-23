@@ -286,7 +286,7 @@ start_server() {
 		cd "$sandbox"
 		# This process-local path authorizes only the exact staged demo copy to
 		# satisfy the journey prerequisite. It does not publish or release-verify it.
-		exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" \
+		exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1 \
 			ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$bundled_plugin" \
 			"$repo_root/bin/ori-agent"
 	) >>"$server_log" 2>&1 &

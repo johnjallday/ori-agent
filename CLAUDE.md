@@ -274,8 +274,11 @@ By hand, when you need a second sandbox or a non-default port:
 SMOKE_DIR="$TMPDIR/smoke-$$"
 mkdir -p "$SMOKE_DIR"
 # HOME override redirects "Ori Workspaces" (and its Agents/); ORI_DATA_DIR redirects DB/vaults/templates/agent_state
-HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 ./bin/ori-agent
+# ORI_NO_DESKTOP_OPEN keeps the server from launching desktop apps under the fake HOME
+HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 ORI_NO_DESKTOP_OPEN=1 ./bin/ori-agent
 ```
+
+**Always set `ORI_NO_DESKTOP_OPEN=1` on a server with an overridden `HOME`.** A desktop app that the server opens (a `.rpp` after "open after create", a folder, "Reveal in Finder") inherits the fake `HOME`. REAPER then can't find `~/Library/Application Support/REAPER` and writes a portable config (`reaper.ini`, `Effects/`, `Scripts/`, …) next to `REAPER.app` in `/Applications`, and keeps using it on every later launch until those files are deleted. With the switch set, each launch is skipped and logged as `Skipped desktop launch`. Every sandbox script in `scripts/` (`wt demo`, `demo-server.sh`, `e2e-fresh.sh`, `reaper-demo.sh`, the RC check) already sets it.
 
 **Do NOT use `$(mktemp -d)` here.** Agent sandboxes deny it, and the failure is silent: `SMOKE_DIR` ends up empty, so `HOME=""` and `ORI_DATA_DIR=""` resolve the data dir to the **current working directory** and the server starts writing `sessions.db`, `agents.json`, and `model_categories.json` into your worktree. Those files are gitignored, so `git status` will not show the damage — but a polluted worktree fails `TestSetupWizardRegistry_MatchesTheAuthorableAdapters` (its stale `sessions.db` breaks migration 13, the session store dies, and several adapters never register) while a clean checkout passes. `$TMPDIR` is always set and always writable.
 
