@@ -45,7 +45,7 @@ func makeAgentToolApplier(b *ServerBuilder) func(string, string, projecttemplate
 				var ok bool
 				var err error
 				if requirePersonalSkillSource {
-					_, ok, err = mgr.ResolvePersonalSkillByName(name)
+					_, ok, err = mgr.ResolvePluginSkillByName(name)
 				} else {
 					_, ok, err = mgr.ResolveSkillByName(name)
 				}

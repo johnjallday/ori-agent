@@ -30,7 +30,7 @@ func applierBuilder(t *testing.T, pluginsDir string) (*ServerBuilder, workspace.
 	b := &ServerBuilder{}
 	store := workspace.NewInMemoryStore()
 	b.workspaceStore = store
-	b.pluginHandler = pluginhttp.NewHandler(nil, nil, t.TempDir(), pluginsDir)
+	b.pluginHandler = pluginhttp.NewHandler(nil, nil, pluginsDir)
 	return b, store
 }
 

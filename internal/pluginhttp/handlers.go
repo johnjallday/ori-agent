@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -37,7 +38,7 @@ type ReviewedReplacement func(ctx context.Context, installed plugin.InstalledPlu
 const ReviewedReleaseCurrentCode = "reviewed_release_current"
 
 // Handler serves plugin operations and owns the plugin Manager wired to Ori's
-// live MCP config/registry and skills directory.
+// live MCP config/registry.
 type Handler struct {
 	mgr     *plugin.Manager
 	updates *plugin.UpdateChecker
@@ -47,13 +48,11 @@ type Handler struct {
 }
 
 // NewHandler builds the plugin manager over Ori's MCP config manager + runtime
-// registry and the given skills directory, and returns an HTTP handler for it.
-// pluginsDir is the managed directory for the installed-plugins registry and
-// git clones.
-func NewHandler(config *mcp.ConfigManager, registry *mcp.Registry, skillsDir, pluginsDir string) *Handler {
+// registry and returns an HTTP handler for it. pluginsDir is the managed
+// directory for the installed-plugins registry and git clones.
+func NewHandler(config *mcp.ConfigManager, registry *mcp.Registry, pluginsDir string) *Handler {
 	mgr := plugin.NewManager(
 		newMCPRegistrar(config, registry),
-		newSkillDirInstaller(skillsDir),
 		pluginsDir,
 		filepath.Join(pluginsDir, "src"),
 	)
@@ -75,12 +74,22 @@ func (h *Handler) Manager() *plugin.Manager { return h.mgr }
 // lifecycle code starts and stops it; direct handler construction stays idle.
 func (h *Handler) UpdateChecker() *plugin.UpdateChecker { return h.updates }
 
+// skillNameTakenMessage turns a refused skill name into the sentence the user
+// sees, naming the clashing skill: `A skill named "x" is already ...`.
+func skillNameTakenMessage(err error) string {
+	detail := strings.TrimPrefix(err.Error(), plugin.ErrSkillNameTaken.Error()+": ")
+	if detail == err.Error() || detail == "" {
+		return "One of this plugin's skills has the same name as a skill you already have."
+	}
+	return strings.ToUpper(detail[:1]) + detail[1:] + "."
+}
+
 func respondPluginMutationError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, plugin.ErrSkillDestinationConflict):
-		orihttp.Conflict(w, "A plugin skill destination is independently owned; preserve or move it before trying again")
-	case errors.Is(err, plugin.ErrSkillOwnershipChanged):
-		orihttp.Conflict(w, "A plugin-owned skill changed after installation; preserve or restore it before changing the plugin")
+	case errors.Is(err, plugin.ErrSkillNameTaken):
+		orihttp.Conflict(w, skillNameTakenMessage(err))
+	case errors.Is(err, plugin.ErrSourceChanged):
+		orihttp.Conflict(w, "The plugin source changed while it was being installed; try again")
 	default:
 		orihttp.InternalError(w, err.Error())
 	}

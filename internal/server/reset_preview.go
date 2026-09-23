@@ -49,18 +49,13 @@ func (b *ServerBuilder) resetPreviewOwners() settingsreset.Owners {
 
 // resetPluginPaths resolves the installed-plugin locations the same way the
 // live handler wiring does, and the same way pre-store recovery will resolve
-// them independently. An unresolvable personal skills root leaves the owner
-// zero-valued, which the planner reports as unavailable rather than guessing a
-// layout or silently reviewing a smaller scope.
+// them independently. An unresolved data dir leaves the owner zero-valued,
+// which the planner reports as unavailable rather than guessing a layout.
 func resetPluginPaths(dataDir string) plugin.ResetPaths {
 	if strings.TrimSpace(dataDir) == "" {
 		return plugin.ResetPaths{}
 	}
-	skillsRoot, err := plugin.DefaultPersonalSkillsRoot()
-	if err != nil {
-		return plugin.ResetPaths{}
-	}
-	return plugin.DefaultResetPaths(dataDir, skillsRoot)
+	return plugin.DefaultResetPaths(dataDir)
 }
 
 func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(context.Context) []settingsreset.Blocker) {
@@ -95,13 +90,12 @@ func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(co
 		add(settingsreset.CategoryIntegrations, "mcp_search_cache", cache, "Remove fetched MCP registry cache.")
 	}
 	if b.pluginHandler != nil && b.pluginHandler.Manager() != nil {
-		// Start Fresh keeps these broader targets. Its plugin portion now runs the
+		// Start Fresh keeps these broader targets. Its plugin portion runs the
 		// same exact offline removal the selective category uses, before these
-		// roots are deleted, so reviewed plugin-copied skills no longer need a
-		// manual-uninstall blocker. Plugin ownership that cannot be established
-		// safely still blocks, through the planner's own inventory inspection.
+		// roots are deleted. Plugin ownership that cannot be established safely
+		// still blocks, through the planner's own inventory inspection.
 		for kind, path := range b.pluginHandler.Manager().FreshPersistencePaths() {
-			add(settingsreset.CategoryIntegrations, kind, path, "Remove enumerated managed plugin registration, marketplace, clone, artifact or state after each installed plugin's exact components have been removed; linked external sources and personal skills you wrote remain.")
+			add(settingsreset.CategoryIntegrations, kind, path, "Remove enumerated managed plugin registration, marketplace, clone, artifact or state after each installed plugin's exact components have been removed; linked external sources remain.")
 		}
 	}
 	if b.configManager != nil {

@@ -51,7 +51,7 @@ func catalogEndpointServer(t *testing.T, libDir, pluginsDir string, installed []
 	s := &Server{}
 	s.Core = NewCoreSystemFacade(nil, nil, configMgr, nil, nil)
 	s.Handlers = &HandlerFacade{
-		Plugin: pluginhttp.NewHandler(nil, nil, t.TempDir(), pluginsDir),
+		Plugin: pluginhttp.NewHandler(nil, nil, pluginsDir),
 	}
 	return s
 }

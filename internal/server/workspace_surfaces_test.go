@@ -106,7 +106,7 @@ func TestWireWorkspaceSurfacesRestoresInstalledPluginThroughOnlyGenericRoutes(t 
 	}
 	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
 	t.Setenv("ORI_DATA_DIR", t.TempDir())
-	pluginHandler := pluginhttp.NewHandler(nil, nil, t.TempDir(), t.TempDir())
+	pluginHandler := pluginhttp.NewHandler(nil, nil, t.TempDir())
 	installed, err := pluginHandler.Manager().Install(
 		filepath.Join(repositoryRoot, "examples", "plugins", "workspace-surface-demo"),
 		"",

@@ -162,6 +162,8 @@ function getSourceTheme(source) {
       return { bg: 'rgba(16, 185, 129, 0.22)', color: 'var(--text-primary)' };
     case 'personal':
       return { bg: 'rgba(92, 92, 94, 0.28)', color: 'var(--text-primary)' };
+    case 'plugin':
+      return { bg: 'rgba(14, 165, 233, 0.22)', color: 'var(--text-primary)' };
     default:
       return { bg: 'rgba(148, 163, 184, 0.22)', color: 'var(--text-primary)' };
   }
@@ -232,23 +234,6 @@ function renderSourceFilters() {
   });
 }
 
-let pluginSkillNames = null; // null until first fetched
-let lastRenderedSkills = null;
-
-// ensurePluginSkillNames lazily fetches which skills are plugin-owned (read-only)
-// so they can be badged, then re-renders once. Cached; safe if /api/plugins is absent.
-function ensurePluginSkillNames() {
-  if (pluginSkillNames !== null) return;
-  pluginSkillNames = new Set();
-  fetch('/api/plugins')
-    .then(r => (r.ok ? r.json() : { plugins: [] }))
-    .then(d => {
-      (d.plugins || []).forEach(p => (p.skills || []).forEach(s => pluginSkillNames.add(s)));
-      if (lastRenderedSkills) renderSkills(lastRenderedSkills);
-    })
-    .catch(() => {});
-}
-
 function renderSkills(skills) {
   const container = document.getElementById('skillsList');
   if (!container) return;
@@ -259,17 +244,14 @@ function renderSkills(skills) {
     return;
   }
 
-  lastRenderedSkills = skills;
-  ensurePluginSkillNames();
-  const pNames = pluginSkillNames || new Set();
   container.innerHTML = '';
   skills.forEach(skill => {
     const name = skill?.name || '(unnamed skill)';
     const description = skill?.description || 'No description';
     const source = getSourceLabel(skill?.source);
-    const isPlugin = pNames.has(name);
-    const isEditable =
-      !isPlugin && (source === 'agent' || source === '.agents' || source === 'personal');
+    // A plugin's skill is read from the plugin's own folder and is read-only;
+    // its source badge already says "plugin".
+    const isEditable = source === 'agent' || source === '.agents' || source === 'personal';
     const canDelete = source === 'agent';
     const validationErrors = Array.isArray(skill?.validation_errors) ? skill.validation_errors : [];
     const hasErrors = validationErrors.length > 0;
@@ -290,11 +272,6 @@ function renderSkills(skills) {
     badges.push(
       `<span class="badge" style="background: ${sourceTheme.bg}; color: ${sourceTheme.color}; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`
     );
-    if (isPlugin) {
-      badges.push(
-        '<span class="badge bg-info" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">plugin</span>'
-      );
-    }
     if (hasErrors) {
       badges.push(
         '<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>'

@@ -32,12 +32,7 @@ type RecoveryOptions struct {
 	DataDir         string
 	SecretStore     vault.SecretStore
 	OpenSecretStore func() (vault.SecretStore, error)
-	// PersonalSkillsRoot resolves the shared skills directory independently of
-	// the receipt. It defaults to the same resolver the live handler wiring
-	// uses; a receipt naming a different root is a scope change, never an
-	// instruction to delete somewhere else.
-	PersonalSkillsRoot func() (string, error)
-	Now                func() time.Time
+	Now             func() time.Time
 }
 
 // ProductionRecoveryOptions resolves and migrates the canonical Settings
@@ -45,8 +40,7 @@ type RecoveryOptions struct {
 // not contact a provider or inspect external CLI authentication.
 func ProductionRecoveryOptions(dataDir string) RecoveryOptions {
 	return RecoveryOptions{
-		DataDir:            dataDir,
-		PersonalSkillsRoot: plugin.DefaultPersonalSkillsRoot,
+		DataDir: dataDir,
 		OpenSecretStore: func() (vault.SecretStore, error) {
 			settingsPath := filepath.Join(dataDir, "settings.json")
 			canonical := vault.NewDefaultSecretStoreForNamespace(settingsPath)
@@ -278,7 +272,7 @@ func validatePluginRecoveryScope(root string, j *journal, options RecoveryOption
 	if evidence == nil {
 		return plugin.ResetPaths{}, nil
 	}
-	paths, err := recoveredPluginPaths(root, evidence, options.PersonalSkillsRoot)
+	paths, err := recoveredPluginPaths(root, evidence)
 	if err != nil {
 		return plugin.ResetPaths{}, err
 	}
@@ -355,10 +349,9 @@ func independentlyResolvedTargets(root string) (map[string]string, error) {
 		}
 	}
 	pluginsRoot := filepath.Join(root, "plugins")
-	pluginPaths := plugin.DefaultResetPaths(root, filepath.Join(root, "unused-skills-placeholder"))
+	pluginPaths := plugin.DefaultResetPaths(root)
 	return map[string]string{
-		// Selected installed-plugin reset edits within these owner scopes; the
-		// personal skills root is resolved separately and never appears here.
+		// Selected installed-plugin reset edits within these owner scopes.
 		"plugin_registry_records":  pluginPaths.RegistryPath(),
 		"plugin_mcp_entries":       pluginPaths.MCPRegistry,
 		"plugin_surface_state":     pluginPaths.StateRoot(),
@@ -525,8 +518,7 @@ func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected 
 		completeResultCheck(&result, "supplemental_configuration_default")
 	case CategoryIntegrations:
 		// Exact plugin removal first: it reads the installed registry and the MCP
-		// document that the broader removal below deletes, and it is the only step
-		// that can reach the plugin-copied skills outside this installation.
+		// document that the broader removal below deletes.
 		// Exactly one plugin-removal pass runs — the selective category and Start
 		// Fresh never both apply, because they cannot appear in one plan.
 		if !applyFreshPluginRemoval(ctx, &result, evidence.Plugins, pluginPaths) {

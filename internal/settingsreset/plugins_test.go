@@ -113,8 +113,10 @@ func TestPreviewNamesTheExactPluginInventory(t *testing.T) {
 	if got := factCount(t, category, "plugin MCP registrations removed"); got != 1 {
 		t.Fatalf("mcp count = %d", got)
 	}
-	if got := factCount(t, category, "plugin-copied personal skills removed"); got != 2 {
-		t.Fatalf("skill count = %d", got)
+	for _, fact := range category.Facts {
+		if strings.Contains(fact.Name, "skill") {
+			t.Fatalf("plugin reset still counts skills it no longer removes: %+v", fact)
+		}
 	}
 	if got := factCount(t, category, "managed plugin clones removed"); got != 1 {
 		t.Fatalf("managed count = %d", got)
@@ -143,11 +145,12 @@ func TestPreviewNamesTheExactPluginInventory(t *testing.T) {
 	if !locationListed(category.Retained, paths.MarketplacesPath()) {
 		t.Fatal("marketplace registrations are not shown as retained")
 	}
-	if !locationListed(category.Removed, filepath.Join(f.PersonalSkillsRoot(), "demo-managed-skill")) {
-		t.Fatal("the exact copied skill destination is not shown as removed")
-	}
-	if locationListed(category.Removed, f.PersonalSkillsRoot()) {
-		t.Fatal("the shared personal skills root was listed as a removal target")
+	// Plugin skills live in the plugin's folder: ~/.agents/skills is neither a
+	// removal target nor named at all.
+	for _, location := range append(append([]Location{}, category.Removed...), category.Retained...) {
+		if strings.HasPrefix(location.DisplayPath, f.PersonalSkillsRoot()) {
+			t.Fatalf("plugin reset names ~/.agents/skills: %+v", location)
+		}
 	}
 	if locationListed(category.Removed, paths.MarketplacesPath()) {
 		t.Fatal("selected plugin reset listed marketplace registrations for removal")
@@ -229,10 +232,7 @@ func stagePluginReset(t *testing.T, c *Coordinator, categories ...CategoryID) Op
 }
 
 func recoveryOptions(f *resetfixture.Fixture) RecoveryOptions {
-	return RecoveryOptions{
-		DataDir: f.Paths().DataDir, SecretStore: f.Secrets(),
-		PersonalSkillsRoot: func() (string, error) { return f.PersonalSkillsRoot(), nil },
-	}
+	return RecoveryOptions{DataDir: f.Paths().DataDir, SecretStore: f.Secrets()}
 }
 
 func TestStagedPluginResetDeletesNothingUntilRelaunch(t *testing.T) {
@@ -279,13 +279,13 @@ func TestRecoveredPluginResetRemovesExactlyTheReviewedFootprint(t *testing.T) {
 		t.Fatalf("per-plugin outcomes are incomplete: %v", names)
 	}
 
+	// The managed clone goes, with the skill inside it; the linked source keeps
+	// its own skill.
 	for _, gone := range []string{
 		filepath.Join(paths.CloneDir, "demo-managed-repo"),
 		filepath.Join(paths.ArtifactsRoot(), "demo-managed"),
 		filepath.Join(paths.StateRoot(), plugin.ResetStateNamespace("demo-managed")),
 		filepath.Join(paths.StateRoot(), "demo-managed"),
-		filepath.Join(f.PersonalSkillsRoot(), "demo-managed-skill"),
-		filepath.Join(f.PersonalSkillsRoot(), "demo-linked-skill"),
 		paths.PreviewRoot(),
 	} {
 		if pathExists(t, gone) {
@@ -369,9 +369,8 @@ func TestPluginInventoryChangeAfterReviewInvalidatesConfirmation(t *testing.T) {
 		}
 		paths := f.PluginResetPaths()
 		for _, kept := range []string{
-			filepath.Join(paths.CloneDir, "demo-managed-repo"),
+			filepath.Join(paths.CloneDir, "demo-managed-repo", "skills", "demo-managed-skill"),
 			filepath.Join(paths.CloneDir, "demo-installed-later-repo"),
-			filepath.Join(f.PersonalSkillsRoot(), "demo-managed-skill"),
 		} {
 			if !pathExists(t, kept) {
 				t.Errorf("a blocked recovery still removed %s", kept)
@@ -381,57 +380,47 @@ func TestPluginInventoryChangeAfterReviewInvalidatesConfirmation(t *testing.T) {
 	})
 }
 
-// TestPluginResetAgreesOnRootsAcrossASymlinkedHome is a regression guard. The
-// planner used to record the personal skills root exactly as the owner declared
-// it while recovery canonicalized symlinks, so a HOME reached through a symlink
-// — an ordinary macOS temporary directory, for one — made every reviewed plugin
-// reset look like a changed scope and stranded the receipt.
-func TestPluginResetAgreesOnRootsAcrossASymlinkedHome(t *testing.T) {
-	f, owners, c, _ := pluginFixture(t, demoSeeds()...)
-	real := f.PersonalSkillsRoot()
-	link := filepath.Join(f.Paths().Root, "home-link")
-	if err := os.Symlink(f.Paths().Home, link); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	// The owner declares the location through the symlink, exactly as a host
-	// whose HOME traverses one would.
-	viaLink := filepath.Join(link, ".agents", "skills")
-	owners.PluginPaths = plugin.DefaultResetPaths(f.Paths().DataDir, viaLink)
+// FR 40: plugin reset touches no skills folder. Anything in ~/.agents/skills —
+// an old plugin copy, a stray file where a copy was — neither blocks the reset
+// nor is removed by it.
+func TestPluginResetNeverTouchesTheHomeSkillsFolder(t *testing.T) {
+	f, _, c, _ := pluginFixture(t, demoSeeds()...)
+	oldCopy := filepath.Join(f.PersonalSkillsRoot(), "demo-managed-skill")
+	mustPreview(t, os.MkdirAll(oldCopy, 0o750))
+	mustPreview(t, os.WriteFile(filepath.Join(oldCopy, "SKILL.md"), []byte("old copy\n"), 0o600))
+	mustPreview(t, os.WriteFile(filepath.Join(f.PersonalSkillsRoot(), "demo-linked-skill"), []byte("not a skill directory\n"), 0o600))
+	before := treeBytes(t, f.PersonalSkillsRoot())
 
 	operation := stagePluginReset(t, c)
-	options := recoveryOptions(f)
-	options.PersonalSkillsRoot = func() (string, error) { return viaLink, nil }
-	mustPreview(t, RecoverBeforeStores(t.Context(), c.lease, options))
+	mustPreview(t, RecoverBeforeStores(t.Context(), c.lease, recoveryOptions(f)))
 	recovered, err := c.Status(t.Context(), operation.ID)
 	mustPreview(t, err)
 	if !recovered.VerifiedComplete() {
-		t.Fatalf("a symlinked personal skills root stranded the receipt: %+v", recovered)
+		t.Fatalf("plugin reset did not verify complete: %+v", recovered)
 	}
-	if pathExists(t, filepath.Join(real, "demo-managed-skill")) {
-		t.Error("the reviewed skill copy survived under the canonical root")
+	if !treesEqual(before, treeBytes(t, f.PersonalSkillsRoot())) {
+		t.Fatal("plugin reset changed ~/.agents/skills")
 	}
 	f.AssertPreserved(t)
 }
 
-func TestRecoveryRefusesAReceiptNamingAnotherSkillsRoot(t *testing.T) {
+// A receipt written while plugin skills were copied names a skills root and
+// each plugin's skills. It must still validate; that part is ignored.
+func TestAnOlderReceiptWithASkillsRootStillValidates(t *testing.T) {
 	f, _, c, _ := pluginFixture(t, demoSeeds()...)
-	operation := stagePluginReset(t, c)
-	elsewhere := filepath.Join(f.Paths().Root, "elsewhere-skills")
-	mustPreview(t, os.MkdirAll(elsewhere, 0o750))
-	options := recoveryOptions(f)
-	options.PersonalSkillsRoot = func() (string, error) { return elsewhere, nil }
-	if err := RecoverBeforeStores(t.Context(), c.lease, options); !errors.Is(err, ErrRecoveryIncomplete) {
-		t.Fatalf("a receipt naming another skills root was applied: %v", err)
-	}
-	blocked, err := c.Status(t.Context(), operation.ID)
+	stagePluginReset(t, c)
+	receipt, err := c.lease.Read(resetstate.OperationRecord)
 	mustPreview(t, err)
-	if blocked.State != StateBlocked {
-		t.Fatalf("expected a blocked operation, got %+v", blocked)
+	older, err := decodeJournal(receipt)
+	mustPreview(t, err)
+	older.Plan.Evidence.Plugins.SkillsRoot = f.PersonalSkillsRoot()
+	older.Plan.Evidence.Plugins.SkillsRootPresent = true
+	for index := range older.Plan.Evidence.Plugins.Items {
+		older.Plan.Evidence.Plugins.Items[index].SkillOwnershipSchema = 1
 	}
-	if !pathExists(t, filepath.Join(f.PersonalSkillsRoot(), "demo-managed-skill")) {
-		t.Error("a refused recovery still removed a recorded skill copy")
+	if err := validateJournal(older); err != nil {
+		t.Fatalf("an older receipt with a skills root stopped validating: %v", err)
 	}
-	f.AssertPreserved(t)
 }
 
 func TestPluginResetCombinesWithOtherSelectedCategories(t *testing.T) {
@@ -456,37 +445,6 @@ func TestPluginResetCombinesWithOtherSelectedCategories(t *testing.T) {
 	f.AssertPreserved(t)
 }
 
-// TestUnexpectedSkillDestinationBlocksBeforeAnyRemoval pins that an unexpected
-// file type at a recorded destination is caught by scope revalidation, before
-// the first deletion, rather than part-way through the category.
-func TestUnexpectedSkillDestinationBlocksBeforeAnyRemoval(t *testing.T) {
-	f, _, c, _ := pluginFixture(t, demoSeeds()...)
-	operation := stagePluginReset(t, c)
-	destination := filepath.Join(f.PersonalSkillsRoot(), "demo-linked-skill")
-	mustPreview(t, os.RemoveAll(destination))
-	mustPreview(t, os.WriteFile(destination, []byte("not a skill directory\n"), 0o600))
-
-	if err := RecoverBeforeStores(t.Context(), c.lease, recoveryOptions(f)); !errors.Is(err, ErrRecoveryIncomplete) {
-		t.Fatalf("an unexpected destination reported success: %v", err)
-	}
-	blocked, err := c.Status(t.Context(), operation.ID)
-	mustPreview(t, err)
-	if blocked.State != StateBlocked {
-		t.Fatalf("expected a blocked operation, got %+v", blocked)
-	}
-	paths := f.PluginResetPaths()
-	for _, kept := range []string{
-		filepath.Join(paths.CloneDir, "demo-managed-repo"),
-		filepath.Join(f.PersonalSkillsRoot(), "demo-managed-skill"),
-		paths.RegistryPath(),
-	} {
-		if !pathExists(t, kept) {
-			t.Errorf("a blocked recovery still removed %s", kept)
-		}
-	}
-	f.AssertPreserved(t)
-}
-
 func TestPartialPluginFailureKeepsCompletedEvidenceAndStaysFenced(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("permission-based fault injection is meaningless as root")
@@ -494,11 +452,11 @@ func TestPartialPluginFailureKeepsCompletedEvidenceAndStaysFenced(t *testing.T) 
 	f, _, c, _ := pluginFixture(t, demoSeeds()...)
 	operation := stagePluginReset(t, c)
 
-	// Injected fault: one recorded skill directory holds an unreadable
-	// subdirectory, so its removal fails while the other plugin's succeeds. The
-	// destination is still an ordinary directory, so scope revalidation passes
-	// and the failure happens where a real I/O error would.
-	locked := filepath.Join(f.PersonalSkillsRoot(), "demo-linked-skill", "locked")
+	// Injected fault: one plugin's service data folder holds an unreadable
+	// subdirectory, so its removal fails while the other plugin's succeeds.
+	// Scope revalidation passes and the failure happens where a real I/O error
+	// would.
+	locked := filepath.Join(f.PluginResetPaths().StateRoot(), "demo-linked", "locked")
 	mustPreview(t, os.MkdirAll(locked, 0o750))
 	mustPreview(t, os.WriteFile(filepath.Join(locked, "held.txt"), []byte("held\n"), 0o600))
 	mustPreview(t, os.Chmod(locked, 0))
@@ -545,7 +503,7 @@ func TestPartialPluginFailureKeepsCompletedEvidenceAndStaysFenced(t *testing.T) 
 	if !recovered.VerifiedComplete() {
 		t.Fatalf("retry did not converge: %+v", recovered)
 	}
-	if pathExists(t, filepath.Join(f.PersonalSkillsRoot(), "demo-linked-skill")) {
+	if pathExists(t, filepath.Join(f.PluginResetPaths().StateRoot(), "demo-linked")) {
 		t.Error("the retry did not finish removing the unresolved plugin")
 	}
 	f.AssertPreserved(t)
@@ -555,7 +513,7 @@ func TestMissingRegistryRowAloneIsNotCompletion(t *testing.T) {
 	f, _, c, _ := pluginFixture(t, demoSeeds()...)
 	operation := stagePluginReset(t, c)
 	// Drop the whole registry, as a hand-edit or a partially applied removal
-	// would. The recorded skill copies still exist outside the installation.
+	// would. The managed clone still exists.
 	paths := f.PluginResetPaths()
 	mustPreview(t, os.Remove(paths.RegistryPath()))
 	if err := RecoverBeforeStores(t.Context(), c.lease, recoveryOptions(f)); !errors.Is(err, ErrRecoveryIncomplete) {
@@ -566,14 +524,14 @@ func TestMissingRegistryRowAloneIsNotCompletion(t *testing.T) {
 	if blocked.VerifiedComplete() {
 		t.Fatal("a vanished registry produced a false completion")
 	}
-	if !pathExists(t, filepath.Join(f.PersonalSkillsRoot(), "demo-managed-skill")) {
-		t.Error("a blocked recovery removed a recorded skill copy anyway")
+	if !pathExists(t, filepath.Join(paths.CloneDir, "demo-managed-repo")) {
+		t.Error("a blocked recovery removed the managed clone anyway")
 	}
 	f.AssertPreserved(t)
 }
 
 func TestJournalRefusesPluginEvidenceOutsideItsBoundary(t *testing.T) {
-	f, _, c, _ := pluginFixture(t, demoSeeds()...)
+	_, _, c, _ := pluginFixture(t, demoSeeds()...)
 	stagePluginReset(t, c)
 	receipt, err := c.lease.Read(resetstate.OperationRecord)
 	mustPreview(t, err)
@@ -581,15 +539,6 @@ func TestJournalRefusesPluginEvidenceOutsideItsBoundary(t *testing.T) {
 	mustPreview(t, err)
 
 	for name, mutate := range map[string]func(*journal){
-		"skills root escapes to the installation": func(j *journal) {
-			j.Plan.Evidence.Plugins.SkillsRoot = j.Plan.Installation
-		},
-		"skills root overlaps retained workspaces": func(j *journal) {
-			j.Plan.Evidence.Plugins.SkillsRoot = f.Paths().Workspaces
-		},
-		"skill name traverses": func(j *journal) {
-			j.Plan.Evidence.Plugins.Items[0].Skills = []string{"../escape"}
-		},
 		"plugin name traverses": func(j *journal) {
 			j.Plan.Evidence.Plugins.Items[0].Name = "../escape"
 		},

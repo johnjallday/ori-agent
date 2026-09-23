@@ -151,25 +151,6 @@ func (f *fakeRegistrar) RemoveServer(name string) error {
 	return nil
 }
 
-type fakeSkills struct {
-	installed []string
-	removed   []string
-	failOn    string
-}
-
-func (f *fakeSkills) InstallSkill(_, name, _ string) error {
-	if name == f.failOn {
-		return fmt.Errorf("install failed for %s", name)
-	}
-	f.installed = append(f.installed, name)
-	return nil
-}
-
-func (f *fakeSkills) RemoveSkill(_, name string) error {
-	f.removed = append(f.removed, name)
-	return nil
-}
-
 func TestRegisterSuccessWithBinaryWarning(t *testing.T) {
 	d := PluginDescriptor{
 		Name:       "reaper",
@@ -178,9 +159,8 @@ func TestRegisterSuccessWithBinaryWarning(t *testing.T) {
 		Skills:     []SkillSpec{{Name: "reaper-session-setup", Path: "/p/skills/reaper-session-setup"}},
 	}
 	reg := &fakeRegistrar{}
-	sk := &fakeSkills{}
 
-	res, err := Register(d, reg, sk)
+	res, err := Register(d, reg)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -195,23 +175,36 @@ func TestRegisterSuccessWithBinaryWarning(t *testing.T) {
 	}
 }
 
-func TestRegisterRollbackOnSkillFailure(t *testing.T) {
+func TestRegisterRollbackOnServerFailure(t *testing.T) {
 	d := PluginDescriptor{
 		Name:       "p",
 		InstallDir: "/p",
-		MCPServers: []MCPServerSpec{{Name: "srv", Command: "/usr/bin/true"}},
-		Skills:     []SkillSpec{{Name: "bad", Path: "/p/skills/bad"}},
+		MCPServers: []MCPServerSpec{{Name: "a-srv", Command: "/usr/bin/true"}, {Name: "b-bad", Command: "/usr/bin/true"}},
+		Skills:     []SkillSpec{{Name: "skill", Path: "/p/skills/skill"}},
 	}
-	reg := &fakeRegistrar{}
-	sk := &fakeSkills{failOn: "bad"}
+	reg := &fakeRegistrar{failOn: "p/b-bad"}
 
-	if _, err := Register(d, reg, sk); err == nil {
-		t.Fatal("expected error from skill install")
+	if _, err := Register(d, reg); err == nil {
+		t.Fatal("expected error from server registration")
 	}
-	if len(reg.removed) != 1 || reg.removed[0] != "p/srv" {
+	if len(reg.removed) != 1 || reg.removed[0] != "p/a-srv" {
 		t.Errorf("expected MCP server rollback, removed = %v", reg.removed)
 	}
 	if len(reg.added) != 0 {
 		t.Errorf("server should have been rolled back, added = %v", reg.added)
+	}
+}
+
+func TestSkillPathsAreRecordedInsideTheInstallFolder(t *testing.T) {
+	d := PluginDescriptor{
+		InstallDir: "/p",
+		Skills: []SkillSpec{
+			{Name: "inside", Path: "/p/skills/inside"},
+			{Name: "outside", Path: "/elsewhere/outside"},
+		},
+	}
+	paths := skillPathsOf(d)
+	if len(paths) != 1 || paths["inside"] != "skills/inside" {
+		t.Fatalf("skill paths = %v", paths)
 	}
 }

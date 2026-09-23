@@ -117,8 +117,7 @@ func TestLegacyRelativeRecordUpdatesToContributedBlueprints(t *testing.T) {
 
 	pluginsDir := t.TempDir()
 	registrar := &fakeRegistrar{}
-	skills := &fakeSkills{}
-	manager := NewManager(registrar, skills, pluginsDir, "")
+	manager := NewManager(registrar, pluginsDir, "")
 
 	// A legacy record: relative install root, no recorded contribution, and
 	// enabled by a user who had been using it.

@@ -129,7 +129,7 @@ func validateJournal(j *journal) error {
 		if !pluginEvidencePermitted(selected) {
 			return ErrJournalInvalid
 		}
-		if err := validatePluginEvidence(root, evidence.Plugins, evidence.ProtectedPaths); err != nil {
+		if err := validatePluginEvidence(root, evidence.Plugins); err != nil {
 			return err
 		}
 	case pluginEvidenceRequired(selected):

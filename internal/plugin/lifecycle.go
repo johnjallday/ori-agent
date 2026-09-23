@@ -25,25 +25,26 @@ type contributionLifecycle interface {
 }
 
 type Manager struct {
-	operationMu  sync.Mutex
-	reg          MCPRegistrar
-	skills       SkillInstaller
-	store        *Store
-	marketplaces *MarketplaceStore
-	artifacts    *ArtifactInstaller
-	surfaces     contributionLifecycle
-	pluginsDir   string
-	cloneDir     string
-	previewDir   string
+	operationMu    sync.Mutex
+	reg            MCPRegistrar
+	skillNameGuard SkillNameGuard
+	store          *Store
+	marketplaces   *MarketplaceStore
+	artifacts      *ArtifactInstaller
+	surfaces       contributionLifecycle
+	pluginsDir     string
+	cloneDir       string
+	previewDir     string
+	skillDirs      skillDirCache
 }
 
 // NewManager builds a plugin manager backed by the managed pluginsDir (which
 // holds the installed-plugins registry and marketplace records). cloneDir is
-// where git sources are cloned.
-func NewManager(reg MCPRegistrar, skills SkillInstaller, pluginsDir, cloneDir string) *Manager {
+// where git sources are cloned. A plugin's skills are never copied: they are
+// read in place from its install folder (see EnabledSkills).
+func NewManager(reg MCPRegistrar, pluginsDir, cloneDir string) *Manager {
 	return &Manager{
 		reg:          reg,
-		skills:       skills,
 		store:        NewStore(pluginsDir),
 		marketplaces: NewMarketplaceStore(pluginsDir),
 		artifacts:    NewArtifactInstaller(pluginsDir),
@@ -67,6 +68,17 @@ func (m *Manager) FreshPersistencePaths() map[string]string {
 		"plugin_artifacts":    filepath.Join(m.pluginsDir, "artifacts"),
 		"plugin_preview":      m.previewDir,
 	}
+}
+
+// SetSkillNameGuard refuses installs and updates whose skill names are already
+// used outside the plugin registry (the Workspace Directory's Skills folder).
+func (m *Manager) SetSkillNameGuard(guard SkillNameGuard) {
+	if m == nil {
+		return
+	}
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	m.skillNameGuard = guard
 }
 
 func (m *Manager) SetSurfaceLifecycle(lifecycle contributionLifecycle) {
@@ -113,6 +125,9 @@ func (m *Manager) install(source string, prefer SourceFormat, confirm ConfirmFun
 		return InstalledPlugin{}, err
 	}
 	componentFingerprint := trustedComponentFingerprint(d)
+	if err := m.checkSkillNames(d); err != nil {
+		return InstalledPlugin{}, err
+	}
 
 	if confirm != nil && !confirm(BuildTrustReport(d)) {
 		return InstalledPlugin{}, ErrInstallDeclined
@@ -122,13 +137,13 @@ func (m *Manager) install(source string, prefer SourceFormat, confirm ConfirmFun
 	if err != nil {
 		return InstalledPlugin{}, err
 	}
-	res, err := Register(d, m.reg, m.skills)
+	res, err := Register(d, m.reg)
 	if err != nil {
 		return InstalledPlugin{}, err
 	}
 	if trustedComponentFingerprint(d) != componentFingerprint {
-		rollback(m.reg, m.skills, d.Name, res)
-		return InstalledPlugin{}, fmt.Errorf("plugin: source changed while components were installed: %w", ErrSkillOwnershipChanged)
+		rollback(m.reg, res)
+		return InstalledPlugin{}, ErrSourceChanged
 	}
 
 	p := InstalledPlugin{
@@ -140,7 +155,7 @@ func (m *Manager) install(source string, prefer SourceFormat, confirm ConfirmFun
 		InstallDir:           d.InstallDir,
 		MCPServers:           res.MCPServers,
 		Skills:               res.Skills,
-		SkillOwnershipSchema: SkillOwnershipSchemaVersion,
+		SkillPaths:           skillPathsOf(d),
 		WorkspaceSurfaces:    d.WorkspaceSurfaces,
 		ResolvedArtifacts:    resolvedArtifacts,
 		ResolvedBlueprints:   append([]ResolvedBlueprint(nil), d.ResolvedBlueprints...),
@@ -153,13 +168,13 @@ func (m *Manager) install(source string, prefer SourceFormat, confirm ConfirmFun
 	if err := m.store.Put(p); err != nil {
 		// Couldn't record the install — undo the registration so we don't leave
 		// orphaned components the store doesn't know about.
-		rollback(m.reg, m.skills, d.Name, RegisterResult{MCPServers: res.MCPServers, Skills: res.Skills})
+		rollback(m.reg, res)
 		return InstalledPlugin{}, fmt.Errorf("plugin: record install: %w", err)
 	}
 	if m.surfaces != nil {
 		if err := m.surfaces.RegisterInstalled(p); err != nil {
 			_ = m.store.Delete(p.Name)
-			rollback(m.reg, m.skills, d.Name, RegisterResult{MCPServers: res.MCPServers, Skills: res.Skills})
+			rollback(m.reg, res)
 			return InstalledPlugin{}, fmt.Errorf("plugin: register workspace surfaces: %w", err)
 		}
 	}
@@ -254,9 +269,6 @@ func (m *Manager) Uninstall(name string) error {
 	if !ok {
 		return fmt.Errorf("plugin: %q not installed", name)
 	}
-	if err := verifyOwnedSkills(m.skills, p.Name, p.Skills); err != nil {
-		return err
-	}
 	surfaceRemoved := false
 	if m.surfaces != nil && p.WorkspaceSurfaces != nil {
 		if err := m.surfaces.Unregister(p.Name, p.Generation); err != nil {
@@ -275,12 +287,7 @@ func (m *Manager) Uninstall(name string) error {
 			return fmt.Errorf("plugin %q: remove server %q: %w", name, srv, err)
 		}
 	}
-	for _, sk := range p.Skills {
-		if err := m.skills.RemoveSkill(name, sk); err != nil {
-			restoreSurface()
-			return fmt.Errorf("plugin %q: remove skill %q: %w", name, sk, err)
-		}
-	}
+	// The plugin's skills live in its install folder and leave with it.
 	if m.surfaces != nil {
 		if err := m.surfaces.DeleteState(p.Name); err != nil {
 			restoreSurface()
@@ -412,20 +419,7 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 	if !ok {
 		return InstalledPlugin{}, fmt.Errorf("plugin: %q not installed", name)
 	}
-	if err := verifyOwnedSkills(m.skills, existing.Name, existing.Skills); err != nil {
-		return InstalledPlugin{}, err
-	}
-	skillRollback, err := prepareSkillRollback(m.skills, existing.Name, existing.Skills)
-	if err != nil {
-		return InstalledPlugin{}, err
-	}
-	preserveSkillRollback := false
-	defer func() {
-		if skillRollback != nil && !preserveSkillRollback {
-			_ = skillRollback.Discard()
-		}
-	}()
-	oldDescriptor, err := m.installedDescriptor(existing, skillRollback != nil)
+	oldDescriptor, err := m.installedDescriptor(existing)
 	if err != nil {
 		return InstalledPlugin{}, fmt.Errorf("plugin: read existing generation before update: %w", err)
 	}
@@ -446,10 +440,8 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 		}
 	}
 	removedServers := make([]string, 0, len(existing.MCPServers))
-	removedSkills := make([]string, 0, len(existing.Skills))
 	restoreExisting := func() error {
-		if restoreErr := restoreRecordedComponents(m.reg, m.skills, oldDescriptor, skillRollback, removedServers, removedSkills); restoreErr != nil {
-			preserveSkillRollback = skillRollback != nil
+		if restoreErr := restoreRecordedComponents(m.reg, oldDescriptor, removedServers); restoreErr != nil {
 			return restoreErr
 		}
 		if surfaceStopped && m.surfaces != nil {
@@ -467,6 +459,10 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 		return InstalledPlugin{}, err
 	}
 	if err := prepareTrustedBlueprints(&d); err != nil {
+		restoreSurface()
+		return InstalledPlugin{}, err
+	}
+	if err := m.checkSkillNames(d); err != nil {
 		restoreSurface()
 		return InstalledPlugin{}, err
 	}
@@ -492,16 +488,7 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 		}
 		removedServers = append(removedServers, srv)
 	}
-	for _, sk := range existing.Skills {
-		if err := m.skills.RemoveSkill(name, sk); err != nil {
-			if restoreErr := restoreExisting(); restoreErr != nil {
-				return InstalledPlugin{}, fmt.Errorf("plugin: remove existing skill for update: %v; existing generation could not be restored: %w", err, restoreErr)
-			}
-			return InstalledPlugin{}, fmt.Errorf("plugin: remove existing skill for update: %w", err)
-		}
-		removedSkills = append(removedSkills, sk)
-	}
-	res, err := Register(d, m.reg, m.skills)
+	res, err := Register(d, m.reg)
 	if err != nil {
 		if restoreErr := restoreExisting(); restoreErr != nil {
 			return InstalledPlugin{}, fmt.Errorf("plugin: update failed and existing generation could not be restored: %w", restoreErr)
@@ -509,11 +496,11 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 		return InstalledPlugin{}, err
 	}
 	if trustedComponentFingerprint(d) != componentFingerprint {
-		rollback(m.reg, m.skills, d.Name, res)
+		rollback(m.reg, res)
 		if restoreErr := restoreExisting(); restoreErr != nil {
 			return InstalledPlugin{}, fmt.Errorf("plugin: source changed during update and existing generation could not be restored: %w", restoreErr)
 		}
-		return InstalledPlugin{}, fmt.Errorf("plugin: source changed while components were installed: %w", ErrSkillOwnershipChanged)
+		return InstalledPlugin{}, ErrSourceChanged
 	}
 
 	updated := InstalledPlugin{
@@ -525,7 +512,7 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 		InstallDir:           d.InstallDir,
 		MCPServers:           res.MCPServers,
 		Skills:               res.Skills,
-		SkillOwnershipSchema: SkillOwnershipSchemaVersion,
+		SkillPaths:           skillPathsOf(d),
 		WorkspaceSurfaces:    d.WorkspaceSurfaces,
 		ResolvedArtifacts:    resolvedArtifacts,
 		ResolvedBlueprints:   append([]ResolvedBlueprint(nil), d.ResolvedBlueprints...),
@@ -537,7 +524,7 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 	}
 	if m.surfaces != nil {
 		if err := m.surfaces.RegisterInstalled(updated); err != nil {
-			rollback(m.reg, m.skills, d.Name, res)
+			rollback(m.reg, res)
 			if restoreErr := restoreExisting(); restoreErr != nil {
 				return InstalledPlugin{}, fmt.Errorf("plugin: updated surface failed and existing generation could not be restored: %w", restoreErr)
 			}
@@ -550,7 +537,7 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 			_ = m.surfaces.Unregister(updated.Name, updated.Generation)
 			surfaceStopped = existing.WorkspaceSurfaces != nil
 		}
-		rollback(m.reg, m.skills, d.Name, res)
+		rollback(m.reg, res)
 		if restoreErr := restoreExisting(); restoreErr != nil {
 			return InstalledPlugin{}, fmt.Errorf("plugin: record update failed and existing generation could not be restored: %w", restoreErr)
 		}
@@ -574,9 +561,6 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 	if !ok {
 		return InstalledPlugin{}, fmt.Errorf("plugin: %q not installed", name)
 	}
-	if err := verifyOwnedSkills(m.skills, existing.Name, existing.Skills); err != nil {
-		return InstalledPlugin{}, err
-	}
 	candidate, err := Load(source, m.cloneDir, prefer)
 	if err != nil {
 		return InstalledPlugin{}, err
@@ -587,6 +571,9 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 	if candidate.Name != existing.Name {
 		return InstalledPlugin{}, fmt.Errorf("plugin: reviewed replacement identity mismatch")
 	}
+	if err := m.checkSkillNames(candidate); err != nil {
+		return InstalledPlugin{}, err
+	}
 	componentFingerprint := trustedComponentFingerprint(candidate)
 	report := BuildTrustReport(candidate)
 	if confirm == nil || !confirm(report) {
@@ -596,17 +583,7 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 	if err != nil {
 		return InstalledPlugin{}, err
 	}
-	skillRollback, err := prepareSkillRollback(m.skills, existing.Name, existing.Skills)
-	if err != nil {
-		return InstalledPlugin{}, err
-	}
-	preserveSkillRollback := false
-	defer func() {
-		if skillRollback != nil && !preserveSkillRollback {
-			_ = skillRollback.Discard()
-		}
-	}()
-	oldDescriptor, err := m.installedDescriptor(existing, skillRollback != nil)
+	oldDescriptor, err := m.installedDescriptor(existing)
 	if err != nil {
 		return InstalledPlugin{}, fmt.Errorf("plugin: read existing generation before replacement: %w", err)
 	}
@@ -619,10 +596,8 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 		surfaceStopped = true
 	}
 	removedServers := make([]string, 0, len(existing.MCPServers))
-	removedSkills := make([]string, 0, len(existing.Skills))
 	restoreExisting := func() error {
-		if restoreErr := restoreRecordedComponents(m.reg, m.skills, oldDescriptor, skillRollback, removedServers, removedSkills); restoreErr != nil {
-			preserveSkillRollback = skillRollback != nil
+		if restoreErr := restoreRecordedComponents(m.reg, oldDescriptor, removedServers); restoreErr != nil {
 			return restoreErr
 		}
 		if surfaceStopped && m.surfaces != nil {
@@ -642,16 +617,7 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 		}
 		removedServers = append(removedServers, server)
 	}
-	for _, skill := range existing.Skills {
-		if err := m.skills.RemoveSkill(existing.Name, skill); err != nil {
-			if restoreErr := restoreExisting(); restoreErr != nil {
-				return InstalledPlugin{}, fmt.Errorf("plugin: remove existing skill for replacement: %v; existing generation could not be restored: %w", err, restoreErr)
-			}
-			return InstalledPlugin{}, fmt.Errorf("plugin: remove existing skill for replacement: %w", err)
-		}
-		removedSkills = append(removedSkills, skill)
-	}
-	registered, err := Register(candidate, m.reg, m.skills)
+	registered, err := Register(candidate, m.reg)
 	if err != nil {
 		if restoreErr := restoreExisting(); restoreErr != nil {
 			return InstalledPlugin{}, fmt.Errorf("plugin: replacement failed and existing generation could not be restored: %w", restoreErr)
@@ -659,18 +625,18 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 		return InstalledPlugin{}, err
 	}
 	if trustedComponentFingerprint(candidate) != componentFingerprint {
-		rollback(m.reg, m.skills, candidate.Name, registered)
+		rollback(m.reg, registered)
 		if restoreErr := restoreExisting(); restoreErr != nil {
 			return InstalledPlugin{}, fmt.Errorf("plugin: replacement source changed and existing generation could not be restored: %w", restoreErr)
 		}
-		return InstalledPlugin{}, fmt.Errorf("plugin: replacement source changed while components were installed: %w", ErrSkillOwnershipChanged)
+		return InstalledPlugin{}, ErrSourceChanged
 	}
 	updated := InstalledPlugin{
 		Name: candidate.Name, Version: candidate.Version, Description: candidate.Description,
 		Source: source, Format: candidate.SourceFormat, InstallDir: candidate.InstallDir,
 		MCPServers: registered.MCPServers, Skills: registered.Skills,
-		SkillOwnershipSchema: SkillOwnershipSchemaVersion,
-		WorkspaceSurfaces:    candidate.WorkspaceSurfaces, ResolvedArtifacts: resolvedArtifacts,
+		SkillPaths:        skillPathsOf(candidate),
+		WorkspaceSurfaces: candidate.WorkspaceSurfaces, ResolvedArtifacts: resolvedArtifacts,
 		ResolvedBlueprints:   append([]ResolvedBlueprint(nil), candidate.ResolvedBlueprints...),
 		ComponentFingerprint: componentFingerprint,
 		Generation:           nextPluginGeneration(existing.Generation),
@@ -679,7 +645,7 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 	}
 	if m.surfaces != nil {
 		if err := m.surfaces.RegisterInstalled(updated); err != nil {
-			rollback(m.reg, m.skills, candidate.Name, registered)
+			rollback(m.reg, registered)
 			if restoreErr := restoreExisting(); restoreErr != nil {
 				return InstalledPlugin{}, fmt.Errorf("plugin: replacement surface failed and existing generation could not be restored: %w", restoreErr)
 			}
@@ -692,7 +658,7 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 			_ = m.surfaces.Unregister(updated.Name, updated.Generation)
 			surfaceStopped = existing.WorkspaceSurfaces != nil
 		}
-		rollback(m.reg, m.skills, candidate.Name, registered)
+		rollback(m.reg, registered)
 		if restoreErr := restoreExisting(); restoreErr != nil {
 			return InstalledPlugin{}, fmt.Errorf("plugin: record replacement failed and existing generation could not be restored: %w", restoreErr)
 		}
@@ -701,7 +667,9 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 	return updated, nil
 }
 
-func restoreRecordedComponents(reg MCPRegistrar, skills SkillInstaller, descriptor PluginDescriptor, snapshot SkillRollbackSnapshot, serverNames, skillNames []string) error {
+// restoreRecordedComponents re-registers the MCP servers an update removed
+// before it failed. Skills need no restoring: they were never copied.
+func restoreRecordedComponents(reg MCPRegistrar, descriptor PluginDescriptor, serverNames []string) error {
 	servers := make(map[string]struct{}, len(serverNames))
 	for _, name := range serverNames {
 		servers[name] = struct{}{}
@@ -713,31 +681,12 @@ func restoreRecordedComponents(reg MCPRegistrar, skills SkillInstaller, descript
 	if len(descriptor.MCPServers) != len(servers) {
 		return errors.New("recorded server rollback source is incomplete")
 	}
-
-	restoredFromSource := make(map[string]struct{}, len(skillNames))
-	for _, name := range skillNames {
-		restoredFromSource[name] = struct{}{}
-	}
-	if snapshot != nil {
-		descriptor.Skills = nil
-	} else {
-		descriptor.Skills = slices.DeleteFunc(descriptor.Skills, func(skill SkillSpec) bool {
-			_, restore := restoredFromSource[skill.Name]
-			return !restore
-		})
-		if len(descriptor.Skills) != len(restoredFromSource) {
-			return errors.New("recorded skill rollback source is incomplete")
-		}
-	}
-	_, registerErr := Register(descriptor, reg, skills)
-	var skillErr error
-	if snapshot != nil {
-		skillErr = snapshot.Restore(skillNames)
-	}
-	return errors.Join(registerErr, skillErr)
+	descriptor.Skills = nil
+	_, err := Register(descriptor, reg)
+	return err
 }
 
-func (m *Manager) installedDescriptor(existing InstalledPlugin, skillsPreserved bool) (PluginDescriptor, error) {
+func (m *Manager) installedDescriptor(existing InstalledPlugin) (PluginDescriptor, error) {
 	root, err := canonicalInstallRoot(existing.InstallDir, existing.Source, m.cloneDir)
 	if err != nil {
 		return PluginDescriptor{}, err
@@ -766,24 +715,14 @@ func (m *Manager) installedDescriptor(existing InstalledPlugin, skillsPreserved 
 			filteredServers = append(filteredServers, server)
 		}
 	}
-	skills := make(map[string]struct{}, len(existing.Skills))
-	for _, name := range existing.Skills {
-		skills[name] = struct{}{}
-	}
-	filteredSkills := make([]SkillSpec, 0, len(existing.Skills))
-	for _, skill := range descriptor.Skills {
-		if _, recorded := skills[skill.Name]; recorded {
-			filteredSkills = append(filteredSkills, skill)
-		}
-	}
-	if len(filteredServers) != len(existing.MCPServers) || !skillsPreserved && len(filteredSkills) != len(existing.Skills) {
+	if len(filteredServers) != len(existing.MCPServers) {
 		return PluginDescriptor{}, fmt.Errorf("plugin: recorded generation source no longer contains its registered components")
 	}
 	descriptor.Name = existing.Name
 	descriptor.Version = existing.Version
 	descriptor.Description = existing.Description
 	descriptor.MCPServers = filteredServers
-	descriptor.Skills = filteredSkills
+	descriptor.Skills = nil
 	descriptor.WorkspaceSurfaces = existing.WorkspaceSurfaces
 	descriptor.ResolvedBlueprints = append([]ResolvedBlueprint(nil), existing.ResolvedBlueprints...)
 	return descriptor, nil

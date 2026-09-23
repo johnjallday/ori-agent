@@ -46,8 +46,6 @@ const (
 	ResetProblemNameUnsafe         = "plugin_name_unsafe"
 	ResetProblemDuplicateRecord    = "plugin_record_duplicated"
 	ResetProblemComponentUnsafe    = "plugin_component_unsafe"
-	ResetProblemSkillAmbiguous     = "plugin_skill_ownership_ambiguous"
-	ResetProblemSkillUnexpected    = "plugin_skill_destination_unexpected"
 	ResetProblemRootUnresolved     = "plugin_install_root_unresolved"
 	ResetProblemOwnerUnavailable   = "plugin_reset_owner_unavailable"
 )
@@ -64,25 +62,22 @@ type ResetProblem struct {
 // resolver during recovery) and must be absolute and cleaned. None is ever
 // derived from a browser request or from a plugin manifest.
 //
-// SkillsRoot is the shared personal skills directory and is the only location
-// outside the Ori installation. It is treated as an ownership boundary, not as a
-// deletion root: only exact recorded direct children are ever removed.
+// Every root is inside the Ori installation. A plugin's skills live in its own
+// install folder, so no skills folder is ever a reset root: a managed clone
+// takes its skills with it and a linked source keeps them.
 type ResetPaths struct {
 	PluginsDir  string
 	CloneDir    string
-	SkillsRoot  string
 	MCPRegistry string
 }
 
 // DefaultResetPaths derives the canonical layout from the installation data
-// directory and the resolved personal skills root, matching what the live
-// plugin handler and MCP config manager use.
-func DefaultResetPaths(dataDir, skillsRoot string) ResetPaths {
+// directory, matching what the live plugin handler and MCP config manager use.
+func DefaultResetPaths(dataDir string) ResetPaths {
 	pluginsDir := filepath.Join(dataDir, "plugins")
 	return ResetPaths{
 		PluginsDir:  pluginsDir,
 		CloneDir:    filepath.Join(pluginsDir, "src"),
-		SkillsRoot:  skillsRoot,
 		MCPRegistry: filepath.Join(dataDir, "mcp_registry.json"),
 	}
 }
@@ -101,18 +96,6 @@ func (p ResetPaths) MarketplacesPath() string {
 
 // Resolved reports whether these roots are usable at all.
 func (p ResetPaths) Resolved() bool { return p.validate() == nil }
-
-// DefaultPersonalSkillsRoot resolves the shared skills directory plugins copy
-// their skills into. It is the one location outside the Ori installation that
-// plugin reset touches, so both the live handler wiring and the independent
-// pre-store recovery resolver must derive it here rather than each guessing.
-func DefaultPersonalSkillsRoot() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".agents", "skills"), nil
-}
 
 // ResetStateNamespace reports the managed directory name that holds a plugin's
 // host-owned namespaced Workspace Surface state. Tests and fixtures use it so
@@ -134,7 +117,7 @@ func ValidResetServerName(pluginName, server string) bool {
 }
 
 func (p ResetPaths) validate() error {
-	for _, path := range []string{p.PluginsDir, p.CloneDir, p.SkillsRoot, p.MCPRegistry} {
+	for _, path := range []string{p.PluginsDir, p.CloneDir, p.MCPRegistry} {
 		if strings.TrimSpace(path) == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path || len(path) > maxResetPathBytes {
 			return errors.New("plugin: reset paths are unresolved")
 		}
@@ -142,15 +125,16 @@ func (p ResetPaths) validate() error {
 	if !containsResetPath(p.PluginsDir, p.CloneDir) {
 		return errors.New("plugin: managed clone root is outside the plugins directory")
 	}
-	if containsResetPath(p.SkillsRoot, p.PluginsDir) || containsResetPath(p.PluginsDir, p.SkillsRoot) {
-		return errors.New("plugin: personal skills root overlaps managed plugin state")
-	}
 	return nil
 }
 
 // ResetItem is one installed plugin's complete reviewed footprint. Public
 // summary fields are safe to render; the path fields are private evidence used
 // only by this package's apply and verify operations.
+//
+// Skills names the plugin's skills for review only: they live in its install
+// folder and nothing removes them by name. SkillOwnershipSchema is kept so a
+// receipt written while plugin skills were copied still decodes; it is ignored.
 type ResetItem struct {
 	Name                 string   `json:"name"`
 	Version              string   `json:"version,omitempty"`
@@ -180,7 +164,6 @@ type ResetInventory struct {
 	Items          []ResetItem `json:"items"`
 	RegistryPath   string      `json:"registry_path"`
 	RegistryDigest string      `json:"registry_digest"`
-	SkillsRoot     string      `json:"skills_root"`
 }
 
 // InspectReset reads the installed registry and derives the exact reviewed
@@ -193,7 +176,6 @@ func InspectReset(paths ResetPaths) (ResetInventory, []ResetProblem) {
 		return inventory, []ResetProblem{{Code: ResetProblemOwnerUnavailable, Detail: "plugin reset roots are unresolved"}}
 	}
 	inventory.RegistryPath = paths.RegistryPath()
-	inventory.SkillsRoot = paths.SkillsRoot
 
 	records, digest, err := readResetRegistry(inventory.RegistryPath)
 	if err != nil {
@@ -212,7 +194,6 @@ func InspectReset(paths ResetPaths) (ResetInventory, []ResetProblem) {
 		}
 	}
 	seenNames := make(map[string]bool, len(records))
-	skillOwner := make(map[string]string)
 	serverOwner := make(map[string]string)
 
 	for _, record := range records {
@@ -229,11 +210,7 @@ func InspectReset(paths ResetPaths) (ResetInventory, []ResetProblem) {
 		item := ResetItem{
 			Name: record.Name, Version: boundedResetText(record.Version), Enabled: record.Enabled,
 			Generation: record.Generation, Surfaces: record.WorkspaceSurfaces != nil,
-			Artifacts: len(record.ResolvedArtifacts), SkillOwnershipSchema: record.SkillOwnershipSchema,
-		}
-		if record.SkillOwnershipSchema < 0 || record.SkillOwnershipSchema > SkillOwnershipSchemaVersion {
-			add(ResetProblemComponentUnsafe, "an installed record uses an unsupported skill ownership schema")
-			continue
+			Artifacts: len(record.ResolvedArtifacts),
 		}
 		if len(record.MCPServers) > maxResetComponentItems || len(record.Skills) > maxResetComponentItems {
 			add(ResetProblemInventoryTooLarge, "an installed record declares more components than one reviewed reset supports")
@@ -259,28 +236,12 @@ func InspectReset(paths ResetPaths) (ResetInventory, []ResetProblem) {
 			serverOwner[server] = record.Name
 			item.MCPServers = append(item.MCPServers, server)
 		}
+		// Skills are named for review only, so a name that is not a plain
+		// single segment is simply left out of the summary.
 		for _, skill := range record.Skills {
-			if !validResetSegment(skill) {
-				add(ResetProblemComponentUnsafe, "an installed record claims a skill name that is not a safe single path segment")
-				safe = false
-				continue
+			if validResetSegment(skill) && !slices.Contains(item.Skills, skill) {
+				item.Skills = append(item.Skills, skill)
 			}
-			if owner, exists := skillOwner[skill]; exists {
-				if owner == record.Name {
-					add(ResetProblemComponentUnsafe, "an installed record lists the same skill twice")
-				} else {
-					add(ResetProblemSkillAmbiguous, "two installed plugins claim the same personal skill directory")
-				}
-				safe = false
-				continue
-			}
-			if err := checkResetSkillOwnership(paths.SkillsRoot, record.Name, skill, record.SkillOwnershipSchema); err != nil {
-				add(ResetProblemSkillUnexpected, "a recorded personal skill destination is unowned, changed, linked, or an unexpected file type")
-				safe = false
-				continue
-			}
-			skillOwner[skill] = record.Name
-			item.Skills = append(item.Skills, skill)
 		}
 		if !safe {
 			continue
@@ -302,7 +263,7 @@ func InspectReset(paths ResetPaths) (ResetInventory, []ResetProblem) {
 		// caller could mistake for the complete reviewed scope.
 		return ResetInventory{
 			Items: []ResetItem{}, RegistryPath: inventory.RegistryPath,
-			RegistryDigest: inventory.RegistryDigest, SkillsRoot: inventory.SkillsRoot,
+			RegistryDigest: inventory.RegistryDigest,
 		}, problems
 	}
 	return inventory, nil
@@ -312,8 +273,8 @@ func InspectReset(paths ResetPaths) (ResetInventory, []ResetProblem) {
 //
 // The order mirrors Manager.Uninstall so that an interrupted run leaves the
 // installed record — the ownership authority — in place for a retry: namespaced
-// state, then managed artifacts, then the managed clone, then recorded personal
-// skill copies, then recorded MCP registrations, and only then the record.
+// state, then managed artifacts, then the managed clone (and the skills inside
+// it), then recorded MCP registrations, and only then the record.
 func RemoveResetItem(paths ResetPaths, item ResetItem) error {
 	// Every piece of evidence is validated before the first effect, so an item
 	// that is unsafe in any respect removes nothing at all.
@@ -340,11 +301,6 @@ func RemoveResetItem(paths ResetPaths, item ResetItem) error {
 			return err
 		}
 	}
-	for _, skill := range item.Skills {
-		if err := removeResetTree(paths.SkillsRoot, filepath.Join(paths.SkillsRoot, skill)); err != nil {
-			return err
-		}
-	}
 	if len(item.MCPServers) != 0 {
 		if _, err := mcp.RemoveRegisteredServers(paths.MCPRegistry, item.MCPServers); err != nil {
 			return err
@@ -361,17 +317,6 @@ func validateResetItem(paths ResetPaths, item ResetItem) error {
 	}
 	if !validResetSegment(item.Name) {
 		return fmt.Errorf("plugin: reset item name is unsafe")
-	}
-	if item.SkillOwnershipSchema < 0 || item.SkillOwnershipSchema > SkillOwnershipSchemaVersion {
-		return fmt.Errorf("plugin: reset skill ownership schema is unsupported")
-	}
-	for _, skill := range item.Skills {
-		if !validResetSegment(skill) {
-			return fmt.Errorf("plugin: reset skill name is unsafe")
-		}
-		if err := checkResetSkillOwnership(paths.SkillsRoot, item.Name, skill, item.SkillOwnershipSchema); err != nil {
-			return err
-		}
 	}
 	for _, server := range item.MCPServers {
 		if !validResetServerName(item.Name, server) {
@@ -416,11 +361,6 @@ func ResetItemRemoved(paths ResetPaths, item ResetItem) (bool, error) {
 			return false, err
 		}
 		if exists, err := resetPathExists(clone); err != nil || exists {
-			return false, err
-		}
-	}
-	for _, skill := range item.Skills {
-		if exists, err := resetPathExists(filepath.Join(paths.SkillsRoot, skill)); err != nil || exists {
 			return false, err
 		}
 	}
@@ -550,59 +490,6 @@ func removeResetTree(root, path string) error {
 	}
 	if _, err := owned.Lstat(relative); !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("plugin: reset target remained after removal")
-	}
-	return nil
-}
-
-// checkResetSkillDestination refuses anything but an absent or ordinary
-// directory at the recorded destination. A symlink, regular file, or special
-// file there means the shared personal skills root no longer matches what the
-// install recorded, and removing it could affect something Ori does not own.
-func checkResetSkillOwnership(root, pluginName, skill string, ownershipSchema int) error {
-	if err := checkResetSkillDestination(root, skill); err != nil {
-		return err
-	}
-	destination := filepath.Join(root, skill)
-	if _, err := os.Lstat(destination); errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	if _, err := os.Lstat(filepath.Join(destination, SkillOwnershipFileName)); errors.Is(err, os.ErrNotExist) {
-		// Only records explicitly predating ownership receipts retain their
-		// conservative registry-based cleanup behavior. A missing marker from a
-		// new managed copy is an ownership loss and must fail closed.
-		if ownershipSchema == 0 {
-			return nil
-		}
-		return ErrSkillDestinationConflict
-	} else if err != nil {
-		return err
-	}
-	return VerifySkillOwnership(destination, pluginName, skill)
-}
-
-func checkResetSkillDestination(root, skill string) error {
-	if !validResetSegment(skill) {
-		return fmt.Errorf("plugin: reset skill name is unsafe")
-	}
-	owned, err := os.OpenRoot(root)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer func() { _ = owned.Close() }()
-	info, err := owned.Lstat(skill)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("plugin: recorded skill destination is not an owned directory")
 	}
 	return nil
 }

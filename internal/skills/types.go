@@ -2,10 +2,12 @@ package skills
 
 // Skill represents a reusable prompt template with optional tool constraints.
 type Skill struct {
-	Name               string          `json:"name"`
-	Description        string          `json:"description,omitempty"`
-	Prompt             string          `json:"prompt,omitempty"`
-	Source             string          `json:"source"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+	Source      string `json:"source"`
+	// Plugin names the installed plugin that bundles a SourcePlugin skill.
+	Plugin             string          `json:"plugin,omitempty"`
 	Path               string          `json:"path,omitempty"`
 	AllowedTools       []string        `json:"allowed_tools,omitempty"`
 	DisallowedTools    []string        `json:"disallowed_tools,omitempty"`
