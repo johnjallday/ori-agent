@@ -33,7 +33,9 @@ def probe(command, version, timeout=45):
         # A machine's HTTP proxy must never intercept this loopback-only probe.
         http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with (root / "server.log").open("w+", encoding="utf-8") as log:
-            process = subprocess.Popen([*command, f"--port={port}"], cwd=root, env=env,
+            # A launched browser inherits the server's cwd (the data dir) and
+            # outlives it, so on Windows it locks the temp dir against cleanup.
+            process = subprocess.Popen([*command, "--no-browser", f"--port={port}"], cwd=root, env=env,
                                        stdout=log, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + timeout

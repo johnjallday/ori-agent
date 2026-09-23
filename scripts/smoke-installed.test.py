@@ -20,7 +20,7 @@ SERVER = '''
 import http.server, json, os, pathlib, sys
 mode, record = sys.argv[1:3]
 port = int(sys.argv[-1].split('=')[1])
-pathlib.Path(record).write_text(json.dumps(dict(cwd=os.getcwd(), pid=os.getpid(), env=dict(os.environ))))
+pathlib.Path(record).write_text(json.dumps(dict(cwd=os.getcwd(), pid=os.getpid(), env=dict(os.environ), argv=sys.argv)))
 if mode == 'exit':
     raise SystemExit(9)
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -54,6 +54,7 @@ class ProbeTests(unittest.TestCase):
                             smoke.probe(command, "v1.2.4-rc.1", timeout=3)
                 child = json.loads(record.read_text())
                 self.assertFalse(Path(child["cwd"]).exists(), "temporary profile not cleaned")
+                self.assertIn("--no-browser", child["argv"], "a launched browser would pin the temp dir")
                 self.assertNotIn("GH_TOKEN", child["env"])
                 self.assertNotIn("OPENAI_API_KEY", child["env"])
                 self.assertNotEqual(child["env"]["ORI_DATA_DIR"], "/never-use-this-live-profile")
