@@ -106,6 +106,44 @@ func TestApplyUpgradeAddsMissingSpecialistsAndStampsVersion(t *testing.T) {
 	}
 }
 
+func TestApplyUpgradeAssistantBuiltHQAddsNoChiefOfStaff(t *testing.T) {
+	svc, profiles, store := newTestHarness(t)
+	userID := "user-1"
+	// An HQ built around the hired assistant (Assistant + Journal, presentation
+	// marker stamped) already has its full roster by contract.
+	hqID := designatedHQ(t, svc, profiles, store, userID, "Assistant", "Journal")
+	ws, err := store.GetWorkspace(context.Background(), hqID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	ws.SharedData = map[string]any{
+		PersonalAssistantPresentationKey: map[string]any{"version": 1, "assistant_id": "assistant-1"},
+	}
+	if err := store.UpdateWorkspace(context.Background(), ws); err != nil {
+		t.Fatalf("UpdateWorkspace: %v", err)
+	}
+
+	prov := &fakeProvisioner{store: store}
+	coord := NewUpgradeCoordinator(svc, store, prov)
+	res, err := coord.ApplyUpgrade(context.Background(), userID, hqID)
+	if err != nil {
+		t.Fatalf("ApplyUpgrade: %v", err)
+	}
+	if res.Outcome != UpgradeOutcomeSuccess || res.Version != CurrentProvisioningVersion {
+		t.Fatalf("expected a clean version stamp, got %+v", res)
+	}
+	if len(res.AddedRoles) != 0 || len(prov.lastRoles) != 0 {
+		t.Fatalf("assistant-built HQ must not be sent a Personal Chief of Staff (added=%v requested=%v)", res.AddedRoles, prov.lastRoles)
+	}
+	ws, _ = store.GetWorkspace(context.Background(), hqID)
+	if _, ok := findByName(ws, "Personal Chief of Staff"); ok {
+		t.Fatal("a Personal Chief of Staff was seeded beside the hired assistant")
+	}
+	if len(ws.AgentInstances) != 2 {
+		t.Fatalf("roster must stay Assistant + Journal, got %d instances", len(ws.AgentInstances))
+	}
+}
+
 func TestApplyUpgradeIsIdempotent(t *testing.T) {
 	svc, profiles, store := newTestHarness(t)
 	userID := "user-1"

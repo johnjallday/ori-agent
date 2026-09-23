@@ -124,17 +124,70 @@ func writeProvisionState(ws *session.Workspace, state ProvisionState) error {
 	return nil
 }
 
+// PersonalAssistantPresentationKey is the SharedData key the personal-assistant
+// HQ creation path stamps on an HQ built around the user's hired assistant
+// (sessionhttp.markPersonalAssistantPresentation). Its presence means the
+// workspace's entry agent IS the hired assistant standing in for the Personal
+// Chief of Staff roster role: the assistant reuses that role's prompt, and the
+// contract requires zero Personal Chief of Staff instances in such an HQ.
+const PersonalAssistantPresentationKey = "personal_assistant_presentation"
+
+// AssistantEntryInstance returns the entry-point instance of an HQ built around
+// the user's hired personal assistant, or nil when the workspace was not built
+// that way (no presentation marker) or has no entry point.
+func AssistantEntryInstance(ws *session.Workspace) *session.AgentInstance {
+	if i := assistantEntryInstanceIndex(ws); i >= 0 {
+		return &ws.AgentInstances[i]
+	}
+	return nil
+}
+
+func assistantEntryInstanceIndex(ws *session.Workspace) int {
+	if ws == nil || ws.SharedData == nil {
+		return -1
+	}
+	if raw, ok := ws.SharedData[PersonalAssistantPresentationKey]; !ok || raw == nil {
+		return -1
+	}
+	for i := range ws.AgentInstances {
+		if ws.AgentInstances[i].EntryPoint {
+			return i
+		}
+	}
+	return -1
+}
+
 // FindRoleInstance returns the agent instance fulfilling a specialist role in a
-// workspace, matched case-insensitively by the role's canonical AgentName, plus
-// whether one was found.
+// workspace, plus whether one was found.
+//
+// The entry role is fulfilled by the hired personal assistant on an HQ built
+// around one (see AssistantEntryInstance), whatever the assistant is named;
+// every other role is matched case-insensitively by its canonical AgentName.
+// Without that rule the upgrade planner read an assistant-built HQ as missing
+// its Personal Chief of Staff, and applying the upgrade seeded a second
+// orchestrator beside the assistant.
 func FindRoleInstance(ws *session.Workspace, role SpecialistRole) (*session.AgentInstance, bool) {
+	if i := findRoleInstanceIndex(ws, role); i >= 0 {
+		return &ws.AgentInstances[i], true
+	}
+	return nil, false
+}
+
+// findRoleInstanceIndex is FindRoleInstance by index into ws.AgentInstances,
+// or -1 when the role is unfulfilled.
+func findRoleInstanceIndex(ws *session.Workspace, role SpecialistRole) int {
 	if ws == nil {
-		return nil, false
+		return -1
+	}
+	if role.Entry {
+		if i := assistantEntryInstanceIndex(ws); i >= 0 {
+			return i
+		}
 	}
 	for i := range ws.AgentInstances {
 		if strings.EqualFold(strings.TrimSpace(ws.AgentInstances[i].Name), role.AgentName) {
-			return &ws.AgentInstances[i], true
+			return i
 		}
 	}
-	return nil, false
+	return -1
 }
