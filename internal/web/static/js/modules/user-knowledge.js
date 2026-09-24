@@ -92,15 +92,24 @@ export function assistantLearningSources(workspaces) {
 }
 
 function normalizeMemoryEntries(payload) {
-  return (Array.isArray(payload?.entries) ? payload.entries : [])
-    .filter(entry => cleanText(entry?.text))
-    .map(entry => ({
-      index: Number(entry.index) || 0,
-      type: cleanText(entry.type) || 'fact',
-      date: cleanText(entry.date),
-      provenance: cleanText(entry.provenance),
-      text: cleanText(entry.text)
-    }));
+  return (
+    (Array.isArray(payload?.entries) ? payload.entries : [])
+      // Reviewed HQ lines belong only to the binding-validated dossier. A
+      // prepared Forget can still be on disk, but must not reappear in this
+      // legacy workspace overview while its removal is being recovered.
+      .filter(
+        entry =>
+          cleanText(entry?.text) &&
+          !cleanText(entry?.provenance).toLowerCase().startsWith('ori-hq:')
+      )
+      .map(entry => ({
+        index: Number(entry.index) || 0,
+        type: cleanText(entry.type) || 'fact',
+        date: cleanText(entry.date),
+        provenance: cleanText(entry.provenance),
+        text: cleanText(entry.text)
+      }))
+  );
 }
 
 function currentLearningRevision(learning) {
@@ -421,7 +430,12 @@ export class UserKnowledgeManager {
         const row = makeElement('li', 'user-knowledge-memory-row');
         row.append(
           makeElement('span', 'user-knowledge-memory-type', entry.type),
-          makeElement('span', 'user-knowledge-memory-text', entry.text)
+          makeElement('span', 'user-knowledge-memory-text', entry.text),
+          makeElement(
+            'span',
+            'user-knowledge-source-meta',
+            `Existing workspace memory · origin unverified · ${/^\\d{4}-\\d{2}-\\d{2}$/.test(entry.date) ? `recorded entry date ${entry.date}` : 'entry date unavailable'}`
+          )
         );
         list.append(row);
       }

@@ -19,6 +19,9 @@ type personalAssistantContextAdapter struct {
 	relationship *personalassistant.Service
 	profiles     userprofile.UserStore
 	workspaces   workspace.Store
+	knowledge    interface {
+		HomeSection(ctx context.Context, userID, workspaceID string) (string, error)
+	}
 }
 
 func (a personalAssistantContextAdapter) ResolvePersonalAssistantContext(ctx context.Context, userID string) (*agenthttp.PersonalAssistantWorkContext, error) {
@@ -57,7 +60,7 @@ func (a personalAssistantContextAdapter) ResolvePersonalAssistantContext(ctx con
 	}
 
 	a.loadProfile(ctx, userID, out)
-	a.loadMemory(out)
+	a.loadMemory(ctx, userID, out)
 	return out, nil
 }
 
@@ -88,7 +91,7 @@ func (a personalAssistantContextAdapter) loadProfile(ctx context.Context, userID
 	out.Sources["user_profile"] = agenthttp.PersonalAssistantContextSource{Status: status}
 }
 
-func (a personalAssistantContextAdapter) loadMemory(out *agenthttp.PersonalAssistantWorkContext) {
+func (a personalAssistantContextAdapter) loadMemory(ctx context.Context, userID string, out *agenthttp.PersonalAssistantWorkContext) {
 	resolver, ok := a.workspaces.(workspace.FolderResolver)
 	if !ok || resolver == nil {
 		out.Sources["personal_hq_memory"] = agenthttp.PersonalAssistantContextSource{Status: "unavailable", Reason: "store_unavailable"}
@@ -104,10 +107,40 @@ func (a personalAssistantContextAdapter) loadMemory(out *agenthttp.PersonalAssis
 		out.Sources["personal_hq_memory"] = agenthttp.PersonalAssistantContextSource{Status: "rejected", Reason: "secret_like_text"}
 		return
 	}
+	// The generic renderer omits every managed marker. Only the relationship-
+	// bound reader below may add a currently eligible, exact canonical revision.
+	// Its failure never turns a suspended or forgotten sidecar revision into
+	// ordinary memory or leaks raw source errors into the prompt.
 	out.HQMemory = rendered
 	status := "available"
 	if strings.TrimSpace(rendered) == "" {
 		status = "healthy_empty"
 	}
 	out.Sources["personal_hq_memory"] = agenthttp.PersonalAssistantContextSource{Status: status}
+	if out.State == string(personalassistant.APIStatePaused) {
+		out.Sources["reviewed_personal_hq_memory"] = agenthttp.PersonalAssistantContextSource{Status: "unavailable", Reason: "assistant_paused"}
+		return
+	}
+	if a.knowledge == nil {
+		out.Sources["reviewed_personal_hq_memory"] = agenthttp.PersonalAssistantContextSource{Status: "unavailable", Reason: "review_store_unavailable"}
+		return
+	}
+	reviewed, err := a.knowledge.HomeSection(ctx, userID, out.HQWorkspaceID)
+	if err != nil {
+		out.Sources["reviewed_personal_hq_memory"] = agenthttp.PersonalAssistantContextSource{Status: "unavailable", Reason: "review_read_failed"}
+		return
+	}
+	if sensitive.ContainsSecretLikeText(reviewed) {
+		out.Sources["reviewed_personal_hq_memory"] = agenthttp.PersonalAssistantContextSource{Status: "rejected", Reason: "secret_like_text"}
+		return
+	}
+	if strings.TrimSpace(reviewed) == "" {
+		out.Sources["reviewed_personal_hq_memory"] = agenthttp.PersonalAssistantContextSource{Status: "healthy_empty"}
+		return
+	}
+	out.Sources["reviewed_personal_hq_memory"] = agenthttp.PersonalAssistantContextSource{Status: "available"}
+	if out.HQMemory != "" {
+		out.HQMemory += "\n"
+	}
+	out.HQMemory += reviewed
 }

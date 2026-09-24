@@ -624,6 +624,333 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   border-top: 1px solid var(--border-color);
 }
 
+.reviewed-interview {
+  padding: 1.5rem;
+  border-top: 3px solid var(--primary-color);
+}
+
+.reviewed-interview h2 {
+  font-size: 1.3rem;
+  margin: 0.35rem 0 0.65rem;
+}
+
+.reviewed-interview-actions,
+#personalHQInterviewFinal {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+#personalHQInterviewFinal {
+  display: block;
+  padding: 1rem;
+  margin-top: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+#personalHQInterviewFinal[hidden],
+#personalHQInterviewForm[hidden],
+#personalHQInterviewStart[hidden],
+#personalHQInterviewDefer[hidden],
+#personalHQInterviewBuild[hidden] {
+  display: none;
+}
+
+.reviewed-interview-questions {
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.reviewed-interview-question {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.reviewed-interview-question legend {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.reviewed-interview-question label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.reviewed-interview-question textarea {
+  resize: vertical;
+  max-width: 100%;
+}
+
+.reviewed-interview-question small {
+  color: var(--text-secondary);
+}
+
+#personalHQInterviewSelected li {
+  margin: 0.5rem 0;
+  overflow-wrap: anywhere;
+}
+
+/* The HQ review is a quiet ledger: pending hypotheses on one side, exact
+   approved canonical facts on the other. It never impersonates the global
+   profile editor or the separate Assistant Program overview above. */
+.reviewed-knowledge-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+#personalHQBuildLink[hidden] {
+  display: none;
+}
+
+.reviewed-knowledge-add {
+  padding: 1.4rem;
+  margin-bottom: 1rem;
+  border-top: 3px solid var(--primary-color);
+}
+
+.reviewed-knowledge-add h3 {
+  margin: 0 0 0.3rem;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.reviewed-knowledge-add p,
+.reviewed-knowledge-add small {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.reviewed-knowledge-add-fields {
+  display: grid;
+  gap: 0.45rem;
+  max-width: 42rem;
+  margin-bottom: 0.9rem;
+}
+
+.reviewed-knowledge-add-fields label {
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.reviewed-dossier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 1rem;
+}
+
+.reviewed-dossier-card {
+  padding: 1.4rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reviewed-dossier-card h3 {
+  color: var(--text-primary);
+  font-size: 1.04rem;
+  font-weight: 700;
+  margin: 0 0 0.75rem;
+}
+
+.reviewed-dossier-card ul {
+  margin: 0 0 0.6rem;
+  padding-left: 1.2rem;
+}
+
+.reviewed-dossier-card li + li {
+  margin-top: 0.45rem;
+}
+
+.reviewed-dossier-card p,
+.reviewed-dossier-card li {
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.reviewed-dossier-source {
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.reviewed-dossier-source strong {
+  color: var(--text-primary);
+}
+
+.reviewed-dossier-capabilities {
+  display: grid;
+  grid-template-columns: minmax(5.8rem, 0.36fr) minmax(0, 1fr);
+  gap: 0.3rem 0.65rem;
+  margin: 0.5rem 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.reviewed-dossier-capabilities dt {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.reviewed-dossier-capabilities dd {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.reviewed-knowledge-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.reviewed-knowledge-review,
+.reviewed-knowledge-facts {
+  padding: 1.5rem;
+  min-width: 0;
+}
+
+.reviewed-knowledge-review {
+  border-top: 3px solid var(--warning-color, #ae762e);
+}
+
+.reviewed-knowledge-facts {
+  border-top: 3px solid var(--primary-color);
+}
+
+.reviewed-knowledge-grid h3 {
+  margin: 0.35rem 0 1.1rem;
+  color: var(--text-primary);
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.reviewed-knowledge-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.reviewed-knowledge-item {
+  min-width: 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--primary-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  overflow-wrap: anywhere;
+}
+
+.reviewed-knowledge-review .reviewed-knowledge-item {
+  border-left-color: var(--warning-color, #ae762e);
+}
+
+.reviewed-knowledge-meta,
+.reviewed-knowledge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  align-items: center;
+}
+
+.reviewed-knowledge-meta {
+  margin: 0 0 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.reviewed-knowledge-meta span + span::before {
+  content: "·";
+  margin-right: 0.75rem;
+}
+
+.reviewed-knowledge-statement {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  margin: 0 0 0.65rem;
+}
+
+.reviewed-knowledge-evidence,
+.reviewed-knowledge-footnote,
+.reviewed-knowledge-empty {
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-size: 0.83rem;
+}
+
+.reviewed-knowledge-warning {
+  color: var(--warning-color, #ae762e);
+  font-weight: 650;
+  font-size: 0.84rem;
+}
+
+.reviewed-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.reviewed-profile-actions .modern-btn {
+  font-size: 0.81rem;
+  padding: 0.4rem 0.65rem;
+}
+
+.reviewed-knowledge-actions {
+  margin-top: 0.8rem;
+}
+
+.reviewed-knowledge-actions .modern-btn {
+  font-size: 0.81rem;
+  padding: 0.45rem 0.75rem;
+}
+
+.reviewed-knowledge-edit {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.reviewed-knowledge-edit label {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.reviewed-knowledge-edit textarea {
+  max-width: 100%;
+  resize: vertical;
+}
+
+.reviewed-knowledge-edit small {
+  color: var(--text-secondary);
+}
+
+.reviewed-knowledge-edit .modern-btn {
+  justify-self: start;
+}
+
+.reviewed-knowledge-footnote {
+  margin: 0.9rem 0 0;
+}
+
+@media (max-width: 780px) {
+  .reviewed-knowledge-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .profile-knowledge-header {
   display: flex;
   align-items: flex-end;

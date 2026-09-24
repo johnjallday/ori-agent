@@ -59,6 +59,11 @@ const userProfileManager = {
       event.preventDefault();
       this.saveProfile();
     });
+    this.form.querySelectorAll('[data-profile-field][data-profile-action]').forEach(button => {
+      button.addEventListener('click', () =>
+        this.savePreference(button.dataset.profileField, button.dataset.profileAction, button)
+      );
+    });
     await this.loadProfile();
   },
 
@@ -105,9 +110,123 @@ const userProfileManager = {
     this.setValue('profileAbout', profile.about || '');
   },
 
+  async savePreference(key, action, button) {
+    const fields = {
+      response_style: 'profileResponseStyle',
+      units: 'profileUnits',
+      language: 'profileLanguage'
+    };
+    const input = document.getElementById(fields[key]);
+    if (
+      !input ||
+      !this.profile ||
+      this.preferenceBusy ||
+      this.fullProfileBusy ||
+      !['save', 'forget'].includes(action)
+    )
+      return;
+    const status = document.getElementById('userProfileFieldStatus');
+    const announce = message => {
+      if (status) status.textContent = message;
+    };
+    const before = this.profile.preferences?.[key] || '';
+    const value = action === 'forget' ? '' : input.value.trim();
+    if (action === 'forget') {
+      if (input.value.trim() !== before) {
+        announce('Save or discard your unsaved wording before forgetting this preference.');
+        input.focus();
+        return;
+      }
+      if (!before) {
+        announce('No saved preference to forget.');
+        return;
+      }
+      if (!window.confirm(`Forget your saved ${key.replace('_', ' ')} preference?`)) return;
+    } else if (value === before) {
+      announce('This preference is already saved.');
+      return;
+    } else if (
+      !value ||
+      new TextEncoder().encode(value).length > 500 ||
+      value !== value.split(/\s+/u).join(' ') ||
+      Array.from(value).some(character => {
+        const code = character.codePointAt(0);
+        return (
+          code < 32 ||
+          (code >= 127 && code <= 159) ||
+          (code >= 0x202a && code <= 0x202e) ||
+          (code >= 0x2066 && code <= 0x2069)
+        );
+      })
+    ) {
+      announce('Use one exact, safe line of at most 500 UTF-8 bytes for a single-field save.');
+      input.focus();
+      return;
+    }
+    if (!this.profile.updated_at) {
+      announce('Save your global profile first, then edit one preference at a time.');
+      return;
+    }
+    this.preferenceBusy = true;
+    button.disabled = true;
+    const saveProfileButton = document.getElementById('saveUserProfileBtn');
+    if (saveProfileButton) saveProfileButton.disabled = true;
+    announce(
+      action === 'forget'
+        ? 'Clearing only this global preference…'
+        : 'Saving only this global preference…'
+    );
+    try {
+      const response = await fetch('/api/user/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          field: `preferences.${key}`,
+          expected_updated_at: this.profile.updated_at,
+          expected_value: before,
+          value
+        })
+      });
+      if (!response.ok) {
+        const error = new Error('The canonical preference could not be verified.');
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      if (!data.profile || !data.profile.updated_at) throw new Error('Save status is unknown');
+      this.profile = data.profile;
+      input.value = data.profile.preferences?.[key] || '';
+      this.emitProfileUpdated();
+      document.dispatchEvent(new Event('personal-assistant-knowledge-changed'));
+      announce(
+        action === 'forget'
+          ? 'Preference forgotten from your global profile.'
+          : 'Global preference saved.'
+      );
+    } catch (error) {
+      announce(
+        error.status === 409
+          ? 'The global profile changed. Your wording is still here; refresh and review before trying again.'
+          : 'Could not verify the change. Your wording is still here; refresh before trying again.'
+      );
+    } finally {
+      this.preferenceBusy = false;
+      button.disabled = false;
+      if (saveProfileButton) saveProfileButton.disabled = false;
+    }
+  },
+
   async saveProfile() {
+    if (this.preferenceBusy || this.fullProfileBusy) return;
+    this.fullProfileBusy = true;
     const button = document.getElementById('saveUserProfileBtn');
+    const fieldButtons =
+      this.form?.querySelectorAll('[data-profile-field][data-profile-action]') || [];
     if (button) button.disabled = true;
+    fieldButtons.forEach(fieldButton => {
+      fieldButton.disabled = true;
+    });
     try {
       const body = this.readForm();
       const response = await fetch('/api/user/profile', {
@@ -116,8 +235,14 @@ const userProfileManager = {
         body: JSON.stringify(body)
       });
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'Failed to save profile');
+        if (response.status === 409) {
+          const status = document.getElementById('userProfileFieldStatus');
+          if (status)
+            status.textContent =
+              'The global profile changed. Your unsaved wording is still here; refresh and review before saving.';
+          return;
+        }
+        throw new Error('Could not verify the profile save. Refresh before trying again.');
       }
       const data = await response.json();
       this.profile = data.profile || body;
@@ -128,7 +253,11 @@ const userProfileManager = {
       console.error('Error saving profile:', error);
       this.notify('Failed to save profile: ' + error.message, 'error');
     } finally {
+      this.fullProfileBusy = false;
       if (button) button.disabled = false;
+      fieldButtons.forEach(fieldButton => {
+        fieldButton.disabled = false;
+      });
     }
   },
 
@@ -144,6 +273,7 @@ const userProfileManager = {
     }
 
     return {
+      updated_at: this.profile?.updated_at || undefined,
       display_name: this.getValue('profileDisplayName'),
       email: this.getValue('profileEmail'),
       timezone: this.getValue('profileTimezone'),

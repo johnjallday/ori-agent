@@ -378,6 +378,10 @@ func (s *Server) serveAgentsDetail(w http.ResponseWriter, r *http.Request) {
 	data.Title = "Agent Details - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
+	name, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/agents/"))
+	if err == nil {
+		data.Extra["IsHiredAssistant"] = s.currentPersonalHQForPage("", name)
+	}
 	s.renderAndWritePage(w, "agents-detail", data)
 }
 
@@ -780,6 +784,7 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID, worksp
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
+	data.Extra["IsPersonalHQ"] = s.currentPersonalHQForPage(workspaceID, "")
 	s.renderAndWritePage(w, "workspace-detail", data)
 }
 
@@ -795,6 +800,7 @@ func (s *Server) serveWorkspaceAgentDetail(w http.ResponseWriter, workspaceID, w
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["AgentName"] = agentName
+	data.Extra["IsPersonalHQEntry"] = s.currentPersonalHQForPage(workspaceID, agentName)
 	s.renderAndWritePage(w, "workspace-agent-detail", data)
 }
 

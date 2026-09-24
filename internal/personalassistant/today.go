@@ -172,6 +172,8 @@ type TodayProjection struct {
 	Brief           TodayBriefProjection   `json:"brief"`
 	Decisions       TodaySection           `json:"decisions"`
 	Priorities      TodaySection           `json:"priorities"`
+	Remembered      TodaySection           `json:"remembered"`
+	InterviewStatus string                 `json:"interview_status,omitempty"`
 	FollowUps       TodaySection           `json:"follow_ups"`
 	Results         TodaySection           `json:"results"`
 	// Studio is present only when the user accepted a domain specialist and a
@@ -240,7 +242,14 @@ type TodayService struct {
 	followUps          todayFollowUpReader
 	setup              todaySpecialistSetupReader
 	janitorResults     JanitorResultReader
-	now                func() time.Time
+	remembered         interface {
+		ReviewItems(context.Context, string) ([]KnowledgeReviewItem, error)
+	}
+	interviewPreferences interface {
+		ConfirmedProfilePreferences(context.Context, string) ([]ConfirmedInterviewPreference, error)
+		Read(context.Context, string) (*KnowledgeInterview, error)
+	}
+	now func() time.Time
 
 	// onBriefSeen fires the first time this process serves a user Today with a
 	// Daily Brief. briefSeen records who it already fired for.
@@ -311,7 +320,7 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 	out := &TodayProjection{
 		State: "unavailable", GeneratedAt: now, Links: TodayLinks{Advanced: "/agents"},
 		Brief:     TodayBriefProjection{Health: todayUnavailable("not_loaded"), Items: []TodayItem{}},
-		Decisions: emptyTodaySection(), Priorities: emptyTodaySection(),
+		Decisions: emptyTodaySection(), Priorities: emptyTodaySection(), Remembered: emptyTodaySection(),
 		FollowUps: emptyTodaySection(), Results: emptyTodaySection(),
 	}
 	if s == nil || s.relationship == nil {
@@ -355,6 +364,7 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		out.Brief.Health = todayUnavailable("hq_unavailable")
 		out.Decisions.Health = todayUnavailable("hq_unavailable")
 		out.Priorities.Health = todayUnavailable("hq_unavailable")
+		out.Remembered.Health = todayUnavailable("hq_unavailable")
 		out.FollowUps.Health = todayUnavailable("hq_unavailable")
 		out.Results.Health = todayUnavailable("hq_unavailable")
 		out.State = "partial"
@@ -382,6 +392,7 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		s.noteBriefSeen(userID)
 	}
 	out.Decisions = decisionsFromFollowUps(followUpsByRef, out.FollowUps.Health, now)
+	s.loadRemembered(ctx, userID, relationship.State, out)
 	out.Studio = s.loadStudio(userID, relationship.SpecialistSlug, relationship.HQWorkspaceID)
 	out.SpecialistSetup = s.loadSpecialistSetup(ctx, userID, relationship.SpecialistSlug)
 	out.NextCheckIn = nextTodayCheckIn(relationship, now)
@@ -1041,6 +1052,10 @@ func todayOverallState(relationship *Projection, out *TodayProjection) string {
 	}
 	health := []TodaySourceHealth{out.Brief.Health, out.Decisions.Health, out.Priorities.Health, out.FollowUps.Health, out.Results.Health}
 	unavailable, itemCount := false, len(out.Brief.Items)+len(out.Decisions.Items)+len(out.Priorities.Items)+len(out.FollowUps.Items)+len(out.Results.Items)
+	if out.Remembered.Health.Reason != "review_store_unavailable" {
+		health = append(health, out.Remembered.Health)
+		itemCount += len(out.Remembered.Items)
+	}
 	// Studio counts only when it is actually being reported. An absent studio
 	// is not a degraded source, so it must not turn Today "partial".
 	if out.Studio != nil {

@@ -393,6 +393,7 @@ func (s *Service) finishUndo(workspaceID string, action FileAction, state UndoSt
 	result := UndoResult{ActionID: action.ID, Name: DisplayFileName(action.SourceName), Message: message}
 	if state == UndoDone {
 		result.Result = "undone"
+		s.notifyReviewedKnowledge(workspaceID, action.ID, true)
 	} else {
 		result.Result = "failed"
 	}

@@ -273,6 +273,66 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssistantMemory = personalassistant.NewMemoryService(
 		b.personalAssistantStore, b.personalHQService, b.userStore, workspace.NewMemoryStore(b.workspaceFileStore),
 	)
+	var rememberedReader *personalassistant.KnowledgeLearningService
+	var interviewReader *personalassistant.KnowledgeInterviewService
+	if b.onboardingMgr != nil && b.workspaceFileStore != nil && b.userStore != nil {
+		resolver := personalassistant.NewKnowledgeResolver(b.personalAssistantStore, b.personalHQService, profileReader)
+		knowledge := personalassistant.NewKnowledgeStore(resolver, b.workspaceFileStore)
+		var janitorEvidence *janitorKnowledgeReader
+		if b.fileJanitorService != nil {
+			janitorEvidence = &janitorKnowledgeReader{
+				bindings: resolver, briefs: briefService, workspaces: b.workspaceFileStore,
+				janitor: b.fileJanitorService, now: time.Now,
+			}
+		}
+		authority := scopedKnowledgeAuthority{
+			apps: personalassistant.NewSavedAppAuthority(b.onboardingMgr), janitor: janitorEvidence,
+		}
+		memoryStore := workspace.NewMemoryStore(b.workspaceFileStore)
+		learning := personalassistant.NewKnowledgeLifecycleService(knowledge, memoryStore, authority)
+		b.personalAssistantLearning = learning
+		b.personalAssistantMemory.SetReviewedHQWriter(learning)
+		rememberedReader = learning
+		if cas, ok := b.userStore.(personalassistant.ProfileCASStore); ok {
+			learning.SetProfileCAS(cas)
+		}
+		b.personalAssistantHandler.SetKnowledgeReview(learning)
+		b.personalAssistantHandler.SetKnowledgeSources(personalKnowledgeSources{
+			bindings: resolver, apps: b.onboardingMgr, janitor: janitorEvidence,
+		})
+		b.personalAssistantKnowledge = personalassistant.NewKnowledgeContextReader(knowledge, memoryStore, authority)
+		if b.chatHandler != nil {
+			b.chatHandler.SetReviewedMemoryReader(b.personalAssistantKnowledge)
+		}
+		if b.taskHandler != nil {
+			b.taskHandler.SetReviewedMemoryReader(b.personalAssistantKnowledge)
+		}
+		appProducer := personalassistant.NewSavedAppProducer(learning, b.onboardingMgr, b.userStore)
+		b.personalAssistantHandler.SetSavedAppSuggestions(appProducer)
+		if janitorEvidence != nil {
+			recovery := &janitorKnowledgeRecovery{reader: janitorEvidence, store: knowledge, learning: learning}
+			producer := janitorKnowledgeProducer{reader: janitorEvidence, learning: learning, recovery: recovery}
+			recovery.producer = producer
+			b.personalAssistantHandler.SetJanitorSuggestions(producer)
+			b.fileJanitorService.SetReviewedKnowledgeObserver(recovery)
+		}
+		b.onboardingMgr.SetSavedProfileObserver(func() {
+			// This observer sees a durable saved observation only. A missing HQ,
+			// pause or full review queue must not roll back the canonical save;
+			// the explicit check and HQ completion reconcile missed events.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, _ = appProducer.Check(ctx, userprofile.LocalUserID)
+		})
+		interview := personalassistant.NewKnowledgeInterviewService(knowledge)
+		interview.SetReviewedMemoryWriter(b.personalAssistantMemory)
+		interviewReader = interview
+		if cas, ok := b.userStore.(personalassistant.ProfileCASStore); ok {
+			interview.SetCanonicalSavers(learning, cas)
+		}
+		b.personalAssistantHandler.SetInterviewOffer(interview)
+		b.personalAssistantHandler.SetKnowledgeInterview(interview)
+	}
 	b.personalAssistantHandler.SetContinuityService(continuity)
 	renameCoordinator := personalassistant.NewRenameCoordinator(
 		continuity, newPersonalAssistantAgentProfiles(b.st), b.workspaceStore,
@@ -297,6 +357,12 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	todayService := personalassistant.NewTodayService(
 		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
 	)
+	if rememberedReader != nil {
+		todayService.SetRememberedReview(rememberedReader)
+	}
+	if interviewReader != nil {
+		todayService.SetInterviewPreferences(interviewReader)
+	}
 	todayService.SetFollowUpWorkspaceSource(workspaceSource)
 	// File Janitor's recent results join Today's Results section (starter
 	// missions FR36). The service is wired in Phase 17, before this runs.

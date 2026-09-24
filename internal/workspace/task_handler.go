@@ -55,6 +55,7 @@ type LLMTaskHandler struct {
 	workspaceStore   Store // Added to access workspace attachments
 	contextStore     taskPromptContextStore
 	userProfileStore userprofile.UserStore
+	reviewedMemory   ReviewedMemoryReader
 	eventBus         *EventBus // Optional event bus for publishing execution events
 	mcpRegistry      mcpRegistry
 	// nativeMCPExecTimeout bounds a native-MCP CLI task run (which runs its own
@@ -223,6 +224,14 @@ func (h *LLMTaskHandler) SetContextStore(store taskPromptContextStore) {
 	h.contextStore = store
 }
 
+// SetReviewedMemoryReader attaches the server-authorized current HQ projection.
+// Nil leaves all managed entries excluded by the generic memory renderer.
+func (h *LLMTaskHandler) SetReviewedMemoryReader(reader ReviewedMemoryReader) {
+	if h != nil {
+		h.reviewedMemory = reader
+	}
+}
+
 func (h *LLMTaskHandler) SetUserProfileStore(store userprofile.UserStore) {
 	h.userProfileStore = store
 }
@@ -346,7 +355,9 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 		effectiveSkills = task.RuntimeSkillPrompts
 	}
 	taskSystemPrompt = AppendSkillPromptsFromResolved(taskSystemPrompt, effectiveSkills)
+	reviewedInBase := false
 	if resolvedBase, hadVars := h.resolveTaskAgentBasePrompt(ctx, ag, agentName, task); hadVars {
+		reviewedInBase = strings.Contains(ag.Settings.SystemPrompt, "workspace.memory")
 		// The author wrote a variable-bearing base prompt, so a parametric persona
 		// is meant to apply here too: lead the task prompt with the resolved
 		// persona. The author placed context via variables, so the generic
@@ -399,7 +410,7 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 	// Cloud windows are large enough that nothing trims. If the prompt still
 	// overflows after all trims, block rather than let the server truncate it.
 	contextWindow := llm.ResolveModelContextWindow(provider, modelName)
-	segments := h.buildTaskPromptSegments(ctx, task)
+	segments := h.buildTaskPromptSegments(ctx, task, reviewedInBase)
 	trims, overflow := budgetPromptSegments(contextWindow, taskSystemPrompt, tools, segments)
 	if overflow {
 		return "", h.buildContextOverflowError(task, contextWindow, trimmableSegmentLabels(segments))

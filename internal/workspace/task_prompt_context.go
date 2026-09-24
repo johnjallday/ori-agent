@@ -128,8 +128,11 @@ func (h *LLMTaskHandler) resolveTaskAgentBasePrompt(ctx context.Context, ag *res
 
 	memory := ""
 	if resolver, ok := h.workspaceStore.(workspaceFolderStore); ok && strings.TrimSpace(task.WorkspaceID) != "" {
-		if raw, err := NewMemoryStore(resolver).ReadRaw(task.WorkspaceID); err == nil {
+		if raw, err := NewMemoryStore(resolver).ReadPromptRaw(task.WorkspaceID); err == nil {
 			memory = raw
+		}
+		if strings.Contains(prompt, "workspace.memory") {
+			memory = strings.TrimSpace(memory + "\n\n" + h.reviewedTaskMemorySection(ctx, task, agentName))
 		}
 	}
 
@@ -168,7 +171,42 @@ func (h *LLMTaskHandler) resolveTaskAgentBasePrompt(ctx context.Context, ag *res
 	})
 }
 
-func (h *LLMTaskHandler) buildTaskMemorySection(task Task) string {
+func (h *LLMTaskHandler) reviewedTaskMemorySection(ctx context.Context, task Task, agentName string) string {
+	if h == nil || h.reviewedMemory == nil || strings.TrimSpace(task.WorkspaceID) == "" ||
+		strings.TrimSpace(agentName) == "" {
+		return ""
+	}
+	// Resolve the concrete assignee from the server's workspace attachment;
+	// neither task text nor a browser-provided name is sufficient authority.
+	instanceID := h.taskAgentInstanceID(task, agentName)
+	if instanceID == "" {
+		return ""
+	}
+	if strings.TrimSpace(task.AssignedNodeID) != "" {
+		// FindAgentInstance has a compatibility fallback from an unknown node to
+		// the first matching name. That is insufficient for reviewed HQ facts.
+		ws, err := h.workspaceStore.Get(task.WorkspaceID)
+		if err != nil || ws == nil {
+			return ""
+		}
+		inst, found := ws.FindAgentInstance(agentName, task.AssignedNodeID)
+		if !found || inst == nil || inst.ID != instanceID ||
+			!strings.EqualFold(inst.Name, agentName) || inst.NodeID != task.AssignedNodeID {
+			return ""
+		}
+	}
+	userID := h.taskOwnerUserID(task)
+	if userID == "" {
+		return ""
+	}
+	section, err := h.reviewedMemory.Section(ctx, userID, task.WorkspaceID, instanceID)
+	if err != nil {
+		return ""
+	}
+	return section
+}
+
+func (h *LLMTaskHandler) buildTaskMemorySection(ctx context.Context, task Task, reviewedInBase bool) string {
 	if h.workspaceStore == nil || strings.TrimSpace(task.WorkspaceID) == "" {
 		return ""
 	}
@@ -185,6 +223,11 @@ func (h *LLMTaskHandler) buildTaskMemorySection(task Task) string {
 		})
 	} else if section := RenderMemoryPromptSection(doc, true); strings.TrimSpace(section) != "" {
 		parts = append(parts, section)
+	}
+	if !reviewedInBase {
+		if reviewed := h.reviewedTaskMemorySection(ctx, task, task.To); strings.TrimSpace(reviewed) != "" {
+			parts = append(parts, reviewed)
+		}
 	}
 	current, getErr := h.workspaceStore.Get(task.WorkspaceID)
 	if getErr == nil && current != nil {
@@ -803,7 +846,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 // fixed order (WS2.6) without dropping load-bearing content. Concatenating the
 // segments in order reproduces the previous single-string prompt exactly when no
 // trimming occurs.
-func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task) []promptSegment {
+func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task, reviewedInBase ...bool) []promptSegment {
 	segs := make([]promptSegment, 0, 6)
 
 	// Protected header: assignment framing, description, details, reference URL,
@@ -838,7 +881,8 @@ func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task)
 	segs = append(segs, promptSegment{label: "header", text: header.String(), trimOrder: 0})
 
 	// Workspace memory — trimmed last (WS2.6 d).
-	if workspaceMemory := h.buildTaskMemorySection(task); workspaceMemory != "" {
+	skipReviewed := len(reviewedInBase) != 0 && reviewedInBase[0]
+	if workspaceMemory := h.buildTaskMemorySection(ctx, task, skipReviewed); workspaceMemory != "" {
 		segs = append(segs, promptSegment{label: "memory", text: workspaceMemory + "\n\n", trimOrder: 4})
 	}
 

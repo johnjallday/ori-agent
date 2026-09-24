@@ -53,6 +53,28 @@ test('assistantLearningSources reads explicit station links and deduplicates sha
   assert.equal(sources[0].route, '/workspaces/research/assistant');
 });
 
+test('legacy memory overview omits all HQ managed revisions, including prepared Forget on disk', () => {
+  const view = buildUserKnowledgeView({
+    workspaces: [{ id: 'hq-1', name: 'Personal HQ', folder_slug: 'personal-hq' }],
+    memories: [
+      {
+        workspaceID: 'hq-1',
+        payload: {
+          entries: [
+            { index: 0, text: 'Old managed fact', provenance: 'ori-hq:item:rev' },
+            { index: 1, text: 'Legacy Home fact', provenance: 'user' }
+          ]
+        }
+      }
+    ]
+  });
+  assert.equal(view.stats.workspaceEntries, 1);
+  assert.deepEqual(
+    view.workspaceScopes[0].entries.map(entry => entry.text),
+    ['Legacy Home fact']
+  );
+});
+
 test('buildUserKnowledgeView keeps global, workspace, candidate, and reviewed scopes separate', () => {
   const view = buildUserKnowledgeView({
     profile: {

@@ -304,6 +304,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 			relationship: s.Storage.PersonalAssistant,
 			profiles:     s.Storage.UserStore,
 			workspaces:   s.Storage.WorkspaceStore,
+			knowledge:    s.Storage.PersonalAssistantKnowledge,
 		}, "local")
 	}
 	if s.Storage != nil && s.Integration != nil {
@@ -1063,6 +1064,16 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/personal-assistant", s.Handlers.PersonalAssistant.GetState)
 		mux.HandleFunc("GET /api/personal-assistant/today", s.Handlers.PersonalAssistant.GetToday)
 		mux.HandleFunc("GET /api/personal-assistant/capabilities", s.Handlers.PersonalAssistant.GetCapabilities)
+		mux.HandleFunc("GET /api/personal-assistant/knowledge", s.Handlers.PersonalAssistant.GetKnowledgeReview)
+		mux.HandleFunc("GET /api/personal-assistant/knowledge/interview", s.Handlers.PersonalAssistant.GetKnowledgeInterview)
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/interview/defer", s.Handlers.PersonalAssistant.DeferKnowledgeInterview)
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/interview/save", s.Handlers.PersonalAssistant.SaveKnowledgeInterview)
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/explicit", s.Handlers.PersonalAssistant.SaveExplicitKnowledge)
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/check-saved-apps", s.Handlers.PersonalAssistant.CheckSavedAppSuggestions)
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/check-janitor", s.Handlers.PersonalAssistant.CheckJanitorSuggestions)
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/resume-forget", s.Handlers.PersonalAssistant.ResumeKnowledgeForget)
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/resume-operation", s.Handlers.PersonalAssistant.ResumeKnowledgeOperation)
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/{action}", s.Handlers.PersonalAssistant.MutateKnowledgeReview)
 		mux.HandleFunc("POST /api/personal-assistant/specialist", s.Handlers.PersonalAssistant.AnswerSpecialistOffer)
 		mux.HandleFunc("PATCH /api/personal-assistant/working-agreement", s.Handlers.PersonalAssistant.UpdateWorkingAgreement)
 		mux.HandleFunc("POST /api/personal-assistant/pause", s.Handlers.PersonalAssistant.Pause)

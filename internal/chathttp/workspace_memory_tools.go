@@ -80,8 +80,22 @@ func (p *WorkspaceToolProvider) memoryWriteTool() toolapi.Tool {
 				Provenance: p.memoryProvenance(),
 				Text:       text,
 			}
-			if err := store.Append(p.workspaceID, entry); err != nil {
-				return "", fmt.Errorf("failed to save memory entry: %w", err)
+			handled := false
+			if write := p.hqVisibility.MemoryWrite; write != nil {
+				handled, err = write(ctx, p.workspaceID, entry)
+				if err != nil {
+					return "", err
+				}
+			}
+			if !handled {
+				if p.hqVisibility.MemoryWriteGuard != nil {
+					if err := p.hqVisibility.MemoryWriteGuard(ctx, p.workspaceID, text); err != nil {
+						return "", err
+					}
+				}
+				if err := store.Append(p.workspaceID, entry); err != nil {
+					return "", fmt.Errorf("failed to save memory entry: %w", err)
+				}
 			}
 			return marshalToolResponse(map[string]any{
 				"entry":   entry,
@@ -189,7 +203,28 @@ func (p *WorkspaceToolProvider) profileSetTool() toolapi.Tool {
 					userID = strings.TrimSpace(resolved)
 				}
 			}
-			profile, err := p.userStore.SetFields(ctx, userID, fields)
+			var profile *userprofile.UserProfile
+			var err error
+			if guard := p.hqVisibility.ProfileWriteGuard; guard != nil {
+				var version time.Time
+				version, err = guard(ctx, userID, fields)
+				if err != nil {
+					return "", err
+				}
+				if !version.IsZero() {
+					store, ok := p.userStore.(interface {
+						SetFieldsIfVersion(context.Context, string, map[string]any, time.Time) (*userprofile.UserProfile, error)
+					})
+					if !ok {
+						return "", fmt.Errorf("versioned profile storage is unavailable")
+					}
+					profile, err = store.SetFieldsIfVersion(ctx, userID, fields, version)
+				} else {
+					profile, err = p.userStore.SetFields(ctx, userID, fields)
+				}
+			} else {
+				profile, err = p.userStore.SetFields(ctx, userID, fields)
+			}
 			if err != nil {
 				return "", err
 			}

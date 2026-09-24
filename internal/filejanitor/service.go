@@ -172,6 +172,9 @@ type Service struct {
 	trash      TrashRemover
 	notifier   Notifier
 	provider   ClassificationProvider
+	// The host receives only durable applied/undone action IDs. Learning may
+	// fail independently; it never changes the user's file-action result.
+	reviewedKnowledge ReviewedKnowledgeObserver
 	// automation reports whether the watcher and daily schedule are actually
 	// registered. Until it is wired, those checks stay pending — which keeps a
 	// workspace out of Ready rather than overstating what is running.
@@ -194,6 +197,42 @@ type Service struct {
 // store that owns directory references and MCP bindings.
 func NewService(store *Store, workspaces WorkspaceStore) *Service {
 	return &Service{store: store, workspaces: workspaces, scanner: NewScanner(store, workspaces), now: time.Now}
+}
+
+// ReviewedKnowledgeObserver is a best-effort host-owned evidence notification
+// seam. Neither file names/paths nor journal objects cross it. A missed event
+// is recovered later from durable journal state; an observer cannot approve
+// memory or change the outcome of a user's file operation.
+type ReviewedKnowledgeObserver interface {
+	MoveApplied(workspaceID, actionID string)
+	UndoSucceeded(workspaceID, actionID string)
+}
+
+func (s *Service) SetReviewedKnowledgeObserver(observer ReviewedKnowledgeObserver) {
+	if s != nil {
+		s.reviewedKnowledge = observer
+	}
+}
+
+// Learning is a consequence of a file action, never part of its transaction.
+// A host observer failure must not make a durable applied move/undo look
+// replayable or change the user's receipt. No source paths enter this seam.
+func (s *Service) notifyReviewedKnowledge(workspaceID, actionID string, undone bool) {
+	if s == nil || s.reviewedKnowledge == nil {
+		return
+	}
+	defer func() {
+		if recover() != nil {
+			logger.Warn("File Janitor reviewed-knowledge notification deferred", logger.Fields{
+				"workspace_id": workspaceID, "action_id": actionID,
+			})
+		}
+	}()
+	if undone {
+		s.reviewedKnowledge.UndoSucceeded(workspaceID, actionID)
+	} else {
+		s.reviewedKnowledge.MoveApplied(workspaceID, actionID)
+	}
 }
 
 // Status is the full setup/readiness picture for one workspace.

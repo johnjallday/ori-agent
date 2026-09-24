@@ -86,6 +86,32 @@ test('launcher cues are textual, bounded, and derived only from canonical states
   assert.equal(personalAssistantLauncherCue(null, null), '');
 });
 
+test('reviewed Today recap distinguishes current fact links, existing next actions and unavailable sources', () => {
+  const rows = todaySectionRows({
+    health: { status: 'available' },
+    items: [
+      {
+        kind: 'reviewed_memory',
+        title: 'Finish my portfolio',
+        route: '/profile#personalHQKnowledge'
+      },
+      {
+        kind: 'existing_next_action',
+        title: 'Next from Today: Morning briefing',
+        route: '/workspaces/my-hq?ticket=123'
+      }
+    ]
+  });
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].title, 'Finish my portfolio');
+  assert.equal(rows[0].route, '/profile#personalHQKnowledge');
+  assert.equal(rows[1].route, '/workspaces/my-hq?ticket=123');
+  assert.match(
+    todaySectionRows({ health: { status: 'unavailable' }, items: [] })[0].title,
+    /unavailable/i
+  );
+});
+
 test('Today section never turns unavailable into a healthy empty all-clear', () => {
   assert.match(
     todaySectionRows({ health: { status: 'unavailable' }, items: [] })[0].title,

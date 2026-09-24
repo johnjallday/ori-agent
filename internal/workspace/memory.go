@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/johnjallday/ori-agent/internal/sensitive"
 )
@@ -64,6 +65,11 @@ func ValidateMemoryText(raw string) (string, error) {
 	}
 	if len(text) > MemoryEntryMaxLen {
 		return "", fmt.Errorf("memory entries are capped at %d characters (got %d) — memory holds one curated line per fact; put long content in a workspace note and store a one-line pointer here instead", MemoryEntryMaxLen, len(text))
+	}
+	for _, char := range text {
+		if unicode.IsControl(char) || (char >= '\u202a' && char <= '\u202e') || (char >= '\u2066' && char <= '\u2069') {
+			return "", errors.New("memory text must not contain control or bidirectional override characters")
+		}
 	}
 	if sensitive.ContainsSecretLikeText(text) {
 		return "", errors.New("this text looks like a credential or secret; workspace memory is plaintext on disk and injected into prompts, so secrets are refused — store it in the Vault instead")
@@ -126,7 +132,7 @@ func ParseMemoryDocument(content string) MemoryDocument {
 	doc := MemoryDocument{lines: make([]memoryLine, 0, len(rawLines))}
 	for _, raw := range rawLines {
 		line := memoryLine{raw: raw}
-		if m := memoryEntryPattern.FindStringSubmatch(raw); m != nil {
+		if m := memoryEntryPattern.FindStringSubmatch(strings.TrimSuffix(raw, "\r")); m != nil {
 			line.entry = &MemoryEntry{
 				Type:       NormalizeMemoryEntryType(m[1]),
 				Date:       m[2],
@@ -210,7 +216,15 @@ const memoryPromptGuidance = "Persistent knowledge accumulated for this workspac
 // pass true where those tools are available (mission/chat) and false for the
 // native-CLI path, which only reads memory as context.
 func RenderMemoryPromptSection(doc MemoryDocument, includeToolGuidance bool) string {
-	entries := doc.Entries()
+	// A raw workspace document contains no lifecycle proof. A managed HQ
+	// marker is inert here even if its bytes appear to be a structured entry;
+	// only a separate, bound eligibility projection may render it.
+	entries := make([]MemoryEntry, 0)
+	for _, entry := range doc.Entries() {
+		if !IsHQManagedProvenance(entry.Provenance) {
+			entries = append(entries, entry)
+		}
+	}
 	if len(entries) == 0 && !includeToolGuidance {
 		return ""
 	}
@@ -235,6 +249,12 @@ func RenderMemoryPromptSection(doc MemoryDocument, includeToolGuidance bool) str
 		fmt.Fprintf(&b, "\n(memory truncated — %d entr%s not shown; consider pruning)\n", dropped, plural(dropped, "y", "ies"))
 	}
 	return b.String()
+}
+
+// IsHQManagedProvenance reserves the Ori-managed HQ marker namespace. Other
+// memory entries remain ordinary workspace data and retain existing behavior.
+func IsHQManagedProvenance(provenance string) bool {
+	return strings.HasPrefix(strings.TrimSpace(provenance), "ori-hq:")
 }
 
 func plural(n int, one, many string) string {
@@ -300,6 +320,9 @@ var (
 	ErrMemoryAmbiguousMatch = errors.New("memory match is ambiguous")
 	// ErrMemoryIndexOutOfRange is returned for an invalid entry index.
 	ErrMemoryIndexOutOfRange = errors.New("memory entry index out of range")
+	// ErrMemoryManaged prevents generic tools/index endpoints from modifying HQ
+	// reviewed facts without their lifecycle transaction.
+	ErrMemoryManaged = errors.New("managed memory must be changed through review")
 )
 
 // FolderResolver resolves a workspace ID to its folder path.
@@ -321,6 +344,8 @@ var memoryMu sync.Mutex
 // concurrent hand edits are honored on a last-write-wins basis.
 type MemoryStore struct {
 	resolver FolderResolver
+	// Test-only failure seam for byte-preserving managed mutations.
+	beforeExactRename func() error
 }
 
 // NewMemoryStore creates a memory store backed by the given folder resolver.
@@ -356,6 +381,24 @@ func (s *MemoryStore) ReadRaw(workspaceID string) (string, error) {
 	return string(data), nil
 }
 
+// ReadPromptRaw is for the raw workspace.memory prompt variable only. The
+// canonical ReadRaw remains available for editing; without an authorized HQ
+// binding and current lifecycle proof no managed marker may be exposed here.
+func (s *MemoryStore) ReadPromptRaw(workspaceID string) (string, error) {
+	raw, err := s.ReadRaw(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	var filtered strings.Builder
+	for _, line := range splitPhysicalMemoryLines([]byte(raw)) {
+		if strings.Contains(strings.ToLower(string(line.body)), "ori-hq:") {
+			continue
+		}
+		filtered.WriteString(raw[line.start:line.end])
+	}
+	return filtered.String(), nil
+}
+
 // Read returns the parsed memory document.
 func (s *MemoryStore) Read(workspaceID string) (MemoryDocument, error) {
 	raw, err := s.ReadRaw(workspaceID)
@@ -368,57 +411,39 @@ func (s *MemoryStore) Read(workspaceID string) (MemoryDocument, error) {
 // Append adds an entry, lazily creating MEMORY.md (with a title header) on
 // first write.
 func (s *MemoryStore) Append(workspaceID string, entry MemoryEntry) error {
-	if strings.TrimSpace(entry.Text) == "" {
-		return errors.New("memory entry text must not be empty")
-	}
-	entry.Type = NormalizeMemoryEntryType(string(entry.Type))
-
-	memoryMu.Lock()
-	defer memoryMu.Unlock()
-
-	doc, err := s.Read(workspaceID)
+	entry, err := validateGenericMemoryEntry(entry)
 	if err != nil {
 		return err
 	}
-	if len(doc.lines) == 0 {
-		doc.lines = append(doc.lines,
-			memoryLine{raw: "# Workspace Memory"},
-			memoryLine{raw: ""},
-		)
+	memoryMu.Lock()
+	defer memoryMu.Unlock()
+	raw, path, err := s.readExact(workspaceID)
+	if err != nil {
+		return err
 	}
-	line := memoryLine{raw: entry.Render(), entry: &entry}
-	doc.lines = append(doc.lines, line)
-	return s.write(workspaceID, doc)
+	return s.writeExact(path, appendMemoryBytes(raw, entry), hashMemoryBytes(raw))
 }
 
 // AppendUnique adds an entry only when the same normalized type, provenance,
 // and text are not already present. The check and append share memoryMu, making
 // confirmation retries idempotent even across MemoryStore instances.
 func (s *MemoryStore) AppendUnique(workspaceID string, entry MemoryEntry) (bool, error) {
-	text, err := ValidateMemoryText(entry.Text)
+	entry, err := validateGenericMemoryEntry(entry)
 	if err != nil {
 		return false, err
 	}
-	entry.Text = text
-	entry.Type = NormalizeMemoryEntryType(string(entry.Type))
-	entry.Provenance = strings.TrimSpace(entry.Provenance)
-
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
-	doc, err := s.Read(workspaceID)
+	raw, path, err := s.readExact(workspaceID)
 	if err != nil {
 		return false, err
 	}
-	for _, existing := range doc.Entries() {
-		if existing.Type == entry.Type && strings.EqualFold(existing.Provenance, entry.Provenance) && existing.Text == entry.Text {
+	for _, line := range splitPhysicalMemoryLines(raw) {
+		if line.entry != nil && line.entry.Type == entry.Type && strings.EqualFold(line.entry.Provenance, entry.Provenance) && line.entry.Text == entry.Text {
 			return false, nil
 		}
 	}
-	if len(doc.lines) == 0 {
-		doc.lines = append(doc.lines, memoryLine{raw: "# Workspace Memory"}, memoryLine{raw: ""})
-	}
-	doc.lines = append(doc.lines, memoryLine{raw: entry.Render(), entry: &entry})
-	if err := s.write(workspaceID, doc); err != nil {
+	if err := s.writeExact(path, appendMemoryBytes(raw, entry), hashMemoryBytes(raw)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -432,98 +457,83 @@ func (s *MemoryStore) Forget(workspaceID string, match string) (MemoryEntry, err
 	if match == "" {
 		return MemoryEntry{}, errors.New("memory forget match must not be empty")
 	}
-
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
-
-	doc, err := s.Read(workspaceID)
+	raw, path, err := s.readExact(workspaceID)
 	if err != nil {
 		return MemoryEntry{}, err
 	}
-
-	entryLines := doc.entryLineIndexes()
-	var exact, partial []int
-	for _, li := range entryLines {
-		text := doc.lines[li].entry.Text
-		if text == match {
-			exact = append(exact, li)
-		} else if strings.Contains(strings.ToLower(text), strings.ToLower(match)) {
-			partial = append(partial, li)
+	var exact, partial []physicalMemoryLine
+	for _, line := range splitPhysicalMemoryLines(raw) {
+		if line.entry == nil || IsHQManagedProvenance(line.entry.Provenance) {
+			continue
+		}
+		if line.entry.Text == match {
+			exact = append(exact, line)
+		} else if strings.Contains(strings.ToLower(line.entry.Text), strings.ToLower(match)) {
+			partial = append(partial, line)
 		}
 	}
-
 	candidates := exact
 	if len(exact) == 0 {
 		candidates = partial
 	}
 	switch len(candidates) {
 	case 0:
-		return MemoryEntry{}, fmt.Errorf("%w: no entry matches %q", ErrMemoryEntryNotFound, match)
+		return MemoryEntry{}, ErrMemoryEntryNotFound // do not echo possibly forgotten request text
 	case 1:
-		removed := *doc.lines[candidates[0]].entry
-		doc.lines = append(doc.lines[:candidates[0]], doc.lines[candidates[0]+1:]...)
-		if err := s.write(workspaceID, doc); err != nil {
+		line := candidates[0]
+		result := removeMemoryLine(raw, line)
+		if err := s.writeExact(path, result, hashMemoryBytes(raw)); err != nil {
 			return MemoryEntry{}, err
 		}
-		return removed, nil
+		return *line.entry, nil
 	default:
 		texts := make([]string, len(candidates))
-		for i, li := range candidates {
-			texts[i] = fmt.Sprintf("%q", doc.lines[li].entry.Text)
+		for i, line := range candidates {
+			texts[i] = fmt.Sprintf("%q", line.entry.Text)
 		}
-		return MemoryEntry{}, fmt.Errorf("%w: %q matches %d entries: %s",
-			ErrMemoryAmbiguousMatch, match, len(candidates), strings.Join(texts, ", "))
+		return MemoryEntry{}, fmt.Errorf("%w: %d ordinary entries: %s",
+			ErrMemoryAmbiguousMatch, len(candidates), strings.Join(texts, ", "))
 	}
 }
 
 // EditAt replaces the entry at the given entry index (file order, 0-based)
 // with the provided entry, rendered canonically.
 func (s *MemoryStore) EditAt(workspaceID string, index int, entry MemoryEntry) error {
-	if strings.TrimSpace(entry.Text) == "" {
-		return errors.New("memory entry text must not be empty")
-	}
-	entry.Type = NormalizeMemoryEntryType(string(entry.Type))
-
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
-
-	doc, err := s.Read(workspaceID)
+	raw, path, err := s.readExact(workspaceID)
 	if err != nil {
 		return err
 	}
-	entryLines := doc.entryLineIndexes()
-	if index < 0 || index >= len(entryLines) {
-		return fmt.Errorf("%w: index %d, have %d entries", ErrMemoryIndexOutOfRange, index, len(entryLines))
+	line, err := selectGenericMemoryLine(raw, index)
+	if err != nil {
+		return err
 	}
-	doc.lines[entryLines[index]] = memoryLine{raw: entry.Render(), entry: &entry}
-	return s.write(workspaceID, doc)
+	entry, err = validateGenericMemoryEntry(entry)
+	if err != nil {
+		return err
+	}
+	result := make([]byte, 0, len(raw)+len(entry.Render()))
+	result = append(result, raw[:line.start]...)
+	result = append(result, entry.Render()...)
+	result = append(result, raw[line.start+len(line.body):line.end]...)
+	result = append(result, raw[line.end:]...)
+	return s.writeExact(path, result, hashMemoryBytes(raw))
 }
 
 // DeleteAt removes the entry at the given entry index (file order, 0-based).
 func (s *MemoryStore) DeleteAt(workspaceID string, index int) error {
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
-
-	doc, err := s.Read(workspaceID)
+	raw, path, err := s.readExact(workspaceID)
 	if err != nil {
 		return err
 	}
-	entryLines := doc.entryLineIndexes()
-	if index < 0 || index >= len(entryLines) {
-		return fmt.Errorf("%w: index %d, have %d entries", ErrMemoryIndexOutOfRange, index, len(entryLines))
-	}
-	li := entryLines[index]
-	doc.lines = append(doc.lines[:li], doc.lines[li+1:]...)
-	return s.write(workspaceID, doc)
-}
-
-func (s *MemoryStore) write(workspaceID string, doc MemoryDocument) error {
-	path, err := s.filePath(workspaceID)
+	line, err := selectGenericMemoryLine(raw, index)
 	if err != nil {
 		return err
 	}
-	if err := atomicWriteFile(path, []byte(doc.Render())); err != nil {
-		return fmt.Errorf("failed to write workspace memory: %w", err)
-	}
-	return nil
+	return s.writeExact(path, removeMemoryLine(raw, line), hashMemoryBytes(raw))
 }

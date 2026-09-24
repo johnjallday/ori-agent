@@ -28,12 +28,21 @@ type HQMemoryStore interface {
 	AppendUnique(workspaceID string, entry workspace.MemoryEntry) (bool, error)
 }
 
+// ReviewedExplicitWriter is the HQ sidecar/journal seam for an already
+// user-confirmed MemoryService.Remember request. It never self-approves source
+// suggestions; interview rows provide an exact retry ID and reviewed category.
+type ReviewedExplicitWriter interface {
+	SaveExplicit(ctx context.Context, userID string, stateVersion int64, requestID, category, text string) (KnowledgeItem, error)
+}
+
 type RememberRequest struct {
 	IfVersion   int64
 	Destination MemoryDestination
 	Text        string
 	Preference  string
 	Value       string
+	RequestID   string // optional: exact reviewed interview/explicit HQ retry identity
+	Category    string // required with RequestID; unclassified legacy Home actions remain legacy memory
 }
 
 type RememberResult struct {
@@ -41,6 +50,7 @@ type RememberResult struct {
 	Text        string            `json:"text"`
 	Href        string            `json:"href"`
 	Created     bool              `json:"created"`
+	ItemID      string            `json:"item_id,omitempty"`
 }
 
 // MemoryService saves only explicit, confirmed memory into existing canonical
@@ -50,11 +60,18 @@ type MemoryService struct {
 	hq       PersonalHQReader
 	profiles ProfileMemoryStore
 	memory   HQMemoryStore
+	reviewed ReviewedExplicitWriter
 	now      func() time.Time
 }
 
 func NewMemoryService(store Store, hq PersonalHQReader, profiles ProfileMemoryStore, memory HQMemoryStore) *MemoryService {
 	return &MemoryService{store: store, hq: hq, profiles: profiles, memory: memory, now: time.Now}
+}
+
+func (s *MemoryService) SetReviewedHQWriter(writer ReviewedExplicitWriter) {
+	if s != nil {
+		s.reviewed = writer
+	}
 }
 
 func (s *MemoryService) Remember(ctx context.Context, userID string, request RememberRequest) (*RememberResult, error) {
@@ -92,6 +109,9 @@ func (s *MemoryService) Remember(ctx context.Context, userID string, request Rem
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
+	if request.RequestID != "" && request.Destination != MemoryDestinationPersonalHQ {
+		return nil, fmt.Errorf("%w: reviewed HQ retry key requires the HQ destination", ErrValidation)
+	}
 
 	switch request.Destination {
 	case MemoryDestinationProfile:
@@ -111,6 +131,18 @@ func (s *MemoryService) Remember(ctx context.Context, userID string, request Rem
 		}
 		return &RememberResult{Destination: request.Destination, Text: text, Href: "/profile", Created: true}, nil
 	case MemoryDestinationPersonalHQ:
+		if request.RequestID != "" {
+			if s.reviewed == nil {
+				return nil, ErrRepairNeeded
+			}
+			item, err := s.reviewed.SaveExplicit(ctx, state.UserID, request.IfVersion,
+				request.RequestID, request.Category, text)
+			if err != nil {
+				return nil, err
+			}
+			return &RememberResult{Destination: request.Destination, Text: text,
+				Href: "/profile#personalHQKnowledge", Created: true, ItemID: item.ID}, nil
+		}
 		if s.memory == nil {
 			return nil, errors.New("personal assistant: workspace memory is unavailable")
 		}

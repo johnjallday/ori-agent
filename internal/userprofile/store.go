@@ -199,23 +199,32 @@ func (s *SQLiteStore) SetFields(ctx context.Context, id string, fields map[strin
 	} else if err != nil {
 		return nil, err
 	}
+	if err := applyProfileFields(current, fields); err != nil {
+		return nil, err
+	}
+	if err := s.Upsert(ctx, current); err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, id)
+}
+
+func applyProfileFields(current *UserProfile, fields map[string]any) error {
 	if current.Preferences == nil {
 		current.Preferences = map[string]string{}
 	}
-
 	for rawField, rawValue := range fields {
 		field := strings.TrimSpace(rawField)
 		switch {
 		case field == "about":
 			value := profileFieldValue(rawValue)
 			if err := ValidateFreeText(value); err != nil {
-				return nil, err
+				return err
 			}
 			current.About = value
 		case strings.HasPrefix(field, "preferences."):
 			key := strings.TrimPrefix(field, "preferences.")
 			if _, ok := allowedPreferenceKeys[key]; !ok {
-				return nil, fmt.Errorf("%w: %s", ErrUnknownPreference, key)
+				return fmt.Errorf("%w: %s", ErrUnknownPreference, key)
 			}
 			value := strings.Join(strings.Fields(profileFieldValue(rawValue)), " ")
 			if value == "" {
@@ -223,22 +232,19 @@ func (s *SQLiteStore) SetFields(ctx context.Context, id string, fields map[strin
 				continue
 			}
 			if err := ValidateFreeText(value); err != nil {
-				return nil, fmt.Errorf("%s: %w", field, err)
+				return fmt.Errorf("%s: %w", field, err)
 			}
 			current.Preferences[key] = value
 		case isIdentityField(field):
-			return nil, fmt.Errorf("%w: %s", ErrIdentityField, field)
+			return fmt.Errorf("%w: %s", ErrIdentityField, field)
 		default:
-			return nil, fmt.Errorf("%w: %s", ErrUnknownField, field)
+			return fmt.Errorf("%w: %s", ErrUnknownField, field)
 		}
 	}
 	if len(current.Preferences) == 0 {
 		current.Preferences = nil
 	}
-	if err := s.Upsert(ctx, current); err != nil {
-		return nil, err
-	}
-	return s.Get(ctx, id)
+	return nil
 }
 
 func profileFieldValue(value any) string {

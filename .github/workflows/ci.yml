@@ -263,12 +263,12 @@ jobs:
           fi
           # -timeout: internal/sessionhttp opens a fresh in-memory database per
           # test and runs every migration against it, ~208 times. Under -race on
-          # the Linux runner that package alone sat at 574s of Go's default 600s
-          # per-package budget before this flag existed, so an ordinary PR adding
-          # a handful of tests to it failed as a timeout rather than on its own
-          # merits. The headroom buys back that margin; the standing fix is to
-          # migrate once and reuse the schema across tests, tracked separately.
-          go test -v -short -race -timeout 20m -coverprofile=coverage.txt -covermode=atomic $packages
+          # the Linux runner it took 788s on dev and exceeded the previous 20m
+          # budget on #532 while still executing tests (no assertion failure).
+          # Preserve the full suite and allow for runner variance; the standing
+          # fix is to migrate once and reuse the schema across tests, tracked
+          # separately. Go applies this timeout per package, not to the job.
+          go test -v -short -race -timeout 30m -coverprofile=coverage.txt -covermode=atomic $packages
 
       # Linux only: the macOS profile now covers a 15-package subset, and
       # uploading it under the same flag would report the difference as a

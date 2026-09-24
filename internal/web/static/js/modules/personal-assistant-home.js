@@ -263,6 +263,8 @@ function elements() {
     banner: document.getElementById('personalAssistantTodayBanner'),
     sections: document.getElementById('personalAssistantTodaySections'),
     decisions: document.getElementById('personalAssistantTodayDecisions'),
+    remembered: document.getElementById('personalAssistantTodayRemembered'),
+    interview: document.getElementById('personalAssistantTodayInterview'),
     priorities: document.getElementById('personalAssistantTodayPriorities'),
     followUps: document.getElementById('personalAssistantTodayFollowUps'),
     results: document.getElementById('personalAssistantTodayResults'),
@@ -612,6 +614,10 @@ function renderToday(today) {
   }
 
   renderRows(els.decisions, today?.decisions);
+  renderRows(els.remembered, today?.remembered);
+  if (els.interview) {
+    els.interview.hidden = !['available', 'offered', 'deferred'].includes(today?.interview_status);
+  }
   renderRows(els.priorities, today?.priorities);
   renderRows(els.followUps, today?.follow_ups);
   renderRows(els.results, today?.results);

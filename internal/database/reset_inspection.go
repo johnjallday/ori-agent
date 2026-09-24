@@ -14,7 +14,7 @@ import (
 // identifier supplied by a browser. Return a copy so callers cannot broaden it.
 func ResetRecordTables() []string {
 	return []string{
-		"users", "workspaces", "sessions", "messages", "session_tags", "tool_calls",
+		"users", "user_preference_revisions", "workspaces", "sessions", "messages", "session_tags", "tool_calls",
 		"review_issues", "review_runs", "session_review_status", "session_tasks",
 		"scheduled_task_reminders", "smart_input_overrides", "workspace_notes",
 		"note_links", "note_tags", "note_headings", "workspace_runs", "workspace_run_trace",

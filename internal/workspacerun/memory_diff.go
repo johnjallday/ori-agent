@@ -1,6 +1,8 @@
 package workspacerun
 
 import (
+	"strings"
+
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -23,7 +25,9 @@ func snapshotMemoryLines(resolver workspaceFolderResolver, workspaceID string) [
 	entries := doc.Entries()
 	lines := make([]string, 0, len(entries))
 	for _, e := range entries {
-		lines = append(lines, e.Render())
+		if !workspace.IsHQManagedProvenance(e.Provenance) {
+			lines = append(lines, e.Render())
+		}
 	}
 	return lines
 }
@@ -35,25 +39,41 @@ func snapshotMemoryLines(resolver workspaceFolderResolver, workspaceID string) [
 func diffMemoryLines(before, after []string) (added, removed []string) {
 	beforeSet := make(map[string]int, len(before))
 	for _, l := range before {
-		beforeSet[l]++
+		if !isManagedMemoryDiffLine(l) {
+			beforeSet[l]++
+		}
 	}
 	afterSet := make(map[string]int, len(after))
 	for _, l := range after {
-		afterSet[l]++
+		if !isManagedMemoryDiffLine(l) {
+			afterSet[l]++
+		}
 	}
 	for _, l := range after {
+		if isManagedMemoryDiffLine(l) {
+			continue
+		}
 		if afterSet[l] > beforeSet[l] {
 			added = append(added, l)
 			afterSet[l]-- // count each surplus occurrence once
 		}
 	}
 	for _, l := range before {
+		if isManagedMemoryDiffLine(l) {
+			continue
+		}
 		if beforeSet[l] > afterSet[l] {
 			removed = append(removed, l)
 			beforeSet[l]--
 		}
 	}
 	return added, removed
+}
+
+func isManagedMemoryDiffLine(line string) bool {
+	// A trace is not an authorized context; even a malformed managed line is
+	// omitted rather than copied into run metadata.
+	return strings.Contains(strings.ToLower(line), "ori-hq:")
 }
 
 // memoryDiffArtifact builds the run's "what it learned" trace artifact, or nil
