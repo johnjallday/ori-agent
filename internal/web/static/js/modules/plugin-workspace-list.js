@@ -104,12 +104,52 @@
       ${changes.map(rowHTML).join('')}`;
   }
 
+  // applyBadge shows count on the Plugins menu item, or hides the badge at 0.
+  function applyBadge(count) {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('[data-plugins-badge]').forEach(badge => {
+      badge.textContent = count > 0 ? String(count) : '';
+      badge.hidden = count <= 0;
+      badge.setAttribute(
+        'aria-label',
+        count > 0 ? `${count} plugin change${count === 1 ? '' : 's'} for this Mac` : ''
+      );
+    });
+  }
+
+  // refreshBadge reads the list's pending changes and updates the badge. A
+  // failure hides it: a badge must never claim changes it cannot show.
+  async function refreshBadge(fetchImpl) {
+    const load = fetchImpl || (typeof fetch === 'function' ? fetch : null);
+    if (!load) return 0;
+    let count = 0;
+    try {
+      const response = await load('/api/plugins/workspace-list');
+      if (response.ok) count = badgeCount(await response.json());
+    } catch (error) {
+      count = 0;
+    }
+    applyBadge(count);
+    return count;
+  }
+
   root.PluginWorkspaceList = {
     normalize,
     visibleChanges,
     badgeCount,
     title,
     renderBanner,
-    escapeHTML
+    escapeHTML,
+    applyBadge,
+    refreshBadge
   };
+
+  // Every page with the sidebar shows the badge.
+  if (typeof document !== 'undefined' && document.querySelector) {
+    const start = () => {
+      if (document.querySelector('[data-plugins-badge]')) void refreshBadge();
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+  }
 })(window);

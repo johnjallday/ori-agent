@@ -138,6 +138,104 @@ func TestAnUnreadableListIsReportedAndNeverOverwrittenByStartup(t *testing.T) {
 	}
 }
 
+func pendingOf(t *testing.T, h *Handler) workspaceListResponse {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	h.WorkspaceListHandler(rr, httptest.NewRequest(http.MethodGet, "/api/plugins/workspace-list", nil))
+	var body workspaceListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func postSkip(t *testing.T, h *Handler, name string) *httptest.ResponseRecorder {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	h.SkipHandler(rr, httptest.NewRequest(http.MethodPost, "/api/plugins/workspace-list/skip", strings.NewReader(`{"name":"`+name+`"}`)))
+	return rr
+}
+
+// FR 36: a skip holds until the plugin's entry in the list changes.
+func TestASkipHoldsUntilTheEntryChanges(t *testing.T) {
+	h, root := listHandler(t)
+	skipsPath := filepath.Join(t.TempDir(), "plugin_list_skips.json")
+	h.SetPluginListSkipsPath(skipsPath)
+	entry := plugin.PluginListEntry{Name: "reaper", Version: "0.1.0", Source: claudeBundle(t), Format: plugin.FormatClaude}
+	if _, err := plugin.WritePluginList(root, plugin.PluginList{Plugins: []plugin.PluginListEntry{entry}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if rr := postSkip(t, h, "reaper"); rr.Code != http.StatusOK {
+		t.Fatalf("skip: %d %s", rr.Code, rr.Body.String())
+	}
+	if body := pendingOf(t, h); len(body.Pending) != 1 || !body.Pending[0].Skipped {
+		t.Fatalf("after skip = %+v", body.Pending)
+	}
+	if _, err := os.Stat(skipsPath); err != nil {
+		t.Fatalf("the skip was not stored in the data dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "plugin_list_skips.json")); !os.IsNotExist(err) {
+		t.Fatal("the skip was stored in the Workspace Directory")
+	}
+
+	entry.Version = "0.2.0"
+	if _, err := plugin.WritePluginList(root, plugin.PluginList{Plugins: []plugin.PluginListEntry{entry}}); err != nil {
+		t.Fatal(err)
+	}
+	if body := pendingOf(t, h); len(body.Pending) != 1 || body.Pending[0].Skipped {
+		t.Fatalf("a changed entry stayed skipped: %+v", body.Pending)
+	}
+	if rr := postSkip(t, h, "not-listed"); rr.Code != http.StatusNotFound {
+		t.Fatalf("skipping nothing: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// FR 33: a switch reads the listed source on the server and goes through the
+// same review as any update.
+func TestASwitchUsesTheListedSourceAfterReview(t *testing.T) {
+	h, root := listHandler(t)
+	installedFrom := claudeBundle(t)
+	if rr := postInstall(t, h, installedFrom, true); rr.Code != http.StatusOK {
+		t.Fatalf("install: %s", rr.Body.String())
+	}
+	listed := claudeBundle(t)
+	mustWrite(t, filepath.Join(listed, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.3.0"}`)
+	list := readList(t, root)
+	list.Plugins[0].Source, list.Plugins[0].Version = listed, "0.3.0"
+	if _, err := plugin.WritePluginList(root, list); err != nil {
+		t.Fatal(err)
+	}
+	if body := pendingOf(t, h); len(body.Pending) != 1 || body.Pending[0].Kind != plugin.PendingSwitch || body.Pending[0].Direction != "update" {
+		t.Fatalf("pending = %+v", body.Pending)
+	}
+
+	update := func(confirm bool) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		body := `{"confirm":` + map[bool]string{true: "true", false: "false"}[confirm] + `,"from_list":true}`
+		request := httptest.NewRequest(http.MethodPost, "/api/plugins/reaper/update", strings.NewReader(body))
+		request.SetPathValue("name", "reaper")
+		h.UpdateHandler(rr, request)
+		return rr
+	}
+	preview := update(false)
+	if preview.Code != http.StatusOK || !strings.Contains(preview.Body.String(), `"trust"`) || !strings.Contains(preview.Body.String(), `"updated":false`) {
+		t.Fatalf("preview: %d %s", preview.Code, preview.Body.String())
+	}
+	if records, _ := h.mgr.Installed(); records[0].Source != installedFrom {
+		t.Fatal("the preview changed the installed plugin")
+	}
+	if rr := update(true); rr.Code != http.StatusOK {
+		t.Fatalf("switch: %d %s", rr.Code, rr.Body.String())
+	}
+	if records, _ := h.mgr.Installed(); records[0].Source != listed || records[0].Version != "0.3.0" {
+		t.Fatalf("after switch = %+v", records[0])
+	}
+	if body := pendingOf(t, h); len(body.Pending) != 0 {
+		t.Fatalf("still pending after the switch: %+v", body.Pending)
+	}
+}
+
 func TestTheWorkspaceListOffersAListedPluginToInstall(t *testing.T) {
 	h, root := listHandler(t)
 	bundle := claudeBundle(t)

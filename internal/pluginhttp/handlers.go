@@ -346,12 +346,24 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Confirm bool `json:"confirm"`
+		// FromList switches the plugin to the version the Workspace
+		// Directory's plugin list names. The source is read here, never
+		// taken from the request, and goes through the same review.
+		FromList bool `json:"from_list,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
-	replacement, err := h.replacementFor(r.Context(), name)
-	if err != nil {
+	var replacement ReviewedUpdate
+	var err error
+	if req.FromList {
+		entry, listed := h.listedEntry(name)
+		if !listed {
+			orihttp.Conflict(w, "The plugin list no longer lists this plugin.")
+			return
+		}
+		replacement = ReviewedUpdate{Source: entry.Source, Format: entry.Format}
+	} else if replacement, err = h.replacementFor(r.Context(), name); err != nil {
 		orihttp.InternalError(w, err.Error())
 		return
 	}
@@ -378,7 +390,12 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			orihttp.BadRequest(w, err.Error())
 			return
 		}
-		orihttp.WriteJSON(w, map[string]any{"updated": false, "changed": changed, "trust": report})
+		response := map[string]any{"updated": false, "changed": changed, "trust": report}
+		if req.FromList {
+			// The review of a switch names exactly what it would install.
+			response["source"] = source
+		}
+		orihttp.WriteJSON(w, response)
 		return
 	}
 	confirm := func(plugin.TrustReport) bool { return true }

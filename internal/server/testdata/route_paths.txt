@@ -158,6 +158,7 @@
 /api/plugins/marketplaces
 /api/plugins/marketplaces/install
 /api/plugins/workspace-list
+/api/plugins/workspace-list/skip
 /api/plugins/demo-plugin/enable
 /api/plugins/tool-call
 /api/progression

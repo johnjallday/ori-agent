@@ -108,3 +108,48 @@ test('a list that cannot be read shows its message instead of changes', () => {
   );
   assert.doesNotMatch(html, /Review and install/);
 });
+
+test('the menu badge counts un-skipped changes and hides at zero or on failure', async () => {
+  const badge = {
+    textContent: '',
+    hidden: true,
+    attributes: {},
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    }
+  };
+  const sandbox = {
+    window: {},
+    Set,
+    Array,
+    String,
+    Object,
+    document: {
+      readyState: 'complete',
+      querySelector: () => null,
+      querySelectorAll: () => [badge]
+    }
+  };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(SOURCE, sandbox, { filename: 'plugin-workspace-list.js' });
+  const list = sandbox.window.PluginWorkspaceList;
+
+  const answer = body => async () => ({ ok: true, json: async () => body });
+  assert.equal(await list.refreshBadge(answer(payload)), 4);
+  assert.equal(badge.textContent, '4');
+  assert.equal(badge.hidden, false);
+  assert.equal(badge.attributes['aria-label'], '4 plugin changes for this Mac');
+
+  assert.equal(await list.refreshBadge(answer({ pending: [] })), 0);
+  assert.equal(badge.hidden, true);
+
+  await list.refreshBadge(answer(payload));
+  assert.equal(
+    await list.refreshBadge(async () => {
+      throw new Error('offline');
+    }),
+    0
+  );
+  assert.equal(badge.hidden, true);
+});

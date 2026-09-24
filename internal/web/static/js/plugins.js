@@ -142,6 +142,17 @@
     const html = workspaceList.renderBanner(workspaceListState);
     banner.innerHTML = html;
     banner.hidden = html === '';
+    workspaceList.applyBadge(workspaceList.visibleChanges(workspaceListState).length);
+  }
+
+  async function skipListedChange(change) {
+    try {
+      await api('POST', '/api/plugins/workspace-list/skip', { name: change.name });
+      await window.loadWorkspaceList();
+      notify(change.name + ' is skipped on this Mac until the plugin list changes it.', 'info');
+    } catch (e) {
+      notify('Skip failed: ' + e.message, 'error');
+    }
   }
 
   window.loadWorkspaceList = async function () {
@@ -181,6 +192,15 @@
       switch (button.getAttribute('data-list-action')) {
         case 'install':
           reviewListedInstall(change);
+          break;
+        case 'switch':
+          window.pluginUpdate(change.name, { fromList: true });
+          break;
+        case 'uninstall':
+          window.pluginUninstall(change.name);
+          break;
+        case 'skip':
+          skipListedChange(change);
           break;
       }
     });
@@ -302,13 +322,27 @@
     if (replacement) replacement.focus();
   }
 
-  function showUpdateTrust(name, report, onConfirm) {
+  // showUpdateTrust opens the update review. source, when given (a switch to
+  // the plugin list's version), is shown first with its pinned commit.
+  function showUpdateTrust(name, report, onConfirm, source) {
     const titleEl = byId('pluginUpdateModalLabel');
     const bodyEl = byId('pluginUpdateTrustBody');
     if (!titleEl || !bodyEl) throw new Error('The update confirmation dialog is unavailable.');
 
     titleEl.textContent = 'Update ' + name;
     renderTrustInto(bodyEl, report || {});
+    if (source) {
+      const commit = (String(source).match(/[#&]sha=([0-9a-fA-F]+)/) || [])[1] || '';
+      const origin = document.createElement('div');
+      origin.className = 'small mb-2';
+      origin.setAttribute('data-update-source', '');
+      origin.innerHTML =
+        '<div><strong>Source:</strong> <span class="text-break">' +
+        esc(source) +
+        '</span></div>' +
+        (commit ? '<div><strong>Commit:</strong> <code>' + esc(commit) + '</code></div>' : '');
+      bodyEl.prepend(origin);
+    }
     pendingUpdateConfirm = onConfirm;
     pendingUpdateName = name;
     updateReturnFocus = document.activeElement;
@@ -550,7 +584,12 @@
     }
   };
 
-  window.pluginUpdate = async function (name) {
+  // pluginUpdate updates from the plugin's recorded source, or, with
+  // options.fromList, switches it to the version the Workspace Directory's
+  // plugin list names. A switch always shows the review first: the list is
+  // untrusted, so its source and commit are disclosed before anything runs.
+  window.pluginUpdate = async function (name, options) {
+    const fromList = Boolean(options && options.fromList);
     const url = '/api/plugins/' + encodeURIComponent(name) + '/update';
     const prev = installedCache.find(p => p.name === name);
     const oldVersion = (prev && prev.version) || '';
@@ -558,7 +597,8 @@
     // 409. That is information, not a failure, so it is matched on the code and
     // never on the message text. Every other failure still throws.
     const update = async confirm => {
-      const result = await window.PluginLifecycle.request('POST', url, { confirm });
+      const body = fromList ? { confirm, from_list: true } : { confirm };
+      const result = await window.PluginLifecycle.request('POST', url, body);
       if (result.ok) return result.data;
       if (result.status === 409 && result.data && result.data.code === 'reviewed_release_current') {
         notify(result.error, 'info');
@@ -582,10 +622,11 @@
           notify(name + ' is already up to date', 'info');
         }
       };
-      if (data.changed) {
-        // The component set changed, so re-disclose and re-confirm in context
-        // without moving the user to the unrelated install form.
-        showUpdateTrust(name, data.trust, doUpdate);
+      if (data.changed || fromList) {
+        // The component set changed (or the source comes from the plugin
+        // list), so disclose and confirm in context without moving the user
+        // to the unrelated install form.
+        showUpdateTrust(name, data.trust, doUpdate, fromList ? data.source : '');
       } else {
         await doUpdate();
       }

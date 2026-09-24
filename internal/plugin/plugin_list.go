@@ -224,6 +224,8 @@ type PendingChange struct {
 	// Fingerprint identifies the list entry the change came from, so a skip
 	// stops applying once that entry changes.
 	Fingerprint string `json:"fingerprint"`
+	// Skipped marks a change this machine skips; the host fills it in.
+	Skipped bool `json:"skipped,omitempty"`
 }
 
 // LocalFolderNotHereReason is shown for an entry installed from a local

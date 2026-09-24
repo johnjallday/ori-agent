@@ -1398,6 +1398,7 @@ func registerPluginRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/plugins", s.Handlers.Plugin.ListHandler)
 		mux.HandleFunc("GET /api/plugins/updates", s.Handlers.Plugin.UpdateStatusHandler)
 		mux.HandleFunc("GET /api/plugins/workspace-list", s.Handlers.Plugin.WorkspaceListHandler)
+		mux.HandleFunc("POST /api/plugins/workspace-list/skip", s.Handlers.Plugin.SkipHandler)
 		mux.HandleFunc("POST /api/plugins/install", s.Handlers.Plugin.InstallHandler)
 		mux.HandleFunc("GET /api/plugins/marketplaces", s.Handlers.Plugin.MarketplacesHandler)
 		mux.HandleFunc("POST /api/plugins/marketplaces", s.Handlers.Plugin.MarketplacesHandler)

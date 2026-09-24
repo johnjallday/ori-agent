@@ -641,6 +641,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.pluginHandler.SetWorkspaceRootResolver(func() string {
 			return resolveWorkspaceRoot(b.configManager)
 		})
+		b.pluginHandler.SetPluginListSkipsPath(filepath.Join(config.DefaultDataDir(), "plugin_list_skips.json"))
 		b.pluginHandler.FillWorkspaceList(shouldRunWorkspaceStartupMaintenance(b.configManager))
 	}
 
