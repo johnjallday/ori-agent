@@ -34,6 +34,10 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 			return b.sessionHandler != nil && b.sessionHandler.BlueprintInstalled(id)
 		},
 		Linker: folderWorkspaceLinker{files: b.workspaceFileStore, sessions: b.sessionStore, tasks: b.sessionHandler},
+		Creator: folderWorkspaceCreator{
+			handler: b.sessionHandler,
+			linker:  folderWorkspaceLinker{files: b.workspaceFileStore, sessions: b.sessionStore, tasks: b.sessionHandler},
+		},
 		Tidier: b.newFolderTidyRunner(),
 	})
 	b.personalAssistantFolderDigest = service
@@ -162,6 +166,65 @@ func (l folderWorkspaceLinker) LinkFolder(ctx context.Context, req personalassis
 	}
 	logger.Debug("Linked shown folder to workspace", logger.Fields{"workspace_id": req.WorkspaceID, "directory_id": dirID, "shape": string(req.Shape)})
 	return result, nil
+}
+
+// folderWorkspaceCreator sets a project workspace up on the assistant's
+// behalf once the user confirms the card's plan: it creates the workspace
+// through the ordinary creation pipeline (so the blueprint, roster,
+// provenance, allowlist and workspace.created event are exactly the modal's)
+// and then links the folder the way a modal-created workspace is linked.
+type folderWorkspaceCreator struct {
+	handler *sessionhttp.Handler
+	linker  folderWorkspaceLinker
+}
+
+func (c folderWorkspaceCreator) CreateProjectWorkspace(ctx context.Context, req personalassistant.FolderCreateRequest) (personalassistant.FolderCreateResult, error) {
+	if c.handler == nil || c.linker.files == nil {
+		return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderOutcomeUnavailable
+	}
+	// A retried click after the create landed but before the offer recorded
+	// it must not make a second workspace: the one carrying this offer's id
+	// is reused, and linking it again is idempotent.
+	workspaceID, created := c.existingForOffer(req.UserID, req.OfferID), false
+	if workspaceID == "" {
+		id, err := c.handler.CreateFolderOfferWorkspace(ctx, sessionhttp.FolderOfferWorkspaceRequest{
+			Name: req.Name, TemplateID: req.Blueprint, OfferID: req.OfferID,
+		})
+		if err != nil {
+			logger.Warn("Failed to set up the shown folder's workspace", logger.Fields{"offer_id": req.OfferID, "blueprint": req.Blueprint, "error": err})
+			return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderCreateFailed
+		}
+		workspaceID, created = id, true
+	}
+	link, err := c.linker.LinkFolder(ctx, personalassistant.FolderLinkRequest{
+		UserID: req.UserID, WorkspaceID: workspaceID, OfferID: req.OfferID,
+		Name: req.Name, Path: req.Path, Shape: req.Shape,
+	})
+	if err != nil {
+		return personalassistant.FolderCreateResult{}, err
+	}
+	logger.Info("Set up the shown folder's workspace", logger.Fields{"workspace_id": workspaceID, "blueprint": req.Blueprint, "created": created})
+	return personalassistant.FolderCreateResult{WorkspaceID: workspaceID, Route: link.Route, Created: created}, nil
+}
+
+// existingForOffer finds the user's active workspace already created for the
+// offer, or returns "".
+func (c folderWorkspaceCreator) existingForOffer(userID, offerID string) string {
+	if c.linker.files == nil || strings.TrimSpace(offerID) == "" {
+		return ""
+	}
+	for id, ws := range c.linker.files.CachedWorkspaces() {
+		if ws == nil || ws.GetStatus() != workspace.StatusActive {
+			continue
+		}
+		if ws.OwnerUserID != "" && ws.OwnerUserID != userID {
+			continue
+		}
+		if recorded, _ := ws.SharedData[projecttemplates.FolderOfferIDKey].(string); strings.TrimSpace(recorded) == offerID {
+			return id
+		}
+	}
+	return ""
 }
 
 // insideWorkspaceFolder reports whether path sits under the workspace's own

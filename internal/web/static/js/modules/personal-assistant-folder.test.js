@@ -81,35 +81,84 @@ test('the chooser explains itself when there is nothing to choose', () => {
   assert.match(pickerOnly.note, /pick another folder/);
 });
 
-test('a project offer names the folder, promises to remember, and offers the three actions', () => {
-  const view = folderOfferView({
-    id: 'o1',
-    status: 'pending',
-    verdict: 'project',
-    folder: 'Documents',
-    subject: { name: 'Thesis', shape: 'manuscript' },
-    reason: '14 LaTeX files, edited yesterday',
-    remember: true
-  });
+const thesisOffer = {
+  id: 'o1',
+  status: 'pending',
+  verdict: 'project',
+  folder: 'Documents',
+  subject: { name: 'Thesis', shape: 'manuscript', marker: 'LaTeX manuscript' },
+  reason: '14 LaTeX files, edited yesterday',
+  remember: true,
+  blueprint: 'writing-project',
+  blueprint_label: 'Writing project',
+  create_available: true
+};
+
+test('a project offer says what it found, asks to confirm the plan, and offers Set up and Adjust', () => {
+  const view = folderOfferView(thesisOffer);
   assert.equal(view.visible, true);
-  assert.equal(headlineText(view), 'You have been working in Thesis.');
+  assert.equal(headlineText(view), 'Thesis looks like a LaTeX manuscript.');
   assert.deepEqual(strongText(view), ['Thesis']);
   assert.equal(
     view.question,
-    'Want me to set up a workspace for it? I will also remember that Thesis is a project you are working on.'
+    'Set up Thesis as a Writing project workspace? I will also remember that Thesis is a project you are working on.'
   );
   assert.equal(view.reason, '14 LaTeX files, edited yesterday');
   assert.deepEqual(
     view.actions.map(a => [a.label, a.decision, a.choice || '']),
     [
-      ['Set up workspace', 'yes', 'project'],
+      ['Set up', 'yes', 'project'],
+      ['Adjust…', 'yes', 'project'],
       ['Not this one', 'no', ''],
       ['Later', 'later', '']
     ]
   );
-  assert.equal(view.actions[0].style, 'primary');
-  assert.equal(view.actions[1].style, 'outline');
-  assert.equal(view.actions[2].style, 'link');
+  assert.equal(view.actions[0].create, true, 'Set up has the assistant create it');
+  assert.equal(view.actions[1].modal, true, 'Adjust… opens the modal');
+  assert.deepEqual(
+    view.actions.map(a => a.style),
+    ['primary', 'outline', 'outline', 'link']
+  );
+  assert.equal(view.confirming, false);
+});
+
+test('without the server-side setup the modal is the one project path', () => {
+  const view = folderOfferView({ ...thesisOffer, create_available: false });
+  assert.deepEqual(
+    view.actions.map(a => [a.id, a.label]),
+    [
+      ['yes', 'Set up workspace'],
+      ['no', 'Not this one'],
+      ['later', 'Later']
+    ]
+  );
+  assert.equal(view.actions[0].modal, true);
+  assert.equal(view.actions[0].create, undefined);
+});
+
+test('a project without a marker or a blueprint is still a plan, and a missing blueprint is explained', () => {
+  const plain = folderOfferView({
+    status: 'pending',
+    verdict: 'project',
+    folder: 'Documents',
+    subject: { name: 'Stuff' },
+    reason: '9 files, edited today',
+    remember: false
+  });
+  assert.equal(headlineText(plain), 'Stuff looks like a project.');
+  assert.equal(plain.question, 'Set up a workspace for Stuff?');
+
+  const fallback = folderOfferView({
+    ...thesisOffer,
+    blueprint: '',
+    blueprint_note:
+      'The Writing project blueprint is not installed, so this starts as a blank workspace.',
+    remember: false
+  });
+  assert.equal(
+    fallback.question,
+    'Set up a workspace for Thesis? The Writing project blueprint is not installed, so this starts as a blank workspace.'
+  );
 });
 
 test('the remember sentence is dropped when the server says the fact cannot be saved', () => {
@@ -121,7 +170,7 @@ test('the remember sentence is dropped when the server says the fact cannot be s
     reason: '14 LaTeX files, edited yesterday',
     remember: false
   });
-  assert.equal(view.question, 'Want me to set up a workspace for it?');
+  assert.equal(view.question, 'Set up a workspace for Thesis?');
 });
 
 test('a dump offer states the counts and offers a tidy', () => {
@@ -165,13 +214,39 @@ test('a mixed offer counts projects and loose files and asks which to start with
   assert.deepEqual(strongText(view), ['3 projects', '40 loose files']);
   assert.equal(view.question, 'Start with a project, or a tidy?');
   assert.deepEqual(
-    view.actions.map(a => [a.label, a.decision, a.choice || '']),
+    view.actions.map(a => [a.label, a.decision || '', a.choice || '']),
     [
-      ['Start with Thesis', 'yes', 'project'],
+      ['Start with Thesis', '', ''],
       ['Tidy the loose files', 'yes', 'tidy'],
       ['Later', 'later', '']
     ]
   );
+  // The project is confirmed on its own card first, with a way back.
+  assert.equal(view.actions[0].confirm, 'project');
+  const confirm = folderOfferView(
+    {
+      status: 'pending',
+      verdict: 'mixed',
+      folder: 'Documents',
+      subject: { name: 'Thesis', shape: 'manuscript', marker: 'LaTeX manuscript' },
+      reason: '3 projects and 40 loose files',
+      projects_count: 3,
+      loose_files: 40,
+      blueprint: 'writing-project',
+      blueprint_label: 'Writing project',
+      create_available: true,
+      remember: true
+    },
+    { confirmProject: true }
+  );
+  assert.equal(confirm.confirming, true);
+  assert.equal(headlineText(confirm), 'Thesis looks like a LaTeX manuscript.');
+  assert.match(confirm.question, /^Set up Thesis as a Writing project workspace\?/);
+  assert.deepEqual(
+    confirm.actions.map(a => a.id),
+    ['setup', 'adjust', 'back']
+  );
+  assert.equal(confirm.actions[2].back, true);
   const one = folderOfferView({
     status: 'pending',
     verdict: 'mixed',
@@ -195,14 +270,41 @@ test('an ambiguous offer asks rather than guesses', () => {
   assert.equal(headlineText(view), 'I am not sure what Scans is.');
   assert.equal(view.question, 'Is this a project you work in, or a folder to tidy?');
   assert.deepEqual(
-    view.actions.map(a => [a.label, a.decision, a.choice || '']),
+    view.actions.map(a => [a.label, a.decision || '', a.choice || '']),
     [
-      ["It's a project", 'yes', 'project'],
+      ["It's a project", '', ''],
       ['Tidy it', 'yes', 'tidy'],
       ['Neither', 'no', '']
     ]
   );
+  assert.equal(view.actions[0].confirm, 'project');
   assert.equal(view.reason, '31 PDF files, last edited in March');
+
+  // "It's a project" confirms the plan before anything is decided.
+  const confirm = folderOfferView(
+    {
+      status: 'pending',
+      verdict: 'ambiguous',
+      folder: 'Scans',
+      subject: { name: 'Scans', is_root: true },
+      reason: '31 PDF files, last edited in March',
+      create_available: true
+    },
+    { confirmProject: true }
+  );
+  assert.equal(headlineText(confirm), 'Scans looks like a project.');
+  assert.equal(confirm.question, 'Set up a workspace for Scans?');
+  assert.deepEqual(
+    confirm.actions.map(a => a.id),
+    ['setup', 'adjust', 'back']
+  );
+  // A decided offer never shows the confirm card.
+  const decided = folderOfferView(
+    { status: 'declined', verdict: 'ambiguous', folder: 'Scans', subject: { name: 'Scans' } },
+    { confirmProject: true }
+  );
+  assert.equal(decided.confirming, false);
+  assert.equal(headlineText(decided), 'I am not sure what Scans is.');
 });
 
 test('an empty offer is a soft landing with one way forward', () => {

@@ -1277,10 +1277,10 @@ No body (any request data is `400`). Same as a scan with `{ "picker": true }`.
 **Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/decide`
 
 ```json
-{ "decision": "yes", "choice": "project", "request_id": "…" }
+{ "decision": "yes", "choice": "project", "create": true, "request_id": "…" }
 ```
 
-`decision` is `yes`, `no`, or `later`. `choice` (`project` or `tidy`) is required with `yes` when the verdict leaves both open. `no` never asks about that folder again; `later` asks again in a week. A `yes` with `tidy` runs the File Janitor setup for the folder on the server and the returned offer is `resolved` with `outcome.route` (the first review batch, or the workspace that already manages the folder). A `yes` with `project` leaves the offer `awaiting_outcome` until the resolve below. `request_id` makes a retry return the same result. `404` for an unknown offer; `409` when it was already answered.
+`decision` is `yes`, `no`, or `later`. `choice` (`project` or `tidy`) is required with `yes` when the verdict leaves both open. `no` never asks about that folder again; `later` asks again in a week. A `yes` with `tidy` runs the File Janitor setup for the folder on the server and the returned offer is `resolved` with `outcome.route` (the first review batch, or the workspace that already manages the folder). A `yes` with `project` and `create: true` — the card's confirmed plan ("Set up Thesis as a Writing project workspace?") — has the server set the workspace up itself (the folder's name, the shape's installed blueprint or blank, the folder linked as the primary directory, the first task seeded) and the returned offer is `resolved` with `outcome.workspace_id`, `outcome.route` and `outcome.blueprint`; a retried click reuses the workspace already made for the offer. It is offered only while the offer's `create_available` is true. A `yes` with `project` and no `create` (the card's Adjust…) leaves the offer `awaiting_outcome` until the resolve below. `request_id` makes a retry return the same result. `404` for an unknown offer; `409` when it was already answered; `503` when the workspace could not be created (the offer stays pending).
 
 ### Resolve a Project Offer
 

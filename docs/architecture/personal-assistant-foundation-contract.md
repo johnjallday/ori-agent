@@ -528,13 +528,25 @@ assistant makes one explained offer.
   Decisions: `no` (tombstone: never asked again about that folder), `later`
   (asked again in a week), `yes` with a `project` or `tidy` choice. Replays
   through `request_id` return the same result.
-- **Project.** The Create Workspace modal opens pre-filled (name, the shape's
-  blueprint when installed, otherwise blank with a note); the create carries
-  `entry_point: folder_digest` and `folder_offer_id`, and
-  `POST …/offers/{id}/resolve` links the folder as the workspace's primary
-  directory (an outside linked directory, not `project_path`), superseding a
-  blueprint scaffold inside the workspace, and seeds one first task that names
-  the read-only tools. The modal's Cancel leaves the offer pending.
+- **Project.** The card says what the scan found ("Thesis looks like a LaTeX
+  manuscript." — the marker's label, with a language's manifest ranking above
+  `.git`) and asks to confirm the plan ("Set up Thesis as a Writing project
+  workspace?"). Shapes map to blueprints: manuscript → Writing Project, corpus
+  → Research Project, code → **Code Project** (a built-in with no scaffold and
+  no roles), audio → REAPER song; a blueprint that is not installed is named
+  in a note and the workspace starts blank. **Set up** (decide with
+  `create: true`) has the server create the workspace through the ordinary
+  creation pipeline (`sessionhttp.Handler.CreateFolderOfferWorkspace`, an
+  in-process `POST /api/workspaces` carrying `entry_point: folder_digest` and
+  `folder_offer_id`), link the folder as the primary directory (an outside
+  linked directory, not `project_path`, superseding a blueprint scaffold),
+  seed the shape's first task, and resolve the offer in the same request; a
+  retried click reuses the workspace already made for the offer. **Adjust…**
+  opens the Create Workspace modal pre-filled instead, and
+  `POST …/offers/{id}/resolve` links the folder once the modal reports the
+  workspace; the modal's Cancel leaves the offer pending. A mixed or
+  ambiguous offer's "Start with X" / "It's a project" shows the same confirm
+  card (with Back) before anything is decided.
 - **Tidy.** The server drives the File Janitor setup coordinator with the
   offer's folder (accept, folder intent, grant, review) and the decide response
   carries the first review batch's route; a folder already managed opens that

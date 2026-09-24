@@ -58,6 +58,36 @@ func TestMarkerPrecedence_SpecificShapesBeatCode(t *testing.T) {
 	}
 }
 
+// A language's manifest names a code project (and its tool) better than the
+// repository it sits in, so "Go module" beats "git repository".
+func TestMarkerPrecedence_ManifestsBeatTheRepository(t *testing.T) {
+	git, _ := MatchMarker(".git", true)
+	for _, name := range []string{"go.mod", "package.json", "Cargo.toml", "pyproject.toml", "requirements.txt"} {
+		manifest, ok := MatchMarker(name, false)
+		if !ok || manifest.Shape != ShapeCode {
+			t.Fatalf("%s is not a code marker", name)
+		}
+		if markerRank(manifest) >= markerRank(git) {
+			t.Errorf("%s ranks below .git", name)
+		}
+	}
+	xcode, _ := MatchMarker("App.xcodeproj", true)
+	if markerRank(xcode) >= markerRank(git) {
+		t.Errorf("an Xcode project ranks below .git")
+	}
+}
+
+// Every shape with a home has one, and code's is the Code Project blueprint.
+func TestShapeBlueprints_CodeHasAHome(t *testing.T) {
+	row, ok := BlueprintForShape(ShapeCode)
+	if !ok || row.BlueprintID != "code-project" || row.Label != "Code project" {
+		t.Fatalf("code blueprint = %+v ok=%t", row, ok)
+	}
+	if _, ok := BlueprintForShape(ShapeNotes); ok {
+		t.Fatal("a notes vault has no blueprint yet; it should start blank")
+	}
+}
+
 func TestToolTable_Lookups(t *testing.T) {
 	if tool, ok := ToolForExtension("rpp"); !ok || tool.ToolID != "reaper" || tool.ToolName != "REAPER" {
 		t.Errorf("ToolForExtension(rpp) = %+v, %v", tool, ok)

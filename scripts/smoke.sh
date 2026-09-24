@@ -1646,10 +1646,22 @@ PY
       mv "$home/$rel.hidden" "$home/$rel" && echo "restored $rel"
     fi
     ;;
+  setup)
+    # The project outcome the way the card's confirmed plan does it: one
+    # decide with create, and the server sets the workspace up (name,
+    # blueprint, folder linked, first task) and resolves the offer.
+    local offer="${4:-}"
+    [[ -n "$offer" ]] || fail "usage: $0 showfolder setup <base-url> <offer-id>"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/decide" \
+      -H 'Content-Type: application/json' \
+      -d "{\"decision\":\"yes\",\"choice\":\"project\",\"create\":true,\"request_id\":\"smoke-$(date +%s%N)\"}" \
+      | python3 -c 'import json,sys; p=json.load(sys.stdin); o=p.get("offer") or {}; print("set up:", o.get("status"), (o.get("subject") or {}).get("name"), json.dumps(o.get("outcome")), p.get("error",""))'
+    ;;
   project)
     # The project outcome end to end through the API, as the Create Workspace
-    # modal does it: yes on the offer, create the workspace for the offer
-    # (name + blueprint, entry_point folder_digest), then resolve.
+    # modal (the card's Adjust…) does it: yes on the offer, create the
+    # workspace for the offer (name + blueprint, entry_point folder_digest),
+    # then resolve.
     local offer="${4:-}" name="${5:-Thesis}" template="${6:-writing-project}" ws
     [[ -n "$offer" ]] || fail "usage: $0 showfolder project <base-url> <offer-id> [name] [template-id]"
     curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/decide" \

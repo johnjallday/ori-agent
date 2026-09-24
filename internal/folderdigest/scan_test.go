@@ -75,8 +75,13 @@ func TestScan_HiddenMarkersCountButHiddenFilesDoNot(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := result.RootCandidate()
-	if c.Marker == nil || c.Marker.Name != ".git" {
-		t.Fatalf("marker = %+v, want .git", c.Marker)
+	// The manifest names the project; the hidden .git still counts as a
+	// marker (HasMarker is what revalidation asks).
+	if c.Marker == nil || c.Marker.Name != "go.mod" {
+		t.Fatalf("marker = %+v, want go.mod", c.Marker)
+	}
+	if !HasMarker(root, ".git") || !HasMarker(root, "go.mod") {
+		t.Fatal("the hidden .git marker or the manifest was not seen")
 	}
 	// .git/HEAD is never counted: the directory is hidden and not descended.
 	if c.FileCount != 12 {

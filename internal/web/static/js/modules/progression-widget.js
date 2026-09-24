@@ -145,12 +145,12 @@ export function firstMissionView(status) {
 // offer's copy and actions are the chooser's own, so a user who lives in the
 // mission list answers the same question with the same buttons. A decided
 // offer keeps its outcome note until the mission moves on.
-export function firstMissionOfferView(view, offer) {
+export function firstMissionOfferView(view, offer, confirmProject = false) {
   if (!view?.visible || view.completed || view.skipped) return { visible: false };
   if (String(view.actionURL || '').indexOf(FOLDER_QUEST_ACTION_URL) !== 0) {
     return { visible: false };
   }
-  const offerView = folderOfferView(offer);
+  const offerView = folderOfferView(offer, { confirmProject });
   if (!offerView.visible) return { visible: false };
   return {
     ...offerView,
@@ -469,6 +469,9 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
   // folder.js; undefined until it has said anything, so the card can still
   // ask it directly on a render that comes first.
   let folderOffer;
+  // Whether the chooser is showing a mixed or ambiguous offer's project
+  // confirm card; the mission card follows it.
+  let folderConfirmProject = false;
 
   function currentFolderOffer() {
     if (folderOffer !== undefined) return folderOffer;
@@ -490,7 +493,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
   function renderFirstMissionOffer(view) {
     const box = el('first-mission-offer');
     if (!box) return;
-    const offer = firstMissionOfferView(view, currentFolderOffer());
+    const offer = firstMissionOfferView(view, currentFolderOffer(), folderConfirmProject);
     box.hidden = !offer.visible;
     if (!offer.visible) return;
     box.dataset.verdict = offer.verdict;
@@ -658,6 +661,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     // follows without a status fetch.
     document.addEventListener('personal-assistant:folder-offer', event => {
       folderOffer = event.detail?.offer || null;
+      folderConfirmProject = event.detail?.confirmProject === true;
       if (lastStatus) renderFirstMission(lastStatus);
     });
   }

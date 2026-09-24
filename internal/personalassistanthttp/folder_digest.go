@@ -136,9 +136,14 @@ type folderDecideRequest struct {
 	Decision  string `json:"decision"`
 	Choice    string `json:"choice"`
 	RequestID string `json:"request_id"`
+	// Create, with a project yes, has the assistant set the workspace up
+	// itself (the card's confirmed plan) instead of the Create Workspace
+	// modal reporting one.
+	Create bool `json:"create"`
 }
 
-// DecideFolderDigest records yes, no, or later for one offer.
+// DecideFolderDigest records yes, no, or later for one offer. A project yes
+// with create also sets the workspace up and resolves the offer.
 func (h *Handler) DecideFolderDigest(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
@@ -153,7 +158,7 @@ func (h *Handler) DecideFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req folderDecideRequest
-	if !decodeFolderDigestBody(w, r, &req, "decision", "choice", "request_id") {
+	if !decodeFolderDigestBody(w, r, &req, "decision", "choice", "request_id", "create") {
 		return
 	}
 	userID, ok := h.currentUserID(w, r)
@@ -161,7 +166,7 @@ func (h *Handler) DecideFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	offer, err := h.folderDigest.Decide(r.Context(), userID, offerID, personalassistant.FolderDecisionInput{
-		Decision: req.Decision, Choice: req.Choice, RequestID: req.RequestID,
+		Decision: req.Decision, Choice: req.Choice, RequestID: req.RequestID, Create: req.Create,
 	})
 	if err != nil {
 		writeFolderDigestError(w, err)
@@ -271,6 +276,8 @@ func writeFolderDigestError(w http.ResponseWriter, err error) {
 		orihttp.NotFound(w, "That workspace is no longer here")
 	case errors.Is(err, personalassistant.ErrFolderWorkspaceRefused):
 		orihttp.Conflict(w, "That workspace was not created for this offer, or already has a linked folder")
+	case errors.Is(err, personalassistant.ErrFolderCreateFailed):
+		orihttp.ServiceUnavailable(w, "The workspace could not be created right now. Adjust… creates it through the usual dialog")
 	case errors.Is(err, personalassistant.ErrFolderOutcomeUnavailable):
 		orihttp.ServiceUnavailable(w, "The workspace could not be linked to the folder right now")
 	case errors.Is(err, personalassistant.ErrFolderScanBusy):

@@ -23,11 +23,18 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 
 	// The file-scaffold starter and metadata-only built-ins all materialize.
 	for _, id := range []string{
-		"writing-project", "travels", "daily-briefings", "content-production", "research-project", "personal-ops",
+		"writing-project", "travels", "daily-briefings", "content-production", "research-project", "personal-ops", "code-project",
 	} {
 		if _, ok := byID[id]; !ok {
 			t.Fatalf("missing starter %q; got %v", id, templates)
 		}
+	}
+
+	// Code Project is the workspace "show me a folder" sets up over a code
+	// folder: metadata only, no scaffold to supersede, no roles to staff.
+	if code := byID["code-project"]; !code.Builtin || code.HasSkeleton || code.HasAgents() ||
+		len(code.Tags) != 1 || code.Tags[0] != "code" || code.Icon == "" {
+		t.Errorf("code-project: %+v", code)
 	}
 
 	// Scaffold starters keep their files and are flagged builtin.

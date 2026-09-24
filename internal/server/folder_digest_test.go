@@ -19,6 +19,7 @@ import (
 
 type folderLinkerFixture struct {
 	linker   folderWorkspaceLinker
+	handler  *sessionhttp.Handler
 	sessions session.HybridStore
 	files    *workspace.FileStore
 	root     string
@@ -41,7 +42,71 @@ func newFolderLinkerFixture(t *testing.T) *folderLinkerFixture {
 	handler.SetWorkspaceStore(files)
 	return &folderLinkerFixture{
 		linker:   folderWorkspaceLinker{files: files, sessions: sessions, tasks: handler},
+		handler:  handler,
 		sessions: sessions, files: files, root: root,
+	}
+}
+
+// The assistant's own setup: the workspace is created through the ordinary
+// pipeline for the offer, the folder linked, the first task seeded; a retried
+// click for the same offer reuses the workspace instead of making a second.
+func TestFolderWorkspaceCreator_CreatesLinksAndReusesForTheSameOffer(t *testing.T) {
+	f := newFolderLinkerFixture(t)
+	ctx := context.Background()
+	creator := folderWorkspaceCreator{handler: f.handler, linker: f.linker}
+	folder := f.folder(t, "Thesis")
+
+	result, err := creator.CreateProjectWorkspace(ctx, personalassistant.FolderCreateRequest{
+		UserID: "local", OfferID: "offer-1", Name: "Thesis", Path: folder, Shape: folderdigest.ShapeManuscript, RequestID: "r1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Created || result.WorkspaceID == "" || !strings.HasPrefix(result.Route, "/workspaces/") || strings.Contains(result.Route, result.WorkspaceID) {
+		t.Fatalf("result=%+v", result)
+	}
+	ws, err := f.sessions.GetWorkspace(ctx, result.WorkspaceID)
+	if err != nil || ws == nil || ws.Name != "Thesis" {
+		t.Fatalf("workspace=%+v err=%v", ws, err)
+	}
+	if recorded, _ := ws.SharedData[projecttemplates.FolderOfferIDKey].(string); recorded != "offer-1" {
+		t.Fatalf("offer id on the workspace = %q", recorded)
+	}
+	folderWS, err := f.files.Get(result.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	primary, _ := folderWS.SharedData[projecttemplates.PrimaryDirectoryIDKey].(string)
+	ref, err := folderWS.GetDirectoryReference(primary)
+	if err != nil || ref == nil || filepath.Clean(ref.Path) != filepath.Clean(folder) {
+		t.Fatalf("primary directory=%+v err=%v", ref, err)
+	}
+	if len(folderWS.Tasks) != 1 || !strings.Contains(folderWS.Tasks[0].Description, "draft") {
+		t.Fatalf("first task=%+v", folderWS.Tasks)
+	}
+
+	again, err := creator.CreateProjectWorkspace(ctx, personalassistant.FolderCreateRequest{
+		UserID: "local", OfferID: "offer-1", Name: "Thesis", Path: folder, Shape: folderdigest.ShapeManuscript, RequestID: "r1",
+	})
+	if err != nil || again.Created || again.WorkspaceID != result.WorkspaceID {
+		t.Fatalf("retry=%+v err=%v", again, err)
+	}
+	all, err := f.sessions.ListWorkspaces(ctx)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("workspaces after a retry = %d err=%v", len(all), err)
+	}
+
+	// A different offer for a folder gets its own workspace.
+	other, err := creator.CreateProjectWorkspace(ctx, personalassistant.FolderCreateRequest{
+		UserID: "local", OfferID: "offer-2", Name: "Album", Path: f.folder(t, "Album"), Shape: folderdigest.ShapeAudio, RequestID: "r2",
+	})
+	if err != nil || !other.Created || other.WorkspaceID == result.WorkspaceID {
+		t.Fatalf("other=%+v err=%v", other, err)
+	}
+
+	// Without the creation pipeline nothing is made.
+	if _, err := (folderWorkspaceCreator{linker: f.linker}).CreateProjectWorkspace(ctx, personalassistant.FolderCreateRequest{UserID: "local", OfferID: "offer-3", Name: "X", Path: folder}); !errors.Is(err, personalassistant.ErrFolderOutcomeUnavailable) {
+		t.Fatalf("no handler err=%v", err)
 	}
 }
 

@@ -544,14 +544,25 @@ test('firstMissionOfferView: the folder mission shows a pending offer inline', (
   const offer = firstMissionOfferView(view, pendingProjectOffer);
   assert.equal(offer.visible, true);
   assert.equal(offer.verdict, 'project');
-  assert.equal(offer.headline.map(part => part.text).join(''), 'You have been working in Thesis.');
-  assert.match(offer.question, /set up a workspace/);
+  assert.equal(offer.headline.map(part => part.text).join(''), 'Thesis looks like a project.');
+  assert.match(offer.question, /Set up a workspace for Thesis\?/);
   assert.equal(offer.reason, '14 LaTeX files, edited yesterday');
   assert.deepEqual(
     offer.actions.map(action => action.id),
     ['yes', 'no', 'later']
   );
   assert.equal(offer.note, '');
+
+  // With the server-side setup the card offers Set up and Adjust…, and a
+  // mixed offer's confirm card follows the chooser's state.
+  const setup = firstMissionOfferView(view, { ...pendingProjectOffer, create_available: true });
+  assert.deepEqual(
+    setup.actions.map(action => action.id),
+    ['setup', 'adjust', 'no', 'later']
+  );
+  const mixed = { ...pendingProjectOffer, verdict: 'mixed', projects_count: 3, loose_files: 40 };
+  assert.equal(firstMissionOfferView(view, mixed).confirming, false);
+  assert.equal(firstMissionOfferView(view, mixed, true).confirming, true);
 });
 
 test('firstMissionOfferView: a decided offer keeps its note and drops the buttons', () => {

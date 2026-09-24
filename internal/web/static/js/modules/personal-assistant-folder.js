@@ -59,10 +59,74 @@ function plural(n, noun) {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
+// projectConfirmView is the card for a project subject: what the scan found
+// ("Thesis looks like a LaTeX manuscript."), the plan as a question ("Set up
+// Thesis as a Writing project workspace?"), and Set up / Adjust…. Set up has
+// the assistant create the workspace itself when the server offers that
+// (create_available); Adjust… opens the Create Workspace modal pre-filled,
+// which is also Set up's whole path when the server does not. A confirm
+// reached from a mixed or ambiguous offer gets Back instead of Not this one
+// and Later, which belong to the offer it came from.
+function projectConfirmView(offer, base, subject, remember, { back = false } = {}) {
+  const marker = String(offer.subject?.marker || '').trim();
+  // The plan names its blueprint only when that blueprint will be used; a
+  // missing one is explained by the note instead.
+  const label = String(offer.blueprint || '').trim()
+    ? String(offer.blueprint_label || '').trim()
+    : '';
+  const note = String(offer.blueprint_note || '').trim();
+  const headline = marker
+    ? segments([{ text: subject }, ` looks like a ${marker}.`])
+    : segments([{ text: subject }, ' looks like a project.']);
+  let question = label
+    ? `Set up ${subject} as a ${label} workspace?`
+    : `Set up a workspace for ${subject}?`;
+  if (note) question += ` ${note}`;
+  if (remember)
+    question += ` I will also remember that ${subject} is a project you are working on.`;
+  const createAvailable = offer.create_available === true;
+  const actions = createAvailable
+    ? [
+        {
+          id: 'setup',
+          label: 'Set up',
+          style: 'primary',
+          decision: 'yes',
+          choice: 'project',
+          create: true
+        },
+        {
+          id: 'adjust',
+          label: 'Adjust…',
+          style: 'outline',
+          decision: 'yes',
+          choice: 'project',
+          modal: true
+        }
+      ]
+    : [
+        {
+          id: 'yes',
+          label: 'Set up workspace',
+          style: 'primary',
+          decision: 'yes',
+          choice: 'project',
+          modal: true
+        }
+      ];
+  if (back) actions.push({ id: 'back', label: 'Back', style: 'link', back: true });
+  else {
+    actions.push({ id: 'no', label: 'Not this one', style: 'outline', decision: 'no' });
+    actions.push({ id: 'later', label: 'Later', style: 'link', decision: 'later' });
+  }
+  return { ...base, headline, question, actions, confirming: back };
+}
+
 // folderOfferView is the whole render decision for one offer (FR22). Every
 // string comes from the verdict and the server's counts and names; the
-// reason line is always present.
-export function folderOfferView(offer) {
+// reason line is always present. options.confirmProject shows a mixed or
+// ambiguous offer's project confirm card instead of its question.
+export function folderOfferView(offer, options = {}) {
   if (!offer || typeof offer !== 'object') return { visible: false };
   const verdict = String(offer.verdict || '').trim();
   const folder = String(offer.folder || '').trim() || 'that folder';
@@ -71,37 +135,20 @@ export function folderOfferView(offer) {
   const reason = String(offer.reason || '').trim();
   const remember = offer.remember === true;
   const decided = status !== 'pending' && status !== 'closed';
+  const confirmProject = options?.confirmProject === true && !decided;
   const base = {
     visible: true,
     verdict,
     status,
     reason,
     decided,
+    confirming: false,
     needsPick: offer.needs_pick === true
   };
 
   switch (verdict) {
     case 'project':
-      return {
-        ...base,
-        headline: segments(['You have been working in ', { text: subject }, '.']),
-        question:
-          'Want me to set up a workspace for it?' +
-          (remember
-            ? ` I will also remember that ${subject} is a project you are working on.`
-            : ''),
-        actions: [
-          {
-            id: 'yes',
-            label: 'Set up workspace',
-            style: 'primary',
-            decision: 'yes',
-            choice: 'project'
-          },
-          { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
-          { id: 'later', label: 'Later', style: 'link', decision: 'later' }
-        ]
-      };
+      return projectConfirmView(offer, base, subject, remember);
     case 'dump':
       return {
         ...base,
@@ -117,6 +164,7 @@ export function folderOfferView(offer) {
         ]
       };
     case 'mixed':
+      if (confirmProject) return projectConfirmView(offer, base, subject, remember, { back: true });
       return {
         ...base,
         headline: segments([
@@ -128,13 +176,8 @@ export function folderOfferView(offer) {
         ]),
         question: 'Start with a project, or a tidy?',
         actions: [
-          {
-            id: 'project',
-            label: `Start with ${subject}`,
-            style: 'primary',
-            decision: 'yes',
-            choice: 'project'
-          },
+          // The project's plan is confirmed on its own card first.
+          { id: 'project', label: `Start with ${subject}`, style: 'primary', confirm: 'project' },
           {
             id: 'tidy',
             label: 'Tidy the loose files',
@@ -146,18 +189,13 @@ export function folderOfferView(offer) {
         ]
       };
     case 'ambiguous':
+      if (confirmProject) return projectConfirmView(offer, base, subject, remember, { back: true });
       return {
         ...base,
         headline: segments(['I am not sure what ', { text: subject }, ' is.']),
         question: 'Is this a project you work in, or a folder to tidy?',
         actions: [
-          {
-            id: 'project',
-            label: "It's a project",
-            style: 'primary',
-            decision: 'yes',
-            choice: 'project'
-          },
+          { id: 'project', label: "It's a project", style: 'primary', confirm: 'project' },
           { id: 'tidy', label: 'Tidy it', style: 'outline', decision: 'yes', choice: 'tidy' },
           { id: 'no', label: 'Neither', style: 'link', decision: 'no' }
         ]
@@ -198,6 +236,9 @@ export function folderOutcomeNote(offer) {
       if (offer?.outcome?.kind === 'tidy') {
         return String(offer?.outcome?.note || '').trim() || `${subject} is being tidied.`;
       }
+      if (offer?.outcome?.blueprint && String(offer?.blueprint_label || '').trim()) {
+        return `${subject} is set up as a ${String(offer.blueprint_label).trim()} workspace.`;
+      }
       return `The workspace for ${subject} is ready.`;
     default:
       return '';
@@ -223,8 +264,22 @@ const state = {
   offer: null,
   busy: false,
   chooserOpen: false,
-  available: false
+  available: false,
+  // A mixed or ambiguous offer's project is confirmed on its own card
+  // before anything is decided; this is that card being shown.
+  confirmProject: false
 };
+
+// announceOffer tells the mission card (progression-widget.js) what the
+// chooser shows, so the two render the same offer in the same state.
+function announceOffer() {
+  if (typeof document === 'undefined') return;
+  document.dispatchEvent(
+    new CustomEvent('personal-assistant:folder-offer', {
+      detail: { offer: state.offer, confirmProject: state.confirmProject }
+    })
+  );
+}
 
 function elements() {
   const root = document.getElementById('personalAssistantFolder');
@@ -311,7 +366,7 @@ function renderChooser() {
 function renderOffer() {
   const els = elements();
   if (!els?.offer) return;
-  const view = folderOfferView(state.offer);
+  const view = folderOfferView(state.offer, { confirmProject: state.confirmProject });
   els.offer.hidden = !view.visible;
   els.root.dataset.state = view.visible
     ? `offer-${view.verdict}`
@@ -389,7 +444,13 @@ function runAction(action) {
     openChooser();
     return;
   }
-  if (action.decision === 'yes' && action.choice === 'project') {
+  if (action.confirm === 'project' || action.back) {
+    state.confirmProject = action.confirm === 'project';
+    render();
+    announceOffer();
+    return;
+  }
+  if (action.modal) {
     startProjectOutcome(action);
     return;
   }
@@ -400,7 +461,7 @@ function runAction(action) {
 // renders the same offer inline. Returns false when there is no such action
 // to run: no offer, an offer already decided, or an unknown id.
 function act(actionId) {
-  const view = folderOfferView(state.offer);
+  const view = folderOfferView(state.offer, { confirmProject: state.confirmProject });
   if (!view.visible || view.decided) return false;
   const action = (view.actions || []).find(candidate => candidate.id === actionId);
   if (!action) return false;
@@ -423,6 +484,7 @@ async function load() {
     const payload = await readJSON(response);
     state.digest = payload?.folder_digest || null;
     state.offer = state.digest?.offer || null;
+    state.confirmProject = false;
     // A pending offer is the assistant's one question; it needs no chooser
     // in front of it.
     if (state.offer) state.chooserOpen = false;
@@ -430,9 +492,7 @@ async function load() {
     state.digest = state.digest || { chips: [], picker_available: false };
   }
   render();
-  document.dispatchEvent(
-    new CustomEvent('personal-assistant:folder-offer', { detail: { offer: state.offer } })
-  );
+  announceOffer();
 }
 
 async function scan(body) {
@@ -486,9 +546,8 @@ async function postOffer(offerId, action, body) {
   const payload = await readJSON(response);
   if (response.ok && payload?.offer) {
     state.offer = payload.offer;
-    document.dispatchEvent(
-      new CustomEvent('personal-assistant:folder-offer', { detail: { offer: state.offer } })
-    );
+    state.confirmProject = false;
+    announceOffer();
   }
   return { ok: response.ok, payload };
 }
@@ -510,18 +569,18 @@ async function decide(action) {
   showError('');
   render();
   try {
-    const { ok, payload } = await postOffer(offer.id, 'decide', {
-      decision: action.decision,
-      choice: action.choice || ''
-    });
+    const body = { decision: action.decision, choice: action.choice || '' };
+    // The card's confirmed plan: the assistant sets the workspace up itself.
+    if (action.create === true) body.create = true;
+    const { ok, payload } = await postOffer(offer.id, 'decide', body);
     if (!ok) {
       showOfferFailure(payload);
       return;
     }
-    // A tidy resolves in the same request: the server ran the File Janitor
-    // setup with the folder already chosen, and the route is its first
-    // review batch (or the workspace that already manages the folder).
-    const route = tidyRouteFor(state.offer);
+    // A tidy, or a workspace the assistant set up, resolves in the same
+    // request; the route is the first review batch (or the workspace that
+    // already manages the folder) or the new workspace.
+    const route = resolvedRouteFor(state.offer);
     if (route && typeof window !== 'undefined') window.location.assign(route);
   } catch (_) {
     showError('That could not be saved. Try again.');
@@ -531,12 +590,20 @@ async function decide(action) {
   }
 }
 
-// tidyRouteFor returns the page a resolved tidy should open, or '' when the
-// offer is not a resolved tidy or the route is not a local path.
-export function tidyRouteFor(offer) {
-  if (String(offer?.status || '') !== 'resolved' || offer?.outcome?.kind !== 'tidy') return '';
+// resolvedRouteFor returns the page a resolved outcome should open — a tidy's
+// first review batch or a set-up workspace — or '' when the offer is not
+// resolved or the route is not a local path.
+export function resolvedRouteFor(offer) {
+  if (String(offer?.status || '') !== 'resolved') return '';
+  const kind = offer?.outcome?.kind;
+  if (kind !== 'tidy' && kind !== 'project') return '';
   const route = String(offer?.outcome?.route || '').trim();
   return route.startsWith('/') && !route.startsWith('//') ? route : '';
+}
+
+// tidyRouteFor is resolvedRouteFor for a tidy only.
+export function tidyRouteFor(offer) {
+  return offer?.outcome?.kind === 'tidy' ? resolvedRouteFor(offer) : '';
 }
 
 // startProjectOutcome runs a project yes (FR28, FR29): the Create Workspace

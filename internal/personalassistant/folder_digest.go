@@ -36,6 +36,7 @@ var (
 	ErrFolderWorkspaceNotFound  = errors.New("personal assistant: workspace not found")
 	ErrFolderWorkspaceRefused   = errors.New("personal assistant: that workspace was not created for this offer")
 	ErrFolderOutcomeUnavailable = errors.New("personal assistant: the folder outcome is unavailable")
+	ErrFolderCreateFailed       = errors.New("personal assistant: the workspace could not be created")
 	ErrFolderChipUnknown        = errors.New("personal assistant: unknown folder")
 	ErrFolderChipMissing        = errors.New("personal assistant: that folder is not on this computer")
 	ErrFolderScanBusy           = errors.New("personal assistant: a folder scan is already running")
@@ -154,6 +155,44 @@ type FolderWorkspaceLinker interface {
 	LinkFolder(ctx context.Context, req FolderLinkRequest) (FolderLinkResult, error)
 }
 
+// FolderCreateRequest asks the host to set up a project workspace for an
+// offer the way the assistant would: the folder's name, the shape's
+// blueprint (or blank), the folder linked, the first task seeded. The card's
+// confirm line is the user's yes; nothing here comes from the browser but
+// that yes.
+type FolderCreateRequest struct {
+	UserID  string
+	OfferID string
+	// Name is the folder's base name, the workspace's name too.
+	Name string
+	// Path is the folder's canonical absolute path from the offer the server
+	// holds.
+	Path  string
+	Shape folderdigest.Shape
+	// Blueprint is the installed blueprint to create from; "" is the blank
+	// workspace.
+	Blueprint string
+	// RequestID is the click's idempotency key.
+	RequestID string
+}
+
+// FolderCreateResult is the workspace the host set up.
+type FolderCreateResult struct {
+	WorkspaceID string
+	// Route is the workspace page to open.
+	Route string
+	// Created is false when a workspace made for this offer already existed
+	// (a retried click) and was reused.
+	Created bool
+}
+
+// FolderWorkspaceCreator is the host seam that creates the workspace for a
+// project offer and links the folder to it. It must reuse a workspace already
+// created for the same offer rather than make a second one.
+type FolderWorkspaceCreator interface {
+	CreateProjectWorkspace(ctx context.Context, req FolderCreateRequest) (FolderCreateResult, error)
+}
+
 // FolderTidyRequest asks the host to tidy a shown folder through the File
 // Janitor engine (FR31).
 type FolderTidyRequest struct {
@@ -206,6 +245,9 @@ type FolderDigestDeps struct {
 	BlueprintAvailable func(id string) bool
 	// Linker attaches the folder to the created workspace (FR28, FR30).
 	Linker FolderWorkspaceLinker
+	// Creator sets a project workspace up on the assistant's behalf when the
+	// user confirms the card's plan; the modal (Linker) stays the adjust path.
+	Creator FolderWorkspaceCreator
 	// Tidier runs the tidy outcome through the File Janitor engine (FR31).
 	Tidier FolderTidier
 	// OnResolved runs after a project outcome completes: the dossier
@@ -349,6 +391,10 @@ type FolderOfferView struct {
 	Blueprint      string `json:"blueprint,omitempty"`
 	BlueprintLabel string `json:"blueprint_label,omitempty"`
 	BlueprintNote  string `json:"blueprint_note,omitempty"`
+	// CreateAvailable says the assistant can set the workspace up itself on
+	// a yes (decide with create): name, blueprint, folder, first task. When
+	// false the card's only project path is the Create Workspace modal.
+	CreateAvailable bool `json:"create_available,omitempty"`
 }
 
 // FolderResolveInput reports the workspace the modal created for an offer.
@@ -371,6 +417,10 @@ type FolderDecisionInput struct {
 	Decision  string
 	Choice    string
 	RequestID string
+	// Create asks the assistant to set the project workspace up itself (the
+	// card's confirmed plan) rather than wait for the Create Workspace modal.
+	// Ignored for anything but a project yes.
+	Create bool
 }
 
 func (s *FolderDigestService) now() time.Time { return s.deps.Now() }
@@ -539,9 +589,11 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	if err != nil {
 		return FolderOfferView{}, err
 	}
-	// A tidy runs its outcome before anything is recorded, so a failed setup
-	// leaves the offer pending and a retried click can try again (FR33).
+	// A tidy, or a workspace the assistant sets up itself, runs its outcome
+	// before anything is recorded, so a failed setup leaves the offer pending
+	// and a retried click can try again (FR33).
 	var tidy *FolderTidyResult
+	var created *FolderCreateResult
 	if input.Decision == FolderDecisionYes {
 		doc, err := s.store.Read(ctx, userID)
 		if err != nil {
@@ -559,19 +611,26 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 			if err != nil {
 				return FolderOfferView{}, err
 			}
-			if choice == FolderChoiceTidy {
+			switch {
+			case choice == FolderChoiceTidy:
 				result, err := s.runTidy(ctx, userID, *offer, input.RequestID)
 				if err != nil {
 					return FolderOfferView{}, err
 				}
 				tidy = &result
+			case choice == FolderChoiceProject && input.Create:
+				result, err := s.runCreate(ctx, userID, *offer, input.RequestID)
+				if err != nil {
+					return FolderOfferView{}, err
+				}
+				created = &result
 			}
 		}
 	}
 
 	now := s.now()
 	var result FolderOffer
-	tidied := false
+	resolvedNow := false
 	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
 		offer := d.Offer(offerID)
 		if offer == nil {
@@ -623,7 +682,17 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 				offer.Outcome.WorkspaceID = tidy.WorkspaceID
 				offer.Outcome.Route = tidy.Route
 				offer.Outcome.Note = tidy.Note
-				tidied = true
+				resolvedNow = true
+			}
+			if created != nil {
+				// The assistant set the workspace up: resolved here, as a
+				// modal-created workspace is on resolve.
+				offer.Status = FolderOfferResolved
+				offer.ResolvedAt = &decided
+				offer.Outcome.WorkspaceID = created.WorkspaceID
+				offer.Outcome.Route = created.Route
+				offer.Outcome.Blueprint, _, _ = s.blueprintFor(offer.Subject.Shape)
+				resolvedNow = true
 			}
 		}
 		d.Decisions = append(d.Decisions, FolderDecision{
@@ -638,10 +707,35 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	if err != nil && !errors.Is(err, errFolderReplay) {
 		return FolderOfferView{}, err
 	}
-	if err == nil && tidied {
+	if err == nil && resolvedNow {
 		result = s.afterOutcome(ctx, userID, result)
 	}
 	return s.view(result, binding.Paused), nil
+}
+
+// runCreate has the host set the project workspace up for the offer's
+// subject: the folder's name, the shape's installed blueprint, the folder
+// linked, the first task seeded.
+func (s *FolderDigestService) runCreate(ctx context.Context, userID string, offer FolderOffer, requestID string) (FolderCreateResult, error) {
+	if s.deps.Creator == nil {
+		return FolderCreateResult{}, ErrFolderOutcomeUnavailable
+	}
+	path, err := s.subjectPathOf(offer)
+	if err != nil {
+		return FolderCreateResult{}, err
+	}
+	blueprint, _, _ := s.blueprintFor(offer.Subject.Shape)
+	result, err := s.deps.Creator.CreateProjectWorkspace(ctx, FolderCreateRequest{
+		UserID: userID, OfferID: offer.ID, Name: offer.Subject.Name, Path: path,
+		Shape: folderdigest.Shape(offer.Subject.Shape), Blueprint: blueprint, RequestID: requestID,
+	})
+	if err != nil {
+		return FolderCreateResult{}, err
+	}
+	if strings.TrimSpace(result.WorkspaceID) == "" {
+		return FolderCreateResult{}, ErrFolderCreateFailed
+	}
+	return result, nil
 }
 
 // runTidy hands the offer's folder to the File Janitor engine (FR31, FR32).
@@ -1028,6 +1122,7 @@ func (s *FolderDigestService) view(offer FolderOffer, paused bool) FolderOfferVi
 	switch folderdigest.Kind(offer.Verdict) {
 	case folderdigest.KindProject, folderdigest.KindMixed, folderdigest.KindAmbiguous:
 		v.Blueprint, v.BlueprintLabel, v.BlueprintNote = s.blueprintFor(offer.Subject.Shape)
+		v.CreateAvailable = s.deps.Creator != nil
 	}
 	return v
 }

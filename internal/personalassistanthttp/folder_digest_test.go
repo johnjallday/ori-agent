@@ -174,6 +174,32 @@ func TestFolderDigestDecide_ReplayReturnsStoredResult(t *testing.T) {
 	}
 }
 
+// The card's confirmed plan reaches the service as a create; a decide without
+// it is the modal path, unchanged.
+func TestFolderDigestDecide_CarriesTheCreateFlag(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	send := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/offer-1/decide", strings.NewReader(body))
+		request.SetPathValue("offerID", "offer-1")
+		response := httptest.NewRecorder()
+		h.DecideFolderDigest(response, request)
+		return response
+	}
+	if response := send(`{"decision":"yes","choice":"project","create":true,"request_id":"req-1"}`); response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := send(`{"decision":"yes","choice":"project","request_id":"req-2"}`); response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(fake.decided) != 2 || !fake.decided[0].Create || fake.decided[1].Create {
+		t.Fatalf("decisions=%+v", fake.decided)
+	}
+	if response := send(`{"decision":"yes","choice":"project","create":"yes","request_id":"req-3"}`); response.Code != http.StatusBadRequest {
+		t.Fatalf("create with the wrong type status=%d", response.Code)
+	}
+}
+
 func TestFolderDigestResolve_AcceptsWorkspaceIDOnly(t *testing.T) {
 	h := newFolderDigestHandler(&fakeFolderDigest{})
 	send := func(body string) *httptest.ResponseRecorder {

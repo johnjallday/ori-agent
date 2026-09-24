@@ -654,6 +654,121 @@ func TestFolderFirstTask_PerShape(t *testing.T) {
 	}
 }
 
+// fakeFolderCreator answers like the host creator: a fresh workspace id per
+// offer, the same one again for the same offer.
+type fakeFolderCreator struct {
+	requests []FolderCreateRequest
+	byOffer  map[string]string
+	fail     error
+}
+
+func (c *fakeFolderCreator) CreateProjectWorkspace(_ context.Context, req FolderCreateRequest) (FolderCreateResult, error) {
+	c.requests = append(c.requests, req)
+	if c.fail != nil {
+		return FolderCreateResult{}, c.fail
+	}
+	if c.byOffer == nil {
+		c.byOffer = map[string]string{}
+	}
+	id, existed := c.byOffer[req.OfferID]
+	if !existed {
+		id = "ws-" + strings.ToLower(req.Name)
+		c.byOffer[req.OfferID] = id
+	}
+	return FolderCreateResult{WorkspaceID: id, Route: "/workspaces/" + id, Created: !existed}, nil
+}
+
+// A confirmed plan on the card: the assistant sets the workspace up itself
+// and the offer resolves in the same request, exactly as a tidy does.
+func TestFolderDigest_DecideCreatesTheWorkspaceWhenAsked(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	creator := &fakeFolderCreator{}
+	f.service.deps.Creator = creator
+	f.service.deps.BlueprintAvailable = func(id string) bool { return id == "writing-project" }
+	var resolvedOffers, outcomes []string
+	f.service.deps.OnResolved = func(_ context.Context, _ string, offer FolderOffer) FolderLearning {
+		resolvedOffers = append(resolvedOffers, offer.ID)
+		return FolderLearning{Remembered: true}
+	}
+	f.service.deps.OnOutcome = func(_ context.Context, _ string, offer FolderOffer) {
+		outcomes = append(outcomes, offer.Outcome.Kind)
+	}
+
+	offer, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !offer.CreateAvailable {
+		t.Fatalf("the card was not told the assistant can set the workspace up: %+v", offer)
+	}
+
+	decided, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, Create: true, RequestID: "req-setup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decided.Status != FolderOfferResolved || decided.Outcome == nil ||
+		decided.Outcome.Kind != FolderChoiceProject || decided.Outcome.WorkspaceID != "ws-thesis" ||
+		decided.Outcome.Route != "/workspaces/ws-thesis" || decided.Outcome.Blueprint != "writing-project" || !decided.Outcome.Remembered {
+		t.Fatalf("decided=%+v outcome=%+v", decided, decided.Outcome)
+	}
+	if len(creator.requests) != 1 {
+		t.Fatalf("creator called %d times", len(creator.requests))
+	}
+	req := creator.requests[0]
+	if req.Name != "Thesis" || req.Blueprint != "writing-project" || req.Shape != "manuscript" || req.OfferID != offer.ID ||
+		req.Path != filepath.Join(f.home, "Documents", "Thesis") || req.RequestID != "req-setup" || req.UserID != "local" {
+		t.Fatalf("create request=%+v", req)
+	}
+	if len(resolvedOffers) != 1 || len(outcomes) != 1 || outcomes[0] != FolderChoiceProject {
+		t.Fatalf("observers: resolved=%v outcomes=%v", resolvedOffers, outcomes)
+	}
+
+	// The same click again returns the stored result without creating again.
+	again, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, Create: true, RequestID: "req-setup"})
+	if err != nil || again.Status != FolderOfferResolved || again.Outcome.WorkspaceID != "ws-thesis" || len(creator.requests) != 1 {
+		t.Fatalf("replay=%+v err=%v creator calls=%d", again, err, len(creator.requests))
+	}
+	// And a resolved offer takes no second yes.
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, Create: true, RequestID: "req-again"}); !errors.Is(err, ErrFolderOfferDecided) {
+		t.Fatalf("second yes err=%v", err)
+	}
+}
+
+// A failed setup leaves the offer pending for another try, and a service
+// with no creator wired keeps the modal as the only project path.
+func TestFolderDigest_DecideCreateFailureLeavesTheOfferPending(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	offer, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offer.CreateAvailable {
+		t.Fatal("no creator is wired, yet the card was offered one")
+	}
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, Create: true, RequestID: "r1"}); !errors.Is(err, ErrFolderOutcomeUnavailable) {
+		t.Fatalf("without a creator err=%v", err)
+	}
+
+	creator := &fakeFolderCreator{fail: ErrFolderCreateFailed}
+	f.service.deps.Creator = creator
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, Create: true, RequestID: "r2"}); !errors.Is(err, ErrFolderCreateFailed) {
+		t.Fatalf("failed create err=%v", err)
+	}
+	view, err := f.service.Current(ctx, "local")
+	if err != nil || view.Offer == nil || view.Offer.Status != FolderOfferPending {
+		t.Fatalf("offer after a failed create=%+v err=%v", view.Offer, err)
+	}
+
+	// A yes without create still waits for the modal, creator or not.
+	creator.fail = nil
+	decided, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, RequestID: "r3"})
+	if err != nil || decided.Status != FolderOfferAwaitingOutcome || len(creator.requests) != 1 {
+		t.Fatalf("plain yes=%+v err=%v creator calls=%d", decided, err, len(creator.requests))
+	}
+}
+
 // fakeFolderTidier records tidy requests and answers like the host runner:
 // a folder already owned opens the existing workspace, anything else gets a
 // fresh one.

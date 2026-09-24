@@ -1,0 +1,13 @@
+{
+  "name": "Code Project",
+  "description": "A workspace over a code folder you already have. Ori reads the code through the linked folder, keeps track of open TODOs and what changed last, and never writes to the folder itself.",
+  "icon": "💻",
+  "behavior_profile": "general",
+  "builtin": true,
+  "builtin_version": 1,
+  "tags": [
+    "code"
+  ],
+  "agents": [],
+  "tagline": "Your code folder, read and tracked."
+}

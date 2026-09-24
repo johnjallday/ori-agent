@@ -29,14 +29,15 @@ var Markers = []Marker{
 	{Name: "*.bib", Kind: MarkerGlob, Shape: ShapeCorpus, Label: "bibliography"},
 	// Notes
 	{Name: ".obsidian", Kind: MarkerDir, Shape: ShapeNotes, Label: "Obsidian vault"},
-	// Code
-	{Name: ".git", Kind: MarkerDir, Shape: ShapeCode, Label: "git repository"},
-	{Name: "package.json", Kind: MarkerFile, Shape: ShapeCode, Label: "Node.js package"},
+	// Code. A language's manifest names the project better than the
+	// repository it sits in, and names its tool, so .git comes last.
 	{Name: "go.mod", Kind: MarkerFile, Shape: ShapeCode, Label: "Go module"},
+	{Name: "package.json", Kind: MarkerFile, Shape: ShapeCode, Label: "Node.js package"},
 	{Name: "Cargo.toml", Kind: MarkerFile, Shape: ShapeCode, Label: "Rust crate"},
 	{Name: "pyproject.toml", Kind: MarkerFile, Shape: ShapeCode, Label: "Python project"},
 	{Name: "requirements.txt", Kind: MarkerFile, Shape: ShapeCode, Label: "Python project"},
 	{Name: "*.xcodeproj", Kind: MarkerGlob, Shape: ShapeCode, Label: "Xcode project"},
+	{Name: ".git", Kind: MarkerDir, Shape: ShapeCode, Label: "git repository"},
 }
 
 // Tools is the tool table. Values are lower-case; extensions carry the dot.
@@ -62,6 +63,7 @@ var ShapeBlueprints = []ShapeBlueprint{
 	{Shape: ShapeAudio, BlueprintID: "reaper-song", Label: "REAPER song"},
 	{Shape: ShapeManuscript, BlueprintID: "writing-project", Label: "Writing project"},
 	{Shape: ShapeCorpus, BlueprintID: "research-project", Label: "Research project"},
+	{Shape: ShapeCode, BlueprintID: "code-project", Label: "Code project"},
 }
 
 // extensionKinds turns an extension into the plain word a reason line uses
