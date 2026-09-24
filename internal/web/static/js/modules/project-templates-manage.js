@@ -1034,10 +1034,6 @@ function ptcSyncRecoveryToSelection() {
   ptcInvalidateRecovery();
 }
 
-function ptcRecoveryEndpoint(template) {
-  return `/api/project-templates/${encodeURIComponent(template.id)}/plugin-recovery`;
-}
-
 // ptcStartRecovery runs one lifecycle action end to end.
 //
 // The client sends an action name and a plugin name — never a source, a path,
@@ -1046,8 +1042,9 @@ function ptcRecoveryEndpoint(template) {
 // visible, immediately before the user agrees to it.
 async function ptcStartRecovery(action, template, readiness) {
   const lifecycle = window.PluginLifecycle;
+  const client = window.PluginRecoveryClient;
   const host = ptcRecoveryHost();
-  if (!lifecycle || !host || !template?.id) {
+  if (!lifecycle || !client || !host || !template?.id) {
     ptcOpenPluginsPage();
     return;
   }
@@ -1062,23 +1059,15 @@ async function ptcStartRecovery(action, template, readiness) {
   ptcRecoveryBlueprintKey = ptcSelectionKey(template);
   ptcRecoveryContext = { action, pluginName };
 
-  const url = ptcRecoveryEndpoint(template);
   const generation = Number(readiness?.generation) || 0;
   const copy = ptcRecoveryCopy(action, readiness?.dependency?.displayName);
 
   const flow = lifecycle.createFlow({
-    preview: () =>
-      lifecycle.request('POST', url, { action, plugin: pluginName, confirm: false, generation }),
+    preview: () => client.previewRecovery(template.id, action, pluginName, generation),
     // A reviewed release is confirmed by the version the preview disclosed, so
     // a release published in between is refused rather than installed unseen.
     apply: preview =>
-      lifecycle.request('POST', url, {
-        action,
-        plugin: pluginName,
-        confirm: true,
-        generation,
-        release: String(preview?.release || '') || undefined
-      }),
+      client.confirmRecovery(template.id, action, pluginName, generation, preview?.release),
     onState: (state, payload) =>
       ptcRenderRecovery(state, payload, { action, template, copy, pluginName })
   });

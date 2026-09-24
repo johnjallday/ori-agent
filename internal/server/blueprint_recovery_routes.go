@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
+	"github.com/johnjallday/ori-agent/internal/setupjourney"
 )
 
 // Blueprint dependency recovery.
@@ -248,15 +249,51 @@ func declaredPluginSource(template projecttemplates.Template, name string) strin
 }
 
 func (s *Server) deriveRecoveryReadiness(template projecttemplates.Template) blueprintreadiness.Readiness {
-	sources := blueprintreadiness.Sources{Catalog: s.projectTemplateCatalog}
+	var installed installedPluginLister
 	if s.Handlers != nil && s.Handlers.Plugin != nil {
-		if list, err := s.Handlers.Plugin.Manager().List(); err == nil {
-			sources.Installed = list
-		} else {
-			sources.DependencyStateUnavailable = true
-		}
+		installed = s.Handlers.Plugin.Manager()
 	}
-	return blueprintreadiness.Derive(template, sources)
+	return blueprintreadiness.Derive(template, recoveryReadinessSources(installed, s.projectTemplateCatalog))
+}
+
+type installedPluginLister interface {
+	List() ([]plugin.InstalledPlugin, error)
+}
+
+// recoveryReadinessSources is the one input set blueprint recovery derives
+// readiness from. The setup quest's Home-provider read uses it too, so the
+// quest and the Create Workspace card describe a plugin state identically.
+func recoveryReadinessSources(installed installedPluginLister, catalog projecttemplates.RuntimeCatalog) blueprintreadiness.Sources {
+	sources := blueprintreadiness.Sources{Catalog: catalog}
+	if installed == nil {
+		return sources
+	}
+	if list, err := installed.List(); err == nil {
+		sources.Installed = list
+	} else {
+		sources.DependencyStateUnavailable = true
+	}
+	return sources
+}
+
+// questHomeProviderSource derives a split blueprint's Home-provider state for
+// the setup quest's group screen, exactly as the recovery endpoint does.
+type questHomeProviderSource struct {
+	installed installedPluginLister
+	catalog   projecttemplates.RuntimeCatalog
+}
+
+func (s questHomeProviderSource) HomeProviderState(_ context.Context, template projecttemplates.Template) (setupjourney.HomeProviderState, error) {
+	if template.AssistantProject == nil {
+		return setupjourney.HomeProviderState{}, errors.New("blueprint has no independent Home")
+	}
+	state := setupjourney.HomeProviderState{
+		Readiness: blueprintreadiness.Derive(template, recoveryReadinessSources(s.installed, s.catalog)),
+	}
+	if provider, ok := reviewedHomeProviderFor(template, template.AssistantProject.Home.ProviderPluginID); ok {
+		state.DisplayName, state.MinimumVersion, state.Reviewed = provider.DisplayName, provider.MinimumVersion, true
+	}
+	return state, nil
 }
 
 // currentBlueprintID reports the qualified ID this blueprint now has in the

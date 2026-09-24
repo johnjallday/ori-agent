@@ -192,6 +192,10 @@ const BUILDING_ART_SOURCE = readFileSync(
   'utf8'
 );
 const LIFECYCLE_SOURCE = readFileSync(new URL('./plugin-lifecycle.js', import.meta.url), 'utf8');
+const RECOVERY_CLIENT_SOURCE = readFileSync(
+  new URL('./plugin-recovery-client.js', import.meta.url),
+  'utf8'
+);
 const PICKER_SOURCE = readFileSync(
   new URL('./project-templates-manage.js', import.meta.url),
   'utf8'
@@ -253,6 +257,7 @@ function loadModules() {
   vm.runInContext(READINESS_SOURCE, sandbox, { filename: 'blueprint-readiness.js' });
   vm.runInContext(BUILDING_ART_SOURCE, sandbox, { filename: 'workspace-building-art.js' });
   vm.runInContext(LIFECYCLE_SOURCE, sandbox, { filename: 'plugin-lifecycle.js' });
+  vm.runInContext(RECOVERY_CLIENT_SOURCE, sandbox, { filename: 'plugin-recovery-client.js' });
   vm.runInContext(PICKER_SOURCE, sandbox, { filename: 'project-templates-manage.js' });
   // The page's own startup, so the modal's show/hidden handlers are wired the
   // way they are in the browser.

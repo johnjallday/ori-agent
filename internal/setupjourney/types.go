@@ -122,8 +122,11 @@ const (
 	ReasonRuntimeSetupRequired               ReasonCode = "runtime_setup_required"
 	ReasonRuntimeNeedsAttention              ReasonCode = "runtime_needs_attention"
 	ReasonHomeUnavailable                    ReasonCode = "home_unavailable"
-	ReasonStaffingRequired                   ReasonCode = "staffing_required"
-	ReasonStaffingNeedsAttention             ReasonCode = "staffing_needs_attention"
+	// ReasonHomeProviderMissing: a split blueprint's Home comes from a plugin
+	// that is not installed, switched off, or not compatible yet.
+	ReasonHomeProviderMissing    ReasonCode = "home_provider_missing"
+	ReasonStaffingRequired       ReasonCode = "staffing_required"
+	ReasonStaffingNeedsAttention ReasonCode = "staffing_needs_attention"
 
 	// Account-link shape reasons. Each maps from one mailbox readiness verdict
 	// that blocks progress; unfinished first-time setup (connect Google, enable
@@ -149,7 +152,7 @@ var validReasonCodes = map[ReasonCode]struct{}{
 	ReasonBlueprintUnavailable:               {}, ReasonAssistantProgramMismatch: {},
 	ReasonProjectSelectionRequired: {}, ReasonProjectScopeInvalid: {}, ReasonProjectAlreadyConnected: {},
 	ReasonProjectUnavailable: {}, ReasonRuntimeSetupRequired: {}, ReasonRuntimeNeedsAttention: {},
-	ReasonHomeUnavailable: {}, ReasonStaffingRequired: {}, ReasonStaffingNeedsAttention: {},
+	ReasonHomeUnavailable: {}, ReasonHomeProviderMissing: {}, ReasonStaffingRequired: {}, ReasonStaffingNeedsAttention: {},
 	ReasonWorkspaceRequired: {}, ReasonAccountConnectionNotConfigured: {},
 	ReasonAccountReconnectRequired: {}, ReasonAccountVaultRepairRequired: {},
 	ReasonMailboxLinkRequired: {}, ReasonMailboxAccountUnavailable: {},

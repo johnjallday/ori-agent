@@ -86,7 +86,10 @@ const state = {
   busy: false,
   commitLocked: false,
   modal: null,
-  groupTemplate: null
+  groupTemplate: null,
+  // The in-quest Home-provider recovery: a disclosure awaiting confirmation,
+  // or the last refused/failed attempt. Keyed to its run and plugin.
+  providerRecovery: null
 };
 
 function byID(id) {
@@ -181,9 +184,67 @@ export function setupJourneyReceiptRows(journey, step) {
         .join(' ')
     ]);
   }
+  const providerRow = homeProviderReceiptRow(step?.home_provider);
+  if (providerRow) rows.push(providerRow);
   rows.push(...accountStepReceiptRows(step));
   if (journey?.lifecycle === 'ready') rows.push(['Setup', 'Ready']);
   return rows.filter(row => row[1]);
+}
+
+// homeProviderReceiptRow states the plugin that provides a split blueprint's
+// Home: its ID, its version once installed, and where its lifecycle stands.
+export function homeProviderReceiptRow(provider) {
+  const pluginID = String(provider?.plugin_id || '').trim();
+  if (!pluginID) return null;
+  const version = provider.installed ? String(provider.version || '').trim() : '';
+  const lifecycle = !provider.installed
+    ? 'Not installed'
+    : provider.enabled
+      ? 'Installed · Enabled'
+      : 'Installed · Switched off';
+  return ['Home provider', `${[pluginID, version].filter(Boolean).join(' ')} · ${lifecycle}`];
+}
+
+// homeProviderOffer picks the one recovery the group screen offers for a
+// missing Home provider. Only a provider on the host's reviewed list is
+// installed from here; any other is left to the Plugins page.
+export function homeProviderOffer(provider) {
+  const actions = Array.isArray(provider?.actions) ? provider.actions : [];
+  const name = provider?.reviewed ? String(provider.display_name || '').trim() : '';
+  if (name && actions.includes('install_plugin')) {
+    return { action: 'install_plugin', label: `Install ${name}…`, confirm: 'Install' };
+  }
+  return null;
+}
+
+// homeProviderDisclosureRows are the facts shown above the trust report before
+// the user confirms: what will be installed, the reviewed floor, and its source.
+export function homeProviderDisclosureRows(provider, preview) {
+  return [
+    ['Release', String(preview?.release || '').trim()],
+    ['Minimum reviewed version', String(provider?.minimum_version || '').trim()],
+    ['Installed from', String(preview?.source || '').trim()]
+  ].filter(row => row[1]);
+}
+
+// homeProviderRecoveryFailure turns a refused or failed recovery call into the
+// copy the group screen shows. The endpoint's own outcome wins; a transport
+// failure falls back to the lifecycle client's message.
+export function homeProviderRecoveryFailure(result) {
+  const outcome = result?.data?.outcome || {};
+  const step = Array.isArray(outcome.steps) ? outcome.steps.find(item => item?.message) : null;
+  return {
+    message:
+      String(outcome.summary || '').trim() ||
+      String(result?.error || '').trim() ||
+      'That did not work. Nothing was changed.',
+    detail: [String(step?.message || '').trim(), String(outcome.detail || '').trim()]
+      .filter(Boolean)
+      .join(' '),
+    // Only a reachable server answered about the current plugin state; a
+    // transport failure leaves nothing new to re-read.
+    reread: Number(result?.status) > 0
+  };
 }
 
 export const RELEASE_UNCHECKED_NOTE =
@@ -739,6 +800,8 @@ function renderWorkspaceLaunch(journey) {
         },
         true
       );
+    } else if (groupBuildState(journey) === 'provider') {
+      renderHomeProviderGroup(journey, project, button);
     } else if (groupBuildState(journey) !== 'create') {
       elements.stepDescription.textContent =
         'The existing setup group could not be verified. Check its status before building anything; no replacement group will be created.';
@@ -834,6 +897,154 @@ function renderWorkspaceLaunch(journey) {
     } else button('Create New Workspace', launchWorkspaceCreator, true);
   }
   renderReview();
+}
+
+// renderHomeProviderGroup is the group screen while a split blueprint's Home
+// provider is not ready. Its copy is the server's derivation — the Create
+// Workspace card's own words — and its one recovery goes through the same
+// reviewed endpoint the card uses.
+function renderHomeProviderGroup(journey, step, button) {
+  const elements = ui();
+  const provider = step.home_provider;
+  const offer = homeProviderOffer(provider);
+  const recovery =
+    state.providerRecovery?.runID === journey.run_id &&
+    state.providerRecovery?.pluginID === provider.plugin_id
+      ? state.providerRecovery
+      : null;
+  elements.stepDescription.textContent = [provider.summary, provider.detail]
+    .filter(Boolean)
+    .join(' ');
+  appendRows(elements.receipt, setupJourneyReceiptRows(journey, step));
+  if (recovery?.phase === 'review') {
+    renderHomeProviderDisclosure(provider, recovery);
+    button(recovery.confirmLabel, confirmHomeProviderRecovery, true);
+    button('Cancel', () => {
+      state.providerRecovery = null;
+      render();
+      elements.stepTitle.focus();
+    });
+    return;
+  }
+  if (recovery?.phase === 'failed') {
+    const alert = makeText('p', 'setup-journey__provider-error', recovery.message);
+    alert.setAttribute('role', 'alert');
+    alert.tabIndex = -1;
+    elements.draft.appendChild(alert);
+    if (recovery.detail) {
+      elements.draft.appendChild(makeText('p', 'setup-journey__scope-note', recovery.detail));
+    }
+  }
+  if (offer) button(offer.label, () => startHomeProviderRecovery(provider, offer), true);
+  button('Open Plugins', () => window.location.assign(PLUGINS_PAGE_URL));
+  button('Check Again', () => {
+    state.providerRecovery = null;
+    void refreshJourney();
+  });
+}
+
+// renderHomeProviderDisclosure shows, in the step itself, exactly what the
+// reviewed release will register — the card's trust report — before Install.
+function renderHomeProviderDisclosure(provider, recovery) {
+  const elements = ui();
+  const panel = makeText('div', 'setup-journey__provider-review', '');
+  panel.setAttribute('role', 'group');
+  panel.setAttribute('aria-label', `Review ${provider.display_name || provider.plugin_id}`);
+  panel.tabIndex = -1;
+  panel.appendChild(
+    makeText(
+      'p',
+      'setup-journey__provider-review-intro',
+      `${provider.display_name || provider.plugin_id} will be able to do the following on this computer:`
+    )
+  );
+  appendRows(panel, homeProviderDisclosureRows(provider, recovery.preview));
+  const lifecycle = window.PluginLifecycle;
+  if (lifecycle?.renderTrustReport)
+    panel.appendChild(lifecycle.renderTrustReport(recovery.preview?.trust));
+  elements.draft.appendChild(panel);
+}
+
+async function startHomeProviderRecovery(provider, offer) {
+  const client = window.PluginRecoveryClient;
+  if (!client || !window.PluginLifecycle) {
+    window.location.assign(PLUGINS_PAGE_URL);
+    return;
+  }
+  if (state.busy || !state.journey) return;
+  const runID = state.journey.run_id;
+  showError('');
+  setBusy(true, `Reading what ${provider.display_name || provider.plugin_id} will add…`);
+  try {
+    const result = await client.previewRecovery(
+      provider.template_id,
+      offer.action,
+      provider.plugin_id,
+      provider.generation
+    );
+    if (state.journey?.run_id !== runID) return;
+    state.providerRecovery = result?.ok
+      ? {
+          runID,
+          pluginID: provider.plugin_id,
+          templateID: provider.template_id,
+          action: offer.action,
+          generation: provider.generation,
+          confirmLabel: offer.confirm,
+          preview: result.data || {},
+          phase: 'review'
+        }
+      : {
+          runID,
+          pluginID: provider.plugin_id,
+          phase: 'failed',
+          ...homeProviderRecoveryFailure(result)
+        };
+    render();
+  } finally {
+    setBusy(false);
+  }
+  ui()?.draft?.firstElementChild?.focus?.();
+}
+
+// confirmHomeProviderRecovery applies the disclosed release, then re-reads the
+// step so the screen moves on without Check Again. A refusal or failure keeps
+// the offer and says why; nothing was applied.
+async function confirmHomeProviderRecovery() {
+  const recovery = state.providerRecovery;
+  const client = window.PluginRecoveryClient;
+  if (!client || recovery?.phase !== 'review' || state.busy) return;
+  setBusy(true, `Installing ${recovery.pluginID}…`, { lockClose: true });
+  let result = null;
+  try {
+    result = await client.confirmRecovery(
+      recovery.templateID,
+      recovery.action,
+      recovery.pluginID,
+      recovery.generation,
+      recovery.preview?.release
+    );
+  } finally {
+    setBusy(false);
+  }
+  const outcome = result?.data?.outcome || {};
+  const failure = homeProviderRecoveryFailure(result);
+  if (result?.ok && outcome.completed !== false) {
+    state.providerRecovery = null;
+  } else {
+    // An install that could not be switched on reports its partial outcome
+    // here; the re-read then offers what is left to do.
+    state.providerRecovery = {
+      runID: recovery.runID,
+      pluginID: recovery.pluginID,
+      phase: 'failed',
+      ...failure
+    };
+  }
+  if (result?.ok || failure.reread) await refreshJourney();
+  else render();
+  const live = ui()?.live;
+  if (live && result?.ok && outcome.summary) live.textContent = outcome.summary;
 }
 
 // The group stage names the same Group Template and the same group/coordinator
@@ -2039,6 +2250,7 @@ export async function openSpecialistSetupJourney(requested = null) {
     let payload = await request(endpoint);
     state.journey = payload?.setup_journey;
     state.groupTemplate = null;
+    state.providerRecovery = null;
     if (!state.journey) return false;
     // An unresolved owner operation blocks presentation writes, not access
     // to its status. Show the authorized read without claiming another action.
