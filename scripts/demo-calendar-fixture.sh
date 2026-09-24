@@ -10,6 +10,11 @@
 #
 # Usage:
 #   ./scripts/demo-calendar-fixture.sh <port>
+#   ./scripts/demo-calendar-fixture.sh --build-only
+#
+# --build-only builds the fixture binary and prints its path, touching no
+# server: tests/personal-assistant-meetings.spec.ts registers it itself from
+# FAKE_CALENDAR_MCP_BIN.
 #
 # The port is required so the script can never fall through to the default app
 # port of a real, non-sandboxed Ori. Start the server with `wt demo` (or
@@ -27,9 +32,32 @@
 
 set -euo pipefail
 
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -n "$repo_root" ]] || {
+	echo "must run inside a git worktree" >&2
+	exit 2
+}
+
+tmp_root="${TMPDIR:-/tmp}"
+tmp_root="${tmp_root%/}"
+bin_dir="$tmp_root/ori-fake-calendar-mcp"
+binary="$bin_dir/fake-calendar-mcp"
+
+build_fixture() {
+	mkdir -p "$bin_dir"
+	(cd "$repo_root" && go build -o "$binary" ./tests/fixtures/fake-calendar-mcp)
+	echo "FAKE_CALENDAR_MCP_BIN=$binary"
+}
+
+if [[ "${1:-}" == "--build-only" ]]; then
+	build_fixture
+	exit 0
+fi
+
 port="${1:-}"
 if [[ ! "$port" =~ ^[0-9]+$ ]]; then
 	echo "usage: $0 <port>   (the demo server's port, e.g. 8931)" >&2
+	echo "       $0 --build-only" >&2
 	exit 2
 fi
 base="http://localhost:$port"
@@ -40,26 +68,17 @@ command -v jq >/dev/null || {
 	exit 2
 }
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-[[ -n "$repo_root" ]] || {
-	echo "must run inside a git worktree" >&2
-	exit 2
-}
-
-# The fixture builds its events in this machine's local time, so the display
-# timezone must be the same zone or "today" lands on a different calendar day.
-# CALENDAR_DISPLAY_TZ overrides it (the Calendar Ops spec pins America/New_York).
+# The fixture builds its events in the server process's local time (it runs as
+# the server's child), so the display timezone must be that zone or "today"
+# lands on a different calendar day. CALENDAR_DISPLAY_TZ overrides it: set it
+# to match a server started with TZ=..., or to pin a zone (the Calendar Ops
+# spec pins America/New_York).
 display_tz="${CALENDAR_DISPLAY_TZ:-}"
 if [[ -z "$display_tz" ]]; then
 	localtime="$(readlink /etc/localtime 2>/dev/null || true)"
 	display_tz="${localtime##*/zoneinfo/}"
 	[[ -n "$localtime" && "$display_tz" != "$localtime" ]] || display_tz="UTC"
 fi
-
-tmp_root="${TMPDIR:-/tmp}"
-tmp_root="${tmp_root%/}"
-bin_dir="$tmp_root/ori-fake-calendar-mcp"
-binary="$bin_dir/fake-calendar-mcp"
 
 # call METHOD PATH [JSON] — prints the body; exits on transport failure or non-2xx.
 call() {
@@ -102,9 +121,7 @@ if [[ "$(jq -r '.needs_onboarding' <<<"$onboarding")" == "true" ]]; then
 	exit 1
 fi
 
-mkdir -p "$bin_dir"
-(cd "$repo_root" && go build -o "$binary" ./tests/fixtures/fake-calendar-mcp)
-echo "FAKE_CALENDAR_MCP_BIN=$binary"
+build_fixture
 
 if [[ "$(status_of "/api/mcp/servers/$server_name/status")" == 2* ]]; then
 	echo "reusing registered MCP server $server_name" >&2

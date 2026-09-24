@@ -110,12 +110,39 @@ async function bindAndMapConnector(request: APIRequestContext, workspaceId: stri
   expect(saveBody.state).toBe('ready');
 }
 
+// registerFixtureIfProvided registers the in-repo fake calendar from
+// FAKE_CALENDAR_MCP_BIN (./scripts/demo-calendar-fixture.sh --build-only) when
+// the server does not already have one, so this suite also runs on a fresh
+// ./scripts/e2e-fresh.sh sandbox. Without the variable nothing changes: the
+// connector must already be registered, as before.
+async function registerFixtureIfProvided(request: APIRequestContext) {
+  const bin = process.env.FAKE_CALENDAR_MCP_BIN;
+  if (!bin) return;
+  const existing = await request.get(`/api/mcp/servers/${CONNECTOR_SERVER_NAME}/status`);
+  if (!existing.ok()) {
+    const add = await request.post('/api/mcp/servers', {
+      data: { name: CONNECTOR_SERVER_NAME, transport: 'stdio', command: bin, enabled: true }
+    });
+    expect(add.ok(), await add.text()).toBeTruthy();
+  }
+  await request.post(`/api/mcp/servers/${CONNECTOR_SERVER_NAME}/connect`);
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`/api/mcp/servers/${CONNECTOR_SERVER_NAME}/status`)).json())
+          .status,
+      { timeout: 15000 }
+    )
+    .toBe('running');
+}
+
 test.describe.serial('Calendar Ops', () => {
   let readyWorkspaceId: string;
 
   test.beforeAll(async ({ request }) => {
     const skipRes = await request.post('/api/onboarding/skip');
     expect(skipRes.ok()).toBeTruthy();
+    await registerFixtureIfProvided(request);
     readyWorkspaceId = await createCalendarOpsWorkspace(request, `Calendar Ops E2E ${RUN_SUFFIX}`);
     await bindAndMapConnector(request, readyWorkspaceId);
   });
