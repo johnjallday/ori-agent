@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/charactercatalog"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -191,6 +192,49 @@ func TestDecodeStaffingInput_ModeIsBackwardCompatible(t *testing.T) {
 	}
 	if _, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A","mode":"bind","model":"gpt-4o"}]}`)); err == nil {
 		t.Fatal("bind accepted a model it cannot apply")
+	}
+}
+
+// A staged face decodes to the canonical record — catalog version assigned by
+// the server — so review and commit hash the same value; a bind cannot carry
+// one, and an upload cannot be staged for an agent that does not exist yet.
+func TestDecodeStaffingInput_Appearance(t *testing.T) {
+	cat, err := charactercatalog.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	working := cat.Working()
+	if len(working) == 0 {
+		t.Fatal("the catalog declares no working character")
+	}
+	id, version := string(working[0].ID), working[0].EntryVersion
+
+	staged, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A","appearance":{"mode":"character","character":{"catalog_id":"` + id + `"}}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := staged.Roles[0].Appearance
+	if got == nil || got.CharacterCatalogID() != id || got.CharacterCatalogVersion() != version {
+		t.Fatalf("appearance = %#v, want %s@%d", got, id, version)
+	}
+	// Absent stays absent, so a request taken before the field existed still
+	// encodes byte-for-byte as it did.
+	plain, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(mustJSON(t, plain)), "appearance") {
+		t.Fatalf("an unstaged role encodes an appearance: %s", mustJSON(t, plain))
+	}
+
+	if _, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A","mode":"bind","appearance":{"mode":"generated"}}]}`)); err == nil {
+		t.Fatal("bind accepted an appearance it cannot apply")
+	}
+	if _, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A","appearance":{"mode":"uploaded"}}]}`)); err == nil {
+		t.Fatal("an upload was staged for an agent that does not exist")
+	}
+	if _, err := decodeStaffingInput([]byte(`{"roles":[{"role_id":"a","name":"A","appearance":{"character":{"catalog_id":"no-such-character"}}}]}`)); err == nil {
+		t.Fatal("an unknown character was accepted")
 	}
 }
 

@@ -64,12 +64,32 @@ function fakeHost(values) {
 test('the inert shared core has one template ID and no preassigned field IDs', () => {
   assert.match(template, /id="agentCreateFormTemplate"/);
   assert.equal((template.match(/\sid="/g) || []).length, 1);
-  for (const field of ['name', 'model', 'reasoningEffort', 'systemPrompt']) {
+  for (const field of ['name', 'role', 'model', 'reasoningEffort', 'systemPrompt']) {
     assert.match(template, new RegExp(`data-agent-create-field="${field}"`));
   }
   assert.doesNotMatch(template, /data-agent-create-field="type"/);
   assert.match(template, /data-agent-create-for="Name"/);
   assert.match(template, /data-agent-create-describedby="NameHelp NameError"/);
+});
+
+test('the role select offers Unspecialized plus the six catalog roles, by slug', () => {
+  const roleSection = template.match(/data-agent-create-section="role">([\s\S]*?)<\/select>/);
+  assert.ok(roleSection, 'the template has a role section');
+  const slugs = [...roleSection[1].matchAll(/<option value="([^"]*)"/g)].map(match => match[1]);
+  assert.deepEqual(slugs, [
+    'general',
+    'orchestrator',
+    'researcher',
+    'analyzer',
+    'synthesizer',
+    'validator',
+    'specialist'
+  ]);
+  assert.match(
+    roleSection[1],
+    />Unspecialized</,
+    'general reads as Unspecialized, as on the roster'
+  );
 });
 
 test('scoped IDs are deterministic and reject an empty prefix', () => {
@@ -81,6 +101,7 @@ test('scoped IDs are deterministic and reject an empty prefix', () => {
 test('profiles expose only fields backed by their contracts', () => {
   assert.deepEqual(Form.profileFields('standalone'), [
     'name',
+    'role',
     'model',
     'provider',
     'reasoningEffort',
@@ -93,6 +114,29 @@ test('profiles expose only fields backed by their contracts', () => {
     'reasoningEffort',
     'systemPrompt'
   ]);
+});
+
+test('a template mount drops the role section; a standalone mount keeps every section', () => {
+  const removed = [];
+  const root = {
+    querySelector(selector) {
+      const match = selector.match(/data-agent-create-section="(.+)"/);
+      return match ? { remove: () => removed.push(match[1]) } : null;
+    }
+  };
+  assert.deepEqual(Form.dropOffProfileSections(root, 'template'), ['role']);
+  assert.deepEqual(removed, ['role']);
+  assert.deepEqual(Form.dropOffProfileSections(root, 'standalone'), []);
+  assert.deepEqual(removed, ['role'], 'nothing else is touched');
+});
+
+test('standalone extraction returns the role as a lowercase slug; template extraction has none', () => {
+  const values = { name: 'Agent', model: 'm', provider: 'p', role: ' Researcher ' };
+  assert.equal(Form.extract(fakeHost(values), 'standalone').values.role, 'researcher');
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(Form.extract(fakeHost(values), 'template').values, 'role'),
+    false
+  );
 });
 
 test('name validation matches the Go create and override contract', () => {

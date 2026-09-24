@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/johnjallday/ori-agent/internal/agentappearance"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -128,6 +129,11 @@ type staffingRoleInput struct {
 	// ReasoningEffort is omitted when empty so a request without it hashes
 	// exactly as one taken before the field existed (see Mode above).
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Appearance is the face staged for the agent a create makes: Generated
+	// or Character, never an upload (FR-46). Omitted when nil for the same
+	// digest reason as Mode. decodeStaffingInput stores the validated record,
+	// so review and commit hash the same canonical value.
+	Appearance *types.AgentAppearance `json:"appearance,omitempty"`
 }
 
 // binds reports whether this role attaches an existing agent rather than
@@ -329,6 +335,7 @@ func (a *AssistantStaffingAdapter) commitReviewedRoles(scope ReadScope, owner *s
 				Role: types.AgentRole(role.Role), Model: requested.Model,
 				LLMProvider: requested.Provider, SystemPrompt: role.SystemPrompt,
 				ReasoningEffort: requested.ReasoningEffort,
+				Appearance:      requested.Appearance.Clone(),
 			}); err != nil {
 				rollback()
 				return CanonicalResult{}, ErrConflict
@@ -525,6 +532,8 @@ type RoleFill struct {
 	Provider        string
 	Model           string
 	ReasoningEffort string
+	// Appearance is the staged face for a create; ignored for a bind.
+	Appearance *types.AgentAppearance
 }
 
 // StaffRoleOnWorkspace fills one role owned by the exact workspace in the
@@ -563,6 +572,7 @@ func (a *AssistantStaffingAdapter) StaffRoleOnWorkspace(_ context.Context, works
 	wireInput := staffingInput{Roles: []staffingRoleInput{{
 		RoleID: requested.RoleID, Mode: requested.Mode, Name: requested.Name,
 		Provider: requested.Provider, Model: requested.Model, ReasoningEffort: requested.ReasoningEffort,
+		Appearance: requested.Appearance,
 	}}}
 	raw, err := json.Marshal(wireInput)
 	if err != nil {
@@ -694,10 +704,13 @@ func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx cont
 				if scopeByRole[fill.RoleID] != target || optionalByRole[fill.RoleID] != optional {
 					continue
 				}
-				role := staffingRoleInput{RoleID: fill.RoleID, Name: fill.Name, Provider: fill.Provider, Model: fill.Model, ReasoningEffort: fill.ReasoningEffort}
+				role := staffingRoleInput{
+					RoleID: fill.RoleID, Name: fill.Name, Provider: fill.Provider, Model: fill.Model,
+					ReasoningEffort: fill.ReasoningEffort, Appearance: fill.Appearance,
+				}
 				if fill.Mode == StaffingModeBind {
 					role.Mode = StaffingModeBind
-					role.Provider, role.Model, role.ReasoningEffort = "", "", ""
+					role.Provider, role.Model, role.ReasoningEffort, role.Appearance = "", "", "", nil
 				}
 				input.Roles = append(input.Roles, role)
 			}
@@ -1202,8 +1215,15 @@ func decodeStaffingInput(raw json.RawMessage) (staffingInput, error) {
 		// Binding attaches an existing definition as it stands. Its provider and
 		// model are the user's, set on /agents; accepting them here would look
 		// like this request could change them, and it cannot.
-		if role.binds() && (role.Provider != "" || role.Model != "" || role.ReasoningEffort != "") {
+		if role.binds() && (role.Provider != "" || role.Model != "" || role.ReasoningEffort != "" || role.Appearance != nil) {
 			return staffingInput{}, ErrInvalid
+		}
+		if role.Appearance != nil {
+			appearance, err := agentappearance.ValidateStaged(role.Appearance)
+			if err != nil {
+				return staffingInput{}, ErrInvalid
+			}
+			role.Appearance = appearance
 		}
 		if role.RoleID == "" || role.Name == "" || len(role.RoleID) > 80 || len(role.Name) > 80 || len(role.Provider) > 120 || len(role.Model) > 240 || strings.ContainsAny(role.Name, "\r\n\x00") {
 			return staffingInput{}, ErrInvalid

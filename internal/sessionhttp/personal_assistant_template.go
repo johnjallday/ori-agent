@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	personalAssistantSupportSharedDataKey = "personal_assistant_presentation"
+	personalAssistantSupportSharedDataKey = personalhq.PersonalAssistantPresentationKey
 	personalAssistantSupportGroup         = "assistant_support"
 	maxPersonalAssistantPromptFragment    = 2048
 	maxPersonalAssistantCombinedPrompt    = 8192

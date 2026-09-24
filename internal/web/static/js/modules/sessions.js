@@ -5172,6 +5172,15 @@ const sessionManager = {
       values: setupValues
     });
     this.applyWorkspaceAgentNameLock(this.workspaceAgentSetupForm, lockReason);
+    // A face already staged for this entry reopens as staged; otherwise the
+    // blueprint's declared face, or the suggestion for the entry's role.
+    const planAgent = this.planAgentAt(index) || {};
+    const staged = draft.overrides?.get?.(index) || null;
+    this.mountDraftAppearanceEditor(this.workspaceAgentSetupForm, {
+      role: planAgent.role || recommended.role || '',
+      appearance:
+        (staged && staged.appearance) || planAgent.appearance || recommended.appearance || null
+    });
 
     const createButton = document.getElementById('createAgentBtn');
     if (createButton) {
@@ -5271,6 +5280,7 @@ const sessionManager = {
       delete createButton.dataset.workspaceDraftOriginalHtml;
       createButton.disabled = false;
     }
+    this.destroyDraftAppearanceEditor();
     window.resetStandaloneAgentCreateForm?.();
 
     this.workspaceAgentSetupIndex = null;
@@ -5379,6 +5389,8 @@ const sessionManager = {
     const saveButton = document.getElementById('createAgentBtn');
     if (saveButton?.disabled) return;
     if (saveButton) saveButton.disabled = true;
+    const appearance = this.draftAppearanceRequest();
+    if (appearance) values.appearance = appearance;
     api.saveSetup(draft, index, values);
     this.invalidateGroupRequirementReview();
     const name = values.name;
@@ -6020,6 +6032,10 @@ const sessionManager = {
       providers: Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [],
       values: { name: operation.roleLabel, type: 'tool_calling' }
     });
+    // Hidden with the form while Assign (or a stale clear) is the mode.
+    this.mountDraftAppearanceEditor(this.workspaceGroupRoleSetupForm, {
+      role: canonicalRole.primary ? 'orchestrator' : 'specialist'
+    });
     if (canonicalRole.needs_clear) {
       agentModalElement.classList.add('is-workspace-group-role-assign');
       const createButton = document.getElementById('createAgentBtn');
@@ -6170,6 +6186,8 @@ const sessionManager = {
         system_prompt: result.values.systemPrompt || ''
       };
       if (result.values.reasoningEffort) body.reasoning_effort = result.values.reasoningEffort;
+      const appearance = this.draftAppearanceRequest();
+      if (appearance) body.appearance = appearance;
     }
 
     operation.phase = 'committing';
@@ -6289,6 +6307,7 @@ const sessionManager = {
     this.workspaceGroupRoleSetupRequestId += 1;
     this.workspaceGroupRoleSetup = null;
     this.workspaceGroupRoleSetupForm = null;
+    this.destroyDraftAppearanceEditor();
     modal.classList.remove('is-workspace-agent-draft', 'is-workspace-group-role-assign');
     delete modal.dataset.agentCreateMode;
     const title = document.getElementById('addAgentModalTitleText');
@@ -6339,6 +6358,76 @@ const sessionManager = {
     } else {
       afterResume();
     }
+  },
+
+  // ---- Draft-mode appearance ------------------------------------------------
+  // Every draft mode of the Create Agent modal mounts the same Appearance
+  // editor the standalone modal and the Agents page use, in staged mode, so a
+  // face can be chosen wherever an agent is set up. Only Generated and
+  // Character are offered: an upload needs an agent to belong to, and none of
+  // these agents exist until the workspace (or the group role) is committed
+  // (FR-46). The choice travels with the staged fill or override and is
+  // applied by the server when it creates the agent.
+  mountDraftAppearanceEditor(form, options = {}) {
+    this.destroyDraftAppearanceEditor();
+    const section = document.getElementById('agentCreateAppearanceSection');
+    const host = document.getElementById('agentCreateAppearanceHost');
+    if (!section || !host || !window.AgentAppearanceEditor) return null;
+    const nameInput = form?.get?.('name') || null;
+    const appearance = options.appearance || null;
+    const editor = window.AgentAppearanceEditor.create({
+      host,
+      idPrefix: 'agentCreateAppearance',
+      mode: 'create',
+      agent: {
+        name: String(nameInput?.value || ''),
+        source: 'user',
+        role: String(options.role || '')
+      },
+      appearance,
+      allowedModes: ['generated', 'character'],
+      takenCharacterIds: () => this.draftTakenCharacterIds(),
+      // A face the blueprint declares, or one already staged, is kept as it
+      // is; otherwise the role's suggested character, as on every other
+      // create form.
+      suggestCharacter: !appearance
+    });
+    if (!editor) return null;
+    // The generated portrait is seeded from the name, so the preview follows
+    // the field as it is typed. Only the preview repaints, never the editor.
+    const onName = () => editor.setAgentName(nameInput.value);
+    nameInput?.addEventListener('input', onName);
+    this.draftAppearance = { editor, nameInput, onName };
+    section.hidden = false;
+    return editor;
+  },
+
+  destroyDraftAppearanceEditor() {
+    const current = this.draftAppearance;
+    if (current) {
+      current.nameInput?.removeEventListener('input', current.onName);
+      current.editor?.destroy?.();
+    }
+    this.draftAppearance = null;
+    const host = document.getElementById('agentCreateAppearanceHost');
+    if (host) host.replaceChildren();
+    const section = document.getElementById('agentCreateAppearanceSection');
+    if (section) section.hidden = true;
+  },
+
+  // The staged choice as a create request sends it, or null when no editor is
+  // mounted — the caller then sends nothing and the server default applies.
+  draftAppearanceRequest() {
+    return this.draftAppearance?.editor?.createRequest?.() || null;
+  },
+
+  // Characters the user's saved agents already wear, so the picker suggests an
+  // unused one first. Reuse stays allowed; only the recommendation changes.
+  draftTakenCharacterIds() {
+    const agents = this.ensureWorkspaceTeamDraft?.()?.savedRoster?.agents || [];
+    return agents
+      .map(agent => String(agent?.appearance?.character?.catalog_id || '').trim())
+      .filter(Boolean);
   },
 
   // Create opens the app's canonical Create Agent form, prefilled for the role,
@@ -6412,6 +6501,12 @@ const sessionManager = {
       this.workspaceRoleSetupForm,
       this.workspaceRoleLockReason(roleId)
     );
+    // The slot's role drives the suggested face; a face the blueprint
+    // declares for the role is kept.
+    this.mountDraftAppearanceEditor(this.workspaceRoleSetupForm, {
+      role: proposed.role || (row.primary ? 'orchestrator' : 'specialist'),
+      appearance: proposed.appearance || null
+    });
 
     const createButton = document.getElementById('createAgentBtn');
     if (createButton) {
@@ -6513,7 +6608,8 @@ const sessionManager = {
         provider: values.provider,
         model: values.model,
         systemPrompt: values.systemPrompt,
-        reasoningEffort: values.reasoningEffort
+        reasoningEffort: values.reasoningEffort,
+        appearance: this.draftAppearanceRequest()
       })
     ) {
       return;
@@ -6557,6 +6653,7 @@ const sessionManager = {
       delete createButton.dataset.workspaceDraftOriginalHtml;
       createButton.disabled = false;
     }
+    this.destroyDraftAppearanceEditor();
     window.resetStandaloneAgentCreateForm?.();
 
     this.workspaceRoleSetupId = '';
@@ -6815,6 +6912,12 @@ const sessionManager = {
         reasoningEffort: create?.reasoningEffort || ''
       }
     });
+    // Group roles carry no proposed setup, so the suggestion follows the
+    // role's designation; a fill staged earlier reopens with its face.
+    this.mountDraftAppearanceEditor(this.groupTemplateRoleSetupForm, {
+      role: role.primary ? 'orchestrator' : 'specialist',
+      appearance: create?.appearance || null
+    });
 
     const createButton = document.getElementById('createAgentBtn');
     if (createButton) {
@@ -6888,7 +6991,8 @@ const sessionManager = {
         name,
         provider: result.values.provider,
         model: result.values.model,
-        reasoningEffort: result.values.reasoningEffort
+        reasoningEffort: result.values.reasoningEffort,
+        appearance: this.draftAppearanceRequest()
       })
     ) {
       return refuse('This role can no longer be changed. Close this form and review the team.');
@@ -6928,6 +7032,7 @@ const sessionManager = {
       delete createButton.dataset.workspaceDraftOriginalHtml;
       createButton.disabled = false;
     }
+    this.destroyDraftAppearanceEditor();
     window.resetStandaloneAgentCreateForm?.();
     this.groupTemplateRoleSetup = null;
     this.groupTemplateRoleSetupForm = null;

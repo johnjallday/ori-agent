@@ -59,6 +59,48 @@ func TestPutWorkspaceRole_AssistantHomeDispatchesCreateAndAssignToTheExactTarget
 	}
 }
 
+// The live group-role fill is the same wire shape as create-time staffing, so
+// a face staged in that form reaches the staffer validated, with its version.
+func TestPutWorkspaceRole_PassesStagedAppearanceToTheStaffer(t *testing.T) {
+	template := policyTemplate(projecttemplates.GroupPolicyRequired)
+	handler, _, cleanup := newPolicyHandler(t, &template)
+	defer cleanup()
+	homeID := preparePolicyHome(t, handler)
+	id, version := stagedCharacter(t)
+
+	var called []RoleStaffingFill
+	handler.SetAssistantWorkspaceRoleStaffer(func(_ context.Context, _ string, fills []RoleStaffingFill) error {
+		called = append([]RoleStaffingFill(nil), fills...)
+		return nil
+	})
+	body := `{"mode":"create","name":"Home Lead","appearance":{"mode":"character","character":{"catalog_id":"` + id + `"}}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/"+homeID+"/roles/portfolio_manager", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("workspaceID", homeID)
+	req.SetPathValue("roleID", "portfolio_manager")
+	response := httptest.NewRecorder()
+	handler.PutWorkspaceRole(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(called) != 1 || called[0].Appearance == nil || called[0].Appearance.CharacterCatalogID() != id || called[0].Appearance.CharacterCatalogVersion() != version {
+		t.Fatalf("callback fills=%#v, want the staged character %s@%d", called, id, version)
+	}
+
+	// An invalid face is a 400 before the staffer is reached.
+	called = nil
+	bad := `{"mode":"create","name":"Home Lead","appearance":{"mode":"uploaded"}}`
+	req = httptest.NewRequest(http.MethodPut, "/api/workspaces/"+homeID+"/roles/portfolio_manager", strings.NewReader(bad))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("workspaceID", homeID)
+	req.SetPathValue("roleID", "portfolio_manager")
+	response = httptest.NewRecorder()
+	handler.PutWorkspaceRole(response, req)
+	if response.Code != http.StatusBadRequest || called != nil {
+		t.Fatalf("status=%d called=%#v, want 400 and no staffing", response.Code, called)
+	}
+}
+
 func TestDeleteWorkspaceRole_AssistantHomeDispatchesToTheExactTarget(t *testing.T) {
 	template := policyTemplate(projecttemplates.GroupPolicyRequired)
 	handler, _, cleanup := newPolicyHandler(t, &template)

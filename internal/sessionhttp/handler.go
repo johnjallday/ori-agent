@@ -259,6 +259,8 @@ type RoleStaffingFill struct {
 	Provider        string
 	Model           string
 	ReasoningEffort string
+	// Appearance is the validated face staged for a create; nil for an assign.
+	Appearance *types.AgentAppearance
 }
 
 // SetAssistantRoleStaffer supplies the reviewed project-role batch callback

@@ -280,9 +280,14 @@
         heldElsewhere: '',
         templateAgentIndex: index,
         proposed: {
+          // The role and any declared face seed the Create form's Appearance
+          // editor: the suggested character follows the role, and a blueprint
+          // that declares a face keeps it. Both present only when declared.
+          ...(text(recommended.role) ? { role: text(recommended.role) } : {}),
           model: text(recommended.model),
           provider: text(recommended.provider),
           system_prompt: text(recommended.systemPrompt),
+          ...(recommended.appearance ? { appearance: recommended.appearance } : {}),
           ...(recommended.tools ? { tools: recommended.tools } : {})
         }
       };
@@ -296,6 +301,22 @@
     return flat.length <= 160 ? flat : flat.slice(0, 160).replace(/\s\S*$/, '') + '…';
   }
 
+  // The face a Create form staged, in the shape a create request sends: the
+  // requested source plus the colour and character choices behind it. An
+  // upload cannot travel here — the agent it belongs to does not exist until
+  // the workspace is created — so a staged Upload falls back to Generated,
+  // exactly as the shared editor's own createRequest() does (FR-46/FR-57).
+  function normalizeStagedAppearance(value) {
+    if (!value || typeof value !== 'object') return null;
+    const requested = text(value.mode).toLowerCase();
+    const color = text(value.generated && value.generated.color);
+    const catalogId = text(value.character && value.character.catalog_id);
+    const appearance = { mode: requested === 'character' && catalogId ? 'character' : 'generated' };
+    appearance.generated = color ? { color } : {};
+    if (catalogId) appearance.character = { catalog_id: catalogId };
+    return appearance;
+  }
+
   function normalizeFill(fill) {
     if (!fill || typeof fill !== 'object') return null;
     const mode = text(fill.mode) === FILL_ASSIGN ? FILL_ASSIGN : FILL_CREATE;
@@ -304,7 +325,7 @@
     // An assigned agent keeps its own definition entirely, so a fill that binds
     // one carries nothing but its name.
     if (mode === FILL_ASSIGN) return { mode, name };
-    return {
+    const normalized = {
       mode,
       name,
       provider: text(fill.provider),
@@ -315,6 +336,11 @@
       // The Create form's reasoning level; empty means the model's default.
       reasoningEffort: text(fill.reasoningEffort)
     };
+    // The face chosen in the Create form; absent means the blueprint's own,
+    // or the generated default.
+    const appearance = normalizeStagedAppearance(fill.appearance);
+    if (appearance) normalized.appearance = appearance;
+    return normalized;
   }
 
   // setRoleFill records that a role will be filled — by creating an agent for
@@ -774,6 +800,17 @@
       }
       if (!same) next[field] = value;
     });
+    // The face staged in the form is an override only when it differs from
+    // what the plan already declares for this entry, compared in the shape a
+    // request sends so a server-assigned catalog version never counts as an
+    // edit.
+    if (has(fields, 'appearance')) {
+      const staged = normalizeStagedAppearance(fields.appearance);
+      const declared = normalizeStagedAppearance(planAgent.appearance);
+      if (staged && JSON.stringify(stableValue(staged)) !== JSON.stringify(stableValue(declared))) {
+        next.appearance = staged;
+      }
+    }
     if (Object.keys(next).length > 0) {
       draft.overrides.set(index, next);
       if (!draft.overrideIdentities) draft.overrideIdentities = new Map();
@@ -1017,6 +1054,8 @@
       key: agentKey(name),
       name,
       source: 'blueprint',
+      // A staged face shows on the Team roster before anything is created,
+      // so the row already looks like the agent the request will make.
       identity: identityFrom(
         name,
         planAgent.action === 'reuse' && !renamed
@@ -1026,7 +1065,7 @@
             }
           : {
               role: definition.role,
-              appearance: definition.appearance
+              appearance: has(override, 'appearance') ? override.appearance : definition.appearance
             }
       ),
       lifecycle,
@@ -1222,6 +1261,7 @@
         Object.keys(OVERRIDE_FIELDS).forEach(field => {
           if (has(override, field)) payload[OVERRIDE_FIELDS[field]] = override[field];
         });
+        if (has(override, 'appearance')) payload.appearance = override.appearance;
         return payload;
       })
       .filter(override => Object.keys(override).length > 1);
@@ -1264,10 +1304,12 @@
         const saved = savedAgentsByKey.get(agentKey(fill.name));
         item.state = 'filled';
         item.source = fill.mode === FILL_ASSIGN ? SOURCE_ASSIGNED_WIRE : SOURCE_CREATED_WIRE;
+        // A Create fill's staged face shows on the row before anything is
+        // created; an assigned agent wears its own.
         item.agent = {
           name: fill.name,
           role: saved ? text(saved.role) : '',
-          appearance: (saved && saved.appearance) || null
+          appearance: (saved && saved.appearance) || fill.appearance || null
         };
         // A filled role has nothing left to propose.
         delete item.proposed;
@@ -1660,6 +1702,7 @@
             // server applies what the blueprint declared.
             if (fill.systemPrompt) item.system_prompt = fill.systemPrompt;
             if (fill.reasoningEffort) item.reasoning_effort = fill.reasoningEffort;
+            if (fill.appearance) item.appearance = fill.appearance;
           }
           return item;
         });
@@ -1837,6 +1880,7 @@
     stageOverride,
     clearOverride,
     getOverride,
+    normalizeStagedAppearance,
     acceptRecommended,
     acceptAllRecommended,
     undoBatchRecommended,

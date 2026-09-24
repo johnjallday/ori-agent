@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -321,7 +322,7 @@ func parseRecoveryHQPresentation(workspace *session.Workspace) (recoveryHQPresen
 	if workspace == nil || workspace.SharedData == nil {
 		return presentation, errors.New("personal assistant: recovery hq provenance is missing")
 	}
-	raw, ok := workspace.SharedData["personal_assistant_presentation"]
+	raw, ok := workspace.SharedData[personalhq.PersonalAssistantPresentationKey]
 	if !ok || raw == nil {
 		return presentation, errors.New("personal assistant: recovery hq provenance is missing")
 	}

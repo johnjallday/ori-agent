@@ -65,6 +65,45 @@ func TestPersonalAssistantTemplatePlanSubstitutesIdentityWithoutMutatingBase(t *
 	}
 }
 
+// TestCreatePersonalAssistantHQRosterShowsTheAssistantAsChiefOfStaff: the
+// Roles roster of an assistant-built HQ reads the hired assistant as holding
+// the blueprint's Personal Chief of Staff slot and Journal as holding its own,
+// so the workspace never offers to create or assign a second Chief of Staff.
+func TestCreatePersonalAssistantHQRosterShowsTheAssistantAsChiefOfStaff(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	if err := projecttemplates.EnsureLibrary(handler.templatesRootResolver()); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+	result, err := handler.CreatePersonalAssistantHQ(context.Background(), "My HQ", personalhq.AssistantCreationOptions{
+		AssistantID: "assistant-id", RequestID: "request-id",
+		DisplayName: "Assistant", Role: types.RoleOrchestrator,
+		SystemPromptFragment: testPAFPromptFragment,
+	})
+	if err != nil {
+		t.Fatalf("CreatePersonalAssistantHQ: %v", err)
+	}
+	current, err := handler.workspaceTaskStore.Get(result.WorkspaceID)
+	if err != nil || current == nil {
+		t.Fatalf("workspace read = %#v, err=%v", current, err)
+	}
+	roster := handler.buildWorkspaceRoster(current)
+	if roster.TotalCount != 2 || roster.FilledCount != 2 || roster.EntryAgentName != "Assistant" {
+		t.Fatalf("roster = %#v", roster)
+	}
+	chief := roster.Roles[0]
+	if chief.RoleID != "personal-chief-of-staff" || !chief.Primary || chief.State != "filled" || chief.Agent == nil || chief.Agent.Name != "Assistant" {
+		t.Fatalf("Chief of Staff slot = %#v", chief)
+	}
+	journal := roster.Roles[1]
+	if journal.RoleID != "journal" || journal.State != "filled" || journal.Agent == nil || journal.Agent.Name != "Journal" {
+		t.Fatalf("Journal slot = %#v", journal)
+	}
+	if len(roster.Unassigned) != 0 {
+		t.Fatalf("unassigned = %#v", roster.Unassigned)
+	}
+}
+
 func TestCreatePersonalAssistantHQCreatesOneSelectedEntryAndSupportMetadata(t *testing.T) {
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()

@@ -68,6 +68,10 @@ func (p UpgradePlan) Blocked() bool {
 //     created from personal-ops reads as version 0 with all specialist roles
 //     missing, so the same plan/apply path converges it onto the assistant
 //     roster (task 2.1, 2.9) without assuming the template.
+//   - Assistant-built HQs: an HQ created around the hired personal assistant
+//     (PersonalAssistantPresentationKey) has no Personal Chief of Staff by
+//     contract; its entry agent fulfils that role, so the plan never proposes
+//     adding one and only tops up support roles such as Journal.
 func PlanUpgrade(ws *session.Workspace, userID string) UpgradePlan {
 	state := ReadProvisionState(ws)
 	plan := UpgradePlan{
@@ -153,26 +157,28 @@ func editedAgentNames(ws *session.Workspace) []string {
 	return out
 }
 
-// nonRosterAgentNames returns agents present in the workspace that are not part
-// of the v1 specialist roster — user-added agents an upgrade must never remove.
+// nonRosterAgentNames returns agents present in the workspace that do not
+// fulfil a v1 specialist role — user-added agents an upgrade must never remove.
+// Roster membership is decided by FindRoleInstance, so on an assistant-built HQ
+// the hired assistant counts as the roster's entry agent, and a stray "Personal
+// Chief of Staff" left by an earlier upgrade is listed here as the user's own.
 func nonRosterAgentNames(ws *session.Workspace) []string {
+	roster := make(map[int]struct{}, len(V1Roster))
+	for _, role := range V1Roster {
+		if i := findRoleInstanceIndex(ws, role); i >= 0 {
+			roster[i] = struct{}{}
+		}
+	}
 	var out []string
 	for i := range ws.AgentInstances {
 		name := strings.TrimSpace(ws.AgentInstances[i].Name)
-		if name == "" || isRosterAgentName(name) {
+		if name == "" {
+			continue
+		}
+		if _, ok := roster[i]; ok {
 			continue
 		}
 		out = append(out, name)
 	}
 	return out
-}
-
-// isRosterAgentName reports whether name matches a v1 specialist role.
-func isRosterAgentName(name string) bool {
-	for _, role := range V1Roster {
-		if strings.EqualFold(name, role.AgentName) {
-			return true
-		}
-	}
-	return false
 }
