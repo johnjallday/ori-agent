@@ -39,7 +39,6 @@ var (
 const (
 	marketplaceSearchTimeout  = 45 * time.Second
 	marketplaceInstallTimeout = 2 * time.Minute
-	marketplaceCheckTimeout   = 75 * time.Second
 	marketplaceUpdateTimeout  = 2 * time.Minute
 	skillCreateTimeout        = 75 * time.Second
 	skillPromptTimeout        = 45 * time.Second
@@ -811,7 +810,7 @@ func (h *Handler) handleMarketplace(w http.ResponseWriter, r *http.Request, path
 		return
 	}
 	if path == "marketplace/update" {
-		h.updateMarketplaceSkills(w, r)
+		h.updateMarketplaceSkill(w, r)
 		return
 	}
 	if path == "marketplace/remove" {
@@ -963,47 +962,82 @@ func (h *Handler) checkMarketplaceUpdates(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), marketplaceCheckTimeout)
-	defer cancel()
-
-	output, err := runSkillsCLI(ctx, "check")
+	statuses, err := h.checkSkillUpdates(r.Context())
 	if err != nil {
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "failed to check skill updates",
-			"details": truncateMarketplaceOutput(output),
+		_ = orihttp.RespondJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": "failed to check skill updates: " + err.Error(),
 		})
 		return
 	}
-
+	available := 0
+	for _, status := range statuses {
+		if status.UpdateAvailable {
+			available++
+		}
+	}
+	summary := "All marketplace skills are up to date."
+	if available > 0 {
+		summary = fmt.Sprintf("%d update%s available.", available, map[bool]string{true: "", false: "s"}[available == 1])
+	}
 	orihttp.Success(w, map[string]any{
 		"status":  "checked",
-		"summary": marketplaceOutputSummary(output),
-		"details": truncateMarketplaceOutput(output),
+		"skills":  statuses,
+		"summary": summary,
 	})
 }
 
-func (h *Handler) updateMarketplaceSkills(w http.ResponseWriter, r *http.Request) {
+type marketplaceUpdateRequest struct {
+	Skill string `json:"skill"`
+	Force bool   `json:"force,omitempty"`
+}
+
+// updateMarketplaceSkill replaces one marketplace skill with its latest
+// version. A skill the user edited is refused with code locally_modified
+// unless the request carries force: true.
+func (h *Handler) updateMarketplaceSkill(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req marketplaceUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		orihttp.BadRequest(w, "invalid request body")
+		return
+	}
+	skillName := strings.TrimSpace(req.Skill)
+	if !isPlainSkillFolderName(skillName) {
+		orihttp.BadRequest(w, "invalid skill name")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), marketplaceUpdateTimeout)
 	defer cancel()
 
-	output, err := runSkillsCLI(ctx, "update")
-	if err != nil {
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "failed to update installed skills",
-			"details": truncateMarketplaceOutput(output),
+	updated, output, err := h.updateSkillFolder(ctx, skillName, req.Force)
+	switch {
+	case errors.Is(err, errSkillLocallyModified):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"code":  "locally_modified",
+			"error": "You changed this skill since it was installed. Updating will replace your changes.",
 		})
+		return
+	case errors.Is(err, os.ErrNotExist):
+		orihttp.NotFound(w, "no skill with that name is in your Skills folder")
+		return
+	case errors.Is(err, errNotAMarketplaceSkill):
+		orihttp.BadRequest(w, err.Error())
+		return
+	case err != nil:
+		respondMarketplaceError(w, "failed to update the skill", output, err)
 		return
 	}
 
 	orihttp.Success(w, map[string]any{
-		"status":  "updated",
-		"summary": marketplaceOutputSummary(output),
-		"details": truncateMarketplaceOutput(output),
+		"skill":      skillName,
+		"status":     "updated",
+		"updated_at": updated.UpdatedAt,
+		"summary":    "Updated " + skillName + ".",
 	})
 }
 
@@ -1169,28 +1203,6 @@ func parseSkillsFindOutput(output string, limit int) []marketplaceSkillResult {
 	}
 
 	return results
-}
-
-func marketplaceOutputSummary(output string) string {
-	cleaned := stripANSI(output)
-	if cleaned == "" {
-		return ""
-	}
-
-	lines := strings.Split(cleaned, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		line = strings.TrimSpace(strings.TrimLeft(line, "│└├─•·◇■"))
-		if line == "" {
-			continue
-		}
-		return line
-	}
-	return ""
-}
-
-func runSkillsCLI(ctx context.Context, args ...string) (string, error) {
-	return runSkillsCLIInDir(ctx, "", args...)
 }
 
 func runSkillsCLIInDir(ctx context.Context, workingDir string, args ...string) (string, error) {

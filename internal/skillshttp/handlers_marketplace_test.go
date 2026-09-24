@@ -101,14 +101,6 @@ func TestParseSkillsFindOutput(t *testing.T) {
 	}
 }
 
-func TestMarketplaceOutputSummary(t *testing.T) {
-	output := "\x1b[38;5;145mChecking for skill updates...\x1b[0m\n\n\x1b[38;5;145m✓ All skills are up to date\x1b[0m\n"
-	got := marketplaceOutputSummary(output)
-	if got != "✓ All skills are up to date" {
-		t.Fatalf("marketplaceOutputSummary() = %q", got)
-	}
-}
-
 func TestSkillsInitAlreadyExists(t *testing.T) {
 	already := "\x1b[38;5;145mSkill already exists at \x1b[38;5;102mdemo-skill/SKILL.md\x1b[0m"
 	if !skillsInitAlreadyExists(already) {

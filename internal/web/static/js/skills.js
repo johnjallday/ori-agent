@@ -8,6 +8,10 @@ let defaultAgentName = '';
 let editingSkillName = '';
 let marketplaceResults = [];
 let marketplaceInstalledSkills = [];
+// Latest update check per skill name: { update_available, locally_modified, error }.
+let marketplaceUpdateStatus = new Map();
+// The skill whose "Update anyway" confirmation is showing, or ''.
+let marketplacePendingOverwrite = '';
 let marketplaceSearchBusy = false;
 let marketplaceInstallBusy = false;
 let marketplaceManageBusy = false;
@@ -513,7 +517,6 @@ function setupSkillsEvents() {
   const marketManageTab = document.getElementById('skillsMarketplaceManageTab');
   const marketManageRefreshBtn = document.getElementById('skillsMarketplaceManageRefreshBtn');
   const marketCheckUpdatesBtn = document.getElementById('skillsMarketplaceCheckUpdatesBtn');
-  const marketUpdateAllBtn = document.getElementById('skillsMarketplaceUpdateAllBtn');
   const marketRemoveInput = document.getElementById('skillsMarketplaceRemoveSkillInput');
   const marketRemoveBtn = document.getElementById('skillsMarketplaceRemoveBtn');
 
@@ -609,10 +612,6 @@ function setupSkillsEvents() {
 
   if (marketCheckUpdatesBtn) {
     marketCheckUpdatesBtn.addEventListener('click', () => checkMarketplaceUpdates());
-  }
-
-  if (marketUpdateAllBtn) {
-    marketUpdateAllBtn.addEventListener('click', () => updateMarketplaceSkills());
   }
 
   if (marketRemoveBtn) {
@@ -849,7 +848,6 @@ function setMarketplaceActionBusy(isBusy) {
   const packageInput = document.getElementById('skillsMarketplacePackageInput');
   const refreshBtn = document.getElementById('skillsMarketplaceManageRefreshBtn');
   const checkBtn = document.getElementById('skillsMarketplaceCheckUpdatesBtn');
-  const updateBtn = document.getElementById('skillsMarketplaceUpdateAllBtn');
   const removeInput = document.getElementById('skillsMarketplaceRemoveSkillInput');
   const removeBtn = document.getElementById('skillsMarketplaceRemoveBtn');
   if (searchBtn) searchBtn.disabled = isBusy;
@@ -859,16 +857,16 @@ function setMarketplaceActionBusy(isBusy) {
   if (packageInput) packageInput.disabled = isBusy;
   if (refreshBtn) refreshBtn.disabled = isBusy;
   if (checkBtn) checkBtn.disabled = isBusy;
-  if (updateBtn) updateBtn.disabled = isBusy;
   if (removeInput) removeInput.disabled = isBusy;
   if (removeBtn) removeBtn.disabled = isBusy;
 
-  document.querySelectorAll('[data-market-install]').forEach(button => {
-    button.disabled = isBusy;
-  });
-  document.querySelectorAll('[data-market-remove]').forEach(button => {
-    button.disabled = isBusy;
-  });
+  document
+    .querySelectorAll(
+      '[data-market-install], [data-market-remove], [data-market-update], [data-market-update-anyway], [data-market-update-cancel]'
+    )
+    .forEach(button => {
+      button.disabled = isBusy;
+    });
 }
 
 function renderMarketplaceResults(results) {
@@ -941,11 +939,39 @@ function renderInstalledMarketplaceSkills(skills) {
   const anyMarketplaceBusy =
     marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy;
 
+  const disabled = anyMarketplaceBusy ? 'disabled' : '';
   container.innerHTML = skills
     .map(skill => {
       const name = skill?.name || '';
       const location = skill?.location || '';
       const packageSpec = skill?.package || '';
+      const update = marketplaceUpdateStatus.get(name) || {};
+      const badges = [];
+      if (update.update_available) {
+        badges.push(
+          '<span class="badge bg-info" style="font-size: 10px;" data-market-update-badge>Update available</span>'
+        );
+      }
+      if (update.locally_modified) {
+        badges.push('<span class="badge bg-secondary" style="font-size: 10px;">Edited</span>');
+      }
+      const updateButton = update.update_available
+        ? `<button class="modern-btn modern-btn-primary btn-sm" data-market-update="${safeText(name)}" ${disabled}>Update</button>`
+        : '';
+      const confirmation =
+        marketplacePendingOverwrite === name
+          ? `
+        <div class="alert alert-warning mb-0 py-2" role="alert" style="font-size: 12px;">
+          You changed this skill since it was installed. Updating will replace your changes.
+          <div class="d-flex gap-2 mt-2">
+            <button class="modern-btn modern-btn-primary btn-sm" data-market-update-anyway="${safeText(name)}" ${disabled}>Update anyway</button>
+            <button class="modern-btn modern-btn-secondary btn-sm" data-market-update-cancel="${safeText(name)}" ${disabled}>Cancel</button>
+          </div>
+        </div>`
+          : '';
+      const checkError = update.error
+        ? `<small style="color: var(--danger-color, #dc3545);">${safeText(update.error)}</small>`
+        : '';
 
       return `
       <div class="plugin-item" style="display: flex; flex-direction: column; gap: 10px;">
@@ -954,12 +980,18 @@ function renderInstalledMarketplaceSkills(skills) {
             <div style="font-weight: 600; color: var(--text-primary); word-break: break-word;">${safeText(name)}</div>
             <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.85; word-break: break-all;">${safeText(location)}</div>
           </div>
+          <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-end;">${badges.join('')}</div>
         </div>
+        ${confirmation}
+        ${checkError}
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
           <small style="color: var(--text-secondary); word-break: break-all;">${safeText(packageSpec)}</small>
-          <button class="modern-btn modern-btn-secondary btn-sm" data-market-remove="${safeText(name)}" ${anyMarketplaceBusy ? 'disabled' : ''}>
-            Remove
-          </button>
+          <div style="display: flex; gap: 6px;">
+            ${updateButton}
+            <button class="modern-btn modern-btn-secondary btn-sm" data-market-remove="${safeText(name)}" ${disabled}>
+              Remove
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -970,6 +1002,23 @@ function renderInstalledMarketplaceSkills(skills) {
     button.addEventListener('click', () => {
       const skillName = button.getAttribute('data-market-remove') || '';
       removeMarketplaceSkill(skillName);
+    });
+  });
+  container.querySelectorAll('[data-market-update]').forEach(button => {
+    button.addEventListener('click', () => {
+      updateMarketplaceSkill(button.getAttribute('data-market-update') || '', false);
+    });
+  });
+  container.querySelectorAll('[data-market-update-anyway]').forEach(button => {
+    button.addEventListener('click', () => {
+      updateMarketplaceSkill(button.getAttribute('data-market-update-anyway') || '', true);
+    });
+  });
+  container.querySelectorAll('[data-market-update-cancel]').forEach(button => {
+    button.addEventListener('click', () => {
+      marketplacePendingOverwrite = '';
+      setMarketplaceStatus('Update cancelled. Your changes are kept.', false);
+      renderInstalledMarketplaceSkills(marketplaceInstalledSkills);
     });
   });
 }
@@ -1025,6 +1074,10 @@ async function checkMarketplaceUpdates() {
       throw new Error((data?.error || 'Failed to check updates.') + details);
     }
 
+    marketplaceUpdateStatus = new Map(
+      (Array.isArray(data?.skills) ? data.skills : []).map(status => [status.name, status])
+    );
+    marketplacePendingOverwrite = '';
     const summary = data?.summary || 'Update check complete.';
     setMarketplaceStatus(summary, false);
     if (typeof showToast === 'function') {
@@ -1039,40 +1092,53 @@ async function checkMarketplaceUpdates() {
   } finally {
     marketplaceManageBusy = false;
     setMarketplaceActionBusy(false);
+    renderInstalledMarketplaceSkills(marketplaceInstalledSkills);
   }
 }
 
-async function updateMarketplaceSkills() {
+// updateMarketplaceSkill replaces one skill with its latest version. A skill
+// the user edited comes back as locally_modified; the card then asks
+// "Update anyway" or "Cancel", and "Update anyway" resends with force.
+async function updateMarketplaceSkill(skillName, force) {
+  const normalized = (skillName || '').trim();
+  if (!normalized) return;
   if (marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy) return;
 
   marketplaceManageBusy = true;
   setMarketplaceActionBusy(true);
-  setMarketplaceStatus('Updating installed skills...', false);
+  setMarketplaceStatus(`Updating ${normalized}...`, false);
 
   try {
     const response = await fetch('/api/skills/marketplace/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}'
+      body: JSON.stringify({ skill: normalized, force: Boolean(force) })
     });
     const data = await response.json().catch(() => ({}));
+    if (response.status === 409 && data?.code === 'locally_modified') {
+      marketplacePendingOverwrite = normalized;
+      setMarketplaceStatus(data.error, true);
+      return;
+    }
     if (!response.ok) {
       const details = data?.details ? ` ${data.details}` : '';
-      throw new Error((data?.error || 'Failed to update installed skills.') + details);
+      throw new Error((data?.error || 'Failed to update the skill.') + details);
     }
 
-    const summary = data?.summary || 'Installed skills updated.';
-    setMarketplaceStatus(summary, false);
+    marketplacePendingOverwrite = '';
+    marketplaceUpdateStatus.delete(normalized);
+    const summary = data?.summary || `Updated ${normalized}.`;
     if (typeof showToast === 'function') {
       showToast(summary, 'success');
     }
     await loadInstalledMarketplaceSkills(true);
     await loadSkills(selectedAgentName);
+    setMarketplaceStatus(summary, false);
   } catch (error) {
-    console.error('Failed to update marketplace skills:', error);
-    setMarketplaceStatus(error?.message || 'Failed to update installed skills.', true);
+    console.error('Failed to update marketplace skill:', error);
+    setMarketplaceStatus(error?.message || 'Failed to update the skill.', true);
     if (typeof showToast === 'function') {
-      showToast('Failed to update installed skills.', 'error');
+      showToast('Failed to update the skill.', 'error');
     }
   } finally {
     marketplaceManageBusy = false;
