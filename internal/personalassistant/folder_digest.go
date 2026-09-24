@@ -164,9 +164,67 @@ type FolderDigestDeps struct {
 	Linker FolderWorkspaceLinker
 	// Tidier runs the tidy outcome through the File Janitor engine (FR31).
 	Tidier FolderTidier
-	// OnResolved runs after a project outcome completes, for the dossier
-	// producer and the mission that observe it. Best-effort.
-	OnResolved func(ctx context.Context, userID string, offer FolderOffer)
+	// OnResolved runs after a project outcome completes: the dossier
+	// producer learns from the offer and reports whether the fact was saved
+	// (FR35–FR39). Best-effort; its answer is recorded on the outcome.
+	OnResolved func(ctx context.Context, userID string, offer FolderOffer) FolderLearning
+	// OnOutcome runs after any outcome completes, for the mission that
+	// observes it (FR42). Best-effort.
+	OnOutcome func(ctx context.Context, userID string, offer FolderOffer)
+}
+
+// FolderLearning is what the dossier producer did with a resolved project
+// offer.
+type FolderLearning struct {
+	// Remembered reports that the project fact was approved into the
+	// dossier.
+	Remembered bool
+	// Note explains a fact that was not saved, in the assistant's voice.
+	Note string
+}
+
+// SetOnResolved installs the dossier producer after the service exists;
+// the producer is built later than the service in the host.
+func (s *FolderDigestService) SetOnResolved(fn func(ctx context.Context, userID string, offer FolderOffer) FolderLearning) {
+	if s != nil {
+		s.deps.OnResolved = fn
+	}
+}
+
+// SetOnOutcome installs the outcome observer (the mission hook).
+func (s *FolderDigestService) SetOnOutcome(fn func(ctx context.Context, userID string, offer FolderOffer)) {
+	if s != nil {
+		s.deps.OnOutcome = fn
+	}
+}
+
+// ResolvedProjectOfferForKey finds the resolved project offer whose subject
+// is the folder with the given key, for revalidating a fact learned from it
+// (FR38). The folder's path is then read from the workspace the offer
+// created, never from this record.
+func (s *FolderDigestService) ResolvedProjectOfferForKey(ctx context.Context, userID, key string) (FolderOffer, bool, error) {
+	if s == nil || s.store == nil {
+		return FolderOffer{}, false, ErrRepairNeeded
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return FolderOffer{}, false, err
+	}
+	var found *FolderOffer
+	for i := range doc.Offers {
+		o := &doc.Offers[i]
+		if o.Status != FolderOfferResolved || o.Subject.Key != key || o.Outcome == nil ||
+			o.Outcome.Kind != FolderChoiceProject || strings.TrimSpace(o.Outcome.WorkspaceID) == "" {
+			continue
+		}
+		if found == nil || o.CreatedAt.After(found.CreatedAt) {
+			found = o
+		}
+	}
+	if found == nil {
+		return FolderOffer{}, false, nil
+	}
+	return *found, true, nil
 }
 
 // FolderDigestService turns "show me a folder" into one explained offer and
@@ -467,6 +525,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 
 	now := s.now()
 	var result FolderOffer
+	tidied := false
 	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
 		offer := d.Offer(offerID)
 		if offer == nil {
@@ -518,6 +577,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 				offer.Outcome.WorkspaceID = tidy.WorkspaceID
 				offer.Outcome.Route = tidy.Route
 				offer.Outcome.Note = tidy.Note
+				tidied = true
 			}
 		}
 		d.Decisions = append(d.Decisions, FolderDecision{
@@ -531,6 +591,9 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	})
 	if err != nil && !errors.Is(err, errFolderReplay) {
 		return FolderOfferView{}, err
+	}
+	if err == nil && tidied {
+		result = s.afterOutcome(ctx, userID, result)
 	}
 	return s.view(result, binding.Paused), nil
 }
@@ -715,12 +778,41 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 	if err != nil && !errors.Is(err, errFolderReplay) {
 		return FolderOfferView{}, err
 	}
-	if err == nil && s.deps.OnResolved != nil {
+	if err == nil {
 		if stored := updated.Offer(offerID); stored != nil {
-			s.deps.OnResolved(ctx, userID, *stored)
+			resolved = s.afterOutcome(ctx, userID, *stored)
 		}
 	}
 	return s.view(resolved, binding.Paused), nil
+}
+
+// afterOutcome runs the best-effort observers of a completed outcome: the
+// dossier producer for a project (whose answer is recorded on the offer)
+// and the mission hook for any outcome.
+func (s *FolderDigestService) afterOutcome(ctx context.Context, userID string, offer FolderOffer) FolderOffer {
+	if s.deps.OnResolved != nil && offer.Outcome != nil && offer.Outcome.Kind == FolderChoiceProject {
+		learning := s.deps.OnResolved(ctx, userID, offer)
+		updated, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+			o := d.Offer(offer.ID)
+			if o == nil || o.Outcome == nil {
+				return errFolderReplay
+			}
+			o.Outcome.Remembered = learning.Remembered
+			if learning.Note != "" {
+				o.Outcome.Note = learning.Note
+			}
+			return nil
+		})
+		if err == nil {
+			if stored := updated.Offer(offer.ID); stored != nil {
+				offer = *stored
+			}
+		}
+	}
+	if s.deps.OnOutcome != nil {
+		s.deps.OnOutcome(ctx, userID, offer)
+	}
+	return offer
 }
 
 // blueprintFor picks the blueprint a project outcome starts with (FR28): the
@@ -1021,10 +1113,12 @@ func folderCandidateRecord(c folderdigest.Candidate, kind, reason string) Folder
 	record := FolderCandidateRecord{
 		Key: FolderKey(c.Path), Name: c.Name, Kind: kind,
 		Shape: string(folderdigest.ShapeFor(c)), Reason: reason,
-		IsRoot: c.IsRoot, RelPath: c.RelPath,
+		DominantExtension: c.DominantExtension,
+		IsRoot:            c.IsRoot, RelPath: c.RelPath,
 	}
 	if c.Marker != nil {
 		record.Marker = c.Marker.Label
+		record.MarkerName = c.Marker.Name
 	}
 	return record
 }

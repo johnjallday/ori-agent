@@ -48,9 +48,11 @@ var Tools = []Tool{
 	{Match: ToolByExtension, Value: ".ipynb", ToolID: "jupyter", ToolName: "Jupyter", HypothesisText: "Jupyter may be one of the tools you use."},
 	{Match: ToolByMarker, Value: "go.mod", ToolID: "go", ToolName: "Go", HypothesisText: "Go may be one of the tools you use."},
 	{Match: ToolByMarker, Value: "package.json", ToolID: "nodejs", ToolName: "Node.js", HypothesisText: "Node.js may be one of the tools you use."},
-	{Match: ToolByExtension, Value: ".fig", ToolID: "figma", ToolName: "Figma", HypothesisText: "Figma may be one of the tools you use."},
+	{Match: ToolByExtension, Value: ".fig", AppNames: []string{"Figma"}, ToolID: "figma", ToolName: "Figma", HypothesisText: "Figma may be one of the tools you use for visual planning."},
 	{Match: ToolByExtension, Value: ".psd", ToolID: "photoshop", ToolName: "Photoshop", HypothesisText: "Photoshop may be one of the tools you use."},
 	{Match: ToolByExtension, Value: ".bib", ToolID: "reference-manager", ToolName: "a reference manager", HypothesisText: "A reference manager may be one of the tools you use."},
+	{Match: ToolByMarker, Value: ".obsidian", AppNames: []string{"Obsidian"}, ToolID: "obsidian", ToolName: "Obsidian", HypothesisText: "Obsidian may be one of the tools you use to keep notes."},
+	{Match: ToolByApp, AppNames: []string{"Visual Studio Code"}, ToolID: "vscode", ToolName: "Visual Studio Code", HypothesisText: "Visual Studio Code may be one of the tools you use for development."},
 }
 
 // ShapeBlueprints maps a shape to the blueprint a workspace created from the

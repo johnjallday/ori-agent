@@ -93,6 +93,7 @@ function actionButton(label, onClick, className = 'modern-btn modern-btn-seconda
 function sourceLabel(item) {
   if (item.source_kind === 'saved_app') return 'Saved app evidence';
   if (item.source_kind === 'file_janitor') return 'Approved File Janitor actions';
+  if (item.source_kind === 'folder_scan') return 'A folder you showed Ori';
   if (item.source_kind === 'explicit') return 'You told Ori';
   return 'Source not available';
 }

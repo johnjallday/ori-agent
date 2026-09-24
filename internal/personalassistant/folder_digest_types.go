@@ -66,16 +66,22 @@ const (
 // files. Names are base names; RelPath is the subfolder's own name or empty
 // for the root, which is all a display needs and all FR27 allows.
 type FolderCandidateRecord struct {
-	Key        string `json:"key"`
-	Name       string `json:"name"`
-	Kind       string `json:"kind"`
-	Shape      string `json:"shape,omitempty"`
+	Key   string `json:"key"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`
+	Shape string `json:"shape,omitempty"`
+	// Marker is the marker's plain label ("git repository"); MarkerName is
+	// the table row it came from (".git"), for revalidation and tools.
 	Marker     string `json:"marker,omitempty"`
-	Reason     string `json:"reason"`
-	IsRoot     bool   `json:"is_root,omitempty"`
-	RelPath    string `json:"rel_path,omitempty"`
-	LooseFiles int    `json:"loose_files,omitempty"`
-	LooseKinds int    `json:"loose_kinds,omitempty"`
+	MarkerName string `json:"marker_name,omitempty"`
+	// DominantExtension is the candidate's most common file kind (".tex"),
+	// for tool candidates.
+	DominantExtension string `json:"dominant_ext,omitempty"`
+	Reason            string `json:"reason"`
+	IsRoot            bool   `json:"is_root,omitempty"`
+	RelPath           string `json:"rel_path,omitempty"`
+	LooseFiles        int    `json:"loose_files,omitempty"`
+	LooseKinds        int    `json:"loose_kinds,omitempty"`
 }
 
 // FolderOutcome is what a yes produced.

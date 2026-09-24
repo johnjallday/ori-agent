@@ -555,8 +555,9 @@ func TestFolderDigest_ResolveLinksOnceAndRefusesOtherWorkspaces(t *testing.T) {
 	f.service.deps.Linker = linker
 	f.service.deps.BlueprintAvailable = func(id string) bool { return id == "writing-project" }
 	var resolvedOffers []string
-	f.service.deps.OnResolved = func(_ context.Context, _ string, offer FolderOffer) {
+	f.service.deps.OnResolved = func(_ context.Context, _ string, offer FolderOffer) FolderLearning {
 		resolvedOffers = append(resolvedOffers, offer.ID)
+		return FolderLearning{Remembered: true}
 	}
 
 	offer, err := f.service.ScanChip(ctx, "local", "documents")

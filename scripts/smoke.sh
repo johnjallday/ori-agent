@@ -1631,6 +1631,41 @@ PY
       -H 'Content-Type: application/json' \
       -d "{\"decision\":\"$decision\",\"choice\":\"$choice\",\"request_id\":\"smoke-$(date +%s%N)\"}" | python3 -m json.tool
     ;;
+  hide | unhide)
+    # Make a seeded folder disappear from (or return to) its canonical path
+    # inside the sandbox, by renaming it, to show a folder_scan fact flip to
+    # needs-review and back. Never touches anything outside the sandbox.
+    local home="${4:-}" rel="${5:-}"
+    [[ -n "$home" && -d "$home" && -n "$rel" ]] || fail "usage: $0 showfolder $stage <sandbox-dir> <relative-folder>"
+    [[ "$rel" != /* && "$rel" != *..* ]] || fail "relative folder must stay inside the sandbox"
+    if [[ "$stage" == hide ]]; then
+      [[ -d "$home/$rel" ]] || fail "no folder at $rel"
+      mv "$home/$rel" "$home/$rel.hidden" && echo "hid $rel"
+    else
+      [[ -d "$home/$rel.hidden" ]] || fail "no hidden folder at $rel"
+      mv "$home/$rel.hidden" "$home/$rel" && echo "restored $rel"
+    fi
+    ;;
+  project)
+    # The project outcome end to end through the API, as the Create Workspace
+    # modal does it: yes on the offer, create the workspace for the offer
+    # (name + blueprint, entry_point folder_digest), then resolve.
+    local offer="${4:-}" name="${5:-Thesis}" template="${6:-writing-project}" ws
+    [[ -n "$offer" ]] || fail "usage: $0 showfolder project <base-url> <offer-id> [name] [template-id]"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/decide" \
+      -H 'Content-Type: application/json' \
+      -d "{\"decision\":\"yes\",\"choice\":\"project\",\"request_id\":\"smoke-$(date +%s%N)\"}" \
+      | python3 -c 'import json,sys; o=json.load(sys.stdin)["offer"]; print("decided:", o["status"], o["subject"]["name"])'
+    ws=$(curl -s -X POST "$BASE_URL/api/workspaces" -H 'Content-Type: application/json' \
+      -d "{\"name\":\"$name\",\"template_id\":\"$template\",\"entry_point\":\"folder_digest\",\"folder_offer_id\":\"$offer\"}" \
+      | workspace_id)
+    [[ -n "$ws" ]] || fail "workspace create returned no id"
+    echo "created workspace $ws"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/resolve" \
+      -H 'Content-Type: application/json' \
+      -d "{\"workspace_id\":\"$ws\",\"request_id\":\"smoke-$(date +%s%N)\"}" \
+      | python3 -c 'import json,sys; o=json.load(sys.stdin)["offer"]; print("resolved:", o["status"], json.dumps(o.get("outcome")))'
+    ;;
   resolve)
     local offer="${4:-}" workspace="${5:-}"
     [[ -n "$offer" && -n "$workspace" ]] || fail "usage: $0 showfolder resolve <base-url> <offer-id> <workspace-id>"
@@ -1641,7 +1676,7 @@ PY
   current)
     curl -s "$BASE_URL/api/personal-assistant/folder-digest" | python3 -m json.tool
     ;;
-  *) fail "usage: $0 showfolder <base-url> <seed <sandbox>|seed-audio <sandbox>|hq|scan <chip>|decide <offer> <decision> [choice]|resolve <offer> <workspace>|current>" ;;
+  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus <sandbox>|hq|scan <chip>|decide <offer> <decision> [choice]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
   esac
 }
 

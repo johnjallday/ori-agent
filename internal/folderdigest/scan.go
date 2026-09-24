@@ -156,6 +156,35 @@ func (r Result) Subfolders() []Candidate {
 	return r.Candidates[1:]
 }
 
+// HasMarker reports whether the marker row named markerName still sits
+// directly inside dir, for revalidating a fact learned from it (FR38). It
+// reads one directory listing and never opens a file.
+func HasMarker(dir, markerName string) bool {
+	var row *Marker
+	for i := range Markers {
+		if Markers[i].Name == markerName {
+			row = &Markers[i]
+			break
+		}
+	}
+	if row == nil {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		if row.matches(entry.Name(), entry.IsDir()) {
+			return true
+		}
+	}
+	return false
+}
+
 // Scan reads the shape of root within the bounds in opts. The caller has
 // already validated root (FR7); Scan only refuses a path that is not a real
 // directory. Errors reading a subfolder (permissions, a vanished entry) skip

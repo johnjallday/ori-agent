@@ -90,6 +90,9 @@ const (
 	ToolByExtension ToolMatch = "extension"
 	// ToolByMarker compares the row's value against a marker name ("go.mod").
 	ToolByMarker ToolMatch = "marker"
+	// ToolByApp has no file signal: the row is reached only through an
+	// installed application's name.
+	ToolByApp ToolMatch = "app"
 )
 
 // Tool is one row of the shared host-owned tool table (FR36). The saved-app
@@ -97,12 +100,32 @@ const (
 type Tool struct {
 	Match ToolMatch
 	Value string
+	// AppNames are the application names the saved-app observation reports
+	// for this tool, compared case-insensitively.
+	AppNames []string
 	// ToolID is the stable identity used to dedupe proposals across producers.
 	ToolID string
 	// ToolName is the display name used in the hypothesis text.
 	ToolName string
 	// HypothesisText is the candidate fact proposed to the dossier.
 	HypothesisText string
+}
+
+// ToolForApp returns the tool row an installed application's name belongs
+// to, if the table has one.
+func ToolForApp(appName string) (Tool, bool) {
+	appName = strings.TrimSpace(appName)
+	if appName == "" {
+		return Tool{}, false
+	}
+	for _, t := range Tools {
+		for _, name := range t.AppNames {
+			if strings.EqualFold(name, appName) {
+				return t, true
+			}
+		}
+	}
+	return Tool{}, false
 }
 
 // The Tools table itself lives in tables.go, the package's data-only file.
