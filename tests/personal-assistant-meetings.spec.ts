@@ -58,13 +58,21 @@ async function connectFakeCalendar(request: APIRequestContext) {
   expect(add.ok(), await add.text()).toBeTruthy();
   await request.post(`/api/mcp/servers/${CONNECTOR}/connect`);
   await expect
-    .poll(async () => (await (await request.get(`/api/mcp/servers/${CONNECTOR}/status`)).json()).status, {
-      timeout: 15000
-    })
+    .poll(
+      async () => (await (await request.get(`/api/mcp/servers/${CONNECTOR}/status`)).json()).status,
+      {
+        timeout: 15000
+      }
+    )
     .toBe('running');
 
   const created = await request.post('/api/workspaces', {
-    data: { name: 'Calendar Ops', description: '', template_id: 'calendar-ops', create_template_agents: true }
+    data: {
+      name: 'Calendar Ops',
+      description: '',
+      template_id: 'calendar-ops',
+      create_template_agents: true
+    }
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const workspaceId = (await created.json()).folder.id as string;
@@ -127,7 +135,12 @@ test.describe.serial("Today's meetings", () => {
     expect(hire.status(), await hire.text()).toBe(201);
     const hired = (await hire.json()).personal_assistant;
     const hq = await request.post('/api/personal-assistant/hq', {
-      data: { request_id: 'meetings-e2e-hq', if_version: hired.state_version, name: 'My HQ', timezone: DISPLAY_TZ }
+      data: {
+        request_id: 'meetings-e2e-hq',
+        if_version: hired.state_version,
+        name: 'My HQ',
+        timezone: DISPLAY_TZ
+      }
     });
     expect(hq.status(), await hq.text()).toBe(201);
   });
@@ -145,14 +158,20 @@ test.describe.serial("Today's meetings", () => {
       'href',
       '/?create=1&blueprint=calendar-ops'
     );
-    await expect(page.locator('#personalAssistantToday')).not.toHaveAttribute('data-state', 'partial');
+    await expect(page.locator('#personalAssistantToday')).not.toHaveAttribute(
+      'data-state',
+      'partial'
+    );
   });
 
   test('a connected calendar lists today with overlaps, and a meeting opens with Prepare me', async ({
     page,
     request
   }) => {
-    test.skip(!FIXTURE_BIN, 'set FAKE_CALENDAR_MCP_BIN (./scripts/demo-calendar-fixture.sh --build-only)');
+    test.skip(
+      !FIXTURE_BIN,
+      'set FAKE_CALENDAR_MCP_BIN (./scripts/demo-calendar-fixture.sh --build-only)'
+    );
     await connectFakeCalendar(request);
 
     await stubDetection(page);
@@ -160,7 +179,9 @@ test.describe.serial("Today's meetings", () => {
     await openToday(page);
     const meetings = page.locator('#personalAssistantTodayMeetingsSection');
     await expect(page.locator('#personalAssistantTodayMeetingsTitle')).toContainText('2 overlaps');
-    await expect(meetings.locator('.personal-assistant-today__badge[data-state="conflict"]')).toHaveCount(2);
+    await expect(
+      meetings.locator('.personal-assistant-today__badge[data-state="conflict"]')
+    ).toHaveCount(2);
     await expect(meetings).toContainText('Private event');
     await expect(meetings).not.toContainText('Dentist');
     // Tomorrow's Retro is on the connector but not on today's agenda.
@@ -174,8 +195,13 @@ test.describe.serial("Today's meetings", () => {
     await expect(drawer.getByRole('button', { name: 'Prepare me' })).toBeVisible();
   });
 
-  test("the Daily Brief leads with Today's Meetings once a calendar is connected", async ({ page }) => {
-    test.skip(!FIXTURE_BIN, 'set FAKE_CALENDAR_MCP_BIN (./scripts/demo-calendar-fixture.sh --build-only)');
+  test("the Daily Brief leads with Today's Meetings once a calendar is connected", async ({
+    page
+  }) => {
+    test.skip(
+      !FIXTURE_BIN,
+      'set FAKE_CALENDAR_MCP_BIN (./scripts/demo-calendar-fixture.sh --build-only)'
+    );
     await stubDetection(page);
     await page.goto('/');
     await openToday(page);
