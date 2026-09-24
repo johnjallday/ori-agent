@@ -1931,10 +1931,14 @@
           <div id="resetAgentsFolderConfirm" class="alert alert-warning mb-3" hidden>
             <p class="mb-1"><strong>Your agents folder</strong></p>
             <p class="mb-2"><code id="resetAgentsFolderPath" style="overflow-wrap: anywhere;"></code></p>
+            <div id="resetAgentsFolderAlso" hidden>
+              <p class="mb-1"><strong>Also removed: your Skills folder and plugin list</strong></p>
+              <ul id="resetAgentsFolderAlsoList" class="mb-2"></ul>
+            </div>
             <p id="resetAgentsFolderNotice" class="mb-2"></p>
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="resetAgentsFolderCheck" disabled>
-              <label class="form-check-label" for="resetAgentsFolderCheck">
+              <label class="form-check-label" id="resetAgentsFolderCheckLabel" for="resetAgentsFolderCheck">
                 I understand this removes my agents from this folder, including on other machines it syncs to.
               </label>
             </div>

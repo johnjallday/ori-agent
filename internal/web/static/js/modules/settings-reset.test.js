@@ -142,7 +142,10 @@ function harness({
       'resetAgentsFolderConfirm',
       'resetAgentsFolderPath',
       'resetAgentsFolderNotice',
-      'resetAgentsFolderCheck'
+      'resetAgentsFolderCheck',
+      'resetAgentsFolderAlso',
+      'resetAgentsFolderAlsoList',
+      'resetAgentsFolderCheckLabel'
     ].map(id => [id, element()])
   );
   elements.resetAgentsFolderConfirm.hidden = true;
@@ -470,6 +473,45 @@ test('an agents reset shows its folder and needs the second confirmation before 
     confirmation: 'RESET',
     confirm_agents_folder: '/Users/me/Ori Workspaces/Agents'
   });
+});
+
+test('a selected agents reset names only the agents folder', async () => {
+  const h = harness({ previewResult: agentsPreview });
+  await h.review(['resetAgents']);
+  assert.equal(h.elements.resetAgentsFolderAlso.hidden, true);
+  assert.equal(h.elements.resetAgentsFolderAlsoList.children.length, 0);
+  assert.match(
+    h.elements.resetAgentsFolderCheckLabel.textContent,
+    /removes my agents from this folder/
+  );
+});
+
+test('Start Fresh names the Skills folder and the plugin list under the agents folder confirmation', async () => {
+  const also = ['/Users/me/Ori Workspaces/Skills', '/Users/me/Ori Workspaces/Plugins.json'];
+  const h = harness({
+    previewResult: {
+      ...agentsPreview,
+      intent: 'start_fresh',
+      agents_folder: { ...agentsPreview.agents_folder, also_removed: also }
+    }
+  });
+  await h.review(['resetAgents']);
+  assert.equal(h.elements.resetAgentsFolderAlso.hidden, false);
+  assert.deepEqual(
+    h.elements.resetAgentsFolderAlsoList.children.map(item => item.children[0].textContent),
+    also
+  );
+  assert.match(h.elements.resetAgentsFolderCheckLabel.textContent, /my skills, and my plugin list/);
+
+  // The same single checkbox confirms all three; nothing else is sent.
+  h.elements.resetAgentsFolderCheck.checked = true;
+  await h.elements.resetAgentsFolderCheck.emit('change');
+  await h.elements.confirmResetBtn.click();
+  const post = h.calls.find(call => call.url === '/api/reset');
+  assert.equal(
+    JSON.parse(post.options.body).confirm_agents_folder,
+    '/Users/me/Ori Workspaces/Agents'
+  );
 });
 
 test('closing an agents review clears the second confirmation', async () => {

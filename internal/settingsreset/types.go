@@ -115,10 +115,17 @@ type AgentsFolderReview struct {
 	Path                 string `json:"path"`
 	Notice               string `json:"notice"`
 	ConfirmationRequired bool   `json:"confirmation_required"`
+	// AlsoRemoved lists what Start Fresh removes beside the agents folder
+	// under the same confirmation: the Skills folder and the plugin list.
+	AlsoRemoved []string `json:"also_removed,omitempty"`
 }
 
 // AgentsFolderNotice is the warning shown with the agents folder in a preview.
 const AgentsFolderNotice = "This folder is in your Workspace Directory, where you can see it, and it may be synced to your other machines. Resetting removes each agent's folder from it — on every machine it syncs to. Other files there are kept."
+
+// AgentsFolderFreshNotice is the warning when Start Fresh also removes the
+// Skills folder and the plugin list beside the agents folder.
+const AgentsFolderFreshNotice = "These are in your Workspace Directory, where you can see them, and they may be synced to your other machines. Start Fresh removes each agent's folder, each skill in your Skills folder, and your plugin list (Plugins.json) — on every machine the Workspace Directory syncs to. Other files there are kept."
 
 // ExecuteRequest references a server-held, reviewed plan. Neither categories,
 // intent nor filesystem targets can be broadened at execution time. HTTP must

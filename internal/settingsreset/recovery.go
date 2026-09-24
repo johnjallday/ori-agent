@@ -449,6 +449,18 @@ func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected 
 				return result
 			}
 		}
+		// Start Fresh only: the Skills folder and plugin list beside it,
+		// confirmed together with the agents folder.
+		if folder := evidence.SkillsFolder; folder != "" && validFreshSiblings(evidence) {
+			if _, err := resetRootSkills(folder); err != nil {
+				return result
+			}
+		}
+		if list := evidence.PluginList; list != "" && validFreshSiblings(evidence) {
+			if err := resetPluginList(list); err != nil {
+				return result
+			}
+		}
 		completeResultCheck(&result, "old_profiles_absent")
 		policy, err := ReadStartupPolicy(lease)
 		if err == nil && policy.SuppressAgentRehydration {
@@ -615,7 +627,7 @@ func protectedDigestsUnchanged(ctx context.Context, evidence resolvedEvidence) b
 		if err != nil || resolved != fingerprint.Path {
 			return false
 		}
-		digest, err := digestProtectedPath(ctx, fingerprint.Path, evidence.AgentsFolder)
+		digest, err := evidence.digestRetained(ctx, fingerprint.Path)
 		if err != nil || digest != fingerprint.Digest {
 			return false
 		}
