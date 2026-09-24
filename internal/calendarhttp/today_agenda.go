@@ -13,6 +13,7 @@ package calendarhttp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -45,6 +46,9 @@ const (
 	TodayPrepStale  = "stale"
 	TodayPrepFailed = "failed"
 )
+
+// ErrTodayAgendaUnreadable reports that no selected calendar could be read.
+var ErrTodayAgendaUnreadable = errors.New("calendar ops: no selected calendar could be read")
 
 const (
 	todayMeetingTitleMaxRunes    = 200
@@ -105,9 +109,10 @@ type TodayAgenda struct {
 //
 // A missing or unreadable workspace is a state, not an error. The error
 // return is reserved for failures the caller must report as a gap: an
-// internal failure resolving the gateway, or ctx ending before the read
-// finished (callers bound this read with a timeout and rely on getting
-// ctx.Err() back rather than a silently empty agenda).
+// internal failure resolving the gateway, every selected calendar failing
+// (ErrTodayAgendaUnreadable), or ctx ending before the read finished (callers
+// bound this read with a timeout and rely on getting ctx.Err() back rather
+// than a silently empty agenda).
 func (h *Handler) TodayAgenda(ctx context.Context, userID, fallbackTZ string, limit int) (TodayAgenda, error) {
 	out := TodayAgenda{State: TodayAgendaNotConnected, Meetings: []TodayMeeting{}}
 	if h == nil {
@@ -144,11 +149,16 @@ func (h *Handler) TodayAgenda(ctx context.Context, userID, fallbackTZ string, li
 	out.TimeZone = tz
 	start, end := todayWindow(tz, nowUTC())
 
-	events, partial := h.loadWindowEvents(ctx, gw, start, end)
+	events, failed, attempted := h.loadWindowEvents(ctx, gw, start, end)
 	if err := ctx.Err(); err != nil {
 		return out, err
 	}
-	out.Partial = partial
+	// Every selected calendar failing is a failed read, not a partial one:
+	// reported as partial with no meetings, it would read as an empty day.
+	if attempted > 0 && failed == attempted {
+		return out, ErrTodayAgendaUnreadable
+	}
+	out.Partial = failed > 0
 
 	type dayEvent struct {
 		event      calendar.Event
@@ -223,6 +233,11 @@ func (h *Handler) TodayAgenda(ctx context.Context, userID, fallbackTZ string, li
 			meeting.PrepStatus, meeting.PrepNoteID = h.todayPrepStatus(ctx, gw, evt)
 		}
 		out.Meetings = append(out.Meetings, meeting)
+	}
+	// A deadline that expired during the prep lookups would otherwise read as
+	// "no prep yet" on every meeting after it.
+	if err := ctx.Err(); err != nil {
+		return out, err
 	}
 	return out, nil
 }

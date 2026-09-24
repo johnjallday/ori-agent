@@ -306,6 +306,41 @@ func TestTodayAgenda_OneCalendarFailingKeepsTheOthersAndIsPartial(t *testing.T) 
 	}
 }
 
+func TestTodayAgenda_EveryCalendarFailingIsAFailedReadNotAnEmptyDay(t *testing.T) {
+	h, _, rec := newTodayAgendaHandler(t, []string{"primary", "team"}, "")
+	rec.resultFn = func(string, map[string]any) (any, error) { return nil, errConnectorBoom }
+	_, err := h.TodayAgenda(context.Background(), "local", "", 12)
+	if !errors.Is(err, ErrTodayAgendaUnreadable) {
+		t.Fatalf("err = %v, want ErrTodayAgendaUnreadable", err)
+	}
+}
+
+func TestTodayAgenda_ADeadlineDuringPrepLookupsIsATimeoutNotNoPrep(t *testing.T) {
+	h, _, rec := newTodayAgendaHandler(t, []string{"primary"}, "")
+	rec.resultFn = func(string, map[string]any) (any, error) {
+		return map[string]any{"items": []any{googleItem("standup", "Standup", agendaClock("09:00"), agendaClock("09:30"), nil)}}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	h.SetMeetingPreps(cancelingPrepStore{cancel: cancel})
+	if _, err := h.TodayAgenda(ctx, "local", "", 12); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the context's error", err)
+	}
+}
+
+// cancelingPrepStore ends the caller's context on the first lookup, standing
+// in for a deadline that expires mid-agenda.
+type cancelingPrepStore struct{ cancel context.CancelFunc }
+
+func (s cancelingPrepStore) GetByKey(ctx context.Context, _ meetingprep.Key) (*meetingprep.Link, error) {
+	s.cancel()
+	return nil, ctx.Err()
+}
+func (cancelingPrepStore) StartRun(context.Context, meetingprep.Key, string) (*meetingprep.Link, bool, error) {
+	return nil, false, errors.New("unused")
+}
+func (cancelingPrepStore) MarkReady(context.Context, string, string, string) error { return nil }
+func (cancelingPrepStore) MarkFailed(context.Context, string, string) error        { return nil }
+
 func TestTodayAgenda_ReturnsContextErrorWhenTheReadOutlivesItsDeadline(t *testing.T) {
 	h, _, _ := newTodayAgendaHandler(t, []string{"primary"}, "")
 	h.WithToolCallerFactory(func(string) calendar.ToolCaller {

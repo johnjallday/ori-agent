@@ -146,6 +146,15 @@ type Snapshot struct {
 	// user in the designated HQ or a scope-authorized Email Ops workspace.
 	// Nil/empty is healthy when no follow-up source is configured.
 	FollowUps []FollowUpSnapshot
+	// CalendarEvents are today's meetings, bounded (see calendar.go). Empty
+	// with CalendarConnected=true is a real "no meetings today"; with
+	// CalendarConnected=false there is no calendar to report on at all.
+	CalendarEvents    []CalendarEventSnapshot
+	CalendarConnected bool
+	// CalendarMeetingCount and CalendarOverlapCount describe the whole day,
+	// before CalendarEvents was capped.
+	CalendarMeetingCount int
+	CalendarOverlapCount int
 	// Gaps names data sources that could not be read (an inaccessible
 	// workspace, a failed opportunity/session query, a failed email read, ...)
 	// so a missing source is never silently presented as "no activity"
@@ -176,6 +185,9 @@ func (s Snapshot) AllRefs() map[string]SourceRef {
 	}
 	for _, followUp := range s.FollowUps {
 		out[followUp.Ref.Key()] = followUp.Ref
+	}
+	for _, evt := range s.CalendarEvents {
+		out[evt.Ref.Key()] = evt.Ref
 	}
 	return out
 }
@@ -241,6 +253,9 @@ type SnapshotSources struct {
 	// configured and is distinct from a configured owner read failure. Every
 	// authorized owner is filtered and validated independently.
 	FollowUps FollowUpSource
+	// Calendar is optional; nil means no calendar integration is wired (no
+	// calendar section, no gap, no call). Only Daily Brief generation sets it.
+	Calendar CalendarSource
 }
 
 func isGroupWorkspace(ws *workspace.Workspace) bool {
@@ -362,6 +377,11 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 			snap.EmailThreads = threads
 		}
 	}
+
+	// Today's meetings, through the same not-configured / gap split as email
+	// plus a partial read (calendar.go). A calendar failure degrades only
+	// this source.
+	collectCalendar(ctx, sources.Calendar, cfg, userID, &snap)
 	return snap
 }
 

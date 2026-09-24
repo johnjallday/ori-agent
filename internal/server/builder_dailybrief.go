@@ -159,6 +159,16 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		workspaceSource = b.workspaceFileStore
 	}
 
+	// Today's meetings (Issue #533), read through the Calendar Ops handler
+	// wired at Phase 18, for both brief generation and Today. Left nil (not a
+	// typed-nil interface) when there is no handler, so neither surface reads.
+	var calendarSource *dailyBriefCalendarSource
+	var briefCalendar dailybrief.CalendarSource
+	if b.calendarOpsHandler != nil {
+		calendarSource = newDailyBriefCalendarSource(b.calendarOpsHandler)
+		briefCalendar = calendarSource
+	}
+
 	resolver := func(ctx context.Context, req dailybrief.GenerationRequest, cfg dailybrief.Config) (dailybrief.Snapshot, *dailybrief.Revision, error) {
 		sources := dailybrief.SnapshotSources{
 			Workspaces:    workspaceSource,
@@ -168,6 +178,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			// vault init, which runs before this resolver is ever invoked.
 			Mailbox:   b.dailyBriefMailbox,
 			FollowUps: b.followUpService,
+			Calendar:  briefCalendar,
 		}
 		snap := dailybrief.BuildSnapshot(ctx, sources, cfg, req.UserID, time.Now())
 		previous, err := store.GetCurrentRevision(ctx, cfg.WorkspaceID)
@@ -371,10 +382,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			workspaces: b.workspaceFileStore, janitor: b.fileJanitorService,
 		})
 	}
-	// Today's meetings (Issue #533), read through the Calendar Ops handler wired
-	// at Phase 18. No handler, no section: Today stays exactly as it was.
-	if b.calendarOpsHandler != nil {
-		todayService.SetMeetingReader(newDailyBriefCalendarSource(b.calendarOpsHandler))
+	// No calendar source, no Meetings section: Today stays exactly as it was.
+	if calendarSource != nil {
+		todayService.SetMeetingReader(calendarSource)
 	}
 	b.personalAssistantToday = todayService
 	b.initializeSetupJourney()

@@ -9,7 +9,9 @@ import {
   formatMeta,
   computeBanner,
   isQuietDay,
-  renderContent
+  renderContent,
+  formatMeetingTime,
+  meetingPrepText
 } from './home-daily-brief.js';
 
 test('Daily Brief has one stable Today mount and no Updates copy', () => {
@@ -285,4 +287,159 @@ test('renderContent escapes untrusted title/reason text', () => {
   });
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /&lt;script&gt;/);
+});
+
+// --- Today's meetings (Issue #533) -------------------------------------------
+
+const meetingRef = (id, extra = {}) => ({
+  workspace_id: 'cal-ws',
+  workspace_slug: 'calendar-ops',
+  entity_type: 'calendar_event',
+  entity_id: id,
+  calendar_id: 'primary',
+  ...extra
+});
+
+test('hrefForRef opens a meeting in its Calendar Ops console with the drawer deep link', () => {
+  assert.equal(
+    hrefForRef(meetingRef('design-review')),
+    '/workspaces/calendar-ops?panel=calendar&event=design-review&calendar=primary'
+  );
+  assert.equal(
+    hrefForRef(meetingRef('evt 1', { calendar_id: 'team@group.calendar.google.com' })),
+    '/workspaces/calendar-ops?panel=calendar&event=evt+1&calendar=team%40group.calendar.google.com'
+  );
+  assert.equal(
+    hrefForRef(meetingRef('design', { calendar_id: '' })),
+    '/workspaces/calendar-ops?panel=calendar&event=design'
+  );
+  for (const bad of [
+    meetingRef(''),
+    meetingRef('x', { workspace_slug: '' }),
+    meetingRef('x', { workspace_slug: '../evil' }),
+    meetingRef('x\nInjected'),
+    meetingRef('x'.repeat(600))
+  ]) {
+    assert.equal(hrefForRef(bad), '#', JSON.stringify(bad).slice(0, 80));
+  }
+});
+
+test('humanizeReason names the calendar attention reasons', () => {
+  assert.equal(humanizeReason('calendar_conflict'), 'Overlaps another meeting');
+  assert.equal(humanizeReason('meeting_needs_prep'), 'No prep note yet');
+});
+
+test('isQuietDay counts today_meetings as content', () => {
+  assert.equal(isQuietDay({ todays_meetings: [{ ref: meetingRef('a') }] }), false);
+  assert.equal(isQuietDay({ todays_meetings: [] }), true);
+});
+
+test('formatMeetingTime renders a range in the brief timezone, or All day', () => {
+  const item = { start_time: '2026-09-24T02:00:00Z', end_time: '2026-09-24T02:30:00Z' };
+  const seoul = formatMeetingTime(item, 'Asia/Seoul');
+  assert.match(seoul, /^11:00\sAM – 11:30\sAM$/);
+  assert.equal(formatMeetingTime({ all_day: true }, 'UTC'), 'All day');
+  assert.equal(formatMeetingTime({ start_time: 'garbage' }, 'UTC'), '');
+});
+
+test('meetingPrepText states prep facts and says nothing for private or all-day meetings', () => {
+  assert.equal(meetingPrepText({ prep_status: 'ready' }), 'Prep note ready');
+  assert.equal(meetingPrepText({ prep_status: 'pending' }), 'Preparing…');
+  assert.equal(meetingPrepText({ prep_status: 'stale' }), 'Prep note is out of date');
+  assert.equal(meetingPrepText({ prep_status: 'failed' }), 'Prep did not finish — try again');
+  assert.equal(meetingPrepText({}), 'No prep note yet');
+  assert.equal(meetingPrepText({ private: true }), '');
+  assert.equal(meetingPrepText({ all_day: true }), '');
+});
+
+test("renderContent leads with Today's Meetings: badges, prep, suggestion, and a private meeting unnamed", () => {
+  const html = renderContent(
+    {
+      calendar_connected: true,
+      todays_meetings: [
+        {
+          ref: meetingRef('design'),
+          title: 'Design <b>review</b>',
+          start_time: '2026-09-24T02:00:00Z',
+          end_time: '2026-09-24T03:00:00Z',
+          location: 'Room 4',
+          conflict: true,
+          why_prepare: 'Bring the setup notes.'
+        },
+        {
+          ref: meetingRef('lunch'),
+          title: 'Team lunch',
+          start_time: '2026-09-24T03:30:00Z',
+          end_time: '2026-09-24T04:30:00Z',
+          back_to_back: true,
+          prep_status: 'ready'
+        },
+        {
+          ref: meetingRef('private'),
+          title: 'Dentist',
+          location: 'Clinic',
+          private: true,
+          start_time: '2026-09-24T05:00:00Z',
+          end_time: '2026-09-24T06:00:00Z',
+          why_prepare: 'Should never render.'
+        }
+      ],
+      needs_attention: [
+        {
+          ref: meetingRef('design'),
+          title: 'Design review',
+          workspace_name: 'Calendar',
+          reason: 'calendar_conflict'
+        }
+      ]
+    },
+    { timeZone: 'Asia/Seoul' }
+  );
+  assert.ok(html.indexOf("Today's Meetings") < html.indexOf('Needs Attention'));
+  assert.match(html, /Design &lt;b&gt;review&lt;\/b&gt;/);
+  assert.match(html, /data-state="conflict">Overlaps</);
+  assert.match(html, /data-state="back_to_back">Back-to-back</);
+  assert.match(html, /11:00\sAM – 12:00\sPM · Room 4/);
+  assert.match(html, /class="home-daily-brief-item-why is-suggestion">Bring the setup notes\./);
+  assert.match(html, /Prep note ready/);
+  assert.match(html, /Private event/);
+  assert.doesNotMatch(html, /Dentist|Clinic|Should never render/);
+  assert.match(html, /Overlaps another meeting/);
+  assert.match(
+    html,
+    /href="\/workspaces\/calendar-ops\?panel=calendar&event=design&calendar=primary"/
+  );
+});
+
+test("renderContent says how many of today's meetings are not listed", () => {
+  const html = renderContent({
+    calendar_connected: true,
+    todays_meetings_more: 4,
+    todays_meetings: [{ ref: meetingRef('a'), title: 'A' }]
+  });
+  assert.match(html, /4 more meetings today\.<\/p><\/section>/);
+  assert.doesNotMatch(
+    renderContent({
+      calendar_connected: true,
+      todays_meetings: [{ ref: meetingRef('a'), title: 'A' }]
+    }),
+    /more meeting/
+  );
+});
+
+test('a meeting id cannot break out of the link attribute', () => {
+  const html = renderContent({
+    calendar_connected: true,
+    todays_meetings: [{ ref: meetingRef('x" onmouseover="alert(1)'), title: 'T' }]
+  });
+  assert.doesNotMatch(html, /onmouseover="/);
+  assert.match(html, /event=x%22\+onmouseover%3D%22alert%281%29/);
+});
+
+test('renderContent says No meetings today only when a calendar was read', () => {
+  const connected = renderContent({ calendar_connected: true, todays_meetings: [] });
+  assert.match(connected, /Today's Meetings/);
+  assert.match(connected, /No meetings today\./);
+  const none = renderContent({});
+  assert.doesNotMatch(none, /Meetings|meetings today/);
 });
