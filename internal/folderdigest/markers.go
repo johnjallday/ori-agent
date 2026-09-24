@@ -42,33 +42,7 @@ type Marker struct {
 	Label string
 }
 
-// Markers is the marker table. Order is precedence: when a folder carries
-// several markers the first matching row decides its shape, so the more
-// specific shapes (a REAPER session, a manuscript, a corpus, a notes vault)
-// come before the generic code markers a thesis or a vault may also carry
-// (a .git directory, for instance). Adding a marker is a table edit.
-var Markers = []Marker{
-	// Audio
-	{Name: "*.rpp", Kind: MarkerGlob, Shape: ShapeAudio, Label: "REAPER session"},
-	{Name: "*.logicx", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Logic Pro project"},
-	{Name: "*.als", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Ableton Live set"},
-	// Manuscript
-	{Name: "main.tex", Kind: MarkerFile, Shape: ShapeManuscript, Label: "LaTeX manuscript"},
-	{Name: "chapters", Kind: MarkerDir, Shape: ShapeManuscript, Label: "chapters folder"},
-	{Name: "outline.md", Kind: MarkerFile, Shape: ShapeManuscript, Label: "outline"},
-	// Corpus
-	{Name: "*.bib", Kind: MarkerGlob, Shape: ShapeCorpus, Label: "bibliography"},
-	// Notes
-	{Name: ".obsidian", Kind: MarkerDir, Shape: ShapeNotes, Label: "Obsidian vault"},
-	// Code
-	{Name: ".git", Kind: MarkerDir, Shape: ShapeCode, Label: "git repository"},
-	{Name: "package.json", Kind: MarkerFile, Shape: ShapeCode, Label: "Node.js package"},
-	{Name: "go.mod", Kind: MarkerFile, Shape: ShapeCode, Label: "Go module"},
-	{Name: "Cargo.toml", Kind: MarkerFile, Shape: ShapeCode, Label: "Rust crate"},
-	{Name: "pyproject.toml", Kind: MarkerFile, Shape: ShapeCode, Label: "Python project"},
-	{Name: "requirements.txt", Kind: MarkerFile, Shape: ShapeCode, Label: "Python project"},
-	{Name: "*.xcodeproj", Kind: MarkerGlob, Shape: ShapeCode, Label: "Xcode project"},
-}
+// The Markers table itself lives in tables.go, the package's data-only file.
 
 // matches reports whether one directory entry satisfies the marker row.
 func (m Marker) matches(name string, isDir bool) bool {
@@ -112,7 +86,7 @@ type ToolMatch string
 
 const (
 	// ToolByExtension compares the row's value against a dominant or present
-	// file extension (".rpp").
+	// file extension (".tex").
 	ToolByExtension ToolMatch = "extension"
 	// ToolByMarker compares the row's value against a marker name ("go.mod").
 	ToolByMarker ToolMatch = "marker"
@@ -131,22 +105,10 @@ type Tool struct {
 	HypothesisText string
 }
 
-// Tools is the tool table. Values are lower-case; extensions carry the dot.
-var Tools = []Tool{
-	{Match: ToolByExtension, Value: ".rpp", ToolID: "reaper", ToolName: "REAPER", HypothesisText: "REAPER may be one of the tools you use."},
-	{Match: ToolByExtension, Value: ".logicx", ToolID: "logic-pro", ToolName: "Logic Pro", HypothesisText: "Logic Pro may be one of the tools you use."},
-	{Match: ToolByExtension, Value: ".als", ToolID: "ableton-live", ToolName: "Ableton Live", HypothesisText: "Ableton Live may be one of the tools you use."},
-	{Match: ToolByExtension, Value: ".tex", ToolID: "latex", ToolName: "LaTeX", HypothesisText: "LaTeX may be one of the tools you use."},
-	{Match: ToolByExtension, Value: ".ipynb", ToolID: "jupyter", ToolName: "Jupyter", HypothesisText: "Jupyter may be one of the tools you use."},
-	{Match: ToolByMarker, Value: "go.mod", ToolID: "go", ToolName: "Go", HypothesisText: "Go may be one of the tools you use."},
-	{Match: ToolByMarker, Value: "package.json", ToolID: "nodejs", ToolName: "Node.js", HypothesisText: "Node.js may be one of the tools you use."},
-	{Match: ToolByExtension, Value: ".fig", ToolID: "figma", ToolName: "Figma", HypothesisText: "Figma may be one of the tools you use."},
-	{Match: ToolByExtension, Value: ".psd", ToolID: "photoshop", ToolName: "Photoshop", HypothesisText: "Photoshop may be one of the tools you use."},
-	{Match: ToolByExtension, Value: ".bib", ToolID: "reference-manager", ToolName: "a reference manager", HypothesisText: "A reference manager may be one of the tools you use."},
-}
+// The Tools table itself lives in tables.go, the package's data-only file.
 
-// ToolForExtension returns the tool row for a file extension (".rpp" or
-// "rpp"), if the table has one.
+// ToolForExtension returns the tool row for a file extension (".tex" or
+// "tex"), if the table has one.
 func ToolForExtension(ext string) (Tool, bool) {
 	ext = strings.ToLower(strings.TrimSpace(ext))
 	if ext != "" && !strings.HasPrefix(ext, ".") {
@@ -161,7 +123,7 @@ func ToolForExtension(ext string) (Tool, bool) {
 }
 
 // ToolForMarker returns the tool row for a marker name ("go.mod"), if the
-// table has one. Glob markers ("*.rpp") are looked up by their extension.
+// table has one. Glob markers ("*.bib") are looked up by their extension.
 func ToolForMarker(m Marker) (Tool, bool) {
 	if m.Kind == MarkerGlob {
 		return ToolForExtension(filepath.Ext(m.Name))

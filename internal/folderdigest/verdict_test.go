@@ -1,6 +1,7 @@
 package folderdigest
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,46 @@ func TestDecide_MixedRanksProjects(t *testing.T) {
 	}
 	if v.LooseFiles != 40 || v.LooseKinds != 6 {
 		t.Errorf("loose = %d of %d kinds", v.LooseFiles, v.LooseKinds)
+	}
+}
+
+func TestExclude_RedecidesWithoutDeclinedCandidates(t *testing.T) {
+	root := materializeTree(t, "mixed")
+	result, err := Scan(root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := fixtureNow()
+	declineNamed := func(names ...string) func(Candidate) bool {
+		return func(c Candidate) bool { return slices.Contains(names, c.Name) }
+	}
+
+	// Declining the top project moves the next one up and keeps the mix.
+	v := Exclude(result, now, declineNamed("Thesis"))
+	if v.Kind != KindMixed || v.Project == nil || v.Project.Name != "website" || v.Reason != "2 projects and 40 loose files" {
+		t.Errorf("after declining Thesis: %s %q project=%v", v.Kind, v.Reason, v.Project)
+	}
+	// Declining every project leaves a plain dump.
+	v = Exclude(result, now, declineNamed("Thesis", "website", "Album"))
+	if v.Kind != KindDump || v.Reason != "40 loose files of 6 kinds" {
+		t.Errorf("after declining all projects: %s %q", v.Kind, v.Reason)
+	}
+	// Declining the root removes the tidy branch; the projects remain.
+	v = Exclude(result, now, declineNamed("mixed"))
+	if v.Kind != KindMixed || len(v.Projects) != 3 || v.RootDump {
+		t.Errorf("after declining root: %s projects=%d rootDump=%v", v.Kind, len(v.Projects), v.RootDump)
+	}
+	// Declining everything is the declined verdict, still with a reason.
+	v = Exclude(result, now, declineNamed("mixed", "Thesis", "website", "Album"))
+	if v.Kind != KindDeclined || v.Reason == "" {
+		t.Errorf("after declining everything: %s %q", v.Kind, v.Reason)
+	}
+	// A nil filter is a plain Decide.
+	if v := Exclude(result, now, nil); v.Kind != KindMixed {
+		t.Errorf("nil filter kind = %s", v.Kind)
+	}
+	if got := Decide(result, now).LooseReason(); got != "40 loose files of 6 kinds" {
+		t.Errorf("LooseReason = %q", got)
 	}
 }
 

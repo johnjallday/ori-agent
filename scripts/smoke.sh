@@ -1481,6 +1481,97 @@ smoke_starter() {
   node "$root/scripts/demo-starter-missions.mjs" "$BASE_URL" "$out" "$stage" "${@:4}"
 }
 
+# smoke_show_folder drives "Show me a folder" (tasks/prd-show-me-a-folder.md).
+#   seed <sandbox>   fill the sandbox HOME with one folder per chip: Documents is
+#                    a mixed tree (three projects + 40 loose files), Downloads a
+#                    dump (25 loose files of 6 kinds), Desktop empty (2 files),
+#                    plus Documents/Papers (a corpus of real PDFs when
+#                    tests/fixtures has one) and Documents/Scans (dated PDFs).
+#   hq <base-url>    onboard, hire the assistant and build Personal HQ so the
+#                    chooser is available on Home.
+#   scan <base-url> <chip>            scan one chip and print the offer
+#   decide <base-url> <offer> <decision> [choice]  answer an offer
+#   current <base-url>                print the pending offer and chips
+smoke_show_folder() {
+  local stage="${3:-current}"
+  case "$stage" in
+  seed)
+    local home="${4:-}"
+    [[ -n "$home" && -d "$home" ]] || fail "usage: $0 showfolder seed <sandbox-dir>"
+    python3 - "$home" <<'PY'
+import os, sys, time
+home = sys.argv[1]
+def put(rel, age_days=0, body=b"fixture"):
+    path = os.path.join(home, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(body)
+    at = time.time() - age_days * 86400
+    os.utime(path, (at, at))
+kinds = [".pdf", ".png", ".zip", ".dmg", ".csv", ".txt"]
+# Downloads: 25 loose files of 6 kinds (5+5+5+4+3+3).
+counts = [5, 5, 5, 4, 3, 3]
+for ext, n in zip(kinds, counts):
+    for i in range(n):
+        put(f"Downloads/download-{i}{ext}", age_days=2 + i)
+# Documents: 40 loose files of 6 kinds, three projects, one folder of scans.
+counts = [10, 10, 8, 5, 4, 3]
+for ext, n in zip(kinds, counts):
+    for i in range(n):
+        put(f"Documents/doc-{i}{ext}", age_days=3 + i)
+put("Documents/Thesis/main.tex", 1)
+for i in range(5):
+    put(f"Documents/Thesis/chapters/chapter-{i}.tex", 1)
+put("Documents/Thesis/refs.bib", 4)
+put("Documents/website/package.json", 3)
+for i in range(4):
+    put(f"Documents/website/src/index-{i}.js", 3)
+put("Documents/Album/Song.rpp", 7)
+for i in range(3):
+    put(f"Documents/Album/Media/take-{i}.wav", 7)
+for i in range(30):
+    put(f"Documents/Scans/invoice-{i}.pdf", 45 + i)
+# Desktop: two files, nothing to do.
+put("Desktop/todo.txt", 0)
+put("Desktop/photo.png", 0)
+print(f"seeded {home}/Downloads, Documents, Desktop")
+PY
+    ;;
+  hq)
+    curl -s -o /dev/null -w "%{http_code} onboarding skip\n" -X POST "$BASE_URL/api/onboarding/skip"
+    curl -s -o /dev/null -w "%{http_code} workspace root\n" -X POST "$BASE_URL/api/settings/workspace-root" \
+      -H 'Content-Type: application/json' -d '{"workspace_root":""}'
+    local hire version
+    hire=$(curl -s -X POST "$BASE_URL/api/personal-assistant/hire" -H 'Content-Type: application/json' \
+      -d '{"request_id":"showfolder-hire","if_version":0,"display_name":"Atlas","mandate":"Keep my projects moving.","focus_areas":["plan_my_day","keep_projects_moving"]}')
+    version=$(printf '%s' "$hire" | json_field 'personal_assistant.state_version')
+    [[ -n "$version" ]] || fail "hire failed: $hire"
+    echo "hired Atlas (state_version $version)"
+    curl -s -o /dev/null -w "%{http_code} personal hq\n" -X POST "$BASE_URL/api/personal-assistant/hq" \
+      -H 'Content-Type: application/json' \
+      -d "{\"request_id\":\"showfolder-hq\",\"if_version\":$version,\"name\":\"My HQ\",\"timezone\":\"UTC\"}"
+    printf 'personal_assistant.state = %s\n' \
+      "$(curl -s "$BASE_URL/api/personal-assistant" | json_field 'personal_assistant.state')"
+    ;;
+  scan)
+    local chip="${4:-downloads}"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/scan" -H 'Content-Type: application/json' \
+      -d "{\"chip\":\"$chip\"}" | python3 -m json.tool
+    ;;
+  decide)
+    local offer="${4:-}" decision="${5:-no}" choice="${6:-}"
+    [[ -n "$offer" ]] || fail "usage: $0 showfolder decide <base-url> <offer-id> <yes|no|later> [project|tidy]"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/decide" \
+      -H 'Content-Type: application/json' \
+      -d "{\"decision\":\"$decision\",\"choice\":\"$choice\",\"request_id\":\"smoke-$(date +%s%N)\"}" | python3 -m json.tool
+    ;;
+  current)
+    curl -s "$BASE_URL/api/personal-assistant/folder-digest" | python3 -m json.tool
+    ;;
+  *) fail "usage: $0 showfolder <base-url> <seed <sandbox>|hq|scan <chip>|decide <offer> <decision> [choice]|current>" ;;
+  esac
+}
+
 # smoke_meet_assistant drives Mission 01 ("Meet your assistant") through the API.
 #   onboard       close onboarding without a hire (what the modal's Model step does)
 #   status        print the relationship state and the five missions with their locks
@@ -2852,6 +2943,7 @@ blueprint-details) smoke_blueprint_details "$@" ;;
 blueprintintake | blueprint-intake) smoke_blueprint_intake "${3:-}" ;;
 starter) smoke_starter "$@" ;;
 meetassistant) smoke_meet_assistant "$@" ;;
+showfolder) smoke_show_folder "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
 agent-type-strip) smoke_agent_type_strip "$@" ;;
 economyseed) smoke_economy_seed ;;
@@ -2899,6 +2991,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 meetassistant <base-url> <stage>      # Mission 01: onboard | status | hire [name] | demo <stage>" >&2
+  echo "  $0 showfolder <base-url> <stage>         # Show me a folder: seed <sandbox> | hq | scan <chip> | decide <offer> <d> [choice] | current" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
   echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2
   echo "  $0 blueprintintake <base-url> [folder]   # import Course; verify intake, optionally choose a folder via native picker" >&2

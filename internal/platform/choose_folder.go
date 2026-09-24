@@ -1,0 +1,83 @@
+package platform
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"runtime"
+	"strings"
+)
+
+// ErrFolderDialogUnavailable reports that no native folder dialog can be
+// shown: the platform has none wired up, or desktop launches are switched
+// off with ORI_NO_DESKTOP_OPEN.
+var ErrFolderDialogUnavailable = errors.New("folder dialog is unavailable")
+
+// chooseFolderCommand runs the AppleScript and returns its stdout. Tests
+// replace it to exercise cancellation and parsing without a dialog.
+var chooseFolderCommand = func(ctx context.Context, script string) ([]byte, error) {
+	return exec.CommandContext(ctx, "osascript", "-e", script).Output()
+}
+
+// ChooseFolderAvailable reports whether ChooseFolder can show a dialog here.
+// It is quiet: a chooser may ask on every render, and the skipped launch is
+// logged once when a choice is actually attempted.
+func ChooseFolderAvailable() bool {
+	return runtime.GOOS == "darwin" && !desktopOpenSwitchedOff()
+}
+
+// ChooseFolder shows the native Finder folder dialog and returns the chosen
+// folder's POSIX path. A cancelled dialog returns chosen=false with no error,
+// so callers can treat it as "no folder chosen" rather than a failure.
+//
+// Platform support: macOS only (osascript "choose folder"). Elsewhere, and
+// under ORI_NO_DESKTOP_OPEN, it returns ErrFolderDialogUnavailable.
+func ChooseFolder(ctx context.Context, prompt string) (path string, chosen bool, err error) {
+	if runtime.GOOS != "darwin" {
+		return "", false, ErrFolderDialogUnavailable
+	}
+	if desktopOpenDisabled("choose_folder", prompt) {
+		return "", false, ErrFolderDialogUnavailable
+	}
+	out, err := chooseFolderCommand(ctx, chooseFolderScript(prompt))
+	if err != nil {
+		if chooseFolderCancelled(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("choose folder: %w", err)
+	}
+	path = strings.TrimSpace(string(out))
+	if path == "" {
+		return "", false, nil
+	}
+	return path, true, nil
+}
+
+// chooseFolderScript builds the AppleScript. The prompt is the only variable
+// part and is escaped the way the menu bar app escapes its dialog strings.
+func chooseFolderScript(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return `POSIX path of (choose folder)`
+	}
+	return fmt.Sprintf(`POSIX path of (choose folder with prompt "%s")`, escapeAppleScriptString(prompt))
+}
+
+// chooseFolderCancelled recognises the dialog's Cancel button: osascript
+// exits non-zero with AppleScript error -128 ("User canceled") on stderr.
+func chooseFolderCancelled(err error) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return false
+	}
+	return strings.Contains(string(exit.Stderr), "-128")
+}
+
+// escapeAppleScriptString quotes a value for use inside an AppleScript
+// string literal. Backslashes are escaped before quotes, or the quote
+// escaping itself gets double-escaped.
+func escapeAppleScriptString(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	return strings.ReplaceAll(value, "\"", "\\\"")
+}

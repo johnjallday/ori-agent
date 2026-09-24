@@ -1,6 +1,7 @@
 package folderdigest
 
 import (
+	"fmt"
 	"sort"
 	"time"
 )
@@ -51,6 +52,10 @@ const (
 	KindMixed     Kind = "mixed"
 	KindAmbiguous Kind = "ambiguous"
 	KindEmpty     Kind = "empty"
+	// KindDeclined is not a shape: it is what remains when the user has
+	// already said "not this one" about the root and nothing inside it is
+	// left to offer (FR23).
+	KindDeclined Kind = "declined"
 )
 
 // Verdict is what the assistant concluded about a root and why.
@@ -60,6 +65,9 @@ type Verdict struct {
 	Reason string
 	// Root is the root candidate's stats.
 	Root Candidate
+	// RootDump records whether the root met the dump rule (FR17), kept so the
+	// verdict can be re-decided after declined candidates are removed.
+	RootDump bool
 	// Project is the candidate the offer names: the root or the top-ranked
 	// subfolder. Nil unless Kind is project or mixed.
 	Project *Candidate
@@ -71,6 +79,18 @@ type Verdict struct {
 	LooseFiles int
 	LooseKinds int
 	Partial    bool
+}
+
+// LooseReason words the root's loose files the way a dump offer does
+// ("40 loose files of 6 kinds"), for the tidy branch of a mixed offer.
+func (v Verdict) LooseReason() string {
+	return fmt.Sprintf("%s of %s", plural(v.LooseFiles, "loose file"), plural(v.LooseKinds, "kind"))
+}
+
+// DescribeCandidate words one candidate's contents and last edit, the way a
+// project offer's reason does ("14 LaTeX files, edited yesterday").
+func DescribeCandidate(c Candidate, now time.Time) string {
+	return describeWork(c, now)
 }
 
 // projectSignal applies FR16 to one candidate.
@@ -117,6 +137,21 @@ func Rank(candidates []Candidate) []Candidate {
 // checked in the order the requirement lists them: project, then mixed and
 // dump, then empty, then ambiguous.
 func Decide(r Result, now time.Time) Verdict {
+	return decide(r, now, func(Candidate) bool { return false })
+}
+
+// Exclude re-decides the verdict without the candidates the user declined
+// earlier (FR23): a declined subfolder is no longer a project signal, and a
+// declined root is neither a project nor a dump, leaving only what sits
+// inside it to offer.
+func Exclude(r Result, now time.Time, declined func(c Candidate) bool) Verdict {
+	if declined == nil {
+		return Decide(r, now)
+	}
+	return decide(r, now, declined)
+}
+
+func decide(r Result, now time.Time, declined func(Candidate) bool) Verdict {
 	root := r.RootCandidate()
 	v := Verdict{
 		Root:       root,
@@ -127,26 +162,29 @@ func Decide(r Result, now time.Time) Verdict {
 
 	var subProjects []Candidate
 	for _, c := range r.Subfolders() {
-		if projectSignal(c, now) {
+		if projectSignal(c, now) && !declined(c) {
 			subProjects = append(subProjects, c)
 		}
 	}
 	subProjects = Rank(subProjects)
-	rootProject := projectSignal(root, now)
-	rootDump := dumpSignal(root)
+	rootDeclined := declined(root)
+	rootProject := !rootDeclined && projectSignal(root, now)
+	v.RootDump = !rootDeclined && dumpSignal(root)
 
 	switch {
 	case rootProject:
 		v.Kind = KindProject
 		v.Projects = append([]Candidate{root}, subProjects...)
-	case rootDump && len(subProjects) >= 1, len(subProjects) >= 2:
+	case v.RootDump && len(subProjects) >= 1, len(subProjects) >= 2:
 		v.Kind = KindMixed
 		v.Projects = subProjects
 	case len(subProjects) == 1:
 		v.Kind = KindProject
 		v.Projects = subProjects
-	case rootDump:
+	case v.RootDump:
 		v.Kind = KindDump
+	case rootDeclined:
+		v.Kind = KindDeclined
 	case root.FileCount < EmptyMaxFiles:
 		v.Kind = KindEmpty
 	default:

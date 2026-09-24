@@ -50,6 +50,33 @@
     </div>
   </section>
 
+  <!-- Show me a folder: the assistant's first proactive act. The chooser names
+       folders by identifier and the server resolves them; the offer card is
+       built from counts and names only. Shown for an active or paused
+       assistant, never before the hire or while HQ is being built. -->
+  <section id="personalAssistantFolder" class="pa-folder" data-state="idle"
+           aria-labelledby="personalAssistantFolderTitle" hidden>
+    <div class="pa-folder__launch">
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="personalAssistantFolderShowBtn"
+              aria-expanded="false" aria-controls="personalAssistantFolderChooser">Show me a folder</button>
+    </div>
+    <div id="personalAssistantFolderChooser" class="pa-folder__chooser" hidden>
+      <p id="personalAssistantFolderTitle" class="pa-folder__prompt">Which folder should I look at?</p>
+      <div id="personalAssistantFolderChips" class="pa-folder__chips" role="group" aria-label="Folders"></div>
+      <p id="personalAssistantFolderNote" class="pa-folder__note" hidden></p>
+      <p id="personalAssistantFolderStatus" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
+    </div>
+    <section id="personalAssistantFolderOffer" class="pa-specialist-offer pa-folder__offer"
+             aria-labelledby="personalAssistantFolderOfferHeadline" hidden>
+      <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
+      <p id="personalAssistantFolderOfferQuestion" class="pa-specialist-offer__question"></p>
+      <p id="personalAssistantFolderOfferReason" class="pa-folder__reason"></p>
+      <div id="personalAssistantFolderOfferActions" class="pa-specialist-offer__actions"></div>
+      <p id="personalAssistantFolderOfferNote" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
+      <p id="personalAssistantFolderOfferError" class="pa-specialist-offer__error" role="alert" hidden></p>
+    </section>
+  </section>
+
   <!-- The domain offer is server-authored and non-blocking. An empty or failed
        detection keeps this whole region absent. -->
   <section id="personalAssistantSpecialistOffer" class="pa-specialist-offer" data-decision="unanswered"

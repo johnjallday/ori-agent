@@ -1074,6 +1074,12 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/resume-forget", s.Handlers.PersonalAssistant.ResumeKnowledgeForget)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/resume-operation", s.Handlers.PersonalAssistant.ResumeKnowledgeOperation)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/{item_id}/{action}", s.Handlers.PersonalAssistant.MutateKnowledgeReview)
+		// Show me a folder: chips and offer identifiers only, never a path.
+		const folderDigest = "/api/personal-assistant/folder-digest"
+		mux.HandleFunc("GET "+folderDigest, s.Handlers.PersonalAssistant.GetFolderDigest)
+		mux.HandleFunc("POST "+folderDigest+"/scan", s.Handlers.PersonalAssistant.ScanFolderDigest)
+		mux.HandleFunc("POST "+folderDigest+"/picker", s.Handlers.PersonalAssistant.PickFolderDigest)
+		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/decide", s.Handlers.PersonalAssistant.DecideFolderDigest)
 		mux.HandleFunc("POST /api/personal-assistant/specialist", s.Handlers.PersonalAssistant.AnswerSpecialistOffer)
 		mux.HandleFunc("PATCH /api/personal-assistant/working-agreement", s.Handlers.PersonalAssistant.UpdateWorkingAgreement)
 		mux.HandleFunc("POST /api/personal-assistant/pause", s.Handlers.PersonalAssistant.Pause)

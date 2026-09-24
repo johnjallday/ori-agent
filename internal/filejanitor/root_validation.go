@@ -54,6 +54,29 @@ func DefaultRootGuards() RootGuards {
 	return guards
 }
 
+// ValidateRoot applies the folder rules File Janitor enforces on its own root
+// — canonical, symlink-resolved, and not too broad to hand to Ori — to a
+// selection made elsewhere, such as a folder shown to the assistant. It
+// returns the canonical path, or a *SetupError whose Message is safe to show
+// the user with its RepairChooseFolder action.
+func ValidateRoot(raw string, guards RootGuards) (string, error) {
+	root, err := canonicalizeRoot(raw)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return "", setupErr(CodeRootMissing, "That folder no longer exists. Choose a folder that is on this computer.", RepairChooseFolder, err)
+	}
+	if !info.IsDir() {
+		return "", setupErr(CodeNotADirectory, "That is a file, not a folder. Choose a folder.", RepairChooseFolder, nil)
+	}
+	if err := rejectUnsafeRoot(root, guards); err != nil {
+		return "", err
+	}
+	return root, nil
+}
+
 // canonicalizeRoot turns a user-confirmed selection into the one absolute,
 // symlink-resolved path everything else derives from (FR-46, FR-47).
 //

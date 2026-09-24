@@ -6,24 +6,8 @@ import (
 	"time"
 )
 
-// extensionKinds turns an extension into the plain word a reason line uses
-// ("14 LaTeX files"). Anything missing falls back to the upper-cased
-// extension ("3 MOV files").
-var extensionKinds = map[string]string{
-	".tex": "LaTeX", ".bib": "BibTeX", ".pdf": "PDF", ".docx": "Word", ".doc": "Word",
-	".md": "Markdown", ".txt": "text", ".rtf": "rich text", ".epub": "EPUB",
-	".xlsx": "Excel", ".pptx": "PowerPoint", ".csv": "CSV", ".json": "JSON",
-	".xml": "XML", ".html": "HTML", ".yaml": "YAML", ".yml": "YAML",
-	".go": "Go", ".py": "Python", ".js": "JavaScript", ".ts": "TypeScript",
-	".swift": "Swift", ".rs": "Rust", ".java": "Java", ".rb": "Ruby", ".c": "C",
-	".h": "C header", ".css": "CSS", ".sh": "shell", ".ipynb": "notebook",
-	".rpp": "REAPER", ".wav": "WAV", ".aif": "AIFF", ".aiff": "AIFF", ".mp3": "MP3",
-	".flac": "FLAC", ".mid": "MIDI", ".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG",
-	".heic": "HEIC", ".gif": "GIF", ".svg": "SVG", ".psd": "Photoshop", ".fig": "Figma",
-	".mov": "video", ".mp4": "video", ".zip": "ZIP", ".dmg": "disk image", ".pkg": "installer",
-}
-
-// KindName is the plain word for a file extension.
+// KindName is the plain word for a file extension, from the extensionKinds
+// table in tables.go.
 func KindName(ext string) string {
 	if ext == "" {
 		return "untyped"
