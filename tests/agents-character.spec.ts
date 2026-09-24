@@ -15,8 +15,9 @@ import { mockHiredAssistant } from './helpers/hired-assistant';
  * costs the user their uploaded avatar.
  */
 
-// Creating agents with the ordinary New Agent form is what a user with a hired
-// assistant does (see helpers/hired-assistant.ts).
+// New Agent opens the shared Create Agent modal for a user with a hired
+// assistant (see helpers/hired-assistant.ts); before the hire it opens Mission
+// 01's preset instead.
 test.beforeEach(async ({ page }) => {
   await mockHiredAssistant(page);
 });
@@ -260,17 +261,17 @@ test.describe('creating an agent with a character', () => {
 
     const name = unique('PWCreate');
     await page.locator('#newAgentBtn').click();
-    await page.locator('#cr-name').fill(name);
+    await page.locator('#agentName').fill(name);
 
-    await page.locator('#cr-appearance-character-choose').click();
+    await page.locator('#agentCreateAppearance-character-choose').click();
     await expect(page.locator('#charPicker')).toBeVisible();
     await page.locator('.char-card', { hasText: 'Insight Researcher' }).click();
     await page.locator('#charPickerConfirm').click();
 
     // Staged only: nothing is persisted until the create request succeeds.
-    await expect(page.locator('#cr-appearance-mode-character')).toBeChecked();
-    await expect(page.locator('#cr-appearance-root')).toContainText('Insight Researcher');
-    await page.locator('#createSubmit').click();
+    await expect(page.locator('#agentCreateAppearance-mode-character')).toBeChecked();
+    await expect(page.locator('#agentCreateAppearance-root')).toContainText('Insight Researcher');
+    await page.locator('#createAgentBtn').click();
 
     // Persisted in the same successful creation, not a follow-up write (FR-93).
     await expect(page.locator('#stageName')).toHaveText(name);
@@ -283,15 +284,17 @@ test.describe('creating an agent with a character', () => {
 
     const name = unique('PWFace');
     await page.locator('#newAgentBtn').click();
-    await page.locator('#cr-name').fill(name);
-    await page.locator('#cr-role').selectOption('researcher');
+    await page.locator('#agentName').fill(name);
+    await page.locator('#agentRole').selectOption('researcher');
 
     // The form opens on a character suited to the role and says it chose it,
     // so the suggestion is never mistaken for the user's own pick.
-    await expect(page.locator('#cr-appearance-mode-character')).toBeChecked();
-    await expect(page.locator('#cr-appearance-root')).toContainText('Suggested for this role');
+    await expect(page.locator('#agentCreateAppearance-mode-character')).toBeChecked();
+    await expect(page.locator('#agentCreateAppearance-root')).toContainText(
+      'Suggested for this role'
+    );
 
-    await page.locator('#createSubmit').click();
+    await page.locator('#createAgentBtn').click();
     await expect(page.locator('#stageName')).toHaveText(name);
     await expect(page.locator('#stageCharacter')).toContainText('Character art:');
     await expect(page.locator(`.roster-card[data-name="${name}"] .agent-avatar`)).not.toHaveClass(
@@ -307,16 +310,16 @@ test.describe('creating an agent with a character', () => {
 
     const name = unique('PWSkip');
     await page.locator('#newAgentBtn').click();
-    await page.locator('#cr-name').fill(name);
+    await page.locator('#agentName').fill(name);
 
     // Generated is a choice, not the absence of one (FR-5). Making it is a
     // decision, and a later role change must not talk the form back out of it.
-    await expect(page.locator('#cr-appearance-mode-character')).toBeChecked();
-    await page.locator('#cr-appearance-mode-generated').check();
-    await page.locator('#cr-role').selectOption('analyzer');
-    await expect(page.locator('#cr-appearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#agentCreateAppearance-mode-character')).toBeChecked();
+    await page.locator('#agentCreateAppearance-mode-generated').check();
+    await page.locator('#agentRole').selectOption('analyzer');
+    await expect(page.locator('#agentCreateAppearance-mode-generated')).toBeChecked();
 
-    await page.locator('#createSubmit').click();
+    await page.locator('#createAgentBtn').click();
     await expect(page.locator('#stageName')).toHaveText(name);
     // No character means the generated portrait, not a broken one. Asserted on
     // the roster's own surfaces: creation lands there, and the Inspector no

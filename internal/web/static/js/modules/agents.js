@@ -226,7 +226,8 @@ function createDefaultAgentCreationFlowState() {
     taskId: '',
     assignTask: false,
     suggestedMCPServers: [],
-    suggestedSkills: []
+    suggestedSkills: [],
+    onCreated: null
   };
 }
 
@@ -554,7 +555,11 @@ function normalizeAgentCreationFlowOptions(options = {}) {
     taskId: String(options?.taskId || '').trim(),
     assignTask: Boolean(options?.assignTask),
     suggestedMCPServers: normalizeAgentCreationFlowSelections(options?.suggestedMCPServers),
-    suggestedSkills: normalizeAgentCreationFlowSelections(options?.suggestedSkills)
+    suggestedSkills: normalizeAgentCreationFlowSelections(options?.suggestedSkills),
+    // A page that keeps its own collection current (the Agents roster) takes
+    // the created agent from here and is not reloaded. Every other caller
+    // still gets the reload that shows the new agent.
+    onCreated: typeof options?.onCreated === 'function' ? options.onCreated : null
   };
 }
 
@@ -1477,6 +1482,9 @@ async function createNewAgent() {
   }
   const formValues = extracted.values;
   const agentName = formValues.name;
+  // Taken now: hiding the modal below clears the pending flow before the
+  // success path reaches it.
+  const onCreated = pendingAgentCreationFlow.onCreated;
 
   // Set loading state
   const originalText = createBtn.textContent;
@@ -1635,6 +1643,12 @@ async function createNewAgent() {
 
     // Emit event for other modules
     EventBus.emit('agent:created', { name: agentName, role: requestBody.role });
+
+    // The opener that asked for the result shows the new agent itself.
+    if (onCreated) {
+      onCreated({ name: agentName, role: requestBody.role });
+      return;
+    }
 
     // Refresh the agent list
     agentsLog.debug('Refreshing agent list...');
