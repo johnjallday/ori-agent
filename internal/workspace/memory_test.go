@@ -306,6 +306,14 @@ func TestWorkspaceMemoryToolsGate(t *testing.T) {
 	}
 }
 
+func TestValidateMemoryTextRejectsOpaqueControlCharacters(t *testing.T) {
+	for _, input := range []string{"ordinary\x00hidden", "ordinary\x7fhidden", "visible\u202ehidden"} {
+		if text, err := ValidateMemoryText(input); err == nil {
+			t.Fatalf("control character accepted in %q: %q", input, text)
+		}
+	}
+}
+
 func TestRenderMemoryPromptSection_EmptyAndGuidance(t *testing.T) {
 	empty := ParseMemoryDocument("")
 

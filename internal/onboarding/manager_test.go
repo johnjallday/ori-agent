@@ -31,6 +31,57 @@ func TestOpenForResetRefusesMalformedStateWithoutOverwriting(t *testing.T) {
 	}
 }
 
+func TestSavedProfileObserverRunsAfterPersistenceOutsideLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := NewManager(path)
+	called := 0
+	mgr.SetSavedProfileObserver(func() {
+		called++
+		if saved := mgr.GetUserProfile(); saved == nil || saved.DetectedApps[0] != "Obsidian" {
+			t.Fatalf("observer saw no saved snapshot: %+v", saved)
+		}
+		if _, err := os.ReadFile(path); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := mgr.SetUserProfile(&types.InferredProfile{DetectedApps: []string{"Obsidian"}}); err != nil || called != 1 {
+		t.Fatalf("save=%v observer calls=%d", err, called)
+	}
+	if err := mgr.SetUserProfile(nil); err != nil || called != 1 {
+		t.Fatalf("nil profile save=%v observer calls=%d", err, called)
+	}
+	bad := NewManager(t.TempDir()) // a directory cannot be atomically replaced by a state file
+	bad.SetSavedProfileObserver(func() { t.Fatal("observer ran after a failed save") })
+	if err := bad.SetUserProfile(&types.InferredProfile{DetectedApps: []string{"Obsidian"}}); err == nil {
+		t.Fatal("directory path unexpectedly accepted saved state")
+	}
+}
+
+func TestManagerSavedProfileSnapshotDoesNotAliasAppEvidence(t *testing.T) {
+	mgr := NewManager(filepath.Join(t.TempDir(), "app_state.json"))
+	input := &types.InferredProfile{
+		InferredAt:   time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC),
+		DetectedApps: []string{"Visual Studio Code"}, PreferredTools: []string{"Go"},
+		Specializations: []string{"programming"}, Interests: []string{"coding"},
+		SecondaryCategories: []string{"developer"},
+	}
+	if err := mgr.SetUserProfile(input); err != nil {
+		t.Fatal(err)
+	}
+	input.DetectedApps[0] = "changed outside manager"
+	input.PreferredTools[0] = "changed outside manager"
+	snapshot := mgr.GetUserProfile()
+	if snapshot == nil || snapshot.DetectedApps[0] != "Visual Studio Code" || snapshot.PreferredTools[0] != "Go" {
+		t.Fatalf("setter retained external pointer: %+v", snapshot)
+	}
+	snapshot.DetectedApps[0] = "changed after snapshot"
+	snapshot.Specializations[0] = "changed after snapshot"
+	again := mgr.GetUserProfile()
+	if again.DetectedApps[0] != "Visual Studio Code" || again.Specializations[0] != "programming" {
+		t.Fatalf("getter exposed manager-owned slices: %+v", again)
+	}
+}
+
 func TestManager_AssistantProgress_Defaults(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "app_state.json")
 	mgr := NewManager(statePath)

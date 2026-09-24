@@ -1,6 +1,7 @@
 package workspacerun
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,20 @@ func TestDiffMemoryLines_NoChange(t *testing.T) {
 	added, removed := diffMemoryLines(lines, lines)
 	if len(added) != 0 || len(removed) != 0 {
 		t.Errorf("identical snapshots should produce no diff, got added=%v removed=%v", added, removed)
+	}
+}
+
+func TestMemoryDiffArtifactDoesNotCopyManagedHQText(t *testing.T) {
+	const sentinel = "FORGOTTEN-MANAGED-SENTINEL"
+	line := "- [fact, 2026-09-22, ori-hq:item:rev] " + sentinel
+	if artifact := memoryDiffArtifact("run", []string{line}, nil); artifact != nil {
+		t.Fatalf("removed managed text reached trace: %+v", artifact)
+	}
+	if artifact := memoryDiffArtifact("run", nil, []string{line}); artifact != nil {
+		t.Fatalf("added managed text reached trace: %+v", artifact)
+	}
+	if artifact := memoryDiffArtifact("run", []string{line}, []string{line, "- [fact, 2026-09-22, user] safe"}); artifact == nil || strings.Contains(artifact.Metadata["added"].([]string)[0], sentinel) {
+		t.Fatalf("mixed trace included managed text: %+v", artifact)
 	}
 }
 

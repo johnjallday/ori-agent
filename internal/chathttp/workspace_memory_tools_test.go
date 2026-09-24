@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,6 +58,54 @@ func TestMemoryWriteTool_AppendsEntry(t *testing.T) {
 	want := "- [watch, " + time.Now().Format("2006-01-02") + ", agent:Scout] build baseline is ~7 min"
 	if !strings.Contains(content, want) {
 		t.Errorf("MEMORY.md missing entry %q, got:\n%s", want, content)
+	}
+}
+
+func TestMemoryWriteTool_RespectsServerOwnedHQSuppressionBeforeAppending(t *testing.T) {
+	p, fs := newMemoryToolProvider(t)
+	calls := 0
+	p.SetHQVisibilityDeps(HQVisibilityDeps{MemoryWriteGuard: func(_ context.Context, workspaceID, text string) error {
+		calls++
+		if workspaceID != "ws-mem-1" || text != "forgotten personal fact" {
+			return nil
+		}
+		return workspace.ErrMemoryManaged
+	}})
+	if _, err := p.memoryWriteTool().Call(context.Background(), `{"text":"forgotten personal fact"}`); err != workspace.ErrMemoryManaged {
+		t.Fatalf("generic tool bypassed server-owned suppression: %v", err)
+	}
+	if _, err := p.memoryWriteTool().Call(context.Background(), `{"text":"unrelated task baseline"}`); err != nil {
+		t.Fatalf("ordinary tool write was blocked: %v", err)
+	}
+	if calls != 2 || strings.Contains(readMemoryFile(t, fs), "forgotten personal fact") {
+		t.Fatalf("memory guard did not cover each write: calls=%d", calls)
+	}
+}
+
+func TestMemoryWriteTool_UsesAtomicHostWriteInsteadOfSeparateGuard(t *testing.T) {
+	p, fs := newMemoryToolProvider(t)
+	calls := 0
+	p.SetHQVisibilityDeps(HQVisibilityDeps{
+		MemoryWriteGuard: func(context.Context, string, string) error {
+			t.Fatal("a non-atomic separate check must not run for a host-handled write")
+			return nil
+		},
+		MemoryWrite: func(_ context.Context, workspaceID string, entry workspace.MemoryEntry) (bool, error) {
+			calls++
+			if workspaceID != "ws-mem-1" || entry.Text != "rejected reviewed wording" {
+				t.Fatalf("wrong host write input: %s %+v", workspaceID, entry)
+			}
+			return true, workspace.ErrMemoryManaged
+		},
+	})
+	out, err := p.memoryWriteTool().Call(context.Background(), `{"text":"rejected reviewed wording"}`)
+	folder, pathErr := fs.GetFolderPath("ws-mem-1")
+	if pathErr != nil {
+		t.Fatal(pathErr)
+	}
+	_, fileErr := os.Stat(filepath.Join(folder, workspace.MemoryFileName))
+	if !errors.Is(err, workspace.ErrMemoryManaged) || out != "" || calls != 1 || !errors.Is(fileErr, os.ErrNotExist) {
+		t.Fatalf("atomic host refusal leaked/changed canonical memory: %q %v calls=%d file=%v", out, err, calls, fileErr)
 	}
 }
 
@@ -125,6 +174,44 @@ func TestProfileSetTool_UpdatesBehavioralFields(t *testing.T) {
 	}
 	if got.Preferences["response_style"] != "concise" || got.About != "Prefers direct answers." {
 		t.Fatalf("profile_set did not update behavioral fields: %#v", got)
+	}
+}
+
+func TestProfileSetTool_GuardedWriteCannotRaceUserForget(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	store := userprofile.NewSQLiteStore(db)
+	if err := store.Upsert(ctx, &userprofile.UserProfile{
+		ID: "local", Preferences: map[string]string{"response_style": "concise"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p := NewWorkspaceToolProvider(nil, nil, "ordinary-workspace")
+	p.SetUserProfileDeps(store, userprofile.LocalUserProvider{})
+	p.SetHQVisibilityDeps(HQVisibilityDeps{ProfileWriteGuard: func(ctx context.Context, _ string, _ map[string]any) (time.Time, error) {
+		before, err := store.Get(ctx, "local")
+		if err != nil {
+			return time.Time{}, err
+		}
+		_, err = store.UpdateFieldCAS(ctx, "local", "preferences.response_style", before.UpdatedAt, "concise", "")
+		return before.UpdatedAt, err
+	}})
+	if result, err := p.profileSetTool().Call(ctx, `{"fields":{"preferences.response_style":"concise","about":"old tool result"}}`); !errors.Is(err, userprofile.ErrProfileConflict) || result != "" {
+		t.Fatalf("interleaved Forget must conflict without echoing profile: %q %v", result, err)
+	}
+	got, err := store.Get(ctx, "local")
+	if err != nil || got.Preferences["response_style"] != "" || got.About != "" {
+		t.Fatalf("tool undid canonical Forget or wrote part of its bundle: %+v %v", got, err)
+	}
+	p.SetHQVisibilityDeps(HQVisibilityDeps{ProfileWriteGuard: func(context.Context, string, map[string]any) (time.Time, error) {
+		return time.Time{}, workspace.ErrMemoryManaged
+	}})
+	if result, err := p.profileSetTool().Call(ctx, `{"field":"preferences.response_style","value":"concise"}`); !errors.Is(err, workspace.ErrMemoryManaged) || result != "" {
+		t.Fatalf("prior reviewed text must not be returned or restored: %q %v", result, err)
 	}
 }
 
