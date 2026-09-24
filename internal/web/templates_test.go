@@ -426,12 +426,22 @@ func TestSharedAgentCreateFormIsCanonicalAndLoadsBeforeConsumers(t *testing.T) {
 			`id="agentCreateFormHost"`:               1,
 			`id="agentCreateFormTemplate"`:           1,
 			`src="/js/modules/agent-create-form.js"`: 1,
+			// The Profile block (description, tags, favorite, appearance) is
+			// standalone-only, so a blueprint draft never shows it, and its IDs
+			// carry the agentCreate prefix so they cannot collide with a page's
+			// own #agentDescription.
+			`class="agent-create-profile agent-create-standalone-only"`: 1,
+			`id="agentCreateDescription"`:                               1,
+			`id="agentCreateTagsHost"`:                                  1,
+			`id="agentCreateFavorite"`:                                  1,
+			`id="agentCreateAppearanceSection"`:                         1,
+			`id="agentCreateAppearanceHost"`:                            1,
 		} {
 			if got := strings.Count(html, marker); got != want {
 				t.Errorf("page %s marker %q count = %d, want %d", page, marker, got, want)
 			}
 		}
-		for _, fieldID := range []string{"agentName", "agentModel", "agentReasoning", "agentSystemPrompt"} {
+		for _, fieldID := range []string{"agentName", "agentRole", "agentModel", "agentReasoning", "agentSystemPrompt"} {
 			if got := strings.Count(html, `id="`+fieldID+`"`); got != 0 {
 				t.Errorf("page %s preassigns shared field ID %q %d times; IDs must be mount-scoped", page, fieldID, got)
 			}

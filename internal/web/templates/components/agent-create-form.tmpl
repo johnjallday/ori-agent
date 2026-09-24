@@ -4,6 +4,10 @@
   IDs: AgentCreateForm assigns every control, label, help, and error ID from the
   mounting host's prefix. This lets standalone and workspace-draft callers
   share one canonical form without duplicate IDs or cross-mode state.
+
+  A section outside a profile's contract is removed at mount, never hidden:
+  the role select is standalone-only, because a blueprint's draft agent has
+  its role fixed by the blueprint.
 -->
 <template id="agentCreateFormTemplate">
   <div class="agent-create-form-core" data-agent-create-root>
@@ -14,6 +18,24 @@
              data-agent-create-describedby="NameHelp NameError">
       <small class="form-helper" data-agent-create-id="NameHelp">Use 1–100 characters: letters, numbers, spaces, underscores, and hyphens.</small>
       <div class="invalid-feedback" data-agent-create-id="NameError" data-agent-create-error="name" role="alert"></div>
+    </div>
+
+    <!-- Labels match the Role Catalog's display names (internal/agentcatalog),
+         the same names the Agents page shows, so a role reads the same here as
+         on the card it lands on. -->
+    <div class="mb-3" data-agent-create-section="role">
+      <label class="form-label" style="color: var(--text-primary);" data-agent-create-for="Role">Role</label>
+      <select class="modern-input w-100" data-agent-create-id="Role" data-agent-create-field="role"
+              data-agent-create-describedby="RoleHelp">
+        <option value="general">Unspecialized</option>
+        <option value="orchestrator">Commander</option>
+        <option value="researcher">Researcher</option>
+        <option value="analyzer">Analyzer</option>
+        <option value="synthesizer">Writer</option>
+        <option value="validator">Reviewer</option>
+        <option value="specialist">Specialist</option>
+      </select>
+      <small class="form-helper" data-agent-create-id="RoleHelp">What this agent does on a team. The suggested face follows the role.</small>
     </div>
 
     <div class="mb-3" data-agent-create-section="model">

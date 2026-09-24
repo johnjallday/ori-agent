@@ -679,6 +679,52 @@ test('a staged reasoning level rides the Create fill; Assign never carries one',
   });
 });
 
+test('a staged face rides the Create fill as a create request sends it; Assign never carries one', async () => {
+  const env = environment({ fetch: staffingFetch() });
+  const creator = staffingCreator(env.api);
+  env.api.setFill(creator, 'coordinator', {
+    mode: 'create',
+    name: 'Portfolio Manager',
+    // The catalog version is server-assigned and an upload cannot be staged,
+    // so neither travels; a staged Upload falls back to Generated.
+    appearance: {
+      mode: 'character',
+      generated: { color: '#112233' },
+      character: { catalog_id: 'insight-researcher', catalog_version: 2 },
+      uploaded: { image: 'face.png' }
+    }
+  });
+  env.api.setFill(creator, 'curator', {
+    mode: 'assign',
+    name: 'Librarian',
+    appearance: { mode: 'character', character: { catalog_id: 'insight-researcher' } }
+  });
+  // Round-tripped through JSON like the request bodies below: the module runs
+  // in its own realm, so a strict deep-equal would fail on prototypes alone.
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(env.api.stagedFill(creator, 'coordinator'))).appearance,
+    {
+      mode: 'character',
+      generated: { color: '#112233' },
+      character: { catalog_id: 'insight-researcher' }
+    }
+  );
+  assert.equal(env.api.stagedFill(creator, 'curator').appearance, undefined);
+  assert.equal(
+    env.api.teamRoster(creator).roles.find(role => role.role_id === 'coordinator').agent.appearance
+      .character.catalog_id,
+    'insight-researcher',
+    'the staged face shows on the row before anything is created'
+  );
+  assert.equal(await confirmStaffing(env.api, env.element, creator), true);
+  assert.deepEqual(JSON.parse(env.calls[2].options.body).appearance, {
+    mode: 'character',
+    generated: { color: '#112233' },
+    character: { catalog_id: 'insight-researcher' }
+  });
+  assert.equal(JSON.parse(env.calls[3].options.body).appearance, undefined);
+});
+
 test('fills are sent one role at a time, only after the commit, and never carry a prompt', async () => {
   const env = environment({ fetch: staffingFetch() });
   const creator = staffingCreator(env.api);

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agentappearance"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -346,6 +347,12 @@ type roleStaffingInput struct {
 	// ReasoningEffort is the Create form's reasoning level. It is kept only
 	// when the created agent's provider/model accepts it (Codex, Claude Code).
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Appearance is the face the Create form staged for the agent this role
+	// creates: Generated or Character only, since an upload needs the agent
+	// to exist first (FR-46). Absent means the blueprint's own appearance, or
+	// the generated default. Validated here, before anything is created, so a
+	// bad selection is a clean 400 rather than a half-configured workspace.
+	Appearance *types.AgentAppearance `json:"appearance,omitempty"`
 }
 
 const (
@@ -384,8 +391,15 @@ func normalizeRoleStaffing(items []roleStaffingInput) (map[string]roleStaffingIn
 		// An assigned agent keeps its own definition entirely — accepting any of
 		// these would imply this request could rewrite an agent the user owns.
 		if item.Mode == roleStaffingModeAssign &&
-			(item.Provider != "" || item.Model != "" || item.SystemPrompt != "" || item.ReasoningEffort != "") {
+			(item.Provider != "" || item.Model != "" || item.SystemPrompt != "" || item.ReasoningEffort != "" || item.Appearance != nil) {
 			return nil, fmt.Errorf("assigning %q cannot change its setup; edit it on the Agents page", item.Name)
+		}
+		if item.Appearance != nil {
+			appearance, err := agentappearance.ValidateStaged(item.Appearance)
+			if err != nil {
+				return nil, fmt.Errorf("appearance for %q: %w", item.RoleID, err)
+			}
+			item.Appearance = appearance
 		}
 		if _, duplicate := out[item.RoleID]; duplicate {
 			return nil, fmt.Errorf("role %q is staffed twice", item.RoleID)

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/charactercatalog"
+	"github.com/johnjallday/ori-agent/internal/agentappearance"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -275,28 +275,12 @@ func applyCharacterRequest(next *types.AgentAppearance, raw json.RawMessage) err
 }
 
 // resolveAssignableCharacter validates a catalog ID and returns the version the
-// server will record for it.
-//
-// One branch covers the unknown ID, the withdrawn ID, and the reserved guide ID,
-// because none of them are in the assignable set — the guide is called out
-// separately only so the error explains itself (FR-25).
+// server will record for it. The rule itself lives in agentappearance, shared
+// with the create paths that stage an appearance before the agent exists (the
+// Create Workspace wizard, the assistant staffing adapter), so every path
+// refuses exactly the same IDs (FR-25).
 func resolveAssignableCharacter(id string) (int, error) {
-	cat, err := charactercatalog.Load()
-	if err != nil {
-		return 0, fmt.Errorf("character catalog unavailable: %w", err)
-	}
-	cid := charactercatalog.CharacterID(id)
-	if !cat.IsAssignable(cid) {
-		if cid == cat.ReservedGuideID {
-			return 0, fmt.Errorf("character %q is reserved for the app guide and cannot be assigned to an agent", id)
-		}
-		return 0, fmt.Errorf("unknown character %q", id)
-	}
-	entry, ok := cat.Get(cid)
-	if !ok {
-		return 0, fmt.Errorf("unknown character %q", id)
-	}
-	return entry.EntryVersion, nil
+	return agentappearance.ResolveAssignableCharacter(id)
 }
 
 // appearancePayload projects an appearance for an API response.

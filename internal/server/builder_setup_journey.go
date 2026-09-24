@@ -208,6 +208,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 					roles = append(roles, setupjourney.RoleFill{
 						RoleID: fill.RoleID, Mode: mode, Name: fill.Name,
 						Provider: fill.Provider, Model: fill.Model, ReasoningEffort: fill.ReasoningEffort,
+						Appearance: fill.Appearance,
 					})
 				}
 				return roles

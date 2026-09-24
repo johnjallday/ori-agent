@@ -13,10 +13,16 @@
   const NAME_PATTERN = /^[A-Za-z0-9 _-]+$/;
   const controllers = new WeakMap();
 
+  // The role is standalone-only: a blueprint's draft agent has its role fixed
+  // by the blueprint, so the template profile never collects one.
   const PROFILE_FIELDS = {
-    [PROFILE_STANDALONE]: ['name', 'model', 'provider', 'reasoningEffort', 'systemPrompt'],
+    [PROFILE_STANDALONE]: ['name', 'role', 'model', 'provider', 'reasoningEffort', 'systemPrompt'],
     [PROFILE_TEMPLATE]: ['name', 'model', 'provider', 'reasoningEffort', 'systemPrompt']
   };
+
+  // Every field the template renders as its own section. Provider is derived
+  // from the chosen model and has no section of its own.
+  const SECTION_FIELDS = ['name', 'role', 'model', 'reasoningEffort', 'systemPrompt'];
 
   function text(value) {
     return String(value == null ? '' : value);
@@ -99,6 +105,21 @@
       }
     }
     return omitted;
+  }
+
+  // Removes the sections a profile's contract has no field for, so a mount
+  // never shows a control whose value it could not send. Returns their names.
+  function dropOffProfileSections(root, profile) {
+    const fields = profileFields(profile);
+    const dropped = SECTION_FIELDS.filter(name => !fields.includes(name));
+    for (const name of dropped) {
+      root.querySelector(`[data-agent-create-section="${name}"]`)?.remove();
+    }
+    return dropped;
+  }
+
+  function normalizeRole(value) {
+    return normalizedText(value).toLowerCase();
   }
 
   function normalizeProviders(providers) {
@@ -274,6 +295,16 @@
       const element = field(controller.host, name);
       if (element) element.value = text(input[name]);
     }
+    if (Object.prototype.hasOwnProperty.call(input, 'role')) {
+      const select = field(controller.host, 'role');
+      if (select) {
+        // A role the select does not offer falls back to Unspecialized rather
+        // than leaving the select with nothing chosen.
+        const wanted = normalizeRole(input.role);
+        const known = Array.from(select.options || []).some(option => option.value === wanted);
+        select.value = known ? wanted : 'general';
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(input, 'reasoningEffort')) {
       controller.reasoningPreference = normalizedText(input.reasoningEffort);
     }
@@ -284,6 +315,7 @@
     const model = field(host, 'model');
     return {
       name: text(field(host, 'name')?.value),
+      role: text(field(host, 'role')?.value),
       model: text(model?.value),
       provider: selectedProvider(model),
       reasoningEffort: text(field(host, 'reasoningEffort')?.value),
@@ -299,6 +331,7 @@
     const values = {};
     mountedFields(profile, controller?.omitFields).forEach(name => {
       if (name === 'name') values[name] = normalizedText(raw[name]);
+      else if (name === 'role') values[name] = normalizeRole(raw[name]);
       else if (name === 'systemPrompt') values[name] = normalizedText(raw[name]);
       else if (name === 'reasoningEffort') {
         // Only a level the selected model accepts; '' for every other model.
@@ -336,6 +369,7 @@
     const formRoot = fragment.querySelector('[data-agent-create-root]');
     if (!formRoot) throw new Error('The shared agent-create-form template is malformed.');
     setProfile(formRoot, profile);
+    dropOffProfileSections(formRoot, profile);
     const omitFields = omitSections(formRoot, config.omitFields, config.note);
     host.replaceChildren(fragment);
 
@@ -392,6 +426,7 @@
     profileFields,
     mountedFields,
     omitSections,
+    dropOffProfileSections,
     scopedId,
     supportsReasoning,
     getController(host) {
