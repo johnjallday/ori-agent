@@ -110,6 +110,82 @@ func TestBuildFallsBackToLegacyBindings(t *testing.T) {
 	}
 }
 
+// TestBuildInfersTemplateSeededAgentsWithoutRoleIDs: a workspace whose roster
+// was seeded straight from a blueprint before attachments carried role ids has
+// agents named exactly after the specs. Those fill their roles; an agent named
+// like nothing in the blueprint stays "also in this workspace"; an explicit
+// role id always wins over the inference.
+func TestBuildInfersTemplateSeededAgentsWithoutRoleIDs(t *testing.T) {
+	roster := Build(Input{
+		WorkspaceID: "ws-1", ViewScope: ScopeProject, Roles: musicRoles(),
+		Attachments: []Attachment{
+			{Name: "Producer", EntryPoint: true},
+			{Name: "My Mixer", RoleID: "mix-engineer", RoleSource: SourceAssigned},
+			{Name: "Mix Engineer"},
+			{Name: "Note Taker"},
+		},
+		Lookup: lookupOf("Producer", "My Mixer", "Mix Engineer", "Note Taker"),
+	})
+	if roster.FilledCount != 2 || roster.EntryAgentName != "Producer" {
+		t.Fatalf("roster = %#v", roster)
+	}
+	if roster.Roles[0].State != StateFilled || roster.Roles[0].Source != SourceCreated || roster.Roles[0].Agent.Name != "Producer" {
+		t.Fatalf("seeded primary = %#v", roster.Roles[0])
+	}
+	if roster.Roles[1].Agent == nil || roster.Roles[1].Agent.Name != "My Mixer" || roster.Roles[1].Source != SourceAssigned {
+		t.Fatalf("an explicit role id must win over a same-named legacy attachment: %#v", roster.Roles[1])
+	}
+	if roster.Roles[2].State != StateEmpty {
+		t.Fatalf("nothing is named after the songwriter role: %#v", roster.Roles[2])
+	}
+	if len(roster.Unassigned) != 2 || roster.Unassigned[0].Name != "Mix Engineer" || roster.Unassigned[1].Name != "Note Taker" {
+		t.Fatalf("unassigned = %#v", roster.Unassigned)
+	}
+}
+
+// TestBuildLetsTheAssistantEntryFillThePrimaryRole: a Personal HQ built around
+// the hired assistant seeds it, under the user's chosen name, in the slot the
+// blueprint calls Personal Chief of Staff. With the caller vouching for the
+// entry agent the roster reads that slot as filled, and a stray Chief of Staff
+// left by an earlier upgrade is listed as unassigned rather than taking it.
+func TestBuildLetsTheAssistantEntryFillThePrimaryRole(t *testing.T) {
+	roles := FromTemplateAgents([]projecttemplates.AgentSpec{
+		{Name: "Personal Chief of Staff", SystemPrompt: "You are the Personal Chief of Staff."},
+		{Name: "Journal", SystemPrompt: "You are the Journal specialist."},
+	})
+	attachments := []Attachment{
+		{Name: "Assistant", EntryPoint: true},
+		{Name: "Journal"},
+		{Name: "Personal Chief of Staff"},
+	}
+	lookup := lookupOf("Assistant", "Journal", "Personal Chief of Staff")
+
+	roster := Build(Input{WorkspaceID: "hq", ViewScope: ScopeProject, Roles: roles, Attachments: attachments, Lookup: lookup, EntryFillsPrimary: true})
+	if roster.FilledCount != 2 || roster.EntryAgentName != "Assistant" {
+		t.Fatalf("assistant-built HQ = %#v", roster)
+	}
+	if roster.Roles[0].Agent == nil || roster.Roles[0].Agent.Name != "Assistant" || roster.Roles[0].Source != SourceCreated {
+		t.Fatalf("primary role = %#v", roster.Roles[0])
+	}
+	if roster.Roles[1].Agent == nil || roster.Roles[1].Agent.Name != "Journal" {
+		t.Fatalf("journal role = %#v", roster.Roles[1])
+	}
+	if len(roster.Unassigned) != 1 || roster.Unassigned[0].Name != "Personal Chief of Staff" {
+		t.Fatalf("the stray chief must be unassigned, got %#v", roster.Unassigned)
+	}
+
+	// Without the caller vouching for the entry agent only the name rule
+	// applies, so the stray chief would take the slot: that is why the flag
+	// exists.
+	plain := Build(Input{WorkspaceID: "ws", ViewScope: ScopeProject, Roles: roles, Attachments: attachments, Lookup: lookup})
+	if plain.Roles[0].Agent == nil || plain.Roles[0].Agent.Name != "Personal Chief of Staff" {
+		t.Fatalf("unvouched primary = %#v", plain.Roles[0])
+	}
+	if len(plain.Unassigned) != 1 || plain.Unassigned[0].Name != "Assistant" {
+		t.Fatalf("unvouched unassigned = %#v", plain.Unassigned)
+	}
+}
+
 // TestBuildMarksOutOfScopeRolesReadOnly covers D2: a group coordination role
 // belongs to the group, and the project may show it but not change it.
 func TestBuildMarksOutOfScopeRolesReadOnly(t *testing.T) {

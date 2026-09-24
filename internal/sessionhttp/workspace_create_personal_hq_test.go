@@ -85,6 +85,39 @@ func TestCreateWorkspaceFromPersonalHQTemplate(t *testing.T) {
 	}
 }
 
+// TestCreateWorkspaceFromPersonalHQTemplateRosterReadsSeededAgentsAsFilled:
+// the plain template path seeds agents named after the blueprint's specs but
+// records no role ids on them; the Roles roster still reads those agents as
+// filling their roles instead of offering to create every role again.
+func TestCreateWorkspaceFromPersonalHQTemplateRosterReadsSeededAgentsAsFilled(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	if err := projecttemplates.EnsureLibrary(handler.templatesRootResolver()); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+	w, resp := postCreateWorkspace(t, handler, `{"name":"My HQ","template_id":"personal-ops"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	folder, _ := resp["folder"].(map[string]any)
+	wsID, _ := folder["id"].(string)
+	current, err := handler.workspaceTaskStore.Get(wsID)
+	if err != nil || current == nil {
+		t.Fatalf("workspace read = %#v, err=%v", current, err)
+	}
+	roster := handler.buildWorkspaceRoster(current)
+	if roster.TotalCount != 2 || roster.FilledCount != 2 || roster.EntryAgentName != "Personal Chief of Staff" {
+		t.Fatalf("roster = %#v", roster)
+	}
+	if roster.Roles[0].Agent == nil || roster.Roles[0].Agent.Name != "Personal Chief of Staff" ||
+		roster.Roles[1].Agent == nil || roster.Roles[1].Agent.Name != "Journal" {
+		t.Fatalf("roles = %#v", roster.Roles)
+	}
+	if len(roster.Unassigned) != 0 {
+		t.Fatalf("unassigned = %#v", roster.Unassigned)
+	}
+}
+
 // TestCreateFromTemplateReusesTheProductionCreationPath proves the
 // Personal HQ setup coordinator's workspace-creation hook produces an
 // identical result to a normal POST /api/workspaces call — same entry

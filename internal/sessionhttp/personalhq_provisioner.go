@@ -53,6 +53,11 @@ func (h *Handler) EnsureSpecialists(ctx context.Context, workspaceID string, rol
 	var added []string
 	var created []createdAgent
 	for _, role := range roles {
+		if role.Entry && personalhq.AssistantEntryInstance(ws) != nil {
+			// The hired personal assistant holds the entry role on an
+			// assistant-built HQ; never seed a Personal Chief of Staff beside it.
+			continue
+		}
 		if _, exists := findWorkspaceInstanceByName(ws, role.AgentName); exists {
 			continue // idempotent: role already present
 		}

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
 )
 
@@ -45,7 +46,7 @@ func (r *SessionRecoveryWorkspaceReader) PersonalAssistantRecoveryWorkspaces(ctx
 		if workspace == nil || workspace.SharedData == nil {
 			continue
 		}
-		if _, present := workspace.SharedData["personal_assistant_presentation"]; !present {
+		if _, present := workspace.SharedData[personalhq.PersonalAssistantPresentationKey]; !present {
 			continue
 		}
 		item := RecoveryWorkspace{
