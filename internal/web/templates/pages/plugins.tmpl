@@ -24,6 +24,9 @@
           </div>
         </div>
 
+        <!-- Changes the Workspace Directory's plugin list (Plugins.json) asks of this Mac. -->
+        <div id="pluginWorkspaceListBanner" class="modern-card p-3 mb-4" role="region" aria-live="polite" aria-label="Plugin list changes" hidden></div>
+
         <!-- Cached plugin update status (source checks run in the background). -->
         <div id="pluginUpdateNotice" class="modern-card p-3 mb-4" role="status" aria-live="polite" aria-atomic="true" data-state="pending">
           <div class="d-flex align-items-start gap-3">
@@ -184,6 +187,7 @@
   {{template "theme-init.tmpl" .}}
   <script defer src="/js/modules/plugin-lifecycle.js"></script>
   <script defer src="/js/modules/plugin-update-notifications.js"></script>
+  <script defer src="/js/modules/plugin-workspace-list.js"></script>
   <script defer src="/js/plugins.js"></script>
 </body>
 </html>

@@ -428,12 +428,13 @@ func (h *Handler) MoveStagedContent(ctx context.Context, staging, root string) [
 		// nil self: every moved workspace is loaded, rebased, and saved.
 		h.applyMoveReferenceUpdates(ctx, nil, result.Moved)
 	}
-	if result.AgentsMoved || result.SkillsMoved || len(result.Moved) > 0 {
+	if result.AgentsMoved || result.SkillsMoved || result.PluginListMoved || len(result.Moved) > 0 {
 		logger.Info("Moved staged agents, skills, and workspaces into the confirmed Workspace Directory", logger.Fields{
-			"agents_moved": result.AgentsMoved,
-			"skills_moved": result.SkillsMoved,
-			"workspaces":   len(result.Moved),
-			"root":         root,
+			"agents_moved":      result.AgentsMoved,
+			"skills_moved":      result.SkillsMoved,
+			"plugin_list_moved": result.PluginListMoved,
+			"workspaces":        len(result.Moved),
+			"root":              root,
 		})
 	}
 	return result.Warnings

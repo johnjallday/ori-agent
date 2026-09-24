@@ -42,6 +42,7 @@ const ReviewedReleaseCurrentCode = "reviewed_release_current"
 type Handler struct {
 	mgr     *plugin.Manager
 	updates *plugin.UpdateChecker
+	list    workspaceList
 
 	replacementMu       sync.RWMutex
 	reviewedReplacement ReviewedReplacement

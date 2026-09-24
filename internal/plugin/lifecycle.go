@@ -24,10 +24,27 @@ type contributionLifecycle interface {
 	DeleteState(string) error
 }
 
+// PluginChangeKind is a completed change to what is installed.
+type PluginChangeKind string
+
+const (
+	PluginInstalled   PluginChangeKind = "installed"
+	PluginUpdated     PluginChangeKind = "updated"
+	PluginUninstalled PluginChangeKind = "uninstalled"
+)
+
+// PluginChange reports one completed install, update, or uninstall. Enabling
+// and disabling are not changes: that setting belongs to each machine.
+type PluginChange struct {
+	Kind   PluginChangeKind
+	Plugin InstalledPlugin
+}
+
 type Manager struct {
 	operationMu    sync.Mutex
 	reg            MCPRegistrar
 	skillNameGuard SkillNameGuard
+	changeObserver func(PluginChange)
 	store          *Store
 	marketplaces   *MarketplaceStore
 	artifacts      *ArtifactInstaller
@@ -67,6 +84,24 @@ func (m *Manager) FreshPersistencePaths() map[string]string {
 		"plugin_state":        filepath.Join(m.pluginsDir, "state"),
 		"plugin_artifacts":    filepath.Join(m.pluginsDir, "artifacts"),
 		"plugin_preview":      m.previewDir,
+	}
+}
+
+// SetChangeObserver is told about every completed install, update, and
+// uninstall, whichever path made it. It runs while the operation still holds
+// the manager, so it must not call back into it; use Installed to read.
+func (m *Manager) SetChangeObserver(observer func(PluginChange)) {
+	if m == nil {
+		return
+	}
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	m.changeObserver = observer
+}
+
+func (m *Manager) notifyChange(kind PluginChangeKind, record InstalledPlugin) {
+	if m.changeObserver != nil {
+		m.changeObserver(PluginChange{Kind: kind, Plugin: record})
 	}
 }
 
@@ -178,6 +213,7 @@ func (m *Manager) install(source string, prefer SourceFormat, confirm ConfirmFun
 			return InstalledPlugin{}, fmt.Errorf("plugin: register workspace surfaces: %w", err)
 		}
 	}
+	m.notifyChange(PluginInstalled, p)
 	return p, nil
 }
 
@@ -294,7 +330,11 @@ func (m *Manager) Uninstall(name string) error {
 			return fmt.Errorf("plugin %q: delete namespaced state: %w", name, err)
 		}
 	}
-	return m.store.Delete(name)
+	if err := m.store.Delete(name); err != nil {
+		return err
+	}
+	m.notifyChange(PluginUninstalled, p)
+	return nil
 }
 
 type updatePreviewResolution struct {
@@ -543,6 +583,7 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 		}
 		return InstalledPlugin{}, fmt.Errorf("plugin: record update: %w", err)
 	}
+	m.notifyChange(PluginUpdated, updated)
 	return updated, nil
 }
 
@@ -664,6 +705,7 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 		}
 		return InstalledPlugin{}, fmt.Errorf("plugin: record replacement: %w", err)
 	}
+	m.notifyChange(PluginUpdated, updated)
 	return updated, nil
 }
 

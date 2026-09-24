@@ -131,10 +131,69 @@
     return updateController.refresh();
   };
 
+  // ---- the Workspace Directory's plugin list (Plugins.json) ----
+
+  const workspaceList = window.PluginWorkspaceList;
+  let workspaceListState = { pending: [], readError: '' };
+
+  function renderWorkspaceListBanner() {
+    const banner = byId('pluginWorkspaceListBanner');
+    if (!banner || !workspaceList) return;
+    const html = workspaceList.renderBanner(workspaceListState);
+    banner.innerHTML = html;
+    banner.hidden = html === '';
+  }
+
+  window.loadWorkspaceList = async function () {
+    if (!workspaceList) return;
+    try {
+      workspaceListState = workspaceList.normalize(await api('GET', '/api/plugins/workspace-list'));
+    } catch (e) {
+      workspaceListState = { pending: [], readError: '' };
+    }
+    renderWorkspaceListBanner();
+  };
+
+  function workspaceListChange(name) {
+    return workspaceListState.pending.find(change => change.name === name) || null;
+  }
+
+  // reviewListedInstall runs the ordinary install review with the recorded
+  // source, so a listed plugin goes through exactly the same disclosure and
+  // confirmation as one typed in by hand.
+  function reviewListedInstall(change) {
+    const sourceInput = byId('pluginSource');
+    const formatInput = byId('pluginFormat');
+    if (!sourceInput) return;
+    sourceInput.value = change.source;
+    if (formatInput && change.format) formatInput.value = change.format;
+    window.pluginPreview();
+  }
+
+  function wireWorkspaceListBanner() {
+    const banner = byId('pluginWorkspaceListBanner');
+    if (!banner) return;
+    banner.addEventListener('click', event => {
+      const button = event.target.closest('[data-list-action]');
+      if (!button) return;
+      const change = workspaceListChange(button.getAttribute('data-list-name') || '');
+      if (!change) return;
+      switch (button.getAttribute('data-list-action')) {
+        case 'install':
+          reviewListedInstall(change);
+          break;
+      }
+    });
+  }
+
   // The list and cached status are intentionally independent: one failed
   // endpoint never prevents the other surface from refreshing.
   window.refreshPluginsPage = async function () {
-    return Promise.allSettled([window.loadPlugins(), window.loadPluginUpdateStatus()]);
+    return Promise.allSettled([
+      window.loadPlugins(),
+      window.loadPluginUpdateStatus(),
+      window.loadWorkspaceList()
+    ]);
   };
 
   // ---- trust disclosures ----
@@ -945,7 +1004,9 @@
   document.addEventListener('DOMContentLoaded', function () {
     wireInstalledActions();
     wirePluginUpdateModal();
+    wireWorkspaceListBanner();
     window.loadPlugins();
+    window.loadWorkspaceList();
     updateController.start();
     window.loadMarketplaces();
     // Load the official catalog lazily when its modal opens (auto-adds on first

@@ -635,6 +635,13 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, pluginsDir)
 		b.pluginHandler.UpdateChecker().SetAdmissionGate(b.resetWork)
 		b.wirePluginSkills()
+		// The Workspace Directory's plugin list (Plugins.json) records every
+		// install, update, and uninstall, and is filled from this machine's
+		// plugins only for a root this data dir confirmed.
+		b.pluginHandler.SetWorkspaceRootResolver(func() string {
+			return resolveWorkspaceRoot(b.configManager)
+		})
+		b.pluginHandler.FillWorkspaceList(shouldRunWorkspaceStartupMaintenance(b.configManager))
 	}
 
 	// Let workspaces created from a template bind its declared default tools
@@ -841,6 +848,9 @@ func (b *ServerBuilder) wireWorkspaceRootUpdater() {
 		// the new root, the built-in assistant unchanged, nothing moved.
 		if composite, ok := b.st.(*store.CompositeStore); ok {
 			composite.SetRoot(root)
+		}
+		if b.pluginHandler != nil {
+			b.pluginHandler.FillWorkspaceList(shouldRunWorkspaceStartupMaintenance(b.configManager))
 		}
 		if err := b.reconcileWorkspaceDesignations(ctx); err != nil {
 			logger.Warn("Live workspace designation reconciliation failed", logger.Fields{"error": err.Error()})

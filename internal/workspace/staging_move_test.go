@@ -179,6 +179,39 @@ func TestASkillsFolderAlreadyInTheRootWins(t *testing.T) {
 	}
 }
 
+func TestThePluginListMovesUnlessTheRootHasOne(t *testing.T) {
+	f := newStagingFixture(t)
+	staged := filepath.Join(f.staging, "Plugins.json")
+	if err := os.WriteFile(staged, []byte(`{"schema_version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := MoveStagedContent(f.staging, f.root)
+	if !result.PluginListMoved || len(result.Warnings) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "Plugins.json")); err != nil {
+		t.Fatalf("the list is not in the root: %v", err)
+	}
+
+	g := newStagingFixture(t)
+	if err := os.WriteFile(filepath.Join(g.staging, "Plugins.json"), []byte("staged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(g.root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.root, "Plugins.json"), []byte("synced"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result = MoveStagedContent(g.staging, g.root)
+	if result.PluginListMoved || len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "already has a plugin list") {
+		t.Fatalf("result = %+v", result)
+	}
+	if data, _ := os.ReadFile(filepath.Join(g.root, "Plugins.json")); string(data) != "synced" {
+		t.Fatalf("the synced list was overwritten: %q", data)
+	}
+}
+
 func TestAStagedWorkspaceWhoseNameIsTakenStaysInStaging(t *testing.T) {
 	f := newStagingFixture(t)
 	f.stageWorkspace(t, &Workspace{ID: "ws-1", Name: "Studio", Status: StatusActive})

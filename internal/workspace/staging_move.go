@@ -18,6 +18,8 @@ import (
 const (
 	agentsFolderName = "Agents"
 	skillsFolderName = "Skills"
+	// pluginListFileName is the plugin list (plugin.PluginListFileName).
+	pluginListFileName = "Plugins.json"
 )
 
 // StagedMoveResult is what the first confirmation of a Workspace Directory
@@ -30,6 +32,9 @@ type StagedMoveResult struct {
 	AgentsMoved bool
 	// SkillsMoved reports that <staging>/Skills became <root>/Skills.
 	SkillsMoved bool
+	// PluginListMoved reports that <staging>/Plugins.json became
+	// <root>/Plugins.json.
+	PluginListMoved bool
 	// Warnings says what stayed behind, and why.
 	Warnings []string
 }
@@ -64,6 +69,10 @@ func MoveStagedContent(staging, root string) StagedMoveResult {
 	}
 
 	for _, entry := range entries {
+		if entry.Type().IsRegular() && entry.Name() == pluginListFileName {
+			result.PluginListMoved = result.movePluginList(filepath.Join(staging, entry.Name()), filepath.Join(root, pluginListFileName))
+			continue
+		}
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
@@ -80,6 +89,38 @@ func MoveStagedContent(staging, root string) StagedMoveResult {
 		result.moveWorkspace(src, dst)
 	}
 	return result
+}
+
+// movePluginList moves the staged plugin list into root unless root already
+// has one, and reports whether it moved.
+func (r *StagedMoveResult) movePluginList(src, dst string) bool {
+	if _, err := os.Stat(dst); err == nil {
+		r.Warnings = append(r.Warnings, fmt.Sprintf(
+			"Your Workspace Directory already has a plugin list, so it is used as it is. The list from before you chose it is still at %s.", src))
+		return false
+	}
+	if err := moveStagedFile(src, dst); err != nil {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("Your plugin list could not be moved from %s: %v", src, err))
+		return false
+	}
+	return true
+}
+
+// moveStagedFile moves one file, copying it when root is on another volume.
+func moveStagedFile(src, dst string) error {
+	if err := stagedRename(src, dst); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	data, err := os.ReadFile(src) // #nosec G304 -- a fixed file directly under the app's staging root
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		return err
+	}
+	return os.Remove(src)
 }
 
 // moveOwnedFolder moves the staged Agents or Skills folder into root unless

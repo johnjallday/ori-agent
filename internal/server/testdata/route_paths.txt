@@ -157,6 +157,7 @@
 /api/plugins/install
 /api/plugins/marketplaces
 /api/plugins/marketplaces/install
+/api/plugins/workspace-list
 /api/plugins/demo-plugin/enable
 /api/plugins/tool-call
 /api/progression
