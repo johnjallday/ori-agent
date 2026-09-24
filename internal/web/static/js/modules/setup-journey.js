@@ -205,17 +205,50 @@ export function homeProviderReceiptRow(provider) {
   return ['Home provider', `${[pluginID, version].filter(Boolean).join(' ')} · ${lifecycle}`];
 }
 
-// homeProviderOffer picks the one recovery the group screen offers for a
-// missing Home provider. Only a provider on the host's reviewed list is
-// installed from here; any other is left to the Plugins page.
+// homeProviderOffer picks the one recovery the group screen offers for a Home
+// provider that is not ready, in the Create Workspace card's labels. Only a
+// provider on the host's reviewed list is repaired from here; any other is
+// left to the Plugins page. Enable needs no disclosure: its components were
+// disclosed at install, and enabling registers exactly those.
 export function homeProviderOffer(provider) {
   const actions = Array.isArray(provider?.actions) ? provider.actions : [];
   const name = provider?.reviewed ? String(provider.display_name || '').trim() : '';
-  if (name && actions.includes('install_plugin')) {
-    return { action: 'install_plugin', label: `Install ${name}…`, confirm: 'Install' };
+  if (!name) return null;
+  if (actions.includes('install_plugin')) {
+    return {
+      action: 'install_plugin',
+      label: `Install ${name}…`,
+      confirm: 'Install',
+      disclose: true
+    };
+  }
+  if (actions.includes('enable_plugin')) {
+    return { action: 'enable_plugin', label: `Enable ${name}`, confirm: '', disclose: false };
+  }
+  if (actions.includes('review_plugin_update')) {
+    return {
+      action: 'review_plugin_update',
+      label: 'Review update',
+      confirm: 'Update',
+      disclose: true
+    };
   }
   return null;
 }
+
+// homeProviderDisclosureIntro introduces the trust report, in the card's words.
+export function homeProviderDisclosureIntro(provider, action, preview) {
+  const name = String(provider?.display_name || provider?.plugin_id || '').trim();
+  return action === 'review_plugin_update' && preview?.changed === false
+    ? `${name} asks for nothing new. Updating changes only its version.`
+    : `${name} will be able to do the following on this computer:`;
+}
+
+const HOME_PROVIDER_WORKING = {
+  install_plugin: 'Installing',
+  enable_plugin: 'Enabling',
+  review_plugin_update: 'Updating'
+};
 
 // homeProviderDisclosureRows are the facts shown above the trust report before
 // the user confirms: what will be installed, the reviewed floor, and its source.
@@ -955,7 +988,7 @@ function renderHomeProviderDisclosure(provider, recovery) {
     makeText(
       'p',
       'setup-journey__provider-review-intro',
-      `${provider.display_name || provider.plugin_id} will be able to do the following on this computer:`
+      homeProviderDisclosureIntro(provider, recovery.action, recovery.preview)
     )
   );
   appendRows(panel, homeProviderDisclosureRows(provider, recovery.preview));
@@ -972,8 +1005,21 @@ async function startHomeProviderRecovery(provider, offer) {
     return;
   }
   if (state.busy || !state.journey) return;
-  const runID = state.journey.run_id;
+  const recovery = {
+    runID: state.journey.run_id,
+    pluginID: provider.plugin_id,
+    templateID: provider.template_id,
+    action: offer.action,
+    generation: provider.generation,
+    confirmLabel: offer.confirm,
+    preview: {},
+    phase: 'review'
+  };
   showError('');
+  if (!offer.disclose) {
+    await applyHomeProviderRecovery(recovery);
+    return;
+  }
   setBusy(true, `Reading what ${provider.display_name || provider.plugin_id} will add…`);
   try {
     const result = await client.previewRecovery(
@@ -982,20 +1028,11 @@ async function startHomeProviderRecovery(provider, offer) {
       provider.plugin_id,
       provider.generation
     );
-    if (state.journey?.run_id !== runID) return;
+    if (state.journey?.run_id !== recovery.runID) return;
     state.providerRecovery = result?.ok
-      ? {
-          runID,
-          pluginID: provider.plugin_id,
-          templateID: provider.template_id,
-          action: offer.action,
-          generation: provider.generation,
-          confirmLabel: offer.confirm,
-          preview: result.data || {},
-          phase: 'review'
-        }
+      ? { ...recovery, preview: result.data || {} }
       : {
-          runID,
+          runID: recovery.runID,
           pluginID: provider.plugin_id,
           phase: 'failed',
           ...homeProviderRecoveryFailure(result)
@@ -1007,14 +1044,21 @@ async function startHomeProviderRecovery(provider, offer) {
   ui()?.draft?.firstElementChild?.focus?.();
 }
 
-// confirmHomeProviderRecovery applies the disclosed release, then re-reads the
-// step so the screen moves on without Check Again. A refusal or failure keeps
-// the offer and says why; nothing was applied.
-async function confirmHomeProviderRecovery() {
+function confirmHomeProviderRecovery() {
   const recovery = state.providerRecovery;
+  if (recovery?.phase !== 'review') return;
+  void applyHomeProviderRecovery(recovery);
+}
+
+// applyHomeProviderRecovery applies the reviewed action, then re-reads the
+// step so the screen moves on without Check Again. A refusal or failure keeps
+// the offer and says why; the endpoint reports what, if anything, changed.
+async function applyHomeProviderRecovery(recovery) {
   const client = window.PluginRecoveryClient;
-  if (!client || recovery?.phase !== 'review' || state.busy) return;
-  setBusy(true, `Installing ${recovery.pluginID}…`, { lockClose: true });
+  if (!client || state.busy) return;
+  setBusy(true, `${HOME_PROVIDER_WORKING[recovery.action] || 'Applying'} ${recovery.pluginID}…`, {
+    lockClose: true
+  });
   let result = null;
   try {
     result = await client.confirmRecovery(

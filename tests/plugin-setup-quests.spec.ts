@@ -27,6 +27,8 @@ for (const width of [1280, 390]) {
       },
       steps: [
         {
+          // Deliberately the shape Ori served before home_provider existed:
+          // an older payload must keep rendering exactly as it did.
           id: 'project',
           kind: 'project_connect',
           title: 'Connect a project',

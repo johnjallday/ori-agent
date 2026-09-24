@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { groupBuildState } from './group-builder.js';
 
 // The module's initializer is a no-op without a browser document.
 globalThis.document ||= { readyState: 'complete', getElementById: () => null };
@@ -11,6 +12,7 @@ const {
   RELEASE_UNCHECKED_NOTE,
   START_OVER_EXPLANATION,
   WORKSPACE_LAUNCH_DESCRIPTION,
+  homeProviderDisclosureIntro,
   homeProviderDisclosureRows,
   homeProviderOffer,
   homeProviderReceiptRow,
@@ -625,7 +627,8 @@ test('only a reviewed provider with an install action gets an in-quest install',
   assert.deepEqual(homeProviderOffer(missingMusicProvider()), {
     action: 'install_plugin',
     label: 'Install Music Project Management…',
-    confirm: 'Install'
+    confirm: 'Install',
+    disclose: true
   });
   const unreviewed = {
     ...missingMusicProvider(),
@@ -636,6 +639,85 @@ test('only a reviewed provider with an install action gets an in-quest install',
   assert.equal(homeProviderOffer(unreviewed), null);
   // A reviewed flag alone is not an offer: the derivation must name the action.
   assert.equal(homeProviderOffer({ ...missingMusicProvider(), actions: ['manage_plugins'] }), null);
+});
+
+test('a switched-off provider offers Enable and an incompatible one Review update', () => {
+  const disabled = {
+    ...missingMusicProvider(),
+    installed: true,
+    enabled: false,
+    version: '0.1.0',
+    reason: 'plugin_enable_required',
+    summary: 'Music Project Management is installed but switched off.',
+    detail: 'Enable it so Reaper Song can use Music Production Home.',
+    actions: ['enable_plugin', 'manage_plugins']
+  };
+  // Enable applies directly: its components were disclosed at install.
+  assert.deepEqual(homeProviderOffer(disabled), {
+    action: 'enable_plugin',
+    label: 'Enable Music Project Management',
+    confirm: '',
+    disclose: false
+  });
+  assert.deepEqual(homeProviderReceiptRow(disabled), [
+    'Home provider',
+    'music-project-management 0.1.0 · Installed · Switched off'
+  ]);
+  const incompatible = {
+    ...disabled,
+    enabled: true,
+    reason: 'plugin_update_required',
+    actions: ['review_plugin_update', 'manage_plugins']
+  };
+  assert.deepEqual(homeProviderOffer(incompatible), {
+    action: 'review_plugin_update',
+    label: 'Review update',
+    confirm: 'Update',
+    disclose: true
+  });
+  assert.deepEqual(homeProviderReceiptRow(incompatible), [
+    'Home provider',
+    'music-project-management 0.1.0 · Installed · Enabled'
+  ]);
+  // An unreviewed provider is sent to Plugins in every state.
+  assert.equal(homeProviderOffer({ ...disabled, reviewed: false, display_name: '' }), null);
+  assert.equal(homeProviderOffer({ ...incompatible, reviewed: false, display_name: '' }), null);
+});
+
+test('an update that asks for nothing new says so, in the card words', () => {
+  const provider = missingMusicProvider();
+  assert.equal(
+    homeProviderDisclosureIntro(provider, 'review_plugin_update', { changed: false }),
+    'Music Project Management asks for nothing new. Updating changes only its version.'
+  );
+  assert.equal(
+    homeProviderDisclosureIntro(provider, 'review_plugin_update', { changed: true }),
+    'Music Project Management will be able to do the following on this computer:'
+  );
+  assert.equal(
+    homeProviderDisclosureIntro(provider, 'install_plugin', {}),
+    'Music Project Management will be able to do the following on this computer:'
+  );
+});
+
+test('an older payload without home_provider still reads as unverifiable', () => {
+  // The step shape Ori served before home_provider existed: blocked, a partial
+  // preparation or none, no actions. It must render the old fallback.
+  const step = {
+    kind: 'project_connect',
+    status: 'blocked',
+    reason_code: 'owner_unavailable',
+    preparation: { exists: false, name: 'Music Production Home', group_policy: 'required' },
+    actions: []
+  };
+  const journey = {
+    journey: { workspace_launch: { group_title: 'Create Group', group_name: 'Group' } },
+    receipts: {},
+    steps: [step]
+  };
+  assert.equal(groupBuildState(journey), 'unavailable');
+  assert.equal(homeProviderOffer(step.home_provider), null);
+  assert.deepEqual(setupJourneyReceiptRows(journey, step), []);
 });
 
 test('the install disclosure states the release, the reviewed floor, and the source', () => {
