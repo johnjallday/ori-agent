@@ -629,7 +629,7 @@ The package/API/browser suites must pin at least these cases:
 | **Do this later**, then resume | quest recorded skipped; Build My HQ / Resume mission still prominent; resume re-enters at step 1 |
 | Ori closed during the walkthrough | presentation pauses; quest is neither skipped nor completed |
 | Confirmed Map HQ build | one relationship, one global hired profile reused as entry agent, one HQ, one entry instance, one Journal support instance, one Daily Brief config, zero Personal Chief of Staff |
-| Personal HQ upgrade preview or apply on an assistant-built HQ | the hired entry agent fulfils the Chief of Staff role; zero Personal Chief of Staff added; only a missing support role (Journal) is offered |
+| Personal HQ upgrade preview or apply, or the Roles roster, on an assistant-built HQ | the hired entry agent fulfils the Chief of Staff role and Journal its own; zero Personal Chief of Staff added or offered; only a genuinely missing support role (Journal) is offered |
 | Duplicate hire/apply or HQ setup request | same IDs/refs; one HQ, one assistant, one canonical record |
 | HQ setup replay with a changed payload, or stale version | `409`; no second workspace and no partial overwrite |
 | Pre-amendment active/paused relationship | unchanged byte-for-behavior; never replays the HQ walkthrough |

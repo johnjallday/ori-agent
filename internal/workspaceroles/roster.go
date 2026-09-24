@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -153,6 +154,12 @@ type Input struct {
 	// predate role ids — an assistant program's binding sets. Attachments win
 	// where both are present.
 	Bindings map[string]string
+	// EntryFillsPrimary means the workspace's entry-point attachment holds the
+	// primary role even without a role id or binding. A Personal HQ built
+	// around the hired personal assistant seeds the assistant, under the name
+	// the user chose, in the slot the blueprint calls Personal Chief of Staff;
+	// nothing on the attachment records that, so the caller says so.
+	EntryFillsPrimary bool
 	// Lookup reports the identity of a saved agent definition, and whether it
 	// still exists. A role whose holder was deleted on /agents projects as
 	// empty again (FR42), which is why this is a lookup and not a cache.
@@ -185,6 +192,7 @@ func Build(in Input) Roster {
 			byRole[roleID] = attachment
 		}
 	}
+	legacy := legacyHolders(in, byRole)
 
 	claimed := make(map[string]struct{}, len(in.Roles))
 	for _, role := range in.Roles {
@@ -214,7 +222,7 @@ func Build(in Input) Roster {
 			item.Proposed = &proposed
 		}
 
-		holder, source := holderFor(roleID, byRole, in.Bindings)
+		holder, source := holderFor(roleID, byRole, in.Bindings, legacy)
 		if holder != "" {
 			if identity, exists := lookup(in.Lookup, holder); exists {
 				item.State = StateFilled
@@ -258,10 +266,10 @@ func Build(in Input) Roster {
 }
 
 // holderFor resolves who fills a role, preferring the attachment's own role id
-// over a legacy binding record. It returns the agent name and how the role was
-// filled; an unrecognized source reads as "created", which is what every
-// pre-vacancy binding was.
-func holderFor(roleID string, byRole map[string]Attachment, bindings map[string]string) (string, string) {
+// over a legacy binding record, and either over an inferred legacy holder. It
+// returns the agent name and how the role was filled; an unrecognized source
+// reads as "created", which is what every pre-vacancy binding was.
+func holderFor(roleID string, byRole map[string]Attachment, bindings map[string]string, legacy map[string]Attachment) (string, string) {
 	if attachment, found := byRole[roleID]; found {
 		name := strings.TrimSpace(attachment.Name)
 		if name != "" {
@@ -276,7 +284,82 @@ func holderFor(roleID string, byRole map[string]Attachment, bindings map[string]
 			return name, SourceCreated
 		}
 	}
+	if attachment, found := legacy[roleID]; found {
+		return strings.TrimSpace(attachment.Name), SourceCreated
+	}
 	return "", ""
+}
+
+// legacyHolders infers who fills a role from attachments that carry no role id
+// at all: the shape every template seeding produced before attachments recorded
+// roles, and what the Personal HQ build still produces. Inference applies only
+// to a role nothing explicit claims (an attachment role id or a binding), and
+// each attachment fills at most one role.
+//
+// Two rules, in order. The entry-point attachment fills the primary role when
+// the caller vouches for it (EntryFillsPrimary). Otherwise an attachment whose
+// name slugs to a role's id fills that role: seeding named the agent after the
+// spec, and the role id is the slug of that same name. The entry rule runs
+// first so an HQ that also carries a stray "Personal Chief of Staff" keeps the
+// assistant in the Commander slot and lists the stray as unassigned.
+func legacyHolders(in Input, byRole map[string]Attachment) map[string]Attachment {
+	out := make(map[string]Attachment)
+	placed := make(map[string]struct{})
+	claimable := func(roleID string) bool {
+		if _, taken := byRole[roleID]; taken {
+			return false
+		}
+		for boundRole, name := range in.Bindings {
+			if normalizeRoleID(boundRole) == roleID && strings.TrimSpace(name) != "" {
+				return false
+			}
+		}
+		_, inferred := out[roleID]
+		return !inferred
+	}
+	place := func(roleID string, attachment Attachment) {
+		out[roleID] = attachment
+		placed[strings.ToLower(strings.TrimSpace(attachment.Name))] = struct{}{}
+	}
+	unplaced := func(attachment Attachment) bool {
+		name := strings.TrimSpace(attachment.Name)
+		if name == "" || normalizeRoleID(attachment.RoleID) != "" {
+			return false
+		}
+		_, done := placed[strings.ToLower(name)]
+		return !done
+	}
+
+	if in.EntryFillsPrimary {
+		for _, role := range in.Roles {
+			if !role.Primary {
+				continue
+			}
+			if roleID := normalizeRoleID(role.ID); claimable(roleID) {
+				for _, attachment := range in.Attachments {
+					if attachment.EntryPoint && unplaced(attachment) {
+						place(roleID, attachment)
+						break
+					}
+				}
+			}
+			break
+		}
+	}
+	for _, role := range in.Roles {
+		roleID := normalizeRoleID(role.ID)
+		if !claimable(roleID) {
+			continue
+		}
+		for _, attachment := range in.Attachments {
+			if !unplaced(attachment) || projecttemplates.AgentRoleID(attachment.Name) != roleID {
+				continue
+			}
+			place(roleID, attachment)
+			break
+		}
+	}
+	return out
 }
 
 // entryAgentName applies D3: the primary role's agent, else the first filled

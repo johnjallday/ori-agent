@@ -6,6 +6,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceroles"
 )
@@ -41,14 +42,27 @@ func (h *Handler) GetWorkspaceRoles(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) buildWorkspaceRoster(current *workspace.Workspace) workspaceroles.Roster {
 	roles, bindings, groupID := h.declaredWorkspaceRoles(current)
 	return workspaceroles.Build(workspaceroles.Input{
-		WorkspaceID:      current.ID,
-		ViewScope:        workspaceRosterViewScope(current),
-		GroupWorkspaceID: groupID,
-		Roles:            roles,
-		Attachments:      workspaceRosterAttachments(current),
-		Bindings:         bindings,
-		Lookup:           h.lookupRoleAgentIdentity,
+		WorkspaceID:       current.ID,
+		ViewScope:         workspaceRosterViewScope(current),
+		GroupWorkspaceID:  groupID,
+		Roles:             roles,
+		Attachments:       workspaceRosterAttachments(current),
+		Bindings:          bindings,
+		EntryFillsPrimary: workspaceEntryIsPersonalAssistant(current),
+		Lookup:            h.lookupRoleAgentIdentity,
 	})
+}
+
+// workspaceEntryIsPersonalAssistant reports whether the workspace is a Personal
+// HQ built around the hired personal assistant. Its entry agent then holds the
+// blueprint's Personal Chief of Staff slot under the user's chosen name (the
+// session-store view of the same rule is personalhq.AssistantEntryInstance).
+func workspaceEntryIsPersonalAssistant(current *workspace.Workspace) bool {
+	if current == nil {
+		return false
+	}
+	raw, ok := current.GetSharedData(personalhq.PersonalAssistantPresentationKey)
+	return ok && raw != nil
 }
 
 // declaredWorkspaceRoles resolves the roles a workspace's blueprint declares,
