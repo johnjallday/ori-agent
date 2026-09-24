@@ -65,6 +65,7 @@ func (h *Handler) PutWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 		fills := []RoleStaffingFill{{
 			RoleID: item.RoleID, Mode: item.Mode, Name: item.Name,
 			Provider: item.Provider, Model: item.Model, ReasoningEffort: item.ReasoningEffort,
+			Appearance: item.Appearance,
 		}}
 		if h.assistantWorkspaceRoleStaffer == nil {
 			_ = orihttp.RespondInternalError(w, "Role staffing is unavailable")

@@ -120,6 +120,11 @@ func roleStaffedSpec(spec projecttemplates.AgentSpec, requested roleStaffingInpu
 		spec.SystemPrompt = requested.SystemPrompt
 	}
 	spec.ReasoningEffort = requested.ReasoningEffort
+	// A staged face replaces whatever the blueprint declared, the same way an
+	// edited prompt does. Already validated by normalizeRoleStaffing.
+	if requested.Appearance != nil {
+		spec.Appearance = requested.Appearance.Clone()
+	}
 	return spec
 }
 
@@ -248,6 +253,7 @@ func (h *Handler) staffAssistantRoles(ctx context.Context, workspaceID string, i
 		fills = append(fills, RoleStaffingFill{
 			RoleID: item.RoleID, Mode: item.Mode, Name: item.Name,
 			Provider: item.Provider, Model: item.Model, ReasoningEffort: item.ReasoningEffort,
+			Appearance: item.Appearance,
 		})
 	}
 	// Deterministic order so a failure is reproducible and the created agents

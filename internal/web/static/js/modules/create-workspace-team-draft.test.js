@@ -253,6 +253,92 @@ test('a role filled by Create carries its reasoning level; Assign never does', (
   ]);
 });
 
+test('a staged face rides a Create fill and its roster row; Assign never carries one', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:studio',
+    planResponse([], { assistant_program: assistantProgramPlan() })
+  );
+  Draft.setSavedRosterReady(draft, [{ name: 'My Mixer', role: 'specialist' }]);
+  Draft.setRoleFill(draft, 'producer', {
+    mode: 'create',
+    name: 'June',
+    // Sent as a create request sends it: no server-assigned version, and a
+    // staged Upload falls back to Generated because the file cannot travel.
+    appearance: {
+      mode: 'uploaded',
+      generated: { color: '#112233' },
+      character: { catalog_id: 'insight-researcher', catalog_version: 2 },
+      uploaded: { image: 'face.png' }
+    }
+  });
+  Draft.setRoleFill(draft, 'engineer', {
+    mode: 'assign',
+    name: 'My Mixer',
+    appearance: { mode: 'character', character: { catalog_id: 'insight-researcher' } }
+  });
+  const view = Draft.derive(draft);
+  assert.deepEqual(view.payload.role_staffing, [
+    {
+      role_id: 'producer',
+      mode: 'create',
+      name: 'June',
+      appearance: {
+        mode: 'generated',
+        generated: { color: '#112233' },
+        character: { catalog_id: 'insight-researcher' }
+      }
+    },
+    { role_id: 'engineer', mode: 'assign', name: 'My Mixer' }
+  ]);
+  const producer = view.roleRoster.roles.find(role => role.role_id === 'producer');
+  assert.equal(
+    producer.agent.appearance.character.catalog_id,
+    'insight-researcher',
+    'the staged face shows on the row before anything is created'
+  );
+});
+
+test('a staged face is a blueprint override only when it differs from the declared one', () => {
+  const declared = {
+    mode: 'character',
+    generated: {},
+    character: { catalog_id: 'insight-researcher', catalog_version: 2 }
+  };
+  // A group-roster blueprint: its entries are set up individually and travel
+  // as template_agent_overrides rather than as role staffing.
+  const draft = readyDraft(
+    [planAgent('Lead', { entry_point: true, action: 'create', appearance: declared })],
+    'group-roster',
+    { template_id: 'group-roster' }
+  );
+
+  // The form echoing the declared face (version dropped, as a request sends
+  // it) stages nothing.
+  Draft.saveSetup(draft, 0, {
+    name: 'Lead',
+    appearance: {
+      mode: 'character',
+      generated: {},
+      character: { catalog_id: 'insight-researcher' }
+    }
+  });
+  assert.equal(Draft.toCreatePayload(draft).template_agent_overrides, undefined);
+
+  const chosen = { mode: 'generated', generated: { color: '#aabbcc' } };
+  Draft.saveSetup(draft, 0, { name: 'Lead', appearance: chosen });
+  assert.deepEqual(Draft.toCreatePayload(draft).template_agent_overrides, [
+    { index: 0, appearance: chosen }
+  ]);
+  assert.deepEqual(
+    Draft.derive(draft).roster[0].identity.appearance,
+    chosen,
+    'the Team roster shows the staged face, not the declared one'
+  );
+  assert.deepEqual(Draft.getOverride(draft, 0), { appearance: chosen });
+});
+
 test('a changed reasoning level is an override; showing the model default is not', () => {
   const managerPlan = model =>
     readyDraft(

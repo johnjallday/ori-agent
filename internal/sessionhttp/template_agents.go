@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/agentappearance"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -132,6 +133,9 @@ type templateAgentOverride struct {
 	Provider        *string `json:"provider,omitempty"`
 	SystemPrompt    *string `json:"system_prompt,omitempty"`
 	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+	// Appearance is the face the setup form staged for this entry: Generated
+	// or Character, never an upload, which needs the agent to exist (FR-46).
+	Appearance *types.AgentAppearance `json:"appearance,omitempty"`
 }
 
 type templateAgentOverrideValidationError struct {
@@ -279,6 +283,13 @@ func applyTemplateAgentOverrides(tpl projecttemplates.Template, overrides []temp
 				}
 			}
 			spec.ReasoningEffort = types.NormalizeReasoningEffort(effort)
+		}
+		if override.Appearance != nil {
+			appearance, err := agentappearance.ValidateStaged(override.Appearance)
+			if err != nil {
+				return tpl, &templateAgentOverrideValidationError{Index: idx, Field: "appearance", Cause: err}
+			}
+			spec.Appearance = appearance
 		}
 		next.Agents[idx] = spec
 	}

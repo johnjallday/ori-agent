@@ -6,11 +6,28 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/charactercatalog"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// stagedCharacter returns an assignable catalog character and the version the
+// server records for it, for the create paths that stage a face.
+func stagedCharacter(t *testing.T) (string, int) {
+	t.Helper()
+	cat, err := charactercatalog.Load()
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	working := cat.Working()
+	if len(working) == 0 {
+		t.Fatal("the catalog declares no working character")
+	}
+	return string(working[0].ID), working[0].EntryVersion
+}
 
 func rosterTemplate(specs ...projecttemplates.AgentSpec) projecttemplates.Template {
 	return projecttemplates.Template{Agents: specs}
@@ -371,6 +388,85 @@ func TestNormalizeRoleStaffing_ReasoningEffort(t *testing.T) {
 	}
 	if _, err := normalizeRoleStaffing([]roleStaffingInput{{RoleID: "lead", Name: "Lead", Mode: "assign", ReasoningEffort: "high"}}); err == nil {
 		t.Fatal("expected assign to refuse a reasoning effort it cannot apply")
+	}
+}
+
+// A face staged in the wizard's Create form for a role reaches the agent that
+// role creates, with the catalog version assigned by the server; an assign
+// cannot carry one, and an invalid one is refused before anything is created.
+func TestNormalizeRoleStaffing_Appearance(t *testing.T) {
+	id, version := stagedCharacter(t)
+	staffing, err := normalizeRoleStaffing([]roleStaffingInput{{
+		RoleID: "lead", Name: "Lead",
+		Appearance: &types.AgentAppearance{
+			Mode:      types.AppearanceModeCharacter,
+			Character: &types.CharacterAppearance{CatalogID: id},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := staffing["lead"].Appearance
+	if got == nil || got.CharacterCatalogID() != id || got.CharacterCatalogVersion() != version {
+		t.Fatalf("staffing appearance = %#v, want %s@%d", got, id, version)
+	}
+	blueprint := projecttemplates.AgentSpec{
+		Name:       "Lead",
+		Appearance: &types.AgentAppearance{Mode: types.AppearanceModeGenerated, Generated: &types.GeneratedAppearance{Color: "#112233"}},
+	}
+	spec := roleStaffedSpec(blueprint, staffing["lead"])
+	if spec.Appearance.CharacterCatalogID() != id || spec.Appearance.Mode != types.AppearanceModeCharacter {
+		t.Fatalf("role-staffed spec appearance = %#v, want the staged character", spec.Appearance)
+	}
+	// Nothing staged keeps the blueprint's own declaration.
+	plain, _ := normalizeRoleStaffing([]roleStaffingInput{{RoleID: "lead", Name: "Lead"}})
+	if kept := roleStaffedSpec(blueprint, plain["lead"]).Appearance; kept.GeneratedColor() != "#112233" {
+		t.Fatalf("an unstaged role lost the blueprint appearance: %#v", kept)
+	}
+
+	if _, err := normalizeRoleStaffing([]roleStaffingInput{{
+		RoleID: "lead", Name: "Lead", Mode: "assign",
+		Appearance: &types.AgentAppearance{Character: &types.CharacterAppearance{CatalogID: id}},
+	}}); err == nil {
+		t.Fatal("expected assign to refuse an appearance it cannot apply")
+	}
+	if _, err := normalizeRoleStaffing([]roleStaffingInput{{
+		RoleID: "lead", Name: "Lead",
+		Appearance: &types.AgentAppearance{Uploaded: &types.UploadedAppearance{Image: "face.png"}},
+	}}); err == nil || !strings.Contains(err.Error(), "lead") {
+		t.Fatalf("expected a staged upload to be refused naming the role, got %v", err)
+	}
+}
+
+func TestApplyTemplateAgentOverrides_Appearance(t *testing.T) {
+	id, version := stagedCharacter(t)
+	idx := 0
+	tpl := rosterTemplate(projecttemplates.AgentSpec{Name: "Lead", Model: "gpt-5-mini"})
+	next, err := applyTemplateAgentOverrides(tpl, []templateAgentOverride{{
+		Index: &idx,
+		Appearance: &types.AgentAppearance{
+			Mode:      types.AppearanceModeCharacter,
+			Character: &types.CharacterAppearance{CatalogID: id},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("apply overrides: %v", err)
+	}
+	got := next.Agents[0].Appearance
+	if got == nil || got.Mode != types.AppearanceModeCharacter || got.CharacterCatalogID() != id || got.CharacterCatalogVersion() != version {
+		t.Fatalf("override appearance = %#v, want %s@%d", got, id, version)
+	}
+	if next.Agents[0].Model != "gpt-5-mini" {
+		t.Fatalf("an appearance override changed the model: %+v", next.Agents[0])
+	}
+
+	_, err = applyTemplateAgentOverrides(tpl, []templateAgentOverride{{
+		Index:      &idx,
+		Appearance: &types.AgentAppearance{Character: &types.CharacterAppearance{CatalogID: "no-such-character"}},
+	}})
+	var validation *templateAgentOverrideValidationError
+	if !errors.As(err, &validation) || validation.Field != "appearance" {
+		t.Fatalf("expected an appearance validation error, got %v", err)
 	}
 }
 

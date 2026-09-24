@@ -12,6 +12,10 @@ let availableProviders = []; // Cache for available providers and models
 let systemModelPreferencePromise = null;
 let cachedSystemModelPreference = null;
 let standaloneAgentCreateForm = null;
+// The modal's Profile block, standalone mode only: the tag widget and the
+// staged Appearance editor. Both are rebuilt on every open.
+let standaloneAgentTagsInput = null;
+let standaloneAgentAppearanceEditor = null;
 
 function ensureStandaloneAgentCreateForm() {
   const host = document.getElementById('agentCreateFormHost');
@@ -23,12 +27,14 @@ function ensureStandaloneAgentCreateForm() {
       providers: availableProviders,
       values: {
         name: '',
+        role: 'general',
         model: '',
         provider: '',
         reasoningEffort: 'medium',
         systemPrompt: ''
       }
     });
+    bindStandaloneAppearanceInputs(standaloneAgentCreateForm);
   }
   return standaloneAgentCreateForm;
 }
@@ -41,6 +47,152 @@ function resetStandaloneAgentCreateForm() {
   if (host) host.replaceChildren();
   standaloneAgentCreateForm = null;
   return ensureStandaloneAgentCreateForm();
+}
+
+// The generated portrait is seeded from the name and the suggested character
+// follows the role, so both fields repaint the staged appearance as they
+// change. Bound once per mount; the editor is looked up at event time because
+// it is rebuilt on every open of the modal.
+function bindStandaloneAppearanceInputs(form) {
+  form?.get('name')?.addEventListener('input', event => {
+    standaloneAgentAppearanceEditor?.setAgentName(event.target.value);
+  });
+  form?.get('role')?.addEventListener('change', event => {
+    standaloneAgentAppearanceEditor?.setAgentRole(event.target.value);
+  });
+}
+
+// Characters already worn by an agent, so the picker suggests an unused one
+// first — the same hint the Agents page gives its own New Agent panel. Reuse
+// stays allowed; this only changes what is recommended.
+function standaloneTakenCharacterIds() {
+  return allAgents
+    .map(agent => String(agent?.appearance?.character?.catalog_id || '').trim())
+    .filter(Boolean);
+}
+
+// Mounts the shared Appearance editor in staged (create) mode: the same
+// control the Agents page and the agent's own page use, so the three sources
+// read the same everywhere. Nothing is persisted before the create succeeds;
+// a chosen file waits for the upload call that follows it.
+function mountStandaloneAgentAppearanceEditor() {
+  destroyStandaloneAgentAppearanceEditor();
+  const host = document.getElementById('agentCreateAppearanceHost');
+  if (!host || !window.AgentAppearanceEditor) return null;
+  const section = document.getElementById('agentCreateAppearanceSection');
+  if (section) section.hidden = false;
+  const form = ensureStandaloneAgentCreateForm();
+  standaloneAgentAppearanceEditor = window.AgentAppearanceEditor.create({
+    host,
+    idPrefix: 'agentCreateAppearance',
+    mode: 'create',
+    agent: {
+      name: String(form?.get('name')?.value || ''),
+      source: 'user',
+      role: String(form?.get('role')?.value || '')
+    },
+    takenCharacterIds: standaloneTakenCharacterIds,
+    // A new agent starts with a face suited to its role instead of a
+    // monogram — a suggestion in the form, changeable before anything is
+    // created, not a change to what the API does by default.
+    suggestCharacter: true
+  });
+  return standaloneAgentAppearanceEditor;
+}
+
+// Releases the object URL a staged upload was holding and empties the host.
+function destroyStandaloneAgentAppearanceEditor() {
+  if (standaloneAgentAppearanceEditor?.destroy) standaloneAgentAppearanceEditor.destroy();
+  standaloneAgentAppearanceEditor = null;
+  const host = document.getElementById('agentCreateAppearanceHost');
+  if (host) host.replaceChildren();
+  const section = document.getElementById('agentCreateAppearanceSection');
+  if (section) section.hidden = true;
+}
+
+// The shared tag widget when the page has it; otherwise plain comma-separated
+// entry, exactly as the Agents page falls back.
+function ensureStandaloneAgentTagsInput() {
+  const host = document.getElementById('agentCreateTagsHost');
+  if (!host) return null;
+  if (standaloneAgentTagsInput && host.contains(standaloneAgentTagsInput.element)) {
+    return standaloneAgentTagsInput;
+  }
+  host.replaceChildren();
+  if (window.OriTagInput?.createTagInput) {
+    standaloneAgentTagsInput = window.OriTagInput.createTagInput({
+      container: host,
+      placeholder: 'Add tag…'
+    });
+    return standaloneAgentTagsInput;
+  }
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'agentCreateTagsText';
+  input.className = 'modern-input w-100';
+  input.placeholder = 'tag1, tag2';
+  input.setAttribute('aria-labelledby', 'agentCreateTagsLabel');
+  host.appendChild(input);
+  standaloneAgentTagsInput = {
+    element: input,
+    getTags: () =>
+      input.value
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(Boolean),
+    setTags: tags => {
+      input.value = (Array.isArray(tags) ? tags : []).join(', ');
+    }
+  };
+  return standaloneAgentTagsInput;
+}
+
+// What the Profile block sends besides the shared core — the same fields the
+// Agents page's New Agent panel sends.
+function readStandaloneAgentProfile() {
+  return {
+    description: String(document.getElementById('agentCreateDescription')?.value || '').trim(),
+    tags: ensureStandaloneAgentTagsInput()?.getTags() || [],
+    favorite: Boolean(document.getElementById('agentCreateFavorite')?.checked)
+  };
+}
+
+function resetStandaloneAgentProfile() {
+  const description = document.getElementById('agentCreateDescription');
+  if (description) description.value = '';
+  ensureStandaloneAgentTagsInput()?.setTags([]);
+  const favorite = document.getElementById('agentCreateFavorite');
+  if (favorite) favorite.checked = false;
+  const role = document.getElementById('agentRole');
+  if (role) {
+    role.value = 'general';
+    role.disabled = false;
+  }
+}
+
+// The create-time upload, once the agent exists: the same two-call shape as
+// the Agents page (FR-46). A failure here is a partial success — the agent is
+// real and shows its generated portrait — and the toast says so rather than
+// claiming a finished create.
+async function uploadStandaloneAgentAppearance(agentName, file) {
+  const summary = { imageUploaded: false, failures: [] };
+  if (!file) return summary;
+  const form = new FormData();
+  form.append('image', file);
+  try {
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/appearance/upload`, {
+      method: 'POST',
+      body: form
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.message || body?.error || `HTTP ${response.status}`);
+    }
+    summary.imageUploaded = true;
+  } catch (error) {
+    summary.failures.push(`image upload: ${error.message || 'failed'}`);
+  }
+  return summary;
 }
 // The protected system assistant. One identity: the guide and the working
 // assistant merged under "Ask Ori" (Issue #350). This must match the canonical
@@ -353,6 +505,10 @@ function showAddAgentModal(options = {}) {
   updateAgentCreationCapabilityCopy();
   // A fresh form starts at the selected model's default level.
   updateAgentReasoningVisibility('');
+  // The Profile block starts empty too, with a freshly staged appearance: a
+  // file chosen and then cancelled last time must not survive into this open.
+  resetStandaloneAgentProfile();
+  mountStandaloneAgentAppearanceEditor();
 
   modal.show();
   void loadAgentCreationCapabilityCatalog();
@@ -419,6 +575,20 @@ async function applyPendingAgentCreationFlowToModal() {
 
   if (options.seedName && agentNameInput) {
     agentNameInput.value = options.seedName;
+    standaloneAgentAppearanceEditor?.setAgentName(options.seedName);
+  }
+
+  // A flow that opened the modal for a specific role (a workspace manager
+  // hire) creates the agent in that role: shown in the Role field, but not up
+  // for change here. The suggested face follows it.
+  const agentRoleInput = document.getElementById('agentRole');
+  if (agentRoleInput && options.seedRole) {
+    const offered = Array.from(agentRoleInput.options).some(
+      option => option.value === options.seedRole
+    );
+    if (offered) agentRoleInput.value = options.seedRole;
+    agentRoleInput.disabled = true;
+    standaloneAgentAppearanceEditor?.setAgentRole(options.seedRole);
   }
 
   let systemPref = null;
@@ -1321,9 +1491,28 @@ async function createNewAgent() {
       : true;
 
     // A flow that opened this modal for a specific role (e.g. a workspace
-    // manager hire) creates the agent in that role.
-    if (pendingAgentCreationFlow.seedRole) {
-      requestBody.role = pendingAgentCreationFlow.seedRole;
+    // manager hire) creates the agent in that role; otherwise the Role field
+    // decides, defaulting to Unspecialized like the Agents page.
+    requestBody.role = pendingAgentCreationFlow.seedRole || formValues.role || 'general';
+
+    const profile = readStandaloneAgentProfile();
+    if (profile.description) {
+      requestBody.description = profile.description;
+    }
+    if (profile.tags.length > 0) {
+      requestBody.tags = profile.tags;
+    }
+    if (profile.favorite) {
+      requestBody.favorite = true;
+    }
+
+    // Appearance travels in the create itself, so a chosen source is never
+    // lost between creating the agent and opening it (FR-45). An upload is
+    // the exception: the file needs an agent to belong to, so it is a second
+    // call once the create has succeeded (FR-46).
+    const pendingAppearanceFile = standaloneAgentAppearanceEditor?.pendingFile() || null;
+    if (standaloneAgentAppearanceEditor) {
+      requestBody.appearance = standaloneAgentAppearanceEditor.createRequest();
     }
 
     // Add model if provided
@@ -1349,6 +1538,13 @@ async function createNewAgent() {
     }
 
     await API.post('/api/agents', requestBody);
+
+    let appearanceSummary = { imageUploaded: false, failures: [] };
+    if (pendingAppearanceFile) {
+      createBtn.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Uploading image...';
+      appearanceSummary = await uploadStandaloneAgentAppearance(agentName, pendingAppearanceFile);
+    }
 
     const capabilitySelections = {
       mcpServers: getSelectedAgentCreationMCPServers(),
@@ -1398,31 +1594,42 @@ async function createNewAgent() {
     resetAgentCreationCapabilitySelections();
     clearPendingAgentCreationFlow();
     if (agentReasoningInput) updateAgentReasoningVisibility('');
+    resetStandaloneAgentProfile();
+    destroyStandaloneAgentAppearanceEditor();
 
     // Show success message
     agentsLog.info('Agent created successfully', {
       agent: agentName,
+      appearance: appearanceSummary,
       capabilities: capabilitySummary,
       followUp: followUpSummary
     });
+    const failures = [
+      ...appearanceSummary.failures,
+      ...capabilitySummary.failures,
+      ...followUpSummary.failures
+    ];
     if (window.Toast) {
       const capabilityDetails = describeAgentCreationCapabilities(capabilitySummary);
       const followUpDetails = describeAgentCreationFollowUp(followUpSummary);
-      const failureCount = capabilitySummary.failures.length + followUpSummary.failures.length;
-      const detailParts = [capabilityDetails, followUpDetails].filter(Boolean);
+      const detailParts = [
+        appearanceSummary.imageUploaded ? 'its image uploaded' : '',
+        capabilityDetails,
+        followUpDetails
+      ].filter(Boolean);
       const detailText = detailParts.length > 0 ? ` with ${detailParts.join(' and ')}` : '';
-      if (failureCount > 0) {
+      if (failures.length > 0) {
         Toast.warning(
-          `Agent "${agentName}" created${detailText}, but ${failureCount} follow-up update${failureCount === 1 ? '' : 's'} failed.`
+          `Agent "${agentName}" created${detailText}, but ${failures.length} follow-up update${failures.length === 1 ? '' : 's'} failed.`
         );
       } else {
         Toast.success(`Agent "${agentName}" created successfully${detailText}.`);
       }
     }
-    if (capabilitySummary.failures.length > 0 || followUpSummary.failures.length > 0) {
-      agentsLog.warn('Agent created with capability setup warnings', {
+    if (failures.length > 0) {
+      agentsLog.warn('Agent created with follow-up warnings', {
         agent: agentName,
-        failures: [...capabilitySummary.failures, ...followUpSummary.failures]
+        failures
       });
     }
 
@@ -2051,6 +2258,9 @@ function setupAgentManagement() {
   if (addAgentModal) {
     addAgentModal.addEventListener('hidden.bs.modal', () => {
       clearPendingAgentCreationFlow();
+      // A cancelled open must not keep a staged file (and its object URL)
+      // alive until the next one.
+      destroyStandaloneAgentAppearanceEditor();
     });
   }
 

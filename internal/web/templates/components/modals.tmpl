@@ -2,6 +2,10 @@
 
 {{template "agent-create-form.tmpl" .}}
 <script defer src="/js/modules/agent-create-form.js"></script>
+<!-- The Profile block below also needs the Appearance editor, the character
+     picker, and the tag widget (window.OriTagInput). All three load from
+     head.tmpl, which every page that renders this modal shares. -->
+
 
 <!-- Add Agent Modal (shared across pages with sidebar) -->
 <div class="modal fade" id="addAgentModal" tabindex="-1" aria-labelledby="addAgentModalLabel" aria-hidden="true">
@@ -111,6 +115,40 @@
             <label class="form-check-label" for="agentAllowWebSearch" style="color: var(--text-primary);">Allow Web Tools</label>
             <div class="form-helper mt-1">If enabled, this agent can use <code>web_search</code>, <code>web_fetch</code>, and <code>browser</code>.</div>
           </div>
+          <!-- Profile: what the Agents page's own New Agent panel collects
+               beyond the shared core — description, tags, favorite, and the
+               staged Appearance editor. Standalone-only: a blueprint draft
+               stages exactly the fields its final workspace request accepts.
+               IDs carry the agentCreate prefix because this modal also renders
+               on pages that own an #agentDescription of their own. -->
+          <section id="agentCreateProfileSection" class="agent-create-profile agent-create-standalone-only" aria-labelledby="agentCreateProfileTitle">
+            <div class="agent-create-profile-header">
+              <span id="agentCreateProfileTitle" class="form-label mb-1" style="color: var(--text-primary);">Profile</span>
+              <div class="form-helper">How the agent shows up on the Agents page. All of this can be changed later from the agent's page.</div>
+            </div>
+            <div class="mb-3">
+              <label for="agentCreateDescription" class="form-label" style="color: var(--text-primary);">Description</label>
+              <textarea id="agentCreateDescription" class="form-control" rows="2"
+                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                        placeholder="One line about what this agent is for."></textarea>
+            </div>
+            <div class="mb-3">
+              <span id="agentCreateTagsLabel" class="form-label d-block" style="color: var(--text-primary);">Tags</span>
+              <div id="agentCreateTagsHost" aria-labelledby="agentCreateTagsLabel"></div>
+            </div>
+            <div class="mb-3 form-check">
+              <input class="form-check-input" type="checkbox" id="agentCreateFavorite">
+              <label class="form-check-label" for="agentCreateFavorite" style="color: var(--text-primary);">Favorite</label>
+            </div>
+          </section>
+          <!-- Appearance is shared by standalone creation AND every wizard
+               draft mode (a role slot's Create, a blueprint agent's setup, a
+               group role), so unlike the Profile block it is not
+               standalone-only. It stays hidden until whoever owns the modal
+               mounts the shared editor into the host. -->
+          <section id="agentCreateAppearanceSection" class="agent-create-appearance" hidden>
+            <div id="agentCreateAppearanceHost"></div>
+          </section>
           <section id="agentCreateCapabilitiesSection" class="agent-create-capabilities agent-create-standalone-only" aria-labelledby="agentCreateCapabilitiesTitle">
             <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
               <div>
@@ -168,6 +206,35 @@
 </div>
 
 <style>
+  /* The Profile block sits between the model settings and Review Skills, set
+     off by a rule rather than a card so the Appearance editor inside it keeps
+     the plain modal background its contrast was tuned for. */
+  .agent-create-profile {
+    margin-top: 1.1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .agent-create-profile-header {
+    margin-bottom: 0.9rem;
+  }
+
+  .agent-create-profile-header .form-label {
+    display: block;
+  }
+
+  .agent-create-appearance {
+    margin-top: 0.25rem;
+  }
+
+  /* In a wizard draft there is no Profile heading above it, so the section
+     draws its own rule, like the Profile block does in standalone mode. */
+  #addAgentModal.is-workspace-agent-draft .agent-create-appearance {
+    margin-top: 1.1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+  }
+
   .agent-create-capabilities {
     margin-top: 1.1rem;
     padding: 1rem;

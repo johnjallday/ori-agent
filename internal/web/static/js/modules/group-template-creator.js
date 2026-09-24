@@ -285,9 +285,25 @@
     return state.fills[entry.id];
   }
 
+  // The face the Create form staged, as a create request sends it. An upload
+  // cannot travel here — the agent does not exist until the group is
+  // confirmed — so a staged Upload falls back to Generated (FR-46/FR-57).
+  function normalizeStagedAppearance(value) {
+    if (!value || typeof value !== 'object') return null;
+    const requested = String(value.mode || '')
+      .trim()
+      .toLowerCase();
+    const color = String(value.generated?.color || '').trim();
+    const catalogId = String(value.character?.catalog_id || '').trim();
+    const appearance = { mode: requested === 'character' && catalogId ? 'character' : 'generated' };
+    appearance.generated = color ? { color } : {};
+    if (catalogId) appearance.character = { catalog_id: catalogId };
+    return appearance;
+  }
+
   function normalizeFill(fill) {
     const mode = fill?.mode === FILL_ASSIGN ? FILL_ASSIGN : FILL_CREATE;
-    return {
+    const normalized = {
       mode,
       name: String(fill?.name || '').trim(),
       provider: mode === FILL_CREATE ? String(fill?.provider || '').trim() : '',
@@ -295,6 +311,10 @@
       // The Create form's reasoning level; empty means the model's default.
       reasoningEffort: mode === FILL_CREATE ? String(fill?.reasoningEffort || '').trim() : ''
     };
+    // An assigned agent wears its own face; only a Create carries one.
+    const appearance = mode === FILL_CREATE ? normalizeStagedAppearance(fill?.appearance) : null;
+    if (appearance) normalized.appearance = appearance;
+    return normalized;
   }
 
   // Every required Home role starts as Create under its default name; optional
@@ -462,7 +482,8 @@
         required: Boolean(role.required),
         primary: Boolean(role.primary),
         state: fill || holder ? 'filled' : 'empty',
-        agent: holder || (fill ? { name: fill.name } : null),
+        // A staged face shows on the row before anything is created.
+        agent: holder || (fill ? { name: fill.name, appearance: fill.appearance || null } : null),
         source: holder ? 'group' : fill?.mode === FILL_ASSIGN ? 'assigned' : 'created'
       };
       if (readOnlyReason) {
@@ -1090,7 +1111,9 @@
           provider: fill.provider,
           model: fill.model,
           // Present only for a level the Create form offered (Codex, Claude Code).
-          ...(fill.reasoningEffort ? { reasoning_effort: fill.reasoningEffort } : {})
+          ...(fill.reasoningEffort ? { reasoning_effort: fill.reasoningEffort } : {}),
+          // The staged face, when the Create form chose one.
+          ...(fill.appearance ? { appearance: fill.appearance } : {})
         })
       });
       const body = await response.json().catch(() => ({}));
