@@ -20,11 +20,34 @@ var chooseFolderCommand = func(ctx context.Context, script string) ([]byte, erro
 	return exec.CommandContext(ctx, "osascript", "-e", script).Output()
 }
 
+// Why ChooseFolder cannot show a dialog, for a chooser that has to explain
+// itself rather than offer a list that may be empty.
+const (
+	// FolderDialogUnavailablePlatform: no native dialog is wired up on this
+	// operating system (macOS only for now).
+	FolderDialogUnavailablePlatform = "platform"
+	// FolderDialogUnavailableDesktopOff: desktop launches are switched off with
+	// ORI_NO_DESKTOP_OPEN, as every sandboxed demo server does.
+	FolderDialogUnavailableDesktopOff = "desktop_off"
+)
+
 // ChooseFolderAvailable reports whether ChooseFolder can show a dialog here.
 // It is quiet: a chooser may ask on every render, and the skipped launch is
 // logged once when a choice is actually attempted.
 func ChooseFolderAvailable() bool {
-	return runtime.GOOS == "darwin" && !desktopOpenSwitchedOff()
+	return ChooseFolderUnavailableReason() == ""
+}
+
+// ChooseFolderUnavailableReason names why ChooseFolder cannot show a dialog
+// here, or returns "" when it can. Quiet, like ChooseFolderAvailable.
+func ChooseFolderUnavailableReason() string {
+	if runtime.GOOS != "darwin" {
+		return FolderDialogUnavailablePlatform
+	}
+	if desktopOpenSwitchedOff() {
+		return FolderDialogUnavailableDesktopOff
+	}
+	return ""
 }
 
 // ChooseFolder shows the native Finder folder dialog and returns the chosen

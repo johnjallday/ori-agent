@@ -55,6 +55,32 @@ test('the chooser renders the chips the server sent and hides the picker when it
   assert.deepEqual(folderChooserView(null).chips, []);
 });
 
+// A chooser with nothing to press must say so, even on a payload that
+// forgot its note; the server's own note always wins.
+test('the chooser explains itself when there is nothing to choose', () => {
+  const explained = folderChooserView({
+    chips: [],
+    picker_available: false,
+    picker_note:
+      'Downloads, Documents and Desktop are not under this home, and the folder dialog is switched off in this session (ORI_NO_DESKTOP_OPEN).'
+  });
+  assert.deepEqual(explained.chips, []);
+  assert.equal(explained.pickerVisible, false);
+  assert.match(explained.note, /not under this home, and the folder dialog is switched off/);
+
+  const bare = folderChooserView({ chips: [], picker_available: false });
+  assert.equal(bare.note, 'No folder can be chosen here.');
+  assert.equal(folderChooserView(null).note, 'No folder can be chosen here.');
+
+  const pickerOnly = folderChooserView({
+    chips: [],
+    picker_available: true,
+    picker_note: 'Downloads, Documents and Desktop are not under this home; pick another folder.'
+  });
+  assert.equal(pickerOnly.pickerVisible, true);
+  assert.match(pickerOnly.note, /pick another folder/);
+});
+
 test('a project offer names the folder, promises to remember, and offers the three actions', () => {
   const view = folderOfferView({
     id: 'o1',

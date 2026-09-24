@@ -1248,7 +1248,7 @@ An unreviewed `DELETE` returns `409` with code `group_requirement_review_require
 }
 ```
 
-`offer` is the one current offer (pending, or a decided one whose outcome is still being shown) or `null`. `chips` names the folders under the user's home that exist. `picker_available` is false where the native dialog cannot run, with `picker_note` explaining.
+`offer` is the one current offer (pending, or a decided one whose outcome is still being shown) or `null`. `chips` names the folders under the user's home that exist (none in a sandboxed home). `picker_available` is false where the native dialog cannot run — outside macOS, or under `ORI_NO_DESKTOP_OPEN` as every sandboxed demo server runs. `picker_note` explains what can still be chosen: it is empty only when there are chips and a dialog; otherwise it names the missing folders, the switched-off or unsupported dialog, or both.
 
 ### Scan a Folder
 

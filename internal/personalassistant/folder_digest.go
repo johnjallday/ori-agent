@@ -75,7 +75,51 @@ var folderChips = []struct {
 // FolderPicker opens the native folder dialog on the server (FR5).
 type FolderPicker interface {
 	Available() bool
+	// UnavailableReason names why Available is false: platform.
+	// FolderDialogUnavailablePlatform or FolderDialogUnavailableDesktopOff.
+	// "" while the dialog is available.
+	UnavailableReason() string
 	Choose(ctx context.Context, prompt string) (path string, chosen bool, err error)
+}
+
+// The reasons a FolderPicker gives. They mirror the platform package's
+// constants (a server test pins the two together) so this package stays free
+// of platform code.
+const (
+	FolderDialogUnavailablePlatform   = "platform"
+	FolderDialogUnavailableDesktopOff = "desktop_off"
+)
+
+// Chooser notes: the chooser must always say what can be done, never offer a
+// list that may be empty (a sandboxed home has no Downloads, Documents, or
+// Desktop, and its server has the folder dialog switched off).
+const (
+	folderChipsMissingNote    = "Downloads, Documents and Desktop are not under this home"
+	folderDialogOffPhrase     = "the folder dialog is switched off in this session (ORI_NO_DESKTOP_OPEN)"
+	folderDialogMacOnlyPhrase = "the folder dialog is only available on macOS"
+	folderDialogAwayPhrase    = "the folder dialog is unavailable here"
+)
+
+// folderChooserNote is the line under the chips. Empty only when there is
+// nothing to explain: chips to choose from and a dialog for anything else.
+func folderChooserNote(chips int, pickerAvailable bool, reason string) string {
+	if pickerAvailable {
+		if chips > 0 {
+			return ""
+		}
+		return folderChipsMissingNote + "; pick another folder."
+	}
+	phrase := folderDialogAwayPhrase
+	switch reason {
+	case FolderDialogUnavailableDesktopOff:
+		phrase = folderDialogOffPhrase
+	case FolderDialogUnavailablePlatform:
+		phrase = folderDialogMacOnlyPhrase
+	}
+	if chips > 0 {
+		return "Pick a folder from the list; " + phrase + "."
+	}
+	return folderChipsMissingNote + ", and " + phrase + "."
 }
 
 // FolderLinkRequest asks the host to attach an offer's folder to the
@@ -353,10 +397,12 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 		}
 	}
 	view := FolderDigestView{Chips: s.availableChips(), Paused: binding.Paused}
-	view.PickerAvailable = s.deps.Picker != nil && s.deps.Picker.Available()
-	if !view.PickerAvailable {
-		view.PickerNote = "Pick a folder from the list for now."
+	reason := ""
+	if s.deps.Picker != nil {
+		view.PickerAvailable = s.deps.Picker.Available()
+		reason = s.deps.Picker.UnavailableReason()
 	}
+	view.PickerNote = folderChooserNote(len(view.Chips), view.PickerAvailable, reason)
 	if pending != nil {
 		offer := s.view(*pending, binding.Paused)
 		view.Offer = &offer

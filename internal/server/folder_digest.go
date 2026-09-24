@@ -60,6 +60,8 @@ type nativeFolderPicker struct{}
 
 func (nativeFolderPicker) Available() bool { return platform.ChooseFolderAvailable() }
 
+func (nativeFolderPicker) UnavailableReason() string { return platform.ChooseFolderUnavailableReason() }
+
 func (nativeFolderPicker) Choose(ctx context.Context, prompt string) (string, bool, error) {
 	path, chosen, err := platform.ChooseFolder(ctx, prompt)
 	if errors.Is(err, platform.ErrFolderDialogUnavailable) {

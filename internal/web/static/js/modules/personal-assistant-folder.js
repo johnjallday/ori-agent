@@ -32,11 +32,17 @@ export function folderChooserView(digest) {
         .map(chip => ({ id: chip.id.trim(), label: String(chip.label || chip.id).trim() }))
     : [];
   const pickerVisible = digest?.picker_available === true;
+  // The server explains what can be chosen; the fallbacks only cover a
+  // payload without a note. A chooser with nothing to press must say so.
+  let note = String(digest?.picker_note || '').trim();
+  if (!note && !pickerVisible) {
+    note = chips.length ? 'Pick a folder from the list for now.' : 'No folder can be chosen here.';
+  }
   return {
     chips,
     pickerVisible,
     pickerLabel: 'Pick another folder…',
-    note: pickerVisible ? '' : String(digest?.picker_note || 'Pick a folder from the list for now.')
+    note
   };
 }
 

@@ -767,6 +767,84 @@ type fakeFolderPicker struct {
 
 func (fakeFolderPicker) Available() bool { return true }
 
+func (fakeFolderPicker) UnavailableReason() string { return "" }
+
 func (p fakeFolderPicker) Choose(context.Context, string) (string, bool, error) {
 	return p.path, p.chosen, nil
+}
+
+// offPicker is the sandboxed server's picker: present, switched off.
+type offPicker struct{ reason string }
+
+func (offPicker) Available() bool { return false }
+
+func (p offPicker) UnavailableReason() string { return p.reason }
+
+func (offPicker) Choose(context.Context, string) (string, bool, error) {
+	return "", false, errors.New("off")
+}
+
+// The chooser always says what can be done. A sandboxed home has none of the
+// three folders and a switched-off dialog, and used to show "pick a folder
+// from the list" over an empty list.
+func TestFolderChooserNote(t *testing.T) {
+	cases := []struct {
+		name   string
+		chips  int
+		picker bool
+		reason string
+		want   string
+	}{
+		{"chips and dialog", 3, true, "", ""},
+		{"dialog only", 0, true, "", "Downloads, Documents and Desktop are not under this home; pick another folder."},
+		{"chips, dialog switched off", 3, false, FolderDialogUnavailableDesktopOff, "Pick a folder from the list; the folder dialog is switched off in this session (ORI_NO_DESKTOP_OPEN)."},
+		{"chips, not a Mac", 1, false, FolderDialogUnavailablePlatform, "Pick a folder from the list; the folder dialog is only available on macOS."},
+		{"chips, no picker wired", 1, false, "", "Pick a folder from the list; the folder dialog is unavailable here."},
+		{"nothing at all", 0, false, FolderDialogUnavailableDesktopOff, "Downloads, Documents and Desktop are not under this home, and the folder dialog is switched off in this session (ORI_NO_DESKTOP_OPEN)."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := folderChooserNote(tc.chips, tc.picker, tc.reason); got != tc.want {
+				t.Fatalf("note = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFolderDigest_CurrentExplainsAnEmptyChooser(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+
+	// A home with none of the three folders, and no picker wired at all.
+	f.home = t.TempDir()
+	view, err := f.service.Current(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Chips) != 0 || view.PickerAvailable {
+		t.Fatalf("chooser=%+v", view)
+	}
+	if view.PickerNote != "Downloads, Documents and Desktop are not under this home, and the folder dialog is unavailable here." {
+		t.Fatalf("note = %q", view.PickerNote)
+	}
+
+	// The sandboxed server: the picker exists but is switched off.
+	f.service.deps.Picker = offPicker{reason: FolderDialogUnavailableDesktopOff}
+	view, err = f.service.Current(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(view.PickerNote, "switched off in this session") || view.PickerAvailable {
+		t.Fatalf("chooser=%+v", view)
+	}
+
+	// A working picker over an empty home offers the dialog and says why.
+	f.service.deps.Picker = fakeFolderPicker{}
+	view, err = f.service.Current(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.PickerAvailable || view.PickerNote != "Downloads, Documents and Desktop are not under this home; pick another folder." {
+		t.Fatalf("chooser=%+v", view)
+	}
 }
