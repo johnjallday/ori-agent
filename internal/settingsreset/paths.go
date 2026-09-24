@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -125,7 +126,7 @@ func refreshProtectedDigests(ctx context.Context, evidence *resolvedEvidence) er
 	}
 	updated := make([]protectedDigest, len(evidence.ProtectedPaths))
 	for i, path := range evidence.ProtectedPaths {
-		digest, err := digestProtectedPath(ctx, path, evidence.AgentsFolder)
+		digest, err := evidence.digestRetained(ctx, path)
 		if err != nil {
 			return err
 		}
@@ -135,10 +136,26 @@ func refreshProtectedDigests(ctx context.Context, evidence *resolvedEvidence) er
 	return nil
 }
 
-// digestProtectedPath hashes root, leaving out the subtree at skip (the
-// reviewed agents folder, which the reset removes from inside a retained
-// workspace root). An empty skip hashes everything.
-func digestProtectedPath(ctx context.Context, root, skip string) (string, error) {
+// digestProtectedPath hashes root, leaving out each folder in skips (the
+// reviewed agents folder, and for Start Fresh the Skills folder beside it,
+// whose contents the reset removes from inside a retained workspace root).
+// Empty skips hash everything.
+func digestProtectedPath(ctx context.Context, root string, skips ...string) (string, error) {
+	return digestProtectedTree(ctx, root, skips, nil)
+}
+
+// digestProtectedTree is digestProtectedPath that also leaves out single
+// files (Start Fresh's plugin list). Removing a file changes its folder's
+// recorded size on some file systems, so that folder's size is left out
+// too; with no skipped files the digest is exactly digestProtectedPath's.
+func digestProtectedTree(ctx context.Context, root string, skipDirs, skipFiles []string) (string, error) {
+	skips := append(slices.Clone(skipDirs), skipFiles...)
+	sizeless := map[string]bool{}
+	for _, file := range skipFiles {
+		if file != "" {
+			sizeless[filepath.Dir(file)] = true
+		}
+	}
 	hash := sha256.New()
 	info, err := os.Lstat(root)
 	if os.IsNotExist(err) {
@@ -165,6 +182,9 @@ func digestProtectedPath(ctx context.Context, root, skip string) (string, error)
 			return errors.New("protected tree contains non-local entry")
 		}
 		record := protectedDigestEntry{Path: filepath.ToSlash(rel), Mode: uint32(entryInfo.Mode()), Size: entryInfo.Size()}
+		if entryInfo.IsDir() && sizeless[path] {
+			record.Size = 0
+		}
 		if entryInfo.Mode()&os.ModeSymlink != 0 {
 			record.Link, err = os.Readlink(path)
 			if err != nil {
@@ -199,7 +219,7 @@ func digestProtectedPath(ctx context.Context, root, skip string) (string, error)
 		return hex.EncodeToString(hash.Sum(nil)), nil
 	}
 	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if skip != "" && path == skip && path != root {
+		if path != root && slices.Contains(skips, path) {
 			if entry != nil && entry.IsDir() {
 				return filepath.SkipDir
 			}

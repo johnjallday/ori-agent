@@ -421,8 +421,7 @@ func TestStartFreshAppliesEveryEnumeratedOwnerAndPreservesProtectedBytes(t *test
 		t.Fatalf("Start Fresh did not report per-plugin outcomes: %v", outcomes)
 	}
 	for _, gone := range []string{
-		filepath.Join(f.PersonalSkillsRoot(), "fresh-managed-skill"),
-		filepath.Join(f.PersonalSkillsRoot(), "fresh-linked-skill"),
+		filepath.Join(pluginPaths.CloneDir, "fresh-managed-repo"),
 		pluginPaths.MarketplacesPath(), // Start Fresh's broader policy, unlike selected plugin reset
 	} {
 		if _, err := os.Lstat(gone); !os.IsNotExist(err) {

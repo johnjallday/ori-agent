@@ -520,7 +520,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// and a folder failure is otherwise treated as non-fatal.
 	if strings.TrimSpace(req.ParentID) == "" && h.isWorkspaceRootLocation(req.Location) &&
 		agentworkspace.IsReservedTopLevelSlug(firstNonEmptyString(req.FolderSlug, req.Name)) {
-		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedTopLevelSlugMessage(firstNonEmptyString(req.FolderSlug, req.Name)))
 		return
 	}
 
@@ -1316,7 +1316,7 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 				logger.Error("Failed to rollback workspace after reserved folder name", logger.Fields{"id": ws.ID, "error": delErr})
 			}
 			h.rollbackSeededAgents(seed)
-			_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+			_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage(folderErr))
 			return out, true
 		}
 		var slugConflict *agentworkspace.FolderSlugConflictError
@@ -2310,8 +2310,10 @@ func (h *Handler) renameWorkspace(ctx context.Context, ws *session.Workspace, na
 	if targetSlug == "" {
 		targetSlug = agentworkspace.Slugify(name)
 	}
-	if strings.TrimSpace(ws.ParentID) == "" && targetSlug != oldFolderSlug && agentworkspace.IsReservedTopLevelSlug(targetSlug) {
-		return agentworkspace.ErrReservedWorkspaceSlug
+	if strings.TrimSpace(ws.ParentID) == "" && targetSlug != oldFolderSlug {
+		if err := agentworkspace.ReservedTopLevelSlugError(targetSlug); err != nil {
+			return err
+		}
 	}
 
 	ws.Name = name
@@ -2396,7 +2398,7 @@ func (h *Handler) writeWorkspaceRenameError(w http.ResponseWriter, ctx context.C
 	}
 	switch {
 	case errors.Is(err, agentworkspace.ErrReservedWorkspaceSlug):
-		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage(err))
 	case errors.Is(err, errWorkspaceRenameRollback):
 		_ = orihttp.RespondInternalError(w, "Failed to rollback workspace rename")
 	case errors.Is(err, errWorkspaceRenameFolder):

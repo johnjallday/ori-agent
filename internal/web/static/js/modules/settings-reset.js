@@ -132,6 +132,11 @@
   const agentsFolderPath = byId('resetAgentsFolderPath');
   const agentsFolderNotice = byId('resetAgentsFolderNotice');
   const agentsFolderCheck = byId('resetAgentsFolderCheck');
+  // Start Fresh also removes the Skills folder and the plugin list beside the
+  // agents folder, under the same confirmation.
+  const agentsFolderAlso = byId('resetAgentsFolderAlso');
+  const agentsFolderAlsoList = byId('resetAgentsFolderAlsoList');
+  const agentsFolderCheckLabel = byId('resetAgentsFolderCheckLabel');
   let phase = 'idle';
   let reviewed = null;
   let reviewFocus = reviewButton;
@@ -277,6 +282,25 @@
     if (agentsFolderBlock) agentsFolderBlock.hidden = !folder;
     if (agentsFolderPath) agentsFolderPath.textContent = folder?.path || '';
     if (agentsFolderNotice) agentsFolderNotice.textContent = folder?.notice || '';
+    const alsoRemoved = Array.isArray(folder?.also_removed) ? folder.also_removed : [];
+    if (agentsFolderAlso) agentsFolderAlso.hidden = alsoRemoved.length === 0;
+    if (agentsFolderAlsoList) {
+      agentsFolderAlsoList.replaceChildren(
+        ...alsoRemoved.map(path => {
+          const item = document.createElement('li');
+          const code = document.createElement('code');
+          code.style.overflowWrap = 'anywhere';
+          code.textContent = path;
+          item.appendChild(code);
+          return item;
+        })
+      );
+    }
+    if (agentsFolderCheckLabel) {
+      agentsFolderCheckLabel.textContent = alsoRemoved.length
+        ? 'I understand this removes my agents, my skills, and my plugin list from my Workspace Directory, including on other machines it syncs to.'
+        : 'I understand this removes my agents from this folder, including on other machines it syncs to.';
+    }
     if (preview.blockers?.length) {
       showError(
         'Reset is blocked. Resolve every blocker and review again; no data has been deleted.'

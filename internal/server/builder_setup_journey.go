@@ -393,7 +393,7 @@ func (g serverStaffingToolGrants) AvailablePersonal(skillName string) bool {
 	if g.builder == nil || g.builder.skillsManager == nil {
 		return false
 	}
-	_, found, err := g.builder.skillsManager.ResolvePersonalSkillByName(strings.TrimSpace(skillName))
+	_, found, err := g.builder.skillsManager.ResolvePluginSkillByName(strings.TrimSpace(skillName))
 	return err == nil && found
 }
 
@@ -415,7 +415,7 @@ func (g serverStaffingToolGrants) GrantPersonal(agentName, skillName string) err
 	if g.builder == nil || g.builder.skillsManager == nil {
 		return fmt.Errorf("personal staffing tool grant is unavailable")
 	}
-	_, found, err := g.builder.skillsManager.ResolvePersonalSkillByName(strings.TrimSpace(skillName))
+	_, found, err := g.builder.skillsManager.ResolvePluginSkillByName(strings.TrimSpace(skillName))
 	if err != nil {
 		return fmt.Errorf("resolve personal staffing skill: %w", err)
 	}

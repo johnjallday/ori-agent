@@ -123,6 +123,95 @@ func TestAnAgentsFolderAlreadyInTheRootWins(t *testing.T) {
 	}
 }
 
+// stageSkill writes an installed skill the way the Skills folder holds it
+// before confirmation.
+func (f stagingFixture) stageSkill(t *testing.T, name string) {
+	t.Helper()
+	dir := filepath.Join(f.staging, "Skills", name)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: "+name+"\n---\nbody\n"), 0o600); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+}
+
+func TestFirstConfirmationMovesTheStagedSkillsFolder(t *testing.T) {
+	f := newStagingFixture(t)
+	f.stageAgent(t)
+	f.stageSkill(t, "find-skills")
+
+	result := MoveStagedContent(f.staging, f.root)
+	if len(result.Warnings) != 0 || !result.SkillsMoved || !result.AgentsMoved {
+		t.Fatalf("result = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "Skills", "find-skills", "SKILL.md")); err != nil {
+		t.Errorf("the skill is not in the new root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.staging, "Skills")); !os.IsNotExist(err) {
+		t.Error("the staged Skills folder is still in staging")
+	}
+	if len(result.Moved) != 0 {
+		t.Errorf("the Skills folder was treated as a workspace: %+v", result.Moved)
+	}
+}
+
+func TestASkillsFolderAlreadyInTheRootWins(t *testing.T) {
+	f := newStagingFixture(t)
+	f.stageSkill(t, "staged-skill")
+	synced := filepath.Join(f.root, "Skills", "synced-skill")
+	if err := os.MkdirAll(synced, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	result := MoveStagedContent(f.staging, f.root)
+	if result.SkillsMoved || len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "already has a Skills folder") {
+		t.Fatalf("result = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(f.staging, "Skills", "staged-skill", "SKILL.md")); err != nil {
+		t.Error("the staged skills must stay where they are")
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "Skills", "staged-skill")); !os.IsNotExist(err) {
+		t.Error("the staged skills were merged into the existing folder")
+	}
+	if _, err := os.Stat(synced); err != nil {
+		t.Errorf("the synced skill was touched: %v", err)
+	}
+}
+
+func TestThePluginListMovesUnlessTheRootHasOne(t *testing.T) {
+	f := newStagingFixture(t)
+	staged := filepath.Join(f.staging, "Plugins.json")
+	if err := os.WriteFile(staged, []byte(`{"schema_version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := MoveStagedContent(f.staging, f.root)
+	if !result.PluginListMoved || len(result.Warnings) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "Plugins.json")); err != nil {
+		t.Fatalf("the list is not in the root: %v", err)
+	}
+
+	g := newStagingFixture(t)
+	if err := os.WriteFile(filepath.Join(g.staging, "Plugins.json"), []byte("staged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(g.root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.root, "Plugins.json"), []byte("synced"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result = MoveStagedContent(g.staging, g.root)
+	if result.PluginListMoved || len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "already has a plugin list") {
+		t.Fatalf("result = %+v", result)
+	}
+	if data, _ := os.ReadFile(filepath.Join(g.root, "Plugins.json")); string(data) != "synced" {
+		t.Fatalf("the synced list was overwritten: %q", data)
+	}
+}
+
 func TestAStagedWorkspaceWhoseNameIsTakenStaysInStaging(t *testing.T) {
 	f := newStagingFixture(t)
 	f.stageWorkspace(t, &Workspace{ID: "ws-1", Name: "Studio", Status: StatusActive})

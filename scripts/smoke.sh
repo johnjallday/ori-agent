@@ -1367,6 +1367,96 @@ serve_isolated() {
   HOME="$dir" ORI_DATA_DIR="$dir" PORT="$port" ORI_NO_DESKTOP_OPEN=1 exec "$binary"
 }
 
+# --- Skills in the Workspace Directory (tasks/prd-skills-in-workspace-directory.md)
+#
+# serve-split is serve with HOME and the data dir apart: <sandbox>/home and
+# <sandbox>/data. The usual sandbox makes them one folder, so the data dir's
+# own .agents/skills (a compatibility source) is also ~/.agents/skills and the
+# import panel's candidates show up as skills too, which hides what the panel
+# does. The server starts from inside the data dir so the plugin store is
+# isolated as well.
+serve_split() {
+  local port="${1:-8931}" name="${2:-split}"
+  local dir="${TMPDIR:-/tmp}/ori-smoke-${name}"
+  mkdir -p "$dir/home" "$dir/data" || fail "could not create $dir"
+  [[ -d "$dir/home" && -d "$dir/data" ]] || fail "sandbox $dir does not exist"
+  local binary
+  binary="$(cd "$(dirname "$0")/.." && pwd -P)/bin/ori-agent"
+  [[ -x "$binary" ]] || fail "build first: ./scripts/build-server.sh"
+  echo "sandbox: $dir (HOME=$dir/home, ORI_DATA_DIR=$dir/data)"
+  echo "url:     http://localhost:${port}"
+  cd "$dir/data" || fail "could not enter $dir/data"
+  HOME="$dir/home" ORI_DATA_DIR="$dir/data" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 exec "$binary"
+}
+
+# smoke_seed_import fills a split sandbox's ~/.agents/skills for the import
+# panel: two ordinary skills, one symlink to a skill elsewhere, and one copy a
+# plugin made (it holds .ori-plugin-skill.json, so it is never offered).
+#   ./scripts/smoke.sh seed-import <sandbox-dir>
+smoke_seed_import() {
+  local dir="${2:-}"
+  [[ -n "$dir" && -d "$dir/home" ]] || fail "usage: $0 seed-import <split sandbox dir>"
+  local skills="$dir/home/.agents/skills" elsewhere="$dir/home/Documents/shared-skills/meeting-notes"
+  mkdir -p "$skills/writing-helper" "$skills/release-checklist" "$skills/reaper-mixing" "$elsewhere"
+  printf -- '---\nname: writing-helper\ndescription: Tighten a draft without changing its voice.\n---\nEdit for clarity.\n' >"$skills/writing-helper/SKILL.md"
+  printf -- '---\nname: release-checklist\ndescription: Walk through a release checklist.\n---\nCheck each step.\n' >"$skills/release-checklist/SKILL.md"
+  printf -- '---\nname: meeting-notes\ndescription: Turn a transcript into notes (reached through a symlink).\n---\nSummarize.\n' >"$elsewhere/SKILL.md"
+  ln -sfn "$elsewhere" "$skills/meeting-notes"
+  printf -- '---\nname: reaper-mixing\ndescription: A copy a plugin made.\n---\nMix.\n' >"$skills/reaper-mixing/SKILL.md"
+  printf '{"schema_version":1,"plugin_name":"reaper-plugin","skill_name":"reaper-mixing","tree_digest":"%064d"}\n' 0 >"$skills/reaper-mixing/.ori-plugin-skill.json"
+  printf '{"version":3,"skills":{"writing-helper":{"source":"example/skills","sourceType":"github"}}}\n' >"$dir/home/.agents/.skill-lock.json"
+  find "$dir/home/.agents" -maxdepth 3 | sed "s|$dir/home/||"
+}
+
+# smoke_gosec_new runs gosec over the Go packages this branch changed and
+# prints only the findings on lines it added: the ones the Security Scan's
+# code-scanning gate reports as new. It exits 1 when there are any.
+#   ./scripts/smoke.sh gosec-new [base]    (base defaults to origin/dev)
+smoke_gosec_new() {
+  local base="${2:-origin/dev}"
+  command -v gosec >/dev/null || fail "gosec is not installed"
+  local top report diff packages
+  top="$(git rev-parse --show-toplevel)" || fail "not in a git checkout"
+  report="${TMPDIR:-/tmp}/gosec-new-$$.json"
+  diff="${TMPDIR:-/tmp}/gosec-new-$$.diff"
+  packages="$(git diff --name-only --diff-filter=ACMR "$base"...HEAD -- '*.go' | xargs -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|')"
+  if [[ -z "$packages" ]]; then
+    echo "no Go changes vs $base"
+    return 0
+  fi
+  git diff -U0 "$base"...HEAD -- '*.go' >"$diff"
+  # shellcheck disable=SC2086 # one package path per word
+  (cd "$top" && gosec -quiet -no-fail -fmt json -out "$report" $packages >/dev/null 2>&1)
+  local status=0
+  python3 - "$report" "$diff" "$top" <<'PY' || status=$?
+import json, os, re, sys
+
+report, diff, top = sys.argv[1:4]
+added, current = {}, None
+for line in open(diff, encoding="utf-8", errors="replace"):
+    if line.startswith("+++ "):
+        path = line[4:].strip()
+        current = path[2:] if path.startswith("b/") else None
+    elif line.startswith("@@") and current:
+        match = re.search(r"\+(\d+)(?:,(\d+))?", line)
+        start, count = int(match.group(1)), int(match.group(2) or 1)
+        added.setdefault(current, set()).update(range(start, start + count))
+issues = json.load(open(report)).get("Issues") or []
+new = []
+for issue in issues:
+    rel = os.path.relpath(issue["file"], top)
+    line = int(str(issue["line"]).split("-")[0])
+    if line in added.get(rel, ()):
+        new.append(f'{rel}:{line} {issue["rule_id"]} {issue["details"]}')
+for finding in new:
+    print(finding)
+print(f"{len(new)} new of {len(issues)} findings in the changed packages")
+sys.exit(1 if new else 0)
+PY
+  rm -f "$report" "$diff"
+  return "$status"
+}
+
 # smoke_starter waits for a running isolated server, then runs one stage of the
 # starter missions browser demo, saving screenshots under $TMPDIR/starter-demo.
 # The wait and the run were a repeated two-step shell during development; here
@@ -2734,6 +2824,9 @@ agent_state_digest() {
 
 case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
+serve-split) serve_split "${2:-8931}" "${3:-split}" ;;
+seed-import) smoke_seed_import "$@" ;;
+gosec-new) smoke_gosec_new "$@" ;;
 agent-files) smoke_agent_files "$@" ;;
 agent-chat) smoke_agent_chat "$@" ;;
 seed-legacy-agents) smoke_seed_legacy_agents "$@" ;;
@@ -2786,6 +2879,9 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
+  echo "  $0 serve-split [port] [sandbox-name]     # skills: isolated server with HOME and the data dir apart" >&2
+  echo "  $0 seed-import <sandbox-dir>             # skills: fill the split sandbox's ~/.agents/skills for the import panel" >&2
+  echo "  $0 gosec-new [base]                      # gosec findings on lines this branch added (base: origin/dev)" >&2
   echo "  $0 agent-files <sandbox> <agent>         # agents in the root: mtime + sha of definition and state files" >&2
   echo "  $0 agent-chat <base-url> <agent> [text]  # agents in the root: send one chat turn to an agent" >&2
   echo "  $0 seed-legacy-agents <sandbox>          # agents in the root: pre-upgrade install (agents in the data dir)" >&2

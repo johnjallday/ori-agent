@@ -1362,6 +1362,11 @@ func registerSkillsRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Skills != nil {
 		mux.HandleFunc("/api/skills", s.Handlers.Skills.List)
 		mux.HandleFunc("/api/skills/", s.Handlers.Skills.Handle)
+		// One-time import of ~/.agents/skills into the Workspace Directory's
+		// Skills folder.
+		mux.HandleFunc("GET /api/skills/import/candidates", s.Handlers.Skills.ImportCandidates)
+		mux.HandleFunc("POST /api/skills/import", s.Handlers.Skills.Import)
+		mux.HandleFunc("POST /api/skills/import/dismiss", s.Handlers.Skills.DismissImport)
 	}
 
 	// =============================================================================
@@ -1392,6 +1397,8 @@ func registerPluginRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Plugin != nil {
 		mux.HandleFunc("GET /api/plugins", s.Handlers.Plugin.ListHandler)
 		mux.HandleFunc("GET /api/plugins/updates", s.Handlers.Plugin.UpdateStatusHandler)
+		mux.HandleFunc("GET /api/plugins/workspace-list", s.Handlers.Plugin.WorkspaceListHandler)
+		mux.HandleFunc("POST /api/plugins/workspace-list/skip", s.Handlers.Plugin.SkipHandler)
 		mux.HandleFunc("POST /api/plugins/install", s.Handlers.Plugin.InstallHandler)
 		mux.HandleFunc("GET /api/plugins/marketplaces", s.Handlers.Plugin.MarketplacesHandler)
 		mux.HandleFunc("POST /api/plugins/marketplaces", s.Handlers.Plugin.MarketplacesHandler)

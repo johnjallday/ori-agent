@@ -17,7 +17,7 @@ import (
 func pluginUpdateTestServer(t *testing.T) *Server {
 	t.Helper()
 	pluginsDir := t.TempDir()
-	handler := pluginhttp.NewHandler(nil, nil, filepath.Join(pluginsDir, "skills"), pluginsDir)
+	handler := pluginhttp.NewHandler(nil, nil, pluginsDir)
 	return &Server{Handlers: &HandlerFacade{Plugin: handler}}
 }
 
@@ -47,7 +47,7 @@ func TestServerOwnsPluginUpdateCheckerLifecycle(t *testing.T) {
 func TestPluginUpdateStatusRouteMarksReviewedReleaseAnswers(t *testing.T) {
 	updates, _, entry := reviewedUpdatesFixture("0.9.0")
 	pluginsDir := t.TempDir()
-	handler := pluginhttp.NewHandler(nil, nil, filepath.Join(pluginsDir, "skills"), pluginsDir)
+	handler := pluginhttp.NewHandler(nil, nil, pluginsDir)
 	record, err := json.Marshal([]plugin.InstalledPlugin{
 		reviewedInstall(entry, "0.8.0", entry.SourceRepository+".git"),
 	})

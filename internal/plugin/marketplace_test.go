@@ -48,8 +48,7 @@ func TestMarketplaceAddAndInstall(t *testing.T) {
 	writeFile(t, filepath.Join(catalog, "reaper", "skills", "s1", "SKILL.md"), "---\nname: s1\n---\n")
 
 	reg := &fakeRegistrar{}
-	sk := &fakeSkills{}
-	m := NewManager(reg, sk, t.TempDir(), "")
+	m := NewManager(reg, t.TempDir(), "")
 
 	mp, err := m.AddMarketplace(catalog)
 	if err != nil {
@@ -214,8 +213,7 @@ func TestMarketplaceInstallGitSubdir(t *testing.T) {
 	writeFile(t, filepath.Join(catalog, "marketplace.json"), entry)
 
 	reg := &fakeRegistrar{}
-	sk := &fakeSkills{}
-	m := NewManager(reg, sk, t.TempDir(), t.TempDir())
+	m := NewManager(reg, t.TempDir(), t.TempDir())
 
 	if _, err := m.AddMarketplace(catalog); err != nil {
 		t.Fatalf("add marketplace: %v", err)

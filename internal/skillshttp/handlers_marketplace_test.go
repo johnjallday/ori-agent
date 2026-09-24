@@ -101,40 +101,6 @@ func TestParseSkillsFindOutput(t *testing.T) {
 	}
 }
 
-func TestParseSkillsListOutput(t *testing.T) {
-	output := "\x1b[1mGlobal Skills\x1b[0m\n\n" +
-		"\x1b[36mfind-skills\x1b[0m \x1b[38;5;102m~/.agents/skills/find-skills\x1b[0m\n" +
-		"  \x1b[38;5;102mAgents:\x1b[0m \x1b[33muniversal\x1b[0m\n" +
-		"\x1b[36mfrontend-design\x1b[0m \x1b[38;5;102m~/.agents/skills/frontend-design\x1b[0m\n" +
-		"  \x1b[38;5;102mAgents:\x1b[0m \x1b[33mnot linked\x1b[0m\n"
-
-	results := parseSkillsListOutput(output, 10)
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-
-	if results[0].Name != "find-skills" {
-		t.Fatalf("unexpected name[0]: %q", results[0].Name)
-	}
-	if results[0].Scope != "global" {
-		t.Fatalf("unexpected scope[0]: %q", results[0].Scope)
-	}
-	if results[0].Agents != "universal" {
-		t.Fatalf("unexpected agents[0]: %q", results[0].Agents)
-	}
-	if results[0].Path != "~/.agents/skills/find-skills" {
-		t.Fatalf("unexpected path[0]: %q", results[0].Path)
-	}
-}
-
-func TestMarketplaceOutputSummary(t *testing.T) {
-	output := "\x1b[38;5;145mChecking for skill updates...\x1b[0m\n\n\x1b[38;5;145m✓ All skills are up to date\x1b[0m\n"
-	got := marketplaceOutputSummary(output)
-	if got != "✓ All skills are up to date" {
-		t.Fatalf("marketplaceOutputSummary() = %q", got)
-	}
-}
-
 func TestSkillsInitAlreadyExists(t *testing.T) {
 	already := "\x1b[38;5;145mSkill already exists at \x1b[38;5;102mdemo-skill/SKILL.md\x1b[0m"
 	if !skillsInitAlreadyExists(already) {

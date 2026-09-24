@@ -12,9 +12,15 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// agentsFolderName is the root folder holding the user's agents
-// (config.AgentsFolderName); it is not a workspace.
-const agentsFolderName = "Agents"
+// agentsFolderName and skillsFolderName are the root folders holding the
+// user's agents and skills (config.AgentsFolderName, config.SkillsFolderName);
+// they are not workspaces.
+const (
+	agentsFolderName = "Agents"
+	skillsFolderName = "Skills"
+	// pluginListFileName is the plugin list (plugin.PluginListFileName).
+	pluginListFileName = "Plugins.json"
+)
 
 // StagedMoveResult is what the first confirmation of a Workspace Directory
 // moved out of the staging folder.
@@ -24,6 +30,11 @@ type StagedMoveResult struct {
 	Moved []MovedWorkspace
 	// AgentsMoved reports that <staging>/Agents became <root>/Agents.
 	AgentsMoved bool
+	// SkillsMoved reports that <staging>/Skills became <root>/Skills.
+	SkillsMoved bool
+	// PluginListMoved reports that <staging>/Plugins.json became
+	// <root>/Plugins.json.
+	PluginListMoved bool
 	// Warnings says what stayed behind, and why.
 	Warnings []string
 }
@@ -32,14 +43,14 @@ type StagedMoveResult struct {
 var stagedRename = os.Rename
 
 // MoveStagedContent moves what a new user created before choosing a Workspace
-// Directory — their agents and their workspaces, kept under the staging folder
-// until then — into the directory they confirmed. It runs once, on the first
-// confirmation, before the workspace store is pointed at the new root.
+// Directory — their agents, skills, and workspaces, kept under the staging
+// folder until then — into the directory they confirmed. It runs once, on the
+// first confirmation, before the workspace store is pointed at the new root.
 //
-// Nothing is ever overwritten. An Agents folder already in root (synced from
-// another machine, say) wins and the staged agents stay where they are; so
-// does a folder with a staged workspace's name. A workspace with work in
-// progress stays too. Each case is reported in Warnings.
+// Nothing is ever overwritten. An Agents or Skills folder already in root
+// (synced from another machine, say) wins and the staged one stays where it
+// is; so does a folder with a staged workspace's name. A workspace with work
+// in progress stays too. Each case is reported in Warnings.
 func MoveStagedContent(staging, root string) StagedMoveResult {
 	result := StagedMoveResult{Warnings: []string{}}
 	if strings.TrimSpace(staging) == "" || strings.TrimSpace(root) == "" || samePath(staging, root) {
@@ -58,13 +69,21 @@ func MoveStagedContent(staging, root string) StagedMoveResult {
 	}
 
 	for _, entry := range entries {
+		if entry.Type().IsRegular() && entry.Name() == pluginListFileName {
+			result.PluginListMoved = result.movePluginList(filepath.Join(staging, entry.Name()), filepath.Join(root, pluginListFileName))
+			continue
+		}
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		src := filepath.Join(staging, entry.Name())
 		dst := filepath.Join(root, entry.Name())
 		if strings.EqualFold(entry.Name(), agentsFolderName) {
-			result.moveAgents(src, filepath.Join(root, agentsFolderName))
+			result.AgentsMoved = result.moveOwnedFolder(src, filepath.Join(root, agentsFolderName), "an Agents folder", "agents")
+			continue
+		}
+		if strings.EqualFold(entry.Name(), skillsFolderName) {
+			result.SkillsMoved = result.moveOwnedFolder(src, filepath.Join(root, skillsFolderName), "a Skills folder", "skills")
 			continue
 		}
 		result.moveWorkspace(src, dst)
@@ -72,17 +91,51 @@ func MoveStagedContent(staging, root string) StagedMoveResult {
 	return result
 }
 
-func (r *StagedMoveResult) moveAgents(src, dst string) {
+// movePluginList moves the staged plugin list into root unless root already
+// has one, and reports whether it moved.
+func (r *StagedMoveResult) movePluginList(src, dst string) bool {
 	if _, err := os.Stat(dst); err == nil {
 		r.Warnings = append(r.Warnings, fmt.Sprintf(
-			"Your Workspace Directory already has an Agents folder, so it is used as it is. The agents you created before choosing it are still in %s.", src))
-		return
+			"Your Workspace Directory already has a plugin list, so it is used as it is. The list from before you chose it is still at %s.", src))
+		return false
+	}
+	if err := moveStagedFile(src, dst); err != nil {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("Your plugin list could not be moved from %s: %v", src, err))
+		return false
+	}
+	return true
+}
+
+// moveStagedFile moves one file, copying it when root is on another volume.
+func moveStagedFile(src, dst string) error {
+	if err := stagedRename(src, dst); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	data, err := os.ReadFile(src) // #nosec G304 -- a fixed file directly under the app's staging root
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, data, 0o600); err != nil { // #nosec G703 -- dst is the fixed plugin list name directly under the confirmed Workspace Directory
+		return err
+	}
+	return os.Remove(src)
+}
+
+// moveOwnedFolder moves the staged Agents or Skills folder into root unless
+// root already has one, and reports whether it moved.
+func (r *StagedMoveResult) moveOwnedFolder(src, dst, folder, what string) bool {
+	if _, err := os.Stat(dst); err == nil {
+		r.Warnings = append(r.Warnings, fmt.Sprintf(
+			"Your Workspace Directory already has %s, so it is used as it is. The %s you created before choosing it are still in %s.", folder, what, src))
+		return false
 	}
 	if err := moveStagedDir(src, dst); err != nil {
-		r.Warnings = append(r.Warnings, fmt.Sprintf("Your agents could not be moved from %s: %v", src, err))
-		return
+		r.Warnings = append(r.Warnings, fmt.Sprintf("Your %s could not be moved from %s: %v", what, src, err))
+		return false
 	}
-	r.AgentsMoved = true
+	return true
 }
 
 func (r *StagedMoveResult) moveWorkspace(src, dst string) {

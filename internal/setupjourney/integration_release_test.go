@@ -64,7 +64,7 @@ func installPublishedRelease(t *testing.T, entry reviewedintegration.Entry, rele
 	t.Helper()
 	root := t.TempDir()
 	components := inertReleaseComponents{}
-	manager := plugin.NewManager(components, components, filepath.Join(root, "plugins"), filepath.Join(root, "sources"))
+	manager := plugin.NewManager(components, filepath.Join(root, "plugins"), filepath.Join(root, "sources"))
 	if legacy {
 		// Reproduce the ordinary Plugins-page installation rather than
 		// forging a source in the installed record.
@@ -182,7 +182,5 @@ func fileSHA256(t *testing.T, path string) string {
 
 type inertReleaseComponents struct{}
 
-func (inertReleaseComponents) AddServer(mcp.ServerConfig) error          { return nil }
-func (inertReleaseComponents) RemoveServer(string) error                 { return nil }
-func (inertReleaseComponents) InstallSkill(string, string, string) error { return nil }
-func (inertReleaseComponents) RemoveSkill(string, string) error          { return nil }
+func (inertReleaseComponents) AddServer(mcp.ServerConfig) error { return nil }
+func (inertReleaseComponents) RemoveServer(string) error        { return nil }

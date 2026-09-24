@@ -19,13 +19,20 @@ const (
 	SourcePersonal     = "personal"
 	SourceClaude       = "claude"
 	SourceCodex        = "codex"
+	// SourcePlugin marks a skill bundled by an installed plugin, read in place
+	// from the plugin's own install folder.
+	SourcePlugin = "plugin"
 )
 
 type ManagerConfig struct {
-	AgentStorePath    string
-	PersonalSkillsDir string
-	ExternalAgents    *externalagents.Cache
-	ConfigManager     *config.Manager
+	AgentStorePath string
+	// PersonalSkillsDir is a fixed folder of installed skills (source
+	// "personal"). PersonalSkillsDirResolver, when set, wins: it is asked on
+	// every read, so the folder follows the current Workspace Directory.
+	PersonalSkillsDir         string
+	PersonalSkillsDirResolver func() string
+	ExternalAgents            *externalagents.Cache
+	ConfigManager             *config.Manager
 }
 
 // AgentLoadout describes an agent's active-skill slot budget for cap
@@ -53,26 +60,37 @@ type LoadoutResolver interface {
 // a workspace holds), which has no per-agent skill state to read or write.
 type AgentFolderResolver func(agentName string) (dir string, handled bool)
 
-// PersonalSkillAvailability identifies managed personal skills and whether
-// their exact owning package is currently available. Managed names are also
-// reserved against higher-precedence sources so runtime resolution cannot
-// silently switch to unrelated instructions after staffing.
-type PersonalSkillAvailability func(agentName string, skill Skill) (managed bool, available bool)
+// PluginSkill is one skill an installed plugin bundles: its folder (holding
+// SKILL.md) inside the plugin's install folder. Plugin skills are never copied.
+type PluginSkill struct {
+	Plugin string
+	Name   string
+	Dir    string
+}
 
-// ErrNoAgentFolder refuses per-agent skill state for an agent without a folder.
+// PluginSkillProvider returns the skills of the plugins available to an agent
+// right now: enabled plugins only, and, for an agent a plugin-provided role
+// owns, only while that provider is still the reviewed one. An empty
+// agentName asks for every enabled plugin's skills.
+type PluginSkillProvider func(agentName string) []PluginSkill
+
 var (
-	ErrNoAgentFolder       = errors.New("agent has no folder of its own")
-	ErrSkillSourceConflict = errors.New("a higher-precedence skill shadows the personal skill")
+	// ErrNoAgentFolder refuses per-agent skill state for an agent without a folder.
+	ErrNoAgentFolder = errors.New("agent has no folder of its own")
+	// ErrSkillSourceConflict refuses to resolve a plugin skill by name while
+	// another source has a skill with the same name, so a role set up with a
+	// plugin's skill can never silently run someone else's instructions.
+	ErrSkillSourceConflict = errors.New("another skill has the same name as a plugin skill")
 )
 
 type Manager struct {
 	agentStorePath    string
-	personalSkillsDir string
+	personalSkillsDir func() string
 	externalAgents    *externalagents.Cache
 	configManager     *config.Manager
 	loadoutResolver   LoadoutResolver
 	agentFolder       AgentFolderResolver
-	personalAvailable PersonalSkillAvailability
+	pluginSkills      PluginSkillProvider
 }
 
 // SetAgentFolderResolver makes per-agent skill state follow the agent: the
@@ -81,8 +99,10 @@ func (m *Manager) SetAgentFolderResolver(resolver AgentFolderResolver) {
 	m.agentFolder = resolver
 }
 
-func (m *Manager) SetPersonalSkillAvailability(check PersonalSkillAvailability) {
-	m.personalAvailable = check
+// SetPluginSkillProvider makes the skills of installed plugins available,
+// read from each plugin's install folder.
+func (m *Manager) SetPluginSkillProvider(provider PluginSkillProvider) {
+	m.pluginSkills = provider
 }
 
 // agentDir returns the folder holding one agent's skill state and skills.
@@ -106,12 +126,47 @@ func (m *Manager) agentDir(agentName string) (string, error) {
 }
 
 func NewManager(cfg ManagerConfig) *Manager {
+	personalSkillsDir := cfg.PersonalSkillsDirResolver
+	if personalSkillsDir == nil {
+		fixed := cfg.PersonalSkillsDir
+		personalSkillsDir = func() string { return fixed }
+	}
 	return &Manager{
 		agentStorePath:    cfg.AgentStorePath,
-		personalSkillsDir: cfg.PersonalSkillsDir,
+		personalSkillsDir: personalSkillsDir,
 		externalAgents:    cfg.ExternalAgents,
 		configManager:     cfg.ConfigManager,
 	}
+}
+
+// ReadSkillSummary reads a SKILL.md's name (defaultName when it has none) and
+// description from its front matter, without the prompt.
+func ReadSkillSummary(skillMDPath, defaultName string) (Skill, error) {
+	return parseSkillFile(skillMDPath, defaultName, false)
+}
+
+// PluginSkillNames lists the names of the skills enabled plugins provide.
+func (m *Manager) PluginSkillNames() []string {
+	var names []string
+	for _, skill := range m.loadPluginSkills("", false) {
+		names = append(names, skill.Name)
+	}
+	return names
+}
+
+// PersonalSkills lists the installed skills in the Skills folder, without
+// their prompts.
+func (m *Manager) PersonalSkills() ([]Skill, error) {
+	return m.loadPersonalSkills(false)
+}
+
+// PersonalSkillsDir is the folder installed skills are read from right now:
+// <Workspace Directory>/Skills in the server, so it follows a root switch.
+func (m *Manager) PersonalSkillsDir() string {
+	if m == nil || m.personalSkillsDir == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.personalSkillsDir())
 }
 
 // SetLoadoutResolver wires stage-based slot-cap enforcement for the per-agent
@@ -173,25 +228,8 @@ func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
 		return nil, false, nil
 	}
 
-	personalSkills, err := m.loadPersonalSkills(true)
-	if err != nil {
-		return nil, false, err
-	}
-	var personal *Skill
-	managed, available := false, true
-	for index := range personalSkills {
-		if strings.ToLower(strings.TrimSpace(personalSkills[index].Name)) != target {
-			continue
-		}
-		candidate := personalSkills[index]
-		personal = &candidate
-		if m.personalAvailable != nil {
-			managed, available = m.personalAvailable("", candidate)
-		}
-		break
-	}
-
-	for _, loadFn := range []func(bool) ([]Skill, error){m.loadRepoSkills, m.loadCompatSkills} {
+	pluginSkill := m.findPluginSkill(target, true)
+	for _, loadFn := range []func(bool) ([]Skill, error){m.loadRepoSkills, m.loadCompatSkills, m.loadPersonalSkills} {
 		skills, loadErr := loadFn(true)
 		if loadErr != nil {
 			return nil, false, loadErr
@@ -200,22 +238,15 @@ func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
 			if strings.ToLower(strings.TrimSpace(skill.Name)) != target {
 				continue
 			}
-			// Configured compatibility and personal roots can resolve to the same
-			// physical tree. One physical file is not a higher-precedence shadow.
-			if personal != nil && sameSkillFile(skill.Path, personal.Path) {
-				continue
-			}
-			if managed {
+			// One physical file reached through two roots is not a clash.
+			if pluginSkill != nil && !sameSkillFile(skill.Path, pluginSkill.Path) {
 				return nil, false, ErrSkillSourceConflict
 			}
 			return &skill, true, nil
 		}
 	}
-	if personal != nil {
-		if managed && !available {
-			return nil, false, nil
-		}
-		return personal, true, nil
+	if pluginSkill != nil {
+		return pluginSkill, true, nil
 	}
 
 	if m.externalAgents != nil && m.configManager != nil {
@@ -256,51 +287,48 @@ func (m *Manager) ResolveSkillByName(skillName string) (*Skill, bool, error) {
 	return nil, false, nil
 }
 
-// ResolvePersonalSkillByName resolves only an unshadowed personal-directory
-// skill. Plugin-owned role setup uses this path so a repository or .agents copy
+// ResolvePluginSkillByName resolves only a skill an enabled plugin bundles,
+// and only while no other source has a skill with that name. Plugin-provided
+// role setup uses this path so a repository, .agents, or Skills folder copy
 // with the same name cannot silently replace the reviewed packaged source.
-func (m *Manager) ResolvePersonalSkillByName(skillName string) (*Skill, bool, error) {
+func (m *Manager) ResolvePluginSkillByName(skillName string) (*Skill, bool, error) {
 	target := strings.ToLower(strings.TrimSpace(skillName))
 	if target == "" {
 		return nil, false, nil
 	}
-	personalSkills, err := m.loadPersonalSkills(true)
-	if err != nil {
-		return nil, false, err
+	pluginSkill := m.findPluginSkill(target, true)
+	if pluginSkill == nil {
+		return nil, false, nil
 	}
-	var personal *Skill
-	for index := range personalSkills {
-		if strings.ToLower(strings.TrimSpace(personalSkills[index].Name)) == target {
-			candidate := personalSkills[index]
-			personal = &candidate
-			break
-		}
-	}
-	for _, load := range []func(bool) ([]Skill, error){m.loadRepoSkills, m.loadCompatSkills} {
+	for _, load := range []func(bool) ([]Skill, error){m.loadRepoSkills, m.loadCompatSkills, m.loadPersonalSkills} {
 		entries, loadErr := load(false)
 		if loadErr != nil {
 			return nil, false, loadErr
 		}
 		for _, candidate := range entries {
-			if strings.ToLower(strings.TrimSpace(candidate.Name)) != target {
-				continue
-			}
-			if personal != nil && sameSkillFile(candidate.Path, personal.Path) {
-				continue
-			}
-			return nil, false, ErrSkillSourceConflict
-		}
-	}
-	if personal != nil {
-		if m.personalAvailable != nil {
-			_, available := m.personalAvailable("", *personal)
-			if !available {
-				return nil, false, nil
+			if strings.ToLower(strings.TrimSpace(candidate.Name)) == target && !sameSkillFile(candidate.Path, pluginSkill.Path) {
+				return nil, false, ErrSkillSourceConflict
 			}
 		}
-		return personal, true, nil
 	}
-	return nil, false, nil
+	return pluginSkill, true, nil
+}
+
+// findPluginSkill returns the enabled plugin skill named target (lower case),
+// or nil. Two plugins claiming one name is a clash, so neither is returned.
+func (m *Manager) findPluginSkill(target string, includePrompt bool) *Skill {
+	var found *Skill
+	for _, skill := range m.loadPluginSkills("", includePrompt) {
+		if strings.ToLower(strings.TrimSpace(skill.Name)) != target {
+			continue
+		}
+		if found != nil {
+			return nil
+		}
+		candidate := skill
+		found = &candidate
+	}
+	return found
 }
 
 func sameSkillFile(left, right string) bool {
@@ -355,23 +383,23 @@ func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, err
 	if err != nil {
 		return nil, err
 	}
-
-	type personalStatus struct {
-		managed   bool
-		available bool
-		path      string
-	}
-	personalStatuses := make(map[string]personalStatus, len(personalSkills))
-	for _, skill := range personalSkills {
-		status := personalStatus{available: true, path: skill.Path}
-		if m.personalAvailable != nil {
-			status.managed, status.available = m.personalAvailable(agentName, skill)
-		}
-		personalStatuses[strings.ToLower(skill.Name)] = status
-	}
+	pluginSkills := m.loadPluginSkills(agentName, includePrompt)
 
 	skillMap := make(map[string]Skill)
 	conflictMap := make(map[string]*SkillConflict)
+	addConflict := func(key string, existing, skill Skill) {
+		conflict := conflictMap[key]
+		if conflict == nil {
+			conflict = &SkillConflict{
+				Name:    skill.Name,
+				Paths:   []string{existing.Path},
+				Sources: []string{existing.Source},
+			}
+			conflictMap[key] = conflict
+		}
+		conflict.Paths = append(conflict.Paths, skill.Path)
+		conflict.Sources = append(conflict.Sources, skill.Source)
+	}
 
 	localSources := [][]Skill{agentSkills, repoSkills, compatSkills}
 	for _, sourceList := range localSources {
@@ -380,28 +408,41 @@ func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, err
 			if key == "" {
 				continue
 			}
-			status, hasPersonal := personalStatuses[key]
-			if hasPersonal && sameSkillFile(skill.Path, status.path) {
-				continue
-			}
-			if status.managed {
-				return nil, ErrSkillSourceConflict
-			}
 			if existing, exists := skillMap[key]; exists {
-				conflict := conflictMap[key]
-				if conflict == nil {
-					conflict = &SkillConflict{
-						Name:    skill.Name,
-						Paths:   []string{existing.Path},
-						Sources: []string{existing.Source},
-					}
-				}
-				conflict.Paths = append(conflict.Paths, skill.Path)
-				conflict.Sources = append(conflict.Sources, skill.Source)
-				conflictMap[key] = conflict
+				addConflict(key, existing, skill)
 				continue
 			}
 			skillMap[key] = skill
+		}
+	}
+
+	// A plugin skill may not share its name with any other skill: installing
+	// the plugin is refused then, and a clash that appears later (a skill
+	// added to the Skills folder, say) is reported like any other.
+	personalByName := make(map[string]Skill, len(personalSkills))
+	for _, skill := range personalSkills {
+		if key := strings.ToLower(skill.Name); key != "" {
+			if _, exists := personalByName[key]; !exists {
+				personalByName[key] = skill
+			}
+		}
+	}
+	pluginByName := make(map[string]Skill, len(pluginSkills))
+	for _, skill := range pluginSkills {
+		key := strings.ToLower(skill.Name)
+		if key == "" {
+			continue
+		}
+		clashed := false
+		for _, others := range []map[string]Skill{skillMap, personalByName, pluginByName} {
+			if existing, exists := others[key]; exists && !sameSkillFile(existing.Path, skill.Path) {
+				addConflict(key, existing, skill)
+				clashed = true
+				break
+			}
+		}
+		if !clashed {
+			pluginByName[key] = skill
 		}
 	}
 
@@ -413,14 +454,19 @@ func (m *Manager) listSkills(agentName string, includePrompt bool) ([]Skill, err
 		return nil, &SkillConflictError{Conflicts: conflicts}
 	}
 
+	// Installed skills from the Skills folder come after an agent's own and
+	// the repository's: a name taken there shadows them.
 	for _, skill := range personalSkills {
 		key := strings.ToLower(skill.Name)
-		if key == "" || !personalStatuses[key].available {
+		if key == "" {
 			continue
 		}
 		if _, exists := skillMap[key]; exists {
 			continue
 		}
+		skillMap[key] = skill
+	}
+	for key, skill := range pluginByName {
 		skillMap[key] = skill
 	}
 
@@ -519,11 +565,33 @@ func (m *Manager) loadCompatSkills(includePrompt bool) ([]Skill, error) {
 }
 
 func (m *Manager) loadPersonalSkills(includePrompt bool) ([]Skill, error) {
-	skillsDir := strings.TrimSpace(m.personalSkillsDir)
+	skillsDir := m.PersonalSkillsDir()
 	if skillsDir == "" {
 		return []Skill{}, nil
 	}
 	return m.loadSkillsFromDir(skillsDir, SourcePersonal, includePrompt, false, true)
+}
+
+// loadPluginSkills reads each available plugin skill from its folder inside
+// the plugin's install folder. A folder without a readable SKILL.md is skipped.
+func (m *Manager) loadPluginSkills(agentName string, includePrompt bool) []Skill {
+	if m.pluginSkills == nil {
+		return nil
+	}
+	var loaded []Skill
+	for _, pluginSkill := range m.pluginSkills(agentName) {
+		dir := strings.TrimSpace(pluginSkill.Dir)
+		if dir == "" {
+			continue
+		}
+		skill, err := m.loadSkillEntry(filepath.Join(dir, "SKILL.md"), pluginSkill.Name, SourcePlugin, dir, includePrompt)
+		if err != nil {
+			continue
+		}
+		skill.Plugin = pluginSkill.Plugin
+		loaded = append(loaded, skill)
+	}
+	return loaded
 }
 
 func (m *Manager) loadSkillsFromDir(skillsDir, source string, includePrompt bool, allowSingleFile bool, allowCategories bool) ([]Skill, error) {

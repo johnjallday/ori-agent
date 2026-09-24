@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
@@ -50,18 +51,17 @@ func TestStartFreshNoLongerBlocksOnReviewedPluginSkills(t *testing.T) {
 	if len(preview.Blockers) != 0 {
 		t.Fatalf("valid plugin skill records blocked Start Fresh: %+v", preview.Blockers)
 	}
-	// The plugin-copied skill is named as removed; the shared root is not.
+	// Plugin skills live in the plugin's folder: ~/.agents/skills is not named.
 	var integrations CategoryPreview
 	for _, category := range preview.Categories {
 		if category.ID == CategoryIntegrations {
 			integrations = category
 		}
 	}
-	if !locationListed(integrations.Removed, filepath.Join(f.PersonalSkillsRoot(), "fresh-managed-skill")) {
-		t.Fatal("Start Fresh did not name the exact plugin-copied skill it removes")
-	}
-	if locationListed(integrations.Removed, f.PersonalSkillsRoot()) {
-		t.Fatal("Start Fresh listed the shared personal skills root as a removal target")
+	for _, location := range integrations.Removed {
+		if strings.HasPrefix(location.DisplayPath, f.PersonalSkillsRoot()) {
+			t.Fatalf("Start Fresh names ~/.agents/skills: %+v", location)
+		}
 	}
 	if len(integrations.Items) != 1 || integrations.Items[0].Name != "fresh-managed" {
 		t.Fatalf("Start Fresh did not name the installed plugin: %+v", integrations.Items)

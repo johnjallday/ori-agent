@@ -39,10 +39,7 @@ var (
 const (
 	marketplaceSearchTimeout  = 45 * time.Second
 	marketplaceInstallTimeout = 2 * time.Minute
-	marketplaceListTimeout    = 45 * time.Second
-	marketplaceCheckTimeout   = 75 * time.Second
 	marketplaceUpdateTimeout  = 2 * time.Minute
-	marketplaceRemoveTimeout  = 75 * time.Second
 	skillCreateTimeout        = 75 * time.Second
 	skillPromptTimeout        = 45 * time.Second
 	marketplaceMaxResults     = 24
@@ -169,13 +166,6 @@ type marketplaceSkillResult struct {
 	Skill      string `json:"skill"`
 	URL        string `json:"url,omitempty"`
 	Installs   string `json:"installs,omitempty"`
-}
-
-type marketplaceInstalledSkill struct {
-	Name   string `json:"name"`
-	Path   string `json:"path,omitempty"`
-	Agents string `json:"agents,omitempty"`
-	Scope  string `json:"scope,omitempty"`
 }
 
 func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request) {
@@ -820,7 +810,7 @@ func (h *Handler) handleMarketplace(w http.ResponseWriter, r *http.Request, path
 		return
 	}
 	if path == "marketplace/update" {
-		h.updateMarketplaceSkills(w, r)
+		h.updateMarketplaceSkill(w, r)
 		return
 	}
 	if path == "marketplace/remove" {
@@ -859,7 +849,11 @@ func (h *Handler) searchMarketplace(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), marketplaceSearchTimeout)
 	defer cancel()
 
-	output, err := runSkillsCLI(ctx, "find", query)
+	output, err := h.runSkillsCLIInDir(ctx, "", "find", query)
+	if errors.Is(err, exec.ErrNotFound) {
+		respondNodeRequired(w)
+		return
+	}
 	if err != nil {
 		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
 			"error":   "failed to search skills marketplace",
@@ -897,45 +891,68 @@ func (h *Handler) installMarketplaceSkill(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), marketplaceInstallTimeout)
 	defer cancel()
 
-	output, err := runSkillsCLI(ctx, "add", packageSpec, "-g", "-y", "--agent", "universal", "--copy")
+	installed, output, err := h.installSkillPackage(ctx, packageSpec)
 	if err != nil {
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "failed to install skill package",
-			"details": truncateMarketplaceOutput(output),
-		})
+		respondMarketplaceError(w, "failed to install skill package", output, err)
 		return
 	}
 
 	orihttp.Success(w, map[string]any{
-		"package": packageSpec,
-		"status":  "installed",
-		"details": truncateMarketplaceOutput(output),
+		"package":  packageSpec,
+		"status":   "installed",
+		"skill":    installed.Name,
+		"location": installed.Location,
+		"path":     installed.Path,
+		"details":  truncateMarketplaceOutput(output),
 	})
 }
 
+// respondMarketplaceError maps a marketplace failure to its response: a name
+// already in the Skills folder is a conflict, a missing Node.js says so, and
+// a failed download carries the tool's output.
+func respondMarketplaceError(w http.ResponseWriter, message, output string, err error) {
+	var taken *skillNameTakenError
+	var download *skillDownloadError
+	switch {
+	case errors.As(err, &taken):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": taken.Error()})
+	case errors.Is(err, errNodeRequired):
+		respondNodeRequired(w)
+	case errors.As(err, &download):
+		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
+			"error":   message,
+			"details": truncateMarketplaceOutput(download.Output),
+		})
+	default:
+		_ = orihttp.RespondJSON(w, http.StatusInternalServerError, map[string]any{
+			"error":   message + ": " + err.Error(),
+			"details": truncateMarketplaceOutput(output),
+		})
+	}
+}
+
+func respondNodeRequired(w http.ResponseWriter) {
+	_ = orihttp.RespondJSON(w, http.StatusServiceUnavailable, map[string]any{"error": nodeRequiredMessage})
+}
+
+// listMarketplaceInstalledSkills lists the skills in the Skills folder that
+// were installed from the marketplace, read from their source files.
 func (h *Handler) listMarketplaceInstalledSkills(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		orihttp.MethodNotAllowed(w)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), marketplaceListTimeout)
-	defer cancel()
-
-	output, err := runSkillsCLI(ctx, "list", "-g")
+	installed, err := h.listMarketplaceSkills()
 	if err != nil {
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "failed to list installed skills",
-			"details": truncateMarketplaceOutput(output),
+		_ = orihttp.RespondJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": "failed to list installed skills: " + err.Error(),
 		})
 		return
 	}
-
-	skillsList := parseSkillsListOutput(output, marketplaceMaxInstalled)
 	orihttp.Success(w, map[string]any{
-		"skills":  skillsList,
-		"count":   len(skillsList),
-		"summary": marketplaceOutputSummary(output),
+		"skills": installed,
+		"count":  len(installed),
 	})
 }
 
@@ -945,47 +962,82 @@ func (h *Handler) checkMarketplaceUpdates(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), marketplaceCheckTimeout)
-	defer cancel()
-
-	output, err := runSkillsCLI(ctx, "check")
+	statuses, err := h.checkSkillUpdates(r.Context())
 	if err != nil {
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "failed to check skill updates",
-			"details": truncateMarketplaceOutput(output),
+		_ = orihttp.RespondJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": "failed to check skill updates: " + err.Error(),
 		})
 		return
 	}
-
+	available := 0
+	for _, status := range statuses {
+		if status.UpdateAvailable {
+			available++
+		}
+	}
+	summary := "All marketplace skills are up to date."
+	if available > 0 {
+		summary = fmt.Sprintf("%d update%s available.", available, map[bool]string{true: "", false: "s"}[available == 1])
+	}
 	orihttp.Success(w, map[string]any{
 		"status":  "checked",
-		"summary": marketplaceOutputSummary(output),
-		"details": truncateMarketplaceOutput(output),
+		"skills":  statuses,
+		"summary": summary,
 	})
 }
 
-func (h *Handler) updateMarketplaceSkills(w http.ResponseWriter, r *http.Request) {
+type marketplaceUpdateRequest struct {
+	Skill string `json:"skill"`
+	Force bool   `json:"force,omitempty"`
+}
+
+// updateMarketplaceSkill replaces one marketplace skill with its latest
+// version. A skill the user edited is refused with code locally_modified
+// unless the request carries force: true.
+func (h *Handler) updateMarketplaceSkill(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req marketplaceUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		orihttp.BadRequest(w, "invalid request body")
+		return
+	}
+	skillName := strings.TrimSpace(req.Skill)
+	if !isPlainSkillFolderName(skillName) {
+		orihttp.BadRequest(w, "invalid skill name")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), marketplaceUpdateTimeout)
 	defer cancel()
 
-	output, err := runSkillsCLI(ctx, "update")
-	if err != nil {
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "failed to update installed skills",
-			"details": truncateMarketplaceOutput(output),
+	updated, output, err := h.updateSkillFolder(ctx, skillName, req.Force)
+	switch {
+	case errors.Is(err, errSkillLocallyModified):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"code":  "locally_modified",
+			"error": "You changed this skill since it was installed. Updating will replace your changes.",
 		})
+		return
+	case errors.Is(err, os.ErrNotExist):
+		orihttp.NotFound(w, "no skill with that name is in your Skills folder")
+		return
+	case errors.Is(err, errNotAMarketplaceSkill):
+		orihttp.BadRequest(w, err.Error())
+		return
+	case err != nil:
+		respondMarketplaceError(w, "failed to update the skill", output, err)
 		return
 	}
 
 	orihttp.Success(w, map[string]any{
-		"status":  "updated",
-		"summary": marketplaceOutputSummary(output),
-		"details": truncateMarketplaceOutput(output),
+		"skill":      skillName,
+		"status":     "updated",
+		"updated_at": updated.UpdatedAt,
+		"summary":    "Updated " + skillName + ".",
 	})
 }
 
@@ -1002,37 +1054,29 @@ func (h *Handler) removeMarketplaceSkill(w http.ResponseWriter, r *http.Request)
 	}
 
 	skillName := normalizeMarketplaceSkillName(req.Skill)
-	if !isValidMarketplaceSkillName(skillName) {
+	if !isPlainSkillFolderName(skillName) {
 		orihttp.BadRequest(w, "invalid skill name")
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), marketplaceRemoveTimeout)
-	defer cancel()
-
-	output, err := runSkillsCLI(ctx, "remove", "-g", "-y", skillName)
+	_, err := h.removeSkillFolder(skillName)
+	if errors.Is(err, os.ErrNotExist) {
+		orihttp.Success(w, map[string]any{"skill": skillName, "status": "not_found", "removed": false})
+		return
+	}
 	if err != nil {
-		_ = orihttp.RespondJSON(w, http.StatusBadGateway, map[string]any{
-			"error":   "failed to remove installed skill",
-			"details": truncateMarketplaceOutput(output),
+		_ = orihttp.RespondJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": "failed to remove installed skill: " + err.Error(),
 		})
 		return
 	}
 
-	cleaned := strings.ToLower(stripANSI(output))
-	status := "removed"
-	removed := true
-	if strings.Contains(cleaned, "no matching skills found") {
-		status = "not_found"
-		removed = false
-	}
-
 	orihttp.Success(w, map[string]any{
 		"skill":   skillName,
-		"status":  status,
-		"removed": removed,
-		"summary": marketplaceOutputSummary(output),
-		"details": truncateMarketplaceOutput(output),
+		"status":  "removed",
+		"removed": true,
+		"trashed": true,
+		"summary": "Moved to Trash",
 	})
 }
 
@@ -1159,102 +1203,6 @@ func parseSkillsFindOutput(output string, limit int) []marketplaceSkillResult {
 	}
 
 	return results
-}
-
-func parseSkillsListOutput(output string, limit int) []marketplaceInstalledSkill {
-	cleaned := stripANSI(output)
-	if cleaned == "" {
-		return []marketplaceInstalledSkill{}
-	}
-
-	if limit <= 0 || limit > marketplaceMaxInstalled {
-		limit = marketplaceMaxInstalled
-	}
-
-	lines := strings.Split(cleaned, "\n")
-	results := make([]marketplaceInstalledSkill, 0, limit)
-	scope := ""
-	currentIndex := -1
-
-	for _, rawLine := range lines {
-		line := strings.TrimSpace(rawLine)
-		if line == "" {
-			continue
-		}
-
-		line = strings.TrimSpace(strings.TrimLeft(line, "│└├─•·◇■"))
-		if line == "" {
-			continue
-		}
-
-		switch strings.ToLower(line) {
-		case "global skills":
-			scope = "global"
-			currentIndex = -1
-			continue
-		case "project skills":
-			scope = "project"
-			currentIndex = -1
-			continue
-		}
-
-		lowerLine := strings.ToLower(line)
-		if strings.HasPrefix(lowerLine, "agents:") {
-			if currentIndex >= 0 && currentIndex < len(results) {
-				results[currentIndex].Agents = strings.TrimSpace(line[len("Agents:"):])
-			}
-			continue
-		}
-
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-
-		name := strings.TrimSpace(fields[0])
-		rest := strings.TrimSpace(line[len(name):])
-		if !isValidMarketplaceSkillName(name) {
-			continue
-		}
-		if !strings.Contains(rest, "/") && !strings.Contains(rest, "\\") {
-			continue
-		}
-
-		if len(results) >= limit {
-			break
-		}
-
-		results = append(results, marketplaceInstalledSkill{
-			Name:  name,
-			Path:  rest,
-			Scope: scope,
-		})
-		currentIndex = len(results) - 1
-	}
-
-	return results
-}
-
-func marketplaceOutputSummary(output string) string {
-	cleaned := stripANSI(output)
-	if cleaned == "" {
-		return ""
-	}
-
-	lines := strings.Split(cleaned, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		line = strings.TrimSpace(strings.TrimLeft(line, "│└├─•·◇■"))
-		if line == "" {
-			continue
-		}
-		return line
-	}
-	return ""
-}
-
-func runSkillsCLI(ctx context.Context, args ...string) (string, error) {
-	return runSkillsCLIInDir(ctx, "", args...)
 }
 
 func runSkillsCLIInDir(ctx context.Context, workingDir string, args ...string) (string, error) {

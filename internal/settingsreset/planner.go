@@ -108,6 +108,20 @@ type resolvedEvidence struct {
 	// retained digests skip exactly this folder. Omitted otherwise, so older
 	// receipts keep their bytes.
 	AgentsFolder string `json:"agents_folder,omitempty"`
+	// SkillsFolder and PluginList are <root>/Skills and <root>/Plugins.json
+	// when Start Fresh removes the agents folder and they exist: they sit
+	// beside it, are removed under the same second confirmation, and are
+	// skipped by the retained digests the same way. Omitted otherwise, so
+	// older receipts keep their bytes.
+	SkillsFolder string `json:"skills_folder,omitempty"`
+	PluginList   string `json:"plugin_list,omitempty"`
+}
+
+// digestRetained hashes one retained path, leaving out what this reset
+// removes from inside it: the agents folder, and for Start Fresh the Skills
+// folder and plugin list beside it.
+func (e resolvedEvidence) digestRetained(ctx context.Context, path string) (string, error) {
+	return digestProtectedTree(ctx, path, []string{e.AgentsFolder, e.SkillsFolder}, []string{e.PluginList})
 }
 
 type resolvedPlan struct {
@@ -308,9 +322,15 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 	if slices.Contains(selected, CategoryAgents) {
 		agentsFolder = reviewAgentsFolder(owners.Agents, protected, block)
 	}
+	// Start Fresh also removes the Skills folder and the plugin list beside
+	// the agents folder, under the same second confirmation.
+	skillsFolder, pluginList := "", ""
+	if intent == IntentStartFresh && agentsFolder != "" {
+		skillsFolder, pluginList = workspaceDirectoryFreshTargets(agentsFolder)
+	}
 	protectedDigests := make([]protectedDigest, 0, len(protected))
 	for _, path := range protected {
-		digest, err := digestProtectedPath(ctx, path, agentsFolder)
+		digest, err := digestProtectedTree(ctx, path, []string{agentsFolder, skillsFolder}, []string{pluginList})
 		if err != nil {
 			block("retained_path_unreadable", selected[0], "Retained workspace or vault contents cannot be hashed before reset.", "Restore read access or reduce the retained tree below the bounded inspection limit, then review again.")
 		}
@@ -366,6 +386,17 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 			category.Removed = append(category.Removed, Location{DisplayPath: agentsFolder, Reason: "Remove each agent's folder (definition, image, skills and tool settings) from your Workspace Directory; keep every other file there."})
 			category.Facts = append(category.Facts, countAgentFolders(agentsFolder))
 			view.AgentsFolder = &AgentsFolderReview{Path: agentsFolder, Notice: AgentsFolderNotice, ConfirmationRequired: true}
+			if skillsFolder != "" {
+				category.Removed = append(category.Removed, Location{DisplayPath: skillsFolder, Reason: "Remove each skill folder from your Workspace Directory's Skills folder; keep every other file there."})
+				view.AgentsFolder.AlsoRemoved = append(view.AgentsFolder.AlsoRemoved, skillsFolder)
+			}
+			if pluginList != "" {
+				category.Removed = append(category.Removed, Location{DisplayPath: pluginList, Reason: "Remove the list of plugins your Workspace Directory asks each machine to install."})
+				view.AgentsFolder.AlsoRemoved = append(view.AgentsFolder.AlsoRemoved, pluginList)
+			}
+			if len(view.AgentsFolder.AlsoRemoved) > 0 {
+				view.AgentsFolder.Notice = AgentsFolderFreshNotice
+			}
 		}
 		view.Categories = append(view.Categories, category)
 	}
@@ -394,7 +425,9 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		// A different Workspace Directory means a different agents folder, and
 		// the second confirmation named the reviewed one.
 		AgentsFolder string
-	}{SchemaVersion, intent, selected, root, plan.Targets, protectedDigests, report.SchemaDigest, report.Version, databasePath, rootConfirmed, view.Blockers, plugins, agentsFolder}
+		SkillsFolder string
+		PluginList   string
+	}{SchemaVersion, intent, selected, root, plan.Targets, protectedDigests, report.SchemaDigest, report.Version, databasePath, rootConfirmed, view.Blockers, plugins, agentsFolder, skillsFolder, pluginList}
 	data, err := json.Marshal(binding)
 	if err != nil {
 		return resolvedPlan{}, err
@@ -411,6 +444,8 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		WorkspaceRootConfirmed: rootConfirmed,
 		Plugins:                plugins,
 		AgentsFolder:           agentsFolder,
+		SkillsFolder:           skillsFolder,
+		PluginList:             pluginList,
 	}
 	digest := sha256.Sum256(data)
 	view.ScopeDigest = hex.EncodeToString(digest[:])

@@ -583,19 +583,16 @@ func (b *ServerBuilder) initializeHandlers() {
 
 	// Initialize skills manager and handler (local + external).
 	//
-	// The personal skills root is resolved through plugin.DefaultPersonalSkillsRoot
-	// rather than composed here, because staged reset must resolve the very same
-	// location independently at the pre-store boundary. Two copies of this join
-	// would let a divergence delete, or fail to delete, the wrong directory.
-	personalSkillsDir := ""
-	if resolved, err := plugin.DefaultPersonalSkillsRoot(); err == nil {
-		personalSkillsDir = resolved
-	}
+	// Installed skills live in <Workspace Directory>/Skills. The folder is
+	// resolved on every read, through the same resolver the agent store uses,
+	// so switching the Workspace Directory switches the skills with it.
 	b.skillsManager = skills.NewManager(skills.ManagerConfig{
-		AgentStorePath:    b.agentStorePath,
-		PersonalSkillsDir: personalSkillsDir,
-		ExternalAgents:    b.externalAgentsCache,
-		ConfigManager:     b.configManager,
+		AgentStorePath: b.agentStorePath,
+		PersonalSkillsDirResolver: func() string {
+			return workspaceSkillsDir(b.configManager)
+		},
+		ExternalAgents: b.externalAgentsCache,
+		ConfigManager:  b.configManager,
 	})
 	// Enforce stage-based active-skill slot caps (PRD section C). Reads the
 	// agent's stage + expert flag through the store on each check, no caching.
@@ -624,8 +621,8 @@ func (b *ServerBuilder) initializeHandlers() {
 	}
 
 	// Plugin installer (Claude Code- and Codex-compatible bundles): wired over the
-	// MCP registry + the personal skills dir; installed plugins live under
-	// <data dir>/plugins. Anchored to config.DefaultDataDir() (same root as the
+	// MCP registry; installed plugins live under <data dir>/plugins, and their
+	// skills are read in place from there. Anchored to config.DefaultDataDir() (same root as the
 	// connections store and secrets reset above), not a bare "plugins" literal:
 	// a relative path resolves against the SERVER PROCESS's working directory,
 	// which is project-checkout-dependent when launched from a terminal but
@@ -635,57 +632,17 @@ func (b *ServerBuilder) initializeHandlers() {
 	// of bug as the CWD-relative agent store path fixed in #179.
 	if b.mcpConfigManager != nil && b.mcpRegistry != nil {
 		pluginsDir := filepath.Join(config.DefaultDataDir(), "plugins")
-		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, personalSkillsDir, pluginsDir)
+		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, pluginsDir)
 		b.pluginHandler.UpdateChecker().SetAdmissionGate(b.resetWork)
-		b.skillsManager.SetPersonalSkillAvailability(func(agentName string, skill skills.Skill) (bool, bool) {
-			directory := filepath.Dir(skill.Path)
-			info, statErr := os.Lstat(directory)
-			if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-				return true, false
-			}
-			receipt, managed, receiptErr := plugin.ReadSkillOwnershipReceipt(directory)
-			if receiptErr != nil {
-				return true, false
-			}
-			installed, listErr := b.pluginHandler.Manager().List()
-			if listErr != nil {
-				return true, false
-			}
-			if !managed {
-				directoryName := filepath.Base(directory)
-				for _, candidate := range installed {
-					for _, candidateSkill := range candidate.Skills {
-						if candidateSkill != directoryName {
-							continue
-						}
-						if candidate.SkillOwnershipSchema >= plugin.SkillOwnershipSchemaVersion {
-							return true, false
-						}
-						return true, candidate.Enabled
-					}
-				}
-				return false, true
-			}
-			if plugin.VerifySkillOwnership(directory, receipt.PluginName, receipt.SkillName) != nil {
-				return true, false
-			}
-			providerAvailable := false
-			for _, candidate := range installed {
-				if !candidate.Enabled || !strings.EqualFold(candidate.Name, receipt.PluginName) {
-					continue
-				}
-				for _, candidateSkill := range candidate.Skills {
-					if candidateSkill == receipt.SkillName {
-						providerAvailable = true
-						break
-					}
-				}
-			}
-			if !providerAvailable || !independentSkillProviderAvailableForAgent(b.workspaceStore, installed, agentName, receipt.PluginName) {
-				return true, false
-			}
-			return true, true
+		b.wirePluginSkills()
+		// The Workspace Directory's plugin list (Plugins.json) records every
+		// install, update, and uninstall, and is filled from this machine's
+		// plugins only for a root this data dir confirmed.
+		b.pluginHandler.SetWorkspaceRootResolver(func() string {
+			return resolveWorkspaceRoot(b.configManager)
 		})
+		b.pluginHandler.SetPluginListSkipsPath(filepath.Join(config.DefaultDataDir(), "plugin_list_skips.json"))
+		b.pluginHandler.FillWorkspaceList(shouldRunWorkspaceStartupMaintenance(b.configManager))
 	}
 
 	// Let workspaces created from a template bind its declared default tools
@@ -705,8 +662,84 @@ func (b *ServerBuilder) initializeHandlers() {
 	}
 }
 
-// independentSkillProviderAvailableForAgent binds managed personal-skill
-// runtime resolution back to any split-provider workspace that owns the agent.
+// wirePluginSkills makes installed plugins' skills available, read in place
+// from each plugin's install folder, and keeps plugin skill names from
+// clashing with the Skills folder. It also runs the one-time cleanup of the
+// copies older versions made in ~/.agents/skills.
+func (b *ServerBuilder) wirePluginSkills() {
+	manager := b.pluginHandler.Manager()
+	b.skillsManager.SetPluginSkillProvider(func(agentName string) []skills.PluginSkill {
+		installed, err := manager.Installed()
+		if err != nil {
+			return nil
+		}
+		available := map[string]bool{}
+		var provided []skills.PluginSkill
+		for _, location := range manager.EnabledSkills(installed) {
+			ok, checked := available[location.Plugin]
+			if !checked {
+				// b.workspaceStore is read at call time: it does not exist yet
+				// while handlers are being wired.
+				ok = independentSkillProviderAvailableForAgent(b.workspaceStore, installed, agentName, location.Plugin)
+				available[location.Plugin] = ok
+			}
+			if ok {
+				provided = append(provided, skills.PluginSkill{Plugin: location.Plugin, Name: location.Name, Dir: location.Dir})
+			}
+		}
+		return provided
+	})
+	manager.SetSkillNameGuard(func(_ string, names []string) error {
+		installedSkills, err := b.skillsManager.PersonalSkills()
+		if err != nil {
+			return err
+		}
+		for _, name := range names {
+			for _, skill := range installedSkills {
+				if strings.EqualFold(skill.Name, name) || strings.EqualFold(filepath.Base(filepath.Dir(skill.Path)), name) {
+					return fmt.Errorf("%w: a skill named %q is already in your Skills folder", plugin.ErrSkillNameTaken, name)
+				}
+			}
+		}
+		return nil
+	})
+	cleanLegacyPluginSkills(manager)
+}
+
+// cleanLegacyPluginSkills removes, once per data directory, the plugin skill
+// copies older versions made in ~/.agents/skills — only those provably Ori's
+// own, for a plugin installed here, and unedited.
+func cleanLegacyPluginSkills(manager *plugin.Manager) {
+	skillsRoot, err := plugin.LegacySkillsRoot()
+	if err != nil {
+		return
+	}
+	installed, err := manager.Installed()
+	if err != nil {
+		logger.Warn("Skipped the one-time cleanup of old plugin skill copies: the plugin registry could not be read", logger.Fields{"error": err.Error()})
+		return
+	}
+	result, ran, err := plugin.CleanLegacyPluginSkillsOnce(config.DefaultDataDir(), skillsRoot, installed)
+	if !ran {
+		return
+	}
+	fields := logger.Fields{
+		"folder":  skillsRoot,
+		"removed": strings.Join(result.Removed, ", "),
+		"kept":    strings.Join(result.Kept, "; "),
+	}
+	if err != nil {
+		fields["error"] = err.Error()
+		logger.Warn("The one-time cleanup of old plugin skill copies did not finish; it will try again at the next start", fields)
+		return
+	}
+	if len(result.Removed) > 0 || len(result.Kept) > 0 {
+		logger.Info("Cleaned up old plugin skill copies in ~/.agents/skills; plugin skills are now read from each plugin's folder", fields)
+	}
+}
+
+// independentSkillProviderAvailableForAgent binds plugin skill runtime
+// resolution back to any split-provider workspace that owns the agent.
 // A reviewed plugin update changes generation/fingerprint evidence, so an
 // existing role cannot silently start executing the replacement instructions.
 func independentSkillProviderAvailableForAgent(store workspace.Store, installed []plugin.InstalledPlugin, agentName, pluginName string) bool {
@@ -816,6 +849,9 @@ func (b *ServerBuilder) wireWorkspaceRootUpdater() {
 		// the new root, the built-in assistant unchanged, nothing moved.
 		if composite, ok := b.st.(*store.CompositeStore); ok {
 			composite.SetRoot(root)
+		}
+		if b.pluginHandler != nil {
+			b.pluginHandler.FillWorkspaceList(shouldRunWorkspaceStartupMaintenance(b.configManager))
 		}
 		if err := b.reconcileWorkspaceDesignations(ctx); err != nil {
 			logger.Warn("Live workspace designation reconciliation failed", logger.Fields{"error": err.Error()})

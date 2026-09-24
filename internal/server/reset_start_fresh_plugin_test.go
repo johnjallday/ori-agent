@@ -28,8 +28,8 @@ import (
 
 // TestStartFreshRemovesAPluginInstalledThroughTheRealHostPath is the Start
 // Fresh counterpart to the selective journey: the plugin is installed through
-// the production plugin manager (registering its MCP server and copying its
-// skill into the shared personal skills directory), a Workspace Surface state
+// the production plugin manager (registering its MCP server; its skill stays in
+// the plugin's own folder), a Workspace Surface state
 // record is written for it, and Start Fresh then completes through a real
 // relaunch without the retired manual-uninstall blocker.
 //
@@ -59,7 +59,7 @@ func TestStartFreshRemovesAPluginInstalledThroughTheRealHostPath(t *testing.T) {
 	pluginsDir := filepath.Join(paths.DataDir, "plugins")
 	skillsRoot := f.PersonalSkillsRoot()
 	mcpConfig := mcp.NewConfigManager(paths.DataDir)
-	pluginHandler := pluginhttp.NewHandler(mcpConfig, mcp.NewRegistry(), skillsRoot, pluginsDir)
+	pluginHandler := pluginhttp.NewHandler(mcpConfig, mcp.NewRegistry(), pluginsDir)
 	installed, err := pluginHandler.Manager().Install(source, plugin.FormatClaude, func(plugin.TrustReport) bool { return true })
 	if err != nil {
 		t.Fatalf("install the synthetic plugin through the real host path: %v", err)
@@ -67,9 +67,10 @@ func TestStartFreshRemovesAPluginInstalledThroughTheRealHostPath(t *testing.T) {
 	if len(installed.Skills) != 1 || len(installed.MCPServers) != 1 {
 		t.Fatalf("the real install did not register the expected components: %+v", installed)
 	}
-	copiedSkill := filepath.Join(skillsRoot, installed.Skills[0])
-	if _, err := os.Lstat(copiedSkill); err != nil {
-		t.Fatalf("the real install did not copy the skill: %v", err)
+	// The skill is read in place from the plugin's folder: nothing is copied
+	// into the fixture's ~/.agents/skills.
+	if _, err := os.Lstat(filepath.Join(skillsRoot, installed.Skills[0])); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the real install copied the skill into ~/.agents/skills: %v", err)
 	}
 	// A plugin-backed Workspace Surface state record, written through the same
 	// store the live surface runtime uses.
@@ -174,9 +175,6 @@ func TestStartFreshRemovesAPluginInstalledThroughTheRealHostPath(t *testing.T) {
 	if err != nil || operation.State != settingsreset.StateAwaitingRestart {
 		t.Fatalf("stage Start Fresh = %+v, %v", operation, err)
 	}
-	if _, err := os.Lstat(copiedSkill); err != nil {
-		t.Fatalf("the accepting process already removed the copied skill: %v", err)
-	}
 	if err := lease.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -219,10 +217,9 @@ func TestStartFreshRemovesAPluginInstalledThroughTheRealHostPath(t *testing.T) {
 		t.Fatalf("Start Fresh did not report the plugin's own outcome: %v", outcomes)
 	}
 
-	// Exact plugin cleanup reached outside the installation; the broader policy
-	// removed the managed roots and marketplaces.
+	// Exact plugin cleanup ran; the broader policy removed the managed roots
+	// and marketplaces.
 	for _, gone := range []string{
-		copiedSkill,
 		filepath.Join(pluginsDir, "state", plugin.ResetStateNamespace(installed.Name)),
 		filepath.Join(pluginsDir, "installed.json"),
 		filepath.Join(pluginsDir, "marketplaces.json"),

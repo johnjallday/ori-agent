@@ -130,17 +130,10 @@ func TestProductionPluginResetPathsMatchTheLiveHandlerLayout(t *testing.T) {
 	if !paths.Resolved() {
 		t.Fatal("production plugin reset paths did not resolve")
 	}
-	skillsRoot, err := plugin.DefaultPersonalSkillsRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if paths.SkillsRoot != skillsRoot {
-		t.Fatalf("reset resolved a different personal skills root: %q vs %q", paths.SkillsRoot, skillsRoot)
-	}
 	// plugin.NewManager is constructed over <data>/plugins with <data>/plugins/src
 	// as its clone directory, and its Start Fresh paths are the authority for the
 	// managed layout. Compare against those rather than restating the joins.
-	manager := plugin.NewManager(nil, nil, paths.PluginsDir, paths.CloneDir)
+	manager := plugin.NewManager(nil, paths.PluginsDir, paths.CloneDir)
 	fresh := manager.FreshPersistencePaths()
 	for kind, want := range map[string]string{
 		"plugin_registry":     paths.RegistryPath(),

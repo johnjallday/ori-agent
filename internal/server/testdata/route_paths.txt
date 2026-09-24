@@ -157,6 +157,8 @@
 /api/plugins/install
 /api/plugins/marketplaces
 /api/plugins/marketplaces/install
+/api/plugins/workspace-list
+/api/plugins/workspace-list/skip
 /api/plugins/demo-plugin/enable
 /api/plugins/tool-call
 /api/progression
@@ -205,6 +207,9 @@
 /api/setup-quests/x/x/runs/x/steps/x/review
 /api/skills
 /api/skills/generate-prompt
+/api/skills/import
+/api/skills/import/candidates
+/api/skills/import/dismiss
 /api/skills/marketplace/check
 /api/skills/marketplace/install
 /api/skills/marketplace/installed

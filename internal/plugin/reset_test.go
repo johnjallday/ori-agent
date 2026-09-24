@@ -33,6 +33,9 @@ type resetHarness struct {
 	data  string
 	home  string
 	paths ResetPaths
+	// agentsSkills is the harness's ~/.agents/skills, where plugin skills used
+	// to be copied. Plugin reset must never touch it.
+	agentsSkills string
 }
 
 func newResetHarness(t *testing.T) *resetHarness {
@@ -46,9 +49,10 @@ func newResetHarness(t *testing.T) *resetHarness {
 		data: filepath.Join(root, "data"),
 		home: filepath.Join(root, "home"),
 	}
-	h.paths = DefaultResetPaths(h.data, filepath.Join(h.home, ".agents", "skills"))
+	h.paths = DefaultResetPaths(h.data)
+	h.agentsSkills = filepath.Join(h.home, ".agents", "skills")
 	for _, dir := range []string{
-		h.paths.PluginsDir, h.paths.CloneDir, h.paths.SkillsRoot,
+		h.paths.PluginsDir, h.paths.CloneDir, h.agentsSkills,
 		filepath.Join(h.paths.PluginsDir, "state"),
 		filepath.Join(h.paths.PluginsDir, "artifacts"),
 		filepath.Join(h.paths.PluginsDir, "preview"),
@@ -102,15 +106,15 @@ func (h *resetHarness) writeMCPRegistry(names ...string) {
 	h.write(h.paths.MCPRegistry, string(data))
 }
 
-// seedManaged creates one fully-loaded managed plugin: a managed clone, a copied
-// personal skill, namespaced surface state in both managed locations, a managed
-// artifact, and a namespaced MCP registration.
+// seedManaged creates one fully-loaded managed plugin: a managed clone with a
+// skill inside it, namespaced surface state in both managed locations, a
+// managed artifact, and a namespaced MCP registration.
 func (h *resetHarness) seedManaged() InstalledPlugin {
 	const name = managedPluginName
 	h.t.Helper()
 	clone := filepath.Join(h.paths.CloneDir, name+"-repo")
 	h.write(filepath.Join(clone, ".claude-plugin", "plugin.json"), `{"name":"`+name+`"}`)
-	h.write(filepath.Join(h.paths.SkillsRoot, name+"-skill", "SKILL.md"), "# harness skill\n")
+	h.write(filepath.Join(clone, "skills", name+"-skill", "SKILL.md"), "# harness skill\n")
 	digest := sha256.Sum256([]byte(name))
 	h.write(filepath.Join(h.paths.PluginsDir, "state", hex.EncodeToString(digest[:]), "workspace.json"), `{"schema_version":1}`)
 	h.write(filepath.Join(h.paths.PluginsDir, "state", name, "service-owned.txt"), "plugin service data\n")
@@ -133,7 +137,7 @@ func (h *resetHarness) seedLinked() InstalledPlugin {
 	h.t.Helper()
 	source := filepath.Join(h.root, "external", name)
 	h.write(filepath.Join(source, ".claude-plugin", "plugin.json"), `{"name":"`+name+`"}`)
-	h.write(filepath.Join(h.paths.SkillsRoot, name+"-skill", "SKILL.md"), "# linked harness skill\n")
+	h.write(filepath.Join(source, "skills", name+"-skill", "SKILL.md"), "# linked harness skill\n")
 	return InstalledPlugin{
 		Name: name, Version: "0.1.0", Source: source, Format: FormatClaude, InstallDir: source,
 		Skills: []string{name + "-skill"}, Generation: 1, Enabled: false, InstalledAt: time.Unix(0, 0).UTC(),
@@ -248,7 +252,7 @@ func TestInspectResetDescribesEveryOwnedComponent(t *testing.T) {
 	if !item.Managed || item.SourceDisposition() != "managed clone (removed)" {
 		t.Fatalf("managed clone not recognised: %+v", item)
 	}
-	if inventory.RegistryDigest == "" || inventory.SkillsRoot != h.paths.SkillsRoot {
+	if inventory.RegistryDigest == "" {
 		t.Fatalf("inventory evidence incomplete: %+v", inventory)
 	}
 }
@@ -328,15 +332,6 @@ func TestInspectResetBlocksUnsafeAndAmbiguousOwnership(t *testing.T) {
 			want: ResetProblemDuplicateRecord,
 		},
 		{
-			name: "skill escaping the personal skills root",
-			record: func(h *resetHarness) []InstalledPlugin {
-				record := h.seedManaged()
-				record.Skills = []string{"../../escape"}
-				return []InstalledPlugin{record}
-			},
-			want: ResetProblemComponentUnsafe,
-		},
-		{
 			name: "unnamespaced mcp registration",
 			record: func(h *resetHarness) []InstalledPlugin {
 				record := h.seedManaged()
@@ -344,16 +339,6 @@ func TestInspectResetBlocksUnsafeAndAmbiguousOwnership(t *testing.T) {
 				return []InstalledPlugin{record}
 			},
 			want: ResetProblemComponentUnsafe,
-		},
-		{
-			name: "two plugins claiming one personal skill",
-			record: func(h *resetHarness) []InstalledPlugin {
-				first := h.seedManaged()
-				second := h.seedLinked()
-				second.Skills = first.Skills
-				return []InstalledPlugin{first, second}
-			},
-			want: ResetProblemSkillAmbiguous,
 		},
 		{
 			name: "unresolvable relative install root",
@@ -383,72 +368,34 @@ func TestInspectResetBlocksUnsafeAndAmbiguousOwnership(t *testing.T) {
 	}
 }
 
-func TestInspectResetBlocksUnexpectedSkillDestinations(t *testing.T) {
-	for _, kind := range []string{"symlink", "regular file"} {
-		t.Run(kind, func(t *testing.T) {
-			h := newResetHarness(t)
-			record := h.seedManaged()
-			destination := filepath.Join(h.paths.SkillsRoot, "harness-alpha-skill")
-			if err := os.RemoveAll(destination); err != nil {
-				t.Fatalf("clear destination: %v", err)
-			}
-			if kind == "symlink" {
-				target := filepath.Join(h.root, "external", "linked-skill")
-				if err := os.MkdirAll(target, 0o750); err != nil {
-					t.Fatalf("create link target: %v", err)
-				}
-				if err := os.Symlink(target, destination); err != nil {
-					t.Skipf("symlinks unavailable: %v", err)
-				}
-			} else {
-				h.write(destination, "not a skill directory\n")
-			}
-			h.writeRegistry(record)
-			before := h.snapshot()
-			_, problems := InspectReset(h.paths)
-			h.assertUnchanged(before)
-			if !slices.Contains(problemCodes(problems), ResetProblemSkillUnexpected) {
-				t.Fatalf("expected an unexpected-destination blocker, got %v", problemCodes(problems))
-			}
-		})
-	}
-}
-
-func TestInspectResetBlocksEditedReceiptOwnedSkill(t *testing.T) {
+// Plugin skills live in the plugin's own folder, so skill names are summary
+// only: odd names, a name two plugins share, or an old record's ownership
+// schema never block a reset, and ~/.agents/skills is never looked at.
+func TestInspectResetTreatsSkillsAsSummaryOnly(t *testing.T) {
 	h := newResetHarness(t)
-	record := h.seedManaged()
-	skillDir := filepath.Join(h.paths.SkillsRoot, record.Skills[0])
-	digest, err := SkillTreeDigest(skillDir)
-	if err != nil {
+	first := h.seedManaged()
+	first.Skills = append(first.Skills, "../../escape", ".hidden")
+	first.SkillOwnershipSchema = 1
+	second := h.seedLinked()
+	second.Skills = []string{"harness-alpha-skill"}
+	h.writeRegistry(first, second)
+	// An old copy in ~/.agents/skills that is a symlink: once a blocker.
+	target := filepath.Join(h.root, "external", "linked-skill")
+	if err := os.MkdirAll(target, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteSkillOwnershipReceipt(skillDir, NewSkillOwnershipReceipt(record.Name, record.Skills[0], digest)); err != nil {
-		t.Fatal(err)
+	if err := os.Symlink(target, filepath.Join(h.agentsSkills, "harness-alpha-skill")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
 	}
-	h.write(filepath.Join(skillDir, "SKILL.md"), "# user edit after install\n")
-	h.writeRegistry(record)
 
+	before := h.snapshot()
 	inventory, problems := InspectReset(h.paths)
-	if len(inventory.Items) != 0 || !slices.Contains(problemCodes(problems), ResetProblemSkillUnexpected) {
-		t.Fatalf("edited owned skill inventory/problems = %+v / %+v", inventory, problems)
+	h.assertUnchanged(before)
+	if len(problems) != 0 || len(inventory.Items) != 2 {
+		t.Fatalf("inventory/problems = %+v / %v", inventory.Items, problemCodes(problems))
 	}
-	if contents, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md")); err != nil || string(contents) != "# user edit after install\n" {
-		t.Fatalf("inspection changed edited skill: %q, %v", contents, err)
-	}
-}
-
-func TestInspectResetBlocksMissingReceiptForNewManagedSkill(t *testing.T) {
-	h := newResetHarness(t)
-	record := h.seedManaged()
-	record.SkillOwnershipSchema = SkillOwnershipSchemaVersion
-	h.writeRegistry(record)
-
-	inventory, problems := InspectReset(h.paths)
-	if len(inventory.Items) != 0 || !slices.Contains(problemCodes(problems), ResetProblemSkillUnexpected) {
-		t.Fatalf("missing owned receipt inventory/problems = %+v / %+v", inventory, problems)
-	}
-	if _, err := os.Stat(filepath.Join(h.paths.SkillsRoot, record.Skills[0], "SKILL.md")); err != nil {
-		t.Fatalf("inspection changed receipt-less skill: %v", err)
+	if !slices.Equal(inventory.Items[0].Skills, []string{"harness-alpha-skill"}) {
+		t.Fatalf("unsafe skill names were not left out of the summary: %v", inventory.Items[0].Skills)
 	}
 }
 
@@ -500,7 +447,9 @@ func TestRemoveResetItemRemovesExactlyItsOwnComponents(t *testing.T) {
 	linked := h.seedLinked()
 	h.writeRegistry(managed, linked)
 	h.writeMCPRegistry(NamespacedServerName("harness-alpha", "tools"), "user-owned-server")
-	h.write(filepath.Join(h.paths.SkillsRoot, "user-authored-skill", "SKILL.md"), "# personal\n")
+	h.write(filepath.Join(h.agentsSkills, "user-authored-skill", "SKILL.md"), "# personal\n")
+	// A copy an older version made; reset leaves it to the one-time cleanup.
+	h.write(filepath.Join(h.agentsSkills, "harness-alpha-skill", "SKILL.md"), "# old copy\n")
 	h.write(filepath.Join(h.paths.PluginsDir, "marketplaces.json"), `[{"name":"harness-market"}]`)
 
 	inventory, problems := InspectReset(h.paths)
@@ -515,7 +464,6 @@ func TestRemoveResetItemRemovesExactlyItsOwnComponents(t *testing.T) {
 	digest := sha256.Sum256([]byte("harness-alpha"))
 	for _, gone := range []string{
 		filepath.Join(h.paths.CloneDir, "harness-alpha-repo"),
-		filepath.Join(h.paths.SkillsRoot, "harness-alpha-skill"),
 		filepath.Join(h.paths.PluginsDir, "state", hex.EncodeToString(digest[:])),
 		filepath.Join(h.paths.PluginsDir, "state", "harness-alpha"),
 		filepath.Join(h.paths.PluginsDir, "artifacts", "harness-alpha"),
@@ -525,11 +473,10 @@ func TestRemoveResetItemRemovesExactlyItsOwnComponents(t *testing.T) {
 		}
 	}
 	for _, kept := range []string{
-		filepath.Join(h.root, "external", "harness-beta"),
-		filepath.Join(h.paths.SkillsRoot, "harness-beta-skill"),
-		filepath.Join(h.paths.SkillsRoot, "user-authored-skill"),
+		filepath.Join(h.root, "external", "harness-beta", "skills", "harness-beta-skill"),
+		filepath.Join(h.agentsSkills, "user-authored-skill"),
+		filepath.Join(h.agentsSkills, "harness-alpha-skill"),
 		filepath.Join(h.paths.PluginsDir, "marketplaces.json"),
-		h.paths.SkillsRoot,
 	} {
 		if !h.exists(kept) {
 			t.Errorf("unrelated or linked location was removed: %s", kept)
@@ -620,9 +567,7 @@ func TestRemoveResetItemRefusesUnsafeEvidence(t *testing.T) {
 	if err := RemoveResetItem(h.paths, ResetItem{Name: "../escape"}); err == nil {
 		t.Fatal("an unsafe plugin name was accepted")
 	}
-	if err := RemoveResetItem(h.paths, ResetItem{Name: "harness-alpha", Skills: []string{"../escape"}}); err == nil {
-		t.Fatal("an unsafe skill name was accepted")
-	}
+	// Skill names address nothing any more, so they are not evidence here.
 	if err := RemoveResetItem(h.paths, ResetItem{
 		Name: "harness-alpha", Managed: true, InstallRoot: filepath.Join(h.root, "external", "elsewhere"),
 	}); err == nil {

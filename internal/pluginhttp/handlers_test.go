@@ -3,6 +3,7 @@ package pluginhttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,19 +28,9 @@ func (s *stubReg) AddServer(c mcp.ServerConfig) error {
 }
 func (s *stubReg) RemoveServer(name string) error { delete(s.added, name); return nil }
 
-type stubSkills struct{}
-
-func (stubSkills) InstallSkill(_, _, _ string) error { return nil }
-func (stubSkills) RemoveSkill(_, _ string) error     { return nil }
-
-type failingSkills struct{ installErr error }
-
-func (s failingSkills) InstallSkill(_, _, _ string) error { return s.installErr }
-func (failingSkills) RemoveSkill(_, _ string) error       { return nil }
-
 func testHandler(t *testing.T) *Handler {
 	t.Helper()
-	mgr := plugin.NewManager(&stubReg{}, stubSkills{}, t.TempDir(), "")
+	mgr := plugin.NewManager(&stubReg{}, t.TempDir(), "")
 	return newHandlerWithManager(mgr)
 }
 
@@ -105,11 +96,16 @@ func TestInstallConfirmThenList(t *testing.T) {
 	}
 }
 
-func TestInstallSkillOwnershipConflictIsActionable(t *testing.T) {
-	mgr := plugin.NewManager(&stubReg{}, failingSkills{installErr: plugin.ErrSkillDestinationConflict}, t.TempDir(), "")
+// FR 26: a plugin whose skill name is already in the Skills folder is refused
+// with a message naming the skill.
+func TestInstallSkillNameClashIsActionable(t *testing.T) {
+	mgr := plugin.NewManager(&stubReg{}, t.TempDir(), "")
+	mgr.SetSkillNameGuard(func(_ string, names []string) error {
+		return fmt.Errorf("%w: a skill named %q is already in your Skills folder", plugin.ErrSkillNameTaken, names[0])
+	})
 	h := newHandlerWithManager(mgr)
 	rr := postInstall(t, h, claudeBundle(t), true)
-	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "independently owned") {
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), `A skill named \"s1\" is already in your Skills folder.`) {
 		t.Fatalf("install conflict status=%d body=%s", rr.Code, rr.Body.String())
 	}
 	if strings.Contains(listBody(t, h), "reaper") {
@@ -117,14 +113,14 @@ func TestInstallSkillOwnershipConflictIsActionable(t *testing.T) {
 	}
 }
 
-func TestPluginSkillMutationConflictsStayUserResolvable(t *testing.T) {
+func TestPluginMutationConflictsStayUserResolvable(t *testing.T) {
 	tests := []struct {
 		name    string
 		err     error
 		message string
 	}{
-		{name: "destination", err: plugin.ErrSkillDestinationConflict, message: "independently owned"},
-		{name: "edited", err: plugin.ErrSkillOwnershipChanged, message: "changed after installation"},
+		{name: "skill name", err: fmt.Errorf("%w: a skill named %q is already provided by the plugin %q", plugin.ErrSkillNameTaken, "x", "other"), message: `already provided by the plugin \"other\".`},
+		{name: "source changed", err: plugin.ErrSourceChanged, message: "source changed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

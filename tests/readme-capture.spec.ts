@@ -416,6 +416,13 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { has_workspace: false });
       return;
     }
+    // The sidebar's Plugins badge asks on every page load. The real API's
+    // answer for a Workspace Directory with no Plugins.json keeps the badge
+    // hidden, same as a profile with no plugin list.
+    if (url.pathname === '/api/plugins/workspace-list') {
+      await json(route, { pending: [], found: false });
+      return;
+    }
     if (
       [
         '/api/updates/check',

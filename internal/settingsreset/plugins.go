@@ -10,18 +10,13 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
-	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
 
 // Installed-plugin reset evidence.
 //
-// The generic reset target rules require every resolved path to be absolute,
-// inside the installation, outside recovery metadata, and clear of retained
-// workspace/vault contents. Copied plugin skills live in the shared personal
-// skills directory, which satisfies none of that. Rather than weakening those
-// rules for every category, plugin ownership gets this dedicated, narrower
-// boundary: one independently validated external root, and only the exact
-// recorded direct children beneath it.
+// Every plugin location is inside the installation: a plugin's skills live in
+// its own install folder, so a managed clone takes them with it and a linked
+// source keeps them. Plugin reset touches no skills folder.
 
 // maxPreviewPluginItems bounds how many plugins are named individually in a
 // review. Beyond it the preview reports a summary count; the private evidence
@@ -32,6 +27,10 @@ const maxPreviewPluginItems = 25
 // recovered path: pre-start apply re-resolves every root independently and
 // compares. It is an additive pointer field, so a receipt written before plugin
 // reset existed omits it entirely and keeps its canonical bytes.
+//
+// SkillsRoot and SkillsRootPresent come from receipts written while plugin
+// skills were copied into ~/.agents/skills. They are kept so those receipts
+// keep their bytes and still validate, and are otherwise ignored.
 type pluginEvidence struct {
 	SkillsRoot         string             `json:"skills_root"`
 	SkillsRootPresent  bool               `json:"skills_root_present"`
@@ -43,29 +42,14 @@ type pluginEvidence struct {
 }
 
 // resolvedPluginPaths derives the plugin layout from the installation root the
-// planner already resolved, plus the personal skills root resolved through the
-// same helper the pre-store recovery resolver uses.
-//
-// Both sides must agree byte-for-byte or a reviewed operation looks like a
-// changed scope and refuses to apply. Storing an unresolved root here and
-// resolving it at recovery is exactly that bug: on macOS a temporary or
-// symlinked HOME resolves to a different absolute path, and the receipt is
-// stranded through no fault of the user.
-func resolvedPluginPaths(installationRoot, skillsRoot string) (plugin.ResetPaths, bool) {
-	if strings.TrimSpace(installationRoot) == "" || strings.TrimSpace(skillsRoot) == "" {
+// planner already resolved, the same way the pre-store recovery resolver does,
+// so both sides agree byte-for-byte.
+func resolvedPluginPaths(installationRoot string) (plugin.ResetPaths, bool) {
+	if strings.TrimSpace(installationRoot) == "" {
 		return plugin.ResetPaths{}, false
 	}
-	paths := plugin.DefaultResetPaths(installationRoot, resolveOwnedRoot(skillsRoot))
+	paths := plugin.DefaultResetPaths(installationRoot)
 	return paths, paths.Resolved()
-}
-
-// resolveOwnedRoot canonicalizes a location that may not exist yet. An absent
-// personal skills folder is ordinary — nothing was ever copied into it.
-func resolveOwnedRoot(path string) string {
-	if resolved, err := resolvePath(path); err == nil {
-		return resolved
-	}
-	return filepath.Clean(path)
 }
 
 // pluginTargetPaths maps this category's installation-local target kinds to the
@@ -92,10 +76,10 @@ func pluginTargetPaths(paths plugin.ResetPaths) map[string]string {
 // exact cleanup before those broader roots are deleted.
 func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, installationRoot string, category *CategoryPreview,
 	target func(string, string, string), block func(string, CategoryID, string, string)) *pluginEvidence {
-	paths, ok := resolvedPluginPaths(installationRoot, owners.PluginPaths.SkillsRoot)
-	if !ok {
+	paths, ok := resolvedPluginPaths(installationRoot)
+	if !ok || !owners.PluginPaths.Resolved() {
 		block("plugin_owner_unavailable", id, "The authoritative installed-plugin owner is unavailable.",
-			"Restore the plugin registry and personal skills locations before reviewing reset; no plugin layout will be guessed.")
+			"Restore the plugin registry location before reviewing reset; no plugin layout will be guessed.")
 		category.Facts = append(category.Facts, CountFact{Name: "installed plugins", UnavailableReason: "Authoritative owner or non-interactive inspection unavailable."})
 		return nil
 	}
@@ -115,10 +99,9 @@ func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, installat
 
 	total := int64(len(inventory.Items))
 	category.Facts = append(category.Facts, CountFact{Name: "installed plugins", Count: &total})
-	servers, skills, managed := int64(0), int64(0), int64(0)
+	servers, managed := int64(0), int64(0)
 	for _, item := range inventory.Items {
 		servers += int64(len(item.MCPServers))
-		skills += int64(len(item.Skills))
 		if item.Managed {
 			managed++
 		}
@@ -126,7 +109,6 @@ func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, installat
 	linked := total - managed
 	category.Facts = append(category.Facts,
 		CountFact{Name: "plugin MCP registrations removed", Count: &servers},
-		CountFact{Name: "plugin-copied personal skills removed", Count: &skills},
 		CountFact{Name: "managed plugin clones removed", Count: &managed},
 		CountFact{Name: "linked plugin sources kept", Count: &linked},
 	)
@@ -146,12 +128,6 @@ func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, installat
 		}
 	}
 	for _, item := range inventory.Items {
-		for _, skill := range item.Skills {
-			category.Removed = append(category.Removed, Location{
-				DisplayPath: filepath.Join(paths.SkillsRoot, skill),
-				Reason:      "Remove this exact plugin-copied skill directory. The shared personal skills folder itself and every skill Ori did not copy are untouched.",
-			})
-		}
 		if !item.Managed && item.InstallRoot != "" {
 			category.Retained = append(category.Retained, Location{
 				DisplayPath: item.InstallRoot,
@@ -166,23 +142,14 @@ func inspectPlugins(ctx context.Context, owners Owners, id CategoryID, installat
 		})
 	}
 	category.Retained = append(category.Retained,
-		Location{DisplayPath: paths.SkillsRoot, Reason: "The shared personal skills folder and every skill outside the recorded plugin copies above."},
 		Location{DisplayPath: "Workspace files, history and plugin bindings", Reason: "Plugin-backed workspace data stays readable; its provider is shown as unavailable through existing behavior."},
 	)
 
 	evidence := &pluginEvidence{
-		SkillsRoot: paths.SkillsRoot, RegistryPath: inventory.RegistryPath,
-		RegistryDigest: inventory.RegistryDigest, MarketplacesPath: paths.MarketplacesPath(),
-		Items: inventory.Items,
+		RegistryPath: inventory.RegistryPath, RegistryDigest: inventory.RegistryDigest,
+		MarketplacesPath: paths.MarketplacesPath(), Items: inventory.Items,
 	}
-	present, err := pathPresent(paths.SkillsRoot)
-	if err != nil {
-		block("plugin_skills_root_unreadable", id, "The shared personal skills location cannot be inspected safely.",
-			"Restore access to the personal skills folder and review reset again.")
-		return nil
-	}
-	evidence.SkillsRootPresent = present
-	digest, err := digestProtectedPath(ctx, paths.MarketplacesPath(), "")
+	digest, err := digestProtectedPath(ctx, paths.MarketplacesPath())
 	if err != nil {
 		block("plugin_marketplaces_unreadable", id, "Marketplace registrations cannot be hashed before reset, so their preservation could not be proven.",
 			"Restore read access to the plugin marketplace registrations and review reset again.")
@@ -206,7 +173,7 @@ func pluginCategoryItem(item plugin.ResetItem) CategoryItem {
 		details = append(details, "MCP registrations: "+strings.Join(item.MCPServers, ", "))
 	}
 	if len(item.Skills) != 0 {
-		details = append(details, "Personal skills: "+strings.Join(item.Skills, ", "))
+		details = append(details, "Skills: "+strings.Join(item.Skills, ", "))
 	}
 	if item.Surfaces {
 		details = append(details, "Workspace Surfaces, sessions and namespaced state")
@@ -239,15 +206,15 @@ func pluginTargetReason(kind string) string {
 	}
 }
 
-// validatePluginEvidence enforces the dedicated external boundary. Roots are
-// derived from the receipt's own installation root, so a receipt cannot name a
-// different managed layout, and the personal skills root is checked
-// independently instead of relaxing the generic confinement rules.
-func validatePluginEvidence(root string, evidence *pluginEvidence, protected []string) error {
+// validatePluginEvidence bounds the recorded plugin evidence. Roots are derived
+// from the receipt's own installation root, so a receipt cannot name a
+// different managed layout. Skill names and an older receipt's skills root are
+// ignored: plugin reset no longer removes any skill by name.
+func validatePluginEvidence(root string, evidence *pluginEvidence) error {
 	if evidence == nil {
 		return ErrJournalInvalid
 	}
-	expected := plugin.DefaultResetPaths(root, evidence.SkillsRoot)
+	expected := plugin.DefaultResetPaths(root)
 	if !expected.Resolved() || evidence.RegistryPath != expected.RegistryPath() || evidence.MarketplacesPath != expected.MarketplacesPath() {
 		return ErrJournalInvalid
 	}
@@ -259,37 +226,15 @@ func validatePluginEvidence(root string, evidence *pluginEvidence, protected []s
 			return ErrJournalInvalid
 		}
 	}
-	skillsRoot := evidence.SkillsRoot
-	if !filepath.IsAbs(skillsRoot) || filepath.Clean(skillsRoot) != skillsRoot || len(skillsRoot) > 4096 ||
-		filepath.Dir(skillsRoot) == skillsRoot || containsPath(filepath.Join(root, resetstate.Directory), skillsRoot) {
-		return ErrJournalInvalid
-	}
-	for _, kept := range protected {
-		if pathsOverlap(skillsRoot, kept) {
-			return ErrJournalInvalid
-		}
-	}
 	if len(evidence.Items) > plugin.MaxResetItems {
 		return ErrJournalInvalid
 	}
-	names, skills, servers := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	names, servers := map[string]bool{}, map[string]bool{}
 	for _, item := range evidence.Items {
 		if !plugin.ValidResetName(item.Name) || names[item.Name] {
 			return ErrJournalInvalid
 		}
 		names[item.Name] = true
-		for _, skill := range item.Skills {
-			if !plugin.ValidResetName(skill) || skills[skill] {
-				return ErrJournalInvalid
-			}
-			skills[skill] = true
-			destination := filepath.Join(skillsRoot, skill)
-			for _, kept := range protected {
-				if pathsOverlap(destination, kept) {
-					return ErrJournalInvalid
-				}
-			}
-		}
 		for _, server := range item.MCPServers {
 			if !plugin.ValidResetServerName(item.Name, server) || servers[server] {
 				return ErrJournalInvalid
@@ -367,21 +312,14 @@ func validateCategoryMembers(category CategoryPreview, result CategoryResult, ev
 }
 
 // recoveredPluginPaths re-derives the reset roots at startup from the
-// independently resolved installation root and personal skills location. The
-// receipt supplies no executable path: a difference is a scope change.
-func recoveredPluginPaths(root string, evidence *pluginEvidence, resolve func() (string, error)) (plugin.ResetPaths, error) {
+// independently resolved installation root. The receipt supplies no
+// executable path: a difference is a scope change.
+func recoveredPluginPaths(root string, evidence *pluginEvidence) (plugin.ResetPaths, error) {
 	if evidence == nil {
 		return plugin.ResetPaths{}, ErrJournalInvalid
 	}
-	if resolve == nil {
-		resolve = plugin.DefaultPersonalSkillsRoot
-	}
-	skillsRoot, err := resolve()
-	if err != nil {
-		return plugin.ResetPaths{}, ErrScopeChanged
-	}
-	paths, ok := resolvedPluginPaths(root, skillsRoot)
-	if !ok || paths.SkillsRoot != evidence.SkillsRoot || paths.RegistryPath() != evidence.RegistryPath {
+	paths, ok := resolvedPluginPaths(root)
+	if !ok || paths.RegistryPath() != evidence.RegistryPath {
 		return plugin.ResetPaths{}, ErrScopeChanged
 	}
 	return paths, nil
@@ -412,7 +350,7 @@ func applyPluginRecovery(ctx context.Context, result CategoryResult, evidence *p
 	if pluginPreservationVerified(ctx, evidence, paths, true) {
 		completeResultCheck(&result, "unrelated_integrations_preserved")
 	} else {
-		result.Message = "Preserved marketplace, linked source or personal skills evidence changed during plugin removal."
+		result.Message = "Preserved marketplace or linked source evidence changed during plugin removal."
 	}
 	return result
 }
@@ -422,7 +360,7 @@ func applyPluginRecovery(ctx context.Context, result CategoryResult, evidence *p
 // delete the installed registry and MCP document that are its authority.
 //
 // Start Fresh legitimately removes marketplaces afterwards, so preservation
-// here covers linked sources and the shared personal skills root only.
+// here covers linked sources only.
 func applyFreshPluginRemoval(ctx context.Context, result *CategoryResult, evidence *pluginEvidence, paths plugin.ResetPaths) bool {
 	if evidence == nil {
 		// A receipt written before plugin reset existed keeps its original raw
@@ -433,7 +371,7 @@ func applyFreshPluginRemoval(ctx context.Context, result *CategoryResult, eviden
 		return false
 	}
 	if !pluginPreservationVerified(ctx, evidence, paths, false) {
-		result.Message = "Linked plugin sources or the shared personal skills folder changed during plugin removal."
+		result.Message = "Linked plugin sources changed during plugin removal."
 		return false
 	}
 	return true
@@ -483,20 +421,14 @@ func removePluginItems(ctx context.Context, result *CategoryResult, evidence *pl
 }
 
 // pluginPreservationVerified proves the named preservation postcondition with
-// the evidence bound at review time. The shared personal skills root is checked
-// for presence only: enumerating it is exactly what this feature must not do.
+// the evidence bound at review time.
 //
 // marketplaces is false for Start Fresh, which legitimately removes marketplace
 // registrations under its own broader policy after this exact pass completes.
 func pluginPreservationVerified(ctx context.Context, evidence *pluginEvidence, paths plugin.ResetPaths, marketplaces bool) bool {
 	if marketplaces {
-		digest, err := digestProtectedPath(ctx, paths.MarketplacesPath(), "")
+		digest, err := digestProtectedPath(ctx, paths.MarketplacesPath())
 		if err != nil || digest != evidence.MarketplacesDigest {
-			return false
-		}
-	}
-	if evidence.SkillsRootPresent {
-		if present, err := pathPresent(paths.SkillsRoot); err != nil || !present {
 			return false
 		}
 	}

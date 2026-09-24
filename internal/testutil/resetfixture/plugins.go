@@ -31,19 +31,20 @@ type PluginSeed struct {
 	Artifacts  bool
 }
 
-// UserAuthoredSkill names the personal skill no plugin installed. New() seeds it
-// as a byte-checked sentinel: reset must never enumerate or clear the shared
-// skills directory, only the exact recorded plugin copies beside it.
+// UserAuthoredSkill names a skill no plugin installed, in the fixture's
+// ~/.agents/skills. It is a byte-checked sentinel: plugin reset must never
+// touch that folder at all.
 const UserAuthoredSkill = "user-authored-skill"
 
 // PluginResetPaths reports the owner-resolved locations plugin reset operates
 // within, derived exactly as production derives them from this fixture's roots.
 func (f *Fixture) PluginResetPaths() plugin.ResetPaths {
-	return plugin.DefaultResetPaths(f.paths.DataDir, f.PersonalSkillsRoot())
+	return plugin.DefaultResetPaths(f.paths.DataDir)
 }
 
-// PersonalSkillsRoot is the fixture's isolated stand-in for ~/.agents/skills.
-// The fixture sets HOME, so production resolution lands here.
+// PersonalSkillsRoot is the fixture's isolated stand-in for ~/.agents/skills,
+// where plugin skills used to be copied. The fixture sets HOME, so production
+// resolution lands here.
 func (f *Fixture) PersonalSkillsRoot() string {
 	return filepath.Join(f.paths.Home, ".agents", "skills")
 }
@@ -78,9 +79,14 @@ func (f *Fixture) SeedPlugins(t testing.TB, seeds ...PluginSeed) []plugin.Instal
 				Name: namespaced, Command: "never-started-by-reset", Transport: "stdio",
 			})
 		}
+		// A plugin's skills live in its own install folder.
 		for _, skill := range seed.Skills {
 			record.Skills = append(record.Skills, skill)
-			f.mustWrite(t, filepath.Join(f.PersonalSkillsRoot(), skill), "SKILL.md")
+			if record.SkillPaths == nil {
+				record.SkillPaths = map[string]string{}
+			}
+			record.SkillPaths[skill] = "skills/" + skill
+			f.mustWrite(t, filepath.Join(record.InstallDir, "skills", skill), "SKILL.md")
 		}
 		if seed.Surfaces {
 			record.WorkspaceSurfaces = &plugin.SurfaceContribution{}

@@ -13,14 +13,20 @@ import (
 // InstalledPlugin records an installed plugin and exactly what it registered, so
 // uninstall is exact and reversible (PRD req #14).
 type InstalledPlugin struct {
-	Name                 string               `json:"name"`
-	Version              string               `json:"version,omitempty"`
-	Description          string               `json:"description,omitempty"`
-	Source               string               `json:"source"`
-	Format               SourceFormat         `json:"format"`
-	InstallDir           string               `json:"install_dir"`
-	MCPServers           []string             `json:"mcp_servers,omitempty"` // namespaced names
-	Skills               []string             `json:"skills,omitempty"`
+	Name        string       `json:"name"`
+	Version     string       `json:"version,omitempty"`
+	Description string       `json:"description,omitempty"`
+	Source      string       `json:"source"`
+	Format      SourceFormat `json:"format"`
+	InstallDir  string       `json:"install_dir"`
+	MCPServers  []string     `json:"mcp_servers,omitempty"` // namespaced names
+	Skills      []string     `json:"skills,omitempty"`
+	// SkillPaths maps each skill name to its folder relative to InstallDir.
+	// Records written before skills were read in place have none; their
+	// folders are found from the manifest (see Manager.EnabledSkills).
+	SkillPaths map[string]string `json:"skill_paths,omitempty"`
+	// SkillOwnershipSchema is read from records written while plugin skills
+	// were copied into ~/.agents/skills. It is no longer written or checked.
 	SkillOwnershipSchema int                  `json:"skill_ownership_schema,omitempty"`
 	WorkspaceSurfaces    *SurfaceContribution `json:"workspace_surfaces,omitempty"`
 	ResolvedArtifacts    []ResolvedArtifact   `json:"resolved_artifacts,omitempty"`

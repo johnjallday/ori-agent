@@ -143,7 +143,7 @@ func TestProductionPluginResetJourneyThroughHTTPAndRelaunch(t *testing.T) {
 	// Nothing is deleted by the accepting process.
 	for _, present := range []string{
 		filepath.Join(pluginPaths.CloneDir, "demo-managed-repo"),
-		filepath.Join(f.PersonalSkillsRoot(), "demo-managed-skill"),
+		filepath.Join(pluginPaths.CloneDir, "demo-managed-repo", "skills", "demo-managed-skill"),
 		pluginPaths.RegistryPath(),
 	} {
 		if _, err := os.Lstat(present); err != nil {
@@ -185,14 +185,14 @@ func TestProductionPluginResetJourneyThroughHTTPAndRelaunch(t *testing.T) {
 		t.Fatalf("per-plugin outcomes were not reported: %v", outcomes)
 	}
 
-	// 5. Owned components are gone; every preserved sentinel is unchanged.
+	// 5. Owned components are gone — the managed clone with the skills inside
+	// it; the linked source keeps its own. Every preserved sentinel, including
+	// the fixture's ~/.agents/skills, is unchanged.
 	for _, gone := range []string{
 		filepath.Join(pluginPaths.CloneDir, "demo-managed-repo"),
 		filepath.Join(pluginPaths.ArtifactsRoot(), "demo-managed"),
 		filepath.Join(pluginPaths.StateRoot(), plugin.ResetStateNamespace("demo-managed")),
 		filepath.Join(pluginPaths.StateRoot(), "demo-managed"),
-		filepath.Join(f.PersonalSkillsRoot(), "demo-managed-skill"),
-		filepath.Join(f.PersonalSkillsRoot(), "demo-linked-skill"),
 		pluginPaths.PreviewRoot(),
 	} {
 		if _, err := os.Lstat(gone); !errors.Is(err, os.ErrNotExist) {

@@ -41,8 +41,9 @@ var sourceEnableRank = map[string]int{
 	SourceAgentsCompat: 1,
 	SourceAgent:        2,
 	SourcePersonal:     3,
-	SourceClaude:       4,
-	SourceCodex:        5,
+	SourcePlugin:       4,
+	SourceClaude:       5,
+	SourceCodex:        6,
 }
 
 func sourceRank(source string) int {

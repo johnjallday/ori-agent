@@ -129,7 +129,7 @@ func validateJournal(j *journal) error {
 		if !pluginEvidencePermitted(selected) {
 			return ErrJournalInvalid
 		}
-		if err := validatePluginEvidence(root, evidence.Plugins, evidence.ProtectedPaths); err != nil {
+		if err := validatePluginEvidence(root, evidence.Plugins); err != nil {
 			return err
 		}
 	case pluginEvidenceRequired(selected):
@@ -150,6 +150,13 @@ func validateJournal(j *journal) error {
 		}
 	} else if v.AgentsFolder != nil {
 		return ErrJournalInvalid
+	}
+	// Start Fresh's Skills folder and plugin list may only be the ones beside
+	// the reviewed agents folder, and only for Start Fresh.
+	if evidence.SkillsFolder != "" || evidence.PluginList != "" {
+		if v.Intent != IntentStartFresh || !validFreshSiblings(evidence) {
+			return ErrJournalInvalid
+		}
 	}
 	wantKinds := make(map[string]CategoryID)
 	allPending, allComplete, hasUnresolved := true, true, false

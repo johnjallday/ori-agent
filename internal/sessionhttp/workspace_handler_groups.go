@@ -52,7 +52,7 @@ func handleWorkspaceMoveError(w http.ResponseWriter, err error) {
 	var slugConflict *agentworkspace.FolderSlugConflictError
 	switch {
 	case errors.Is(err, agentworkspace.ErrReservedWorkspaceSlug):
-		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage)
+		_ = orihttp.RespondBadRequest(w, agentworkspace.ReservedWorkspaceSlugMessage(err))
 	case errors.As(err, &slugConflict):
 		_ = orihttp.RespondConflict(w, "A workspace with the same folder name already exists in the destination group. Rename one of them and try again.")
 	case errors.Is(err, agentworkspace.ErrGroupRequirementProtected):
