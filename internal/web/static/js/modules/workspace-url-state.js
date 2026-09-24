@@ -38,6 +38,11 @@ const VALID_PANELS = new Set(['tasks', 'backlog', 'settings']);
 // (`?panel=file-janitor`, its History deep link from Today) and Calendar Ops'
 // (`?panel=calendar`). Those consoles read the parameter themselves. They are
 // not this page's drawers, so they are neither applied nor reported as stale.
+// The same holds for Calendar Ops' meeting deep link from Today and the Daily
+// Brief (`&event=<id>&calendar=<id>`): those params are not parsed here, so
+// they are never reported as stale either, and like `panel` they are gone once
+// the sanitized state is written back. calendar-console.js captures all three
+// at parse time, before that happens.
 const CONSOLE_PANELS = new Set(['file-janitor', 'calendar']);
 
 /** Parse a query string (with or without a leading `?`) into raw URL state. */

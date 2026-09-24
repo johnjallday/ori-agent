@@ -160,6 +160,108 @@ export function studioSectionView(studio) {
   };
 }
 
+// The short badge each meeting row state renders as. A state the server does
+// not send renders no badge.
+export const MEETING_BADGES = Object.freeze({
+  conflict: 'Overlaps',
+  back_to_back: 'Back-to-back',
+  prep_ready: 'Prep ready',
+  prep_pending: 'Preparing…',
+  needs_prep: 'Prepare'
+});
+
+function plural(count, word) {
+  return `${count} ${word}${count === 1 ? '' : 's'}`;
+}
+
+// meetingsSectionView decides whether Today's Meetings appears and what it
+// says. The server decides presence (no `meetings` means no section); this
+// only turns its states into copy, and every route it renders is re-checked.
+export function meetingsSectionView(meetings) {
+  const hidden = {
+    visible: false,
+    heading: '',
+    rows: [],
+    note: '',
+    noteRoute: '',
+    noteLinkLabel: ''
+  };
+  if (!meetings || typeof meetings !== 'object') return hidden;
+  const state = String(meetings.state || 'unavailable');
+  const health = String(meetings?.health?.status || 'unavailable');
+  const reason = String(meetings?.health?.reason || '');
+  const count = key => Math.max(0, Number(meetings?.[key]) || 0);
+  const route = safeTodayRoute(meetings.route) ? String(meetings.route) : '';
+  const setupRoute = safeTodayRoute(meetings.setup_route) ? String(meetings.setup_route) : '';
+  const setupLabel = String(meetings.setup_label || '').trim();
+
+  if (state === 'not_connected' || state === 'needs_setup') {
+    return {
+      visible: true,
+      heading: 'Meetings',
+      rows: [],
+      note:
+        state === 'not_connected'
+          ? 'Connect a calendar and Today will list your meetings.'
+          : 'Your calendar connection needs attention before Today can list your meetings.',
+      noteRoute: setupRoute,
+      noteLinkLabel: setupRoute ? setupLabel || 'Open calendar setup' : ''
+    };
+  }
+
+  if (health === 'unavailable') {
+    return {
+      visible: true,
+      heading: 'Meetings',
+      rows: [
+        {
+          kind: 'status',
+          title:
+            reason === 'timed_out'
+              ? 'Your calendar did not answer in time — other Today sections are still current.'
+              : 'Your calendar could not be read — other Today sections are still current.'
+        }
+      ],
+      note: '',
+      noteRoute: route,
+      noteLinkLabel: route ? 'Open calendar' : ''
+    };
+  }
+
+  const items = Array.isArray(meetings.items) ? meetings.items.slice(0, 12) : [];
+  const rows = items.map(item => {
+    const rowState = String(item?.state || '');
+    return {
+      kind: 'meeting',
+      title: String(item?.title || '').trim() || 'Untitled event',
+      detail: String(item?.detail || '').trim(),
+      route: safeTodayRoute(item?.route) ? String(item.route) : '',
+      state: rowState,
+      badge: Object.hasOwn(MEETING_BADGES, rowState) ? MEETING_BADGES[rowState] : ''
+    };
+  });
+  if (!rows.length) rows.push({ kind: 'status', title: 'Nothing scheduled today.' });
+  if (health === 'partial') {
+    rows.unshift({
+      kind: 'status',
+      title: 'Some calendars could not be read — showing the meetings that could.'
+    });
+  }
+
+  let heading = 'Meetings';
+  if (count('conflict_count')) heading += ` · ${plural(count('conflict_count'), 'overlap')}`;
+  if (count('back_to_back_count')) heading += ` · ${count('back_to_back_count')} back-to-back`;
+  const more = count('more_count');
+  return {
+    visible: true,
+    heading,
+    rows,
+    note: more ? `${plural(more, 'more meeting')} today.` : '',
+    noteRoute: route,
+    noteLinkLabel: route ? 'Open calendar' : ''
+  };
+}
+
 export function safeTodayRoute(value) {
   const route = String(value || '');
   if (!route.startsWith('/') || route.startsWith('//') || route.includes('://')) return false;
@@ -287,6 +389,10 @@ function elements() {
     studioTitle: document.getElementById('personalAssistantTodayStudioTitle'),
     studio: document.getElementById('personalAssistantTodayStudio'),
     studioNote: document.getElementById('personalAssistantTodayStudioNote'),
+    meetingsSection: document.getElementById('personalAssistantTodayMeetingsSection'),
+    meetingsTitle: document.getElementById('personalAssistantTodayMeetingsTitle'),
+    meetings: document.getElementById('personalAssistantTodayMeetings'),
+    meetingsNote: document.getElementById('personalAssistantTodayMeetingsNote'),
     links: {
       personal_hq: document.getElementById('personalAssistantTodayHQ'),
       working_agreement: document.getElementById('personalAssistantTodayAgreement'),
@@ -553,6 +659,55 @@ function renderStudio(els, studio) {
   els.studioNote.append(view.note, ' ', link);
 }
 
+function renderMeetings(els, meetings) {
+  if (!els.meetingsSection) return;
+  const view = meetingsSectionView(meetings);
+  els.meetingsSection.hidden = !view.visible;
+  if (!view.visible) return;
+  if (els.meetingsTitle) els.meetingsTitle.textContent = view.heading;
+  if (els.meetings) {
+    els.meetings.replaceChildren();
+    els.meetings.hidden = !view.rows.length;
+    els.meetingsSection.dataset.empty = view.rows.every(row => row.kind === 'status');
+    view.rows.forEach(row => {
+      const li = document.createElement('li');
+      if (row.kind === 'status') li.className = 'personal-assistant-today__empty';
+      if (row.route) {
+        const link = document.createElement('a');
+        link.href = row.route;
+        link.textContent = row.title;
+        li.appendChild(link);
+      } else {
+        li.append(row.title);
+      }
+      if (row.badge) {
+        const badge = document.createElement('span');
+        badge.className = 'personal-assistant-today__badge';
+        badge.dataset.state = row.state;
+        badge.textContent = row.badge;
+        li.appendChild(badge);
+      }
+      if (row.detail) {
+        const detail = document.createElement('span');
+        detail.textContent = row.detail;
+        li.appendChild(detail);
+      }
+      els.meetings.appendChild(li);
+    });
+  }
+  if (!els.meetingsNote) return;
+  els.meetingsNote.replaceChildren();
+  if (view.note) els.meetingsNote.append(view.note);
+  if (view.noteRoute && view.noteLinkLabel) {
+    const link = document.createElement('a');
+    link.href = view.noteRoute;
+    link.textContent = view.noteLinkLabel;
+    if (view.note) els.meetingsNote.append(' ');
+    els.meetingsNote.append(link);
+  }
+  els.meetingsNote.hidden = !els.meetingsNote.childNodes.length;
+}
+
 function setLink(link, route) {
   if (!link) return;
   const safe = safeTodayRoute(route);
@@ -613,6 +768,7 @@ function renderToday(today) {
     );
   }
 
+  renderMeetings(els, today?.meetings);
   renderRows(els.decisions, today?.decisions);
   renderRows(els.remembered, today?.remembered);
   if (els.interview) {

@@ -52,6 +52,30 @@ export function hrefForRef(ref) {
     }
     return `/workspaces/${encodeURIComponent(workspaceSlug)}?follow_up=${encodeURIComponent(recordId)}`;
   }
+  // A meeting opens in its Calendar Ops workspace's console, on today, with
+  // that meeting's drawer (and meeting prep) open — the same link Today uses.
+  if (ref.entity_type === 'calendar_event') {
+    const workspaceSlug = String(ref.workspace_slug || '');
+    const eventId = String(ref.entity_id || '');
+    const calendarId = String(ref.calendar_id || '');
+    const safeId = value =>
+      value.length <= 512 &&
+      ![...value].some(character => {
+        const code = character.charCodeAt(0);
+        return code < 32 || code === 127;
+      });
+    if (
+      !/^[a-z0-9][a-z0-9-]{0,79}$/.test(workspaceSlug) ||
+      !eventId ||
+      !safeId(eventId) ||
+      !safeId(calendarId)
+    ) {
+      return '#';
+    }
+    const params = new URLSearchParams({ panel: 'calendar', event: eventId });
+    if (calendarId) params.set('calendar', calendarId);
+    return `/workspaces/${encodeURIComponent(workspaceSlug)}?${params.toString()}`;
+  }
   if (!ref.workspace_slug) return '#';
   const workspaceSlug = encodeURIComponent(ref.workspace_slug);
   if (ref.entity_type === 'task' && ref.entity_id) {
@@ -69,8 +93,49 @@ export function humanizeReason(reason) {
       return 'Waiting on your reply';
     case 'email_unread':
       return 'Unread email';
+    case 'calendar_conflict':
+      return 'Overlaps another meeting';
+    case 'meeting_needs_prep':
+      return 'No prep note yet';
     default:
       return reason || '';
+  }
+}
+
+// formatMeetingTime renders a meeting's time range in `timeZone` (the brief's
+// own zone; the browser's when absent): "All day", or "9:00 AM – 9:30 AM".
+export function formatMeetingTime(item, timeZone) {
+  if (item && item.all_day) return 'All day';
+  const clock = iso => {
+    const d = new Date(iso || '');
+    if (Number.isNaN(d.getTime())) return '';
+    const options = { hour: 'numeric', minute: '2-digit' };
+    try {
+      return d.toLocaleTimeString(undefined, timeZone ? { ...options, timeZone } : options);
+    } catch (_) {
+      return d.toLocaleTimeString(undefined, options);
+    }
+  };
+  const start = clock(item && item.start_time);
+  const end = clock(item && item.end_time);
+  if (!start) return '';
+  return end ? `${start} – ${end}` : start;
+}
+
+// meetingPrepText is the prep fact a meeting row shows. Nothing is said about
+// prep for a private or all-day meeting that has none.
+export function meetingPrepText(item) {
+  switch (item && item.prep_status) {
+    case 'ready':
+      return 'Prep note ready';
+    case 'pending':
+      return 'Preparing…';
+    case 'stale':
+      return 'Prep note is out of date';
+    case 'failed':
+      return 'Prep did not finish — try again';
+    default:
+      return item && !item.private && !item.all_day ? 'No prep note yet' : '';
   }
 }
 
@@ -165,8 +230,53 @@ export function isQuietDay(content) {
     !(content.since_last_brief && content.since_last_brief.length) &&
     !(content.todays_plan && content.todays_plan.length) &&
     !(content.resume && content.resume.length) &&
-    !(content.suggested_actions && content.suggested_actions.length)
+    !(content.suggested_actions && content.suggested_actions.length) &&
+    !(content.todays_meetings && content.todays_meetings.length)
   );
+}
+
+// meetingsSection renders Today's Meetings: present whenever a calendar was
+// read, saying so plainly when the day is empty; absent when there is no
+// calendar at all. Titles and locations are untrusted and always escaped; a
+// why_prepare line is the model's suggestion and styled as one.
+function meetingsSection(content, timeZone) {
+  const meetings = Array.isArray(content.todays_meetings) ? content.todays_meetings : [];
+  if (!content.calendar_connected && !meetings.length) return '';
+  if (!meetings.length) {
+    return `
+      <section class="home-daily-brief-section home-daily-brief-meetings">
+        <h3 class="home-daily-brief-section-title">Today's Meetings</h3>
+        <p class="home-daily-brief-quiet">No meetings today.</p>
+      </section>`;
+  }
+  const more = Math.max(0, Number(content.todays_meetings_more) || 0);
+  const moreNote = more
+    ? `<p class="home-daily-brief-item-fact">${more} more meeting${more === 1 ? '' : 's'} today.</p>`
+    : '';
+  const section = listSection("Today's Meetings", meetings, item => {
+    const title = item.private
+      ? 'Private event'
+      : String(item.title || '').trim() || 'Untitled event';
+    const when = formatMeetingTime(item, timeZone);
+    const where = item.private ? '' : String(item.location || '').trim();
+    const badges = [
+      item.conflict
+        ? '<span class="home-daily-brief-badge" data-state="conflict">Overlaps</span>'
+        : '',
+      item.back_to_back
+        ? '<span class="home-daily-brief-badge" data-state="back_to_back">Back-to-back</span>'
+        : ''
+    ].join('');
+    const prep = meetingPrepText(item);
+    return `
+      <li class="home-daily-brief-item home-daily-brief-meeting">
+        <a href="${hrefForRef(item.ref)}" class="home-daily-brief-item-title">${escapeHtml(title)}</a>${badges}
+        <span class="home-daily-brief-item-ws">${escapeHtml([when, where].filter(Boolean).join(' · '))}</span>
+        ${prep ? `<p class="home-daily-brief-item-fact">${escapeHtml(prep)}</p>` : ''}
+        ${item.why_prepare && !item.private ? `<p class="home-daily-brief-item-why is-suggestion">${escapeHtml(item.why_prepare)}</p>` : ''}
+      </li>`;
+  });
+  return moreNote ? section.replace(/<\/section>\s*$/, `${moreNote}</section>`) : section;
 }
 
 function escapeHtml(str) {
@@ -195,8 +305,9 @@ function listSection(title, items, renderItem) {
 // renderContent renders one brief's full body. Facts (Needs Attention,
 // Since Last Brief, Resume's LastKnownState) and suggestions (WhySuggested,
 // NextStep, Suggested Actions) are visually distinguishable per PRD FR82 —
-// suggestion text is rendered inside a ".is-suggestion" span.
-export function renderContent(content) {
+// suggestion text is rendered inside a ".is-suggestion" span. options.timeZone
+// is the brief's own timezone, used for meeting times.
+export function renderContent(content, options = {}) {
   const parts = [];
   if (content.opening_summary) {
     parts.push(`<p class="home-daily-brief-opening">${escapeHtml(content.opening_summary)}</p>`);
@@ -206,6 +317,8 @@ export function renderContent(content) {
       `<p class="home-daily-brief-gaps">Data gaps: ${escapeHtml(content.data_gaps.join('; '))}</p>`
     );
   }
+  // Today's Meetings leads: it is the part of the day already fixed in time.
+  parts.push(meetingsSection(content, options.timeZone));
   if (isQuietDay(content)) {
     parts.push(
       '<p class="home-daily-brief-quiet">Nothing else needs your attention right now.</p>'
@@ -381,7 +494,10 @@ export function renderContent(content) {
         : null;
     if (metaEl) metaEl.textContent = formatMeta(revision, config, relativeTimeFn);
     renderBanner(computeBanner(revision, latestClaim));
-    if (bodyEl) bodyEl.innerHTML = renderContent(parseContent(revision));
+    if (bodyEl)
+      bodyEl.innerHTML = renderContent(parseContent(revision), {
+        timeZone: (config && config.timezone) || undefined
+      });
     renderedRevisionId = String(revision.id || '');
     markBriefSeen();
   }

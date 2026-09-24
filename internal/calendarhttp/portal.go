@@ -79,9 +79,22 @@ func (h *Handler) PortalSummary(w http.ResponseWriter, r *http.Request) {
 // failed, so the caller can show partial data with an honest caveat rather
 // than either hiding it or presenting it as complete.
 func (h *Handler) loadTodayEvents(ctx context.Context, gw *gatewayContext) (events []calendar.Event, dataGap bool) {
+	settings := calendar.ReadBindingSettings(gw.Binding.Config)
+	start, end := todayWindow(settings.DisplayTimeZone, nowUTC())
+	events, failed, _ := h.loadWindowEvents(ctx, gw, start, end)
+	return events, failed > 0
+}
+
+// loadWindowEvents is the selected-calendars loop behind loadTodayEvents, and
+// behind TodayAgenda, whose "today" can fall back to a timezone the binding does
+// not configure. It returns the connector's events as-is (the window is passed
+// to the connector, never re-applied here), plus how many calendars it tried
+// and how many failed, so a caller can tell "one calendar failed" from "none
+// could be read".
+func (h *Handler) loadWindowEvents(ctx context.Context, gw *gatewayContext, start, end time.Time) (events []calendar.Event, failed, attempted int) {
 	op, mapped := gw.Mapping.Operation(calendar.OpListEvents)
 	if !mapped {
-		return nil, true
+		return nil, 1, 1
 	}
 	settings := calendar.ReadBindingSettings(gw.Binding.Config)
 	calendarIDs := settings.SelectedCalendarIDs
@@ -90,19 +103,18 @@ func (h *Handler) loadTodayEvents(ctx context.Context, gw *gatewayContext) (even
 	}
 	if len(calendarIDs) == 0 {
 		// No calendars selected is a legitimate empty state, not a gap.
-		return nil, false
+		return nil, 0, 0
 	}
 
-	start, end := todayWindow(settings.DisplayTimeZone, nowUTC())
 	startStr, endStr := start.Format(time.RFC3339), end.Format(time.RFC3339)
 
 	events = make([]calendar.Event, 0, maxAgendaEvents)
-	failed := 0
 	for _, calID := range calendarIDs {
 		calID = strings.TrimSpace(calID)
 		if calID == "" {
 			continue
 		}
+		attempted++
 		input := map[string]any{
 			"calendar_id": calID,
 			"start_time":  startStr,
@@ -126,7 +138,7 @@ func (h *Handler) loadTodayEvents(ctx context.Context, gw *gatewayContext) (even
 		calEvents, _ := raw.([]calendar.Event)
 		events = append(events, calEvents...)
 	}
-	return events, failed > 0
+	return events, failed, attempted
 }
 
 // todayWindow returns [start,end) for "today" in tz (UTC if empty/invalid).

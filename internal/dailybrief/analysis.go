@@ -29,7 +29,9 @@ type AttentionItem struct {
 	Title         string
 	WorkspaceName string
 	// Reason is a machine-readable tag: waiting_for_choice | failed |
-	// timeout | high_priority_opportunity | schedule_failing.
+	// timeout | high_priority_opportunity | schedule_failing | follow_up_stale |
+	// email_waiting_on_user | email_unread | calendar_conflict |
+	// meeting_needs_prep.
 	Reason string
 }
 
@@ -48,6 +50,10 @@ func attentionRank(reason string) int {
 	// adding email never reorders existing non-email items of a different rank.
 	case "email_waiting_on_user":
 		return 3
+	// Two of today's meetings overlapping is a decision only the user can make,
+	// the same tier as a task waiting for a choice.
+	case "calendar_conflict":
+		return 3
 	case "high_priority_opportunity":
 		return 2
 	case "schedule_failing":
@@ -55,6 +61,10 @@ func attentionRank(reason string) int {
 	// Unread inbound mail and threads waiting on someone else are the lowest
 	// attention tier — surfaced only if higher-severity items don't fill the cap.
 	case "email_unread":
+		return 1
+	// A meeting with no prep note only fills spare slots: it is a nudge, not
+	// something going wrong.
+	case "meeting_needs_prep":
 		return 1
 	default:
 		return 0
@@ -111,10 +121,37 @@ func ComputeNeedsAttention(snap Snapshot) []AttentionItem {
 			items = append(items, AttentionItem{Ref: e.Ref, Title: emailAttentionTitle(e), WorkspaceName: "Email", Reason: "email_unread"})
 		}
 	}
+	// Today's meetings that are still ahead: each overlapping one, and each
+	// timed, non-private one with no usable prep note. A meeting already in
+	// the list for an overlap is not listed again for prep.
+	for _, evt := range snap.CalendarEvents {
+		if !evt.EndTime.After(snap.GeneratedAt) {
+			continue
+		}
+		switch {
+		case evt.Conflict:
+			items = append(items, AttentionItem{Ref: evt.Ref, Title: calendarDisplayTitle(evt), WorkspaceName: "Calendar", Reason: "calendar_conflict"})
+		case meetingNeedsPrep(evt):
+			items = append(items, AttentionItem{Ref: evt.Ref, Title: calendarDisplayTitle(evt), WorkspaceName: "Calendar", Reason: "meeting_needs_prep"})
+		}
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		ri, rj := attentionRank(items[i].Reason), attentionRank(items[j].Reason)
 		if ri != rj {
 			return ri > rj
+		}
+		// A meeting's timestamp is its start, usually in the future, so the
+		// newest-first rule below would always put meetings first. Within a
+		// rank they follow everything else instead (a day with several
+		// overlaps must not crowd out a task waiting for a choice), soonest
+		// meeting first, so the one about to start is the last to be cut.
+		ci := items[i].Ref.EntityType == EntityCalendarEvent
+		cj := items[j].Ref.EntityType == EntityCalendarEvent
+		switch {
+		case ci != cj:
+			return cj
+		case ci:
+			return items[i].Ref.Timestamp.Before(items[j].Ref.Timestamp)
 		}
 		return items[i].Ref.Timestamp.After(items[j].Ref.Timestamp)
 	})
@@ -140,6 +177,52 @@ func emailAttentionTitle(e EmailThreadSnapshot) string {
 	default:
 		return "(no subject)"
 	}
+}
+
+// meetingNeedsPrep reports a meeting that could be prepared for and has no
+// usable prep note: timed, not private, and no prep ready or already running.
+func meetingNeedsPrep(evt CalendarEventSnapshot) bool {
+	if evt.AllDay || evt.Private {
+		return false
+	}
+	switch evt.PrepStatus {
+	case "ready", "pending":
+		return false
+	default:
+		return true
+	}
+}
+
+// MeetingItem is one of today's meetings in the brief's Today's Meetings
+// section, with its overlap, hand-off, and prep facts.
+type MeetingItem struct {
+	Ref        SourceRef
+	Title      string
+	Location   string
+	StartTime  time.Time
+	EndTime    time.Time
+	AllDay     bool
+	Private    bool
+	Conflict   bool
+	BackToBack bool
+	PrepStatus string
+}
+
+// ComputeTodaysMeetings lists today's meetings in start order, capped at
+// maxCalendarEventsPerBrief. The snapshot is already bounded; this only
+// projects it.
+func ComputeTodaysMeetings(snap Snapshot) []MeetingItem {
+	items := make([]MeetingItem, 0, min(len(snap.CalendarEvents), maxCalendarEventsPerBrief))
+	for _, evt := range snap.CalendarEvents {
+		if len(items) >= maxCalendarEventsPerBrief {
+			break
+		}
+		// A conversion, not a copy: MeetingItem must keep exactly the pinned
+		// snapshot's fields, and this stops compiling if either one drifts.
+		items = append(items, MeetingItem(evt))
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].StartTime.Before(items[j].StartTime) })
+	return items
 }
 
 // PlanItem is one Today's Plan recommendation: scheduled/in-progress work or

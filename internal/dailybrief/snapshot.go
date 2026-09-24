@@ -32,14 +32,22 @@ const (
 type SourceRef struct {
 	WorkspaceID   string    `json:"workspace_id"`
 	WorkspaceSlug string    `json:"workspace_slug,omitempty"`
-	EntityType    string    `json:"entity_type"` // task | opportunity | scheduled_task | session | email_thread
+	EntityType    string    `json:"entity_type"` // task | opportunity | scheduled_task | session | email_thread | follow_up | calendar_event
 	EntityID      string    `json:"entity_id"`
 	Timestamp     time.Time `json:"timestamp"`
 	// AccountID is set only for email_thread refs: the connected mailbox account
 	// the provider thread belongs to, needed to build a validated open route
 	// (task 4.1). Never a token — just the account's stable ID.
 	AccountID string `json:"account_id,omitempty"`
+	// CalendarID is set only for calendar_event refs: the selected calendar the
+	// meeting was read from, needed to open it in the Calendar Ops console.
+	// WorkspaceID is the Calendar Ops workspace that owns the connection.
+	CalendarID string `json:"calendar_id,omitempty"`
 }
+
+// EntityCalendarEvent is the SourceRef entity type of a meeting read through
+// the bounded Calendar Ops read (Issue #533).
+const EntityCalendarEvent = "calendar_event"
 
 // Key returns a stable string identity used for allowlist membership.
 func (r SourceRef) Key() string {
@@ -138,6 +146,15 @@ type Snapshot struct {
 	// user in the designated HQ or a scope-authorized Email Ops workspace.
 	// Nil/empty is healthy when no follow-up source is configured.
 	FollowUps []FollowUpSnapshot
+	// CalendarEvents are today's meetings, bounded (see calendar.go). Empty
+	// with CalendarConnected=true is a real "no meetings today"; with
+	// CalendarConnected=false there is no calendar to report on at all.
+	CalendarEvents    []CalendarEventSnapshot
+	CalendarConnected bool
+	// CalendarMeetingCount and CalendarOverlapCount describe the whole day,
+	// before CalendarEvents was capped.
+	CalendarMeetingCount int
+	CalendarOverlapCount int
 	// Gaps names data sources that could not be read (an inaccessible
 	// workspace, a failed opportunity/session query, a failed email read, ...)
 	// so a missing source is never silently presented as "no activity"
@@ -168,6 +185,9 @@ func (s Snapshot) AllRefs() map[string]SourceRef {
 	}
 	for _, followUp := range s.FollowUps {
 		out[followUp.Ref.Key()] = followUp.Ref
+	}
+	for _, evt := range s.CalendarEvents {
+		out[evt.Ref.Key()] = evt.Ref
 	}
 	return out
 }
@@ -233,6 +253,9 @@ type SnapshotSources struct {
 	// configured and is distinct from a configured owner read failure. Every
 	// authorized owner is filtered and validated independently.
 	FollowUps FollowUpSource
+	// Calendar is optional; nil means no calendar integration is wired (no
+	// calendar section, no gap, no call). Only Daily Brief generation sets it.
+	Calendar CalendarSource
 }
 
 func isGroupWorkspace(ws *workspace.Workspace) bool {
@@ -354,6 +377,11 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 			snap.EmailThreads = threads
 		}
 	}
+
+	// Today's meetings, through the same not-configured / gap split as email
+	// plus a partial read (calendar.go). A calendar failure degrades only
+	// this source.
+	collectCalendar(ctx, sources.Calendar, cfg, userID, &snap)
 	return snap
 }
 

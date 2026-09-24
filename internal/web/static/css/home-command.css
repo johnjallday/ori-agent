@@ -340,6 +340,48 @@ body.home-command-page .home-command-bridge * {
   outline-offset: 3px;
 }
 
+/* Today's meetings read as one agenda across the full width. */
+.personal-assistant-today__sections > .personal-assistant-today__meetings {
+  grid-column: 1 / -1;
+}
+
+.personal-assistant-today__meetings .personal-assistant-today__meta {
+  margin: 8px 0 0;
+}
+
+.personal-assistant-today__meetings .personal-assistant-today__meta[hidden] {
+  display: none;
+}
+
+/* A meeting row's one-word state. Overlaps is the only alarm; the rest are
+   quiet labels. */
+.personal-assistant-today__sections li > span.personal-assistant-today__badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 7px;
+  border: 1px solid var(--hc-line);
+  border-radius: 999px;
+  color: var(--hc-ink-dim);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 18px;
+  vertical-align: 1px;
+}
+
+.personal-assistant-today__sections
+  li
+  > span.personal-assistant-today__badge[data-state="conflict"] {
+  border-color: var(--hc-alert);
+  color: var(--hc-alert);
+}
+
+.personal-assistant-today__sections
+  li
+  > span.personal-assistant-today__badge[data-state="needs_prep"] {
+  border-color: var(--hc-signal);
+  color: var(--hc-signal);
+}
+
 /* Who did the work. Distinct from a row's detail line so the agent's name
    reads as a name rather than as more description. */
 .personal-assistant-today__attribution {
@@ -1866,6 +1908,28 @@ a.quest-title:focus-visible {
   margin: 4px 0 0;
   color: var(--hc-ink-dim);
   font-size: 9.5px;
+}
+
+/* A meeting's time is its most important fact, so it reads as one. */
+.home-daily-brief-meeting .home-daily-brief-item-ws {
+  color: var(--hc-ink-dim);
+}
+
+.home-daily-brief-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--hc-line);
+  border-radius: 999px;
+  color: var(--hc-ink-dim);
+  font-size: 8.5px;
+  font-weight: 650;
+  line-height: 15px;
+}
+
+.home-daily-brief-badge[data-state="conflict"] {
+  border-color: var(--hc-alert);
+  color: var(--hc-alert);
 }
 
 .home-daily-brief-item-why {

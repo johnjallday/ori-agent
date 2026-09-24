@@ -343,7 +343,8 @@ func buildListEventsProbeArgs(mapping agentworkspace.CapabilityMapping, start, e
 	return args
 }
 
-func nowUTC() time.Time { return time.Now().UTC() }
+// nowUTC is a variable so tests can pin "today".
+var nowUTC = func() time.Time { return time.Now().UTC() }
 
 // applySave validates and normalizes the final setup submission, then
 // persists it: the confirmed mapping, the derived read-only tool allowlist,
