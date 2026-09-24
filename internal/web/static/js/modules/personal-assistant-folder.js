@@ -145,7 +145,29 @@ export function folderOfferView(offer, options = {}) {
     confirming: false,
     needsPick: offer.needs_pick === true
   };
+  const view = verdictView(offer, base, { verdict, folder, subject, remember, confirmProject });
+  // A yes needs the folder's path, and a dialog-chosen folder is held in
+  // memory only: after a server restart the card asks for the folder again
+  // before offering anything a yes would need.
+  if (view.visible && view.needsPick && !view.decided) return repickView(view, subject);
+  return view;
+}
 
+// repickView keeps what the scan said and swaps the yes for "Pick it again".
+function repickView(view, subject) {
+  return {
+    ...view,
+    confirming: false,
+    question: `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to carry on.`,
+    actions: [
+      { id: 'repick', label: 'Pick it again', style: 'primary', repick: true },
+      { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
+      { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+    ]
+  };
+}
+
+function verdictView(offer, base, { verdict, folder, subject, remember, confirmProject }) {
   switch (verdict) {
     case 'project':
       return projectConfirmView(offer, base, subject, remember);
@@ -444,6 +466,12 @@ function runAction(action) {
     openChooser();
     return;
   }
+  if (action.repick) {
+    // Straight to the dialog where there is one; the chips otherwise.
+    if (state.digest?.picker_available === true) scan({ picker: true });
+    else openChooser();
+    return;
+  }
   if (action.confirm === 'project' || action.back) {
     state.confirmProject = action.confirm === 'project';
     render();
@@ -554,9 +582,13 @@ async function postOffer(offerId, action, body) {
 
 function showOfferFailure(payload) {
   if (payload?.needs_pick) {
-    showError('');
+    // Said on the card that was pressed as well as in the chooser, and the
+    // card itself now offers Pick it again.
+    const message = String(payload?.error || 'Pick the folder again.');
+    showError(message);
+    if (state.offer) state.offer = { ...state.offer, needs_pick: true };
     state.chooserOpen = true;
-    showStatus(String(payload?.error || 'Pick the folder again.'));
+    showStatus(message);
     return;
   }
   showError(String(payload?.error || 'That could not be saved. Try again.'));

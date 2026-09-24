@@ -161,6 +161,27 @@ test('a project without a marker or a blueprint is still a plan, and a missing b
   );
 });
 
+test('an offer whose folder the server no longer holds asks for it again before any yes', () => {
+  const view = folderOfferView({ ...thesisOffer, needs_pick: true });
+  assert.equal(headlineText(view), 'Thesis looks like a LaTeX manuscript.');
+  assert.match(view.question, /Pick the folder again/);
+  assert.deepEqual(
+    view.actions.map(a => a.id),
+    ['repick', 'no', 'later']
+  );
+  assert.equal(view.actions[0].repick, true);
+  assert.equal(view.confirming, false);
+  // A mixed offer's confirm card too; a decided offer is left alone.
+  const mixed = folderOfferView(
+    { ...thesisOffer, verdict: 'mixed', projects_count: 2, loose_files: 5, needs_pick: true },
+    { confirmProject: true }
+  );
+  assert.equal(mixed.actions[0].id, 'repick');
+  const decided = folderOfferView({ ...thesisOffer, needs_pick: true, status: 'later' });
+  assert.equal(decided.decided, true);
+  assert.notEqual(decided.actions[0]?.id, 'repick');
+});
+
 test('the remember sentence is dropped when the server says the fact cannot be saved', () => {
   const view = folderOfferView({
     status: 'pending',
