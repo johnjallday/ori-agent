@@ -176,17 +176,33 @@ export function folderOutcomeNote(offer) {
   switch (status) {
     case 'awaiting_outcome':
       return offer?.choice === 'tidy'
-        ? `Setting up a tidy of ${subject}… (outcome wired in group 3)`
-        : `Setting up a workspace for ${subject}… (outcome wired in group 3)`;
+        ? `Setting up a tidy of ${subject}… (outcome wired in group 5)`
+        : `Setting up a workspace for ${subject}…`;
     case 'later':
       return 'I will ask again in a week.';
     case 'declined':
       return `I will not ask about ${subject} again.`;
     case 'resolved':
-      return 'Done.';
+      return offer?.outcome?.kind === 'tidy'
+        ? `${subject} is being tidied.`
+        : `The workspace for ${subject} is ready.`;
     default:
       return '';
   }
+}
+
+// folderProjectModalOptions is what a project yes hands the Create Workspace
+// modal (FR28): the folder's name, its preferred blueprint (empty means the
+// blank workspace), the fallback note, and the offer identifier the server
+// needs to attach the folder afterwards. The folder's path is not here.
+export function folderProjectModalOptions(offer) {
+  return {
+    entryPoint: 'folder_digest',
+    name: String(offer?.subject?.name || '').trim(),
+    blueprint: String(offer?.blueprint || '').trim(),
+    blueprintNote: String(offer?.blueprint_note || '').trim(),
+    folderOfferId: String(offer?.id || '').trim()
+  };
 }
 
 const state = {
@@ -327,13 +343,31 @@ function renderOffer() {
             openChooser();
             return;
           }
+          if (action.decision === 'yes' && action.choice === 'project') {
+            startProjectOutcome(action);
+            return;
+          }
           decide(action);
         });
         els.actions.appendChild(button);
       });
     }
   }
-  setText(els.offerNote, view.decided ? folderOutcomeNote(state.offer) : '');
+  if (els.offerNote) {
+    const note = view.decided ? folderOutcomeNote(state.offer) : '';
+    els.offerNote.replaceChildren();
+    els.offerNote.hidden = !note;
+    if (note) {
+      els.offerNote.append(note);
+      const route = String(state.offer?.outcome?.route || '').trim();
+      if (view.status === 'resolved' && route.startsWith('/')) {
+        const link = document.createElement('a');
+        link.href = route;
+        link.textContent = 'Open it';
+        els.offerNote.append(' ', link);
+      }
+    }
+  }
 }
 
 function render() {
@@ -409,6 +443,37 @@ async function scan(body) {
   }
 }
 
+// postOffer sends one offer action (decide or resolve) and returns the
+// response, updating the shown offer on success.
+async function postOffer(offerId, action, body) {
+  const response = await fetch(
+    `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(offerId)}/${action}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ ...body, request_id: requestId() })
+    }
+  );
+  const payload = await readJSON(response);
+  if (response.ok && payload?.offer) {
+    state.offer = payload.offer;
+    document.dispatchEvent(
+      new CustomEvent('personal-assistant:folder-offer', { detail: { offer: state.offer } })
+    );
+  }
+  return { ok: response.ok, payload };
+}
+
+function showOfferFailure(payload) {
+  if (payload?.needs_pick) {
+    showError('');
+    state.chooserOpen = true;
+    showStatus(String(payload?.error || 'Pick the folder again.'));
+    return;
+  }
+  showError(String(payload?.error || 'That could not be saved. Try again.'));
+}
+
 async function decide(action) {
   const offer = state.offer;
   if (!offer?.id || state.busy) return;
@@ -416,39 +481,67 @@ async function decide(action) {
   showError('');
   render();
   try {
-    const response = await fetch(
-      `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(offer.id)}/decide`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          decision: action.decision,
-          choice: action.choice || '',
-          request_id: requestId()
-        })
-      }
-    );
-    const payload = await readJSON(response);
-    if (!response.ok) {
-      if (payload?.needs_pick) {
-        showError('');
-        state.chooserOpen = true;
-        showStatus(String(payload?.error || 'Pick the folder again.'));
-        return;
-      }
-      showError(String(payload?.error || 'That could not be saved. Try again.'));
-      return;
-    }
-    state.offer = payload?.offer || null;
-    document.dispatchEvent(
-      new CustomEvent('personal-assistant:folder-offer', { detail: { offer: state.offer } })
-    );
+    const { ok, payload } = await postOffer(offer.id, 'decide', {
+      decision: action.decision,
+      choice: action.choice || ''
+    });
+    if (!ok) showOfferFailure(payload);
   } catch (_) {
     showError('That could not be saved. Try again.');
   } finally {
     state.busy = false;
     render();
   }
+}
+
+// startProjectOutcome runs a project yes (FR28, FR29): the Create Workspace
+// modal opens pre-filled; only once it reports a created workspace is the yes
+// recorded and the folder attached. Closing the modal without creating
+// leaves the offer exactly where it was.
+function startProjectOutcome(action) {
+  const offer = state.offer;
+  if (!offer?.id || state.busy) return;
+  if (offer.needs_pick) {
+    showOfferFailure({
+      needs_pick: true,
+      error: 'Ori no longer has that folder open. Pick it again.'
+    });
+    render();
+    return;
+  }
+  const manager = typeof window !== 'undefined' ? window.sessionManager : null;
+  if (!manager?.showAddWorkspaceModal) {
+    showError('The workspace creator is not available on this page.');
+    render();
+    return;
+  }
+  showError('');
+  manager.showAddWorkspaceModal({
+    ...folderProjectModalOptions(offer),
+    onCreated: async ({ workspaceId } = {}) => {
+      const id = String(workspaceId || '').trim();
+      if (!id) return;
+      state.busy = true;
+      render();
+      try {
+        const decided = await postOffer(offer.id, 'decide', {
+          decision: action.decision,
+          choice: action.choice || ''
+        });
+        if (!decided.ok) {
+          showOfferFailure(decided.payload);
+          return;
+        }
+        const resolved = await postOffer(offer.id, 'resolve', { workspace_id: id });
+        if (!resolved.ok) showOfferFailure(resolved.payload);
+      } catch (_) {
+        showError('The workspace was created, but the folder could not be attached. Try again.');
+      } finally {
+        state.busy = false;
+        render();
+      }
+    }
+  });
 }
 
 function onStatus(personalAssistant) {

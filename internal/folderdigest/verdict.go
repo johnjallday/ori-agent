@@ -198,6 +198,26 @@ func decide(r Result, now time.Time, declined func(Candidate) bool) Verdict {
 	return v
 }
 
+// ShapeBlueprint is one row of the shape → blueprint table in tables.go.
+type ShapeBlueprint struct {
+	Shape       Shape
+	BlueprintID string
+	// Label is the blueprint's display name, for the fallback note when it
+	// is not installed.
+	Label string
+}
+
+// BlueprintForShape returns the preferred blueprint for a shape, if the
+// table names one. Shapes without a row start from the blank workspace.
+func BlueprintForShape(shape Shape) (ShapeBlueprint, bool) {
+	for _, row := range ShapeBlueprints {
+		if row.Shape == shape {
+			return row, true
+		}
+	}
+	return ShapeBlueprint{}, false
+}
+
 // ShapeFor names the shape a project outcome should use for a candidate
 // (FR28): the marker's shape when it has one, otherwise a document shape
 // inferred from the dominant file kind, otherwise "" for the generic

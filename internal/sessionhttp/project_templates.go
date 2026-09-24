@@ -34,6 +34,17 @@ const workspaceSharedDataProjectDirectoryIDKey = projecttemplates.ProjectDirecto
 // (the caller already has filesystem access), but this endpoint and
 // LoadFolder should not be exposed to untrusted callers without adding a
 // path allowlist/containment check.
+// BlueprintInstalled reports whether a blueprint id resolves on this install,
+// through the same resolver creation uses, so a caller can fall back to the
+// blank workspace before opening the creator.
+func (h *Handler) BlueprintInstalled(templateID string) bool {
+	if h == nil || strings.TrimSpace(templateID) == "" {
+		return false
+	}
+	_, err := h.resolveProjectTemplate(templateID, "")
+	return err == nil
+}
+
 func (h *Handler) resolveProjectTemplate(templateID, templatePath string) (projecttemplates.Template, error) {
 	if h.projectTemplateResolver != nil {
 		return h.projectTemplateResolver(templateID, templatePath)

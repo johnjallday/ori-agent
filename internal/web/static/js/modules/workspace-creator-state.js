@@ -97,6 +97,17 @@
       parentLocked: Boolean(options.parentLocked) && String(options.parentId || '').trim() !== '',
       selection: selectionFor(options.selection),
       invoker: options.invoker || null,
+      // name pre-fills the Details step; a caller that already knows what the
+      // workspace is for (a folder the assistant was shown) supplies it, and
+      // the user can still change it before creating.
+      name: String(options.name || '').trim(),
+      // folderOfferId ties the create to a "show me a folder" offer, so the
+      // server can attach that folder after creation. Only the identifier
+      // travels; the server holds the folder itself.
+      folderOfferId: String(options.folderOfferId || '').trim(),
+      // blueprintNote is the one-line reason the preferred blueprint was not
+      // used (it is not installed), shown under the name field.
+      blueprintNote: String(options.blueprintNote || '').trim(),
       onCreated: typeof options.onCreated === 'function' ? options.onCreated : null,
       guided: options.guided && typeof options.guided === 'object' ? options.guided : null,
       teamLock: normalizeTeamLock(options.teamLock),

@@ -1537,6 +1537,28 @@ put("Desktop/photo.png", 0)
 print(f"seeded {home}/Downloads, Documents, Desktop")
 PY
     ;;
+  seed-audio)
+    # Turn the sandbox Desktop into an audio session folder (a *.rpp marker
+    # plus takes), so the project outcome can show the missing-blueprint
+    # fallback line on an install without the audio blueprint.
+    local home="${4:-}"
+    [[ -n "$home" && -d "$home" ]] || fail "usage: $0 showfolder seed-audio <sandbox-dir>"
+    python3 - "$home" <<'PY'
+import os, sys, time
+home = sys.argv[1]
+def put(rel, age_days=0):
+    path = os.path.join(home, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(b"fixture")
+    at = time.time() - age_days * 86400
+    os.utime(path, (at, at))
+put("Desktop/Song.rpp", 1)
+for i in range(6):
+    put(f"Desktop/Media/take-{i}.wav", 2)
+print(f"seeded {home}/Desktop as an audio session")
+PY
+    ;;
   hq)
     curl -s -o /dev/null -w "%{http_code} onboarding skip\n" -X POST "$BASE_URL/api/onboarding/skip"
     curl -s -o /dev/null -w "%{http_code} workspace root\n" -X POST "$BASE_URL/api/settings/workspace-root" \
@@ -1565,10 +1587,17 @@ PY
       -H 'Content-Type: application/json' \
       -d "{\"decision\":\"$decision\",\"choice\":\"$choice\",\"request_id\":\"smoke-$(date +%s%N)\"}" | python3 -m json.tool
     ;;
+  resolve)
+    local offer="${4:-}" workspace="${5:-}"
+    [[ -n "$offer" && -n "$workspace" ]] || fail "usage: $0 showfolder resolve <base-url> <offer-id> <workspace-id>"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/resolve" \
+      -H 'Content-Type: application/json' \
+      -d "{\"workspace_id\":\"$workspace\",\"request_id\":\"smoke-$(date +%s%N)\"}" | python3 -m json.tool
+    ;;
   current)
     curl -s "$BASE_URL/api/personal-assistant/folder-digest" | python3 -m json.tool
     ;;
-  *) fail "usage: $0 showfolder <base-url> <seed <sandbox>|hq|scan <chip>|decide <offer> <decision> [choice]|current>" ;;
+  *) fail "usage: $0 showfolder <base-url> <seed <sandbox>|seed-audio <sandbox>|hq|scan <chip>|decide <offer> <decision> [choice]|resolve <offer> <workspace>|current>" ;;
   esac
 }
 

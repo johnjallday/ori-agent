@@ -1080,6 +1080,7 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST "+folderDigest+"/scan", s.Handlers.PersonalAssistant.ScanFolderDigest)
 		mux.HandleFunc("POST "+folderDigest+"/picker", s.Handlers.PersonalAssistant.PickFolderDigest)
 		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/decide", s.Handlers.PersonalAssistant.DecideFolderDigest)
+		mux.HandleFunc("POST "+folderDigest+"/offers/{offerID}/resolve", s.Handlers.PersonalAssistant.ResolveFolderDigest)
 		mux.HandleFunc("POST /api/personal-assistant/specialist", s.Handlers.PersonalAssistant.AnswerSpecialistOffer)
 		mux.HandleFunc("PATCH /api/personal-assistant/working-agreement", s.Handlers.PersonalAssistant.UpdateWorkingAgreement)
 		mux.HandleFunc("POST /api/personal-assistant/pause", s.Handlers.PersonalAssistant.Pause)

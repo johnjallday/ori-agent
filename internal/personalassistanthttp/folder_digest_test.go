@@ -60,6 +60,16 @@ func (f *fakeFolderDigest) Decide(_ context.Context, _ string, offerID string, i
 	return view, nil
 }
 
+func (f *fakeFolderDigest) Resolve(_ context.Context, _ string, offerID string, input personalassistant.FolderResolveInput) (personalassistant.FolderOfferView, error) {
+	if input.WorkspaceID == "foreign" {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderWorkspaceRefused
+	}
+	return personalassistant.FolderOfferView{
+		ID: offerID, Status: personalassistant.FolderOfferResolved,
+		Outcome: &personalassistant.FolderOutcome{Kind: "project", WorkspaceID: input.WorkspaceID, Route: "/workspaces/thesis"},
+	}, nil
+}
+
 func newFolderDigestHandler(fake *fakeFolderDigest) *Handler {
 	h := NewHandler(nil, userprofile.LocalUserProvider{})
 	h.SetFolderDigest(fake)
@@ -161,6 +171,27 @@ func TestFolderDigestDecide_ReplayReturnsStoredResult(t *testing.T) {
 	}
 	if response := send(`{"decision":"no","request_id":"req-2","path":"/tmp"}`); response.Code != http.StatusBadRequest {
 		t.Fatalf("decide with path status=%d", response.Code)
+	}
+}
+
+func TestFolderDigestResolve_AcceptsWorkspaceIDOnly(t *testing.T) {
+	h := newFolderDigestHandler(&fakeFolderDigest{})
+	send := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/offer-1/resolve", strings.NewReader(body))
+		request.SetPathValue("offerID", "offer-1")
+		response := httptest.NewRecorder()
+		h.ResolveFolderDigest(response, request)
+		return response
+	}
+	ok := send(`{"workspace_id":"ws-1","request_id":"req-1"}`)
+	if ok.Code != http.StatusOK || !strings.Contains(ok.Body.String(), `"/workspaces/thesis"`) {
+		t.Fatalf("resolve status=%d body=%s", ok.Code, ok.Body.String())
+	}
+	if response := send(`{"workspace_id":"ws-1","request_id":"req-1","path":"/Users/me/Thesis"}`); response.Code != http.StatusBadRequest || strings.Contains(response.Body.String(), "/Users/me") {
+		t.Fatalf("resolve with path status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := send(`{"workspace_id":"foreign","request_id":"req-2"}`); response.Code != http.StatusConflict {
+		t.Fatalf("foreign workspace status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

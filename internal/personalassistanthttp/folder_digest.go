@@ -20,6 +20,7 @@ type FolderDigestService interface {
 	ScanChip(ctx context.Context, userID, chip string) (personalassistant.FolderOfferView, error)
 	ScanPicked(ctx context.Context, userID string) (*personalassistant.FolderOfferView, error)
 	Decide(ctx context.Context, userID, offerID string, input personalassistant.FolderDecisionInput) (personalassistant.FolderOfferView, error)
+	Resolve(ctx context.Context, userID, offerID string, input personalassistant.FolderResolveInput) (personalassistant.FolderOfferView, error)
 }
 
 // SetFolderDigest adds the folder-digest boundary.
@@ -169,6 +170,46 @@ func (h *Handler) DecideFolderDigest(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"offer": offer})
 }
 
+type folderResolveRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	RequestID   string `json:"request_id"`
+}
+
+// ResolveFolderDigest reports the workspace the Create Workspace modal made
+// for a project offer; the server attaches the offer's folder to it. Only a
+// workspace id and a request id are accepted — the folder comes from the
+// offer the server already holds.
+func (h *Handler) ResolveFolderDigest(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	offerID := strings.TrimSpace(r.PathValue("offerID"))
+	if offerID == "" {
+		orihttp.BadRequest(w, "Offer id is required")
+		return
+	}
+	var req folderResolveRequest
+	if !decodeFolderDigestBody(w, r, &req, "workspace_id", "request_id") {
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	offer, err := h.folderDigest.Resolve(r.Context(), userID, offerID, personalassistant.FolderResolveInput{
+		WorkspaceID: req.WorkspaceID, RequestID: req.RequestID,
+	})
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"offer": offer})
+}
+
 // decodeFolderDigestBody reads one bounded JSON object and refuses any field
 // outside allowed. The refusal is deliberate and named: a folder path from
 // the browser is never accepted by this feature (FR48).
@@ -226,6 +267,12 @@ func writeFolderDigestError(w http.ResponseWriter, err error) {
 		orihttp.BadRequest(w, "The decision is not valid")
 	case errors.Is(err, personalassistant.ErrFolderOfferNotFound):
 		orihttp.NotFound(w, "That offer is no longer here")
+	case errors.Is(err, personalassistant.ErrFolderWorkspaceNotFound):
+		orihttp.NotFound(w, "That workspace is no longer here")
+	case errors.Is(err, personalassistant.ErrFolderWorkspaceRefused):
+		orihttp.Conflict(w, "That workspace was not created for this offer, or already has a linked folder")
+	case errors.Is(err, personalassistant.ErrFolderOutcomeUnavailable):
+		orihttp.ServiceUnavailable(w, "The workspace could not be linked to the folder right now")
 	case errors.Is(err, personalassistant.ErrFolderScanBusy):
 		orihttp.Conflict(w, "Ori is still looking at a folder. Try again in a moment")
 	case errors.Is(err, personalassistant.ErrFolderPickerUnavailable):

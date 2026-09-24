@@ -53,6 +53,15 @@ var Tools = []Tool{
 	{Match: ToolByExtension, Value: ".bib", ToolID: "reference-manager", ToolName: "a reference manager", HypothesisText: "A reference manager may be one of the tools you use."},
 }
 
+// ShapeBlueprints maps a shape to the blueprint a workspace created from the
+// folder starts with (FR28). A shape with no row, or a blueprint that is not
+// installed, starts from the blank workspace instead.
+var ShapeBlueprints = []ShapeBlueprint{
+	{Shape: ShapeAudio, BlueprintID: "reaper-song", Label: "REAPER song"},
+	{Shape: ShapeManuscript, BlueprintID: "writing-project", Label: "Writing project"},
+	{Shape: ShapeCorpus, BlueprintID: "research-project", Label: "Research project"},
+}
+
 // extensionKinds turns an extension into the plain word a reason line uses
 // ("14 LaTeX files"). Anything missing falls back to the upper-cased
 // extension ("3 MOV files").

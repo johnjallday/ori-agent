@@ -113,8 +113,8 @@ func TestSpecialistDomainDataFileStaysDataOnly(t *testing.T) {
 }
 
 // The folder scan's tables file is excepted from the audit for the same
-// reason and is held to the same shape: three package-level vars (markers,
-// tools, kind names) and nothing that runs.
+// reason and is held to the same shape: four package-level vars (markers,
+// tools, shape blueprints, kind names) and nothing that runs.
 func TestFolderDigestTablesStayDataOnly(t *testing.T) {
 	path := filepath.Join("..", "folderdigest", "tables.go")
 	data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- fixed repository-relative audit path
@@ -127,7 +127,7 @@ func TestFolderDigestTablesStayDataOnly(t *testing.T) {
 			t.Errorf("internal/folderdigest/tables.go must stay data only; found %q", strings.TrimSpace(forbidden))
 		}
 	}
-	if strings.Count(source, "\nvar ") != 3 {
-		t.Error("internal/folderdigest/tables.go must declare exactly three vars: Markers, Tools, extensionKinds")
+	if strings.Count(source, "\nvar ") != 4 {
+		t.Error("internal/folderdigest/tables.go must declare exactly four vars: Markers, Tools, ShapeBlueprints, extensionKinds")
 	}
 }

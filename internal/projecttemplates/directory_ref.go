@@ -15,7 +15,56 @@ import (
 const (
 	PrimaryDirectoryIDKey = "primary_directory_id"
 	ProjectDirectoryIDKey = "project_directory_id"
+	// FolderOfferIDKey records which "show me a folder" offer a workspace
+	// was created for, so the offer's resolution can attach the folder to
+	// that workspace and no other.
+	FolderOfferIDKey = "folder_digest_offer_id"
 )
+
+// AttachLinkedDirectory records an outside folder (an absolute path that
+// stays where it is; nothing is copied) as a directory reference on folderWS
+// and marks it the workspace's primary project directory. A reference for
+// the same path is reused rather than duplicated. It returns the reference
+// ID.
+func AttachLinkedDirectory(folderWS *workspace.Workspace, name, absPath string) (string, error) {
+	if folderWS == nil {
+		return "", fmt.Errorf("workspace metadata is unavailable")
+	}
+	path := filepath.Clean(strings.TrimSpace(absPath))
+	if path == "" || !filepath.IsAbs(path) {
+		return "", fmt.Errorf("a linked directory needs an absolute path")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = filepath.Base(path)
+	}
+	id := ""
+	for _, ref := range folderWS.DirectoryReferences {
+		if filepath.Clean(ref.Path) == path {
+			id = ref.ID
+			break
+		}
+	}
+	if id == "" {
+		if err := folderWS.AddDirectoryReference(workspace.DirectoryReference{Name: name, Path: path}); err != nil {
+			return "", err
+		}
+		for _, ref := range folderWS.DirectoryReferences {
+			if filepath.Clean(ref.Path) == path {
+				id = ref.ID
+				break
+			}
+		}
+	}
+	if id == "" {
+		return "", fmt.Errorf("linked directory reference was not recorded")
+	}
+	if folderWS.SharedData == nil {
+		folderWS.SharedData = make(map[string]any)
+	}
+	SetPrimaryDirectoryID(folderWS.SharedData, id)
+	return id, nil
+}
 
 // EnsureProjectDirectoryReference records the project folder at
 // folderPath/relPath as a directory reference on folderWS, returning its ID.

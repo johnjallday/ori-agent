@@ -6,7 +6,8 @@ import {
   folderActionAvailable,
   folderChooserView,
   folderOfferView,
-  folderOutcomeNote
+  folderOutcomeNote,
+  folderProjectModalOptions
 } from './personal-assistant-folder.js';
 
 const headlineText = view => view.headline.map(part => part.text).join('');
@@ -254,6 +255,40 @@ test('a decided offer hides its actions and explains what happens next', () => {
     /tidy of Downloads/
   );
   assert.equal(folderOutcomeNote({ status: 'pending' }), '');
+});
+
+test('a project yes opens the creator pre-filled with the name, blueprint, note, and offer id — never a path', () => {
+  const options = folderProjectModalOptions({
+    id: 'offer-7',
+    subject: { name: 'Thesis', shape: 'manuscript' },
+    blueprint: 'writing-project',
+    blueprint_note: ''
+  });
+  assert.deepEqual(options, {
+    entryPoint: 'folder_digest',
+    name: 'Thesis',
+    blueprint: 'writing-project',
+    blueprintNote: '',
+    folderOfferId: 'offer-7'
+  });
+  const fallback = folderProjectModalOptions({
+    id: 'offer-8',
+    subject: { name: 'Album', shape: 'audio' },
+    blueprint: '',
+    blueprint_note:
+      'The REAPER song blueprint is not installed, so this starts as a blank workspace.'
+  });
+  assert.equal(fallback.blueprint, '');
+  assert.match(fallback.blueprintNote, /not installed/);
+  assert.equal(Object.keys(fallback).includes('path'), false);
+  assert.match(
+    folderOutcomeNote({
+      status: 'resolved',
+      outcome: { kind: 'project' },
+      subject: { name: 'Thesis' }
+    }),
+    /ready/
+  );
 });
 
 test('the module never sends a folder path to the server', () => {

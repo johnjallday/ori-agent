@@ -229,6 +229,9 @@
                 <label id="folderNameLabel" for="folderNameInput" class="workspace-create-section-title" style="display: block; margin-bottom: 6px;">Workspace name</label>
                 <input type="text" id="folderNameInput" class="modern-input w-100" placeholder="Name your workspace" aria-describedby="workspaceNameHint">
                 <div id="workspaceNameHint" class="workspace-create-name-hint" aria-live="polite"></div>
+                <!-- One line from "show me a folder" when the folder's preferred
+                     blueprint is not installed and the workspace starts blank. -->
+                <div id="workspaceCreateFolderNote" class="workspace-create-name-hint" role="status" hidden></div>
               </div>
 
               <!-- Shown only for a blueprint that declares existing projects.

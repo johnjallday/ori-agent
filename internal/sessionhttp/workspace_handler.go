@@ -304,7 +304,17 @@ type createWorkspaceRequest struct {
 	// in projecttemplates decides what each field type accepts — this layer
 	// never interprets a number or an option value itself.
 	BlueprintInputs map[string]json.RawMessage `json:"blueprint_inputs,omitempty"`
+	// EntryPoint names the surface that opened the creator. It is a label,
+	// except for "folder_digest": a workspace created for a "show me a
+	// folder" offer records FolderOfferID so the offer's resolution can attach
+	// the folder to this workspace and no other. The folder's path never
+	// travels here; the server holds it against the offer.
+	EntryPoint    string `json:"entry_point,omitempty"`
+	FolderOfferID string `json:"folder_offer_id,omitempty"`
 }
+
+// folderDigestEntryPoint is the EntryPoint a "show me a folder" create sends.
+const folderDigestEntryPoint = "folder_digest"
 
 func (req *createWorkspaceRequest) UnmarshalJSON(data []byte) error {
 	type requestAlias createWorkspaceRequest
@@ -1016,6 +1026,12 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 			ws.SharedData = make(map[string]any)
 		}
 		ws.SharedData["workspace_bootstrap"] = bootstrapData
+	}
+	if offerID := strings.TrimSpace(req.FolderOfferID); offerID != "" && strings.TrimSpace(req.EntryPoint) == folderDigestEntryPoint {
+		if ws.SharedData == nil {
+			ws.SharedData = make(map[string]any)
+		}
+		ws.SharedData[projecttemplates.FolderOfferIDKey] = offerID
 	}
 	return ws
 }

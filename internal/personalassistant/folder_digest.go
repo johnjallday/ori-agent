@@ -33,15 +33,18 @@ const (
 )
 
 var (
-	ErrFolderChipUnknown       = errors.New("personal assistant: unknown folder")
-	ErrFolderChipMissing       = errors.New("personal assistant: that folder is not on this computer")
-	ErrFolderScanBusy          = errors.New("personal assistant: a folder scan is already running")
-	ErrFolderPickerUnavailable = errors.New("personal assistant: the folder dialog is unavailable here")
-	ErrFolderOfferNotFound     = errors.New("personal assistant: folder offer not found")
-	ErrFolderOfferDecided      = errors.New("personal assistant: folder offer is no longer pending")
-	ErrFolderOfferChoice       = errors.New("personal assistant: this offer needs a choice")
-	ErrFolderPathLost          = errors.New("personal assistant: pick the folder again")
-	errFolderReplay            = errors.New("personal assistant: replayed folder request")
+	ErrFolderWorkspaceNotFound  = errors.New("personal assistant: workspace not found")
+	ErrFolderWorkspaceRefused   = errors.New("personal assistant: that workspace was not created for this offer")
+	ErrFolderOutcomeUnavailable = errors.New("personal assistant: the folder outcome is unavailable")
+	ErrFolderChipUnknown        = errors.New("personal assistant: unknown folder")
+	ErrFolderChipMissing        = errors.New("personal assistant: that folder is not on this computer")
+	ErrFolderScanBusy           = errors.New("personal assistant: a folder scan is already running")
+	ErrFolderPickerUnavailable  = errors.New("personal assistant: the folder dialog is unavailable here")
+	ErrFolderOfferNotFound      = errors.New("personal assistant: folder offer not found")
+	ErrFolderOfferDecided       = errors.New("personal assistant: folder offer is no longer pending")
+	ErrFolderOfferChoice        = errors.New("personal assistant: this offer needs a choice")
+	ErrFolderPathLost           = errors.New("personal assistant: pick the folder again")
+	errFolderReplay             = errors.New("personal assistant: replayed folder request")
 )
 
 // FolderRootError carries the message shown when a folder fails the root
@@ -75,6 +78,38 @@ type FolderPicker interface {
 	Choose(ctx context.Context, prompt string) (path string, chosen bool, err error)
 }
 
+// FolderLinkRequest asks the host to attach an offer's folder to the
+// workspace the user just created for it (FR28).
+type FolderLinkRequest struct {
+	UserID      string
+	WorkspaceID string
+	OfferID     string
+	// Name is the folder's base name, used as the linked directory's name.
+	Name string
+	// Path is the folder's canonical absolute path, taken from the offer the
+	// server holds, never from the browser.
+	Path  string
+	Shape folderdigest.Shape
+}
+
+// FolderLinkResult is what linking produced.
+type FolderLinkResult struct {
+	// Route is the workspace page to open.
+	Route string
+	// DirectoryID is the linked directory reference.
+	DirectoryID string
+	// FirstTaskSeeded reports whether the shape's first task was added (FR30).
+	FirstTaskSeeded bool
+}
+
+// FolderWorkspaceLinker is the host seam that verifies the workspace was
+// created for the offer, attaches the folder as its primary linked directory,
+// and seeds the first task. It must be idempotent for a workspace already
+// linked to the same folder.
+type FolderWorkspaceLinker interface {
+	LinkFolder(ctx context.Context, req FolderLinkRequest) (FolderLinkResult, error)
+}
+
 // FolderDigestDeps are the seams the service is built over. Zero values
 // take production defaults except ValidateRoot, which the server supplies
 // from File Janitor's root rules.
@@ -87,6 +122,14 @@ type FolderDigestDeps struct {
 	Scan         func(root string) (folderdigest.Result, error)
 	Now          func() time.Time
 	NewID        func() string
+	// BlueprintAvailable reports whether a blueprint id is installed, so the
+	// offer can fall back to the blank workspace and say so (FR28).
+	BlueprintAvailable func(id string) bool
+	// Linker attaches the folder to the created workspace (FR28, FR30).
+	Linker FolderWorkspaceLinker
+	// OnResolved runs after a project outcome completes, for the dossier
+	// producer and the mission that observe it. Best-effort.
+	OnResolved func(ctx context.Context, userID string, offer FolderOffer)
 }
 
 // FolderDigestService turns "show me a folder" into one explained offer and
@@ -160,6 +203,19 @@ type FolderOfferView struct {
 	Decision  string         `json:"decision,omitempty"`
 	Choice    string         `json:"choice,omitempty"`
 	Outcome   *FolderOutcome `json:"outcome,omitempty"`
+	// Blueprint is the id the Create Workspace modal should preselect for a
+	// project outcome; empty means the blank workspace. BlueprintNote is the
+	// one-line fallback explanation when the preferred blueprint is not
+	// installed (FR28).
+	Blueprint      string `json:"blueprint,omitempty"`
+	BlueprintLabel string `json:"blueprint_label,omitempty"`
+	BlueprintNote  string `json:"blueprint_note,omitempty"`
+}
+
+// FolderResolveInput reports the workspace the modal created for an offer.
+type FolderResolveInput struct {
+	WorkspaceID string
+	RequestID   string
 }
 
 // FolderSubjectView names what the offer is about.
@@ -477,7 +533,11 @@ func (s *FolderDigestService) SubjectPath(ctx context.Context, userID, offerID s
 	if offer == nil {
 		return "", ErrFolderOfferNotFound
 	}
-	root, ok := s.rootPath(*offer)
+	return s.subjectPathOf(*offer)
+}
+
+func (s *FolderDigestService) subjectPathOf(offer FolderOffer) (string, error) {
+	root, ok := s.rootPath(offer)
 	if !ok {
 		return "", ErrFolderPathLost
 	}
@@ -485,6 +545,136 @@ func (s *FolderDigestService) SubjectPath(ctx context.Context, userID, offerID s
 		return root, nil
 	}
 	return filepath.Join(root, offer.Subject.RelPath), nil
+}
+
+// Resolve completes a project outcome: the modal reported that a workspace
+// was created for the offer, so the folder is attached to it as the primary
+// linked directory and the offer is marked resolved (FR28, FR29, FR33). A
+// replayed request id, or a second call naming the same workspace, returns
+// the stored result without linking again.
+func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID string, input FolderResolveInput) (FolderOfferView, error) {
+	if s == nil || s.store == nil {
+		return FolderOfferView{}, ErrRepairNeeded
+	}
+	input.WorkspaceID = strings.TrimSpace(input.WorkspaceID)
+	input.RequestID = strings.TrimSpace(input.RequestID)
+	if input.WorkspaceID == "" || len(input.WorkspaceID) > 200 {
+		return FolderOfferView{}, fmt.Errorf("%w: workspace id", ErrValidation)
+	}
+	if input.RequestID == "" || len(input.RequestID) > folderRequestIDMax {
+		return FolderOfferView{}, fmt.Errorf("%w: request id", ErrValidation)
+	}
+	binding, err := s.store.Binding(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	offer := doc.Offer(offerID)
+	if offer == nil {
+		return FolderOfferView{}, ErrFolderOfferNotFound
+	}
+	if receipt := doc.Receipt(input.RequestID); receipt != nil {
+		if receipt.OfferID != offerID {
+			return FolderOfferView{}, ErrFolderOfferDecided
+		}
+		return s.view(*offer, binding.Paused), nil
+	}
+	if offer.Status == FolderOfferResolved {
+		if offer.Outcome != nil && offer.Outcome.WorkspaceID == input.WorkspaceID {
+			return s.view(*offer, binding.Paused), nil
+		}
+		return FolderOfferView{}, ErrFolderOfferDecided
+	}
+	if offer.Status != FolderOfferAwaitingOutcome || offer.Choice != FolderChoiceProject {
+		return FolderOfferView{}, ErrFolderOfferDecided
+	}
+	if s.deps.Linker == nil {
+		return FolderOfferView{}, ErrFolderOutcomeUnavailable
+	}
+	path, err := s.subjectPathOf(*offer)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	blueprint, _, _ := s.blueprintFor(offer.Subject.Shape)
+	result, err := s.deps.Linker.LinkFolder(ctx, FolderLinkRequest{
+		UserID: userID, WorkspaceID: input.WorkspaceID, OfferID: offerID,
+		Name: offer.Subject.Name, Path: path, Shape: folderdigest.Shape(offer.Subject.Shape),
+	})
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+
+	now := s.now()
+	var resolved FolderOffer
+	updated, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		o := d.Offer(offerID)
+		if o == nil {
+			return ErrFolderOfferNotFound
+		}
+		if r := d.Receipt(input.RequestID); r != nil {
+			resolved = *o
+			return errFolderReplay
+		}
+		o.Status = FolderOfferResolved
+		o.ResolvedAt = &now
+		o.Outcome = &FolderOutcome{
+			Kind: FolderChoiceProject, WorkspaceID: input.WorkspaceID,
+			Route: result.Route, Blueprint: blueprint,
+		}
+		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: offerID, Action: "resolve", At: now})
+		pruneFolderDigest(d)
+		resolved = *o
+		return nil
+	})
+	if err != nil && !errors.Is(err, errFolderReplay) {
+		return FolderOfferView{}, err
+	}
+	if err == nil && s.deps.OnResolved != nil {
+		if stored := updated.Offer(offerID); stored != nil {
+			s.deps.OnResolved(ctx, userID, *stored)
+		}
+	}
+	return s.view(resolved, binding.Paused), nil
+}
+
+// blueprintFor picks the blueprint a project outcome starts with (FR28): the
+// shape's preferred blueprint when it is installed, else the blank workspace
+// with a one-line note.
+func (s *FolderDigestService) blueprintFor(shape string) (id, label, note string) {
+	row, ok := folderdigest.BlueprintForShape(folderdigest.Shape(shape))
+	if !ok {
+		return "", "", ""
+	}
+	if s.deps.BlueprintAvailable == nil || !s.deps.BlueprintAvailable(row.BlueprintID) {
+		return "", row.Label, "The " + row.Label + " blueprint is not installed, so this starts as a blank workspace."
+	}
+	return row.BlueprintID, row.Label, ""
+}
+
+// FolderFirstTask is the suggested first task for a workspace created from a
+// folder of the given shape (FR30). It is a task the user runs; the
+// assistant never starts it on its own.
+func FolderFirstTask(shape folderdigest.Shape) (description, details string) {
+	switch shape {
+	case folderdigest.ShapeCode:
+		return "List the open TODOs and the last thing changed",
+			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to look through it. Report open TODO or FIXME notes and the most recently changed files."
+	case folderdigest.ShapeAudio:
+		return "Summarize the session's tracks and the most recent edits",
+			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to read the session file. Name the tracks and what was edited most recently."
+	case folderdigest.ShapeManuscript:
+		return "Summarize the current draft and its open sections",
+			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to read the manuscript. Summarize the draft as it stands and list the sections that are still open or thin."
+	case folderdigest.ShapeCorpus:
+		return "Build the sources index from the documents already in this folder: one line per document with a citation and a one-paragraph summary",
+			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to read each document. Write one line per document with a citation, followed by a one-paragraph summary."
+	default:
+		return "Tell me what is in this folder and what looks most active",
+			"Use workspace_directories to find the linked folder, then workspace_directory_list and workspace_directory_read to look through it. Describe what the folder holds and what looks most active."
+	}
 }
 
 // promote surfaces the next question when nothing is pending: a "later"
@@ -609,11 +799,15 @@ func (s *FolderDigestService) view(offer FolderOffer, paused bool) FolderOfferVi
 		ProjectsCount: offer.ProjectsCount, LooseFiles: offer.LooseFiles, LooseKinds: offer.LooseKinds,
 		Decision: offer.Decision, Choice: offer.Choice, Outcome: offer.Outcome,
 	}
-	if offer.Status == FolderOfferPending {
+	if offer.Status == FolderOfferPending || offer.Status == FolderOfferAwaitingOutcome {
 		_, ok := s.rootPath(offer)
 		v.NeedsPick = !ok
 	}
 	v.Remember = folderOfferRemembers(offer, paused)
+	switch folderdigest.Kind(offer.Verdict) {
+	case folderdigest.KindProject, folderdigest.KindMixed, folderdigest.KindAmbiguous:
+		v.Blueprint, v.BlueprintLabel, v.BlueprintNote = s.blueprintFor(offer.Subject.Shape)
+	}
 	return v
 }
 

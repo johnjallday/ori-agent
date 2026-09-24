@@ -9,7 +9,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
+
+func folderdigestShape(s string) folderdigest.Shape { return folderdigest.Shape(s) }
 
 // folderDigestFixture is a hired, active relationship over a temporary HQ
 // with a fake home holding one folder per chip: Documents is a mixed tree,
@@ -512,6 +516,138 @@ func TestFolderDigestStore_RejectsUnknownFieldsAndPaths(t *testing.T) {
 	_, err = f.store.Update(ctx, "local", 999, func(*FolderDigestDocument) error { return nil })
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale version err=%v", err)
+	}
+}
+
+// fakeFolderLinker stands in for the host: it accepts one workspace id per
+// offer and records every link it made.
+type fakeFolderLinker struct {
+	expectedOffer map[string]string // workspace id → offer id it was created for
+	links         []FolderLinkRequest
+	linked        map[string]string // workspace id → path
+}
+
+func (l *fakeFolderLinker) LinkFolder(_ context.Context, req FolderLinkRequest) (FolderLinkResult, error) {
+	if l.linked == nil {
+		l.linked = map[string]string{}
+	}
+	offerID, ok := l.expectedOffer[req.WorkspaceID]
+	if !ok {
+		return FolderLinkResult{}, ErrFolderWorkspaceNotFound
+	}
+	if offerID != req.OfferID {
+		return FolderLinkResult{}, ErrFolderWorkspaceRefused
+	}
+	if existing, ok := l.linked[req.WorkspaceID]; ok && existing != req.Path {
+		return FolderLinkResult{}, ErrFolderWorkspaceRefused
+	}
+	l.linked[req.WorkspaceID] = req.Path
+	l.links = append(l.links, req)
+	return FolderLinkResult{Route: "/workspaces/" + req.WorkspaceID, DirectoryID: "dir-" + req.WorkspaceID, FirstTaskSeeded: true}, nil
+}
+
+func TestFolderDigest_ResolveLinksOnceAndRefusesOtherWorkspaces(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	linker := &fakeFolderLinker{expectedOffer: map[string]string{"ws-thesis": "offer-1", "ws-other": "offer-99"}}
+	f.service.deps.Linker = linker
+	f.service.deps.BlueprintAvailable = func(id string) bool { return id == "writing-project" }
+	var resolvedOffers []string
+	f.service.deps.OnResolved = func(_ context.Context, _ string, offer FolderOffer) {
+		resolvedOffers = append(resolvedOffers, offer.ID)
+	}
+
+	offer, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offer.Blueprint != "writing-project" || offer.BlueprintNote != "" || offer.BlueprintLabel != "Writing project" {
+		t.Fatalf("blueprint on mixed offer=%+v", offer)
+	}
+	// A pending offer cannot be resolved: the modal only reports a created
+	// workspace after the yes.
+	if _, err := f.service.Resolve(ctx, "local", offer.ID, FolderResolveInput{WorkspaceID: "ws-thesis", RequestID: "r0"}); !errors.Is(err, ErrFolderOfferDecided) {
+		t.Fatalf("resolve before yes err=%v", err)
+	}
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, RequestID: "req-yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Resolve(ctx, "local", offer.ID, FolderResolveInput{WorkspaceID: "ws-other", RequestID: "r1"}); !errors.Is(err, ErrFolderWorkspaceRefused) {
+		t.Fatalf("foreign workspace err=%v", err)
+	}
+	if _, err := f.service.Resolve(ctx, "local", offer.ID, FolderResolveInput{WorkspaceID: "missing", RequestID: "r2"}); !errors.Is(err, ErrFolderWorkspaceNotFound) {
+		t.Fatalf("missing workspace err=%v", err)
+	}
+	resolved, err := f.service.Resolve(ctx, "local", offer.ID, FolderResolveInput{WorkspaceID: "ws-thesis", RequestID: "r3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Status != FolderOfferResolved || resolved.Outcome == nil || resolved.Outcome.WorkspaceID != "ws-thesis" || resolved.Outcome.Route != "/workspaces/ws-thesis" || resolved.Outcome.Blueprint != "writing-project" {
+		t.Fatalf("resolved=%+v outcome=%+v", resolved, resolved.Outcome)
+	}
+	if len(linker.links) != 1 || linker.links[0].Path != filepath.Join(f.home, "Documents", "Thesis") || linker.links[0].Name != "Thesis" || linker.links[0].Shape != "manuscript" {
+		t.Fatalf("links=%+v", linker.links)
+	}
+	// Replay by request id and by workspace id both return the stored result
+	// without linking again.
+	for _, requestID := range []string{"r3", "r4"} {
+		again, err := f.service.Resolve(ctx, "local", offer.ID, FolderResolveInput{WorkspaceID: "ws-thesis", RequestID: requestID})
+		if err != nil || again.Status != FolderOfferResolved || again.Outcome.WorkspaceID != "ws-thesis" {
+			t.Fatalf("replay %s: %+v err=%v", requestID, again, err)
+		}
+	}
+	if len(linker.links) != 1 {
+		t.Fatalf("replay linked again: %d links", len(linker.links))
+	}
+	if _, err := f.service.Resolve(ctx, "local", offer.ID, FolderResolveInput{WorkspaceID: "ws-second", RequestID: "r5"}); !errors.Is(err, ErrFolderOfferDecided) {
+		t.Fatalf("second workspace on a resolved offer err=%v", err)
+	}
+	if len(resolvedOffers) != 1 || resolvedOffers[0] != offer.ID {
+		t.Fatalf("OnResolved calls=%v", resolvedOffers)
+	}
+	// The next question waits for a later sitting, then names website.
+	f.now = f.now.Add(FolderNextOfferDelay)
+	view, err := f.service.Current(ctx, "local")
+	if err != nil || view.Offer == nil || view.Offer.Subject.Name != "website" {
+		t.Fatalf("next offer=%+v err=%v", view.Offer, err)
+	}
+}
+
+func TestFolderDigest_BlueprintFallsBackToBlankWithNote(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	f.service.deps.BlueprintAvailable = func(string) bool { return false }
+	offer, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if offer.Blueprint != "" || offer.BlueprintLabel != "Writing project" || offer.BlueprintNote != "The Writing project blueprint is not installed, so this starts as a blank workspace." {
+		t.Fatalf("fallback=%+v", offer)
+	}
+	// A dump offer has no blueprint at all.
+	dump, err := f.service.ScanChip(ctx, "local", "downloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dump.Blueprint != "" || dump.BlueprintNote != "" || dump.BlueprintLabel != "" {
+		t.Fatalf("dump blueprint=%+v", dump)
+	}
+}
+
+func TestFolderFirstTask_PerShape(t *testing.T) {
+	cases := map[string]string{
+		"code":       "List the open TODOs and the last thing changed",
+		"audio":      "Summarize the session's tracks and the most recent edits",
+		"manuscript": "Summarize the current draft and its open sections",
+		"corpus":     "Build the sources index from the documents already in this folder: one line per document with a citation and a one-paragraph summary",
+		"notes":      "Tell me what is in this folder and what looks most active",
+		"":           "Tell me what is in this folder and what looks most active",
+	}
+	for shape, want := range cases {
+		description, details := FolderFirstTask(folderdigestShape(shape))
+		if description != want || !strings.Contains(details, "workspace_directory_read") {
+			t.Errorf("%q: %q / %q", shape, description, details)
+		}
 	}
 }
 
