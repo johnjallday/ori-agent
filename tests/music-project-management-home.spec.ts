@@ -46,6 +46,45 @@ interface Snapshot {
   project_templates: { templates?: Array<Record<string, any>> };
   group_templates: { group_templates?: Array<Record<string, any>> };
   workspaces: { folders?: WorkspaceSummary[] };
+  // The Set up REAPER quest's read at the checkpoint, or its HTTP status when
+  // the quest does not exist yet (REAPER not installed).
+  reaper_quest?: { setup_journey?: Record<string, any>; status?: number };
+}
+
+const QUEST_ROOT = '/api/setup-quests/reaper-plugin/reaper_setup';
+
+function questGroupStep(journey: Record<string, any> | undefined): Record<string, any> {
+  const step = (journey?.steps || []).find(
+    (candidate: { kind: string }) => candidate.kind === 'project_connect'
+  );
+  expect(step, 'the quest has a project_connect step').toBeTruthy();
+  return step;
+}
+
+// expectMusicProviderMissing asserts the group screen's read names Music
+// Project Management and offers its reviewed install.
+function expectMusicProviderMissing(journey: Record<string, any> | undefined) {
+  const step = questGroupStep(journey);
+  expect(step).toMatchObject({
+    status: 'blocked',
+    reason_code: 'home_provider_missing',
+    preparation: { exists: false, group_policy: 'required' },
+    home_provider: {
+      plugin_id: 'music-project-management',
+      display_name: 'Music Project Management',
+      reviewed: true,
+      installed: false,
+      enabled: false,
+      template_id: SONG_BLUEPRINT,
+      reason: 'plugin_install_required'
+    }
+  });
+  expect(step.home_provider.actions).toContain('install_plugin');
+  expect(step.home_provider.summary).toContain('comes from a separate plugin');
+}
+
+function newKey(): string {
+  return `acceptance-${RUN}-${Math.random().toString(36).slice(2)}`;
 }
 
 let homeID = '';
@@ -326,6 +365,9 @@ test('installation order preserves consequence-free provider boundaries', async 
         template => template.provider?.plugin_id === 'music-project-management'
       )
     ).toBe(false);
+    // With REAPER alone, Set up REAPER's group screen names the missing Home
+    // provider and offers its reviewed install instead of "could not be verified".
+    expectMusicProviderMissing(first.reaper_quest?.setup_journey);
   }
 
   const finalPlugins = pluginList(final.plugins);
@@ -337,7 +379,15 @@ test('installation order preserves consequence-free provider boundaries', async 
       enabled: true
     });
     expect(MUSIC_PATH).toBe('');
+    expectMusicProviderMissing(final.reaper_quest?.setup_journey);
   } else {
+    // Both providers are ready: the group screen offers Build Group.
+    const group = questGroupStep(final.reaper_quest?.setup_journey);
+    expect(group.home_provider).toBeUndefined();
+    expect(group.preparation).toMatchObject({ exists: false, group_policy: 'required' });
+    expect((group.actions || []).map((action: { id: string }) => action.id)).toContain(
+      'review_create_group'
+    );
     expect(MUSIC_REVISION).toMatch(/^[a-f0-9]{40}$/);
     expect(finalPlugins.map(plugin => plugin.name).sort()).toEqual([
       'music-project-management',
@@ -358,6 +408,118 @@ test('installation order preserves consequence-free provider boundaries', async 
       .map(plugin => plugin.name)
       .sort()
   ).toEqual(finalPlugins.map(plugin => plugin.name).sort());
+});
+
+test('Set up REAPER builds the split Home through its own routes, once', async ({ request }) => {
+  test.skip(
+    ORDER !== 'reaper-first',
+    'quest Build Group acceptance runs in the reaper-first order'
+  );
+  await json(await request.post('/api/onboarding/skip'));
+  expect(await workspaces(request)).toEqual([]);
+
+  let journey = (await json(await request.get(QUEST_ROOT))).setup_journey;
+  journey = (
+    await json(
+      await request.post(`${QUEST_ROOT}/open`, {
+        data: { if_revision: journey.state_revision, idempotency_key: newKey() }
+      })
+    )
+  ).setup_journey;
+  const ready = questGroupStep(journey);
+  expect(ready.home_provider).toBeUndefined();
+  expect(ready.preparation).toMatchObject({ exists: false, name: 'Music Production Home' });
+  expect(ready.actions.map((action: { id: string }) => action.id)).toEqual(['review_create_group']);
+
+  const run = `${QUEST_ROOT}/runs/${encodeURIComponent(journey.run_id)}`;
+  const questHomeName = `Quest Music Home ${RUN}`;
+  const reviewed = await json(
+    await request.post(`${run}/actions/review_create_group`, {
+      data: {
+        if_revision: journey.state_revision,
+        idempotency_key: newKey(),
+        input: { name: questHomeName }
+      }
+    })
+  );
+  expect(reviewed.review).toMatchObject({
+    commit_action: 'create_group',
+    group: { name: questHomeName, exists: false }
+  });
+  const commit = {
+    if_revision: reviewed.setup_journey.state_revision,
+    idempotency_key: newKey(),
+    review_token: reviewed.review.token,
+    input: { name: questHomeName }
+  };
+  journey = (await json(await request.post(`${run}/actions/create_group`, { data: commit })))
+    .setup_journey;
+  const built = questGroupStep(journey);
+  expect(built.preparation).toMatchObject({ exists: true, name: questHomeName });
+  const questHomeID = built.preparation.group_id;
+  expect(questHomeID).toBeTruthy();
+
+  const created = await workspaces(request);
+  expect(created).toHaveLength(1);
+  expect(created[0]).toMatchObject({ id: questHomeID, name: questHomeName, kind: 'group' });
+  const persisted = persistedWorkspace(questHomeID).data.assistant_program_state;
+  expect(persisted).toMatchObject({
+    key: {
+      owner_user_id: 'local',
+      plugin_id: 'music-project-management',
+      program_id: 'music-producer-assistant'
+    },
+    home_provider: {
+      plugin_id: 'music-project-management',
+      plugin_version: '0.1.0',
+      program_id: 'music-producer-assistant',
+      home_schema_version: 1,
+      home_version: 1,
+      plugin_generation: 1
+    }
+  });
+  expect(persisted.home_provider.declaration_digest).toMatch(/^[a-f0-9]{64}$/);
+  expect(persisted.home_provider.component_fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  expect(
+    persisted.declaration.roles.every((role: { scope: string }) => role.scope === 'home')
+  ).toBe(true);
+
+  // Replaying the same confirmed request, or reviewing a new one, never builds
+  // a second Home.
+  const replay = await request.post(`${run}/actions/create_group`, { data: commit });
+  expect(replay.status()).toBeLessThan(500);
+  const again = await request.post(`${run}/actions/review_create_group`, {
+    data: {
+      if_revision: journey.state_revision,
+      idempotency_key: newKey(),
+      input: { name: `${questHomeName} Again` }
+    }
+  });
+  expect(again.ok()).toBe(false);
+  expect(await workspaces(request)).toHaveLength(1);
+  const reread = questGroupStep((await json(await request.get(run))).setup_journey);
+  expect(reread.preparation).toMatchObject({ exists: true, group_id: questHomeID });
+
+  // Remove the quest-built Home so the Group Template acceptance below starts
+  // from the same empty sandbox it always has.
+  // An Assistant Home is removed through its own reviewed removal first.
+  const summary = await json(await request.get(`/api/workspaces/${questHomeID}/assistant-program`));
+  const removal = await json(
+    await request.post(`/api/workspaces/${questHomeID}/assistant-program/remove-home/review`, {
+      data: { state_revision: summary.state_revision }
+    })
+  );
+  await json(
+    await request.post(`/api/workspaces/${questHomeID}/assistant-program/remove-home/commit`, {
+      data: { token: removal.token }
+    })
+  );
+  // The reviewed removal may already have moved the Home to the Trash.
+  if ((await workspaces(request)).some(workspace => workspace.id === questHomeID)) {
+    const removed = await request.delete(`/api/workspaces/${questHomeID}?confirm=true`);
+    expect(removed.ok(), await removed.text()).toBeTruthy();
+  }
+  await expect.poll(async () => (await workspaces(request)).length).toBe(0);
 });
 
 test('two REAPER projects share one independently staffed Home and one manager', async ({
