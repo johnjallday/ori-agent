@@ -1362,6 +1362,11 @@ func registerSkillsRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Skills != nil {
 		mux.HandleFunc("/api/skills", s.Handlers.Skills.List)
 		mux.HandleFunc("/api/skills/", s.Handlers.Skills.Handle)
+		// One-time import of ~/.agents/skills into the Workspace Directory's
+		// Skills folder.
+		mux.HandleFunc("GET /api/skills/import/candidates", s.Handlers.Skills.ImportCandidates)
+		mux.HandleFunc("POST /api/skills/import", s.Handlers.Skills.Import)
+		mux.HandleFunc("POST /api/skills/import/dismiss", s.Handlers.Skills.DismissImport)
 	}
 
 	// =============================================================================

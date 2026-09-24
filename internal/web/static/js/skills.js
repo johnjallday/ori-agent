@@ -1771,15 +1771,124 @@ async function runSkill(name) {
   }
 }
 
+// --- One-time import from ~/.agents/skills ---------------------------------
+
+// importPanelState is null while the panel is hidden.
+let importPanelState = null;
+
+function renderImportPanel() {
+  const container = document.getElementById('skillsImportPanel');
+  if (!container) return;
+  if (!importPanelState || !window.SkillsImportPanel) {
+    container.classList.add('d-none');
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = window.SkillsImportPanel.render(importPanelState);
+  container.classList.remove('d-none');
+}
+
+// loadImportCandidates shows the panel the first time the page opens for
+// this Workspace Directory, or at any time when onDemand is set.
+async function loadImportCandidates(onDemand) {
+  try {
+    const response = await fetch('/api/skills/import/candidates');
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || 'Failed to look for skills to import.');
+    if (!onDemand && !data?.should_show) return;
+    importPanelState = {
+      candidates: Array.isArray(data?.candidates) ? data.candidates : [],
+      selected: new Set(),
+      busy: false
+    };
+  } catch (error) {
+    if (!onDemand) return;
+    importPanelState = { candidates: [], selected: new Set(), error: error?.message };
+  }
+  renderImportPanel();
+}
+
+async function submitImport() {
+  if (!importPanelState || importPanelState.busy) return;
+  const names = [...importPanelState.selected];
+  if (names.length === 0) return;
+  importPanelState.busy = true;
+  renderImportPanel();
+  try {
+    const response = await fetch('/api/skills/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || 'Failed to import skills.');
+    importPanelState = {
+      ...importPanelState,
+      busy: false,
+      result: { imported: data?.imported || [], failed: data?.failed || [] }
+    };
+    renderImportPanel();
+    await loadSkills(selectedAgentName);
+  } catch (error) {
+    importPanelState = { ...importPanelState, busy: false, error: error?.message };
+    renderImportPanel();
+  }
+}
+
+async function dismissImportPanel() {
+  importPanelState = null;
+  renderImportPanel();
+  try {
+    await fetch('/api/skills/import/dismiss', { method: 'POST' });
+  } catch (error) {
+    console.error('Failed to save the import choice:', error);
+  }
+}
+
+function setupImportPanelEvents() {
+  const container = document.getElementById('skillsImportPanel');
+  const menuItem = document.getElementById('skillsImportMenuItem');
+  if (menuItem) {
+    menuItem.addEventListener('click', () => loadImportCandidates(true));
+  }
+  if (!container) return;
+  container.addEventListener('change', event => {
+    const box = event.target.closest('[data-import-name]');
+    if (!box || !importPanelState) return;
+    const name = box.getAttribute('data-import-name');
+    if (box.checked) importPanelState.selected.add(name);
+    else importPanelState.selected.delete(name);
+    renderImportPanel();
+  });
+  container.addEventListener('click', event => {
+    const button = event.target.closest('[data-import-action]');
+    if (!button) return;
+    switch (button.getAttribute('data-import-action')) {
+      case 'import':
+        submitImport();
+        break;
+      case 'dismiss':
+        dismissImportPanel();
+        break;
+      case 'done':
+        importPanelState = null;
+        renderImportPanel();
+        break;
+    }
+  });
+}
+
 async function initializeSkillsPage() {
   defaultAgentName = getSkillPageDefaultAgent();
   setupSkillsEvents();
+  setupImportPanelEvents();
   await refreshSystemModelDisplay();
   await loadAgents();
   if (!selectedAgentName) {
     selectedAgentName = defaultAgentName;
   }
   await loadSkills(selectedAgentName);
+  await loadImportCandidates(false);
 }
 
 if (document.readyState === 'loading') {

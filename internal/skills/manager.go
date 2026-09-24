@@ -139,6 +139,21 @@ func NewManager(cfg ManagerConfig) *Manager {
 	}
 }
 
+// ReadSkillSummary reads a SKILL.md's name (defaultName when it has none) and
+// description from its front matter, without the prompt.
+func ReadSkillSummary(skillMDPath, defaultName string) (Skill, error) {
+	return parseSkillFile(skillMDPath, defaultName, false)
+}
+
+// PluginSkillNames lists the names of the skills enabled plugins provide.
+func (m *Manager) PluginSkillNames() []string {
+	var names []string
+	for _, skill := range m.loadPluginSkills("", false) {
+		names = append(names, skill.Name)
+	}
+	return names
+}
+
 // PersonalSkills lists the installed skills in the Skills folder, without
 // their prompts.
 func (m *Manager) PersonalSkills() ([]Skill, error) {

@@ -47,9 +47,17 @@
                 </svg>
                 Refresh
               </button>
+              <div class="dropdown">
+                <button id="skillsActionsMenuBtn" class="modern-btn modern-btn-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">&#8943;</button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                  <li><button type="button" class="dropdown-item" id="skillsImportMenuItem">Import from ~/.agents/skills&hellip;</button></li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
+
+        <div id="skillsImportPanel" class="modern-card p-4 mb-4 d-none" aria-live="polite"></div>
 
         <div class="modern-card p-4">
           <div id="skillsError" class="alert alert-danger d-none" style="font-size: 0.875rem;"></div>
@@ -253,6 +261,7 @@
   <script defer src="/js/modules/resizer.js"></script>
   <script defer src="/js/modules/agents.js"></script>
   <script defer src="/js/modules/sidebar.js"></script>
+  <script defer src="/js/modules/skills-import-panel.js"></script>
   <script defer src="/js/skills.js"></script>
   {{template "theme-init.tmpl" .}}
 </body>
