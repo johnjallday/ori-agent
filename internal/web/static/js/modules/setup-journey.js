@@ -244,6 +244,19 @@ export function homeProviderDisclosureIntro(provider, action, preview) {
     : `${name} will be able to do the following on this computer:`;
 }
 
+// homeProviderSuccessToast is the confirmation shown once a Home-provider
+// recovery fully completes; a partial outcome keeps its in-step message instead.
+export function homeProviderSuccessToast(name, action) {
+  const plugin = String(name || '').trim() || 'The plugin';
+  return (
+    {
+      install_plugin: `${plugin} installed and enabled.`,
+      enable_plugin: `${plugin} enabled.`,
+      review_plugin_update: `${plugin} updated.`
+    }[action] || ''
+  );
+}
+
 const HOME_PROVIDER_WORKING = {
   install_plugin: 'Installing',
   enable_plugin: 'Enabling',
@@ -1008,6 +1021,7 @@ async function startHomeProviderRecovery(provider, offer) {
   const recovery = {
     runID: state.journey.run_id,
     pluginID: provider.plugin_id,
+    displayName: provider.display_name || provider.plugin_id,
     templateID: provider.template_id,
     action: offer.action,
     generation: provider.generation,
@@ -1073,7 +1087,8 @@ async function applyHomeProviderRecovery(recovery) {
   }
   const outcome = result?.data?.outcome || {};
   const failure = homeProviderRecoveryFailure(result);
-  if (result?.ok && outcome.completed !== false) {
+  const completed = Boolean(result?.ok && outcome.completed !== false);
+  if (completed) {
     state.providerRecovery = null;
   } else {
     // An install that could not be switched on reports its partial outcome
@@ -1089,6 +1104,8 @@ async function applyHomeProviderRecovery(recovery) {
   else render();
   const live = ui()?.live;
   if (live && result?.ok && outcome.summary) live.textContent = outcome.summary;
+  const toast = completed ? homeProviderSuccessToast(recovery.displayName, recovery.action) : '';
+  if (toast) globalThis.Toast?.success?.(toast);
 }
 
 // The group stage names the same Group Template and the same group/coordinator

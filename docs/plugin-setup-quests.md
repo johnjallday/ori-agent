@@ -213,8 +213,9 @@ and update preview first (`confirm: false`); the step then shows the release,
 the minimum reviewed version, the source and the full trust report, with
 **Install** or **Update** and **Cancel**. Enable applies at once, like the
 card, because its components were disclosed at install. One install
-confirmation installs and enables the provider. After success the step re-reads
-itself and moves on without **Check Again**. A refused confirmation (the plugin
+confirmation installs and enables the provider. After success a toast confirms
+it ("<name> installed and enabled.", "<name> enabled." or "<name> updated.")
+and the step re-reads itself and moves on without **Check Again**. A refused confirmation (the plugin
 or its newest reviewed release changed) or a failed download shows the
 endpoint's outcome and keeps the offer; nothing was applied. **Open Plugins**
 opens the Plugins page in the same tab, and every entry point reopens the same

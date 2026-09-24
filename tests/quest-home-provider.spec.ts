@@ -255,7 +255,12 @@ test('a missing reviewed Home provider is installed from the group screen', asyn
   await expect(dialog.locator('#specialistSetupJourneyLiveStatus')).toHaveText(
     'Installed and enabled.'
   );
-  await dialog.screenshot({ path: testInfo.outputPath('provider-installed.png') });
+  await expect(
+    page.locator('#toastContainer .toast-success', {
+      hasText: 'Music Project Management installed and enabled.'
+    })
+  ).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('provider-installed.png') });
 });
 
 test('cancelling the disclosure installs nothing', async ({ page }) => {
@@ -296,6 +301,8 @@ test('a refused confirmation keeps the offer and says why', async ({ page }) => 
     dialog.getByRole('button', { name: 'Install Music Project Management…' })
   ).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Build Group', exact: true })).toHaveCount(0);
+  // A refusal never claims success.
+  await expect(page.locator('#toastContainer .toast-success')).toHaveCount(0);
   expect(recoveries).toHaveLength(2);
 });
 
@@ -316,6 +323,11 @@ test('a switched-off provider is enabled from the group screen', async ({ page }
     .getByRole('button', { name: 'Enable Music Project Management', exact: true })
     .click();
   await expect(dialog.getByRole('button', { name: 'Build Group', exact: true })).toBeVisible();
+  await expect(
+    page.locator('#toastContainer .toast-success', {
+      hasText: 'Music Project Management enabled.'
+    })
+  ).toBeVisible();
   // Enable needs no disclosure: one confirmed call, at the read's generation.
   expect(recoveries.map(call => call.body)).toEqual([
     { action: 'enable_plugin', plugin: 'music-project-management', confirm: true, generation: 12 }

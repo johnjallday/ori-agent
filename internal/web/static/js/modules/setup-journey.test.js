@@ -17,6 +17,7 @@ const {
   homeProviderOffer,
   homeProviderReceiptRow,
   homeProviderRecoveryFailure,
+  homeProviderSuccessToast,
   integrationHandoffNavigation,
   integrationReleaseCheckNote,
   integrationReviewPresentation,
@@ -682,6 +683,23 @@ test('a switched-off provider offers Enable and an incompatible one Review updat
   // An unreviewed provider is sent to Plugins in every state.
   assert.equal(homeProviderOffer({ ...disabled, reviewed: false, display_name: '' }), null);
   assert.equal(homeProviderOffer({ ...incompatible, reviewed: false, display_name: '' }), null);
+});
+
+test('a completed Home-provider recovery confirms itself in a toast', () => {
+  assert.equal(
+    homeProviderSuccessToast('Music Project Management', 'install_plugin'),
+    'Music Project Management installed and enabled.'
+  );
+  assert.equal(
+    homeProviderSuccessToast('Music Project Management', 'enable_plugin'),
+    'Music Project Management enabled.'
+  );
+  assert.equal(
+    homeProviderSuccessToast('Music Project Management', 'review_plugin_update'),
+    'Music Project Management updated.'
+  );
+  assert.equal(homeProviderSuccessToast('', 'install_plugin'), 'The plugin installed and enabled.');
+  assert.equal(homeProviderSuccessToast('Music Project Management', 'manage_plugins'), '');
 });
 
 test('an update that asks for nothing new says so, in the card words', () => {
