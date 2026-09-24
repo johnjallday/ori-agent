@@ -562,7 +562,9 @@ test('firstMissionOfferView: the folder mission shows a pending offer inline', (
   );
   const mixed = { ...pendingProjectOffer, verdict: 'mixed', projects_count: 3, loose_files: 40 };
   assert.equal(firstMissionOfferView(view, mixed).confirming, false);
-  assert.equal(firstMissionOfferView(view, mixed, true).confirming, true);
+  assert.equal(firstMissionOfferView(view, mixed, 'project').confirming, true);
+  const dump = { ...pendingProjectOffer, verdict: 'dump', loose_files: 25, loose_kinds: 6 };
+  assert.equal(firstMissionOfferView(view, dump, 'tidy').actions[0].id, 'setup');
 });
 
 test('firstMissionOfferView: a decided offer keeps its note and drops the buttons', () => {

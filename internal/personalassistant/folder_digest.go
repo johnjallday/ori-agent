@@ -683,6 +683,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 				offer.Outcome.WorkspaceID = tidy.WorkspaceID
 				offer.Outcome.Route = tidy.Route
 				offer.Outcome.Note = tidy.Note
+				offer.Outcome.Existing = tidy.Existing
 				resolvedNow = true
 			}
 			if created != nil {

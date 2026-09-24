@@ -547,10 +547,21 @@ assistant makes one explained offer.
   workspace; the modal's Cancel leaves the offer pending. A mixed or
   ambiguous offer's "Start with X" / "It's a project" shows the same confirm
   card (with Back) before anything is decided.
-- **Tidy.** The server drives the File Janitor setup coordinator with the
-  offer's folder (accept, folder intent, grant, review) and the decide response
-  carries the first review batch's route; a folder already managed opens that
-  workspace instead.
+- **Tidy.** "Tidy it" first shows the plan ("Set up File Janitor for
+  Downloads? Ori will create a File Janitor workspace with a File Curator,
+  watch the folder while paused, scan it once and propose moves — nothing
+  moves until you approve a batch." → Set up / Adjust… / Back). **Set up**
+  has the server drive the File Janitor setup coordinator with the offer's
+  folder (accept, folder intent, grant, first review; an invalidated earlier
+  run is started over from, and a run still waiting for its folder is
+  resumed); the decide response resolves the offer with the review batch's
+  route, and the browser then shows the setup as it happened — the
+  assistant-led setup card in the Today panel with its receipts and
+  walkthrough, ending on the review — instead of jumping to the batch. A
+  folder another File Janitor already manages opens that workspace instead
+  (`outcome.existing`). A workspace that cannot be opened is a failed tidy
+  (503) and the offer stays pending. **Adjust…** opens the ordinary File
+  Janitor creator, whose own setup wizard asks for the folder.
 - **Tools.** `workspace_directory_list` and `workspace_directory_read` (in
   `chathttp`) list and read files under a workspace's linked directories,
   symlink-safe, read-only, parsing PDF/DOCX/text through `internal/fileparser`

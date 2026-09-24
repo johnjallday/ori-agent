@@ -92,6 +92,10 @@ type FolderOutcome struct {
 	Blueprint   string `json:"blueprint,omitempty"`
 	Remembered  bool   `json:"remembered,omitempty"`
 	Note        string `json:"note,omitempty"`
+	// Existing marks a tidy that opened a workspace already covering the
+	// folder rather than setting a fresh one up, so the card opens that
+	// workspace instead of showing a setup that did not happen.
+	Existing bool `json:"existing,omitempty"`
 }
 
 // FolderOffer is one question about one folder and its answer.

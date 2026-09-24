@@ -211,13 +211,67 @@ test('a dump offer states the counts and offers a tidy', () => {
     'Want me to tidy it? I will propose moves and you approve each batch.'
   );
   assert.deepEqual(
-    view.actions.map(a => [a.label, a.decision, a.choice || '']),
+    view.actions.map(a => [a.label, a.decision || '', a.choice || '']),
     [
-      ['Tidy it', 'yes', 'tidy'],
+      ['Tidy it', '', ''],
       ['Not this one', 'no', ''],
       ['Later', 'later', '']
     ]
   );
+  // Tidy it confirms the plan first.
+  assert.equal(view.actions[0].confirm, 'tidy');
+});
+
+test('a tidy is confirmed as a plan: Set up shows the setup, Adjust… opens the creator', () => {
+  const dump = {
+    status: 'pending',
+    verdict: 'dump',
+    folder: 'Downloads',
+    subject: { name: 'Downloads', is_root: true },
+    reason: '63 loose files of 9 kinds',
+    loose_files: 63,
+    loose_kinds: 9
+  };
+  const confirm = folderOfferView(dump, { confirm: 'tidy' });
+  assert.equal(confirm.confirming, true);
+  assert.equal(headlineText(confirm), 'Set up File Janitor for Downloads?');
+  assert.deepEqual(strongText(confirm), ['Downloads']);
+  assert.match(confirm.question, /File Curator/);
+  assert.match(confirm.question, /nothing moves until you approve a batch/);
+  assert.equal(confirm.reason, '63 loose files of 9 kinds');
+  assert.deepEqual(
+    confirm.actions.map(a => [a.id, a.label]),
+    [
+      ['setup', 'Set up'],
+      ['adjust', 'Adjust…'],
+      ['back', 'Back']
+    ]
+  );
+  assert.equal(confirm.actions[0].decision, 'yes');
+  assert.equal(confirm.actions[0].choice, 'tidy');
+  assert.equal(confirm.actions[0].walkthrough, true);
+  assert.equal(confirm.actions[1].manual, 'file-janitor');
+  assert.equal(confirm.actions[2].back, true);
+
+  // The same plan from a mixed or ambiguous offer's tidy button.
+  const mixed = folderOfferView(
+    {
+      ...dump,
+      verdict: 'mixed',
+      folder: 'Documents',
+      subject: { name: 'Thesis' },
+      projects_count: 3
+    },
+    { confirm: 'tidy' }
+  );
+  assert.equal(headlineText(mixed), 'Set up File Janitor for Documents?');
+  const ambiguous = folderOfferView({ ...dump, verdict: 'ambiguous' }, { confirm: 'tidy' });
+  assert.equal(ambiguous.actions[0].id, 'setup');
+  // A project verdict has no tidy plan, and a lost folder comes first.
+  const project = folderOfferView({ ...dump, verdict: 'project' }, { confirm: 'tidy' });
+  assert.equal(project.actions[0].id, 'yes');
+  const lost = folderOfferView({ ...dump, needs_pick: true }, { confirm: 'tidy' });
+  assert.equal(lost.actions[0].id, 'repick');
 });
 
 test('a mixed offer counts projects and loose files and asks which to start with', () => {
@@ -238,12 +292,13 @@ test('a mixed offer counts projects and loose files and asks which to start with
     view.actions.map(a => [a.label, a.decision || '', a.choice || '']),
     [
       ['Start with Thesis', '', ''],
-      ['Tidy the loose files', 'yes', 'tidy'],
+      ['Tidy the loose files', '', ''],
       ['Later', 'later', '']
     ]
   );
-  // The project is confirmed on its own card first, with a way back.
+  // Each plan is confirmed on its own card first, with a way back.
   assert.equal(view.actions[0].confirm, 'project');
+  assert.equal(view.actions[1].confirm, 'tidy');
   const confirm = folderOfferView(
     {
       status: 'pending',
@@ -294,11 +349,12 @@ test('an ambiguous offer asks rather than guesses', () => {
     view.actions.map(a => [a.label, a.decision || '', a.choice || '']),
     [
       ["It's a project", '', ''],
-      ['Tidy it', 'yes', 'tidy'],
+      ['Tidy it', '', ''],
       ['Neither', 'no', '']
     ]
   );
   assert.equal(view.actions[0].confirm, 'project');
+  assert.equal(view.actions[1].confirm, 'tidy');
   assert.equal(view.reason, '31 PDF files, last edited in March');
 
   // "It's a project" confirms the plan before anything is decided.

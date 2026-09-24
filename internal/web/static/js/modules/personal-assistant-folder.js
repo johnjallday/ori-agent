@@ -124,8 +124,8 @@ function projectConfirmView(offer, base, subject, remember, { back = false } = {
 
 // folderOfferView is the whole render decision for one offer (FR22). Every
 // string comes from the verdict and the server's counts and names; the
-// reason line is always present. options.confirmProject shows a mixed or
-// ambiguous offer's project confirm card instead of its question.
+// reason line is always present. options.confirm ('project' or 'tidy') shows
+// the plan card for a mixed or ambiguous offer instead of its question.
 export function folderOfferView(offer, options = {}) {
   if (!offer || typeof offer !== 'object') return { visible: false };
   const verdict = String(offer.verdict || '').trim();
@@ -135,7 +135,12 @@ export function folderOfferView(offer, options = {}) {
   const reason = String(offer.reason || '').trim();
   const remember = offer.remember === true;
   const decided = status !== 'pending' && status !== 'closed';
-  const confirmProject = options?.confirmProject === true && !decided;
+  // Which plan is being confirmed on the card: 'project' or 'tidy', or ''.
+  const requested =
+    options?.confirm === true || options?.confirmProject === true
+      ? 'project'
+      : String(options?.confirm || '');
+  const confirm = decided ? '' : requested;
   const base = {
     visible: true,
     verdict,
@@ -145,7 +150,7 @@ export function folderOfferView(offer, options = {}) {
     confirming: false,
     needsPick: offer.needs_pick === true
   };
-  const view = verdictView(offer, base, { verdict, folder, subject, remember, confirmProject });
+  const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
   // A yes needs the folder's path, and a dialog-chosen folder is held in
   // memory only: after a server restart the card asks for the folder again
   // before offering anything a yes would need.
@@ -167,7 +172,36 @@ function repickView(view, subject) {
   };
 }
 
-function verdictView(offer, base, { verdict, folder, subject, remember, confirmProject }) {
+// tidyConfirmView is the plan for a tidy: what Ori will set up and how it
+// keeps its hands off the files. Set up runs it and then shows the setup as
+// it happened (the assistant-led setup card's walkthrough); Adjust… opens the
+// ordinary File Janitor creator, whose own wizard asks for the folder.
+function tidyConfirmView(offer, base, folder) {
+  return {
+    ...base,
+    confirming: true,
+    headline: segments(['Set up File Janitor for ', { text: folder }, '?']),
+    question:
+      'Ori will create a File Janitor workspace with a File Curator, watch the folder while paused, scan it once and propose moves — nothing moves until you approve a batch.',
+    actions: [
+      {
+        id: 'setup',
+        label: 'Set up',
+        style: 'primary',
+        decision: 'yes',
+        choice: 'tidy',
+        walkthrough: true
+      },
+      { id: 'adjust', label: 'Adjust…', style: 'outline', manual: 'file-janitor' },
+      { id: 'back', label: 'Back', style: 'link', back: true }
+    ]
+  };
+}
+
+function verdictView(offer, base, { verdict, folder, subject, remember, confirm }) {
+  if (confirm === 'tidy' && ['dump', 'mixed', 'ambiguous'].includes(verdict)) {
+    return tidyConfirmView(offer, base, folder);
+  }
   switch (verdict) {
     case 'project':
       return projectConfirmView(offer, base, subject, remember);
@@ -180,13 +214,15 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirmP
         ]),
         question: 'Want me to tidy it? I will propose moves and you approve each batch.',
         actions: [
-          { id: 'yes', label: 'Tidy it', style: 'primary', decision: 'yes', choice: 'tidy' },
+          // The tidy's plan is confirmed on its own card first.
+          { id: 'yes', label: 'Tidy it', style: 'primary', confirm: 'tidy' },
           { id: 'no', label: 'Not this one', style: 'outline', decision: 'no' },
           { id: 'later', label: 'Later', style: 'link', decision: 'later' }
         ]
       };
     case 'mixed':
-      if (confirmProject) return projectConfirmView(offer, base, subject, remember, { back: true });
+      if (confirm === 'project')
+        return projectConfirmView(offer, base, subject, remember, { back: true });
       return {
         ...base,
         headline: segments([
@@ -198,27 +234,22 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirmP
         ]),
         question: 'Start with a project, or a tidy?',
         actions: [
-          // The project's plan is confirmed on its own card first.
+          // Each plan is confirmed on its own card first.
           { id: 'project', label: `Start with ${subject}`, style: 'primary', confirm: 'project' },
-          {
-            id: 'tidy',
-            label: 'Tidy the loose files',
-            style: 'outline',
-            decision: 'yes',
-            choice: 'tidy'
-          },
+          { id: 'tidy', label: 'Tidy the loose files', style: 'outline', confirm: 'tidy' },
           { id: 'later', label: 'Later', style: 'link', decision: 'later' }
         ]
       };
     case 'ambiguous':
-      if (confirmProject) return projectConfirmView(offer, base, subject, remember, { back: true });
+      if (confirm === 'project')
+        return projectConfirmView(offer, base, subject, remember, { back: true });
       return {
         ...base,
         headline: segments(['I am not sure what ', { text: subject }, ' is.']),
         question: 'Is this a project you work in, or a folder to tidy?',
         actions: [
           { id: 'project', label: "It's a project", style: 'primary', confirm: 'project' },
-          { id: 'tidy', label: 'Tidy it', style: 'outline', decision: 'yes', choice: 'tidy' },
+          { id: 'tidy', label: 'Tidy it', style: 'outline', confirm: 'tidy' },
           { id: 'no', label: 'Neither', style: 'link', decision: 'no' }
         ]
       };
@@ -256,7 +287,10 @@ export function folderOutcomeNote(offer) {
       return `I will not ask about ${subject} again.`;
     case 'resolved':
       if (offer?.outcome?.kind === 'tidy') {
-        return String(offer?.outcome?.note || '').trim() || `${subject} is being tidied.`;
+        return (
+          String(offer?.outcome?.note || '').trim() ||
+          `File Janitor is set up for ${subject}; its first proposals are ready to review.`
+        );
       }
       if (offer?.outcome?.blueprint && String(offer?.blueprint_label || '').trim()) {
         return `${subject} is set up as a ${String(offer.blueprint_label).trim()} workspace.`;
@@ -287,9 +321,12 @@ const state = {
   busy: false,
   chooserOpen: false,
   available: false,
-  // A mixed or ambiguous offer's project is confirmed on its own card
-  // before anything is decided; this is that card being shown.
-  confirmProject: false
+  // The plan being confirmed on the card before anything is decided:
+  // 'project', 'tidy', or ''.
+  confirm: '',
+  // What the assistant is doing right now, shown under the card while a
+  // setup runs.
+  progress: ''
 };
 
 // announceOffer tells the mission card (progression-widget.js) what the
@@ -298,7 +335,7 @@ function announceOffer() {
   if (typeof document === 'undefined') return;
   document.dispatchEvent(
     new CustomEvent('personal-assistant:folder-offer', {
-      detail: { offer: state.offer, confirmProject: state.confirmProject }
+      detail: { offer: state.offer, confirm: state.confirm }
     })
   );
 }
@@ -388,7 +425,7 @@ function renderChooser() {
 function renderOffer() {
   const els = elements();
   if (!els?.offer) return;
-  const view = folderOfferView(state.offer, { confirmProject: state.confirmProject });
+  const view = folderOfferView(state.offer, { confirm: state.confirm });
   els.offer.hidden = !view.visible;
   els.root.dataset.state = view.visible
     ? `offer-${view.verdict}`
@@ -434,7 +471,7 @@ function renderOffer() {
     }
   }
   if (els.offerNote) {
-    const note = view.decided ? folderOutcomeNote(state.offer) : '';
+    const note = state.progress || (view.decided ? folderOutcomeNote(state.offer) : '');
     els.offerNote.replaceChildren();
     els.offerNote.hidden = !note;
     if (note) {
@@ -472,8 +509,8 @@ function runAction(action) {
     else openChooser();
     return;
   }
-  if (action.confirm === 'project' || action.back) {
-    state.confirmProject = action.confirm === 'project';
+  if (action.confirm || action.back) {
+    state.confirm = action.back ? '' : String(action.confirm);
     render();
     announceOffer();
     return;
@@ -482,14 +519,38 @@ function runAction(action) {
     startProjectOutcome(action);
     return;
   }
+  if (action.manual === 'file-janitor') {
+    startManualTidy();
+    return;
+  }
   decide(action);
+}
+
+// startManualTidy is the tidy's Adjust…: the ordinary File Janitor creator,
+// named after the folder, whose own setup wizard asks for the folder through
+// its picker. The offer stays where it is; nothing is decided by looking.
+function startManualTidy() {
+  const offer = state.offer;
+  const manager = typeof window !== 'undefined' ? window.sessionManager : null;
+  if (!manager?.showAddWorkspaceModal) {
+    if (typeof window !== 'undefined')
+      window.location.assign('/workspaces/new?template=file-janitor');
+    return;
+  }
+  showError('');
+  manager.showAddWorkspaceModal({
+    entryPoint: 'folder_digest',
+    name: `File Janitor — ${String(offer?.folder || '').trim() || 'folder'}`,
+    blueprint: 'file-janitor',
+    blueprintNote: 'Choose the folder to tidy in the setup wizard after creating.'
+  });
 }
 
 // act runs the current offer's action with this id, for the mission card that
 // renders the same offer inline. Returns false when there is no such action
 // to run: no offer, an offer already decided, or an unknown id.
 function act(actionId) {
-  const view = folderOfferView(state.offer, { confirmProject: state.confirmProject });
+  const view = folderOfferView(state.offer, { confirm: state.confirm });
   if (!view.visible || view.decided) return false;
   const action = (view.actions || []).find(candidate => candidate.id === actionId);
   if (!action) return false;
@@ -512,7 +573,7 @@ async function load() {
     const payload = await readJSON(response);
     state.digest = payload?.folder_digest || null;
     state.offer = state.digest?.offer || null;
-    state.confirmProject = false;
+    state.confirm = '';
     // A pending offer is the assistant's one question; it needs no chooser
     // in front of it.
     if (state.offer) state.chooserOpen = false;
@@ -547,11 +608,10 @@ async function scan(body) {
       return;
     }
     state.offer = payload?.offer || null;
+    state.confirm = '';
     state.chooserOpen = false;
     showStatus('');
-    document.dispatchEvent(
-      new CustomEvent('personal-assistant:folder-offer', { detail: { offer: state.offer } })
-    );
+    announceOffer();
   } catch (_) {
     showStatus('That folder could not be looked at right now.');
   } finally {
@@ -574,7 +634,7 @@ async function postOffer(offerId, action, body) {
   const payload = await readJSON(response);
   if (response.ok && payload?.offer) {
     state.offer = payload.offer;
-    state.confirmProject = false;
+    state.confirm = '';
     announceOffer();
   }
   return { ok: response.ok, payload };
@@ -599,6 +659,11 @@ async function decide(action) {
   if (!offer?.id || state.busy) return;
   state.busy = true;
   showError('');
+  // A setup takes a few seconds (a workspace, a grant, a scan); the card
+  // says so rather than sitting there disabled.
+  const folder = String(offer.folder || '').trim() || 'the folder';
+  if (action.walkthrough) state.progress = `Setting up File Janitor for ${folder}…`;
+  else if (action.create) state.progress = `Setting up the workspace for ${folder}…`;
   render();
   try {
     const body = { decision: action.decision, choice: action.choice || '' };
@@ -610,16 +675,55 @@ async function decide(action) {
       return;
     }
     // A tidy, or a workspace the assistant set up, resolves in the same
-    // request; the route is the first review batch (or the workspace that
-    // already manages the folder) or the new workspace.
+    // request. A tidy from the confirmed plan is shown as it happened (the
+    // setup card's walkthrough, ending on its review); anything else opens
+    // its route: the first review batch, the workspace that already manages
+    // the folder, or the new workspace.
     const route = resolvedRouteFor(state.offer);
+    if (action.walkthrough && (await revealSetupWalkthrough(state.offer))) return;
     if (route && typeof window !== 'undefined') window.location.assign(route);
   } catch (_) {
     showError('That could not be saved. Try again.');
   } finally {
+    state.progress = '';
     state.busy = false;
     render();
   }
+}
+
+// revealSetupWalkthrough shows a fresh tidy as the setup it was: the
+// assistant-led setup card (in the Today panel) with its receipts — the
+// workspace, the File Curator, the folder, the paused watch, the first scan —
+// and its walkthrough open, ending on the review. Returns false when there is
+// no fresh run to show (the folder was already managed, or the card is not on
+// this page), so the caller opens the route instead.
+async function revealSetupWalkthrough(offer) {
+  if (typeof window === 'undefined') return false;
+  if (String(offer?.status || '') !== 'resolved' || offer?.outcome?.kind !== 'tidy') return false;
+  if (offer?.outcome?.existing === true) return false;
+  const setup = window.AssistantLedSetup;
+  if (!setup || typeof setup.load !== 'function') return false;
+  let projection = null;
+  try {
+    projection = await setup.load('');
+  } catch (_) {
+    return false;
+  }
+  if (!projection?.run) return false;
+  const panel = window.PersonalAssistantPanel;
+  if (panel && typeof panel.open === 'function') {
+    panel.open(document.getElementById('personalAssistantLauncher'), {
+      view: 'today',
+      focusTab: false
+    });
+  }
+  const card = document.getElementById('assistantLedSetup');
+  card?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+  const milestones = projection.milestones || [];
+  if (milestones.length && setup.presentation && typeof setup.presentation.open === 'function') {
+    setup.presentation.open(milestones, { invoker: setup.els?.replay || null });
+  }
+  return true;
 }
 
 // resolvedRouteFor returns the page a resolved outcome should open — a tidy's
