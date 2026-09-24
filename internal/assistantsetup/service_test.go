@@ -692,6 +692,32 @@ func TestRemovedWorkspaceInvalidatesWithoutRecreation(t *testing.T) {
 	if accepted.Run.TargetWorkspaceID == "" {
 		t.Fatal("test did not create a target")
 	}
+
+	// A stopped setup does not block the user's next explicit one: starting
+	// over retires it and the ordinary fresh projection comes back, with a
+	// proposal that can be accepted into a new run.
+	if _, err := service.StartOver(context.Background(), "local", reloaded.Run.ID, reloaded.Run.Revision-1); !errors.Is(err, ErrStaleRun) {
+		t.Fatalf("stale start over err=%v", err)
+	}
+	fresh, err := service.StartOver(context.Background(), "local", reloaded.Run.ID, reloaded.Run.Revision)
+	if err != nil || fresh.Run != nil || fresh.Proposal == nil {
+		t.Fatalf("fresh=%+v err=%v", fresh, err)
+	}
+	retired, err := store.GetRun(context.Background(), "local", reloaded.Run.ID)
+	if err != nil || retired.Status != RunSuperseded {
+		t.Fatalf("retired=%+v err=%v", retired, err)
+	}
+	if _, err := store.FindActiveRun(context.Background(), "local", CapabilityID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a superseded run is still the active one: %v", err)
+	}
+	again, _, err := service.Accept(context.Background(), "local", fresh.Proposal.Revision, fresh.Proposal.SelectedWorkspaceID)
+	if err != nil || again.Run == nil || again.Run.ID == reloaded.Run.ID {
+		t.Fatalf("accept after start over=%+v err=%v", again, err)
+	}
+	// Only an invalidated run can be started over from.
+	if _, err := service.StartOver(context.Background(), "local", again.Run.ID, again.Run.Revision); !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("start over on a live run err=%v", err)
+	}
 }
 
 func TestFolderIntentExpiresBeforeAnyGrant(t *testing.T) {

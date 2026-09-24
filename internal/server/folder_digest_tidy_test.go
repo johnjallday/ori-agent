@@ -38,6 +38,15 @@ func (c *fakeTidyCoordinator) Get(context.Context, string, string) (*assistantse
 	return p, nil
 }
 
+func (c *fakeTidyCoordinator) StartOver(_ context.Context, _ string, runID string, ifVersion int64) (*assistantsetup.Projection, error) {
+	c.calls = append(c.calls, "start-over:"+runID)
+	if c.activeRun == nil || c.activeRun.ID != runID || c.activeRun.Revision != ifVersion || c.activeRun.Status != assistantsetup.RunInvalidated {
+		return nil, assistantsetup.ErrInvalidAction
+	}
+	c.activeRun = nil
+	return c.Get(context.Background(), "", "")
+}
+
 func (c *fakeTidyCoordinator) Accept(_ context.Context, _ string, revision, _ string) (*assistantsetup.Projection, bool, error) {
 	c.calls = append(c.calls, "accept:"+revision[:4])
 	return &assistantsetup.Projection{Run: &assistantsetup.Run{ID: "run-1", Revision: 2, CurrentStep: assistantsetup.StepFolder, TargetWorkspaceID: "ws-janitor"}}, true, nil
@@ -165,6 +174,76 @@ func TestFolderTidyRunner_ConflictDuringGrantOpensTheOwner(t *testing.T) {
 	}
 	if !result.Existing || result.WorkspaceID != "ws-other" || coordinator.granted {
 		t.Fatalf("result=%+v granted=%v", result, coordinator.granted)
+	}
+}
+
+// A setup that stopped for good (its workspace is gone) used to answer "a
+// setup is already in progress, so I opened it" with nothing to open. The
+// user's yes now starts a fresh setup over it.
+func TestFolderTidyRunner_StartsOverFromAnInvalidatedRun(t *testing.T) {
+	coordinator := &fakeTidyCoordinator{
+		proposalMode: assistantsetup.TargetCreate,
+		reviewRoute:  "/workspaces/file-janitor?panel=file-janitor&batch_id=batch-1",
+		activeRun:    &assistantsetup.Run{ID: "run-dead", Revision: 7, Status: assistantsetup.RunInvalidated, TargetWorkspaceID: "ws-gone", CurrentStep: assistantsetup.StepFolder},
+	}
+	janitor := &fakeTidyJanitor{}
+	result, err := newTidyRunner(coordinator, janitor).TidyFolder(context.Background(), personalassistant.FolderTidyRequest{
+		UserID: "local", OfferID: "offer-1", Name: "Downloads", Path: "/Users/me/Downloads", RequestID: "req-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Existing || result.WorkspaceID != "ws-janitor" || result.BatchID != "batch-1" || result.Route != coordinator.reviewRoute {
+		t.Fatalf("result=%+v", result)
+	}
+	if strings.Join(coordinator.calls, ",") != "get,start-over:run-dead,get,accept:aaaa,intent,grant,review" {
+		t.Fatalf("calls=%v", coordinator.calls)
+	}
+}
+
+// An accepted setup still waiting for its folder takes the shown one rather
+// than being restarted.
+func TestFolderTidyRunner_ResumesARunWaitingForItsFolder(t *testing.T) {
+	coordinator := &fakeTidyCoordinator{
+		reviewRoute: "/workspaces/file-janitor?panel=file-janitor&batch_id=batch-1",
+		activeRun:   &assistantsetup.Run{ID: "run-1", Revision: 2, Status: assistantsetup.RunActive, TargetWorkspaceID: "ws-janitor", CurrentStep: assistantsetup.StepFolder},
+	}
+	janitor := &fakeTidyJanitor{}
+	result, err := newTidyRunner(coordinator, janitor).TidyFolder(context.Background(), personalassistant.FolderTidyRequest{
+		UserID: "local", OfferID: "offer-1", Name: "Downloads", Path: "/Users/me/Downloads", RequestID: "req-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Existing || result.WorkspaceID != "ws-janitor" || result.BatchID != "batch-1" || len(janitor.granted) != 1 {
+		t.Fatalf("result=%+v granted=%d", result, len(janitor.granted))
+	}
+	if strings.Join(coordinator.calls, ",") != "get,intent,grant,review" {
+		t.Fatalf("calls=%v", coordinator.calls)
+	}
+}
+
+// "So I opened it" is never said about a workspace that cannot be opened:
+// that is a failed tidy, and the offer stays pending.
+func TestFolderTidyRunner_NeverClaimsToOpenAMissingWorkspace(t *testing.T) {
+	coordinator := &fakeTidyCoordinator{activeRun: &assistantsetup.Run{ID: "run-9", Status: assistantsetup.RunActive, TargetWorkspaceID: "ws-missing", CurrentStep: assistantsetup.StepMonitoring}}
+	runner := newTidyRunner(coordinator, &fakeTidyJanitor{})
+	runner.route = func(id string) string {
+		if id == "ws-missing" {
+			return ""
+		}
+		return "/workspaces/" + id
+	}
+	if _, err := runner.TidyFolder(context.Background(), personalassistant.FolderTidyRequest{
+		UserID: "local", OfferID: "offer-1", Name: "Downloads", Path: "/Users/me/Downloads", RequestID: "req-1",
+	}); !errors.Is(err, personalassistant.ErrFolderTidyFailed) {
+		t.Fatalf("missing workspace err=%v", err)
+	}
+	owned := newTidyRunner(&fakeTidyCoordinator{}, &fakeTidyJanitor{owner: &filejanitor.RootOwner{WorkspaceID: ""}})
+	if _, err := owned.TidyFolder(context.Background(), personalassistant.FolderTidyRequest{
+		UserID: "local", OfferID: "offer-1", Name: "Downloads", Path: "/Users/me/Downloads", RequestID: "req-1",
+	}); !errors.Is(err, personalassistant.ErrFolderTidyFailed) {
+		t.Fatalf("owner without a workspace err=%v", err)
 	}
 }
 

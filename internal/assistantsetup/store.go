@@ -37,6 +37,7 @@ type Store interface {
 	DeferRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*Run, error)
 	ResumeRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*Run, error)
 	InvalidateRun(ctx context.Context, ownerUserID, runID string, ifVersion int64, safeCode string) (*Run, error)
+	SupersedeRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*Run, error)
 	ListDueRetries(ctx context.Context, now time.Time, limit int) ([]Run, error)
 	ClearRetry(ctx context.Context, ownerUserID, runID string, ifVersion int64, safeCode string) error
 }
@@ -1195,6 +1196,38 @@ func (s *SQLiteStore) InvalidateRun(ctx context.Context, ownerUserID, runID stri
 		WHERE id=? AND owner_user_id=? AND revision=?
 			AND status IN ('active','deferred','reconcile_required','first_result')`,
 		strings.TrimSpace(safeCode), now, strings.TrimSpace(runID), strings.TrimSpace(ownerUserID), ifVersion)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rows != 1 {
+		if _, getErr := s.GetRun(ctx, ownerUserID, runID); errors.Is(getErr, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, ErrStaleRun
+	}
+	return s.GetRun(ctx, ownerUserID, runID)
+}
+
+// SupersedeRun retires an invalidated run so a fresh setup can begin: its row
+// and operations stay for the record under a status the active lookup does
+// not return. Only an invalidated run can be superseded; anything else is a
+// stale request.
+func (s *SQLiteStore) SupersedeRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*Run, error) {
+	if err := s.configured(); err != nil {
+		return nil, err
+	}
+	if ifVersion < 1 {
+		return nil, ErrInvalid
+	}
+	now := s.now().UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE assistant_setup_runs
+		SET status='superseded', revision=revision+1, updated_at=?
+		WHERE id=? AND owner_user_id=? AND revision=? AND status='invalidated'`,
+		now, strings.TrimSpace(runID), strings.TrimSpace(ownerUserID), ifVersion)
 	if err != nil {
 		return nil, err
 	}

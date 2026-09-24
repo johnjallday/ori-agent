@@ -276,6 +276,8 @@ func writeFolderDigestError(w http.ResponseWriter, err error) {
 		orihttp.NotFound(w, "That workspace is no longer here")
 	case errors.Is(err, personalassistant.ErrFolderWorkspaceRefused):
 		orihttp.Conflict(w, "That workspace was not created for this offer, or already has a linked folder")
+	case errors.Is(err, personalassistant.ErrFolderTidyFailed):
+		orihttp.ServiceUnavailable(w, "File Janitor could not be set up for that folder right now. Try again in a moment")
 	case errors.Is(err, personalassistant.ErrFolderCreateFailed):
 		orihttp.ServiceUnavailable(w, "The workspace could not be created right now. Adjust… creates it through the usual dialog")
 	case errors.Is(err, personalassistant.ErrFolderOutcomeUnavailable):

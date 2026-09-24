@@ -37,6 +37,7 @@ var (
 	ErrFolderWorkspaceRefused   = errors.New("personal assistant: that workspace was not created for this offer")
 	ErrFolderOutcomeUnavailable = errors.New("personal assistant: the folder outcome is unavailable")
 	ErrFolderCreateFailed       = errors.New("personal assistant: the workspace could not be created")
+	ErrFolderTidyFailed         = errors.New("personal assistant: File Janitor could not be set up for the folder")
 	ErrFolderChipUnknown        = errors.New("personal assistant: unknown folder")
 	ErrFolderChipMissing        = errors.New("personal assistant: that folder is not on this computer")
 	ErrFolderScanBusy           = errors.New("personal assistant: a folder scan is already running")

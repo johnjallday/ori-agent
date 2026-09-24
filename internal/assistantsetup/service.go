@@ -628,6 +628,34 @@ func (s *Service) DeferRun(ctx context.Context, ownerUserID, runID string, ifVer
 	return s.projectRun(ctx, base, run)
 }
 
+// StartOver retires a run that stopped for good — its workspace or capability
+// is no longer available — so the user's next explicit setup can begin a
+// fresh one. Nothing is recreated or restored here: the retired run keeps its
+// history under a status the active lookup no longer returns, and the
+// projection that comes back is the ordinary fresh one (a proposal, or an
+// already set-up target). Only an invalidated run can be started over from.
+func (s *Service) StartOver(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*Projection, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrUnavailable
+	}
+	release, err := s.gate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	run, err := s.store.GetRun(ctx, ownerUserID, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.Status != RunInvalidated {
+		return nil, ErrInvalidAction
+	}
+	if _, err := s.store.SupersedeRun(ctx, ownerUserID, runID, ifVersion); err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, ownerUserID, "")
+}
+
 func (s *Service) ResumeRun(ctx context.Context, ownerUserID, runID string, ifVersion int64) (*Projection, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrUnavailable

@@ -52,6 +52,9 @@ const (
 	RunFirstResult       RunStatus = "first_result"
 	RunInvalidated       RunStatus = "invalidated"
 	RunReconcileRequired RunStatus = "reconcile_required"
+	// RunSuperseded is an invalidated run the user started over from: it
+	// keeps its history but no longer counts as the owner's run.
+	RunSuperseded RunStatus = "superseded"
 )
 
 type Step string
