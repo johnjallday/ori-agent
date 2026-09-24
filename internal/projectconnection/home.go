@@ -4,9 +4,16 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// ErrHomeProviderMissing reports that a split blueprint's Home comes from a
+// plugin that is not installed, switched off, or not compatible with this
+// project. HomePreparation still returns the partial preparation with it, so
+// a reader can name the group while it explains the provider.
+var ErrHomeProviderMissing = errors.New("project connection Home provider is missing")
 
 // HomePreparation is owner-read state, not a runtime grant or live verification.
 // Whether the group exists is the only readiness it reports; live-control
@@ -22,6 +29,15 @@ type HomePreparation struct {
 	// program key. It is presentation-only: it selects which catalog entry the
 	// shared creator describes and never authorizes this setup's own review.
 	GroupTemplateID string `json:"group_template_id,omitempty"`
+}
+
+// homeTarget is the one Home a template's project joins: its key, the
+// declaration a new Home is created from, and, for a split blueprint, the
+// provider that contributed that declaration.
+type homeTarget struct {
+	key         workspace.AssistantProgramKey
+	declaration *workspace.AssistantProgramDeclaration
+	owner       *workspace.AssistantProgramHomeOwner
 }
 
 func homeKey(scope Scope) (workspace.AssistantProgramKey, error) {
@@ -45,13 +61,48 @@ func homeKey(scope Scope) (workspace.AssistantProgramKey, error) {
 	return key, nil
 }
 
+// resolveHomeTarget reads a combined blueprint's own declaration, or resolves
+// a split blueprint's Home through the group-requirements service's
+// independent-Home join. A provider the user can repair is ErrHomeProviderMissing.
+func (s *Service) resolveHomeTarget(scope Scope) (homeTarget, error) {
+	switch {
+	case scope.Template.AssistantProgram != nil:
+		key, err := homeKey(scope)
+		if err != nil {
+			return homeTarget{}, ErrUnavailable
+		}
+		return homeTarget{key: key, declaration: scope.Template.AssistantProgram}, nil
+	case scope.Template.AssistantProject != nil:
+		resolved, err := s.grouping.ResolveIndependentHome(scope.OwnerUserID, scope.Template)
+		if grouprequirements.HomeProviderRepairable(err) {
+			return homeTarget{}, ErrHomeProviderMissing
+		}
+		if err != nil {
+			return homeTarget{}, ErrUnavailable
+		}
+		owner := resolved.Owner.Clone()
+		return homeTarget{key: resolved.Key.Normalize(), declaration: resolved.Declaration, owner: &owner}, nil
+	default:
+		return homeTarget{}, ErrUnavailable
+	}
+}
+
+// HomePreparation reads whether the template's Home exists. For a split
+// blueprint whose Home provider is missing it returns the partial preparation
+// (name, template, policy, compositions) together with ErrHomeProviderMissing.
 func (s *Service) HomePreparation(scope Scope) (HomePreparation, error) {
-	if s == nil || s.store == nil || scope.Template.AssistantProgram == nil {
+	if s == nil || s.store == nil || (scope.Template.AssistantProgram == nil && scope.Template.AssistantProject == nil) {
 		return HomePreparation{}, ErrUnavailable
 	}
-	result := HomePreparation{Name: scope.Template.AssistantProgram.StationName, TemplateID: scope.Template.ID}
+	result := HomePreparation{TemplateID: scope.Template.ID}
+	if scope.Template.AssistantProgram != nil {
+		result.Name = scope.Template.AssistantProgram.StationName
+	}
 	if requirement := scope.Template.GroupRequirement; requirement != nil {
 		result.GroupPolicy = string(requirement.Policy)
+		if result.Name == "" {
+			result.Name = requirement.DefaultHomeName
+		}
 		switch requirement.Policy {
 		case projecttemplates.GroupPolicyNone:
 			result.AvailableCompositions = []string{"standalone"}
@@ -62,12 +113,18 @@ func (s *Service) HomePreparation(scope Scope) (HomePreparation, error) {
 			result.AvailableCompositions = []string{"grouped"}
 		}
 	}
-	key, err := homeKey(scope)
+	target, err := s.resolveHomeTarget(scope)
+	if errors.Is(err, ErrHomeProviderMissing) {
+		return result, ErrHomeProviderMissing
+	}
 	if err != nil {
 		return HomePreparation{}, ErrUnavailable
 	}
-	result.GroupTemplateID = projecttemplates.GroupTemplateIDForKey(key)
-	home, err := workspace.NewAssistantProgramStore(s.store).FindStation(key)
+	if result.Name == "" {
+		result.Name = target.declaration.StationName
+	}
+	result.GroupTemplateID = projecttemplates.GroupTemplateIDForKey(target.key)
+	home, err := workspace.NewAssistantProgramStore(s.store).FindStation(target.key)
 	if errors.Is(err, workspace.ErrAssistantStationNotFound) {
 		return result, nil
 	}
@@ -91,11 +148,20 @@ func (s *Service) CreateHome(scope Scope, name string) (HomePreparation, error) 
 	if err != nil || before.Exists {
 		return before, err
 	}
-	key, err := homeKey(scope)
+	target, err := s.resolveHomeTarget(scope)
 	if err != nil {
 		return HomePreparation{}, err
 	}
-	home, created, err := workspace.NewAssistantProgramStore(s.store).EnsureNamedStation(key, scope.Template.AssistantProgram, name)
+	programs := workspace.NewAssistantProgramStore(s.store)
+	var home *workspace.Workspace
+	var created bool
+	if target.owner != nil {
+		// A split Home records the provider it came from; group-requirement
+		// evaluation later accepts only a Home with that exact provider.
+		home, created, err = programs.EnsureNamedIndependentStation(target.key, target.declaration, name, *target.owner)
+	} else {
+		home, created, err = programs.EnsureNamedStation(target.key, target.declaration, name)
+	}
 	if err != nil {
 		return HomePreparation{}, ErrUnavailable
 	}

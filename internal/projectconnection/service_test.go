@@ -66,6 +66,74 @@ func connectionService(t *testing.T) (*Service, *workspace.SyncStore, *pathselec
 	return NewService(store, selections), store, selections
 }
 
+// splitConnectionTemplate is a split blueprint: its project team names a Home
+// contributed by a separate provider plugin instead of carrying a combined
+// assistant_program.
+func splitConnectionTemplate(t *testing.T) projecttemplates.Template {
+	t.Helper()
+	template := connectionTemplate(t)
+	template.AssistantProgram = nil
+	template.Revision = strings.Repeat("a", 64)
+	template.AssistantProject = &projecttemplates.AssistantProjectDeclaration{
+		SchemaVersion: projecttemplates.AssistantProjectSchemaVersion, Version: 1, ID: "song-team",
+		Home: projecttemplates.AssistantProjectHomeReference{
+			ProviderPluginID: "home-provider", ProgramID: "production", HomeSchemaVersion: 1, MinHomeVersion: 1, MaxHomeVersion: 1,
+		},
+		Roles: []projecttemplates.AssistantProjectRole{{ID: "engineer", Label: "Engineer", Required: true, Primary: true, SystemPrompt: "Engineer this song."}},
+	}
+	template.GroupRequirement = &projecttemplates.GroupRequirement{
+		SchemaVersion: projecttemplates.SplitGroupRequirementSchemaVersion, Policy: projecttemplates.GroupPolicyRequired,
+		AssistantProjectID: "song-team", MissingHome: projecttemplates.MissingHomeOfferCreate, DefaultHomeName: "Production Home",
+	}
+	return template
+}
+
+// fakeHomeResolver stands in for the host's reciprocal two-provider join. err
+// selects the provider state it reports; nil resolves the fixture's Home.
+type fakeHomeResolver struct {
+	err   error
+	calls int
+}
+
+func (f *fakeHomeResolver) resolve(ownerUserID string, _ projecttemplates.Template, requireHome bool) (grouprequirements.IndependentHomeResolution, error) {
+	f.calls++
+	project := &workspace.AssistantProjectProviderOwner{
+		PluginID: "neutral", PluginVersion: "1.0.0", BlueprintID: "project", BlueprintVersion: 2,
+		ProjectTeamID: "song-team", ProjectTeamSchema: 1, ProjectTeamVersion: 1,
+		ProjectTeamDigest: strings.Repeat("b", 64), PluginGeneration: 3, ComponentFingerprint: strings.Repeat("c", 64),
+	}
+	if !requireHome {
+		return grouprequirements.IndependentHomeResolution{ProjectOwner: project}, nil
+	}
+	if f.err != nil {
+		return grouprequirements.IndependentHomeResolution{}, f.err
+	}
+	home := projecttemplates.AssistantProgramHome{
+		SchemaVersion: 1, Version: 1, ID: "production", StationName: "Provider Station", DefaultPrimaryName: "Producer", HireTitle: "Hire producer",
+		Roles:      []projecttemplates.AssistantProgramHomeRole{{ID: "producer", Label: "Producer", Required: true, Primary: true, SystemPrompt: "Coordinate songs."}},
+		Stages:     []workspace.AssistantProgramStageSpec{{ID: "initial", Label: "Initial"}},
+		Reflection: workspace.AssistantReflectionConfig{MinimumProjects: 2, CadenceHours: 24, MaxProjects: 8, MaxEventsPerProject: 16, MaxCandidates: 4, MaxEvidence: 4, Rubric: "Review patterns."},
+	}
+	owner := &workspace.AssistantProgramHomeOwner{
+		PluginID: "home-provider", PluginVersion: "0.1.0", ProgramID: "production", HomeSchemaVersion: 1, HomeVersion: 1,
+		DeclarationDigest: projecttemplates.AssistantProgramHomeDigest(home), PluginGeneration: 5, ComponentFingerprint: strings.Repeat("d", 64),
+	}
+	return grouprequirements.IndependentHomeResolution{
+		Key:         workspace.AssistantProgramKey{OwnerUserID: ownerUserID, PluginID: "home-provider", ProgramID: "production"}.Normalize(),
+		Declaration: home.AssistantProgram(), Owner: owner, ProjectOwner: project,
+	}, nil
+}
+
+func splitConnectionService(t *testing.T) (*Service, *workspace.SyncStore, *grouprequirements.Service, *fakeHomeResolver) {
+	t.Helper()
+	service, store, _ := connectionService(t)
+	grouping := grouprequirements.NewService(store, grouprequirements.NewMemoryStore())
+	resolver := &fakeHomeResolver{}
+	grouping.SetIndependentHomeResolver(resolver.resolve)
+	service.SetGroupRequirementService(grouping)
+	return service, store, grouping, resolver
+}
+
 func TestAttachExistingPreviewsThenCommitsWithoutWritingExternalFolder(t *testing.T) {
 	service, store, selections := connectionService(t)
 	external := t.TempDir()
