@@ -22,10 +22,19 @@ type ProjectTemplateResolver interface {
 type ProjectConnectionAdapter struct {
 	owner     *projectconnection.Service
 	templates ProjectTemplateResolver
+	providers HomeProviderSource
 }
 
 func NewProjectConnectionAdapter(owner *projectconnection.Service, templates ProjectTemplateResolver) *ProjectConnectionAdapter {
 	return &ProjectConnectionAdapter{owner: owner, templates: templates}
+}
+
+// SetHomeProviderSource lets the group read explain a split blueprint's
+// missing Home provider. Without it that state stays owner_unavailable.
+func (a *ProjectConnectionAdapter) SetHomeProviderSource(source HomeProviderSource) {
+	if a != nil {
+		a.providers = source
+	}
 }
 
 func (a *ProjectConnectionAdapter) InputDigest(action ActionID, raw json.RawMessage) (string, error) {
@@ -135,6 +144,9 @@ func (a *ProjectConnectionAdapter) Read(ctx context.Context, scope ReadScope) (C
 		(template.GroupRequirement != nil && template.GroupRequirement.Policy == projecttemplates.GroupPolicyRequired)
 	if scope.WorkspaceLaunch {
 		value, prepErr := a.owner.HomePreparation(projectConnectionScope(scope, template))
+		if errors.Is(prepErr, projectconnection.ErrHomeProviderMissing) {
+			return a.homeProviderMissing(ctx, template, value), nil
+		}
 		if prepErr != nil {
 			return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}, nil
 		}
@@ -176,6 +188,28 @@ func (a *ProjectConnectionAdapter) Read(ctx context.Context, scope ReadScope) (C
 		result.HomeWorkspaceID = observed.HomeWorkspaceID
 	}
 	return CanonicalStepRead{Complete: true, AvailableActions: []ActionID{ActionOpenProject}, Result: result, Preparation: preparation}, nil
+}
+
+// homeProviderMissing explains a split blueprint whose Home provider is not
+// installed, switched off, or not compatible, with the Create Workspace card's
+// own derivation. A state the derivation cannot explain stays owner_unavailable.
+func (a *ProjectConnectionAdapter) homeProviderMissing(ctx context.Context, template projecttemplates.Template, preparation projectconnection.HomePreparation) CanonicalStepRead {
+	if a.providers == nil {
+		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}
+	}
+	state, err := a.providers.HomeProviderState(ctx, template)
+	if err != nil {
+		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}
+	}
+	projection := newHomeProviderProjection(template, state)
+	if projection == nil {
+		return CanonicalStepRead{BlockedReason: ReasonOwnerUnavailable}
+	}
+	read := CanonicalStepRead{BlockedReason: ReasonHomeProviderMissing, HomeProvider: projection}
+	if validHomePreparation(&preparation) {
+		read.Preparation = &preparation
+	}
+	return read
 }
 
 func (a *ProjectConnectionAdapter) ConsequenceObserved(action ActionID, state CanonicalStepRead) bool {

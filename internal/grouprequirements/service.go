@@ -97,6 +97,25 @@ type IndependentHomeResolution struct {
 
 type IndependentHomeResolver func(ownerUserID string, template projecttemplates.Template, requireHome bool) (IndependentHomeResolution, error)
 
+// Independent Home resolution failures. A resolver names the provider state it
+// found so a reader can explain it; callers that only need success keep
+// checking err != nil.
+var (
+	ErrHomeProviderNotInstalled = errors.New("independent Home provider is not installed")
+	ErrHomeProviderDisabled     = errors.New("independent Home provider is switched off")
+	ErrHomeProviderIncompatible = errors.New("independent Home provider does not accept this project")
+	ErrIndependentHomeInvalid   = errors.New("independent Home is ambiguous or invalid")
+	ErrResolverUnavailable      = errors.New("independent Home resolver is not configured")
+)
+
+// HomeProviderRepairable reports whether a resolution failed only because the
+// Home's provider plugin is not installed, switched off, or not compatible:
+// states that installing, enabling, or updating that plugin can repair.
+func HomeProviderRepairable(err error) bool {
+	return errors.Is(err, ErrHomeProviderNotInstalled) || errors.Is(err, ErrHomeProviderDisabled) ||
+		errors.Is(err, ErrHomeProviderIncompatible)
+}
+
 type Evaluation struct {
 	State               State                                    `json:"state"`
 	Policy              projecttemplates.GroupPolicy             `json:"policy,omitempty"`
@@ -214,6 +233,23 @@ func (s *Service) SetIndependentHomeResolver(resolver IndependentHomeResolver) {
 	if s != nil {
 		s.independentHomeResolver = resolver
 	}
+}
+
+// ResolveIndependentHome resolves the exact Home a split template's project
+// joins, through the same reciprocal join Evaluate uses. It is read-only.
+func (s *Service) ResolveIndependentHome(ownerUserID string, template projecttemplates.Template) (IndependentHomeResolution, error) {
+	if s == nil || s.independentHomeResolver == nil {
+		return IndependentHomeResolution{}, ErrResolverUnavailable
+	}
+	resolved, err := s.independentHomeResolver(strings.TrimSpace(ownerUserID), template, true)
+	if err != nil {
+		return IndependentHomeResolution{}, err
+	}
+	if resolved.Declaration == nil || resolved.Owner == nil || !resolved.Owner.Valid() ||
+		resolved.ProjectOwner == nil || !resolved.ProjectOwner.Valid() || !resolved.Key.Normalize().Valid() {
+		return IndependentHomeResolution{}, ErrIndependentHomeInvalid
+	}
+	return resolved, nil
 }
 
 func (s *Service) Evaluate(input Input) Evaluation {

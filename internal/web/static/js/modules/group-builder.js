@@ -13,6 +13,9 @@ export function groupBuildState(journey) {
   const preparation = project?.preparation;
   if (preparation?.exists) return 'existing';
   if (journey?.busy) return 'busy';
+  // A split blueprint's Home comes from a separate plugin. While that plugin
+  // is not ready the server names it, so this is explainable, not unavailable.
+  if (project?.home_provider) return 'provider';
   if (
     !preparation ||
     journey?.receipts?.home_workspace_id ||
@@ -241,6 +244,9 @@ export function openGroupBuilder({ journey = null, onJourneyChange, onClose } = 
   const status = groupBuildState(journey);
   if (status === 'busy')
     throw new Error('Group setup is already in progress. Check setup status first.');
+  if (status === 'provider') {
+    throw new Error('Install the plugin that provides this Home, then check again.');
+  }
   if (status === 'unavailable') {
     throw new Error(
       'The existing setup group could not be verified. No replacement will be created.'

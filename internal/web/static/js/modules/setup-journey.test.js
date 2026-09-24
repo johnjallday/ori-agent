@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { groupBuildState } from './group-builder.js';
 
 // The module's initializer is a no-op without a browser document.
 globalThis.document ||= { readyState: 'complete', getElementById: () => null };
@@ -11,6 +12,12 @@ const {
   RELEASE_UNCHECKED_NOTE,
   START_OVER_EXPLANATION,
   WORKSPACE_LAUNCH_DESCRIPTION,
+  homeProviderDisclosureIntro,
+  homeProviderDisclosureRows,
+  homeProviderOffer,
+  homeProviderReceiptRow,
+  homeProviderRecoveryFailure,
+  homeProviderSuccessToast,
   integrationHandoffNavigation,
   integrationReleaseCheckNote,
   integrationReviewPresentation,
@@ -588,6 +595,225 @@ test('an unmet integration precondition offers only the install quest', () => {
     }).installDetail,
     null
   );
+});
+
+const missingMusicProvider = () => ({
+  plugin_id: 'music-project-management',
+  display_name: 'Music Project Management',
+  reviewed: true,
+  minimum_version: '0.1.0',
+  template_id: 'plugin:reaper-plugin:reaper-song',
+  installed: false,
+  enabled: false,
+  reason: 'plugin_install_required',
+  summary: 'Reaper Song needs Music Production Home, which comes from a separate plugin.',
+  detail:
+    "Install Music Project Management to add it. Installing this blueprint's plugin did not add it.",
+  actions: ['install_plugin', 'manage_plugins', 'change_blueprint']
+});
+
+test('the group screen names a missing Home provider in its receipt', () => {
+  const step = { kind: 'project_connect', home_provider: missingMusicProvider() };
+  const rows = setupJourneyReceiptRows({ receipts: {} }, step);
+  assert.deepEqual(rows, [['Home provider', 'music-project-management · Not installed']]);
+  assert.equal(homeProviderReceiptRow(null), null);
+  // A version is shown only once the provider is installed.
+  assert.deepEqual(homeProviderReceiptRow({ ...missingMusicProvider(), version: '0.1.0' }), [
+    'Home provider',
+    'music-project-management · Not installed'
+  ]);
+});
+
+test('only a reviewed provider with an install action gets an in-quest install', () => {
+  assert.deepEqual(homeProviderOffer(missingMusicProvider()), {
+    action: 'install_plugin',
+    label: 'Install Music Project Management…',
+    confirm: 'Install',
+    disclose: true
+  });
+  const unreviewed = {
+    ...missingMusicProvider(),
+    reviewed: false,
+    display_name: '',
+    actions: ['manage_plugins', 'change_blueprint']
+  };
+  assert.equal(homeProviderOffer(unreviewed), null);
+  // A reviewed flag alone is not an offer: the derivation must name the action.
+  assert.equal(homeProviderOffer({ ...missingMusicProvider(), actions: ['manage_plugins'] }), null);
+});
+
+test('a switched-off provider offers Enable and an incompatible one Review update', () => {
+  const disabled = {
+    ...missingMusicProvider(),
+    installed: true,
+    enabled: false,
+    version: '0.1.0',
+    reason: 'plugin_enable_required',
+    summary: 'Music Project Management is installed but switched off.',
+    detail: 'Enable it so Reaper Song can use Music Production Home.',
+    actions: ['enable_plugin', 'manage_plugins']
+  };
+  // Enable applies directly: its components were disclosed at install.
+  assert.deepEqual(homeProviderOffer(disabled), {
+    action: 'enable_plugin',
+    label: 'Enable Music Project Management',
+    confirm: '',
+    disclose: false
+  });
+  assert.deepEqual(homeProviderReceiptRow(disabled), [
+    'Home provider',
+    'music-project-management 0.1.0 · Installed · Switched off'
+  ]);
+  const incompatible = {
+    ...disabled,
+    enabled: true,
+    reason: 'plugin_update_required',
+    actions: ['review_plugin_update', 'manage_plugins']
+  };
+  assert.deepEqual(homeProviderOffer(incompatible), {
+    action: 'review_plugin_update',
+    label: 'Review update',
+    confirm: 'Update',
+    disclose: true
+  });
+  assert.deepEqual(homeProviderReceiptRow(incompatible), [
+    'Home provider',
+    'music-project-management 0.1.0 · Installed · Enabled'
+  ]);
+  // An unreviewed provider is sent to Plugins in every state.
+  assert.equal(homeProviderOffer({ ...disabled, reviewed: false, display_name: '' }), null);
+  assert.equal(homeProviderOffer({ ...incompatible, reviewed: false, display_name: '' }), null);
+});
+
+test('a completed Home-provider recovery confirms itself in a toast', () => {
+  assert.equal(
+    homeProviderSuccessToast('Music Project Management', 'install_plugin'),
+    'Music Project Management installed and enabled.'
+  );
+  assert.equal(
+    homeProviderSuccessToast('Music Project Management', 'enable_plugin'),
+    'Music Project Management enabled.'
+  );
+  assert.equal(
+    homeProviderSuccessToast('Music Project Management', 'review_plugin_update'),
+    'Music Project Management updated.'
+  );
+  assert.equal(homeProviderSuccessToast('', 'install_plugin'), 'The plugin installed and enabled.');
+  assert.equal(homeProviderSuccessToast('Music Project Management', 'manage_plugins'), '');
+});
+
+test('an update that asks for nothing new says so, in the card words', () => {
+  const provider = missingMusicProvider();
+  assert.equal(
+    homeProviderDisclosureIntro(provider, 'review_plugin_update', { changed: false }),
+    'Music Project Management asks for nothing new. Updating changes only its version.'
+  );
+  assert.equal(
+    homeProviderDisclosureIntro(provider, 'review_plugin_update', { changed: true }),
+    'Music Project Management will be able to do the following on this computer:'
+  );
+  assert.equal(
+    homeProviderDisclosureIntro(provider, 'install_plugin', {}),
+    'Music Project Management will be able to do the following on this computer:'
+  );
+});
+
+test('an older payload without home_provider still reads as unverifiable', () => {
+  // The step shape Ori served before home_provider existed: blocked, a partial
+  // preparation or none, no actions. It must render the old fallback.
+  const step = {
+    kind: 'project_connect',
+    status: 'blocked',
+    reason_code: 'owner_unavailable',
+    preparation: { exists: false, name: 'Music Production Home', group_policy: 'required' },
+    actions: []
+  };
+  const journey = {
+    journey: { workspace_launch: { group_title: 'Create Group', group_name: 'Group' } },
+    receipts: {},
+    steps: [step]
+  };
+  assert.equal(groupBuildState(journey), 'unavailable');
+  assert.equal(homeProviderOffer(step.home_provider), null);
+  assert.deepEqual(setupJourneyReceiptRows(journey, step), []);
+});
+
+test('the install disclosure states the release, the reviewed floor, and the source', () => {
+  const rows = homeProviderDisclosureRows(missingMusicProvider(), {
+    release: '0.1.0',
+    source: 'https://github.com/johnjallday/music-project-management@f92c919'
+  });
+  assert.deepEqual(rows, [
+    ['Release', '0.1.0'],
+    ['Minimum reviewed version', '0.1.0'],
+    ['Installed from', 'https://github.com/johnjallday/music-project-management@f92c919']
+  ]);
+  assert.deepEqual(homeProviderDisclosureRows({}, {}), []);
+});
+
+test('a refused install shows the endpoint outcome; a transport failure its own message', () => {
+  const refused = homeProviderRecoveryFailure({
+    ok: false,
+    status: 409,
+    data: {
+      outcome: {
+        summary: 'This plugin changed while you were reviewing it.',
+        detail: 'Nothing was applied. Review the current details and confirm again.'
+      }
+    },
+    error: 'This changed while you were working. Review it and try again.'
+  });
+  assert.equal(refused.message, 'This plugin changed while you were reviewing it.');
+  assert.equal(
+    refused.detail,
+    'Nothing was applied. Review the current details and confirm again.'
+  );
+  assert.equal(refused.reread, true);
+  const failedInstall = homeProviderRecoveryFailure({
+    ok: false,
+    status: 409,
+    data: {
+      outcome: {
+        summary: 'Ori could not find a release of Music Project Management to install.',
+        detail: 'Nothing was installed. Try again later, or update Ori.',
+        steps: [{ name: 'preview', succeeded: false, message: 'Ori could not verify a release.' }]
+      }
+    }
+  });
+  assert.equal(
+    failedInstall.detail,
+    'Ori could not verify a release. Nothing was installed. Try again later, or update Ori.'
+  );
+  const offline = homeProviderRecoveryFailure({
+    ok: false,
+    status: 0,
+    data: {},
+    error: 'Ori could not reach the server. Check your connection and try again.'
+  });
+  assert.equal(
+    offline.message,
+    'Ori could not reach the server. Check your connection and try again.'
+  );
+  assert.equal(offline.reread, false);
+});
+
+test('a missing provider keeps the workspace screen closed', () => {
+  const journey = {
+    journey: { workspace_launch: { group_title: 'Create Group', group_name: 'Group' } },
+    receipts: {},
+    steps: [
+      {
+        kind: 'project_connect',
+        status: 'blocked',
+        reason_code: 'home_provider_missing',
+        preparation: { exists: false, name: 'Music Production Home', group_policy: 'required' },
+        home_provider: missingMusicProvider()
+      }
+    ]
+  };
+  const stages = workspaceLaunchStages(journey);
+  assert.equal(stages[0].complete, false);
+  assert.equal(stages[1].enabled, false);
 });
 
 test('an incompatible root offers Start over on its own restart route', () => {

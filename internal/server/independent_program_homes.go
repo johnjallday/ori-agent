@@ -1,7 +1,7 @@
 package server
 
 import (
-	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
@@ -10,7 +10,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-var errIndependentProgramHomeUnavailable = errors.New("independent Assistant Program Home is unavailable")
+// errIndependentProgramHomeUnavailable is an ambiguous or invalid join. The
+// Home provider states a user can repair (not installed, switched off, not
+// compatible) are reported with their own grouprequirements errors instead.
+var errIndependentProgramHomeUnavailable = fmt.Errorf("independent Assistant Program Home is unavailable: %w", grouprequirements.ErrIndependentHomeInvalid)
 
 // resolveIndependentProgramHome performs the reciprocal, two-provider trust
 // join for one already-trusted project template. It is read-only and never
@@ -60,10 +63,16 @@ func resolveIndependentProgramHome(installed []plugin.InstalledPlugin, ownerUser
 
 	var homeInstall *plugin.InstalledPlugin
 	var homeDeclaration *projecttemplates.AssistantProgramHome
+	providerFound, providerEnabled := false, false
 	for index := range installed {
 		candidate := &installed[index]
-		if !strings.EqualFold(candidate.Name, project.Home.ProviderPluginID) || !pluginBlueprintsActive(*candidate) ||
-			candidate.Generation == 0 || !lowerDigest(candidate.ComponentFingerprint) || !requiresFeature(candidate.WorkspaceSurfaces, plugin.HostFeatureIndependentProgramHomesV1) {
+		if !strings.EqualFold(candidate.Name, project.Home.ProviderPluginID) {
+			continue
+		}
+		providerFound = true
+		providerEnabled = providerEnabled || candidate.Enabled
+		if !pluginBlueprintsActive(*candidate) || candidate.Generation == 0 || !lowerDigest(candidate.ComponentFingerprint) ||
+			!requiresFeature(candidate.WorkspaceSurfaces, plugin.HostFeatureIndependentProgramHomesV1) {
 			continue
 		}
 		for homeIndex := range candidate.WorkspaceSurfaces.AssistantProgramHomes {
@@ -79,8 +88,13 @@ func resolveIndependentProgramHome(installed []plugin.InstalledPlugin, ownerUser
 			homeInstall, homeDeclaration = candidate, home
 		}
 	}
-	if homeInstall == nil || homeDeclaration == nil || roleIDsOverlap(homeDeclaration.AssistantProgram().Roles, project.ProgramRoles()) {
-		return grouprequirements.IndependentHomeResolution{}, errIndependentProgramHomeUnavailable
+	switch {
+	case !providerFound:
+		return grouprequirements.IndependentHomeResolution{}, grouprequirements.ErrHomeProviderNotInstalled
+	case !providerEnabled:
+		return grouprequirements.IndependentHomeResolution{}, grouprequirements.ErrHomeProviderDisabled
+	case homeInstall == nil || homeDeclaration == nil || roleIDsOverlap(homeDeclaration.AssistantProgram().Roles, project.ProgramRoles()):
+		return grouprequirements.IndependentHomeResolution{}, grouprequirements.ErrHomeProviderIncompatible
 	}
 	homeOwner := &workspace.AssistantProgramHomeOwner{
 		PluginID: homeInstall.Name, PluginVersion: homeInstall.Version, ProgramID: homeDeclaration.ID,

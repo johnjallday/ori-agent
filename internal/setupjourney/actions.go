@@ -254,9 +254,12 @@ type CanonicalStepRead struct {
 	WorkspaceSetup   *WorkspaceSetupProjection
 	Staffing         *StaffingProjection
 	Preparation      *projectconnection.HomePreparation
-	WorkspaceCreate  *WorkspaceCreateProjection
-	AccountConnect   *AccountConnectProjection
-	AccountLink      *AccountLinkProjection
+	// HomeProvider explains a split blueprint's missing Home provider. Only a
+	// project_connect read blocked with home_provider_missing carries it.
+	HomeProvider    *HomeProviderProjection
+	WorkspaceCreate *WorkspaceCreateProjection
+	AccountConnect  *AccountConnectProjection
+	AccountLink     *AccountLinkProjection
 	// Handoff is the quest an install quest's summary continues into. Only a
 	// summary read carries it, and only together with its continue action.
 	Handoff *QuestHandoffProjection
@@ -377,6 +380,7 @@ func (r *ReaderRegistry) read(ctx context.Context, kind specialist.SetupStepKind
 	state.WorkspaceSetup = cloneWorkspaceSetupProjection(state.WorkspaceSetup)
 	state.Staffing = cloneStaffingProjection(state.Staffing)
 	state.Preparation = cloneHomePreparation(state.Preparation)
+	state.HomeProvider = cloneHomeProviderProjection(state.HomeProvider)
 	state.WorkspaceCreate = cloneWorkspaceCreateProjection(state.WorkspaceCreate)
 	state.AccountConnect = cloneAccountConnectProjection(state.AccountConnect)
 	state.AccountLink = cloneAccountLinkProjection(state.AccountLink)
@@ -386,6 +390,10 @@ func (r *ReaderRegistry) read(ctx context.Context, kind specialist.SetupStepKind
 
 func validCanonicalRead(kind specialist.SetupStepKind, state CanonicalStepRead) bool {
 	if !validHomePreparation(state.Preparation) || (state.Preparation != nil && kind != specialist.SetupStepProjectConnect) {
+		return false
+	}
+	if !validHomeProviderProjection(state.HomeProvider) ||
+		(state.HomeProvider != nil && (kind != specialist.SetupStepProjectConnect || state.BlockedReason != ReasonHomeProviderMissing)) {
 		return false
 	}
 	if state.Complete && state.BlockedReason != "" {

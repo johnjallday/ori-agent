@@ -175,6 +175,53 @@ The preparation gate is removed. There is no preparation screen, no
 exists, the existing **Team and extras** view and the workspace open action
 work as before.
 
+### Split blueprints and the Home provider
+
+A split blueprint (one with `assistant_project` and no `assistant_program`)
+gets its Home from a separate provider plugin. The group screen resolves that
+Home through the same independent-Home join Create Workspace uses, and builds
+it with the provider's declaration and recorded provider identity.
+
+When the provider is not installed, switched off, or not compatible, the
+`project_connect` step is blocked with `home_provider_missing` ("Install the
+plugin that provides this Home, then check again.") and carries a
+`home_provider` projection: the provider plugin ID, its reviewed display name
+and minimum reviewed version when it is on the reviewed Home-provider list, the
+blueprint's qualified template ID, installed/enabled/version, the plugin
+generation, and the readiness reason, summary, detail and actions. The summary,
+detail and actions come from the Create Workspace card's own readiness
+derivation, so the two screens use the same words. The group screen shows, in
+order of priority:
+
+| State | Copy | Primary action | Also |
+| --- | --- | --- | --- |
+| Home exists | "Using your existing group: <name>. No duplicate group will be created." | **Continue** | |
+| Provider not installed, reviewed | Derivation summary and detail | **Install <name>…** | **Open Plugins**, **Check Again** |
+| Provider not installed, not reviewed | Derivation summary and detail (points to Plugins) | — | **Open Plugins**, **Check Again** |
+| Provider switched off, reviewed | Derivation summary and detail | **Enable <name>** | **Open Plugins**, **Check Again** |
+| Provider needs an update, reviewed | Derivation summary and detail | **Review update** | **Open Plugins**, **Check Again** |
+| Provider ready, no Home | "Create "<group name>", the one group for these projects. …" | **Build Group** | |
+| Read failed | "The existing setup group could not be verified. …" | **Check Again** | |
+
+A **Home provider** receipt row shows the plugin ID, its version once
+installed, and Not installed / Installed · Enabled / Installed · Switched off.
+
+Install, enable and update all use the existing
+`POST /api/project-templates/{templateID}/plugin-recovery` endpoint through the
+shared `plugin-recovery-client.js`, with the card's exact request body. Install
+and update preview first (`confirm: false`); the step then shows the release,
+the minimum reviewed version, the source and the full trust report, with
+**Install** or **Update** and **Cancel**. Enable applies at once, like the
+card, because its components were disclosed at install. One install
+confirmation installs and enables the provider. After success a toast confirms
+it ("<name> installed and enabled.", "<name> enabled." or "<name> updated.")
+and the step re-reads itself and moves on without **Check Again**. A refused confirmation (the plugin
+or its newest reviewed release changed) or a failed download shows the
+endpoint's outcome and keeps the offer; nothing was applied. **Open Plugins**
+opens the Plugins page in the same tab, and every entry point reopens the same
+saved quest in its current state. A `project_connect` step without
+`home_provider` renders exactly as before.
+
 ## REAPER release and the reviewed floor
 
 REAPER **0.6.0** is the first release that declares its quest under
@@ -303,12 +350,13 @@ or user declaration that uses the account-link kinds is rejected:
 go test ./internal/plugin ./internal/projecttemplates ./internal/setupjourney ./internal/setupjourneyhttp ./internal/specialist ./internal/reviewedintegration
 go test ./internal/hostquests ./internal/server -run 'EmailOps|HostQuest|SetupJourney|GoldenRouteTable'
 make test-js
-scripts/e2e.sh --workers=1 tests/install-quest.spec.ts tests/plugin-setup-quests.spec.ts tests/email-setup-quest.spec.ts
+scripts/e2e.sh --workers=1 tests/install-quest.spec.ts tests/plugin-setup-quests.spec.ts tests/quest-home-provider.spec.ts tests/email-setup-quest.spec.ts
 ```
 
 Browser tests mock consequence endpoints and exercise desktop/mobile discovery
 from Plugins, the picker and Templates, the install quest handoff, the
 precondition panel, Start over, shared progress, existing-group reuse,
+the Home-provider install/enable/update/unreviewed states,
 read-only plugin editors and catalog failure/retry. They do not install plugins
 or access/control REAPER. Full Go tests, ratcheted lint and scoped security
 checks remain the repository's delivery gates.

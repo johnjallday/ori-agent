@@ -1,9 +1,11 @@
 package server
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -160,6 +162,59 @@ func TestResolveIndependentProgramHomeFailsClosedForOneSidedOrStaleAuthorization
 			test.mutate(installed, &template)
 			if _, err := resolveIndependentProgramHome(installed, "local", template, true); err == nil {
 				t.Fatal("expected fail-closed resolution")
+			}
+		})
+	}
+}
+
+func TestResolveIndependentProgramHomeNamesTheRepairableProviderState(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func([]plugin.InstalledPlugin, *projecttemplates.Template) []plugin.InstalledPlugin
+		want   error
+	}{
+		{name: "provider not installed", want: grouprequirements.ErrHomeProviderNotInstalled,
+			mutate: func(installed []plugin.InstalledPlugin, _ *projecttemplates.Template) []plugin.InstalledPlugin {
+				return installed[1:]
+			}},
+		{name: "provider switched off", want: grouprequirements.ErrHomeProviderDisabled,
+			mutate: func(installed []plugin.InstalledPlugin, _ *projecttemplates.Template) []plugin.InstalledPlugin {
+				installed[0].Enabled = false
+				return installed
+			}},
+		{name: "provider does not accept the project", want: grouprequirements.ErrHomeProviderIncompatible,
+			mutate: func(installed []plugin.InstalledPlugin, _ *projecttemplates.Template) []plugin.InstalledPlugin {
+				installed[0].WorkspaceSurfaces.AssistantProgramHomes[0].AllowedProjectAttachments = nil
+				return installed
+			}},
+		{name: "provider lacks the host feature", want: grouprequirements.ErrHomeProviderIncompatible,
+			mutate: func(installed []plugin.InstalledPlugin, _ *projecttemplates.Template) []plugin.InstalledPlugin {
+				installed[0].WorkspaceSurfaces.RequiresHostFeatures = nil
+				return installed
+			}},
+		{name: "project provider is stale", want: grouprequirements.ErrIndependentHomeInvalid,
+			mutate: func(installed []plugin.InstalledPlugin, _ *projecttemplates.Template) []plugin.InstalledPlugin {
+				installed[1].Generation = 0
+				return installed
+			}},
+		{name: "two Homes match", want: grouprequirements.ErrIndependentHomeInvalid,
+			mutate: func(installed []plugin.InstalledPlugin, _ *projecttemplates.Template) []plugin.InstalledPlugin {
+				homes := installed[0].WorkspaceSurfaces.AssistantProgramHomes
+				installed[0].WorkspaceSurfaces.AssistantProgramHomes = append(homes, homes[0])
+				return installed
+			}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			installed, template := splitProgramFixture()
+			installed = test.mutate(installed, &template)
+			_, err := resolveIndependentProgramHome(installed, "local", template, true)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("error = %v, want %v", err, test.want)
+			}
+			repairable := test.want != grouprequirements.ErrIndependentHomeInvalid
+			if grouprequirements.HomeProviderRepairable(err) != repairable {
+				t.Fatalf("repairable = %v, want %v", !repairable, repairable)
 			}
 		})
 	}

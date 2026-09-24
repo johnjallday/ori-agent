@@ -164,6 +164,10 @@ func (b *ServerBuilder) initializeSetupJourney() {
 				connectionService,
 				installedProjectTemplateResolver{manager: b.pluginHandler.Manager(), userTemplates: userTemplates},
 			)
+			projectAdapter.SetHomeProviderSource(questHomeProviderSource{
+				installed: b.pluginHandler.Manager(),
+				catalog:   templateRuntimeCatalog{capabilities: b.workspaceCapabilityRegistry, runtimes: b.runtimeCapabilityRegistry},
+			})
 			readers[specialist.SetupStepProjectConnect] = projectAdapter
 		}
 	} else {

@@ -124,6 +124,7 @@ type StepProjection struct {
 	WorkspaceSetup  *WorkspaceSetupProjection          `json:"workspace_setup,omitempty"`
 	Staffing        *StaffingProjection                `json:"staffing,omitempty"`
 	Preparation     *projectconnection.HomePreparation `json:"preparation,omitempty"`
+	HomeProvider    *HomeProviderProjection            `json:"home_provider,omitempty"`
 	WorkspaceCreate *WorkspaceCreateProjection         `json:"workspace_create,omitempty"`
 	AccountConnect  *AccountConnectProjection          `json:"account_connect,omitempty"`
 	AccountLink     *AccountLinkProjection             `json:"account_link,omitempty"`
@@ -189,6 +190,7 @@ var safeGuidance = map[ReasonCode]string{
 	ReasonRuntimeSetupRequired:        "Choose and finish a supported workspace setup mode to continue.",
 	ReasonRuntimeNeedsAttention:       "The workspace setup needs attention before it is ready.",
 	ReasonHomeUnavailable:             "Ori could not verify the linked Home workspace.",
+	ReasonHomeProviderMissing:         "Install the plugin that provides this Home, then check again.",
 	ReasonStaffingRequired:            "Review the required Home and project staffing to continue.",
 	ReasonStaffingNeedsAttention:      "One or more required roles need attention.",
 
@@ -996,6 +998,7 @@ func projectionFromRun(
 			WorkspaceSetup:  cloneWorkspaceSetupProjection(reads[index].WorkspaceSetup),
 			Staffing:        cloneStaffingProjection(reads[index].Staffing),
 			Preparation:     cloneHomePreparation(reads[index].Preparation),
+			HomeProvider:    cloneHomeProviderProjection(reads[index].HomeProvider),
 			WorkspaceCreate: cloneWorkspaceCreateProjection(reads[index].WorkspaceCreate),
 			AccountConnect:  cloneAccountConnectProjection(reads[index].AccountConnect),
 			AccountLink:     cloneAccountLinkProjection(reads[index].AccountLink),

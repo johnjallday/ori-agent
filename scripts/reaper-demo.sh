@@ -343,6 +343,7 @@ capture_snapshot() {
 	python3 - "$base_url" "$destination" <<'PY'
 import json
 import sys
+import urllib.error
 import urllib.request
 
 base, destination = sys.argv[1:]
@@ -356,6 +357,14 @@ result = {}
 for key, path in paths.items():
     with urllib.request.urlopen(base + path, timeout=10) as response:
         result[key] = json.load(response)
+# The Set up REAPER quest's own read at this checkpoint. It exists only once
+# REAPER is installed, so its absence is recorded rather than treated as a
+# failure; reading it creates no Home, workspace, or plugin change.
+try:
+    with urllib.request.urlopen(base + "/api/setup-quests/reaper-plugin/reaper_setup", timeout=10) as response:
+        result["reaper_quest"] = json.load(response)
+except urllib.error.HTTPError as error:
+    result["reaper_quest"] = {"status": error.code}
 with open(destination, "w") as handle:
     json.dump(result, handle, indent=2, sort_keys=True)
 PY
