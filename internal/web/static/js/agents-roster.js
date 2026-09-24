@@ -25,15 +25,6 @@
   // and becomes a modal sheet over it. Kept in sync with the same breakpoint in
   // agents-roster.css.
   var INSPECTOR_SHEET_MAX_WIDTH = 1100;
-  var ROLES = [
-    'general',
-    'orchestrator',
-    'researcher',
-    'analyzer',
-    'synthesizer',
-    'validator',
-    'specialist'
-  ];
 
   var state = {
     agents: [],
@@ -96,11 +87,6 @@
 
   var els = {};
 
-  // OriTagInput instance for the Create panel; read back in submitCreate. The
-  // Overview tab had one too until the Inspector stopped editing — creating an
-  // agent is a creation flow, not a field editor, so it keeps its inputs.
-  var createTagsInput = null;
-
   // The personal-assistant relationship, read once on load (Mission 01, PRD
   // FR19) and again after a hire or repair attempt. `state` stays null until
   // the read answers, and when it cannot be read; either way New Agent opens
@@ -146,6 +132,7 @@
       stageFullPage: document.getElementById('stageFullPage'),
       stageFavoriteToggle: document.getElementById('stageFavoriteToggle'),
       newAgentBtn: document.getElementById('newAgentBtn'),
+      inspectorKicker: document.getElementById('inspectorKicker'),
       createPanel: document.getElementById('createPanel'),
       createBody: document.getElementById('createBody'),
       createCancel: document.getElementById('createCancel'),
@@ -278,6 +265,17 @@
     els.list.addEventListener('touchcancel', cancelLongPress);
     els.newAgentBtn.addEventListener('click', openCreate);
     els.createCancel.addEventListener('click', closeCreate);
+    // Bootstrap leaves focus on <body> when the Create Agent modal closes. Hand
+    // it back to the button that opens the modal, unless the roster has
+    // focused something since (the created agent's card, say).
+    var createModal = document.getElementById('addAgentModal');
+    if (createModal) {
+      createModal.addEventListener('hidden.bs.modal', function () {
+        if (!document.activeElement || document.activeElement === document.body) {
+          els.newAgentBtn.focus();
+        }
+      });
+    }
     els.stageDelete.addEventListener('click', onDeleteClick);
     els.stageFavoriteToggle.addEventListener('click', onStageFavoriteClick);
 
@@ -1967,6 +1965,12 @@
     if (isSheetMode() && els.inspectorClose) els.inspectorClose.focus();
   }
 
+  // The topline says what the Inspector holds: the focused agent, or the hire
+  // preset while it is open.
+  function setInspectorKicker(text) {
+    if (els.inspectorKicker) els.inspectorKicker.textContent = text;
+  }
+
   // Closing hands the reclaimed width back to the collection. It deliberately
   // does not clear the focused agent, its history entry, or the checked set —
   // reopening restores the same context (PRD FR51).
@@ -2018,8 +2022,9 @@
 
   function renderStage(name) {
     var listItem = state.byName[name];
-    state.creating = false;
-    els.createPanel.hidden = true;
+    // A card opened while the hire preset is showing takes its place. (The
+    // ordinary create is a modal, so no card click can dismiss it.)
+    if (state.creating) closeCreate();
     els.placeholder.hidden = true;
     els.stage.hidden = false;
 
@@ -2550,11 +2555,11 @@
 
   /* ---- create agent -------------------------------------------------------- */
 
-  // New Agent opens the personal-assistant preset while there is no assistant to
-  // keep (Mission 01), and the ordinary form otherwise. A press that lands
-  // before the one relationship read answers waits for it briefly, so it still
-  // opens the right form; a read that fails or never answers opens the ordinary
-  // one.
+  // New Agent opens the personal-assistant preset in the Inspector while there
+  // is no assistant to keep (Mission 01), and the shared Create Agent modal
+  // otherwise. A press that lands before the one relationship read answers
+  // waits for it briefly, so it still opens the right surface; a read that
+  // fails or never answers opens the modal.
   function openCreate() {
     if (assistant.known || !assistant.pending) {
       renderCreate(assistantCreateMode());
@@ -2570,86 +2575,67 @@
     setTimeout(open, 1500);
   }
 
-  // renderCreate shows the create panel in 'assistant' (the preset, or its
-  // reconnect / resume / blocked view) or 'standard' mode, then announces it so
-  // Ori's walkthrough can re-anchor on the freshly rendered controls.
+  // renderCreate opens the surface a create mode calls for. 'assistant' fills
+  // the Inspector's create panel with Mission 01's preset (or its reconnect /
+  // resume / blocked view) and announces it so Ori's walkthrough can anchor on
+  // the freshly rendered controls. Anything else is the ordinary create, which
+  // is the modal — including an 'assistant' request the relationship no longer
+  // has a preset for.
   function renderCreate(mode) {
+    var view = assistantPresetView();
+    if (mode !== 'assistant' || !hireApi() || view.mode === 'standard') {
+      openCreateModal();
+      return;
+    }
     state.creating = true;
     els.stage.hidden = true;
     els.placeholder.hidden = true;
     els.createPanel.hidden = false;
+    setInspectorKicker('New agent');
     // The create panel lives in the Inspector, so creating has to open it —
     // otherwise the New Agent button appears to do nothing (PRD FR4/FR65).
     openInspector(els.newAgentBtn);
-    if (mode === 'assistant') {
-      renderAssistantCreate();
-    } else {
-      mode = 'standard';
-      renderStandardCreate();
-    }
-    window.dispatchEvent(new CustomEvent('ori:agent-create-opened', { detail: { mode: mode } }));
+    if (view.mode === 'form') renderAssistantCreate(view);
+    else renderAssistantRepair(view);
+    window.dispatchEvent(
+      new CustomEvent('ori:agent-create-opened', { detail: { mode: 'assistant' } })
+    );
   }
 
-  function renderStandardCreate() {
-    els.createBody.innerHTML =
-      '<form class="stage-form" id="createForm" novalidate>' +
-      field('Name', textInput('cr-name', '', 'Unique agent name'), 'cr-name') +
-      field('Role', selectInput('cr-role', ROLES, 'general', roleLabel), 'cr-role') +
-      field('Model', textInput('cr-model', 'gpt-4o-mini'), 'cr-model') +
-      field('Description', textareaInput('cr-description', '', 3), 'cr-description') +
-      field(
-        'Favorite',
-        '<label class="check"><input id="cr-favorite" type="checkbox"> Favorited</label>'
-      ) +
-      field('Tags', '<div id="cr-tags-host"></div>', 'cr-tags-host') +
-      // The same Appearance editor the Inspector uses, in staged mode: all
-      // three sources are offered here too, and choosing one is never required
-      // — an agent created without touching this simply starts Generated
-      // (FR-4/FR-45).
-      '<div class="field field--appearance"><div class="field__control" id="cr-appearance-host"></div></div>' +
-      '</form>' +
-      '<div class="save-bar" id="savebar-create">' +
-      '<span class="save-status is-muted"></span>' +
-      '<button type="button" class="btn-ghost" id="createCancel2">Cancel</button>' +
-      '<button type="button" class="btn-primary" id="createSubmit">Create agent</button>' +
-      '</div>' +
-      // While the assistant is still unhired, the way back to Mission 01 stays
-      // one click away. Creating a plain agent changes nothing about it.
-      (assistantPresetView().mode === 'form'
-        ? '<p class="create-panel__switch"><button type="button" class="roster-linkbtn" id="cr-assistant-form">' +
-          'Hire your personal assistant instead</button></p>'
-        : '');
-    var backToAssistant = document.getElementById('cr-assistant-form');
-    if (backToAssistant) {
-      backToAssistant.addEventListener('click', function () {
-        renderCreate('assistant');
-      });
+  // The ordinary create form is the shared Create Agent modal (modals.tmpl,
+  // driven by modules/agents.js) — the same one Home and the workspace pages
+  // open — not a panel in the Inspector: that form wants more width than the
+  // Inspector column has, and a card click while it is open must not throw a
+  // half-written draft away. The Inspector keeps whatever it was showing, and
+  // the created agent is focused in the collection once the modal closes
+  // (FR65).
+  function openCreateModal() {
+    if (state.creating) closeCreate();
+    // As a sheet the Inspector covers the whole page, above the modal's layer.
+    if (isSheetMode() && state.inspectorOpen) closeInspector();
+    // Announced as a standard create so Ori's walkthrough stops pointing at a
+    // preset that is no longer on screen.
+    window.dispatchEvent(
+      new CustomEvent('ori:agent-create-opened', { detail: { mode: 'standard' } })
+    );
+    if (typeof window.showAddAgentModal !== 'function') {
+      console.error('[roster] the Create Agent modal is not available on this page');
+      return;
     }
-    createTagsInput = null;
-    var tagHost = document.getElementById('cr-tags-host');
-    if (window.OriTagInput && tagHost) {
-      createTagsInput = window.OriTagInput.createTagInput({
-        container: tagHost,
-        placeholder: 'Add tag…'
-      });
-    } else if (tagHost) {
-      tagHost.innerHTML = '<input id="cr-tags-text" type="text" placeholder="tag1, tag2">';
-    }
-    mountCreateAppearanceEditor();
-    document.getElementById('createSubmit').addEventListener('click', submitCreate);
-    document.getElementById('createCancel2').addEventListener('click', closeCreate);
-    var nameInput = document.getElementById('cr-name');
-    if (nameInput) nameInput.focus();
+    window.showAddAgentModal({
+      onCreated: function (created) {
+        reloadThenSelect(created && created.name);
+      }
+    });
   }
 
-  // The staged appearance for the create panel. Nothing is persisted before the
-  // create request succeeds, and a staged upload keeps its File until after the
-  // agent exists (FR-46).
+  // The staged appearance for the hire preset. Nothing is persisted before the
+  // hire succeeds.
   var createAppearanceEditor = null;
 
-  // options.role fixes the role instead of following the Role select (the
-  // assistant preset has none; its assistant is always an orchestrator), and
-  // options.allowedModes narrows the sources offered.
+  // options.role fixes the role (the preset has no Role select; its assistant
+  // is always an orchestrator), and options.allowedModes narrows the sources
+  // offered.
   function mountCreateAppearanceEditor(options) {
     var opts = options || {};
     var host = document.getElementById('cr-appearance-host');
@@ -2659,7 +2645,7 @@
       host: host,
       idPrefix: 'cr-appearance',
       mode: 'create',
-      agent: { name: val('cr-name'), source: 'user', role: opts.role || val('cr-role') },
+      agent: { name: val('cr-name'), source: 'user', role: opts.role || '' },
       takenCharacterIds: takenCharacterIds,
       // A new agent starts with a face suited to its role instead of a
       // monogram. It is a suggestion in the form, shown and changeable before
@@ -2679,12 +2665,6 @@
         if (createAppearanceEditor) createAppearanceEditor.setAgentName(nameInput.value);
       });
     }
-    var roleSelect = document.getElementById('cr-role');
-    if (roleSelect) {
-      roleSelect.addEventListener('change', function () {
-        if (createAppearanceEditor) createAppearanceEditor.setAgentRole(roleSelect.value);
-      });
-    }
   }
 
   // Characters already in use, so the picker can offer an unused one first.
@@ -2701,10 +2681,10 @@
 
   function closeCreate() {
     state.creating = false;
-    // Releases any object URL the staged upload was holding.
     if (createAppearanceEditor && createAppearanceEditor.destroy) createAppearanceEditor.destroy();
     createAppearanceEditor = null;
     els.createPanel.hidden = true;
+    setInspectorKicker('Selected agent');
     if (state.selected) {
       els.stage.hidden = false;
     } else {
@@ -2772,21 +2752,12 @@
     );
   }
 
-  // renderAssistantCreate fills the create panel for Mission 01: the hire
-  // preset, or — for a relationship that already has an assistant to keep — the
-  // one-button reconnect / resume view, or the blocked status with no button.
-  function renderAssistantCreate() {
+  // renderAssistantCreate fills the create panel with Mission 01's hire preset.
+  // (A relationship that already has an assistant to keep gets the one-button
+  // reconnect / resume view, or the blocked status with no button, from
+  // renderAssistantRepair instead.)
+  function renderAssistantCreate(view) {
     var api = hireApi();
-    var view = assistantPresetView();
-    if (!api || view.mode === 'standard') {
-      renderStandardCreate();
-      return;
-    }
-    if (view.mode !== 'form') {
-      renderAssistantRepair(view);
-      return;
-    }
-
     var current = assistant.state || {};
     var chosen = Array.isArray(current.focus_areas) && current.focus_areas.length;
     var selected = new Set(chosen ? current.focus_areas : []);
@@ -2807,9 +2778,9 @@
     els.createBody.innerHTML =
       '<form class="stage-form create-preset" id="createForm" novalidate>' +
       '<div class="create-preset__intro">' +
-      '<h3 class="create-preset__title">' +
+      '<h2 class="create-preset__title">' +
       esc(view.title) +
-      '</h3>' +
+      '</h2>' +
       '<p class="create-preset__lead">' +
       esc(view.message) +
       '</p>' +
@@ -2851,7 +2822,6 @@
       '<p class="create-panel__switch"><button type="button" class="roster-linkbtn" id="cr-standard-form">' +
       'Create a different kind of agent instead</button></p>';
 
-    createTagsInput = null;
     mountCreateAppearanceEditor({ role: 'orchestrator', allowedModes: ['generated', 'character'] });
 
     var nameInput = document.getElementById('cr-name');
@@ -2865,18 +2835,16 @@
     syncSubmit();
     submit.addEventListener('click', submitAssistantHire);
     document.getElementById('createCancel2').addEventListener('click', closeCreate);
-    document.getElementById('cr-standard-form').addEventListener('click', function () {
-      renderCreate('standard');
-    });
+    document.getElementById('cr-standard-form').addEventListener('click', openCreateModal);
     nameInput.focus();
   }
 
   function renderAssistantRepair(view) {
     els.createBody.innerHTML =
       '<div class="create-preset create-preset--repair" id="cr-repair">' +
-      '<h3 class="create-preset__title">' +
+      '<h2 class="create-preset__title">' +
       esc(view.title) +
-      '</h3>' +
+      '</h2>' +
       '<p class="create-preset__lead">' +
       esc(view.message) +
       '</p>' +
@@ -2884,7 +2852,6 @@
       '<div class="create-preset__error" id="createError" role="alert" tabindex="-1" hidden></div>' +
       '</div>' +
       assistantSaveBar(view.buttonLabel);
-    createTagsInput = null;
     document.getElementById('createCancel2').addEventListener('click', closeCreate);
     var submit = document.getElementById('createSubmit');
     if (submit) {
@@ -3054,147 +3021,8 @@
       });
   }
 
-  function submitCreate() {
-    var name = val('cr-name').trim();
-    var status = document.querySelector('#savebar-create .save-status');
-    if (!name) {
-      status.textContent = 'Name is required.';
-      status.className = 'save-status is-error';
-      return;
-    }
-    var crTags = createTagsInput
-      ? createTagsInput.getTags()
-      : val('cr-tags-text')
-        ? val('cr-tags-text')
-            .split(',')
-            .map(function (t) {
-              return t.trim();
-            })
-            .filter(Boolean)
-        : [];
-    var body = {
-      name: name,
-      role: val('cr-role'),
-      model: val('cr-model').trim(),
-      description: val('cr-description'),
-      tags: crTags,
-      favorite: checked('cr-favorite')
-    };
-    // Appearance is persisted in the same successful create as the rest of the
-    // configuration, so a chosen source is never lost between creating the
-    // agent and opening it (FR-45). An upload is the exception: it needs an
-    // agent to belong to, so it is a second call (FR-46).
-    var pendingFile = createAppearanceEditor ? createAppearanceEditor.pendingFile() : null;
-    if (createAppearanceEditor) body.appearance = createAppearanceEditor.createRequest();
-
-    var submit = document.getElementById('createSubmit');
-    submit.disabled = true;
-    submit.textContent = 'Creating…';
-
-    var restore = function () {
-      submit.disabled = false;
-      submit.textContent = 'Create agent';
-    };
-
-    fetch('/api/agents', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-      .then(function (r) {
-        return r
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (d) {
-            return { status: r.status, data: d };
-          });
-      })
-      .then(function (res) {
-        if (res.status < 200 || res.status >= 300) {
-          restore();
-          status.textContent =
-            (res.data && res.data.message) || 'Create failed (' + res.status + ').';
-          status.className = 'save-status is-error';
-          return;
-        }
-        if (!pendingFile) {
-          restore();
-          reloadThenSelect(name);
-          closeCreate();
-          return;
-        }
-        // The agent exists now, so the staged image finally has somewhere to
-        // go. Completion is only claimed after both calls succeed (FR-46).
-        status.textContent = 'Uploading image…';
-        status.className = 'save-status is-muted';
-        var form = new FormData();
-        form.append('image', pendingFile);
-        fetch('/api/agents/' + encodeURIComponent(name) + '/appearance/upload', {
-          method: 'POST',
-          body: form
-        })
-          .then(function (uploadRes) {
-            restore();
-            if (uploadRes.ok) {
-              reloadThenSelect(name);
-              closeCreate();
-              return;
-            }
-            reportPartialCreate(name, status);
-          })
-          .catch(function () {
-            restore();
-            reportPartialCreate(name, status);
-          });
-      })
-      .catch(function () {
-        restore();
-        status.textContent = 'Network error.';
-        status.className = 'save-status is-error';
-      });
-  }
-
-  // A create that succeeded with an upload that did not is partial success, and
-  // saying "created" would be a lie the user only discovers later. The agent is
-  // real and valid in Generated mode; the panel stays open on the same agent so
-  // the retry is one click and creates no duplicate (FR-47).
-  function reportPartialCreate(name, status) {
-    status.innerHTML =
-      esc(name) +
-      ' was created, but its image was not uploaded. The agent is valid and is ' +
-      'showing its generated appearance. ' +
-      '<button type="button" class="btn-ghost" id="cr-upload-retry">Retry upload</button>';
-    status.className = 'save-status is-error';
-    var retry = document.getElementById('cr-upload-retry');
-    if (!retry) return;
-    retry.addEventListener('click', function () {
-      var file = createAppearanceEditor && createAppearanceEditor.pendingFile();
-      if (!file) return;
-      status.textContent = 'Uploading image…';
-      status.className = 'save-status is-muted';
-      var form = new FormData();
-      form.append('image', file);
-      fetch('/api/agents/' + encodeURIComponent(name) + '/appearance/upload', {
-        method: 'POST',
-        body: form
-      })
-        .then(function (res) {
-          if (!res.ok) {
-            reportPartialCreate(name, status);
-            return;
-          }
-          reloadThenSelect(name);
-          closeCreate();
-        })
-        .catch(function () {
-          reportPartialCreate(name, status);
-        });
-    });
-  }
-
   // Reload the roster from the server, then select the named agent if present.
+  // Where the Create Agent modal lands after a create.
   function reloadThenSelect(name) {
     fetch('/api/agents/dashboard/list?sort_by=name&order=asc')
       .then(function (r) {
@@ -4847,48 +4675,11 @@
       : '<span class="field__label">' + esc(label) + '</span>';
     return '<div class="field">' + lab + '<div class="field__control">' + control + '</div></div>';
   }
-  function textInput(id, value, placeholder) {
-    return (
-      '<input id="' +
-      id +
-      '" type="text" value="' +
-      esc(value) +
-      '"' +
-      (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') +
-      '>'
-    );
-  }
-  // A read-only text input for derived values (e.g. Provider, set by the model).
-  // Kept as an <input> so the form still submits its value, but not user-editable.
-  function selectInput(id, options, value, labeler) {
-    var opts = options
-      .map(function (o) {
-        var label = labeler ? labeler(o) : o;
-        return (
-          '<option value="' +
-          esc(o) +
-          '"' +
-          (o === value ? ' selected' : '') +
-          '>' +
-          esc(label) +
-          '</option>'
-        );
-      })
-      .join('');
-    return '<select id="' + id + '">' + opts + '</select>';
-  }
-  function textareaInput(id, value, rows) {
-    return '<textarea id="' + id + '" rows="' + rows + '">' + esc(value) + '</textarea>';
-  }
   /* ---- misc helpers -------------------------------------------------------- */
 
   function val(id) {
     var el = document.getElementById(id);
     return el ? el.value : '';
-  }
-  function checked(id) {
-    var el = document.getElementById(id);
-    return !!(el && el.checked);
   }
 
   function vital(label, value) {

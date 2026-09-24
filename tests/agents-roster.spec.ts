@@ -1079,7 +1079,7 @@ test.describe('Agents single-agent editing', () => {
   // and "switching cards and tabs never raises an unsaved-changes prompt"
   // above.
 
-  test('the New Agent panel creates an agent and focuses the new definition', async ({
+  test('New Agent opens the shared Create Agent modal and focuses the new definition', async ({
     page,
     request
   }) => {
@@ -1096,18 +1096,23 @@ test.describe('Agents single-agent editing', () => {
       await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('#rosterList')).toBeVisible();
 
-      // Cancelling leaves the collection untouched.
+      // The ordinary create is the shared modal, not a panel in the Inspector.
+      // Cancelling leaves the collection and the Inspector untouched.
+      const modal = page.locator('#addAgentModal');
       await page.locator('#newAgentBtn').click();
-      await expect(page.locator('#createPanel')).toBeVisible();
-      await page.locator('#createCancel').click();
+      await expect(modal).toBeVisible();
       await expect(page.locator('#createPanel')).toBeHidden();
+      await page.locator('#cancelAgentBtn').click();
+      await expect(modal).toBeHidden();
 
       await page.locator('#newAgentBtn').click();
-      await page.locator('#cr-name').fill(name);
-      await page.locator('#cr-description').fill('Made by the create panel.');
-      await page.locator('#createSubmit').click();
+      await page.locator('#agentName').fill(name);
+      await page.locator('#agentCreateDescription').fill('Made by the Create Agent modal.');
+      await page.locator('#createAgentBtn').click();
 
-      // The created definition is focused and present in the collection (FR65).
+      // The modal closes and the created definition is focused and present in
+      // the collection, without a page reload (FR65).
+      await expect(modal).toBeHidden();
       await expect(page.locator('#stageName')).toHaveText(name);
       await expect(page.locator(`.roster-card[data-name="${name}"]`)).toBeVisible();
       await expect
