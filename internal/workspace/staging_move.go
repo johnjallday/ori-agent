@@ -117,7 +117,7 @@ func moveStagedFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(dst, data, 0o600); err != nil {
+	if err := os.WriteFile(dst, data, 0o600); err != nil { // #nosec G703 -- dst is the fixed plugin list name directly under the confirmed Workspace Directory
 		return err
 	}
 	return os.Remove(src)

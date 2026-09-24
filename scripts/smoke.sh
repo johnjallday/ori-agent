@@ -1408,6 +1408,55 @@ smoke_seed_import() {
   find "$dir/home/.agents" -maxdepth 3 | sed "s|$dir/home/||"
 }
 
+# smoke_gosec_new runs gosec over the Go packages this branch changed and
+# prints only the findings on lines it added: the ones the Security Scan's
+# code-scanning gate reports as new. It exits 1 when there are any.
+#   ./scripts/smoke.sh gosec-new [base]    (base defaults to origin/dev)
+smoke_gosec_new() {
+  local base="${2:-origin/dev}"
+  command -v gosec >/dev/null || fail "gosec is not installed"
+  local top report diff packages
+  top="$(git rev-parse --show-toplevel)" || fail "not in a git checkout"
+  report="${TMPDIR:-/tmp}/gosec-new-$$.json"
+  diff="${TMPDIR:-/tmp}/gosec-new-$$.diff"
+  packages="$(git diff --name-only --diff-filter=ACMR "$base"...HEAD -- '*.go' | xargs -n1 dirname 2>/dev/null | sort -u | sed 's|^|./|')"
+  if [[ -z "$packages" ]]; then
+    echo "no Go changes vs $base"
+    return 0
+  fi
+  git diff -U0 "$base"...HEAD -- '*.go' >"$diff"
+  # shellcheck disable=SC2086 # one package path per word
+  (cd "$top" && gosec -quiet -no-fail -fmt json -out "$report" $packages >/dev/null 2>&1)
+  local status=0
+  python3 - "$report" "$diff" "$top" <<'PY' || status=$?
+import json, os, re, sys
+
+report, diff, top = sys.argv[1:4]
+added, current = {}, None
+for line in open(diff, encoding="utf-8", errors="replace"):
+    if line.startswith("+++ "):
+        path = line[4:].strip()
+        current = path[2:] if path.startswith("b/") else None
+    elif line.startswith("@@") and current:
+        match = re.search(r"\+(\d+)(?:,(\d+))?", line)
+        start, count = int(match.group(1)), int(match.group(2) or 1)
+        added.setdefault(current, set()).update(range(start, start + count))
+issues = json.load(open(report)).get("Issues") or []
+new = []
+for issue in issues:
+    rel = os.path.relpath(issue["file"], top)
+    line = int(str(issue["line"]).split("-")[0])
+    if line in added.get(rel, ()):
+        new.append(f'{rel}:{line} {issue["rule_id"]} {issue["details"]}')
+for finding in new:
+    print(finding)
+print(f"{len(new)} new of {len(issues)} findings in the changed packages")
+sys.exit(1 if new else 0)
+PY
+  rm -f "$report" "$diff"
+  return "$status"
+}
+
 # smoke_starter waits for a running isolated server, then runs one stage of the
 # starter missions browser demo, saving screenshots under $TMPDIR/starter-demo.
 # The wait and the run were a repeated two-step shell during development; here
@@ -2777,6 +2826,7 @@ case "${1:-}" in
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 serve-split) serve_split "${2:-8931}" "${3:-split}" ;;
 seed-import) smoke_seed_import "$@" ;;
+gosec-new) smoke_gosec_new "$@" ;;
 agent-files) smoke_agent_files "$@" ;;
 agent-chat) smoke_agent_chat "$@" ;;
 seed-legacy-agents) smoke_seed_legacy_agents "$@" ;;
@@ -2831,6 +2881,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
   echo "  $0 serve-split [port] [sandbox-name]     # skills: isolated server with HOME and the data dir apart" >&2
   echo "  $0 seed-import <sandbox-dir>             # skills: fill the split sandbox's ~/.agents/skills for the import panel" >&2
+  echo "  $0 gosec-new [base]                      # gosec findings on lines this branch added (base: origin/dev)" >&2
   echo "  $0 agent-files <sandbox> <agent>         # agents in the root: mtime + sha of definition and state files" >&2
   echo "  $0 agent-chat <base-url> <agent> [text]  # agents in the root: send one chat turn to an agent" >&2
   echo "  $0 seed-legacy-agents <sandbox>          # agents in the root: pre-upgrade install (agents in the data dir)" >&2

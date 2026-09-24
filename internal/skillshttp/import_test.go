@@ -198,6 +198,12 @@ func TestImportWritesASourceFileFromTheLockFile(t *testing.T) {
 	if _, found, _ := readSkillSource(filepath.Join(f.skillsDir, "handmade")); found {
 		t.Fatal("a skill with no lock entry got a source file")
 	}
+
+	// A skill already in the Skills folder is skipped, never overwritten.
+	imported, skipped, failed := f.importNames(t, "handmade")
+	if len(imported) != 0 || len(failed) != 0 || len(skipped) != 1 || skipped[0] != "handmade" {
+		t.Fatalf("re-import: imported %v skipped %v failed %v", imported, skipped, failed)
+	}
 }
 
 func TestOneImportFailureDoesNotStopTheRest(t *testing.T) {
