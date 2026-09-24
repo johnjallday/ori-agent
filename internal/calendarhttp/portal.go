@@ -79,6 +79,16 @@ func (h *Handler) PortalSummary(w http.ResponseWriter, r *http.Request) {
 // failed, so the caller can show partial data with an honest caveat rather
 // than either hiding it or presenting it as complete.
 func (h *Handler) loadTodayEvents(ctx context.Context, gw *gatewayContext) (events []calendar.Event, dataGap bool) {
+	settings := calendar.ReadBindingSettings(gw.Binding.Config)
+	start, end := todayWindow(settings.DisplayTimeZone, nowUTC())
+	return h.loadWindowEvents(ctx, gw, start, end)
+}
+
+// loadWindowEvents is the selected-calendars loop behind loadTodayEvents, and
+// behind TodayAgenda, whose "today" can fall back to a timezone the binding does
+// not configure. It returns the connector's events as-is: the window is passed
+// to the connector, never re-applied here.
+func (h *Handler) loadWindowEvents(ctx context.Context, gw *gatewayContext, start, end time.Time) (events []calendar.Event, dataGap bool) {
 	op, mapped := gw.Mapping.Operation(calendar.OpListEvents)
 	if !mapped {
 		return nil, true
@@ -93,7 +103,6 @@ func (h *Handler) loadTodayEvents(ctx context.Context, gw *gatewayContext) (even
 		return nil, false
 	}
 
-	start, end := todayWindow(settings.DisplayTimeZone, nowUTC())
 	startStr, endStr := start.Format(time.RFC3339), end.Format(time.RFC3339)
 
 	events = make([]calendar.Event, 0, maxAgendaEvents)
