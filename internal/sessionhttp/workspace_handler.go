@@ -819,7 +819,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		if templateResolved {
 			createdTemplateID = resolvedTemplate.ID
 		}
-		h.publishWorkspaceCreated(ws.ID, ws.Name, createdTemplateID, string(ws.Kind))
+		h.publishWorkspaceCreated(ws.ID, ws.Name, createdTemplateID, string(ws.Kind), folderDigestEntryPointOf(req))
 	}
 
 	agentSeedWarnings := append(seed.Warnings, prov.agentToolWarnings...)
@@ -972,21 +972,36 @@ func (h *Handler) allowlistLocallyCreatedWorkspace(workspaceID string) {
 // the starter missions' "Start a project workspace" branch reads it to tell a
 // project apart from Personal HQ and the starter blueprints
 // (tasks/prd-starter-missions.md FR16). kind separates a group from a
-// workspace.
-func (h *Handler) publishWorkspaceCreated(workspaceID, name, templateID, kind string) {
+// workspace. entry_point is present only for a create that came from the
+// assistant's folder offer, which completes Show your assistant a folder.
+func (h *Handler) publishWorkspaceCreated(workspaceID, name, templateID, kind, entryPoint string) {
 	if h == nil || h.eventBus == nil {
 		return
+	}
+	data := map[string]any{
+		"name":        name,
+		"template_id": strings.TrimSpace(templateID),
+		"kind":        kind,
+	}
+	if entryPoint != "" {
+		data["entry_point"] = entryPoint
 	}
 	h.eventBus.Publish(agentworkspace.Event{
 		Type:        agentworkspace.EventWorkspaceCreated,
 		WorkspaceID: workspaceID,
 		Source:      "api",
-		Data: map[string]any{
-			"name":        name,
-			"template_id": strings.TrimSpace(templateID),
-			"kind":        kind,
-		},
+		Data:        data,
 	})
+}
+
+// folderDigestEntryPointOf returns the folder-offer entry point when the
+// create request named an offer through it, and "" otherwise. The label alone
+// never counts: the offer ID is what the assistant's resolve step verifies.
+func folderDigestEntryPointOf(req createWorkspaceRequest) string {
+	if strings.TrimSpace(req.FolderOfferID) == "" || strings.TrimSpace(req.EntryPoint) != folderDigestEntryPoint {
+		return ""
+	}
+	return folderDigestEntryPoint
 }
 
 // buildCreateWorkspace constructs the workspace record from a validated

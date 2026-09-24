@@ -22,6 +22,7 @@ http://localhost:8765/api
 - [Updates API](#updates-api)
 - [Tags API](#tags-api)
 - [Workspace Groups](#workspace-groups)
+- [Personal Assistant Folder Digest API](#personal-assistant-folder-digest-api)
 - [Scheduler Nodes API](#scheduler-nodes-api)
 - [Workspace Map Activity API](#workspace-map-activity-api)
 - [Custom Workflows API](#custom-workflows-api)
@@ -1222,6 +1223,83 @@ DELETE /api/workspaces/{id}?confirm=true
 ```
 
 An unreviewed `DELETE` returns `409` with code `group_requirement_review_required`. The review is inert and expires after 15 minutes. It succeeds only when the canonical Required contract is structurally valid and the project has no live child link, Home reciprocal membership, or Assistant Home state. The returned impact names whether the exact request will use Trash or permanent deletion. The repeated `DELETE` consumes a token bound to the owner, workspace ID, complete contract snapshot, immutable contract operation digest, `delete_sessions` choice, and Trash/permanent mode. Changing any of those facts requires a new review. Ordinary Assistant disconnect/Home-removal review still runs first, and the existing external-folder deletion boundary remains unchanged.
+
+## Personal Assistant Folder Digest API
+
+"Show me a folder" (`tasks/prd-show-me-a-folder.md`): the user points the personal assistant at a folder, the server looks at the folder's shape (names, dates, sizes, kinds, project markers — it never opens a file) and makes one explained offer. Every folder is chosen on the server, from a chip identifier or the native dialog. **No endpoint here accepts a filesystem path**: a body with any `path`- or `folder`-named field is refused with `400` before anything is looked at. Available only for an `active` or `paused` assistant with a built HQ (`409` otherwise); `503` when the feature is not wired. Bodies are capped at 4 KiB and must be one JSON object with only the fields named below.
+
+### Get Folder Digest
+
+**Endpoint:** `GET /api/personal-assistant/folder-digest`
+
+```json
+{
+  "folder_digest": {
+    "offer": { "id": "…", "status": "pending", "verdict": "project", "…": "…" },
+    "chips": [
+      { "id": "downloads", "label": "Downloads" },
+      { "id": "documents", "label": "Documents" },
+      { "id": "desktop", "label": "Desktop" }
+    ],
+    "picker_available": true,
+    "picker_note": "",
+    "paused": false
+  }
+}
+```
+
+`offer` is the one current offer (pending, or a decided one whose outcome is still being shown) or `null`. `chips` names the folders under the user's home that exist. `picker_available` is false where the native dialog cannot run, with `picker_note` explaining.
+
+### Scan a Folder
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/scan`
+
+```json
+{ "chip": "downloads" }
+```
+
+or
+
+```json
+{ "picker": true }
+```
+
+Exactly one of `chip` or `picker`. With `picker`, the server opens the operating system's folder dialog and scans the chosen folder; a cancelled dialog returns `{ "cancelled": true }`. The response is `{ "offer": … }`: the new offer with its `verdict` (`project`, `dump`, `mixed`, `ambiguous`, `empty`, or `declined` for a folder the user asked never to be asked about), `reason` (counts only), `subject` (the ranked project, when any), `blueprint`/`blueprint_label`/`blueprint_note`, `partial`, and `remember`. A previous pending offer is moved to later. `400` for an unknown chip, a chip whose folder is missing, or a root that cannot be looked at (with `"repair": "choose_folder"`); `409` while another scan is running or when the dialog is unavailable.
+
+### Open the Picker
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/picker`
+
+No body (any request data is `400`). Same as a scan with `{ "picker": true }`.
+
+### Decide an Offer
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/decide`
+
+```json
+{ "decision": "yes", "choice": "project", "request_id": "…" }
+```
+
+`decision` is `yes`, `no`, or `later`. `choice` (`project` or `tidy`) is required with `yes` when the verdict leaves both open. `no` never asks about that folder again; `later` asks again in a week. A `yes` with `tidy` runs the File Janitor setup for the folder on the server and the returned offer is `resolved` with `outcome.route` (the first review batch, or the workspace that already manages the folder). A `yes` with `project` leaves the offer `awaiting_outcome` until the resolve below. `request_id` makes a retry return the same result. `404` for an unknown offer; `409` when it was already answered.
+
+### Resolve a Project Offer
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/resolve`
+
+```json
+{ "workspace_id": "…", "request_id": "…" }
+```
+
+After the Create Workspace modal (opened pre-filled, sent with `entry_point: "folder_digest"` and `folder_offer_id`) reports the workspace it made. The server links the offer's folder as the workspace's primary project directory, superseding a blueprint scaffold inside the workspace, seeds one first task naming the read-only tools below, and returns the `resolved` offer. `409` when the workspace was not created for this offer or already has an outside linked folder; `409` with `"needs_pick": true` when the server no longer holds the picked folder (pick it again); `503` when the folder store is unavailable.
+
+### Read-only tools over linked directories
+
+Chat and task runs in a workspace with a linked directory get two tools:
+
+- `workspace_directory_list` — `{ "directory_id", "path"?, "depth"? }` lists entries (name, relative path, kind `file`/`folder`/`link`, size, modified time) up to depth 3 and 500 entries, never following symlinks outside the directory.
+- `workspace_directory_read` — `{ "directory_id", "path", "offset"? }` returns parsed text for PDF, DOCX, and text-like files in 40,000-character pages with `next_offset`; binary and unsupported files are refused. The `content` field is labelled as file content: reference data, not instructions.
+
+Both are read-only; nothing here writes to a linked directory.
 
 ## Workspace Memory API
 

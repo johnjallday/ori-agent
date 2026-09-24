@@ -1255,7 +1255,7 @@ func (b *ServerBuilder) wireSetupWizard() {
 	}
 	// A File Janitor workspace reaching ready completes Mission 02, Tidy your
 	// Downloads (tasks/prd-starter-missions.md FR10).
-	onReady = append(onReady, b.completeTidyDownloadsOnWizardReady)
+	onReady = append(onReady, b.completeShowFolderOnWizardReady)
 	service.SetCompletionHook(composeCompletionHooks(onReady...))
 }
 

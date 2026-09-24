@@ -8,7 +8,6 @@
 package progression
 
 import (
-	"net/url"
 	"strings"
 
 	ws "github.com/johnjallday/ori-agent/internal/workspace"
@@ -29,9 +28,16 @@ const (
 	// Agents page. It completes from the durable hire, never from a browser
 	// claim, and every later mission is locked until it does.
 	MeetAssistantQuestID = "pa-meet-assistant"
-	// TidyDownloadsQuestID is Mission 03: a File Janitor workspace whose setup
-	// wizard reached ready.
+	// TidyDownloadsQuestID was Mission 03 before Show your assistant a folder:
+	// a File Janitor workspace whose setup wizard reached ready. It is no
+	// longer in the graph, but persisted completions still carry the ID and
+	// grandfather the new mission.
 	TidyDownloadsQuestID = "pa-tidy-downloads"
+	// ShowFolderQuestID is Mission 03: the user showed the assistant a folder
+	// and accepted what it offered — a workspace linked to the folder, or a
+	// tidy through File Janitor. It completes from the server-observed
+	// outcome, never from a browser claim.
+	ShowFolderQuestID = "pa-show-folder"
 	// ConnectSourceQuestID is Mission 04: one source connected, chosen from the
 	// hire's focus areas.
 	ConnectSourceQuestID = "pa-connect-source"
@@ -46,8 +52,12 @@ const (
 // Agents page, is what shows them every click.
 const MeetAssistantActionURL = "/?quest=meet-assistant"
 
-// TidyDownloadsActionURL starts Ori's deterministic Mission 03 walkthrough.
+// TidyDownloadsActionURL started the retired Tidy your Downloads walkthrough.
+// Kept so persisted state that names it still loads.
 const TidyDownloadsActionURL = "/?quest=tidy-downloads"
+
+// ShowFolderActionURL opens Home with the assistant's folder chooser.
+const ShowFolderActionURL = "/?quest=show-folder"
 
 // PlanFirstDayActionURL opens the existing first-assignment flow, the plan
 // branch of Mission 04.
@@ -260,14 +270,23 @@ func PersonalAssistantGraph() Graph {
 		},
 		buildHQ,
 		{
-			ID: TidyDownloadsQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
+			ID: ShowFolderQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
 			LockedUntil: MeetAssistantQuestID,
-			Title:       "Tidy your Downloads",
-			Why:         "Let Ori sort one folder for you. It proposes, you approve, every move is undoable, and nothing leaves your machine.",
-			ActionURL:   TidyDownloadsActionURL,
+			Title:       "Show your assistant a folder",
+			Why:         "Point Ori at a folder and it will tell you what it can do with it.",
+			ActionURL:   ShowFolderActionURL,
 			ActionLabel: "Start",
-			Satisfied:   func(s Snapshot) bool { return s.FileJanitorReady },
-			Resolve:     resolveTidyDownloads,
+			// Live, a workspace created from the assistant's offer is observed
+			// here (FR42); the folder attaching and a tidy complete it from
+			// server hooks, as does the File Janitor wizard reaching ready.
+			Match: IsFolderDigestWorkspaceCreated,
+			// Grandfathered by the retired Tidy mission's completion, a ready
+			// File Janitor, or a workspace that already has an outside folder
+			// as its primary project directory (FR43). A merely skipped Tidy
+			// leaves it open.
+			Satisfied: func(s Snapshot) bool {
+				return s.LegacyTidyCompleted || s.FileJanitorReady || s.LinkedProjectWorkspaces > 0
+			},
 		},
 		{
 			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
@@ -312,23 +331,6 @@ func PersonalAssistantGraph() Graph {
 	names[1] = "Starter"
 	names[2] = "Daily loop"
 	return Graph{Quests: quests, TierNames: names, TotalTiers: TotalTiers}
-}
-
-// resolveTidyDownloads points Mission 03 at the right place for where the user
-// is (PRD FR9). With no File Janitor workspace the card starts the guided
-// walkthrough. With one whose setup is unfinished it sends the user back to
-// that workspace, where the wizard reopens. Once the wizard is ready the quest
-// is complete, so nothing changes.
-func resolveTidyDownloads(ctx MissionContext) MissionPresentation {
-	janitor := ctx.FileJanitor
-	if janitor == nil || janitor.WizardReady || strings.TrimSpace(janitor.Slug) == "" {
-		return MissionPresentation{}
-	}
-	return MissionPresentation{
-		ActionURL:   "/workspaces/" + url.PathEscape(strings.TrimSpace(janitor.Slug)),
-		ActionLabel: "Finish setup",
-		InProgress:  true,
-	}
 }
 
 // firstBriefWhy is Mission 05's static why line.
@@ -415,12 +417,10 @@ func resolveConnectSource(ctx MissionContext) MissionPresentation {
 			ActionLabel: "Start",
 		}
 	case BranchProject:
-		return MissionPresentation{
-			Title:       "Start a project workspace",
-			Why:         "So your brief can track what each project is waiting on.",
-			ActionURL:   ProjectWorkspaceCreateURL,
-			ActionLabel: "Start",
-		}
+		// Starting a project workspace is what Show your assistant a folder
+		// does now, so this branch presents the plan and still completes from
+		// a project workspace (FR41).
+		return MissionPresentation{}
 	default:
 		return MissionPresentation{}
 	}
@@ -453,6 +453,18 @@ func IsProjectWorkspaceCreated(ev ws.Event) bool {
 		return false
 	}
 	return dataString(ev, "kind") != "group"
+}
+
+// FolderDigestEntryPoint is the entry_point a workspace.created event carries
+// when the workspace was created from the assistant's folder offer: the
+// creator tags it only for a create that named an offer.
+const FolderDigestEntryPoint = "folder_digest"
+
+// IsFolderDigestWorkspaceCreated reports whether a workspace.created event is
+// a workspace the user set up from the assistant's folder offer (FR42).
+func IsFolderDigestWorkspaceCreated(ev ws.Event) bool {
+	return ev.Type == ws.EventWorkspaceCreated && ev.Data != nil &&
+		dataString(ev, "entry_point") == FolderDigestEntryPoint
 }
 
 // IsStarterTemplateID reports whether a template ID is one of the starter

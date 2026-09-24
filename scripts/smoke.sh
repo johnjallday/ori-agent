@@ -22,8 +22,8 @@
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
-# Starter missions (tasks/prd-starter-missions.md),
-# Retire the Agent Type field
+# Starter missions (tasks/prd-starter-missions.md), Show me a folder
+# (tasks/prd-show-me-a-folder.md): showfolder, Retire the Agent Type field
 # (tasks/prd-retire-agent-type.md), City Economy (tasks/prd-city-economy.md), Agents Page
 # UX (tasks/prd-agents-page-ux.md), Workspace
 # Planning Workflow (tasks/prd-workspace-planning-policy.md) and the
@@ -1465,7 +1465,7 @@ PY
 #   ./scripts/smoke.sh starter http://localhost:8947 tidy --sandbox="$TMPDIR/ori-smoke-starter"
 smoke_starter() {
   local stage="${3:-}"
-  [[ -n "$stage" ]] || fail "usage: $0 starter <base-url> <card|tidy|email|plan|results|states> [demo flags]"
+  [[ -n "$stage" ]] || fail "usage: $0 starter <base-url> <card|folder|email|plan|results|states> [demo flags]"
   local ready=""
   for _ in $(seq 1 30); do
     if curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/progression" | grep -q 200; then

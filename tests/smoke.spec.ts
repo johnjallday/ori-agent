@@ -652,14 +652,14 @@ test.describe('Home First Run', () => {
         optional: true
       };
       const tidy = {
-        id: 'pa-tidy-downloads',
+        id: 'pa-show-folder',
         tier: 1,
         order: 2,
         featured: true,
-        title: 'Tidy your Downloads',
-        why: 'Let Ori sort one folder for you.',
+        title: 'Show your assistant a folder',
+        why: 'Point Ori at a folder and it will tell you what it can do with it.',
         status: 'available',
-        action_url: '/?quest=tidy-downloads',
+        action_url: '/?quest=show-folder',
         action_label: 'Start',
         optional: true
       };
@@ -711,7 +711,7 @@ test.describe('Home First Run', () => {
     // The mission on the card is the only one the checklist omits.
     const rows = page.locator('[data-role="quests"] .quest-item');
     await expect(rows).toHaveCount(1);
-    await expect(rows.first()).toContainText('Tidy your Downloads');
+    await expect(rows.first()).toContainText('Show your assistant a folder');
 
     await page.setViewportSize({ width: 720, height: 800 });
     await expect(mission).toBeVisible();

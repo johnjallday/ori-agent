@@ -1,10 +1,8 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { mkdtempSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 /**
- * Starter missions, the golden path (tasks/prd-starter-missions.md).
+ * Starter missions, the golden path (tasks/prd-starter-missions.md, with
+ * Mission 03 replaced by tasks/prd-show-me-a-folder.md).
  *
  * Run against a FRESH isolated sandbox, serially:
  *   ./scripts/smoke.sh serve 8947 starter-e2e      (in another terminal)
@@ -16,21 +14,18 @@ import { join } from 'node:path';
  *
  * What only a browser proves, and so what is here:
  *   - The Quests card follows the server's missions, and Mission 03's Start
- *     opens the creator with File Janitor preselected and Ori's mark on Create.
- *   - The File Janitor setup wizard reaching ready completes Mission 03 on the
- *     server, and Home then shows Mission 04 with Mission 03 checked.
- *   - A real approved move appears on Today as "Filed 1 file into …".
+ *     opens the assistant panel on Today with the folder chooser unfolded and
+ *     the quest parameter scrubbed.
+ *   - Deferring Mission 03 moves the card on to Mission 04.
  *   - The first-day plan completes Mission 04.
  * Mission 01 (Meet your assistant) is the hire, made here through the API;
- * tests/personal-assistant-foundation.spec.ts drives it in the browser.
- *
- * The one thing mocked is the operating system's folder dialog: its endpoint
- * answers with a throwaway fixture path, and every request after it is real.
+ * tests/personal-assistant-foundation.spec.ts drives it in the browser. The
+ * rest of Mission 03 — a scan, an offer, a workspace linked to the folder or a
+ * tidy — needs folders under the server's own HOME, which
+ * `scripts/smoke.sh showfolder` seeds and drives.
  */
 
 test.describe.configure({ mode: 'serial' });
-
-const OLD = new Date(Date.now() - 6 * 60 * 60 * 1000);
 
 // Messages the app logs on any fresh sandbox, unrelated to this feature: the
 // update checker has no network, and some pages probe resources a fresh
@@ -46,19 +41,6 @@ function watchErrors(page: Page): string[] {
     if (!KNOWN_NOISE.some(pattern => pattern.test(text))) errors.push(`console: ${text}`);
   });
   return errors;
-}
-
-function fixtureFolder(files: string[]): string {
-  const root = mkdtempSync(join(tmpdir(), 'starter-missions-'));
-  // The feature really moves files: never anywhere near a real Downloads folder.
-  if (!root.startsWith(tmpdir()) || root.startsWith(join(homedir(), 'Downloads'))) {
-    throw new Error(`refusing to use ${root} as a fixture`);
-  }
-  for (const name of files) {
-    writeFileSync(join(root, name), `fixture ${name}`);
-    utimesSync(join(root, name), OLD, OLD);
-  }
-  return root;
 }
 
 type Mission = { id: string; order: number; status: string; title: string; in_progress?: boolean };
@@ -90,9 +72,6 @@ async function expectNoHorizontalScroll(page: Page) {
   }));
   expect(width.page).toBeLessThanOrEqual(width.viewport + 1);
 }
-
-let janitorSlug = '';
-let janitorRoot = '';
 
 // Mission 01 (Meet your assistant) completes from the hire itself and Mission
 // 02 from Build My HQ, so the card opens on Mission 03.
@@ -129,18 +108,24 @@ test('a fresh hire with HQ sees Mission 03 on the card', async ({ page, request 
 
   const card = await openQuests(page);
   await expect(card.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 03');
-  await expect(card.locator('[data-role="first-mission-title"]')).toHaveText('Tidy your Downloads');
+  await expect(card.locator('[data-role="first-mission-title"]')).toHaveText(
+    'Show your assistant a folder'
+  );
   await expect(card.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
   await expect(card.locator('[data-role="first-mission-action"]')).toHaveAttribute(
     'href',
-    '/?quest=tidy-downloads'
+    '/?quest=show-folder'
   );
+  // No offer yet, so the card carries no inline question.
+  await expect(card.locator('[data-role="first-mission-offer"]')).toBeHidden();
   // The card's mission is the only Starter mission not repeated beneath it:
   // four of the five, Meet your assistant and Build My HQ among them, done.
   const rows = page.locator('[data-role="quests"] .quest-item');
   await expect(rows).toHaveCount(4);
   await expect(page.locator('[data-role="quests"] .quest-item-locked')).toHaveCount(0);
+  await expect(rows.filter({ hasText: 'Show your assistant a folder' })).toHaveCount(0);
   await expect(rows.filter({ hasText: 'Tidy your Downloads' })).toHaveCount(0);
+  await expect(rows.filter({ hasText: 'Start a project workspace' })).toHaveCount(0);
 
   await page.setViewportSize({ width: 400, height: 860 });
   await expect(card).toBeVisible();
@@ -148,7 +133,7 @@ test('a fresh hire with HQ sees Mission 03 on the card', async ({ page, request 
   expect(errors).toEqual([]);
 });
 
-test('Mission 03: Start guides to Create, and File Janitor setup completes it', async ({
+test('Mission 03: Start opens the folder chooser in the assistant panel', async ({
   page,
   request
 }) => {
@@ -156,135 +141,43 @@ test('Mission 03: Start guides to Create, and File Janitor setup completes it', 
   const card = await openQuests(page);
   await card.locator('[data-role="first-mission-action"]').click();
 
-  // The creator opens with File Janitor preselected and Ori explains the step.
-  const creator = page.locator('#addFolderModal');
-  await expect(creator).toBeVisible({ timeout: 15000 });
-  await expect
-    .poll(() => page.evaluate(() => window.ProjectTemplateCard?.getSelectedTemplate?.()?.id))
-    .toBe('file-janitor');
+  // The assistant panel opens on Today with the chooser unfolded; the quest
+  // parameter is scrubbed so a reload does not open it again.
+  await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible({ timeout: 15000 });
+  const chooser = page.locator('#personalAssistantFolderChooser');
+  await expect(chooser).toBeVisible({ timeout: 15000 });
+  await expect(chooser.locator('button').first()).toBeVisible();
   await expect(page).not.toHaveURL(/quest=/);
-  await expect(page.locator('#oriGuideReply')).toContainText('Step 1 of 2');
-  await expect(page.locator('#oriGuideReply')).not.toContainText('cannot point');
+  // Opening the chooser is not doing the mission.
+  expect(await missionStatus(request, 'pa-show-folder')).toBe('available');
 
-  // Walk the creator as a user does; the Team step needs its File Curator.
-  for (let i = 0; i < 6 && !(await page.locator('#createFolderBtn').isVisible()); i++) {
-    const role = page.locator(
-      '#wizardStep3:not([hidden]) #workspaceRoleRoster .ws-role-row button.btn-primary'
-    );
-    if (
-      await role
-        .first()
-        .isVisible()
-        .catch(() => false)
-    ) {
-      await role.first().click();
-      await expect(page.locator('#addAgentModal')).toBeVisible({ timeout: 10000 });
-      await page.locator('#createAgentBtn').click();
-      await expect(page.locator('#addAgentModal')).toBeHidden({ timeout: 10000 });
-      await expect(creator).toBeVisible({ timeout: 10000 });
-      continue;
-    }
-    await page.locator('#wizardNextBtn').click();
-  }
-  const create = page.locator('#createFolderBtn');
-  await expect(create).toBeVisible();
-  await expect(create).toHaveClass(/is-ori-coachmark/, { timeout: 5000 });
-
-  await create.click();
-  await expect(page).toHaveURL(/\/workspaces\/[^/?#]+/, { timeout: 30000 });
-  janitorSlug = decodeURIComponent(new URL(page.url()).pathname.split('/')[2] || '');
-  const wizard = page.locator('#setupWizardDialog');
-  await expect(wizard).toBeVisible({ timeout: 20000 });
-  await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to tidy');
-
-  // Mid-wizard, the card says so and points back here.
-  expect(await missionStatus(request, 'pa-tidy-downloads')).toBe('available');
-  const inProgress = (await missions(request)).find(m => m.id === 'pa-tidy-downloads');
-  expect(inProgress?.in_progress).toBe(true);
-
-  janitorRoot = fixtureFolder(['invoice.pdf']);
-  await page.route('**/api/folder-picker/select-path', route =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, selected: true, path: janitorRoot })
-    })
-  );
-  await page.locator('#fileJanitorWizardPick').click();
-
-  // The wizard's own primary action through automation, readiness, and summary.
-  const primary = page.locator('#setupWizardPrimary');
-  for (let i = 0; i < 8 && (await wizard.isVisible()); i++) {
-    await expect(primary).toBeEnabled({ timeout: 15000 });
-    await primary.click();
-    await page.waitForTimeout(800);
-  }
-  await expect
-    .poll(() => missionStatus(request, 'pa-tidy-downloads'), { timeout: 15000 })
-    .toBe('completed');
-
-  const home = await openQuests(page);
-  await expect(home.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 04');
-  await expect(
-    page.locator('[data-role="quests"] .quest-item.quest-item-done').filter({
-      hasText: 'Tidy your Downloads'
-    })
-  ).toHaveCount(1);
+  await page.setViewportSize({ width: 400, height: 860 });
+  await expect(chooser).toBeVisible();
+  await expectNoHorizontalScroll(page);
   expect(errors).toEqual([]);
 });
 
-test('an approved move appears on Today and links to History', async ({ page }) => {
-  test.skip(!janitorSlug || !janitorRoot, 'needs the File Janitor workspace from Mission 03');
+test('deferring Mission 03 moves the card on to Mission 04', async ({ page, request }) => {
   const errors = watchErrors(page);
+  const skipped = await request.post('/api/progression/skip', {
+    data: { quest_id: 'pa-show-folder' }
+  });
+  expect(skipped.ok(), await skipped.text()).toBeTruthy();
 
-  await page.goto(`/workspaces/${encodeURIComponent(janitorSlug)}`);
-  await page.locator('#fileJanitorCardOpen').click();
-  const consoleBody = page.locator('#fileJanitorConsoleBody');
-  await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
-  await page.locator('#fileJanitorScan').click();
-  const row = consoleBody.locator('.fj-row-item').filter({ hasText: 'invoice.pdf' });
-  await expect(row).toBeVisible({ timeout: 20000 });
-  await row.locator('.fj-select').check();
-  await page.locator('#fileJanitorApprove').click();
-  await consoleBody
-    .getByRole('button', { name: /Move|Apply|Confirm these/ })
-    .first()
-    .click();
-  await expect
-    .poll(() => existsSync(join(janitorRoot, 'Filed', 'Documents', 'invoice.pdf')), {
-      timeout: 30000
+  const card = await openQuests(page);
+  await expect(card.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 04');
+  await expect(
+    page.locator('[data-role="quests"] .quest-item').filter({
+      hasText: 'Show your assistant a folder'
     })
-    .toBe(true);
-
-  await page.goto('/');
-  await page.locator('#personalAssistantLauncher').click();
-  await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible({ timeout: 15000 });
-  const line = page
-    .locator('#personalAssistantTodayResults li')
-    .filter({ hasText: /Filed 1 file into .+\/Filed/ });
-  await expect(line).toBeVisible({ timeout: 15000 });
-  await expect(line).toContainText('Undo from History');
-
-  await page.setViewportSize({ width: 400, height: 860 });
-  await expect(line).toBeVisible();
-  await expectNoHorizontalScroll(page);
-  await page.setViewportSize({ width: 1280, height: 800 });
-
-  await line.locator('a').click();
-  await expect(page).toHaveURL(/panel=file-janitor&tab=history/);
-  await expect(page.locator('#fileJanitorConsole [data-fj-tab="history"]')).toHaveAttribute(
-    'aria-selected',
-    'true',
-    { timeout: 15000 }
-  );
-  await expect(page.getByText('Some link details were out of date')).toHaveCount(0);
+  ).toContainText('Resume');
   expect(errors).toEqual([]);
 });
 
 test('Mission 04, plan branch: the first-day plan completes it', async ({ page, request }) => {
   test.skip(
-    (await missionStatus(request, 'pa-tidy-downloads')) !== 'completed',
-    'needs Mission 03 completed by the earlier test'
+    !['completed', 'skipped'].includes(await missionStatus(request, 'pa-show-folder')),
+    'needs Mission 03 resolved by the earlier test'
   );
   const errors = watchErrors(page);
 

@@ -410,7 +410,7 @@ Mission 04.
 | --- | --- | --- | --- |
 | 01 | `pa-meet-assistant` | Meet your assistant, `/?quest=meet-assistant` | the request that makes a hire durable (`HireResult.NewlyHired`), or a repair that leaves the relationship hired; never a replay |
 | 02 | `t2-build-hq` | Build My HQ, `/?quest=build-hq` | a Personal HQ designation |
-| 03 | `pa-tidy-downloads` | Tidy your Downloads, `/?quest=tidy-downloads`, or "In progress · Finish setup" on an unfinished File Janitor workspace | a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaches ready |
+| 03 | `pa-show-folder` | Show your assistant a folder, `/?quest=show-folder`; while an offer is pending, the offer itself renders on the card with its own buttons | the folder offer's outcome — a workspace linked to the shown folder or a tidy prepared for it (`FolderDigestService.SetOnOutcome`), a `workspace.created` whose `entry_point` is `folder_digest`, or a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaching ready |
 | 04 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
 | 05 | `pa-first-brief` | Read your first Daily Brief, `/`; while open and with no model configured, adds "Add a model in Settings to generate one." | Today is first served with a Daily Brief revision for an active or paused relationship |
 
@@ -436,7 +436,7 @@ Mission 04 branches, in priority order when several focus areas match:
 | --- | --- | --- | --- |
 | email | `help_with_email` | Set up email, the host `email_ops_setup` quest; "In progress · Resume" once started | the journey's first ready (`setupjourney.Service.SetOnFirstReady`) |
 | calendar | `prepare_for_meetings` | Connect your calendar, `/?create=1&blueprint=calendar-ops` | `workspace.updated` with `mcp_binding_created` on a `calendar-ops` workspace that has a ready calendar binding |
-| project | `keep_projects_moving` | Start a project workspace, `/?create=1` | `workspace.created` from the creator whose `template_id` is blank or not `personal-ops`, `file-janitor`, `downloads-janitor`, `email-ops`, or `calendar-ops`, and which is not a group |
+| project | `keep_projects_moving` | the plan's card (starting a project workspace is what Mission 03 does now, so this branch no longer offers one) | `workspace.created` from the creator whose `template_id` is blank or not `personal-ops`, `file-janitor`, `downloads-janitor`, `email-ops`, or `calendar-ops`, and which is not a group |
 | plan | anything else, or none | Plan my first day, `/?quest=plan-first-day` | a successful first-assignment apply |
 
 The calendar branch promises "So your brief can prepare you for today's
@@ -474,11 +474,14 @@ How the card works:
   `MissionContext`. The widget shows the first mission that is neither
   completed nor skipped and lists the others beneath it. It holds no quest IDs.
 - Every completion is observed on the server. The browser never claims one.
-- Mission 03's walkthrough (`tidy-downloads-quest.js`) opens the unified creator
-  with File Janitor preselected and marks Create
-  (`create_workspace_submit`) once the creator reaches its last step. It offers
-  no panel choice, because Ori's panel sits beneath the creator's backdrop. The
-  exits are the creator's Cancel, which pauses, and the card's Do this later.
+- Mission 03's start (`show-folder-quest.js`) opens the assistant panel on
+  Today with the folder chooser unfolded and scrubs `?quest=show-folder`
+  without a history entry. It makes no request of its own and never completes
+  anything. A pending offer also renders on the mission card
+  (`progression-widget.js`, matched on the action URL
+  `personal-assistant-folder.js` exports, so the widget still holds no quest
+  IDs); its buttons run the chooser's own actions through
+  `window.PersonalAssistantFolder.act`.
 - Hooks that need the assistant, the setup journey, or Today are installed in
   `completeProgressionWiring`, after the Daily Brief phase. Wiring them with
   progression itself bound nil on a real server.
@@ -490,7 +493,63 @@ predates the starter missions gets one silent pass, recorded under the
 `starter-missions-v1` key in `ProgressionState.Reconciled`. It pays no Craft
 and survives a reset, so a reset stays a blank slate. Mission 01 has its own
 pass, `meet-assistant-v1`, with the same rules: an install that hired before the
-mission existed sees it complete, with no toast and no Craft.
+mission existed sees it complete, with no toast and no Craft. Mission 03 has
+`show-folder-v1`: a persisted `pa-tidy-downloads` completion, a ready File
+Janitor, or an active workspace whose primary project directory is a folder
+outside the workspace's own folder (a linked folder, not a blueprint scaffold)
+marks Show your assistant a folder complete. A Tidy that was only skipped leaves
+it open. `pa-tidy-downloads` itself stays out of the graph; its ID and action
+URL remain as constants so persisted state that names it still loads.
+
+## Show me a folder
+
+`tasks/prd-show-me-a-folder.md`. The assistant's first proactive act: the user
+points it at a folder, the server looks at the folder's shape, and the
+assistant makes one explained offer.
+
+- **Entry.** Today's "Show me a folder" (`personal-assistant-today.tmpl`,
+  `#personalAssistantFolder`), Mission 03's Start, or the pending offer on the
+  mission card. Only an `active` or `paused` relationship sees it.
+- **Choosing.** Chips name Downloads, Documents, and Desktop under the server's
+  home; "Pick another folder…" runs the native picker on the server
+  (`platform.ChooseFolder`, osascript). The browser never sends a filesystem
+  path: `POST /api/personal-assistant/folder-digest/scan` accepts `{chip}` or
+  `{picker: true}` and answers 400 to any `path`/`folder` key.
+- **Scan.** `internal/folderdigest` reads names, dates, sizes, and kinds with
+  `os.ReadDir`/`Lstat`; it never opens a file. Depth 3, 5,000 entries, 3 s;
+  hidden entries, `node_modules`, `Library`, `.Trash`, iCloud placeholders and
+  dataless files are skipped; symlinks are counted, not followed. Verdicts:
+  `project`, `dump`, `mixed`, `ambiguous`, `empty`, plus `declined` for a folder
+  the user asked not to be asked about. Reason lines carry counts, never
+  contents.
+- **Offer.** One pending offer per user, persisted in
+  `<HQ>/.ori/folder-digest-v1.json` with the knowledge store's discipline
+  (no-follow open, lock, temp+fsync+rename, 0600, size cap, owner check).
+  Decisions: `no` (tombstone: never asked again about that folder), `later`
+  (asked again in a week), `yes` with a `project` or `tidy` choice. Replays
+  through `request_id` return the same result.
+- **Project.** The Create Workspace modal opens pre-filled (name, the shape's
+  blueprint when installed, otherwise blank with a note); the create carries
+  `entry_point: folder_digest` and `folder_offer_id`, and
+  `POST …/offers/{id}/resolve` links the folder as the workspace's primary
+  directory (an outside linked directory, not `project_path`), superseding a
+  blueprint scaffold inside the workspace, and seeds one first task that names
+  the read-only tools. The modal's Cancel leaves the offer pending.
+- **Tidy.** The server drives the File Janitor setup coordinator with the
+  offer's folder (accept, folder intent, grant, review) and the decide response
+  carries the first review batch's route; a folder already managed opens that
+  workspace instead.
+- **Tools.** `workspace_directory_list` and `workspace_directory_read` (in
+  `chathttp`) list and read files under a workspace's linked directories,
+  symlink-safe, read-only, parsing PDF/DOCX/text through `internal/fileparser`
+  in 40,000-character pages; content is labelled as data, not instructions.
+- **Learning.** A resolved project offer proposes a reviewed `projects` fact
+  ("You are working on a project in the folder X.") and tool suggestions from
+  the marker and dominant extension under the `folder_scan` source; the
+  authority re-validates against the offer's key, the workspace's primary
+  directory, and the marker on disk, and a hidden or moved folder turns the
+  fact into "Needs review".
+- **Mission.** See Mission 03 above. Every completion is server-observed.
 
 Today's Results section also gains one `janitor_result` line per File Janitor
 workspace with applied, not-undone actions in the last 24 hours ("Filed N files

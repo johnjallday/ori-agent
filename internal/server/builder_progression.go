@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/economy"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -96,6 +99,10 @@ const starterMissionsReconcileKey = "starter-missions-v1"
 // your assistant. Never change it: a new key re-runs the pass.
 const meetAssistantReconcileKey = "meet-assistant-v1"
 
+// showFolderReconcileKey names the one-time grandfathering pass for Show your
+// assistant a folder (FR43). Never change it: a new key re-runs the pass.
+const showFolderReconcileKey = "show-folder-v1"
+
 // completeProgressionWiring installs the progression hooks whose owners are
 // built in initializeDailyBrief, then runs the one-time backfill and the
 // startup reconcile. Call it after that phase. Safe when progression was not
@@ -143,15 +150,25 @@ func (b *ServerBuilder) completeProgressionWiring() {
 			engine.Complete(progression.FirstBriefQuestID)
 		})
 	}
+	// Show your assistant a folder (Mission 03): any accepted outcome — a
+	// workspace linked to the folder or a tidy — completes it (FR42). The
+	// File Janitor wizard reaching ready completes it too, via the setup
+	// wizard hook.
+	if b.personalAssistantFolderDigest != nil {
+		b.personalAssistantFolderDigest.SetOnOutcome(func(context.Context, string, personalassistant.FolderOffer) {
+			engine.Complete(progression.ShowFolderQuestID)
+		})
+	}
 
 	// Installs whose backfill ran before the starter missions existed get one
-	// silent grandfathering pass for them (PRD FR44): a ready File Janitor, a
-	// connected source, or an existing brief shows as done, with no toast
-	// storm and no Craft paid for past work. Runs before Backfill, which covers
-	// a fresh install on its own.
+	// silent grandfathering pass for them (PRD FR44): a connected source or an
+	// existing brief shows as done, with no toast storm and no Craft paid for
+	// past work. Runs before Backfill, which covers a fresh install on its own.
+	// The pass once named Tidy your Downloads too; that mission left the graph,
+	// and the show-folder pass below reads its persisted completion instead.
 	scanner := progression.ScannerFunc(b.scanProgression)
 	if marked, err := engine.ReconcileOnce(starterMissionsReconcileKey, scanner,
-		progression.TidyDownloadsQuestID, progression.ConnectSourceQuestID, progression.FirstBriefQuestID,
+		progression.ConnectSourceQuestID, progression.FirstBriefQuestID,
 	); err != nil {
 		logger.Warn("Starter missions reconcile failed", logger.Fields{"error": err})
 	} else if marked > 0 {
@@ -163,6 +180,14 @@ func (b *ServerBuilder) completeProgressionWiring() {
 		logger.Warn("Meet your assistant reconcile failed", logger.Fields{"error": err})
 	} else if marked > 0 {
 		logger.Info("Meet your assistant grandfathered", logger.Fields{"quests": marked})
+	}
+	// Installs that finished the retired Tidy mission, or already linked an
+	// outside folder as a project, see Show your assistant a folder done
+	// (FR43). A Tidy that was only skipped stays open.
+	if marked, err := engine.ReconcileOnce(showFolderReconcileKey, scanner, progression.ShowFolderQuestID); err != nil {
+		logger.Warn("Show your assistant a folder reconcile failed", logger.Fields{"error": err})
+	} else if marked > 0 {
+		logger.Info("Show your assistant a folder grandfathered", logger.Fields{"quests": marked})
 	}
 
 	// One-time backfill so established installs are grandfathered silently.
@@ -228,10 +253,16 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 	// Mission 01: the assistant is already hired.
 	snap.AssistantHired = b.assistantHired()
 
-	// Mission 03: a File Janitor workspace whose setup already reached ready.
+	// Mission 03: a File Janitor workspace whose setup already reached ready,
+	// the retired Tidy mission's completion, or a workspace that already has
+	// an outside folder as its primary project directory.
 	if _, ready, ok := findJanitorWorkspace(b.starterWorkspaces()); ok {
 		snap.FileJanitorReady = ready
 	}
+	if b.progressionEngine != nil {
+		snap.LegacyTidyCompleted = b.progressionEngine.HasCompleted(progression.TidyDownloadsQuestID)
+	}
+	snap.LinkedProjectWorkspaces = linkedProjectWorkspaces(b.starterWorkspaces(), b.workspaceFolderPath)
 
 	// Mission 04: any source already connected, on any branch.
 	snap.EmailOpsReady = b.emailSetupEverReady()
@@ -261,6 +292,70 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 	}
 
 	return snap
+}
+
+// workspaceFolderPath returns a workspace's own folder, or "" when unknown.
+func (b *ServerBuilder) workspaceFolderPath(workspaceID string) string {
+	if b == nil || b.workspaceFileStore == nil {
+		return ""
+	}
+	path, err := b.workspaceFileStore.GetFolderPath(workspaceID)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+// linkedProjectWorkspaces counts active workspaces whose primary project
+// directory points outside the workspace's own folder — a folder the user
+// linked, as showing one does, rather than a project a blueprint scaffolded.
+func linkedProjectWorkspaces(src starterWorkspaceSource, folderPath func(workspaceID string) string) int {
+	if src == nil {
+		return 0
+	}
+	count := 0
+	for id, ws := range src.CachedWorkspaces() {
+		if ws == nil || ws.GetStatus() != workspace.StatusActive {
+			continue
+		}
+		primary, _ := ws.SharedData[projecttemplates.PrimaryDirectoryIDKey].(string)
+		if strings.TrimSpace(primary) == "" {
+			continue
+		}
+		ref, err := ws.GetDirectoryReference(strings.TrimSpace(primary))
+		if err != nil || ref == nil || strings.TrimSpace(ref.Path) == "" {
+			continue
+		}
+		own := ""
+		if folderPath != nil {
+			own = folderPath(id)
+		}
+		if own != "" && pathInsideFolder(ref.Path, own) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// pathInsideFolder reports whether path sits under folder (or is it). Both
+// are compared as they resolve on disk, so a store that recorded one through
+// a symlinked temp directory still matches.
+func pathInsideFolder(path, folder string) bool {
+	rel, err := filepath.Rel(resolvedPath(folder), resolvedPath(path))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolvedPath is the cleaned path with symlinks resolved when it exists.
+func resolvedPath(path string) string {
+	cleaned := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return resolved
+	}
+	return cleaned
 }
 
 // assistantHired reports whether the local user's relationship owns a hired

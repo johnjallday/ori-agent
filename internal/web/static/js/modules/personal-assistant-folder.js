@@ -10,6 +10,12 @@ const DIGEST_ENDPOINT = '/api/personal-assistant/folder-digest';
 
 export const FOLDER_CHIP_ICON = '\u{1F4C1}';
 
+// FOLDER_QUEST_ACTION_URL is where the "Show your assistant a folder" mission
+// card sends the user (show-folder-quest.js opens the chooser from it). The
+// Quests widget matches a mission on it to render a pending offer inline;
+// it knows no quest IDs.
+export const FOLDER_QUEST_ACTION_URL = '/?quest=show-folder';
+
 // folderActionAvailable reports whether "Show me a folder" may be offered:
 // only for a hired assistant with a built HQ, active or paused (FR1, FR52).
 export function folderActionAvailable(personalAssistant) {
@@ -176,7 +182,7 @@ export function folderOutcomeNote(offer) {
   switch (status) {
     case 'awaiting_outcome':
       return offer?.choice === 'tidy'
-        ? `Setting up a tidy of ${subject}… (outcome wired in group 5)`
+        ? `Setting up a tidy of ${subject}…`
         : `Setting up a workspace for ${subject}…`;
     case 'later':
       return 'I will ask again in a week.';
@@ -339,17 +345,7 @@ function renderOffer() {
         button.dataset.folderAction = action.id;
         button.textContent = action.label;
         button.disabled = state.busy;
-        button.addEventListener('click', () => {
-          if (action.open) {
-            openChooser();
-            return;
-          }
-          if (action.decision === 'yes' && action.choice === 'project') {
-            startProjectOutcome(action);
-            return;
-          }
-          decide(action);
-        });
+        button.addEventListener('click', () => runAction(action));
         els.actions.appendChild(button);
       });
     }
@@ -378,6 +374,32 @@ function render() {
   if (!state.available) return;
   renderChooser();
   renderOffer();
+}
+
+// runAction carries out one of the offer's actions, wherever its button was
+// pressed: the panel's card or the mission card (act below).
+function runAction(action) {
+  if (action.open) {
+    openChooser();
+    return;
+  }
+  if (action.decision === 'yes' && action.choice === 'project') {
+    startProjectOutcome(action);
+    return;
+  }
+  decide(action);
+}
+
+// act runs the current offer's action with this id, for the mission card that
+// renders the same offer inline. Returns false when there is no such action
+// to run: no offer, an offer already decided, or an unknown id.
+function act(actionId) {
+  const view = folderOfferView(state.offer);
+  if (!view.visible || view.decided) return false;
+  const action = (view.actions || []).find(candidate => candidate.id === actionId);
+  if (!action) return false;
+  runAction(action);
+  return true;
 }
 
 function openChooser() {
@@ -589,7 +611,8 @@ function init() {
   window.PersonalAssistantFolder = {
     open: openChooser,
     reload: load,
-    current: () => state.offer
+    current: () => state.offer,
+    act
   };
 }
 

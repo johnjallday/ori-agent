@@ -27,6 +27,11 @@
 // toast-suppression decisions without a DOM.
 
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+import {
+  FOLDER_QUEST_ACTION_URL,
+  folderOfferView,
+  folderOutcomeNote
+} from './personal-assistant-folder.js';
 
 export function currentTier(status) {
   return (
@@ -131,6 +136,26 @@ export function firstMissionView(status) {
     actionURL,
     showAction: !completed && !!actionURL,
     showSkip: !!quest.optional && !completed && !skipped
+  };
+}
+
+// firstMissionOfferView decides whether the assistant's folder offer renders
+// inline on the card (FR21): only while the card's mission is the one whose
+// Start opens the folder chooser, and only while that mission is open. The
+// offer's copy and actions are the chooser's own, so a user who lives in the
+// mission list answers the same question with the same buttons. A decided
+// offer keeps its outcome note until the mission moves on.
+export function firstMissionOfferView(view, offer) {
+  if (!view?.visible || view.completed || view.skipped) return { visible: false };
+  if (String(view.actionURL || '').indexOf(FOLDER_QUEST_ACTION_URL) !== 0) {
+    return { visible: false };
+  }
+  const offerView = folderOfferView(offer);
+  if (!offerView.visible) return { visible: false };
+  return {
+    ...offerView,
+    actions: offerView.decided ? [] : offerView.actions || [],
+    note: offerView.decided ? folderOutcomeNote(offer) : ''
   };
 }
 
@@ -436,11 +461,96 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
       skip.hidden = !view.showSkip;
       skip.onclick = view.showSkip ? () => skipQuest(view.questID, skip) : null;
     }
+    renderFirstMissionOffer(view);
     mission.hidden = false;
   }
 
+  // The assistant's folder offer, as last announced by personal-assistant-
+  // folder.js; undefined until it has said anything, so the card can still
+  // ask it directly on a render that comes first.
+  let folderOffer;
+
+  function currentFolderOffer() {
+    if (folderOffer !== undefined) return folderOffer;
+    const api = window.PersonalAssistantFolder;
+    return api && typeof api.current === 'function' ? api.current() || null : null;
+  }
+
+  // openFolderChooser opens the assistant panel on Today and its chooser: the
+  // same two things the mission's Start does, without a page load.
+  function openFolderChooser() {
+    const panel = window.PersonalAssistantPanel;
+    const chooser = window.PersonalAssistantFolder;
+    if (!panel || typeof panel.open !== 'function') return;
+    if (!panel.open(document.getElementById('personalAssistantLauncher'), { view: 'today' }))
+      return;
+    if (chooser && typeof chooser.open === 'function') chooser.open();
+  }
+
+  function renderFirstMissionOffer(view) {
+    const box = el('first-mission-offer');
+    if (!box) return;
+    const offer = firstMissionOfferView(view, currentFolderOffer());
+    box.hidden = !offer.visible;
+    if (!offer.visible) return;
+    box.dataset.verdict = offer.verdict;
+    box.dataset.status = offer.status;
+
+    const headline = el('first-mission-offer-headline');
+    if (headline) {
+      headline.replaceChildren();
+      offer.headline.forEach(part => {
+        if (part.strong) {
+          const strong = document.createElement('strong');
+          strong.textContent = part.text;
+          headline.appendChild(strong);
+        } else {
+          headline.append(part.text);
+        }
+      });
+    }
+    const question = el('first-mission-offer-question');
+    if (question) question.textContent = offer.decided ? offer.note : offer.question;
+    const reason = el('first-mission-offer-reason');
+    if (reason) {
+      reason.textContent = offer.reason;
+      reason.hidden = !offer.reason;
+    }
+    const actions = el('first-mission-offer-actions');
+    if (actions) {
+      actions.replaceChildren();
+      actions.hidden = !offer.actions.length;
+      offer.actions.forEach(action => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className =
+          action.style === 'primary'
+            ? 'btn btn-sm btn-primary'
+            : action.style === 'outline'
+              ? 'btn btn-sm btn-outline-secondary'
+              : 'btn btn-sm btn-link';
+        button.dataset.folderAction = action.id;
+        button.textContent = action.label;
+        button.addEventListener('click', () => {
+          if (action.open) {
+            openFolderChooser();
+            return;
+          }
+          const api = window.PersonalAssistantFolder;
+          if (api && typeof api.act === 'function') api.act(action.id);
+        });
+        actions.appendChild(button);
+      });
+    }
+  }
+
+  // The status last rendered, so the folder offer can re-render the card on
+  // its own announcements without another fetch.
+  let lastStatus = null;
+
   function render(status) {
     if (!widget) return;
+    lastStatus = status;
 
     const current = currentTier(status);
 
@@ -544,6 +654,12 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
       if (document.visibilityState === 'visible') refresh();
     });
     window.addEventListener('ori:progression-refresh', refresh);
+    // The chooser announces every offer it loads or decides; the card
+    // follows without a status fetch.
+    document.addEventListener('personal-assistant:folder-offer', event => {
+      folderOffer = event.detail?.offer || null;
+      if (lastStatus) renderFirstMission(lastStatus);
+    });
   }
 
   if (document.readyState === 'loading') {

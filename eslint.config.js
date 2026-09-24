@@ -146,6 +146,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-hq-onboarding.js',
       'internal/web/static/js/modules/personal-assistant-home.js',
       'internal/web/static/js/modules/personal-assistant-folder.js',
+      'internal/web/static/js/modules/show-folder-quest.js',
       'internal/web/static/js/modules/personal-assistant-hire.js',
       'internal/web/static/js/modules/meet-assistant-home-prompt.js',
       'internal/web/static/js/modules/ori-spotlight.js',

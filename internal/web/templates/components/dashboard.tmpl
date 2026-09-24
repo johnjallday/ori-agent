@@ -337,6 +337,14 @@
                   <div class="quest-log-first-mission-copy">
                     <h3 id="questFirstMissionTitle" class="quest-log-first-mission-title" data-role="first-mission-title">Build My HQ</h3>
                     <p class="quest-log-first-mission-why" data-role="first-mission-why"></p>
+                    <!-- Show your assistant a folder: the pending offer, rendered inline so a
+                         user who lives in the mission list never has to find the assistant panel. -->
+                    <div class="quest-log-first-mission-offer pa-specialist-offer" data-role="first-mission-offer" hidden>
+                      <p class="pa-specialist-offer__headline" data-role="first-mission-offer-headline"></p>
+                      <p class="pa-specialist-offer__question" data-role="first-mission-offer-question"></p>
+                      <p class="pa-folder__reason" data-role="first-mission-offer-reason"></p>
+                      <div class="pa-specialist-offer__actions" data-role="first-mission-offer-actions"></div>
+                    </div>
                   </div>
                   <div class="quest-log-first-mission-actions">
                     <a class="quest-log-first-mission-action" data-role="first-mission-action" href="/?focus=personal-hq">

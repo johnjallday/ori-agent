@@ -52,13 +52,18 @@ func (b *ServerBuilder) newFolderTidyRunner() folderTidyRunner {
 			}
 			return b.fileJanitorService
 		},
+		// Browser routes name the workspace by slug, never by its internal
+		// id; a workspace whose slug cannot be read gets no route, and the
+		// offer's note then stands without an "Open it" link.
 		route: func(workspaceID string) string {
-			if b != nil && b.workspaceFileStore != nil {
-				if ws, err := b.workspaceFileStore.Get(workspaceID); err == nil && ws != nil && strings.TrimSpace(ws.FolderSlug) != "" {
-					return "/workspaces/" + ws.FolderSlug + "?panel=file-janitor"
-				}
+			if b == nil || b.workspaceFileStore == nil {
+				return ""
 			}
-			return "/workspaces/" + workspaceID + "?panel=file-janitor"
+			ws, err := b.workspaceFileStore.Get(workspaceID)
+			if err != nil || ws == nil || strings.TrimSpace(ws.FolderSlug) == "" {
+				return ""
+			}
+			return "/workspaces/" + ws.FolderSlug + "?panel=file-janitor"
 		},
 	}
 }

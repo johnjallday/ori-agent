@@ -47,6 +47,13 @@ type Snapshot struct {
 	// (projected to clients as needs_hq), provisioning_hq, active, or paused.
 	// not_hired, hiring, and repair_needed never count.
 	AssistantHired bool
+	// LegacyTidyCompleted is true when the retired Tidy your Downloads mission
+	// was completed, which grandfathers Show your assistant a folder.
+	LegacyTidyCompleted bool
+	// LinkedProjectWorkspaces counts active workspaces whose primary project
+	// directory is a folder outside the workspace's own folder: a folder the
+	// user linked, not one a blueprint scaffolded.
+	LinkedProjectWorkspaces int
 	// FileJanitorReady is true when a File Janitor workspace's setup wizard has
 	// reached ready (Tidy your Downloads).
 	FileJanitorReady bool

@@ -617,6 +617,9 @@ func TestStarterQuestsCoverAFirstFarm(t *testing.T) {
 // tasks/prd-meet-your-assistant-mission.md moved it to 45: hiring the assistant
 // became Mission 01 and pays like every other starter mission (PRD §9.3), so
 // the first reward a new user sees teaches where Craft comes from.
+//
+// tasks/prd-show-me-a-folder.md kept it at 45: Show your assistant a folder
+// replaced Tidy your Downloads as Mission 03 and took over its Craft.
 func TestStarterQuestTotalIsPinned(t *testing.T) {
 	const want int64 = 45
 	if got := StarterQuestTotal(); got != want {

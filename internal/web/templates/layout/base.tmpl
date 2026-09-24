@@ -290,8 +290,9 @@
        run in document order. -->
   <script type="module" src="/js/modules/ori-spotlight.js"></script>
   <script type="module" src="/js/modules/personal-hq-quest.js"></script>
-  <!-- Mission 03's walkthrough. Inert without ?quest=tidy-downloads: no request
-       on a plain page load. -->
+  <!-- Mission 03's start: ?quest=show-folder opens the assistant's folder
+       chooser. Inert on a plain page load: no request. -->
+  <script type="module" src="/js/modules/show-folder-quest.js"></script>
   <!-- Mission 01's start on Home: Ori's briefing after onboarding, and the
        first step, the page dimmed around the Agents nav entry. Asked for by
        ?quest=meet-assistant only; a plain page load makes no request. -->
