@@ -1,0 +1,8 @@
+# A Go repository. .git is hidden and still counts as the marker.
+# Expected: project, shape code, "10 Go files, edited yesterday".
+.git/
+.git/HEAD @1d
+go.mod @2d
+main.go @1d
+internal/server_{1..9}.go @1d
+README.md @30d

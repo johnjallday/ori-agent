@@ -1,0 +1,7 @@
+# A symbolic link to a folder outside the root. The test creates ../outside
+# with a dump's worth of files; the scan must not follow the link.
+# Expected: 3 files, 1 skipped link.
+docs/a.txt @1d
+docs/b.txt @1d
+docs/c.txt @1d
+link -> ../outside
