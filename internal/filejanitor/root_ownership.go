@@ -79,6 +79,14 @@ func (s *Service) findConflictingOwner(requestingWorkspaceID, root string) (*Roo
 	return nil, false
 }
 
+// FolderOwner reports the workspace whose File Janitor already manages a
+// folder overlapping root (the same folder, an ancestor, or a descendant),
+// for callers that would rather open that workspace than start a second
+// setup (FR-49).
+func (s *Service) FolderOwner(root string) (*RootOwner, bool) {
+	return s.findConflictingOwner("", root)
+}
+
 // ensureRootAvailable refuses a folder another workspace already manages.
 //
 // It runs at setup and relink, before any grant is recorded, so a rejected

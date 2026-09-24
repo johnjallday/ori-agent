@@ -63,6 +63,7 @@ func (f *folderDigestFixture) newService() *FolderDigestService {
 			f.ids++
 			return fmt.Sprintf("offer-%d", f.ids)
 		},
+		Tidier: &fakeFolderTidier{},
 	})
 }
 
@@ -266,7 +267,8 @@ func TestFolderDigest_YesChoicesAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if yes.Status != FolderOfferAwaitingOutcome || yes.Choice != FolderChoiceTidy || !yes.Subject.IsRoot || yes.Subject.Name != "Documents" || yes.Outcome == nil || yes.Outcome.Kind != FolderChoiceTidy {
+	// A tidy runs in the same request, so the offer comes back resolved.
+	if yes.Status != FolderOfferResolved || yes.Choice != FolderChoiceTidy || !yes.Subject.IsRoot || yes.Subject.Name != "Documents" || yes.Outcome == nil || yes.Outcome.Kind != FolderChoiceTidy || yes.Outcome.WorkspaceID == "" {
 		t.Fatalf("yes=%+v", yes)
 	}
 	doc, _ := f.store.Read(ctx, "local")
@@ -276,7 +278,7 @@ func TestFolderDigest_YesChoicesAndReplay(t *testing.T) {
 	}
 
 	replay, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "req-yes"})
-	if err != nil || replay.Status != FolderOfferAwaitingOutcome || replay.Decision != FolderDecisionYes {
+	if err != nil || replay.Status != FolderOfferResolved || replay.Decision != FolderDecisionYes {
 		t.Fatalf("replay=%+v err=%v", replay, err)
 	}
 	doc, _ = f.store.Read(ctx, "local")
@@ -648,6 +650,112 @@ func TestFolderFirstTask_PerShape(t *testing.T) {
 		if description != want || !strings.Contains(details, "workspace_directory_read") {
 			t.Errorf("%q: %q / %q", shape, description, details)
 		}
+	}
+}
+
+// fakeFolderTidier records tidy requests and answers like the host runner:
+// a folder already owned opens the existing workspace, anything else gets a
+// fresh one.
+type fakeFolderTidier struct {
+	owned  map[string]string // path → workspace id already tidying it
+	calls  []FolderTidyRequest
+	fail   error
+	nextID int
+}
+
+func (f *fakeFolderTidier) TidyFolder(_ context.Context, req FolderTidyRequest) (FolderTidyResult, error) {
+	f.calls = append(f.calls, req)
+	if f.fail != nil {
+		return FolderTidyResult{}, f.fail
+	}
+	if id, ok := f.owned[req.Path]; ok {
+		return FolderTidyResult{WorkspaceID: id, Route: "/workspaces/" + id + "?panel=file-janitor", Existing: true, Note: "Another File Janitor already tidies this folder, so I opened it."}, nil
+	}
+	f.nextID++
+	id := fmt.Sprintf("janitor-%d", f.nextID)
+	if f.owned == nil {
+		f.owned = map[string]string{}
+	}
+	f.owned[req.Path] = id
+	return FolderTidyResult{WorkspaceID: id, Route: "/workspaces/" + id + "?panel=file-janitor&batch_id=batch-1", BatchID: "batch-1"}, nil
+}
+
+func TestFolderDigest_TidyRunsTheEngineAndResolvesInOneRequest(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	tidier := &fakeFolderTidier{}
+	f.service.deps.Tidier = tidier
+
+	offer, err := f.service.ScanChip(ctx, "local", "downloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, RequestID: "req-tidy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Status != FolderOfferResolved || resolved.Outcome == nil || resolved.Outcome.Kind != FolderChoiceTidy ||
+		resolved.Outcome.WorkspaceID != "janitor-1" || !strings.Contains(resolved.Outcome.Route, "batch_id=batch-1") {
+		t.Fatalf("resolved=%+v outcome=%+v", resolved, resolved.Outcome)
+	}
+	if len(tidier.calls) != 1 || tidier.calls[0].Path != filepath.Join(f.home, "Downloads") || tidier.calls[0].Name != "Downloads" || tidier.calls[0].RequestID != "req-tidy" {
+		t.Fatalf("tidy calls=%+v", tidier.calls)
+	}
+	// A retried click returns the same workspace without a second setup.
+	replay, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, RequestID: "req-tidy"})
+	if err != nil || replay.Outcome == nil || replay.Outcome.WorkspaceID != "janitor-1" || len(tidier.calls) != 1 {
+		t.Fatalf("replay=%+v err=%v calls=%d", replay, err, len(tidier.calls))
+	}
+
+	// A second tidy on the same folder (a new offer after a rescan of the
+	// same root) opens the existing workspace.
+	f.now = f.now.Add(FolderNextOfferDelay)
+	again, err := f.service.ScanChip(ctx, "local", "downloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.service.Decide(ctx, "local", again.ID, FolderDecisionInput{Decision: FolderDecisionYes, RequestID: "req-tidy-2"})
+	if err != nil || second.Outcome == nil || second.Outcome.WorkspaceID != "janitor-1" || second.Outcome.Note == "" {
+		t.Fatalf("second tidy=%+v err=%v", second, err)
+	}
+	if len(tidier.calls) != 2 {
+		t.Fatalf("calls=%d", len(tidier.calls))
+	}
+}
+
+func TestFolderDigest_TidyFailureLeavesTheOfferPending(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	tidier := &fakeFolderTidier{fail: ErrFolderOutcomeUnavailable}
+	f.service.deps.Tidier = tidier
+	offer, err := f.service.ScanChip(ctx, "local", "downloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, RequestID: "req"}); !errors.Is(err, ErrFolderOutcomeUnavailable) {
+		t.Fatalf("err=%v", err)
+	}
+	view, _ := f.service.Current(ctx, "local")
+	if view.Offer == nil || view.Offer.ID != offer.ID || view.Offer.Status != FolderOfferPending {
+		t.Fatalf("offer after failed tidy=%+v", view.Offer)
+	}
+	// The mixed offer's tidy branch sends the named project back to the queue.
+	tidier.fail = nil
+	mixed, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := f.service.Decide(ctx, "local", mixed.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceTidy, RequestID: "req-mixed"})
+	if err != nil || resolved.Status != FolderOfferResolved || !resolved.Subject.IsRoot || resolved.Outcome.Kind != FolderChoiceTidy {
+		t.Fatalf("mixed tidy=%+v err=%v", resolved, err)
+	}
+	if tidier.calls[len(tidier.calls)-1].Path != filepath.Join(f.home, "Documents") {
+		t.Fatalf("mixed tidy path=%s", tidier.calls[len(tidier.calls)-1].Path)
+	}
+	f.now = f.now.Add(FolderNextOfferDelay)
+	next, _ := f.service.Current(ctx, "local")
+	if next.Offer == nil || next.Offer.Subject.Name != "Thesis" || next.Offer.Verdict != "project" {
+		t.Fatalf("next offer after tidy=%+v", next.Offer)
 	}
 }
 

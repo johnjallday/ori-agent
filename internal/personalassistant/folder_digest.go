@@ -110,6 +110,41 @@ type FolderWorkspaceLinker interface {
 	LinkFolder(ctx context.Context, req FolderLinkRequest) (FolderLinkResult, error)
 }
 
+// FolderTidyRequest asks the host to tidy a shown folder through the File
+// Janitor engine (FR31).
+type FolderTidyRequest struct {
+	UserID  string
+	OfferID string
+	// Name is the folder's base name; Path its canonical absolute path from
+	// the offer the server holds.
+	Name string
+	Path string
+	// RequestID is the click's idempotency key, carried into the setup run.
+	RequestID string
+}
+
+// FolderTidyResult is where the tidy landed.
+type FolderTidyResult struct {
+	WorkspaceID string
+	// Route is the page to open: the first review batch, or the workspace
+	// that already manages the folder.
+	Route string
+	// Existing reports that another File Janitor workspace already owned the
+	// folder (or an ancestor), so nothing new was created (FR32).
+	Existing bool
+	// BatchID is the first review batch when a scan ran.
+	BatchID string
+	// Note is a one-line explanation shown on the offer when the outcome was
+	// not a fresh first review.
+	Note string
+}
+
+// FolderTidier runs the tidy outcome: the assistant-led File Janitor setup
+// with the folder already chosen, ending at the first review batch.
+type FolderTidier interface {
+	TidyFolder(ctx context.Context, req FolderTidyRequest) (FolderTidyResult, error)
+}
+
 // FolderDigestDeps are the seams the service is built over. Zero values
 // take production defaults except ValidateRoot, which the server supplies
 // from File Janitor's root rules.
@@ -127,6 +162,8 @@ type FolderDigestDeps struct {
 	BlueprintAvailable func(id string) bool
 	// Linker attaches the folder to the created workspace (FR28, FR30).
 	Linker FolderWorkspaceLinker
+	// Tidier runs the tidy outcome through the File Janitor engine (FR31).
+	Tidier FolderTidier
 	// OnResolved runs after a project outcome completes, for the dossier
 	// producer and the mission that observe it. Best-effort.
 	OnResolved func(ctx context.Context, userID string, offer FolderOffer)
@@ -398,6 +435,9 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	if err != nil {
 		return FolderOfferView{}, err
 	}
+	// A tidy runs its outcome before anything is recorded, so a failed setup
+	// leaves the offer pending and a retried click can try again (FR33).
+	var tidy *FolderTidyResult
 	if input.Decision == FolderDecisionYes {
 		doc, err := s.store.Read(ctx, userID)
 		if err != nil {
@@ -410,6 +450,17 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 		if receipt := doc.Receipt(input.RequestID); receipt == nil && offer.Status == FolderOfferPending {
 			if _, ok := s.rootPath(*offer); !ok {
 				return FolderOfferView{}, ErrFolderPathLost
+			}
+			choice, err := folderOfferChoice(*offer, input.Choice)
+			if err != nil {
+				return FolderOfferView{}, err
+			}
+			if choice == FolderChoiceTidy {
+				result, err := s.runTidy(ctx, userID, *offer, input.RequestID)
+				if err != nil {
+					return FolderOfferView{}, err
+				}
+				tidy = &result
 			}
 		}
 	}
@@ -459,6 +510,15 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 			if err := applyFolderChoice(offer, choice); err != nil {
 				return err
 			}
+			if tidy != nil {
+				// The tidy already ran: the offer is resolved in the same
+				// request, with the File Janitor route to open.
+				offer.Status = FolderOfferResolved
+				offer.ResolvedAt = &decided
+				offer.Outcome.WorkspaceID = tidy.WorkspaceID
+				offer.Outcome.Route = tidy.Route
+				offer.Outcome.Note = tidy.Note
+			}
 		}
 		d.Decisions = append(d.Decisions, FolderDecision{
 			OfferID: offer.ID, FolderKey: offer.FolderKey, CandidateKey: offer.Subject.Key,
@@ -473,6 +533,29 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 		return FolderOfferView{}, err
 	}
 	return s.view(result, binding.Paused), nil
+}
+
+// runTidy hands the offer's folder to the File Janitor engine (FR31, FR32).
+// The tidy's own subject is the root even for a mixed offer, whose named
+// project is the queue's business.
+func (s *FolderDigestService) runTidy(ctx context.Context, userID string, offer FolderOffer, requestID string) (FolderTidyResult, error) {
+	if s.deps.Tidier == nil {
+		return FolderTidyResult{}, ErrFolderOutcomeUnavailable
+	}
+	root, ok := s.rootPath(offer)
+	if !ok {
+		return FolderTidyResult{}, ErrFolderPathLost
+	}
+	result, err := s.deps.Tidier.TidyFolder(ctx, FolderTidyRequest{
+		UserID: userID, OfferID: offer.ID, Name: offer.FolderName, Path: root, RequestID: requestID,
+	})
+	if err != nil {
+		return FolderTidyResult{}, err
+	}
+	if strings.TrimSpace(result.WorkspaceID) == "" {
+		return FolderTidyResult{}, ErrFolderOutcomeUnavailable
+	}
+	return result, nil
 }
 
 // folderOfferChoice resolves what a yes means for the offer's verdict.

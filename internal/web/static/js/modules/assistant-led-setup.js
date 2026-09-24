@@ -348,6 +348,14 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       state.projection = null;
       return;
     }
+    // The setup journey no longer starts from this card: "Show me a folder"
+    // is the way into a tidy. The card remains only for a run already in
+    // flight, which finishes here or from the File Janitor workspace itself.
+    if (!projection.run) {
+      root.hidden = true;
+      state.projection = projection;
+      return;
+    }
     const focusedAction = doc.activeElement?.dataset?.setupAction || '';
     state.projection = projection;
     root.hidden = false;
@@ -608,19 +616,6 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     }
   }
 
-  async function startFromMission() {
-    state.explicit = true;
-    const panel = win.PersonalAssistantPanel;
-    const onHome = Boolean(doc.getElementById('personalAssistantTodayPanel'));
-    panel?.open?.(doc.getElementById('personalAssistantLauncher'), {
-      view: onHome ? 'today' : 'ask',
-      focusTab: false,
-      focusComposer: false
-    });
-    await load('', { focus: true });
-    return !root.hidden;
-  }
-
   function onRelationship(event) {
     const personalAssistant = event?.detail?.personalAssistant || null;
     state.relationshipState = String(personalAssistant?.state || '');
@@ -644,7 +639,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     else clearRefresh();
   });
   doc.addEventListener('personal-assistant:status', onRelationship);
-  return { load, act, render, startFromMission, state, els, presentation };
+  return { load, act, render, state, els, presentation };
 }
 
 let controller = null;

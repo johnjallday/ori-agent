@@ -183,9 +183,10 @@ export function folderOutcomeNote(offer) {
     case 'declined':
       return `I will not ask about ${subject} again.`;
     case 'resolved':
-      return offer?.outcome?.kind === 'tidy'
-        ? `${subject} is being tidied.`
-        : `The workspace for ${subject} is ready.`;
+      if (offer?.outcome?.kind === 'tidy') {
+        return String(offer?.outcome?.note || '').trim() || `${subject} is being tidied.`;
+      }
+      return `The workspace for ${subject} is ready.`;
     default:
       return '';
   }
@@ -485,13 +486,29 @@ async function decide(action) {
       decision: action.decision,
       choice: action.choice || ''
     });
-    if (!ok) showOfferFailure(payload);
+    if (!ok) {
+      showOfferFailure(payload);
+      return;
+    }
+    // A tidy resolves in the same request: the server ran the File Janitor
+    // setup with the folder already chosen, and the route is its first
+    // review batch (or the workspace that already manages the folder).
+    const route = tidyRouteFor(state.offer);
+    if (route && typeof window !== 'undefined') window.location.assign(route);
   } catch (_) {
     showError('That could not be saved. Try again.');
   } finally {
     state.busy = false;
     render();
   }
+}
+
+// tidyRouteFor returns the page a resolved tidy should open, or '' when the
+// offer is not a resolved tidy or the route is not a local path.
+export function tidyRouteFor(offer) {
+  if (String(offer?.status || '') !== 'resolved' || offer?.outcome?.kind !== 'tidy') return '';
+  const route = String(offer?.outcome?.route || '').trim();
+  return route.startsWith('/') && !route.startsWith('//') ? route : '';
 }
 
 // startProjectOutcome runs a project yes (FR28, FR29): the Create Workspace

@@ -34,6 +34,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 			return b.sessionHandler != nil && b.sessionHandler.BlueprintInstalled(id)
 		},
 		Linker: folderWorkspaceLinker{files: b.workspaceFileStore, sessions: b.sessionStore, tasks: b.sessionHandler},
+		Tidier: b.newFolderTidyRunner(),
 	})
 	b.personalAssistantFolderDigest = service
 	b.personalAssistantHandler.SetFolderDigest(service)
