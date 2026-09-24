@@ -187,6 +187,12 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		p.readDirectoriesTool(),
 	}
 
+	// Read-only parsed access to linked directories, only when the workspace
+	// has one (FR58). No write, move, rename, or delete counterpart exists.
+	if p.linkedDirectoriesEnabled() {
+		tools = append(tools, p.directoryListTool(), p.directoryReadTool())
+	}
+
 	// Workspace memory tools (need folder storage for MEMORY.md)
 	if p.fileStore != nil {
 		tools = append(tools, p.memoryWriteTool(), p.memoryForgetTool())
@@ -1011,8 +1017,9 @@ func (p *WorkspaceToolProvider) readFilesTool() toolapi.Tool {
 func (p *WorkspaceToolProvider) readDirectoriesTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{
-			Name:        "workspace_directories",
-			Description: "List directories referenced by the current workspace. Returns directory names and filesystem paths.",
+			Name: "workspace_directories",
+			Description: "List directories linked to the current workspace. Returns directory ids, names, and filesystem paths. " +
+				"Use the id with workspace_directory_list and workspace_directory_read to browse and read files inside one.",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -1024,17 +1031,21 @@ func (p *WorkspaceToolProvider) readDirectoriesTool() toolapi.Tool {
 				return "", fmt.Errorf("workspace not found: %w", err)
 			}
 
-			if len(ws.DirectoryReferences) == 0 {
-				return `{"directories":[],"message":"No directories in this workspace."}`, nil
-			}
-
 			items := make([]map[string]any, 0, len(ws.DirectoryReferences))
 			for _, d := range ws.DirectoryReferences {
+				// Directories with an internal purpose (a capability's sample
+				// library) are never generic file roots (FR57).
+				if strings.TrimSpace(d.Purpose) != "" {
+					continue
+				}
 				items = append(items, map[string]any{
 					"id":   d.ID,
 					"name": d.Name,
 					"path": d.Path,
 				})
+			}
+			if len(items) == 0 {
+				return `{"directories":[],"message":"No directories in this workspace."}`, nil
 			}
 			return marshalToolResponse(map[string]any{"directories": items, "total": len(items)})
 		},

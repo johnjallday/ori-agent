@@ -1559,6 +1559,50 @@ for i in range(6):
 print(f"seeded {home}/Desktop as an audio session")
 PY
     ;;
+  seed-corpus)
+    # Desktop as a corpus: a bibliography plus two small real PDFs (one page
+    # of text each, with a valid cross-reference table), for the corpus
+    # outcome and the read-only directory tools demo. Desktop is used so the
+    # corpus is a chip root. No Node is needed to read the PDFs.
+    local home="${4:-}"
+    [[ -n "$home" && -d "$home" ]] || fail "usage: $0 showfolder seed-corpus <sandbox-dir>"
+    python3 - "$home" <<'PY'
+import os, sys, time
+home = sys.argv[1]
+papers = os.path.join(home, "Desktop")
+os.makedirs(papers, exist_ok=True)
+def pdf(path, text):
+    parts = [b"%PDF-1.4\n"]
+    offsets = []
+    def obj(body):
+        offsets.append(sum(len(p) for p in parts))
+        parts.append(body.encode("latin-1"))
+    obj("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+    obj("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+    obj("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n")
+    obj("4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
+    stream = "BT /F1 12 Tf 72 720 Td (%s) Tj ET" % text
+    obj("5 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n" % (len(stream), stream))
+    xref = sum(len(p) for p in parts)
+    tail = "xref\n0 %d\n0000000000 65535 f \n" % (len(offsets) + 1)
+    for off in offsets:
+        tail += "%010d 00000 n \n" % off
+    tail += "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(offsets) + 1, xref)
+    parts.append(tail.encode("latin-1"))
+    with open(path, "wb") as f:
+        f.write(b"".join(parts))
+    at = time.time() - 3 * 86400
+    os.utime(path, (at, at))
+pdf(os.path.join(papers, "reyes-2024-tidal-memory.pdf"),
+    "Reyes 2024. Tidal memory in estuary sediments: the alkenone record shows a 1,400-year cycle.")
+pdf(os.path.join(papers, "okafor-2023-river-mouths.pdf"),
+    "Okafor 2023. River mouths as archives: grain size ratios track storm frequency since 1850.")
+with open(os.path.join(papers, "refs.bib"), "w") as f:
+    f.write("@article{reyes2024, title={Tidal memory in estuary sediments}, author={Reyes, M.}, year={2024}}\n")
+    f.write("@article{okafor2023, title={River mouths as archives}, author={Okafor, T.}, year={2023}}\n")
+print(f"seeded {papers} with refs.bib and two PDFs")
+PY
+    ;;
   hq)
     curl -s -o /dev/null -w "%{http_code} onboarding skip\n" -X POST "$BASE_URL/api/onboarding/skip"
     curl -s -o /dev/null -w "%{http_code} workspace root\n" -X POST "$BASE_URL/api/settings/workspace-root" \

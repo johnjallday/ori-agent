@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -220,7 +221,9 @@ func annotateWorkspaceEntries(store Store, basePath string, files []FileInfo) {
 	}
 }
 
-// ReadDirectoryFile reads the content of a file in a directory reference
+// ReadDirectoryFile reads the content of a file in a directory reference.
+// The path is resolved by OpenDirectoryFile, so a symbolic link that leaves
+// the directory is refused the same way ".." and absolute paths are.
 func (w *Workspace) ReadDirectoryFile(dirID string, relativePath string) ([]byte, error) {
 	dir, err := w.GetDirectoryReference(dirID)
 	if err != nil {
@@ -229,38 +232,23 @@ func (w *Workspace) ReadDirectoryFile(dirID string, relativePath string) ([]byte
 	if dir.Purpose == "sample_library" {
 		return nil, fmt.Errorf("sample library roots are available only through bounded catalog actions")
 	}
-
-	// Validate the relative path to prevent directory traversal attacks
-	if err := validateRelativePath(relativePath); err != nil {
+	if strings.TrimSpace(relativePath) == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	_, fullPath, _, err := w.OpenDirectoryFile(dirID, relativePath)
+	if err != nil {
+		if errors.Is(err, ErrDirectoryNotFound) {
+			return nil, fmt.Errorf("file not found: %s", relativePath)
+		}
 		return nil, err
 	}
-
-	// Construct the full path
-	fullPath := filepath.Join(dir.Path, relativePath)
-
-	// Verify the resolved path is still within the directory
-	absPath, err := filepath.Abs(fullPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve path: %w", err)
-	}
-	absDirPath, err := filepath.Abs(dir.Path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve directory path: %w", err)
-	}
-
-	if !strings.HasPrefix(absPath, absDirPath) {
-		return nil, fmt.Errorf("access denied: path is outside directory")
-	}
-
-	// Read the file
-	content, err := os.ReadFile(fullPath)
+	content, err := os.ReadFile(fullPath) // #nosec G304 -- resolved and contained by OpenDirectoryFile
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("file not found: %s", relativePath)
 		}
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
-
 	return content, nil
 }
 

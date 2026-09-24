@@ -44,9 +44,14 @@ func TestPruneToolsForLocal_KeepsCoreAndRanksByRelevance(t *testing.T) {
 	for _, k := range kept {
 		keptNames[k.Name] = true
 	}
-	// All five core tools survive.
+	// Every core tool that was offered survives (a workspace without a linked
+	// directory never offers the directory tools, so only offered ones count).
+	offered := map[string]bool{}
+	for _, tool := range tools {
+		offered[tool.Name] = true
+	}
 	for name := range workspaceCoreToolNames {
-		if !keptNames[name] {
+		if offered[name] && !keptNames[name] {
 			t.Fatalf("core tool %q was dropped", name)
 		}
 	}
