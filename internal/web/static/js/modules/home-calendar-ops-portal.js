@@ -1,11 +1,14 @@
 // home-calendar-ops-portal.js — the Home Calendar Ops portal (PRD FR50/FR51,
 // task 7.3). A second, independent Home orientation region: a single bounded
 // read of today's calendar via the shared Calendar Ops workspace resolver
-// (FR49), entirely separate from Daily Brief in both data source and
-// lifecycle (FR54: Daily Brief generation never gains a live Calendar Ops
-// call). Purely additive: no-op on pages without #homeCalendarOpsPortal. A
-// fetch failure hides the section rather than surfacing a broken widget
-// (FR51) -- this portal degrading must never block Home rendering.
+// (FR49), independent of Daily Brief in its lifecycle: the portal loads and
+// fails on its own. (Daily Brief generation itself now performs one bounded,
+// timed read of today's meetings through the same resolver — Issue #533
+// reversed FR54's "never a live Calendar Ops call" — but this region neither
+// waits for nor reuses it.) Purely additive: no-op on pages without
+// #homeCalendarOpsPortal. A fetch failure hides the section rather than
+// surfacing a broken widget (FR51) -- this portal degrading must never block
+// Home rendering.
 //
 // Pure rendering/decision helpers are exported (loaded as type="module",
 // mirroring home-daily-brief.js) so home-calendar-ops-portal.test.js can

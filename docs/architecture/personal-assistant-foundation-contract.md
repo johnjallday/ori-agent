@@ -439,6 +439,34 @@ Mission 04 branches, in priority order when several focus areas match:
 | project | `keep_projects_moving` | Start a project workspace, `/?create=1` | `workspace.created` from the creator whose `template_id` is blank or not `personal-ops`, `file-janitor`, `downloads-janitor`, `email-ops`, or `calendar-ops`, and which is not a group |
 | plan | anything else, or none | Plan my first day, `/?quest=plan-first-day` | a successful first-assignment apply |
 
+The calendar branch promises "So your brief can prepare you for today's
+meetings", and since Issue #533 that is what connecting delivers. Today's
+**Meetings** section and the Daily Brief's **Today's Meetings** section both
+read the connected calendar through one bounded Calendar Ops read
+(`calendarhttp.Handler.TodayAgenda`, resolved by the same FR49 resolver as the
+Home portal). The read is read-only and uses the Calendar Ops workspace's
+existing connection: no new scope, no calendar write. Today bounds it to 5
+seconds and brief generation to 8 seconds (the email source's bound). Each
+meeting carries only its time, a truncated title and location, overlap and
+back-to-back flags, and its meeting-prep status. It never carries a description,
+attendees, or links, and a private meeting has no title or location. A meeting
+row opens that meeting's drawer in the Calendar console, where "Prepare me"
+lives.
+
+| State | Today | Daily Brief |
+| --- | --- | --- |
+| Not connected | "Connect your calendar" nudge, only for hires with `prepare_for_meetings`; otherwise absent. Never makes Today partial | No section, no gap |
+| Calendar Ops workspace, connection not ready | "Finish Calendar Ops setup", routed to that workspace. Not partial | Gap: "the calendar connection needs attention, so today's meetings are not listed" |
+| Connected, meetings today | Meetings with Overlaps / Back-to-back / Prepare / Preparing… / Prep ready | Today's Meetings section; overlaps rank with waiting-for-choice items in Needs Attention, meetings without a prep note fill spare slots |
+| Connected, nothing today | "Nothing scheduled today." | "No meetings today." |
+| Read failed or timed out | Named as unavailable; Today is partial | Gap: "today's meetings could not be read"; every other section intact |
+
+Some selected calendars failing is partial on both: the readable meetings stay,
+and the brief adds the gap "some calendars could not be read".
+`internal/dailybrief/calendar_ops_boundary_test.go` pins the brief's side of
+this bound and records that FR54 ("Calendar Ops must never add a live call to
+Daily Brief generation") was reversed deliberately.
+
 How the card works:
 
 - `GET /api/progression` returns `missions`, the featured quests in order,

@@ -239,9 +239,11 @@
           </section>
 
           <!-- Calendar Ops portal: a second, independent Home orientation
-               region — a bounded read of today's calendar, separate from
-               Daily Brief in both data source and lifecycle. Populated/wired
-               by home-calendar-ops-portal.js; a fetch failure hides the whole
+               region — a bounded read of today's calendar with its own
+               lifecycle. (Daily Brief generation now makes its own bounded,
+               timed read of today's meetings — Issue #533 — and this region
+               neither waits for nor reuses it.) Populated/wired by
+               home-calendar-ops-portal.js; a fetch failure hides the whole
                section rather than surfacing a broken widget. -->
           <section id="homeCalendarOpsPortal" class="home-daily-brief home-calendar-ops-portal" data-state="loading" aria-labelledby="homeCalendarOpsPortalTitle" hidden>
             <header class="home-daily-brief-header">
