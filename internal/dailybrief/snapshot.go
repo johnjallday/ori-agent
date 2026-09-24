@@ -32,14 +32,22 @@ const (
 type SourceRef struct {
 	WorkspaceID   string    `json:"workspace_id"`
 	WorkspaceSlug string    `json:"workspace_slug,omitempty"`
-	EntityType    string    `json:"entity_type"` // task | opportunity | scheduled_task | session | email_thread
+	EntityType    string    `json:"entity_type"` // task | opportunity | scheduled_task | session | email_thread | follow_up | calendar_event
 	EntityID      string    `json:"entity_id"`
 	Timestamp     time.Time `json:"timestamp"`
 	// AccountID is set only for email_thread refs: the connected mailbox account
 	// the provider thread belongs to, needed to build a validated open route
 	// (task 4.1). Never a token — just the account's stable ID.
 	AccountID string `json:"account_id,omitempty"`
+	// CalendarID is set only for calendar_event refs: the selected calendar the
+	// meeting was read from, needed to open it in the Calendar Ops console.
+	// WorkspaceID is the Calendar Ops workspace that owns the connection.
+	CalendarID string `json:"calendar_id,omitempty"`
 }
+
+// EntityCalendarEvent is the SourceRef entity type of a meeting read through
+// the bounded Calendar Ops read (Issue #533).
+const EntityCalendarEvent = "calendar_event"
 
 // Key returns a stable string identity used for allowlist membership.
 func (r SourceRef) Key() string {

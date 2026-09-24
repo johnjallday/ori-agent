@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  MEETING_BADGES,
+  meetingsSectionView,
   needsHireBanner,
   personalAssistantLauncherCue,
   personalAssistantTodayView,
@@ -349,4 +351,152 @@ test('the offer is only open for a settled relationship that has not answered', 
       `expected ${answered} not to re-ask`
     );
   }
+});
+
+test('the meetings section is absent unless the server reports one', () => {
+  for (const meetings of [undefined, null, 'ready']) {
+    assert.equal(meetingsSectionView(meetings).visible, false);
+  }
+});
+
+test('a calendar that is not connected is a nudge to Mission 04, never an empty agenda', () => {
+  const view = meetingsSectionView({
+    state: 'not_connected',
+    health: { status: 'healthy_empty', reason: 'not_connected' },
+    setup_route: '/?create=1&blueprint=calendar-ops',
+    setup_label: 'Connect your calendar',
+    items: []
+  });
+  assert.equal(view.visible, true);
+  assert.deepEqual(view.rows, []);
+  assert.match(view.note, /Connect a calendar/);
+  assert.equal(view.noteRoute, '/?create=1&blueprint=calendar-ops');
+  assert.equal(view.noteLinkLabel, 'Connect your calendar');
+});
+
+test('a connection that needs setup routes to the workspace that owns it', () => {
+  const view = meetingsSectionView({
+    state: 'needs_setup',
+    health: { status: 'healthy_empty', reason: 'connection_not_ready' },
+    setup_route: '/workspaces/calendar-ops?panel=calendar',
+    setup_label: 'Finish Calendar Ops setup'
+  });
+  assert.match(view.note, /needs attention/);
+  assert.equal(view.noteRoute, '/workspaces/calendar-ops?panel=calendar');
+  assert.equal(view.noteLinkLabel, 'Finish Calendar Ops setup');
+});
+
+test('ready meetings render as rows with badges, counts, and the console route', () => {
+  const view = meetingsSectionView({
+    state: 'ready',
+    health: { status: 'available' },
+    route: '/workspaces/calendar-ops?panel=calendar',
+    conflict_count: 2,
+    back_to_back_count: 1,
+    more_count: 3,
+    items: [
+      {
+        id: 'design',
+        title: 'Design review',
+        detail: '11:00 AM–12:00 PM',
+        state: 'conflict',
+        route: '/workspaces/calendar-ops?calendar=primary&event=design&panel=calendar'
+      },
+      { id: 'standup', title: 'Standup', detail: '9:00–9:30 AM · Room 2', state: 'needs_prep' },
+      { id: 'lunch', title: 'Lunch', state: 'back_to_back' },
+      { id: 'prepped', title: 'Board prep', state: 'prep_ready' },
+      { id: 'running', title: 'Hiring sync', state: 'prep_pending' },
+      { id: 'private', title: 'Private event', state: '' },
+      { id: 'odd', title: 'Odd', state: 'toString' }
+    ]
+  });
+  assert.equal(view.heading, 'Meetings · 2 overlaps · 1 back-to-back');
+  assert.deepEqual(
+    view.rows.map(row => row.badge),
+    ['Overlaps', 'Prepare', 'Back-to-back', 'Prep ready', 'Preparing…', '', '']
+  );
+  assert.equal(
+    view.rows[0].route,
+    '/workspaces/calendar-ops?calendar=primary&event=design&panel=calendar'
+  );
+  assert.equal(view.rows[1].detail, '9:00–9:30 AM · Room 2');
+  assert.equal(view.note, '3 more meetings today.');
+  assert.equal(view.noteRoute, '/workspaces/calendar-ops?panel=calendar');
+  assert.equal(view.noteLinkLabel, 'Open calendar');
+  assert.equal(Object.isFrozen(MEETING_BADGES), true);
+});
+
+test('a ready calendar with nothing today says so plainly', () => {
+  const view = meetingsSectionView({
+    state: 'ready',
+    health: { status: 'healthy_empty' },
+    route: '/workspaces/calendar-ops?panel=calendar',
+    items: []
+  });
+  assert.deepEqual(
+    view.rows.map(row => [row.kind, row.title]),
+    [['status', 'Nothing scheduled today.']]
+  );
+  assert.equal(view.heading, 'Meetings');
+  assert.equal(view.note, '');
+});
+
+test('an unreadable calendar is named, never an empty day', () => {
+  const failed = meetingsSectionView({
+    state: 'unavailable',
+    health: { status: 'unavailable', reason: 'read_failed' },
+    items: []
+  });
+  assert.equal(failed.rows.length, 1);
+  assert.equal(failed.rows[0].kind, 'status');
+  assert.match(failed.rows[0].title, /could not be read/);
+  assert.doesNotMatch(failed.rows[0].title, /Nothing scheduled/);
+
+  const timedOut = meetingsSectionView({
+    state: 'unavailable',
+    health: { status: 'unavailable', reason: 'timed_out' }
+  });
+  assert.match(timedOut.rows[0].title, /did not answer in time/);
+});
+
+test('some calendars failing keeps the readable meetings behind a warning', () => {
+  const view = meetingsSectionView({
+    state: 'ready',
+    health: { status: 'partial', reason: 'some_calendars_unavailable' },
+    items: [{ id: 'standup', title: 'Standup', detail: '9:00–9:30 AM', state: '' }]
+  });
+  assert.deepEqual(
+    view.rows.map(row => row.kind),
+    ['status', 'meeting']
+  );
+  assert.match(view.rows[0].title, /Some calendars could not be read/);
+});
+
+test('meeting routes that leave the app are dropped', () => {
+  const view = meetingsSectionView({
+    state: 'ready',
+    health: { status: 'available' },
+    route: 'https://evil.example/calendar',
+    setup_route: '//evil.example',
+    items: [
+      { id: 'a', title: 'A', route: 'https://evil.example/a' },
+      { id: 'b', title: 'B', route: '//evil.example/b' },
+      { id: 'c', title: 'C', route: 'javascript:alert(1)' }
+    ]
+  });
+  assert.deepEqual(
+    view.rows.map(row => row.route),
+    ['', '', '']
+  );
+  assert.equal(view.noteRoute, '');
+  assert.equal(view.noteLinkLabel, '');
+
+  const nudge = meetingsSectionView({
+    state: 'not_connected',
+    health: { status: 'healthy_empty' },
+    setup_route: 'https://evil.example/create',
+    setup_label: 'Connect your calendar'
+  });
+  assert.equal(nudge.noteRoute, '');
+  assert.equal(nudge.noteLinkLabel, '');
 });

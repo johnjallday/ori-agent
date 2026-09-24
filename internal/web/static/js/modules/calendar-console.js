@@ -31,6 +31,17 @@
     typeof window !== 'undefined' && window.location && window.location.search
       ? new URLSearchParams(window.location.search).get('panel')
       : null;
+  // The meeting deep link Today and the Daily Brief build
+  // (?panel=calendar&event=<id>&calendar=<id>) is captured the same way, for
+  // the same reason: the sanitize pass drops these params too.
+  const initialDeepLink = (() => {
+    if (typeof window === 'undefined' || !window.location || !window.location.search) return null;
+    const params = new URLSearchParams(window.location.search);
+    const eventId = (params.get('event') || '').trim();
+    if (!eventId) return null;
+    return { eventId, calendarId: (params.get('calendar') || '').trim() };
+  })();
+  let deepLinkHandled = false;
 
   // ---------------------------------------------------------------------
   // Pure logic (no DOM) -- exported below for direct unit testing.
@@ -110,6 +121,26 @@
       }
     }
     return conflicted;
+  }
+
+  /**
+   * pickDeepLinkedEvent finds the event a meeting deep link names among the
+   * loaded agenda: the exact id on the named calendar first, else the same id
+   * on any calendar (a meeting shared across selected calendars is listed once
+   * upstream, under whichever calendar was read first). null when it is not
+   * on the loaded agenda any more.
+   */
+  function pickDeepLinkedEvent(events, eventId, calendarId) {
+    const id = String(eventId || '');
+    if (!id) return null;
+    const list = Array.isArray(events) ? events : [];
+    const sameId = list.filter(evt => evt && String(evt.id || '') === id);
+    const calendar = String(calendarId || '');
+    return (
+      (calendar && sameId.find(evt => String(evt.calendar_id || '') === calendar)) ||
+      sameId[0] ||
+      null
+    );
   }
 
   // Working-day bounds for the event-derived free-window fallback: suggesting
@@ -1313,7 +1344,54 @@
   }
 
   function handlePanelQueryParam() {
-    if (initialPanelParam === 'calendar') openCalendarTab();
+    if (initialPanelParam !== 'calendar') return;
+    whenCommandViewReady(() => {
+      openCalendarTab();
+      openDeepLinkedEvent();
+    });
+  }
+
+  // whenCommandViewReady waits for the workspace page's Command view before
+  // opening the console through it. The page sets currentWorkspaceId at the
+  // top of <body>, so this module's capabilities read can finish before the
+  // page's module script constructs window.workspaceCommand; opening then took
+  // the no-Command-view fallback, which never shows the Tools modal, and
+  // ?panel=calendar (the Home portal link, and Today's meeting links) landed
+  // on a closed console. A page with no Command view container opens at once.
+  function whenCommandViewReady(onReady) {
+    const hasCommandView =
+      typeof document !== 'undefined' && !!document.getElementById('workspaceCommandView');
+    const started = Date.now();
+    const attempt = () => {
+      const cmd = typeof window !== 'undefined' && window.workspaceCommand;
+      const ready = cmd && typeof cmd.openStatModal === 'function';
+      if (!hasCommandView || ready || Date.now() - started > 5000) {
+        onReady();
+        return;
+      }
+      setTimeout(attempt, 50);
+    };
+    attempt();
+  }
+
+  // openDeepLinkedEvent opens the meeting a Today or Daily Brief link named,
+  // once, from the day view the console already loaded for today. The drawer
+  // it opens is the ordinary one, so meeting prep ("Prepare me", the prep
+  // note) is the existing flow, not a second one. When setup is not ready the
+  // open state already explains why, so there is nothing to select.
+  function openDeepLinkedEvent() {
+    if (!initialDeepLink || deepLinkHandled || !capabilities) return;
+    deepLinkHandled = true;
+    const evt = pickDeepLinkedEvent(
+      currentEvents,
+      initialDeepLink.eventId,
+      initialDeepLink.calendarId
+    );
+    if (evt) {
+      openDetailDrawer(evt);
+      return;
+    }
+    announce("That meeting is no longer on today's agenda.");
   }
 
   function init(id) {
@@ -1366,7 +1444,8 @@
       formatTimeRangeLabel,
       dayKey,
       cssColorOrNone,
-      isPreparableEvent
+      isPreparableEvent,
+      pickDeepLinkedEvent
     },
     _internal: {
       renderAgenda,

@@ -98,7 +98,8 @@ type TodayAgenda struct {
 // connector's scope.
 //
 // Meetings are the timed and all-day events that overlap today's window,
-// sorted by start, with canceled and declined events removed. Conflict and
+// sorted by start, with canceled and declined events removed and a meeting
+// shared across selected calendars listed once (its event id is its identity). Conflict and
 // back-to-back flags are computed over the whole day before the list is cut to
 // limit, so a meeting overlapping one past the cut is still flagged.
 //
@@ -154,8 +155,15 @@ func (h *Handler) TodayAgenda(ctx context.Context, userID, fallbackTZ string, li
 		start, end time.Time
 	}
 	day := make([]dayEvent, 0, len(events))
+	seen := make(map[string]bool, len(events))
 	for _, evt := range events {
 		if evt.Canceled || strings.EqualFold(strings.TrimSpace(evt.ResponseStatus), "declined") {
+			continue
+		}
+		// One meeting on two selected calendars (a shared event) arrives
+		// twice with the same id. Keep the first calendar's copy: showing it
+		// twice would also flag it as conflicting with itself.
+		if seen[evt.ID] {
 			continue
 		}
 		evtStart, err1 := time.Parse(time.RFC3339, evt.StartTime)
@@ -168,6 +176,7 @@ func (h *Handler) TodayAgenda(ctx context.Context, userID, fallbackTZ string, li
 		if !evtEnd.After(start) || !evtStart.Before(end) {
 			continue
 		}
+		seen[evt.ID] = true
 		day = append(day, dayEvent{event: evt, start: evtStart, end: evtEnd})
 	}
 	sort.SliceStable(day, func(i, j int) bool {

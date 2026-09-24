@@ -80,6 +80,16 @@
   </section>
 
   <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
+    <!-- Today's meetings, read through the Calendar Ops workspace that owns the
+         calendar connection. Present only when the server sends a section; a
+         meeting row opens that meeting in the Calendar console, where meeting
+         prep lives. Nothing here writes to a calendar. -->
+    <section id="personalAssistantTodayMeetingsSection" class="personal-assistant-today__meetings"
+             aria-labelledby="personalAssistantTodayMeetingsTitle" hidden>
+      <h4 id="personalAssistantTodayMeetingsTitle">Meetings</h4>
+      <ul id="personalAssistantTodayMeetings"></ul>
+      <p id="personalAssistantTodayMeetingsNote" class="personal-assistant-today__meta"></p>
+    </section>
     <section aria-labelledby="personalAssistantTodayRememberedTitle">
       <h4 id="personalAssistantTodayRememberedTitle">What I’m keeping in mind</h4>
       <ul id="personalAssistantTodayRemembered"></ul>

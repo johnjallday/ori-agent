@@ -271,6 +271,22 @@ func TestTodayAgenda_ReadyButEmptyIsNotPartial(t *testing.T) {
 	})
 }
 
+func TestTodayAgenda_AMeetingOnTwoSelectedCalendarsIsListedOnce(t *testing.T) {
+	h, _, rec := newTodayAgendaHandler(t, []string{"primary", "team"}, "")
+	rec.resultFn = func(string, map[string]any) (any, error) {
+		return map[string]any{"items": []any{
+			googleItem("all-hands", "All hands", agendaClock("10:00"), agendaClock("11:00"), nil),
+		}}, nil
+	}
+	got, err := h.TodayAgenda(context.Background(), "local", "", 12)
+	if err != nil {
+		t.Fatalf("TodayAgenda: %v", err)
+	}
+	if len(got.Meetings) != 1 || got.Meetings[0].CalendarID != "primary" || got.Meetings[0].Conflict {
+		t.Fatalf("got %+v, want one all-hands from the first calendar, not a conflict with itself", got.Meetings)
+	}
+}
+
 func TestTodayAgenda_OneCalendarFailingKeepsTheOthersAndIsPartial(t *testing.T) {
 	h, _, rec := newTodayAgendaHandler(t, []string{"primary", "broken"}, "")
 	rec.resultFn = func(_ string, args map[string]any) (any, error) {

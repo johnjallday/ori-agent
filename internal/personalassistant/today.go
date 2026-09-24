@@ -181,9 +181,12 @@ type TodayProjection struct {
 	// honest to report and the section is absent rather than empty.
 	Studio          *TodayStudioProjection          `json:"studio,omitempty"`
 	SpecialistSetup *TodaySpecialistSetupProjection `json:"specialist_setup,omitempty"`
-	NextCheckIn     *time.Time                      `json:"next_check_in,omitempty"`
-	Links           TodayLinks                      `json:"links"`
-	GeneratedAt     time.Time                       `json:"generated_at"`
+	// Meetings is present only when a meeting reader is wired and there is
+	// something honest to say (see TodayMeetingsProjection).
+	Meetings    *TodayMeetingsProjection `json:"meetings,omitempty"`
+	NextCheckIn *time.Time               `json:"next_check_in,omitempty"`
+	Links       TodayLinks               `json:"links"`
+	GeneratedAt time.Time                `json:"generated_at"`
 }
 
 type todayRelationshipReader interface {
@@ -242,6 +245,7 @@ type TodayService struct {
 	followUps          todayFollowUpReader
 	setup              todaySpecialistSetupReader
 	janitorResults     JanitorResultReader
+	meetings           TodayMeetingReader
 	remembered         interface {
 		ReviewItems(context.Context, string) ([]KnowledgeReviewItem, error)
 	}
@@ -386,7 +390,8 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 	s.loadTicketsAndResults(ws, route, now, out)
 	s.loadJanitorResults(ctx, userID, now, out)
 	followUpsByRef := s.loadFollowUps(ctx, userID, relationship, now, out)
-	s.loadBrief(ctx, userID, ws.ID, route, tasksByID, followUpsByRef, out)
+	meetingsByRef := s.loadMeetings(ctx, userID, relationship, now, out)
+	s.loadBrief(ctx, userID, ws.ID, route, tasksByID, followUpsByRef, meetingsByRef, out)
 	if out.Brief.RevisionID != "" {
 		// Only the active and paused states reach this point.
 		s.noteBriefSeen(userID)
@@ -930,7 +935,7 @@ func followUpTodayItem(grounded groundedFollowUp) TodayItem {
 	}
 }
 
-func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route string, tasks map[string]workspace.Task, followUps map[string]groundedFollowUp, out *TodayProjection) {
+func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route string, tasks map[string]workspace.Task, followUps map[string]groundedFollowUp, meetings map[string]TodayItem, out *TodayProjection) {
 	out.Brief = TodayBriefProjection{Health: todayUnavailable("service_unavailable"), Items: []TodayItem{}}
 	if s.briefs == nil {
 		return
@@ -959,8 +964,19 @@ func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route
 		if len(items) >= todayBriefCap || strings.TrimSpace(title) == "" {
 			return
 		}
+		if ref.EntityType == dailybrief.EntityCalendarEvent {
+			// Meetings leave today's agenda routinely: the day rolls over under
+			// yesterday's brief, a meeting is canceled, or today's calendar read
+			// failed. A meeting ref that no longer grounds is skipped, not
+			// counted as a stale reference that would hide the whole brief.
+			if item, ok := groundedTodayItem(title, detail, ref, route, tasks, followUps, meetings); ok {
+				referenced++
+				items = append(items, item)
+			}
+			return
+		}
 		referenced++
-		item, ok := groundedTodayItem(title, detail, ref, route, tasks, followUps)
+		item, ok := groundedTodayItem(title, detail, ref, route, tasks, followUps, meetings)
 		if ok {
 			items = append(items, item)
 		} else {
@@ -996,8 +1012,11 @@ func (s *TodayService) loadBrief(ctx context.Context, userID, workspaceID, route
 	}
 }
 
-func groundedTodayItem(title, detail string, ref dailybrief.SourceRef, route string, tasks map[string]workspace.Task, followUps map[string]groundedFollowUp) (TodayItem, bool) {
+func groundedTodayItem(title, detail string, ref dailybrief.SourceRef, route string, tasks map[string]workspace.Task, followUps map[string]groundedFollowUp, meetings map[string]TodayItem) (TodayItem, bool) {
 	switch ref.EntityType {
+	case dailybrief.EntityCalendarEvent:
+		// detail is the brief's reason code; the title is the meeting's own.
+		return groundedMeetingBriefItem(detail, ref, meetings)
 	case "task":
 		task, ok := tasks[ref.EntityID]
 		if !ok || ref.WorkspaceID != task.WorkspaceID {
@@ -1064,6 +1083,13 @@ func todayOverallState(relationship *Projection, out *TodayProjection) string {
 	}
 	if out.SpecialistSetup != nil {
 		health = append(health, out.SpecialistSetup.Health)
+	}
+	// Meetings, like Studio, counts only when reported. Not connected and
+	// needs-setup are healthy-empty nudges, so only a failed or partial
+	// calendar read can make Today "partial".
+	if out.Meetings != nil {
+		health = append(health, out.Meetings.Health)
+		itemCount += len(out.Meetings.Items)
 	}
 	for _, source := range health {
 		if source.Status == TodaySectionUnavailable || source.Status == TodaySectionPartial {

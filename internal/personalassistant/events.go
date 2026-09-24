@@ -21,8 +21,12 @@ const (
 	EventPreviewCreated  EventType = "personal_assistant.preview_created"
 	EventFirstResultDone EventType = "personal_assistant.first_result_completed"
 	EventTodayViewed     EventType = "personal_assistant.today_viewed"
-	EventPaused          EventType = "personal_assistant.paused"
-	EventResumed         EventType = "personal_assistant.resumed"
+	// EventTodayCalendarRead is one Today read of today's meetings: the read's
+	// state, how many rows Today shows, and a reason code. Never a title, an
+	// event id, or a calendar id.
+	EventTodayCalendarRead EventType = "personal_assistant.today_calendar_read"
+	EventPaused            EventType = "personal_assistant.paused"
+	EventResumed           EventType = "personal_assistant.resumed"
 
 	// Guided Personal HQ Map quest lifecycle. These carry the same closed
 	// vocabulary as every other PAF event: stable IDs, closed state names,
@@ -56,6 +60,7 @@ var (
 		EventPaused: true, EventResumed: true, EventRecoverableFailure: true,
 		EventHQQuestStarted: true, EventHQQuestDeferred: true,
 		EventHQSetupStarted: true, EventHQActivated: true,
+		EventTodayCalendarRead: true,
 	}
 	eventFieldAllowlist = map[string]bool{
 		eventFieldName: true, eventFieldAssistantID: true, eventFieldWorkspaceID: true,
@@ -68,6 +73,8 @@ var (
 		"active": true, "paused": true, "repair_needed": true, "not_started": true,
 		"previewed": true, "applying": true, "completed": true, "failed": true,
 		"superseded": true,
+		// Today's calendar read.
+		"not_connected": true, "needs_setup": true, "ready": true, "unavailable": true,
 	}
 	eventReasonCodes = map[string]bool{
 		"assignment_partial": true, "hq_creation": true, "designation": true,
@@ -75,6 +82,9 @@ var (
 		"profile_creation": true, "hq_not_built": true, "hq_setup_incomplete": true,
 		// Why a walkthrough ended, as a code rather than as quest copy.
 		"user_deferred": true, "quest_resumed": true,
+		// Today's calendar read.
+		"not_connected": true, "connection_not_ready": true, "read_failed": true,
+		"timed_out": true, "some_calendars_unavailable": true,
 	}
 )
 

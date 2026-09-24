@@ -771,3 +771,127 @@ test('openCalendarTab re-renders the ready agenda when capabilities already succ
   const status = doc.getElementById('calendarConsoleStatus');
   assert.equal(status.textContent, 'UTC');
 });
+
+// --- meeting deep links from Today and the Daily Brief (Issue #533) -------
+
+test('pickDeepLinkedEvent prefers the named calendar, falls back to the id, and is null when gone', () => {
+  const events = [
+    { id: 'standup', calendar_id: 'primary' },
+    { id: 'all-hands', calendar_id: 'primary' },
+    { id: 'all-hands', calendar_id: 'team' }
+  ];
+  assert.equal(pure.pickDeepLinkedEvent(events, 'all-hands', 'team'), events[2]);
+  assert.equal(pure.pickDeepLinkedEvent(events, 'all-hands', 'other'), events[1]);
+  assert.equal(pure.pickDeepLinkedEvent(events, 'all-hands', ''), events[1]);
+  assert.equal(pure.pickDeepLinkedEvent(events, 'retro', 'primary'), null);
+  assert.equal(pure.pickDeepLinkedEvent(events, '', 'primary'), null);
+  assert.equal(pure.pickDeepLinkedEvent(null, 'standup', ''), null);
+});
+
+// loadWithDeepLink evaluates a fresh copy of the module with the given URL, so
+// its parse-time capture sees the deep link, and lets its own bootstrap run
+// against a URL-routed fetch stub until the drawer opens or it announces.
+let deepLinkLoads = 0;
+
+async function loadWithDeepLink(search, events, beforeImport = () => {}) {
+  const doc = setup();
+  const drawer = doc.getElementById('calendarConsoleDrawer');
+  const live = doc.getElementById('calendarConsoleLiveRegion');
+  drawer.hidden = true;
+  delete globalThis.window.workspaceCommand;
+  beforeImport(doc);
+  globalThis.window.location = { search };
+  globalThis.fetch = async url => {
+    const path = String(url);
+    let body = { linked: false };
+    if (path.startsWith('/api/calendar-ops/capabilities')) body = { display_time_zone: 'UTC' };
+    else if (path.startsWith('/api/calendar-ops/calendars'))
+      body = { calendars: [{ id: 'primary' }], selected_calendar_ids: ['primary'] };
+    else if (path.startsWith('/api/calendar-ops/events?'))
+      body = { events, start_time: '', end_time: '' };
+    return { ok: true, json: async () => body };
+  };
+  // A unique specifier per call: the module cache would otherwise hand back
+  // the copy an earlier test already evaluated.
+  deepLinkLoads += 1;
+  await import(`./calendar-console.js?deeplink=${deepLinkLoads}`);
+  for (let i = 0; i < 200; i++) {
+    if (live.textContent || /Prepare me/.test(drawer.textContent)) break;
+    await new Promise(r => setTimeout(r, 5));
+  }
+  return { drawer, live };
+}
+
+test('?panel=calendar waits for Command view instead of opening a console nobody can see', async () => {
+  const opened = [];
+  const { drawer } = await loadWithDeepLink(
+    '?panel=calendar&event=design&calendar=primary',
+    [
+      {
+        id: 'design',
+        calendar_id: 'primary',
+        title: 'Design review',
+        start_time: '2026-09-24T11:00:00Z',
+        end_time: '2026-09-24T12:00:00Z'
+      }
+    ],
+    doc => {
+      // The workspace page renders the Command view container, but its module
+      // script constructs window.workspaceCommand only after this console's
+      // capabilities read has already come back.
+      doc.register('workspaceCommandView');
+      setTimeout(() => {
+        globalThis.window.workspaceCommand = {
+          openStatModal: section => opened.push(['modal', section]),
+          setToolsTab: tab => opened.push(['tab', tab])
+        };
+      }, 120);
+    }
+  );
+  assert.deepEqual(opened, [
+    ['modal', 'tools'],
+    ['tab', 'calendar']
+  ]);
+  assert.match(drawer.textContent, /Design review/);
+  delete globalThis.window.workspaceCommand;
+});
+
+test('a meeting deep link opens that meeting in the drawer, with meeting prep', async () => {
+  const { drawer, live } = await loadWithDeepLink('?panel=calendar&event=design&calendar=primary', [
+    {
+      id: 'standup',
+      calendar_id: 'primary',
+      title: 'Standup',
+      start_time: '2026-09-24T09:00:00Z',
+      end_time: '2026-09-24T09:30:00Z'
+    },
+    {
+      id: 'design',
+      calendar_id: 'primary',
+      title: 'Design review',
+      start_time: '2026-09-24T11:00:00Z',
+      end_time: '2026-09-24T12:00:00Z'
+    }
+  ]);
+  assert.equal(drawer.hidden, false);
+  assert.match(drawer.textContent, /Design review/);
+  assert.match(drawer.textContent, /Prepare me/);
+  assert.equal(live.textContent, '');
+});
+
+test('a deep link to a meeting that is gone stays on the day view and says so', async () => {
+  const { drawer, live } = await loadWithDeepLink(
+    '?panel=calendar&event=vanished&calendar=primary',
+    [
+      {
+        id: 'standup',
+        calendar_id: 'primary',
+        title: 'Standup',
+        start_time: '2026-09-24T09:00:00Z',
+        end_time: '2026-09-24T09:30:00Z'
+      }
+    ]
+  );
+  assert.equal(drawer.hidden, true);
+  assert.equal(live.textContent, "That meeting is no longer on today's agenda.");
+});

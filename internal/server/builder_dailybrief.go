@@ -371,6 +371,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			workspaces: b.workspaceFileStore, janitor: b.fileJanitorService,
 		})
 	}
+	// Today's meetings (Issue #533), read through the Calendar Ops handler wired
+	// at Phase 18. No handler, no section: Today stays exactly as it was.
+	if b.calendarOpsHandler != nil {
+		todayService.SetMeetingReader(newDailyBriefCalendarSource(b.calendarOpsHandler))
+	}
 	b.personalAssistantToday = todayService
 	b.initializeSetupJourney()
 	if b.setupJourneyService != nil {
