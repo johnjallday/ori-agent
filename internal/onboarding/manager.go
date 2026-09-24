@@ -29,6 +29,9 @@ type Manager struct {
 	statePath string
 	state     *types.AppState
 	userStore userprofile.UserStore
+	// Called only after a saved inferred profile is durable. The observer must
+	// not alter onboarding success or perform a new app scan.
+	savedProfileObserver func()
 }
 
 // NewManager loads existing state or initializes a canonical onboarding state.
@@ -530,23 +533,58 @@ func (m *Manager) SetNotesOpenBehavior(behavior string) error {
 	return m.saveUnlocked()
 }
 
-// GetUserProfile returns the stored user profile (may be nil)
+// GetUserProfile returns an independent snapshot of the stored inferred
+// profile. Consumers may inspect saved app evidence without retaining a
+// pointer to manager-owned state after its read lock is released.
 func (m *Manager) GetUserProfile() *types.InferredProfile {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.state.UserProfile
+	return copyInferredProfile(m.state.UserProfile)
 }
 
-// SetUserProfile stores the user's inferred profile
+func copyInferredProfile(profile *types.InferredProfile) *types.InferredProfile {
+	if profile == nil {
+		return nil
+	}
+	copy := *profile
+	copy.SecondaryCategories = append([]string(nil), profile.SecondaryCategories...)
+	copy.Specializations = append([]string(nil), profile.Specializations...)
+	copy.DetectedApps = append([]string(nil), profile.DetectedApps...)
+	copy.Interests = append([]string(nil), profile.Interests...)
+	copy.PreferredTools = append([]string(nil), profile.PreferredTools...)
+	return &copy
+}
+
+// SetSavedProfileObserver installs a server-owned, best-effort post-save
+// observer. It is never called by a read, manual app scan, or failed save.
+func (m *Manager) SetSavedProfileObserver(observer func()) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.savedProfileObserver = observer
+	m.mu.Unlock()
+}
+
+// SetUserProfile stores an independent snapshot of the inferred profile.
 func (m *Manager) SetUserProfile(profile *types.InferredProfile) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	profile = copyInferredProfile(profile)
 	if profile != nil && profile.InferredAt.IsZero() {
 		profile.InferredAt = time.Now()
 	}
 	m.state.UserProfile = profile
-	return m.saveUnlocked()
+	err := m.saveUnlocked()
+	observer := m.savedProfileObserver
+	hasObservation := profile != nil && len(profile.DetectedApps) > 0 && !profile.InferredAt.IsZero()
+	m.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if hasObservation && observer != nil {
+		observer() // outside the manager lock; the observer may reread the saved profile
+	}
+	return nil
 }
 
 // GetNames returns persisted display names for onboarding.

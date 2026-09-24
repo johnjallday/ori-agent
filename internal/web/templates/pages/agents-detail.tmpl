@@ -517,6 +517,15 @@
             </div>
           </div>
 
+          {{if .Extra.IsHiredAssistant}}
+          <div class="modern-card p-3 mb-4" id="hiredAssistantKnowledgeEntry">
+            <strong>Your assistant’s reviewed knowledge</strong>
+            <p class="mb-2">Review or change the facts your assistant can use in Personal HQ.</p>
+            <a class="modern-btn modern-btn-secondary" href="/profile#personalHQKnowledge">Review what Ori knows about you</a>
+            <a class="modern-btn modern-btn-secondary" href="/profile#personalHQInterview">Start or resume interview</a>
+          </div>
+          {{end}}
+
           <!-- Setup Health -->
           <div id="setupHealthBanner" class="section-card modern-card p-3 mb-4 setup-health-banner" style="display: none;"></div>
 

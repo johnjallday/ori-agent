@@ -95,6 +95,8 @@ type StorageSystemFacade struct {
 	// PersonalAssistant is the user-owned relationship/read service.
 	PersonalAssistant       *personalassistant.Service
 	PersonalAssistantMemory *personalassistant.MemoryService
+	// PersonalAssistantKnowledge is the current, server-bound reviewed HQ context reader.
+	PersonalAssistantKnowledge *personalassistant.KnowledgeContextReader
 	// PersonalHQ is the raw domain service (not the HTTP handler), so
 	// non-HTTP callers like serveIndex's first-run classification can read
 	// onboarding status directly.

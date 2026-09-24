@@ -52,22 +52,36 @@
 
   <div class="user-profile-form-section">
     <h3 class="user-profile-form-heading">Assistant Preferences</h3>
+    <p class="settings-help">Save or forget one reviewed preference at a time (one safe line, up to 500 UTF-8 bytes). The existing Save Profile button below saves the whole form.</p>
     <div class="settings-grid">
       <div class="settings-field">
         <label class="settings-label" for="profileResponseStyle">Response style</label>
-        <input type="text" id="profileResponseStyle" class="form-control settings-input" placeholder="concise">
+        <input type="text" id="profileResponseStyle" class="form-control settings-input" placeholder="concise" maxlength="1000">
+        <div class="reviewed-profile-actions">
+          <button type="button" class="modern-btn modern-btn-secondary" data-profile-field="response_style" data-profile-action="save">Save response style</button>
+          <button type="button" class="modern-btn modern-btn-secondary" data-profile-field="response_style" data-profile-action="forget">Forget response style</button>
+        </div>
       </div>
       <div class="settings-field">
         <label class="settings-label" for="profileUnits">Units</label>
-        <input type="text" id="profileUnits" class="form-control settings-input" placeholder="imperial or metric">
+        <input type="text" id="profileUnits" class="form-control settings-input" placeholder="imperial or metric" maxlength="1000">
+        <div class="reviewed-profile-actions">
+          <button type="button" class="modern-btn modern-btn-secondary" data-profile-field="units" data-profile-action="save">Save units</button>
+          <button type="button" class="modern-btn modern-btn-secondary" data-profile-field="units" data-profile-action="forget">Forget units</button>
+        </div>
       </div>
       <div class="settings-field">
         <label class="settings-label" for="profileLanguage">Language</label>
-        <input type="text" id="profileLanguage" class="form-control settings-input" placeholder="English">
+        <input type="text" id="profileLanguage" class="form-control settings-input" placeholder="English" maxlength="1000">
+        <div class="reviewed-profile-actions">
+          <button type="button" class="modern-btn modern-btn-secondary" data-profile-field="language" data-profile-action="save">Save language</button>
+          <button type="button" class="modern-btn modern-btn-secondary" data-profile-field="language" data-profile-action="forget">Forget language</button>
+        </div>
       </div>
     </div>
   </div>
 
+  <p id="userProfileFieldStatus" role="status" aria-live="polite" class="settings-help"></p>
   <div class="settings-actions user-profile-form-actions">
     <button type="submit" class="modern-btn modern-btn-primary" id="saveUserProfileBtn">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">

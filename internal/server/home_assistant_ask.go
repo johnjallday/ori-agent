@@ -384,6 +384,7 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 			relationship: s.Storage.PersonalAssistant,
 			profiles:     s.Storage.UserStore,
 			workspaces:   s.Storage.WorkspaceStore,
+			knowledge:    s.Storage.PersonalAssistantKnowledge,
 		}, "local")
 		if s.Storage.PersonalAssistantMemory != nil {
 			handler.SetPersonalAssistantMemoryWriter(s.Storage.PersonalAssistantMemory)

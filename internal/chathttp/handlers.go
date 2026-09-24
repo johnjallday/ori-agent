@@ -69,6 +69,7 @@ type Handler struct {
 	fileStore             *workspace.FileStore
 	userProfileStore      userprofile.UserStore
 	userProvider          userprofile.UserProvider
+	reviewedMemory        workspace.ReviewedMemoryReader
 	runtimeResolver       chatRuntimeResolver
 	toolCallStore         session.ToolCallStore
 	calendarOpsPreference chatCalendarOpsPreference

@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -119,6 +120,67 @@ func (b *ServerBuilder) hqVisibilityDeps() chathttp.HQVisibilityDeps {
 			return path
 		},
 		UserID: userprofile.LocalUserID,
+		MemoryWriteGuard: func(ctx context.Context, workspaceID, text string) error {
+			if b.personalHQService == nil {
+				return personalassistant.ErrRepairNeeded
+			}
+			designated, err := b.personalHQService.IsWorkspaceDesignatedPersonalHQ(ctx, userprofile.LocalUserID, workspaceID)
+			if err != nil {
+				return err
+			}
+			if !designated {
+				return nil // ordinary workspace semantics remain unchanged
+			}
+			if b.personalAssistantLearning == nil {
+				return personalassistant.ErrRepairNeeded
+			}
+			return b.personalAssistantLearning.GuardGenericMemoryWrite(ctx, userprofile.LocalUserID, workspaceID, text)
+		},
+		MemoryWrite: func(ctx context.Context, workspaceID string, entry workspace.MemoryEntry) (bool, error) {
+			if b.personalHQService == nil {
+				return true, personalassistant.ErrRepairNeeded
+			}
+			designated, err := b.personalHQService.IsWorkspaceDesignatedPersonalHQ(ctx, userprofile.LocalUserID, workspaceID)
+			if err != nil {
+				return true, err
+			}
+			if !designated {
+				return false, nil
+			}
+			if b.personalAssistantLearning == nil {
+				return true, personalassistant.ErrRepairNeeded
+			}
+			return true, b.personalAssistantLearning.AppendGenericMemoryWrite(ctx, userprofile.LocalUserID, workspaceID, entry)
+		},
+		ProfileWriteGuard: func(ctx context.Context, userID string, fields map[string]any) (time.Time, error) {
+			if b.personalAssistantStore == nil {
+				return time.Time{}, personalassistant.ErrRepairNeeded
+			}
+			state, err := b.personalAssistantStore.GetState(ctx, userID)
+			if errors.Is(err, personalassistant.ErrNotFound) {
+				return time.Time{}, nil // no hired relationship: keep old global profile tool behavior
+			}
+			if err != nil || state == nil {
+				return time.Time{}, personalassistant.ErrRepairNeeded
+			}
+			if state.Status != personalassistant.StatusActive && state.Status != personalassistant.StatusPaused {
+				if state.Status == personalassistant.StatusRepairNeeded {
+					return time.Time{}, personalassistant.ErrRepairNeeded
+				}
+				return time.Time{}, nil // interview and reviewed HQ do not exist before HQ activation
+			}
+			if b.personalAssistantLearning == nil || b.userStore == nil {
+				return time.Time{}, personalassistant.ErrRepairNeeded
+			}
+			current, err := b.userStore.Get(ctx, userID)
+			if err != nil || current == nil || current.UpdatedAt.IsZero() {
+				return time.Time{}, personalassistant.ErrRepairNeeded
+			}
+			if err := b.personalAssistantLearning.GuardGenericProfileWrite(ctx, userID, current, fields); err != nil {
+				return time.Time{}, err
+			}
+			return current.UpdatedAt, nil
+		},
 	}
 }
 

@@ -20,6 +20,14 @@
 
     <div class="main-content">
       <div class="container-fluid py-4">
+        {{if .Extra.IsPersonalHQ}}
+        <div class="modern-card p-3 mb-3" id="personalHQKnowledgeEntry">
+          <strong>Personal HQ knowledge</strong>
+          <p class="mb-2">Review what your assistant remembers and finish the optional interview. Workspace Memory remains available below for direct editing.</p>
+          <a class="modern-btn modern-btn-secondary" href="/profile#personalHQKnowledge">Review what Ori knows about you</a>
+          <a class="modern-btn modern-btn-secondary" href="/profile#personalHQInterview">Start or resume interview</a>
+        </div>
+        {{end}}
         <section id="workspaceGroupRequirementStatus" class="workspace-group-requirement-status" aria-live="polite" hidden>
           <strong id="workspaceGroupRequirementStatusTitle"></strong>
           <span id="workspaceGroupRequirementStatusSummary"></span>

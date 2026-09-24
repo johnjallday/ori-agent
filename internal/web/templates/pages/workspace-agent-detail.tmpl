@@ -35,6 +35,15 @@
             </div>
           </div>
 
+          {{if .Extra.IsPersonalHQEntry}}
+          <div class="modern-card p-3 mb-3" id="personalHQAgentKnowledgeEntry">
+            <strong>Your assistant’s reviewed knowledge</strong>
+            <p class="mb-2">See, correct or forget what this assistant remembers in Personal HQ.</p>
+            <a class="modern-btn modern-btn-secondary" href="/profile#personalHQKnowledge">Review what Ori knows about you</a>
+            <a class="modern-btn modern-btn-secondary" href="/profile#personalHQInterview">Start or resume interview</a>
+          </div>
+          {{end}}
+
           <!-- Loading / error states -->
           <div id="wad-loading" class="modern-card p-4 text-center">
             <div class="wad-muted">Loading agent details…</div>

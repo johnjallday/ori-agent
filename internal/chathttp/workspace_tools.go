@@ -77,6 +77,18 @@ type HQVisibilityDeps struct {
 	IsDesignatedHQ  func(ctx context.Context, workspaceID string) (bool, error)
 	FolderPath      func(workspaceID string) string
 	UserID          string
+	// MemoryWriteGuard is host-owned and checks the designated HQ sidecar
+	// before generic agent memory tools can append the same reviewed meaning.
+	// Ordinary workspace memory tools retain their existing behavior.
+	MemoryWriteGuard func(context.Context, string, string) error
+	// MemoryWrite atomically guards and appends HQ tool memory under the
+	// lifecycle lock. Return handled=false only for an ordinary workspace.
+	// A separate guard call followed by Append can race a user Forget.
+	MemoryWrite func(context.Context, string, workspace.MemoryEntry) (handled bool, err error)
+	// ProfileWriteGuard protects completed interview preference receipts across
+	// all workspace tools, because profile_set mutates one global user profile.
+	// A nonzero version requires an atomic versioned commit after this check.
+	ProfileWriteGuard func(context.Context, string, map[string]any) (time.Time, error)
 }
 
 // mcpServerLister allows listing available MCP servers.

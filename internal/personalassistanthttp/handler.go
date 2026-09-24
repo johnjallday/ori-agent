@@ -103,6 +103,12 @@ type Handler struct {
 	capabilities               CapabilityReader
 	specialistOffers           SpecialistOfferService
 	assistantSetup             AssistantSetupService
+	savedAppSuggestions        SavedAppSuggestions
+	janitorSuggestions         SavedAppSuggestions
+	knowledgeReview            *personalassistant.KnowledgeLearningService
+	knowledgeSources           KnowledgeSourceReader
+	interviewOffer             InterviewOffer
+	interview                  *personalassistant.KnowledgeInterviewService
 	provider                   userprofile.UserProvider
 	onFirstAssignmentCompleted func()
 	onHired                    func()
@@ -489,6 +495,20 @@ func (h *Handler) SetupHQ(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The interview is an optional, idempotent offer after canonical HQ
+	// activation. An unavailable review sidecar must never roll back or conceal
+	// a successfully built HQ; subsequent offers may safely retry.
+	if h.interviewOffer != nil {
+		_, _ = h.interviewOffer.Offer(r.Context(), userID)
+	}
+	if h.savedAppSuggestions != nil {
+		// HQ activation may follow a previously saved observation. Reconcile
+		// that existing evidence without rescanning; a source gap or full
+		// queue cannot roll back successful HQ creation.
+		checkCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		_, _ = h.savedAppSuggestions.Check(checkCtx, userID)
+		cancel()
+	}
 	response := responseFromResult(&personalassistant.HireResult{
 		State: result.State, BriefConfig: result.BriefConfig, Resumed: result.Resumed,
 	})

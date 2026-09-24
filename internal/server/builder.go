@@ -332,17 +332,19 @@ type ServerBuilder struct {
 	userHandler *userhttp.Handler
 
 	// Personal Assistant relationship/read projection.
-	personalAssistantStore   *personalassistant.SQLiteStore
-	personalAssistantService *personalassistant.Service
-	personalAssistantHire    *personalassistant.HireCoordinator
-	personalAssistantHQSetup *personalassistant.HQSetupCoordinator
-	personalAssistantMemory  *personalassistant.MemoryService
-	personalAssignment       *personalassistant.AssignmentService
-	personalAssistantHandler *personalassistanthttp.Handler
-	assistantSetupStore      *assistantsetup.SQLiteStore
-	assistantSetupService    *assistantsetup.Service
-	assistantSetupRetries    *assistantsetup.RetryRunner
-	setupJourneyStore        *setupjourney.SQLiteStore
+	personalAssistantStore     *personalassistant.SQLiteStore
+	personalAssistantService   *personalassistant.Service
+	personalAssistantHire      *personalassistant.HireCoordinator
+	personalAssistantHQSetup   *personalassistant.HQSetupCoordinator
+	personalAssistantMemory    *personalassistant.MemoryService
+	personalAssistantKnowledge *personalassistant.KnowledgeContextReader
+	personalAssistantLearning  *personalassistant.KnowledgeLearningService
+	personalAssignment         *personalassistant.AssignmentService
+	personalAssistantHandler   *personalassistanthttp.Handler
+	assistantSetupStore        *assistantsetup.SQLiteStore
+	assistantSetupService      *assistantsetup.Service
+	assistantSetupRetries      *assistantsetup.RetryRunner
+	setupJourneyStore          *setupjourney.SQLiteStore
 	// integrationReleases resolves the latest reviewed integration release for
 	// both the guided setup and the Plugins page update check.
 	integrationReleases  *integrationrelease.Resolver
@@ -642,6 +644,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	// discarded here — the agent handler then read a nil store and a rename
 	// dropped the agent's saved tile.
 	b.server.Storage.AgentMapPositions = b.agentMapStore
+	b.server.Storage.PersonalAssistantKnowledge = b.personalAssistantKnowledge
 
 	// Workflow System Facade
 	b.server.Workflow = NewWorkflowSystemFacade(

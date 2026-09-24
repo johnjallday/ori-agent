@@ -37,6 +37,7 @@
             </div>
 
             {{template "user-profile-form.tmpl" .}}
+            <p class="user-knowledge-source-meta">Your current global details and preferences are in the editor above. Older values have no per-field source or observation date; editing here does not turn them into newly reviewed Personal HQ facts.</p>
           </section>
 
           <aside class="profile-page-aside" aria-label="Profile context">
@@ -107,6 +108,113 @@
               <div id="userKnowledgeLearningList" class="user-knowledge-source-list"></div>
             </section>
           </div>
+        </section>
+
+        <section id="personalHQDossier" class="profile-knowledge" aria-labelledby="personalHQDossierTitle">
+          <header class="profile-knowledge-header">
+            <div>
+              <div class="profile-page-kicker">Current values · source-owned</div>
+              <h2 id="personalHQDossierTitle" class="profile-knowledge-title">Your assistant’s knowledge</h2>
+              <p class="profile-knowledge-subtitle">Your global profile and approved Personal HQ facts stay in their own canonical stores. Suggestions are listed separately below; nothing is inferred from these headings.</p>
+            </div>
+          </header>
+          <div class="reviewed-dossier-grid">
+            <section class="modern-card reviewed-dossier-card" aria-labelledby="reviewedDossierYouTitle">
+              <h3 id="reviewedDossierYouTitle">You</h3>
+              <p>Your identity and global profile are yours to edit. Ori does not turn an app or file action into an identity claim.</p>
+              <a href="#profileEditorTitle">Review global profile</a>
+            </section>
+            <section class="modern-card reviewed-dossier-card" aria-labelledby="reviewedDossierWorkTitle">
+              <h3 id="reviewedDossierWorkTitle">How you work</h3>
+              <ul id="reviewedDossierHowYouWork" aria-label="Approved Personal HQ work-style facts"></ul>
+              <a href="#profileEditorTitle">Review global preferences separately</a>
+            </section>
+            <section class="modern-card reviewed-dossier-card" aria-labelledby="reviewedDossierPeopleTitle">
+              <h3 id="reviewedDossierPeopleTitle">People</h3>
+              <ul id="reviewedDossierPeople" aria-label="Approved Personal HQ people facts"></ul>
+            </section>
+            <section class="modern-card reviewed-dossier-card" aria-labelledby="reviewedDossierProjectsTitle">
+              <h3 id="reviewedDossierProjectsTitle">Projects</h3>
+              <ul id="reviewedDossierProjects" aria-label="Approved Personal HQ project facts"></ul>
+            </section>
+            <section class="modern-card reviewed-dossier-card" aria-labelledby="reviewedDossierRoutinesTitle">
+              <h3 id="reviewedDossierRoutinesTitle">Routines</h3>
+              <ul id="reviewedDossierRoutines" aria-label="Approved Personal HQ routine facts"></ul>
+            </section>
+            <section class="modern-card reviewed-dossier-card" aria-labelledby="reviewedDossierSourcesTitle">
+              <h3 id="reviewedDossierSourcesTitle">Sources</h3>
+              <div id="reviewedDossierSources" role="status" aria-live="polite">Checking available sources…</div>
+            </section>
+          </div>
+        </section>
+
+        <section id="personalHQInterview" class="profile-knowledge modern-card reviewed-interview" aria-labelledby="personalHQInterviewTitle" aria-busy="true">
+          <div class="profile-page-kicker">Optional · after Personal HQ setup</div>
+          <h2 id="personalHQInterviewTitle">Tell your assistant what matters</h2>
+          <p>Three short questions. Skip any of them, review exact wording and destinations, then choose Save these facts. Nothing is saved while you type.</p>
+          <p id="personalHQInterviewStatus" role="status" aria-live="polite">Checking interview availability…</p>
+          <div class="reviewed-interview-actions">
+            <button id="personalHQInterviewStart" type="button" class="modern-btn modern-btn-secondary" hidden>Start or resume interview</button>
+            <button id="personalHQInterviewDefer" type="button" class="modern-btn modern-btn-secondary" hidden>Not now</button>
+            <a id="personalHQInterviewBuild" href="/?quest=build-hq" hidden>Build Personal HQ first</a>
+          </div>
+          <form id="personalHQInterviewForm" hidden>
+            <div id="personalHQInterviewQuestions" class="reviewed-interview-questions"></div>
+            <button id="personalHQInterviewReview" type="button" class="modern-btn modern-btn-secondary">Review my answers</button>
+            <div id="personalHQInterviewFinal" hidden>
+              <h3 id="personalHQInterviewFinalTitle" tabindex="-1">Review exactly what will be saved</h3>
+              <ul id="personalHQInterviewSelected"></ul>
+              <p>Nothing here creates a task, brief, connection or app scan. Global communication preferences use your profile; other facts stay inside Personal HQ.</p>
+              <button id="personalHQInterviewBack" type="button" class="modern-btn modern-btn-secondary">Change answers</button>
+              <button id="personalHQInterviewSave" type="submit" class="modern-btn modern-btn-primary">Save these facts</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="personalHQKnowledge" class="profile-knowledge reviewed-knowledge" aria-labelledby="reviewedKnowledgeTitle" aria-busy="true">
+          <header class="profile-knowledge-header">
+            <div>
+              <div class="profile-page-kicker">Personal HQ · review ledger</div>
+              <h2 id="reviewedKnowledgeTitle" class="profile-knowledge-title">Your assistant’s working memory</h2>
+              <p class="profile-knowledge-subtitle">Suggestions stay out of your assistant’s context until you approve them. Approved facts stay in Personal HQ; global preferences stay in your profile. Nothing here starts a new app scan.</p>
+            </div>
+            <div class="reviewed-knowledge-source-actions">
+              <button type="button" id="checkSavedKnowledge" class="modern-btn modern-btn-secondary">Check saved app evidence</button>
+              <button type="button" id="checkJanitorKnowledge" class="modern-btn modern-btn-secondary">Check approved File Janitor decisions</button>
+            </div>
+          </header>
+          <p id="personalHQKnowledgeStatus" class="user-knowledge-status" role="status" aria-live="polite">Checking your Personal HQ…</p>
+          <a id="personalHQBuildLink" href="/?quest=build-hq" class="modern-btn modern-btn-secondary" hidden>Build or repair Personal HQ</a>
+          <form id="addPersonalHQFact" class="modern-card reviewed-knowledge-add" aria-labelledby="addPersonalHQFactTitle">
+            <h3 id="addPersonalHQFactTitle">Tell your assistant what to remember</h3>
+            <p>A fact is saved to Personal HQ only when you choose Save this fact. Global identity and communication preferences belong in your profile above.</p>
+            <div class="reviewed-knowledge-add-fields">
+              <label for="personalHQFactCategory">Category</label>
+              <select id="personalHQFactCategory" class="form-select">
+                <option value="projects">Projects and priorities</option>
+                <option value="how_you_work">How you work</option>
+                <option value="people">People</option>
+                <option value="routines">Routines</option>
+              </select>
+              <label for="personalHQFactText">Exact wording</label>
+              <textarea id="personalHQFactText" class="form-control" rows="2" maxlength="500" placeholder="A priority, person, or routine you want your assistant to remember"></textarea>
+              <small id="personalHQFactLimit">0 / 500 UTF-8 bytes</small>
+            </div>
+            <button id="savePersonalHQFact" type="submit" class="modern-btn modern-btn-primary">Save this fact</button>
+          </form>
+          <div class="reviewed-knowledge-grid">
+            <section class="modern-card reviewed-knowledge-review" aria-labelledby="reviewQueueTitle">
+              <span class="profile-page-kicker">Before it becomes context</span>
+              <h3 id="reviewQueueTitle">Needs your review</h3>
+              <div id="reviewedKnowledgeQueue" class="reviewed-knowledge-list"></div>
+            </section>
+            <section class="modern-card reviewed-knowledge-facts" aria-labelledby="reviewedFactsTitle">
+              <span class="profile-page-kicker">Current and scoped</span>
+              <h3 id="reviewedFactsTitle">Facts you approved</h3>
+              <div id="reviewedKnowledgeFacts" class="reviewed-knowledge-list"></div>
+            </section>
+          </div>
+          <p class="reviewed-knowledge-footnote">You can change or forget approved facts here. For other workspace memories, use the Memory tab in that workspace; the Assistant Program above remains separate.</p>
         </section>
 
         <!-- Personalization: interests, tools, work style. Folded in from the
@@ -206,6 +314,8 @@
   {{template "theme-init.tmpl" .}}
   <script defer src="/js/modules/user-profile.js"></script>
   <script type="module" src="/js/modules/user-knowledge.js"></script>
+  <script type="module" src="/js/modules/personal-hq-knowledge.js"></script>
+  <script type="module" src="/js/modules/personal-assistant-interview.js"></script>
   <script defer src="/js/modules/personalize.js"></script>
 </body>
 </html>

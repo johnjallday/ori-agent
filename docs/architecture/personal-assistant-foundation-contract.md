@@ -553,6 +553,184 @@ Assistant profile edits must preserve stable IDs and pass existing
 free-text/secret validation. Memory writes use
 `ValidateMemoryText`, fixed workspace roots, and atomic `0600` persistence.
 
+### Reviewed Personal HQ memory (#532)
+
+The designated HQ's `MEMORY.md` remains the sole current-value owner of
+reviewed operational facts; global identity and communication preferences
+remain in `userprofile`. A schema-versioned
+`<HQ>/.ori/personal-assistant-knowledge.json` sidecar in the **validated HQ
+folder** holds proposal state, bounded review-revision text/evidence,
+revision hashes, canonical target references, admission counts, suppression
+keys and retry/recovery receipts. Reviewed plaintext is retained only for the
+lifecycle and scrubbed on Forget; it is not a second active-fact store. Each
+read and write verifies the current local user, hired assistant's owned profile,
+relationship version/state, designated HQ folder and entry-agent instance.
+Paused assistants may review metadata but do not receive these facts in context.
+A missing/foreign/corrupt sidecar cannot be treated as approval.
+
+Suggestions are inert until the user approves exact wording; an edit to a
+candidate is still only a candidate. Source approval first prepares an inert
+sidecar operation, then compares and writes the exact canonical revision, then
+verifies and finalizes the approved state. Edit, suspension and Forget use the
+same exclusion-before-canonical-mutation ordering. Retries check exact
+request/revision receipts and resume an interrupted operation rather than
+appending a second fact. Outside changes, ambiguous duplicate lines, stale
+profile fields and changed folder/ownership return a conflict or an unavailable
+state; Ori never restores a remembered previous value over outside edits.
+Reject/Forget leave semantic suppression markers and normalized one-way
+text hashes for prior reviewed revisions even after proposal plaintext is
+scrubbed. The server-owned generic `memory_write` path holds the HQ lifecycle
+lock while it checks current review revisions and hashes **and** appends the
+canonical operational line; Forget cannot interleave its exclusion between
+those two actions. It prevents an agent from adding a duplicate candidate or
+resurrecting an exactly matching rejected/forgotten line as ordinary memory;
+separately confirmed user re-entry stays available. It cannot infer
+arbitrary paraphrases, and a concurrent external full-file write remains a
+canonical outside edit, not a reviewed approval. The three-new-proposals-per-rolling-24h and six-pending
+limits share one sidecar across saved-app and File Janitor sources. Explicitly
+confirmed user facts do not consume that proposal quota and can be deliberately
+re-entered after Forget; an automatic source observation cannot re-propose a
+forgotten meaning. Forget removes an exact Ori-managed canonical line when it
+still matches; if a user changed it outside review, the old managed revision is
+excluded but the changed text is **not** deleted behind their back. This is not
+a whole-file erasure or control of other copies, backups or legacy memory.
+The pre-existing workspace-memory overview shows only ordinary legacy entries,
+labels their origin as unverified and distinguishes an optional recorded entry
+date from an observation time; managed HQ markers (including a prepared
+interrupted Forget still on disk) appear only through the binding-validated
+review dossier, never as a second active legacy fact. The global profile editor
+remains the source of existing identity/preference values; it does not invent
+per-field source or observation dates for earlier records. Explicit global
+response-style, units and language edits/Forgets on that form can use
+`PATCH /api/user/profile` with the current SQL profile version and exact old
+field value. New one-field wording must pass `workspace.ValidateMemoryText`
+unchanged (one line, 500 UTF-8 bytes, no secrets/control/bidi text); an empty
+value explicitly clears the field. It changes only the allowlisted canonical
+preference via CAS,
+without a new HQ fact, tombstone, owner selector or fabricated approval date;
+a different or empty current value excludes the interview's old receipt from Today.
+The existing global agent `profile_set` tool remains available, but a
+server-owned guard denies an exact completed-interview preference when the
+current canonical field no longer matches; this applies even if the tool is
+called from another workspace. Its multi-field write uses the guarded SQL
+version so a concurrent user Forget conflicts rather than restoring a prior
+value. Different new preferences and unrelated About writes remain supported.
+An absent/corrupt sidecar is indistinguishable from a lost receipt and makes
+agent preference writes fail closed for a hired HQ; unrelated About writes and
+explicit user profile editing remain available. Before hire/HQ setup, legacy `profile_set` behavior remains.
+Legacy unversioned profile `PUT` remains available to explicit clients; neither
+this guard nor an old hash proves a *new* review. SQL-owned per-field generations
+ensure even an identical user re-entry after a clear cannot inherit the old
+interview confirmation or its date.
+The pre-existing whole-profile `PUT` remains available for legacy unversioned
+callers. The current editor now includes its last-read `updated_at`, so that
+form uses an atomic full-row version check instead of bypassing a stale
+single-field conflict; it leaves unsaved input intact on HTTP 409. Older
+clients that omit the version retain their original `PUT` behavior.
+Manual full-file and existing Memory-tab editing remain available; there is no
+new full-file editor. Generic memory reads/prompts omit managed marker lines;
+only the server-owned reviewed reader can put a current, canonical, eligible
+revision into authorized hired Home and bound HQ chat/task contexts. Native CLI
+runs without a verified hired principal continue to receive **no** managed
+facts. Other workspaces and Ori Guide never inherit this HQ projection.
+
+Home's Today panel, the hired assistant's global agent page, the current
+Personal HQ workspace and its bound entry-agent page link to
+`/profile#personalHQKnowledge` and the optional interview.
+The workspace/agent links require a current hired, correctly bound and available
+HQ/entry identity; a bare portable marker or same-name foreign agent does not
+inherit them. The dossier API still validates authorization independently.
+
+Saved-app and Janitor *inferred candidates* can only approve to canonical HQ
+`MEMORY.md`; there is deliberately no browser/agent route to approve an
+inference into the global profile. Existing allowlisted global preferences are
+edited or cleared by the user via the profile form, or saved after the
+interview's exact explicit review through one-field SQL CAS. The sidecar's
+profile-target Forget recovery primitive is defensive for a previously
+recorded target, not a new producer or a source-consent shortcut.
+
+The optional three-question interview is offered only after a successful HQ
+activation. Read and defer do not save answers. The user can skip every row or
+edit its text, category and destination before an explicit **Save these facts**.
+HQ rows cross the existing `MemoryService.Remember` validation/authority
+boundary and its reviewed-HQ journal seam; a selected global communication
+preference uses a one-field `userprofile` compare-and-swap, with per-row saved
+receipts so a partial save can be reviewed and retried after restart without
+clobbering later profile changes. For a changed global preference, a bounded
+sidecar prepare record stores only the before/after value hashes and the exact
+server-chosen SQL version before attempting the field CAS; a retry verifies
+both that version and the current value before finalizing a lost receipt.
+Identical wording written by an outside editor at a different version is a
+conflict, not an interview save. A fresh explicit final review can supersede
+an uncommitted prepare record without altering previously saved rows. Unsaved
+drafts live only in the browser.
+Today reads only currently eligible reviewed priorities/work-style facts and
+completed, unchanged global preference receipts. A SQL-owned monotonic
+per-field generation (migration 63; no copied values) ties each receipt to the
+exact canonical preference: unrelated profile edits preserve its review date,
+but clearing/re-entering identical wording through PATCH, legacy PUT or an
+outside SQL writer advances the generation and cannot inherit an older
+confirmation. Existing receipts lacking this generation fail closed. The date
+shown for an eligible preference is the saved row receipt, not the profile's
+last-write time for unrelated fields.
+It may link one already existing next action. It creates no task, Follow-Up, brief revision, account,
+scan or model call. Missing or failed reads appear as empty/partial/unavailable,
+never as confirmation of absent work.
+
+Saved-app suggestions read only durable onboarding evidence with its actual
+observation time, never a fresh app detection or an automatically persisted
+manual scan. File Janitor suggestions require three distinct verified,
+user-approved applied moves for one category and one approved root generation
+in a currently owned, built-in Janitor workspace inside the HQ's Daily Brief
+scope. The adapter checks approved folder/directory/MCP read permissions and
+passes fixed-label action IDs/counts/times, not names, paths or contents.
+A reviewed context read checks source support twice and then rereads the
+sidecar's ledger version: Forget/suspension can exclude a fact between its
+first sidecar snapshot and the final source check while the old canonical line
+is still present. A changed ledger version omits that in-flight section rather
+than returning a fact withdrawn mid-read.
+A current, explicit failed required folder/MCP read check makes the dossier
+source card `revoked` (missing or revoked access); an unknown root, malformed
+status, failed journal read or changed ownership/scope remains `unavailable`,
+not an authorized empty source. Neither state permits a suggestion or prompt.
+Email/Calendar source cards display bounded server-owned capability CanRead,
+CanPropose-in-existing-workflows and confirmation copy as inert text. A
+connection setup nudge appears only while not configured or revoked; a ready
+Calendar connection yields an honest empty routine section rather than a
+connect prompt. Neither card claims reviewed-memory learning from #533/#534.
+A successful **`UndoDone`** removes supporting evidence; `UndoneAt` alone does
+not, because a failed undo may set that timestamp. Durable apply/undo
+notifications are best-effort; a fresh evidence read must exclude stale support
+even if the notification failed. A verified contradiction suspends the
+canonical fact into **Needs review** before reuse. Reconfirmation requires an
+exact current revision and fresh acknowledged three-action checkpoint; a
+previously reviewed undo cannot suspend that checkpoint again, while a later
+successful contradiction can. Changed scope/root or missing/pruned evidence
+never proves a reversal and cannot silently authorize an old source fact.
+
+Public review routes under `/api/personal-assistant/knowledge` use current-user
+resolution, bounded JSON, item IDs, state/item versions and retry keys. `GET`
+reads the ledger (no candidate generation); POST-only bodyless `check-saved-apps`
+and `check-janitor` read authorized existing evidence to propose. An explicit
+fact save, item approve/reject/edit/forget/reconfirm, and interview read/defer/
+save are separate actions. An interrupted prepared Forget has a bodyless
+`POST .../knowledge/{item_id}/resume-forget`: the server reuses its stored retry
+key and exact canonical target, and refuses if that target changed. A separate
+bodyless `POST .../knowledge/{item_id}/resume-operation` continues only an
+already-confirmed prepared approval, edit or host-verified contradiction
+suspension using the stored reviewed revision and operation key; source
+approvals revalidate current authority, and edits/suspension compare the exact
+canonical target before changing it. Neither route accepts browser text or a new
+retry key; a mismatched operation kind cannot be cast into the other action.
+Other intermediate records remain excluded from context until recovered.
+No endpoint accepts a browser-supplied owner, root,
+source observation or arbitrary proposal. Validation errors are bounded;
+conflicts require refreshing exact current values. A durable canonical save
+with a lost HTTP response must be reconciled by retry or read, not reported as
+an unsaved fact. This feature adds no calendar/email producer, new provider
+integration, change to Assistant Program learning, plugin installation or
+source-permission expansion; #533/#534 remain separate work.
+
 ## Privacy, permissions, and telemetry
 
 Hiring and delegation never expand authority. Effective tools, grants,

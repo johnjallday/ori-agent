@@ -290,7 +290,9 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 		// reconciled in favour of what the filesystem shows.
 		after, _ := currentFingerprintAt(destinationDir, finalName)
 		action = action.MarkApplied(after, s.clock())
-		_ = s.updateAction(settings.WorkspaceID, action, CandidateApplied)
+		if err := s.updateAction(settings.WorkspaceID, action, CandidateApplied); err == nil {
+			s.notifyReviewedKnowledge(settings.WorkspaceID, action.ID, false)
+		}
 		return ItemOutcome{
 			CandidateID: candidate.ID, ActionID: action.ID, Name: candidate.Display(),
 			Operation: OperationMove, Result: ResultApplied, Destination: relative, Undoable: true,

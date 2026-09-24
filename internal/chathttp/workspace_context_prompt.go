@@ -43,7 +43,7 @@ func (h *Handler) buildRuntimeSystemPrompt(ctx context.Context, routeCtx normali
 func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context, routeCtx normalizedChatRouteContext, toolCallable bool) string {
 	base := buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, toolCallable)
 	profile := h.buildUserProfilePrompt(ctx, routeCtx)
-	memory := h.buildWorkspaceMemoryPrompt(routeCtx, toolCallable)
+	memory := h.buildWorkspaceMemoryPrompt(ctx, routeCtx, toolCallable)
 	managedLearning := h.buildAssistantManagedLearningPrompt(routeCtx)
 	refinement := h.buildAgentRefinementPrompt(routeCtx)
 
@@ -88,8 +88,11 @@ func (h *Handler) resolveAgentBasePromptVars(ctx context.Context, routeCtx norma
 
 	memory := ""
 	if h.fileStore != nil && ws != nil {
-		if raw, err := workspace.NewMemoryStore(h.fileStore).ReadRaw(routeCtx.WorkspaceID); err == nil {
+		if raw, err := workspace.NewMemoryStore(h.fileStore).ReadPromptRaw(routeCtx.WorkspaceID); err == nil {
 			memory = raw
+		}
+		if strings.Contains(prompt, "workspace.memory") {
+			memory = strings.TrimSpace(memory + "\n\n" + h.reviewedHQMemorySection(ctx, routeCtx))
 		}
 	}
 
@@ -184,7 +187,49 @@ func (h *Handler) buildUserProfilePrompt(ctx context.Context, routeCtx normalize
 // chat runtime prompt. Scoped to workspace surfaces (same gate as the snapshot)
 // and requires the folder-backed file store to read MEMORY.md. Tool guidance is
 // included only when workspace tools are callable on this route.
-func (h *Handler) buildWorkspaceMemoryPrompt(routeCtx normalizedChatRouteContext, toolCallable bool) string {
+func (h *Handler) SetReviewedMemoryReader(reader workspace.ReviewedMemoryReader) {
+	if h != nil {
+		h.reviewedMemory = reader
+	}
+}
+
+// reviewedHQMemorySection requires a unique server-resolved agent attachment.
+// A route-supplied name or an ambiguous duplicate is not a principal and may
+// never expand Personal HQ context into another agent or workspace.
+func (h *Handler) reviewedHQMemorySection(ctx context.Context, routeCtx normalizedChatRouteContext) string {
+	if h == nil || h.reviewedMemory == nil || h.userProvider == nil || h.workspaceStore == nil ||
+		!shouldAttachWorkspaceSnapshot(routeCtx) {
+		return ""
+	}
+	ws, err := h.workspaceStore.Get(routeCtx.WorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	var principal string
+	for _, inst := range ws.AgentInstances {
+		if !strings.EqualFold(strings.TrimSpace(inst.Name), strings.TrimSpace(routeCtx.AgentName)) || routeCtx.AgentName == "" {
+			continue
+		}
+		if principal != "" || strings.TrimSpace(inst.ID) == "" {
+			return ""
+		}
+		principal = strings.TrimSpace(inst.ID)
+	}
+	if principal == "" {
+		return ""
+	}
+	userID, err := h.userProvider.CurrentUserID(ctx)
+	if err != nil || strings.TrimSpace(userID) == "" {
+		return ""
+	}
+	section, err := h.reviewedMemory.Section(ctx, userID, ws.ID, principal)
+	if err != nil {
+		return ""
+	}
+	return section
+}
+
+func (h *Handler) buildWorkspaceMemoryPrompt(ctx context.Context, routeCtx normalizedChatRouteContext, toolCallable bool) string {
 	if !shouldAttachWorkspaceSnapshot(routeCtx) || h.fileStore == nil {
 		return ""
 	}
@@ -196,7 +241,15 @@ func (h *Handler) buildWorkspaceMemoryPrompt(routeCtx normalizedChatRouteContext
 		})
 		return ""
 	}
-	return workspace.RenderMemoryPromptSection(doc, toolCallable)
+	section := workspace.RenderMemoryPromptSection(doc, toolCallable)
+	reviewed := h.reviewedHQMemorySection(ctx, routeCtx)
+	if reviewed != "" {
+		if section != "" {
+			section += "\n\n---\n"
+		}
+		section += reviewed
+	}
+	return section
 }
 
 // buildAssistantManagedLearningPrompt projects only current user-approved
