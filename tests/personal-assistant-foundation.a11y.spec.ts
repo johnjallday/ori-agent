@@ -177,7 +177,17 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(launcher).toBeFocused();
 
     await launcher.press('Enter');
+    const more = page.locator('#personalAssistantTodayMore > summary');
+    await expect(more).toHaveAttribute('aria-label', 'More assistant options');
+    await more.focus();
+    await more.press('Enter');
     const agreementLink = page.getByRole('link', { name: 'Working agreement' });
+    await expect(agreementLink).toBeVisible();
+    await more.press('Escape');
+    await expect(assistantDialog).toBeVisible();
+    await expect(more).toBeFocused();
+    await expect(agreementLink).toBeHidden();
+    await more.press('Enter');
     await agreementLink.focus();
     await page.keyboard.press('Enter');
     const agreement = page.getByRole('dialog', { name: 'How your assistant works with you' });

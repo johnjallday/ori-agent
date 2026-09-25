@@ -1217,6 +1217,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     // Working agreement edits reuse canonical schedule values, rename the same
     // stable identity, and survive reload.
     await page.locator('#personalAssistantLauncher').click();
+    await page.locator('#personalAssistantTodayMore > summary').click();
     await page.locator('#personalAssistantTodayAgreement').click();
     await expect(page.locator('#personalAssistantContinuity')).toBeVisible();
     await expect(page.locator('#personalAssistantCapabilities')).toContainText(
@@ -1244,6 +1245,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.reload();
     await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Nova');
     await page.locator('#personalAssistantLauncher').click();
+    await page.locator('#personalAssistantTodayMore > summary').click();
     await page.locator('#personalAssistantTodayAgreement').click();
     await expect(page.locator('#personalAssistantContinuityName')).toHaveValue('Nova');
     await page.locator('#personalAssistantContinuityPause').click();

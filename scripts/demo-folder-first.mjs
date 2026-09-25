@@ -110,6 +110,10 @@ try {
   await page.locator('#darkModeToggle').click();
   await page.waitForTimeout(350);
   await shot('04d-inline-chooser-dark');
+  await page.locator('#personalAssistantTodayMore > summary').click();
+  await page.locator('#personalAssistantTodayAgreement').waitFor({ state: 'visible' });
+  await shot('04e-more-menu-dark');
+  await page.locator('#personalAssistantTodayMore > summary').click();
   await page.locator('#darkModeToggle').click();
   await page.waitForTimeout(350);
   await page.goto(`${base}/?panel=today`);
@@ -220,6 +224,9 @@ try {
   await shot('10-seven-day-receipts');
   await page.setViewportSize({ width: 390, height: 844 });
   await shot('11-today-phone');
+  await page.locator('#personalAssistantTodayMore > summary').click();
+  await shot('11b-more-menu-phone');
+  await page.locator('#personalAssistantTodayMore > summary').click();
   await page.setViewportSize({ width: 1280, height: 900 });
   // Force only one read to degrade, keeping the real server's other rows.
   await page.route('**/api/personal-assistant/today', async route => {

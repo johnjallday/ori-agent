@@ -5,19 +5,21 @@
 <section id="personalAssistantToday" class="personal-assistant-today" data-state="loading"
          aria-labelledby="personalAssistantTodayTitle" hidden>
   <header class="personal-assistant-today__header">
-    <div>
-      <span id="personalAssistantTodayEyebrow" class="personal-assistant-today__eyebrow">Today from your assistant</span>
+    <div class="personal-assistant-today__heading">
       <h3 id="personalAssistantTodayTitle" class="personal-assistant-today__title">Today</h3>
       <p id="personalAssistantTodayMeta" class="personal-assistant-today__meta"></p>
     </div>
-    <nav class="personal-assistant-today__links" aria-label="Personal assistant details">
-      <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
-      <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
-      <a id="personalAssistantTodayMemory" href="/" hidden>Memory</a>
-      <a href="/profile#personalHQKnowledge">Review or change remembered facts</a>
-      <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" hidden>Optional interview</a>
-      <a id="personalAssistantTodayAdvanced" href="/agents">Advanced</a>
-    </nav>
+    <details id="personalAssistantTodayMore" class="personal-assistant-today__more">
+      <summary aria-label="More assistant options">More <span aria-hidden="true">⋯</span></summary>
+      <nav class="personal-assistant-today__links" aria-label="Personal assistant details">
+        <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
+        <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
+        <a id="personalAssistantTodayMemory" href="/" hidden>Workspace memory</a>
+        <a href="/profile#personalHQKnowledge">Review remembered facts</a>
+        <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" hidden>Optional interview</a>
+        <a id="personalAssistantTodayAdvanced" href="/agents">Manage agents</a>
+      </nav>
+    </details>
   </header>
   <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
 

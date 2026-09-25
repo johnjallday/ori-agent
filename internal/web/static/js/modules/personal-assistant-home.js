@@ -411,7 +411,6 @@ function elements() {
   return {
     root,
     launcherStatus: document.getElementById('personalAssistantLauncherStatus'),
-    eyebrow: document.getElementById('personalAssistantTodayEyebrow'),
     title: document.getElementById('personalAssistantTodayTitle'),
     meta: document.getElementById('personalAssistantTodayMeta'),
     banner: document.getElementById('personalAssistantTodayBanner'),
@@ -827,13 +826,27 @@ function renderToday(today) {
   const view = personalAssistantTodayView(today);
   els.root.hidden = false;
   els.root.dataset.state = view.state;
-  els.eyebrow.textContent = 'Personal briefing';
   els.title.textContent = `Today from ${view.displayName}`;
-  els.meta.textContent = today?.next_check_in
-    ? `Next scheduled check-in: ${new Date(today.next_check_in).toLocaleString()}`
-    : view.paused
-      ? 'Proactive check-ins are paused.'
-      : 'No scheduled check-in is enabled.';
+  if (view.paused) {
+    els.meta.textContent = 'Check-ins paused';
+  } else if (today?.next_check_in) {
+    const date = new Date(today.next_check_in);
+    if (Number.isNaN(date.getTime())) {
+      els.meta.textContent = 'Next check-in unavailable';
+    } else {
+      const time = document.createElement('time');
+      time.dateTime = today.next_check_in;
+      time.textContent = new Intl.DateTimeFormat(undefined, {
+        weekday: 'short',
+        hour: 'numeric',
+        minute: '2-digit'
+      }).format(date);
+      time.title = date.toLocaleString();
+      els.meta.replaceChildren('Next check-in · ', time);
+    }
+  } else {
+    els.meta.textContent = 'No check-in scheduled';
+  }
 
   if (view.repair) {
     els.banner.textContent =
@@ -927,7 +940,6 @@ function renderRelationship(personalAssistant, view) {
   // A hired assistant with no HQ yet already has a real, trustworthy name —
   // unlike needsHire, where nothing has been chosen yet.
   const named = view.available || view.needsHQ;
-  els.eyebrow.textContent = 'Personal briefing';
   els.title.textContent = named ? `Today from ${view.name}` : 'Your personal assistant';
   els.meta.textContent = view.available ? 'Loading the latest Today records…' : '';
   els.sections.hidden = !view.available && !view.needsHQ;
@@ -995,7 +1007,6 @@ async function loadToday() {
     if (!els) return;
     els.root.hidden = false;
     els.root.dataset.state = 'unavailable';
-    els.eyebrow.textContent = 'Personal briefing';
     els.title.textContent = `Today from ${state.relationship?.display_name || 'your assistant'}`;
     els.banner.textContent =
       'Today is temporarily unavailable. The Workspace Map and the rest of Home remain available; no all-clear is being shown.';
@@ -1051,6 +1062,17 @@ function init() {
   document.addEventListener('personal-assistant:hq-receipt', () => {
     if (state.today)
       renderCompactRows(elements()?.doneItems, todayThreeSectionView(state.today).done);
+  });
+  const more = document.getElementById('personalAssistantTodayMore');
+  more?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !more.open) return;
+    event.preventDefault();
+    event.stopPropagation(); // Escape closes this menu, not the assistant drawer.
+    more.open = false;
+    more.querySelector('summary')?.focus();
+  });
+  document.addEventListener('click', event => {
+    if (more?.open && !more.contains(event.target)) more.open = false;
   });
   document
     .getElementById('personalAssistantTodayRetry')

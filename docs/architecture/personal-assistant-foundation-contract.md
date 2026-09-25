@@ -636,7 +636,10 @@ demand through the existing launcher and panel for that same bound Personal
 Assistant. Today's only three named sections are **Needs you**, **Working on**,
 and **Done**, in that display order. Needs you leads with the next action and
 collapses other requests under **Also needs you**; the server's records and
-ordering are unchanged. Empty sections disappear, unhealthy sources are named
+ordering are unchanged. The Today heading leaves space for the assistant name
+and a short local check-in time. Its **More** menu preserves the distinct HQ,
+working agreement, workspace memory, remembered-facts review, optional
+interview, and Agents destinations rather than showing a wall of header links. Empty sections disappear, unhealthy sources are named
 once in a retryable footer, and machine reason/status identifiers are humanized.
 The old Decisions/Priorities/Remembered/FollowUps/Results JSON fields remain
 available for one release but no longer render as sections. Direct launcher

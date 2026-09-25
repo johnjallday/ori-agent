@@ -106,38 +106,80 @@ body.home-command-page .home-command-bridge * {
   min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
+  gap: 12px;
 }
 
-.personal-assistant-today__eyebrow {
-  color: var(--hc-signal);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.personal-assistant-today__heading {
+  flex: 1;
+  min-width: 0;
 }
 
 .personal-assistant-today__title {
-  margin: 3px 0;
+  margin: 0;
   color: var(--hc-ink);
   font-family: "Fraunces", Georgia, serif;
   font-size: clamp(22px, 3vw, 28px);
   line-height: 1.12;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .personal-assistant-today__meta {
-  margin: 0;
+  margin: 5px 0 0;
   color: var(--hc-ink-dim);
   font-size: 13px;
 }
 
+.personal-assistant-today__more {
+  position: relative;
+  z-index: 10;
+  flex: 0 0 auto;
+}
+
+.personal-assistant-today__more > summary {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 10px;
+  background: var(--hc-panel-raised);
+  color: var(--hc-ink);
+  font-size: 12px;
+  font-weight: 700;
+  list-style: none;
+  cursor: pointer;
+}
+
+.personal-assistant-today__more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.personal-assistant-today__more > summary:hover,
+.personal-assistant-today__more[open] > summary {
+  border-color: var(--hc-signal);
+}
+
+.personal-assistant-today__more > summary:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
 .personal-assistant-today__links {
-  display: flex;
-  max-width: 100%;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px 14px;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  width: min(250px, calc(100vw - 48px));
+  padding: 5px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 12px;
+  background: var(--hc-panel-raised);
+  box-shadow: var(--hc-shadow);
+}
+
+.personal-assistant-today__more:not([open]) .personal-assistant-today__links {
+  display: none;
 }
 
 .personal-assistant-today__links a,
@@ -146,6 +188,29 @@ body.home-command-page .home-command-bridge * {
   color: var(--hc-signal);
   font-weight: 700;
   overflow-wrap: anywhere;
+}
+
+.personal-assistant-today__links a {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.personal-assistant-today__links a[hidden] {
+  display: none;
+}
+
+.personal-assistant-today__links a:hover,
+.personal-assistant-today__links a:focus-visible {
+  background: color-mix(in srgb, var(--hc-signal) 15%, transparent);
+  color: var(--hc-ink);
+  outline-color: var(--hc-signal);
 }
 
 .personal-assistant-today__banner {
@@ -797,12 +862,8 @@ body.home-command-page .home-command-bridge * {
 }
 
 @media (max-width: 560px) {
-  .personal-assistant-today__header {
-    flex-direction: column;
-  }
-
-  .personal-assistant-today__links {
-    justify-content: flex-start;
+  .personal-assistant-today__title {
+    font-size: clamp(20px, 5vw, 26px);
   }
 
   .personal-assistant-today__sections {
