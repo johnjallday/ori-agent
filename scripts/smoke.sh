@@ -1414,7 +1414,11 @@ smoke_seed_import() {
 #   ./scripts/smoke.sh gosec-new [base]    (base defaults to origin/dev)
 smoke_gosec_new() {
   local base="${2:-origin/dev}"
-  command -v gosec >/dev/null || fail "gosec is not installed"
+  # GOSEC_BIN names the scanner to run; scripts/ci-local.sh sets it to the
+  # version CI pins, so a newer or older local install cannot disagree with
+  # the PR gate.
+  local gosec_bin="${GOSEC_BIN:-gosec}"
+  command -v "$gosec_bin" >/dev/null || fail "gosec is not installed (make ci-local installs CI's pinned version; or set GOSEC_BIN)"
   local top report diff packages
   top="$(git rev-parse --show-toplevel)" || fail "not in a git checkout"
   report="${TMPDIR:-/tmp}/gosec-new-$$.json"
@@ -1426,7 +1430,19 @@ smoke_gosec_new() {
   fi
   git diff -U0 "$base"...HEAD -- '*.go' >"$diff"
   # shellcheck disable=SC2086 # one package path per word
-  (cd "$top" && gosec -quiet -no-fail -fmt json -out "$report" $packages >/dev/null 2>&1)
+  # Not -quiet: in quiet mode gosec exits before writing the report when it
+  # found nothing, and a missing report used to crash the diff below. The
+  # scanner's own output goes to a log, shown only when the report is missing.
+  local scanner_log="${TMPDIR:-/tmp}/gosec-new-$$.log"
+  (cd "$top" && "$gosec_bin" -no-fail -fmt json -out "$report" $packages >"$scanner_log" 2>&1) || true
+  if [[ ! -s "$report" ]]; then
+    # A scanner that wrote nothing is a broken gate, not a clean one.
+    echo "gosec wrote no report for: $packages" >&2
+    tail -n 20 "$scanner_log" >&2
+    rm -f "$report" "$diff" "$scanner_log"
+    return 1
+  fi
+  rm -f "$scanner_log"
   local status=0
   python3 - "$report" "$diff" "$top" <<'PY' || status=$?
 import json, os, re, sys

@@ -197,7 +197,11 @@ func TestIndexRecoversExpiredDurableClaimWithoutAssumingSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	past := time.Now().Add(-time.Hour)
+	// The service's clock is UTC and the store compares expires_at as text, so
+	// the stale row must be UTC too: a local-time value on a machine east of
+	// UTC reads as a later text than "now" and the claim never expires (the
+	// failure this test had on macOS in KST, which CI's UTC runners never saw).
+	past := time.Now().UTC().Add(-time.Hour)
 	if _, err = store.db.ExecContext(ctx, `INSERT INTO sample_library_operation_receipt(operation_id,home_workspace_id,root_id,operation_kind,idempotency_key,input_digest,status,created_at,expires_at) VALUES('stale',?,?,'index','stale',?,'claimed',?,?)`, homeID, root.ID, digestStrings("stale"), past, past); err != nil {
 		t.Fatal(err)
 	}

@@ -17,15 +17,29 @@ Recent history uses Conventional Commit-style subjects such as `feat(workspace):
 
 ### Before opening a PR
 
-Run all four. `make test` alone is not enough — it runs no linter and no
-security scanner, so a branch can be fully green locally and still fail CI:
+Run CI's gates locally, in CI's order, with CI's pins:
 
 ```bash
-make test                          # the main Go suite
-make lint-new                      # golangci-lint, ratcheted against origin/dev
-gosec ./path/to/changed/pkg/...    # scoped to what you touched — see below
-make test-js                       # plus affected JS, integration, e2e, or smoke suites
+make ci-local                      # what wt pr runs before it pushes anything
+make ci-local-quick                # mid-work: gofmt, vet, lint-new, test-unit, JS tests/lint/format
 ```
+
+`wt pr` runs `make ci-local` first and pushes nothing when a gate fails
+(`wt pr --skip-checks` bypasses it, for the rare change only CI can exercise).
+The full run is gofmt + `go vet` on the changed packages, `make
+check-wails-modes`, `make lint-new`, the unit suite exactly as CI's Unit Tests
+job runs it (`go test -short -race` over `scripts/list-unit-packages.sh`),
+`make test-js`, `npm run lint`, `npm run format:check`, `npm run
+test:character-assets`, gosec scoped to your change **at the version CI pins**
+(installed on first use into `~/.cache/ori-tools`), and — when the branch
+touches a path the README scenes photograph (`internal/web/`, `routes.go`,
+the README manifest) — CI's README Contract: the Node tests, `make
+readme-check`, a disposable capture, and the tracked-files check. `make test`
+alone is not enough: it runs no linter, no security scanner, and no capture,
+and it also runs suites CI does not gate on, so a branch can be fully green
+locally and still fail CI — or red locally on a clean `dev`.
+`CI_LOCAL_ARGS="--readme"` forces the capture; `--no-readme` skips it;
+`--keep-going` runs every gate instead of stopping at the first failure.
 
 **Both static checks are ratcheted, and both have a large pre-existing
 baseline. Scope them to your change or they are pure noise.**
@@ -38,15 +52,19 @@ fails on a spotless branch and tells you nothing about your change. This is
 also why the codebase is full of unchecked `fmt.Fprintf` calls: they predate
 the ratchet. New ones are still rejected.
 
-`gosec` has **no make target** and is not part of `make test`. CI runs it as a
-GitHub Action that reports only "new alerts in code changed by this pull
-request". A bare `gosec ./...` reports the whole repository (currently ~306
-findings) and is not a gate — always scope it to the packages you changed,
-where the target is zero. Install it once with
-`go install github.com/securego/gosec/v2/cmd/gosec@latest`. Common findings
-here are G301/G302 (directory and file permissions — prefer `0750` and
-`0600`) and G304 (file read built from a composed path; annotate with a
-`#nosec G304` comment stating why the path is trusted).
+`gosec` is not part of `make test`. CI runs it as a GitHub Action that reports
+only "new alerts in code changed by this pull request", at a pinned version
+(the `pinned action/image: gosec X.Y.Z` comment in `.github/workflows/ci.yml`).
+`make ci-local` runs `scripts/smoke.sh gosec-new` with that exact version
+(`scripts/ci-local.test.sh` keeps the two pins equal), so a local gosec that is
+newer or older than CI's cannot pass what CI fails: the pinned 2.29 has a taint
+analyzer (G703, "path traversal via taint analysis") that older builds lack.
+A bare `gosec ./...` reports the whole repository (currently ~306 findings)
+and is not a gate — always scope it to the packages you changed, where the
+target is zero. Common findings here are G301/G302 (directory and file
+permissions — prefer `0750` and `0600`), G304 (file read built from a composed
+path) and G703 (the same, found by taint analysis); annotate with a
+`#nosec G304 G703` comment stating why the path is trusted.
 
 ## Security & Configuration Tips
 Never commit API keys or local state. Load provider credentials through environment variables or ignored local config, and use `make check-env` before running provider-backed agents. Keep generated binaries, coverage output, and workspace state out of commits unless explicitly required.
