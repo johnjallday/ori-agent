@@ -248,8 +248,8 @@ func TestQuestNeverAdoptsRetiredAssistantOwnedRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	projection, err := scoped.Read(ctx, "local", "")
-	if err != nil || projection.RunID == legacyRoot.ID {
-		t.Fatalf("plugin quest resumed the retired root: %#v err=%v", projection, err)
+	if err != nil || projection.RunID == legacyRoot.ID || projection.Journey.Source != QuestSourcePlugin {
+		t.Fatalf("plugin quest resumed the retired root or omitted its source: %#v err=%v", projection, err)
 	}
 	stored, err := store.GetRun(ctx, projection.RunID)
 	if err != nil || stored.SpecialistSlug != pluginQuestSlug || stored.RelationshipID != questRelationshipID(reaperQuestKey) {

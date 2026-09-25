@@ -5,7 +5,7 @@
 # run it as a tracked background process (see "Smoke Testing" in CLAUDE.md).
 #
 # Usage:
-#   ./scripts/demo-server.sh [--rev REV] [--open] [port] [sandbox_dir]
+#   ./scripts/demo-server.sh [--rev REV] [--open] [--native-picker] [port] [sandbox_dir]
 #
 # --rev REV serves a build of another commit instead of the working tree, so a
 # failing browser test can be checked against its baseline (for example the
@@ -13,7 +13,8 @@
 # with `git archive` and built once under $TMPDIR/ori-rev-<sha>/.
 #
 # Demo servers do not open a browser by default. Pass --open or set
-# ORI_DEMO_OPEN=1 to opt in.
+# ORI_DEMO_OPEN=1 to opt in. --native-picker separately opts in to desktop
+# dialogs for explicit file/folder picker demos; it never opens a browser.
 #
 # Both HOME and ORI_DATA_DIR are redirected into the sandbox, and the server is
 # started from INSIDE it so the plugin store is isolated too. Nothing is ever
@@ -26,6 +27,7 @@ set -euo pipefail
 
 rev=""
 open_browser="${ORI_DEMO_OPEN:-0}"
+native_picker=0
 while [[ "${1:-}" == --* ]]; do
 	case "$1" in
 	--rev)
@@ -38,6 +40,10 @@ while [[ "${1:-}" == --* ]]; do
 		;;
 	--open)
 		open_browser=1
+		shift
+		;;
+	--native-picker)
+		native_picker=1
 		shift
 		;;
 	*)
@@ -90,7 +96,9 @@ echo "BRANCH=$label"
 echo "URL=http://localhost:$port"
 
 cd "$sandbox"
+desktop_off=1
+if [[ "$native_picker" == "1" ]]; then desktop_off=0; fi
 if [[ "$open_browser" == "1" ]]; then
-	exec env -u NO_BROWSER HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1 "$binary"
+	exec env -u NO_BROWSER HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary"
 fi
-exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 "$binary"
+exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary"

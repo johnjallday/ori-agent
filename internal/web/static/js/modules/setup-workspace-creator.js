@@ -302,7 +302,7 @@ async function submit(payload) {
   const folder = await jsonRequest(`/api/workspaces/${encodeURIComponent(id)}`);
   state.journey = journey;
   state.pending = null;
-  state.onCreated?.(journey);
+  await state.onCreated?.(journey);
   // The existing creator continues its separately confirmed team provisioning,
   // optional OS-open request, success handling, and workspace navigation.
   return new Response(JSON.stringify({ success: true, folder, project_warning: warning }), {
@@ -387,13 +387,27 @@ function mountProjectChoice(state) {
   el('workspaceReviewSummary').after(review);
 }
 
-export async function openSetupWorkspaceCreator(journey, onCreated) {
+export async function openSetupWorkspaceCreator(journey, onCreated, { folderOfferID = '' } = {}) {
   const manager = window.sessionManager;
   const preparation = journey.steps.find(step => step.kind === 'project_connect')?.preparation;
   const placement = setupWorkspacePlacement(preparation);
   const { groupPolicy, availableCompositions } = placement;
   if (!manager || !placement.canOpen)
     throw new Error('Finish the required group and preparation steps first.');
+  // A confirmed folder card already owns the picked path on the server. Mint
+  // the ordinary project-picker token there instead of asking for a second
+  // native folder dialog (which could select an unrelated project).
+  const folderSelection = folderOfferID
+    ? await jsonRequest(
+        `/api/personal-assistant/folder-digest/offers/${encodeURIComponent(folderOfferID)}/project-selection`,
+        {
+          method: 'POST',
+          body: '{}'
+        }
+      )
+    : null;
+  if (folderOfferID && !folderSelection?.selection_token)
+    throw new Error('Pick the project folder again to continue setup.');
   await manager.loadFolders();
   const state = {
     journey,
@@ -404,15 +418,16 @@ export async function openSetupWorkspaceCreator(journey, onCreated) {
     groupPolicy,
     availableCompositions,
     groupComposition: placement.groupComposition,
-    mode: 'new_project',
-    selectionToken: '',
+    mode: folderSelection ? 'existing_project' : 'new_project',
+    selectionToken: folderSelection?.selection_token || '',
+    folderDisplay: folderSelection?.folder || '',
     entryName: '',
     generation: 0,
     signature: '',
     review: null,
     pending: null
   };
-  const draft = savedDraft?.runID === journey.run_id ? savedDraft : null;
+  const draft = !folderSelection && savedDraft?.runID === journey.run_id ? savedDraft : null;
   if (draft) {
     state.mode = draft.mode;
     state.selectionToken = draft.selectionToken;

@@ -6,10 +6,12 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/onboarding/detector"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -28,6 +30,23 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 	service := personalassistant.NewFolderDigestService(store, personalassistant.FolderDigestDeps{
 		ValidateRoot: validateShownFolder,
 		Picker:       nativeFolderPicker{},
+		AppInstalled: silentAppInstalled(),
+		ProjectQuest: func(ctx context.Context, integrationKey, blueprintID string) (string, string, bool) {
+			return reviewedProjectQuest(ctx, b, integrationKey, blueprintID)
+		},
+		HomeExists: func(_ context.Context, userID, providerKey string) (bool, error) {
+			return reviewedHomeExists(b, userID, providerKey)
+		},
+		LegacyDeclined: func(ctx context.Context, userID, domain string) (bool, error) {
+			if b.personalAssistantStore == nil || domain != "music_production" {
+				return false, nil
+			}
+			state, err := b.personalAssistantStore.GetState(ctx, userID)
+			if err != nil {
+				return false, err
+			}
+			return state.SpecialistOfferState == personalassistant.SpecialistOfferDeclined, nil
+		},
 		// Resolved lazily: the template resolver is wired in a later phase,
 		// and the answer must reflect plugins enabled after startup.
 		BlueprintAvailable: func(id string) bool {
@@ -38,10 +57,52 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 			handler: b.sessionHandler,
 			linker:  folderWorkspaceLinker{files: b.workspaceFileStore, sessions: b.sessionStore, tasks: b.sessionHandler},
 		},
-		Tidier: b.newFolderTidyRunner(),
+		Tidier:      b.newFolderTidyRunner(),
+		Journey:     folderJourneyVerifier{builder: b},
+		HomeJourney: folderHomeVerifier{builder: b},
 	})
 	b.personalAssistantFolderDigest = service
 	b.personalAssistantHandler.SetFolderDigest(service)
+	b.personalAssistantHandler.SetFolderHomeProvider(folderHomeProviderSetup{builder: b})
+	b.personalAssistantHandler.SetFolderProjectSelections(b.pathSelectionStore)
+}
+
+// silentAppInstalled keeps the installed-app lookup off the suggestion rail.
+// The detector normally filters for recent use; a wide window lets a synced
+// project still offer setup when its application was not used on this Mac.
+// Cache the bounded lookup so polling the card does not re-run system queries.
+func silentAppInstalled() func(context.Context, string) bool {
+	config := detector.DefaultConfig()
+	config.RecencyDays = 36500
+	lookup, err := detector.New(config)
+	var mu sync.Mutex
+	var apps []detector.DetectedApp
+	var checked time.Time
+	return func(ctx context.Context, name string) bool {
+		if err != nil || strings.TrimSpace(name) == "" {
+			return false
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if time.Since(checked) > time.Minute || checked.IsZero() {
+			bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
+			found, scanErr := lookup.DetectApps(bounded)
+			cancel()
+			checked = time.Now()
+			if scanErr != nil {
+				return false
+			}
+			apps = found
+		}
+		for _, app := range apps {
+			found := strings.ToLower(strings.TrimSuffix(app.Name, ".app"))
+			wanted := strings.ToLower(name)
+			if found == wanted || strings.HasPrefix(found, wanted+" ") {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // validateShownFolder applies File Janitor's root rules (FR7) and turns the
@@ -68,6 +129,14 @@ func (nativeFolderPicker) UnavailableReason() string { return platform.ChooseFol
 
 func (nativeFolderPicker) Choose(ctx context.Context, prompt string) (string, bool, error) {
 	path, chosen, err := platform.ChooseFolder(ctx, prompt)
+	if errors.Is(err, platform.ErrFolderDialogUnavailable) {
+		return "", false, personalassistant.ErrFolderPickerUnavailable
+	}
+	return path, chosen, err
+}
+
+func (nativeFolderPicker) ChooseFile(ctx context.Context, prompt string) (string, bool, error) {
+	path, chosen, err := platform.ChooseFile(ctx, prompt)
 	if errors.Is(err, platform.ErrFolderDialogUnavailable) {
 		return "", false, personalassistant.ErrFolderPickerUnavailable
 	}

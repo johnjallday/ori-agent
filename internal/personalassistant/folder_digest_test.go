@@ -123,6 +123,390 @@ func seedFolderTrees(t *testing.T, home string) {
 	write("Desktop/photo.png", 0)
 }
 
+func TestFolderDigest_CapabilityOfferUsesEvidenceAndSilentInstallLookup(t *testing.T) {
+	for _, installed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("installed=%t", installed), func(t *testing.T) {
+			f := newFolderDigestFixture(t)
+			if err := os.WriteFile(filepath.Join(f.home, "Desktop", "Song.rpp"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			f.service.deps.AppInstalled = func(_ context.Context, name string) bool {
+				calls++
+				if name != "REAPER" {
+					t.Errorf("unexpected app lookup: %s", name)
+				}
+				return installed
+			}
+			offer, err := f.service.ScanChip(context.Background(), "local", "desktop")
+			if err != nil || offer.Capability == nil {
+				t.Fatalf("offer = %+v, err = %v", offer, err)
+			}
+			capability := offer.Capability
+			if capability.Domain != "music_production" || capability.Recognized != "REAPER" ||
+				capability.Workspace != "REAPER song workspace" || capability.AppInstalled != installed ||
+				capability.AcceptLabel == "" || capability.DeclineLabel == "" ||
+				!strings.Contains(capability.Evidence, "REAPER") || calls != 1 {
+				t.Fatalf("capability = %+v, calls = %d", capability, calls)
+			}
+			if installed && !strings.Contains(capability.Integration, "connect to REAPER") ||
+				!installed && (!strings.Contains(capability.Integration, "install REAPER separately") || !strings.Contains(capability.Integration, "Ori integration plugin")) {
+				t.Fatalf("install wording = %q", capability.Integration)
+			}
+			manuscript, err := f.service.ScanChip(context.Background(), "local", "documents")
+			if err != nil || manuscript.Capability != nil || calls != 1 {
+				t.Fatalf("non-offer shape = %+v, calls = %d, err = %v", manuscript, calls, err)
+			}
+		})
+	}
+}
+
+type fakeJourneyVerifier struct {
+	folder string
+	calls  int
+}
+
+func (v *fakeJourneyVerifier) VerifiedProject(_ context.Context, userID, runID, folderPath, blueprintID, integrationKey string, after time.Time) (FolderCreateResult, error) {
+	v.calls++
+	if userID != "local" || runID != "new-run" || folderPath != v.folder || blueprintID != "reaper-song" || integrationKey != "ori_reaper" || after.IsZero() {
+		return FolderCreateResult{}, ErrFolderWorkspaceRefused
+	}
+	return FolderCreateResult{WorkspaceID: "quest-project", Route: "/workspaces/quest-project"}, nil
+}
+
+func TestFolderDigest_PortfolioPrecedesProjectsAndSuppressesExistingHome(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		count         int
+		home          bool
+		wantPortfolio bool
+	}{
+		{"four are individual projects", 4, false, false},
+		{"five mixed DAW folders", 5, false, true},
+		{"Home already exists", 5, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFolderDigestFixture(t)
+			root := filepath.Join(f.home, "Desktop")
+			for i := range tc.count {
+				ext := ".rpp"
+				if i%2 != 0 {
+					ext = ".als"
+				}
+				project := filepath.Join(root, fmt.Sprintf("Album-%d", i))
+				if err := os.MkdirAll(project, 0o750); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(project, "Session"+ext), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.service.deps.HomeExists = func(_ context.Context, owner, key string) (bool, error) {
+				if owner != "local" || key != "music_project_management" {
+					t.Fatalf("unreviewed Home lookup: %s %s", owner, key)
+				}
+				return tc.home, nil
+			}
+			offer, err := f.service.ScanChip(context.Background(), "local", "desktop")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (offer.Portfolio != nil) != tc.wantPortfolio {
+				t.Fatalf("portfolio = %+v, want %v", offer, tc.wantPortfolio)
+			}
+			if tc.wantPortfolio && (offer.Portfolio.Projects != 5 || offer.Portfolio.Shape != "audio" ||
+				offer.Subject.Name != "Desktop" || offer.Capability == nil || offer.Capability.SetupSource != "portfolio" ||
+				offer.CreateAvailable) {
+				t.Fatalf("portfolio did not win or show Home: %+v", offer)
+			}
+			if tc.home && (offer.Capability != nil || offer.Blueprint != "") {
+				t.Fatalf("existing Home offered a capability or blueprint: %+v", offer)
+			}
+		})
+	}
+}
+
+type fakeHomeVerifier struct{ calls int }
+
+func (v *fakeHomeVerifier) VerifiedHome(_ context.Context, owner, homeID, key string, after time.Time) (FolderCreateResult, error) {
+	v.calls++
+	if owner != "local" || homeID != "new-home" || key != "music_project_management" || after.IsZero() {
+		return FolderCreateResult{}, ErrFolderWorkspaceRefused
+	}
+	return FolderCreateResult{WorkspaceID: "new-home", Route: "/workspaces/music-home"}, nil
+}
+
+func TestFolderDigest_ProjectSelectionReusesOnlyConfirmedPickedFolder(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	root := filepath.Join(f.home, "Desktop")
+	if err := os.WriteFile(filepath.Join(root, "Session.rpp"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	offer, err := f.service.ScanChip(ctx, "local", "desktop")
+	if err != nil || offer.Capability == nil {
+		t.Fatalf("offer = %+v, %v", offer, err)
+	}
+	if _, err := f.service.ProjectSelectionPath(ctx, "local", offer.ID); !errors.Is(err, ErrFolderOfferDecided) {
+		t.Fatalf("before confirmation: %v", err)
+	}
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, RequestID: "yes"}); err != nil {
+		t.Fatal(err)
+	}
+	path, err := f.service.ProjectSelectionPath(ctx, "local", offer.ID)
+	if err != nil || path != root {
+		t.Fatalf("selected %s, %v, want %s", path, err, root)
+	}
+	if recovered, err := f.newService().ProjectSelectionPath(ctx, "local", offer.ID); err != nil || recovered != root {
+		t.Fatalf("chip path after restart: %s, %v", recovered, err)
+	}
+	if _, err := f.service.ProjectSelectionPath(ctx, "someone-else", offer.ID); err == nil {
+		t.Fatal("foreign user received a project selection")
+	}
+}
+
+func TestFolderDigest_PortfolioResolvesOnlyReviewedHomeAfterConfirm(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	root := filepath.Join(f.home, "Desktop")
+	for i := range 5 {
+		sub := filepath.Join(root, fmt.Sprintf("Track-%d", i))
+		if err := os.Mkdir(sub, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "Song.als"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.service.deps.HomeExists = func(context.Context, string, string) (bool, error) { return false, nil }
+	verifier := &fakeHomeVerifier{}
+	f.service.deps.HomeJourney = verifier
+	offer, err := f.service.ScanChip(ctx, "local", "desktop")
+	if err != nil || offer.Portfolio == nil {
+		t.Fatalf("offer = %+v, %v", offer, err)
+	}
+	if _, err := f.service.ResolvePortfolio(ctx, "local", offer.ID, FolderResolveInput{HomeID: "new-home", RequestID: "early"}); !errors.Is(err, ErrFolderOfferDecided) {
+		t.Fatalf("early Home: %v", err)
+	}
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, RequestID: "confirmed"}); err != nil {
+		t.Fatal(err)
+	}
+	if key, err := f.service.PortfolioProvider(ctx, "local", offer.ID); err != nil || key != "music_project_management" {
+		t.Fatalf("provider = %s, %v", key, err)
+	}
+	if _, err := f.service.ResolvePortfolio(ctx, "local", offer.ID, FolderResolveInput{HomeID: "foreign", RequestID: "foreign"}); !errors.Is(err, ErrFolderWorkspaceRefused) {
+		t.Fatalf("foreign Home: %v", err)
+	}
+	restarted := f.newService()
+	restarted.deps.HomeJourney = verifier
+	got, err := restarted.ResolvePortfolio(ctx, "local", offer.ID, FolderResolveInput{HomeID: "new-home", RequestID: "ready"})
+	if err != nil || got.Outcome == nil || got.Outcome.Kind != FolderChoiceHome || got.Outcome.WorkspaceID != "new-home" || got.Remember {
+		t.Fatalf("canonical Home = %+v, %v", got, err)
+	}
+	if replay, err := restarted.ResolvePortfolio(ctx, "local", offer.ID, FolderResolveInput{HomeID: "new-home", RequestID: "ready"}); err != nil || replay.Status != FolderOfferResolved || verifier.calls != 2 {
+		t.Fatalf("replay = %+v, calls=%d, %v", replay, verifier.calls, err)
+	}
+}
+
+func TestFolderDigest_DomainDeclineRevivesOnceAndMigratesAppAnswer(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%v", legacy), func(t *testing.T) {
+			f := newFolderDigestFixture(t)
+			ctx := context.Background()
+			f.service.deps.HomeExists = func(context.Context, string, string) (bool, error) { return false, nil }
+			f.service.deps.LegacyDeclined = func(_ context.Context, _, domain string) (bool, error) {
+				if domain != "music_production" {
+					t.Fatalf("domain %q", domain)
+				}
+				return legacy, nil
+			}
+			project := filepath.Join(f.home, "Song")
+			if err := os.Mkdir(project, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(project, "Song.rpp"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			first, err := f.service.scanRoot(ctx, "local", project, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if legacy {
+				if first.Capability != nil || first.Blueprint != "" {
+					t.Fatalf("legacy no not honored: %+v", first)
+				}
+			} else {
+				if first.Capability == nil {
+					t.Fatal("first project offer absent")
+				}
+				if _, err := f.service.Decide(ctx, "local", first.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "single-no"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			another := filepath.Join(f.home, "Another Song")
+			if err := os.Mkdir(another, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(another, "Take.rpp"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			second, err := f.service.scanRoot(ctx, "local", another, "")
+			if err != nil || second.Capability != nil || second.Blueprint != "" {
+				t.Fatalf("later single should be plain: %+v, %v", second, err)
+			}
+			for n := range 2 {
+				root := filepath.Join(f.home, fmt.Sprintf("Collection %d", n))
+				if err := os.Mkdir(root, 0o750); err != nil {
+					t.Fatal(err)
+				}
+				for i := range 5 {
+					sub := filepath.Join(root, fmt.Sprintf("Album %d", i))
+					if err := os.Mkdir(sub, 0o750); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(sub, "Song.rpp"), nil, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				offer, err := f.service.scanRoot(ctx, "local", root, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if n == 0 {
+					if offer.Capability == nil || !offer.Capability.Revived || offer.Portfolio == nil {
+						t.Fatalf("stronger evidence did not revive: %+v", offer)
+					}
+					if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "portfolio-no"}); err != nil {
+						t.Fatal(err)
+					}
+				} else if offer.Capability != nil || offer.Blueprint != "" {
+					t.Fatalf("second no was not final: %+v", offer)
+				}
+			}
+			doc, err := f.store.Read(ctx, "local")
+			if err != nil || doc.DeclineFor("music_production") == nil || doc.DeclineFor("music_production").Count != 2 {
+				t.Fatalf("saved domain decline = %+v, %v", doc.DomainDeclines, err)
+			}
+		})
+	}
+}
+
+func TestFolderDigest_InstalledReviewedQuestSkipsInstallQuest(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	if err := os.WriteFile(filepath.Join(f.home, "Desktop", "Song.rpp"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.service.deps.ProjectQuest = func(_ context.Context, integration, blueprint string) (string, string, bool) {
+		if integration != "ori_reaper" || blueprint != "reaper-song" {
+			t.Fatalf("unexpected quest query %q %q", integration, blueprint)
+		}
+		return "reaper-plugin", "reaper_setup", true
+	}
+	offer, err := f.service.ScanChip(context.Background(), "local", "desktop")
+	if err != nil || offer.Capability == nil || offer.Capability.SetupSource != "plugin" || offer.Capability.SetupQuestID != "reaper_setup" {
+		t.Fatalf("installed integration = %+v, %v", offer, err)
+	}
+}
+
+func TestFolderDigest_ReviewedJourneyResolvesOnlyCanonicalProject(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	folder := filepath.Join(f.home, "Desktop")
+	if err := os.WriteFile(filepath.Join(folder, "Song.rpp"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	verifier := &fakeJourneyVerifier{folder: folder}
+	f.service.deps.Journey = verifier
+	offer, err := f.service.scanRoot(ctx, "local", folder, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "new-run", RequestID: "early"}); !errors.Is(err, ErrFolderOfferDecided) {
+		t.Fatalf("before confirmation: %v", err)
+	}
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, RequestID: "confirmed"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "old-run", RequestID: "old"}); !errors.Is(err, ErrFolderWorkspaceRefused) {
+		t.Fatalf("unrelated run: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("verifier called %d times", verifier.calls)
+	}
+	// A confirmed offer must remain visible after reload/restart, even when
+	// there is no longer a pending card and the picker path was forgotten.
+	restarted := f.newService()
+	restarted.deps.Journey = verifier
+	current, err := restarted.Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.ID != offer.ID ||
+		current.Offer.Status != FolderOfferAwaitingOutcome || !current.Offer.NeedsPick {
+		t.Fatalf("confirmed picker offer after restart = %+v, %v", current.Offer, err)
+	}
+	if _, err := restarted.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "new-run", RequestID: "too-soon"}); !errors.Is(err, ErrFolderPathLost) {
+		t.Fatalf("lost picker path must not be guessed after restart: %v", err)
+	}
+	resumed, err := restarted.scanRoot(ctx, "local", folder, "")
+	if err != nil || resumed.ID != offer.ID || resumed.Status != FolderOfferAwaitingOutcome {
+		t.Fatalf("re-picking shown root = %+v, err = %v", resumed, err)
+	}
+	got, err := restarted.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "new-run", RequestID: "ready"})
+	if err != nil || got.Status != FolderOfferResolved || got.Outcome == nil || got.Outcome.WorkspaceID != "quest-project" || got.Outcome.Blueprint != "reaper-song" {
+		t.Fatalf("verified journey = %+v, err = %v", got, err)
+	}
+	replayed, err := restarted.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "new-run", RequestID: "ready"})
+	if err != nil || replayed.Status != FolderOfferResolved || verifier.calls != 2 {
+		t.Fatalf("replay = %+v, calls = %d, err = %v", replayed, verifier.calls, err)
+	}
+}
+
+func TestFolderDigest_ReviewedProjectNeverCreatesABlankPlaceholder(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	if err := os.WriteFile(filepath.Join(f.home, "Desktop", "Song.rpp"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	creator := &fakeFolderCreator{}
+	f.service.deps.Creator = creator
+	offer, err := f.service.ScanChip(ctx, "local", "desktop")
+	if err != nil || offer.Capability == nil || offer.CreateAvailable || offer.Blueprint != "reaper-song" || offer.BlueprintNote != "" {
+		t.Fatalf("planned offer = %+v, err = %v", offer, err)
+	}
+	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Create: true, RequestID: "forged-create"}); !errors.Is(err, ErrFolderOutcomeUnavailable) {
+		t.Fatalf("direct creation was not refused: %v", err)
+	}
+	if len(creator.requests) != 0 {
+		t.Fatalf("creator called before install: %+v", creator.requests)
+	}
+	waiting, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, RequestID: "journey-confirm"})
+	if err != nil || waiting.Status != FolderOfferAwaitingOutcome || waiting.Capability == nil {
+		t.Fatalf("journey confirmation = %+v, err = %v", waiting, err)
+	}
+	if _, err := f.service.Resolve(ctx, "local", offer.ID, FolderResolveInput{WorkspaceID: "foreign", RequestID: "forged-resolve"}); !errors.Is(err, ErrFolderWorkspaceRefused) {
+		t.Fatalf("unverified workspace was not refused: %v", err)
+	}
+}
+
+func TestFolderDigest_AbletonAndLogicGetPlainBlankWorkspace(t *testing.T) {
+	for _, extension := range []string{".als", ".logicx"} {
+		t.Run(extension, func(t *testing.T) {
+			f := newFolderDigestFixture(t)
+			if err := os.WriteFile(filepath.Join(f.home, "Desktop", "Session"+extension), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f.service.deps.BlueprintAvailable = func(string) bool { return true }
+			f.service.deps.AppInstalled = func(_ context.Context, name string) bool {
+				t.Fatalf("unexpected application lookup for plain workspace: %s", name)
+				return false
+			}
+			offer, err := f.service.ScanChip(context.Background(), "local", "desktop")
+			if err != nil || offer.Verdict != "project" || offer.Subject.Shape != "audio" ||
+				offer.Capability != nil || offer.Blueprint != "" || offer.BlueprintNote != "" {
+				t.Fatalf("plain audio offer = %+v, err = %v", offer, err)
+			}
+		})
+	}
+}
+
 func TestFolderDigest_FirstPromptPersistsOnceAndResetRearmsIt(t *testing.T) {
 	f := newFolderDigestFixture(t)
 	ctx := context.Background()
@@ -437,6 +821,92 @@ func TestFolderDigest_RestartKeepsChipOffersAndLosesPickedOnes(t *testing.T) {
 	// Saying no still works without the path.
 	if _, err := restarted.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "r3"}); err != nil {
 		t.Fatalf("picked no after restart err=%v", err)
+	}
+}
+
+func TestFolderDigest_FilePickerUsesParentAndNeverReadsContents(t *testing.T) {
+	for _, test := range []struct {
+		extension, shape, verdict string
+		capability                bool
+	}{
+		{extension: ".rpp", shape: "audio", verdict: "project", capability: true},
+		{extension: ".als", shape: "audio", verdict: "project"},
+		{extension: ".tex", shape: "manuscript", verdict: "project"},
+		{extension: ".unknown", verdict: "empty"},
+	} {
+		t.Run(test.extension, func(t *testing.T) {
+			f := newFolderDigestFixture(t)
+			picked := filepath.Join(f.home, "Desktop", "Session"+test.extension)
+			if err := os.WriteFile(picked, nil, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			f.service.deps.Picker = fakeFolderPicker{path: picked, chosen: true}
+			offer, err := f.service.ScanPickedFile(context.Background(), "local")
+			if err != nil || offer == nil || offer.Verdict != test.verdict || offer.Folder != "Desktop" {
+				t.Fatalf("picked offer = %+v, err = %v", offer, err)
+			}
+			if offer.Subject.Shape != test.shape || (offer.Capability != nil) != test.capability {
+				t.Errorf("subject = %+v, capability = %+v", offer.Subject, offer.Capability)
+			}
+			if offer.Capability != nil && offer.Capability.Recognized != "REAPER" {
+				t.Errorf("file offer = %+v", offer.Capability)
+			}
+			if offer.Blueprint != "" && test.extension == ".als" {
+				t.Errorf("plain audio uses a tool-specific blueprint: %+v", offer)
+			}
+			if strings.Contains(offer.Reason, picked) {
+				t.Fatalf("absolute file path leaked in reason: %q", offer.Reason)
+			}
+		})
+	}
+}
+
+func TestFolderDigest_PickedUppercaseREAPERFolderOffersCapability(t *testing.T) {
+	for _, pickFile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("file=%t", pickFile), func(t *testing.T) {
+			f := newFolderDigestFixture(t)
+			folder := filepath.Join(f.home, "Documents", "ReaperTest")
+			if err := os.Mkdir(folder, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(folder, "ReaperTest.RPP")
+			if err := os.WriteFile(file, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var offer *FolderOfferView
+			var err error
+			if pickFile {
+				f.service.deps.Picker = fakeFolderPicker{path: file, chosen: true}
+				offer, err = f.service.ScanPickedFile(context.Background(), "local")
+			} else {
+				f.service.deps.Picker = fakeFolderPicker{path: folder, chosen: true}
+				offer, err = f.service.ScanPicked(context.Background(), "local")
+			}
+			if err != nil || offer.Verdict != "project" || offer.Folder != "ReaperTest" || offer.Capability == nil || offer.Capability.Recognized != "REAPER" {
+				t.Fatalf("picked offer = %+v, err = %v", offer, err)
+			}
+		})
+	}
+}
+
+func TestFolderDigest_FilePickerRejectsSymlinksAndCancel(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	if _, err := f.service.ScanPickedFile(ctx, "local"); !errors.Is(err, ErrFolderPickerUnavailable) {
+		t.Fatalf("missing file picker: %v", err)
+	}
+	f.service.deps.Picker = fakeFolderPicker{}
+	if picked, err := f.service.ScanPickedFile(ctx, "local"); err != nil || picked != nil {
+		t.Fatalf("cancel: %+v, %v", picked, err)
+	}
+	link := filepath.Join(f.home, "Desktop", "link.rpp")
+	if err := os.Symlink(filepath.Join(f.home, "Desktop", "todo.txt"), link); err != nil {
+		t.Fatal(err)
+	}
+	f.service.deps.Picker = fakeFolderPicker{path: link, chosen: true}
+	var rootErr *FolderRootError
+	if _, err := f.service.ScanPickedFile(ctx, "local"); !errors.As(err, &rootErr) {
+		t.Fatalf("symlink must be refused: %v", err)
 	}
 }
 
@@ -969,6 +1439,10 @@ func (fakeFolderPicker) Available() bool { return true }
 func (fakeFolderPicker) UnavailableReason() string { return "" }
 
 func (p fakeFolderPicker) Choose(context.Context, string) (string, bool, error) {
+	return p.path, p.chosen, nil
+}
+
+func (p fakeFolderPicker) ChooseFile(context.Context, string) (string, bool, error) {
 	return p.path, p.chosen, nil
 }
 

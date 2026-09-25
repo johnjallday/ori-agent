@@ -484,6 +484,28 @@ func (s *Service) ensureChild(scope Scope, request Request, preview Preview, hom
 				return nil, ErrChanged
 			}
 		}
+		if groupSnapshot != nil && groupSnapshot.SelectedComposition == workspace.GroupRequirementCompositionGrouped &&
+			existing.GetTemplateProvenance().AssistantProgram == nil && existing.GetAssistantProjectLink() == nil && scope.Template.ResolvedAssistantHome != nil {
+			// An earlier attempt may have saved the deterministic child before
+			// its independent Home link, with no resolved Home declaration.
+			// Heal only this run's exact reviewed operation before reconciliation.
+			if err := s.store.Update(childID, func(current *workspace.Workspace) error {
+				provenance := current.GetTemplateProvenance()
+				if current.SharedData[connectionRunKey] != scope.RunID || provenance == nil || provenance.GroupRequirement == nil ||
+					provenance.GroupRequirement.OperationDigest != groupSnapshot.OperationDigest {
+					return ErrChanged
+				}
+				provenance.AssistantProgram = workspace.CloneAssistantProgramDeclaration(scope.Template.ResolvedAssistantHome)
+				current.SetTemplateProvenance(provenance)
+				return nil
+			}); err != nil {
+				return nil, ErrUnavailable
+			}
+			existing, err = s.projectRecord(childID)
+			if err != nil {
+				return nil, ErrUnavailable
+			}
+		}
 		if _, resolveErr := workspace.ResolveProjectEntry(existing, mustFolderPath(s.store, existing.ID)); resolveErr == nil {
 			return existing, nil
 		}
@@ -683,13 +705,20 @@ func templateProvenance(template projecttemplates.Template, now time.Time, snaps
 	if len(snapshots) > 0 {
 		snapshot = snapshots[0]
 	}
+	program := template.AssistantProgram
+	if program == nil && snapshot != nil && snapshot.SelectedComposition == workspace.GroupRequirementCompositionGrouped {
+		// Split blueprints resolve the independent Home during the reviewed
+		// group operation. Persist that canonical declaration on the project;
+		// EnsureProjectStation uses it to link the child to the existing Home.
+		program = template.ResolvedAssistantHome
+	}
 	return &workspace.TemplateProvenance{
 		TemplateID: template.ID, TemplateName: template.Name, Builtin: template.Builtin, Version: version, AppliedAt: now,
 		PluginOwner: template.PluginOwner, UserTemplateOwner: userOwner, DirectoryRequirements: template.DirectoryRequirements,
 		AutomationRecipes: template.AutomationRecipes, IntakeRequirements: template.IntakeRequirements, CapabilityRequirements: template.CapabilityRequirements,
 		Plugins: template.Tools.Plugins, PluginSources: template.Tools.PluginSources,
 		RuntimeRequirements: template.RuntimeRequirements, SetupWizard: template.SetupWizard,
-		AssistantProgram: template.AssistantProgram, GroupRequirement: snapshot,
+		AssistantProgram: workspace.CloneAssistantProgramDeclaration(program), GroupRequirement: snapshot,
 	}
 }
 

@@ -13,12 +13,17 @@ func TestMatchMarker_TableRows(t *testing.T) {
 		{".git", false, "", false}, // a .git file (worktree pointer) is not the marker
 		{"package.json", false, ShapeCode, true},
 		{"package.json", true, "", false},
+		{"PACKAGE.JSON", false, "", false}, // exact-name manifests keep their case
 		{"go.mod", false, ShapeCode, true},
 		{"Cargo.toml", false, ShapeCode, true},
 		{"pyproject.toml", false, ShapeCode, true},
 		{"requirements.txt", false, ShapeCode, true},
 		{"App.xcodeproj", true, ShapeCode, true},
 		{"Song.rpp", false, ShapeAudio, true},
+		{"ReaperTest.RPP", false, ShapeAudio, true},
+		{"Session.ALS", false, ShapeAudio, true},
+		{"Session.LOGICX", true, ShapeAudio, true},
+		{"App.XCODEPROJ", true, ShapeCode, true},
 		{"Song.logicx", true, ShapeAudio, true},
 		{"Set.als", false, ShapeAudio, true},
 		{"main.tex", false, ShapeManuscript, true},

@@ -48,7 +48,9 @@ export function folderChooserView(digest) {
   return {
     chips,
     pickerVisible,
+    filePickerVisible: pickerVisible && digest?.file_picker_available === true,
     pickerLabel: 'Pick another folder…',
+    filePickerLabel: 'Pick a file…',
     note
   };
 }
@@ -117,6 +119,7 @@ function plural(n, noun) {
 // reached from a mixed or ambiguous offer gets Back instead of Not this one
 // and Later, which belong to the offer it came from.
 function projectConfirmView(offer, base, subject, remember, { back = false } = {}) {
+  if (offer.capability && !back) return capabilityConfirmView(offer, base, subject);
   const marker = String(offer.subject?.marker || '').trim();
   // The plan names its blueprint only when that blueprint will be used; a
   // missing one is explained by the note instead.
@@ -171,6 +174,50 @@ function projectConfirmView(offer, base, subject, remember, { back = false } = {
   return { ...base, headline, question, actions, confirming: back };
 }
 
+// A reviewed capability rides the same result card and opens the existing
+// install → project-setup journey. It never uses the blank-workspace creator.
+function capabilityConfirmView(offer, base, subject) {
+  const capability = offer.capability;
+  const continuing = base.status === 'awaiting_outcome';
+  const actions = continuing
+    ? [{ id: 'resume', label: 'Continue setup', style: 'primary', journey: true }]
+    : base.decided
+      ? []
+      : [
+          {
+            id: 'setup',
+            label: String(capability.accept_label || 'Set up'),
+            style: 'primary',
+            journey: true
+          },
+          {
+            id: 'no',
+            label: String(capability.decline_label || 'No thanks'),
+            style: 'outline',
+            decision: 'no'
+          },
+          { id: 'later', label: 'Later', style: 'link', decision: 'later' }
+        ];
+  const portfolio = offer.portfolio;
+  const headline = portfolio
+    ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
+    : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
+  const question = portfolio
+    ? String(capability.question || `Set up a ${capability.workspace}?`)
+    : `Set up ${subject} as a ${capability.workspace}?`;
+  return {
+    ...base,
+    headline,
+    question: capability.revived
+      ? `You said no before, but this is a whole collection now. ${question}`
+      : question,
+    capabilityDetail: String(capability.integration || ''),
+    reason: String(capability.evidence || base.reason),
+    actions,
+    resume: continuing
+  };
+}
+
 // folderOfferView is the whole render decision for one offer (FR22). Every
 // string comes from the verdict and the server's counts and names; the
 // reason line is always present. options.confirm ('project' or 'tidy') shows
@@ -211,6 +258,12 @@ export function folderOfferView(offer, options = {}) {
   // A yes needs the folder's path, and a dialog-chosen folder is held in
   // memory only: after a server restart the card asks for the folder again
   // before offering anything a yes would need.
+  if (view.visible && view.needsPick && status === 'awaiting_outcome') {
+    return {
+      ...repickView(view, subject),
+      actions: [{ id: 'repick', label: 'Pick it again', style: 'primary', repick: true }]
+    };
+  }
   if (view.visible && view.needsPick && !view.decided) return repickView(view, subject);
   return view;
 }
@@ -355,6 +408,8 @@ export function folderOutcomeNote(offer) {
   const subject = String(offer?.subject?.name || '').trim() || 'that folder';
   switch (status) {
     case 'awaiting_outcome':
+      if (offer?.capability)
+        return `Continue reviewed setup for ${subject}; no folder was changed.`;
       return offer?.choice === 'tidy'
         ? `Setting up a tidy of ${subject}…`
         : `Setting up a workspace for ${subject}…`;
@@ -363,6 +418,9 @@ export function folderOutcomeNote(offer) {
     case 'declined':
       return `I will not ask about ${subject} again.`;
     case 'resolved':
+      if (offer?.outcome?.kind === 'home') {
+        return 'Music Production Home is ready. Your project folders were not moved or linked.';
+      }
       if (offer?.outcome?.kind === 'tidy') {
         return (
           String(offer?.outcome?.note || '').trim() ||
@@ -441,6 +499,7 @@ function elements() {
     headline: document.getElementById('personalAssistantFolderOfferHeadline'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
+    capability: document.getElementById('personalAssistantFolderOfferCapability'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
     receipt: document.getElementById('personalAssistantFolderReceipt'),
     actions: document.getElementById('personalAssistantFolderOfferActions'),
@@ -512,6 +571,16 @@ function renderChooser() {
       button.addEventListener('click', () => scan({ picker: true }));
       els.chips.appendChild(button);
     }
+    if (view.filePickerVisible) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'pa-folder__chip';
+      button.dataset.filePicker = 'true';
+      button.textContent = view.filePickerLabel;
+      button.disabled = state.busy;
+      button.addEventListener('click', () => scan({ file: true }));
+      els.chips.appendChild(button);
+    }
   }
   setText(els.note, view.note);
 }
@@ -576,6 +645,7 @@ function renderOffer() {
     });
   }
   setText(els.question, view.question, false);
+  setText(els.capability, view.capabilityDetail);
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
   if (els.receipt) {
@@ -606,14 +676,14 @@ function renderOffer() {
   }
   if (els.actions) {
     els.actions.replaceChildren();
-    els.actions.hidden = view.decided && !receipt.route;
+    els.actions.hidden = view.decided && !receipt.route && !view.resume;
     if (receipt.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
       open.href = receipt.route;
       open.textContent = receipt.openLabel;
       els.actions.append(open);
-    } else if (!view.decided) {
+    } else if (!view.decided || view.resume) {
       view.actions.forEach(action => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -678,6 +748,10 @@ function runAction(action) {
     announceOffer();
     return;
   }
+  if (action.journey) {
+    void startCapabilityJourney();
+    return;
+  }
   if (action.modal) {
     startProjectOutcome(action);
     return;
@@ -687,6 +761,130 @@ function runAction(action) {
     return;
   }
   decide(action);
+}
+
+// A card confirmation records intent before opening the reviewed install
+// quest. A failed modal load leaves a Continue setup action for retry; the
+// digest never creates a placeholder workspace or installs on scan.
+async function startCapabilityJourney() {
+  const offer = state.offer;
+  if (!offer?.id || !offer?.capability?.setup_quest_id || state.busy) return;
+  state.busy = true;
+  showError('');
+  render();
+  try {
+    if (offer.status === 'pending') {
+      const { ok, payload } = await postOffer(offer.id, 'decide', {
+        decision: 'yes',
+        choice: 'project'
+      });
+      if (!ok) {
+        showOfferFailure(payload);
+        return;
+      }
+    }
+    if (state.offer.portfolio) {
+      await startPortfolioSetup(state.offer);
+      return;
+    }
+    const { openSpecialistSetupJourney } = await import('./setup-journey.js');
+    const capability = state.offer.capability;
+    const selection =
+      capability.setup_source === 'plugin'
+        ? {
+            source: 'plugin',
+            plugin_id: capability.setup_plugin_id,
+            quest_id: capability.setup_quest_id
+          }
+        : { source: 'host', quest_id: capability.setup_quest_id };
+    selection.folder_offer_id = state.offer.id;
+    if (!(await openSpecialistSetupJourney(selection))) {
+      showError('Could not open setup. Choose Continue setup to try again.');
+    }
+  } catch (error) {
+    showError(error?.message || 'Could not open setup. Choose Continue setup to try again.');
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+async function startPortfolioSetup(offer) {
+  const url = `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(offer.id)}/home-provider`;
+  const post = async data => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(data)
+    });
+    const body = await readJSON(response);
+    if (!response.ok) throw new Error(body?.error || 'The Home provider is unavailable.');
+    return body.home_provider;
+  };
+  let provider = await post({});
+  if (!provider?.plugin_id) throw new Error('The reviewed Home provider is unavailable.');
+  if (!provider.ready) {
+    const disclosure = provider.disclosure || {};
+    const action = provider.installed
+      ? 'enable the installed provider'
+      : 'install and enable the reviewed provider';
+    const parts = [
+      `Set up Music Production Home: ${action}?`,
+      `Plugin: ${provider.plugin_id} ${provider.version || ''}`,
+      provider.source ? `Reviewed source: ${provider.source}` : '',
+      (disclosure.AssistantProgramHomes || []).length
+        ? `Homes: ${disclosure.AssistantProgramHomes.join(', ')}`
+        : '',
+      (disclosure.Skills || []).length ? `Skills: ${disclosure.Skills.join(', ')}` : '',
+      'Only the reviewed provider is installed; project integrations and the native music apps are not installed.'
+    ].filter(Boolean);
+    if (!window.confirm(parts.join('\n'))) return;
+    provider = await post({ confirm: true, reviewed_version: provider.version });
+    if (!provider?.ready) throw new Error('The Home provider could not be enabled.');
+  }
+  const response = await fetch('/api/workspaces/group-templates', {
+    headers: { Accept: 'application/json' }
+  });
+  const payload = await readJSON(response);
+  if (!response.ok) throw new Error('The Home setup templates are unavailable.');
+  const matches = (payload?.group_templates || []).filter(
+    item => item.kind === 'managed_home' && item.provider?.plugin_id === provider.plugin_id
+  );
+  if (matches.length !== 1) throw new Error('The reviewed Home template is missing or ambiguous.');
+  const template = matches[0];
+  if (template.home?.state === 'exists' && template.home.workspace_id) {
+    const result = await postOffer(offer.id, 'resolve', { home_id: template.home.workspace_id });
+    if (!result.ok)
+      throw new Error('That Home was not created for this offer. Pick another collection.');
+    render();
+    return;
+  }
+  if (template.availability?.state !== 'creatable')
+    throw new Error('This Home cannot be prepared right now.');
+  const manager = window.sessionManager;
+  const picker = window.GroupTemplateCreator;
+  if (!manager?.showAddWorkspaceModal || !picker?.select)
+    throw new Error('The Home creator is unavailable.');
+  manager.showAddWorkspaceModal({
+    kind: 'group',
+    entryPoint: 'folder_digest_portfolio',
+    drafts: { group: { name: template.proposed_group_name || 'Music Production Home' } },
+    onCreated: async ({ groupId }) => {
+      const result = await postOffer(offer.id, 'resolve', { home_id: groupId });
+      if (!result.ok)
+        throw new Error(
+          'The Home was built, but its folder offer is still open. Continue setup to reconcile it.'
+        );
+      render();
+    }
+  });
+  const context = manager.workspaceCreatorContext;
+  for (let retry = 0; retry < 40 && picker.stateFor(context)?.status !== 'ready'; retry++) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  if (manager.workspaceCreatorContext !== context || !picker.select(manager, template.id)) {
+    throw new Error('The exact Home template could not be selected. Nothing was created.');
+  }
 }
 
 // startManualTidy is the tidy's Adjust…: the ordinary File Janitor creator,
@@ -714,7 +912,7 @@ function startManualTidy() {
 // to run: no offer, an offer already decided, or an unknown id.
 function act(actionId) {
   const view = folderOfferView(state.offer, { confirm: state.confirm });
-  if (!view.visible || view.decided) return false;
+  if (!view.visible || (view.decided && !view.resume)) return false;
   const action = (view.actions || []).find(candidate => candidate.id === actionId);
   if (!action) return false;
   runAction(action);
@@ -774,17 +972,20 @@ async function load() {
 async function scan(body) {
   if (state.busy) return;
   state.busy = true;
-  state.scanning = !body.picker;
+  state.scanning = !body.picker && !body.file;
   state.scanFailed = false;
   state.freshScan = false;
-  state.scanName = body.picker
-    ? ''
-    : folderChooserView(state.digest).chips.find(chip => chip.id === body.chip)?.label ||
-      'your folder';
+  state.scanName =
+    body.picker || body.file
+      ? ''
+      : folderChooserView(state.digest).chips.find(chip => chip.id === body.chip)?.label ||
+        'your folder';
   const els = elements();
   if (els?.why) els.why.open = false;
   showError('');
-  showStatus(body.picker ? 'Choose a folder in the dialog…' : '');
+  showStatus(
+    body.file ? 'Choose a file in the dialog…' : body.picker ? 'Choose a folder in the dialog…' : ''
+  );
   render();
   try {
     const response = await fetch(`${DIGEST_ENDPOINT}/scan`, {
@@ -817,6 +1018,9 @@ async function scan(body) {
     state.scanning = false;
     state.busy = false;
     render();
+    if (pendingProjectRun?.offerID === state.offer?.id && !state.offer?.needs_pick) {
+      void onSetupProjectReady(pendingProjectRun.runID);
+    }
   }
 }
 
@@ -935,7 +1139,7 @@ async function revealSetupWalkthrough(offer) {
 export function resolvedRouteFor(offer) {
   if (String(offer?.status || '') !== 'resolved') return '';
   const kind = offer?.outcome?.kind;
-  if (kind !== 'tidy' && kind !== 'project') return '';
+  if (kind !== 'tidy' && kind !== 'project' && kind !== 'home') return '';
   const route = String(offer?.outcome?.route || '').trim();
   return route.startsWith('/') && !route.startsWith('//') ? route : '';
 }
@@ -995,6 +1199,43 @@ function startProjectOutcome(action) {
   });
 }
 
+let resolvingProjectRun = '';
+let pendingProjectRun = null;
+// Called before workspace navigation as well as when a ready quest is
+// reopened after a restart. The offer ID must still be the card in Today.
+export async function resolveFolderProjectRun(runID, offerID) {
+  if (state.offer?.id !== offerID) return;
+  await onSetupProjectReady(runID);
+}
+
+async function onSetupProjectReady(runID) {
+  const offer = state.offer;
+  if (
+    !offer?.id ||
+    !offer.capability ||
+    offer.portfolio ||
+    offer.status !== 'awaiting_outcome' ||
+    !runID ||
+    resolvingProjectRun === runID
+  )
+    return;
+  resolvingProjectRun = runID;
+  pendingProjectRun = { offerID: offer.id, runID };
+  try {
+    const { ok } = await postOffer(offer.id, 'resolve', { run_id: runID });
+    // A different or historical quest can be ready on the same page. The
+    // server refuses it; leave this card resumable without claiming a match.
+    if (ok) {
+      pendingProjectRun = null;
+      render();
+    }
+  } catch (_) {
+    // A network interruption can be retried by reopening setup or re-picking.
+  } finally {
+    resolvingProjectRun = '';
+  }
+}
+
 function onStatus(personalAssistant) {
   const available = folderActionAvailable(personalAssistant);
   const changed = available !== state.available;
@@ -1017,6 +1258,9 @@ function init() {
   if (!els) return;
   document.addEventListener('personal-assistant:status', event => {
     onStatus(event.detail?.personalAssistant);
+  });
+  window.addEventListener('ori:setup-project-ready', event => {
+    void onSetupProjectReady(String(event.detail?.run_id || ''));
   });
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);

@@ -110,6 +110,8 @@ type Handler struct {
 	interviewOffer             InterviewOffer
 	interview                  *personalassistant.KnowledgeInterviewService
 	folderDigest               FolderDigestService
+	folderHomeProvider         FolderHomeProviderSetup
+	folderProjectSelections    FolderProjectSelectionIssuer
 	provider                   userprofile.UserProvider
 	onFirstAssignmentCompleted func()
 	onHired                    func()

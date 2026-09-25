@@ -8,6 +8,23 @@ Group 2–4 refinements and their demo evidence. Line references in §1 point at
 the base commit `48392740`. Line references in later sections are approximate
 after implementation, so use the named function instead.
 
+### Folder-fed capability entry point (current)
+
+The post-hire installed-app specialist offer is retired. `POST /api/onboarding/detect`
+remains for generic onboarding app/profile reads but never matches a specialist,
+and Home never calls it to produce an offer. A person must feed a folder or a
+single file to the Folder Digest before a capability card can appear. The host
+capability table in `internal/folderdigest/tables.go` selects the reviewed
+integration. A REAPER `.rpp` project confirmation opens the host/plugin quest;
+its `project_connect` step owns workspace creation and a canonical ready quest
+receipt verifies the resulting project and the shown folder. A collection of at
+least five immediate audio project folders instead offers the reviewed Music
+Project Management Home provider. Its release disclosure, independent
+Home-only Group Template creator, and checked provenance are the resolution
+path. An existing Home suppresses the collection offer. Neither path installs
+a native music application, nor does a folder scan create a workspace. Existing
+accepted specialist relationships and their setup reporting remain readable.
+
 What shipped, in one place:
 
 | Area | Where |

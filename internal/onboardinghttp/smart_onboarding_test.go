@@ -5,41 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
-
-	"github.com/johnjallday/ori-agent/internal/onboarding/detector"
 )
-
-func TestMatchSpecialistReturnsTheOneDomainOffer(t *testing.T) {
-	entry := MatchSpecialist([]detector.DetectedApp{
-		{Name: "Safari", LastUsed: time.Now()},
-		{Name: "REAPER", LastUsed: time.Now().Add(-time.Hour)},
-	})
-	if entry == nil {
-		t.Fatal("expected a specialist for a detected REAPER install")
-	}
-	if entry.Slug != "music_production" {
-		t.Fatalf("specialist slug = %q", entry.Slug)
-	}
-	if entry.OfferCopy.Headline == "" || entry.OfferCopy.Question == "" {
-		t.Fatal("the offer must carry its own copy so the wizard hardcodes none")
-	}
-}
-
-// No match, an empty scan, and a nil scan are all the generic flow. None of
-// them is an error, and none of them may produce an offer.
-func TestMatchSpecialistReturnsNilWhenNothingMatches(t *testing.T) {
-	cases := map[string][]detector.DetectedApp{
-		"nil":      nil,
-		"empty":    {},
-		"no match": {{Name: "Safari", LastUsed: time.Now()}, {Name: "Slack", LastUsed: time.Now()}},
-	}
-	for name, apps := range cases {
-		if entry := MatchSpecialist(apps); entry != nil {
-			t.Fatalf("%s: expected no specialist, got %q", name, entry.Slug)
-		}
-	}
-}
 
 func TestSpecialistsEndpointServesTheBuiltInMapping(t *testing.T) {
 	handler := &SmartOnboardingHandler{}
@@ -69,8 +35,7 @@ func TestSpecialistsEndpointServesTheBuiltInMapping(t *testing.T) {
 	if entry.Slug != "music_production" || entry.SuggestedTemplateID != "reaper-song" {
 		t.Fatalf("entry = %+v", entry)
 	}
-	// The manual route into a domain is what a producer on a second machine
-	// uses; it must reach the client without waiting for a scan.
+	// Historical accepted relationships still resolve their domain copy.
 	if entry.OfferCopy.ManualLabel == "" {
 		t.Fatal("expected a manual path label")
 	}

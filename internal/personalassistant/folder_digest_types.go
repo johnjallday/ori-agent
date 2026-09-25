@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
 // The folder-digest sidecar records what the assistant has offered about
@@ -59,6 +61,7 @@ const (
 const (
 	FolderChoiceProject = "project"
 	FolderChoiceTidy    = "tidy"
+	FolderChoiceHome    = "home" // resolved portfolio, not a project folder
 )
 
 // FolderCandidateRecord is one thing the assistant could offer about a
@@ -108,6 +111,15 @@ type FolderOutcome struct {
 	Receipt  []FolderReceiptRow `json:"receipt,omitempty"`
 }
 
+// FolderPortfolioEvidence is the bounded, path-free count seen at scan time.
+// It is persisted so a later read cannot turn a project offer into a Home
+// offer (or the reverse) after the contents of a folder change.
+type FolderPortfolioEvidence struct {
+	Shape       string `json:"shape"`
+	Projects    int    `json:"projects"`
+	ProviderKey string `json:"provider_key"`
+}
+
 // FolderOffer is one question about one folder and its answer.
 type FolderOffer struct {
 	ID         string            `json:"id"`
@@ -124,18 +136,22 @@ type FolderOffer struct {
 	Subject FolderCandidateRecord `json:"subject"`
 	// Queue holds the remaining candidates a later offer can ask about
 	// once this one is decided (FR24).
-	Queue         []FolderCandidateRecord `json:"queue,omitempty"`
-	ProjectsCount int                     `json:"projects_count,omitempty"`
-	LooseFiles    int                     `json:"loose_files,omitempty"`
-	LooseKinds    int                     `json:"loose_kinds,omitempty"`
-	Decision      string                  `json:"decision,omitempty"`
-	Choice        string                  `json:"choice,omitempty"`
-	Outcome       *FolderOutcome          `json:"outcome,omitempty"`
-	RequestID     string                  `json:"request_id,omitempty"`
-	CreatedAt     time.Time               `json:"created_at"`
-	DecidedAt     *time.Time              `json:"decided_at,omitempty"`
-	LaterUntil    *time.Time              `json:"later_until,omitempty"`
-	ResolvedAt    *time.Time              `json:"resolved_at,omitempty"`
+	Queue         []FolderCandidateRecord  `json:"queue,omitempty"`
+	ProjectsCount int                      `json:"projects_count,omitempty"`
+	Portfolio     *FolderPortfolioEvidence `json:"portfolio,omitempty"`
+	// The proactive capability decision is frozen when this scan is offered.
+	CapabilitySuppressed bool           `json:"capability_suppressed,omitempty"`
+	CapabilityRevived    bool           `json:"capability_revived,omitempty"`
+	LooseFiles           int            `json:"loose_files,omitempty"`
+	LooseKinds           int            `json:"loose_kinds,omitempty"`
+	Decision             string         `json:"decision,omitempty"`
+	Choice               string         `json:"choice,omitempty"`
+	Outcome              *FolderOutcome `json:"outcome,omitempty"`
+	RequestID            string         `json:"request_id,omitempty"`
+	CreatedAt            time.Time      `json:"created_at"`
+	DecidedAt            *time.Time     `json:"decided_at,omitempty"`
+	LaterUntil           *time.Time     `json:"later_until,omitempty"`
+	ResolvedAt           *time.Time     `json:"resolved_at,omitempty"`
 }
 
 // FolderDecision is the durable record of one answer (FR23).
@@ -148,6 +164,15 @@ type FolderDecision struct {
 	Decision     string    `json:"decision"`
 	Choice       string    `json:"choice,omitempty"`
 	At           time.Time `json:"at"`
+}
+
+// FolderDomainDecline is scoped to a capability domain, not a path. A first
+// single-project no can revive exactly once on a stronger portfolio signal.
+type FolderDomainDecline struct {
+	Domain        string    `json:"domain"`
+	FirstEvidence string    `json:"first_evidence"` // single_project | portfolio
+	Count         int       `json:"count"`          // one or two; two is final
+	At            time.Time `json:"at"`
 }
 
 // FolderTombstone is a durable "never ask about this again" (FR23).
@@ -167,13 +192,14 @@ type FolderReceipt struct {
 
 // FolderDigestDocument is the sidecar's content.
 type FolderDigestDocument struct {
-	SchemaVersion int               `json:"schema_version"`
-	Version       int64             `json:"version"`
-	Owner         KnowledgeOwner    `json:"owner"`
-	Offers        []FolderOffer     `json:"offers,omitempty"`
-	Decisions     []FolderDecision  `json:"decisions,omitempty"`
-	Tombstones    []FolderTombstone `json:"tombstones,omitempty"`
-	Receipts      []FolderReceipt   `json:"receipts,omitempty"`
+	SchemaVersion  int                   `json:"schema_version"`
+	Version        int64                 `json:"version"`
+	Owner          KnowledgeOwner        `json:"owner"`
+	Offers         []FolderOffer         `json:"offers,omitempty"`
+	Decisions      []FolderDecision      `json:"decisions,omitempty"`
+	Tombstones     []FolderTombstone     `json:"tombstones,omitempty"`
+	DomainDeclines []FolderDomainDecline `json:"domain_declines,omitempty"`
+	Receipts       []FolderReceipt       `json:"receipts,omitempty"`
 	// FirstPromptShownAt persists the one-time hand-over after HQ activation.
 	FirstPromptShownAt *time.Time `json:"first_prompt_shown_at,omitempty"`
 	Present            bool       `json:"-"`
@@ -187,6 +213,19 @@ func (d *FolderDigestDocument) Pending() *FolderOffer {
 		}
 	}
 	return nil
+}
+
+// Awaiting returns the most recent confirmed offer whose setup is still in
+// progress. Unlike a pending card, it must survive a page or server restart.
+func (d *FolderDigestDocument) Awaiting() *FolderOffer {
+	var latest *FolderOffer
+	for i := range d.Offers {
+		o := &d.Offers[i]
+		if o.Status == FolderOfferAwaitingOutcome && (latest == nil || o.CreatedAt.After(latest.CreatedAt)) {
+			latest = o
+		}
+	}
+	return latest
 }
 
 // Offer finds an offer by id.
@@ -207,6 +246,16 @@ func (d *FolderDigestDocument) Tombstoned(key string) bool {
 		}
 	}
 	return false
+}
+
+// DeclineFor finds this domain's saved no, including a migrated app-card no.
+func (d *FolderDigestDocument) DeclineFor(domain string) *FolderDomainDecline {
+	for i := range d.DomainDeclines {
+		if d.DomainDeclines[i].Domain == domain {
+			return &d.DomainDeclines[i]
+		}
+	}
+	return nil
 }
 
 // Receipt finds a stored request receipt.
@@ -252,6 +301,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		default:
 			return fmt.Errorf("%w: offer status", errFolderDigestInvalid)
 		}
+		if offer.CapabilitySuppressed && offer.CapabilityRevived {
+			return fmt.Errorf("%w: capability offer", errFolderDigestInvalid)
+		}
 		if err := validateFolderKey(offer.FolderKey); err != nil {
 			return err
 		}
@@ -276,6 +328,14 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 				}
 			}
 		}
+		if offer.Portfolio != nil {
+			row, ok := folderdigest.CapabilityForShape(folderdigest.Shape(offer.Portfolio.Shape))
+			if !ok || row.Offer == nil || row.Offer.HomeProviderKey != offer.Portfolio.ProviderKey ||
+				offer.Portfolio.Projects < folderdigest.PortfolioMinProjects || offer.Portfolio.Projects > 5000 ||
+				offer.Subject.Kind != FolderChoiceProject || !offer.Subject.IsRoot || offer.Subject.Shape != offer.Portfolio.Shape {
+				return fmt.Errorf("%w: portfolio", errFolderDigestInvalid)
+			}
+		}
 		if len(offer.Queue) > folderDigestMaxQueue {
 			return fmt.Errorf("%w: queue", errFolderDigestInvalid)
 		}
@@ -287,6 +347,18 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 	}
 	if pending > 1 {
 		return fmt.Errorf("%w: more than one pending offer", errFolderDigestInvalid)
+	}
+	if len(doc.DomainDeclines) > 16 {
+		return fmt.Errorf("%w: domain declines", errFolderDigestInvalid)
+	}
+	domains := map[string]bool{}
+	for _, decline := range doc.DomainDeclines {
+		if decline.Domain == "" || len(decline.Domain) > 64 || domains[decline.Domain] ||
+			(decline.FirstEvidence != "single_project" && decline.FirstEvidence != "portfolio") ||
+			decline.Count < 1 || decline.Count > 2 || decline.At.IsZero() {
+			return fmt.Errorf("%w: domain decline", errFolderDigestInvalid)
+		}
+		domains[decline.Domain] = true
 	}
 	for _, t := range doc.Tombstones {
 		if err := validateFolderKey(t.Key); err != nil {

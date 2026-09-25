@@ -52,7 +52,9 @@ func (m Marker) matches(name string, isDir bool) bool {
 	case MarkerDir:
 		return isDir && name == m.Name
 	case MarkerGlob:
-		ok, err := filepath.Match(m.Name, name)
+		// Project extension globs match case-insensitively,
+		// while exact-name manifests above keep their original case.
+		ok, err := filepath.Match(strings.ToLower(m.Name), strings.ToLower(name))
 		return err == nil && ok
 	}
 	return false
@@ -109,6 +111,55 @@ type Tool struct {
 	ToolName string
 	// HypothesisText is the candidate fact proposed to the dossier.
 	HypothesisText string
+}
+
+// ProjectCapabilityFor returns an offer only when the project's marker (or
+// dominant extension when unmarked) matches an eligible tool in that row.
+// Shape alone is insufficient: sharing an audio shape does not make every
+// tool eligible for the same integration. Portfolios use shape separately.
+func ProjectCapabilityFor(shape Shape, markerName, dominantExtension string) (CapabilityRow, bool) {
+	row, ok := CapabilityForShape(shape)
+	if !ok || row.Offer == nil {
+		return CapabilityRow{}, false
+	}
+	extension := strings.ToLower(dominantExtension)
+	if markerName != "" {
+		extension = ""
+		for _, marker := range row.Markers {
+			if marker.Name == markerName && marker.Kind == MarkerGlob {
+				extension = strings.ToLower(filepath.Ext(marker.Name))
+				break
+			}
+		}
+	}
+	for _, allowed := range row.Offer.ProjectExtensions {
+		if extension == allowed {
+			return row, true
+		}
+	}
+	return CapabilityRow{}, false
+}
+
+// ShapeForExtension reports the host-recognized project shape of a picked
+// file. Tool-only rows without a shape are not project evidence.
+func ShapeForExtension(extension string) Shape {
+	extension = strings.ToLower(extension)
+	for _, row := range capabilityRows {
+		if row.Shape == "" {
+			continue
+		}
+		for _, marker := range row.Markers {
+			if marker.Kind == MarkerGlob && strings.EqualFold(filepath.Ext(marker.Name), extension) {
+				return row.Shape
+			}
+		}
+		for _, tool := range row.Tools {
+			if tool.Match == ToolByExtension && tool.Value == extension {
+				return row.Shape
+			}
+		}
+	}
+	return ""
 }
 
 // ToolForApp returns the tool row an installed application's name belongs

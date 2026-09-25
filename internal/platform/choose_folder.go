@@ -90,6 +90,37 @@ func chooseFolderScript(prompt string) string {
 	return fmt.Sprintf(`POSIX path of (choose folder with prompt "%s")`, escapeAppleScriptString(prompt))
 }
 
+// ChooseFile uses the same gated native chooser as ChooseFolder, without an
+// extension filter. The caller validates the selected file and its parent.
+func ChooseFile(ctx context.Context, prompt string) (path string, chosen bool, err error) {
+	if runtime.GOOS != "darwin" {
+		return "", false, ErrFolderDialogUnavailable
+	}
+	if desktopOpenDisabled("choose_file", prompt) {
+		return "", false, ErrFolderDialogUnavailable
+	}
+	out, err := chooseFolderCommand(ctx, chooseFileScript(prompt))
+	if err != nil {
+		if chooseFolderCancelled(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("choose file: %w", err)
+	}
+	path = strings.TrimSpace(string(out))
+	if path == "" {
+		return "", false, nil
+	}
+	return path, true, nil
+}
+
+func chooseFileScript(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return `POSIX path of (choose file)`
+	}
+	return fmt.Sprintf(`POSIX path of (choose file with prompt "%s")`, escapeAppleScriptString(prompt))
+}
+
 // chooseFolderCancelled recognises the dialog's Cancel button: osascript
 // exits non-zero with AppleScript error -128 ("User canceled") on stderr.
 func chooseFolderCancelled(err error) bool {

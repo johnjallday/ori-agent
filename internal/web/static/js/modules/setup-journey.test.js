@@ -36,8 +36,22 @@ const {
   setupJourneyCurrentStep,
   setupJourneyReceiptRows,
   setupJourneyStartOverView,
-  setupQuestSelectionFromParams
+  setupQuestSelectionFromParams,
+  completedProjectRunID
 } = await import('./setup-journey.js');
+
+test('folder offers hear only completed plugin project runs, not claimed browser workspaces', () => {
+  const run = {
+    run_id: 'run-1',
+    journey: { source: 'plugin' },
+    lifecycle_state: 'ready',
+    receipts: { project_workspace_id: 'project-1' }
+  };
+  assert.equal(completedProjectRunID(run), 'run-1');
+  assert.equal(completedProjectRunID({ ...run, lifecycle_state: 'in_progress' }), '');
+  assert.equal(completedProjectRunID({ ...run, journey: { source: 'host' } }), '');
+  assert.equal(completedProjectRunID({ ...run, receipts: {} }), '');
+});
 
 test('quest deep links select a host, user-template, or plugin quest by explicit source', () => {
   const select = query => setupQuestSelectionFromParams(new URLSearchParams(query));

@@ -1044,6 +1044,8 @@ func baseProjection(declaration *specialist.SetupJourney, run *Run) *JourneyProj
 		FirstCompletedAt: cloneTime(run.FirstCompletedAt), UpdatedAt: run.UpdatedAt.UTC(),
 	}
 	switch run.SpecialistSlug {
+	case pluginQuestSlug:
+		projection.Journey.Source = QuestSourcePlugin
 	case userTemplateQuestSlug:
 		projection.Journey.Source = QuestSourceUserTemplate
 		projection.Journey.TemplateID = declaration.ExpectedBlueprintID

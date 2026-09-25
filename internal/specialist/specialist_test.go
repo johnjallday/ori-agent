@@ -3,79 +3,7 @@ package specialist
 import (
 	"strings"
 	"testing"
-	"time"
 )
-
-func TestMatchIsCaseInsensitiveAndVersionTolerant(t *testing.T) {
-	for _, name := range []string{
-		"REAPER", "reaper", "Reaper", "REAPER64", "Reaper 7", "REAPER.app",
-		"reaper64.app", "Reaper x64", "REAPER 7 (x64)",
-	} {
-		entry, ok := Match([]App{{Name: name, LastUsed: time.Now()}})
-		if !ok {
-			t.Fatalf("expected %q to match a specialist", name)
-		}
-		if entry.Slug != "music_production" {
-			t.Fatalf("expected %q to map to music_production, got %q", name, entry.Slug)
-		}
-	}
-}
-
-func TestMatchRejectsUnrelatedApps(t *testing.T) {
-	for _, name := range []string{
-		"Safari", "Visual Studio Code", "Grim Reaper", "Reaperbot",
-		"Soul Reaper Deluxe", "", "   ", "Logic Pro", "Ableton Live 12",
-	} {
-		if entry, ok := Match([]App{{Name: name, LastUsed: time.Now()}}); ok {
-			t.Fatalf("expected %q not to match, got %q", name, entry.Slug)
-		}
-	}
-}
-
-func TestMatchReturnsAtMostOneSpecialistMostRecentlyUsed(t *testing.T) {
-	older := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
-	newer := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
-
-	entry, ok := Match([]App{
-		{Name: "Safari", LastUsed: newer.Add(time.Hour)},
-		{Name: "REAPER", LastUsed: older},
-		{Name: "Reaper 7", LastUsed: newer},
-	})
-	if !ok {
-		t.Fatal("expected a specialist match")
-	}
-	// Both REAPER entries collapse to the same specialist; the point of the
-	// tie-break is that exactly one offer is produced regardless.
-	if entry.Slug != "music_production" {
-		t.Fatalf("unexpected slug %q", entry.Slug)
-	}
-}
-
-func TestMatchIsDeterministicOnEqualTimestamps(t *testing.T) {
-	same := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
-	apps := []App{{Name: "Reaper 7", LastUsed: same}, {Name: "REAPER", LastUsed: same}}
-
-	first, ok := Match(apps)
-	if !ok {
-		t.Fatal("expected a match")
-	}
-	second, ok := Match([]App{apps[1], apps[0]})
-	if !ok {
-		t.Fatal("expected a match on the reordered input")
-	}
-	if first.Slug != second.Slug {
-		t.Fatalf("match is not deterministic: %q vs %q", first.Slug, second.Slug)
-	}
-}
-
-func TestMatchOnEmptyInput(t *testing.T) {
-	if _, ok := Match(nil); ok {
-		t.Fatal("expected no specialist for a nil app list")
-	}
-	if _, ok := Match([]App{}); ok {
-		t.Fatal("expected no specialist for an empty app list")
-	}
-}
 
 func TestGetRejectsUnknownSlugs(t *testing.T) {
 	if _, ok := Get(""); ok {
