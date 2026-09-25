@@ -1880,8 +1880,21 @@ function wt_dispatch {
     wt_start_execute
     ;;
   pr)
-    # Push the current (or named) worktree's branch and open a PR against dev.
-    local name="$2" branch target_path feature issue_snapshot bundle_body=""
+    # Run CI's gates locally (make ci-local), then push the current (or named)
+    # worktree's branch and open a PR against dev. A failing gate pushes
+    # nothing; --skip-checks bypasses the gates for the rare change only CI
+    # can exercise.
+    local name="" branch target_path feature issue_snapshot bundle_body="" skip_checks=0 pr_arg
+    for pr_arg in "${@:2}"; do
+      case "$pr_arg" in
+        --skip-checks) skip_checks=1 ;;
+        --*)
+          echo "Usage: wt pr [name] [--skip-checks]"
+          return 1
+          ;;
+        *) name="$pr_arg" ;;
+      esac
+    done
     if [[ -n "$name" ]]; then
       target_path="$(wt_resolve_worktree_path "$name")"
       branch="$(wt_resolve_worktree_branch "$name")"
@@ -1911,6 +1924,19 @@ function wt_dispatch {
       fi
       if (( ${#WT_ATTACHED_ISSUE_NUMBERS[@]} > 1 )); then
         bundle_body="$(wt_pr_bundle_body "$target_path" "${WT_ATTACHED_ISSUE_NUMBERS[@]}")"
+      fi
+    fi
+
+    if (( skip_checks )); then
+      echo "Skipping make ci-local (--skip-checks); CI is the first place these gates run."
+    elif [[ ! -f "$target_path/scripts/ci-local.sh" ]]; then
+      # A branch cut before the local gate existed has no runner to call.
+      echo "No scripts/ci-local.sh in $target_path (the branch predates the local CI gate); pushing without it."
+    else
+      echo "Running make ci-local in $target_path before pushing (wt pr --skip-checks bypasses it)..."
+      if ! (cd "$target_path" && make ci-local); then
+        echo "make ci-local failed; nothing was pushed. Fix the gate and run wt pr again."
+        return 1
       fi
     fi
 
