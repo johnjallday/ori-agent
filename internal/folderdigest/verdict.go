@@ -29,6 +29,9 @@ const (
 	// EmptyMaxFiles: a root with fewer files than this has nothing for the
 	// assistant to do yet.
 	EmptyMaxFiles = 3
+	// PortfolioMinProjects is the number of immediate same-shape projects
+	// needed to suggest the shape's Home, not separate workspaces.
+	PortfolioMinProjects = 5
 )
 
 // documentExtensions are exempt from the density rule (FR16): a folder of
@@ -58,6 +61,13 @@ const (
 	KindDeclined Kind = "declined"
 )
 
+// PortfolioSignal is evidence from immediate, same-shape project subfolders.
+// It is independent of whether those folders already have Ori workspaces.
+type PortfolioSignal struct {
+	Shape    Shape
+	Projects int
+}
+
 // Verdict is what the assistant concluded about a root and why.
 type Verdict struct {
 	Kind Kind
@@ -74,6 +84,9 @@ type Verdict struct {
 	// Projects are every project-signal candidate in rank order (FR20). The
 	// first is Project; the rest are kept for later offers.
 	Projects []Candidate
+	// Portfolio is derived from the unfiltered scan, even when an individual
+	// project was declined: the root's shape evidence is still present.
+	Portfolio *PortfolioSignal
 	// LooseFiles and LooseKinds describe the root's direct children, for the
 	// tidy branch of a mixed offer.
 	LooseFiles int
@@ -158,6 +171,7 @@ func decide(r Result, now time.Time, declined func(Candidate) bool) Verdict {
 		LooseFiles: root.LooseFiles,
 		LooseKinds: root.LooseKinds(),
 		Partial:    r.Partial,
+		Portfolio:  portfolioFromScan(r, now),
 	}
 
 	var subProjects []Candidate
@@ -196,6 +210,28 @@ func decide(r Result, now time.Time, declined func(Candidate) bool) Verdict {
 	}
 	v.Reason = reasonFor(v, r, now)
 	return v
+}
+
+func portfolioFromScan(r Result, now time.Time) *PortfolioSignal {
+	counts := map[Shape]int{}
+	for _, candidate := range r.Subfolders() {
+		if !projectSignal(candidate, now) {
+			continue
+		}
+		if shape := ShapeFor(candidate); shape != "" {
+			counts[shape]++
+		}
+	}
+	var best *PortfolioSignal
+	for shape, count := range counts {
+		if count < PortfolioMinProjects {
+			continue
+		}
+		if best == nil || count > best.Projects || count == best.Projects && shape < best.Shape {
+			best = &PortfolioSignal{Shape: shape, Projects: count}
+		}
+	}
+	return best
 }
 
 // ShapeBlueprint is one row of the shape → blueprint table in tables.go.

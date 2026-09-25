@@ -28,8 +28,6 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 			needs = append(needs, TodayItem{ID: view.Offer.ID, Kind: "folder_offer", Title: "Look at " + view.Offer.Folder})
 		}
 	}
-	// The independent specialist-offer controller mounts its card in Needs you
-	// only if detection found an actual domain. No speculative row is invented.
 	if out.SpecialistSetup != nil {
 		switch out.SpecialistSetup.Lifecycle {
 		case "needs_attention":

@@ -88,13 +88,17 @@ test('the chooser renders the chips the server sent and hides the picker when it
     ['downloads', 'documents']
   );
   assert.equal(view.pickerVisible, false);
+  assert.equal(view.filePickerVisible, false);
   assert.equal(view.note, 'Pick a folder from the list for now.');
 
   const withPicker = folderChooserView({
     chips: [{ id: 'desktop', label: 'Desktop' }],
-    picker_available: true
+    picker_available: true,
+    file_picker_available: true
   });
   assert.equal(withPicker.pickerVisible, true);
+  assert.equal(withPicker.filePickerVisible, true);
+  assert.equal(withPicker.filePickerLabel, 'Pick a file…');
   assert.equal(withPicker.note, '');
   assert.equal(withPicker.pickerLabel, 'Pick another folder…');
   assert.deepEqual(folderChooserView(null).chips, []);
@@ -111,6 +115,7 @@ test('the chooser explains itself when there is nothing to choose', () => {
   });
   assert.deepEqual(explained.chips, []);
   assert.equal(explained.pickerVisible, false);
+  assert.equal(explained.filePickerVisible, false);
   assert.match(explained.note, /not under this home, and the folder dialog is switched off/);
 
   const bare = folderChooserView({ chips: [], picker_available: false });
@@ -193,6 +198,68 @@ const thesisOffer = {
   blueprint_label: 'Writing project',
   create_available: true
 };
+
+test('a mixed-DAW portfolio names its evidence and a one-time revival acknowledges no', () => {
+  const offer = {
+    id: 'collection',
+    status: 'pending',
+    verdict: 'project',
+    folder: 'Music',
+    subject: { name: 'Music', shape: 'audio', is_root: true },
+    portfolio: { shape: 'audio', projects: 7, provider_key: 'music_project_management' },
+    reason: '7 audio project folders',
+    capability: {
+      recognized: '7 music projects',
+      workspace: 'Music Production Home',
+      question: 'Set up one Music Production Home for these projects?',
+      revived: true,
+      integration: 'Setup will install the reviewed Music Project Management provider if needed.',
+      accept_label: 'Yes, set up Music Production Home',
+      decline_label: 'No thanks'
+    }
+  };
+  const view = folderOfferView(offer);
+  assert.match(headlineText(view), /7 music projects/);
+  assert.match(view.question, /said no before/);
+  assert.match(view.question, /Music Production Home/);
+  assert.equal(view.actions[0].journey, true);
+  assert.equal(view.reason, '7 audio project folders');
+});
+
+test('a reviewed file project uses the same card and never the blank creator', () => {
+  const offer = {
+    id: 'offer-1',
+    verdict: 'project',
+    status: 'pending',
+    folder: 'Album',
+    subject: { name: 'Album', shape: 'audio', marker: 'REAPER session' },
+    reason: 'One project',
+    capability: {
+      recognized: 'REAPER',
+      workspace: 'REAPER song workspace',
+      integration: 'Setup can install the Ori integration plugin.',
+      evidence: '1 REAPER session, edited today',
+      accept_label: 'Yes, help with my music',
+      decline_label: 'No thanks',
+      setup_quest_id: 'install_ori_reaper'
+    }
+  };
+  const view = folderOfferView(offer);
+  assert.match(headlineText(view), /REAPER project/);
+  assert.match(view.question, /REAPER song workspace/);
+  assert.match(view.capabilityDetail, /Ori integration plugin/);
+  assert.equal(view.reason, offer.capability.evidence);
+  assert.deepEqual(
+    view.actions.map(action => action.id),
+    ['setup', 'no', 'later']
+  );
+  assert.equal(view.actions[0].journey, true);
+  assert.ok(!view.actions.some(action => action.create || action.modal));
+  const waiting = folderOfferView({ ...offer, status: 'awaiting_outcome' });
+  assert.equal(waiting.resume, true);
+  assert.equal(waiting.actions[0].id, 'resume');
+  assert.equal(waiting.actions[0].journey, true);
+});
 
 test('a project offer says what it found, asks to confirm the plan, and offers Set up and Adjust', () => {
   const view = folderOfferView(thesisOffer);
@@ -277,6 +344,11 @@ test('an offer whose folder the server no longer holds asks for it again before 
     { confirmProject: true }
   );
   assert.equal(mixed.actions[0].id, 'repick');
+  const waiting = folderOfferView({ ...thesisOffer, needs_pick: true, status: 'awaiting_outcome' });
+  assert.deepEqual(
+    waiting.actions.map(a => a.id),
+    ['repick']
+  );
   const decided = folderOfferView({ ...thesisOffer, needs_pick: true, status: 'later' });
   assert.equal(decided.decided, true);
   assert.notEqual(decided.actions[0]?.id, 'repick');

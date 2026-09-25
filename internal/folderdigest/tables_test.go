@@ -63,7 +63,18 @@ func TestCapabilityTableIntegrity(t *testing.T) {
 		if !ok || entry.ExpectedBlueprintID != o.SuggestedTemplateID || o.SuggestedTemplateID != row.Blueprint.BlueprintID {
 			t.Errorf("%q: offer integration/blueprint mismatch", row.Shape)
 		}
+		if len(o.ProjectExtensions) == 0 {
+			t.Errorf("%q: offer has no eligible project extensions", row.Shape)
+		}
+		for _, extension := range o.ProjectExtensions {
+			if seenExtensions[extension] != row.Shape {
+				t.Errorf("%q: offer extension %q not claimed by this row", row.Shape, extension)
+			}
+		}
 		if o.HomeProviderKey != "" {
+			if o.HomeProviderName == "" {
+				t.Errorf("%q: missing Home provider display name", row.Shape)
+			}
 			found := false
 			for _, provider := range reviewedintegration.HomeProviders() {
 				found = found || provider.Key == o.HomeProviderKey
@@ -72,7 +83,7 @@ func TestCapabilityTableIntegrity(t *testing.T) {
 				t.Errorf("%q: unknown Home provider %q", row.Shape, o.HomeProviderKey)
 			}
 		}
-		if o.Slug == "" || o.DisplayName == "" || o.OfferCopy.Headline == "" ||
+		if o.Slug == "" || o.DisplayName == "" || o.IntegrationName == "" || o.OfferCopy.Headline == "" ||
 			o.OfferCopy.Question == "" || o.OfferCopy.AcceptLabel == "" || o.OfferCopy.DeclineLabel == "" ||
 			o.OfferCopy.AcceptedNote == "" || o.OfferCopy.ManualLabel == "" {
 			t.Errorf("%q: incomplete offer copy or domain", row.Shape)
@@ -88,15 +99,35 @@ func claimExtension(t *testing.T, seen map[string]folderdigest.Shape, ext string
 	seen[ext] = shape
 }
 
+func TestProjectCapabilityFor_OnlyReviewedToolReceivesOffer(t *testing.T) {
+	for _, test := range []struct {
+		marker, dominant string
+		want             bool
+	}{
+		{marker: "*.rpp", dominant: ".wav", want: true},
+		{marker: "*.als", dominant: ".als"},
+		{marker: "*.logicx", dominant: ".logicx"},
+		{dominant: ".rpp", want: true},
+		{dominant: ".als"},
+	} {
+		_, ok := folderdigest.ProjectCapabilityFor(folderdigest.ShapeAudio, test.marker, test.dominant)
+		if ok != test.want {
+			t.Errorf("marker %q, dominant %q: offer = %t, want %t", test.marker, test.dominant, ok, test.want)
+		}
+	}
+}
+
 func TestCapabilityRowsAreDetached(t *testing.T) {
 	rows := folderdigest.AllCapabilities()
 	rows[0].Markers[0].Name = "forged"
 	rows[0].Tools[0].ToolID = "forged"
 	rows[0].Offer.AppPatterns[0][0] = "forged"
 	rows[0].Offer.IntegrationKey = "forged"
+	rows[0].Offer.ProjectExtensions[0] = ".als"
 	row, ok := folderdigest.CapabilityForShape(folderdigest.ShapeAudio)
 	if !ok || row.Markers[0].Name != "*.rpp" || row.Tools[0].ToolID != "reaper" ||
-		row.Offer.AppPatterns[0][0] != "reaper" || row.Offer.IntegrationKey != "ori_reaper" {
+		row.Offer.AppPatterns[0][0] != "reaper" || row.Offer.IntegrationKey != "ori_reaper" ||
+		row.Offer.ProjectExtensions[0] != ".rpp" {
 		t.Fatalf("caller mutated host table: %+v", row)
 	}
 }

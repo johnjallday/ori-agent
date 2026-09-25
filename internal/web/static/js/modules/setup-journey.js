@@ -79,6 +79,7 @@ const state = {
   launchStage: '',
   draft: null,
   projectDrafts: {},
+  folderOfferID: '',
   review: null,
   reviewInput: null,
   pendingCommit: null,
@@ -526,10 +527,29 @@ function statusLabel(status) {
   );
 }
 
+// The folder card needs only the quest run identity. Its own server endpoint
+// verifies owner, reviewed blueprint, completion time and selected directory;
+// no browser-supplied workspace ID is accepted as proof.
+export function completedProjectRunID(journey) {
+  return journey?.journey?.source === 'plugin' &&
+    journey?.lifecycle_state === 'ready' &&
+    journey?.receipts?.project_workspace_id
+    ? String(journey.run_id || '')
+    : '';
+}
+
+let lastAnnouncedProjectRun = '';
 function render() {
   const elements = ui();
   if (!elements || !state.journey) return;
   const journey = state.journey;
+  const completedRun = completedProjectRunID(journey);
+  if (completedRun && completedRun !== lastAnnouncedProjectRun) {
+    lastAnnouncedProjectRun = completedRun;
+    window.dispatchEvent(
+      new CustomEvent('ori:setup-project-ready', { detail: { run_id: completedRun } })
+    );
+  }
   if (journey.precondition && !journey.declaration_incompatible) {
     renderPrecondition(journey);
     return;
@@ -1195,12 +1215,23 @@ async function launchWorkspaceCreator() {
   const elements = ui();
   const open = async () => {
     try {
-      await openSetupWorkspaceCreator(journeyToOpen, journey => {
-        if (state.journey?.run_id === journeyToOpen.run_id) {
-          state.journey = journey;
-          state.launchStage = '';
-        }
-      });
+      await openSetupWorkspaceCreator(
+        journeyToOpen,
+        async journey => {
+          if (state.journey?.run_id === journeyToOpen.run_id) {
+            state.journey = journey;
+            state.launchStage = '';
+          }
+          // Settle the exact confirmed folder offer before the creator's
+          // ordinary success navigation leaves Today. Failure keeps the card
+          // resumable; it never manufactures a quest receipt.
+          if (state.folderOfferID && completedProjectRunID(journey)) {
+            const { resolveFolderProjectRun } = await import('./personal-assistant-folder.js');
+            await resolveFolderProjectRun(journey.run_id, state.folderOfferID);
+          }
+        },
+        { folderOfferID: state.folderOfferID }
+      );
     } catch (error) {
       showError(error.message);
       if (state.modal) state.modal.show();
@@ -2290,6 +2321,8 @@ export async function openSpecialistSetupJourney(requested = null) {
   const intent = String(requested?.detail?.intent || requested?.intent || 'review');
   const requestedRunID = String(requested?.detail?.run_id || requested?.run_id || '');
   const selection = requested?.detail || requested || {};
+  if (selection.folder_offer_id) state.folderOfferID = String(selection.folder_offer_id);
+  else if (selection.source !== 'plugin') state.folderOfferID = '';
   const elements = ui();
   if (!elements || state.busy || state.launchingGroup || isGroupBuilderOpen()) return false;
   state.returnFocus = document.activeElement;

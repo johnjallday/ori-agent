@@ -26,7 +26,12 @@ type CapabilityOffer struct {
 	Suggestion          Suggestion
 	CapabilityOrder     []string
 	IntegrationKey      string
-	HomeProviderKey     string
+	IntegrationName     string
+	// ProjectExtensions gates per-project offers within a shared shape.
+	// Other audio tools still count toward the shape's Home portfolio.
+	ProjectExtensions []string
+	HomeProviderKey   string
+	HomeProviderName  string
 }
 
 type OfferCopy struct {
@@ -107,7 +112,7 @@ var capabilityRows = []CapabilityRow{
 				{Index: 1, Title: "Owed and waiting", Legend: "What do you owe a collaborator—or what are you waiting on?"},
 				{Index: 2, Title: "Release and session dates", Legend: "Dates to keep visible"},
 			},
-			SuggestedTemplateID: "reaper-song", IntegrationKey: "ori_reaper", HomeProviderKey: "music_project_management",
+			SuggestedTemplateID: "reaper-song", IntegrationKey: "ori_reaper", IntegrationName: "REAPER", ProjectExtensions: []string{".rpp"}, HomeProviderKey: "music_project_management", HomeProviderName: "Music Project Management",
 			Suggestion: Suggestion{
 				Title:       "Set up your music projects",
 				Body:        "Install the Ori REAPER plugin, create your music production group, then create a workspace for a new or existing project. There is no project monitoring or studio team until workspace setup is confirmed. Live access is approved and verified separately for each workspace.",
@@ -190,6 +195,7 @@ func cloneCapability(row CapabilityRow) CapabilityRow {
 		offer.AssignmentLabels = append([]AssignmentLabel(nil), offer.AssignmentLabels...)
 		offer.AssignmentSteps = append([]AssignmentStep(nil), offer.AssignmentSteps...)
 		offer.CapabilityOrder = append([]string(nil), offer.CapabilityOrder...)
+		offer.ProjectExtensions = append([]string(nil), offer.ProjectExtensions...)
 		row.Offer = &offer
 	}
 	return row

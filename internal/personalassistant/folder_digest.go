@@ -30,6 +30,7 @@ const (
 	folderRequestIDMax = 128
 	// folderPickerPrompt is the native dialog's title.
 	folderPickerPrompt = "Which folder should Ori look at?"
+	filePickerPrompt   = "Which file should Ori look at?"
 )
 
 var (
@@ -82,6 +83,12 @@ type FolderPicker interface {
 	// "" while the dialog is available.
 	UnavailableReason() string
 	Choose(ctx context.Context, prompt string) (path string, chosen bool, err error)
+}
+
+// FolderFilePicker is the optional file mode of the server-side chooser.
+// The browser never supplies a path or file extension.
+type FolderFilePicker interface {
+	ChooseFile(ctx context.Context, prompt string) (path string, chosen bool, err error)
 }
 
 // The reasons a FolderPicker gives. They mirror the platform package's
@@ -230,6 +237,18 @@ type FolderTidier interface {
 	TidyFolder(ctx context.Context, req FolderTidyRequest) (FolderTidyResult, error)
 }
 
+// FolderJourneyVerifier checks a canonical plugin-quest receipt against the
+// offered folder, owner and blueprint. It never trusts a browser workspace ID.
+type FolderJourneyVerifier interface {
+	VerifiedProject(ctx context.Context, userID, runID, folderPath, blueprintID, integrationKey string, acceptedAfter time.Time) (FolderCreateResult, error)
+}
+
+// FolderHomeVerifier re-reads the canonical Group Template Home, not a
+// browser assertion that an arbitrary workspace has been created.
+type FolderHomeVerifier interface {
+	VerifiedHome(ctx context.Context, userID, homeID, providerKey string, acceptedAfter time.Time) (FolderCreateResult, error)
+}
+
 // FolderDigestDeps are the seams the service is built over. Zero values
 // take production defaults except ValidateRoot, which the server supplies
 // from File Janitor's root rules.
@@ -242,6 +261,17 @@ type FolderDigestDeps struct {
 	Scan         func(root string) (folderdigest.Result, error)
 	Now          func() time.Time
 	NewID        func() string
+	// AppInstalled is a silent installed-application lookup, not an offer
+	// trigger. An unknown or unavailable detector reports false.
+	AppInstalled func(ctx context.Context, appName string) bool
+	// ProjectQuest returns a single installed, reviewed project-setup quest.
+	// Nil or ambiguous means use the host's generated install quest first.
+	ProjectQuest func(ctx context.Context, integrationKey, blueprintID string) (pluginID, questID string, ok bool)
+	// HomeExists is an owner-scoped canonical station read. Unknown/unreadable
+	// state fails closed rather than promising a duplicate Home.
+	HomeExists func(ctx context.Context, userID, providerKey string) (exists bool, err error)
+	// LegacyDeclined reads the pre-folder app-card answer once per domain.
+	LegacyDeclined func(ctx context.Context, userID, domain string) (bool, error)
 	// BlueprintAvailable reports whether a blueprint id is installed, so the
 	// offer can fall back to the blank workspace and say so (FR28).
 	BlueprintAvailable func(id string) bool
@@ -252,6 +282,9 @@ type FolderDigestDeps struct {
 	Creator FolderWorkspaceCreator
 	// Tidier runs the tidy outcome through the File Janitor engine (FR31).
 	Tidier FolderTidier
+	// Journey verifies the plugin's created project before resolving a card.
+	Journey     FolderJourneyVerifier
+	HomeJourney FolderHomeVerifier
 	// OnResolved runs after a project outcome completes: the dossier
 	// producer learns from the offer and reports whether the fact was saved
 	// (FR35–FR39). Best-effort; its answer is recorded on the outcome.
@@ -386,28 +419,30 @@ func NewFolderDigestService(store *FolderDigestStore, deps FolderDigestDeps) *Fo
 
 // FolderDigestView is what the chooser and offer card render.
 type FolderDigestView struct {
-	Offer             *FolderOfferView `json:"offer"`
-	Chips             []FolderChip     `json:"chips"`
-	PickerAvailable   bool             `json:"picker_available"`
-	PickerNote        string           `json:"picker_note,omitempty"`
-	Paused            bool             `json:"paused"`
-	PromptFirstFolder bool             `json:"prompt_first_folder"`
+	Offer               *FolderOfferView `json:"offer"`
+	Chips               []FolderChip     `json:"chips"`
+	PickerAvailable     bool             `json:"picker_available"`
+	FilePickerAvailable bool             `json:"file_picker_available"`
+	PickerNote          string           `json:"picker_note,omitempty"`
+	Paused              bool             `json:"paused"`
+	PromptFirstFolder   bool             `json:"prompt_first_folder"`
 }
 
 // FolderOfferView is an offer as the browser sees it: names and counts,
 // never a path.
 type FolderOfferView struct {
-	ID            string            `json:"id"`
-	Status        FolderOfferStatus `json:"status"`
-	Verdict       string            `json:"verdict"`
-	Reason        string            `json:"reason"`
-	Partial       bool              `json:"partial,omitempty"`
-	Folder        string            `json:"folder"`
-	Chip          string            `json:"chip,omitempty"`
-	Subject       FolderSubjectView `json:"subject"`
-	ProjectsCount int               `json:"projects_count,omitempty"`
-	LooseFiles    int               `json:"loose_files,omitempty"`
-	LooseKinds    int               `json:"loose_kinds,omitempty"`
+	ID            string                   `json:"id"`
+	Status        FolderOfferStatus        `json:"status"`
+	Verdict       string                   `json:"verdict"`
+	Reason        string                   `json:"reason"`
+	Partial       bool                     `json:"partial,omitempty"`
+	Folder        string                   `json:"folder"`
+	Chip          string                   `json:"chip,omitempty"`
+	Subject       FolderSubjectView        `json:"subject"`
+	ProjectsCount int                      `json:"projects_count,omitempty"`
+	Portfolio     *FolderPortfolioEvidence `json:"portfolio,omitempty"`
+	LooseFiles    int                      `json:"loose_files,omitempty"`
+	LooseKinds    int                      `json:"loose_kinds,omitempty"`
 	// Remember says whether the card may promise "I will also remember"
 	// (FR22, FR39, FR52).
 	Remember bool `json:"remember"`
@@ -429,12 +464,40 @@ type FolderOfferView struct {
 	// a yes (decide with create): name, blueprint, folder, first task. When
 	// false the card's only project path is the Create Workspace modal.
 	CreateAvailable bool `json:"create_available,omitempty"`
+	// Capability is derived from the host table and the saved digest evidence;
+	// it is never accepted as a client-supplied action or plugin declaration.
+	Capability *FolderCapabilityView `json:"capability,omitempty"`
+}
+
+// FolderCapabilityView is the optional explanation on the existing digest
+// card. The setup journey, not the scan, owns every consequence.
+type FolderCapabilityView struct {
+	Domain        string `json:"domain"`
+	Recognized    string `json:"recognized"`
+	Workspace     string `json:"workspace"`
+	Integration   string `json:"integration"`
+	Evidence      string `json:"evidence"`
+	AppInstalled  bool   `json:"app_installed"`
+	Question      string `json:"question"`
+	AcceptLabel   string `json:"accept_label"`
+	DeclineLabel  string `json:"decline_label"`
+	SetupQuestID  string `json:"setup_quest_id"`
+	SetupSource   string `json:"setup_source"`
+	SetupPluginID string `json:"setup_plugin_id,omitempty"`
+	Revived       bool   `json:"revived,omitempty"`
 }
 
 // FolderResolveInput reports the workspace the modal created for an offer.
 type FolderResolveInput struct {
 	WorkspaceID string
+	HomeID      string
 	RequestID   string
+}
+
+// FolderJourneyInput identifies a quest run, never a claimed workspace.
+type FolderJourneyInput struct {
+	RunID     string
+	RequestID string
 }
 
 // FolderSubjectView names what the offer is about.
@@ -459,8 +522,9 @@ type FolderDecisionInput struct {
 
 func (s *FolderDigestService) now() time.Time { return s.deps.Now() }
 
-// Current returns the pending offer (resurfacing a due "later" or the next
-// queued candidate first) with the chooser's chips.
+// Current returns the pending or confirmed-in-progress offer with the chooser's
+// chips. A confirmed journey survives page/server restarts; only when neither
+// exists do we resurface a due "later" or the next queued candidate.
 func (s *FolderDigestService) Current(ctx context.Context, userID string) (FolderDigestView, error) {
 	if s == nil || s.store == nil {
 		return FolderDigestView{}, ErrRepairNeeded
@@ -475,6 +539,9 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 	}
 	pending := doc.Pending()
 	if pending == nil {
+		pending = doc.Awaiting()
+	}
+	if pending == nil {
 		pending, err = s.promote(ctx, userID, doc)
 		if err != nil {
 			return FolderDigestView{}, err
@@ -486,11 +553,13 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 	reason := ""
 	if s.deps.Picker != nil {
 		view.PickerAvailable = s.deps.Picker.Available()
+		_, supportsFiles := s.deps.Picker.(FolderFilePicker)
+		view.FilePickerAvailable = view.PickerAvailable && supportsFiles
 		reason = s.deps.Picker.UnavailableReason()
 	}
 	view.PickerNote = folderChooserNote(len(view.Chips), view.PickerAvailable, reason)
 	if pending != nil {
-		offer := s.view(*pending, binding.Paused)
+		offer := s.view(ctx, *pending, binding.Paused)
 		view.Offer = &offer
 	}
 	return view, nil
@@ -575,14 +644,73 @@ func (s *FolderDigestService) ScanPicked(ctx context.Context, userID string) (*F
 	return &offer, nil
 }
 
+// ScanPickedFile digests the parent of the file selected on the server. The
+// file is never opened, and its path is never sent to the browser or sidecar.
+func (s *FolderDigestService) ScanPickedFile(ctx context.Context, userID string) (*FolderOfferView, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrRepairNeeded
+	}
+	picker, ok := s.deps.Picker.(FolderFilePicker)
+	if !ok || !s.deps.Picker.Available() {
+		return nil, ErrFolderPickerUnavailable
+	}
+	if _, err := s.store.Binding(ctx, userID); err != nil {
+		return nil, err
+	}
+	path, chosen, err := picker.ChooseFile(ctx, filePickerPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("personal assistant: file dialog: %w", err)
+	}
+	if !chosen {
+		return nil, nil
+	}
+	info, err := os.Lstat(path) // #nosec G304 G703 -- path comes from the local server-side native file dialog, not HTTP
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, &FolderRootError{Message: "That file is unavailable. Choose a regular file."}
+	}
+	offer, err := s.scanSelectedRoot(ctx, userID, filepath.Dir(path), "", filepath.Base(path))
+	if err != nil {
+		return nil, err
+	}
+	return &offer, nil
+}
+
 func (s *FolderDigestService) scanRoot(ctx context.Context, userID, raw, chip string) (FolderOfferView, error) {
+	return s.scanSelectedRoot(ctx, userID, raw, chip, "")
+}
+
+func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw, chip, pickedFile string) (FolderOfferView, error) {
 	root, err := s.deps.ValidateRoot(raw)
 	if err != nil {
 		return FolderOfferView{}, err
 	}
+	// Recheck inside the canonical parent after root validation: a symlink
+	// swap between dialog and scan must not redirect the chosen file.
+	if pickedFile != "" {
+		info, statErr := os.Lstat(filepath.Join(root, pickedFile)) // #nosec G304 G703 -- root is canonical and picker supplies only a basename
+		if statErr != nil || !info.Mode().IsRegular() {
+			return FolderOfferView{}, &FolderRootError{Message: "That file is unavailable. Choose a regular file."}
+		}
+	}
 	binding, err := s.store.Binding(ctx, userID)
 	if err != nil {
 		return FolderOfferView{}, err
+	}
+	// Native picker paths intentionally are not persisted. After a restart the
+	// user can re-pick the same canonical root to resume a confirmed journey;
+	// do not replace that pending offer or silently adopt a different folder.
+	if chip == "" {
+		doc, readErr := s.store.Read(ctx, userID)
+		if readErr != nil {
+			return FolderOfferView{}, readErr
+		}
+		for _, prior := range doc.Offers {
+			if prior.FolderKey == FolderKey(root) && prior.Status == FolderOfferAwaitingOutcome {
+				s.rememberPath(prior.ID, root)
+				view := s.view(ctx, prior, binding.Paused)
+				return view, nil
+			}
+		}
 	}
 
 	s.mu.Lock()
@@ -619,9 +747,50 @@ func (s *FolderDigestService) scanRoot(ctx context.Context, userID, raw, chip st
 	verdict := folderdigest.Exclude(result, now, func(c folderdigest.Candidate) bool {
 		return doc.Tombstoned(FolderKey(c.Path))
 	})
+	fileShape := folderdigest.Shape("")
+	if pickedFile != "" {
+		verdict, fileShape = fileVerdict(verdict, pickedFile, now)
+	}
 	offer := buildFolderOffer(verdict, result, chip, now, s.deps.NewID())
+	// A whole collection is one Home question, not the first of seven
+	// per-project questions. An existing or unreadable Home suppresses it.
+	if pickedFile == "" && verdict.Portfolio != nil {
+		row, found := folderdigest.CapabilityForShape(verdict.Portfolio.Shape)
+		if found && row.Offer != nil && row.Offer.HomeProviderKey != "" && s.deps.HomeExists != nil {
+			exists, homeErr := s.deps.HomeExists(ctx, userID, row.Offer.HomeProviderKey)
+			if homeErr == nil {
+				offer = buildPortfolioOffer(offer, verdict, row.Offer.HomeProviderKey)
+				if exists {
+					// Home already serves this shape: leave one plain folder
+					// suggestion, never a Home or per-project capability offer.
+					offer.Portfolio = nil
+				}
+			}
+		}
+	}
+	if fileShape != "" && offer.Status == FolderOfferPending {
+		offer.Subject.Shape = string(fileShape)
+		offer.Subject.DominantExtension = strings.ToLower(filepath.Ext(pickedFile))
+	}
+	domain, evidence := folderOfferDomainClass(offer)
+	legacyDeclined := false
+	if domain != "" && doc.DeclineFor(domain) == nil && s.deps.LegacyDeclined != nil {
+		legacyDeclined, err = s.deps.LegacyDeclined(ctx, userID, domain)
+		if err != nil {
+			return FolderOfferView{}, err // do not offer on an unreadable prior no
+		}
+	}
 
 	updated, err := s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		if legacyDeclined && d.DeclineFor(domain) == nil {
+			d.DomainDeclines = append(d.DomainDeclines, FolderDomainDecline{
+				Domain: domain, FirstEvidence: "single_project", Count: 1, At: now,
+			})
+		}
+		if decline := d.DeclineFor(domain); decline != nil {
+			offer.CapabilityRevived = decline.Count == 1 && decline.FirstEvidence == "single_project" && evidence == "portfolio"
+			offer.CapabilitySuppressed = !offer.CapabilityRevived
+		}
 		// Showing a second folder replaces the pending offer; the earlier
 		// one becomes "later" (FR8).
 		if pending := d.Pending(); pending != nil && offer.Status == FolderOfferPending {
@@ -641,7 +810,34 @@ func (s *FolderDigestService) scanRoot(ctx context.Context, userID, raw, chip st
 	if stored == nil {
 		stored = &offer
 	}
-	return s.view(*stored, binding.Paused), nil
+	return s.view(ctx, *stored, binding.Paused), nil
+}
+
+// fileVerdict makes a recognized picked file's parent the project instead
+// of suggesting an unrelated subfolder. An unrecognized pick still uses an
+// already-recognized parent; otherwise it follows the existing empty path.
+func fileVerdict(v folderdigest.Verdict, pickedFile string, now time.Time) (folderdigest.Verdict, folderdigest.Shape) {
+	extension := strings.ToLower(filepath.Ext(pickedFile))
+	shape := folderdigest.ShapeFor(folderdigest.Candidate{DominantExtension: extension})
+	if shape == "" {
+		shape = folderdigest.ShapeForExtension(extension)
+	}
+	if shape != "" {
+		root := v.Root
+		v.Kind = folderdigest.KindProject
+		v.Project = &root
+		v.Projects = []folderdigest.Candidate{root}
+		v.Reason = "Picked a " + strings.TrimPrefix(extension, ".") + " file in " + root.Name + "; " + folderdigest.DescribeCandidate(root, now)
+		return v, shape
+	}
+	if v.Project != nil && v.Project.IsRoot {
+		return v, ""
+	}
+	v.Kind = folderdigest.KindEmpty
+	v.Project = nil
+	v.Projects = nil
+	v.Reason = "No recognized project in " + v.Root.Name
+	return v, ""
 }
 
 // Decide records the user's answer (FR23, FR25, FR26, FR33).
@@ -677,6 +873,9 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 		offer := doc.Offer(offerID)
 		if offer == nil {
 			return FolderOfferView{}, ErrFolderOfferNotFound
+		}
+		if input.Create && isProjectCapabilityOffer(*offer) {
+			return FolderOfferView{}, ErrFolderOutcomeUnavailable
 		}
 		if receipt := doc.Receipt(input.RequestID); receipt == nil && offer.Status == FolderOfferPending {
 			if _, ok := s.rootPath(*offer); !ok {
@@ -735,6 +934,18 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 		switch input.Decision {
 		case FolderDecisionNo:
 			offer.Status = FolderOfferDeclined
+			if !offer.CapabilitySuppressed {
+				if domain, evidence := folderOfferDomainClass(*offer); domain != "" {
+					if decline := d.DeclineFor(domain); decline != nil {
+						if decline.Count < 2 {
+							decline.Count++
+						}
+						decline.At = now
+					} else {
+						d.DomainDeclines = append(d.DomainDeclines, FolderDomainDecline{Domain: domain, FirstEvidence: evidence, Count: 1, At: now})
+					}
+				}
+			}
 			if !d.Tombstoned(offer.Subject.Key) {
 				d.Tombstones = append(d.Tombstones, FolderTombstone{Key: offer.Subject.Key, Name: offer.Subject.Name, CreatedAt: now})
 			}
@@ -767,7 +978,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 				offer.ResolvedAt = &decided
 				offer.Outcome.WorkspaceID = created.WorkspaceID
 				offer.Outcome.Route = created.Route
-				offer.Outcome.Blueprint, _, _ = s.blueprintFor(offer.Subject.Shape)
+				offer.Outcome.Blueprint, _, _ = s.blueprintForOffer(*offer)
 				offer.Outcome.Receipt = append([]FolderReceiptRow(nil), created.Receipt...)
 				resolvedNow = true
 			}
@@ -787,7 +998,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	if err == nil && resolvedNow {
 		result = s.afterOutcome(ctx, userID, result)
 	}
-	return s.view(result, binding.Paused), nil
+	return s.view(ctx, result, binding.Paused), nil
 }
 
 // runCreate has the host set the project workspace up for the offer's
@@ -801,7 +1012,7 @@ func (s *FolderDigestService) runCreate(ctx context.Context, userID string, offe
 	if err != nil {
 		return FolderCreateResult{}, err
 	}
-	blueprint, _, _ := s.blueprintFor(offer.Subject.Shape)
+	blueprint, _, _ := s.blueprintForOffer(offer)
 	result, err := s.deps.Creator.CreateProjectWorkspace(ctx, FolderCreateRequest{
 		UserID: userID, OfferID: offer.ID, Name: offer.Subject.Name, Path: path,
 		Shape: folderdigest.Shape(offer.Subject.Shape), Blueprint: blueprint, RequestID: requestID,
@@ -910,6 +1121,30 @@ func (s *FolderDigestService) subjectPathOf(offer FolderOffer) (string, error) {
 	return filepath.Join(root, offer.Subject.RelPath), nil
 }
 
+// ProjectSelectionPath issues a trusted project-picker selection only for a
+// confirmed capability card, never for a browser-selected arbitrary path.
+func (s *FolderDigestService) ProjectSelectionPath(ctx context.Context, userID, offerID string) (string, error) {
+	if s == nil || s.store == nil {
+		return "", ErrRepairNeeded
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	offer := doc.Offer(offerID)
+	if offer == nil {
+		return "", ErrFolderOfferNotFound
+	}
+	if offer.Status != FolderOfferAwaitingOutcome || offer.Choice != FolderChoiceProject || offer.DecidedAt == nil || offer.Portfolio != nil || offer.CapabilitySuppressed {
+		return "", ErrFolderOfferDecided
+	}
+	row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension)
+	if !ok || row.Offer == nil {
+		return "", ErrFolderOfferDecided
+	}
+	return s.subjectPathOf(*offer)
+}
+
 // Resolve completes a project outcome: the modal reported that a workspace
 // was created for the offer, so the folder is attached to it as the primary
 // linked directory and the offer is marked resolved (FR28, FR29, FR33). A
@@ -943,16 +1178,22 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 		if receipt.OfferID != offerID {
 			return FolderOfferView{}, ErrFolderOfferDecided
 		}
-		return s.view(*offer, binding.Paused), nil
+		return s.view(ctx, *offer, binding.Paused), nil
 	}
 	if offer.Status == FolderOfferResolved {
 		if offer.Outcome != nil && offer.Outcome.WorkspaceID == input.WorkspaceID {
-			return s.view(*offer, binding.Paused), nil
+			return s.view(ctx, *offer, binding.Paused), nil
 		}
 		return FolderOfferView{}, ErrFolderOfferDecided
 	}
 	if offer.Status != FolderOfferAwaitingOutcome || offer.Choice != FolderChoiceProject {
 		return FolderOfferView{}, ErrFolderOfferDecided
+	}
+	// An arbitrary workspace ID from the browser cannot prove that the
+	// reviewed journey created it. The journey completion path will provide
+	// a canonical receipt before the digest can resolve this offer.
+	if isProjectCapabilityOffer(*offer) {
+		return FolderOfferView{}, ErrFolderWorkspaceRefused
 	}
 	if s.deps.Linker == nil {
 		return FolderOfferView{}, ErrFolderOutcomeUnavailable
@@ -961,7 +1202,7 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 	if err != nil {
 		return FolderOfferView{}, err
 	}
-	blueprint, _, _ := s.blueprintFor(offer.Subject.Shape)
+	blueprint, _, _ := s.blueprintForOffer(*offer)
 	result, err := s.deps.Linker.LinkFolder(ctx, FolderLinkRequest{
 		UserID: userID, WorkspaceID: input.WorkspaceID, OfferID: offerID,
 		Name: offer.Subject.Name, Path: path, Shape: folderdigest.Shape(offer.Subject.Shape),
@@ -1000,7 +1241,168 @@ func (s *FolderDigestService) Resolve(ctx context.Context, userID, offerID strin
 			resolved = s.afterOutcome(ctx, userID, *stored)
 		}
 	}
-	return s.view(resolved, binding.Paused), nil
+	return s.view(ctx, resolved, binding.Paused), nil
+}
+
+// ResolvePortfolio verifies a just-created independent Home against its
+// reviewed provider and Group Template creation provenance before recording
+// an outcome. No project integration or linked directory is inferred.
+func (s *FolderDigestService) ResolvePortfolio(ctx context.Context, userID, offerID string, input FolderResolveInput) (FolderOfferView, error) {
+	if s == nil || s.store == nil || s.deps.HomeJourney == nil || strings.TrimSpace(input.HomeID) == "" ||
+		strings.TrimSpace(input.RequestID) == "" || len(input.RequestID) > folderRequestIDMax {
+		return FolderOfferView{}, ErrFolderOutcomeUnavailable
+	}
+	binding, err := s.store.Binding(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	offer := doc.Offer(offerID)
+	if offer == nil {
+		return FolderOfferView{}, ErrFolderOfferNotFound
+	}
+	if receipt := doc.Receipt(input.RequestID); receipt != nil {
+		if receipt.OfferID != offerID || receipt.Action != "portfolio" {
+			return FolderOfferView{}, ErrFolderOfferDecided
+		}
+		return s.view(ctx, *offer, binding.Paused), nil
+	}
+	if offer.Status != FolderOfferAwaitingOutcome || offer.Portfolio == nil || offer.CapabilitySuppressed || offer.DecidedAt == nil {
+		return FolderOfferView{}, ErrFolderOfferDecided
+	}
+	verified, err := s.deps.HomeJourney.VerifiedHome(ctx, userID, input.HomeID, offer.Portfolio.ProviderKey, *offer.DecidedAt)
+	if err != nil || verified.WorkspaceID != input.HomeID || !strings.HasPrefix(verified.Route, "/workspaces/") {
+		return FolderOfferView{}, ErrFolderWorkspaceRefused
+	}
+	now := s.now()
+	var resolved FolderOffer
+	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		item := d.Offer(offerID)
+		if item == nil || item.Status != FolderOfferAwaitingOutcome || item.Portfolio == nil || item.CapabilitySuppressed {
+			return ErrFolderOfferDecided
+		}
+		item.Status, item.ResolvedAt = FolderOfferResolved, &now
+		item.Outcome = &FolderOutcome{Kind: FolderChoiceHome, WorkspaceID: verified.WorkspaceID, Route: verified.Route}
+		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: offerID, Action: "portfolio", At: now})
+		pruneFolderDigest(d)
+		resolved = *item
+		return nil
+	})
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	// A portfolio Home is not a project workspace and must not enter the
+	// dossier's folder→project fact or first-project mission observers.
+	return s.view(ctx, resolved, binding.Paused), nil
+}
+
+// PortfolioProvider returns the Home provider for a confirmed collection
+// offer. A browser never gets to choose the plugin or create a Home on scan.
+func (s *FolderDigestService) PortfolioProvider(ctx context.Context, userID, offerID string) (string, error) {
+	if s == nil || s.store == nil {
+		return "", ErrFolderOutcomeUnavailable
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	offer := doc.Offer(offerID)
+	if offer == nil || offer.Status != FolderOfferAwaitingOutcome || offer.Choice != FolderChoiceProject ||
+		offer.DecidedAt == nil || offer.CapabilitySuppressed || offer.Portfolio == nil {
+		return "", ErrFolderOfferDecided
+	}
+	return offer.Portfolio.ProviderKey, nil
+}
+
+// folderOfferDomainClass identifies only an actually eligible capability.
+// A blank Ableton/Logic workspace has no music-domain decline to record.
+func folderOfferDomainClass(offer FolderOffer) (domain, evidence string) {
+	if offer.Portfolio != nil {
+		row, ok := folderdigest.CapabilityForShape(folderdigest.Shape(offer.Portfolio.Shape))
+		if ok && row.Offer != nil && row.Offer.HomeProviderKey == offer.Portfolio.ProviderKey {
+			return row.Offer.Slug, "portfolio"
+		}
+		return "", ""
+	}
+	if offer.Subject.Kind != FolderChoiceProject || offer.Verdict != string(folderdigest.KindProject) {
+		return "", ""
+	}
+	row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension)
+	if ok {
+		return row.Offer.Slug, "single_project"
+	}
+	return "", ""
+}
+
+// ResolveJourney completes a confirmed capability offer only when the host
+// can re-read a ready plugin quest and prove it created a workspace connected
+// to this exact shown folder. A replay or mismatched run cannot adopt a
+// foreign or historical project, and failure leaves the offer resumable.
+func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerID string, input FolderJourneyInput) (FolderOfferView, error) {
+	if s == nil || s.store == nil || s.deps.Journey == nil {
+		return FolderOfferView{}, ErrFolderOutcomeUnavailable
+	}
+	input.RunID = strings.TrimSpace(input.RunID)
+	input.RequestID = strings.TrimSpace(input.RequestID)
+	if input.RunID == "" || len(input.RunID) > 200 || input.RequestID == "" || len(input.RequestID) > folderRequestIDMax {
+		return FolderOfferView{}, fmt.Errorf("%w: journey request", ErrValidation)
+	}
+	binding, err := s.store.Binding(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	offer := doc.Offer(offerID)
+	if offer == nil {
+		return FolderOfferView{}, ErrFolderOfferNotFound
+	}
+	if receipt := doc.Receipt(input.RequestID); receipt != nil {
+		if receipt.OfferID != offerID || receipt.Action != "journey" {
+			return FolderOfferView{}, ErrFolderOfferDecided
+		}
+		return s.view(ctx, *offer, binding.Paused), nil
+	}
+	if offer.Status != FolderOfferAwaitingOutcome || offer.Choice != FolderChoiceProject || offer.DecidedAt == nil || offer.Portfolio != nil {
+		return FolderOfferView{}, ErrFolderOfferDecided
+	}
+	row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension)
+	if !ok {
+		return FolderOfferView{}, ErrFolderOfferDecided
+	}
+	path, err := s.subjectPathOf(*offer)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	verified, err := s.deps.Journey.VerifiedProject(ctx, userID, input.RunID, path, row.Blueprint.BlueprintID, row.Offer.IntegrationKey, *offer.DecidedAt)
+	if err != nil || verified.WorkspaceID == "" || !strings.HasPrefix(verified.Route, "/workspaces/") {
+		return FolderOfferView{}, ErrFolderWorkspaceRefused
+	}
+	now := s.now()
+	var resolved FolderOffer
+	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		item := d.Offer(offerID)
+		if item == nil || item.Status != FolderOfferAwaitingOutcome || item.Choice != FolderChoiceProject {
+			return ErrFolderOfferDecided
+		}
+		item.Status = FolderOfferResolved
+		item.ResolvedAt = &now
+		item.Outcome = &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: verified.WorkspaceID, Route: verified.Route, Blueprint: row.Blueprint.BlueprintID}
+		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: offerID, Action: "journey", At: now})
+		pruneFolderDigest(d)
+		resolved = *item
+		return nil
+	})
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	resolved = s.afterOutcome(ctx, userID, resolved)
+	return s.view(ctx, resolved, binding.Paused), nil
 }
 
 // afterOutcome runs the best-effort observers of a completed outcome: the
@@ -1044,6 +1446,25 @@ func (s *FolderDigestService) blueprintFor(shape string) (id, label, note string
 		return "", row.Label, "The " + row.Label + " blueprint is not installed, so this starts as a blank workspace."
 	}
 	return row.BlueprintID, row.Label, ""
+}
+
+func (s *FolderDigestService) blueprintForOffer(offer FolderOffer) (id, label, note string) {
+	if offer.CapabilitySuppressed {
+		return "", "", ""
+	}
+	return s.blueprintForSubject(offer.Subject)
+}
+
+// blueprintForSubject prevents an unrelated audio project from silently
+// acquiring the wrong tool-specific blueprint. Non-audio shapes keep the existing
+// installed-blueprint/blank fallback.
+func (s *FolderDigestService) blueprintForSubject(subject FolderCandidateRecord) (id, label, note string) {
+	if subject.Shape == string(folderdigest.ShapeAudio) {
+		if _, ok := folderdigest.ProjectCapabilityFor(folderdigest.ShapeAudio, subject.MarkerName, subject.DominantExtension); !ok {
+			return "", "", ""
+		}
+	}
+	return s.blueprintFor(subject.Shape)
 }
 
 // FolderFirstTask is the suggested first task for a workspace created from a
@@ -1180,7 +1601,21 @@ func (s *FolderDigestService) promote(ctx context.Context, userID string, doc Fo
 	return updated.Offer(nextID), nil
 }
 
-func (s *FolderDigestService) view(offer FolderOffer, paused bool) FolderOfferView {
+func isProjectCapabilityOffer(offer FolderOffer) bool {
+	if offer.CapabilitySuppressed {
+		return false
+	}
+	if offer.Portfolio != nil {
+		return true
+	}
+	if offer.Verdict != string(folderdigest.KindProject) || offer.Subject.Kind != FolderChoiceProject {
+		return false
+	}
+	_, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension)
+	return ok
+}
+
+func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, paused bool) FolderOfferView {
 	v := FolderOfferView{
 		ID: offer.ID, Status: offer.Status, Verdict: offer.Verdict, Reason: offer.Reason, Partial: offer.Partial,
 		Folder: offer.FolderName, Chip: offer.Chip,
@@ -1188,7 +1623,7 @@ func (s *FolderDigestService) view(offer FolderOffer, paused bool) FolderOfferVi
 			Name: offer.Subject.Name, Kind: offer.Subject.Kind, Shape: offer.Subject.Shape,
 			Marker: offer.Subject.Marker, IsRoot: offer.Subject.IsRoot,
 		},
-		ProjectsCount: offer.ProjectsCount, LooseFiles: offer.LooseFiles, LooseKinds: offer.LooseKinds,
+		ProjectsCount: offer.ProjectsCount, Portfolio: offer.Portfolio, LooseFiles: offer.LooseFiles, LooseKinds: offer.LooseKinds,
 		Decision: offer.Decision, Choice: offer.Choice, Outcome: offer.Outcome,
 	}
 	if offer.Status == FolderOfferPending || offer.Status == FolderOfferAwaitingOutcome {
@@ -1198,8 +1633,65 @@ func (s *FolderDigestService) view(offer FolderOffer, paused bool) FolderOfferVi
 	v.Remember = folderOfferRemembers(offer, paused)
 	switch folderdigest.Kind(offer.Verdict) {
 	case folderdigest.KindProject, folderdigest.KindMixed, folderdigest.KindAmbiguous:
-		v.Blueprint, v.BlueprintLabel, v.BlueprintNote = s.blueprintFor(offer.Subject.Shape)
+		v.Blueprint, v.BlueprintLabel, v.BlueprintNote = s.blueprintForOffer(offer)
 		v.CreateAvailable = s.deps.Creator != nil
+	}
+	if offer.Portfolio != nil && !offer.CapabilitySuppressed {
+		if row, ok := folderdigest.CapabilityForShape(folderdigest.Shape(offer.Portfolio.Shape)); ok && row.Offer != nil {
+			v.CreateAvailable = false
+			v.Blueprint, v.BlueprintLabel, v.BlueprintNote = "", "", ""
+			v.Capability = &FolderCapabilityView{
+				Revived: offer.CapabilityRevived,
+				Domain:  row.Offer.Slug, Recognized: fmt.Sprintf("%d music projects", offer.Portfolio.Projects),
+				Workspace: "Music Production Home", Integration: "Setup will install the reviewed " + row.Offer.HomeProviderName + " provider if needed; no project integration is installed for these folders.",
+				Evidence: offer.Reason, Question: "Set up one Music Production Home for these projects?",
+				AcceptLabel: "Yes, set up Music Production Home", DeclineLabel: row.Offer.OfferCopy.DeclineLabel,
+				SetupSource: "portfolio", SetupQuestID: "home_" + row.Offer.HomeProviderKey,
+			}
+		}
+	} else if offer.CapabilitySuppressed {
+		v.Blueprint, v.BlueprintLabel, v.BlueprintNote = "", "", ""
+	} else if offer.Verdict == string(folderdigest.KindProject) && offer.Subject.Kind == FolderChoiceProject {
+		if row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension); ok {
+			tool, found := folderdigest.ToolForExtension(offer.Subject.DominantExtension)
+			if offer.Subject.MarkerName != "" {
+				if marker, matched := folderdigest.MatchMarker(offer.Subject.MarkerName, false); matched {
+					tool, found = folderdigest.ToolForMarker(marker)
+				}
+			}
+			recognized := row.Offer.DisplayName
+			if found {
+				recognized = tool.ToolName
+			}
+			installed := s.deps.AppInstalled != nil && s.deps.AppInstalled(ctx, row.Offer.IntegrationName)
+			integration := row.Offer.IntegrationName + " is not installed here. Setup can install the Ori integration plugin; install " + row.Offer.IntegrationName + " separately before live connection."
+			if installed {
+				integration = "Setup will connect to " + row.Offer.IntegrationName + " through the Ori integration plugin, installing the plugin if needed."
+			}
+			v.CreateAvailable = false // only the reviewed journey may create this workspace
+			v.Blueprint = row.Blueprint.BlueprintID
+			v.BlueprintLabel = row.Blueprint.Label
+			v.BlueprintNote = "" // no silent blank-workspace fallback on an offer
+			v.Capability = &FolderCapabilityView{
+				Revived: offer.CapabilityRevived,
+				Domain:  row.Offer.Slug, Recognized: recognized,
+				Workspace: row.Blueprint.Label + " workspace", Integration: integration,
+				Evidence: offer.Subject.Reason, AppInstalled: installed,
+				Question:     row.Offer.OfferCopy.Question,
+				AcceptLabel:  row.Offer.OfferCopy.AcceptLabel,
+				DeclineLabel: row.Offer.OfferCopy.DeclineLabel,
+				SetupQuestID: "install_" + row.Offer.IntegrationKey,
+				SetupSource:  "host",
+			}
+			if s.deps.ProjectQuest != nil {
+				pluginID, questID, found := s.deps.ProjectQuest(ctx, row.Offer.IntegrationKey, row.Blueprint.BlueprintID)
+				if found && pluginID != "" && questID != "" {
+					v.Capability.SetupSource = "plugin"
+					v.Capability.SetupPluginID = pluginID
+					v.Capability.SetupQuestID = questID
+				}
+			}
+		}
 	}
 	return v
 }
@@ -1208,7 +1700,7 @@ func (s *FolderDigestService) view(offer FolderOffer, paused bool) FolderOfferVi
 // project: not while paused (FR52), and not when the fact text would be
 // refused by the memory validator (FR39).
 func folderOfferRemembers(offer FolderOffer, paused bool) bool {
-	if paused {
+	if paused || offer.Portfolio != nil {
 		return false
 	}
 	switch folderdigest.Kind(offer.Verdict) {
@@ -1287,6 +1779,25 @@ func (s *FolderDigestService) rootPath(offer FolderOffer) (string, bool) {
 	}
 	s.rememberPath(offer.ID, canonical)
 	return canonical, true
+}
+
+// buildPortfolioOffer makes the root the subject even when the scan would
+// otherwise prioritize one subproject. No queue of per-project offers follows.
+func buildPortfolioOffer(offer FolderOffer, verdict folderdigest.Verdict, providerKey string) FolderOffer {
+	signal := verdict.Portfolio
+	offer.Subject = folderCandidateRecord(verdict.Root, FolderChoiceProject,
+		fmt.Sprintf("%d %s project folders", signal.Projects, signal.Shape))
+	offer.Subject.Shape = string(signal.Shape)
+	// The collection has no one project tool; don't let a dominant extension
+	// subfolder turn an already-owned Home into another project offer.
+	offer.Subject.MarkerName, offer.Subject.Marker, offer.Subject.DominantExtension = "", "", ""
+	offer.Subject.IsRoot = true
+	offer.Verdict = string(folderdigest.KindProject)
+	offer.Reason = offer.Subject.Reason
+	offer.ProjectsCount = signal.Projects
+	offer.Portfolio = &FolderPortfolioEvidence{Shape: string(signal.Shape), Projects: signal.Projects, ProviderKey: providerKey}
+	offer.Queue = nil
+	return offer
 }
 
 // buildFolderOffer turns a verdict into the stored offer: the subject it

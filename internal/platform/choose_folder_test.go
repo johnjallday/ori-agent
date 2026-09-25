@@ -19,6 +19,48 @@ func TestChooseFolderScript_EscapesPrompt(t *testing.T) {
 	}
 }
 
+func TestChooseFileScript_AcceptsAnyFileAndEscapesPrompt(t *testing.T) {
+	if got := chooseFileScript(""); got != `POSIX path of (choose file)` {
+		t.Errorf("empty prompt = %q", got)
+	}
+	got := chooseFileScript(`Pick "a file" \ now`)
+	want := `POSIX path of (choose file with prompt "Pick \"a file\" \\ now")`
+	if got != want {
+		t.Errorf("script = %q, want %q", got, want)
+	}
+}
+
+func TestChooseFile_GateAndCancel(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		if _, _, err := ChooseFile(context.Background(), "Pick"); !errors.Is(err, ErrFolderDialogUnavailable) {
+			t.Fatalf("non-macOS err = %v", err)
+		}
+		return
+	}
+	t.Setenv(NoDesktopOpenEnv, "1")
+	if _, _, err := ChooseFile(context.Background(), "Pick"); !errors.Is(err, ErrFolderDialogUnavailable) {
+		t.Fatalf("disabled picker err = %v", err)
+	}
+	t.Setenv(NoDesktopOpenEnv, "")
+	original := chooseFolderCommand
+	t.Cleanup(func() { chooseFolderCommand = original })
+	chooseFolderCommand = func(_ context.Context, script string) ([]byte, error) {
+		if script != chooseFileScript("Pick") {
+			t.Errorf("unexpected script %q", script)
+		}
+		return []byte("/Users/me/Song.rpp\n"), nil
+	}
+	if path, chosen, err := ChooseFile(context.Background(), "Pick"); err != nil || !chosen || path != "/Users/me/Song.rpp" {
+		t.Errorf("file = %q %t %v", path, chosen, err)
+	}
+	chooseFolderCommand = func(context.Context, string) ([]byte, error) {
+		return nil, &exec.ExitError{Stderr: []byte("User canceled (-128)")}
+	}
+	if path, chosen, err := ChooseFile(context.Background(), "Pick"); err != nil || chosen || path != "" {
+		t.Errorf("cancel = %q %t %v", path, chosen, err)
+	}
+}
+
 func TestChooseFolder_GateAndCancel(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		if _, _, err := ChooseFolder(context.Background(), "x"); !errors.Is(err, ErrFolderDialogUnavailable) {

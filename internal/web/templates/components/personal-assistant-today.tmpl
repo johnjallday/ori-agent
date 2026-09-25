@@ -115,6 +115,7 @@
              aria-labelledby="personalAssistantFolderOfferHeadline" hidden>
       <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
       <p id="personalAssistantFolderOfferQuestion" class="pa-specialist-offer__question"></p>
+      <p id="personalAssistantFolderOfferCapability" class="pa-folder__note" hidden></p>
       <details class="pa-folder__why"><summary>Why this suggestion?</summary>
         <p id="personalAssistantFolderOfferReason" class="pa-folder__reason"></p>
       </details>
@@ -124,21 +125,6 @@
       <p id="personalAssistantFolderOfferError" class="pa-specialist-offer__error" role="alert" hidden></p>
     </section>
   </section>
-
-  <!-- The domain offer is server-authored and non-blocking. An empty or failed
-       detection keeps this whole region absent. -->
-  <section id="personalAssistantSpecialistOffer" class="pa-specialist-offer" data-decision="unanswered"
-           aria-labelledby="personalAssistantSpecialistOfferHeadline" hidden>
-    <p id="personalAssistantSpecialistOfferHeadline" class="pa-specialist-offer__headline"></p>
-    <p id="personalAssistantSpecialistOfferQuestion" class="pa-specialist-offer__question"></p>
-    <p id="personalAssistantSpecialistOfferAccepted" class="pa-specialist-offer__accepted" role="status" aria-live="polite" hidden></p>
-    <div id="personalAssistantSpecialistOfferActions" class="pa-specialist-offer__actions">
-      <button type="button" class="btn btn-sm btn-primary" id="personalAssistantSpecialistAcceptBtn">Yes</button>
-      <button type="button" class="btn btn-sm btn-outline-secondary" id="personalAssistantSpecialistDeclineBtn">No thanks</button>
-    </div>
-    <p id="personalAssistantSpecialistOfferError" class="pa-specialist-offer__error" role="alert" hidden></p>
-  </section>
-  <p id="personalAssistantSpecialistManual" class="pa-specialist-manual" hidden></p>
 
   <!-- Canonical setup/program/add-on reporting. Controls either navigate to a
        server-derived workspace route or open the reviewed setup shell; none is

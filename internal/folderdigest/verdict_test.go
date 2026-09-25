@@ -135,6 +135,38 @@ func TestExclude_RedecidesWithoutDeclinedCandidates(t *testing.T) {
 	}
 }
 
+func TestDecide_PortfolioCountsImmediateProjectsOfSameShape(t *testing.T) {
+	root := Candidate{Name: "Music", IsRoot: true}
+	result := Result{Candidates: []Candidate{root}}
+	markers := []string{"*.rpp", "*.als", "*.logicx", "*.rpp", "*.als"}
+	for _, name := range markers {
+		marker, found := MatchMarker(name, false)
+		if !found {
+			t.Fatalf("no marker for %q", name)
+		}
+		result.Candidates = append(result.Candidates, Candidate{Name: name, RelPath: name, Marker: &marker})
+	}
+	result.Candidates = append(result.Candidates, Candidate{Name: "unmarked", RelPath: "unmarked"})
+	four := result
+	four.Candidates = result.Candidates[:5]
+	if got := Decide(four, time.Now()).Portfolio; got != nil {
+		t.Fatalf("four project folders are not a portfolio: %+v", got)
+	}
+	five := Decide(result, time.Now())
+	if five.Portfolio == nil || five.Portfolio.Shape != ShapeAudio || five.Portfolio.Projects != 5 {
+		t.Fatalf("mixed-DAW portfolio = %+v", five.Portfolio)
+	}
+	if got := Exclude(result, time.Now(), func(c Candidate) bool { return c.Name == "*.als" }).Portfolio; got == nil || got.Projects != 5 {
+		t.Fatalf("prior project declines must not remove folder evidence: %+v", got)
+	}
+	// A marked root is itself a project, but does not count as a sixth
+	// immediate subfolder. The portfolio signal still takes precedence later.
+	result.Candidates[0].Marker = &Markers[0]
+	if got := Decide(result, time.Now()); got.Kind != KindProject || got.Portfolio == nil || got.Portfolio.Projects != 5 {
+		t.Fatalf("project root with portfolio = %+v", got)
+	}
+}
+
 func TestRank_MarkerThenRecencyThenCount(t *testing.T) {
 	now := time.Now()
 	marker := Markers[0]

@@ -1,21 +1,10 @@
-// Package specialist maps a detected desktop application to a domain
-// specialist, so the personal-assistant hire can be shaped around the work the
-// user actually does.
-//
-// The mapping is a built-in, server-side table. Adding a domain is one new
-// Entry plus its copy — no change to the onboarding wizard, the hire payload
-// builder, or the capability projection. Templates and plugins deliberately
-// cannot register their own app signatures; that is a separate design.
-//
-// Nothing in this package acts. It answers two questions: "does a detected app
-// suggest a domain?" and "what copy and ordering does that domain use?".
+// Package specialist retains the domain metadata needed to read historical
+// accepted relationships and their downstream setup journeys. New capability
+// offers are triggered only by user-fed folder evidence in folderdigest.
 package specialist
 
 import (
-	"sort"
 	"strings"
-	"time"
-	"unicode"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
@@ -29,10 +18,7 @@ const (
 	ItemFixedCommitment = "fixed_commitment"
 )
 
-// OfferCopy is the exact wording of the in-wizard offer. The headline states
-// what was found; the question asks the only thing actually unknown, which is
-// whether the user wants help with it. It never asks whether they use the app —
-// the install is already known, and asking reads as not paying attention.
+// OfferCopy retains the domain-specific copy in the host capability table.
 type OfferCopy = folderdigest.OfferCopy
 
 // FocusOption is one focus checkbox offered in place of the generic six. Value
@@ -51,13 +37,13 @@ type AssignmentStep = folderdigest.AssignmentStep
 // wizard on its behalf.
 type Suggestion = folderdigest.Suggestion
 
-// Entry is one app-to-domain mapping.
+// Entry is the legacy domain projection used by accepted relationships.
 type Entry struct {
 	// Slug is the stable machine identity persisted on the relationship. It is
 	// never shown to users and never changes once shipped.
 	Slug string `json:"slug"`
-	// AppPatterns are the detected application names this entry answers to,
-	// normalized to lowercase tokens. See Match for the comparison rule.
+	// AppPatterns are retained for compatibility with historical projections;
+	// app matching no longer triggers capability offers.
 	AppPatterns [][]string `json:"-"`
 	// DisplayName is the domain in the user's words, e.g. "music projects".
 	DisplayName string `json:"display_name"`
@@ -89,7 +75,7 @@ type Entry struct {
 	IntegrationKey string `json:"integration_key,omitempty"`
 }
 
-// The legacy specialist projection is derived from host-owned capability rows.
+// Historical domain metadata is derived from host-owned capability rows.
 // No independent domain definitions or plugin-authored rows are accepted.
 var registry = mustNormalizeRegistry(entriesFromCapabilities())
 
@@ -134,103 +120,6 @@ func Get(slug string) (Entry, bool) {
 		}
 	}
 	return Entry{}, false
-}
-
-// App is the shape Match needs from a detected application. It mirrors the
-// fields of detector.DetectedApp that matter here, so this package stays
-// independent of how detection is performed on any one platform.
-type App struct {
-	Name     string
-	LastUsed time.Time
-}
-
-// Match returns at most one specialist for a set of detected apps.
-//
-// A user with three creative apps installed is not helped by three offers at
-// the moment they are trying to finish setting up, so when several apps match,
-// the one used most recently wins. Ties resolve deterministically by slug and
-// then by app name, so the same input always produces the same offer.
-func Match(apps []App) (Entry, bool) {
-	type candidate struct {
-		entry Entry
-		app   App
-	}
-	matches := make([]candidate, 0, 1)
-	for _, app := range apps {
-		tokens := nameTokens(app.Name)
-		if len(tokens) == 0 {
-			continue
-		}
-		for _, entry := range registry {
-			if entryMatches(entry, tokens) {
-				matches = append(matches, candidate{entry: entry, app: app})
-				break
-			}
-		}
-	}
-	if len(matches) == 0 {
-		return Entry{}, false
-	}
-	sort.SliceStable(matches, func(i, j int) bool {
-		left, right := matches[i], matches[j]
-		if !left.app.LastUsed.Equal(right.app.LastUsed) {
-			return left.app.LastUsed.After(right.app.LastUsed)
-		}
-		if left.entry.Slug != right.entry.Slug {
-			return left.entry.Slug < right.entry.Slug
-		}
-		return left.app.Name < right.app.Name
-	})
-	return cloneEntry(matches[0].entry), true
-}
-
-func entryMatches(entry Entry, tokens []string) bool {
-	for _, pattern := range entry.AppPatterns {
-		if hasPrefixTokens(tokens, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasPrefixTokens reports whether the app's tokens begin with the pattern's
-// tokens. Anchoring at the start is what lets a pattern match an app plus its
-// version text while rejecting an unrelated product that merely happens to
-// contain the pattern word later in its name.
-func hasPrefixTokens(tokens, pattern []string) bool {
-	if len(pattern) == 0 || len(tokens) < len(pattern) {
-		return false
-	}
-	for i, want := range pattern {
-		if tokens[i] != want {
-			return false
-		}
-	}
-	return true
-}
-
-// nameTokens lowercases an application name, drops a trailing ".app", splits on
-// anything that is not a letter or digit, and strips a trailing digit run from
-// each token. That is what makes matching tolerant of the version text vendors
-// bake into a bundle name: "Foo", "FOO64", and "Foo 7" all reduce to a leading
-// "foo" token.
-func nameTokens(name string) []string {
-	lowered := strings.ToLower(strings.TrimSpace(name))
-	lowered = strings.TrimSuffix(lowered, ".app")
-	fields := strings.FieldsFunc(lowered, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-	tokens := make([]string, 0, len(fields))
-	for _, field := range fields {
-		trimmed := strings.TrimRightFunc(field, unicode.IsDigit)
-		if trimmed == "" {
-			// A purely numeric token ("7", "64") carries version text only, but
-			// it still has to occupy its position so a pattern cannot skip it.
-			trimmed = field
-		}
-		tokens = append(tokens, trimmed)
-	}
-	return tokens
 }
 
 // FocusValues returns the entry's focus values in declared order.

@@ -15,6 +15,7 @@ import (
 type fakeFolderDigest struct {
 	chips     []string
 	picks     int
+	filePicks int
 	decisions map[string]personalassistant.FolderOfferView
 	decided   []personalassistant.FolderDecisionInput
 	paused    bool
@@ -51,6 +52,14 @@ func (f *fakeFolderDigest) ScanPicked(context.Context, string) (*personalassista
 	return &personalassistant.FolderOfferView{ID: "offer-2", Verdict: "project", Folder: "Thesis"}, nil
 }
 
+func (f *fakeFolderDigest) ScanPickedFile(context.Context, string) (*personalassistant.FolderOfferView, error) {
+	f.filePicks++
+	if f.cancel {
+		return nil, nil
+	}
+	return &personalassistant.FolderOfferView{ID: "offer-3", Verdict: "project", Folder: "Album"}, nil
+}
+
 func (f *fakeFolderDigest) Decide(_ context.Context, _ string, offerID string, input personalassistant.FolderDecisionInput) (personalassistant.FolderOfferView, error) {
 	if f.decisions == nil {
 		f.decisions = map[string]personalassistant.FolderOfferView{}
@@ -74,6 +83,28 @@ func (f *fakeFolderDigest) Resolve(_ context.Context, _ string, offerID string, 
 		ID: offerID, Status: personalassistant.FolderOfferResolved,
 		Outcome: &personalassistant.FolderOutcome{Kind: "project", WorkspaceID: input.WorkspaceID, Route: "/workspaces/thesis"},
 	}, nil
+}
+
+func (f *fakeFolderDigest) ProjectSelectionPath(context.Context, string, string) (string, error) {
+	return "/tmp/Album", nil
+}
+
+func (f *fakeFolderDigest) PortfolioProvider(context.Context, string, string) (string, error) {
+	return "music_project_management", nil
+}
+
+func (f *fakeFolderDigest) ResolvePortfolio(_ context.Context, _ string, offerID string, input personalassistant.FolderResolveInput) (personalassistant.FolderOfferView, error) {
+	if input.HomeID != "verified-home" {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderWorkspaceRefused
+	}
+	return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferResolved}, nil
+}
+
+func (f *fakeFolderDigest) ResolveJourney(_ context.Context, _ string, offerID string, input personalassistant.FolderJourneyInput) (personalassistant.FolderOfferView, error) {
+	if input.RunID != "verified" {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderWorkspaceRefused
+	}
+	return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferResolved}, nil
 }
 
 func newFolderDigestHandler(fake *fakeFolderDigest) *Handler {
@@ -119,6 +150,9 @@ func TestFolderDigestScan_AcceptsChipsOnly(t *testing.T) {
 		{`{"path":"/Users/me/Secrets"}`, http.StatusBadRequest, "/Users/me"},
 		{`{"chip":"downloads","folder_path":"/Users/me/Secrets"}`, http.StatusBadRequest, "/Users/me"},
 		{`{"chip":"downloads","picker":true}`, http.StatusBadRequest, ""},
+		{`{"chip":"downloads","file":true}`, http.StatusBadRequest, ""},
+		{`{"picker":true,"file":true}`, http.StatusBadRequest, ""},
+		{`{"file":true,"path":"/Users/me/Secrets"}`, http.StatusBadRequest, "/Users/me"},
 		{`{}`, http.StatusBadRequest, ""},
 		{`not json`, http.StatusBadRequest, ""},
 	} {
@@ -139,6 +173,26 @@ func TestFolderDigestScan_AcceptsChipsOnly(t *testing.T) {
 	h.ScanFolderDigest(response, httptest.NewRequest(http.MethodGet, "/scan", nil))
 	if response.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET scan status=%d", response.Code)
+	}
+}
+
+func TestFolderDigestScan_FileModeIsServerChosenAndCancellable(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	request := func(body string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		h.ScanFolderDigest(response, httptest.NewRequest(http.MethodPost, "/scan", strings.NewReader(body)))
+		return response
+	}
+	if got := request(`{"file":true}`); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"Album"`) {
+		t.Fatalf("file mode status=%d body=%s", got.Code, got.Body.String())
+	}
+	fake.cancel = true
+	if got := request(`{"file":true}`); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"cancelled":true`) {
+		t.Fatalf("cancel status=%d body=%s", got.Code, got.Body.String())
+	}
+	if fake.filePicks != 2 {
+		t.Fatalf("file dialog calls = %d", fake.filePicks)
 	}
 }
 
@@ -169,6 +223,102 @@ func TestFolderDigestPicker_CancelIsCleanAndBodyIsRefused(t *testing.T) {
 	h.ScanFolderDigest(response, httptest.NewRequest(http.MethodPost, "/scan", strings.NewReader(`{"picker":true}`)))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"Thesis"`) || fake.picks != 2 {
 		t.Fatalf("scan picker status=%d picks=%d body=%s", response.Code, fake.picks, response.Body.String())
+	}
+}
+
+type fakeFolderProjectIssuer struct{ paths []string }
+
+func (f *fakeFolderProjectIssuer) Issue(path string) (string, error) {
+	f.paths = append(f.paths, path)
+	return "opaque-selection", nil
+}
+
+func TestFolderProjectSelectionRefusesBrowserPathAndUsesConfirmedOffer(t *testing.T) {
+	h := newFolderDigestHandler(&fakeFolderDigest{})
+	issuer := &fakeFolderProjectIssuer{}
+	h.SetFolderProjectSelections(issuer)
+	for _, tc := range []struct {
+		body   string
+		status int
+		calls  int
+	}{
+		{`{"path":"/etc"}`, http.StatusBadRequest, 0},
+		{`{}`, http.StatusOK, 1},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/project-selection", strings.NewReader(tc.body))
+		req.SetPathValue("offerID", "offer-1")
+		res := httptest.NewRecorder()
+		h.FolderProjectSelection(res, req)
+		if res.Code != tc.status || len(issuer.paths) != tc.calls {
+			t.Errorf("body %s: %d issued %v, want %d and %d", tc.body, res.Code, issuer.paths, tc.status, tc.calls)
+		}
+	}
+	if len(issuer.paths) != 1 || issuer.paths[0] != "/tmp/Album" {
+		t.Errorf("issuer paths = %v", issuer.paths)
+	}
+}
+
+type fakeFolderHomeSetup struct{ installed int }
+
+func (f *fakeFolderHomeSetup) Preview(_ context.Context, key string) (FolderHomeProviderPreview, error) {
+	if key != "music_project_management" {
+		return FolderHomeProviderPreview{}, personalassistant.ErrFolderOfferDecided
+	}
+	return FolderHomeProviderPreview{PluginID: "music-project-management", Version: "0.1.0"}, nil
+}
+func (f *fakeFolderHomeSetup) Install(_ context.Context, key, version string) (FolderHomeProviderPreview, error) {
+	if key != "music_project_management" || version != "0.1.0" {
+		return FolderHomeProviderPreview{}, personalassistant.ErrFolderWorkspaceRefused
+	}
+	f.installed++
+	return FolderHomeProviderPreview{PluginID: "music-project-management", Version: version, Ready: true}, nil
+}
+
+func TestFolderHomeProvider_RequiresReviewedVersionAndOneExplicitConfirm(t *testing.T) {
+	h := newFolderDigestHandler(&fakeFolderDigest{})
+	fake := &fakeFolderHomeSetup{}
+	h.SetFolderHomeProvider(fake)
+	for _, tc := range []struct {
+		body      string
+		code      int
+		installed int
+	}{
+		{`{"confirm":true,"reviewed_version":"0.0.1"}`, http.StatusConflict, 0},
+		{`{"reviewed_version":"0.1.0"}`, http.StatusBadRequest, 0},
+		{`{}`, http.StatusOK, 0},
+		{`{"confirm":true,"reviewed_version":"0.1.0"}`, http.StatusOK, 1},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/home-provider", strings.NewReader(tc.body))
+		req.SetPathValue("offerID", "offer-1")
+		res := httptest.NewRecorder()
+		h.SetupFolderHomeProvider(res, req)
+		if res.Code != tc.code || fake.installed != tc.installed {
+			t.Errorf("body %s: status %d installs %d want %d %d: %s", tc.body, res.Code, fake.installed, tc.code, tc.installed, res.Body.String())
+		}
+	}
+}
+
+func TestFolderDigestResolve_UsesOneProofMode(t *testing.T) {
+	h := newFolderDigestHandler(&fakeFolderDigest{})
+	for _, tc := range []struct {
+		body string
+		want int
+	}{
+		{`{"workspace_id":"ws","run_id":"verified","request_id":"a"}`, http.StatusBadRequest},
+		{`{"request_id":"b"}`, http.StatusBadRequest},
+		{`{"run_id":"foreign","request_id":"c"}`, http.StatusConflict},
+		{`{"run_id":"verified","request_id":"d"}`, http.StatusOK},
+		{`{"home_id":"verified-home","request_id":"e"}`, http.StatusOK},
+		{`{"home_id":"foreign","request_id":"f"}`, http.StatusConflict},
+		{`{"home_id":"verified-home","run_id":"verified","request_id":"g"}`, http.StatusBadRequest},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/resolve", strings.NewReader(tc.body))
+		request.SetPathValue("offerID", "offer-1")
+		response := httptest.NewRecorder()
+		h.ResolveFolderDigest(response, request)
+		if response.Code != tc.want {
+			t.Errorf("%s: code %d, want %d: %s", tc.body, response.Code, tc.want, response.Body.String())
+		}
 	}
 }
 
