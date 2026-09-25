@@ -122,8 +122,26 @@
   justify-content: center;
   min-height: var(--cockpit-control-h);
   padding: 0 12px;
+  /* The cockpit's square-cut frame rather than the app-wide pill, so actions
+     and readouts read as one header (3.4). Ask Ori keeps its pill on purpose:
+     it is a different role. */
+  border-radius: 2px;
   font-size: 12.5px;
   white-space: nowrap;
+}
+
+/* The app-wide primary gradient ends at #2a8762, where white text is about
+   4.4:1. Home's primary creation actions sit on the gradient's darker end as
+   a solid fill instead (6.4:1). */
+.cockpit-area-actions .modern-btn-primary,
+.cockpit-map .cockpit-empty-map-actions .modern-btn-primary {
+  background: #1f6b4e;
+  color: #fff;
+}
+
+.cockpit-area-actions .modern-btn-primary:hover,
+.cockpit-map .cockpit-empty-map-actions .modern-btn-primary:hover {
+  background: #175a41;
 }
 
 /* On a phone-width cockpit the groups wrap under each other; a divider left at
@@ -152,7 +170,7 @@
 .cockpit-area-eyebrow {
   display: block;
   color: var(--hc-signal);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -708,7 +726,9 @@
    than staying permanently covered. Wider screens need none. */
 @media (max-width: 760px) {
   body.home-command-page {
-    --home-assistant-clearance: 104px;
+    /* Home's compact launcher (ori-guide.css) is at most ~56px tall, plus its
+       12px margin. */
+    --home-assistant-clearance: 80px;
   }
 
   /* The same room below the page, so scrolling to the end brings the map's
@@ -900,29 +920,150 @@
    steps attached to the canvas without turning the rest of this overlay into
    a pointer-blocking sheet. The top-left placement stays clear of the compass,
    bottom control clusters, and the centrally framed Personal HQ landmark. */
+/* home-workspace-map-ui-refresh 3.2: the same two actions, now a small
+   invitation card — a heading that says what they are for, an optional line
+   of context (the HQ-only map), and the buttons. Still no sheet: only the
+   buttons take the pointer, so dragging across the card still pans. */
 .cockpit-map .cockpit-empty-map-actions {
   position: absolute;
   top: 14px;
   left: 16px;
   z-index: 8;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
-  max-width: calc(100% - 88px);
-  padding: 6px;
+  max-width: min(340px, calc(100% - 88px));
+  padding: 10px 12px;
   border: 1px solid var(--hc-line);
-  background: color-mix(in srgb, var(--hc-panel-raised) 92%, transparent);
+  background: color-mix(in srgb, var(--hc-panel-raised) 94%, transparent);
   box-shadow: var(--hc-shadow);
   pointer-events: none;
 }
 
-.cockpit-map .cockpit-empty-map-actions > button {
+.cockpit-empty-map-title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.cockpit-empty-map-detail {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cockpit-empty-map-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cockpit-map .cockpit-empty-map-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 2px;
+  font-size: 12.5px;
   pointer-events: auto;
 }
 
-.cockpit-map .cockpit-empty-map-actions > button:focus-visible {
+.cockpit-map .cockpit-empty-map-actions button:focus-visible {
   outline: 2px solid var(--hc-signal);
   outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .cockpit-map .cockpit-empty-map-actions button {
+    min-height: 44px;
+  }
+}
+
+/* On a phone-width cockpit the card spans the map, so it stays one heading
+   and one row of buttons; the optional context line goes. That keeps it clear
+   of the framed HQ below it, and of the compass beside it. */
+@container cockpit (max-width: 560px) {
+  .cockpit-map .cockpit-empty-map-actions {
+    gap: 6px;
+    max-width: calc(100% - 72px);
+    padding: 8px 10px;
+  }
+
+  .cockpit-empty-map-detail {
+    display: none;
+  }
+
+  .cockpit-empty-map-buttons {
+    gap: 6px;
+  }
+
+  .cockpit-map .cockpit-empty-map-actions button {
+    padding: 0 9px;
+    font-size: 12px;
+  }
+}
+
+/* Home map labels (3.3): the same artwork, with metadata that can be read.
+   The mode line used --ws-ink-faint at 9px, about 3:1 on the map in either
+   theme; --ws-ink-dim clears 4.5:1 in both. Sizes grow a step, not a scale,
+   so tile boxes, hit areas, and Fit all bounds are unchanged. */
+.cockpit-map .ws-map-tile-flag {
+  font-size: 10px;
+}
+
+/* The dock's zoom readout is a measurement people read, not decoration. */
+.cockpit-map .ws-map-zoom {
+  color: var(--ws-ink-dim);
+}
+
+.cockpit-map .ws-map-tile-type {
+  color: var(--ws-ink-dim);
+  font-size: 10px;
+}
+
+.cockpit-map .ws-map-tile-meta {
+  color: var(--ws-ink);
+  font-size: 10.5px;
+}
+
+/* The Personal HQ reads as the capital: its name in Home's text-safe amber
+   (--hc-amber: 5:1+ on the map in light, far more in dark), a larger badge,
+   and a warm ground glow on the built HQ's existing artwork. */
+.cockpit-map .ws-map-tile.is-hq .ws-map-tile-name,
+.cockpit-map .ws-map-hq-site .ws-map-tile-name {
+  color: var(--hc-amber);
+}
+
+.cockpit-map .ws-map-tile-hq-badge {
+  padding: 1px 6px;
+  font-size: 10px;
+}
+
+[data-bs-theme="light"] .cockpit-map .ws-map-tile-hq-badge {
+  border-color: var(--hc-amber);
+  background: var(--ws-field-bg);
+  color: var(--hc-amber);
+}
+
+.cockpit-map .ws-map-tile.is-hq .ws-map-struct {
+  filter: drop-shadow(0 12px 12px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 12px rgba(232, 181, 75, 0.3));
+}
+
+[data-bs-theme="light"] .cockpit-map .ws-map-tile.is-hq .ws-map-struct {
+  filter: var(--ws-struct-shadow) drop-shadow(0 0 12px rgba(138, 90, 21, 0.28));
+}
+
+/* The status flag and the HQ badge share the tile's top-right corner, and at
+   readable sizes they collide. The flag steps left instead of shrinking: past
+   the badge on the built HQ (the bulk-select box owns the top-left there), and
+   to the left edge on the unbuilt site, which has no bulk-select box. */
+.cockpit-map .ws-map-tile.is-hq .ws-map-tile-flag {
+  right: 42px;
+}
+
+.cockpit-map .ws-map-hq-site .ws-map-tile-flag {
+  right: auto;
+  left: 0;
 }
 
 /* On a narrow screen, the HQ landmark, creation group, and two map-control
@@ -931,7 +1072,9 @@
    hiding content; populated Map and Tree sizing remains unchanged. */
 @media (max-width: 700px) {
   .home-cockpit[data-state="empty-map"] .cockpit-area-body,
-  .home-cockpit[data-state="empty-map"] .cockpit-map {
+  .home-cockpit[data-state="empty-map"] .cockpit-map,
+  .home-cockpit[data-invitation="hq-only"] .cockpit-area-body,
+  .home-cockpit[data-invitation="hq-only"] .cockpit-map {
     min-height: 520px;
   }
 }

@@ -351,6 +351,18 @@ export function personalAssistantLauncherCue(personalAssistant, today) {
   return '';
 }
 
+// Whether a launcher cue asks something of the user. Home's compact resting
+// launcher shows 'action' cues and lets 'info' ones rest (they are routine
+// progress), so a paused, HQ-less, broken, or degraded assistant is never
+// hidden to save space.
+const INFO_CUES = new Set(['Loading Today', 'Today ready']);
+
+export function personalAssistantLauncherCueTone(cue) {
+  const text = String(cue || '');
+  if (!text) return '';
+  return INFO_CUES.has(text) ? 'info' : 'action';
+}
+
 const state = {
   today: null,
   relationship: null,
@@ -582,6 +594,7 @@ function renderLauncherCue(els, today = state.today) {
   const cue = personalAssistantLauncherCue(state.relationship, today);
   els.launcherStatus.textContent = cue;
   els.launcherStatus.hidden = !cue;
+  els.launcherStatus.dataset.tone = personalAssistantLauncherCueTone(cue);
 }
 
 function syncNeedsQueue(els = elements()) {

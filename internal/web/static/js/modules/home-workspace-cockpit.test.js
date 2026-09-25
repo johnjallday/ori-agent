@@ -47,6 +47,7 @@ import {
   workspaceRailView,
   renderWorkspaceRailHTML,
   workspaceAreaState,
+  mapInvitationView,
   hqSiteVisible,
   workspaceHydrationAllowed,
   renderWorkspaceAreaStatusHTML,
@@ -623,6 +624,63 @@ test('workspaceAreaState: authoritative zero workspaces renders the map with or 
     workspaceAreaState({ workspaces: [{ id: 'a' }], hqSiteVisible: false }).state,
     'ready'
   );
+});
+
+test('mapInvitationView invites on an authoritative empty map and on a map holding only the valid HQ', () => {
+  const empty = workspaceAreaState({ workspaces: [], hqSiteVisible: true });
+  assert.deepEqual(mapInvitationView({ areaState: empty, workspaces: [] }), {
+    show: true,
+    variant: 'empty'
+  });
+  // An unbuilt HQ site is scenery, not a workspace: still the empty voice.
+  assert.equal(
+    mapInvitationView({
+      areaState: empty,
+      workspaces: [],
+      hqStatus: { valid: false, hq_onboarding_state: 'unseen' }
+    }).variant,
+    'empty'
+  );
+
+  const hq = { id: 'hq-1', name: 'Home base', kind: 'workspace' };
+  const ready = workspaceAreaState({ workspaces: [hq] });
+  assert.deepEqual(
+    mapInvitationView({
+      areaState: ready,
+      workspaces: [hq],
+      hqStatus: { valid: true, workspace_id: 'hq-1' }
+    }),
+    { show: true, variant: 'hq-only' }
+  );
+});
+
+test('mapInvitationView stays quiet whenever the state is not authoritative or not sparse', () => {
+  const hq = { id: 'hq-1', name: 'Home base' };
+  const other = { id: 'ws-2', name: 'Studio' };
+  const valid = { valid: true, workspace_id: 'hq-1' };
+  const quiet = { show: false, variant: '' };
+  const view = (areaInput, workspaces, hqStatus) =>
+    mapInvitationView({ areaState: workspaceAreaState(areaInput), workspaces, hqStatus });
+
+  // Loading, failed, and gated loads never read as empty.
+  assert.deepEqual(view({ loading: true, workspaces: [] }, [], valid), quiet);
+  assert.deepEqual(view({ error: new Error('boom'), workspaces: [] }, [], valid), quiet);
+  assert.deepEqual(
+    view({ workspaces: [], onboardingGate: { state: 'required', message: 'Finish' } }, [], valid),
+    quiet
+  );
+  // One workspace that is not the HQ, or an HQ status that has not arrived or
+  // does not validate, is not "HQ-only".
+  assert.deepEqual(view({ workspaces: [other] }, [other], valid), quiet);
+  assert.deepEqual(view({ workspaces: [hq] }, [hq], null), quiet);
+  assert.deepEqual(view({ workspaces: [hq] }, [hq], { valid: false, workspace_id: 'hq-1' }), quiet);
+  // More than one workspace — including members of a collapsed group, which
+  // the flattened list still carries — is populated.
+  const member = { id: 'ws-3', name: 'Member', parent_id: 'grp' };
+  assert.deepEqual(view({ workspaces: [hq, member] }, [hq, member], valid), quiet);
+  // A group on its own is not an HQ.
+  const group = { id: 'hq-1', name: 'Group', kind: 'group' };
+  assert.deepEqual(view({ workspaces: [group] }, [group], valid), quiet);
 });
 
 test('workspaceAreaState: the HQ site never overrides loading, error, or the onboarding gate', () => {

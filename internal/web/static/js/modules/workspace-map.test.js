@@ -2646,7 +2646,11 @@ test('the Home-only empty presentation renders a real blank canvas without legac
   assert.doesNotMatch(container.innerHTML, /No workspaces yet/);
   assert.doesNotMatch(container.innerHTML, /data-ws-map-create/);
   assert.equal((container.innerHTML.match(/cockpit-empty-map-actions/g) || []).length, 1);
-  assert.match(container.innerHTML, /role="group" aria-label="Create or import a workspace"/);
+  // The invitation is named by its own visible heading.
+  assert.match(
+    container.innerHTML,
+    /role="group" aria-labelledby="cockpitMapInviteTitle" data-map-invitation="empty"><p class="cockpit-empty-map-title" id="cockpitMapInviteTitle">Add a workspace to your map<\/p>/
+  );
   assert.match(
     container.innerHTML,
     /data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">New Workspace/
@@ -2674,6 +2678,32 @@ test('the zero-workspace actions survive a late Personal HQ landmark remount exa
   assert.equal((container.innerHTML.match(/>New Workspace<\/button>/g) || []).length, 1);
   assert.equal((container.innerHTML.match(/>Import Folder<\/button>/g) || []).length, 1);
   assert.doesNotMatch(container.innerHTML, /No workspaces yet/);
+});
+
+test('a host-decided HQ-only invitation draws once beside the HQ, and an empty string means none', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['hq-1'] });
+  const common = { hideChrome: true, selectOnly: true, noAutoSelect: true };
+  map.mount(container, {
+    ...common,
+    workspaces: [{ id: 'hq-1', name: 'My HQ' }],
+    emptyPresentation: 'legacy',
+    invitation: 'hq-only'
+  });
+  assert.equal((container.innerHTML.match(/cockpit-empty-map-actions/g) || []).length, 1);
+  assert.match(container.innerHTML, /data-map-invitation="hq-only"/);
+  assert.match(container.innerHTML, /Your Personal HQ is set up\./);
+  assert.equal((container.innerHTML.match(/>New Workspace<\/button>/g) || []).length, 1);
+  assert.match(container.innerHTML, /data-ws-id="hq-1"/, 'the HQ building still draws');
+
+  // The host withdrew it (say, a second workspace arrived): nothing is inferred.
+  map.mount(container, {
+    ...common,
+    workspaces: [],
+    emptyPresentation: 'canvas',
+    invitation: ''
+  });
+  assert.doesNotMatch(container.innerHTML, /cockpit-empty-map-actions/);
 });
 
 test('the Home empty canvas remounts cleanly when a real workspace arrives', () => {

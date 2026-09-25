@@ -1378,6 +1378,217 @@ test.describe('Header hierarchy', () => {
   }
 });
 
+/**
+ * Sparse maps and the compact Home assistant (home-workspace-map-ui-refresh
+ * group 3). Workspace lists, HQ status, and the assistant relationship are
+ * route-mocked here so each state is exact; the real empty/HQ-only paths are
+ * exercised in the demo.
+ */
+test.describe('Sparse map invitation and compact assistant', () => {
+  const HQ = { id: 'hq-1', name: 'Personal HQ', kind: 'workspace', folder_slug: 'personal-hq' };
+  const OTHER = { id: 'ws-2', name: 'Studio', kind: 'workspace', folder_slug: 'studio' };
+
+  function routeTree(page: Page, folders: () => unknown[]) {
+    return page.route('**/api/workspaces?tree=true', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ folders: folders() })
+      })
+    );
+  }
+
+  function routeHQ(page: Page, status: Record<string, unknown>, delay = 0) {
+    return page.route('**/api/personal-hq/status', async route => {
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status })
+      });
+    });
+  }
+
+  function routeAssistant(page: Page, state: string, name = 'Atlas') {
+    return page.route(/\/api\/personal-assistant$/, route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          personal_assistant: {
+            state,
+            state_version: 1,
+            assistant_id: 'spec-assistant',
+            display_name: name,
+            hq_workspace_id: 'hq-1',
+            next_action: 'ask',
+            availability: { model: { status: 'not_configured', available: false } }
+          }
+        })
+      })
+    );
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await skipOnboarding(page);
+  });
+
+  test('an authoritative empty map invites with a heading and the two existing entry points', async ({
+    page
+  }) => {
+    await routeTree(page, () => []);
+    await routeHQ(page, { valid: false, hq_onboarding_state: 'unseen' });
+    await page.goto('/');
+    const invite = page.locator('.cockpit-empty-map-actions');
+    await expect(invite).toHaveAttribute('data-map-invitation', 'empty');
+    // Named by its own visible heading.
+    await expect(page.getByRole('group', { name: 'Add a workspace to your map' })).toBeVisible();
+    await expect(invite.getByRole('button', { name: 'New Workspace' })).toHaveCount(1);
+    await expect(invite.getByRole('button', { name: 'Import Folder' })).toHaveCount(1);
+  });
+
+  test('an HQ-only map invites once its late HQ status validates, and stops when a workspace arrives', async ({
+    page
+  }) => {
+    let folders: unknown[] = [HQ];
+    await routeTree(page, () => folders);
+    await routeHQ(page, { valid: true, workspace_id: 'hq-1' }, 400);
+    await page.goto('/');
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${HQ.id}"]`)).toBeVisible();
+
+    // The list lands first; the invitation waits for the status that proves
+    // this lone workspace is the designated HQ.
+    const invite = page.locator('.cockpit-empty-map-actions');
+    await expect(invite).toHaveAttribute('data-map-invitation', 'hq-only');
+    await expect(invite).toContainText('Your Personal HQ is set up.');
+
+    // A filter dims tiles; it never makes a map look empty or change the voice.
+    await page.locator('[data-cockpit-signal="running"]').click();
+    await expect(invite).toHaveAttribute('data-map-invitation', 'hq-only');
+    await page.locator('[data-cockpit-signal="running"]').click();
+
+    folders = [HQ, OTHER];
+    await page.evaluate(() => window.dispatchEvent(new Event('ori:workspaces-changed')));
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${OTHER.id}"]`)).toBeVisible();
+    await expect(invite).toHaveCount(0);
+  });
+
+  test('on a phone, the HQ-only invitation gets room and never covers the HQ', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await routeTree(page, () => [HQ]);
+    await routeHQ(page, { valid: true, workspace_id: 'hq-1' });
+    // A first visit: no saved camera, so the map frames the HQ itself (a
+    // shared sandbox would otherwise restore wherever it last looked).
+    await page.route('**/api/workspace-map/layout', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          layout: { schema_version: 1, revision: 1, snap_to_grid: true, positions: {} }
+        })
+      })
+    );
+    await page.goto('/');
+    const invite = page.locator('.cockpit-empty-map-actions');
+    await expect(invite).toHaveAttribute('data-map-invitation', 'hq-only');
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-invitation', 'hq-only');
+    const map = (await page.locator('#cockpitMap').boundingBox())!;
+    expect(
+      map.height,
+      'the first-run map gets the empty map’s extra height'
+    ).toBeGreaterThanOrEqual(519);
+    await page.waitForTimeout(300);
+    const [card, hq] = await Promise.all([
+      invite.boundingBox(),
+      page.locator(`.ws-map-tile[data-ws-id="${HQ.id}"]`).boundingBox()
+    ]);
+    const overlap =
+      card!.x < hq!.x + hq!.width &&
+      hq!.x < card!.x + card!.width &&
+      card!.y < hq!.y + hq!.height &&
+      hq!.y < card!.y + card!.height;
+    expect(overlap, 'the card leaves the HQ building visible').toBe(false);
+  });
+
+  test('a lone workspace that is not the HQ, or a failed load, never invites', async ({ page }) => {
+    await routeTree(page, () => [OTHER]);
+    await routeHQ(page, { valid: true, workspace_id: 'hq-1' });
+    await page.goto('/');
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${OTHER.id}"]`)).toBeVisible();
+    await page.waitForTimeout(400);
+    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
+
+    await page.unroute('**/api/workspaces?tree=true');
+    await page.route('**/api/workspaces?tree=true', route =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
+    );
+    await page.reload();
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'error');
+    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
+  });
+
+  test('the resting Home assistant is compact, keeps its identity, and shows cues that need the user', async ({
+    page
+  }) => {
+    await routeAssistant(page, 'paused', 'Wilhelmina Featherstonehaugh-Montgomery');
+    await ensureWorkspace(page);
+    await page.goto('/');
+    const launcher = page.locator('#personalAssistantLauncher');
+    await expect(launcher).toBeVisible();
+    await expect(launcher).toContainText('Wilhelmina Featherstonehaugh-Montgomery');
+    await expect(launcher).toContainText('Personal Assistant');
+    const status = page.locator('#personalAssistantLauncherStatus');
+    await expect(status).toHaveText('Paused');
+    await expect(status).toBeVisible();
+    const box = (await launcher.boundingBox())!;
+    expect(box.height, 'compact at rest').toBeLessThanOrEqual(56);
+    expect(box.width).toBeLessThanOrEqual(262);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+    // Still the personal assistant, distinct from the App Guide.
+    await expect(page.locator('#oriGuideMapTrigger')).toContainText('App Guide');
+    await expect(launcher).not.toContainText('App Guide');
+  });
+
+  for (const [state, cue] of [
+    ['needs_hq', 'Build HQ'],
+    ['repair_needed', 'Repair needed']
+  ] as const) {
+    test(`the compact launcher keeps the "${cue}" cue visible`, async ({ page }) => {
+      await routeAssistant(page, state);
+      await ensureWorkspace(page);
+      await page.goto('/');
+      await expect(page.locator('#personalAssistantLauncherStatus')).toHaveText(cue);
+      await expect(page.locator('#personalAssistantLauncherStatus')).toBeVisible();
+    });
+  }
+
+  test('a routine cue rests on Home but not elsewhere, where the launcher is unchanged', async ({
+    page
+  }) => {
+    await routeAssistant(page, 'active');
+    await ensureWorkspace(page);
+    await page.goto('/');
+    const status = page.locator('#personalAssistantLauncherStatus');
+    await expect(status).toHaveAttribute('data-tone', /info|action/);
+    if ((await status.getAttribute('data-tone')) === 'info') await expect(status).toBeHidden();
+    const home = (await page.locator('#personalAssistantLauncher').boundingBox())!;
+
+    await page.goto('/agents');
+    const launcher = page.locator('#personalAssistantLauncher');
+    await expect(launcher).toBeVisible();
+    const elsewhere = (await launcher.boundingBox())!;
+    expect(elsewhere.height, 'the full launcher everywhere else').toBeGreaterThan(home.height);
+    await expect(page.locator('.personal-assistant-launcher__role')).toHaveCSS(
+      'text-transform',
+      'uppercase'
+    );
+  });
+});
+
 async function titleOf(page: Page, id: string): Promise<string> {
   const name = await page
     .locator(`.ws-map-tile[data-ws-id="${id}"] .ws-map-tile-name`)

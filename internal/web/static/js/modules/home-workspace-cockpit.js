@@ -1520,6 +1520,30 @@ export function workspaceAreaState({
   return { state: 'ready', message: '', canRetry: false };
 }
 
+/**
+ * Whether the Map invites the user to add a workspace, and in which voice.
+ *
+ * Decided only from loaded, authoritative state (home-workspace-map-ui-refresh
+ * 3.1): an authoritative empty list ('empty'), or a list whose one workspace
+ * IS the designated, valid Personal HQ ('hq-only'). Every other state stays
+ * quiet — loading, a failed load, an onboarding gate, a list with groups, and
+ * an HQ status that has not arrived or does not validate. A signal filter
+ * never matters here because it dims tiles and never changes the list, and a
+ * collapsed group still lists its members. The synthetic, unbuilt HQ site is
+ * not a workspace, so a profile with only that site is 'empty', not 'hq-only'.
+ */
+export function mapInvitationView({ areaState, workspaces, hqStatus } = {}) {
+  const none = { show: false, variant: '' };
+  const state = areaState && areaState.state;
+  if (state === 'empty-map') return { show: true, variant: 'empty' };
+  if (state !== 'ready') return none;
+  const rows = (Array.isArray(workspaces) ? workspaces : []).filter(Boolean);
+  if (rows.length !== 1 || isGroupWorkspace(rows[0])) return none;
+  const hqId = hqStatus && hqStatus.valid ? String(hqStatus.workspace_id || '') : '';
+  if (!hqId || String(rows[0].id || '') !== hqId) return none;
+  return { show: true, variant: 'hq-only' };
+}
+
 export function renderWorkspaceAreaStatusHTML(status) {
   if (!status || status.state === 'ready' || status.state === 'empty-map') return '';
   if (status.state === 'onboarding-loading' || status.state === 'onboarding-required') {
@@ -1710,14 +1734,34 @@ import {
 
   // ---- workspace area ----
 
-  function renderAreaStatus() {
-    const status = workspaceAreaState({
+  function currentAreaState() {
+    return workspaceAreaState({
       loading: state.loading,
       error: state.error,
       workspaces: state.flattened,
       onboardingGate: state.onboardingGate,
       hqSiteVisible: hqSiteVisible(state.hqStatus)
     });
+  }
+
+  /**
+   * The Map's add-a-workspace invitation variant, or '' for none. Also mirrored
+   * onto the cockpit root, where narrow-screen CSS gives an invited first-run
+   * map the same extra height the empty map already gets.
+   */
+  function currentInvitation() {
+    const view = mapInvitationView({
+      areaState: currentAreaState(),
+      workspaces: state.flattened,
+      hqStatus: state.hqStatus
+    });
+    const variant = view.show ? view.variant : '';
+    root.dataset.invitation = variant;
+    return variant;
+  }
+
+  function renderAreaStatus() {
+    const status = currentAreaState();
     if (els.areaStatus) {
       els.areaStatus.innerHTML = renderWorkspaceAreaStatusHTML(status);
       const retry = els.areaStatus.querySelector('[data-cockpit-retry]');
@@ -1736,6 +1780,7 @@ import {
     const mapRenderable = status.state === 'ready' || status.state === 'empty-map';
     if (els.map) els.map.hidden = state.view !== VIEW_MAP || !mapRenderable;
     if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
+    currentInvitation();
     return status;
   }
 
@@ -1809,6 +1854,9 @@ import {
       // Explicit Home-only contract. The shared Map keeps its legacy empty
       // prompt unless its cockpit host opts into a real buildingless canvas.
       emptyPresentation: state.flattened.length === 0 ? 'canvas' : 'legacy',
+      // The add-a-workspace invitation, decided here from authoritative state
+      // (mapInvitationView) so the Map never infers emptiness for itself.
+      invitation: currentInvitation(),
       onSelect: id =>
         selectItem(id, {
           fromMap: true,
@@ -2859,6 +2907,7 @@ import {
   async function refreshHQStatus() {
     if (!canHydrateWorkspaceData()) return;
     const hadSite = hqSiteVisible(state.hqStatus);
+    const hadInvitation = currentInvitation();
     try {
       const res = await fetch('/api/personal-hq/status');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2876,6 +2925,11 @@ import {
     if (hqSiteVisible(state.hqStatus) !== hadSite) {
       renderAreaStatus();
       renderFilters();
+      mountMap();
+    } else if (currentInvitation() !== hadInvitation) {
+      // The status is what tells an HQ-only map from any other one-workspace
+      // map, and it usually lands after the list; re-mount so the invitation
+      // appears (or leaves) without waiting for the next refresh.
       mountMap();
     }
     if (state.selectedId === HQ_SITE_ID) {

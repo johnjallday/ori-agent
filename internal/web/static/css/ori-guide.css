@@ -561,6 +561,62 @@
   white-space: nowrap;
 }
 
+/* Home's resting launcher (home-workspace-map-ui-refresh 3.5): a compact avatar
+   and two short lines — the name, then "Personal Assistant" with any cue that
+   needs the user — so it takes less of the map's corner. The name keeps its
+   ellipsis and its full text in the accessible name. Routine progress cues
+   (data-tone="info": "Loading Today", "Today ready") rest; paused, Build HQ,
+   repair, and unavailable cues always show. Other pages and the open panel are
+   unchanged. */
+body.home-command-page .personal-assistant-launcher {
+  max-width: min(290px, calc(100vw - 40px));
+  min-height: 44px;
+  gap: 8px;
+  padding: 5px 14px 5px 5px;
+}
+
+body.home-command-page .personal-assistant-launcher .agent-avatar {
+  --aa-size: 34px;
+}
+
+body.home-command-page .personal-assistant-launcher__copy {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 6px;
+  align-items: baseline;
+}
+
+body.home-command-page .personal-assistant-launcher__name {
+  grid-column: 1 / -1;
+  max-width: 170px;
+  font-size: 13px;
+}
+
+/* Home's amber token is text-safe in both themes (--ori-accent-strong reads at
+   under 3:1 on the dark launcher). */
+body.home-command-page .personal-assistant-launcher__role {
+  margin: 0;
+  color: var(--hc-amber, var(--ori-accent-strong));
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+/* The cue is never the part that truncates: a long custom name gives way
+   first (its own ellipsis), so "Model unavailable" always reads whole. */
+body.home-command-page .personal-assistant-launcher__status {
+  max-width: none;
+  padding-left: 6px;
+  border-left: 1px solid
+    color-mix(in srgb, var(--hc-amber, var(--ori-accent-strong)) 45%, transparent);
+  color: var(--hc-amber, var(--ori-accent-strong));
+  font-size: 10.5px;
+}
+
+body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
+  display: none;
+}
+
 .personal-assistant-panel {
   display: flex;
   width: min(640px, calc(100vw - 48px));

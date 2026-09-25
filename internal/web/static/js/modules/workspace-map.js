@@ -3591,11 +3591,26 @@
     );
   }
 
-  function cockpitEmptyActionsHTML() {
+  // Home's add-a-workspace invitation (home-workspace-map-ui-refresh 3.2). The
+  // host decides WHEN from authoritative state — an empty list, or a list whose
+  // only workspace is the valid Personal HQ — and this draws the same two
+  // create entry points the empty map always had, under one small heading. It
+  // is a card in the corner, not a sheet: only its buttons take the pointer.
+  function cockpitEmptyActionsHTML(variant) {
+    var detail =
+      variant === 'hq-only'
+        ? '<p class="cockpit-empty-map-detail">Your Personal HQ is set up. Add one for a project, a class, or a routine.</p>'
+        : '';
     return (
-      '<div class="cockpit-empty-map-actions" role="group" aria-label="Create or import a workspace">' +
+      '<div class="cockpit-empty-map-actions" role="group" aria-labelledby="cockpitMapInviteTitle" data-map-invitation="' +
+      escapeHtml(variant || 'empty') +
+      '">' +
+      '<p class="cockpit-empty-map-title" id="cockpitMapInviteTitle">Add a workspace to your map</p>' +
+      detail +
+      '<div class="cockpit-empty-map-buttons">' +
       '<button type="button" class="modern-btn modern-btn-primary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">New Workspace</button>' +
       '<button type="button" class="modern-btn modern-btn-secondary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="true" data-workspace-entry-point="home_cockpit_import">Import Folder</button>' +
+      '</div>' +
       '</div>'
     );
   }
@@ -3611,6 +3626,14 @@
       (Array.isArray(workspaces) && workspaces.length > 0) || site.show || authoritativeEmpty
         ? canvasHTML(workspaces, selectedId, { viewport: viewport }).html
         : emptyCanvasHTML();
+    // A host that decides the invitation itself (Home) says so with a string,
+    // '' meaning none; a host that does not keeps the authoritative-empty rule.
+    var invitation =
+      options && typeof options.invitation === 'string'
+        ? options.invitation
+        : authoritativeEmpty
+          ? 'empty'
+          : '';
     // Cockpit mode: the workspace-area header and on-demand context modal
     // already own the title, the stat readout, New Workspace, and the selected
     // workspace's overview (PRD FR15, FR17, FR29, FR62-FR69). Rendering the
@@ -3621,7 +3644,7 @@
         '<section class="ws-map-theatre">' +
         '<div class="ws-map-compass">N<b>▲</b></div>' +
         canvas +
-        (authoritativeEmpty ? cockpitEmptyActionsHTML() : '') +
+        (invitation ? cockpitEmptyActionsHTML(invitation) : '') +
         '</section>' +
         '</div>' +
         selBarHTML() +
