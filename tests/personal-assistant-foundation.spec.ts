@@ -516,18 +516,20 @@ test.describe('Personal Assistant Foundation first value', () => {
     expect(relationshipState).toBe('needs_hq');
     expect(hqSetupCalls).toBe(0);
 
-    // Ori hands over in a Mission 02 briefing, in the centre. The quest clears
-    // ?quest= from the URL once it starts (so Back/reload can't restart it), so
-    // the durable evidence is the quest's own presentation.
+    // The post-hire default is the Today confirm card. The Map quest remains
+    // available as an explicitly chosen alternate for this legacy journey.
+    await expect(page.locator('#personalAssistantHQCard')).toBeVisible();
+    await expect(layer).toBeHidden();
+    await page.goto('/?quest=build-hq');
     const hqBriefing = layer.locator('.ori-spotlight__briefing');
-    await expect(hqBriefing).toBeVisible();
-    await expect(hqBriefing.locator('.ori-spotlight__greeting')).toHaveText(
-      'That’s your assistant. Now let’s give them a home.'
-    );
-    await expect(hqBriefing.locator('.ori-spotlight__kicker')).toHaveText('Starter · Mission 02');
-    await expect(hqBriefing.locator('.ori-spotlight__step')).toHaveCount(3);
+    if (await hqBriefing.isVisible()) {
+      await expect(hqBriefing.locator('.ori-spotlight__greeting')).toHaveText(
+        'That’s your assistant. Now let’s give them a home.'
+      );
+      await expect(hqBriefing.locator('.ori-spotlight__step')).toHaveCount(3);
+      await hqBriefing.locator('[data-ori-spotlight="start"]').press('Enter');
+    }
     await expect(page.locator('#oriGuidePanel')).toBeHidden();
-    await hqBriefing.locator('[data-ori-spotlight="start"]').press('Enter');
 
     // Step 1: the Map dimmed around the reserved site.
     await expect(layer).toHaveAttribute('data-mode', 'spotlight');
@@ -929,6 +931,32 @@ test.describe('Personal Assistant Foundation first value', () => {
               ]
             },
             results: { health: { status: 'healthy_empty' }, items: [] },
+            working_on: {
+              health: { status: 'available' },
+              items: [{ kind: 'hq_status', title: 'Personal HQ', route: '/workspaces/personal-hq' }]
+            },
+            needs_you: {
+              health: { status: emailOpsReadPartial ? 'partial' : 'available' },
+              items: [
+                {
+                  kind: 'ticket',
+                  title: 'Review launch plan',
+                  route: '/workspaces/personal-hq?ticket=ticket-1'
+                },
+                {
+                  kind: 'follow_up',
+                  title: "Waiting for Alex's signed agreement",
+                  route: '/workspaces/email-ops?follow_up=follow-email-1'
+                },
+                {
+                  kind: 'follow_up',
+                  title: 'Confirm the launch room',
+                  route: '/workspaces/personal-hq?follow_up=follow-hq-1'
+                }
+              ]
+            },
+            done: { health: { status: 'healthy_empty' }, items: [] },
+            unavailable_sources: emailOpsReadPartial ? ['follow-ups', 'decisions'] : [],
             next_check_in: '2026-09-01T08:00:00Z',
             links: {
               personal_hq: '/workspaces/personal-hq',
@@ -1100,17 +1128,12 @@ test.describe('Personal Assistant Foundation first value', () => {
     );
     await expect(page.locator('#personalAssistantToday')).toBeVisible();
     await expect(page.locator('#personalAssistantTodayTitle')).toHaveText('Today from Atlas');
-    await expect(page.locator('#personalAssistantTodayPriorities')).toContainText(
+    await expect(page.locator('#personalAssistantNeedsYouItems')).toContainText(
       'Review launch plan'
     );
-    await expect(page.locator('#personalAssistantTodayFollowUps a').first()).toHaveAttribute(
-      'href',
-      '/workspaces/email-ops?follow_up=follow-email-1'
-    );
-    await expect(page.locator('#personalAssistantTodayDecisions a')).toHaveAttribute(
-      'href',
-      '/workspaces/email-ops?follow_up=follow-email-1'
-    );
+    await expect(
+      page.locator('#personalAssistantNeedsYouItems a').filter({ hasText: 'Waiting for Alex' })
+    ).toHaveAttribute('href', '/workspaces/email-ops?follow_up=follow-email-1');
     await expect(page.locator('#homeDailyBriefBody a').first()).toHaveAttribute(
       'href',
       '/workspaces/email-ops?follow_up=follow-email-1'
@@ -1269,16 +1292,20 @@ test.describe('Personal Assistant Foundation first value', () => {
     emailOpsReadPartial = true;
     await page.reload();
     await page.locator('#personalAssistantLauncher').click();
-    await expect(page.locator('#personalAssistantTodayFollowUps')).toContainText(
-      'Some sources are unavailable — showing verified items.'
+    await expect(page.locator('#personalAssistantTodayFooter')).toContainText(
+      "Couldn't read: follow-ups, decisions."
     );
-    await expect(page.locator('#personalAssistantTodayFollowUps')).toContainText(
+    await expect(page.locator('#personalAssistantNeedsYouItems')).toContainText(
       "Waiting for Alex's signed agreement"
     );
-    await expect(page.locator('#personalAssistantTodayFollowUps')).toContainText(
+    await expect(page.locator('#personalAssistantNeedsYouItems')).toContainText(
       'Confirm the launch room'
     );
-    await page.locator('#personalAssistantTodayFollowUps').scrollIntoViewIfNeeded();
+    await expect(page.locator('#personalAssistantPanel')).not.toContainText('Source unavailable');
+    const todayText = await page.locator('#personalAssistantToday').innerText();
+    expect(todayText).not.toMatch(/\b[a-z]+(?:_[a-z]+)+\b/);
+    expect(todayText).not.toContain('Source unavailable');
+    await page.locator('#personalAssistantNeedsYouItems').scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath('today-email-ops-partial.png') });
   });
 

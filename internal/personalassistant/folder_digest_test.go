@@ -996,10 +996,10 @@ func TestFolderChooserNote(t *testing.T) {
 	}{
 		{"chips and dialog", 3, true, "", ""},
 		{"dialog only", 0, true, "", "Downloads, Documents and Desktop are not under this home; pick another folder."},
-		{"chips, dialog switched off", 3, false, FolderDialogUnavailableDesktopOff, "Pick a folder from the list; the folder dialog is switched off in this session (ORI_NO_DESKTOP_OPEN)."},
+		{"chips, dialog switched off", 3, false, FolderDialogUnavailableDesktopOff, "Pick a folder from the list; the folder dialog is switched off in this session."},
 		{"chips, not a Mac", 1, false, FolderDialogUnavailablePlatform, "Pick a folder from the list; the folder dialog is only available on macOS."},
 		{"chips, no picker wired", 1, false, "", "Pick a folder from the list; the folder dialog is unavailable here."},
-		{"nothing at all", 0, false, FolderDialogUnavailableDesktopOff, "Downloads, Documents and Desktop are not under this home, and the folder dialog is switched off in this session (ORI_NO_DESKTOP_OPEN)."},
+		{"nothing at all", 0, false, FolderDialogUnavailableDesktopOff, "Downloads, Documents and Desktop are not under this home, and the folder dialog is switched off in this session."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

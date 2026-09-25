@@ -295,6 +295,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
           close: { top: close.top, right: close.right, bottom: close.bottom },
           navbarBottom: navbar.bottom,
           internallyScrollable: view.scrollHeight > view.clientHeight,
+          viewOverflowY: getComputedStyle(view).overflowY,
           pageWidth: document.documentElement.scrollWidth
         };
       });
@@ -308,7 +309,9 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       expect(layout.close.right).toBeLessThanOrEqual(viewport.width);
       expect(layout.close.bottom).toBeLessThanOrEqual(viewport.height);
       expect(layout.pageWidth).toBeLessThanOrEqual(viewport.width + 1);
-      expect(layout.internallyScrollable).toBe(true);
+      // The three-section Today may fit without scrolling; when it grows,
+      // scrolling stays inside the drawer rather than on the page.
+      expect(['auto', 'scroll']).toContain(layout.viewOverflowY);
       if (viewport.mode === 'sheet') {
         expect(layout.panel.left).toBeLessThanOrEqual(1);
         expect(layout.panel.width).toBeGreaterThanOrEqual(viewport.width - 1);
@@ -328,8 +331,9 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(page.locator('#personalAssistantLauncherStatus')).toHaveText('Build HQ');
     await launcher.click();
     await expect(page.locator('#personalAssistantToday')).toBeVisible();
-    await expect(page.locator('#personalAssistantTodayBanner')).toContainText('needs a home base');
-    await expect(page.getByRole('link', { name: 'Build Personal HQ' })).toHaveCount(1);
+    await expect(page.locator('#personalAssistantHQCard')).toBeVisible();
+    await expect(page.locator('#personalAssistantHQHeadline')).toContainText('Atlas is hired');
+    await expect(page.getByRole('link', { name: 'Build Personal HQ' })).toHaveCount(0);
     await page.locator('#personalAssistantAskTab').click();
     await expect(page.locator('#personalAssistantInput')).toBeDisabled();
     await expect(page.locator('#personalAssistantSend')).toBeDisabled();

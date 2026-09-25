@@ -14,6 +14,8 @@
       <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
       <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
       <a id="personalAssistantTodayMemory" href="/" hidden>Memory</a>
+      <a href="/profile#personalHQKnowledge">Review or change remembered facts</a>
+      <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" hidden>Optional interview</a>
       <a id="personalAssistantTodayAdvanced" href="/agents">Advanced</a>
     </nav>
   </header>
@@ -136,45 +138,31 @@
   </section>
 
   <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
-    <!-- Today's meetings, read through the Calendar Ops workspace that owns the
-         calendar connection. Present only when the server sends a section; a
-         meeting row opens that meeting in the Calendar console, where meeting
-         prep lives. Nothing here writes to a calendar. -->
-    <section id="personalAssistantTodayMeetingsSection" class="personal-assistant-today__meetings"
-             aria-labelledby="personalAssistantTodayMeetingsTitle" hidden>
-      <h4 id="personalAssistantTodayMeetingsTitle">Meetings</h4>
-      <ul id="personalAssistantTodayMeetings"></ul>
-      <p id="personalAssistantTodayMeetingsNote" class="personal-assistant-today__meta"></p>
+    <section id="personalAssistantWorkingOn" aria-labelledby="personalAssistantWorkingOnTitle" hidden>
+      <h4 id="personalAssistantWorkingOnTitle">Working on</h4>
+      <div id="personalAssistantWorkingOnContent"></div>
+      <section id="personalAssistantTodayMeetingsSection" class="personal-assistant-today__meetings"
+               aria-labelledby="personalAssistantTodayMeetingsTitle" hidden>
+        <h5 id="personalAssistantTodayMeetingsTitle">Meetings</h5>
+        <ul id="personalAssistantTodayMeetings"></ul>
+        <p id="personalAssistantTodayMeetingsNote" class="personal-assistant-today__meta"></p>
+      </section>
+      <ul id="personalAssistantWorkingOnItems"></ul>
     </section>
-    <section aria-labelledby="personalAssistantTodayRememberedTitle">
-      <h4 id="personalAssistantTodayRememberedTitle">What I’m keeping in mind</h4>
-      <ul id="personalAssistantTodayRemembered"></ul>
-      <a href="/profile#personalHQKnowledge" class="personal-assistant-today__meta">Review or change remembered facts</a>
-      <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" class="personal-assistant-today__meta" hidden>Start or resume the optional interview</a>
+    <section id="personalAssistantNeedsYou" aria-labelledby="personalAssistantNeedsYouTitle" hidden>
+      <h4 id="personalAssistantNeedsYouTitle">Needs you</h4>
+      <p id="personalAssistantTodayAllClear" hidden>Nothing needs you right now.</p>
+      <div id="personalAssistantNeedsYouCards"></div>
+      <ul id="personalAssistantNeedsYouItems"></ul>
     </section>
-    <section aria-labelledby="personalAssistantTodayDecisionsTitle">
-      <h4 id="personalAssistantTodayDecisionsTitle">Decisions</h4>
-      <ul id="personalAssistantTodayDecisions"></ul>
-    </section>
-    <section aria-labelledby="personalAssistantTodayPrioritiesTitle">
-      <h4 id="personalAssistantTodayPrioritiesTitle">Priorities</h4>
-      <ul id="personalAssistantTodayPriorities"></ul>
-    </section>
-    <section aria-labelledby="personalAssistantTodayFollowUpsTitle">
-      <h4 id="personalAssistantTodayFollowUpsTitle">Follow-ups</h4>
-      <ul id="personalAssistantTodayFollowUps"></ul>
-    </section>
-    <section aria-labelledby="personalAssistantTodayResultsTitle">
-      <h4 id="personalAssistantTodayResultsTitle">Results to review</h4>
-      <ul id="personalAssistantTodayResults"></ul>
-    </section>
-    <!-- Studio reporting names the specialist and links to that specialist's
-         canonical workspace. It never implies unsupported delegation. -->
-    <section id="personalAssistantTodayStudioSection" aria-labelledby="personalAssistantTodayStudioTitle" hidden>
-      <h4 id="personalAssistantTodayStudioTitle">From your studio</h4>
-      <ul id="personalAssistantTodayStudio"></ul>
-      <p id="personalAssistantTodayStudioNote" class="personal-assistant-today__meta"></p>
+    <section id="personalAssistantDone" aria-labelledby="personalAssistantDoneTitle" hidden>
+      <h4 id="personalAssistantDoneTitle">Done</h4>
+      <ul id="personalAssistantDoneItems"></ul>
     </section>
   </div>
+  <footer id="personalAssistantTodayFooter" class="personal-assistant-today__meta" hidden>
+    <span id="personalAssistantTodayUnavailable"></span>
+    <button id="personalAssistantTodayRetry" type="button" class="btn btn-sm btn-link">Retry</button>
+  </footer>
 </section>
 {{end}}

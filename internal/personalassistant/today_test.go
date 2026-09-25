@@ -68,11 +68,124 @@ type stubFolderReceipts struct {
 	err    error
 	userID string
 	since  time.Time
+	reads  []time.Time
 }
 
 func (s *stubFolderReceipts) RecentReceipts(_ context.Context, userID string, since time.Time) ([]FolderOffer, error) {
 	s.userID, s.since = userID, since
+	s.reads = append(s.reads, since)
 	return s.offers, s.err
+}
+
+type stubTodayDigest struct {
+	stubFolderReceipts
+	view FolderDigestView
+}
+
+func (s *stubTodayDigest) Current(context.Context, string) (FolderDigestView, error) {
+	return s.view, nil
+}
+
+func TestTodayService_ThreeSectionsOrderCardsAndSummarizeResults(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	store, hq := newTodayWorkspace(t, now)
+	hq.CreatedAt = now.Add(-2 * 24 * time.Hour)
+	if err := store.Save(hq); err != nil {
+		t.Fatal(err)
+	}
+	project := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Thesis"})
+	project.ID, project.FolderSlug = "project-1", "thesis"
+	project.SetTemplateProvenance(&workspace.TemplateProvenance{TemplateID: "writing-project", TemplateName: "Writing Project"})
+	if err := store.Save(project); err != nil {
+		t.Fatal(err)
+	}
+	resolved := now.Add(-time.Hour)
+	digest := &stubTodayDigest{
+		stubFolderReceipts: stubFolderReceipts{offers: []FolderOffer{{ID: "o1", ResolvedAt: &resolved, Outcome: &FolderOutcome{
+			Kind: FolderChoiceProject, WorkspaceID: project.ID, Receipt: []FolderReceiptRow{{Kind: "workspace", Name: "Thesis"}, {Kind: "blueprint", Name: "Writing Project"}},
+		}}}},
+		view: FolderDigestView{Offer: &FolderOfferView{ID: "o2", Folder: "Documents", Status: FolderOfferPending}},
+	}
+	service := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()}, stubTodayBrief{}, store, stubTodayFollowUps{})
+	service.now = func() time.Time { return now }
+	service.SetFolderDigestReader(digest)
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.WorkingOn.Items) < 2 || got.WorkingOn.Items[0].ID != "hq-1" ||
+		got.WorkingOn.Items[1].Title != "Thesis" || got.WorkingOn.Items[1].Detail != "Writing Project" ||
+		len(got.NeedsYou.Items) == 0 || got.NeedsYou.Items[0].Kind != "folder_offer" ||
+		len(got.Done.Items) < 3 || got.Done.Items[0].Kind != "hq_setup" || got.Done.Items[1].ID != "o1" {
+		t.Fatalf("three Today sections: working=%+v needs=%+v done=%+v", got.WorkingOn.Items, got.NeedsYou.Items, got.Done.Items)
+	}
+	for _, section := range []TodaySection{got.WorkingOn, got.NeedsYou, got.Done} {
+		for _, item := range section.Items {
+			if strings.Contains(item.Title, "waiting_for_choice") || strings.Contains(item.Detail, "waiting_for_choice") {
+				t.Fatalf("raw state in Today item: %+v", item)
+			}
+		}
+	}
+	digest.view.Offer = nil
+	service.now = func() time.Time { return now.Add(8 * 24 * time.Hour) }
+	late, err := service.Get(context.Background(), "local")
+	if err != nil || len(late.Done.Items) != 1 || late.Done.Items[0].Kind != "result" ||
+		len(late.WorkingOn.Items) < 2 || len(late.NeedsYou.Items) != 0 {
+		t.Fatalf("expired Done/retained Working on = %+v / %+v, err=%v", late.Done, late.WorkingOn, err)
+	}
+}
+
+func TestTodayService_CandidatesAndTodaysCompletedFollowUpsHaveSeparateActions(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	store, hq := newTodayWorkspace(t, now)
+	hq.CreatedAt = now.Add(-30 * 24 * time.Hour)
+	if err := store.Save(hq); err != nil {
+		t.Fatal(err)
+	}
+	completed := now.Add(-time.Hour)
+	earlier := now.Add(-30 * time.Hour)
+	service := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()},
+		stubTodayBrief{err: dailybrief.ErrRevisionNotFound}, store,
+		stubTodayFollowUps{items: []*followup.FollowUp{
+			{ID: "confirm-1", UserID: "local", WorkspaceID: "hq-1", Status: followup.StatusCandidate, Title: "Launch timing"},
+			{ID: "done-1", UserID: "local", WorkspaceID: "hq-1", Status: followup.StatusCompleted, Title: "Call Morgan", CompletedAt: &completed},
+			{ID: "old-1", UserID: "local", WorkspaceID: "hq-1", Status: followup.StatusCompleted, Title: "Old result", CompletedAt: &earlier},
+		}},
+	)
+	service.now = func() time.Time { return now }
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.NeedsYou.Items) != 1 || got.NeedsYou.Items[0].Title != "Confirm Launch timing" ||
+		got.NeedsYou.Items[0].Route != "/workspaces/personal-hq?follow_up=confirm-1" ||
+		len(got.Done.Items) != 2 || got.Done.Items[1].Title != "Completed Call Morgan" {
+		t.Fatalf("follow-up sections: needs=%+v done=%+v", got.NeedsYou.Items, got.Done.Items)
+	}
+}
+
+func TestTodayService_UnavailableSourcesAppearOnceAndDoNotHideVerifiedRows(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	store, _ := newTodayWorkspace(t, now)
+	service := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()},
+		stubTodayBrief{err: dailybrief.ErrRevisionNotFound}, store,
+		stubTodayFollowUps{err: errors.New("unavailable")})
+	service.now = func() time.Time { return now }
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, source := range got.UnavailableSources {
+		if seen[source] {
+			t.Fatalf("source reported twice: %+v", got.UnavailableSources)
+		}
+		seen[source] = true
+	}
+	if !seen["follow-ups"] || !seen["decisions"] || got.NeedsYou.Health.Status != TodaySectionUnavailable ||
+		len(got.WorkingOn.Items) == 0 || got.WorkingOn.Items[0].Title != "Personal HQ" {
+		t.Fatalf("partial Today lost verified rows: working=%+v needs=%+v unavailable=%+v", got.WorkingOn, got.NeedsYou, got.UnavailableSources)
+	}
 }
 
 func TestTodayService_SevenDayFolderSetupReceiptsSurviveReloadAndStayBounded(t *testing.T) {
@@ -101,7 +214,7 @@ func TestTodayService_SevenDayFolderSetupReceiptsSurviveReloadAndStayBounded(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipts.userID != "local" || !receipts.since.Equal(now.Add(-todayFolderReceiptWindow)) {
+	if receipts.userID != "local" || len(receipts.reads) != 2 || !receipts.reads[0].Equal(now.Add(-todayFolderReceiptWindow)) || !receipts.reads[1].IsZero() {
 		t.Fatalf("wrong receipt scope: user=%q since=%s", receipts.userID, receipts.since)
 	}
 	items := got.Results.Items
@@ -302,11 +415,15 @@ func TestTodayService_AggregatesEmailOpsDecisionsAndGroundsBriefToOwningRoute(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(filters) != 2 {
-		t.Fatalf("filters = %+v, want one read per owner", filters)
+	if len(filters) != 6 {
+		t.Fatalf("filters = %+v, want one read per owner per lifecycle", filters)
 	}
-	for _, filter := range filters {
-		if filter.UserID != "local" || filter.WorkspaceID == "" || len(filter.Statuses) != 2 {
+	for i, filter := range filters {
+		wantStatuses := 2
+		if i >= 2 {
+			wantStatuses = 1
+		}
+		if filter.UserID != "local" || filter.WorkspaceID == "" || len(filter.Statuses) != wantStatuses {
 			t.Fatalf("unbounded follow-up filter: %+v", filter)
 		}
 	}

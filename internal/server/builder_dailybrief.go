@@ -386,9 +386,6 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		todayService.SetInterviewPreferences(interviewReader)
 	}
 	todayService.SetFollowUpWorkspaceSource(workspaceSource)
-	if b.personalAssistantFolderDigest != nil {
-		todayService.SetFolderReceiptReader(b.personalAssistantFolderDigest)
-	}
 	// File Janitor's recent results join Today's Results section (starter
 	// missions FR36). The service is wired in Phase 17, before this runs.
 	if b.fileJanitorService != nil && b.workspaceFileStore != nil {

@@ -97,7 +97,7 @@ const (
 // Desktop, and its server has the folder dialog switched off).
 const (
 	folderChipsMissingNote    = "Downloads, Documents and Desktop are not under this home"
-	folderDialogOffPhrase     = "the folder dialog is switched off in this session (ORI_NO_DESKTOP_OPEN)"
+	folderDialogOffPhrase     = "the folder dialog is switched off in this session"
 	folderDialogMacOnlyPhrase = "the folder dialog is only available on macOS"
 	folderDialogAwayPhrase    = "the folder dialog is unavailable here"
 )

@@ -156,10 +156,32 @@ try {
   await shot('09-corpus-receipt');
   await page.reload();
   await page.locator('#personalAssistantLauncher').click();
-  await page.locator('#personalAssistantTodayResults li').first().waitFor({ timeout: 30000 });
-  console.log('Today results:', await page.locator('#personalAssistantTodayResults').innerText());
-  await page.locator('#personalAssistantTodayResults').scrollIntoViewIfNeeded();
+  await page.locator('#personalAssistantDoneItems li').first().waitFor({ timeout: 30000 });
+  console.log('Today results:', await page.locator('#personalAssistantDoneItems').innerText());
+  await page.locator('#personalAssistantDoneItems').scrollIntoViewIfNeeded();
   await shot('10-seven-day-receipts');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot('11-today-phone');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // Force only one read to degrade, keeping the real server's other rows.
+  await page.route('**/api/personal-assistant/today', async route => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.data ??= {};
+    const today = payload.today || payload.data.today;
+    if (today) today.unavailable_sources = ['meetings'];
+    await route.fulfill({ response, body: JSON.stringify(payload) });
+  });
+  await page.reload();
+  await page.locator('#personalAssistantLauncher').click();
+  await page.locator('#personalAssistantTodayFooter:not([hidden])').waitFor({ timeout: 30000 });
+  console.log(
+    'Today degraded footer:',
+    await page.locator('#personalAssistantTodayFooter').innerText()
+  );
+  await page.locator('#personalAssistantTodayFooter').scrollIntoViewIfNeeded();
+  await shot('12-today-degraded');
+  await page.unroute('**/api/personal-assistant/today');
   await page.goto(`${base}/?quest=build-hq`);
   console.log(
     'Map quest after built:',

@@ -13,6 +13,9 @@ import {
   specialistSetupView,
   specialistOfferView,
   studioSectionView,
+  todayLabel,
+  todaySectionItems,
+  todayThreeSectionView,
   todaySectionRows
 } from './personal-assistant-home.js';
 
@@ -27,6 +30,36 @@ const musicEntry = Object.freeze({
     accepted_note: 'Your assistant will keep an eye on your music projects.',
     manual_label: 'I work on music'
   }
+});
+
+test('three Today sections hide empty rows and report unavailable sources only once in the footer', () => {
+  assert.equal(todayLabel('waiting_for_choice'), 'Waiting for your choice');
+  assert.equal(todayLabel('future_status'), 'Future status');
+  assert.deepEqual(todaySectionItems({ health: { status: 'unavailable' }, items: [] }), []);
+  const view = todayThreeSectionView({
+    working_on: {
+      items: [
+        {
+          kind: 'hq_status',
+          title: 'Personal HQ',
+          detail: 'waiting_for_choice',
+          route: '/workspaces/my-hq'
+        }
+      ]
+    },
+    needs_you: { items: [] },
+    done: { items: [] },
+    unavailable_sources: ['follow-ups', 'follow-ups', 'decisions']
+  });
+  assert.equal(view.working[0].detail, 'Waiting for your choice');
+  assert.deepEqual(view.needs, []);
+  assert.equal(view.footer, "Couldn't read: follow-ups, decisions.");
+  assert.equal(view.allClear, false);
+  assert.equal(todayThreeSectionView({ needs_you: { items: [] } }).allClear, true);
+  assert.equal(
+    todayThreeSectionView({ needs_you: { items: [{ title: 'Confirm' }] } }).allClear,
+    false
+  );
 });
 
 test('Today view distinguishes active, paused, partial, no-model, empty, and fatal states', () => {
@@ -257,7 +290,7 @@ test('specialist setup reports exact project and child status with closed action
   assert.equal(view.visible, true);
   assert.match(view.status, /2 connected projects/i);
   assert.match(view.status, /1 later setup needs attention/i);
-  assert.deepEqual(view.runs, ['First project — ready', 'Second project — needs attention']);
+  assert.deepEqual(view.runs, ['First project — ready', 'Second project — Needs attention']);
   assert.match(view.sampleStatus, /2 approved folders, 1 indexed/i);
   assert.deepEqual(
     view.actions.map(action => action.id),

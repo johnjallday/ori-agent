@@ -43,6 +43,57 @@ function renderNeedsHireBanner(els) {
   els.banner.replaceChildren(link, banner.trail);
 }
 
+const TODAY_LABELS = Object.freeze({
+  waiting_for_choice: 'Waiting for your choice',
+  needs_review: 'Needs review',
+  needs_attention: 'Needs attention',
+  in_progress: 'In progress',
+  prep_pending: 'Preparing',
+  prep_ready: 'Prep ready',
+  back_to_back: 'Back-to-back',
+  follow_up: 'Follow-up'
+});
+
+export function todayLabel(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (TODAY_LABELS[text]) return TODAY_LABELS[text];
+  return text.includes('_')
+    ? text.replaceAll('_', ' ').replace(/^./, char => char.toUpperCase())
+    : text;
+}
+
+export function todaySectionItems(section) {
+  return (Array.isArray(section?.items) ? section.items : []).slice(0, 10).map(item => ({
+    title: String(item?.title || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
+    detail: String(item?.detail || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
+    attribution: String(item?.attribution || '').trim(),
+    route: safeTodayRoute(item?.route) ? String(item.route) : '',
+    kind: String(item?.kind || '')
+  }));
+}
+
+export function todayThreeSectionView(today) {
+  const working = todaySectionItems(today?.working_on);
+  const needs = todaySectionItems(today?.needs_you);
+  const done = todaySectionItems(today?.done);
+  const sources = [
+    ...new Set(
+      (Array.isArray(today?.unavailable_sources) ? today.unavailable_sources : [])
+        .map(source => todayLabel(source))
+        .filter(Boolean)
+    )
+  ];
+  return {
+    working,
+    needs,
+    done,
+    sources,
+    footer: sources.length ? `Couldn't read: ${sources.join(', ')}.` : '',
+    allClear: !needs.length && !sources.length
+  };
+}
+
 export function todaySectionRows(section) {
   const health = String(section?.health?.status || 'unavailable');
   const rows = Array.isArray(section?.items) ? section.items.slice(0, 10) : [];
@@ -96,7 +147,7 @@ export function specialistSetupView(setup) {
   const runs = (Array.isArray(setup?.runs) ? setup.runs : []).slice(0, 64).map(run => {
     const kind = String(run?.run_kind || '') === 'child' ? 'Later project' : 'First project';
     const name = String(run?.project_name || '').trim();
-    const state = String(run?.lifecycle || 'not_started').replaceAll('_', ' ');
+    const state = todayLabel(run?.lifecycle || 'not_started');
     return `${name || kind} — ${state}`;
   });
   const allowed = new Set([
@@ -125,7 +176,7 @@ export function specialistSetupView(setup) {
   const sample = setup?.sample_library;
   let sampleStatus = '';
   if (sample) {
-    const state = String(sample.state || 'unavailable').replaceAll('_', ' ');
+    const state = todayLabel(sample.state || 'unavailable');
     const roots = Math.max(0, Number(sample.active_root_count) || 0);
     const indexed = Math.max(0, Number(sample.indexed_root_count) || 0);
     sampleStatus = `Sample library: ${state}; ${roots} approved folder${roots === 1 ? '' : 's'}, ${indexed} indexed.`;
@@ -364,6 +415,18 @@ function elements() {
     meta: document.getElementById('personalAssistantTodayMeta'),
     banner: document.getElementById('personalAssistantTodayBanner'),
     sections: document.getElementById('personalAssistantTodaySections'),
+    workingSection: document.getElementById('personalAssistantWorkingOn'),
+    workingContent: document.getElementById('personalAssistantWorkingOnContent'),
+    workingItems: document.getElementById('personalAssistantWorkingOnItems'),
+    needsSection: document.getElementById('personalAssistantNeedsYou'),
+    needsCards: document.getElementById('personalAssistantNeedsYouCards'),
+    needsItems: document.getElementById('personalAssistantNeedsYouItems'),
+    allClear: document.getElementById('personalAssistantTodayAllClear'),
+    doneSection: document.getElementById('personalAssistantDone'),
+    doneItems: document.getElementById('personalAssistantDoneItems'),
+    footer: document.getElementById('personalAssistantTodayFooter'),
+    unavailable: document.getElementById('personalAssistantTodayUnavailable'),
+    retry: document.getElementById('personalAssistantTodayRetry'),
     decisions: document.getElementById('personalAssistantTodayDecisions'),
     remembered: document.getElementById('personalAssistantTodayRemembered'),
     interview: document.getElementById('personalAssistantTodayInterview'),
@@ -402,40 +465,36 @@ function elements() {
   };
 }
 
-function renderRows(list, section) {
+function renderCompactRows(list, rows, skipCards = false) {
   if (!list) return;
   list.replaceChildren();
-  const rows = todaySectionRows(section);
-  const sectionElement = list.closest?.('section');
-  if (sectionElement) sectionElement.dataset.empty = rows.every(row => row.kind === 'status');
   rows.forEach(row => {
+    // Offer cards provide their own single actions. Never render another
+    // inert row that looks like a competing action.
+    if (
+      skipCards &&
+      (row.kind === 'folder_offer' || row.kind === 'hq_setup' || row.kind === 'specialist_offer')
+    )
+      return;
     const li = document.createElement('li');
-    if (row.kind === 'status') li.className = 'personal-assistant-today__empty';
     if (row.route) {
       const link = document.createElement('a');
       link.href = row.route;
       link.textContent = row.title;
-      li.appendChild(link);
-    } else {
-      li.textContent = row.title;
-    }
+      li.append(link);
+    } else li.textContent = row.title;
     if (row.detail) {
       const detail = document.createElement('span');
       detail.textContent = row.detail;
-      li.appendChild(detail);
+      li.append(detail);
     }
     if (row.attribution) {
-      // Who did it, by name. Deliberately text: the shared portrait renderer
-      // (OriWorkspaceAgentPortrait) draws a 76x64 card with its own name label,
-      // which is right on the Map and the workspace page — where this agent
-      // already renders — and wrong in a list row. Shrinking it here would be
-      // a second portrait system, which is exactly what must not happen.
       const by = document.createElement('span');
       by.className = 'personal-assistant-today__attribution';
       by.textContent = row.attribution;
-      li.appendChild(by);
+      li.append(by);
     }
-    list.appendChild(li);
+    list.append(li);
   });
 }
 
@@ -593,8 +652,8 @@ function bindSpecialistOffer() {
 function renderSpecialistSetup(els, setup) {
   if (!els.setup) return;
   const view = specialistSetupView(setup);
-  els.setup.hidden = !view.visible;
-  if (!view.visible) return;
+  els.setup.hidden = !view.visible || setup?.health?.status === 'unavailable';
+  if (els.setup.hidden) return;
   if (els.setupTitle) els.setupTitle.textContent = view.title;
   if (els.setupStatus) els.setupStatus.textContent = view.status;
   if (els.setupSamples) {
@@ -635,28 +694,6 @@ function makeTodayTextItem(text) {
   const item = document.createElement('li');
   item.textContent = text;
   return item;
-}
-
-function renderStudio(els, studio) {
-  if (!els.studioSection) return;
-  const view = studioSectionView(studio);
-  els.studioSection.hidden = !view.visible;
-  if (!view.visible) return;
-  if (els.studioTitle) els.studioTitle.textContent = view.heading;
-  renderRows(els.studio, view.section);
-  if (!els.studioNote) return;
-  els.studioNote.replaceChildren();
-  if (!view.route) {
-    els.studioNote.textContent = view.note;
-    return;
-  }
-  // The link is the direct route to the specialist, offered as a peer of
-  // everything else here — not as a workaround for something the assistant
-  // cannot do.
-  const link = document.createElement('a');
-  link.href = view.route;
-  link.textContent = view.linkLabel;
-  els.studioNote.append(view.note, ' ', link);
 }
 
 function renderMeetings(els, meetings) {
@@ -755,31 +792,55 @@ function renderToday(today) {
   } else if (view.paused) {
     els.banner.textContent = `${view.displayName} is paused proactively. Your records and prior briefs are unchanged.`;
   } else if (view.partial) {
-    els.banner.textContent =
-      'Some Today sources are unavailable. Available sections remain visible; this is not an all-clear.';
+    els.banner.textContent = String(today?.brief?.opening_summary || '');
   } else if (view.modelUnavailable) {
     els.banner.textContent =
       'Conversational answers are paused until a model is configured. Deterministic Today records remain available.';
   } else if (view.state === 'healthy_empty') {
-    els.banner.textContent = 'Today is honestly empty based on the sources that were available.';
+    els.banner.textContent = '';
   } else {
     els.banner.textContent = String(
       today?.brief?.opening_summary || 'Your current Personal HQ records are ready.'
     );
   }
 
-  renderMeetings(els, today?.meetings);
-  renderRows(els.decisions, today?.decisions);
-  renderRows(els.remembered, today?.remembered);
-  if (els.interview) {
+  const sections = todayThreeSectionView(today);
+  if (els.interview)
     els.interview.hidden = !['available', 'offered', 'deferred'].includes(today?.interview_status);
+  renderMeetings(els, today?.meetings);
+  // The unavailable source appears once in the footer, not as an empty
+  // calendar or results placeholder.
+  if (today?.meetings?.health?.status === 'unavailable' && els.meetingsSection) {
+    els.meetingsSection.hidden = true;
   }
-  renderRows(els.priorities, today?.priorities);
-  renderRows(els.followUps, today?.follow_ups);
-  renderRows(els.results, today?.results);
   renderSpecialistSetup(els, today?.specialist_setup);
-  renderStudio(els, today?.studio);
+  if (els.setup?.hidden === false && today?.specialist_setup?.lifecycle === 'in_progress') {
+    els.workingContent?.append(els.setup);
+  } else if (els.setup) els.needsCards?.append(els.setup);
+  renderCompactRows(els.workingItems, sections.working);
+  renderCompactRows(els.needsItems, sections.needs, true);
+  renderCompactRows(els.doneItems, sections.done);
+  if (els.workingSection)
+    els.workingSection.hidden = !(
+      sections.working.length ||
+      !document.getElementById('homeDailyBrief')?.hidden ||
+      !els.meetingsSection?.hidden
+    );
+  if (els.needsSection)
+    els.needsSection.hidden = !(
+      sections.needs.length ||
+      !document.getElementById('personalAssistantFolder')?.hidden ||
+      !document.getElementById('personalAssistantHQCard')?.hidden ||
+      !els.offer?.hidden
+    );
+  if (els.doneSection) els.doneSection.hidden = !sections.done.length;
+  if (els.allClear) els.allClear.hidden = !sections.allClear || !view.active;
+  if (els.footer) els.footer.hidden = !sections.footer;
+  if (els.unavailable) els.unavailable.textContent = sections.footer;
+  if (els.sections)
+    els.sections.hidden = !(view.active || view.paused || view.partial || view.needsHQ);
   Object.entries(els.links).forEach(([key, link]) => setLink(link, today?.links?.[key]));
+  els.banner.hidden = !els.banner.textContent.trim();
   renderLauncherCue(els, today);
 }
 
@@ -806,7 +867,10 @@ function renderRelationship(personalAssistant, view) {
   els.eyebrow.textContent = 'Personal briefing';
   els.title.textContent = named ? `Today from ${view.name}` : 'Your personal assistant';
   els.meta.textContent = view.available ? 'Loading the latest Today records…' : '';
-  els.sections.hidden = !view.available;
+  els.sections.hidden = !view.available && !view.needsHQ;
+  if (els.needsSection && view.needsHQ) els.needsSection.hidden = false;
+  if (els.workingSection && view.needsHQ) els.workingSection.hidden = true;
+  if (els.doneSection && view.needsHQ) els.doneSection.hidden = true;
   if (view.repair) {
     const repairStep = String(personalAssistant?.repair_step || '').trim();
     const recoverable = repairStep === 'relationship_recovery';
@@ -880,6 +944,29 @@ async function loadToday() {
 function init() {
   state.root = document.getElementById('personalAssistantToday');
   if (!state.root) return;
+  // Place existing card controllers inside the new three-section hierarchy
+  // without remounting or duplicating any of their event handlers.
+  const working = document.getElementById('personalAssistantWorkingOnContent');
+  const needs = document.getElementById('personalAssistantNeedsYouCards');
+  if (working) {
+    const brief = document.getElementById('homeDailyBrief');
+    if (brief) working.append(brief);
+  }
+  if (needs)
+    [
+      'personalAssistantHQCard',
+      'personalAssistantFolder',
+      'personalAssistantSpecialistOffer',
+      'personalAssistantSpecialistManual',
+      'personalAssistantSpecialistSetup',
+      'assistantLedSetup'
+    ].forEach(id => {
+      const node = document.getElementById(id);
+      if (node) needs.append(node);
+    });
+  document
+    .getElementById('personalAssistantTodayRetry')
+    ?.addEventListener('click', () => void loadToday());
   bindSpecialistOffer();
   document.addEventListener('personal-assistant:status', event => {
     renderRelationship(event.detail?.personalAssistant, event.detail?.view);
