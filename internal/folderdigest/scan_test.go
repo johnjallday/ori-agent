@@ -68,6 +68,30 @@ func TestScan_RootStatsAndCandidates(t *testing.T) {
 	}
 }
 
+func TestScan_UppercaseREAPERProjectMarkerAndRevalidation(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "ReaperTest")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ReaperTest.RPP"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Scan(root, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := result.RootCandidate()
+	if candidate.Marker == nil || candidate.Marker.Name != "*.rpp" || candidate.DominantExtension != ".rpp" {
+		t.Fatalf("candidate = %+v, want REAPER marker and normalized extension", candidate)
+	}
+	if verdict := Decide(result, time.Now()); verdict.Kind != KindProject || verdict.Project == nil || !verdict.Project.IsRoot {
+		t.Fatalf("single-file REAPER folder verdict = %+v, want root project", verdict)
+	}
+	if !HasMarker(root, "*.rpp") {
+		t.Fatal("REAPER marker must still validate for the shown folder")
+	}
+}
+
 func TestScan_HiddenMarkersCountButHiddenFilesDoNot(t *testing.T) {
 	root := materializeTree(t, "code")
 	result, err := Scan(root, Options{})

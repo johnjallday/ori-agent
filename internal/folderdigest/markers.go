@@ -52,7 +52,9 @@ func (m Marker) matches(name string, isDir bool) bool {
 	case MarkerDir:
 		return isDir && name == m.Name
 	case MarkerGlob:
-		ok, err := filepath.Match(m.Name, name)
+		// Project extension globs match case-insensitively,
+		// while exact-name manifests above keep their original case.
+		ok, err := filepath.Match(strings.ToLower(m.Name), strings.ToLower(name))
 		return err == nil && ok
 	}
 	return false

@@ -861,6 +861,34 @@ func TestFolderDigest_FilePickerUsesParentAndNeverReadsContents(t *testing.T) {
 	}
 }
 
+func TestFolderDigest_PickedUppercaseREAPERFolderOffersCapability(t *testing.T) {
+	for _, pickFile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("file=%t", pickFile), func(t *testing.T) {
+			f := newFolderDigestFixture(t)
+			folder := filepath.Join(f.home, "Documents", "ReaperTest")
+			if err := os.Mkdir(folder, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(folder, "ReaperTest.RPP")
+			if err := os.WriteFile(file, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var offer *FolderOfferView
+			var err error
+			if pickFile {
+				f.service.deps.Picker = fakeFolderPicker{path: file, chosen: true}
+				offer, err = f.service.ScanPickedFile(context.Background(), "local")
+			} else {
+				f.service.deps.Picker = fakeFolderPicker{path: folder, chosen: true}
+				offer, err = f.service.ScanPicked(context.Background(), "local")
+			}
+			if err != nil || offer.Verdict != "project" || offer.Folder != "ReaperTest" || offer.Capability == nil || offer.Capability.Recognized != "REAPER" {
+				t.Fatalf("picked offer = %+v, err = %v", offer, err)
+			}
+		})
+	}
+}
+
 func TestFolderDigest_FilePickerRejectsSymlinksAndCancel(t *testing.T) {
 	f := newFolderDigestFixture(t)
 	ctx := context.Background()
