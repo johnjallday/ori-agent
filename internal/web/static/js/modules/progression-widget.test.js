@@ -9,6 +9,7 @@ import {
   compactSummaryView,
   missionKicker,
   firstMissionView,
+  firstMissionOfferView,
   tierQuestRows,
   questRowState,
   renderQuestRow,
@@ -500,21 +501,104 @@ test('renderQuestRow: an open optional row keeps its link, reward, and Skip', ()
   const li = renderQuestRow(
     quest({
       id: 'q-open',
-      title: 'Tidy your Downloads',
+      title: 'Show your assistant a folder',
       status: 'available',
       optional: true,
-      action_url: '/?quest=tidy-downloads',
+      action_url: '/?quest=show-folder',
       reward_craft: 5
     }),
     { doc: stubDocument(), onSkip: id => skipped.push(id) }
   );
   const [, title, reward, skip] = li.children;
   assert.equal(title.tag, 'a');
-  assert.equal(title.href, '/?quest=tidy-downloads');
+  assert.equal(title.href, '/?quest=show-folder');
   assert.equal(reward.textContent, '+5 Craft');
   assert.equal(skip.textContent, 'Skip');
   skip.listeners.click();
   assert.deepEqual(skipped, ['q-open']);
+});
+
+// The folder mission's card carries the assistant's pending offer, with the
+// chooser's own copy and buttons (FR21). Other missions never show it.
+const folderMission = {
+  id: 'pa-show-folder',
+  order: 3,
+  title: 'Show your assistant a folder',
+  status: 'available',
+  optional: true,
+  action_url: '/?quest=show-folder',
+  action_label: 'Start'
+};
+const pendingProjectOffer = {
+  id: 'offer-1',
+  status: 'pending',
+  verdict: 'project',
+  folder: 'Documents',
+  subject: { name: 'Thesis' },
+  reason: '14 LaTeX files, edited yesterday',
+  remember: true
+};
+
+test('firstMissionOfferView: the folder mission shows a pending offer inline', () => {
+  const view = firstMissionView({ missions: [folderMission] });
+  const offer = firstMissionOfferView(view, pendingProjectOffer);
+  assert.equal(offer.visible, true);
+  assert.equal(offer.verdict, 'project');
+  assert.equal(offer.headline.map(part => part.text).join(''), 'Thesis looks like a project.');
+  assert.match(offer.question, /Set up a workspace for Thesis\?/);
+  assert.equal(offer.reason, '14 LaTeX files, edited yesterday');
+  assert.deepEqual(
+    offer.actions.map(action => action.id),
+    ['yes', 'no', 'later']
+  );
+  assert.equal(offer.note, '');
+
+  // With the server-side setup the card offers Set up and Adjust…, and a
+  // mixed offer's confirm card follows the chooser's state.
+  const setup = firstMissionOfferView(view, { ...pendingProjectOffer, create_available: true });
+  assert.deepEqual(
+    setup.actions.map(action => action.id),
+    ['setup', 'adjust', 'no', 'later']
+  );
+  const mixed = { ...pendingProjectOffer, verdict: 'mixed', projects_count: 3, loose_files: 40 };
+  assert.equal(firstMissionOfferView(view, mixed).confirming, false);
+  assert.equal(firstMissionOfferView(view, mixed, 'project').confirming, true);
+  const dump = { ...pendingProjectOffer, verdict: 'dump', loose_files: 25, loose_kinds: 6 };
+  assert.equal(firstMissionOfferView(view, dump, 'tidy').actions[0].id, 'setup');
+});
+
+test('firstMissionOfferView: a decided offer keeps its note and drops the buttons', () => {
+  const view = firstMissionView({ missions: [folderMission] });
+  const offer = firstMissionOfferView(view, {
+    ...pendingProjectOffer,
+    status: 'later',
+    outcome: {}
+  });
+  assert.equal(offer.visible, true);
+  assert.equal(offer.decided, true);
+  assert.deepEqual(offer.actions, []);
+  assert.ok(offer.note, 'a decided offer explains what happened');
+});
+
+test('firstMissionOfferView: hidden without an offer, on other missions, and once resolved', () => {
+  const view = firstMissionView({ missions: [folderMission] });
+  assert.equal(firstMissionOfferView(view, null).visible, false, 'no offer');
+  assert.equal(
+    firstMissionOfferView(view, { verdict: 'unknown' }).visible,
+    false,
+    'unknown verdict'
+  );
+
+  const other = firstMissionView({
+    missions: [{ ...folderMission, id: 't2-build-hq', action_url: '/?quest=build-hq' }]
+  });
+  assert.equal(firstMissionOfferView(other, pendingProjectOffer).visible, false, 'other mission');
+
+  for (const status of ['completed', 'skipped']) {
+    const resolved = firstMissionView({ missions: [{ ...folderMission, status }] });
+    assert.equal(firstMissionOfferView(resolved, pendingProjectOffer).visible, false, status);
+  }
+  assert.equal(firstMissionOfferView({ visible: false }, pendingProjectOffer).visible, false);
 });
 
 test('diffAnnouncements is silent on the very first load (knownCompleted === null)', () => {

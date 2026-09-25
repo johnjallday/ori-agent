@@ -111,10 +111,10 @@ func completedByDirectCall(questID string) bool {
 	switch questID {
 	case "t1-personalize", "t2-build-hq",
 		// Starter missions complete from server hooks: the hire (or its
-		// repair), the File Janitor wizard reaching ready, a source connecting,
-		// and Today serving a brief.
+		// repair), a folder offer's outcome or the File Janitor wizard reaching
+		// ready, a source connecting, and Today serving a brief.
 		progression.MeetAssistantQuestID,
-		progression.TidyDownloadsQuestID, progression.ConnectSourceQuestID,
+		progression.ShowFolderQuestID, progression.ConnectSourceQuestID,
 		progression.FirstBriefQuestID:
 		return true
 	default:
@@ -130,8 +130,8 @@ func rewardedQuestIDs() []string {
 		"t1-first-message", "t1-personalize",
 		"t2-create-workspace", "t2-create-note", "t2-run-task", "t2-build-hq",
 		progression.MeetAssistantQuestID,
-		progression.TidyDownloadsQuestID, progression.ConnectSourceQuestID,
-		progression.FirstBriefQuestID,
+		progression.ShowFolderQuestID, progression.TidyDownloadsQuestID,
+		progression.ConnectSourceQuestID, progression.FirstBriefQuestID,
 		"t3-second-agent", "t3-delegate", "t4-enable-skill",
 		"t5-create-trigger", "t6-memory",
 	}

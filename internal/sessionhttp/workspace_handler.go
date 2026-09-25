@@ -304,7 +304,17 @@ type createWorkspaceRequest struct {
 	// in projecttemplates decides what each field type accepts — this layer
 	// never interprets a number or an option value itself.
 	BlueprintInputs map[string]json.RawMessage `json:"blueprint_inputs,omitempty"`
+	// EntryPoint names the surface that opened the creator. It is a label,
+	// except for "folder_digest": a workspace created for a "show me a
+	// folder" offer records FolderOfferID so the offer's resolution can attach
+	// the folder to this workspace and no other. The folder's path never
+	// travels here; the server holds it against the offer.
+	EntryPoint    string `json:"entry_point,omitempty"`
+	FolderOfferID string `json:"folder_offer_id,omitempty"`
 }
+
+// folderDigestEntryPoint is the EntryPoint a "show me a folder" create sends.
+const folderDigestEntryPoint = "folder_digest"
 
 func (req *createWorkspaceRequest) UnmarshalJSON(data []byte) error {
 	type requestAlias createWorkspaceRequest
@@ -809,7 +819,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		if templateResolved {
 			createdTemplateID = resolvedTemplate.ID
 		}
-		h.publishWorkspaceCreated(ws.ID, ws.Name, createdTemplateID, string(ws.Kind))
+		h.publishWorkspaceCreated(ws.ID, ws.Name, createdTemplateID, string(ws.Kind), folderDigestEntryPointOf(req))
 	}
 
 	agentSeedWarnings := append(seed.Warnings, prov.agentToolWarnings...)
@@ -962,21 +972,36 @@ func (h *Handler) allowlistLocallyCreatedWorkspace(workspaceID string) {
 // the starter missions' "Start a project workspace" branch reads it to tell a
 // project apart from Personal HQ and the starter blueprints
 // (tasks/prd-starter-missions.md FR16). kind separates a group from a
-// workspace.
-func (h *Handler) publishWorkspaceCreated(workspaceID, name, templateID, kind string) {
+// workspace. entry_point is present only for a create that came from the
+// assistant's folder offer, which completes Show your assistant a folder.
+func (h *Handler) publishWorkspaceCreated(workspaceID, name, templateID, kind, entryPoint string) {
 	if h == nil || h.eventBus == nil {
 		return
+	}
+	data := map[string]any{
+		"name":        name,
+		"template_id": strings.TrimSpace(templateID),
+		"kind":        kind,
+	}
+	if entryPoint != "" {
+		data["entry_point"] = entryPoint
 	}
 	h.eventBus.Publish(agentworkspace.Event{
 		Type:        agentworkspace.EventWorkspaceCreated,
 		WorkspaceID: workspaceID,
 		Source:      "api",
-		Data: map[string]any{
-			"name":        name,
-			"template_id": strings.TrimSpace(templateID),
-			"kind":        kind,
-		},
+		Data:        data,
 	})
+}
+
+// folderDigestEntryPointOf returns the folder-offer entry point when the
+// create request named an offer through it, and "" otherwise. The label alone
+// never counts: the offer ID is what the assistant's resolve step verifies.
+func folderDigestEntryPointOf(req createWorkspaceRequest) string {
+	if strings.TrimSpace(req.FolderOfferID) == "" || strings.TrimSpace(req.EntryPoint) != folderDigestEntryPoint {
+		return ""
+	}
+	return folderDigestEntryPoint
 }
 
 // buildCreateWorkspace constructs the workspace record from a validated
@@ -1016,6 +1041,12 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 			ws.SharedData = make(map[string]any)
 		}
 		ws.SharedData["workspace_bootstrap"] = bootstrapData
+	}
+	if offerID := strings.TrimSpace(req.FolderOfferID); offerID != "" && strings.TrimSpace(req.EntryPoint) == folderDigestEntryPoint {
+		if ws.SharedData == nil {
+			ws.SharedData = make(map[string]any)
+		}
+		ws.SharedData[projecttemplates.FolderOfferIDKey] = offerID
 	}
 	return ws
 }

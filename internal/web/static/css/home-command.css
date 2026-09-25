@@ -282,6 +282,91 @@ body.home-command-page .home-command-bridge * {
   font-size: 12px;
 }
 
+/* Show me a folder: a launch button, a short chooser sheet, and an offer
+   card that reuses the specialist-offer structure. */
+.pa-folder {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.pa-folder__launch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pa-folder__chooser {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--hc-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--hc-panel-raised) 72%, transparent);
+}
+
+.pa-folder__prompt {
+  margin: 0;
+  color: var(--hc-ink);
+  font-weight: 600;
+}
+
+.pa-folder__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pa-folder__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--hc-line);
+  border-radius: 999px;
+  background: var(--hc-panel);
+  color: var(--hc-ink);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.pa-folder__chip:hover,
+.pa-folder__chip:focus-visible {
+  border-color: var(--hc-signal);
+  color: var(--hc-signal-deep);
+}
+
+.pa-folder__chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.pa-folder__note,
+.pa-folder__status {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+}
+
+.pa-folder__offer {
+  margin: 0;
+}
+
+/* The reason line: counts and kinds, always present, in smaller muted type. */
+.pa-folder__reason {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+}
+
+.pa-folder__offer .btn-link {
+  padding: 0;
+  color: var(--hc-ink-dim);
+  text-decoration: underline;
+}
+
 .pa-specialist-setup {
   display: grid;
   min-width: 0;

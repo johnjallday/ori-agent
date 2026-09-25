@@ -109,6 +109,7 @@ type Handler struct {
 	knowledgeSources           KnowledgeSourceReader
 	interviewOffer             InterviewOffer
 	interview                  *personalassistant.KnowledgeInterviewService
+	folderDigest               FolderDigestService
 	provider                   userprofile.UserProvider
 	onFirstAssignmentCompleted func()
 	onHired                    func()

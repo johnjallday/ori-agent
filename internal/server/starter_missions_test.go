@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,7 +10,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/hostquests"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/progression"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -120,45 +123,42 @@ func TestFindJanitorWorkspace_IgnoresATrashedWorkspace(t *testing.T) {
 	}
 }
 
-func TestStarterMissionContext_ResolvesTidyDownloadsFromTheFolderStore(t *testing.T) {
+// Show your assistant a folder always starts at the chooser: a File Janitor
+// workspace mid-setup no longer turns the card into "Finish setup".
+func TestStarterMissionContext_ShowFolderKeepsItsCardWhateverTheJanitorState(t *testing.T) {
 	s := newStarterStore(t)
 	b := &ServerBuilder{workspaceFileStore: s.store}
 	engine := progression.New(nil, progression.WithGraph(progression.PersonalAssistantGraph()),
 		progression.WithMissionContext(b.starterMissionContext))
 
-	tidy := func() progression.QuestView {
+	folder := func() progression.QuestView {
 		for _, m := range engine.Status().Missions {
-			if m.ID == progression.TidyDownloadsQuestID {
+			if m.ID == progression.ShowFolderQuestID {
 				return m
 			}
 		}
-		t.Fatal("Mission 02 missing")
+		t.Fatal("Mission 03 missing")
 		return progression.QuestView{}
 	}
 
-	// No File Janitor workspace: Start the walkthrough.
-	if m := tidy(); m.ActionURL != progression.TidyDownloadsActionURL || m.ActionLabel != "Start" || m.InProgress {
+	if m := folder(); m.ActionURL != progression.ShowFolderActionURL || m.ActionLabel != "Start" || m.InProgress {
 		t.Fatalf("no workspace: %+v", m)
 	}
-
-	// Created but not set up: Finish setup on that workspace, in progress.
 	ws := s.add("ws-1", "Tidy Downloads", "file-janitor", "", nil)
-	if m := tidy(); m.ActionURL != "/workspaces/"+ws.FolderSlug || m.ActionLabel != "Finish setup" || !m.InProgress {
-		t.Fatalf("unfinished workspace: %+v", m)
+	if m := folder(); m.ActionURL != progression.ShowFolderActionURL || m.ActionLabel != "Start" || m.InProgress {
+		t.Fatalf("unfinished janitor workspace: %+v", m)
 	}
-
-	// Ready: the presentation is unchanged (the hook completes the quest).
 	now := time.Now()
 	ws.SetupWizardProgress.CompletedAt = &now
 	if err := s.store.Save(ws); err != nil {
 		t.Fatal(err)
 	}
-	if m := tidy(); m.ActionURL != progression.TidyDownloadsActionURL || m.InProgress {
-		t.Fatalf("ready workspace: %+v", m)
+	if m := folder(); m.ActionURL != progression.ShowFolderActionURL || m.InProgress {
+		t.Fatalf("ready janitor workspace: %+v", m)
 	}
 }
 
-func TestCompleteTidyDownloadsOnWizardReady(t *testing.T) {
+func TestCompleteShowFolderOnWizardReady(t *testing.T) {
 	s := newStarterStore(t)
 	janitor := s.add("ws-janitor", "Tidy Downloads", "file-janitor", "", nil)
 	email := s.add("ws-email", "Email Ops", "email-ops", "", nil)
@@ -167,7 +167,7 @@ func TestCompleteTidyDownloadsOnWizardReady(t *testing.T) {
 	engine := progression.New(nil,
 		progression.WithGraph(progression.PersonalAssistantGraph()),
 		progression.WithOnComplete(func(q progression.Quest) {
-			if q.ID == progression.TidyDownloadsQuestID {
+			if q.ID == progression.ShowFolderQuestID {
 				fires++
 			}
 		}),
@@ -175,19 +175,139 @@ func TestCompleteTidyDownloadsOnWizardReady(t *testing.T) {
 	b := &ServerBuilder{workspaceFileStore: s.store}
 
 	// Before progression is built the hook is a no-op, never a panic.
-	b.completeTidyDownloadsOnWizardReady(context.Background(), janitor.ID)
+	b.completeShowFolderOnWizardReady(context.Background(), janitor.ID)
 
 	b.progressionEngine = engine
-	b.completeTidyDownloadsOnWizardReady(context.Background(), email.ID)
-	b.completeTidyDownloadsOnWizardReady(context.Background(), "missing")
-	if engine.HasCompleted(progression.TidyDownloadsQuestID) {
-		t.Fatal("a non-janitor wizard completed Mission 02")
+	b.completeShowFolderOnWizardReady(context.Background(), email.ID)
+	b.completeShowFolderOnWizardReady(context.Background(), "missing")
+	if engine.HasCompleted(progression.ShowFolderQuestID) {
+		t.Fatal("a non-janitor wizard completed Mission 03")
 	}
 
-	b.completeTidyDownloadsOnWizardReady(context.Background(), janitor.ID)
-	b.completeTidyDownloadsOnWizardReady(context.Background(), janitor.ID)
-	if !engine.HasCompleted(progression.TidyDownloadsQuestID) || fires != 1 {
-		t.Fatalf("completed=%t fires=%d, want completed once", engine.HasCompleted(progression.TidyDownloadsQuestID), fires)
+	b.completeShowFolderOnWizardReady(context.Background(), janitor.ID)
+	b.completeShowFolderOnWizardReady(context.Background(), janitor.ID)
+	if !engine.HasCompleted(progression.ShowFolderQuestID) || fires != 1 {
+		t.Fatalf("completed=%t fires=%d, want completed once", engine.HasCompleted(progression.ShowFolderQuestID), fires)
+	}
+}
+
+// linkWorkspaceFolder attaches path as the workspace's primary project
+// directory, as showing a folder does. The folder is created when missing, as
+// a blueprint scaffold would be.
+func (s *starterStore) linkWorkspaceFolder(ws *workspace.Workspace, path string) {
+	s.t.Helper()
+	if err := os.MkdirAll(path, 0o750); err != nil {
+		s.t.Fatal(err)
+	}
+	if err := ws.AddDirectoryReference(workspace.DirectoryReference{ID: "dir-" + ws.ID, Name: "Linked", Path: path}); err != nil {
+		s.t.Fatal(err)
+	}
+	if ws.SharedData == nil {
+		ws.SharedData = map[string]any{}
+	}
+	ws.SharedData[projecttemplates.PrimaryDirectoryIDKey] = "dir-" + ws.ID
+	if err := s.store.Save(ws); err != nil {
+		s.t.Fatal(err)
+	}
+}
+
+func TestLinkedProjectWorkspaces_CountsOnlyOutsidePrimaryFolders(t *testing.T) {
+	s := newStarterStore(t)
+	outside := t.TempDir()
+
+	linked := s.add("ws-linked", "Thesis", "writing-project", "", nil)
+	s.linkWorkspaceFolder(linked, outside)
+
+	// A blueprint scaffold sits inside the workspace's own folder: not linked.
+	scaffold := s.add("ws-scaffold", "Album", "reaper-song", "", nil)
+	own, err := s.store.GetFolderPath(scaffold.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.linkWorkspaceFolder(scaffold, filepath.Join(own, "project"))
+
+	// A reference that is not the primary does not count either.
+	plain := s.add("ws-plain", "Notes", "", "", nil)
+	if err := plain.AddDirectoryReference(workspace.DirectoryReference{ID: "dir-plain", Name: "Refs", Path: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Save(plain); err != nil {
+		t.Fatal(err)
+	}
+
+	trashed := s.add("ws-trashed", "Old", "", "", nil)
+	s.linkWorkspaceFolder(trashed, t.TempDir())
+	trashed.Status = workspace.StatusTrashed
+	if err := s.store.Save(trashed); err != nil {
+		t.Fatal(err)
+	}
+
+	b := &ServerBuilder{workspaceFileStore: s.store}
+	if got := linkedProjectWorkspaces(s.store, b.workspaceFolderPath); got != 1 {
+		t.Fatalf("linked project workspaces = %d, want 1 (only the outside primary folder)", got)
+	}
+	if got := linkedProjectWorkspaces(nil, b.workspaceFolderPath); got != 0 {
+		t.Fatalf("no store counted %d", got)
+	}
+}
+
+// The one-time show-folder pass (FR43): a completed Tidy your Downloads or an
+// already linked outside folder marks the new mission done, silently; a Tidy
+// that was only skipped leaves it open.
+func TestCompleteProgressionWiring_ShowFolderReconcile(t *testing.T) {
+	cases := []struct {
+		name string
+		seed func(t *testing.T, s *starterStore, state *types.ProgressionState)
+		want bool
+	}{
+		{"tidy completed", func(_ *testing.T, _ *starterStore, state *types.ProgressionState) {
+			state.CompletedQuests[progression.TidyDownloadsQuestID] = time.Now().Add(-40 * 24 * time.Hour)
+		}, true},
+		{"tidy only skipped", func(_ *testing.T, _ *starterStore, state *types.ProgressionState) {
+			state.SkippedQuests = map[string]time.Time{progression.TidyDownloadsQuestID: time.Now().Add(-40 * 24 * time.Hour)}
+		}, false},
+		{"linked outside folder", func(t *testing.T, s *starterStore, _ *types.ProgressionState) {
+			s.linkWorkspaceFolder(s.add("ws-thesis", "Thesis", "writing-project", "", nil), t.TempDir())
+		}, true},
+		{"scaffolded project only", func(_ *testing.T, s *starterStore, _ *types.ProgressionState) {
+			ws := s.add("ws-album", "Album", "reaper-song", "", nil)
+			own, err := s.store.GetFolderPath(ws.ID)
+			if err != nil {
+				s.t.Fatal(err)
+			}
+			s.linkWorkspaceFolder(ws, filepath.Join(own, "project"))
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := onboarding.NewManager(filepath.Join(t.TempDir(), "app_state.json"))
+			state := mgr.GetProgression()
+			state.BackfilledAt = time.Now().Add(-90 * 24 * time.Hour)
+			state.CompletedQuests = map[string]time.Time{"t1-first-message": time.Now().Add(-80 * 24 * time.Hour)}
+			s := newStarterStore(t)
+			tc.seed(t, s, &state)
+			if err := mgr.SetProgression(state); err != nil {
+				t.Fatal(err)
+			}
+
+			fires := 0
+			engine := progression.New(mgr,
+				progression.WithGraph(progression.PersonalAssistantGraph()),
+				progression.WithOnComplete(func(progression.Quest) { fires++ }),
+			)
+			b := &ServerBuilder{workspaceFileStore: s.store, onboardingMgr: mgr, progressionEngine: engine}
+			b.completeProgressionWiring()
+
+			if got := engine.HasCompleted(progression.ShowFolderQuestID); got != tc.want {
+				t.Fatalf("Show your assistant a folder completed = %t, want %t", got, tc.want)
+			}
+			if fires != 0 {
+				t.Fatalf("grandfathering fired %d completions; it must be silent", fires)
+			}
+			if _, recorded := mgr.GetProgression().Reconciled[showFolderReconcileKey]; !recorded {
+				t.Fatal("the pass was not persisted")
+			}
+		})
 	}
 }
 
@@ -366,7 +486,7 @@ func TestScanStarterWorkspaces_CountsProjectsAndCalendarReadiness(t *testing.T) 
 }
 
 // An install that backfilled before the starter missions existed, with a
-// ready File Janitor, sees Mission 02 done after the upgrade: once, silently,
+// ready File Janitor, sees Mission 03 done after the upgrade: once, silently,
 // and never again.
 func TestCompleteProgressionWiring_GrandfathersAnUpgradedInstallOnce(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "app_state.json")
@@ -393,14 +513,16 @@ func TestCompleteProgressionWiring_GrandfathersAnUpgradedInstallOnce(t *testing.
 	}
 
 	engine, fires := start()
-	if !engine.HasCompleted(progression.TidyDownloadsQuestID) {
+	if !engine.HasCompleted(progression.ShowFolderQuestID) {
 		t.Fatal("a ready File Janitor on an upgraded install was not grandfathered")
 	}
 	if *fires != 0 {
 		t.Fatalf("grandfathering fired %d completions; it must be silent", *fires)
 	}
-	if _, recorded := mgr.GetProgression().Reconciled[starterMissionsReconcileKey]; !recorded {
-		t.Fatal("the pass was not persisted")
+	for _, key := range []string{starterMissionsReconcileKey, showFolderReconcileKey} {
+		if _, recorded := mgr.GetProgression().Reconciled[key]; !recorded {
+			t.Fatalf("the %s pass was not persisted", key)
+		}
 	}
 
 	// A reset after the upgrade stays a blank slate across restarts.
@@ -408,8 +530,8 @@ func TestCompleteProgressionWiring_GrandfathersAnUpgradedInstallOnce(t *testing.
 		t.Fatal(err)
 	}
 	restarted, _ := start()
-	if restarted.HasCompleted(progression.TidyDownloadsQuestID) {
-		t.Fatal("a restart after a reset re-grandfathered Mission 02")
+	if restarted.HasCompleted(progression.ShowFolderQuestID) {
+		t.Fatal("a restart after a reset re-grandfathered Mission 03")
 	}
 }
 

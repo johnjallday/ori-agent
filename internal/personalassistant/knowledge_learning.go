@@ -342,9 +342,19 @@ func hasKnowledgeAlias(item KnowledgeItem, key string) bool {
 	return false
 }
 
+// FolderScanSourceKind is the reviewed-knowledge source for facts learned
+// from a folder the user showed the assistant (FR34).
+const FolderScanSourceKind = "folder_scan"
+
 func validateKnowledgeProposal(input KnowledgeProposal) (KnowledgeProposal, error) {
 	switch input.SourceKind {
 	case "saved_app", "file_janitor":
+	case FolderScanSourceKind:
+		// A shown folder says what the user works on and what tools they
+		// use; it never names people, routines, or sources.
+		if input.Category != "projects" && input.Category != "how_you_work" {
+			return KnowledgeProposal{}, fmt.Errorf("%w: unsupported category for source", ErrValidation)
+		}
 	default:
 		return KnowledgeProposal{}, fmt.Errorf("%w: unsupported source", ErrValidation)
 	}

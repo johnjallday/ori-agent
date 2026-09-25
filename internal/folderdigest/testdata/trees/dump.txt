@@ -1,0 +1,8 @@
+# A Downloads folder: 25 loose files of 6 kinds, no marker.
+# Expected: dump, "25 loose files of 6 kinds".
+doc-{1..5}.pdf @3d
+shot-{1..5}.png @2d
+pack-{1..5}.zip @9d
+app-{1..4}.dmg @20d
+data-{1..3}.csv @1d
+note-{1..3}.txt @0d

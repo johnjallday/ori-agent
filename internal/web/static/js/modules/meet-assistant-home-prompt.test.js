@@ -22,7 +22,7 @@ const MISSIONS = [
     reward_craft: 5
   },
   { order: 2, title: 'Build My HQ', status: 'available', locked: true },
-  { order: 3, title: 'Tidy your Downloads', status: 'available', locked: true },
+  { order: 3, title: 'Show your assistant a folder', status: 'available', locked: true },
   { order: 4, title: 'Plan my first day', status: 'available', locked: true },
   { order: 5, title: 'Read your first Daily Brief', status: 'available', locked: true }
 ];
@@ -232,7 +232,7 @@ test('the briefing still reads well with nothing to go on', () => {
     briefingCopy({
       missions: [
         { title: 'Build My HQ', locked: true },
-        { title: 'Tidy your Downloads', locked: true }
+        { title: 'Show your assistant a folder', locked: true }
       ]
     }).unlocks,
     'Unlocks Build My HQ and 1 more mission.'

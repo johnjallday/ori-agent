@@ -1,0 +1,6 @@
+# Ten files of four kinds, no marker, no dominant kind, too few to be a dump.
+# Expected: ambiguous, "10 files of 4 kinds, edited 2 days ago".
+a-{1..4}.txt @2d
+b-{1..3}.md @2d
+c-{1..2}.csv @2d
+d.json @2d

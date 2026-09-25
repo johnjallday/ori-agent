@@ -339,12 +339,15 @@ type ServerBuilder struct {
 	personalAssistantMemory    *personalassistant.MemoryService
 	personalAssistantKnowledge *personalassistant.KnowledgeContextReader
 	personalAssistantLearning  *personalassistant.KnowledgeLearningService
-	personalAssignment         *personalassistant.AssignmentService
-	personalAssistantHandler   *personalassistanthttp.Handler
-	assistantSetupStore        *assistantsetup.SQLiteStore
-	assistantSetupService      *assistantsetup.Service
-	assistantSetupRetries      *assistantsetup.RetryRunner
-	setupJourneyStore          *setupjourney.SQLiteStore
+	// personalAssistantFolderDigest is "show me a folder": chooser, scan,
+	// offers, and decisions over the HQ sidecar.
+	personalAssistantFolderDigest *personalassistant.FolderDigestService
+	personalAssignment            *personalassistant.AssignmentService
+	personalAssistantHandler      *personalassistanthttp.Handler
+	assistantSetupStore           *assistantsetup.SQLiteStore
+	assistantSetupService         *assistantsetup.Service
+	assistantSetupRetries         *assistantsetup.RetryRunner
+	setupJourneyStore             *setupjourney.SQLiteStore
 	// integrationReleases resolves the latest reviewed integration release for
 	// both the guided setup and the Plugins page update check.
 	integrationReleases  *integrationrelease.Resolver

@@ -61,7 +61,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 
 	wantTiers := map[string]int{
 		MeetAssistantQuestID: 1,
-		BuildHQQuestID:       1, TidyDownloadsQuestID: 1, ConnectSourceQuestID: 1, FirstBriefQuestID: 1,
+		BuildHQQuestID:       1, ShowFolderQuestID: 1, ConnectSourceQuestID: 1, FirstBriefQuestID: 1,
 		"t1-first-message": 2, "t1-personalize": 2, "t2-create-note": 2, "t2-run-task": 2,
 		"t3-second-agent": 3, "t3-delegate": 3, "t3-agent-task-done": 3,
 		"t4-enable-skill": 4, "t4-connect-mcp": 4, "t4-tool-task": 4,
@@ -85,7 +85,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 			t.Fatalf("quest %q tier = %d, want %d", q.ID, q.Tier, tier)
 		}
 	}
-	for _, retired := range []string{PersonalAssistantFirstDayQuestID, "t2-create-workspace"} {
+	for _, retired := range []string{PersonalAssistantFirstDayQuestID, "t2-create-workspace", TidyDownloadsQuestID} {
 		if seen[retired] {
 			t.Fatalf("retired quest %q is still in the cohort graph", retired)
 		}
@@ -101,7 +101,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 	}{
 		{MeetAssistantQuestID, "Meet your assistant", MeetAssistantActionURL, "Start", false, ""},
 		{BuildHQQuestID, "Build My HQ", GuidedBuildHQActionURL, "Build My HQ", true, MeetAssistantQuestID},
-		{TidyDownloadsQuestID, "Tidy your Downloads", TidyDownloadsActionURL, "Start", true, MeetAssistantQuestID},
+		{ShowFolderQuestID, "Show your assistant a folder", ShowFolderActionURL, "Start", true, MeetAssistantQuestID},
 		{ConnectSourceQuestID, "Plan my first day", PlanFirstDayActionURL, "Start", true, MeetAssistantQuestID},
 		{FirstBriefQuestID, "Read your first Daily Brief", "/", "Open Today", true, MeetAssistantQuestID},
 	}
@@ -122,6 +122,9 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 	}
 	if why := graph.Quests[0].Why; why != "Your assistant is the one agent that owns your ongoing work. Make them yours." {
 		t.Fatalf("Meet your assistant why = %q", why)
+	}
+	if why := graph.Quests[2].Why; why != "Point Ori at a folder and it will tell you what it can do with it." {
+		t.Fatalf("Show your assistant a folder why = %q", why)
 	}
 	for _, q := range graph.Quests[len(wantMissions):] {
 		if q.Featured || q.Order != 0 || q.LockedUntil != "" {
@@ -156,7 +159,7 @@ func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 
 	// A hired user who built HQ and resolved every mission sits in Daily loop,
 	// never back in a first-contact tier.
-	for _, id := range []string{MeetAssistantQuestID, BuildHQQuestID, TidyDownloadsQuestID, ConnectSourceQuestID} {
+	for _, id := range []string{MeetAssistantQuestID, BuildHQQuestID, ShowFolderQuestID, ConnectSourceQuestID} {
 		e.Complete(id)
 	}
 	if err := e.Skip(FirstBriefQuestID); err != nil {
@@ -313,27 +316,85 @@ func TestStatus_CallsTheProviderOutsideTheLock(t *testing.T) {
 	}
 }
 
-func TestResolveTidyDownloads(t *testing.T) {
+// Show your assistant a folder has no resolver: the card's Start always opens
+// the chooser, whatever File Janitor workspaces exist. A janitor mid-setup no
+// longer turns the card into "Finish setup".
+func TestShowFolder_PresentsTheSameCardWhateverTheJanitorState(t *testing.T) {
+	for _, janitor := range []*MissionWorkspace{nil, {Slug: "tidy-downloads"}, {Slug: "tidy-downloads", WizardReady: true}} {
+		provider := func() MissionContext { return MissionContext{FileJanitor: janitor} }
+		e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()), WithMissionContext(provider))
+		e.Complete(MeetAssistantQuestID)
+		view := questView(e, ShowFolderQuestID)
+		if view == nil || view.ActionURL != ShowFolderActionURL || view.ActionLabel != "Start" || view.InProgress {
+			t.Fatalf("janitor %+v: card = %+v", janitor, view)
+		}
+	}
+}
+
+// The mission's grandfathering evidence (FR43): a completed Tidy your
+// Downloads, a ready File Janitor, or a linked outside folder. A Tidy that was
+// only skipped is no evidence.
+func TestShowFolder_Satisfied(t *testing.T) {
 	cases := []struct {
-		name    string
-		janitor *MissionWorkspace
-		want    MissionPresentation
+		name string
+		snap Snapshot
+		want bool
 	}{
-		{"no workspace starts the walkthrough", nil, MissionPresentation{}},
-		{
-			"unfinished setup resumes that workspace",
-			&MissionWorkspace{Slug: "tidy-downloads"},
-			MissionPresentation{ActionURL: "/workspaces/tidy-downloads", ActionLabel: "Finish setup", InProgress: true},
-		},
-		{"ready setup changes nothing", &MissionWorkspace{Slug: "tidy-downloads", WizardReady: true}, MissionPresentation{}},
-		{"a workspace without a slug has nowhere to go", &MissionWorkspace{}, MissionPresentation{}},
+		{"fresh", Snapshot{}, false},
+		{"legacy tidy completed", Snapshot{LegacyTidyCompleted: true}, true},
+		{"file janitor ready", Snapshot{FileJanitorReady: true}, true},
+		{"linked project folder", Snapshot{LinkedProjectWorkspaces: 1}, true},
+		{"project workspaces alone", Snapshot{ProjectWorkspaces: 3}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveTidyDownloads(MissionContext{FileJanitor: tc.janitor}); got != tc.want {
-				t.Fatalf("got %+v, want %+v", got, tc.want)
+			e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+			if err := e.Backfill(ScannerFunc(func() Snapshot { return tc.snap })); err != nil {
+				t.Fatal(err)
+			}
+			if completed(e, ShowFolderQuestID) != tc.want {
+				t.Fatalf("completed = %t, want %t", completed(e, ShowFolderQuestID), tc.want)
 			}
 		})
+	}
+}
+
+// A workspace the user set up from the assistant's folder offer completes the
+// mission live (FR42); an ordinary create, or one that only claims the label
+// without an offer, does not.
+func TestIsFolderDigestWorkspaceCreated(t *testing.T) {
+	created := func(data map[string]any) ws.Event {
+		return ws.Event{Type: ws.EventWorkspaceCreated, WorkspaceID: "w", Data: data}
+	}
+	cases := []struct {
+		name string
+		ev   ws.Event
+		want bool
+	}{
+		{"from the folder offer", created(map[string]any{"template_id": "writing-project", "entry_point": "folder_digest"}), true},
+		{"blank workspace from the offer", created(map[string]any{"template_id": "", "kind": "workspace", "entry_point": "folder_digest"}), true},
+		{"ordinary create", created(map[string]any{"template_id": "", "kind": "workspace"}), false},
+		{"another entry point", created(map[string]any{"template_id": "", "entry_point": "map"}), false},
+		{"no data", created(nil), false},
+		{"not a create", ws.Event{Type: ws.EventWorkspaceUpdated, Data: map[string]any{"entry_point": "folder_digest"}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsFolderDigestWorkspaceCreated(tc.ev); got != tc.want {
+				t.Fatalf("got %t, want %t", got, tc.want)
+			}
+		})
+	}
+
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+	e.HandleEvent(created(map[string]any{"template_id": "writing-project", "kind": "workspace", "entry_point": "folder_digest"}))
+	if !completed(e, ShowFolderQuestID) {
+		t.Fatal("a workspace created from the folder offer did not complete the mission")
+	}
+	// It is a project workspace too, so Connect one source's project branch
+	// completes alongside, as any project create does.
+	if !completed(e, ConnectSourceQuestID) {
+		t.Fatal("the created project workspace did not count for Connect one source")
 	}
 }
 
@@ -347,11 +408,11 @@ func TestReconcileOnce_GrandfathersNewQuestsSilentlyOnce(t *testing.T) {
 	snap := Snapshot{FileJanitorReady: true, HasBriefRevision: true, Workspaces: 4}
 	scanner := ScannerFunc(func() Snapshot { scans++; return snap })
 
-	marked, err := e.ReconcileOnce("starter-missions-v1", scanner, TidyDownloadsQuestID, ConnectSourceQuestID, FirstBriefQuestID)
+	marked, err := e.ReconcileOnce("starter-missions-v1", scanner, ShowFolderQuestID, ConnectSourceQuestID, FirstBriefQuestID)
 	if err != nil || marked != 2 {
-		t.Fatalf("marked=%d err=%v, want 2 (tidy and brief)", marked, err)
+		t.Fatalf("marked=%d err=%v, want 2 (folder and brief)", marked, err)
 	}
-	if !completed(e, TidyDownloadsQuestID) || !completed(e, FirstBriefQuestID) || completed(e, ConnectSourceQuestID) {
+	if !completed(e, ShowFolderQuestID) || !completed(e, FirstBriefQuestID) || completed(e, ConnectSourceQuestID) {
 		t.Fatalf("reconcile outcome wrong: %+v", e.Status().Missions)
 	}
 	// Only the named quests are reconciled: first contact stays for the live path.
@@ -387,7 +448,7 @@ func TestReconcileOnce_FreshInstallDefersToBackfill(t *testing.T) {
 	scans := 0
 	scanner := ScannerFunc(func() Snapshot { scans++; return Snapshot{FileJanitorReady: true} })
 
-	if marked, err := e.ReconcileOnce("starter-missions-v1", scanner, TidyDownloadsQuestID); err != nil || marked != 0 {
+	if marked, err := e.ReconcileOnce("starter-missions-v1", scanner, ShowFolderQuestID); err != nil || marked != 0 {
 		t.Fatalf("marked=%d err=%v on a fresh install", marked, err)
 	}
 	if scans != 0 {
@@ -399,7 +460,7 @@ func TestReconcileOnce_FreshInstallDefersToBackfill(t *testing.T) {
 	if err := e.Backfill(scanner); err != nil {
 		t.Fatal(err)
 	}
-	if !completed(e, TidyDownloadsQuestID) || scans != 1 {
+	if !completed(e, ShowFolderQuestID) || scans != 1 {
 		t.Fatalf("Backfill did not grandfather Mission 03 (scans=%d)", scans)
 	}
 }
@@ -491,9 +552,11 @@ func TestResolveConnectSource_PresentsTheChosenBranch(t *testing.T) {
 			MissionPresentation{Title: "Connect your calendar", Why: "So your brief can prepare you for today's meetings.", ActionURL: CalendarOpsCreateURL, ActionLabel: "Start"},
 		},
 		{
-			"project opens the creator",
+			// Starting a project is what Show your assistant a folder does now,
+			// so the project focus keeps the plan's card (FR41).
+			"project keeps the static copy",
 			MissionContext{FocusAreas: []string{"keep_projects_moving"}},
-			MissionPresentation{Title: "Start a project workspace", Why: "So your brief can track what each project is waiting on.", ActionURL: ProjectWorkspaceCreateURL, ActionLabel: "Start"},
+			MissionPresentation{},
 		},
 	}
 	for _, tc := range cases {
@@ -605,12 +668,14 @@ func TestPersonalAssistantGraph_BackfillEvidence(t *testing.T) {
 	}{
 		{"fresh", Snapshot{}, nil},
 		{"assistant hired", Snapshot{AssistantHired: true}, []string{MeetAssistantQuestID}},
-		{"janitor ready", Snapshot{FileJanitorReady: true}, []string{TidyDownloadsQuestID}},
+		{"janitor ready", Snapshot{FileJanitorReady: true}, []string{ShowFolderQuestID}},
+		{"legacy tidy completed", Snapshot{LegacyTidyCompleted: true}, []string{ShowFolderQuestID}},
+		{"linked project folder", Snapshot{LinkedProjectWorkspaces: 1}, []string{ShowFolderQuestID}},
 		{"first assignment", Snapshot{FirstAssignmentCompleted: true}, []string{ConnectSourceQuestID}},
 		{"legacy first day", Snapshot{LegacyFirstDayCompleted: true}, []string{ConnectSourceQuestID}},
 		{"brief revision", Snapshot{HasBriefRevision: true}, []string{FirstBriefQuestID}},
 	}
-	missions := []string{MeetAssistantQuestID, TidyDownloadsQuestID, ConnectSourceQuestID, FirstBriefQuestID}
+	missions := []string{MeetAssistantQuestID, ShowFolderQuestID, ConnectSourceQuestID, FirstBriefQuestID}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
@@ -649,7 +714,7 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 	wantLocked := []string{
 		MeetAssistantQuestID + ":false:",
 		BuildHQQuestID + ":true:Meet your assistant first",
-		TidyDownloadsQuestID + ":true:Meet your assistant first",
+		ShowFolderQuestID + ":true:Meet your assistant first",
 		ConnectSourceQuestID + ":true:Meet your assistant first",
 		FirstBriefQuestID + ":true:Meet your assistant first",
 	}
@@ -657,7 +722,7 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 		t.Fatalf("before the hire = %v, want %v", got, wantLocked)
 	}
 	// The tier list carries the same lock the card reads.
-	if view := questView(e, TidyDownloadsQuestID); view == nil || !view.Locked {
+	if view := questView(e, ShowFolderQuestID); view == nil || !view.Locked {
 		t.Fatalf("tier view not locked: %+v", view)
 	}
 	// The next quest is the one the user can act on, never a locked one.
@@ -704,7 +769,7 @@ func TestPersonalAssistantGraph_LockedMissionsStillComplete(t *testing.T) {
 			t.Fatalf("resolved mission %s is shown locked", m.ID)
 		}
 	}
-	if view := questView(e, TidyDownloadsQuestID); view == nil || !view.Locked {
+	if view := questView(e, ShowFolderQuestID); view == nil || !view.Locked {
 		t.Fatalf("the still-open mission lost its lock: %+v", view)
 	}
 
@@ -713,7 +778,7 @@ func TestPersonalAssistantGraph_LockedMissionsStillComplete(t *testing.T) {
 	if err := b.Backfill(ScannerFunc(func() Snapshot { return Snapshot{FileJanitorReady: true} })); err != nil {
 		t.Fatal(err)
 	}
-	if !completed(b, TidyDownloadsQuestID) {
+	if !completed(b, ShowFolderQuestID) {
 		t.Fatal("backfill skipped a locked quest")
 	}
 }
@@ -725,7 +790,7 @@ func TestMeetAssistant_IsRequiredAndHoldsTheStarterTier(t *testing.T) {
 	if err := e.Skip(MeetAssistantQuestID); !errors.Is(err, ErrQuestNotOptional) {
 		t.Fatalf("Skip(Meet your assistant) = %v, want ErrQuestNotOptional", err)
 	}
-	for _, id := range []string{BuildHQQuestID, TidyDownloadsQuestID, ConnectSourceQuestID, FirstBriefQuestID} {
+	for _, id := range []string{BuildHQQuestID, ShowFolderQuestID, ConnectSourceQuestID, FirstBriefQuestID} {
 		if err := e.Skip(id); err != nil {
 			t.Fatal(err)
 		}

@@ -100,6 +100,14 @@ func (h *Handler) seedTemplateStarterTasks(workspaceID string, tpl projecttempla
 	return seeded, nil
 }
 
+// SeedStarterTasks seeds tpl's starter tasks into an existing workspace
+// through the same path creation uses, for callers outside this package that
+// add a task after the fact — a workspace linked to a shown folder gets its
+// shape-specific first task this way.
+func (h *Handler) SeedStarterTasks(workspaceID string, tpl projecttemplates.Template) (int, error) {
+	return h.seedTemplateStarterTasks(workspaceID, tpl)
+}
+
 // seedTemplateStarterTasksLogged runs the seed as a best-effort side effect of
 // workspace creation, logging the outcome and returning the seeded count (0 on
 // failure, so a failed seed is never reported as success).

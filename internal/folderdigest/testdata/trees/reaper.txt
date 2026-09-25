@@ -1,0 +1,5 @@
+# A REAPER session with its media folder.
+# Expected: project, shape audio, "6 WAV files, edited yesterday".
+Song.rpp @1d
+Media/
+Media/take-{1..6}.wav @2d

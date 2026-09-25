@@ -1,0 +1,3 @@
+# Two files: nothing to do yet. Expected: empty, "2 files".
+todo.txt @0d
+photo.png @0d

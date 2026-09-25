@@ -1,0 +1,17 @@
+# A Documents folder: 40 loose files of 6 kinds plus three projects and a
+# folder of scans. Expected: mixed, "3 projects and 40 loose files",
+# Thesis ranked first (newest marker project).
+doc-{1..10}.pdf @3d
+shot-{1..10}.png @2d
+pack-{1..8}.zip @9d
+app-{1..5}.dmg @20d
+data-{1..4}.csv @1d
+note-{1..3}.txt @0d
+Thesis/main.tex @1d
+Thesis/chapters/
+Thesis/chapters/ch-{1..5}.tex @1d
+website/package.json @3d
+website/src/index-{1..4}.js @3d
+Album/Song.rpp @7d
+Album/Media/take-{1..3}.wav @7d
+Scans/scan-{1..5}.pdf @40d

@@ -1,0 +1,4 @@
+# Papers to read with a bibliography beside them.
+# Expected: project, shape corpus, "12 PDF files, edited 5 days ago".
+refs.bib @5d
+paper-{1..12}.pdf @5d

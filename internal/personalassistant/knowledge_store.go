@@ -233,10 +233,18 @@ func encodeKnowledge(doc KnowledgeDocument) ([]byte, error) {
 }
 
 func (s *KnowledgeStore) write(dir *os.File, data []byte) error {
-	name := ".personal-assistant-knowledge-" + uuid.NewString()
+	return s.writeNamed(dir, knowledgeFileName, ".personal-assistant-knowledge-", data)
+}
+
+// writeNamed replaces one sidecar file under the open .ori directory: a
+// no-follow temp file with mode 0600, written and fsynced, renamed over the
+// target only if the target is absent or a regular file, then the directory
+// itself is fsynced. Every sidecar document shares this path.
+func (s *KnowledgeStore) writeNamed(dir *os.File, fileName, tempPrefix string, data []byte) error {
+	name := tempPrefix + uuid.NewString()
 	file, err := openKnowledgeChild(dir, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL, 0o600)
 	if err != nil {
-		return fmt.Errorf("personal assistant: create knowledge temp: %w", err)
+		return fmt.Errorf("personal assistant: create sidecar temp: %w", err)
 	}
 	defer func() { _ = unix.Unlinkat(int(dir.Fd()), name, 0) }()
 	if _, err := file.Write(data); err != nil {
@@ -257,18 +265,60 @@ func (s *KnowledgeStore) write(dir *os.File, data []byte) error {
 	}
 	// Refuse a symlink (or other nonregular target) before replacing it.
 	// A concurrent local writer must cooperate with the advisory lock.
-	old, err := openKnowledgeChild(dir, knowledgeFileName, unix.O_RDONLY, 0)
+	old, err := openKnowledgeChild(dir, fileName, unix.O_RDONLY, 0)
 	if err != nil && !errors.Is(err, unix.ENOENT) {
 		return ErrKnowledgeCorrupt
 	}
 	if old != nil {
 		_ = old.Close()
 	}
-	if err := unix.Renameat(int(dir.Fd()), name, int(dir.Fd()), knowledgeFileName); err != nil {
-		return fmt.Errorf("personal assistant: replace knowledge: %w", err)
+	if err := unix.Renameat(int(dir.Fd()), name, int(dir.Fd()), fileName); err != nil {
+		return fmt.Errorf("personal assistant: replace sidecar: %w", err)
 	}
 	if err := dir.Sync(); err != nil {
-		return fmt.Errorf("personal assistant: sync knowledge directory: %w", err)
+		return fmt.Errorf("personal assistant: sync sidecar directory: %w", err)
 	}
 	return nil
+}
+
+// readSidecarBytes reads one bounded sidecar file under the open .ori
+// directory. present is false when the file does not exist yet.
+func readSidecarBytes(dir *os.File, fileName string, maxBytes int) (data []byte, present bool, err error) {
+	file, err := openKnowledgeChild(dir, fileName, unix.O_RDONLY, 0)
+	if errors.Is(err, unix.ENOENT) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: open sidecar", ErrKnowledgeCorrupt)
+	}
+	defer func() { _ = file.Close() }()
+	data, err = io.ReadAll(io.LimitReader(file, int64(maxBytes)+1))
+	if err != nil || len(data) > maxBytes {
+		return nil, false, ErrKnowledgeCorrupt
+	}
+	return data, true, nil
+}
+
+// lockSidecar takes the exclusive advisory lock named lockName under the open
+// .ori directory, creating it when create is set. The returned release must
+// be called once the critical section ends.
+func lockSidecar(dir *os.File, lockName string, create bool) (release func(), err error) {
+	flags := unix.O_RDWR
+	if create {
+		flags |= unix.O_CREAT
+	}
+	knowledgeLockCreation.Lock()
+	lock, err := openKnowledgeChild(dir, lockName, flags, 0o600)
+	knowledgeLockCreation.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("personal assistant: open sidecar lock: %w", err)
+	}
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("personal assistant: lock sidecar: %w", err)
+	}
+	return func() {
+		_ = unix.Flock(int(lock.Fd()), unix.LOCK_UN)
+		_ = lock.Close()
+	}, nil
 }

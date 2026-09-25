@@ -775,6 +775,7 @@ const sessionManager = {
       }
       this.pendingWorkspaceCreatorOptions = null;
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
+      this.applyCreatorPrefill(this.workspaceCreatorContext);
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       this.workspacePostCreateAction = postCreateAction;
@@ -11069,6 +11070,14 @@ const sessionManager = {
         payload.allow_duplicate = Boolean(this.importAllowDuplicate);
         payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
       } else if (requiresReviewedRoster || !ordinaryGroup) {
+        // A create opened for a "show me a folder" offer names the offer so
+        // the server can attach that folder afterwards (FR28). The folder's
+        // path is never part of this request.
+        const folderOfferId = String(creatorContext?.folderOfferId || '').trim();
+        if (folderOfferId) {
+          payload.entry_point = 'folder_digest';
+          payload.folder_offer_id = folderOfferId;
+        }
         if (!ordinaryGroup && window.ProjectTemplateCard) {
           // Optional project scaffolding from the template picker
           // (template_id/template_path). The scaffolded project folder name
@@ -12694,6 +12703,25 @@ const sessionManager = {
       ? bootstrap.Modal.getOrCreateInstance(modalElement)
       : new bootstrap.Modal(modalElement);
     modal.show();
+  },
+
+  // applyCreatorPrefill fills the Details step from what the opener already
+  // knows: the name of the folder the assistant was shown, and the one-line
+  // note when its preferred blueprint is not installed. The form was just
+  // reset, so nothing here overwrites a user's typing.
+  applyCreatorPrefill(context) {
+    const nameInput = document.getElementById('folderNameInput');
+    const prefilledName = String(context?.name || '').trim();
+    if (nameInput && prefilledName) {
+      nameInput.value = prefilledName;
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const note = document.getElementById('workspaceCreateFolderNote');
+    if (note) {
+      const text = String(context?.blueprintNote || '').trim();
+      note.textContent = text;
+      note.hidden = !text;
+    }
   },
 
   // preselectBlueprintCard selects the blueprint card matching templateId, so a

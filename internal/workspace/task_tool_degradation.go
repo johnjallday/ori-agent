@@ -16,11 +16,13 @@ const localToolCap = 12
 // workspaceCoreToolNames are always kept when pruning — an agent needs them to
 // read/update workspace state regardless of the task (WS4.18).
 var workspaceCoreToolNames = map[string]struct{}{
-	"workspace_notes":       {},
-	"workspace_tasks":       {},
-	"workspace_files":       {},
-	"workspace_directories": {},
-	"workspace_sessions":    {},
+	"workspace_notes":          {},
+	"workspace_tasks":          {},
+	"workspace_files":          {},
+	"workspace_directories":    {},
+	"workspace_directory_list": {},
+	"workspace_directory_read": {},
+	"workspace_sessions":       {},
 }
 
 // toolKeywordStopwords are ignored when scoring tool relevance so common words

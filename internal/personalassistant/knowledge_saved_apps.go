@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
@@ -16,15 +17,20 @@ type SavedAppProfileReader interface {
 	GetUserProfile() *types.InferredProfile
 }
 
+// savedAppHypothesis is the tool row an installed app name maps to. The rows
+// live in the shared host-owned tool table the folder producer reads too, so
+// a tool is added once and both producers agree on its identity (FR36).
 type savedAppHypothesis struct {
 	id   string
 	text string
 }
 
-var savedAppHypotheses = map[string]savedAppHypothesis{
-	"visual studio code": {id: "vscode", text: "Visual Studio Code may be one of the tools you use for development."},
-	"obsidian":           {id: "obsidian", text: "Obsidian may be one of the tools you use to keep notes."},
-	"figma":              {id: "figma", text: "Figma may be one of the tools you use for visual planning."},
+func savedAppHypothesisFor(app string) (savedAppHypothesis, bool) {
+	tool, ok := folderdigest.ToolForApp(app)
+	if !ok {
+		return savedAppHypothesis{}, false
+	}
+	return savedAppHypothesis{id: tool.ToolID, text: tool.HypothesisText}, true
 }
 
 // SavedAppProducer proposes only bounded tool-use hypotheses from a saved
@@ -70,7 +76,7 @@ func (p *SavedAppProducer) Check(ctx context.Context, userID string) ([]Knowledg
 	var results []KnowledgeItem
 	seen := make(map[string]bool)
 	for _, app := range apps {
-		hypothesis, ok := savedAppHypotheses[strings.ToLower(strings.TrimSpace(app))]
+		hypothesis, ok := savedAppHypothesisFor(app)
 		if !ok || seen[hypothesis.id] {
 			continue
 		}
@@ -148,7 +154,7 @@ func (a SavedAppAuthority) Revalidate(_ context.Context, binding KnowledgeBindin
 		return ErrConflict
 	}
 	for _, app := range profile.DetectedApps {
-		if hypothesis, ok := savedAppHypotheses[strings.ToLower(strings.TrimSpace(app))]; ok && hypothesis.id == wantID {
+		if hypothesis, ok := savedAppHypothesisFor(app); ok && hypothesis.id == wantID {
 			key := proposalSemanticKey(binding, KnowledgeProposal{
 				SourceKind: "saved_app", ScopeID: "saved-onboarding", SubjectID: wantID,
 				Predicate: "uses tool", Value: wantID,

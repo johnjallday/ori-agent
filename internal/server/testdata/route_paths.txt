@@ -108,6 +108,11 @@
 /api/orchestration/workspace/activate
 /api/orchestration/workspace/agents
 /api/orchestration/workspace/layout
+/api/personal-assistant/folder-digest
+/api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/decide
+/api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/resolve
+/api/personal-assistant/folder-digest/picker
+/api/personal-assistant/folder-digest/scan
 /api/personal-assistant/setup/file-janitor
 /api/personal-assistant/setup/file-janitor/accept
 /api/personal-assistant/setup/file-janitor/defer

@@ -1,0 +1,14 @@
+# A thesis in progress: main.tex marker, chapters folder, a bibliography.
+# Expected: project, shape manuscript, "6 LaTeX files, edited yesterday".
+main.tex @1d
+chapters/
+chapters/intro.tex @3d
+chapters/methods.tex @2d
+chapters/results.tex @1d
+chapters/discussion.tex @5d
+chapters/conclusion.tex @4d
+refs.bib @10d
+figures/
+figures/fig1.png @8d
+figures/fig2.png @8d
+notes.md @2d

@@ -1,0 +1,6 @@
+# iCloud placeholders (hidden .name.ext.icloud and a bare .icloud suffix)
+# are skipped. Expected: empty, 2 files counted.
+.report.pdf.icloud @0d
+photo.png.icloud @0d
+todo.txt @0d
+photo2.png @0d

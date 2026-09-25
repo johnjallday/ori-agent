@@ -399,8 +399,10 @@ func (d progressionFileJanitorRecommendations) FileJanitorRecommendationDeferred
 	if d.engine == nil {
 		return false, assistantsetup.ErrUnavailable
 	}
+	// The File Janitor recommendation is deferred when the folder mission is
+	// skipped: showing a folder is how a tidy starts now (FR44).
 	for _, mission := range d.engine.Status().Missions {
-		if mission.ID == progression.TidyDownloadsQuestID {
+		if mission.ID == progression.ShowFolderQuestID {
 			return mission.Status == progression.StatusSkipped, nil
 		}
 	}
@@ -411,7 +413,7 @@ func (d progressionFileJanitorRecommendations) DeferFileJanitorRecommendation(co
 	if d.engine == nil {
 		return assistantsetup.ErrUnavailable
 	}
-	return d.engine.Skip(progression.TidyDownloadsQuestID)
+	return d.engine.Skip(progression.ShowFolderQuestID)
 }
 
 func (b *ServerBuilder) wireAssistantSetup() {

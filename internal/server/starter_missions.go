@@ -245,15 +245,16 @@ func composeCompletionHooks(hooks ...setupwizard.CompletionHook) setupwizard.Com
 	}
 }
 
-// completeTidyDownloadsOnWizardReady completes Mission 02 when the setup wizard
-// that just reached ready belongs to a File Janitor workspace (PRD FR10).
+// completeShowFolderOnWizardReady completes Mission 03 when the setup wizard
+// that just reached ready belongs to a File Janitor workspace: a tidy is one
+// of the two things showing a folder can lead to (FR42).
 //
 // The engine is read at call time. Progression is built after the setup wizard
 // is wired, so capturing it at wiring time would bind nil forever.
-func (b *ServerBuilder) completeTidyDownloadsOnWizardReady(_ context.Context, workspaceID string) {
+func (b *ServerBuilder) completeShowFolderOnWizardReady(_ context.Context, workspaceID string) {
 	engine := b.progressionEngine
 	if engine == nil || !janitorWorkspaceByID(b.starterWorkspaces(), workspaceID) {
 		return
 	}
-	engine.Complete(progression.TidyDownloadsQuestID)
+	engine.Complete(progression.ShowFolderQuestID)
 }

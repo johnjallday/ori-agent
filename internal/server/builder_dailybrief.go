@@ -289,6 +289,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	if b.onboardingMgr != nil && b.workspaceFileStore != nil && b.userStore != nil {
 		resolver := personalassistant.NewKnowledgeResolver(b.personalAssistantStore, b.personalHQService, profileReader)
 		knowledge := personalassistant.NewKnowledgeStore(resolver, b.workspaceFileStore)
+		b.wireFolderDigest(knowledge)
 		var janitorEvidence *janitorKnowledgeReader
 		if b.fileJanitorService != nil {
 			janitorEvidence = &janitorKnowledgeReader{
@@ -299,9 +300,19 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		authority := scopedKnowledgeAuthority{
 			apps: personalassistant.NewSavedAppAuthority(b.onboardingMgr), janitor: janitorEvidence,
 		}
+		if b.personalAssistantFolderDigest != nil {
+			authority.folderScan = &folderScanAuthority{
+				digest: b.personalAssistantFolderDigest, files: b.workspaceFileStore, validate: validateShownFolder,
+			}
+		}
 		memoryStore := workspace.NewMemoryStore(b.workspaceFileStore)
 		learning := personalassistant.NewKnowledgeLifecycleService(knowledge, memoryStore, authority)
 		b.personalAssistantLearning = learning
+		if b.personalAssistantFolderDigest != nil {
+			// A yes on a project is the review: the fact is proposed and
+			// approved in the same request, tool candidates wait in the queue.
+			b.personalAssistantFolderDigest.SetOnResolved(personalassistant.NewFolderScanProducer(learning).LearnFromOffer)
+		}
 		b.personalAssistantMemory.SetReviewedHQWriter(learning)
 		rememberedReader = learning
 		if cas, ok := b.userStore.(personalassistant.ProfileCASStore); ok {

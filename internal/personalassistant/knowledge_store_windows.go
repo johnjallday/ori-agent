@@ -196,33 +196,88 @@ func (s *KnowledgeStore) Update(ctx context.Context, userID string, expectedVers
 	if len(data) > knowledgeMaxBytes {
 		return KnowledgeDocument{}, ErrKnowledgeLimit
 	}
-	file, err := os.CreateTemp(dir, ".personal-assistant-knowledge-")
-	if err != nil {
-		return KnowledgeDocument{}, err
-	}
-	defer func() { _ = os.Remove(file.Name()) }()
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		return KnowledgeDocument{}, err
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return KnowledgeDocument{}, err
-	}
-	if err := file.Close(); err != nil {
-		return KnowledgeDocument{}, err
-	}
-	if s.beforeRename != nil {
-		if err := s.beforeRename(); err != nil {
-			return KnowledgeDocument{}, err
-		}
-	}
 	// An existing corrupt/symlinked file cannot be replaced as a repair.
 	if _, err := readKnowledgeWindows(dir, binding.owner()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return KnowledgeDocument{}, err
 	}
-	if err := os.Rename(file.Name(), filepath.Join(dir, knowledgeFileName)); err != nil {
+	if err := s.writeNamed(dir, knowledgeFileName, ".personal-assistant-knowledge-", data); err != nil {
 		return KnowledgeDocument{}, err
 	}
 	return cloneKnowledge(doc), s.checkBinding(ctx, binding)
+}
+
+// writeNamed replaces one sidecar file under the .ori directory through a
+// synced temp file and a rename. Every sidecar document shares this path.
+func (s *KnowledgeStore) writeNamed(dir, fileName, tempPrefix string, data []byte) error {
+	file, err := os.CreateTemp(dir, tempPrefix)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(file.Name()) }()
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if s.beforeRename != nil {
+		if err := s.beforeRename(); err != nil {
+			return err
+		}
+	}
+	return os.Rename(file.Name(), filepath.Join(dir, fileName))
+}
+
+// readSidecarBytes reads one bounded sidecar file under the .ori directory.
+// present is false when the file does not exist yet.
+func readSidecarBytes(dir, fileName string, maxBytes int) (data []byte, present bool, err error) {
+	path := filepath.Join(dir, fileName)
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, false, ErrKnowledgeCorrupt
+	}
+	file, err := os.Open(path) // #nosec G304 -- fixed filename under server-resolved, checked HQ folder
+	if err != nil {
+		return nil, false, ErrKnowledgeCorrupt
+	}
+	defer func() { _ = file.Close() }()
+	data, err = io.ReadAll(io.LimitReader(file, int64(maxBytes)+1))
+	if err != nil || len(data) > maxBytes {
+		return nil, false, ErrKnowledgeCorrupt
+	}
+	return data, true, nil
+}
+
+// lockSidecar takes the exclusive lock named lockName under the .ori
+// directory, creating it when create is set.
+func lockSidecar(dir, lockName string, create bool) (release func(), err error) {
+	flags := os.O_RDWR
+	if create {
+		flags |= os.O_CREATE
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, lockName), flags, 0o600) // #nosec G304 -- fixed lock under server-resolved HQ
+	if err != nil {
+		return nil, err
+	}
+	if info, err := lock.Stat(); err != nil || !info.Mode().IsRegular() {
+		_ = lock.Close()
+		return nil, ErrKnowledgeCorrupt
+	}
+	overlap := new(windows.Overlapped)
+	if err := windows.LockFileEx(windows.Handle(lock.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, overlap); err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("personal assistant: lock sidecar: %w", err)
+	}
+	return func() {
+		_ = windows.UnlockFileEx(windows.Handle(lock.Fd()), 0, 1, 0, overlap)
+		_ = lock.Close()
+	}, nil
 }

@@ -1,0 +1,5 @@
+# Thirty scanned invoices, no marker. The document exception keeps this
+# out of the project verdict. Expected: ambiguous, "30 PDF files, last edited in <month>".
+scan-{1..10}.pdf @45d
+scan-{11..20}.pdf @60d
+scan-{21..30}.pdf @74d

@@ -1,0 +1,6 @@
+# Directories three levels below the root are read; the fourth is not.
+# Expected: 3 files counted (e.txt at level 4 is never seen).
+h.txt @0d
+a/g.txt @0d
+a/b/c/f.txt @0d
+a/b/c/d/e.txt @0d

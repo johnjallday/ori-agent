@@ -94,7 +94,7 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 			t.Fatalf("missions[%d].locked_reason = %v", i, mission["locked_reason"])
 		}
 	}
-	if raw.Missions[0]["id"] != progression.MeetAssistantQuestID || raw.Missions[2]["id"] != progression.TidyDownloadsQuestID {
+	if raw.Missions[0]["id"] != progression.MeetAssistantQuestID || raw.Missions[2]["id"] != progression.ShowFolderQuestID {
 		t.Fatalf("missions[0], [2] = %v, %v", raw.Missions[0]["id"], raw.Missions[2]["id"])
 	}
 	if _, present := raw.Missions[0]["locked_reason"]; present {

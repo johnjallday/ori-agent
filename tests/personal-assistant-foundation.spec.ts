@@ -238,14 +238,14 @@ test.describe('Personal Assistant Foundation first value', () => {
           ...lock
         },
         {
-          id: 'pa-tidy-downloads',
+          id: 'pa-show-folder',
           tier: 1,
           order: 3,
           featured: true,
-          title: 'Tidy your Downloads',
-          why: 'Let Ori sort one folder for you.',
+          title: 'Show your assistant a folder',
+          why: 'Point Ori at a folder and it will tell you what it can do with it.',
           status: active() ? 'completed' : 'available',
-          action_url: '/?quest=tidy-downloads',
+          action_url: '/?quest=show-folder',
           action_label: 'Start',
           optional: true,
           ...lock

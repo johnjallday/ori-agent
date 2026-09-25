@@ -22,8 +22,8 @@
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
-# Starter missions (tasks/prd-starter-missions.md),
-# Retire the Agent Type field
+# Starter missions (tasks/prd-starter-missions.md), Show me a folder
+# (tasks/prd-show-me-a-folder.md): showfolder, Retire the Agent Type field
 # (tasks/prd-retire-agent-type.md), City Economy (tasks/prd-city-economy.md), Agents Page
 # UX (tasks/prd-agents-page-ux.md), Workspace
 # Planning Workflow (tasks/prd-workspace-planning-policy.md) and the
@@ -1465,7 +1465,7 @@ PY
 #   ./scripts/smoke.sh starter http://localhost:8947 tidy --sandbox="$TMPDIR/ori-smoke-starter"
 smoke_starter() {
   local stage="${3:-}"
-  [[ -n "$stage" ]] || fail "usage: $0 starter <base-url> <card|tidy|email|plan|results|states> [demo flags]"
+  [[ -n "$stage" ]] || fail "usage: $0 starter <base-url> <card|folder|email|plan|results|states> [demo flags]"
   local ready=""
   for _ in $(seq 1 30); do
     if curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/progression" | grep -q 200; then
@@ -1479,6 +1479,217 @@ smoke_starter() {
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
   out="${TMPDIR:-/tmp}/starter-demo"
   node "$root/scripts/demo-starter-missions.mjs" "$BASE_URL" "$out" "$stage" "${@:4}"
+}
+
+# smoke_show_folder drives "Show me a folder" (tasks/prd-show-me-a-folder.md).
+#   seed <sandbox>   fill the sandbox HOME with one folder per chip: Documents is
+#                    a mixed tree (three projects + 40 loose files), Downloads a
+#                    dump (25 loose files of 6 kinds), Desktop empty (2 files),
+#                    plus Documents/Papers (a corpus of real PDFs when
+#                    tests/fixtures has one) and Documents/Scans (dated PDFs).
+#   hq <base-url>    onboard, hire the assistant and build Personal HQ so the
+#                    chooser is available on Home.
+#   scan <base-url> <chip>            scan one chip and print the offer
+#   decide <base-url> <offer> <decision> [choice]  answer an offer
+#   current <base-url>                print the pending offer and chips
+smoke_show_folder() {
+  local stage="${3:-current}"
+  case "$stage" in
+  seed)
+    local home="${4:-}"
+    [[ -n "$home" && -d "$home" ]] || fail "usage: $0 showfolder seed <sandbox-dir>"
+    python3 - "$home" <<'PY'
+import os, sys, time
+home = sys.argv[1]
+def put(rel, age_days=0, body=b"fixture"):
+    path = os.path.join(home, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(body)
+    at = time.time() - age_days * 86400
+    os.utime(path, (at, at))
+kinds = [".pdf", ".png", ".zip", ".dmg", ".csv", ".txt"]
+# Downloads: 25 loose files of 6 kinds (5+5+5+4+3+3).
+counts = [5, 5, 5, 4, 3, 3]
+for ext, n in zip(kinds, counts):
+    for i in range(n):
+        put(f"Downloads/download-{i}{ext}", age_days=2 + i)
+# Documents: 40 loose files of 6 kinds, three projects, one folder of scans.
+counts = [10, 10, 8, 5, 4, 3]
+for ext, n in zip(kinds, counts):
+    for i in range(n):
+        put(f"Documents/doc-{i}{ext}", age_days=3 + i)
+put("Documents/Thesis/main.tex", 1)
+for i in range(5):
+    put(f"Documents/Thesis/chapters/chapter-{i}.tex", 1)
+put("Documents/Thesis/refs.bib", 4)
+put("Documents/website/package.json", 3)
+for i in range(4):
+    put(f"Documents/website/src/index-{i}.js", 3)
+put("Documents/Album/Song.rpp", 7)
+for i in range(3):
+    put(f"Documents/Album/Media/take-{i}.wav", 7)
+for i in range(30):
+    put(f"Documents/Scans/invoice-{i}.pdf", 45 + i)
+# Desktop: two files, nothing to do.
+put("Desktop/todo.txt", 0)
+put("Desktop/photo.png", 0)
+print(f"seeded {home}/Downloads, Documents, Desktop")
+PY
+    ;;
+  seed-audio)
+    # Turn the sandbox Desktop into an audio session folder (a *.rpp marker
+    # plus takes), so the project outcome can show the missing-blueprint
+    # fallback line on an install without the audio blueprint.
+    local home="${4:-}"
+    [[ -n "$home" && -d "$home" ]] || fail "usage: $0 showfolder seed-audio <sandbox-dir>"
+    python3 - "$home" <<'PY'
+import os, sys, time
+home = sys.argv[1]
+def put(rel, age_days=0):
+    path = os.path.join(home, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(b"fixture")
+    at = time.time() - age_days * 86400
+    os.utime(path, (at, at))
+put("Desktop/Song.rpp", 1)
+for i in range(6):
+    put(f"Desktop/Media/take-{i}.wav", 2)
+print(f"seeded {home}/Desktop as an audio session")
+PY
+    ;;
+  seed-corpus)
+    # Desktop as a corpus: a bibliography plus two small real PDFs (one page
+    # of text each, with a valid cross-reference table), for the corpus
+    # outcome and the read-only directory tools demo. Desktop is used so the
+    # corpus is a chip root. No Node is needed to read the PDFs.
+    local home="${4:-}"
+    [[ -n "$home" && -d "$home" ]] || fail "usage: $0 showfolder seed-corpus <sandbox-dir>"
+    python3 - "$home" <<'PY'
+import os, sys, time
+home = sys.argv[1]
+papers = os.path.join(home, "Desktop")
+os.makedirs(papers, exist_ok=True)
+def pdf(path, text):
+    parts = [b"%PDF-1.4\n"]
+    offsets = []
+    def obj(body):
+        offsets.append(sum(len(p) for p in parts))
+        parts.append(body.encode("latin-1"))
+    obj("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+    obj("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+    obj("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n")
+    obj("4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
+    stream = "BT /F1 12 Tf 72 720 Td (%s) Tj ET" % text
+    obj("5 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n" % (len(stream), stream))
+    xref = sum(len(p) for p in parts)
+    tail = "xref\n0 %d\n0000000000 65535 f \n" % (len(offsets) + 1)
+    for off in offsets:
+        tail += "%010d 00000 n \n" % off
+    tail += "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(offsets) + 1, xref)
+    parts.append(tail.encode("latin-1"))
+    with open(path, "wb") as f:
+        f.write(b"".join(parts))
+    at = time.time() - 3 * 86400
+    os.utime(path, (at, at))
+pdf(os.path.join(papers, "reyes-2024-tidal-memory.pdf"),
+    "Reyes 2024. Tidal memory in estuary sediments: the alkenone record shows a 1,400-year cycle.")
+pdf(os.path.join(papers, "okafor-2023-river-mouths.pdf"),
+    "Okafor 2023. River mouths as archives: grain size ratios track storm frequency since 1850.")
+with open(os.path.join(papers, "refs.bib"), "w") as f:
+    f.write("@article{reyes2024, title={Tidal memory in estuary sediments}, author={Reyes, M.}, year={2024}}\n")
+    f.write("@article{okafor2023, title={River mouths as archives}, author={Okafor, T.}, year={2023}}\n")
+print(f"seeded {papers} with refs.bib and two PDFs")
+PY
+    ;;
+  hq)
+    curl -s -o /dev/null -w "%{http_code} onboarding skip\n" -X POST "$BASE_URL/api/onboarding/skip"
+    curl -s -o /dev/null -w "%{http_code} workspace root\n" -X POST "$BASE_URL/api/settings/workspace-root" \
+      -H 'Content-Type: application/json' -d '{"workspace_root":""}'
+    local hire version
+    hire=$(curl -s -X POST "$BASE_URL/api/personal-assistant/hire" -H 'Content-Type: application/json' \
+      -d '{"request_id":"showfolder-hire","if_version":0,"display_name":"Atlas","mandate":"Keep my projects moving.","focus_areas":["plan_my_day","keep_projects_moving"]}')
+    version=$(printf '%s' "$hire" | json_field 'personal_assistant.state_version')
+    [[ -n "$version" ]] || fail "hire failed: $hire"
+    echo "hired Atlas (state_version $version)"
+    curl -s -o /dev/null -w "%{http_code} personal hq\n" -X POST "$BASE_URL/api/personal-assistant/hq" \
+      -H 'Content-Type: application/json' \
+      -d "{\"request_id\":\"showfolder-hq\",\"if_version\":$version,\"name\":\"My HQ\",\"timezone\":\"UTC\"}"
+    printf 'personal_assistant.state = %s\n' \
+      "$(curl -s "$BASE_URL/api/personal-assistant" | json_field 'personal_assistant.state')"
+    ;;
+  scan)
+    local chip="${4:-downloads}"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/scan" -H 'Content-Type: application/json' \
+      -d "{\"chip\":\"$chip\"}" | python3 -m json.tool
+    ;;
+  decide)
+    local offer="${4:-}" decision="${5:-no}" choice="${6:-}"
+    [[ -n "$offer" ]] || fail "usage: $0 showfolder decide <base-url> <offer-id> <yes|no|later> [project|tidy]"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/decide" \
+      -H 'Content-Type: application/json' \
+      -d "{\"decision\":\"$decision\",\"choice\":\"$choice\",\"request_id\":\"smoke-$(date +%s%N)\"}" | python3 -m json.tool
+    ;;
+  hide | unhide)
+    # Make a seeded folder disappear from (or return to) its canonical path
+    # inside the sandbox, by renaming it, to show a folder_scan fact flip to
+    # needs-review and back. Never touches anything outside the sandbox.
+    local home="${4:-}" rel="${5:-}"
+    [[ -n "$home" && -d "$home" && -n "$rel" ]] || fail "usage: $0 showfolder $stage <sandbox-dir> <relative-folder>"
+    [[ "$rel" != /* && "$rel" != *..* ]] || fail "relative folder must stay inside the sandbox"
+    if [[ "$stage" == hide ]]; then
+      [[ -d "$home/$rel" ]] || fail "no folder at $rel"
+      mv "$home/$rel" "$home/$rel.hidden" && echo "hid $rel"
+    else
+      [[ -d "$home/$rel.hidden" ]] || fail "no hidden folder at $rel"
+      mv "$home/$rel.hidden" "$home/$rel" && echo "restored $rel"
+    fi
+    ;;
+  setup)
+    # The project outcome the way the card's confirmed plan does it: one
+    # decide with create, and the server sets the workspace up (name,
+    # blueprint, folder linked, first task) and resolves the offer.
+    local offer="${4:-}"
+    [[ -n "$offer" ]] || fail "usage: $0 showfolder setup <base-url> <offer-id>"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/decide" \
+      -H 'Content-Type: application/json' \
+      -d "{\"decision\":\"yes\",\"choice\":\"project\",\"create\":true,\"request_id\":\"smoke-$(date +%s%N)\"}" \
+      | python3 -c 'import json,sys; p=json.load(sys.stdin); o=p.get("offer") or {}; print("set up:", o.get("status"), (o.get("subject") or {}).get("name"), json.dumps(o.get("outcome")), p.get("error",""))'
+    ;;
+  project)
+    # The project outcome end to end through the API, as the Create Workspace
+    # modal (the card's Adjust…) does it: yes on the offer, create the
+    # workspace for the offer (name + blueprint, entry_point folder_digest),
+    # then resolve.
+    local offer="${4:-}" name="${5:-Thesis}" template="${6:-writing-project}" ws
+    [[ -n "$offer" ]] || fail "usage: $0 showfolder project <base-url> <offer-id> [name] [template-id]"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/decide" \
+      -H 'Content-Type: application/json' \
+      -d "{\"decision\":\"yes\",\"choice\":\"project\",\"request_id\":\"smoke-$(date +%s%N)\"}" \
+      | python3 -c 'import json,sys; o=json.load(sys.stdin)["offer"]; print("decided:", o["status"], o["subject"]["name"])'
+    ws=$(curl -s -X POST "$BASE_URL/api/workspaces" -H 'Content-Type: application/json' \
+      -d "{\"name\":\"$name\",\"template_id\":\"$template\",\"entry_point\":\"folder_digest\",\"folder_offer_id\":\"$offer\"}" \
+      | workspace_id)
+    [[ -n "$ws" ]] || fail "workspace create returned no id"
+    echo "created workspace $ws"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/resolve" \
+      -H 'Content-Type: application/json' \
+      -d "{\"workspace_id\":\"$ws\",\"request_id\":\"smoke-$(date +%s%N)\"}" \
+      | python3 -c 'import json,sys; o=json.load(sys.stdin)["offer"]; print("resolved:", o["status"], json.dumps(o.get("outcome")))'
+    ;;
+  resolve)
+    local offer="${4:-}" workspace="${5:-}"
+    [[ -n "$offer" && -n "$workspace" ]] || fail "usage: $0 showfolder resolve <base-url> <offer-id> <workspace-id>"
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/resolve" \
+      -H 'Content-Type: application/json' \
+      -d "{\"workspace_id\":\"$workspace\",\"request_id\":\"smoke-$(date +%s%N)\"}" | python3 -m json.tool
+    ;;
+  current)
+    curl -s "$BASE_URL/api/personal-assistant/folder-digest" | python3 -m json.tool
+    ;;
+  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus <sandbox>|hq|scan <chip>|decide <offer> <decision> [choice]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
+  esac
 }
 
 # smoke_meet_assistant drives Mission 01 ("Meet your assistant") through the API.
@@ -2852,6 +3063,7 @@ blueprint-details) smoke_blueprint_details "$@" ;;
 blueprintintake | blueprint-intake) smoke_blueprint_intake "${3:-}" ;;
 starter) smoke_starter "$@" ;;
 meetassistant) smoke_meet_assistant "$@" ;;
+showfolder) smoke_show_folder "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
 agent-type-strip) smoke_agent_type_strip "$@" ;;
 economyseed) smoke_economy_seed ;;
@@ -2899,6 +3111,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 meetassistant <base-url> <stage>      # Mission 01: onboard | status | hire [name] | demo <stage>" >&2
+  echo "  $0 showfolder <base-url> <stage>         # Show me a folder: seed <sandbox> | hq | scan <chip> | decide <offer> <d> [choice] | current" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
   echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2
   echo "  $0 blueprintintake <base-url> [folder]   # import Course; verify intake, optionally choose a folder via native picker" >&2
