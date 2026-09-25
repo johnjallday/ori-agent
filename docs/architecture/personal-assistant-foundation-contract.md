@@ -210,8 +210,9 @@ a repair goes to the Agents page; on a hired install it does nothing. A provable
 orphan identity (`relationship_recovery`) opens the same panel's reconnect view
 with one Reconnect button; `relationship_recovery_blocked` shows the status and
 no button; a partial hire shows one Finish setup button that replays the same
-request. A successful hire goes straight to `/?quest=build-hq`, which opens with
-Ori's Mission 02 briefing and the hand-over line.
+request. A successful hire goes to `/?panel=today`, where the hired assistant proposes
+its Personal HQ in a confirm card. The old `/?quest=build-hq` Map briefing is
+still available by explicit choice; it is not the default.
 
 One final, confirmed hire then:
 
@@ -230,13 +231,13 @@ The hire creates **no** workspace, no Personal HQ designation, no Journal or
 other support profile, no workspace membership, no Daily Brief configuration,
 and no tool/skill/MCP/Vault/filesystem change.
 
-After completion, the client navigates to `/?quest=build-hq` and Home features
-the optional **Build My HQ** mission, the first of the four starter missions
-(see [Starter missions](#starter-missions)). Designation completes it exactly
-once. Plan my first day is now one branch of Mission 03, and
-`?quest=plan-first-day` still does not open while `needs_hq`.
+After completion, the client opens Today on the HQ confirm card. HQ Build is
+retired from the mission board but its completion event remains persisted.
+Plan my first day is a branch of Mission 03, and `?quest=plan-first-day`
+still does not open while `needs_hq`.
 
-Confirming the Map's Build My HQ form is the sole HQ creation boundary. That one
+Confirming the card's Build or the Map's alternate Build My HQ form is the HQ
+creation boundary. That one
 confirmed request:
 
 1. claims a versioned, idempotent HQ setup operation;
@@ -335,14 +336,12 @@ the Map, the site context dialog, and the HQ build flow fully functional.
 
 ### Steps
 
-The walkthrough is shown in Ori's own layer (`ori-spotlight.js`), as Mission 01
-is. Straight from the hire (the `ori:assistant-just-hired` flag), it opens with
-Ori's Mission 02 briefing in the centre of a dimmed, inert Home: "✓ Mission 01
-complete", the hand-over line, the mission card (title, why and reward from
-`GET /api/progression`, with fixed fallbacks), its three steps, and **Start
-mission** or **Do this later**. From the mission card, `/?quest=build-hq` starts
-at step 1 directly. Without the layer, or with no room beside a dialog (a phone
-width), the steps are shown in Ori's docked panel, as before.
+The explicitly opened Map walkthrough uses Ori's own layer
+(`ori-spotlight.js`) and its three registered steps. The
+`ori:assistant-just-hired` flag now supplies the HQ card's Mission 01 eyebrow;
+it does not auto-start this walkthrough. `/?quest=build-hq` starts at step 1;
+without room beside a dialog (a phone width), the steps are shown in Ori's
+docked panel.
 
 1. `/?quest=build-hq` opens Map view and dims it around the existing reserved
    Personal HQ site (a spotlight: only the site can be clicked). It does **not**
@@ -401,25 +400,27 @@ is maintained.
 Source: `tasks/prd-starter-missions.md` and
 `tasks/prd-meet-your-assistant-mission.md`. The personal-assistant graph
 (`progression.PersonalAssistantGraph`) opens with a Tier 1 named **Starter**:
-five featured missions. Mission 01 hires the assistant and is the only required
-one. Missions 02 to 05 are optional, each ends with Ori visibly doing something,
+four featured missions. Mission 01 hires the assistant and is the only required
+one. Missions 02 to 04 are optional, each ends with Ori visibly doing something,
 and each carries `LockedUntil: pa-meet-assistant`: until Mission 01 is complete
 the status view marks them `locked`, with `locked_reason` "Meet your assistant
 first", and the widget renders them with a lock and no Start, Skip, or Resume.
 Locking is presentation only: `Match`, `Complete`, and backfill still run for a
-locked quest. Tier 2, **Daily loop**, holds first contact, personalize, first
-note, and first task. Tiers 3 to 6 are the built-in ones. `t1-plan-first-day`
+locked quest. Build My HQ (`t2-build-hq`), the older Tier 2 steps, and the built-in
+Tier 3–6 steps are presentation-retired, not deleted. Their IDs still match
+and their completions survive backfill and Reset, but none appears in tiers,
+mission counts or the next mission, and none pays Craft. The four visible
+missions each pay 7 Craft, enough for the first Farm. `t1-plan-first-day`
 and `t2-create-workspace` are not in this graph; their persisted completions
 stay in place, and a `t1-plan-first-day` completion counts as evidence for
-Mission 04.
+Mission 03.
 
 | Order | ID | Card | Completes when |
 | --- | --- | --- | --- |
 | 01 | `pa-meet-assistant` | Meet your assistant, `/?quest=meet-assistant` | the request that makes a hire durable (`HireResult.NewlyHired`), or a repair that leaves the relationship hired; never a replay |
-| 02 | `t2-build-hq` | Build My HQ, `/?quest=build-hq` | a Personal HQ designation |
-| 03 | `pa-show-folder` | Show your assistant a folder, `/?quest=show-folder`; while an offer is pending, the offer itself renders on the card with its own buttons | the folder offer's outcome — a workspace linked to the shown folder or a tidy prepared for it (`FolderDigestService.SetOnOutcome`), a `workspace.created` whose `entry_point` is `folder_digest`, or a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaching ready |
-| 04 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
-| 05 | `pa-first-brief` | Read your first Daily Brief, `/`; while open and with no model configured, adds "Add a model in Settings to generate one." | Today is first served with a Daily Brief revision for an active or paused relationship |
+| 02 | `pa-show-folder` | Show your assistant a folder, `/?quest=show-folder`; while an offer is pending, the offer itself renders on the card with its own buttons | the folder offer's outcome — a workspace linked to the shown folder or a tidy prepared for it (`FolderDigestService.SetOnOutcome`), a `workspace.created` whose `entry_point` is `folder_digest`, or a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaching ready |
+| 03 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
+| 04 | `pa-first-brief` | Read your first Daily Brief, `/`; while open and with no model configured, adds "Add a model in Settings to generate one." | Today is first served with a Daily Brief revision for an active or paused relationship |
 
 Mission 01's completion is `personalassistanthttp.Handler.SetOnHired`, bound in
 `completeProgressionWiring`. Its evidence (`Snapshot.AssistantHired`) is the
@@ -437,13 +438,13 @@ around the Agents nav entry at "Step 1 of 6 · Click Agents"
 (`meet-assistant-home-prompt.js`). The navbar wraps rather than collapses, so
 the Agents entry can be lit at every width.
 
-Mission 04 branches, in priority order when several focus areas match:
+Mission 03 branches, in priority order when several focus areas match:
 
 | Branch | Focus area | Card | Completion signal |
 | --- | --- | --- | --- |
 | email | `help_with_email` | Set up email, the host `email_ops_setup` quest; "In progress · Resume" once started | the journey's first ready (`setupjourney.Service.SetOnFirstReady`) |
 | calendar | `prepare_for_meetings` | Connect your calendar, `/?create=1&blueprint=calendar-ops` | `workspace.updated` with `mcp_binding_created` on a `calendar-ops` workspace that has a ready calendar binding |
-| project | `keep_projects_moving` | the plan's card (starting a project workspace is what Mission 03 does now, so this branch no longer offers one) | `workspace.created` from the creator whose `template_id` is blank or not `personal-ops`, `file-janitor`, `downloads-janitor`, `email-ops`, or `calendar-ops`, and which is not a group |
+| project | `keep_projects_moving` | the plan's card (starting a project workspace is what Mission 02 does now, so this branch no longer offers one) | `workspace.created` from the creator whose `template_id` is blank or not `personal-ops`, `file-janitor`, `downloads-janitor`, `email-ops`, or `calendar-ops`, and which is not a group |
 | plan | anything else, or none | Plan my first day, `/?quest=plan-first-day` | a successful first-assignment apply |
 
 The calendar branch promises "So your brief can prepare you for today's
@@ -481,7 +482,7 @@ How the card works:
   `MissionContext`. The widget shows the first mission that is neither
   completed nor skipped and lists the others beneath it. It holds no quest IDs.
 - Every completion is observed on the server. The browser never claims one.
-- Mission 03's start (`show-folder-quest.js`) opens the assistant panel on
+- Mission 02's start (`show-folder-quest.js`) opens the assistant panel on
   Today with the folder chooser unfolded and scrubs `?quest=show-folder`
   without a history entry. It makes no request of its own and never completes
   anything. A pending offer also renders on the mission card
@@ -500,7 +501,7 @@ predates the starter missions gets one silent pass, recorded under the
 `starter-missions-v1` key in `ProgressionState.Reconciled`. It pays no Craft
 and survives a reset, so a reset stays a blank slate. Mission 01 has its own
 pass, `meet-assistant-v1`, with the same rules: an install that hired before the
-mission existed sees it complete, with no toast and no Craft. Mission 03 has
+mission existed sees it complete, with no toast and no Craft. Mission 02 has
 `show-folder-v1`: a persisted `pa-tidy-downloads` completion, a ready File
 Janitor, or an active workspace whose primary project directory is a folder
 outside the workspace's own folder (a linked folder, not a blueprint scaffold)
@@ -515,7 +516,8 @@ points it at a folder, the server looks at the folder's shape, and the
 assistant makes one explained offer.
 
 - **Entry.** Today's "Show me a folder" (`personal-assistant-today.tmpl`,
-  `#personalAssistantFolder`), Mission 03's Start, or the pending offer on the
+  `#personalAssistantFolder`), Home's primary header button, Mission 02's Start,
+  or the pending offer on the
   mission card. Only an `active` or `paused` relationship sees it.
 - **Choosing.** Chips name Downloads, Documents, and Desktop under the server's
   home; "Pick another folder…" runs the native picker on the server
@@ -553,7 +555,11 @@ assistant makes one explained offer.
   `POST …/offers/{id}/resolve` links the folder once the modal reports the
   workspace; the modal's Cancel leaves the offer pending. A mixed or
   ambiguous offer's "Start with X" / "It's a project" shows the same confirm
-  card (with Back) before anything is decided.
+  card (with Back) before anything is decided. A resolved project Set up stays
+  on Today and lists the server-observed workspace, primary linked folder,
+  blueprint, actual agent instances and seeded task as text-only receipt rows,
+  then offers **Open <workspace>**. Reuse after an interrupted setup says
+  "already set up"; an exact request replay returns the stored receipt.
 - **Tidy.** "Tidy it" first shows the plan ("Set up File Janitor for
   Downloads? Ori will create a File Janitor workspace with a File Curator,
   watch the folder while paused, scan it once and propose moves — nothing
@@ -579,13 +585,19 @@ assistant makes one explained offer.
   authority re-validates against the offer's key, the workspace's primary
   directory, and the marker on disk, and a hidden or moved folder turns the
   fact into "Needs review".
-- **Mission.** See Mission 03 above. Every completion is server-observed.
+- **First prompt.** After HQ becomes active, Today's chooser expands once per
+  relationship with "Now show me a folder you're working in." The
+  `POST /api/personal-assistant/folder-digest/prompted` receipt persists this
+  presentation server-side; Reset Getting Started clears it. No chooser opens
+  before HQ exists, and further visits are manual.
+- **Mission.** See Mission 02 above. Every completion is server-observed.
 
-Today's Results section also gains one `janitor_result` line per File Janitor
+Today's Done section also gains one `janitor_result` line per File Janitor
 workspace with applied, not-undone actions in the last 24 hours ("Filed N files
 into <folder>/Filed", "M sent to Trash · Undo from History"), linking to
-`/workspaces/<slug>?panel=file-janitor&tab=history`. It respects the results
-cap and never changes the section's health.
+`/workspaces/<slug>?panel=file-janitor&tab=history`. Resolved folder project,
+tidy and HQ setup receipts remain in Done for seven days. Both honor the
+results cap; a failed receipt read does not erase healthy results.
 
 ## Surfaces and routing
 
@@ -596,10 +608,19 @@ structurally read-only deterministic guide and may escalate to that same route;
 it is not a peer assistant.
 
 Home is Map-first: the Workspace Map/Tree occupies the available cockpit
-viewport without an always-visible Today row. Today remains a Home-owned
-projection and is available on demand through the existing launcher and panel
-for that same bound Personal Assistant; direct launcher activation on Home opens
-Today, while prefilled handoffs open the Ask composer. Other authenticated
+viewport without an always-visible Today row. Its primary header action is
+**Show me a folder** after hire; before HQ it opens the HQ confirm card, and
+after HQ it opens the existing chooser. **New Workspace** stays a secondary
+header action and retains its full modal and Map create pad. The empty Map and
+launcher link to the chooser instead of instructing the user to create a
+workspace by hand. Today remains a Home-owned projection and is available on
+demand through the existing launcher and panel for that same bound Personal
+Assistant. Today's only three named sections are **Working on**, **Needs you**,
+and **Done**. Empty sections disappear, unhealthy sources are named once in
+a retryable footer, and machine reason/status identifiers are humanized.
+The old Decisions/Priorities/Remembered/FollowUps/Results JSON fields remain
+available for one release but no longer render as sections. Direct launcher
+activation on Home opens Today, while prefilled handoffs open the Ask composer. Other authenticated
 surfaces keep the existing Ask-only launcher behavior. This presentation change
 adds no Personal Assistant page or route and does not change identity,
 ownership, routing, confirmation, persistence, authorization, or API boundaries.

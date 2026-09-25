@@ -46,7 +46,6 @@ test.describe('Home onboarding workspace gate', () => {
       '/api/activity/recent',
       '/api/calendar-ops/home-portal-summary',
       '/api/orchestration/scheduled-tasks/upcoming',
-      '/api/personal-hq/status',
       '/api/progression'
     ]);
 
@@ -123,6 +122,10 @@ test.describe('Home onboarding workspace gate', () => {
     await page.goto('/');
 
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
+    // Until a hire, the primary folder action is absent; the advanced creator
+    // is still available as a secondary header action.
+    await expect(page.locator('#cockpitShowFolderBtn')).toBeHidden();
+    await expect(page.locator('#cockpitCreateWorkspaceBtn')).toHaveClass(/modern-btn-secondary/);
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toHaveCount(1);
     await expect(page.locator('.ws-map-tile[data-ws-id]')).toHaveCount(0);

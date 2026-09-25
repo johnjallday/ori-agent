@@ -27,7 +27,12 @@ try {
     return res.status;
   });
   if (complete !== 200) throw new Error(`onboarding completion failed: ${complete}`);
-  await page.reload();
+  await page.goto(`${base}/`);
+  if (!(await page.locator('#cockpitShowFolderBtn').isHidden())) {
+    throw new Error('Show me a folder appeared before hiring');
+  }
+  await shot('00-before-hire');
+  await page.goto(`${base}/agents`);
   await page.locator('#newAgentBtn').click();
   await page.locator('#cr-name').fill('Atlas');
   await shot('01-hire');
@@ -43,6 +48,11 @@ try {
     throw new Error('Map quest started on the plain Today hand-over');
   }
   await shot('02-hq-card');
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#cockpitShowFolderBtn').waitFor({ state: 'visible' });
+  await page.locator('#cockpitShowFolderBtn').click();
+  await page.locator('#personalAssistantHQCard').waitFor({ state: 'visible' });
+  await shot('02c-home-action-opens-hq');
   await page.goto(`${base}/?quest=build-hq`);
   await page.waitForFunction(() => window.OriPersonalHQQuest?.isActive() === true);
   await shot('02a-alternate-map-quest');
@@ -94,6 +104,19 @@ try {
     throw new Error('first-folder prompt repeated on reload');
   }
   await page.locator('#personalAssistantClose').click();
+  await page.locator('#cockpitShowFolderBtn').click();
+  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
+  await shot('04b-home-action-opens-chooser');
+  await page.goto(`${base}/?panel=today&folder=show`);
+  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
+  if (new URL(page.url()).searchParams.has('folder'))
+    throw new Error('folder deep link was not consumed');
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  await page.locator('#addFolderModal').waitFor({ state: 'visible' });
+  await shot('04c-new-workspace-remains');
+  await page.locator('#addFolderModal [aria-label="Close create workspace"]').click();
+  await page.locator('#addFolderModal').waitFor({ state: 'hidden' });
   await page.locator('#cockpitQuestsToggle').click();
   await page.locator('#questLog [data-role="quests"] li').first().waitFor();
   if (

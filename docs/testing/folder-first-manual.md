@@ -1,0 +1,35 @@
+# Folder-first manual test
+
+Run only on an isolated disposable server. **Never use a server started with your real `HOME`**: folder chips and Agents are resolved from that directory. `scripts/demo-server.sh` sets both `HOME` and `ORI_DATA_DIR` to a temporary sandbox and disables desktop opening. No model or provider credentials are needed for this walkthrough.
+
+```bash
+./scripts/demo-server.sh 8931 > /tmp/ori-folder-first-demo.log 2>&1 & server=$!
+# Wait for SANDBOX=<temporary path> and for http://localhost:8931/agents.
+sandbox=$(awk -F= '/^SANDBOX=/{print $2; exit}' /tmp/ori-folder-first-demo.log)
+./scripts/smoke.sh showfolder http://localhost:8931 seed "$sandbox"
+./scripts/smoke.sh showfolder http://localhost:8931 seed-corpus "$sandbox"
+node scripts/demo-folder-first.mjs http://localhost:8931 /tmp/ori-folder-first-shots
+# When finished:
+kill "$server"
+```
+
+The browser script drives a **fresh** sandbox, asserts the visible receipts and captures PNGs. Don't call the `hqcard` or `hq` smoke recipe *before* the browser script; they change the initial hire state. The lower-level recipes are useful in a separate sandbox: `./scripts/smoke.sh showfolder http://localhost:8931 hqcard` leaves the setup card pending, `hq` provisions an HQ, and `today` prints the three Today sections and source health. `./scripts/smoke.sh showfolder http://localhost:8931 scan documents` inspects an offer after provisioning. The seed steps change only the sandbox path you give them.
+
+Inspect screenshots at full size (especially `02c-home-action-opens-hq.png`, `04b-home-action-opens-chooser.png`, `04c-new-workspace-remains.png`, `05-four-missions.png`, `08-project-receipt.png`, `09-corpus-receipt.png`, `11-today-phone.png`, and `12-today-degraded.png`). Check these behaviors:
+
+1. Before hiring, the primary Home **Show me a folder** action is hidden; **New Workspace** remains available as the advanced path. After hiring, the Home action opens the *existing* HQ setup card; the `/?quest=build-hq` Map walkthrough is still opt-in.
+2. Confirm the suggested workspace directory before building My HQ. The HQ receipt shows the observed workspace, directory, and Daily Brief schedule. Once active, Home opens the folder chooser. The empty Map and assistant launcher also link to the same chooser.
+3. The first folder prompt appears once, only after the HQ is active. Reset/restart re-arms it. The visible board has four missions; retired HQ quest history is still loadable but is not a visible mission.
+4. In the seeded Documents/Thesis folder, choose **Set up project** and confirm. The writing blueprint, linked folder, roles, first task, and route come from the *persisted workspace receipt*, not preview guesses. Repeating the exact Set up request returns the same workspace and does not duplicate starter tasks. In the seeded Desktop corpus, the research blueprint and sources-index task appear.
+5. Today shows **Working on**, **Needs you**, and **Done**, with bounded seven-day results for both created projects. On a narrow viewport the labels remain readable and no section disappears. If one source is unavailable, the footer names it with a Retry button; it does not silently claim an empty day. Confirm the old standalone Today sections are not rendered.
+6. Open **New Workspace** from Home after the assistant is active. The modal still works, and its **Import Folder** advanced option remains separate from the assistant's folder intake. Closing the modal does not dismiss the assistant relationship. The Map's empty-state create/import actions still open the same modal; the old map canvas create pad was removed before this feature.
+
+Automated browser checks from fresh sandboxes:
+
+```bash
+./scripts/e2e-fresh.sh tests/personal-assistant-foundation.spec.ts tests/personal-assistant-foundation.a11y.spec.ts tests/personal-hq-daily-brief.spec.ts tests/starter-missions.spec.ts tests/domain-specialist-onboarding.spec.ts -- --workers=1
+```
+
+Current `origin/dev` browser baseline: the unrelated Group creation tests in `home-workspace-cockpit.spec.ts` (2), old Ask Ori routing assertions in `ori-guide.spec.ts` (6), and Task Output/Settings directory cases in `smoke.spec.ts` (4) fail identically against `./scripts/e2e-fresh.sh --rev origin/dev`. Do not rewrite their behavior to make this feature appear green; compare the targeted spec against that baseline instead. The folder-first foundation, a11y, Daily Brief, missions, and specialist specs pass in fresh sandboxes.
+
+Keep the demo sandbox only for inspection; remove it when finished. Do not save its local directory paths or state to tracked files.

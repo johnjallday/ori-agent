@@ -3090,7 +3090,7 @@
       '<div class="ws-map-empty-cluster">' +
       '<button type="button" class="ws-map-pad ws-map-pad--hero" data-ws-map-create aria-label="Create a new workspace">' +
       '<span class="ws-map-pad-plate">＋</span><span class="ws-map-pad-label">New workspace</span></button>' +
-      '<div class="ws-map-empty-note">No workspaces yet — build your first one.</div>' +
+      '<div class="ws-map-empty-note">No workspaces yet — <a href="/?panel=today&amp;folder=show" data-ws-map-folder>show your assistant a folder</a>.</div>' +
       '</div></div>'
     );
   }
@@ -3676,6 +3676,16 @@
   }
 
   function bindCreate(container) {
+    var folderLinks = container.querySelectorAll('[data-ws-map-folder]');
+    Array.prototype.forEach.call(folderLinks, function (link) {
+      link.addEventListener('click', function (event) {
+        // When Home's controller is ready, open it in place. Otherwise let
+        // the same deep link load and wait for the relationship/controller;
+        // a transient initialization race is not a reason to send a hire to
+        // the Agents page.
+        if (window.OriHomeFolder?.open()) event.preventDefault();
+      });
+    });
     var els = container.querySelectorAll('[data-ws-map-create]');
     Array.prototype.forEach.call(els, function (el) {
       el.addEventListener('click', function () {

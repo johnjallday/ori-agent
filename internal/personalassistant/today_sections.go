@@ -86,6 +86,10 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		}
 	}
 	if out.Studio != nil {
+		if strings.HasPrefix(out.Studio.Route, "/workspaces/") && !strings.HasPrefix(out.Studio.Route, "//") {
+			working = append(working, TodayItem{ID: "studio-" + out.Studio.WorkspaceName,
+				Kind: "studio_workspace", Title: out.Studio.WorkspaceName, Route: out.Studio.Route})
+		}
 		for _, project := range out.Studio.Projects {
 			if strings.HasPrefix(project.Route, "/workspaces/") && !strings.HasPrefix(project.Route, "//") {
 				working = append(working, TodayItem{ID: project.WorkspaceID, Kind: "studio_project",
@@ -126,6 +130,13 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 			Title: "Set up " + hq.Name, Detail: hqBriefSchedule(relationship), Route: hqRoute,
 			SourceAt: hq.CreatedAt}}, done...)
 	}
+	if out.Studio != nil {
+		for _, item := range out.Studio.Items {
+			if strings.HasPrefix(item.Route, "/workspaces/") && !strings.HasPrefix(item.Route, "//") {
+				done = append(done, item)
+			}
+		}
+	}
 	done = append(done, s.followUpItemsByStatus(ctx, userID, relationship, now, followup.StatusCompleted, out)...)
 	if len(done) > todayResultCap {
 		done = done[:todayResultCap]
@@ -135,7 +146,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 	}
 	out.WorkingOn = TodaySection{Items: working, Health: combinedTodayHealth(working, out.Brief.Health, meetingsHealth(out.Meetings), setupHealth(out.SpecialistSetup))}
 	out.NeedsYou = TodaySection{Items: needs, Health: combinedTodayHealth(needs, out.Priorities.Health, out.FollowUps.Health, out.Decisions.Health)}
-	out.Done = TodaySection{Items: done, Health: combinedTodayHealth(done, out.Results.Health)}
+	out.Done = TodaySection{Items: done, Health: combinedTodayHealth(done, out.Results.Health, studioHealth(out.Studio))}
 	for _, src := range []struct {
 		name   string
 		health TodaySourceHealth
@@ -144,6 +155,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		{"priorities", out.Priorities.Health}, {"follow-ups", out.FollowUps.Health},
 		{"decisions", out.Decisions.Health}, {"results", out.Results.Health},
 		{"memory", out.Remembered.Health}, {"specialist setup", setupHealth(out.SpecialistSetup)},
+		{"studio", studioHealth(out.Studio)},
 	} {
 		if src.health.Status == TodaySectionUnavailable || src.health.Status == TodaySectionPartial {
 			out.UnavailableSources = appendSource(out.UnavailableSources, src.name)
@@ -187,6 +199,12 @@ func meetingsHealth(meetings *TodayMeetingsProjection) TodaySourceHealth {
 		return TodaySourceHealth{Status: TodaySectionHealthyEmpty}
 	}
 	return meetings.Health
+}
+func studioHealth(studio *TodayStudioProjection) TodaySourceHealth {
+	if studio == nil {
+		return TodaySourceHealth{Status: TodaySectionHealthyEmpty}
+	}
+	return studio.Health
 }
 func setupHealth(setup *TodaySpecialistSetupProjection) TodaySourceHealth {
 	if setup == nil {
