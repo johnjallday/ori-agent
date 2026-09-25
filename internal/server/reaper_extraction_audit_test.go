@@ -42,20 +42,11 @@ func TestCompiledDomainExtractionLeavesOnlyGenericHostProductionCode(t *testing.
 		// Inert metadata may name external plugins; it registers no route,
 		// module, runtime, template, or capability implementation.
 		//
-		// The specialist mapping's data file is the same shape as the
-		// marketplace cache: onboarding copy, a card ordering, and the ID of a
-		// blueprint published by a plugin. Everything that acts on it —
-		// matching, the hire offer, capability ordering, persistence — is
-		// generic and lives elsewhere. The guard below keeps it that way by
-		// asserting the file stays data only.
-		//
-		// The folder scan's tables are the same kind of data: which file
-		// markers mean which shape, which extensions name which tool, and
-		// the plain word for a file kind. The scan, verdicts, and copy that
-		// act on them are generic. TestFolderDigestTablesStayDataOnly holds
-		// the file to data.
+		// The host-owned folder capability table is inert data: file
+		// signatures, tool names, and presentation metadata. Matching and
+		// actions live in generic code. The audit below checks that the
+		// table does not grow domain-specific imports or behaviors.
 		if clean == "internal/server/marketplace_cache_official.json" ||
-			clean == "internal/specialist/domains.go" ||
 			clean == "internal/reviewedintegration/entries.go" ||
 			clean == "internal/folderdigest/tables.go" {
 			return nil
@@ -91,43 +82,24 @@ func TestCompiledDomainExtractionLeavesOnlyGenericHostProductionCode(t *testing.
 	}
 }
 
-// The specialist mapping's data file is excepted from the audit above only
-// because it is data. This holds it to that: no imports, no functions, no
-// types — one package-level var of mapping entries. A domain that needs code
-// in the host is a domain implementation, and belongs in a plugin.
-func TestSpecialistDomainDataFileStaysDataOnly(t *testing.T) {
-	path := filepath.Join("..", "specialist", "domains.go")
-	data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- fixed repository-relative audit path
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	source := string(data)
-	for _, forbidden := range []string{"\nimport", "\nfunc ", "\ntype ", "\nconst "} {
-		if strings.Contains(source, forbidden) {
-			t.Errorf("internal/specialist/domains.go must stay data only; found %q", strings.TrimSpace(forbidden))
-		}
-	}
-	if strings.Count(source, "\nvar ") != 1 {
-		t.Error("internal/specialist/domains.go must declare exactly one var: the mapping entries")
-	}
-}
-
-// The folder scan's tables file is excepted from the audit for the same
-// reason and is held to the same shape: four package-level vars (markers,
-// tools, shape blueprints, kind names) and nothing that runs.
-func TestFolderDigestTablesStayDataOnly(t *testing.T) {
+// Domain metadata must exist only in the merged host table. Generic
+// projection and copy helpers may live alongside it, but cannot import a
+// plugin or add a second domain registry.
+func TestFolderDigestTablesStayHostOwned(t *testing.T) {
 	path := filepath.Join("..", "folderdigest", "tables.go")
 	data, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- fixed repository-relative audit path
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	source := string(data)
-	for _, forbidden := range []string{"\nimport", "\nfunc ", "\ntype ", "\nconst "} {
-		if strings.Contains(source, forbidden) {
-			t.Errorf("internal/folderdigest/tables.go must stay data only; found %q", strings.TrimSpace(forbidden))
-		}
+	if strings.Contains(source, "\nimport") || strings.Contains(source, "\nconst ") {
+		t.Error("folder capability table must not import behavior or define domain-specific constants")
 	}
-	if strings.Count(source, "\nvar ") != 4 {
-		t.Error("internal/folderdigest/tables.go must declare exactly four vars: Markers, Tools, ShapeBlueprints, extensionKinds")
+	if strings.Count(source, "\nvar capabilityRows =") != 1 ||
+		strings.Count(source, "\nvar Markers, Tools, ShapeBlueprints = deriveTables()") != 1 {
+		t.Error("recognition and offer metadata must derive from one host-owned row table")
+	}
+	if _, err := os.Stat(filepath.Join("..", "specialist", "domains.go")); !os.IsNotExist(err) {
+		t.Error("the independent specialist domain table must remain retired")
 	}
 }

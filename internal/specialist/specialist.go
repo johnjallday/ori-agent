@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
 // Assignment item types. These mirror the durable first-assignment input types
@@ -31,53 +33,23 @@ const (
 // what was found; the question asks the only thing actually unknown, which is
 // whether the user wants help with it. It never asks whether they use the app —
 // the install is already known, and asking reads as not paying attention.
-type OfferCopy struct {
-	Headline     string `json:"headline"`
-	Question     string `json:"question"`
-	AcceptLabel  string `json:"accept_label"`
-	DeclineLabel string `json:"decline_label"`
-	// AcceptedNote confirms what accepting did. It describes watching and
-	// reporting, never directing: the assistant cannot hand work to a
-	// specialist in another workspace, and no copy may imply otherwise.
-	AcceptedNote string `json:"accepted_note"`
-	// ManualLabel reaches this domain when nothing was detected — a second
-	// machine, or the app installed elsewhere.
-	ManualLabel string `json:"manual_label"`
-}
+type OfferCopy = folderdigest.OfferCopy
 
 // FocusOption is one focus checkbox offered in place of the generic six. Value
 // must be a valid personalassistant.FocusArea; the server rejects anything else.
-type FocusOption struct {
-	Value    string `json:"value"`
-	Label    string `json:"label"`
-	Selected bool   `json:"selected"`
-}
+type FocusOption = folderdigest.FocusOption
 
 // AssignmentLabel re-words one first-assignment item type. Type is the durable
 // payload value and is never rewritten.
-type AssignmentLabel struct {
-	Type        string `json:"type"`
-	Label       string `json:"label"`
-	Placeholder string `json:"placeholder"`
-	AddLabel    string `json:"add_label"`
-}
+type AssignmentLabel = folderdigest.AssignmentLabel
 
 // AssignmentStep re-words one of the three first-assignment wizard steps.
-type AssignmentStep struct {
-	Index  int    `json:"index"`
-	Title  string `json:"title"`
-	Legend string `json:"legend"`
-}
+type AssignmentStep = folderdigest.AssignmentStep
 
 // Suggestion is the post-hire workspace recommendation. It is a suggestion the
 // user acts on deliberately: hiring never creates a workspace or runs a setup
 // wizard on its behalf.
-type Suggestion struct {
-	Title       string `json:"title"`
-	Body        string `json:"body"`
-	ActionLabel string `json:"action_label"`
-	ActionRoute string `json:"action_route"`
-}
+type Suggestion = folderdigest.Suggestion
 
 // Entry is one app-to-domain mapping.
 type Entry struct {
@@ -117,9 +89,28 @@ type Entry struct {
 	IntegrationKey string `json:"integration_key,omitempty"`
 }
 
-// The mapping's entries live in domains.go, which is data only. Nothing in
-// this file names an application.
-var registry = mustNormalizeRegistry(registryEntries)
+// The legacy specialist projection is derived from host-owned capability rows.
+// No independent domain definitions or plugin-authored rows are accepted.
+var registry = mustNormalizeRegistry(entriesFromCapabilities())
+
+func entriesFromCapabilities() []Entry {
+	var entries []Entry
+	for _, row := range folderdigest.AllCapabilities() {
+		if row.Offer == nil {
+			continue
+		}
+		offer := row.Offer
+		entries = append(entries, Entry{
+			Slug: offer.Slug, AppPatterns: offer.AppPatterns,
+			DisplayName: offer.DisplayName, SpecialistName: offer.SpecialistName,
+			OfferCopy: offer.OfferCopy, FocusAreas: offer.FocusAreas,
+			AssignmentLabels: offer.AssignmentLabels, AssignmentSteps: offer.AssignmentSteps,
+			SuggestedTemplateID: offer.SuggestedTemplateID, Suggestion: offer.Suggestion,
+			CapabilityOrder: offer.CapabilityOrder, IntegrationKey: offer.IntegrationKey,
+		})
+	}
+	return entries
+}
 
 // All returns a deep copy of the built-in mapping.
 func All() []Entry {
