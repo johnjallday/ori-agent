@@ -1577,6 +1577,36 @@ for i in range(6):
 print(f"seeded {home}/Desktop as an audio session")
 PY
     ;;
+  seed-capability)
+    # Disposable, non-overwriting fixtures for the folder-fed capability
+    # demos. Each mode uses a fresh sandbox so Home/decline state cannot hide
+    # an offer being demonstrated.
+    local home="${4:-}" kind="${5:-}"
+    [[ -n "$home" && -d "$home" && "$home" == *"/ori-demo."* ]] || fail "usage: $0 showfolder <base-url> seed-capability <ori-demo-sandbox> <project|portfolio|decline|file>"
+    case "$kind" in project|portfolio|decline|file) ;; *) fail "unknown capability fixture: $kind" ;; esac
+    python3 - "$home" "$kind" <<'PY'
+import os, sys
+home, kind = sys.argv[1:]
+entries = []
+if kind == "project":
+    entries = [("Desktop/Session.rpp", b"<REAPER_PROJECT>\n")]
+elif kind == "portfolio":
+    extensions = [".rpp", ".als", ".logicx", ".als", ".rpp"]
+    entries = [(f"Desktop/Album-{i}/Session{ext}", b"demo\n") for i,ext in enumerate(extensions,1)]
+elif kind == "decline":
+    entries = [("Documents/Track/Track.rpp", b"<REAPER_PROJECT>\n")]
+    entries += [(f"Desktop/Album-{i}/Session.als", b"demo\n") for i in range(1,6)]
+else:
+    entries = [("Desktop/Picked/Picked.rpp", b"<REAPER_PROJECT>\n")]
+for rel, body in entries:
+    target = os.path.join(home, rel)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    # No fixture overwrites an existing file, even in a sandbox.
+    with open(target, "xb") as output:
+        output.write(body)
+print(f"ok   seeded {kind} capability fixture in {home}")
+PY
+    ;;
   seed-corpus)
     # Desktop as a corpus: a bibliography plus two small real PDFs (one page
     # of text each, with a valid cross-reference table), for the corpus
@@ -1714,7 +1744,7 @@ PY
   today)
     curl -sf "$BASE_URL/api/personal-assistant/today" | python3 -c 'import json,sys; t=json.load(sys.stdin)["today"]; print("Today:", t.get("state")); [print(k + ":", ", ".join(i.get("title", "") for i in (t.get(k) or {}).get("items", [])) or "(empty)") for k in ("working_on", "needs_you", "done")]; print("Could not read:", ", ".join(t.get("unavailable_sources") or []) or "none")'
     ;;
-  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus <sandbox>|hqcard|hq|today|scan <chip>|decide <offer> <decision> [choice]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
+  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|hqcard|hq|today|scan <chip>|decide <offer> <decision> [choice]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
   esac
 }
 
