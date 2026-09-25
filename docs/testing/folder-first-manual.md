@@ -2,18 +2,35 @@
 
 Run only on an isolated disposable server. **Never use a server started with your real `HOME`**: folder chips and Agents are resolved from that directory. `scripts/demo-server.sh` sets both `HOME` and `ORI_DATA_DIR` to a temporary sandbox and disables desktop opening. No model or provider credentials are needed for this walkthrough.
 
+From the feature worktree, paste the entire block. It uses a free port, waits for the build **and** HTTP server, and stops only the server it started:
+
 ```bash
-./scripts/demo-server.sh 8931 > /tmp/ori-folder-first-demo.log 2>&1 & server=$!
-# Wait for SANDBOX=<temporary path> and for http://localhost:8931/agents.
-sandbox=$(awk -F= '/^SANDBOX=/{print $2; exit}' /tmp/ori-folder-first-demo.log)
-./scripts/smoke.sh showfolder http://localhost:8931 seed "$sandbox"
-./scripts/smoke.sh showfolder http://localhost:8931 seed-corpus "$sandbox"
-node scripts/demo-folder-first.mjs http://localhost:8931 /tmp/ori-folder-first-shots
-# When finished:
-kill "$server"
+bash <<'BASH'
+set -euo pipefail
+port=8951
+if lsof -nP -t -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then echo "Port $port is in use" >&2; exit 1; fi
+log=$(mktemp /tmp/ori-folder-first-demo.XXXXXX)
+shots=$(mktemp -d /tmp/ori-folder-first-shots.XXXXXX)
+./scripts/demo-server.sh "$port" >"$log" 2>&1 &
+server=$!
+trap 'kill "$server" 2>/dev/null || true' EXIT
+sandbox=''
+for i in $(seq 1 120); do
+  sandbox=$(awk -F= '/^SANDBOX=/{print $2; exit}' "$log")
+  if [[ -n "$sandbox" && -d "$sandbox" ]] && curl -fsS -o /dev/null -m 2 "http://localhost:$port/agents" 2>/dev/null; then break; fi
+  if ! kill -0 "$server" 2>/dev/null; then tail -25 "$log" >&2; exit 1; fi
+  sleep 1
+done
+case "$sandbox" in /var/folders/*/ori-demo.*|/tmp/ori-demo.*) ;; *) echo "No disposable sandbox; see $log" >&2; exit 1;; esac
+curl -fsS -o /dev/null "http://localhost:$port/agents" || { echo "Server not ready; see $log" >&2; exit 1; }
+./scripts/smoke.sh showfolder "http://localhost:$port" seed "$sandbox"
+./scripts/smoke.sh showfolder "http://localhost:$port" seed-corpus "$sandbox"
+node scripts/demo-folder-first.mjs "http://localhost:$port" "$shots"
+printf 'Screenshots: %s\nServer log: %s\n' "$shots" "$log"
+BASH
 ```
 
-The browser script drives a **fresh** sandbox, asserts the visible receipts and captures PNGs. Don't call the `hqcard` or `hq` smoke recipe *before* the browser script; they change the initial hire state. The lower-level recipes are useful in a separate sandbox: `./scripts/smoke.sh showfolder http://localhost:8931 hqcard` leaves the setup card pending, `hq` provisions an HQ, and `today` prints the three Today sections and source health. `./scripts/smoke.sh showfolder http://localhost:8931 scan documents` inspects an offer after provisioning. The seed steps change only the sandbox path you give them.
+The browser script drives a **fresh** sandbox, asserts the visible receipts and captures PNGs. Don't call the `hqcard` or `hq` smoke recipe *before* the browser script; they change the initial hire state. The lower-level recipes are useful in a separate sandbox: `./scripts/smoke.sh showfolder http://localhost:8951 hqcard` leaves the setup card pending, `hq` provisions an HQ, and `today` prints the three Today sections and source health. `./scripts/smoke.sh showfolder http://localhost:8951 scan documents` inspects an offer after provisioning. The seed steps change only the sandbox path you give them.
 
 Inspect screenshots at full size (especially `02c-home-action-opens-hq.png`, `04b-home-action-opens-chooser.png`, `04c-new-workspace-remains.png`, `05-four-missions.png`, `08-project-receipt.png`, `09-corpus-receipt.png`, `11-today-phone.png`, and `12-today-degraded.png`). Check these behaviors:
 
