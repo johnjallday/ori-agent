@@ -63,6 +63,66 @@ func (s stubTodaySetup) GetSpecialistSetup(context.Context, string) (*TodaySpeci
 	return s.projection, s.err
 }
 
+type stubFolderReceipts struct {
+	offers []FolderOffer
+	err    error
+	userID string
+	since  time.Time
+}
+
+func (s *stubFolderReceipts) RecentReceipts(_ context.Context, userID string, since time.Time) ([]FolderOffer, error) {
+	s.userID, s.since = userID, since
+	return s.offers, s.err
+}
+
+func TestTodayService_SevenDayFolderSetupReceiptsSurviveReloadAndStayBounded(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	store, _ := newTodayWorkspace(t, now)
+	for _, ws := range []struct{ id, slug, name string }{{"project-1", "thesis", "Thesis"}, {"janitor-1", "downloads", "Downloads"}} {
+		w := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: ws.name})
+		w.ID, w.FolderSlug = ws.id, ws.slug
+		if err := store.Save(w); err != nil {
+			t.Fatal(err)
+		}
+	}
+	projectAt, tidyAt, oldAt := now.Add(-time.Hour), now.Add(-6*24*time.Hour), now.Add(-8*24*time.Hour)
+	receipts := &stubFolderReceipts{offers: []FolderOffer{
+		{ID: "project", ResolvedAt: &projectAt, Outcome: &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: "project-1", Receipt: []FolderReceiptRow{
+			{Kind: "folder", Name: "Drafts"}, {Kind: "blueprint", Name: "Writing project"}, {Kind: "agent", Name: "Editor"}, {Kind: "task", Name: "Summarize drafts"},
+		}}},
+		{ID: "tidy", ResolvedAt: &tidyAt, Subject: FolderCandidateRecord{Name: "Downloads"}, Outcome: &FolderOutcome{Kind: FolderChoiceTidy, WorkspaceID: "janitor-1"}},
+		{ID: "old", ResolvedAt: &oldAt, Outcome: &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: "project-1"}},
+		{ID: "missing", ResolvedAt: &projectAt, Outcome: &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: "missing"}},
+	}}
+	service := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()}, stubTodayBrief{}, store, stubTodayFollowUps{})
+	service.SetFolderReceiptReader(receipts)
+	service.now = func() time.Time { return now }
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipts.userID != "local" || !receipts.since.Equal(now.Add(-todayFolderReceiptWindow)) {
+		t.Fatalf("wrong receipt scope: user=%q since=%s", receipts.userID, receipts.since)
+	}
+	items := got.Results.Items
+	if len(items) != 3 || items[0].ID != "project" || items[0].Kind != "folder_setup" ||
+		items[0].Title != "Set up Thesis" || !strings.Contains(items[0].Detail, "First task: Summarize drafts") ||
+		items[0].Route != "/workspaces/thesis" || items[1].Route != "/workspaces/downloads?panel=file-janitor" ||
+		items[2].ID != "result-1" || got.Results.Health.Status != TodaySectionAvailable {
+		t.Fatalf("Today setup receipts = %+v; health = %+v", items, got.Results.Health)
+	}
+	service.now = func() time.Time { return now.Add(8 * 24 * time.Hour) }
+	after, err := service.Get(context.Background(), "local")
+	if err != nil || len(after.Results.Items) != 1 || after.Results.Items[0].ID != "result-1" {
+		t.Fatalf("expired receipts = %+v, err=%v", after.Results.Items, err)
+	}
+	receipts.err = errors.New("unavailable")
+	unavailable, err := service.Get(context.Background(), "local")
+	if err != nil || len(unavailable.Results.Items) != 1 || unavailable.Results.Health.Status == TodaySectionUnavailable {
+		t.Fatalf("failed receipt read changed Today: %+v, err=%v", unavailable.Results, err)
+	}
+}
+
 func baseTodayProjection() *Projection {
 	return &Projection{
 		State: APIStateActive, StateVersion: 4, DisplayName: "Nova", Appearance: types.NewAgentAppearance(),

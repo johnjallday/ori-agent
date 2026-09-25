@@ -235,6 +235,12 @@ type JanitorResultReader interface {
 	JanitorResults(ctx context.Context, userID string) ([]JanitorResult, error)
 }
 
+// FolderReceiptReader supplies already-resolved folder setup outcomes. Today
+// reads them only to show recent, durable receipts; it cannot replay setup.
+type FolderReceiptReader interface {
+	RecentReceipts(ctx context.Context, userID string, since time.Time) ([]FolderOffer, error)
+}
+
 // TodayService reads canonical stores independently; it never generates a
 // brief, mutates a Ticket, or changes a follow-up.
 type TodayService struct {
@@ -245,6 +251,7 @@ type TodayService struct {
 	followUps          todayFollowUpReader
 	setup              todaySpecialistSetupReader
 	janitorResults     JanitorResultReader
+	folderReceipts     FolderReceiptReader
 	meetings           TodayMeetingReader
 	remembered         interface {
 		ReviewItems(context.Context, string) ([]KnowledgeReviewItem, error)
@@ -292,6 +299,13 @@ func (s *TodayService) SetSpecialistSetupReader(reader todaySpecialistSetupReade
 func (s *TodayService) SetJanitorResultReader(reader JanitorResultReader) {
 	if s != nil {
 		s.janitorResults = reader
+	}
+}
+
+// SetFolderReceiptReader enables seven-day setup receipts in Today's Results.
+func (s *TodayService) SetFolderReceiptReader(reader FolderReceiptReader) {
+	if s != nil {
+		s.folderReceipts = reader
 	}
 }
 
@@ -388,6 +402,7 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		tasksByID[task.ID] = task
 	}
 	s.loadTicketsAndResults(ws, route, now, out)
+	s.loadFolderReceipts(ctx, userID, now, out)
 	s.loadJanitorResults(ctx, userID, now, out)
 	followUpsByRef := s.loadFollowUps(ctx, userID, relationship, now, out)
 	meetingsByRef := s.loadMeetings(ctx, userID, relationship, now, out)
@@ -672,6 +687,89 @@ func (s *TodayService) loadTicketsAndResults(ws *workspace.Workspace, route stri
 	out.Priorities = taskTodaySection(priorities, route, "ticket", todayPriorityCap)
 	out.Results = taskTodaySection(results, route, "result", todayResultCap)
 	_ = now
+}
+
+const todayFolderReceiptWindow = 7 * 24 * time.Hour
+
+// loadFolderReceipts reserves space in Results for recent, server-observed
+// setups. An inaccessible receipt source leaves other Today sections intact.
+func (s *TodayService) loadFolderReceipts(ctx context.Context, userID string, now time.Time, out *TodayProjection) {
+	if s.folderReceipts == nil || out.Results.Health.Status == TodaySectionUnavailable {
+		return
+	}
+	offers, err := s.folderReceipts.RecentReceipts(ctx, userID, now.Add(-todayFolderReceiptWindow))
+	if err != nil {
+		logger.Warn("personal assistant today: folder receipts unavailable", logger.Fields{"error": err.Error()})
+		return
+	}
+	items := make([]TodayItem, 0, min(len(offers), todayResultCap))
+	for _, offer := range offers {
+		if len(items) >= todayResultCap {
+			break
+		}
+		if item, ok := s.folderReceiptTodayItem(offer, now); ok {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return
+	}
+	out.Results.Items = append(items, out.Results.Items...)
+	if len(out.Results.Items) > todayResultCap {
+		out.Results.Items = out.Results.Items[:todayResultCap]
+	}
+	out.Results.Health = todayHealthForItems(out.Results.Items, now)
+}
+
+func (s *TodayService) folderReceiptTodayItem(offer FolderOffer, now time.Time) (TodayItem, bool) {
+	if offer.Outcome == nil || offer.ResolvedAt == nil || offer.ResolvedAt.After(now) ||
+		now.Sub(*offer.ResolvedAt) > todayFolderReceiptWindow || offer.Outcome.WorkspaceID == "" || s.workspaces == nil {
+		return TodayItem{}, false
+	}
+	ws, err := s.workspaces.Get(offer.Outcome.WorkspaceID)
+	if err != nil || ws == nil || ws.ID != offer.Outcome.WorkspaceID || !todaySafeSlug.MatchString(ws.FolderSlug) {
+		return TodayItem{}, false
+	}
+	route := "/workspaces/" + url.PathEscape(ws.FolderSlug)
+	kind := offer.Outcome.Kind
+	var title, detail string
+	switch kind {
+	case FolderChoiceProject:
+		title = "Set up " + ws.Name
+		parts := make([]string, 0, 4)
+		for _, row := range offer.Outcome.Receipt {
+			switch row.Kind {
+			case "folder":
+				parts = append(parts, "Linked "+row.Name)
+			case "blueprint":
+				parts = append(parts, "Blueprint: "+row.Name)
+			case "agent":
+				parts = append(parts, "Agent: "+row.Name)
+			case "task":
+				parts = append(parts, "First task: "+row.Name)
+			}
+		}
+		detail = strings.Join(parts, " · ")
+	case FolderChoiceTidy:
+		folder := strings.TrimSpace(offer.Subject.Name)
+		if folder == "" {
+			return TodayItem{}, false
+		}
+		title = "Set up File Janitor for " + folder
+		if offer.Outcome.Existing {
+			title = "Opened File Janitor for " + folder
+		}
+		detail = "Folder ready for review"
+		route += "?panel=file-janitor"
+	default:
+		return TodayItem{}, false
+	}
+	return TodayItem{
+		ID: offer.ID, Kind: "folder_setup", Title: truncateRunes(title, 200),
+		Detail: truncateRunes(detail, 500), Attribution: truncateRunes(ws.Name, 120),
+		Route: route, SourceAt: *offer.ResolvedAt,
+		Ref: dailybrief.SourceRef{WorkspaceID: ws.ID, EntityType: "folder_setup", EntityID: offer.ID, Timestamp: *offer.ResolvedAt},
+	}, true
 }
 
 // todayJanitorWindow is how recent a File Janitor action must be to appear.

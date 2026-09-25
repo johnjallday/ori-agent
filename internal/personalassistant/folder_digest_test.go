@@ -718,7 +718,10 @@ func (c *fakeFolderCreator) CreateProjectWorkspace(_ context.Context, req Folder
 		id = "ws-" + strings.ToLower(req.Name)
 		c.byOffer[req.OfferID] = id
 	}
-	return FolderCreateResult{WorkspaceID: id, Route: "/workspaces/" + id, Created: !existed}, nil
+	return FolderCreateResult{
+		WorkspaceID: id, Route: "/workspaces/" + id, Created: !existed,
+		Receipt: []FolderReceiptRow{{Kind: "workspace", Name: req.Name, Route: "/workspaces/" + id}, {Kind: "folder", Name: req.Name, Detail: "linked as primary"}},
+	}, nil
 }
 
 // A confirmed plan on the card: the assistant sets the workspace up itself
@@ -755,6 +758,9 @@ func TestFolderDigest_DecideCreatesTheWorkspaceWhenAsked(t *testing.T) {
 		decided.Outcome.Route != "/workspaces/ws-thesis" || decided.Outcome.Blueprint != "writing-project" || !decided.Outcome.Remembered {
 		t.Fatalf("decided=%+v outcome=%+v", decided, decided.Outcome)
 	}
+	if decided.Outcome.Receipt == nil || len(decided.Outcome.Receipt) != 2 || decided.Outcome.Receipt[1].Kind != "folder" {
+		t.Fatalf("receipt not copied from creator: %+v", decided.Outcome)
+	}
 	if len(creator.requests) != 1 {
 		t.Fatalf("creator called %d times", len(creator.requests))
 	}
@@ -769,12 +775,47 @@ func TestFolderDigest_DecideCreatesTheWorkspaceWhenAsked(t *testing.T) {
 
 	// The same click again returns the stored result without creating again.
 	again, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, Create: true, RequestID: "req-setup"})
-	if err != nil || again.Status != FolderOfferResolved || again.Outcome.WorkspaceID != "ws-thesis" || len(creator.requests) != 1 {
+	if err != nil || again.Status != FolderOfferResolved || again.Outcome.WorkspaceID != "ws-thesis" ||
+		len(again.Outcome.Receipt) != 2 || len(creator.requests) != 1 {
 		t.Fatalf("replay=%+v err=%v creator calls=%d", again, err, len(creator.requests))
 	}
 	// And a resolved offer takes no second yes.
 	if _, err := f.service.Decide(ctx, "local", offer.ID, FolderDecisionInput{Decision: FolderDecisionYes, Choice: FolderChoiceProject, Create: true, RequestID: "req-again"}); !errors.Is(err, ErrFolderOfferDecided) {
 		t.Fatalf("second yes err=%v", err)
+	}
+}
+
+func TestFolderDigest_RecentReceiptsIncludeProjectsAndTidyWithinSevenDays(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	f.service.deps.Creator = &fakeFolderCreator{}
+	project, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Decide(ctx, "local", project.ID, FolderDecisionInput{
+		Decision: FolderDecisionYes, Choice: FolderChoiceProject, Create: true, RequestID: "create-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A second real tidy outcome is resolved through the same service.
+	f.now = f.now.Add(time.Minute)
+	tidy, err := f.service.ScanChip(ctx, "local", "downloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Decide(ctx, "local", tidy.ID, FolderDecisionInput{
+		Decision: FolderDecisionYes, Choice: FolderChoiceTidy, RequestID: "tidy-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := f.service.RecentReceipts(ctx, "local", f.now.Add(-7*24*time.Hour))
+	if err != nil || len(rows) != 2 || rows[0].Outcome.Kind != FolderChoiceTidy || len(rows[1].Outcome.Receipt) != 2 {
+		t.Fatalf("recent receipts = %+v, err=%v", rows, err)
+	}
+	rows, err = f.service.RecentReceipts(ctx, "local", f.now.Add(time.Second))
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("expired receipts = %+v, err=%v", rows, err)
 	}
 }
 

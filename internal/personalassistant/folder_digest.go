@@ -185,6 +185,7 @@ type FolderCreateResult struct {
 	// Created is false when a workspace made for this offer already existed
 	// (a retried click) and was reused.
 	Created bool
+	Receipt []FolderReceiptRow
 }
 
 // FolderWorkspaceCreator is the host seam that creates the workspace for a
@@ -293,6 +294,27 @@ func (s *FolderDigestService) SetMissionUnresolved(fn func(id string) bool) {
 	if s != nil {
 		s.deps.MissionUnresolved = fn
 	}
+}
+
+// RecentReceipts reads only settled offers with outcomes in the requested
+// window. It returns the stored receipt, never a reconstructed claim about
+// what a workspace may contain today. Tidy outcomes are included too.
+func (s *FolderDigestService) RecentReceipts(ctx context.Context, userID string, since time.Time) ([]FolderOffer, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrRepairNeeded
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	result := []FolderOffer{}
+	for _, offer := range doc.Offers {
+		if offer.Status == FolderOfferResolved && offer.Outcome != nil && offer.ResolvedAt != nil && !offer.ResolvedAt.Before(since) {
+			result = append(result, offer)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool { return result[i].ResolvedAt.After(*result[j].ResolvedAt) })
+	return result, nil
 }
 
 // ResolvedProjectOfferForKey finds the resolved project offer whose subject
@@ -746,6 +768,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 				offer.Outcome.WorkspaceID = created.WorkspaceID
 				offer.Outcome.Route = created.Route
 				offer.Outcome.Blueprint, _, _ = s.blueprintFor(offer.Subject.Shape)
+				offer.Outcome.Receipt = append([]FolderReceiptRow(nil), created.Receipt...)
 				resolvedNow = true
 			}
 		}

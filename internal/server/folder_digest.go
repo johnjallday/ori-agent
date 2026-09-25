@@ -117,7 +117,10 @@ func (l folderWorkspaceLinker) LinkFolder(ctx context.Context, req personalassis
 		ref, err := folderWS.GetDirectoryReference(existing)
 		switch {
 		case err == nil && ref != nil && filepath.Clean(ref.Path) == filepath.Clean(req.Path):
-			return personalassistant.FolderLinkResult{Route: route, DirectoryID: existing}, nil
+			return personalassistant.FolderLinkResult{
+				Route: route, DirectoryID: existing,
+				FirstTaskSeeded: l.seedShownFolderTask(folderWS, req),
+			}, nil
 		case err != nil || ref == nil:
 			// A dangling primary id; the shown folder takes over.
 		case l.insideWorkspaceFolder(req.WorkspaceID, ref.Path):
@@ -153,19 +156,31 @@ func (l folderWorkspaceLinker) LinkFolder(ctx context.Context, req personalassis
 	}
 
 	result := personalassistant.FolderLinkResult{Route: route, DirectoryID: dirID}
-	if l.tasks != nil {
-		description, details := personalassistant.FolderFirstTask(req.Shape)
-		seeded, err := l.tasks.SeedStarterTasks(req.WorkspaceID, projecttemplates.Template{
-			ID:           "folder-digest",
-			StarterTasks: []projecttemplates.StarterTask{{Description: description, Details: details}},
-		})
-		if err != nil {
-			logger.Warn("Failed to seed the shown folder's first task", logger.Fields{"workspace_id": req.WorkspaceID, "error": err})
-		}
-		result.FirstTaskSeeded = seeded > 0
-	}
+	result.FirstTaskSeeded = l.seedShownFolderTask(folderWS, req)
 	logger.Debug("Linked shown folder to workspace", logger.Fields{"workspace_id": req.WorkspaceID, "directory_id": dirID, "shape": string(req.Shape)})
 	return result, nil
+}
+
+// seedShownFolderTask is safe on a replay after a successful link or a
+// partially completed seed; it never adds a second starter task.
+func (l folderWorkspaceLinker) seedShownFolderTask(ws *workspace.Workspace, req personalassistant.FolderLinkRequest) bool {
+	for _, task := range ws.Tasks {
+		if task.Context["template_id"] == "folder-digest" && task.Context["template_starter_task"] == true {
+			return true
+		}
+	}
+	if l.tasks == nil {
+		return false
+	}
+	description, details := personalassistant.FolderFirstTask(req.Shape)
+	seeded, err := l.tasks.SeedStarterTasks(req.WorkspaceID, projecttemplates.Template{
+		ID:           "folder-digest",
+		StarterTasks: []projecttemplates.StarterTask{{Description: description, Details: details}},
+	})
+	if err != nil {
+		logger.Warn("Failed to seed the shown folder's first task", logger.Fields{"workspace_id": req.WorkspaceID, "error": err})
+	}
+	return seeded > 0
 }
 
 // folderWorkspaceCreator sets a project workspace up on the assistant's
@@ -203,8 +218,12 @@ func (c folderWorkspaceCreator) CreateProjectWorkspace(ctx context.Context, req 
 	if err != nil {
 		return personalassistant.FolderCreateResult{}, err
 	}
+	receipt, err := c.handler.FolderOfferWorkspaceReceipt(workspaceID, created)
+	if err != nil {
+		return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderOutcomeUnavailable
+	}
 	logger.Info("Set up the shown folder's workspace", logger.Fields{"workspace_id": workspaceID, "blueprint": req.Blueprint, "created": created})
-	return personalassistant.FolderCreateResult{WorkspaceID: workspaceID, Route: link.Route, Created: created}, nil
+	return personalassistant.FolderCreateResult{WorkspaceID: workspaceID, Route: link.Route, Created: created, Receipt: receipt}, nil
 }
 
 // existingForOffer finds the user's active workspace already created for the

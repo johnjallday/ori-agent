@@ -110,6 +110,56 @@ try {
   await page.goto(`${base}/?panel=today`);
   await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
   await shot('06-reset-rearms-prompt');
+  await page.locator('#personalAssistantFolderChips button[data-chip="documents"]').click();
+  await page.locator('#personalAssistantFolderOffer').waitFor({ state: 'visible' });
+  await page.locator('#personalAssistantFolderOfferActions').getByText('Start with Thesis').click();
+  await shot('07-project-confirm');
+  let setupRequest;
+  page.on('request', request => {
+    if (request.url().includes('/folder-digest/offers/') && request.url().endsWith('/decide')) {
+      const body = request.postDataJSON();
+      if (body?.create === true) setupRequest = { url: request.url(), body };
+    }
+  });
+  await page
+    .locator('#personalAssistantFolderOfferActions')
+    .getByText('Set up', { exact: true })
+    .click();
+  await page.locator('#personalAssistantFolderReceipt li').first().waitFor({ timeout: 30000 });
+  console.log(
+    'project receipt:',
+    await page.locator('#personalAssistantFolderReceipt').innerText()
+  );
+  await shot('08-project-receipt');
+  if (!setupRequest) throw new Error('The Set up request was not captured');
+  const replay = await page.evaluate(async ({ url, body }) => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return { status: response.status, data: await response.json() };
+  }, setupRequest);
+  if (replay.status !== 200 || !replay.data?.offer?.outcome?.receipt?.length) {
+    throw new Error(`The repeated Set up click lost its receipt: ${JSON.stringify(replay)}`);
+  }
+  console.log('Repeated request preserved receipt:', replay.data.offer.outcome.receipt[0].name);
+  await page.locator('#personalAssistantFolderShowBtn').click();
+  await page.locator('#personalAssistantFolderChips button[data-chip="desktop"]').click();
+  await page.locator('#personalAssistantFolderOffer').waitFor({ state: 'visible' });
+  await page
+    .locator('#personalAssistantFolderOfferActions')
+    .getByText('Set up', { exact: true })
+    .click();
+  await page.locator('#personalAssistantFolderReceipt li').first().waitFor({ timeout: 30000 });
+  console.log('corpus receipt:', await page.locator('#personalAssistantFolderReceipt').innerText());
+  await shot('09-corpus-receipt');
+  await page.reload();
+  await page.locator('#personalAssistantLauncher').click();
+  await page.locator('#personalAssistantTodayResults li').first().waitFor({ timeout: 30000 });
+  console.log('Today results:', await page.locator('#personalAssistantTodayResults').innerText());
+  await page.locator('#personalAssistantTodayResults').scrollIntoViewIfNeeded();
+  await shot('10-seven-day-receipts');
   await page.goto(`${base}/?quest=build-hq`);
   console.log(
     'Map quest after built:',

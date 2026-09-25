@@ -158,6 +158,14 @@ export function folderOfferView(offer, options = {}) {
     needsPick: offer.needs_pick === true
   };
   const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
+  if (
+    status === 'resolved' &&
+    offer?.outcome?.kind === 'project' &&
+    offer?.outcome?.receipt?.length
+  ) {
+    view.question = "Here's what I set up:";
+    view.reason = '';
+  }
   // A yes needs the folder's path, and a dialog-chosen folder is held in
   // memory only: after a server restart the card asks for the folder again
   // before offering anything a yes would need.
@@ -279,6 +287,26 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirm 
   }
 }
 
+// A receipt is read only from the resolved server outcome; the workspace name
+// and route are never reconstructed from the folder name or blueprint plan.
+export function folderReceiptView(offer) {
+  if (offer?.status !== 'resolved' || offer?.outcome?.kind !== 'project') return { visible: false };
+  const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
+  if (!rows.length) return { visible: false }; // an older stored offer
+  const workspace = rows.find(row => row.kind === 'workspace');
+  const route = resolvedRouteFor(offer);
+  return {
+    visible: true,
+    rows: rows.map(row => ({
+      kind: String(row.kind || ''),
+      name: String(row.name || ''),
+      detail: String(row.detail || '')
+    })),
+    route,
+    openLabel: `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`
+  };
+}
+
 // folderOutcomeNote is the line shown under a decided offer.
 export function folderOutcomeNote(offer) {
   const status = String(offer?.status || '').trim();
@@ -364,6 +392,7 @@ function elements() {
     headline: document.getElementById('personalAssistantFolderOfferHeadline'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
+    receipt: document.getElementById('personalAssistantFolderReceipt'),
     actions: document.getElementById('personalAssistantFolderOfferActions'),
     offerNote: document.getElementById('personalAssistantFolderOfferNote'),
     error: document.getElementById('personalAssistantFolderOfferError')
@@ -440,6 +469,7 @@ function renderOffer() {
   const els = elements();
   if (!els?.offer) return;
   const view = folderOfferView(state.offer, { confirm: state.confirm });
+  const receipt = folderReceiptView(state.offer);
   els.offer.hidden = !view.visible;
   els.root.dataset.state = view.visible
     ? `offer-${view.verdict}`
@@ -463,10 +493,37 @@ function renderOffer() {
   }
   setText(els.question, view.question, false);
   setText(els.reason, view.reason, false);
+  if (els.receipt) {
+    els.receipt.replaceChildren();
+    els.receipt.hidden = !receipt.visible;
+    if (receipt.visible)
+      receipt.rows.forEach(row => {
+        const li = document.createElement('li');
+        const labels = {
+          workspace: 'Workspace',
+          folder: 'Folder',
+          blueprint: 'Blueprint',
+          agent: 'Agent',
+          task: 'First task'
+        };
+        li.append(
+          document.createTextNode(
+            `${labels[row.kind] || 'Set up'} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`
+          )
+        );
+        els.receipt.append(li);
+      });
+  }
   if (els.actions) {
     els.actions.replaceChildren();
-    els.actions.hidden = view.decided;
-    if (!view.decided) {
+    els.actions.hidden = view.decided && !receipt.route;
+    if (receipt.route) {
+      const open = document.createElement('a');
+      open.className = 'btn btn-sm btn-primary';
+      open.href = receipt.route;
+      open.textContent = receipt.openLabel;
+      els.actions.append(open);
+    } else if (!view.decided) {
       view.actions.forEach(action => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -485,13 +542,14 @@ function renderOffer() {
     }
   }
   if (els.offerNote) {
-    const note = state.progress || (view.decided ? folderOutcomeNote(state.offer) : '');
+    const note =
+      state.progress || (view.decided && !receipt.visible ? folderOutcomeNote(state.offer) : '');
     els.offerNote.replaceChildren();
     els.offerNote.hidden = !note;
     if (note) {
       els.offerNote.append(note);
       const route = String(state.offer?.outcome?.route || '').trim();
-      if (view.status === 'resolved' && route.startsWith('/')) {
+      if (view.status === 'resolved' && !receipt.visible && route.startsWith('/')) {
         const link = document.createElement('a');
         link.href = route;
         link.textContent = 'Open it';
@@ -710,6 +768,9 @@ async function decide(action) {
     // its route: the first review batch, the workspace that already manages
     // the folder, or the new workspace.
     const route = resolvedRouteFor(state.offer);
+    // The server-authored receipt is the confirmation of what Set up actually
+    // made. Stay on it until the user presses Open <workspace>.
+    if (action.create === true && folderReceiptView(state.offer).visible) return;
     if (action.walkthrough && (await revealSetupWalkthrough(state.offer))) return;
     if (route && typeof window !== 'undefined') window.location.assign(route);
   } catch (_) {

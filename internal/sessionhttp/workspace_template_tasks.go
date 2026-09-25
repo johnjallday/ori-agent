@@ -59,6 +59,13 @@ func (h *Handler) seedTemplateStarterTasks(workspaceID string, tpl projecttempla
 
 	seeded := 0
 	err := store.Update(id, func(ws *agentworkspace.Workspace) error {
+		if tpl.ID == "folder-digest" {
+			for _, existing := range ws.Tasks {
+				if existing.Context[taskContextTemplateID] == tpl.ID && existing.Context[taskContextTemplateStarterTask] == true {
+					return nil // a retried folder Set up must not duplicate the first task
+				}
+			}
+		}
 		tasks := make([]agentworkspace.Task, 0, len(tpl.StarterTasks))
 		for _, st := range tpl.StarterTasks {
 			task := agentworkspace.Task{

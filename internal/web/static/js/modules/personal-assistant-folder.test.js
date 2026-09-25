@@ -8,6 +8,7 @@ import {
   firstFolderPromptView,
   folderOfferView,
   folderOutcomeNote,
+  folderReceiptView,
   folderProjectModalOptions
 } from './personal-assistant-folder.js';
 
@@ -28,6 +29,39 @@ test('the action is offered only to an active or paused assistant', () => {
   ]) {
     assert.equal(folderActionAvailable({ state }), false, state);
   }
+});
+
+test('resolved project receipt names only server rows and offers the canonical workspace route', () => {
+  const offer = {
+    status: 'resolved',
+    verdict: 'project',
+    subject: { name: 'Draft' },
+    outcome: {
+      kind: 'project',
+      route: '/workspaces/thesis',
+      receipt: [
+        { kind: 'workspace', name: '<Thesis>', route: '/workspaces/thesis' },
+        { kind: 'folder', name: 'Draft', detail: 'linked as primary' },
+        { kind: 'task', name: 'Summarize current draft' }
+      ]
+    }
+  };
+  assert.deepEqual(folderReceiptView(offer), {
+    visible: true,
+    rows: [
+      { kind: 'workspace', name: '<Thesis>', detail: '' },
+      { kind: 'folder', name: 'Draft', detail: 'linked as primary' },
+      { kind: 'task', name: 'Summarize current draft', detail: '' }
+    ],
+    route: '/workspaces/thesis',
+    openLabel: 'Open <Thesis>'
+  });
+  assert.equal(folderOfferView(offer).question, "Here's what I set up:");
+  assert.equal(
+    folderReceiptView({ ...offer, outcome: { ...offer.outcome, route: '//evil' } }).route,
+    ''
+  );
+  assert.equal(folderReceiptView({ ...offer, outcome: { kind: 'tidy' } }).visible, false);
 });
 
 test('the first-folder hand-over is an active-only server receipt, never a pre-HQ prompt', () => {
