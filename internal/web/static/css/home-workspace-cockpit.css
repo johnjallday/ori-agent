@@ -710,6 +710,12 @@
   body.home-command-page {
     --home-assistant-clearance: 104px;
   }
+
+  /* The same room below the page, so scrolling to the end brings the map's
+     bottom-left dock up clear of the launcher instead of parking it under it. */
+  body.home-command-page .home-command-main {
+    padding-bottom: calc(14px + var(--home-assistant-clearance));
+  }
 }
 
 .cockpit-flyout-body > * {

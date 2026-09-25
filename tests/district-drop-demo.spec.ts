@@ -89,6 +89,8 @@ test('#346 join and #374 confirmed ungroup preserve the dropped coordinate', asy
 
   const dragToggle = page.locator('[data-map-drag]');
   await expect(dragToggle).toHaveAttribute('aria-pressed', 'false');
+  // Move lives under Arrange in Home's bottom-left dock.
+  await page.locator('[data-map-arrange]').click();
   await dragToggle.click();
   await expect(dragToggle).toHaveAttribute('aria-pressed', 'true');
 

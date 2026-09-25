@@ -443,6 +443,75 @@
   position: static;
   justify-content: flex-start;
 }
+/* Home's dock (home-workspace-map-ui-refresh). Home's personal assistant owns
+   the bottom-right corner, so there the camera (zoom, readout, Fit all) and
+   the tools (Arrange, help) share this bottom-left row too. The placement
+   actions are not in it: Arrange discloses them above the row. */
+.ws-map-dock-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+}
+/* An open disclosure's trigger reads as open by shape as well as colour: a
+   filled face and a bar along its lower edge. */
+.ws-map-control-dock.is-home .ws-map-ctl[aria-expanded="true"] {
+  border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.12);
+  box-shadow: inset 0 -3px 0 var(--ws-faction);
+  color: var(--ws-ink);
+}
+/* Move on is stated on Arrange itself — the words "Move on" and the same
+   doubled frame the Move toggle uses — so it stays visible while Arrange is
+   closed. */
+.ws-map-arrange[data-move="on"] {
+  border-style: double;
+  border-width: 3px;
+  font-weight: 700;
+}
+.ws-map-arrange-state[hidden] {
+  display: none;
+}
+/* Arrange's and help's disclosures follow their triggers inside the dock (so
+   Tab reaches them next) and open above it. Their size is bounded by the
+   THEATRE, which the map measures into --ws-map-theatre-w/-h and
+   --ws-map-dock-h (the dock wraps on narrow screens): a disclosure never runs
+   off the top or side of a short map; it scrolls inside itself instead. */
+.ws-map-dock-panel {
+  position: absolute;
+  z-index: 9;
+  left: 0;
+  bottom: calc(100% + 8px);
+  max-width: calc(var(--ws-map-theatre-w, 100vw) - 32px);
+  max-height: calc(var(--ws-map-theatre-h, 60vh) - var(--ws-map-dock-h, 58px) - 36px);
+  overflow: auto;
+}
+.ws-map-arrange-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  padding: 6px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  box-shadow: var(--ws-glow, none);
+}
+.ws-map-arrange-panel[hidden] {
+  display: none;
+}
+/* Restated at higher specificity: the base .ws-map-help rule further down
+   anchors the group page's help bottom-right, and would otherwise win. */
+.ws-map-help.ws-map-dock-panel {
+  right: auto;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(360px, calc(var(--ws-map-theatre-w, 100vw) - 32px));
+  max-height: calc(var(--ws-map-theatre-h, 60vh) - var(--ws-map-dock-h, 58px) - 36px);
+}
 /* Sentence case: these are actions. Uppercase is reserved for labels that name
    a region or a value (eyebrows, metric captions, status tags). */
 .ws-map-ctl {

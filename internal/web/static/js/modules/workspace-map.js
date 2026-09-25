@@ -459,6 +459,20 @@
   // Only a scoped mount carries any; Home draws none.
   var scopeUnits = [];
 
+  // Home's control dock (home-workspace-map-ui-refresh). Home is the unscoped
+  // chrome-less mount; its personal assistant owns the bottom-right corner, so
+  // every map control docks bottom-left: zoom, a visible Fit all, Arrange
+  // (which discloses the placement actions), and help. The group page and the
+  // legacy launcher keep their own presentations.
+  function homeDockMode() {
+    return hideChromeMode && !scopeGroupId;
+  }
+
+  // Which Home dock disclosure is open: '' | 'arrange' | 'help'. Module state,
+  // not DOM state, because Home re-mounts the map on nearly every refresh and a
+  // disclosure the user opened must not snap shut underneath them.
+  var dockPanel = '';
+
   function normalizeFrameInsets(raw) {
     var read = function (value) {
       var n = Number(value);
@@ -2987,18 +3001,15 @@
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-undo-reset hidden>Undo reset</button>' +
       '<button type="button" class="ws-map-ctl" data-map-help aria-expanded="false" aria-label="How the map works">?</button>' +
       '</div>';
+    if (homeDockMode()) return homeDockHTML(readOnly, snapOn);
     // Zoom only. Fit all, Center selected and Reset view moved into the
     // canvas context menu (#317): they are framing choices you make about a
     // spot on the map, so they belong under the cursor rather than in a
     // permanent strip across the bottom of it. Keyboard users reach them by
     // Shift+F10 on the focused canvas, which opens that same menu; 0 still
-    // resets the view directly.
-    var viewControls =
-      '<div class="ws-map-controls" role="group" aria-label="Map view controls">' +
-      '<button type="button" class="ws-map-ctl" data-map-zoom-out aria-label="Zoom out">−</button>' +
-      '<span class="ws-map-zoom" data-map-zoom-readout aria-hidden="true">100%</span>' +
-      '<button type="button" class="ws-map-ctl" data-map-zoom-in aria-label="Zoom in">+</button>' +
-      '</div>';
+    // resets the view directly. (Home's dock brings Fit all back as a button;
+    // see homeDockHTML.)
+    var viewControls = zoomControlsHTML('');
     // A group page sits under page-wide floating widgets (Ori Help, the
     // assistant) that own the viewport's bottom-right corner, so there both
     // clusters dock together at the bottom-left instead of one sitting under
@@ -3014,6 +3025,87 @@
         ? '<p class="ws-map-notice" role="status">Positions cannot be saved right now. You can still look around; building and moving are unavailable until the map layout loads.</p>'
         : '') +
       (scopeGroupId ? '' : viewControls) +
+      '<p class="ws-map-live" data-map-live role="status" aria-live="polite"></p>'
+    );
+  }
+
+  function zoomControlsHTML(extra) {
+    return (
+      '<div class="ws-map-controls" role="group" aria-label="Map view controls">' +
+      '<button type="button" class="ws-map-ctl" data-map-zoom-out aria-label="Zoom out">−</button>' +
+      '<span class="ws-map-zoom" data-map-zoom-readout aria-hidden="true">100%</span>' +
+      '<button type="button" class="ws-map-ctl" data-map-zoom-in aria-label="Zoom in">+</button>' +
+      extra +
+      '</div>'
+    );
+  }
+
+  /**
+   * Home's bottom-left dock.
+   *
+   * Two clusters in one row — the camera (zoom, readout, Fit all) and the
+   * tools (Arrange, help) — so the bottom-right corner stays the personal
+   * assistant's. Camera buttons never move a building. Arrange only DISCLOSES
+   * Move, Snap, and Reset layout: opening it changes nothing, and the Move
+   * state stays on the Arrange button itself so it is visible even while the
+   * disclosure is closed.
+   *
+   * Each disclosure follows its trigger in the markup, so Tab goes from
+   * Arrange straight into Move and Snap. Both open above the dock, and
+   * syncDockMetrics hands CSS the theatre's size so they scroll inside
+   * themselves rather than running off the top of a short map.
+   */
+  function homeDockHTML(readOnly, snapOn) {
+    var disabled = readOnly ? ' disabled' : '';
+    var arrangeOpen = dockPanel === 'arrange';
+    var helpOpen = dockPanel === 'help';
+    return (
+      buildBannerHTML() +
+      '<div class="ws-map-control-dock is-home" data-map-dock>' +
+      zoomControlsHTML(
+        '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-fit>Fit all</button>'
+      ) +
+      '<div class="ws-map-dock-tools" role="group" aria-label="Map tools">' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide ws-map-arrange" data-map-arrange aria-controls="wsMapArrangePanel" aria-expanded="' +
+      (arrangeOpen ? 'true' : 'false') +
+      '" data-move="' +
+      (moveModeEnabled ? 'on' : 'off') +
+      '">Arrange<span class="ws-map-arrange-state" data-map-arrange-state' +
+      (moveModeEnabled ? '' : ' hidden') +
+      '> · Move on</span></button>' +
+      '<div class="ws-map-dock-panel ws-map-arrange-panel" id="wsMapArrangePanel" data-map-arrange-panel role="group" aria-label="Arrange buildings"' +
+      (arrangeOpen ? '' : ' hidden') +
+      '>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-drag aria-pressed="' +
+      (moveModeEnabled ? 'true' : 'false') +
+      '"' +
+      disabled +
+      '>Move: ' +
+      (moveModeEnabled ? 'on' : 'off') +
+      '</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-snap aria-pressed="' +
+      (snapOn ? 'true' : 'false') +
+      '"' +
+      disabled +
+      '>Snap to grid: ' +
+      (snapOn ? 'on' : 'off') +
+      '</button>' +
+      // Reset layout moves every building; Reset view (the canvas menu, or 0)
+      // only moves the camera. Different words, different places (FR-109).
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-reset-layout' +
+      disabled +
+      '>Reset layout…</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-undo-reset hidden>Undo reset</button>' +
+      '</div>' +
+      '<button type="button" class="ws-map-ctl" data-map-help aria-controls="wsMapHelpPanel" aria-expanded="' +
+      (helpOpen ? 'true' : 'false') +
+      '" aria-label="How the map works">?</button>' +
+      helpHTML(helpOpen) +
+      '</div>' +
+      '</div>' +
+      (readOnly
+        ? '<p class="ws-map-notice" role="status">Positions cannot be saved right now. You can still look around; building and moving are unavailable until the map layout loads.</p>'
+        : '') +
       '<p class="ws-map-live" data-map-live role="status" aria-live="polite"></p>'
     );
   }
@@ -3038,16 +3130,28 @@
    * for the ones that have no button — drag to pan, pinch to zoom, Alt to
    * bypass snapping.
    */
-  function helpHTML() {
+  function helpHTML(open) {
+    var home = homeDockMode();
     return (
-      '<div class="ws-map-help" data-map-help-panel hidden role="region" aria-label="How the map works">' +
+      '<div class="ws-map-help' +
+      (home ? ' ws-map-dock-panel' : '') +
+      '"' +
+      (home ? ' id="wsMapHelpPanel"' : '') +
+      ' data-map-help-panel' +
+      (open ? '' : ' hidden') +
+      ' role="region" aria-label="How the map works">' +
       '<h4>How the map works</h4>' +
       '<ul>' +
       '<li><b>Pan</b> — drag empty space, or scroll/swipe.</li>' +
       '<li><b>Zoom</b> — pinch, ' +
       (isApplePlatform() ? '⌘' : 'Ctrl') +
       '+scroll, the + / − buttons, or the + / − keys.</li>' +
-      '<li><b>Move</b> — turn Move on, then drag a building or district. Buildings can reposition, join another expanded district, or leave their group on open ground; membership changes ask for confirmation. A district moves with all its workspaces and never changes membership.</li>' +
+      (home
+        ? '<li><b>Fit all</b> — the Fit all button frames every building. It moves the camera only.</li>'
+        : '') +
+      '<li><b>Move</b> — ' +
+      (home ? 'open Arrange and ' : '') +
+      'turn Move on, then drag a building or district. Buildings can reposition, join another expanded district, or leave their group on open ground; membership changes ask for confirmation. A district moves with all its workspaces and never changes membership.</li>' +
       '<li><b>Keyboard move</b> — with Move on, select a building or district and use an arrow key to begin; press Enter to save or Escape to cancel.</li>' +
       (scopeGroupId
         ? "<li><b>Agents</b> — the group's Commander and specialists stand on the ground with its workspaces. Select one to open its Unit Sheet; with Move on, drag it like a building.</li>"
@@ -3059,7 +3163,9 @@
       '<li><b>Escape</b> — cancels whatever is in progress without saving.</li>' +
       '<li><b>Right-click</b> — anything on the map has a menu: a building, a district, the HQ site, or empty ground. Shift+F10 does the same from the keyboard.</li>' +
       '</ul>' +
-      '<p class="ws-map-help-note">Fit all, Center and Reset view live on the empty-ground menu (0 resets the view directly) and move the camera. Reset layout moves the buildings — and can be undone.</p>' +
+      (home
+        ? '<p class="ws-map-help-note">Fit all, Center and Reset view move the camera: Fit all is a button here, and all three are on the empty-ground menu (0 resets the view directly). Reset layout, under Arrange, moves the buildings — and can be undone.</p>'
+        : '<p class="ws-map-help-note">Fit all, Center and Reset view live on the empty-ground menu (0 resets the view directly) and move the camera. Reset layout moves the buildings — and can be undone.</p>') +
       '</div>'
     );
   }
@@ -3636,6 +3742,8 @@
       // deliberately never refits a camera the user has since moved (FR-106).
       ensureCamera(container);
       applyCamera(container);
+      // The dock may have wrapped onto another row; its disclosures re-size.
+      syncDockMetrics(container);
     });
     resizeObserver.observe(container);
   }
@@ -6521,6 +6629,16 @@
       }
       toggle.textContent = 'Move: ' + (moveModeEnabled ? 'on' : 'off');
     }
+    // Home's Arrange trigger carries the Move state too, so turning Move on and
+    // closing Arrange never leaves an invisible mode behind (text, not colour).
+    if (homeDockMode()) {
+      var arrange = container.querySelector('[data-map-arrange]');
+      if (arrange && arrange.setAttribute) {
+        arrange.setAttribute('data-move', moveModeEnabled ? 'on' : 'off');
+      }
+      var arrangeState = container.querySelector('[data-map-arrange-state]');
+      if (arrangeState) arrangeState.hidden = !moveModeEnabled;
+    }
     var available = writable && moveModeEnabled;
     var canvas = container.querySelector('[data-ws-map-viewport]');
     if (canvas && canvas.classList) {
@@ -6633,7 +6751,7 @@
   function isInteractiveTarget(target) {
     if (!target || typeof target.closest !== 'function') return false;
     return !!target.closest(
-      '.ws-map-tile, .ws-map-district-tag, .ws-map-district-handle, .ws-map-pad, .ws-map-controls, .ws-map-actions, .ws-map-build, button, a, input, select, textarea, [data-ws-check], [role="checkbox"], [data-harvest-pile]'
+      '.ws-map-tile, .ws-map-district-tag, .ws-map-district-handle, .ws-map-pad, .ws-map-controls, .ws-map-actions, .ws-map-control-dock, .ws-map-dock-panel, .ws-map-build, button, a, input, select, textarea, [data-ws-check], [role="checkbox"], [data-harvest-pile]'
     );
   }
 
@@ -6945,11 +7063,14 @@
     };
   }
 
-  // The height the bottom controls take. Normally the fixed one-row strip; the
-  // group page's docked controls wrap onto more rows on a narrow screen, so
-  // there the real dock is measured and the taller of the two is reserved.
+  // The height the bottom controls take. Normally the fixed one-row strip; a
+  // docked control row (the group page's, and Home's) wraps onto more rows on
+  // a narrow screen, so there the real dock is measured and the taller of the
+  // two is reserved. Only the dock row counts: Home's Arrange and help
+  // disclosures are transient overlays above it, not part of the strip, so
+  // opening one never changes what Fit all frames.
   function controlStripHeight(canvas) {
-    if (!scopeGroupId || !canvas || typeof canvas.closest !== 'function') {
+    if ((!scopeGroupId && !homeDockMode()) || !canvas || typeof canvas.closest !== 'function') {
       return CONTROL_STRIP_HEIGHT;
     }
     var theatre = canvas.closest('.ws-map-theatre');
@@ -9515,10 +9636,177 @@
     var panel = container.querySelector('[data-map-help-panel]');
     if (help && panel && help.addEventListener) {
       help.addEventListener('click', function () {
+        // Home's help is one of the dock's two disclosures, so it goes through
+        // the one open/closed authority that keeps it and Arrange exclusive.
+        if (homeDockMode()) {
+          setDockPanel(container, dockPanel === 'help' ? '' : 'help');
+          return;
+        }
         panel.hidden = !panel.hidden;
         if (help.setAttribute) help.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
       });
     }
+  }
+
+  // ---------- Home's control dock ----------
+
+  /**
+   * Open one Home dock disclosure, or none ('').
+   *
+   * Only one is ever open, so help and Arrange never stack. When the panel
+   * holding focus closes, focus moves to that panel's trigger first — a hidden
+   * control must never keep focus — and `focusTrigger` does the same for an
+   * explicit dismissal such as Escape.
+   */
+  function setDockPanel(container, next, options) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    var opts = options || {};
+    var closing = dockPanel;
+    dockPanel = next === 'arrange' || next === 'help' ? next : '';
+    var panels = {
+      arrange: container.querySelector('[data-map-arrange-panel]'),
+      help: container.querySelector('[data-map-help-panel]')
+    };
+    var triggers = {
+      arrange: container.querySelector('[data-map-arrange]'),
+      help: container.querySelector('[data-map-help]')
+    };
+    var focusBack = null;
+    if (closing && closing !== dockPanel) {
+      var closingPanel = panels[closing];
+      var active = typeof document !== 'undefined' ? document.activeElement : null;
+      var heldFocus =
+        !!active &&
+        !!closingPanel &&
+        typeof closingPanel.contains === 'function' &&
+        closingPanel.contains(active);
+      if (opts.focusTrigger || heldFocus) focusBack = triggers[closing];
+    }
+    ['arrange', 'help'].forEach(function (name) {
+      if (panels[name]) panels[name].hidden = dockPanel !== name;
+      if (triggers[name] && triggers[name].setAttribute) {
+        triggers[name].setAttribute('aria-expanded', dockPanel === name ? 'true' : 'false');
+      }
+    });
+    if (focusBack && typeof focusBack.focus === 'function') focusBack.focus();
+  }
+
+  // Escape inside the dock or an open disclosure closes that disclosure and
+  // returns focus to its trigger. An active gesture keeps its priority: while
+  // a move, drag, resize, or reviewed placement is in progress, Escape is left
+  // to cancel that rather than silently closing a panel instead.
+  function handleDockKey(container, event) {
+    if (!event || event.key !== 'Escape' || !dockPanel) return;
+    if (
+      dragState ||
+      clusterDrag ||
+      resizeState ||
+      moveState ||
+      (placementSession && placementSession.container === container)
+    ) {
+      return;
+    }
+    if (event.preventDefault) event.preventDefault();
+    // One Escape closes one thing: Home's own Escape handling (header flyouts)
+    // must not also run for this press.
+    if (event.stopPropagation) event.stopPropagation();
+    setDockPanel(container, '', { focusTrigger: true });
+  }
+
+  function bindHomeDock(container) {
+    if (!homeDockMode()) return;
+    var arrange = container.querySelector('[data-map-arrange]');
+    if (arrange && arrange.addEventListener) {
+      arrange.addEventListener('click', function () {
+        setDockPanel(container, dockPanel === 'arrange' ? '' : 'arrange');
+      });
+    }
+    // The visible Fit all is the SAME action as the canvas menu's: the same
+    // framing, the same limits, the same announcement — and, like every camera
+    // action, it saves only the camera, never a building position.
+    var fit = container.querySelector('[data-map-fit]');
+    if (fit && fit.addEventListener) {
+      fit.addEventListener('click', function () {
+        announce(container, fitAllAnnouncement(fitAll(container)));
+      });
+    }
+    ['[data-map-dock]', '[data-map-arrange-panel]', '[data-map-help-panel]'].forEach(
+      function (selector) {
+        var el = container.querySelector(selector);
+        if (el && typeof el.addEventListener === 'function') {
+          el.addEventListener('keydown', function (event) {
+            handleDockKey(container, event);
+          });
+        }
+      }
+    );
+    syncDockMetrics(container);
+  }
+
+  /**
+   * Tell CSS how big the theatre and the dock are, so the disclosures above
+   * the dock can size themselves against what is actually left of the map
+   * (--ws-map-theatre-w/-h, --ws-map-dock-h). The dock wraps onto more rows on
+   * a narrow screen, and a disclosure positioned against the dock cannot see
+   * the theatre's size any other way.
+   */
+  function syncDockMetrics(container) {
+    if (!homeDockMode() || !container || typeof container.querySelector !== 'function') return;
+    var dock = container.querySelector('.ws-map-control-dock');
+    var theatre =
+      dock && typeof dock.closest === 'function' ? dock.closest('.ws-map-theatre') : null;
+    if (!theatre || !theatre.style || typeof theatre.style.setProperty !== 'function') return;
+    var metrics = {
+      '--ws-map-dock-h': Number(dock.offsetHeight) || 0,
+      '--ws-map-theatre-w': Number(theatre.clientWidth) || 0,
+      '--ws-map-theatre-h': Number(theatre.clientHeight) || 0
+    };
+    Object.keys(metrics).forEach(function (name) {
+      if (metrics[name] > 0) theatre.style.setProperty(name, metrics[name] + 'px');
+    });
+  }
+
+  // Home re-mounts the map on nearly every refresh, which replaces the dock's
+  // buttons. Remember which one had focus so a keyboard user is not dropped
+  // onto <body> by a background task event.
+  var DOCK_FOCUS_KEYS = [
+    'data-map-zoom-out',
+    'data-map-zoom-in',
+    'data-map-fit',
+    'data-map-arrange',
+    'data-map-help',
+    'data-map-drag',
+    'data-map-snap',
+    'data-map-reset-layout',
+    'data-map-undo-reset'
+  ];
+
+  function dockFocusKey(container) {
+    if (!homeDockMode() || typeof document === 'undefined') return '';
+    var active = document.activeElement;
+    if (
+      !active ||
+      typeof active.hasAttribute !== 'function' ||
+      typeof container.contains !== 'function' ||
+      !container.contains(active)
+    ) {
+      return '';
+    }
+    for (var i = 0; i < DOCK_FOCUS_KEYS.length; i += 1) {
+      if (active.hasAttribute(DOCK_FOCUS_KEYS[i])) return DOCK_FOCUS_KEYS[i];
+    }
+    return '';
+  }
+
+  function restoreDockFocus(container, key) {
+    if (!key) return;
+    var target = container.querySelector('[' + key + ']');
+    // A control that came back hidden or disabled cannot hold focus; Arrange
+    // is the stable fallback because it always exists and owns its panel.
+    if (!target || target.hidden || target.disabled) {
+      target = container.querySelector('[data-map-arrange]');
+    }
+    if (target && typeof target.focus === 'function') target.focus();
   }
 
   // ---------- build mode ----------
@@ -10411,6 +10699,7 @@
     settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
     cancelPointerTranslations(container);
     var onScreen = renderedBuildingKeys(container);
+    var dockFocus = dockFocusKey(container);
     lastMount = { container: container, state: state };
 
     container.innerHTML = shellHTML(
@@ -10443,6 +10732,8 @@
     bindResizeHandles(container);
     bindResetLayout(container);
     bindPlacementControls(container);
+    bindHomeDock(container);
+    restoreDockFocus(container, dockFocus);
     if (preservedAnnouncement) {
       var liveAfterRemount = container.querySelector('[data-map-live]');
       if (liveAfterRemount) liveAfterRemount.textContent = preservedAnnouncement;
