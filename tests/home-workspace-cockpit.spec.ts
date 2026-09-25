@@ -122,10 +122,10 @@ test.describe('Home onboarding workspace gate', () => {
     await page.goto('/');
 
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
-    // Until a hire, the primary folder action is absent; the advanced creator
-    // is still available as a secondary header action.
+    // Until a hire, the folder action is absent; New Workspace is the header's
+    // primary creation action either way.
     await expect(page.locator('#cockpitShowFolderBtn')).toBeHidden();
-    await expect(page.locator('#cockpitCreateWorkspaceBtn')).toHaveClass(/modern-btn-secondary/);
+    await expect(page.locator('#cockpitCreateWorkspaceBtn')).toHaveClass(/modern-btn-primary/);
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toHaveCount(1);
     await expect(page.locator('.ws-map-tile[data-ws-id]')).toHaveCount(0);
@@ -1103,39 +1103,279 @@ test.describe('Responsive and regression hardening', () => {
     await expect(page.locator('#cockpitQuestsToggle')).toHaveCount(1);
   });
 
-  test('Updates and Quests are keyboard-reachable in document order after the guide and before the view toggle', async ({
+  test('header controls follow the visual grouping in document and focus order', async ({
     page
   }) => {
     await ensureWorkspace(page);
     await page.goto('/');
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
 
-    const order = await page.evaluate(() => {
-      const ids = [
-        'oriGuideMapTrigger',
-        'cockpitRailToggle',
-        'cockpitQuestsToggle',
-        'cockpitViewMap'
-      ];
-      return ids.map(id => {
-        const el = document.getElementById(id);
-        if (!el) return -1;
-        // Position among all elements, to compare relative document order.
-        return Array.from(document.querySelectorAll('*')).indexOf(el);
-      });
+    // Identity row (view switch, then actions, creation last), then the
+    // readout row (App Guide, filters, Updates, Quests, resources).
+    const ids = [
+      'cockpitViewMap',
+      'cockpitViewTree',
+      'cockpitCaptureBtn',
+      'cockpitSummaryBtn',
+      'cockpitShowFolderBtn',
+      'cockpitCreateWorkspaceBtn',
+      'oriGuideMapTrigger',
+      'cockpitSignalFilters',
+      'cockpitRailToggle',
+      'cockpitQuestsToggle',
+      'cockpitEconomy'
+    ];
+    const order = await page.evaluate(list => {
+      const all = Array.from(document.querySelectorAll('*'));
+      return list.map(id => all.indexOf(document.getElementById(id)));
+    }, ids);
+    order.forEach((position, index) => {
+      expect(position, ids[index]).toBeGreaterThan(-1);
+      if (index > 0) expect(position, ids[index]).toBeGreaterThan(order[index - 1]);
     });
-    const [guide, updates, quests, viewToggle] = order;
-    expect(guide).toBeGreaterThan(-1);
-    expect(updates).toBeGreaterThan(guide);
-    expect(quests).toBeGreaterThan(updates);
-    expect(viewToggle).toBeGreaterThan(quests);
 
-    // And genuinely Tab-reachable: focusing the guide, then Tab, lands on
-    // Updates next (FR53 — logical DOM order backs a logical focus order).
-    await page.locator('#oriGuideMapTrigger').focus();
+    // Genuinely Tab-reachable in that order (FR53): Updates → Quests.
+    await page.locator('#cockpitQuestsToggle').waitFor({ state: 'visible' });
+    await page.locator('#cockpitRailToggle').focus();
     await page.keyboard.press('Tab');
-    await expect(page.locator('#cockpitRailToggle')).toBeFocused();
+    await expect(page.locator('#cockpitQuestsToggle')).toBeFocused();
   });
+});
+
+/**
+ * Home header hierarchy (home-workspace-map-ui-refresh group 1): an identity
+ * row with the view switch and actions, then a quieter readout row. Resource
+ * and Quests states are route-mocked here; that is presentation evidence, not
+ * proof of the economy or progression backends.
+ */
+test.describe('Header hierarchy', () => {
+  function mockEconomy(page: Page, body: Record<string, unknown> | null) {
+    return page.route('**/api/economy', route =>
+      body === null
+        ? route.fulfill({ status: 404, contentType: 'text/plain', body: 'not found' })
+        : route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(body)
+          })
+    );
+  }
+
+  async function headerGeometry(page: Page) {
+    return page.evaluate(() => {
+      const header = document.querySelector('.cockpit-area-header') as HTMLElement;
+      const visible = Array.from(header.querySelectorAll('button')).filter(button => {
+        const rect = button.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+      return {
+        overflow: document.documentElement.scrollWidth - window.innerWidth,
+        clipped: visible
+          .filter(
+            button =>
+              button.scrollWidth > button.clientWidth + 1 ||
+              button.getBoundingClientRect().right > window.innerWidth + 0.5
+          )
+          .map(button => button.id || button.textContent?.trim()),
+        heights: [
+          ...new Set(visible.map(button => Math.round(button.getBoundingClientRect().height)))
+        ]
+      };
+    });
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await skipOnboarding(page);
+  });
+
+  test('groups identity, actions, and readouts, with New Workspace as the primary creation action', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+
+    const main = page.locator('.cockpit-area-main');
+    const utility = page.locator('.cockpit-area-utility');
+    await expect(main.locator('[data-cockpit-area-title]')).toHaveText('Workspace Map');
+    await expect(main.locator('#cockpitViewMap')).toBeVisible();
+    await expect(main.locator('#cockpitCaptureBtn')).toBeVisible();
+    await expect(main.locator('#cockpitSummaryBtn')).toBeVisible();
+    await expect(main.locator('#cockpitCreateWorkspaceBtn')).toHaveClass(/modern-btn-primary/);
+    await expect(utility.locator('#cockpitSignalFilters')).toBeVisible();
+    await expect(utility.locator('#cockpitRailToggle')).toBeVisible();
+    await expect(utility.locator('#oriGuideMapTrigger')).toContainText('App Guide');
+
+    // Explore a folder appears once an assistant relationship makes it useful:
+    // secondary, and before the primary New Workspace.
+    await page.evaluate(() =>
+      document.dispatchEvent(
+        new CustomEvent('personal-assistant:status', {
+          detail: { personalAssistant: { state: 'active' } }
+        })
+      )
+    );
+    const folder = main.locator('#cockpitShowFolderBtn');
+    await expect(folder).toBeVisible();
+    await expect(folder).toHaveClass(/modern-btn-secondary/);
+    const [folderBox, createBox] = await Promise.all([
+      folder.boundingBox(),
+      main.locator('#cockpitCreateWorkspaceBtn').boundingBox()
+    ]);
+    expect(folderBox!.x).toBeLessThan(createBox!.x);
+  });
+
+  test('Map and Tree keep the same header; only the Map-only filters step out', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+    const always = [
+      '#cockpitCaptureBtn',
+      '#cockpitSummaryBtn',
+      '#cockpitCreateWorkspaceBtn',
+      '#cockpitRailToggle',
+      '#oriGuideMapTrigger'
+    ];
+    for (const selector of always) await expect(page.locator(selector)).toBeVisible();
+    await expect(page.locator('#cockpitSignalFilters')).toBeVisible();
+
+    await page.locator('#cockpitViewTree').click();
+    await expect(page.locator('[data-cockpit-area-title]')).toHaveText('Workspace Tree');
+    for (const selector of always) await expect(page.locator(selector)).toBeVisible();
+    await expect(page.locator('#cockpitSignalFilters')).toBeHidden();
+    // The readouts keep their right-hand home even with the filters gone.
+    const controls = await page.locator('.cockpit-area-controls').boundingBox();
+    const utility = await page.locator('.cockpit-area-utility').boundingBox();
+    expect(controls!.x + controls!.width).toBeGreaterThan(utility!.x + utility!.width - 2);
+  });
+
+  test('resources: zero is quiet, positive is not, Energy is labelled, and help works by keyboard', async ({
+    page
+  }) => {
+    await mockEconomy(page, {
+      craft: 0,
+      harvest: 3,
+      energy: { used_today: 0, daily_figure: 100000 },
+      farms: [],
+      pending_by_workspace: {}
+    });
+    await ensureWorkspace(page);
+    await page.goto('/');
+    const economy = page.locator('#cockpitEconomy');
+    await expect(economy).toBeVisible();
+    await expect(page.locator('[data-economy-craft]')).toHaveText('0');
+    await expect(page.locator('[data-economy-craft]')).toHaveAttribute('data-zero', 'true');
+    await expect(page.locator('[data-economy-harvest]')).toHaveText('3');
+    await expect(page.locator('[data-economy-harvest]')).toHaveAttribute('data-zero', 'false');
+    const energy = page.locator('[data-economy-energy]');
+    await expect(energy).toContainText('Energy');
+    await expect(energy).toHaveAttribute('data-idle', 'true');
+
+    // Keyboard: open the Energy explanation, then Escape returns focus to it.
+    await energy.focus();
+    await page.keyboard.press('Enter');
+    const help = page.locator('#cockpitEconomyHelp');
+    await expect(help).toBeVisible();
+    await expect(help).toContainText('Energy');
+    const [helpBox, utilityBox] = await Promise.all([
+      help.boundingBox(),
+      page.locator('.cockpit-area-utility').boundingBox()
+    ]);
+    expect(helpBox!.y).toBeGreaterThanOrEqual(utilityBox!.y + utilityBox!.height);
+    await page.keyboard.press('Escape');
+    await expect(help).toBeHidden();
+    await expect(energy).toBeFocused();
+  });
+
+  test('a disabled economy hides the resource group instead of showing zeros', async ({ page }) => {
+    await mockEconomy(page, null);
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+    await page.waitForTimeout(300);
+    await expect(page.locator('#cockpitEconomy')).toBeHidden();
+    await expect(page.locator('#cockpitRailToggle')).toBeVisible();
+  });
+
+  test('completed Quests keep their text but quiet down', async ({ page }) => {
+    await page.route('**/api/progression', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ current_tier: 3, total_tiers: 3, all_complete: true, tiers: [] })
+      })
+    );
+    await ensureWorkspace(page);
+    await page.goto('/');
+    const quests = page.locator('#cockpitQuestsToggle');
+    await expect(quests).toBeVisible();
+    await expect(quests).toContainText('All complete');
+    await expect(quests).toHaveAttribute('data-complete', 'true');
+  });
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1440, height: 900 }
+  ]) {
+    test(`at ${viewport.width}px the header wraps without overflow and overlays never move the map`, async ({
+      page
+    }) => {
+      await page.route('**/api/progression', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            current_tier: 10,
+            total_tiers: 12,
+            tiers: [
+              {
+                tier: 10,
+                name: 'A very long tier name that should never clip a header label',
+                quests: Array.from({ length: 12 }, (_, i) => ({
+                  id: `long-${i}`,
+                  title: `Quest ${i}`,
+                  status: i < 3 ? 'completed' : 'pending'
+                }))
+              }
+            ]
+          })
+        })
+      );
+      await page.setViewportSize(viewport);
+      await ensureWorkspace(page);
+      await page.goto('/');
+      await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+      await expect(page.locator('#cockpitQuestsToggle')).toContainText('Tier 10 · 3/12');
+
+      const geometry = await headerGeometry(page);
+      expect(geometry.overflow).toBeLessThanOrEqual(1);
+      expect(geometry.clipped).toEqual([]);
+      // One shared control height for every header control.
+      expect(geometry.heights.length).toBe(1);
+
+      const body = page.locator('.cockpit-area-body');
+      const before = await body.boundingBox();
+      for (const trigger of ['#cockpitRailToggle', '#cockpitQuestsToggle']) {
+        await page.locator(trigger).click();
+        const flyout = page.locator(
+          trigger === '#cockpitRailToggle' ? '#cockpitUpdatesFlyout' : '#cockpitQuestsFlyout'
+        );
+        await expect(flyout).toBeVisible();
+        expect(await body.boundingBox()).toEqual(before);
+        // The overlay opens under its trigger row rather than over it.
+        const [flyoutBox, triggerBox] = await Promise.all([
+          flyout.boundingBox(),
+          page.locator(trigger).boundingBox()
+        ]);
+        expect(flyoutBox!.y).toBeGreaterThanOrEqual(triggerBox!.y + triggerBox!.height);
+        await page.keyboard.press('Escape');
+        await expect(flyout).toBeHidden();
+      }
+    });
+  }
 });
 
 async function titleOf(page: Page, id: string): Promise<string> {

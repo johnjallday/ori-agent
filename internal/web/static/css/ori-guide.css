@@ -407,16 +407,13 @@
   color: #f2e7d5;
 }
 
-/* At narrow widths the header is tight, so this collapses to the sprite alone.
-   The button keeps its aria-label ("Ask Ori — app guide"), which is what a
-   screen reader announces, so dropping the visible text costs nothing there.
-   On Home the fixed launcher is hidden, making this the only entry point — the
-   sprite therefore has to stay a real, hittable target rather than decoration. */
-@media (max-width: 560px) {
-  .cockpit-map-ori__label,
-  .cockpit-map-ori__role {
-    display: none;
-  }
+/* The Home header wraps its groups onto new lines instead of squeezing them, so
+   this keeps "Ask Ori · App Guide" visible at every width: on Home the personal
+   assistant launcher shares the screen, and the role is what tells the two
+   apart. It shares the header's control height. */
+.cockpit-map-ori {
+  min-height: var(--cockpit-control-h, 32px);
+  white-space: nowrap;
 }
 
 /* ---- coachmark ---------------------------------------------------------------- */

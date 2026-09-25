@@ -22,36 +22,92 @@
         positioned element's containing block must be an ancestor.
       -->
       <div class="cockpit-area-header-zone">
+      <!--
+        Two rows with two jobs. The first says where you are and what you can
+        make: the Workspace Map/Tree identity, the view switch, the capture and
+        Summary actions, and creation (New Workspace first, Explore a folder
+        beside it). The second is the quieter readout row: the App Guide and
+        signal filters on the left; Updates, Quests, and the city's resources
+        on the right. Every control
+        keeps its id — coachmarks, progression, setup quests, and the specs all
+        find them by it.
+      -->
       <header class="cockpit-area-header">
-        <div class="cockpit-area-heading">
-          <span class="cockpit-area-eyebrow">Workspaces</span>
-          <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>Workspace Map</h2>
+        <div class="cockpit-area-main">
+          <div class="cockpit-area-identity">
+            <div class="cockpit-area-heading">
+              <span class="cockpit-area-eyebrow">Workspaces</span>
+              <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>Workspace Map</h2>
+            </div>
+            <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
+                 active view; the visible labels carry it without color (FR24). -->
+            <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
+              <button type="button" id="cockpitViewMap" class="cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
+              <button type="button" id="cockpitViewTree" class="cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
+            </div>
+          </div>
+          <div class="cockpit-area-actions" role="group" aria-label="Workspace actions">
+            <!-- Add to backlog and Summary stay visible in the stable header so
+                 they are reachable whether context is bare, selected, or
+                 dismissed — secondary, never tucked into an overflow menu. -->
+            <div class="cockpit-area-actions__secondary">
+              <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
+                      aria-expanded="false" aria-controls="cockpitCapturePanel">Add to backlog</button>
+              <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
+                      aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal">Summary</button>
+            </div>
+            <!-- Creation. New Workspace is the primary action; Explore a folder
+                 (shown only once an assistant relationship makes it useful —
+                 see cockpitFolderActionView) sits beside it as the secondary. -->
+            <div class="cockpit-area-actions__create">
+              <button id="cockpitShowFolderBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" hidden>
+                Explore a folder
+              </button>
+              <button id="cockpitCreateWorkspaceBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button"
+                      data-bs-toggle="modal" data-bs-target="#addFolderModal"
+                      data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create"
+                      data-workspace-map-eligible="true">
+                New Workspace
+              </button>
+            </div>
+          </div>
         </div>
-        <div class="cockpit-area-controls">
+        <div class="cockpit-area-utility">
           <!--
             Ori in the cockpit (PRD FR-21). A second entry point to the *same*
             guide: it drives the one controller and the one panel, so the two
             can never disagree about open state. It is never used to represent
-            a running workspace agent (FR-78).
+            a running workspace agent (FR-78), and it is not the personal
+            assistant, which keeps its own launcher in the bottom-right corner.
 
-            It sits in the header rather than floating over the map on purpose —
-            an absolutely-positioned character there covers the map's own empty
-            and error controls and silently eats their clicks.
+            It leads this row, on the LEFT, on purpose: the personal assistant's
+            non-modal panel opens over the right-hand side of Home, and switching
+            from it to the App Guide must never mean hunting under that panel.
+            It also sits in the header rather than floating over the map — an
+            absolutely-positioned character there covers the map's own empty and
+            error controls and silently eats their clicks.
           -->
           <button
             type="button"
             class="cockpit-map-ori"
             id="oriGuideMapTrigger"
             aria-label="Ask Ori — app guide">
-            <img src="/characters/ori-guide/sprite.svg" alt="" width="26" height="26" decoding="async">
+            <img src="/characters/ori-guide/sprite.svg" alt="" width="22" height="22" decoding="async">
             <span class="cockpit-map-ori__label">Ask Ori</span>
             <!-- Home hides the floating launcher, which was the only place that
                  spelled out Ori's role. The boundary between the guide and
-                 Workspace Manager has to be readable BEFORE anything is asked
-                 (FR-22/FR-27), so the role moves onto the surviving entry
-                 point rather than disappearing with the duplicate. -->
+                 the personal assistant has to be readable BEFORE anything is
+                 asked (FR-22/FR-27), so the role stays on this entry point. -->
             <span class="cockpit-map-ori__role">App Guide</span>
           </button>
+          <!-- Map-only signal filters. Single-select and keyboard-operable;
+               counts come from the same authoritative state Map and Summary
+               read, and an unavailable count renders as an em dash rather than
+               a fake 0 (FR31-FR34). Populated by home-workspace-cockpit.js. -->
+          <div id="cockpitSignalFilters" class="cockpit-signal-filters" role="group" aria-label="Filter workspaces by signal" hidden></div>
+          <!-- Readouts and on-demand panels. Updates, Quests, and the resource
+               help open BELOW this row, over the map, and never resize it. -->
+          <div class="cockpit-area-controls">
           <!--
             Updates: a manual, non-modal flyout for the day's non-Progression
             content — attention, scheduled work, Daily Brief, Calendar,
@@ -147,6 +203,9 @@
                     data-economy-help="energy" aria-expanded="false"
                     aria-controls="cockpitEconomyHelp"
                     aria-label="Energy used today">
+              <!-- A persistent word, so the bar and its percentage are never an
+                   unlabeled number beside Craft and Harvest. -->
+              <span class="cockpit-economy__chip-label">Energy</span>
               <span class="cockpit-economy__energy-track">
                 <span class="cockpit-economy__energy-fill" data-economy-energy-fill></span>
               </span>
@@ -173,27 +232,7 @@
             <ul class="cockpit-economy-help__list" data-economy-help-earn></ul>
             <p class="cockpit-economy-help__spend" data-economy-help-spend></p>
           </div>
-          <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
-               active view; the visible labels carry it without color (FR24). -->
-          <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
-            <button type="button" id="cockpitViewMap" class="cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
-            <button type="button" id="cockpitViewTree" class="cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
           </div>
-          <!-- Add to backlog and Summary stay in the stable header so they are
-               reachable whether context is bare, selected, or dismissed. -->
-          <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
-                  aria-expanded="false" aria-controls="cockpitCapturePanel">Add to backlog</button>
-          <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
-                  aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal">Summary</button>
-          <button id="cockpitShowFolderBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button" hidden>
-            Explore a folder
-          </button>
-          <button id="cockpitCreateWorkspaceBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button"
-                  data-bs-toggle="modal" data-bs-target="#addFolderModal"
-                  data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create"
-                  data-workspace-map-eligible="true">
-            New Workspace
-          </button>
         </div>
       </header>
 
@@ -413,11 +452,6 @@
           <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
         </form>
       </div>
-      <!-- Map-only signal filters. Single-select and keyboard-operable; counts
-           come from the same authoritative state Map and Summary read, and an
-           unavailable count renders as an em dash rather than a fake 0
-           (FR31-FR34). Populated by home-workspace-cockpit.js. -->
-      <div id="cockpitSignalFilters" class="cockpit-signal-filters" role="group" aria-label="Filter workspaces by signal" hidden></div>
 
       <div class="cockpit-area-body">
         <!-- Map and Tree occupy the SAME layout slot; activating one hides the

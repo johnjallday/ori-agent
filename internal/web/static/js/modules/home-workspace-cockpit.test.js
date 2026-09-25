@@ -31,6 +31,7 @@ import {
   readEconomy,
   economyMapSnapshot,
   energyBarView,
+  resourceValueView,
   formatTokens,
   resourceHelpView,
   isGroupWorkspace,
@@ -895,6 +896,19 @@ test('renderSignalFiltersHTML marks the active chip and flags unavailable counts
   assert.match(html, /data-cockpit-signal="running"[^>]*aria-pressed="false"/);
   assert.match(html, /data-unavailable="true"/);
   assert.match(html, /—/);
+});
+
+test('renderSignalFiltersHTML quiets a known zero but never an unavailable count', () => {
+  const html = renderSignalFiltersHTML({ attention: 2, running: 0, today: null }, '');
+  const chip = signal =>
+    html.match(new RegExp(`<button[^>]*data-cockpit-signal="${signal}"[^>]*>`))[0];
+  assert.match(chip('running'), /data-zero="true"/);
+  assert.doesNotMatch(chip('attention'), /data-zero/);
+  // "We cannot tell" is not "nothing matches": the Today chip stays unquieted.
+  assert.doesNotMatch(chip('today'), /data-zero/);
+  // A selected chip keeps its pressed state even when its count is zero.
+  const active = renderSignalFiltersHTML({ attention: 0, running: 0, today: 0 }, SIGNAL_RUNNING);
+  assert.match(active, /data-cockpit-signal="running" data-zero="true" aria-pressed="true"/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1771,6 +1785,37 @@ test('a day with no tokens reads as empty, not as missing', () => {
   const view = energyBarView({ usedToday: 0, dailyFigure: 1000000 });
   assert.equal(view.percent, 0);
   assert.equal(view.text, '0%');
+  // Idle is the quiet header treatment; the reading itself stays on screen.
+  assert.equal(view.idle, true);
+});
+
+test('any energy used today is not idle, with or without a figure', () => {
+  assert.equal(energyBarView({ usedToday: 1, dailyFigure: 1000000 }).idle, false);
+  assert.equal(energyBarView({ usedToday: 5000, dailyFigure: 0 }).idle, false);
+  assert.equal(energyBarView({ usedToday: 1250000, dailyFigure: 1000000 }).idle, false);
+});
+
+test('resourceValueView quiets only an authoritative zero, never an unavailable balance', () => {
+  assert.deepEqual(resourceValueView(0), { text: '0', zero: true });
+  assert.deepEqual(resourceValueView(12), { text: '12', zero: false });
+  // Unavailable renders as an em dash at full weight — never as a quiet "0".
+  for (const missing of [null, undefined, '', 'nope']) {
+    assert.deepEqual(resourceValueView(missing), { text: '—', zero: false });
+  }
+});
+
+test('the resource group labels Energy and keeps every label at narrow widths', () => {
+  const dashboard = readFileSync(
+    new URL('../../../templates/components/dashboard.tmpl', import.meta.url),
+    'utf8'
+  );
+  const energy = dashboard.slice(
+    dashboard.indexOf('data-economy-energy'),
+    dashboard.indexOf('data-economy-energy-text')
+  );
+  assert.match(energy, /class="cockpit-economy__chip-label">Energy</);
+  // The old narrow-width rule hid every resource label, leaving bare numbers.
+  assert.doesNotMatch(cockpitCSS, /\.cockpit-economy__chip-label\s*\{\s*display:\s*none/);
 });
 
 test('energy handles a missing payload without dividing by nothing', () => {

@@ -29,14 +29,14 @@
  * Workspace area
  * ----------------------------------------------------------------------- */
 
-/* Four explicit rows: header, signal filters, the Quick Capture disclosure,
-   then the Map/Tree slot as the only flexible one. Every non-flexible row must
-   be declared — when the filters sat on an implicit track they collapsed to
-   0px, so the chips overlapped the map and could not be clicked. Quick Capture
-   moved into this area with its button (FR88/FR101) and needs the same. */
+/* Three explicit rows: the header zone (which now also carries the signal
+   filters in its readout row), the Quick Capture disclosure, then the Map/Tree
+   slot as the only flexible one. Every non-flexible row must be declared —
+   when the filters sat on an implicit track they collapsed to 0px, so the
+   chips overlapped the map and could not be clicked. */
 .cockpit-workspace-area {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
   min-height: 0;
@@ -58,13 +58,95 @@
   position: relative;
 }
 
+/* Two rows (dashboard.tmpl): identity + actions, then the quieter readout row.
+   Every header control shares one height so the rows read as rows rather than
+   a ragged line of differently sized chips; touch pointers get the full 44px.
+   Both rows wrap deliberately — groups move down whole rather than clipping a
+   label or pushing the page sideways (FR135). */
 .cockpit-area-header {
+  --cockpit-control-h: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 14px 0;
+}
+
+@media (pointer: coarse) {
+  .cockpit-area-header {
+    --cockpit-control-h: 44px;
+  }
+}
+
+.cockpit-area-main {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 11px 14px 0;
+  gap: 10px 16px;
+  min-width: 0;
+}
+
+.cockpit-area-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  min-width: 0;
+}
+
+.cockpit-area-actions,
+.cockpit-area-actions__secondary,
+.cockpit-area-actions__create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cockpit-area-actions {
+  gap: 8px 12px;
+}
+
+/* Creation is its own group: a rule before it separates "make something" from
+   the capture and Summary actions without adding another visual weight. */
+.cockpit-area-actions__create {
+  padding-left: 12px;
+  border-left: 1px solid var(--hc-line);
+}
+
+/* Vertical padding is zeroed on purpose: common.css enlarges .modern-btn-sm's
+   padding on small screens, which made these 41px beside 32px neighbours. The
+   shared min-height (44px on touch) is what guarantees the target size. */
+.cockpit-area-actions .modern-btn {
+  justify-content: center;
+  min-height: var(--cockpit-control-h);
+  padding: 0 12px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* On a phone-width cockpit the groups wrap under each other; a divider left at
+   the start of a wrapped line reads as a stray rule, so it goes. */
+@container cockpit (max-width: 560px) {
+  .cockpit-area-actions__create {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+/* The readout row: App Guide and filters on the left (clear of the personal
+   assistant panel, which opens over the right), Updates/Quests/resources on
+   the right. A hairline marks it as subordinate to the row above. */
+.cockpit-area-utility {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--hc-line) 70%, transparent);
 }
 
 .cockpit-area-eyebrow {
@@ -86,11 +168,16 @@
   text-transform: uppercase;
 }
 
+/* Right-aligned even when the filters beside it are hidden (Tree, loading), so
+   the readouts keep one stable home. */
 .cockpit-area-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
+  margin-left: auto;
 }
 
 .cockpit-view-toggle {
@@ -102,12 +189,13 @@
 /* Sentence case: switching the view is an action. See .cockpit-area-eyebrow
    above for the labels that keep uppercase. */
 .cockpit-view-btn {
-  padding: 5px 12px;
+  min-width: 52px;
+  padding: 0 12px;
   border: 0;
   background: transparent;
   color: var(--hc-ink-dim);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.2px;
   cursor: pointer;
@@ -141,63 +229,97 @@
    Every color is an --hc-* token, so both themes come for free — none of these
    values may be hardcoded, and --border-light in particular inverts between
    themes and is not used anywhere in this block. */
+/* One compact group, three segments: Craft | Harvest | Energy. A single frame
+   instead of three separate plates keeps the resources reading as one readout
+   rather than three more buttons competing with the actions above. */
 .cockpit-economy {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.cockpit-economy__chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  padding: 5px 10px;
+  align-items: stretch;
   border: 1px solid var(--hc-line);
   background: var(--hc-panel-deep);
+}
+
+.cockpit-economy__chip,
+.cockpit-economy__energy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--cockpit-control-h, 32px);
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--hc-ink);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.2px;
   white-space: nowrap;
   cursor: help;
 }
 
+.cockpit-economy > button + button {
+  border-left: 1px solid var(--hc-line);
+}
+
 .cockpit-economy__chip:hover,
 .cockpit-economy__energy:hover {
-  border-color: var(--hc-line-bright);
+  background: color-mix(in srgb, var(--hc-signal) 8%, transparent);
 }
 
 .cockpit-economy__chip:focus-visible,
 .cockpit-economy__energy:focus-visible {
+  position: relative;
+  z-index: 1;
   outline: 2px solid var(--hc-signal);
   outline-offset: 2px;
 }
 
-/* The open element keeps its state visible while its panel is up. */
+/* The open element keeps its state visible while its panel is up: a tint AND
+   an underline, so it never rests on color alone. */
 .cockpit-economy__chip[aria-expanded="true"],
 .cockpit-economy__energy[aria-expanded="true"] {
-  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 16%, transparent);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
 }
 
 .cockpit-economy__chip-label {
   color: var(--hc-ink-dim);
+  font-weight: 500;
 }
 
 .cockpit-economy__chip-value {
   color: var(--hc-ink);
   font-size: 12px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-/* One accent per resource, matching what earns it: Craft is made by hand
-   (amber), Harvest is grown and collected (moss). The accent is a left edge
-   rather than the text color, so the number keeps full ink contrast. */
-.cockpit-economy__chip[data-economy-chip="craft"] {
-  box-shadow: inset 2px 0 0 var(--hc-amber);
+/* An authoritative zero is real data, so it stays on screen as "0" — just
+   quieter than a balance that is actually doing something. (An UNAVAILABLE
+   economy hides the whole group instead; it never reads as a zero.) */
+.cockpit-economy__chip-value[data-zero="true"],
+.cockpit-economy__energy[data-idle="true"] .cockpit-economy__energy-text {
+  color: var(--hc-ink-dim);
+  font-weight: 500;
 }
 
-.cockpit-economy__chip[data-economy-chip="harvest"] {
-  box-shadow: inset 2px 0 0 var(--hc-signal);
+/* One accent per resource, matching what earns it: Craft is made by hand
+   (amber), Harvest is grown and collected (moss). The accent is a small mark
+   before the label rather than the text color, so the number keeps its full
+   ink contrast. */
+.cockpit-economy__chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 1px;
+  background: var(--hc-amber);
+}
+
+.cockpit-economy__chip[data-economy-chip="harvest"]::before {
+  background: var(--hc-signal);
 }
 
 /* A resource arriving is worth a glance, not an interruption: no toast for
@@ -222,22 +344,12 @@
   }
 }
 
-/* Energy bar (FR31): 120px of track, filled against the user's daily figure.
-   A button like its neighbours, but with no plate of its own — the bar is the
-   affordance. */
-.cockpit-economy__energy {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  cursor: help;
-}
-
+/* Energy bar (FR31): a short track filled against the user's daily figure,
+   always labelled "Energy" so the percentage beside it is never an unnamed
+   number. It shares the segment styling above. */
 .cockpit-economy__energy-track {
   display: block;
-  width: 120px;
+  width: 64px;
   height: 6px;
   overflow: hidden;
   border: 1px solid var(--hc-line);
@@ -259,10 +371,10 @@
 }
 
 .cockpit-economy__energy-text {
-  color: var(--hc-ink-dim);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
-  font-weight: 600;
+  color: var(--hc-ink);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -272,20 +384,19 @@
   }
 }
 
-/* On a narrow header the labels are the first thing to go: the accent edge and
-   the title attribute still say which number is which. */
-@media (max-width: 900px) {
-  .cockpit-economy__chip-label {
+/* On a narrower cockpit the bar collapses to its percentage (PRD §6). The
+   labels stay: the header wraps instead, so no number is ever left unnamed. */
+@container cockpit (max-width: 1100px) {
+  .cockpit-economy__energy-track {
     display: none;
   }
 }
 
-/* Narrower still: the bar collapses to its percentage label (PRD §6). The
-   number is the part that carries meaning; 120px of track is the part that does
-   not fit. */
-@media (max-width: 1200px) {
-  .cockpit-economy__energy-track {
-    display: none;
+@supports not (container-type: inline-size) {
+  @media (max-width: 1200px) {
+    .cockpit-economy__energy-track {
+      display: none;
+    }
   }
 }
 
@@ -296,16 +407,18 @@
 }
 
 /* The resource help panel.
-   Anchored under the HUD in the header zone, which is already
-   position: relative for the Updates/Quests flyouts — so this uses the same
-   containing block and the same non-modal, dismiss-on-outside-click behavior. */
+   Anchored under the readout row on the right, where the resources live, in the
+   header zone — already position: relative for the Updates/Quests flyouts — so
+   it uses the same containing block, opens over the map rather than pushing
+   it, and keeps the same non-modal, dismiss-on-outside-click behavior. */
 .cockpit-economy-help {
   position: absolute;
-  top: calc(100% - 4px);
-  left: 12px;
+  top: 100%;
+  right: 14px;
   z-index: 40;
   width: 320px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100% - 28px);
+  margin-top: 8px;
   padding: 12px 14px;
   border: 1px solid var(--hc-line-bright);
   background: var(--hc-panel-raised);
@@ -406,15 +519,22 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
+  min-height: var(--cockpit-control-h, 32px);
+  padding: 0 12px;
   border: 1px solid var(--hc-line);
   background: var(--hc-panel-deep);
   color: var(--hc-ink-dim);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.2px;
+  white-space: nowrap;
   cursor: pointer;
+}
+
+.cockpit-flyout-toggle:hover {
+  border-color: var(--hc-line-bright);
+  color: var(--hc-ink);
 }
 
 .cockpit-flyout-toggle[aria-expanded="true"] {
@@ -460,6 +580,13 @@
 
 .cockpit-flyout-toggle--quests .cockpit-flyout-toggle__summary:empty {
   display: none;
+}
+
+/* Every quest done is an achievement, not a call to action: the text ("All
+   complete") stays, the signal color steps back so it stops drawing the eye. */
+.cockpit-flyout-toggle--quests[data-complete="true"] .cockpit-flyout-toggle__summary {
+  color: var(--hc-ink-dim);
+  font-weight: 600;
 }
 
 /* --------------------------------------------------------------------------
@@ -571,8 +698,18 @@
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  padding: 12px;
+  padding: 12px 12px calc(12px + var(--home-assistant-clearance, 0px));
   overflow-y: auto;
+}
+
+/* On a narrow screen the personal assistant's fixed launcher spans the bottom
+   of the viewport, and a flyout that runs to the end of the page ends beneath
+   it. This much extra scroll room lets the last row scroll clear of it rather
+   than staying permanently covered. Wider screens need none. */
+@media (max-width: 760px) {
+  body.home-command-page {
+    --home-assistant-clearance: 104px;
+  }
 }
 
 .cockpit-flyout-body > * {
@@ -599,11 +736,13 @@
  * Signal filters (FR31-FR34)
  * ----------------------------------------------------------------------- */
 
+/* The filters sit at the start of the header's readout row; the row supplies
+   the horizontal padding. */
 .cockpit-signal-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 14px;
+  min-width: 0;
 }
 
 .cockpit-signal-filters[hidden] {
@@ -616,22 +755,39 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 9px;
+  min-height: var(--cockpit-control-h, 32px);
+  padding: 0 10px;
   border: 1px solid var(--hc-line);
   background: var(--hc-panel-deep);
   color: var(--hc-ink-dim);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9.5px;
+  font-size: 11px;
   letter-spacing: 0.2px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-/* The active filter is marked by a filled chip AND a leading check glyph, so
-   it never depends on color alone (FR131). */
+.cockpit-signal-chip:hover {
+  border-color: var(--hc-line-bright);
+  color: var(--hc-ink);
+}
+
+/* Nothing matches: still a working filter, just not asking for attention.
+   The frame steps back; the text keeps AA contrast (--hc-ink-dim). */
+.cockpit-signal-chip[data-zero="true"]:not([aria-pressed="true"]) {
+  border-color: color-mix(in srgb, var(--hc-line) 60%, transparent);
+  background: transparent;
+}
+
+/* The active filter is marked by a filled chip, a heavier frame, AND a leading
+   check glyph, so it never depends on color alone (FR131) — including when
+   its count is zero. */
 .cockpit-signal-chip[aria-pressed="true"] {
   border-color: var(--hc-signal);
   background: color-mix(in srgb, var(--hc-signal) 16%, var(--hc-panel));
+  box-shadow: inset 0 -2px 0 var(--hc-signal);
   color: var(--hc-ink);
+  font-weight: 600;
 }
 
 .cockpit-signal-chip[aria-pressed="true"] .cockpit-signal-label::before {
@@ -644,14 +800,26 @@
 }
 
 .cockpit-signal-count {
+  min-width: 18px;
   padding: 0 4px;
   border: 1px solid var(--hc-line);
   color: var(--hc-ink);
   font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
+.cockpit-signal-chip[data-zero="true"] .cockpit-signal-count {
+  border-color: transparent;
+  color: var(--hc-ink-dim);
+  font-weight: 500;
+}
+
+/* Unavailable is not zero: an em dash in a dashed frame. --hc-ink-dim rather
+   than -faint, which falls under 4.5:1 on the light theme's deep panel. */
 .cockpit-signal-count[data-unavailable="true"] {
-  color: var(--hc-ink-faint);
+  border-style: dashed;
+  color: var(--hc-ink-dim);
   font-weight: 400;
 }
 
@@ -673,7 +841,7 @@
    left the minmax(0, 1fr) row empty below it. The map then fell back to its
    320px min-height with the rest of the panel blank. */
 .cockpit-area-body {
-  grid-row: 4;
+  grid-row: 3;
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -1240,15 +1408,16 @@ body.home-command-page .ori-guide__launcher {
   outline-offset: 2px;
 }
 
-.cockpit-view-btn,
-.cockpit-signal-chip,
 .cockpit-tree-action,
 .cockpit-tree-caret {
   min-height: 24px;
 }
 
+/* Header controls share one height (see .cockpit-area-header): 32px, or the
+   full 44px on a touch pointer. */
+.cockpit-view-btn,
 .cockpit-area-controls button {
-  min-height: 28px;
+  min-height: var(--cockpit-control-h, 32px);
 }
 
 @media (max-width: 575.98px), (max-height: 620px) {

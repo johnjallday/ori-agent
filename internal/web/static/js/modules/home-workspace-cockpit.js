@@ -212,10 +212,15 @@ export function energyBarView(energy) {
   const used = Math.max(0, Number((energy && energy.usedToday) || 0));
   const figure = Math.max(0, Number((energy && energy.dailyFigure) || 0));
 
+  // `idle` is an authoritative "nothing used yet today": the reading stays on
+  // screen, just quieter than a day that is actually burning tokens.
+  const idle = used === 0;
+
   if (!figure) {
     return {
       percent: 0,
       over: false,
+      idle,
       text: formatTokens(used),
       label: `Energy: ${formatTokens(used)} tokens used today`
     };
@@ -228,6 +233,7 @@ export function energyBarView(energy) {
     return {
       percent: 100,
       over: true,
+      idle,
       text: `${formatTokens(used)} · +${formatTokens(over)} over`,
       label:
         `Energy: ${formatTokens(used)} tokens used today, ` +
@@ -237,9 +243,21 @@ export function energyBarView(energy) {
   return {
     percent,
     over: false,
+    idle,
     text: `${percent}%`,
     label: `Energy: ${formatTokens(used)} of ${formatTokens(figure)} tokens used today`
   };
+}
+
+/**
+ * How one HUD balance reads: its text, and whether it is a known zero.
+ *
+ * Unavailable (null) is never a zero — it renders as an em dash and stays at
+ * full weight, so a quiet "0" always means the server really said zero.
+ */
+export function resourceValueView(value) {
+  const count = readCount(value);
+  return { text: formatCount(count), zero: count === 0 };
 }
 
 /**
@@ -557,8 +575,11 @@ export function renderSignalFiltersHTML(counts, activeSignal) {
     const isActive = signal === activeSignal;
     const count = counts ? counts[signal] : null;
     const label = SIGNAL_LABELS[signal];
+    // A KNOWN zero renders quieter; an unavailable count (null) never does,
+    // because "nothing matches" and "we cannot tell" are different answers.
     return (
       `<button type="button" class="cockpit-signal-chip" data-cockpit-signal="${escapeHtml(signal)}" ` +
+      (count === 0 ? 'data-zero="true" ' : '') +
       `aria-pressed="${isActive ? 'true' : 'false'}">` +
       `<span class="cockpit-signal-label">${escapeHtml(label)}</span>` +
       `<span class="cockpit-signal-count"${count === null ? ' data-unavailable="true"' : ''}>` +
@@ -2962,8 +2983,8 @@ import {
     }
     const next = { craft: state.economy.craft, harvest: state.economy.harvest };
     const first = lastEconomyChips === null;
-    if (els.economyCraft) els.economyCraft.textContent = formatCount(next.craft);
-    if (els.economyHarvest) els.economyHarvest.textContent = formatCount(next.harvest);
+    paintResourceValue(els.economyCraft, resourceValueView(next.craft));
+    paintResourceValue(els.economyHarvest, resourceValueView(next.harvest));
     renderEnergyBar(energyBarView(state.economy.energy));
     els.economy.hidden = false;
     if (!first) {
@@ -2976,12 +2997,19 @@ import {
     if (openEconomyHelp) renderEconomyHelp(openEconomyHelp);
   }
 
+  function paintResourceValue(el, view) {
+    if (!el) return;
+    el.textContent = view.text;
+    el.dataset.zero = view.zero ? 'true' : 'false';
+  }
+
   /** Paint the Energy gauge. Never blocks or warns — it only reports (FR31). */
   function renderEnergyBar(view) {
     if (els.economyEnergyFill) els.economyEnergyFill.style.width = `${view.percent}%`;
     if (els.economyEnergyText) els.economyEnergyText.textContent = view.text;
     if (els.economyEnergy) {
       els.economyEnergy.dataset.over = view.over ? 'true' : 'false';
+      els.economyEnergy.dataset.idle = view.idle ? 'true' : 'false';
       // The spoken label carries the whole reading, because the visual is a bar
       // and a percentage that mean nothing read aloud on their own.
       els.economyEnergy.setAttribute('aria-label', view.label);
