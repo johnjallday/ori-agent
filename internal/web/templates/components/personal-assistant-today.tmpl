@@ -88,10 +88,27 @@
            aria-labelledby="personalAssistantFolderTitle" hidden>
     <div class="pa-folder__launch">
       <button type="button" class="btn btn-sm btn-outline-secondary" id="personalAssistantFolderShowBtn"
-              aria-expanded="false" aria-controls="personalAssistantFolderChooser">Show me a folder</button>
+              aria-expanded="false" aria-controls="personalAssistantFolderChooser">Explore a folder</button>
+    </div>
+    <div id="personalAssistantFolderScene" class="pa-folder__scene" data-phase="choosing" hidden>
+      <div class="pa-folder__scene-copy">
+        <p class="pa-folder__scene-kicker">A little field trip</p>
+        <p id="personalAssistantFolderSceneLabel" class="pa-folder__scene-label" role="status" aria-live="polite"></p>
+        <div id="personalAssistantFolderSceneFinds" class="pa-folder__scene-finds"></div>
+        <p class="pa-folder__scene-assurance">A read-only peek. Nothing moves.</p>
+      </div>
+      <div class="pa-folder__scene-art" aria-hidden="true">
+        <span id="personalAssistantFolderSceneAvatar" class="pa-folder__scene-avatar"></span>
+        <svg class="pa-folder__scene-folder" viewBox="0 0 52 45" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 8a4 4 0 0 1 4-4h13l5 5h20a4 4 0 0 1 4 4v25a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V8Z" fill="currentColor" stroke="currentColor" stroke-width="3"/>
+          <path d="M4 18h44v20a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V18Z" fill="var(--hc-panel)" stroke="currentColor" stroke-width="3"/>
+          <path d="M17 26h18M17 32h11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="pa-folder__scene-spark"></span>
+      </div>
     </div>
     <div id="personalAssistantFolderChooser" class="pa-folder__chooser" hidden>
-      <p id="personalAssistantFolderTitle" class="pa-folder__prompt">Which folder should I look at?</p>
+      <p id="personalAssistantFolderTitle" class="pa-folder__prompt">Which folder should I explore?</p>
       <div id="personalAssistantFolderChips" class="pa-folder__chips" role="group" aria-label="Folders"></div>
       <p id="personalAssistantFolderNote" class="pa-folder__note" hidden></p>
       <p id="personalAssistantFolderStatus" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
@@ -100,7 +117,9 @@
              aria-labelledby="personalAssistantFolderOfferHeadline" hidden>
       <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
       <p id="personalAssistantFolderOfferQuestion" class="pa-specialist-offer__question"></p>
-      <p id="personalAssistantFolderOfferReason" class="pa-folder__reason"></p>
+      <details class="pa-folder__why"><summary>Why this suggestion?</summary>
+        <p id="personalAssistantFolderOfferReason" class="pa-folder__reason"></p>
+      </details>
       <ul id="personalAssistantFolderReceipt" class="pa-folder__receipt" hidden></ul>
       <div id="personalAssistantFolderOfferActions" class="pa-specialist-offer__actions"></div>
       <p id="personalAssistantFolderOfferNote" class="pa-folder__status" role="status" aria-live="polite" hidden></p>

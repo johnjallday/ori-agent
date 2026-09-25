@@ -515,7 +515,7 @@ URL remain as constants so persisted state that names it still loads.
 points it at a folder, the server looks at the folder's shape, and the
 assistant makes one explained offer.
 
-- **Entry.** Today's "Show me a folder" (`personal-assistant-today.tmpl`,
+- **Entry.** Today's "Explore a folder" (`personal-assistant-today.tmpl`,
   `#personalAssistantFolder`), Home's primary header button, Mission 02's Start,
   or the pending offer on the
   mission card. Only an `active` or `paused` relationship sees it.
@@ -524,6 +524,14 @@ assistant makes one explained offer.
   (`platform.ChooseFolder`, osascript). The browser never sends a filesystem
   path: `POST /api/personal-assistant/folder-digest/scan` accepts `{chip}` or
   `{picker: true}` and answers 400 to any `path`/`folder` key.
+- **Presentation.** A small visual field trip beside the existing chooser uses
+  the assistant's already-rendered avatar. A folder graphic starts moving
+  only when a real scan begins (and finishes the motion on a fast response);
+  the real server offer produces the finding badges,
+  and a failed scan produces an error, never a made-up result. The explanation
+  is one disclosure away, the server-observed receipt rows remain visible, and
+  `prefers-reduced-motion` keeps the same states without animation. The visual
+  metaphor moves no files and sends no client filesystem paths.
 - **Scan.** `internal/folderdigest` reads names, dates, sizes, and kinds with
   `os.ReadDir`/`Lstat`; it never opens a file. Depth 3, 5,000 entries, 3 s;
   hidden entries, `node_modules`, `Library`, `.Trash`, iCloud placeholders and
@@ -609,7 +617,7 @@ it is not a peer assistant.
 
 Home is Map-first: the Workspace Map/Tree occupies the available cockpit
 viewport without an always-visible Today row. Its primary header action is
-**Show me a folder** after hire; before HQ it opens the HQ confirm card, and
+**Explore a folder** after hire; before HQ it opens the HQ confirm card, and
 after HQ it opens the existing chooser. **New Workspace** stays a secondary
 header action and retains its full modal and Map create pad. The empty Map and
 launcher link to the chooser instead of instructing the user to create a

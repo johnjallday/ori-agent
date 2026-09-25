@@ -401,7 +401,8 @@ const state = {
   root: null,
   sequence: 0,
   offer: null,
-  offerDecision: 'unanswered'
+  offerDecision: 'unanswered',
+  emptyEligible: false
 };
 
 function elements() {
@@ -759,6 +760,19 @@ function renderLauncherCue(els, today = state.today) {
   els.launcherStatus.hidden = !cue;
 }
 
+function syncAllClear(els = elements()) {
+  if (!els?.allClear) return;
+  // A folder offer can arrive after the Today read. Do not say "Nothing needs
+  // you" over an open chooser, an offer, or an HQ/specialist confirmation.
+  const visibleCard = [
+    document.getElementById('personalAssistantFolderScene'),
+    document.getElementById('personalAssistantFolderOffer'),
+    document.getElementById('personalAssistantHQCard'),
+    els.offer
+  ].some(card => card && !card.hidden);
+  els.allClear.hidden = !state.emptyEligible || visibleCard;
+}
+
 function renderToday(today) {
   const els = elements();
   if (!els) return;
@@ -834,7 +848,8 @@ function renderToday(today) {
       !els.offer?.hidden
     );
   if (els.doneSection) els.doneSection.hidden = !sections.done.length;
-  if (els.allClear) els.allClear.hidden = !sections.allClear || !view.active;
+  state.emptyEligible = sections.allClear && view.active;
+  syncAllClear(els);
   if (els.footer) els.footer.hidden = !sections.footer;
   if (els.unavailable) els.unavailable.textContent = sections.footer;
   if (els.sections)
@@ -951,6 +966,13 @@ function init() {
   if (working) {
     const brief = document.getElementById('homeDailyBrief');
     if (brief) working.append(brief);
+  }
+  if (needs && typeof MutationObserver !== 'undefined') {
+    new MutationObserver(() => syncAllClear()).observe(needs, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['hidden']
+    });
   }
   if (needs)
     [

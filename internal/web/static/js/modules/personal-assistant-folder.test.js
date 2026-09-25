@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   folderActionAvailable,
   folderChooserView,
+  folderSceneView,
   firstFolderPromptView,
   folderOfferView,
   folderOutcomeNote,
@@ -67,7 +68,7 @@ test('resolved project receipt names only server rows and offers the canonical w
 test('the first-folder hand-over is an active-only server receipt, never a pre-HQ prompt', () => {
   assert.deepEqual(firstFolderPromptView({ prompt_first_folder: true }, true), {
     expand: true,
-    line: "Now show me a folder you're working in."
+    line: "Now let's explore a folder you're working in."
   });
   assert.equal(firstFolderPromptView({ prompt_first_folder: true }, false).expand, false);
   assert.equal(firstFolderPromptView({ prompt_first_folder: false }, true).expand, false);
@@ -123,6 +124,61 @@ test('the chooser explains itself when there is nothing to choose', () => {
   });
   assert.equal(pickerOnly.pickerVisible, true);
   assert.match(pickerOnly.note, /pick another folder/);
+});
+
+test('the folder field trip mirrors real scan state and only server-observed counts', () => {
+  assert.equal(folderSceneView().visible, false);
+  assert.deepEqual(folderSceneView({ chooserOpen: true }), {
+    visible: true,
+    phase: 'choosing',
+    label: 'Pick a folder to explore.',
+    finds: []
+  });
+  assert.deepEqual(folderSceneView({ chooserOpen: true, scanning: true, scanName: 'Documents' }), {
+    visible: true,
+    phase: 'scanning',
+    label: 'Exploring Documents…',
+    finds: []
+  });
+  const offer = {
+    verdict: 'mixed',
+    status: 'pending',
+    folder: '<Documents>',
+    projects_count: 3,
+    loose_files: 40,
+    blueprint_label: 'Proposed blueprint'
+  };
+  assert.deepEqual(folderSceneView({ offer }), {
+    visible: true,
+    phase: 'found',
+    label: "Here's what I noticed in <Documents>.",
+    finds: ['3 projects', '40 loose files']
+  });
+  assert.deepEqual(folderSceneView({ offer, failed: true }), {
+    visible: true,
+    phase: 'error',
+    label: 'I could not explore that folder.',
+    finds: []
+  });
+  assert.deepEqual(
+    folderSceneView({ offer: { ...offer, status: 'resolved' } }).label,
+    '<Documents> is ready.'
+  );
+  assert.deepEqual(
+    folderSceneView({ offer: { ...offer, projects_count: '3', loose_files: -1 } }).finds,
+    []
+  );
+  assert.deepEqual(
+    folderSceneView({
+      offer: {
+        verdict: 'project',
+        status: 'pending',
+        folder: 'Thesis',
+        subject: { marker: 'LaTeX manuscript' }
+      }
+    }).finds,
+    ['LaTeX manuscript']
+  );
 });
 
 const thesisOffer = {

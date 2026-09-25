@@ -3090,7 +3090,7 @@
       '<div class="ws-map-empty-cluster">' +
       '<button type="button" class="ws-map-pad ws-map-pad--hero" data-ws-map-create aria-label="Create a new workspace">' +
       '<span class="ws-map-pad-plate">＋</span><span class="ws-map-pad-label">New workspace</span></button>' +
-      '<div class="ws-map-empty-note">No workspaces yet — <a href="/?panel=today&amp;folder=show" data-ws-map-folder>show your assistant a folder</a>.</div>' +
+      '<div class="ws-map-empty-note">No workspaces yet — <a href="/?panel=today&amp;folder=show" data-ws-map-folder>let your assistant explore a folder</a>.</div>' +
       '</div></div>'
     );
   }

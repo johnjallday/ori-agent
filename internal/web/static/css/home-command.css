@@ -249,9 +249,41 @@ body.home-command-page .home-command-bridge * {
 }
 
 .pa-folder__receipt {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
   margin: 0.5rem 0 0.75rem;
-  padding-left: 1.25rem;
+  padding: 0;
+  list-style: none;
   overflow-wrap: anywhere;
+}
+
+.pa-folder__receipt li {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border: 1px solid var(--hc-line);
+  border-radius: 7px;
+  background: var(--hc-panel);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.pa-folder__receipt li[data-kind="task"] {
+  grid-column: 1 / -1;
+}
+
+.pa-folder__receipt-icon {
+  flex: none;
+  color: var(--hc-signal);
+  font-weight: 750;
+}
+
+@media (max-width: 440px) {
+  .pa-folder__receipt {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .pa-hq-card #personalAssistantHQPlan {
@@ -326,6 +358,213 @@ body.home-command-page .home-command-bridge * {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/* Folder field trip: the real assistant portrait, a little paper folder, and
+   findings from the scan. Motion is tied to an in-flight scan, never a timer. */
+.pa-folder__scene {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  min-height: 112px;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 16px;
+  background:
+    radial-gradient(
+      circle at 86% 20%,
+      color-mix(in srgb, var(--hc-amber) 16%, transparent),
+      transparent 46%
+    ),
+    linear-gradient(130deg, var(--hc-panel-raised), var(--hc-panel));
+}
+
+.pa-folder__scene[hidden],
+.pa-folder__why[hidden] {
+  display: none;
+}
+
+.pa-folder__scene-copy {
+  align-self: center;
+  min-width: 0;
+  z-index: 1;
+}
+
+.pa-folder__scene-kicker,
+.pa-folder__scene-assurance {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 11px;
+}
+
+.pa-folder__scene-kicker {
+  color: var(--hc-signal);
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.pa-folder__scene-label {
+  margin: 3px 0 5px;
+  color: var(--hc-ink);
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.pa-folder__scene-finds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 7px 0;
+}
+
+.pa-folder__scene-finds:empty {
+  display: none;
+}
+
+.pa-folder__scene-finds span {
+  padding: 2px 8px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 999px;
+  color: var(--hc-ink);
+  background: var(--hc-panel);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.pa-folder__scene-art {
+  position: relative;
+  align-self: stretch;
+  min-height: 78px;
+}
+
+.pa-folder__scene-avatar {
+  position: absolute;
+  right: 8px;
+  bottom: 5px;
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  transform-origin: center;
+}
+
+.pa-folder__scene-avatar .agent-avatar {
+  --aa-size: 54px;
+}
+
+.pa-folder__scene-folder {
+  position: absolute;
+  right: 56px;
+  bottom: 8px;
+  width: 42px;
+  height: 38px;
+  color: var(--hc-amber);
+  filter: drop-shadow(0 3px 1px color-mix(in srgb, var(--hc-ink) 18%, transparent));
+}
+
+.pa-folder__scene-spark {
+  position: absolute;
+  right: 67px;
+  bottom: 58px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hc-amber);
+  box-shadow:
+    18px -11px 0 -2px var(--hc-signal),
+    31px 5px 0 -3px var(--hc-amber);
+  opacity: 0;
+}
+
+.pa-folder__scene[data-phase="scanning"] .pa-folder__scene-folder {
+  animation: pa-folder-nibble 0.75s ease-in forwards;
+}
+
+.pa-folder__scene[data-phase="scanning"] .pa-folder__scene-avatar {
+  animation: pa-folder-digest 1.6s ease-in-out 0.45s infinite;
+}
+
+/* When the server answers quickly, finish the already-started intake instead
+   of skipping it; on reload a saved offer stays still (fresh-scan is false). */
+.pa-folder__scene[data-phase="found"][data-fresh-scan="true"] .pa-folder__scene-folder {
+  transform: translateX(53px) rotate(-18deg) scale(0.15);
+  opacity: 0;
+  transition:
+    transform 0.65s ease-in,
+    opacity 0.65s ease-in;
+}
+
+.pa-folder__scene[data-phase="found"] .pa-folder__scene-spark {
+  animation: pa-folder-spark 0.75s ease-out both;
+}
+
+@keyframes pa-folder-nibble {
+  65% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(53px) rotate(-18deg) scale(0.15);
+    opacity: 0;
+  }
+}
+
+@keyframes pa-folder-digest {
+  50% {
+    transform: scale(0.9, 1.08) rotate(4deg);
+  }
+}
+
+@keyframes pa-folder-spark {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.6);
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.8;
+    transform: translateY(-4px) scale(1);
+  }
+}
+
+.pa-folder__why summary {
+  width: fit-content;
+  color: var(--hc-signal);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pa-folder__why summary:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 3px;
+}
+
+.pa-folder__why .pa-folder__reason {
+  margin-top: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pa-folder__scene[data-phase] .pa-folder__scene-folder,
+  .pa-folder__scene[data-phase] .pa-folder__scene-avatar,
+  .pa-folder__scene[data-phase] .pa-folder__scene-spark {
+    animation: none;
+    transition: none;
+  }
+
+  .pa-folder__scene[data-phase="found"][data-fresh-scan="true"] .pa-folder__scene-folder {
+    transform: none;
+    opacity: 1;
+    transition: none;
+  }
+
+  .pa-folder__scene[data-phase="found"] .pa-folder__scene-spark {
+    opacity: 1;
+  }
 }
 
 .pa-folder__chooser {

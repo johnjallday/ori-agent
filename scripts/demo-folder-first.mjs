@@ -29,7 +29,7 @@ try {
   if (complete !== 200) throw new Error(`onboarding completion failed: ${complete}`);
   await page.goto(`${base}/`);
   if (!(await page.locator('#cockpitShowFolderBtn').isHidden())) {
-    throw new Error('Show me a folder appeared before hiring');
+    throw new Error('Explore a folder appeared before hiring');
   }
   await shot('00-before-hire');
   await page.goto(`${base}/agents`);
@@ -92,7 +92,7 @@ try {
   await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
   if (
     !(await page.locator('#personalAssistantFolderTitle').textContent()).includes(
-      'Now show me a folder'
+      "Now let's explore a folder"
     )
   ) {
     throw new Error('first-folder hand-over did not appear after HQ build');
@@ -133,7 +133,20 @@ try {
   await page.goto(`${base}/?panel=today`);
   await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
   await shot('06-reset-rearms-prompt');
+  // Hold the real request briefly so the visual intake can be captured while
+  // the server is genuinely still scanning. No response body is fabricated.
+  await page.route(
+    '**/api/personal-assistant/folder-digest/scan',
+    async route => {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      await route.continue();
+    },
+    { times: 1 }
+  );
   await page.locator('#personalAssistantFolderChips button[data-chip="documents"]').click();
+  await page.locator('#personalAssistantFolderScene[data-phase="scanning"]').waitFor();
+  await page.waitForTimeout(240);
+  await shot('06a-avatar-digests-folder');
   await page.locator('#personalAssistantFolderOffer').waitFor({ state: 'visible' });
   await page.locator('#personalAssistantFolderOfferActions').getByText('Start with Thesis').click();
   await shot('07-project-confirm');

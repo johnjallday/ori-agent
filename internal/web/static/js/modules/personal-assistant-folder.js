@@ -28,7 +28,7 @@ export function folderActionAvailable(personalAssistant) {
 export function firstFolderPromptView(digest, available) {
   return {
     expand: available === true && digest?.prompt_first_folder === true,
-    line: "Now show me a folder you're working in."
+    line: "Now let's explore a folder you're working in."
   };
 }
 
@@ -51,6 +51,48 @@ export function folderChooserView(digest) {
     pickerLabel: 'Pick another folder…',
     note
   };
+}
+
+// A view of what the server has actually observed. A folder graphic moving
+// towards the portrait is only a metaphor: no files are moved or uploaded.
+// Never derive counts or a blueprint from a proposed workspace plan.
+export function folderSceneView({
+  chooserOpen = false,
+  scanning = false,
+  failed = false,
+  scanName = '',
+  offer = null
+} = {}) {
+  const offered = folderOfferView(offer).visible;
+  if (!chooserOpen && !offered) return { visible: false, phase: 'choosing', label: '', finds: [] };
+  if (scanning) {
+    return {
+      visible: true,
+      phase: 'scanning',
+      label: `Exploring ${scanName || 'your folder'}…`,
+      finds: []
+    };
+  }
+  if (failed)
+    return { visible: true, phase: 'error', label: 'I could not explore that folder.', finds: [] };
+  if (offered) {
+    const finds = [];
+    const count = n => (Number.isSafeInteger(n) && n > 0 ? n : 0);
+    if (count(offer.projects_count)) finds.push(plural(offer.projects_count, 'project'));
+    if (count(offer.loose_files)) finds.push(plural(offer.loose_files, 'loose file'));
+    if (!finds.length && offer.verdict === 'project' && offer.subject?.marker) {
+      finds.push(String(offer.subject.marker));
+    }
+    const folder = String(offer.folder || '').trim() || 'your folder';
+    return {
+      visible: true,
+      phase: 'found',
+      label:
+        offer.status === 'resolved' ? `${folder} is ready.` : `Here's what I noticed in ${folder}.`,
+      finds
+    };
+  }
+  return { visible: true, phase: 'choosing', label: 'Pick a folder to explore.', finds: [] };
 }
 
 function segments(parts) {
@@ -354,6 +396,10 @@ const state = {
   digest: null,
   offer: null,
   busy: false,
+  scanning: false,
+  scanFailed: false,
+  freshScan: false,
+  scanName: '',
   chooserOpen: false,
   available: false,
   handOver: false,
@@ -384,6 +430,10 @@ function elements() {
     root,
     show: document.getElementById('personalAssistantFolderShowBtn'),
     chooser: document.getElementById('personalAssistantFolderChooser'),
+    scene: document.getElementById('personalAssistantFolderScene'),
+    sceneAvatar: document.getElementById('personalAssistantFolderSceneAvatar'),
+    sceneLabel: document.getElementById('personalAssistantFolderSceneLabel'),
+    sceneFinds: document.getElementById('personalAssistantFolderSceneFinds'),
     chips: document.getElementById('personalAssistantFolderChips'),
     title: document.getElementById('personalAssistantFolderTitle'),
     note: document.getElementById('personalAssistantFolderNote'),
@@ -392,6 +442,7 @@ function elements() {
     headline: document.getElementById('personalAssistantFolderOfferHeadline'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
+    why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
     receipt: document.getElementById('personalAssistantFolderReceipt'),
     actions: document.getElementById('personalAssistantFolderOfferActions'),
     offerNote: document.getElementById('personalAssistantFolderOfferNote'),
@@ -436,7 +487,7 @@ function renderChooser() {
   if (els.title)
     els.title.textContent = state.handOver
       ? firstFolderPromptView(state.digest, true).line
-      : 'Which folder should I look at?';
+      : 'Which folder should I explore?';
   els.chooser.hidden = !state.chooserOpen;
   if (els.show) els.show.setAttribute('aria-expanded', String(state.chooserOpen));
   if (els.chips) {
@@ -463,6 +514,39 @@ function renderChooser() {
     }
   }
   setText(els.note, view.note);
+}
+
+function renderScene() {
+  const els = elements();
+  if (!els?.scene) return;
+  const view = folderSceneView({
+    chooserOpen: state.chooserOpen,
+    scanning: state.scanning,
+    failed: state.scanFailed,
+    scanName: state.scanName,
+    offer: state.offer
+  });
+  els.scene.hidden = !view.visible;
+  if (!view.visible) return;
+  els.scene.dataset.phase = view.phase;
+  els.scene.dataset.freshScan = String(state.freshScan);
+  setText(els.sceneLabel, view.label, false);
+  if (els.sceneFinds) {
+    els.sceneFinds.replaceChildren();
+    view.finds.forEach(find => {
+      const badge = document.createElement('span');
+      badge.textContent = find;
+      els.sceneFinds.appendChild(badge);
+    });
+  }
+  // Clone the already rendered identity, including custom portraits. No new
+  // asset lookup, assistant name interpolation, or second appearance pipeline.
+  const portrait = document.getElementById('personalAssistantPanelAvatar');
+  if (els.sceneAvatar && portrait && els.sceneAvatar.innerHTML !== portrait.innerHTML) {
+    els.sceneAvatar.replaceChildren(
+      ...Array.from(portrait.childNodes, node => node.cloneNode(true))
+    );
+  }
 }
 
 function renderOffer() {
@@ -493,6 +577,7 @@ function renderOffer() {
   }
   setText(els.question, view.question, false);
   setText(els.reason, view.reason, false);
+  if (els.why) els.why.hidden = !view.reason;
   if (els.receipt) {
     els.receipt.replaceChildren();
     els.receipt.hidden = !receipt.visible;
@@ -500,16 +585,21 @@ function renderOffer() {
       receipt.rows.forEach(row => {
         const li = document.createElement('li');
         const labels = {
-          workspace: 'Workspace',
-          folder: 'Folder',
-          blueprint: 'Blueprint',
-          agent: 'Agent',
-          task: 'First task'
+          workspace: ['Workspace', '◈'],
+          folder: ['Folder', '▤'],
+          blueprint: ['Blueprint', '✦'],
+          agent: ['Agent', '●'],
+          task: ['First task', '✓']
         };
+        const [label, glyph] = labels[row.kind] || ['Set up', '•'];
+        li.dataset.kind = labels[row.kind] ? row.kind : 'other';
+        const icon = document.createElement('span');
+        icon.className = 'pa-folder__receipt-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = glyph;
         li.append(
-          document.createTextNode(
-            `${labels[row.kind] || 'Set up'} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`
-          )
+          icon,
+          document.createTextNode(`${label} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`)
         );
         els.receipt.append(li);
       });
@@ -566,6 +656,7 @@ function render() {
   if (!state.available) return;
   renderChooser();
   renderOffer();
+  renderScene();
 }
 
 // runAction carries out one of the offer's actions, wherever its button was
@@ -632,6 +723,7 @@ function act(actionId) {
 
 function openChooser() {
   state.chooserOpen = true;
+  state.scanFailed = false;
   showError('');
   render();
   const els = elements();
@@ -639,6 +731,9 @@ function openChooser() {
 }
 
 async function load() {
+  state.scanFailed = false;
+  state.freshScan = false;
+  let revealFirstPrompt = false;
   try {
     const response = await fetch(DIGEST_ENDPOINT, { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`folder digest ${response.status}`);
@@ -651,6 +746,7 @@ async function load() {
     if (state.offer) state.chooserOpen = false;
     const prompt = firstFolderPromptView(state.digest, state.available);
     if (prompt.expand && !state.prompting) {
+      revealFirstPrompt = true;
       state.handOver = true;
       state.chooserOpen = true;
       state.prompting = true;
@@ -669,14 +765,29 @@ async function load() {
     state.digest = state.digest || { chips: [], picker_available: false };
   }
   render();
+  // The brief and HQ receipt precede Needs you and can put the first prompt
+  // below the fold. Reveal it once inside an already-open drawer, without
+  // scrolling Home when the relationship changes in a closed panel.
+  if (revealFirstPrompt && !document.getElementById('personalAssistantPanel')?.hidden) {
+    elements()?.scene?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
+  }
   announceOffer();
 }
 
 async function scan(body) {
   if (state.busy) return;
   state.busy = true;
+  state.scanning = !body.picker;
+  state.scanFailed = false;
+  state.freshScan = false;
+  state.scanName = body.picker
+    ? ''
+    : folderChooserView(state.digest).chips.find(chip => chip.id === body.chip)?.label ||
+      'your folder';
+  const els = elements();
+  if (els?.why) els.why.open = false;
   showError('');
-  showStatus(body.picker ? 'Choose a folder in the dialog…' : 'Looking at the folder…');
+  showStatus(body.picker ? 'Choose a folder in the dialog…' : '');
   render();
   try {
     const response = await fetch(`${DIGEST_ENDPOINT}/scan`, {
@@ -686,6 +797,7 @@ async function scan(body) {
     });
     const payload = await readJSON(response);
     if (!response.ok) {
+      state.scanFailed = true;
       showStatus(
         String(payload?.error || 'That folder could not be looked at. Choose a different folder.')
       );
@@ -696,13 +808,16 @@ async function scan(body) {
       return;
     }
     state.offer = payload?.offer || null;
+    state.freshScan = Boolean(state.offer);
     state.confirm = '';
     state.chooserOpen = false;
     showStatus('');
     announceOffer();
   } catch (_) {
+    state.scanFailed = true;
     showStatus('That folder could not be looked at right now.');
   } finally {
+    state.scanning = false;
     state.busy = false;
     render();
   }
