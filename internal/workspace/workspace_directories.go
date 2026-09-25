@@ -242,7 +242,7 @@ func (w *Workspace) ReadDirectoryFile(dirID string, relativePath string) ([]byte
 		}
 		return nil, err
 	}
-	content, err := os.ReadFile(fullPath) // #nosec G304 -- resolved and contained by OpenDirectoryFile
+	content, err := os.ReadFile(fullPath) // #nosec G304 G703 -- resolved and contained by OpenDirectoryFile
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("file not found: %s", relativePath)

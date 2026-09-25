@@ -332,6 +332,22 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    // "Show me a folder" loads its chooser for an active relationship. The
+    // README user has no pending offer and no chip folders in this fixture,
+    // so the section stays a single button and the scenes stay deterministic.
+    if (url.pathname === '/api/personal-assistant/folder-digest') {
+      await json(route, {
+        folder_digest: {
+          offer: null,
+          chips: [],
+          picker_available: false,
+          picker_note:
+            'Downloads, Documents and Desktop are not under this home, and the folder dialog is unavailable here.',
+          paused: false
+        }
+      });
+      return;
+    }
     if (url.pathname === '/api/personal-assistant/today') {
       await json(route, {
         today: {

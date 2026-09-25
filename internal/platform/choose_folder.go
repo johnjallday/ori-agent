@@ -17,7 +17,10 @@ var ErrFolderDialogUnavailable = errors.New("folder dialog is unavailable")
 // chooseFolderCommand runs the AppleScript and returns its stdout. Tests
 // replace it to exercise cancellation and parsing without a dialog.
 var chooseFolderCommand = func(ctx context.Context, script string) ([]byte, error) {
-	return exec.CommandContext(ctx, "osascript", "-e", script).Output()
+	// The program is the constant osascript; the only variable is the script,
+	// which chooseFolderScript builds from a prompt escaped for an AppleScript
+	// string literal, never from a path or anything the browser sent.
+	return exec.CommandContext(ctx, "osascript", "-e", script).Output() // #nosec G204 -- constant binary, escaped prompt
 }
 
 // Why ChooseFolder cannot show a dialog, for a chooser that has to explain

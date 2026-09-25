@@ -202,7 +202,7 @@ func (w *Workspace) OpenDirectoryFile(dirID, relativePath string) (*DirectoryRef
 	if !isPathWithin(resolved, root) {
 		return nil, "", nil, ErrDirectoryPathOutside
 	}
-	info, err := os.Stat(resolved)
+	info, err := os.Stat(resolved) // #nosec G304 G703 -- symlink-resolved and contained in the linked directory just above
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, "", nil, ErrDirectoryNotFound
