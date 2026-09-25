@@ -131,7 +131,7 @@ test('the folder field trip mirrors real scan state and only server-observed cou
   assert.deepEqual(folderSceneView({ chooserOpen: true }), {
     visible: true,
     phase: 'choosing',
-    label: 'Pick a folder to explore.',
+    label: 'Ready when you are.',
     finds: []
   });
   assert.deepEqual(folderSceneView({ chooserOpen: true, scanning: true, scanName: 'Documents' }), {

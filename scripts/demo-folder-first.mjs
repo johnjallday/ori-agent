@@ -98,10 +98,20 @@ try {
     throw new Error('first-folder hand-over did not appear after HQ build');
   }
   await shot('04-first-folder-prompt');
+  await page.locator('#darkModeToggle').click();
+  await page.waitForTimeout(350);
+  await shot('04d-inline-chooser-dark');
+  await page.locator('#darkModeToggle').click();
+  await page.waitForTimeout(350);
   await page.goto(`${base}/?panel=today`);
   await page.locator('#personalAssistantFolder').waitFor({ state: 'visible' });
-  if (await page.locator('#personalAssistantFolderChooser').isVisible()) {
-    throw new Error('first-folder prompt repeated on reload');
+  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
+  if (
+    (await page.locator('#personalAssistantFolderTitle').textContent()).includes(
+      "Now let's explore"
+    )
+  ) {
+    throw new Error('first-folder hand-over repeated on reload');
   }
   await page.locator('#personalAssistantClose').click();
   await page.locator('#cockpitShowFolderBtn').click();
@@ -180,7 +190,10 @@ try {
     throw new Error(`The repeated Set up click lost its receipt: ${JSON.stringify(replay)}`);
   }
   console.log('Repeated request preserved receipt:', replay.data.offer.outcome.receipt[0].name);
-  await page.locator('#personalAssistantFolderShowBtn').click();
+  if (await page.locator('#personalAssistantFolderShowBtn').count()) {
+    throw new Error('The redundant inline Explore a folder button returned');
+  }
+  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
   await page.locator('#personalAssistantFolderChips button[data-chip="desktop"]').click();
   await page.locator('#personalAssistantFolderOffer').waitFor({ state: 'visible' });
   await page

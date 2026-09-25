@@ -515,10 +515,13 @@ URL remain as constants so persisted state that names it still loads.
 points it at a folder, the server looks at the folder's shape, and the
 assistant makes one explained offer.
 
-- **Entry.** Today's "Explore a folder" (`personal-assistant-today.tmpl`,
-  `#personalAssistantFolder`), Home's primary header button, Mission 02's Start,
-  or the pending offer on the
-  mission card. Only an `active` or `paused` relationship sees it.
+- **Entry.** Today's folder scene and chooser (`personal-assistant-today.tmpl`,
+  `#personalAssistantFolder`) are already expanded for an `active` or `paused`
+  relationship, even after a scan returns an offer or the panel is reopened.
+  There is no second inline launch button. Home's primary **Explore a folder**
+  header action opens the panel and focuses the chooser; Mission 02's Start
+  and the mission card still reach the same flow. Before HQ, Home opens its
+  confirm card instead.
 - **Choosing.** Chips name Downloads, Documents, and Desktop under the server's
   home; "Pick another folder…" runs the native picker on the server
   (`platform.ChooseFolder`, osascript). The browser never sends a filesystem

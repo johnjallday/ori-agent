@@ -92,7 +92,7 @@ export function folderSceneView({
       finds
     };
   }
-  return { visible: true, phase: 'choosing', label: 'Pick a folder to explore.', finds: [] };
+  return { visible: true, phase: 'choosing', label: 'Ready when you are.', finds: [] };
 }
 
 function segments(parts) {
@@ -428,7 +428,6 @@ function elements() {
   if (!root) return null;
   return {
     root,
-    show: document.getElementById('personalAssistantFolderShowBtn'),
     chooser: document.getElementById('personalAssistantFolderChooser'),
     scene: document.getElementById('personalAssistantFolderScene'),
     sceneAvatar: document.getElementById('personalAssistantFolderSceneAvatar'),
@@ -485,11 +484,12 @@ function renderChooser() {
   if (!els?.chooser) return;
   const view = folderChooserView(state.digest);
   if (els.title)
-    els.title.textContent = state.handOver
-      ? firstFolderPromptView(state.digest, true).line
-      : 'Which folder should I explore?';
+    els.title.textContent = state.offer
+      ? 'Or explore another folder'
+      : state.handOver
+        ? firstFolderPromptView(state.digest, true).line
+        : 'Which folder should I explore?';
   els.chooser.hidden = !state.chooserOpen;
-  if (els.show) els.show.setAttribute('aria-expanded', String(state.chooserOpen));
   if (els.chips) {
     els.chips.replaceChildren();
     view.chips.forEach(chip => {
@@ -741,9 +741,6 @@ async function load() {
     state.digest = payload?.folder_digest || null;
     state.offer = state.digest?.offer || null;
     state.confirm = '';
-    // A pending offer is the assistant's one question; it needs no chooser
-    // in front of it.
-    if (state.offer) state.chooserOpen = false;
     const prompt = firstFolderPromptView(state.digest, state.available);
     if (prompt.expand && !state.prompting) {
       revealFirstPrompt = true;
@@ -810,7 +807,7 @@ async function scan(body) {
     state.offer = payload?.offer || null;
     state.freshScan = Boolean(state.offer);
     state.confirm = '';
-    state.chooserOpen = false;
+    state.handOver = false;
     showStatus('');
     announceOffer();
   } catch (_) {
@@ -1008,6 +1005,9 @@ function onStatus(personalAssistant) {
     render();
     return;
   }
+  // The folder field trip is the action in Needs you, not a second button
+  // the user must press. Keep the chooser available beside any current offer.
+  state.chooserOpen = true;
   if (changed || !state.digest) void load();
   else render();
 }
@@ -1015,11 +1015,6 @@ function onStatus(personalAssistant) {
 function init() {
   const els = elements();
   if (!els) return;
-  els.show?.addEventListener('click', () => {
-    state.chooserOpen = !state.chooserOpen;
-    if (state.chooserOpen) openChooser();
-    else render();
-  });
   document.addEventListener('personal-assistant:status', event => {
     onStatus(event.detail?.personalAssistant);
   });

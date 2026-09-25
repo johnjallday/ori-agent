@@ -76,6 +76,8 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   const scene = page.locator('#personalAssistantFolderScene');
   await expect(scene).toBeVisible();
   await expect(scene).toHaveAttribute('data-phase', 'choosing');
+  await expect(page.locator('#personalAssistantFolderShowBtn')).toHaveCount(0);
+  await expect(page.locator('#personalAssistantFolderChooser')).toBeVisible();
   await expect(scene.locator('#personalAssistantFolderSceneAvatar .agent-avatar')).toBeVisible();
   await expect(scene.locator('.pa-folder__scene-art')).toHaveAttribute('aria-hidden', 'true');
   await expect(scene.locator('#personalAssistantFolderSceneLabel')).toHaveAttribute(
@@ -94,6 +96,10 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   expect(motion).toContain('pa-folder-nibble');
   finishScan?.();
   await expect(scene).toHaveAttribute('data-phase', 'found');
+  await expect(page.locator('#personalAssistantFolderChooser')).toBeVisible();
+  await expect(page.locator('#personalAssistantFolderTitle')).toHaveText(
+    'Or explore another folder'
+  );
   await expect(page.locator('#personalAssistantTodayAllClear')).toBeHidden();
   await expect(scene.locator('#personalAssistantFolderSceneFinds')).toHaveText(
     '3 projects40 loose files'
@@ -114,7 +120,6 @@ test('the assistant portrait explores only while a scan is in flight, then shows
     .evaluate(el => getComputedStyle(el).transitionProperty);
   expect(transition).toBe('none');
   failNext = true;
-  await page.locator('#personalAssistantFolderShowBtn').click();
   await page.locator('#personalAssistantFolderChips button[data-chip="documents"]').click();
   await expect(scene).toHaveAttribute('data-phase', 'error');
   await expect(scene.locator('#personalAssistantFolderSceneFinds')).toBeEmpty();
@@ -128,4 +133,9 @@ test('the assistant portrait explores only while a scan is in flight, then shows
     window.innerWidth
   ]);
   expect(widths[0]).toBeLessThanOrEqual(widths[1] + 1);
+  await page.reload();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(page.locator('#personalAssistantFolderChooser')).toBeVisible();
+  await expect(scene).toHaveAttribute('data-phase', 'choosing');
+  await expect(page.locator('#personalAssistantFolderShowBtn')).toHaveCount(0);
 });

@@ -353,13 +353,6 @@ body.home-command-page .home-command-bridge * {
   margin: 0 0 14px;
 }
 
-.pa-folder__launch {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
 /* Folder field trip: the real assistant portrait, a little paper folder, and
    findings from the scan. Motion is tied to an in-flight scan, never a timer. */
 .pa-folder__scene {
