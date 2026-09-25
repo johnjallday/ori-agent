@@ -91,23 +91,24 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 		}
 	}
 
-	// The five starter missions, in order, all featured. Meet your assistant is
-	// the one required mission and gates the other four; those stay optional so
-	// no mission after the hire ever locks the Daily loop tier.
+	// Exactly four missions stay visible. Retired objectives still have IDs,
+	// detectors, and completions but cannot appear on the mission board.
 	wantMissions := []struct {
 		id, title, url, label string
 		optional              bool
 		lockedUntil           string
 	}{
 		{MeetAssistantQuestID, "Meet your assistant", MeetAssistantActionURL, "Start", false, ""},
-		{BuildHQQuestID, "Build My HQ", GuidedBuildHQActionURL, "Build My HQ", true, MeetAssistantQuestID},
 		{ShowFolderQuestID, "Show your assistant a folder", ShowFolderActionURL, "Start", true, MeetAssistantQuestID},
 		{ConnectSourceQuestID, "Plan my first day", PlanFirstDayActionURL, "Start", true, MeetAssistantQuestID},
 		{FirstBriefQuestID, "Read your first Daily Brief", "/", "Open Today", true, MeetAssistantQuestID},
 	}
 	for i, want := range wantMissions {
 		q := graph.Quests[i]
-		if q.ID != want.id || q.Order != i+1 || !q.Featured || q.Optional != want.optional {
+		if i > 0 {
+			q = graph.Quests[i+1]
+		} // the retired HQ quest keeps its original position
+		if q.ID != want.id || q.Order != i+1 || !q.Featured || q.Retired || q.Optional != want.optional {
 			t.Fatalf("mission %d = %s order %d featured %t optional %t", i+1, q.ID, q.Order, q.Featured, q.Optional)
 		}
 		if q.Title != want.title || q.ActionURL != want.url || q.ActionLabel != want.label {
@@ -126,10 +127,16 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 	if why := graph.Quests[2].Why; why != "Point Ori at a folder and it will tell you what it can do with it." {
 		t.Fatalf("Show your assistant a folder why = %q", why)
 	}
-	for _, q := range graph.Quests[len(wantMissions):] {
-		if q.Featured || q.Order != 0 || q.LockedUntil != "" {
-			t.Fatalf("non-mission quest %s is featured (order %d) or locked (%q)", q.ID, q.Order, q.LockedUntil)
+	for _, q := range graph.Quests {
+		if q.Featured {
+			continue
 		}
+		if !q.Retired || q.Order != 0 {
+			t.Fatalf("non-mission quest %s is not retired or has order %d", q.ID, q.Order)
+		}
+	}
+	if q := graph.Quests[1]; q.ID != BuildHQQuestID || q.Featured || !q.Retired || q.ActionURL != GuidedBuildHQActionURL {
+		t.Fatalf("HQ quest must keep its Map action but not its mission slot: %+v", q)
 	}
 
 	names := []string{"Starter", "Daily loop", "Recruit", "Equip", "Automate", "Command"}
@@ -138,7 +145,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 			t.Fatalf("cohort tier %d = %q, want %q", i+1, graph.TierNames[i+1], name)
 		}
 	}
-	if graph.TotalTiers != 6 {
+	if graph.TotalTiers != 1 {
 		t.Fatalf("cohort total tiers = %d", graph.TotalTiers)
 	}
 	// Renaming the cohort's tiers must not leak into the built-in names.
@@ -147,26 +154,56 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 	}
 }
 
+func TestPersonalAssistantGraph_RetiredQuestsKeepHistoryWithoutMissionsOrRewards(t *testing.T) {
+	graph := PersonalAssistantGraph()
+	visible := []string{}
+	for _, q := range graph.Quests {
+		if !q.Retired {
+			visible = append(visible, q.ID)
+		}
+	}
+	want := []string{MeetAssistantQuestID, ShowFolderQuestID, ConnectSourceQuestID, FirstBriefQuestID}
+	if strings.Join(visible, ",") != strings.Join(want, ",") {
+		t.Fatalf("visible quests = %v, want %v", visible, want)
+	}
+	e := New(&fakeStore{}, WithGraph(graph))
+	before := e.Status()
+	// A retired quest still matches its event but cannot change the status meter.
+	e.HandleEvent(ws.Event{Type: ws.EventMessageSent})
+	if !e.HasCompleted("t1-first-message") {
+		t.Fatal("a retired quest stopped recording real events")
+	}
+	if after := e.Status(); after.CompletedCount != before.CompletedCount || after.TotalCount != 4 || after.TotalTiers != 1 || after.NextQuest.ID != MeetAssistantQuestID {
+		t.Fatalf("retired completion changed the mission board: %+v", after)
+	}
+	if err := e.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	if e.HasCompleted("t1-first-message") || e.Status().TotalCount != 4 {
+		t.Fatal("reset did not clear retired history while preserving the visible graph")
+	}
+}
+
 func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
 	st := e.Status()
-	if st.Tiers[0].Name != "Starter" || st.Tiers[1].Name != "Daily loop" {
-		t.Fatalf("tier names = %q, %q", st.Tiers[0].Name, st.Tiers[1].Name)
+	if len(st.Tiers) != 1 || st.Tiers[0].Name != "Starter" {
+		t.Fatalf("visible tiers = %+v", st.Tiers)
 	}
-	if st.TotalTiers != 6 || st.CurrentTier != 1 {
+	if st.TotalTiers != 1 || st.CurrentTier != 1 {
 		t.Fatalf("total/current = %d/%d", st.TotalTiers, st.CurrentTier)
 	}
 
-	// A hired user who built HQ and resolved every mission sits in Daily loop,
-	// never back in a first-contact tier.
+	// Resolving every mission completes the only visible tier. Completing the
+	// retired HQ objective does not affect its status or the meter.
 	for _, id := range []string{MeetAssistantQuestID, BuildHQQuestID, ShowFolderQuestID, ConnectSourceQuestID} {
 		e.Complete(id)
 	}
 	if err := e.Skip(FirstBriefQuestID); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.Status().CurrentTier; got != 2 {
-		t.Fatalf("current tier after the starter missions = %d, want 2", got)
+	if st := e.Status(); st.CurrentTier != 1 || !st.AllComplete || st.TotalCount != 4 {
+		t.Fatalf("status after four missions = %+v", st)
 	}
 }
 
@@ -708,12 +745,11 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
 
 	st := e.Status()
-	if len(st.Missions) != 5 || st.Missions[0].ID != MeetAssistantQuestID {
-		t.Fatalf("missions = %v, want five with Meet your assistant first", missionLocks(e))
+	if len(st.Missions) != 4 || st.Missions[0].ID != MeetAssistantQuestID {
+		t.Fatalf("missions = %v, want four with Meet your assistant first", missionLocks(e))
 	}
 	wantLocked := []string{
 		MeetAssistantQuestID + ":false:",
-		BuildHQQuestID + ":true:Meet your assistant first",
 		ShowFolderQuestID + ":true:Meet your assistant first",
 		ConnectSourceQuestID + ":true:Meet your assistant first",
 		FirstBriefQuestID + ":true:Meet your assistant first",
@@ -738,8 +774,8 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 			t.Fatalf("mission %s still locked after the hire: %+v", m.ID, m)
 		}
 	}
-	if next := e.Status().NextQuest; next == nil || next.ID != BuildHQQuestID {
-		t.Fatalf("next quest after the hire = %+v, want Build My HQ", next)
+	if next := e.Status().NextQuest; next == nil || next.ID != ShowFolderQuestID {
+		t.Fatalf("next quest after the hire = %+v, want Show a folder", next)
 	}
 }
 
@@ -754,7 +790,7 @@ func TestPersonalAssistantGraph_LockedMissionsStillComplete(t *testing.T) {
 		t.Fatal("a locked quest refused a direct Complete")
 	}
 	e.HandleEvent(ws.Event{Type: ws.EventWorkspaceCreated, Data: map[string]any{"template_id": "", "kind": "workspace"}})
-	if !completed(e, BuildHQQuestID) || !completed(e, ConnectSourceQuestID) {
+	if !e.HasCompleted(BuildHQQuestID) || !completed(e, ConnectSourceQuestID) {
 		t.Fatalf("locked quests did not record completion: %v", missionLocks(e))
 	}
 	if strings.Join(fires, ",") != BuildHQQuestID+","+ConnectSourceQuestID {
@@ -799,8 +835,8 @@ func TestMeetAssistant_IsRequiredAndHoldsTheStarterTier(t *testing.T) {
 		t.Fatalf("current tier = %d, want 1 until the assistant is hired", got)
 	}
 	e.Complete(MeetAssistantQuestID)
-	if got := e.Status().CurrentTier; got != 2 {
-		t.Fatalf("current tier after the hire = %d, want 2", got)
+	if st := e.Status(); st.CurrentTier != 1 || !st.AllComplete || st.TotalCount != 4 {
+		t.Fatalf("status after the hire = %+v", st)
 	}
 }
 

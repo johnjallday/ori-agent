@@ -123,6 +123,49 @@ func seedFolderTrees(t *testing.T, home string) {
 	write("Desktop/photo.png", 0)
 }
 
+func TestFolderDigest_FirstPromptPersistsOnceAndResetRearmsIt(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	ctx := context.Background()
+	f.service.SetMissionUnresolved(func(id string) bool { return id == "pa-show-folder" })
+	current, err := f.service.Current(ctx, "local")
+	if err != nil || !current.PromptFirstFolder {
+		t.Fatalf("initial prompt = %+v, err=%v", current, err)
+	}
+	for range 2 {
+		view, err := f.service.MarkFirstPromptShown(ctx, "local")
+		if err != nil || view.PromptFirstFolder {
+			t.Fatalf("marked prompt = %+v, err=%v", view, err)
+		}
+	}
+	stored, err := f.store.Read(ctx, "local")
+	if err != nil || stored.FirstPromptShownAt == nil {
+		t.Fatalf("prompt not durable: %+v, %v", stored, err)
+	}
+	first := *stored.FirstPromptShownAt
+	restarted := f.newService()
+	restarted.SetMissionUnresolved(func(string) bool { return true })
+	view, err := restarted.Current(ctx, "local")
+	if err != nil || view.PromptFirstFolder {
+		t.Fatalf("restarted prompt = %+v, err=%v", view, err)
+	}
+	stored, _ = f.store.Read(ctx, "local")
+	if !stored.FirstPromptShownAt.Equal(first) {
+		t.Fatal("repeated prompt changed its timestamp")
+	}
+	if err := restarted.ClearFirstPrompt(ctx, "local"); err != nil {
+		t.Fatal(err)
+	}
+	view, err = restarted.Current(ctx, "local")
+	if err != nil || !view.PromptFirstFolder {
+		t.Fatalf("reset prompt = %+v, err=%v", view, err)
+	}
+	restarted.SetMissionUnresolved(func(string) bool { return false })
+	view, err = restarted.Current(ctx, "local")
+	if err != nil || view.PromptFirstFolder {
+		t.Fatalf("resolved mission prompted: %+v, err=%v", view, err)
+	}
+}
+
 func TestFolderDigest_ChipScanBuildsOfferWithoutPaths(t *testing.T) {
 	f := newFolderDigestFixture(t)
 	ctx := context.Background()

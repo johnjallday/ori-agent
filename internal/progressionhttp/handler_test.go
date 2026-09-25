@@ -1,6 +1,7 @@
 package progressionhttp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -74,8 +75,8 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(raw.Missions) != 5 {
-		t.Fatalf("missions = %d, want 5 (body=%s)", len(raw.Missions), rec.Body.String())
+	if len(raw.Missions) != 4 {
+		t.Fatalf("missions = %d, want 4 (body=%s)", len(raw.Missions), rec.Body.String())
 	}
 	for i, mission := range raw.Missions {
 		if order, _ := mission["order"].(float64); int(order) != i+1 {
@@ -94,8 +95,8 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 			t.Fatalf("missions[%d].locked_reason = %v", i, mission["locked_reason"])
 		}
 	}
-	if raw.Missions[0]["id"] != progression.MeetAssistantQuestID || raw.Missions[2]["id"] != progression.ShowFolderQuestID {
-		t.Fatalf("missions[0], [2] = %v, %v", raw.Missions[0]["id"], raw.Missions[2]["id"])
+	if raw.Missions[0]["id"] != progression.MeetAssistantQuestID || raw.Missions[1]["id"] != progression.ShowFolderQuestID {
+		t.Fatalf("missions[0], [1] = %v, %v", raw.Missions[0]["id"], raw.Missions[1]["id"])
 	}
 	if _, present := raw.Missions[0]["locked_reason"]; present {
 		t.Fatalf("an unlocked mission sent a lock reason: %v", raw.Missions[0])
@@ -147,6 +148,29 @@ func TestReset(t *testing.T) {
 	}
 	if got := decodeStatus(t, rec.Body.Bytes()).CompletedCount; got != 0 {
 		t.Fatalf("completed_count after reset = %d, want 0", got)
+	}
+}
+
+func TestReset_CallsFirstFolderHookOnlyAfterSuccessfulEngineReset(t *testing.T) {
+	h, engine := newHandler()
+	engine.Complete("t1-first-message")
+	calls := 0
+	h.SetAfterReset(func(ctx context.Context) error {
+		calls++
+		if engine.HasCompleted("t1-first-message") {
+			t.Fatal("hook ran before progression reset")
+		}
+		return nil
+	})
+	for range 2 {
+		w := httptest.NewRecorder()
+		h.Reset(w, httptest.NewRequest(http.MethodPost, "/api/progression/reset", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("reset = %d: %s", w.Code, w.Body.String())
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("hook calls = %d, want two idempotent resets", calls)
 	}
 }
 

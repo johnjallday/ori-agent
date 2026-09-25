@@ -17,6 +17,7 @@ import (
 // dialog. No handler here accepts a filesystem path (FR48).
 type FolderDigestService interface {
 	Current(ctx context.Context, userID string) (personalassistant.FolderDigestView, error)
+	MarkFirstPromptShown(ctx context.Context, userID string) (personalassistant.FolderDigestView, error)
 	ScanChip(ctx context.Context, userID, chip string) (personalassistant.FolderOfferView, error)
 	ScanPicked(ctx context.Context, userID string) (*personalassistant.FolderOfferView, error)
 	Decide(ctx context.Context, userID, offerID string, input personalassistant.FolderDecisionInput) (personalassistant.FolderOfferView, error)
@@ -48,6 +49,35 @@ func (h *Handler) GetFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view, err := h.folderDigest.Current(r.Context(), userID)
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"folder_digest": view})
+}
+
+// PromptedFolderDigest consumes only the first-folder hand-over. It accepts no
+// path or request body; a replay is idempotent and cannot scan a folder.
+func (h *Handler) PromptedFolderDigest(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	if r.Body != nil {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 32))
+		if err != nil || strings.TrimSpace(string(body)) != "" {
+			orihttp.BadRequest(w, "The folder prompt does not accept request data")
+			return
+		}
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	view, err := h.folderDigest.MarkFirstPromptShown(r.Context(), userID)
 	if err != nil {
 		writeFolderDigestError(w, err)
 		return

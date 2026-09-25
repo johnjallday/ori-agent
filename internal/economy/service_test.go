@@ -551,7 +551,7 @@ func TestFinishingAStarterQuestEarnsCraft(t *testing.T) {
 	ctx := context.Background()
 	service, _, _ := newService(t)
 
-	awarded, ok := service.AwardQuestCraft(ctx, "t1-first-message")
+	awarded, ok := service.AwardQuestCraft(ctx, "pa-meet-assistant")
 	if !ok || awarded != CraftPerStarterQuest {
 		t.Fatalf("awarded %d ok=%v, want %d and true", awarded, ok, CraftPerStarterQuest)
 	}
@@ -567,10 +567,10 @@ func TestAStarterQuestPaysOnlyOnce(t *testing.T) {
 	ctx := context.Background()
 	service, _, _ := newService(t)
 
-	if _, ok := service.AwardQuestCraft(ctx, "t2-run-task"); !ok {
+	if _, ok := service.AwardQuestCraft(ctx, "pa-show-folder"); !ok {
 		t.Fatal("first award did not pay")
 	}
-	awarded, ok := service.AwardQuestCraft(ctx, "t2-run-task")
+	awarded, ok := service.AwardQuestCraft(ctx, "pa-show-folder")
 	if ok || awarded != 0 {
 		t.Fatalf("second award = %d ok=%v, want 0 and false", awarded, ok)
 	}
@@ -609,19 +609,10 @@ func TestStarterQuestsCoverAFirstFarm(t *testing.T) {
 
 // The exact onboarding payout is pinned so a change to it is always a decision.
 //
-// tasks/prd-starter-missions.md moved it from 30 to 40: three starter missions
-// were added (Tidy your Downloads, Connect one source, Read your first Daily
-// Brief) and "Create your first workspace" was retired, eight quests at 5 Craft.
-// A first Farm still costs 25, so a new user reaches it a little earlier.
-//
-// tasks/prd-meet-your-assistant-mission.md moved it to 45: hiring the assistant
-// became Mission 01 and pays like every other starter mission (PRD §9.3), so
-// the first reward a new user sees teaches where Craft comes from.
-//
-// tasks/prd-show-me-a-folder.md kept it at 45: Show your assistant a folder
-// replaced Tidy your Downloads as Mission 03 and took over its Craft.
+// Folder-first simplification retires the built-in quests from presentation
+// and payout. Four missions at 7 Craft each total 28, enough for a first Farm.
 func TestStarterQuestTotalIsPinned(t *testing.T) {
-	const want int64 = 45
+	const want int64 = 28
 	if got := StarterQuestTotal(); got != want {
 		t.Fatalf("starter quests pay %d in total, pinned at %d; if this change is "+
 			"deliberate, update the pin and say why here", got, want)
@@ -646,7 +637,7 @@ func TestStarterQuestIdsAreTierOneAndTwo(t *testing.T) {
 }
 
 func TestQuestRewardLookupIsTheOneSourceOfTheAmount(t *testing.T) {
-	amount, ok := StarterQuestCraft("t1-personalize")
+	amount, ok := StarterQuestCraft("pa-meet-assistant")
 	if !ok || amount != CraftPerStarterQuest {
 		t.Fatalf("StarterQuestCraft = %d, %v; want %d, true", amount, ok, CraftPerStarterQuest)
 	}
@@ -654,7 +645,7 @@ func TestQuestRewardLookupIsTheOneSourceOfTheAmount(t *testing.T) {
 		t.Fatal("a Tier 4 quest reported a reward")
 	}
 	// Whitespace is tolerated: ids arrive from a JSON payload.
-	if _, ok := StarterQuestCraft("  t1-personalize  "); !ok {
+	if _, ok := StarterQuestCraft("  pa-meet-assistant  "); !ok {
 		t.Fatal("a padded quest id was not recognized")
 	}
 }

@@ -11,6 +11,7 @@ import {
   firstMissionView,
   firstMissionOfferView,
   tierQuestRows,
+  missionRows,
   questRowState,
   renderQuestRow,
   diffAnnouncements
@@ -87,6 +88,15 @@ test('compactSummaryView: pending — no quest resolved yet', () => {
   assert.equal(view.resolved, 0);
   assert.equal(view.total, 2);
   assert.equal(view.text, 'Tier 1 · 0/2');
+});
+
+test('one visible tier reports missions without Tier X of Y', () => {
+  const status = {
+    current_tier: 1,
+    total_tiers: 1,
+    tiers: [tier({ tier: 1, quests: [quest(), quest({ id: 'q2', status: 'completed' })] })]
+  };
+  assert.equal(compactSummaryView(status).text, 'Missions · 1/2');
 });
 
 test('compactSummaryView: partial — some but not all quests resolved', () => {
@@ -321,6 +331,15 @@ test('firstMissionView hides without missions or once all progression is complet
   assert.deepEqual(firstMissionView(missionStatus({}, { all_complete: true })), {
     visible: false
   });
+});
+
+test('one-tier mission rows use server order and exclude only the featured card', () => {
+  const status = missionStatus({}, { total_tiers: 1 });
+  assert.deepEqual(
+    missionRows(status, 'mission-1').map(row => row.id),
+    ['mission-2', 'mission-3', 'mission-4']
+  );
+  assert.equal(missionRows(status).length, 4);
 });
 
 test('tierQuestRows omits only the mission on the card', () => {

@@ -25,6 +25,13 @@ export function folderActionAvailable(personalAssistant) {
 
 // folderChooserView is the chooser's render decision: which chips to show,
 // whether the native picker chip appears, and the note that replaces it.
+export function firstFolderPromptView(digest, available) {
+  return {
+    expand: available === true && digest?.prompt_first_folder === true,
+    line: "Now show me a folder you're working in."
+  };
+}
+
 export function folderChooserView(digest) {
   const chips = Array.isArray(digest?.chips)
     ? digest.chips
@@ -321,6 +328,8 @@ const state = {
   busy: false,
   chooserOpen: false,
   available: false,
+  handOver: false,
+  prompting: false,
   // The plan being confirmed on the card before anything is decided:
   // 'project', 'tidy', or ''.
   confirm: '',
@@ -348,6 +357,7 @@ function elements() {
     show: document.getElementById('personalAssistantFolderShowBtn'),
     chooser: document.getElementById('personalAssistantFolderChooser'),
     chips: document.getElementById('personalAssistantFolderChips'),
+    title: document.getElementById('personalAssistantFolderTitle'),
     note: document.getElementById('personalAssistantFolderNote'),
     status: document.getElementById('personalAssistantFolderStatus'),
     offer: document.getElementById('personalAssistantFolderOffer'),
@@ -394,6 +404,10 @@ function renderChooser() {
   const els = elements();
   if (!els?.chooser) return;
   const view = folderChooserView(state.digest);
+  if (els.title)
+    els.title.textContent = state.handOver
+      ? firstFolderPromptView(state.digest, true).line
+      : 'Which folder should I look at?';
   els.chooser.hidden = !state.chooserOpen;
   if (els.show) els.show.setAttribute('aria-expanded', String(state.chooserOpen));
   if (els.chips) {
@@ -577,6 +591,22 @@ async function load() {
     // A pending offer is the assistant's one question; it needs no chooser
     // in front of it.
     if (state.offer) state.chooserOpen = false;
+    const prompt = firstFolderPromptView(state.digest, state.available);
+    if (prompt.expand && !state.prompting) {
+      state.handOver = true;
+      state.chooserOpen = true;
+      state.prompting = true;
+      // The panel expands immediately; persisting the receipt cannot delay it.
+      void fetch(`${DIGEST_ENDPOINT}/prompted`, { method: 'POST' })
+        .then(response => {
+          if (!response.ok) throw new Error('Could not save the folder prompt');
+          state.digest.prompt_first_folder = false;
+        })
+        .catch(() => showStatus('Could not save the prompt. It may appear again after a reload.'))
+        .finally(() => {
+          state.prompting = false;
+        });
+    }
   } catch (_) {
     state.digest = state.digest || { chips: [], picker_available: false };
   }
@@ -797,6 +827,8 @@ function onStatus(personalAssistant) {
   const changed = available !== state.available;
   state.available = available;
   if (!available) {
+    state.handOver = false;
+    state.chooserOpen = false;
     render();
     return;
   }
@@ -819,6 +851,7 @@ function init() {
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   window.PersonalAssistantFolder = {
     open: openChooser,
+    openChooser,
     reload: load,
     current: () => state.offer,
     act

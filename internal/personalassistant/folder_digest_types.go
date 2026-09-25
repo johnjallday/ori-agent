@@ -164,7 +164,9 @@ type FolderDigestDocument struct {
 	Decisions     []FolderDecision  `json:"decisions,omitempty"`
 	Tombstones    []FolderTombstone `json:"tombstones,omitempty"`
 	Receipts      []FolderReceipt   `json:"receipts,omitempty"`
-	Present       bool              `json:"-"`
+	// FirstPromptShownAt persists the one-time hand-over after HQ activation.
+	FirstPromptShownAt *time.Time `json:"first_prompt_shown_at,omitempty"`
+	Present            bool       `json:"-"`
 }
 
 // Pending returns the one pending offer, if any.

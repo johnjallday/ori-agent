@@ -79,6 +79,37 @@ try {
   await page.locator('#personalAssistantHQReceipt li').first().waitFor({ timeout: 30000 });
   console.log('receipt:', await page.locator('#personalAssistantHQReceipt').innerText());
   await shot('03-hq-receipt');
+  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
+  if (
+    !(await page.locator('#personalAssistantFolderTitle').textContent()).includes(
+      'Now show me a folder'
+    )
+  ) {
+    throw new Error('first-folder hand-over did not appear after HQ build');
+  }
+  await shot('04-first-folder-prompt');
+  await page.goto(`${base}/?panel=today`);
+  await page.locator('#personalAssistantFolder').waitFor({ state: 'visible' });
+  if (await page.locator('#personalAssistantFolderChooser').isVisible()) {
+    throw new Error('first-folder prompt repeated on reload');
+  }
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#cockpitQuestsToggle').click();
+  await page.locator('#questLog [data-role="quests"] li').first().waitFor();
+  if (
+    (await page.locator('#questLog [data-role="quests"] li').count()) !== 3 ||
+    (await page.locator('#questLog [data-role="progress-label"]').isVisible())
+  ) {
+    throw new Error('Quests did not show four missions without a tier label');
+  }
+  await shot('05-four-missions');
+  await page.goto(`${base}/settings`);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#resetGettingStartedBtn').click();
+  await page.locator('#resetGettingStartedStatus').getByText('Getting Started reset').waitFor();
+  await page.goto(`${base}/?panel=today`);
+  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
+  await shot('06-reset-rearms-prompt');
   await page.goto(`${base}/?quest=build-hq`);
   console.log(
     'Map quest after built:',

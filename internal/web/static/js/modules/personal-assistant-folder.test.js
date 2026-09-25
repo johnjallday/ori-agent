@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   folderActionAvailable,
   folderChooserView,
+  firstFolderPromptView,
   folderOfferView,
   folderOutcomeNote,
   folderProjectModalOptions
@@ -27,6 +28,15 @@ test('the action is offered only to an active or paused assistant', () => {
   ]) {
     assert.equal(folderActionAvailable({ state }), false, state);
   }
+});
+
+test('the first-folder hand-over is an active-only server receipt, never a pre-HQ prompt', () => {
+  assert.deepEqual(firstFolderPromptView({ prompt_first_folder: true }, true), {
+    expand: true,
+    line: "Now show me a folder you're working in."
+  });
+  assert.equal(firstFolderPromptView({ prompt_first_folder: true }, false).expand, false);
+  assert.equal(firstFolderPromptView({ prompt_first_folder: false }, true).expand, false);
 });
 
 test('the chooser renders the chips the server sent and hides the picker when it is unavailable', () => {

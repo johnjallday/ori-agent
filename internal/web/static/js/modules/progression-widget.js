@@ -85,7 +85,10 @@ export function compactSummaryView(status) {
     tier: status.current_tier,
     resolved,
     total,
-    text: `Tier ${status.current_tier} · ${resolved}/${total}`
+    text:
+      status.total_tiers === 1
+        ? `Missions · ${resolved}/${total}`
+        : `Tier ${status.current_tier} · ${resolved}/${total}`
   };
 }
 
@@ -164,6 +167,12 @@ export function firstMissionOfferView(view, offer, confirm = '') {
 // usual mark, Skip, or Resume.
 export function tierQuestRows(tier, shownMissionID) {
   return (tier?.quests || []).filter(quest => !shownMissionID || quest.id !== shownMissionID);
+}
+
+// One visible tier has no tier-navigation list. These are the other featured
+// missions, in server order; a mission shown in the card is not repeated.
+export function missionRows(status, shownMissionID) {
+  return (status?.missions || []).filter(quest => !shownMissionID || quest.id !== shownMissionID);
 }
 
 // questRowState derives the pure per-row rendering decision for one quest:
@@ -567,15 +576,25 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     // for id stability, never shown.
     if (restore) restore.hidden = true;
 
+    const oneTier = status.total_tiers === 1;
+    el('progress-label').hidden = oneTier;
+    const list = el('quests');
+    list.setAttribute('aria-label', oneTier ? 'Missions' : 'Quests');
+    list.dataset.mode = oneTier ? 'missions' : 'tiers';
+
     // All quests complete: compact congratulatory state.
     if (status.all_complete) {
       renderFirstMission(status);
-      el('tier-name').textContent = 'All quests complete';
+      el('tier-name').textContent = oneTier ? 'Missions complete' : 'All quests complete';
       el('tier-insignia').textContent = '✓';
-      el('progress-label').textContent = 'Tier complete';
+      el('progress-label').textContent = oneTier ? '' : 'Tier complete';
       el('progress-count').textContent = `${status.total_count}/${status.total_count}`;
       setMeter(el('progress-bar'), status.total_count, status.total_count);
-      el('quests').innerHTML = '';
+      list.replaceChildren();
+      if (oneTier)
+        missionRows(status).forEach(q =>
+          list.appendChild(renderQuestRow(q, { onSkip: skipQuest }))
+        );
       el('why').textContent = "You've mastered the basics — Ori is all yours.";
       widget.hidden = false;
       return;
@@ -590,19 +609,21 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     renderFirstMission(status);
     const shownMission = firstMissionView(status);
 
-    el('tier-name').textContent = current.name;
-    el('tier-insignia').textContent = tierInsignia(status.current_tier);
-    el('progress-label').textContent = `Tier ${status.current_tier} of ${status.total_tiers}`;
+    el('tier-name').textContent = oneTier ? 'Missions' : current.name;
+    el('tier-insignia').textContent = oneTier ? '✓' : tierInsignia(status.current_tier);
+    el('progress-label').textContent = oneTier
+      ? ''
+      : `Tier ${status.current_tier} of ${status.total_tiers}`;
     const resolved = resolvedCount(current);
     const total = current.quests.length;
     el('progress-count').textContent = `${resolved}/${total}`;
     setMeter(el('progress-bar'), resolved, total);
 
-    const list = el('quests');
-    list.innerHTML = '';
-    tierQuestRows(current, shownMission.visible ? shownMission.questID : '').forEach(q =>
-      list.appendChild(renderQuestRow(q, { onSkip: skipQuest }))
-    );
+    list.replaceChildren();
+    const rows = oneTier
+      ? missionRows(status, shownMission.visible ? shownMission.questID : '')
+      : tierQuestRows(current, shownMission.visible ? shownMission.questID : '');
+    rows.forEach(q => list.appendChild(renderQuestRow(q, { onSkip: skipQuest })));
 
     // The card already states why its mission matters; never say it twice.
     const why = el('why');
