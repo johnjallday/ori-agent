@@ -421,6 +421,9 @@ function elements() {
     workingItems: document.getElementById('personalAssistantWorkingOnItems'),
     needsSection: document.getElementById('personalAssistantNeedsYou'),
     needsCards: document.getElementById('personalAssistantNeedsYouCards'),
+    needsQueue: document.getElementById('personalAssistantNeedsYouQueue'),
+    needsQueueTitle: document.getElementById('personalAssistantNeedsYouQueueTitle'),
+    needsQueueCards: document.getElementById('personalAssistantNeedsYouQueueCards'),
     needsItems: document.getElementById('personalAssistantNeedsYouItems'),
     allClear: document.getElementById('personalAssistantTodayAllClear'),
     doneSection: document.getElementById('personalAssistantDone'),
@@ -494,6 +497,38 @@ function renderCompactRows(list, rows, skipCards = false) {
       by.className = 'personal-assistant-today__attribution';
       by.textContent = row.attribution;
       li.append(by);
+    }
+    if (row.kind === 'hq_setup') {
+      const details = document.createElement('details');
+      details.className = 'personal-assistant-today__hq-receipt';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Setup receipt';
+      details.append(summary);
+      const receipt = window.PersonalAssistantHQCard?.receiptRows?.() || [];
+      if (receipt.length) {
+        const ul = document.createElement('ul');
+        receipt.forEach(entry => {
+          const line = document.createElement('li');
+          const label = { workspace: 'Workspace', schedule: 'Schedule', directory: 'Directory' }[
+            entry.kind
+          ];
+          if (!label) return;
+          line.append(`${label} · `);
+          if (entry.route && safeTodayRoute(entry.route)) {
+            const link = document.createElement('a');
+            link.href = entry.route;
+            link.textContent = entry.name;
+            line.append(link);
+          } else line.append(document.createTextNode(entry.name));
+          ul.append(line);
+        });
+        details.append(ul);
+      } else {
+        const note = document.createElement('p');
+        note.textContent = 'Open My HQ to review its current details.';
+        details.append(note);
+      }
+      li.append(details);
     }
     list.append(li);
   });
@@ -760,6 +795,17 @@ function renderLauncherCue(els, today = state.today) {
   els.launcherStatus.hidden = !cue;
 }
 
+function syncNeedsQueue(els = elements()) {
+  if (!els?.needsQueue) return 0;
+  const cards = Array.from(els.needsQueueCards?.children || []).filter(card => !card.hidden).length;
+  const count = cards + (els.needsItems?.childElementCount || 0);
+  if (els.needsQueue.hidden !== (count === 0)) els.needsQueue.hidden = count === 0;
+  const title = `Also needs you (${count})`;
+  if (els.needsQueueTitle && els.needsQueueTitle.textContent !== title)
+    els.needsQueueTitle.textContent = title;
+  return count;
+}
+
 function syncAllClear(els = elements()) {
   if (!els?.allClear) return;
   // A folder offer can arrive after the Today read. Do not say "Nothing needs
@@ -770,7 +816,8 @@ function syncAllClear(els = elements()) {
     document.getElementById('personalAssistantHQCard'),
     els.offer
   ].some(card => card && !card.hidden);
-  els.allClear.hidden = !state.emptyEligible || visibleCard;
+  const hidden = !state.emptyEligible || visibleCard || syncNeedsQueue(els) > 0;
+  if (els.allClear.hidden !== hidden) els.allClear.hidden = hidden;
 }
 
 function renderToday(today) {
@@ -830,10 +877,11 @@ function renderToday(today) {
   renderSpecialistSetup(els, today?.specialist_setup);
   if (els.setup?.hidden === false && today?.specialist_setup?.lifecycle === 'in_progress') {
     els.workingContent?.append(els.setup);
-  } else if (els.setup) els.needsCards?.append(els.setup);
+  } else if (els.setup) els.needsQueueCards?.append(els.setup);
   renderCompactRows(els.workingItems, sections.working);
   renderCompactRows(els.needsItems, sections.needs, true);
   renderCompactRows(els.doneItems, sections.done);
+  const queueCount = syncNeedsQueue(els);
   if (els.workingSection)
     els.workingSection.hidden = !(
       sections.working.length ||
@@ -845,7 +893,7 @@ function renderToday(today) {
       sections.needs.length ||
       !document.getElementById('personalAssistantFolder')?.hidden ||
       !document.getElementById('personalAssistantHQCard')?.hidden ||
-      !els.offer?.hidden
+      queueCount > 0
     );
   if (els.doneSection) els.doneSection.hidden = !sections.done.length;
   state.emptyEligible = sections.allClear && view.active;
@@ -968,24 +1016,42 @@ function init() {
     if (brief) working.append(brief);
   }
   if (needs && typeof MutationObserver !== 'undefined') {
-    new MutationObserver(() => syncAllClear()).observe(needs, {
+    new MutationObserver(() => {
+      const els = elements();
+      const queueCount = syncNeedsQueue(els);
+      if (state.today && els?.needsSection) {
+        const visible =
+          todayThreeSectionView(state.today).needs.length ||
+          !document.getElementById('personalAssistantFolder')?.hidden ||
+          !document.getElementById('personalAssistantHQCard')?.hidden ||
+          queueCount > 0;
+        if (els.needsSection.hidden === !!visible) els.needsSection.hidden = !visible;
+      }
+      syncAllClear(els);
+    }).observe(document.getElementById('personalAssistantNeedsYou'), {
       subtree: true,
       attributes: true,
+      childList: true,
       attributeFilter: ['hidden']
     });
   }
-  if (needs)
-    [
-      'personalAssistantHQCard',
-      'personalAssistantFolder',
-      'personalAssistantSpecialistOffer',
-      'personalAssistantSpecialistManual',
-      'personalAssistantSpecialistSetup',
-      'assistantLedSetup'
-    ].forEach(id => {
-      const node = document.getElementById(id);
-      if (node) needs.append(node);
-    });
+  ['personalAssistantHQCard', 'personalAssistantFolder'].forEach(id => {
+    const node = document.getElementById(id);
+    if (node) needs?.append(node);
+  });
+  [
+    'personalAssistantSpecialistOffer',
+    'personalAssistantSpecialistManual',
+    'personalAssistantSpecialistSetup',
+    'assistantLedSetup'
+  ].forEach(id => {
+    const node = document.getElementById(id);
+    if (node) document.getElementById('personalAssistantNeedsYouQueueCards')?.append(node);
+  });
+  document.addEventListener('personal-assistant:hq-receipt', () => {
+    if (state.today)
+      renderCompactRows(elements()?.doneItems, todayThreeSectionView(state.today).done);
+  });
   document
     .getElementById('personalAssistantTodayRetry')
     ?.addEventListener('click', () => void loadToday());

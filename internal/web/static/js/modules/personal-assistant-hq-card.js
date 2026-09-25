@@ -49,12 +49,21 @@ export function hqReceiptRows(status, plan, directory) {
       detail: '',
       route: slug ? `/workspaces/${encodeURIComponent(slug)}` : ''
     },
-    { kind: 'schedule', name: `Daily Brief at ${plan.time || '08:00'} on weekdays`, detail: '' },
-    { kind: 'directory', name: String(directory || ''), detail: '' }
+    ...(plan.time
+      ? [{ kind: 'schedule', name: `Daily Brief at ${plan.time} on weekdays`, detail: '' }]
+      : []),
+    ...(directory ? [{ kind: 'directory', name: String(directory), detail: '' }] : [])
   ];
 }
 
-const plan = { name: 'My HQ', time: '08:00', collapsed: false, failed: false, receipt: [] };
+const plan = {
+  name: 'My HQ',
+  time: '08:00',
+  collapsed: false,
+  failed: false,
+  receipt: [],
+  receiptWorkspaceID: ''
+};
 const state = { relationship: null, root: null, busy: false, sequence: 0, justHired: false };
 
 function el(id) {
@@ -91,7 +100,10 @@ function render() {
   const card = el('Card');
   if (!card) return;
   const view = hqCardView(state.relationship, state.root, plan);
-  card.hidden = !view.visible;
+  // Once built, the compact canonical Done item owns the presentation. Keep
+  // these server-observed rows for its receipt disclosure, not a second card
+  // under Needs you.
+  card.hidden = !view.visible || view.receipt;
   if (!view.visible) return;
   el('Eyebrow').textContent = state.justHired ? '✓ Mission 01 complete' : 'Personal HQ';
   el('Headline').textContent = view.receipt
@@ -115,6 +127,7 @@ function render() {
   el('Adjust').disabled = state.busy || view.building;
   el('NotNow').disabled = state.busy || view.building;
   el('Status').textContent = view.status;
+  document.dispatchEvent(new CustomEvent('personal-assistant:hq-receipt'));
 }
 
 async function readJSON(url, options) {
@@ -134,13 +147,18 @@ async function load(relationship = null) {
     if (seq !== state.sequence) return;
     state.relationship = current;
     state.root = root;
-    if (
-      current?.state === 'active' &&
-      ['needs_hq', 'provisioning_hq'].includes(state.relationship?.state)
-    ) {
-      plan.name = document.getElementById('hqBuildName')?.value || plan.name;
-      plan.time = document.getElementById('hqBuildTime')?.value || plan.time;
-      plan.receipt = hqReceiptRows(hq?.status, plan, hqWorkspaceRootView(root).path);
+    if (current?.state === 'active' && hq?.status?.valid) {
+      // After a reload the HQ and its schedule are still canonical, but the
+      // current workspace-root setting is not proof of the original directory.
+      // Keep that third row only for the fresh build in this session.
+      if (!plan.receipt.length || plan.receiptWorkspaceID !== hq.status.workspace?.id) {
+        const time = String(current.daily_brief?.schedule_time || '').trim();
+        plan.receipt = hqReceiptRows(hq.status, { time }, '');
+        plan.receiptWorkspaceID = hq.status.workspace?.id || '';
+      }
+    } else {
+      plan.receipt = [];
+      plan.receiptWorkspaceID = '';
     }
     plan.collapsed = hq?.status?.hq_onboarding_state === 'skipped' && !plan.receipt.length;
     if (['needs_hq', 'provisioning_hq'].includes(current?.state) && !plan.collapsed) {
@@ -219,6 +237,7 @@ async function build() {
     const rows = hqReceiptRows(hq, plan, hqWorkspaceRootView(root).path);
     if (!rows.length) throw new Error('HQ was built. Reload to see its workspace.');
     plan.receipt = rows;
+    plan.receiptWorkspaceID = hq?.workspace?.id || '';
     state.relationship = relationship;
     for (const name of [
       'ori:personal-hq-changed',
@@ -315,6 +334,8 @@ function init() {
 
 const api = {
   load,
+  receiptRows: () =>
+    state.relationship?.state === 'active' ? plan.receipt.map(row => ({ ...row })) : [],
   show: () => {
     plan.collapsed = false;
     render();

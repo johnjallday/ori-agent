@@ -116,6 +116,13 @@ async function openToday(page: Page) {
   await expect(page.locator('#personalAssistantToday')).toBeVisible();
 }
 
+async function openOtherRequests(page: Page) {
+  const queue = page.locator('#personalAssistantNeedsYouQueue');
+  const summary = page.locator('#personalAssistantNeedsYouQueueTitle');
+  await expect(summary).toBeVisible();
+  if ((await queue.getAttribute('open')) === null) await summary.click();
+}
+
 // buildHQ finishes setup the way the Map's Build My HQ form does. A fresh hire
 // now lands in needs_hq, and the capability projection only reports sources for
 // a relationship that is fully active.
@@ -191,6 +198,7 @@ test('Home offers help with the detected domain once setup is finished', async (
   await buildHQ(page);
   await page.goto('/');
   await openToday(page);
+  await openOtherRequests(page);
   await expect(offer(page)).toBeVisible();
   await expect(offer(page)).toHaveAttribute('data-decision', 'unanswered');
   await expect(page.locator('#personalAssistantSpecialistOfferHeadline')).toHaveText(
@@ -712,6 +720,7 @@ test('declining is one click and is never asked again', async ({ page }) => {
 
   await page.goto('/');
   await openToday(page);
+  await openOtherRequests(page);
   await expect(offer(page)).toBeVisible();
   await page.locator('#personalAssistantSpecialistDeclineBtn').click();
   await expect(offer(page)).toBeHidden();
@@ -730,6 +739,7 @@ test('a domain that was not detected is still reachable by hand', async ({ page 
   const manual = page
     .locator('#personalAssistantSpecialistManual button[data-specialist-manual]')
     .first();
+  await openOtherRequests(page);
   await expect(manual).toBeVisible();
   await expect(manual).toHaveText('I work on music');
   await page.screenshot({ path: `${SHOTS}/09-manual-path.png`, fullPage: true });

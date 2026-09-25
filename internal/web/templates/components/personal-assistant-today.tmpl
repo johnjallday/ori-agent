@@ -84,7 +84,7 @@
        folders by identifier and the server resolves them; the offer card is
        built from counts and names only. Shown for an active or paused
        assistant, never before the hire or while HQ is being built. -->
-  <section id="personalAssistantFolder" class="pa-folder" data-state="idle"
+  <section id="personalAssistantFolder" class="pa-folder pa-folder__experience" data-state="idle"
            aria-labelledby="personalAssistantFolderTitle" hidden>
     <div id="personalAssistantFolderScene" class="pa-folder__scene" data-phase="choosing" hidden>
       <div class="pa-folder__scene-copy">
@@ -153,6 +153,16 @@
   </section>
 
   <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
+    <section id="personalAssistantNeedsYou" aria-labelledby="personalAssistantNeedsYouTitle" hidden>
+      <h4 id="personalAssistantNeedsYouTitle">Needs you</h4>
+      <p id="personalAssistantTodayAllClear" hidden>Nothing needs you right now.</p>
+      <div id="personalAssistantNeedsYouCards"></div>
+      <details id="personalAssistantNeedsYouQueue" class="personal-assistant-today__queue" hidden>
+        <summary id="personalAssistantNeedsYouQueueTitle">Also needs you</summary>
+        <div id="personalAssistantNeedsYouQueueCards"></div>
+        <ul id="personalAssistantNeedsYouItems"></ul>
+      </details>
+    </section>
     <section id="personalAssistantWorkingOn" aria-labelledby="personalAssistantWorkingOnTitle" hidden>
       <h4 id="personalAssistantWorkingOnTitle">Working on</h4>
       <div id="personalAssistantWorkingOnContent"></div>
@@ -163,12 +173,6 @@
         <p id="personalAssistantTodayMeetingsNote" class="personal-assistant-today__meta"></p>
       </section>
       <ul id="personalAssistantWorkingOnItems"></ul>
-    </section>
-    <section id="personalAssistantNeedsYou" aria-labelledby="personalAssistantNeedsYouTitle" hidden>
-      <h4 id="personalAssistantNeedsYouTitle">Needs you</h4>
-      <p id="personalAssistantTodayAllClear" hidden>Nothing needs you right now.</p>
-      <div id="personalAssistantNeedsYouCards"></div>
-      <ul id="personalAssistantNeedsYouItems"></ul>
     </section>
     <section id="personalAssistantDone" aria-labelledby="personalAssistantDoneTitle" hidden>
       <h4 id="personalAssistantDoneTitle">Done</h4>

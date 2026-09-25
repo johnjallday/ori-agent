@@ -527,8 +527,9 @@ assistant makes one explained offer.
   (`platform.ChooseFolder`, osascript). The browser never sends a filesystem
   path: `POST /api/personal-assistant/folder-digest/scan` accepts `{chip}` or
   `{picker: true}` and answers 400 to any `path`/`folder` key.
-- **Presentation.** A small visual field trip beside the existing chooser uses
-  the assistant's already-rendered avatar. A folder graphic starts moving
+- **Presentation.** The scene, chooser, and resulting offer share one card in
+  Needs you, ahead of the compact queue of other requests. A small visual field
+  trip beside the chooser uses the assistant's already-rendered avatar. A folder graphic starts moving
   only when a real scan begins (and finishes the motion on a fast response);
   the real server offer produces the finding badges,
   and a failed scan produces an error, never a made-up result. The explanation
@@ -600,15 +601,21 @@ assistant makes one explained offer.
   relationship with "Now show me a folder you're working in." The
   `POST /api/personal-assistant/folder-digest/prompted` receipt persists this
   presentation server-side; Reset Getting Started clears it. No chooser opens
-  before HQ exists, and further visits are manual.
+  before HQ exists; further visits keep the chooser open without repeating the
+  one-time hand-over line.
 - **Mission.** See Mission 02 above. Every completion is server-observed.
 
 Today's Done section also gains one `janitor_result` line per File Janitor
 workspace with applied, not-undone actions in the last 24 hours ("Filed N files
 into <folder>/Filed", "M sent to Trash · Undo from History"), linking to
 `/workspaces/<slug>?panel=file-janitor&tab=history`. Resolved folder project,
-tidy and HQ setup receipts remain in Done for seven days. Both honor the
-results cap; a failed receipt read does not erase healthy results.
+tidy and HQ setup receipts remain in Done for seven days. The completed HQ
+confirm card does not compete with the next action: its canonical Done item
+has a collapsed setup receipt with the workspace, schedule, and (when observed
+for the current build) directory. On reload the current workspace and schedule
+are read from the server; the previous setup directory is not inferred from a
+possibly changed root. Both honor the results cap; a failed receipt read does
+not erase healthy results.
 
 ## Surfaces and routing
 
@@ -626,9 +633,11 @@ header action and retains its full modal and Map create pad. The empty Map and
 launcher link to the chooser instead of instructing the user to create a
 workspace by hand. Today remains a Home-owned projection and is available on
 demand through the existing launcher and panel for that same bound Personal
-Assistant. Today's only three named sections are **Working on**, **Needs you**,
-and **Done**. Empty sections disappear, unhealthy sources are named once in
-a retryable footer, and machine reason/status identifiers are humanized.
+Assistant. Today's only three named sections are **Needs you**, **Working on**,
+and **Done**, in that display order. Needs you leads with the next action and
+collapses other requests under **Also needs you**; the server's records and
+ordering are unchanged. Empty sections disappear, unhealthy sources are named
+once in a retryable footer, and machine reason/status identifiers are humanized.
 The old Decisions/Priorities/Remembered/FollowUps/Results JSON fields remain
 available for one release but no longer render as sections. Direct launcher
 activation on Home opens Today, while prefilled handoffs open the Ask composer. Other authenticated

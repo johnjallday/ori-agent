@@ -86,10 +86,19 @@ try {
     await shot('02b-confirmed-directory');
   }
   await page.locator('#personalAssistantHQBuild').click();
-  await page.locator('#personalAssistantHQReceipt li').first().waitFor({ timeout: 30000 });
-  console.log('receipt:', await page.locator('#personalAssistantHQReceipt').innerText());
+  const hqReceipt = page.locator(
+    '#personalAssistantDoneItems .personal-assistant-today__hq-receipt'
+  );
+  await hqReceipt.locator('summary').waitFor({ timeout: 30000 });
+  await hqReceipt.locator('summary').click();
+  await hqReceipt.locator('li').first().waitFor({ timeout: 30000 });
+  if (!(await hqReceipt.innerText()).includes('Directory ·'))
+    throw new Error('fresh HQ build did not show the selected directory in Done');
+  console.log('receipt:', await hqReceipt.innerText());
+  await hqReceipt.locator('li').last().scrollIntoViewIfNeeded();
   await shot('03-hq-receipt');
   await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
+  await page.locator('#personalAssistantFolderChooser').scrollIntoViewIfNeeded();
   if (
     !(await page.locator('#personalAssistantFolderTitle').textContent()).includes(
       "Now let's explore a folder"

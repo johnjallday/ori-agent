@@ -74,6 +74,26 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   });
   await page.goto('/?panel=today&folder=show');
   const scene = page.locator('#personalAssistantFolderScene');
+  const experience = page.locator('.pa-folder__experience');
+  await expect(experience.locator('#personalAssistantFolderScene')).toBeVisible();
+  await expect(experience.locator('#personalAssistantFolderChooser')).toBeVisible();
+  await expect(page.locator('#personalAssistantHQCard')).toBeHidden();
+  await expect(page.locator('#personalAssistantNeedsYouQueue')).toBeHidden();
+  const hqReceipt = page.locator(
+    '#personalAssistantDoneItems .personal-assistant-today__hq-receipt'
+  );
+  await expect(hqReceipt.locator('summary')).toBeVisible();
+  await hqReceipt.locator('summary').click();
+  await expect(hqReceipt.locator('li').first()).toContainText('Workspace');
+  await expect(hqReceipt).toContainText('Daily Brief at');
+  const order = await page
+    .locator('#personalAssistantTodaySections > section')
+    .evaluateAll(sections => sections.map(section => section.id));
+  expect(order).toEqual([
+    'personalAssistantNeedsYou',
+    'personalAssistantWorkingOn',
+    'personalAssistantDone'
+  ]);
   await expect(scene).toBeVisible();
   await expect(scene).toHaveAttribute('data-phase', 'choosing');
   await expect(page.locator('#personalAssistantFolderShowBtn')).toHaveCount(0);
@@ -104,7 +124,7 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   await expect(scene.locator('#personalAssistantFolderSceneFinds')).toHaveText(
     '3 projects40 loose files'
   );
-  await expect(page.locator('#personalAssistantFolderOffer')).toBeVisible();
+  await expect(experience.locator('#personalAssistantFolderOffer')).toBeVisible();
   await expect(page.locator('#personalAssistantFolderOffer .pa-folder__why')).toBeVisible();
   await expect(page.locator('#personalAssistantFolderOfferReason')).toBeHidden();
   await page.locator('#personalAssistantFolderOffer .pa-folder__why summary').click();
@@ -133,9 +153,27 @@ test('the assistant portrait explores only while a scan is in flight, then shows
     window.innerWidth
   ]);
   expect(widths[0]).toBeLessThanOrEqual(widths[1] + 1);
+  await page.route('**/api/personal-assistant/today', async route => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.today.needs_you.items.push({
+      kind: 'decision',
+      title: 'Review a proposed change',
+      detail: 'One decision is waiting for you.'
+    });
+    await route.fulfill({ response, json: payload });
+  });
   await page.reload();
   await page.locator('#personalAssistantLauncher').click();
   await expect(page.locator('#personalAssistantFolderChooser')).toBeVisible();
+  const queue = page.locator('#personalAssistantNeedsYouQueue');
+  await expect(page.locator('#personalAssistantNeedsYouQueueTitle')).toBeVisible();
+  await expect(queue.locator('#personalAssistantNeedsYouItems')).toBeHidden();
+  await page.locator('#personalAssistantNeedsYouQueueTitle').click();
+  await expect(queue.locator('#personalAssistantNeedsYouItems')).toContainText(
+    'Review a proposed change'
+  );
+  await expect(hqReceipt.locator('summary')).toBeVisible();
   await expect(scene).toHaveAttribute('data-phase', 'choosing');
   await expect(page.locator('#personalAssistantFolderShowBtn')).toHaveCount(0);
 });

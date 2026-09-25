@@ -178,6 +178,47 @@ body.home-command-page .home-command-bridge * {
   background: color-mix(in srgb, var(--hc-panel-raised) 72%, transparent);
 }
 
+.personal-assistant-today__queue {
+  margin-top: 10px;
+  border-top: 1px solid var(--hc-line);
+  padding-top: 8px;
+}
+
+.personal-assistant-today__queue[hidden] {
+  display: none;
+}
+
+.personal-assistant-today__queue summary,
+.personal-assistant-today__hq-receipt summary {
+  width: fit-content;
+  color: var(--hc-signal);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.personal-assistant-today__queue summary:focus-visible,
+.personal-assistant-today__hq-receipt summary:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 3px;
+}
+
+.personal-assistant-today__queue[open] > div,
+.personal-assistant-today__hq-receipt[open] > ul {
+  margin-top: 8px;
+}
+
+.personal-assistant-today__hq-receipt ul {
+  padding: 0;
+  list-style: none;
+  gap: 4px;
+}
+
+.personal-assistant-today__hq-receipt li {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .personal-assistant-today__sections > section[data-empty="true"] {
   padding-block: 8px;
   background: transparent;
@@ -345,12 +386,25 @@ body.home-command-page .home-command-bridge * {
   font-size: 12px;
 }
 
-/* Show me a folder: a launch button, a short chooser sheet, and an offer
-   card that reuses the specialist-offer structure. */
+/* Folder intake is one surface, not separate scene/chooser/offer cards. */
 .pa-folder {
   display: grid;
   gap: 10px;
   margin: 0 0 14px;
+}
+
+.pa-folder__experience {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 16px;
+  background: var(--hc-panel-raised);
+}
+
+.pa-folder__experience[hidden],
+.pa-folder__chooser[hidden],
+.pa-folder__offer[hidden] {
+  display: none;
 }
 
 /* Folder field trip: the real assistant portrait, a little paper folder, and
@@ -361,8 +415,6 @@ body.home-command-page .home-command-bridge * {
   min-height: 112px;
   overflow: hidden;
   padding: 14px;
-  border: 1px solid var(--hc-line-bright);
-  border-radius: 16px;
   background:
     radial-gradient(
       circle at 86% 20%,
@@ -564,9 +616,7 @@ body.home-command-page .home-command-bridge * {
   display: grid;
   gap: 8px;
   padding: 12px 14px;
-  border: 1px solid var(--hc-line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--hc-panel-raised) 72%, transparent);
+  border-top: 1px solid var(--hc-line);
 }
 
 .pa-folder__prompt {
@@ -615,6 +665,9 @@ body.home-command-page .home-command-bridge * {
 
 .pa-folder__offer {
   margin: 0;
+  border: 0;
+  border-top: 1px solid var(--hc-line);
+  border-radius: 0;
 }
 
 /* The reason line: counts and kinds, always present, in smaller muted type. */

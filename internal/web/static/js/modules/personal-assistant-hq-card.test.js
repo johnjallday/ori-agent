@@ -42,5 +42,17 @@ test('HQ receipt uses only canonical workspace facts, schedule and selected dire
       { kind: 'directory', name: '/workspaces', detail: '' }
     ]
   );
+  assert.deepEqual(
+    hqReceiptRows(
+      { valid: true, workspace: { name: 'My HQ', folder_slug: 'my hq' } },
+      { time: '09:30' },
+      ''
+    ),
+    [
+      { kind: 'workspace', name: 'My HQ', detail: '', route: '/workspaces/my%20hq' },
+      { kind: 'schedule', name: 'Daily Brief at 09:30 on weekdays', detail: '' }
+    ],
+    'reloaded receipts must not misidentify the current workspace root as the setup directory'
+  );
   assert.deepEqual(hqReceiptRows({ valid: false }, {}, ''), []);
 });
