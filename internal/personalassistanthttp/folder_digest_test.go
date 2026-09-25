@@ -19,6 +19,7 @@ type fakeFolderDigest struct {
 	decided   []personalassistant.FolderDecisionInput
 	paused    bool
 	cancel    bool
+	prompted  int
 }
 
 func (f *fakeFolderDigest) Current(context.Context, string) (personalassistant.FolderDigestView, error) {
@@ -27,6 +28,11 @@ func (f *fakeFolderDigest) Current(context.Context, string) (personalassistant.F
 		PickerNote: "Pick a folder from the list for now.",
 		Paused:     f.paused,
 	}, nil
+}
+
+func (f *fakeFolderDigest) MarkFirstPromptShown(ctx context.Context, userID string) (personalassistant.FolderDigestView, error) {
+	f.prompted++
+	return f.Current(ctx, userID)
 }
 
 func (f *fakeFolderDigest) ScanChip(_ context.Context, _ string, chip string) (personalassistant.FolderOfferView, error) {
@@ -74,6 +80,30 @@ func newFolderDigestHandler(fake *fakeFolderDigest) *Handler {
 	h := NewHandler(nil, userprofile.LocalUserProvider{})
 	h.SetFolderDigest(fake)
 	return h
+}
+
+func TestFolderDigestPrompted_RejectsPayloadAndMarksOnce(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	for _, tc := range []struct {
+		method, body string
+		status       int
+	}{
+		{http.MethodGet, "", http.StatusMethodNotAllowed},
+		{http.MethodPost, `{"path":"/private"}`, http.StatusBadRequest},
+		{http.MethodPost, "", http.StatusOK},
+		{http.MethodPost, "", http.StatusOK},
+	} {
+		r := httptest.NewRequest(tc.method, "/api/personal-assistant/folder-digest/prompted", strings.NewReader(tc.body))
+		w := httptest.NewRecorder()
+		h.PromptedFolderDigest(w, r)
+		if w.Code != tc.status {
+			t.Fatalf("%s %q => %d, want %d", tc.method, tc.body, w.Code, tc.status)
+		}
+	}
+	if fake.prompted != 2 {
+		t.Fatalf("prompt receipt calls = %d, want 2", fake.prompted)
+	}
 }
 
 func TestFolderDigestScan_AcceptsChipsOnly(t *testing.T) {

@@ -43,6 +43,57 @@ function renderNeedsHireBanner(els) {
   els.banner.replaceChildren(link, banner.trail);
 }
 
+const TODAY_LABELS = Object.freeze({
+  waiting_for_choice: 'Waiting for your choice',
+  needs_review: 'Needs review',
+  needs_attention: 'Needs attention',
+  in_progress: 'In progress',
+  prep_pending: 'Preparing',
+  prep_ready: 'Prep ready',
+  back_to_back: 'Back-to-back',
+  follow_up: 'Follow-up'
+});
+
+export function todayLabel(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (TODAY_LABELS[text]) return TODAY_LABELS[text];
+  return text.includes('_')
+    ? text.replaceAll('_', ' ').replace(/^./, char => char.toUpperCase())
+    : text;
+}
+
+export function todaySectionItems(section) {
+  return (Array.isArray(section?.items) ? section.items : []).slice(0, 10).map(item => ({
+    title: String(item?.title || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
+    detail: String(item?.detail || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
+    attribution: String(item?.attribution || '').trim(),
+    route: safeTodayRoute(item?.route) ? String(item.route) : '',
+    kind: String(item?.kind || '')
+  }));
+}
+
+export function todayThreeSectionView(today) {
+  const working = todaySectionItems(today?.working_on);
+  const needs = todaySectionItems(today?.needs_you);
+  const done = todaySectionItems(today?.done);
+  const sources = [
+    ...new Set(
+      (Array.isArray(today?.unavailable_sources) ? today.unavailable_sources : [])
+        .map(source => todayLabel(source))
+        .filter(Boolean)
+    )
+  ];
+  return {
+    working,
+    needs,
+    done,
+    sources,
+    footer: sources.length ? `Couldn't read: ${sources.join(', ')}.` : '',
+    allClear: !needs.length && !sources.length
+  };
+}
+
 export function todaySectionRows(section) {
   const health = String(section?.health?.status || 'unavailable');
   const rows = Array.isArray(section?.items) ? section.items.slice(0, 10) : [];
@@ -96,7 +147,7 @@ export function specialistSetupView(setup) {
   const runs = (Array.isArray(setup?.runs) ? setup.runs : []).slice(0, 64).map(run => {
     const kind = String(run?.run_kind || '') === 'child' ? 'Later project' : 'First project';
     const name = String(run?.project_name || '').trim();
-    const state = String(run?.lifecycle || 'not_started').replaceAll('_', ' ');
+    const state = todayLabel(run?.lifecycle || 'not_started');
     return `${name || kind} — ${state}`;
   });
   const allowed = new Set([
@@ -125,7 +176,7 @@ export function specialistSetupView(setup) {
   const sample = setup?.sample_library;
   let sampleStatus = '';
   if (sample) {
-    const state = String(sample.state || 'unavailable').replaceAll('_', ' ');
+    const state = todayLabel(sample.state || 'unavailable');
     const roots = Math.max(0, Number(sample.active_root_count) || 0);
     const indexed = Math.max(0, Number(sample.indexed_root_count) || 0);
     sampleStatus = `Sample library: ${state}; ${roots} approved folder${roots === 1 ? '' : 's'}, ${indexed} indexed.`;
@@ -350,7 +401,8 @@ const state = {
   root: null,
   sequence: 0,
   offer: null,
-  offerDecision: 'unanswered'
+  offerDecision: 'unanswered',
+  emptyEligible: false
 };
 
 function elements() {
@@ -359,11 +411,25 @@ function elements() {
   return {
     root,
     launcherStatus: document.getElementById('personalAssistantLauncherStatus'),
-    eyebrow: document.getElementById('personalAssistantTodayEyebrow'),
     title: document.getElementById('personalAssistantTodayTitle'),
     meta: document.getElementById('personalAssistantTodayMeta'),
     banner: document.getElementById('personalAssistantTodayBanner'),
     sections: document.getElementById('personalAssistantTodaySections'),
+    workingSection: document.getElementById('personalAssistantWorkingOn'),
+    workingContent: document.getElementById('personalAssistantWorkingOnContent'),
+    workingItems: document.getElementById('personalAssistantWorkingOnItems'),
+    needsSection: document.getElementById('personalAssistantNeedsYou'),
+    needsCards: document.getElementById('personalAssistantNeedsYouCards'),
+    needsQueue: document.getElementById('personalAssistantNeedsYouQueue'),
+    needsQueueTitle: document.getElementById('personalAssistantNeedsYouQueueTitle'),
+    needsQueueCards: document.getElementById('personalAssistantNeedsYouQueueCards'),
+    needsItems: document.getElementById('personalAssistantNeedsYouItems'),
+    allClear: document.getElementById('personalAssistantTodayAllClear'),
+    doneSection: document.getElementById('personalAssistantDone'),
+    doneItems: document.getElementById('personalAssistantDoneItems'),
+    footer: document.getElementById('personalAssistantTodayFooter'),
+    unavailable: document.getElementById('personalAssistantTodayUnavailable'),
+    retry: document.getElementById('personalAssistantTodayRetry'),
     decisions: document.getElementById('personalAssistantTodayDecisions'),
     remembered: document.getElementById('personalAssistantTodayRemembered'),
     interview: document.getElementById('personalAssistantTodayInterview'),
@@ -402,40 +468,68 @@ function elements() {
   };
 }
 
-function renderRows(list, section) {
+function renderCompactRows(list, rows, skipCards = false) {
   if (!list) return;
   list.replaceChildren();
-  const rows = todaySectionRows(section);
-  const sectionElement = list.closest?.('section');
-  if (sectionElement) sectionElement.dataset.empty = rows.every(row => row.kind === 'status');
   rows.forEach(row => {
+    // Offer cards provide their own single actions. Never render another
+    // inert row that looks like a competing action.
+    if (
+      skipCards &&
+      (row.kind === 'folder_offer' || row.kind === 'hq_setup' || row.kind === 'specialist_offer')
+    )
+      return;
     const li = document.createElement('li');
-    if (row.kind === 'status') li.className = 'personal-assistant-today__empty';
     if (row.route) {
       const link = document.createElement('a');
       link.href = row.route;
       link.textContent = row.title;
-      li.appendChild(link);
-    } else {
-      li.textContent = row.title;
-    }
+      li.append(link);
+    } else li.textContent = row.title;
     if (row.detail) {
       const detail = document.createElement('span');
       detail.textContent = row.detail;
-      li.appendChild(detail);
+      li.append(detail);
     }
     if (row.attribution) {
-      // Who did it, by name. Deliberately text: the shared portrait renderer
-      // (OriWorkspaceAgentPortrait) draws a 76x64 card with its own name label,
-      // which is right on the Map and the workspace page — where this agent
-      // already renders — and wrong in a list row. Shrinking it here would be
-      // a second portrait system, which is exactly what must not happen.
       const by = document.createElement('span');
       by.className = 'personal-assistant-today__attribution';
       by.textContent = row.attribution;
-      li.appendChild(by);
+      li.append(by);
     }
-    list.appendChild(li);
+    if (row.kind === 'hq_setup') {
+      const details = document.createElement('details');
+      details.className = 'personal-assistant-today__hq-receipt';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Setup receipt';
+      details.append(summary);
+      const receipt = window.PersonalAssistantHQCard?.receiptRows?.() || [];
+      if (receipt.length) {
+        const ul = document.createElement('ul');
+        receipt.forEach(entry => {
+          const line = document.createElement('li');
+          const label = { workspace: 'Workspace', schedule: 'Schedule', directory: 'Directory' }[
+            entry.kind
+          ];
+          if (!label) return;
+          line.append(`${label} · `);
+          if (entry.route && safeTodayRoute(entry.route)) {
+            const link = document.createElement('a');
+            link.href = entry.route;
+            link.textContent = entry.name;
+            line.append(link);
+          } else line.append(document.createTextNode(entry.name));
+          ul.append(line);
+        });
+        details.append(ul);
+      } else {
+        const note = document.createElement('p');
+        note.textContent = 'Open My HQ to review its current details.';
+        details.append(note);
+      }
+      li.append(details);
+    }
+    list.append(li);
   });
 }
 
@@ -593,8 +687,8 @@ function bindSpecialistOffer() {
 function renderSpecialistSetup(els, setup) {
   if (!els.setup) return;
   const view = specialistSetupView(setup);
-  els.setup.hidden = !view.visible;
-  if (!view.visible) return;
+  els.setup.hidden = !view.visible || setup?.health?.status === 'unavailable';
+  if (els.setup.hidden) return;
   if (els.setupTitle) els.setupTitle.textContent = view.title;
   if (els.setupStatus) els.setupStatus.textContent = view.status;
   if (els.setupSamples) {
@@ -635,28 +729,6 @@ function makeTodayTextItem(text) {
   const item = document.createElement('li');
   item.textContent = text;
   return item;
-}
-
-function renderStudio(els, studio) {
-  if (!els.studioSection) return;
-  const view = studioSectionView(studio);
-  els.studioSection.hidden = !view.visible;
-  if (!view.visible) return;
-  if (els.studioTitle) els.studioTitle.textContent = view.heading;
-  renderRows(els.studio, view.section);
-  if (!els.studioNote) return;
-  els.studioNote.replaceChildren();
-  if (!view.route) {
-    els.studioNote.textContent = view.note;
-    return;
-  }
-  // The link is the direct route to the specialist, offered as a peer of
-  // everything else here — not as a workaround for something the assistant
-  // cannot do.
-  const link = document.createElement('a');
-  link.href = view.route;
-  link.textContent = view.linkLabel;
-  els.studioNote.append(view.note, ' ', link);
 }
 
 function renderMeetings(els, meetings) {
@@ -722,6 +794,31 @@ function renderLauncherCue(els, today = state.today) {
   els.launcherStatus.hidden = !cue;
 }
 
+function syncNeedsQueue(els = elements()) {
+  if (!els?.needsQueue) return 0;
+  const cards = Array.from(els.needsQueueCards?.children || []).filter(card => !card.hidden).length;
+  const count = cards + (els.needsItems?.childElementCount || 0);
+  if (els.needsQueue.hidden !== (count === 0)) els.needsQueue.hidden = count === 0;
+  const title = `Also needs you (${count})`;
+  if (els.needsQueueTitle && els.needsQueueTitle.textContent !== title)
+    els.needsQueueTitle.textContent = title;
+  return count;
+}
+
+function syncAllClear(els = elements()) {
+  if (!els?.allClear) return;
+  // A folder offer can arrive after the Today read. Do not say "Nothing needs
+  // you" over an open chooser, an offer, or an HQ/specialist confirmation.
+  const visibleCard = [
+    document.getElementById('personalAssistantFolderScene'),
+    document.getElementById('personalAssistantFolderOffer'),
+    document.getElementById('personalAssistantHQCard'),
+    els.offer
+  ].some(card => card && !card.hidden);
+  const hidden = !state.emptyEligible || visibleCard || syncNeedsQueue(els) > 0;
+  if (els.allClear.hidden !== hidden) els.allClear.hidden = hidden;
+}
+
 function renderToday(today) {
   const els = elements();
   if (!els) return;
@@ -729,13 +826,27 @@ function renderToday(today) {
   const view = personalAssistantTodayView(today);
   els.root.hidden = false;
   els.root.dataset.state = view.state;
-  els.eyebrow.textContent = 'Personal briefing';
   els.title.textContent = `Today from ${view.displayName}`;
-  els.meta.textContent = today?.next_check_in
-    ? `Next scheduled check-in: ${new Date(today.next_check_in).toLocaleString()}`
-    : view.paused
-      ? 'Proactive check-ins are paused.'
-      : 'No scheduled check-in is enabled.';
+  if (view.paused) {
+    els.meta.textContent = 'Check-ins paused';
+  } else if (today?.next_check_in) {
+    const date = new Date(today.next_check_in);
+    if (Number.isNaN(date.getTime())) {
+      els.meta.textContent = 'Next check-in unavailable';
+    } else {
+      const time = document.createElement('time');
+      time.dateTime = today.next_check_in;
+      time.textContent = new Intl.DateTimeFormat(undefined, {
+        weekday: 'short',
+        hour: 'numeric',
+        minute: '2-digit'
+      }).format(date);
+      time.title = date.toLocaleString();
+      els.meta.replaceChildren('Next check-in · ', time);
+    }
+  } else {
+    els.meta.textContent = 'No check-in scheduled';
+  }
 
   if (view.repair) {
     els.banner.textContent =
@@ -755,31 +866,57 @@ function renderToday(today) {
   } else if (view.paused) {
     els.banner.textContent = `${view.displayName} is paused proactively. Your records and prior briefs are unchanged.`;
   } else if (view.partial) {
-    els.banner.textContent =
-      'Some Today sources are unavailable. Available sections remain visible; this is not an all-clear.';
+    els.banner.textContent = String(today?.brief?.opening_summary || '');
   } else if (view.modelUnavailable) {
     els.banner.textContent =
       'Conversational answers are paused until a model is configured. Deterministic Today records remain available.';
   } else if (view.state === 'healthy_empty') {
-    els.banner.textContent = 'Today is honestly empty based on the sources that were available.';
+    els.banner.textContent = '';
   } else {
     els.banner.textContent = String(
       today?.brief?.opening_summary || 'Your current Personal HQ records are ready.'
     );
   }
 
-  renderMeetings(els, today?.meetings);
-  renderRows(els.decisions, today?.decisions);
-  renderRows(els.remembered, today?.remembered);
-  if (els.interview) {
+  const sections = todayThreeSectionView(today);
+  if (els.interview)
     els.interview.hidden = !['available', 'offered', 'deferred'].includes(today?.interview_status);
+  renderMeetings(els, today?.meetings);
+  // The unavailable source appears once in the footer, not as an empty
+  // calendar or results placeholder.
+  if (today?.meetings?.health?.status === 'unavailable' && els.meetingsSection) {
+    els.meetingsSection.hidden = true;
   }
-  renderRows(els.priorities, today?.priorities);
-  renderRows(els.followUps, today?.follow_ups);
-  renderRows(els.results, today?.results);
   renderSpecialistSetup(els, today?.specialist_setup);
-  renderStudio(els, today?.studio);
+  if (els.setup?.hidden === false && today?.specialist_setup?.lifecycle === 'in_progress') {
+    els.workingContent?.append(els.setup);
+  } else if (els.setup) els.needsQueueCards?.append(els.setup);
+  renderCompactRows(els.workingItems, sections.working);
+  renderCompactRows(els.needsItems, sections.needs, true);
+  renderCompactRows(els.doneItems, sections.done);
+  const queueCount = syncNeedsQueue(els);
+  if (els.workingSection)
+    els.workingSection.hidden = !(
+      sections.working.length ||
+      !document.getElementById('homeDailyBrief')?.hidden ||
+      !els.meetingsSection?.hidden
+    );
+  if (els.needsSection)
+    els.needsSection.hidden = !(
+      sections.needs.length ||
+      !document.getElementById('personalAssistantFolder')?.hidden ||
+      !document.getElementById('personalAssistantHQCard')?.hidden ||
+      queueCount > 0
+    );
+  if (els.doneSection) els.doneSection.hidden = !sections.done.length;
+  state.emptyEligible = sections.allClear && view.active;
+  syncAllClear(els);
+  if (els.footer) els.footer.hidden = !sections.footer;
+  if (els.unavailable) els.unavailable.textContent = sections.footer;
+  if (els.sections)
+    els.sections.hidden = !(view.active || view.paused || view.partial || view.needsHQ);
   Object.entries(els.links).forEach(([key, link]) => setLink(link, today?.links?.[key]));
+  els.banner.hidden = !els.banner.textContent.trim();
   renderLauncherCue(els, today);
 }
 
@@ -795,6 +932,7 @@ function renderRelationship(personalAssistant, view) {
     return;
   }
   els.root.hidden = false;
+  els.banner.hidden = false;
   els.root.dataset.state = 'loading';
   // Fire-and-forget: the offer appears when detection answers, and Home is
   // fully usable whether it does or not.
@@ -802,10 +940,12 @@ function renderRelationship(personalAssistant, view) {
   // A hired assistant with no HQ yet already has a real, trustworthy name —
   // unlike needsHire, where nothing has been chosen yet.
   const named = view.available || view.needsHQ;
-  els.eyebrow.textContent = 'Personal briefing';
   els.title.textContent = named ? `Today from ${view.name}` : 'Your personal assistant';
   els.meta.textContent = view.available ? 'Loading the latest Today records…' : '';
-  els.sections.hidden = !view.available;
+  els.sections.hidden = !view.available && !view.needsHQ;
+  if (els.needsSection && view.needsHQ) els.needsSection.hidden = false;
+  if (els.workingSection && view.needsHQ) els.workingSection.hidden = true;
+  if (els.doneSection && view.needsHQ) els.doneSection.hidden = true;
   if (view.repair) {
     const repairStep = String(personalAssistant?.repair_step || '').trim();
     const recoverable = repairStep === 'relationship_recovery';
@@ -837,14 +977,10 @@ function renderRelationship(personalAssistant, view) {
     return;
   }
   if (view.needsHQ) {
+    // The confirm card is the default action; the Map walkthrough remains an
+    // alternate, but a second Build link here would compete with the card.
     els.banner.replaceChildren();
-    const link = document.createElement('a');
-    link.href = '/?quest=build-hq';
-    link.textContent = 'Build Personal HQ';
-    els.banner.append(
-      `${view.name} is hired and needs a home base before Today can prepare a brief. `,
-      link
-    );
+    els.banner.hidden = true;
     return;
   }
   if (!view.available) {
@@ -871,7 +1007,6 @@ async function loadToday() {
     if (!els) return;
     els.root.hidden = false;
     els.root.dataset.state = 'unavailable';
-    els.eyebrow.textContent = 'Personal briefing';
     els.title.textContent = `Today from ${state.relationship?.display_name || 'your assistant'}`;
     els.banner.textContent =
       'Today is temporarily unavailable. The Workspace Map and the rest of Home remain available; no all-clear is being shown.';
@@ -883,6 +1018,65 @@ async function loadToday() {
 function init() {
   state.root = document.getElementById('personalAssistantToday');
   if (!state.root) return;
+  // Place existing card controllers inside the new three-section hierarchy
+  // without remounting or duplicating any of their event handlers.
+  const working = document.getElementById('personalAssistantWorkingOnContent');
+  const needs = document.getElementById('personalAssistantNeedsYouCards');
+  if (working) {
+    const brief = document.getElementById('homeDailyBrief');
+    if (brief) working.append(brief);
+  }
+  if (needs && typeof MutationObserver !== 'undefined') {
+    new MutationObserver(() => {
+      const els = elements();
+      const queueCount = syncNeedsQueue(els);
+      if (state.today && els?.needsSection) {
+        const visible =
+          todayThreeSectionView(state.today).needs.length ||
+          !document.getElementById('personalAssistantFolder')?.hidden ||
+          !document.getElementById('personalAssistantHQCard')?.hidden ||
+          queueCount > 0;
+        if (els.needsSection.hidden === !!visible) els.needsSection.hidden = !visible;
+      }
+      syncAllClear(els);
+    }).observe(document.getElementById('personalAssistantNeedsYou'), {
+      subtree: true,
+      attributes: true,
+      childList: true,
+      attributeFilter: ['hidden']
+    });
+  }
+  ['personalAssistantHQCard', 'personalAssistantFolder'].forEach(id => {
+    const node = document.getElementById(id);
+    if (node) needs?.append(node);
+  });
+  [
+    'personalAssistantSpecialistOffer',
+    'personalAssistantSpecialistManual',
+    'personalAssistantSpecialistSetup',
+    'assistantLedSetup'
+  ].forEach(id => {
+    const node = document.getElementById(id);
+    if (node) document.getElementById('personalAssistantNeedsYouQueueCards')?.append(node);
+  });
+  document.addEventListener('personal-assistant:hq-receipt', () => {
+    if (state.today)
+      renderCompactRows(elements()?.doneItems, todayThreeSectionView(state.today).done);
+  });
+  const more = document.getElementById('personalAssistantTodayMore');
+  more?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !more.open) return;
+    event.preventDefault();
+    event.stopPropagation(); // Escape closes this menu, not the assistant drawer.
+    more.open = false;
+    more.querySelector('summary')?.focus();
+  });
+  document.addEventListener('click', event => {
+    if (more?.open && !more.contains(event.target)) more.open = false;
+  });
+  document
+    .getElementById('personalAssistantTodayRetry')
+    ?.addEventListener('click', () => void loadToday());
   bindSpecialistOffer();
   document.addEventListener('personal-assistant:status', event => {
     renderRelationship(event.detail?.personalAssistant, event.detail?.view);
@@ -891,6 +1085,7 @@ function init() {
   if (panelState?.personalAssistant) {
     renderRelationship(panelState.personalAssistant, panelState.view);
   }
+  window.PersonalAssistantToday = { refresh: loadToday };
 }
 
 if (typeof document !== 'undefined') {

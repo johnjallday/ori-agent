@@ -393,6 +393,19 @@ func (e *Engine) HasCompleted(questID string) bool {
 	return done
 }
 
+// MissionUnresolved reports whether a visible featured mission still needs a
+// real completion or skip. It never consults the presentation Status (whose
+// mission context may read other services), so it is safe as a service seam.
+func (e *Engine) MissionUnresolved(id string) bool {
+	if e == nil {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	q, ok := e.questByID(id)
+	return ok && q.Featured && !q.Retired && !e.resolvedLocked(id)
+}
+
 // --- lock-held helpers ---
 
 // markLocked records a completion. If the quest was previously skipped, the
@@ -435,17 +448,19 @@ func (e *Engine) resolvedLocked(questID string) bool {
 // everything is done. A skipped optional quest never keeps a later tier
 // locked. Caller must hold the lock.
 func (e *Engine) currentTierLocked() int {
+	lastVisibleTier := 0
 	for tier := 1; tier <= e.totalTiers; tier++ {
 		for _, q := range e.quests {
-			if q.Tier != tier {
+			if q.Retired || q.Tier != tier {
 				continue
 			}
+			lastVisibleTier = tier
 			if !e.resolvedLocked(q.ID) {
 				return tier
 			}
 		}
 	}
-	return e.totalTiers
+	return lastVisibleTier
 }
 
 // statusLocked builds the API view, resolving featured missions from mission.
@@ -461,6 +476,9 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 	missions := []QuestView{}
 
 	for _, q := range e.quests {
+		if q.Retired {
+			continue
+		}
 		completedAt, done := e.state.CompletedQuests[q.ID]
 		skippedAt, skipped := e.state.SkippedQuests[q.ID]
 		resolved := done || skipped
@@ -532,11 +550,14 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 	// Stable, so two missions that share an Order keep their graph order.
 	sort.SliceStable(missions, func(i, j int) bool { return missions[i].Order < missions[j].Order })
 
-	total := len(e.quests)
+	total := 0
+	for _, tier := range tiers {
+		total += len(tier.Quests)
+	}
 	return Status{
 		Tiers:          tiers,
 		CurrentTier:    current,
-		TotalTiers:     e.totalTiers,
+		TotalTiers:     len(tiers),
 		CompletedCount: completedCount,
 		ResolvedCount:  resolvedCount,
 		TotalCount:     total,

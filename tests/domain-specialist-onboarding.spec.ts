@@ -116,6 +116,13 @@ async function openToday(page: Page) {
   await expect(page.locator('#personalAssistantToday')).toBeVisible();
 }
 
+async function openOtherRequests(page: Page) {
+  const queue = page.locator('#personalAssistantNeedsYouQueue');
+  const summary = page.locator('#personalAssistantNeedsYouQueueTitle');
+  await expect(summary).toBeVisible();
+  if ((await queue.getAttribute('open')) === null) await summary.click();
+}
+
 // buildHQ finishes setup the way the Map's Build My HQ form does. A fresh hire
 // now lands in needs_hq, and the capability projection only reports sources for
 // a relationship that is fully active.
@@ -191,6 +198,7 @@ test('Home offers help with the detected domain once setup is finished', async (
   await buildHQ(page);
   await page.goto('/');
   await openToday(page);
+  await openOtherRequests(page);
   await expect(offer(page)).toBeVisible();
   await expect(offer(page)).toHaveAttribute('data-decision', 'unanswered');
   await expect(page.locator('#personalAssistantSpecialistOfferHeadline')).toHaveText(
@@ -377,6 +385,31 @@ test('Today names the specialist that did the studio work and links straight to 
               }
             ]
           },
+          working_on: {
+            health: { status: 'available' },
+            items: [{ kind: 'studio_workspace', title: 'Ivory', route: '/workspaces/ivory' }]
+          },
+          needs_you: { health: { status: 'healthy_empty' }, items: [] },
+          done: {
+            health: { status: 'available' },
+            items: [
+              {
+                id: 'studio-1',
+                kind: 'studio_result',
+                title: 'Bounced a rough mix of Ivory',
+                attribution: 'Reaper Producer',
+                route: '/workspaces/ivory?ticket=studio-1'
+              },
+              {
+                id: 'studio-2',
+                kind: 'studio_result',
+                title: 'Tagged the session takes',
+                attribution: 'Reaper Producer',
+                route: '/workspaces/ivory?ticket=studio-2'
+              }
+            ]
+          },
+          unavailable_sources: [],
           links: { advanced: '/agents' },
           generated_at: new Date().toISOString()
         }
@@ -386,22 +419,26 @@ test('Today names the specialist that did the studio work and links straight to 
 
   await page.goto('/');
   await openToday(page);
-  const section = page.locator('#personalAssistantTodayStudioSection');
+  const section = page.locator('#personalAssistantDone');
   await expect(section).toBeVisible();
-  await expect(page.locator('#personalAssistantTodayStudioTitle')).toHaveText('From Ivory');
+  await expect(page.locator('#personalAssistantWorkingOnItems a')).toHaveAttribute(
+    'href',
+    '/workspaces/ivory'
+  );
 
-  const rows = page.locator('#personalAssistantTodayStudio li');
+  const rows = page.locator('#personalAssistantDoneItems li');
   await expect(rows).toHaveCount(2);
   await expect(rows.first()).toContainText('Bounced a rough mix of Ivory');
   await expect(rows.first().locator('.personal-assistant-today__attribution')).toHaveText(
     'Reaper Producer'
   );
 
-  // The direct route to the specialist, offered plainly.
-  const note = page.locator('#personalAssistantTodayStudioNote');
-  await expect(note).toContainText('ask Reaper Producer directly');
-  await expect(note.locator('a')).toHaveAttribute('href', '/workspaces/ivory');
-  await expect(note.locator('a')).toHaveText('Open Ivory');
+  // Working on links to the specialist's workspace directly, while Done
+  // attributes each result to the specialist and opens that exact ticket.
+  await expect(rows.first().locator('a')).toHaveAttribute(
+    'href',
+    '/workspaces/ivory?ticket=studio-1'
+  );
   // And nothing claiming the assistant can hand it work.
   await expect(section).not.toContainText(/delegate|assign|on your behalf|instead|workaround/i);
   await page.screenshot({ path: `${SHOTS}/06-today-studio-attribution.png`, fullPage: true });
@@ -683,6 +720,7 @@ test('declining is one click and is never asked again', async ({ page }) => {
 
   await page.goto('/');
   await openToday(page);
+  await openOtherRequests(page);
   await expect(offer(page)).toBeVisible();
   await page.locator('#personalAssistantSpecialistDeclineBtn').click();
   await expect(offer(page)).toBeHidden();
@@ -701,6 +739,7 @@ test('a domain that was not detected is still reachable by hand', async ({ page 
   const manual = page
     .locator('#personalAssistantSpecialistManual button[data-specialist-manual]')
     .first();
+  await openOtherRequests(page);
   await expect(manual).toBeVisible();
   await expect(manual).toHaveText('I work on music');
   await page.screenshot({ path: `${SHOTS}/09-manual-path.png`, fullPage: true });

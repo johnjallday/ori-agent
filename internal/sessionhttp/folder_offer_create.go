@@ -8,7 +8,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 )
 
 // FolderOfferWorkspaceRequest is the workspace the assistant sets up for a
@@ -61,6 +65,54 @@ func (h *Handler) CreateFolderOfferWorkspace(ctx context.Context, req FolderOffe
 		return "", errors.New("folder offer workspace creation returned no workspace id")
 	}
 	return response.Folder.ID, nil
+}
+
+// FolderOfferWorkspaceReceipt reads the canonical workspace AFTER the shown
+// folder has been linked and its first task seeded. Nothing in this receipt is
+// inferred from the blueprint request or the browser's plan.
+func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) ([]personalassistant.FolderReceiptRow, error) {
+	if h == nil || h.workspaceStore == nil {
+		return nil, errors.New("workspace receipt is unavailable")
+	}
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil || ws == nil || strings.TrimSpace(ws.FolderSlug) == "" {
+		return nil, errors.New("created workspace is unavailable for its receipt")
+	}
+	detail := ""
+	if !created {
+		detail = "already set up"
+	}
+	rows := []personalassistant.FolderReceiptRow{{
+		Kind: "workspace", Name: ws.Name, Detail: detail,
+		Route: "/workspaces/" + url.PathEscape(ws.FolderSlug),
+	}}
+	primary, _ := ws.SharedData[projecttemplates.PrimaryDirectoryIDKey].(string)
+	if strings.TrimSpace(primary) != "" {
+		if ref, err := ws.GetDirectoryReference(primary); err == nil && ref != nil {
+			rows = append(rows, personalassistant.FolderReceiptRow{
+				Kind: "folder", Name: ref.Name, Detail: "linked as primary",
+			})
+		}
+	}
+	if provenance := ws.GetTemplateProvenance(); provenance != nil && provenance.TemplateID != "" {
+		rows = append(rows, personalassistant.FolderReceiptRow{
+			Kind: "blueprint", Name: provenance.TemplateName,
+		})
+		for _, instance := range ws.AgentInstances {
+			if strings.TrimSpace(instance.Name) != "" {
+				rows = append(rows, personalassistant.FolderReceiptRow{
+					Kind: "agent", Name: instance.Name, Detail: instance.Role,
+				})
+			}
+		}
+	}
+	for _, task := range ws.Tasks {
+		if task.Context["template_id"] == "folder-digest" && task.Context["template_starter_task"] == true {
+			rows = append(rows, personalassistant.FolderReceiptRow{Kind: "task", Name: task.Description})
+			break
+		}
+	}
+	return rows, nil
 }
 
 // createFailureMessage pulls the user-facing error out of a refused create,

@@ -97,7 +97,7 @@ const (
 // Desktop, and its server has the folder dialog switched off).
 const (
 	folderChipsMissingNote    = "Downloads, Documents and Desktop are not under this home"
-	folderDialogOffPhrase     = "the folder dialog is switched off in this session (ORI_NO_DESKTOP_OPEN)"
+	folderDialogOffPhrase     = "the folder dialog is switched off in this session"
 	folderDialogMacOnlyPhrase = "the folder dialog is only available on macOS"
 	folderDialogAwayPhrase    = "the folder dialog is unavailable here"
 )
@@ -185,6 +185,7 @@ type FolderCreateResult struct {
 	// Created is false when a workspace made for this offer already existed
 	// (a retried click) and was reused.
 	Created bool
+	Receipt []FolderReceiptRow
 }
 
 // FolderWorkspaceCreator is the host seam that creates the workspace for a
@@ -258,6 +259,9 @@ type FolderDigestDeps struct {
 	// OnOutcome runs after any outcome completes, for the mission that
 	// observes it (FR42). Best-effort.
 	OnOutcome func(ctx context.Context, userID string, offer FolderOffer)
+	// MissionUnresolved is bound after progression and the assistant exist.
+	// Nil fails closed: no automatic prompt without trustworthy mission state.
+	MissionUnresolved func(id string) bool
 }
 
 // FolderLearning is what the dossier producer did with a resolved project
@@ -283,6 +287,34 @@ func (s *FolderDigestService) SetOnOutcome(fn func(ctx context.Context, userID s
 	if s != nil {
 		s.deps.OnOutcome = fn
 	}
+}
+
+// SetMissionUnresolved binds the progression view at Phase 22.7.
+func (s *FolderDigestService) SetMissionUnresolved(fn func(id string) bool) {
+	if s != nil {
+		s.deps.MissionUnresolved = fn
+	}
+}
+
+// RecentReceipts reads only settled offers with outcomes in the requested
+// window. It returns the stored receipt, never a reconstructed claim about
+// what a workspace may contain today. Tidy outcomes are included too.
+func (s *FolderDigestService) RecentReceipts(ctx context.Context, userID string, since time.Time) ([]FolderOffer, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrRepairNeeded
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	result := []FolderOffer{}
+	for _, offer := range doc.Offers {
+		if offer.Status == FolderOfferResolved && offer.Outcome != nil && offer.ResolvedAt != nil && !offer.ResolvedAt.Before(since) {
+			result = append(result, offer)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool { return result[i].ResolvedAt.After(*result[j].ResolvedAt) })
+	return result, nil
 }
 
 // ResolvedProjectOfferForKey finds the resolved project offer whose subject
@@ -354,11 +386,12 @@ func NewFolderDigestService(store *FolderDigestStore, deps FolderDigestDeps) *Fo
 
 // FolderDigestView is what the chooser and offer card render.
 type FolderDigestView struct {
-	Offer           *FolderOfferView `json:"offer"`
-	Chips           []FolderChip     `json:"chips"`
-	PickerAvailable bool             `json:"picker_available"`
-	PickerNote      string           `json:"picker_note,omitempty"`
-	Paused          bool             `json:"paused"`
+	Offer             *FolderOfferView `json:"offer"`
+	Chips             []FolderChip     `json:"chips"`
+	PickerAvailable   bool             `json:"picker_available"`
+	PickerNote        string           `json:"picker_note,omitempty"`
+	Paused            bool             `json:"paused"`
+	PromptFirstFolder bool             `json:"prompt_first_folder"`
 }
 
 // FolderOfferView is an offer as the browser sees it: names and counts,
@@ -448,6 +481,8 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 		}
 	}
 	view := FolderDigestView{Chips: s.availableChips(), Paused: binding.Paused}
+	view.PromptFirstFolder = !binding.Paused && doc.FirstPromptShownAt == nil &&
+		s.deps.MissionUnresolved != nil && s.deps.MissionUnresolved("pa-show-folder")
 	reason := ""
 	if s.deps.Picker != nil {
 		view.PickerAvailable = s.deps.Picker.Available()
@@ -459,6 +494,45 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 		view.Offer = &offer
 	}
 	return view, nil
+}
+
+// MarkFirstPromptShown consumes the one-time hand-over on the server, not in
+// browser storage. A retry is safe and returns the current chooser state.
+func (s *FolderDigestService) MarkFirstPromptShown(ctx context.Context, userID string) (FolderDigestView, error) {
+	if s == nil || s.store == nil {
+		return FolderDigestView{}, ErrRepairNeeded
+	}
+	before, err := s.Current(ctx, userID)
+	if err != nil || !before.PromptFirstFolder {
+		return before, err
+	}
+	_, err = s.store.Mutate(ctx, userID, func(doc *FolderDigestDocument) error {
+		if doc.FirstPromptShownAt == nil {
+			now := s.now()
+			doc.FirstPromptShownAt = &now
+		}
+		return nil
+	})
+	if err != nil {
+		return FolderDigestView{}, err
+	}
+	return s.Current(ctx, userID)
+}
+
+// ClearFirstPrompt re-arms the hand-over after Reset Getting Started, without
+// altering any offers, receipts, or workspaces. Pre-HQ resets have no sidecar.
+func (s *FolderDigestService) ClearFirstPrompt(ctx context.Context, userID string) error {
+	if s == nil || s.store == nil {
+		return ErrRepairNeeded
+	}
+	_, err := s.store.Mutate(ctx, userID, func(doc *FolderDigestDocument) error {
+		doc.FirstPromptShownAt = nil
+		return nil
+	})
+	if errors.Is(err, ErrNeedsHQ) || errors.Is(err, ErrRepairNeeded) {
+		return nil // No valid active HQ exists to hold the prompt yet.
+	}
+	return err
 }
 
 // ScanChip scans one of the known folders (FR4).
@@ -694,6 +768,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 				offer.Outcome.WorkspaceID = created.WorkspaceID
 				offer.Outcome.Route = created.Route
 				offer.Outcome.Blueprint, _, _ = s.blueprintFor(offer.Subject.Shape)
+				offer.Outcome.Receipt = append([]FolderReceiptRow(nil), created.Receipt...)
 				resolvedNow = true
 			}
 		}

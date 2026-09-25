@@ -150,6 +150,9 @@ type Quest struct {
 	// carry Order 0.
 	Featured bool
 	Order    int
+	// Retired omits this quest from the status view only. Its event matching,
+	// completion, skip, and backfill history stay fully functional.
+	Retired bool
 	// LockedUntil names the quest that must be completed before this one is
 	// offered. Until then the status view marks it Locked, with the reason
 	// "<that quest's title> first". Locking is presentation only: Match,
@@ -208,9 +211,8 @@ func onWorkspaceAction(action string) func(ws.Event) bool {
 	}
 }
 
-// BuildHQQuestID is the optional Personal HQ objective. In the personal-assistant
-// cohort it is Mission 02: hiring creates the assistant but not its home base,
-// so building HQ is what the user does next.
+// BuildHQQuestID is the optional Personal HQ objective. It remains observable
+// and completable, but the HQ confirm card replaces it on the mission board.
 const BuildHQQuestID = "t2-build-hq"
 
 // GuidedBuildHQActionURL opens Ori's deterministic Personal HQ walkthrough.
@@ -226,13 +228,10 @@ func PersonalAssistantQuests() []Quest { return PersonalAssistantGraph().Quests 
 
 // PersonalAssistantGraph returns the personal-assistant cohort's graph.
 //
-// Tier 1, "Starter", is the five featured missions: Meet your assistant, then
-// four that each end with Ori visibly doing something: Build My HQ, Tidy your
-// Downloads, Connect one source, Read your first Daily Brief. Meet your
-// assistant is the only required one, and the other four stay locked until it
-// is done, because each of them works through the hired assistant. Tier 2,
-// "Daily loop", holds the ordinary first-contact and base quests, so nothing a
-// hired user already did reads as still open. Tiers 3-6 are the built-in ones.
+// Tier 1, "Starter", presents four missions: Meet your assistant, Show your
+// assistant a folder, Connect one source, Read your first Daily Brief. Every
+// other quest is retired from presentation, but still detects and records real
+// actions and backfill, preserving existing installs' history.
 //
 // Two built-in quests are dropped from this graph only. Plan my first day is
 // now one branch of Connect one source, and Create your first workspace is
@@ -246,6 +245,7 @@ func PersonalAssistantGraph() Graph {
 	retier := func(id string, tier int) Quest {
 		q := builtin[id]
 		q.Tier = tier
+		q.Retired = true
 		return q
 	}
 
@@ -254,7 +254,7 @@ func PersonalAssistantGraph() Graph {
 	buildHQ := retier(BuildHQQuestID, 1)
 	buildHQ.ActionURL = GuidedBuildHQActionURL
 	buildHQ.Why = "Give your assistant a home base — where it prepares your daily brief, tracks follow-ups, and helps you resume work."
-	buildHQ.Featured, buildHQ.Order = true, 2
+	buildHQ.Featured, buildHQ.Order = false, 0
 	buildHQ.LockedUntil = MeetAssistantQuestID
 
 	quests := []Quest{
@@ -270,7 +270,7 @@ func PersonalAssistantGraph() Graph {
 		},
 		buildHQ,
 		{
-			ID: ShowFolderQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
+			ID: ShowFolderQuestID, Tier: 1, Featured: true, Order: 2, Optional: true,
 			LockedUntil: MeetAssistantQuestID,
 			Title:       "Show your assistant a folder",
 			Why:         "Point Ori at a folder and it will tell you what it can do with it.",
@@ -289,7 +289,7 @@ func PersonalAssistantGraph() Graph {
 			},
 		},
 		{
-			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
+			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
 			LockedUntil: MeetAssistantQuestID,
 			// The static copy is the plan branch, the fallback for every focus.
 			Title:       "Plan my first day",
@@ -307,7 +307,7 @@ func PersonalAssistantGraph() Graph {
 			Resolve: resolveConnectSource,
 		},
 		{
-			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 5, Optional: true,
+			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
 			LockedUntil: MeetAssistantQuestID,
 			Title:       "Read your first Daily Brief",
 			Why:         firstBriefWhy,
@@ -323,6 +323,7 @@ func PersonalAssistantGraph() Graph {
 	}
 	for _, q := range BuiltinQuests() {
 		if q.Tier >= 3 {
+			q.Retired = true
 			quests = append(quests, q)
 		}
 	}
@@ -330,7 +331,7 @@ func PersonalAssistantGraph() Graph {
 	names := builtinTierNames()
 	names[1] = "Starter"
 	names[2] = "Daily loop"
-	return Graph{Quests: quests, TierNames: names, TotalTiers: TotalTiers}
+	return Graph{Quests: quests, TierNames: names, TotalTiers: 1}
 }
 
 // firstBriefWhy is Mission 05's static why line.

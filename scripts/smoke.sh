@@ -1503,8 +1503,10 @@ smoke_starter() {
 #                    dump (25 loose files of 6 kinds), Desktop empty (2 files),
 #                    plus Documents/Papers (a corpus of real PDFs when
 #                    tests/fixtures has one) and Documents/Scans (dated PDFs).
+#   hqcard <base-url> onboard and hire; leave the HQ setup card pending.
 #   hq <base-url>    onboard, hire the assistant and build Personal HQ so the
 #                    chooser is available on Home.
+#   today <base-url> print the live three-section Today projection and source health.
 #   scan <base-url> <chip>            scan one chip and print the offer
 #   decide <base-url> <offer> <decision> [choice]  answer an offer
 #   current <base-url>                print the pending offer and chips
@@ -1619,7 +1621,7 @@ with open(os.path.join(papers, "refs.bib"), "w") as f:
 print(f"seeded {papers} with refs.bib and two PDFs")
 PY
     ;;
-  hq)
+  hqcard | hq)
     curl -s -o /dev/null -w "%{http_code} onboarding skip\n" -X POST "$BASE_URL/api/onboarding/skip"
     curl -s -o /dev/null -w "%{http_code} workspace root\n" -X POST "$BASE_URL/api/settings/workspace-root" \
       -H 'Content-Type: application/json' -d '{"workspace_root":""}'
@@ -1629,6 +1631,11 @@ PY
     version=$(printf '%s' "$hire" | json_field 'personal_assistant.state_version')
     [[ -n "$version" ]] || fail "hire failed: $hire"
     echo "hired Atlas (state_version $version)"
+    if [[ "$stage" == hqcard ]]; then
+      printf 'personal_assistant.state = %s (open the HQ card on Home)\n' \
+        "$(curl -s "$BASE_URL/api/personal-assistant" | json_field 'personal_assistant.state')"
+      return
+    fi
     curl -s -o /dev/null -w "%{http_code} personal hq\n" -X POST "$BASE_URL/api/personal-assistant/hq" \
       -H 'Content-Type: application/json' \
       -d "{\"request_id\":\"showfolder-hq\",\"if_version\":$version,\"name\":\"My HQ\",\"timezone\":\"UTC\"}"
@@ -1704,7 +1711,10 @@ PY
   current)
     curl -s "$BASE_URL/api/personal-assistant/folder-digest" | python3 -m json.tool
     ;;
-  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus <sandbox>|hq|scan <chip>|decide <offer> <decision> [choice]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
+  today)
+    curl -sf "$BASE_URL/api/personal-assistant/today" | python3 -c 'import json,sys; t=json.load(sys.stdin)["today"]; print("Today:", t.get("state")); [print(k + ":", ", ".join(i.get("title", "") for i in (t.get(k) or {}).get("items", [])) or "(empty)") for k in ("working_on", "needs_you", "done")]; print("Could not read:", ", ".join(t.get("unavailable_sources") or []) or "none")'
+    ;;
+  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus <sandbox>|hqcard|hq|today|scan <chip>|decide <offer> <decision> [choice]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
   esac
 }
 
@@ -3127,7 +3137,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 integration <base-url> [source]       # reviewed integration floor: install a source, print the install step and updates" >&2
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 meetassistant <base-url> <stage>      # Mission 01: onboard | status | hire [name] | demo <stage>" >&2
-  echo "  $0 showfolder <base-url> <stage>         # Show me a folder: seed <sandbox> | hq | scan <chip> | decide <offer> <d> [choice] | current" >&2
+  echo "  $0 showfolder <base-url> <stage>         # Show me a folder: seed <sandbox> | hqcard | hq | today | scan <chip> | decide <offer> <d> [choice] | current" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
   echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2
   echo "  $0 blueprintintake <base-url> [folder]   # import Course; verify intake, optionally choose a folder via native picker" >&2

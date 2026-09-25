@@ -56,18 +56,25 @@ func TestPersonalAssistantQuests_PlanFirstDayIsABranchNotAQuest(t *testing.T) {
 	if connect == nil || connect.Tier != 1 || !connect.Optional || connect.ActionURL != PlanFirstDayActionURL {
 		t.Fatalf("unexpected Connect one source mission: %+v", connect)
 	}
-	// Four missions added (Meet your assistant and the three `pa-` starter
-	// missions), create-workspace dropped. First day was never built in.
-	if paf.Status().TotalCount != legacy.Status().TotalCount+3 {
-		t.Fatalf("PAF total = %d, legacy total = %d", paf.Status().TotalCount, legacy.Status().TotalCount)
+	if paf.Status().TotalCount != 4 {
+		t.Fatalf("visible PAF missions = %d, want four", paf.Status().TotalCount)
 	}
 }
 
 func TestPersonalAssistantQuests_PointBuildHQAtTheGuidedWalkthrough(t *testing.T) {
 	paf := New(&fakeStore{}, WithQuests(PersonalAssistantQuests()))
-	buildHQ := questView(paf, BuildHQQuestID)
-	if buildHQ == nil {
-		t.Fatal("the personal-assistant graph is missing the Build My HQ quest")
+	var buildHQ *Quest
+	for _, q := range PersonalAssistantQuests() {
+		if q.ID == BuildHQQuestID {
+			buildHQ = &q
+			break
+		}
+	}
+	if buildHQ == nil || !buildHQ.Retired || buildHQ.Featured {
+		t.Fatalf("Build My HQ must be retained but retired: %+v", buildHQ)
+	}
+	if questView(paf, BuildHQQuestID) != nil {
+		t.Fatal("retired HQ quest leaked into the status view")
 	}
 	if buildHQ.ActionURL != GuidedBuildHQActionURL {
 		t.Fatalf("Build My HQ action = %q; want %q", buildHQ.ActionURL, GuidedBuildHQActionURL)
@@ -109,14 +116,14 @@ func TestPersonalAssistantQuests_BuildHQCompletesOnlyOnRealDesignation(t *testin
 	})); err != nil {
 		t.Fatal(err)
 	}
-	if completed(e, BuildHQQuestID) {
+	if e.HasCompleted(BuildHQQuestID) {
 		t.Fatal("Build My HQ completed without a Personal HQ designation")
 	}
 
 	// Only the designation completes it.
 	e.Complete(BuildHQQuestID)
-	if !completed(e, BuildHQQuestID) {
-		t.Fatal("designation did not complete Build My HQ")
+	if !e.HasCompleted(BuildHQQuestID) || questView(e, BuildHQQuestID) != nil {
+		t.Fatal("designation did not record the retired HQ quest invisibly")
 	}
 }
 
@@ -125,17 +132,16 @@ func TestPersonalAssistantQuests_DeferredBuildHQStaysResumable(t *testing.T) {
 	if err := e.Skip(BuildHQQuestID); err != nil {
 		t.Fatalf("Do this later was rejected: %v", err)
 	}
-	view := questView(e, BuildHQQuestID)
-	if view == nil || view.Status != StatusSkipped {
-		t.Fatalf("deferred quest = %+v", view)
+	if _, skipped := e.state.SkippedQuests[BuildHQQuestID]; !skipped {
+		t.Fatal("deferred HQ quest was not recorded")
 	}
 	// Skipping records a deferral, never a completion.
-	if completed(e, BuildHQQuestID) {
-		t.Fatal("Do this later was recorded as a completion")
+	if e.HasCompleted(BuildHQQuestID) || questView(e, BuildHQQuestID) != nil {
+		t.Fatal("a deferral must not complete or display retired HQ")
 	}
-	// It remains reachable, which is what keeps Resume quest on Home.
-	if view.ActionURL != GuidedBuildHQActionURL {
-		t.Fatalf("deferred quest lost its action: %+v", view)
+	// It remains reachable through the alternate Map route, not the board.
+	if !e.Complete(BuildHQQuestID) || !e.HasCompleted(BuildHQQuestID) {
+		t.Fatal("a later designation did not replace the deferral")
 	}
 }
 

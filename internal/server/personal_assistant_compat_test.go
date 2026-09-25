@@ -137,21 +137,15 @@ func TestAbandonedWalkthrough_LeavesResumableStateNotAssumedCompletion(t *testin
 	if status != http.StatusOK {
 		t.Fatalf("progression status = %d", status)
 	}
-	found := false
 	for _, tier := range asSlice(progression["tiers"]) {
 		for _, quest := range asSlice(asMap(tier)["quests"]) {
-			q := asMap(quest)
-			if q["id"] == "t2-build-hq" {
-				found = true
-				if q["status"] == "completed" {
-					t.Fatal("merely visiting the guided route completed Build My HQ")
-				}
+			if asMap(quest)["id"] == "t2-build-hq" {
+				t.Fatal("retired Build My HQ leaked into the visible progression board")
 			}
 		}
 	}
-	if !found {
-		t.Fatal("t2-build-hq missing from progression")
-	}
+	// The relationship is still awaiting HQ: a GET never designated it. The
+	// retired quest remains in the engine for a later real designation.
 }
 
 func asSlice(v any) []any {

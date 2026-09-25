@@ -5,17 +5,21 @@
 <section id="personalAssistantToday" class="personal-assistant-today" data-state="loading"
          aria-labelledby="personalAssistantTodayTitle" hidden>
   <header class="personal-assistant-today__header">
-    <div>
-      <span id="personalAssistantTodayEyebrow" class="personal-assistant-today__eyebrow">Today from your assistant</span>
+    <div class="personal-assistant-today__heading">
       <h3 id="personalAssistantTodayTitle" class="personal-assistant-today__title">Today</h3>
       <p id="personalAssistantTodayMeta" class="personal-assistant-today__meta"></p>
     </div>
-    <nav class="personal-assistant-today__links" aria-label="Personal assistant details">
-      <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
-      <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
-      <a id="personalAssistantTodayMemory" href="/" hidden>Memory</a>
-      <a id="personalAssistantTodayAdvanced" href="/agents">Advanced</a>
-    </nav>
+    <details id="personalAssistantTodayMore" class="personal-assistant-today__more">
+      <summary aria-label="More assistant options">More <span aria-hidden="true">⋯</span></summary>
+      <nav class="personal-assistant-today__links" aria-label="Personal assistant details">
+        <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
+        <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
+        <a id="personalAssistantTodayMemory" href="/" hidden>Workspace memory</a>
+        <a href="/profile#personalHQKnowledge">Review remembered facts</a>
+        <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" hidden>Optional interview</a>
+        <a id="personalAssistantTodayAdvanced" href="/agents">Manage agents</a>
+      </nav>
+    </details>
   </header>
   <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
 
@@ -50,18 +54,59 @@
     </div>
   </section>
 
+  <!-- The hired assistant proposes HQ before any folder work is available. -->
+  <section id="personalAssistantHQCard" class="pa-specialist-offer pa-hq-card"
+           aria-labelledby="personalAssistantHQHeadline" hidden>
+    <span id="personalAssistantHQEyebrow" class="personal-assistant-today__eyebrow"></span>
+    <p id="personalAssistantHQHeadline" class="pa-specialist-offer__headline"></p>
+    <div id="personalAssistantHQPlan">
+      <label for="personalAssistantHQName">HQ name</label>
+      <input id="personalAssistantHQName" class="modern-input w-100" value="My HQ" maxlength="100">
+      <label for="personalAssistantHQRoot">Workspace directory</label>
+      <div class="pa-hq-card__root">
+        <input id="personalAssistantHQRoot" class="modern-input w-100" readonly>
+        <button type="button" id="personalAssistantHQChange" class="btn btn-sm btn-outline-secondary">Change</button>
+      </div>
+      <small id="personalAssistantHQRootStatus" aria-live="polite"></small>
+      <label for="personalAssistantHQTime">Daily Brief time (weekdays)</label>
+      <input id="personalAssistantHQTime" type="time" class="modern-input" value="08:00">
+      <p id="personalAssistantHQScope">All workspaces, including future ones.</p>
+    </div>
+    <ul id="personalAssistantHQReceipt" hidden></ul>
+    <div class="pa-specialist-offer__actions">
+      <button type="button" id="personalAssistantHQBuild" class="btn btn-sm btn-primary" disabled>Build</button>
+      <button type="button" id="personalAssistantHQAdjust" class="btn btn-sm btn-outline-secondary">Adjust…</button>
+      <button type="button" id="personalAssistantHQNotNow" class="btn btn-sm btn-outline-secondary">Not now</button>
+    </div>
+    <p id="personalAssistantHQStatus" role="status" aria-live="polite"></p>
+    <p id="personalAssistantHQError" class="pa-specialist-offer__error" role="alert" hidden></p>
+  </section>
+
   <!-- Show me a folder: the assistant's first proactive act. The chooser names
        folders by identifier and the server resolves them; the offer card is
        built from counts and names only. Shown for an active or paused
        assistant, never before the hire or while HQ is being built. -->
-  <section id="personalAssistantFolder" class="pa-folder" data-state="idle"
+  <section id="personalAssistantFolder" class="pa-folder pa-folder__experience" data-state="idle"
            aria-labelledby="personalAssistantFolderTitle" hidden>
-    <div class="pa-folder__launch">
-      <button type="button" class="btn btn-sm btn-outline-secondary" id="personalAssistantFolderShowBtn"
-              aria-expanded="false" aria-controls="personalAssistantFolderChooser">Show me a folder</button>
+    <div id="personalAssistantFolderScene" class="pa-folder__scene" data-phase="choosing" hidden>
+      <div class="pa-folder__scene-copy">
+        <p class="pa-folder__scene-kicker">A little field trip</p>
+        <p id="personalAssistantFolderSceneLabel" class="pa-folder__scene-label" role="status" aria-live="polite"></p>
+        <div id="personalAssistantFolderSceneFinds" class="pa-folder__scene-finds"></div>
+        <p class="pa-folder__scene-assurance">A read-only peek. Nothing moves.</p>
+      </div>
+      <div class="pa-folder__scene-art" aria-hidden="true">
+        <span id="personalAssistantFolderSceneAvatar" class="pa-folder__scene-avatar"></span>
+        <svg class="pa-folder__scene-folder" viewBox="0 0 52 45" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 8a4 4 0 0 1 4-4h13l5 5h20a4 4 0 0 1 4 4v25a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V8Z" fill="currentColor" stroke="currentColor" stroke-width="3"/>
+          <path d="M4 18h44v20a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V18Z" fill="var(--hc-panel)" stroke="currentColor" stroke-width="3"/>
+          <path d="M17 26h18M17 32h11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="pa-folder__scene-spark"></span>
+      </div>
     </div>
     <div id="personalAssistantFolderChooser" class="pa-folder__chooser" hidden>
-      <p id="personalAssistantFolderTitle" class="pa-folder__prompt">Which folder should I look at?</p>
+      <p id="personalAssistantFolderTitle" class="pa-folder__prompt">Which folder should I explore?</p>
       <div id="personalAssistantFolderChips" class="pa-folder__chips" role="group" aria-label="Folders"></div>
       <p id="personalAssistantFolderNote" class="pa-folder__note" hidden></p>
       <p id="personalAssistantFolderStatus" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
@@ -70,7 +115,10 @@
              aria-labelledby="personalAssistantFolderOfferHeadline" hidden>
       <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
       <p id="personalAssistantFolderOfferQuestion" class="pa-specialist-offer__question"></p>
-      <p id="personalAssistantFolderOfferReason" class="pa-folder__reason"></p>
+      <details class="pa-folder__why"><summary>Why this suggestion?</summary>
+        <p id="personalAssistantFolderOfferReason" class="pa-folder__reason"></p>
+      </details>
+      <ul id="personalAssistantFolderReceipt" class="pa-folder__receipt" hidden></ul>
       <div id="personalAssistantFolderOfferActions" class="pa-specialist-offer__actions"></div>
       <p id="personalAssistantFolderOfferNote" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
       <p id="personalAssistantFolderOfferError" class="pa-specialist-offer__error" role="alert" hidden></p>
@@ -107,45 +155,35 @@
   </section>
 
   <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
-    <!-- Today's meetings, read through the Calendar Ops workspace that owns the
-         calendar connection. Present only when the server sends a section; a
-         meeting row opens that meeting in the Calendar console, where meeting
-         prep lives. Nothing here writes to a calendar. -->
-    <section id="personalAssistantTodayMeetingsSection" class="personal-assistant-today__meetings"
-             aria-labelledby="personalAssistantTodayMeetingsTitle" hidden>
-      <h4 id="personalAssistantTodayMeetingsTitle">Meetings</h4>
-      <ul id="personalAssistantTodayMeetings"></ul>
-      <p id="personalAssistantTodayMeetingsNote" class="personal-assistant-today__meta"></p>
+    <section id="personalAssistantNeedsYou" aria-labelledby="personalAssistantNeedsYouTitle" hidden>
+      <h4 id="personalAssistantNeedsYouTitle">Needs you</h4>
+      <p id="personalAssistantTodayAllClear" hidden>Nothing needs you right now.</p>
+      <div id="personalAssistantNeedsYouCards"></div>
+      <details id="personalAssistantNeedsYouQueue" class="personal-assistant-today__queue" hidden>
+        <summary id="personalAssistantNeedsYouQueueTitle">Also needs you</summary>
+        <div id="personalAssistantNeedsYouQueueCards"></div>
+        <ul id="personalAssistantNeedsYouItems"></ul>
+      </details>
     </section>
-    <section aria-labelledby="personalAssistantTodayRememberedTitle">
-      <h4 id="personalAssistantTodayRememberedTitle">What I’m keeping in mind</h4>
-      <ul id="personalAssistantTodayRemembered"></ul>
-      <a href="/profile#personalHQKnowledge" class="personal-assistant-today__meta">Review or change remembered facts</a>
-      <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" class="personal-assistant-today__meta" hidden>Start or resume the optional interview</a>
+    <section id="personalAssistantWorkingOn" aria-labelledby="personalAssistantWorkingOnTitle" hidden>
+      <h4 id="personalAssistantWorkingOnTitle">Working on</h4>
+      <div id="personalAssistantWorkingOnContent"></div>
+      <section id="personalAssistantTodayMeetingsSection" class="personal-assistant-today__meetings"
+               aria-labelledby="personalAssistantTodayMeetingsTitle" hidden>
+        <h5 id="personalAssistantTodayMeetingsTitle">Meetings</h5>
+        <ul id="personalAssistantTodayMeetings"></ul>
+        <p id="personalAssistantTodayMeetingsNote" class="personal-assistant-today__meta"></p>
+      </section>
+      <ul id="personalAssistantWorkingOnItems"></ul>
     </section>
-    <section aria-labelledby="personalAssistantTodayDecisionsTitle">
-      <h4 id="personalAssistantTodayDecisionsTitle">Decisions</h4>
-      <ul id="personalAssistantTodayDecisions"></ul>
-    </section>
-    <section aria-labelledby="personalAssistantTodayPrioritiesTitle">
-      <h4 id="personalAssistantTodayPrioritiesTitle">Priorities</h4>
-      <ul id="personalAssistantTodayPriorities"></ul>
-    </section>
-    <section aria-labelledby="personalAssistantTodayFollowUpsTitle">
-      <h4 id="personalAssistantTodayFollowUpsTitle">Follow-ups</h4>
-      <ul id="personalAssistantTodayFollowUps"></ul>
-    </section>
-    <section aria-labelledby="personalAssistantTodayResultsTitle">
-      <h4 id="personalAssistantTodayResultsTitle">Results to review</h4>
-      <ul id="personalAssistantTodayResults"></ul>
-    </section>
-    <!-- Studio reporting names the specialist and links to that specialist's
-         canonical workspace. It never implies unsupported delegation. -->
-    <section id="personalAssistantTodayStudioSection" aria-labelledby="personalAssistantTodayStudioTitle" hidden>
-      <h4 id="personalAssistantTodayStudioTitle">From your studio</h4>
-      <ul id="personalAssistantTodayStudio"></ul>
-      <p id="personalAssistantTodayStudioNote" class="personal-assistant-today__meta"></p>
+    <section id="personalAssistantDone" aria-labelledby="personalAssistantDoneTitle" hidden>
+      <h4 id="personalAssistantDoneTitle">Done</h4>
+      <ul id="personalAssistantDoneItems"></ul>
     </section>
   </div>
+  <footer id="personalAssistantTodayFooter" class="personal-assistant-today__meta" hidden>
+    <span id="personalAssistantTodayUnavailable"></span>
+    <button id="personalAssistantTodayRetry" type="button" class="btn btn-sm btn-link">Retry</button>
+  </footer>
 </section>
 {{end}}

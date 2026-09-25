@@ -97,8 +97,14 @@ export function humanizeReason(reason) {
       return 'Overlaps another meeting';
     case 'meeting_needs_prep':
       return 'No prep note yet';
-    default:
-      return reason || '';
+    case 'waiting_for_choice':
+      return 'Waiting for your choice';
+    default: {
+      const text = String(reason || '');
+      return /^[a-z]+(?:_[a-z]+)+$/.test(text)
+        ? text.replaceAll('_', ' ').replace(/^./, char => char.toUpperCase())
+        : text;
+    }
   }
 }
 

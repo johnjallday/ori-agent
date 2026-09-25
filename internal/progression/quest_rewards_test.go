@@ -83,9 +83,8 @@ func TestEveryRewardedQuestExists(t *testing.T) {
 		if !ok {
 			t.Fatalf("the economy pays for quest %q, which no longer exists", questID)
 		}
-		if quest.Tier > 2 {
-			t.Fatalf("quest %q is tier %d; only tiers 1 and 2 cover the cold start",
-				questID, quest.Tier)
+		if quest.Retired || quest.Tier != 1 {
+			t.Fatalf("quest %q is retired or not a starter mission", questID)
 		}
 	}
 }

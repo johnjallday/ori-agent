@@ -5,8 +5,11 @@ import { readFileSync } from 'node:fs';
 import {
   folderActionAvailable,
   folderChooserView,
+  folderSceneView,
+  firstFolderPromptView,
   folderOfferView,
   folderOutcomeNote,
+  folderReceiptView,
   folderProjectModalOptions
 } from './personal-assistant-folder.js';
 
@@ -27,6 +30,48 @@ test('the action is offered only to an active or paused assistant', () => {
   ]) {
     assert.equal(folderActionAvailable({ state }), false, state);
   }
+});
+
+test('resolved project receipt names only server rows and offers the canonical workspace route', () => {
+  const offer = {
+    status: 'resolved',
+    verdict: 'project',
+    subject: { name: 'Draft' },
+    outcome: {
+      kind: 'project',
+      route: '/workspaces/thesis',
+      receipt: [
+        { kind: 'workspace', name: '<Thesis>', route: '/workspaces/thesis' },
+        { kind: 'folder', name: 'Draft', detail: 'linked as primary' },
+        { kind: 'task', name: 'Summarize current draft' }
+      ]
+    }
+  };
+  assert.deepEqual(folderReceiptView(offer), {
+    visible: true,
+    rows: [
+      { kind: 'workspace', name: '<Thesis>', detail: '' },
+      { kind: 'folder', name: 'Draft', detail: 'linked as primary' },
+      { kind: 'task', name: 'Summarize current draft', detail: '' }
+    ],
+    route: '/workspaces/thesis',
+    openLabel: 'Open <Thesis>'
+  });
+  assert.equal(folderOfferView(offer).question, "Here's what I set up:");
+  assert.equal(
+    folderReceiptView({ ...offer, outcome: { ...offer.outcome, route: '//evil' } }).route,
+    ''
+  );
+  assert.equal(folderReceiptView({ ...offer, outcome: { kind: 'tidy' } }).visible, false);
+});
+
+test('the first-folder hand-over is an active-only server receipt, never a pre-HQ prompt', () => {
+  assert.deepEqual(firstFolderPromptView({ prompt_first_folder: true }, true), {
+    expand: true,
+    line: "Now let's explore a folder you're working in."
+  });
+  assert.equal(firstFolderPromptView({ prompt_first_folder: true }, false).expand, false);
+  assert.equal(firstFolderPromptView({ prompt_first_folder: false }, true).expand, false);
 });
 
 test('the chooser renders the chips the server sent and hides the picker when it is unavailable', () => {
@@ -79,6 +124,61 @@ test('the chooser explains itself when there is nothing to choose', () => {
   });
   assert.equal(pickerOnly.pickerVisible, true);
   assert.match(pickerOnly.note, /pick another folder/);
+});
+
+test('the folder field trip mirrors real scan state and only server-observed counts', () => {
+  assert.equal(folderSceneView().visible, false);
+  assert.deepEqual(folderSceneView({ chooserOpen: true }), {
+    visible: true,
+    phase: 'choosing',
+    label: 'Ready when you are.',
+    finds: []
+  });
+  assert.deepEqual(folderSceneView({ chooserOpen: true, scanning: true, scanName: 'Documents' }), {
+    visible: true,
+    phase: 'scanning',
+    label: 'Exploring Documents…',
+    finds: []
+  });
+  const offer = {
+    verdict: 'mixed',
+    status: 'pending',
+    folder: '<Documents>',
+    projects_count: 3,
+    loose_files: 40,
+    blueprint_label: 'Proposed blueprint'
+  };
+  assert.deepEqual(folderSceneView({ offer }), {
+    visible: true,
+    phase: 'found',
+    label: "Here's what I noticed in <Documents>.",
+    finds: ['3 projects', '40 loose files']
+  });
+  assert.deepEqual(folderSceneView({ offer, failed: true }), {
+    visible: true,
+    phase: 'error',
+    label: 'I could not explore that folder.',
+    finds: []
+  });
+  assert.deepEqual(
+    folderSceneView({ offer: { ...offer, status: 'resolved' } }).label,
+    '<Documents> is ready.'
+  );
+  assert.deepEqual(
+    folderSceneView({ offer: { ...offer, projects_count: '3', loose_files: -1 } }).finds,
+    []
+  );
+  assert.deepEqual(
+    folderSceneView({
+      offer: {
+        verdict: 'project',
+        status: 'pending',
+        folder: 'Thesis',
+        subject: { marker: 'LaTeX manuscript' }
+      }
+    }).finds,
+    ['LaTeX manuscript']
+  );
 });
 
 const thesisOffer = {

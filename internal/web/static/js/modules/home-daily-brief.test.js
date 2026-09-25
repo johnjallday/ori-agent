@@ -134,6 +134,8 @@ test('hrefForRef opens an email thread in Gmail by its thread id (no token, fixe
 test('humanizeReason maps email reasons to friendly labels and passes others through', () => {
   assert.equal(humanizeReason('email_waiting_on_user'), 'Waiting on your reply');
   assert.equal(humanizeReason('email_unread'), 'Unread email');
+  assert.equal(humanizeReason('waiting_for_choice'), 'Waiting for your choice');
+  assert.equal(humanizeReason('future_status'), 'Future status');
   assert.equal(
     humanizeReason('This is a model-written sentence.'),
     'This is a model-written sentence.'

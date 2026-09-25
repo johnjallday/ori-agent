@@ -25,6 +25,13 @@ export function folderActionAvailable(personalAssistant) {
 
 // folderChooserView is the chooser's render decision: which chips to show,
 // whether the native picker chip appears, and the note that replaces it.
+export function firstFolderPromptView(digest, available) {
+  return {
+    expand: available === true && digest?.prompt_first_folder === true,
+    line: "Now let's explore a folder you're working in."
+  };
+}
+
 export function folderChooserView(digest) {
   const chips = Array.isArray(digest?.chips)
     ? digest.chips
@@ -44,6 +51,48 @@ export function folderChooserView(digest) {
     pickerLabel: 'Pick another folder…',
     note
   };
+}
+
+// A view of what the server has actually observed. A folder graphic moving
+// towards the portrait is only a metaphor: no files are moved or uploaded.
+// Never derive counts or a blueprint from a proposed workspace plan.
+export function folderSceneView({
+  chooserOpen = false,
+  scanning = false,
+  failed = false,
+  scanName = '',
+  offer = null
+} = {}) {
+  const offered = folderOfferView(offer).visible;
+  if (!chooserOpen && !offered) return { visible: false, phase: 'choosing', label: '', finds: [] };
+  if (scanning) {
+    return {
+      visible: true,
+      phase: 'scanning',
+      label: `Exploring ${scanName || 'your folder'}…`,
+      finds: []
+    };
+  }
+  if (failed)
+    return { visible: true, phase: 'error', label: 'I could not explore that folder.', finds: [] };
+  if (offered) {
+    const finds = [];
+    const count = n => (Number.isSafeInteger(n) && n > 0 ? n : 0);
+    if (count(offer.projects_count)) finds.push(plural(offer.projects_count, 'project'));
+    if (count(offer.loose_files)) finds.push(plural(offer.loose_files, 'loose file'));
+    if (!finds.length && offer.verdict === 'project' && offer.subject?.marker) {
+      finds.push(String(offer.subject.marker));
+    }
+    const folder = String(offer.folder || '').trim() || 'your folder';
+    return {
+      visible: true,
+      phase: 'found',
+      label:
+        offer.status === 'resolved' ? `${folder} is ready.` : `Here's what I noticed in ${folder}.`,
+      finds
+    };
+  }
+  return { visible: true, phase: 'choosing', label: 'Ready when you are.', finds: [] };
 }
 
 function segments(parts) {
@@ -151,6 +200,14 @@ export function folderOfferView(offer, options = {}) {
     needsPick: offer.needs_pick === true
   };
   const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
+  if (
+    status === 'resolved' &&
+    offer?.outcome?.kind === 'project' &&
+    offer?.outcome?.receipt?.length
+  ) {
+    view.question = "Here's what I set up:";
+    view.reason = '';
+  }
   // A yes needs the folder's path, and a dialog-chosen folder is held in
   // memory only: after a server restart the card asks for the folder again
   // before offering anything a yes would need.
@@ -272,6 +329,26 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirm 
   }
 }
 
+// A receipt is read only from the resolved server outcome; the workspace name
+// and route are never reconstructed from the folder name or blueprint plan.
+export function folderReceiptView(offer) {
+  if (offer?.status !== 'resolved' || offer?.outcome?.kind !== 'project') return { visible: false };
+  const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
+  if (!rows.length) return { visible: false }; // an older stored offer
+  const workspace = rows.find(row => row.kind === 'workspace');
+  const route = resolvedRouteFor(offer);
+  return {
+    visible: true,
+    rows: rows.map(row => ({
+      kind: String(row.kind || ''),
+      name: String(row.name || ''),
+      detail: String(row.detail || '')
+    })),
+    route,
+    openLabel: `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`
+  };
+}
+
 // folderOutcomeNote is the line shown under a decided offer.
 export function folderOutcomeNote(offer) {
   const status = String(offer?.status || '').trim();
@@ -319,8 +396,14 @@ const state = {
   digest: null,
   offer: null,
   busy: false,
+  scanning: false,
+  scanFailed: false,
+  freshScan: false,
+  scanName: '',
   chooserOpen: false,
   available: false,
+  handOver: false,
+  prompting: false,
   // The plan being confirmed on the card before anything is decided:
   // 'project', 'tidy', or ''.
   confirm: '',
@@ -345,15 +428,21 @@ function elements() {
   if (!root) return null;
   return {
     root,
-    show: document.getElementById('personalAssistantFolderShowBtn'),
     chooser: document.getElementById('personalAssistantFolderChooser'),
+    scene: document.getElementById('personalAssistantFolderScene'),
+    sceneAvatar: document.getElementById('personalAssistantFolderSceneAvatar'),
+    sceneLabel: document.getElementById('personalAssistantFolderSceneLabel'),
+    sceneFinds: document.getElementById('personalAssistantFolderSceneFinds'),
     chips: document.getElementById('personalAssistantFolderChips'),
+    title: document.getElementById('personalAssistantFolderTitle'),
     note: document.getElementById('personalAssistantFolderNote'),
     status: document.getElementById('personalAssistantFolderStatus'),
     offer: document.getElementById('personalAssistantFolderOffer'),
     headline: document.getElementById('personalAssistantFolderOfferHeadline'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
+    why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
+    receipt: document.getElementById('personalAssistantFolderReceipt'),
     actions: document.getElementById('personalAssistantFolderOfferActions'),
     offerNote: document.getElementById('personalAssistantFolderOfferNote'),
     error: document.getElementById('personalAssistantFolderOfferError')
@@ -394,8 +483,13 @@ function renderChooser() {
   const els = elements();
   if (!els?.chooser) return;
   const view = folderChooserView(state.digest);
+  if (els.title)
+    els.title.textContent = state.offer
+      ? 'Or explore another folder'
+      : state.handOver
+        ? firstFolderPromptView(state.digest, true).line
+        : 'Which folder should I explore?';
   els.chooser.hidden = !state.chooserOpen;
-  if (els.show) els.show.setAttribute('aria-expanded', String(state.chooserOpen));
   if (els.chips) {
     els.chips.replaceChildren();
     view.chips.forEach(chip => {
@@ -422,10 +516,44 @@ function renderChooser() {
   setText(els.note, view.note);
 }
 
+function renderScene() {
+  const els = elements();
+  if (!els?.scene) return;
+  const view = folderSceneView({
+    chooserOpen: state.chooserOpen,
+    scanning: state.scanning,
+    failed: state.scanFailed,
+    scanName: state.scanName,
+    offer: state.offer
+  });
+  els.scene.hidden = !view.visible;
+  if (!view.visible) return;
+  els.scene.dataset.phase = view.phase;
+  els.scene.dataset.freshScan = String(state.freshScan);
+  setText(els.sceneLabel, view.label, false);
+  if (els.sceneFinds) {
+    els.sceneFinds.replaceChildren();
+    view.finds.forEach(find => {
+      const badge = document.createElement('span');
+      badge.textContent = find;
+      els.sceneFinds.appendChild(badge);
+    });
+  }
+  // Clone the already rendered identity, including custom portraits. No new
+  // asset lookup, assistant name interpolation, or second appearance pipeline.
+  const portrait = document.getElementById('personalAssistantPanelAvatar');
+  if (els.sceneAvatar && portrait && els.sceneAvatar.innerHTML !== portrait.innerHTML) {
+    els.sceneAvatar.replaceChildren(
+      ...Array.from(portrait.childNodes, node => node.cloneNode(true))
+    );
+  }
+}
+
 function renderOffer() {
   const els = elements();
   if (!els?.offer) return;
   const view = folderOfferView(state.offer, { confirm: state.confirm });
+  const receipt = folderReceiptView(state.offer);
   els.offer.hidden = !view.visible;
   els.root.dataset.state = view.visible
     ? `offer-${view.verdict}`
@@ -449,10 +577,43 @@ function renderOffer() {
   }
   setText(els.question, view.question, false);
   setText(els.reason, view.reason, false);
+  if (els.why) els.why.hidden = !view.reason;
+  if (els.receipt) {
+    els.receipt.replaceChildren();
+    els.receipt.hidden = !receipt.visible;
+    if (receipt.visible)
+      receipt.rows.forEach(row => {
+        const li = document.createElement('li');
+        const labels = {
+          workspace: ['Workspace', '◈'],
+          folder: ['Folder', '▤'],
+          blueprint: ['Blueprint', '✦'],
+          agent: ['Agent', '●'],
+          task: ['First task', '✓']
+        };
+        const [label, glyph] = labels[row.kind] || ['Set up', '•'];
+        li.dataset.kind = labels[row.kind] ? row.kind : 'other';
+        const icon = document.createElement('span');
+        icon.className = 'pa-folder__receipt-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = glyph;
+        li.append(
+          icon,
+          document.createTextNode(`${label} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`)
+        );
+        els.receipt.append(li);
+      });
+  }
   if (els.actions) {
     els.actions.replaceChildren();
-    els.actions.hidden = view.decided;
-    if (!view.decided) {
+    els.actions.hidden = view.decided && !receipt.route;
+    if (receipt.route) {
+      const open = document.createElement('a');
+      open.className = 'btn btn-sm btn-primary';
+      open.href = receipt.route;
+      open.textContent = receipt.openLabel;
+      els.actions.append(open);
+    } else if (!view.decided) {
       view.actions.forEach(action => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -471,13 +632,14 @@ function renderOffer() {
     }
   }
   if (els.offerNote) {
-    const note = state.progress || (view.decided ? folderOutcomeNote(state.offer) : '');
+    const note =
+      state.progress || (view.decided && !receipt.visible ? folderOutcomeNote(state.offer) : '');
     els.offerNote.replaceChildren();
     els.offerNote.hidden = !note;
     if (note) {
       els.offerNote.append(note);
       const route = String(state.offer?.outcome?.route || '').trim();
-      if (view.status === 'resolved' && route.startsWith('/')) {
+      if (view.status === 'resolved' && !receipt.visible && route.startsWith('/')) {
         const link = document.createElement('a');
         link.href = route;
         link.textContent = 'Open it';
@@ -494,6 +656,7 @@ function render() {
   if (!state.available) return;
   renderChooser();
   renderOffer();
+  renderScene();
 }
 
 // runAction carries out one of the offer's actions, wherever its button was
@@ -560,6 +723,7 @@ function act(actionId) {
 
 function openChooser() {
   state.chooserOpen = true;
+  state.scanFailed = false;
   showError('');
   render();
   const els = elements();
@@ -567,6 +731,9 @@ function openChooser() {
 }
 
 async function load() {
+  state.scanFailed = false;
+  state.freshScan = false;
+  let revealFirstPrompt = false;
   try {
     const response = await fetch(DIGEST_ENDPOINT, { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`folder digest ${response.status}`);
@@ -574,21 +741,50 @@ async function load() {
     state.digest = payload?.folder_digest || null;
     state.offer = state.digest?.offer || null;
     state.confirm = '';
-    // A pending offer is the assistant's one question; it needs no chooser
-    // in front of it.
-    if (state.offer) state.chooserOpen = false;
+    const prompt = firstFolderPromptView(state.digest, state.available);
+    if (prompt.expand && !state.prompting) {
+      revealFirstPrompt = true;
+      state.handOver = true;
+      state.chooserOpen = true;
+      state.prompting = true;
+      // The panel expands immediately; persisting the receipt cannot delay it.
+      void fetch(`${DIGEST_ENDPOINT}/prompted`, { method: 'POST' })
+        .then(response => {
+          if (!response.ok) throw new Error('Could not save the folder prompt');
+          state.digest.prompt_first_folder = false;
+        })
+        .catch(() => showStatus('Could not save the prompt. It may appear again after a reload.'))
+        .finally(() => {
+          state.prompting = false;
+        });
+    }
   } catch (_) {
     state.digest = state.digest || { chips: [], picker_available: false };
   }
   render();
+  // The brief and HQ receipt precede Needs you and can put the first prompt
+  // below the fold. Reveal it once inside an already-open drawer, without
+  // scrolling Home when the relationship changes in a closed panel.
+  if (revealFirstPrompt && !document.getElementById('personalAssistantPanel')?.hidden) {
+    elements()?.scene?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
+  }
   announceOffer();
 }
 
 async function scan(body) {
   if (state.busy) return;
   state.busy = true;
+  state.scanning = !body.picker;
+  state.scanFailed = false;
+  state.freshScan = false;
+  state.scanName = body.picker
+    ? ''
+    : folderChooserView(state.digest).chips.find(chip => chip.id === body.chip)?.label ||
+      'your folder';
+  const els = elements();
+  if (els?.why) els.why.open = false;
   showError('');
-  showStatus(body.picker ? 'Choose a folder in the dialog…' : 'Looking at the folder…');
+  showStatus(body.picker ? 'Choose a folder in the dialog…' : '');
   render();
   try {
     const response = await fetch(`${DIGEST_ENDPOINT}/scan`, {
@@ -598,6 +794,7 @@ async function scan(body) {
     });
     const payload = await readJSON(response);
     if (!response.ok) {
+      state.scanFailed = true;
       showStatus(
         String(payload?.error || 'That folder could not be looked at. Choose a different folder.')
       );
@@ -608,13 +805,16 @@ async function scan(body) {
       return;
     }
     state.offer = payload?.offer || null;
+    state.freshScan = Boolean(state.offer);
     state.confirm = '';
-    state.chooserOpen = false;
+    state.handOver = false;
     showStatus('');
     announceOffer();
   } catch (_) {
+    state.scanFailed = true;
     showStatus('That folder could not be looked at right now.');
   } finally {
+    state.scanning = false;
     state.busy = false;
     render();
   }
@@ -680,6 +880,9 @@ async function decide(action) {
     // its route: the first review batch, the workspace that already manages
     // the folder, or the new workspace.
     const route = resolvedRouteFor(state.offer);
+    // The server-authored receipt is the confirmation of what Set up actually
+    // made. Stay on it until the user presses Open <workspace>.
+    if (action.create === true && folderReceiptView(state.offer).visible) return;
     if (action.walkthrough && (await revealSetupWalkthrough(state.offer))) return;
     if (route && typeof window !== 'undefined') window.location.assign(route);
   } catch (_) {
@@ -797,9 +1000,14 @@ function onStatus(personalAssistant) {
   const changed = available !== state.available;
   state.available = available;
   if (!available) {
+    state.handOver = false;
+    state.chooserOpen = false;
     render();
     return;
   }
+  // The folder field trip is the action in Needs you, not a second button
+  // the user must press. Keep the chooser available beside any current offer.
+  state.chooserOpen = true;
   if (changed || !state.digest) void load();
   else render();
 }
@@ -807,11 +1015,6 @@ function onStatus(personalAssistant) {
 function init() {
   const els = elements();
   if (!els) return;
-  els.show?.addEventListener('click', () => {
-    state.chooserOpen = !state.chooserOpen;
-    if (state.chooserOpen) openChooser();
-    else render();
-  });
   document.addEventListener('personal-assistant:status', event => {
     onStatus(event.detail?.personalAssistant);
   });
@@ -819,6 +1022,7 @@ function init() {
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   window.PersonalAssistantFolder = {
     open: openChooser,
+    openChooser,
     reload: load,
     current: () => state.offer,
     act

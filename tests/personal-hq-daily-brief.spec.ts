@@ -40,7 +40,8 @@ import { test, expect, type Page } from '@playwright/test';
  */
 
 test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
-  let assistantReady = false;
+  let assistantState = 'needs_hire';
+  let assistantVersion = 1;
 
   test.beforeEach(async ({ page }) => {
     await page.route(/\/api\/personal-assistant$/, route =>
@@ -48,16 +49,17 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          personal_assistant: assistantReady
-            ? {
-                state: 'active',
-                state_version: 1,
-                assistant_id: 'daily-brief-browser-assistant',
-                display_name: 'Atlas',
-                hq_workspace_id: 'daily-brief-browser-hq',
-                availability: { model: { status: 'available', available: true } }
-              }
-            : { state: 'needs_hire', next_action: 'hire', availability: {} }
+          personal_assistant:
+            assistantState === 'needs_hire'
+              ? { state: 'needs_hire', next_action: 'hire', availability: {} }
+              : {
+                  state: assistantState,
+                  state_version: assistantVersion,
+                  assistant_id: 'daily-brief-browser-assistant',
+                  display_name: 'Atlas',
+                  hq_workspace_id: assistantState === 'active' ? 'daily-brief-browser-hq' : '',
+                  availability: { model: { status: 'available', available: true } }
+                }
         })
       })
     );
@@ -76,6 +78,13 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
             priorities: { health: { status: 'healthy_empty' }, items: [] },
             follow_ups: { health: { status: 'healthy_empty' }, items: [] },
             results: { health: { status: 'healthy_empty' }, items: [] },
+            working_on: {
+              health: { status: 'available' },
+              items: [{ kind: 'hq_status', title: 'My HQ' }]
+            },
+            needs_you: { health: { status: 'healthy_empty' }, items: [] },
+            done: { health: { status: 'healthy_empty' }, items: [] },
+            unavailable_sources: [],
             links: { advanced: '/agents' }
           }
         })
@@ -98,6 +107,18 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const res = await request.post('/api/onboarding/skip');
     expect(res.ok()).toBeTruthy();
+    const hire = await request.post('/api/personal-assistant/hire', {
+      data: {
+        request_id: 'daily-brief-e2e-hire',
+        if_version: 0,
+        display_name: 'Atlas',
+        mandate: 'Keep my projects moving.',
+        focus_areas: ['plan_my_day']
+      }
+    });
+    expect(hire.ok()).toBeTruthy();
+    assistantVersion = (await hire.json()).personal_assistant.state_version;
+    assistantState = 'needs_hq';
     await page.goto('/?focus=personal-hq');
     await expect(page).toHaveURL(/\/\?.*focus=personal-hq/);
     await expect(page.locator('#hqOnboardingGuided')).toHaveCount(0);
@@ -148,10 +169,9 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     // follow the map's focus-intent selection with no click from the user (#322).
     await expect(page.locator('[data-rail-panel="personal-hq"]')).toBeVisible();
     await expect(page.locator('[data-rail-panel="personal-hq"]')).toContainText(
-      'Personal HQ has not been created'
+      'Build Atlas’s Personal HQ'
     );
     await expect(page.locator('[data-hq-action="build"]')).toBeVisible();
-    await expect(page.locator('[data-hq-action="import"]')).toBeVisible();
 
     // The dialog those actions open must exist on THIS page. It is hidden until
     // shown, so presence — not visibility — is the assertion that matters; when
@@ -159,13 +179,8 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(page.locator('#hqBuildModal')).toHaveCount(1);
     await expect(page.locator('#addFolderModal')).toBeHidden();
 
-    await page.locator('[data-hq-action="import"]').click();
-    await expect(page.locator('#addFolderModal')).toBeVisible();
-    await expect(page.locator('#folderModalTitle')).toHaveText('Import HQ');
-    await expect(page.locator('#folderImportHelp')).toContainText('Personal HQ');
-    await expect(page.locator('#createFolderBtn')).toHaveText('Import HQ');
-    await page.locator('#addFolderModal').getByRole('button', { name: 'Cancel' }).click();
-    await expect(page.locator('#addFolderModal')).toBeHidden();
+    // The hired assistant's alternate Map path offers Build. Import remains
+    // available from the advanced workspace UI, not this guided rail.
   });
 
   // "Not now" suppresses the active invitation without hiding reality from
@@ -184,17 +199,15 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
     await expect(page.locator('#homeDailyBrief')).toBeHidden();
-    // Deferring Build My HQ never blocks the missions: this profile has no
-    // assistant hired, so the card stays on Mission 01 (Meet your assistant),
-    // and Build My HQ stays resumable beneath it.
-    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 01');
+    // HQ is retired from the mission board. The hired assistant still offers
+    // its next mission without hiding the unbuilt Map site.
+    await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 02');
     await expect(page.locator('[data-role="first-mission-title"]')).toHaveText(
-      'Meet your assistant'
+      'Show your assistant a folder'
     );
-    await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
     await expect(
       page.locator('[data-role="quests"] .quest-item').filter({ hasText: 'Build My HQ' })
-    ).toContainText('Skipped');
+    ).toHaveCount(0);
   });
 
   // The Map-native action hands off to the existing setup modal and then
@@ -214,11 +227,12 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(page.locator('#hqBuildTimezone')).not.toHaveValue('');
     await page.locator('#hqBuildSubmitBtn').click();
 
-    await expect(page).toHaveURL(/\/$/, { timeout: 15000 });
+    await expect(page.locator('.ws-map-tile.is-hq')).toBeVisible({ timeout: 15000 });
+    await page.goto('/');
     const rootResponse = await page.request.get('/api/settings/workspace-root');
     expect(rootResponse.ok()).toBeTruthy();
     expect((await rootResponse.json()).confirmed).toBe(true);
-    assistantReady = true;
+    assistantState = 'active';
     await page.reload();
     await openToday(page);
     await expect(page.locator('#homeDailyBrief')).toBeVisible();

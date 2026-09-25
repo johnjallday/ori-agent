@@ -3,6 +3,7 @@
 package progressionhttp
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -12,12 +13,20 @@ import (
 
 // Handler serves the progression API.
 type Handler struct {
-	engine *progression.Engine
+	engine     *progression.Engine
+	afterReset func(context.Context) error
 }
 
 // NewHandler creates a progression HTTP handler backed by the given engine.
 func NewHandler(engine *progression.Engine) *Handler {
 	return &Handler{engine: engine}
+}
+
+// SetAfterReset binds sidecars that Reset Getting Started must re-arm.
+func (h *Handler) SetAfterReset(fn func(context.Context) error) {
+	if h != nil {
+		h.afterReset = fn
+	}
 }
 
 // GetStatus returns the full quest graph with derived status and current tier.
@@ -110,6 +119,12 @@ func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 	if err := h.engine.Reset(); err != nil {
 		_ = orihttp.RespondInternalError(w, "failed to reset progression: "+err.Error())
 		return
+	}
+	if h.afterReset != nil {
+		if err := h.afterReset(r.Context()); err != nil {
+			_ = orihttp.RespondInternalError(w, "progression reset; could not reset the first-folder prompt: "+err.Error())
+			return
+		}
 	}
 	_ = orihttp.RespondSuccess(w, h.engine.Status())
 }

@@ -161,21 +161,27 @@ type TodayLinks struct {
 // TodayProjection is the bounded server-owned Home projection. It carries only
 // canonical IDs and routes derived from validated server records.
 type TodayProjection struct {
-	State           string                 `json:"state"`
-	Relationship    APIState               `json:"relationship_state"`
-	StateVersion    int64                  `json:"state_version,omitempty"`
-	DisplayName     string                 `json:"display_name,omitempty"`
-	Appearance      *types.AgentAppearance `json:"appearance,omitempty"`
-	HQWorkspaceID   string                 `json:"hq_workspace_id,omitempty"`
-	HQWorkspaceSlug string                 `json:"hq_workspace_slug,omitempty"`
-	Model           SourceAvailability     `json:"model"`
-	Brief           TodayBriefProjection   `json:"brief"`
-	Decisions       TodaySection           `json:"decisions"`
-	Priorities      TodaySection           `json:"priorities"`
-	Remembered      TodaySection           `json:"remembered"`
-	InterviewStatus string                 `json:"interview_status,omitempty"`
-	FollowUps       TodaySection           `json:"follow_ups"`
-	Results         TodaySection           `json:"results"`
+	State              string                 `json:"state"`
+	Relationship       APIState               `json:"relationship_state"`
+	StateVersion       int64                  `json:"state_version,omitempty"`
+	DisplayName        string                 `json:"display_name,omitempty"`
+	Appearance         *types.AgentAppearance `json:"appearance,omitempty"`
+	HQWorkspaceID      string                 `json:"hq_workspace_id,omitempty"`
+	HQWorkspaceSlug    string                 `json:"hq_workspace_slug,omitempty"`
+	Model              SourceAvailability     `json:"model"`
+	Brief              TodayBriefProjection   `json:"brief"`
+	WorkingOn          TodaySection           `json:"working_on"`
+	NeedsYou           TodaySection           `json:"needs_you"`
+	Done               TodaySection           `json:"done"`
+	UnavailableSources []string               `json:"unavailable_sources"`
+	// Deprecated: kept in the API for one release, but Today no longer renders
+	// these as separate sections.
+	Decisions       TodaySection `json:"decisions"`
+	Priorities      TodaySection `json:"priorities"`
+	Remembered      TodaySection `json:"remembered"`
+	InterviewStatus string       `json:"interview_status,omitempty"`
+	FollowUps       TodaySection `json:"follow_ups"`
+	Results         TodaySection `json:"results"`
 	// Studio is present only when the user accepted a domain specialist and a
 	// workspace built from its blueprint exists. Otherwise there is nothing
 	// honest to report and the section is absent rather than empty.
@@ -235,6 +241,18 @@ type JanitorResultReader interface {
 	JanitorResults(ctx context.Context, userID string) ([]JanitorResult, error)
 }
 
+// FolderReceiptReader supplies already-resolved folder setup outcomes. Today
+// reads them only to show recent, durable receipts; it cannot replay setup.
+type FolderReceiptReader interface {
+	RecentReceipts(ctx context.Context, userID string, since time.Time) ([]FolderOffer, error)
+}
+
+// FolderDigestReader provides the pending card and the durable setup receipts.
+type FolderDigestReader interface {
+	FolderReceiptReader
+	Current(ctx context.Context, userID string) (FolderDigestView, error)
+}
+
 // TodayService reads canonical stores independently; it never generates a
 // brief, mutates a Ticket, or changes a follow-up.
 type TodayService struct {
@@ -245,6 +263,8 @@ type TodayService struct {
 	followUps          todayFollowUpReader
 	setup              todaySpecialistSetupReader
 	janitorResults     JanitorResultReader
+	folderReceipts     FolderReceiptReader
+	folderDigest       FolderDigestReader
 	meetings           TodayMeetingReader
 	remembered         interface {
 		ReviewItems(context.Context, string) ([]KnowledgeReviewItem, error)
@@ -295,6 +315,22 @@ func (s *TodayService) SetJanitorResultReader(reader JanitorResultReader) {
 	}
 }
 
+// SetFolderReceiptReader enables seven-day setup receipts in Today's Results.
+func (s *TodayService) SetFolderReceiptReader(reader FolderReceiptReader) {
+	if s != nil {
+		s.folderReceipts = reader
+	}
+}
+
+// SetFolderDigestReader attaches both folder offer and receipt reads after the
+// relationship and progression services are wired (Phase 22.7).
+func (s *TodayService) SetFolderDigestReader(reader FolderDigestReader) {
+	if s != nil {
+		s.folderDigest = reader
+		s.folderReceipts = reader
+	}
+}
+
 // SetOnBriefSeen installs the callback fired the first time this process serves
 // a user Today with a Daily Brief revision, for an active or paused
 // relationship. It fires at most once per user per process and outside any
@@ -326,6 +362,10 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		Brief:     TodayBriefProjection{Health: todayUnavailable("not_loaded"), Items: []TodayItem{}},
 		Decisions: emptyTodaySection(), Priorities: emptyTodaySection(), Remembered: emptyTodaySection(),
 		FollowUps: emptyTodaySection(), Results: emptyTodaySection(),
+		WorkingOn:          TodaySection{Health: todayHealthForItems(nil, now), Items: []TodayItem{}},
+		NeedsYou:           TodaySection{Health: todayHealthForItems(nil, now), Items: []TodayItem{}},
+		Done:               TodaySection{Health: todayHealthForItems(nil, now), Items: []TodayItem{}},
+		UnavailableSources: []string{},
 	}
 	if s == nil || s.relationship == nil {
 		return nil, errors.New("personal assistant today: relationship service unavailable")
@@ -349,6 +389,9 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		// read as broken: this is an expected setup stage.
 		out.State = "needs_hq"
 		out.Links = TodayLinks{PersonalHQ: "/?quest=build-hq", Advanced: "/agents"}
+		out.NeedsYou = TodaySection{Health: todayHealthForItems(nil, now), Items: []TodayItem{{
+			ID: "personal-hq", Kind: "hq_setup", Title: "Build My HQ", Route: "/?panel=today",
+		}}}
 		return out, nil
 	case APIStateRepairNeeded:
 		out.State = "repair_needed"
@@ -375,6 +418,7 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		if relationship.State == APIStatePaused {
 			out.State = "paused"
 		}
+		out.UnavailableSources = []string{"Personal HQ"}
 		return out, nil
 	}
 	out.HQWorkspaceSlug = ws.FolderSlug
@@ -388,7 +432,8 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		tasksByID[task.ID] = task
 	}
 	s.loadTicketsAndResults(ws, route, now, out)
-	s.loadJanitorResults(ctx, userID, now, out)
+	folderOffers := s.loadFolderReceipts(ctx, userID, now, out)
+	janitorRows := s.loadJanitorResults(ctx, userID, now, out)
 	followUpsByRef := s.loadFollowUps(ctx, userID, relationship, now, out)
 	meetingsByRef := s.loadMeetings(ctx, userID, relationship, now, out)
 	s.loadBrief(ctx, userID, ws.ID, route, tasksByID, followUpsByRef, meetingsByRef, out)
@@ -401,6 +446,7 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 	out.Studio = s.loadStudio(userID, relationship.SpecialistSlug, relationship.HQWorkspaceID)
 	out.SpecialistSetup = s.loadSpecialistSetup(ctx, userID, relationship.SpecialistSlug)
 	out.NextCheckIn = nextTodayCheckIn(relationship, now)
+	s.buildTodaySections(ctx, userID, relationship, ws, route, folderOffers, janitorRows, now, out)
 	out.State = todayOverallState(relationship, out)
 	return out, nil
 }
@@ -674,6 +720,90 @@ func (s *TodayService) loadTicketsAndResults(ws *workspace.Workspace, route stri
 	_ = now
 }
 
+const todayFolderReceiptWindow = 7 * 24 * time.Hour
+
+// loadFolderReceipts reserves space in Results for recent, server-observed
+// setups. An inaccessible receipt source leaves other Today sections intact.
+func (s *TodayService) loadFolderReceipts(ctx context.Context, userID string, now time.Time, out *TodayProjection) []FolderOffer {
+	if s.folderReceipts == nil || out.Results.Health.Status == TodaySectionUnavailable {
+		return nil
+	}
+	offers, err := s.folderReceipts.RecentReceipts(ctx, userID, now.Add(-todayFolderReceiptWindow))
+	if err != nil {
+		logger.Warn("personal assistant today: folder receipts unavailable", logger.Fields{"error": err.Error()})
+		return nil
+	}
+	items := make([]TodayItem, 0, min(len(offers), todayResultCap))
+	for _, offer := range offers {
+		if len(items) >= todayResultCap {
+			break
+		}
+		if item, ok := s.folderReceiptTodayItem(offer, now); ok {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return offers
+	}
+	out.Results.Items = append(items, out.Results.Items...)
+	if len(out.Results.Items) > todayResultCap {
+		out.Results.Items = out.Results.Items[:todayResultCap]
+	}
+	out.Results.Health = todayHealthForItems(out.Results.Items, now)
+	return offers
+}
+
+func (s *TodayService) folderReceiptTodayItem(offer FolderOffer, now time.Time) (TodayItem, bool) {
+	if offer.Outcome == nil || offer.ResolvedAt == nil || offer.ResolvedAt.After(now) ||
+		now.Sub(*offer.ResolvedAt) > todayFolderReceiptWindow || offer.Outcome.WorkspaceID == "" || s.workspaces == nil {
+		return TodayItem{}, false
+	}
+	ws, err := s.workspaces.Get(offer.Outcome.WorkspaceID)
+	if err != nil || ws == nil || ws.ID != offer.Outcome.WorkspaceID || !todaySafeSlug.MatchString(ws.FolderSlug) {
+		return TodayItem{}, false
+	}
+	route := "/workspaces/" + url.PathEscape(ws.FolderSlug)
+	kind := offer.Outcome.Kind
+	var title, detail string
+	switch kind {
+	case FolderChoiceProject:
+		title = "Set up " + ws.Name
+		parts := make([]string, 0, 4)
+		for _, row := range offer.Outcome.Receipt {
+			switch row.Kind {
+			case "folder":
+				parts = append(parts, "Linked "+row.Name)
+			case "blueprint":
+				parts = append(parts, "Blueprint: "+row.Name)
+			case "agent":
+				parts = append(parts, "Agent: "+row.Name)
+			case "task":
+				parts = append(parts, "First task: "+row.Name)
+			}
+		}
+		detail = strings.Join(parts, " · ")
+	case FolderChoiceTidy:
+		folder := strings.TrimSpace(offer.Subject.Name)
+		if folder == "" {
+			return TodayItem{}, false
+		}
+		title = "Set up File Janitor for " + folder
+		if offer.Outcome.Existing {
+			title = "Opened File Janitor for " + folder
+		}
+		detail = "Folder ready for review"
+		route += "?panel=file-janitor"
+	default:
+		return TodayItem{}, false
+	}
+	return TodayItem{
+		ID: offer.ID, Kind: "folder_setup", Title: truncateRunes(title, 200),
+		Detail: truncateRunes(detail, 500), Attribution: truncateRunes(ws.Name, 120),
+		Route: route, SourceAt: *offer.ResolvedAt,
+		Ref: dailybrief.SourceRef{WorkspaceID: ws.ID, EntityType: "folder_setup", EntityID: offer.ID, Timestamp: *offer.ResolvedAt},
+	}, true
+}
+
 // todayJanitorWindow is how recent a File Janitor action must be to appear.
 const todayJanitorWindow = 24 * time.Hour
 
@@ -682,25 +812,27 @@ const todayJanitorWindow = 24 * time.Hour
 // within the same cap. It is one decorative line, not a source the brief
 // depends on: a read failure logs and adds nothing, and the section's health is
 // never changed by it.
-func (s *TodayService) loadJanitorResults(ctx context.Context, userID string, now time.Time, out *TodayProjection) {
+func (s *TodayService) loadJanitorResults(ctx context.Context, userID string, now time.Time, out *TodayProjection) []JanitorResult {
 	if s.janitorResults == nil || out.Results.Health.Status == TodaySectionUnavailable {
-		return
+		return nil
 	}
 	results, err := s.janitorResults.JanitorResults(ctx, strings.TrimSpace(userID))
 	if err != nil {
 		logger.Warn("personal assistant today: File Janitor results unavailable", logger.Fields{"error": err.Error()})
-		return
+		out.UnavailableSources = appendSource(out.UnavailableSources, "File Janitor")
+		return nil
 	}
 	sort.SliceStable(results, func(i, j int) bool { return results[i].NewestAt.After(results[j].NewestAt) })
 	for _, result := range results {
 		if len(out.Results.Items) >= todayResultCap {
-			return
+			break
 		}
 		item, ok := janitorTodayItem(result, now)
 		if ok {
 			out.Results.Items = append(out.Results.Items, item)
 		}
 	}
+	return results
 }
 
 // janitorTodayItem renders one File Janitor result, or false when it has

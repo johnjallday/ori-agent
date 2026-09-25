@@ -51,41 +51,21 @@ const (
 
 // CraftPerStarterQuest is what one onboarding quest pays.
 //
-// The onboarding quests ARE hand-work — send your first request, create a
-// workspace, run a task — so paying Craft for them is the same rule as
-// everything else here, not a starter grant handed out for free.
-const CraftPerStarterQuest int64 = 5
+// Only the four visible starter missions pay Craft. Retired quests still
+// record the user's actions, but no longer mint rewards from hidden objectives.
+// Four missions at 7 each cover a first Farm's 25 Craft cost.
+const CraftPerStarterQuest int64 = 7
 
 // starterQuests are the onboarding quests that pay Craft, by quest id.
 //
-// Tiers 1 and 2 only, and that boundary is the whole point. A brand-new install
-// earns nothing from the first-run backfill (it has no history to count), so
-// reaching the 25 Craft a first Farm costs means 25 chat messages — and the
-// hourly cap makes that two clock hours. That is a wall in front of the loop
-// the PRD's first success metric says a user should complete in one sitting.
-//
-// These quests are exactly the stretch before that wall. Finishing ordinary
-// setup now leaves a user able to afford their first Farm right about when
-// Tier 5 asks them to set up a schedule. Tier 3 and beyond pay nothing: by then
-// the user is earning normally and does not need the help.
-//
-// The starter missions (tasks/prd-starter-missions.md) added three `pa-`
-// missions and retired "Create your first workspace". Its Craft moved to Tidy
-// your Downloads rather than vanishing, and from there to Show your assistant
-// a folder (tasks/prd-show-me-a-folder.md), which replaced it as Mission 03.
-// Meet your assistant (tasks/prd-meet-your-assistant-mission.md) pays too:
-// the hire is the first reward, so it is where a new user learns Craft comes
-// from.
+// A brand-new install earns nothing from first-run backfill; the four
+// user-visible missions now cover a first Farm without rewarding any of the
+// retired built-in quests. Meet your assistant is the first visible reward.
 //
 // Ids are the durable identifiers from internal/progression/quests.go. A quest
 // this map does not name simply pays nothing, so a renamed or retired quest
 // degrades to silence rather than to a crash.
 var starterQuests = map[string]int64{
-	"t1-first-message":  CraftPerStarterQuest,
-	"t1-personalize":    CraftPerStarterQuest,
-	"t2-create-note":    CraftPerStarterQuest,
-	"t2-run-task":       CraftPerStarterQuest,
-	"t2-build-hq":       CraftPerStarterQuest,
 	"pa-meet-assistant": CraftPerStarterQuest,
 	"pa-show-folder":    CraftPerStarterQuest,
 	"pa-connect-source": CraftPerStarterQuest,

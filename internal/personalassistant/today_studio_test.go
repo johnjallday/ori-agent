@@ -139,6 +139,20 @@ func TestToday_StudioWorkIsAttributedToTheSpecialistByName(t *testing.T) {
 	if _, present := byID["studio-open"]; present {
 		t.Fatal("unfinished work is not a result")
 	}
+	foundWorkspace, foundResult := false, false
+	for _, item := range out.WorkingOn.Items {
+		if item.Kind == "studio_workspace" && item.Title == "Ivory" && item.Route == "/workspaces/ivory" {
+			foundWorkspace = true
+		}
+	}
+	for _, item := range out.Done.Items {
+		if item.ID == "studio-result-1" && item.Attribution == "Ivory Producer" && item.Route == "/workspaces/ivory?ticket=studio-result-1" {
+			foundResult = true
+		}
+	}
+	if !foundWorkspace || !foundResult {
+		t.Fatalf("Today must retain specialist workspace and attributed finished result: working=%+v done=%+v", out.WorkingOn, out.Done)
+	}
 	// The studio is a separate read; HQ's own results are unaffected.
 	if len(out.Results.Items) != 1 || out.Results.Items[0].ID != "result-1" {
 		t.Fatalf("hq results = %+v", out.Results.Items)

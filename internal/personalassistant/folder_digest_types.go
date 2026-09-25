@@ -84,6 +84,15 @@ type FolderCandidateRecord struct {
 	LooseKinds        int    `json:"loose_kinds,omitempty"`
 }
 
+// FolderReceiptRow is one server-observed part of a confirmed setup. No row
+// contains a local filesystem path; the browser renders every field as text.
+type FolderReceiptRow struct {
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Detail string `json:"detail,omitempty"`
+	Route  string `json:"route,omitempty"`
+}
+
 // FolderOutcome is what a yes produced.
 type FolderOutcome struct {
 	Kind        string `json:"kind"`
@@ -95,7 +104,8 @@ type FolderOutcome struct {
 	// Existing marks a tidy that opened a workspace already covering the
 	// folder rather than setting a fresh one up, so the card opens that
 	// workspace instead of showing a setup that did not happen.
-	Existing bool `json:"existing,omitempty"`
+	Existing bool               `json:"existing,omitempty"`
+	Receipt  []FolderReceiptRow `json:"receipt,omitempty"`
 }
 
 // FolderOffer is one question about one folder and its answer.
@@ -164,7 +174,9 @@ type FolderDigestDocument struct {
 	Decisions     []FolderDecision  `json:"decisions,omitempty"`
 	Tombstones    []FolderTombstone `json:"tombstones,omitempty"`
 	Receipts      []FolderReceipt   `json:"receipts,omitempty"`
-	Present       bool              `json:"-"`
+	// FirstPromptShownAt persists the one-time hand-over after HQ activation.
+	FirstPromptShownAt *time.Time `json:"first_prompt_shown_at,omitempty"`
+	Present            bool       `json:"-"`
 }
 
 // Pending returns the one pending offer, if any.
@@ -251,6 +263,18 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		}
 		if err := validateFolderCandidate(offer.Subject); err != nil {
 			return err
+		}
+		if offer.Outcome != nil {
+			if len(offer.Outcome.Receipt) > 32 {
+				return fmt.Errorf("%w: receipt rows", errFolderDigestInvalid)
+			}
+			for _, row := range offer.Outcome.Receipt {
+				if !strings.Contains("|workspace|folder|blueprint|agent|task|schedule|directory|", "|"+row.Kind+"|") ||
+					row.Kind == "" || len(row.Name) > 512 || len(row.Detail) > 512 || len(row.Route) > 1024 ||
+					(row.Route != "" && (!strings.HasPrefix(row.Route, "/") || strings.HasPrefix(row.Route, "//"))) {
+					return fmt.Errorf("%w: receipt row", errFolderDigestInvalid)
+				}
+			}
 		}
 		if len(offer.Queue) > folderDigestMaxQueue {
 			return fmt.Errorf("%w: queue", errFolderDigestInvalid)

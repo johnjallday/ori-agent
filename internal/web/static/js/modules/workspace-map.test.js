@@ -2698,7 +2698,10 @@ test('the shared Map keeps its legacy zero-workspace fallback by default', () =>
   const map = loadMapForMount();
   const { container } = createMapHarness();
   map.mount(container, { workspaces: [], hideChrome: true, noAutoSelect: true });
-  assert.match(container.innerHTML, /No workspaces yet — build your first one/);
+  assert.match(
+    container.innerHTML,
+    /No workspaces yet — <a href="\/\?panel=today&amp;folder=show" data-ws-map-folder>let your assistant explore a folder<\/a>/
+  );
   assert.match(container.innerHTML, /data-ws-map-create/);
 });
 

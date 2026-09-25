@@ -155,6 +155,15 @@ func (b *ServerBuilder) completeProgressionWiring() {
 	// File Janitor wizard reaching ready completes it too, via the setup
 	// wizard hook.
 	if b.personalAssistantFolderDigest != nil {
+		if b.personalAssistantToday != nil {
+			b.personalAssistantToday.SetFolderDigestReader(b.personalAssistantFolderDigest)
+		}
+		b.personalAssistantFolderDigest.SetMissionUnresolved(engine.MissionUnresolved)
+		if b.progressionHandler != nil {
+			b.progressionHandler.SetAfterReset(func(ctx context.Context) error {
+				return b.personalAssistantFolderDigest.ClearFirstPrompt(ctx, userprofile.LocalUserID)
+			})
+		}
 		b.personalAssistantFolderDigest.SetOnOutcome(func(context.Context, string, personalassistant.FolderOffer) {
 			engine.Complete(progression.ShowFolderQuestID)
 		})

@@ -66,6 +66,16 @@ export function formatCount(value) {
   return value === null || value === undefined ? '—' : String(value);
 }
 
+// Home's primary action follows the durable relationship, not the number of
+// workspace tiles. A hire without HQ opens its confirmation instead of an
+// unusable folder chooser; before a hire the button is absent.
+export function cockpitFolderActionView(personalAssistant) {
+  const state = String(personalAssistant?.state || '').trim();
+  if (state === 'needs_hq' || state === 'provisioning_hq') return { visible: true, target: 'hq' };
+  if (state === 'active' || state === 'paused') return { visible: true, target: 'folder' };
+  return { visible: false, target: '' };
+}
+
 // ---------------------------------------------------------------------------
 // City Economy (city-economy FR34, FR35)
 // ---------------------------------------------------------------------------
@@ -1563,6 +1573,7 @@ import {
     railContext: document.getElementById('cockpitRailContext'),
     railLive: document.getElementById('cockpitRailLive'),
     summaryBtn: document.getElementById('cockpitSummaryBtn'),
+    showFolderBtn: document.getElementById('cockpitShowFolderBtn'),
     // Updates: the header trigger keeps the retired "Today" toggle's id for
     // compatibility (PRD FR2); its flyout and body are new (Issue #334).
     railToggle: document.getElementById('cockpitRailToggle'),
@@ -3318,6 +3329,52 @@ import {
   if (els.captureBtn) els.captureBtn.addEventListener('click', () => togglePanel(PANEL_CAPTURE));
   if (els.captureForm) els.captureForm.addEventListener('submit', submitCapture);
   if (els.captureCancel) els.captureCancel.addEventListener('click', () => closePanel());
+
+  // The same Today and folder controllers serve the cockpit, the assistant
+  // launcher, and the Map's empty hint. There is no second chooser here.
+  let folderAction = { visible: false, target: '' };
+  function openHomeFolder() {
+    if (!folderAction.visible) return false;
+    // Module initialization and relationship status may race on a deep link.
+    // Do not consume its intent until the actual card/chooser controller is
+    // mounted and can receive it.
+    if (folderAction.target === 'folder' && !window.PersonalAssistantFolder?.openChooser)
+      return false;
+    if (folderAction.target === 'hq' && !window.PersonalAssistantHQCard?.show) return false;
+    const opened = window.PersonalAssistantPanel?.open?.(els.showFolderBtn, { view: 'today' });
+    if (!opened) return false;
+    if (folderAction.target === 'hq') window.PersonalAssistantHQCard.show();
+    else window.PersonalAssistantFolder.openChooser();
+    return true;
+  }
+  let folderDeepLinkRetries = 0;
+  function consumeFolderDeepLink() {
+    if (
+      new URLSearchParams(window.location.search).get('folder') !== 'show' ||
+      !folderAction.visible
+    )
+      return;
+    if (openHomeFolder()) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('folder');
+      window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+    } else if (folderDeepLinkRetries++ < 20) {
+      window.setTimeout(consumeFolderDeepLink, 100);
+    }
+  }
+  window.OriHomeFolder = { open: openHomeFolder };
+  els.showFolderBtn?.addEventListener('click', openHomeFolder);
+  document.addEventListener('personal-assistant:status', event => {
+    folderAction = cockpitFolderActionView(event.detail?.personalAssistant);
+    if (els.showFolderBtn) els.showFolderBtn.hidden = !folderAction.visible;
+    consumeFolderDeepLink();
+  });
+  const initialAssistant = window.PersonalAssistantPanel?._state?.personalAssistant;
+  if (initialAssistant) {
+    folderAction = cockpitFolderActionView(initialAssistant);
+    if (els.showFolderBtn) els.showFolderBtn.hidden = !folderAction.visible;
+  }
+  window.addEventListener('load', consumeFolderDeepLink);
 
   // Personal HQ provisioning can complete while Home is open; re-read the
   // status so Quick Capture stops explaining a requirement already met.

@@ -23,6 +23,7 @@ import {
   panelTriggerId,
   updatesBadgeView,
   contextModalShouldShow,
+  cockpitFolderActionView,
   parseViewFromQuery,
   searchForView,
   readCount,
@@ -85,6 +86,18 @@ const cockpitCSS = readFileSync(
 // ---------------------------------------------------------------------------
 // View state (FR6, FR25, FR26, FR27)
 // ---------------------------------------------------------------------------
+
+test('Home folder action appears after hire and opens the right existing card', () => {
+  for (const state of ['needs_hire', 'hiring', 'repair_needed', 'unavailable']) {
+    assert.deepEqual(cockpitFolderActionView({ state }), { visible: false, target: '' });
+  }
+  for (const state of ['needs_hq', 'provisioning_hq']) {
+    assert.deepEqual(cockpitFolderActionView({ state }), { visible: true, target: 'hq' });
+  }
+  for (const state of ['active', 'paused']) {
+    assert.deepEqual(cockpitFolderActionView({ state }), { visible: true, target: 'folder' });
+  }
+});
 
 test('parseViewFromQuery: the query is authoritative when it carries a valid view', () => {
   assert.equal(parseViewFromQuery('?view=tree'), VIEW_TREE);
