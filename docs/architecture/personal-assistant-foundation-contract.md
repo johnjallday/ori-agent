@@ -268,6 +268,13 @@ assistant, or delete-and-recreate as a repair.
 
 ## Guided Personal HQ Map quest
 
+The default post-hire path is now the HQ confirm card in Today's assistant panel.
+It shows the proposed plan and waits for the user's **Build** confirmation before
+creating anything. The Map walkthrough at `/?quest=build-hq` remains an alternate
+path for people who prefer the guided site and the full HQ form. Both paths use
+the same server-owned HQ setup consequence; neither starts automatically just
+because Home was visited after a hire.
+
 ### Who drives it
 
 Ori — the deterministic app guide — owns the walkthrough. The hired assistant is

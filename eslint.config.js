@@ -145,6 +145,7 @@ export default defineConfig([
       'internal/web/static/js/modules/onboarding.js',
       'internal/web/static/js/modules/personal-hq-onboarding.js',
       'internal/web/static/js/modules/personal-assistant-home.js',
+      'internal/web/static/js/modules/personal-assistant-hq-card.js',
       'internal/web/static/js/modules/personal-assistant-folder.js',
       'internal/web/static/js/modules/show-folder-quest.js',
       'internal/web/static/js/modules/personal-assistant-hire.js',
@@ -226,6 +227,10 @@ export default defineConfig([
     languageOptions: {
       sourceType: 'module'
     }
+  },
+  {
+    files: ['scripts/demo-folder-first.mjs'],
+    languageOptions: { sourceType: 'module', globals: { ...globals.node } }
   },
   {
     files: ['internal/web/static/js/utils/*.js'],

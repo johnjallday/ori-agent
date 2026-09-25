@@ -50,6 +50,34 @@
     </div>
   </section>
 
+  <!-- The hired assistant proposes HQ before any folder work is available. -->
+  <section id="personalAssistantHQCard" class="pa-specialist-offer pa-hq-card"
+           aria-labelledby="personalAssistantHQHeadline" hidden>
+    <span id="personalAssistantHQEyebrow" class="personal-assistant-today__eyebrow"></span>
+    <p id="personalAssistantHQHeadline" class="pa-specialist-offer__headline"></p>
+    <div id="personalAssistantHQPlan">
+      <label for="personalAssistantHQName">HQ name</label>
+      <input id="personalAssistantHQName" class="modern-input w-100" value="My HQ" maxlength="100">
+      <label for="personalAssistantHQRoot">Workspace directory</label>
+      <div class="pa-hq-card__root">
+        <input id="personalAssistantHQRoot" class="modern-input w-100" readonly>
+        <button type="button" id="personalAssistantHQChange" class="btn btn-sm btn-outline-secondary">Change</button>
+      </div>
+      <small id="personalAssistantHQRootStatus" aria-live="polite"></small>
+      <label for="personalAssistantHQTime">Daily Brief time (weekdays)</label>
+      <input id="personalAssistantHQTime" type="time" class="modern-input" value="08:00">
+      <p id="personalAssistantHQScope">All workspaces, including future ones.</p>
+    </div>
+    <ul id="personalAssistantHQReceipt" hidden></ul>
+    <div class="pa-specialist-offer__actions">
+      <button type="button" id="personalAssistantHQBuild" class="btn btn-sm btn-primary" disabled>Build</button>
+      <button type="button" id="personalAssistantHQAdjust" class="btn btn-sm btn-outline-secondary">Adjust…</button>
+      <button type="button" id="personalAssistantHQNotNow" class="btn btn-sm btn-outline-secondary">Not now</button>
+    </div>
+    <p id="personalAssistantHQStatus" role="status" aria-live="polite"></p>
+    <p id="personalAssistantHQError" class="pa-specialist-offer__error" role="alert" hidden></p>
+  </section>
+
   <!-- Show me a folder: the assistant's first proactive act. The chooser names
        folders by identifier and the server resolves them; the offer card is
        built from counts and names only. Shown for an active or paused

@@ -353,7 +353,17 @@ function init() {
   });
   window.addEventListener('resize', syncPanelViewport);
   syncPanelViewport();
-  void refresh();
+  // Only Home has Today. Wait for the server-owned identity before opening the
+  // drawer; a query string must not make an unhired assistant appear hired.
+  const requestedToday =
+    Boolean(state.els.todayPanel) &&
+    new URLSearchParams(window.location.search).get('panel') === 'today';
+  void refresh().then(() => {
+    if (!requestedToday || !open(launcher, { view: 'today' })) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('panel');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+  });
 }
 
 const api = {

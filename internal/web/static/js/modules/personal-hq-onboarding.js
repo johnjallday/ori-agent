@@ -283,6 +283,82 @@ export function hqWorkspaceRootView(state) {
   };
 }
 
+// Shared by the HQ form and the Today confirm card. The picker runs server-side.
+export async function loadHQWorkspaceRoot(fetchImpl = globalThis.fetch) {
+  const response = await fetchImpl('/api/settings/workspace-root', {
+    headers: { Accept: 'application/json' }
+  });
+  if (!response.ok) throw new Error('Could not load the workspace directory.');
+  return response.json();
+}
+
+export async function chooseHQWorkspaceRoot(fetchImpl = globalThis.fetch) {
+  const response = await fetchImpl('/api/folder-picker/select-path', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'Choose Workspace Directory' })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.success) throw new Error(result.error || 'Folder picker unavailable');
+  return result.selected && result.path ? result.path : '';
+}
+
+export async function saveHQWorkspaceRoot(path, fetchImpl = globalThis.fetch) {
+  const response = await fetchImpl('/api/settings/workspace-root', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workspace_root: path })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || 'Could not save the workspace directory.');
+  return result;
+}
+
+export async function skipHQObjective(fetchImpl = globalThis.fetch) {
+  const post = async (url, body) => {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) throw new Error('Could not update Personal HQ setup.');
+  };
+  await post('/api/personal-hq/onboarding-state', { state: 'skipped' });
+  // Already completed/skipped quests must not block an onboarding deferral.
+  await post('/api/progression/skip', { quest_id: 't2-build-hq' }).catch(() => {});
+}
+
+export const HQ_REQUEST_ID_KEY = 'ori.personalAssistantHQRequestId';
+
+export function hqRequestID(storage) {
+  let id = '';
+  try {
+    id = String(storage?.getItem(HQ_REQUEST_ID_KEY) || '').trim();
+  } catch (_) {
+    // An unavailable browser store cannot make a server operation succeed.
+  }
+  if (!id) {
+    id =
+      globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `hq-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try {
+      storage?.setItem(HQ_REQUEST_ID_KEY, id);
+    } catch (_) {
+      // The server still owns the durable operation.
+    }
+  }
+  return id;
+}
+
+export function clearHQRequestID(storage) {
+  try {
+    storage?.removeItem(HQ_REQUEST_ID_KEY);
+  } catch (_) {
+    // Storage cleanup is not part of the durable setup transaction.
+  }
+}
+
 // followUpView turns a follow-up record into a Home projection card view-model.
 // A candidate (inferred, unconfirmed) offers Confirm/Dismiss; an active item
 // offers Done/Snooze.
@@ -348,15 +424,6 @@ export function followUpView(f) {
     } else if (typeof window.notifyToast === 'function') {
       window.notifyToast(message, variant || 'success');
     }
-  }
-
-  function skipHQObjective() {
-    return Promise.all([
-      postJSON('/api/personal-hq/onboarding-state', { state: 'skipped' }),
-      postJSON('/api/progression/skip', { quest_id: 't2-build-hq' }).catch(() => {
-        /* Quest may already be resolved; skipping onboarding state is what matters. */
-      })
-    ]);
   }
 
   // The reserved HQ site names the assistant it belongs to, so the Map needs
@@ -527,11 +594,7 @@ export function followUpView(f) {
   }
 
   async function loadBuildWorkspaceRoot() {
-    const response = await fetch('/api/settings/workspace-root', {
-      headers: { Accept: 'application/json' }
-    });
-    if (!response.ok) throw new Error('Could not load the workspace directory.');
-    const state = await response.json();
+    const state = await loadHQWorkspaceRoot();
     renderBuildWorkspaceRoot(state);
     return state;
   }
@@ -541,18 +604,11 @@ export function followUpView(f) {
     if (button) button.disabled = true;
     showBuildWorkspaceRootError('');
     try {
-      const response = await fetch('/api/folder-picker/select-path', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Choose Workspace Directory' })
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || !result.success)
-        throw new Error(result.error || 'Folder picker unavailable');
-      if (result.selected && result.path) {
+      const path = await chooseHQWorkspaceRoot();
+      if (path) {
         const input = document.getElementById('hqBuildWorkspaceRoot');
         const status = document.getElementById('hqBuildWorkspaceRootStatus');
-        if (input) input.value = result.path;
+        if (input) input.value = path;
         if (status) {
           status.textContent = 'Selected. Build My HQ to confirm this directory.';
           status.classList.remove('is-confirmed');
@@ -577,9 +633,7 @@ export function followUpView(f) {
 
     showBuildWorkspaceRootError('');
     try {
-      const state = await postJSON('/api/settings/workspace-root', {
-        workspace_root: workspaceRoot
-      });
+      const state = await saveHQWorkspaceRoot(workspaceRoot);
       renderBuildWorkspaceRoot(state);
       return true;
     } catch (error) {
@@ -648,40 +702,6 @@ export function followUpView(f) {
     }
     if (title) title.textContent = copy.show ? copy.title : 'Build My HQ';
     if (submit) submit.textContent = copy.show ? copy.submitLabel : 'Build My HQ';
-  }
-
-  // A stable per-browser HQ request ID, so a retry after a timeout or a reload
-  // finishes the SAME operation instead of starting a second one. It is cleared
-  // only once the server has returned an active relationship.
-  const HQ_REQUEST_ID_KEY = 'ori.personalAssistantHQRequestId';
-
-  function hqRequestID() {
-    let id = '';
-    try {
-      id = String(window.localStorage.getItem(HQ_REQUEST_ID_KEY) || '').trim();
-    } catch (_) {
-      id = '';
-    }
-    if (!id) {
-      id =
-        globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
-          ? globalThis.crypto.randomUUID()
-          : `hq-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      try {
-        window.localStorage.setItem(HQ_REQUEST_ID_KEY, id);
-      } catch (_) {
-        // The durable server operation remains authoritative without storage.
-      }
-    }
-    return id;
-  }
-
-  function clearHQRequestID() {
-    try {
-      window.localStorage.removeItem(HQ_REQUEST_ID_KEY);
-    } catch (_) {
-      // Storage cleanup is not part of the durable setup transaction.
-    }
   }
 
   // Bounded local notices for Ori's deterministic HQ walkthrough.
@@ -758,7 +778,7 @@ export function followUpView(f) {
         // Re-read the relationship at submit time: a form left open while the
         // relationship changed must not post to the wrong consequence.
         const target = await refreshBuildTarget();
-        const requestID = target.paf ? hqRequestID() : '';
+        const requestID = target.paf ? hqRequestID(window.localStorage) : '';
         const result = await postJSON(
           target.endpoint,
           hqBuildRequestPayload(target, collectBuildRequest(), requestID)
@@ -780,7 +800,7 @@ export function followUpView(f) {
         // The PAF path transitions in place. Only clear the request ID once the
         // server has actually returned an active relationship.
         const relationship = result && result.personal_assistant;
-        if (relationship && relationship.state === 'active') clearHQRequestID();
+        if (relationship && relationship.state === 'active') clearHQRequestID(window.localStorage);
         await completePAFHQTransition(relationship);
       } catch (err) {
         if (errorBox) {
@@ -1419,6 +1439,10 @@ export function followUpView(f) {
     void wireFollowUps();
     void wireJournal();
   }
+
+  // The Today card opens this same form for Adjust…, rather than maintaining a
+  // second modal or a second submission controller.
+  window.PersonalHQOnboarding = { openBuildModal, refreshHQStatus };
 
   function init() {
     wireMapActions();

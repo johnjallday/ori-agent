@@ -161,6 +161,14 @@ test('the walkthrough does not start without the quest route', async () => {
   assert.deepEqual(calls.fetches, [], 'no eligibility request without the quest parameter');
 });
 
+test('the default post-hire Today route never starts the Map walkthrough', async () => {
+  const { quest, calls } = load({ search: '?panel=today' });
+  await settle();
+  assert.equal(quest.isActive(), false);
+  assert.deepEqual(calls.fetches, []);
+  assert.deepEqual(calls.presented, []);
+});
+
 test('the Email Ops setup quest link never starts the Build-HQ walkthrough', async () => {
   // Both use a `quest` parameter; only the exact Build-HQ value may start it.
   const { quest, calls } = load({ search: '?setup=quest&source=host&quest=email_ops_setup' });

@@ -795,6 +795,7 @@ function renderRelationship(personalAssistant, view) {
     return;
   }
   els.root.hidden = false;
+  els.banner.hidden = false;
   els.root.dataset.state = 'loading';
   // Fire-and-forget: the offer appears when detection answers, and Home is
   // fully usable whether it does or not.
@@ -837,14 +838,10 @@ function renderRelationship(personalAssistant, view) {
     return;
   }
   if (view.needsHQ) {
+    // The confirm card is the default action; the Map walkthrough remains an
+    // alternate, but a second Build link here would compete with the card.
     els.banner.replaceChildren();
-    const link = document.createElement('a');
-    link.href = '/?quest=build-hq';
-    link.textContent = 'Build Personal HQ';
-    els.banner.append(
-      `${view.name} is hired and needs a home base before Today can prepare a brief. `,
-      link
-    );
+    els.banner.hidden = true;
     return;
   }
   if (!view.available) {
@@ -891,6 +888,7 @@ function init() {
   if (panelState?.personalAssistant) {
     renderRelationship(panelState.personalAssistant, panelState.view);
   }
+  window.PersonalAssistantToday = { refresh: loadToday };
 }
 
 if (typeof document !== 'undefined') {

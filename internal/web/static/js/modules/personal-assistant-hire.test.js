@@ -6,6 +6,7 @@ import {
   HIRE_BOUNDARY_COPY,
   HIRE_REQUEST_STORAGE_KEY,
   HQ_QUEST_ROUTE,
+  HQ_CARD_ROUTE,
   JUST_HIRED_FLAG,
   MEET_ASSISTANT_AGENTS_ROUTE,
   MEET_ASSISTANT_BRIEFING_ROUTE,
@@ -128,6 +129,10 @@ test('the routes and flags are the ones the rest of the app links to', () => {
   // A focus parameter would preselect the landmark. The quest highlights it and
   // waits for a real user selection instead.
   assert.equal(HQ_QUEST_ROUTE, '/?quest=build-hq');
+  assert.equal(HQ_CARD_ROUTE, '/?panel=today');
+  const roster = readFileSync(new URL('../agents-roster.js', import.meta.url), 'utf8');
+  assert.equal((roster.match(/api\.HQ_CARD_ROUTE/g) || []).length, 3);
+  assert.equal(roster.includes('api.HQ_QUEST_ROUTE'), false);
   // Mission 01's action URL, the same string the server's quest carries: the
   // walkthrough from its first step, on Home.
   assert.equal(MEET_ASSISTANT_QUEST_ROUTE, '/?quest=meet-assistant');

@@ -2898,7 +2898,7 @@
     } catch (_) {
       // The walkthrough simply opens without the hand-over line.
     }
-    window.location.href = needsHQ ? api.HQ_QUEST_ROUTE : '/';
+    window.location.href = needsHQ ? api.HQ_CARD_ROUTE : '/';
   }
 
   // A failed attempt re-reads the relationship: another tab, or the attempt
@@ -2909,7 +2909,7 @@
     var api = hireApi();
     loadAssistantState().then(function (current) {
       if (current && api.personalAssistantNeedsHQ(current)) {
-        window.location.href = api.HQ_QUEST_ROUTE;
+        window.location.href = api.HQ_CARD_ROUTE;
         return;
       }
       var mode = assistantPresetView().mode;
@@ -3012,7 +3012,7 @@
       .submitRepair({ stateVersion: (assistant.state && assistant.state.state_version) || 0 })
       .then(function (result) {
         if (result.ok) {
-          window.location.href = result.needsHQ ? api.HQ_QUEST_ROUTE : '/';
+          window.location.href = result.needsHQ ? api.HQ_CARD_ROUTE : '/';
           return;
         }
         setAssistantBusy(false);

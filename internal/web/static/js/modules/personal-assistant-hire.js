@@ -14,6 +14,8 @@
 
 // The route Ori's deterministic Personal HQ walkthrough activates on.
 export const HQ_QUEST_ROUTE = '/?quest=build-hq';
+// Default hand-over after a hire: the assistant proposes HQ in Today.
+export const HQ_CARD_ROUTE = '/?panel=today';
 
 // Mission 01's action URL: the walkthrough from its first step, on Home, where
 // Ori dims the page around the Agents nav entry for the user to click. Every
@@ -36,7 +38,7 @@ export const MEET_ASSISTANT_AGENTS_ROUTE = '/agents?quest=meet-assistant';
 export const MEET_ASSISTANT_GUIDED_FLAG = 'ori:meet-assistant-guided';
 
 // Set in sessionStorage the moment a hire succeeds, read (and cleared) by the
-// Build My HQ walkthrough so its first step can say the hand-over line.
+// HQ card (or the alternate Map walkthrough) for the first hand-over.
 export const JUST_HIRED_FLAG = 'ori:assistant-just-hired';
 
 // The browser's copy of the in-flight hire request id. One key, as the retired
@@ -319,6 +321,7 @@ export function presetView(state) {
 if (typeof window !== 'undefined') {
   window.OriAssistantHire = Object.freeze({
     HQ_QUEST_ROUTE,
+    HQ_CARD_ROUTE,
     MEET_ASSISTANT_QUEST_ROUTE,
     MEET_ASSISTANT_BRIEFING_ROUTE,
     MEET_ASSISTANT_AGENTS_ROUTE,
