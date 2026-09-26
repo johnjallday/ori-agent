@@ -52,7 +52,7 @@
                  dismissed — secondary, never tucked into an overflow menu. -->
             <div class="cockpit-area-actions__secondary">
               <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
-                      aria-expanded="false" aria-controls="cockpitCapturePanel">Add to backlog</button>
+                      aria-haspopup="dialog" aria-expanded="false" aria-controls="cockpitCaptureModal">Add to backlog</button>
               <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
                       aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal">Summary</button>
             </div>
@@ -434,26 +434,20 @@
       </div>
       </div>
 
-      <!-- Quick Capture. Writes to the designated Personal HQ's backlog through
-           the existing backlog contract — never a second inbox (FR102). It is
-           a header disclosure, separate from the blocking context modal. -->
-      <div id="cockpitCapturePanel" class="cockpit-capture" hidden>
-        <form id="cockpitCaptureForm" class="cockpit-capture-form">
-          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Capture to your HQ backlog</label>
-          <input type="text" id="cockpitCaptureTitle" class="modern-input" maxlength="300" required
-                 autocomplete="off" placeholder="What's on your mind?">
-          <label class="visually-hidden" for="cockpitCaptureDetails">Optional details</label>
-          <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="2"
-                    maxlength="2000" placeholder="Optional details"></textarea>
-          <div class="cockpit-capture-actions">
-            <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary modern-btn-sm">Save</button>
-            <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary modern-btn-sm">Cancel</button>
-          </div>
-          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
-        </form>
-      </div>
-
       <div class="cockpit-area-body">
+        <!-- Quick Capture's success receipt (home-workspace-map-ui-refresh 4.7).
+             Absolutely positioned over the top of the map area, so showing it
+             never moves the map, and never in the bottom-right corner the
+             personal assistant owns. It is not a live region — the announcement
+             goes through #cockpitRailLive — and nothing here takes focus. -->
+        <div id="cockpitCaptureReceipt" class="cockpit-capture-receipt" hidden>
+          <span class="cockpit-capture-receipt__text" data-capture-receipt-text>Added to Personal HQ backlog</span>
+          <a class="cockpit-capture-receipt__link" data-capture-receipt-link href="#" hidden>View backlog</a>
+          <button type="button" class="cockpit-capture-receipt__close" data-capture-receipt-close
+                  aria-label="Dismiss">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
         <!-- Map and Tree occupy the SAME layout slot; activating one hides the
              other, never a drawer or overlay (FR18). -->
         <div id="cockpitMap" class="ws-map cockpit-map" role="region" aria-label="Workspace map" tabindex="-1" hidden></div>
@@ -547,6 +541,50 @@
         </div>
         <div id="cockpitRailContext" class="modal-body cockpit-rail-body" data-context-state="bare"></div>
       </div>
+    </div>
+  </div>
+
+  <!--
+    Quick Capture (home-workspace-map-ui-refresh group 4). A focused dialog
+    rather than a row in the workspace area, so opening it can never resize
+    the map. It writes to the designated Personal HQ's backlog through the
+    existing backlog contract — never a second inbox, never a destination
+    picker (FR102). Like the context modal it is one stable host, hoisted to
+    <body> once, so the draft in these fields survives every Map/Tree remount
+    and every dismissal until a save is confirmed. Bootstrap owns focus
+    containment, Escape, and the backdrop.
+  -->
+  <div class="modal fade cockpit-capture-modal" id="cockpitCaptureModal" tabindex="-1"
+       aria-labelledby="cockpitCaptureModalTitle" aria-describedby="cockpitCaptureDestination"
+       aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <form id="cockpitCaptureForm" class="modal-content cockpit-capture-modal__content" novalidate>
+        <div class="modal-header cockpit-capture-modal__header">
+          <div class="cockpit-capture-modal__heading">
+            <h2 class="modal-title cockpit-capture-modal__title" id="cockpitCaptureModalTitle" tabindex="-1">Add to backlog</h2>
+            <p class="cockpit-capture-modal__destination" id="cockpitCaptureDestination">Personal HQ · Backlog</p>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body cockpit-capture-modal__body">
+          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Idea or task</label>
+          <input type="text" id="cockpitCaptureTitle" class="modern-input cockpit-capture-title" maxlength="300"
+                 aria-required="true" aria-describedby="cockpitCaptureStatus" autocomplete="off"
+                 placeholder="What's on your mind?">
+          <button type="button" class="cockpit-capture-details-toggle" id="cockpitCaptureDetailsToggle"
+                  aria-expanded="false" aria-controls="cockpitCaptureDetailsGroup">Add details</button>
+          <div class="cockpit-capture-details-group" id="cockpitCaptureDetailsGroup" hidden>
+            <label class="cockpit-capture-label" for="cockpitCaptureDetails">Details <span class="cockpit-capture-optional">(optional)</span></label>
+            <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="4"
+                      maxlength="2000"></textarea>
+          </div>
+          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
+        </div>
+        <div class="modal-footer cockpit-capture-modal__footer">
+          <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary">Add to backlog</button>
+        </div>
+      </form>
     </div>
   </div>
 

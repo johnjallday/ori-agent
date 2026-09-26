@@ -229,6 +229,10 @@ const (
 	TicketSourceAssistant    = BacklogSourceAssistant    // "assistant"
 	TicketSourceActionCenter = BacklogSourceActionCenter // "action_center"
 	TicketSourceMarkdown     = BacklogSourceBacklogFile  // "backlog_markdown"
+	// TicketSourceHomeQuickCapture records Home's Quick Capture. Home has sent
+	// this value since before Tickets existed; leaving it out of the allowlist
+	// below made every Home capture fail with a 400.
+	TicketSourceHomeQuickCapture = BacklogSourceHomeQuickCapture // "home_quick_capture"
 	// TicketSourceNote records a Ticket created from a Note (FR-73). The
 	// source ID is the originating Note's ID.
 	TicketSourceNote = "note"
@@ -241,13 +245,14 @@ const (
 // validTicketSources gates the provenance field so an arbitrary caller
 // string cannot become a permanent, unfilterable value.
 var validTicketSources = map[string]struct{}{
-	TicketSourceManual:          {},
-	TicketSourceAssistant:       {},
-	TicketSourceActionCenter:    {},
-	TicketSourceMarkdown:        {},
-	TicketSourceNote:            {},
-	TicketSourceBlueprintIntake: {},
-	TicketSourceMigration:       {},
+	TicketSourceManual:           {},
+	TicketSourceAssistant:        {},
+	TicketSourceActionCenter:     {},
+	TicketSourceMarkdown:         {},
+	TicketSourceHomeQuickCapture: {},
+	TicketSourceNote:             {},
+	TicketSourceBlueprintIntake:  {},
+	TicketSourceMigration:        {},
 }
 
 // NormalizeTicketSource validates provenance, defaulting empty to manual.

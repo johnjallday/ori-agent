@@ -29,14 +29,16 @@
  * Workspace area
  * ----------------------------------------------------------------------- */
 
-/* Three explicit rows: the header zone (which now also carries the signal
-   filters in its readout row), the Quick Capture disclosure, then the Map/Tree
-   slot as the only flexible one. Every non-flexible row must be declared —
-   when the filters sat on an implicit track they collapsed to 0px, so the
-   chips overlapped the map and could not be clicked. */
+/* Two explicit rows: the header zone (which also carries the signal filters
+   in its readout row) and the Map/Tree slot as the only flexible one. Every
+   non-flexible row must be declared — when the filters sat on an implicit
+   track they collapsed to 0px, so the chips overlapped the map and could not
+   be clicked. Quick Capture used to take a row here and push the map down
+   whenever it opened; it is a dialog now, so nothing between the header and
+   the map ever changes size. */
 .cockpit-workspace-area {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
   min-height: 0;
@@ -861,13 +863,12 @@
   filter: none;
 }
 
-/* Pinned to the flexible track rather than trusting source order. Quick Capture
-   sits above this and is `hidden` almost always, and a display:none element is
-   not a grid item — so auto-placement slid the body up onto an `auto` row and
-   left the minmax(0, 1fr) row empty below it. The map then fell back to its
-   320px min-height with the rest of the panel blank. */
+/* Pinned to the flexible track rather than trusting source order: when a
+   hidden element sat above this row, auto-placement slid the body onto an
+   `auto` row and left the minmax(0, 1fr) row empty below it, and the map fell
+   back to its 320px min-height with the rest of the panel blank. */
 .cockpit-area-body {
-  grid-row: 3;
+  grid-row: 2;
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -1609,7 +1610,9 @@ body.home-command-page .ori-guide__launcher {
   .home-cockpit *::before,
   .home-cockpit *::after,
   .cockpit-context-modal,
-  .cockpit-context-modal * {
+  .cockpit-context-modal *,
+  .cockpit-capture-modal,
+  .cockpit-capture-modal * {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
@@ -2122,43 +2125,130 @@ body.home-command-page .ori-guide__launcher {
   font-size: 11px;
 }
 
-.cockpit-capture[hidden] {
-  display: none;
+/* --------------------------------------------------------------------------
+ * Quick Capture dialog (home-workspace-map-ui-refresh group 4)
+ *
+ * Bootstrap owns dialog semantics, focus containment, Escape, the backdrop,
+ * and body scrolling, exactly as for the context modal above; these rules
+ * give it the cockpit's visual language and a compact, responsive size. On a
+ * short or narrow screen the body scrolls inside the dialog while the header
+ * (with Close) and the footer (with Add to backlog) stay reachable.
+ * ----------------------------------------------------------------------- */
+
+.cockpit-capture-modal {
+  --bs-modal-width: 520px;
+  --bs-modal-margin: 1rem;
 }
 
-/* Quick Capture is a workspace-area row beneath the header, separate from
-   blocking context and its independently scrolling body. */
-.cockpit-capture {
-  margin: 0 14px;
-  padding: 10px 12px;
-  border: 1px solid var(--hc-line);
-  background: var(--hc-panel-raised);
+.cockpit-capture-modal .modal-dialog {
+  max-width: min(var(--bs-modal-width), calc(100vw - 2rem));
 }
 
-.cockpit-capture[hidden] {
-  display: none;
+.cockpit-capture-modal__content {
+  max-height: calc(100dvh - 2rem);
+  border: 1px solid var(--hc-line) !important;
+  border-radius: 2px;
+  background: var(--cozy-paper-raised, #fff) !important;
+  color: var(--hc-ink);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 42%) !important;
+  backdrop-filter: none !important;
 }
 
-.cockpit-capture-form {
+.cockpit-capture-modal__header {
+  align-items: flex-start;
+  gap: 16px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--hc-line) !important;
+  background: var(--cozy-paper, #f4efe3) !important;
+  backdrop-filter: none !important;
+}
+
+.cockpit-capture-modal__heading {
+  min-width: 0;
+}
+
+.cockpit-capture-modal__title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+}
+
+.cockpit-capture-modal__title:focus {
+  outline: none;
+}
+
+.cockpit-capture-modal__title:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 3px;
+}
+
+/* The destination is always spelled out: Quick Capture has exactly one, and
+   a selected workspace elsewhere never changes it. */
+.cockpit-capture-modal__destination {
+  margin: 4px 0 0;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.2px;
+}
+
+.cockpit-capture-modal__body {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.cockpit-capture-label {
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cockpit-capture-optional {
+  color: var(--hc-ink-dim);
+  font-weight: 400;
+}
+
+.cockpit-capture-title,
+.cockpit-capture-details {
+  width: 100%;
+  font-size: 14px;
+}
+
+.cockpit-capture-title[aria-invalid="true"] {
+  border-color: var(--hc-alert) !important;
+}
+
+.cockpit-capture-details {
+  min-height: 96px;
+  resize: vertical;
+}
+
+/* A disclosure, not a second primary action: text-weight, with its state in
+   aria-expanded and in the words ("Add details" / "Hide details"). */
+.cockpit-capture-details-toggle {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hc-signal);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.cockpit-capture-details-group {
   display: grid;
   gap: 6px;
 }
 
-.cockpit-capture-label {
-  color: var(--hc-ink-dim);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9.5px;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-}
-
-.cockpit-capture-details {
-  resize: vertical;
-}
-
-.cockpit-capture-actions {
-  display: flex;
-  gap: 6px;
+.cockpit-capture-details-group[hidden] {
+  display: none;
 }
 
 .cockpit-capture-status:empty {
@@ -2167,17 +2257,180 @@ body.home-command-page .ori-guide__launcher {
 
 .cockpit-capture-status {
   margin: 0;
-  color: var(--hc-ink-faint);
-  font-size: 11px;
+  color: var(--hc-ink-dim);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+/* Errors are stated in words and marked with a rule, not by colour alone. */
+.cockpit-capture-status[data-kind="error"],
+.cockpit-capture-status[data-kind="invalid"] {
+  padding-left: 8px;
+  border-left: 3px solid var(--hc-alert);
+  color: var(--hc-ink);
 }
 
 .cockpit-capture-hq {
+  min-height: 32px;
+  padding: 0;
   border: 0;
   background: none;
   color: var(--hc-signal);
-  font-size: 11px;
+  font-size: 12.5px;
+  font-weight: 600;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.cockpit-capture-modal__footer {
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--hc-line) !important;
+  background: transparent !important;
+}
+
+.cockpit-capture-modal__footer .modern-btn {
+  justify-content: center;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 14px;
+  border-radius: 2px;
+  font-size: 13px;
+}
+
+.cockpit-capture-modal__footer .modern-btn-primary {
+  background: #1f6b4e;
+  color: #fff;
+}
+
+.cockpit-capture-modal__footer .modern-btn-primary:hover:not(:disabled) {
+  background: #175a41;
+}
+
+.cockpit-capture-modal__footer .modern-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cockpit-capture-modal .btn-close {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+[data-bs-theme="dark"] .cockpit-capture-modal .cockpit-capture-modal__content {
+  background: var(--cozy-paper-raised, #303337) !important;
+}
+
+[data-bs-theme="dark"] .cockpit-capture-modal .cockpit-capture-modal__header {
+  background: var(--cozy-paper, #26282b) !important;
+}
+
+[data-bs-theme="dark"] .cockpit-capture-modal .btn-close {
+  filter: var(--bs-btn-close-white-filter);
+}
+
+.cockpit-capture-modal button:focus-visible,
+.cockpit-capture-modal input:focus-visible,
+.cockpit-capture-modal textarea:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
+@media (max-width: 575.98px), (max-height: 620px) {
+  .cockpit-capture-modal {
+    --bs-modal-margin: 0.5rem;
+  }
+
+  .cockpit-capture-modal .modal-dialog {
+    max-width: none;
+    margin: 0.5rem;
+  }
+
+  .cockpit-capture-modal__content {
+    max-height: calc(100dvh - 1rem);
+  }
+}
+
+@media (pointer: coarse) {
+  .cockpit-capture-modal__footer .modern-btn,
+  .cockpit-capture-details-toggle,
+  .cockpit-capture-hq,
+  .cockpit-capture-modal .btn-close {
+    min-height: 44px;
+  }
+
+  .cockpit-capture-modal .btn-close {
+    min-width: 44px;
+  }
+}
+
+/* The success receipt: over the top of the map area, centred, so it never
+   shifts layout and never lands in the assistant's bottom-right corner. */
+.cockpit-capture-receipt {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--hc-signal);
+  background: var(--hc-panel-raised);
+  box-shadow: var(--hc-shadow);
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 600;
+  transform: translateX(-50%);
+}
+
+.cockpit-capture-receipt[hidden] {
+  display: none;
+}
+
+.cockpit-capture-receipt::before {
+  content: "✓";
+  color: var(--hc-signal);
+  font-weight: 700;
+}
+
+.cockpit-capture-receipt__link {
+  color: var(--hc-signal);
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cockpit-capture-receipt__link[hidden] {
+  display: none;
+}
+
+.cockpit-capture-receipt__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--hc-line);
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cockpit-capture-receipt__link:focus-visible,
+.cockpit-capture-receipt__close:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .cockpit-capture-receipt__close {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 /* --------------------------------------------------------------------------
