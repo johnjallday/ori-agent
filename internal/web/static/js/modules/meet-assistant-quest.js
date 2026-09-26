@@ -2,20 +2,22 @@
  * meet-assistant-quest.js — Ori's deterministic walkthrough for Mission 01,
  * "Meet your assistant".
  *
- * The user hires their personal assistant by creating it themselves, in the
- * Agents page's own New Agent panel, which opens in a personal-assistant preset
- * while no assistant is hired (agents-roster.js). The walkthrough's first step
- * is on Home, pointing at the Agents nav entry (meet-assistant-home-prompt.js);
- * this controller carries on from there, pointing at each control in turn: New
- * Agent, the name, the face, the focus, Hire.
+ * The user hires their personal assistant by creating it themselves: the Agents
+ * page's New Agent opens the same Create Agent modal as always, in a personal-
+ * assistant preset while no assistant is hired (agents-roster.js). The
+ * walkthrough's first step is on Home, pointing at the Agents nav entry
+ * (meet-assistant-home-prompt.js); this controller carries on from there,
+ * pointing at each control in turn: New Agent, the name, the face, the focus,
+ * Hire.
  *
  * Two presentations. When the user arrived through the mission (the Home step,
  * or ?quest=meet-assistant), Ori's own layer carries it (ori-spotlight.js): New
- * Agent is the one lit control on a dimmed page, as Agents was on Home, and
- * then Ori's callout sits beside the form, pointing at each field, without
- * dimming anything, because there the user works in several fields at once. A
- * plain visit to the Agents page, and a screen too narrow to fit the callout
- * beside the form, use Ori's docked panel instead.
+ * Agent is the one lit control on a dimmed page, as Agents was on Home. A plain
+ * visit to the Agents page points at New Agent from Ori's docked panel instead.
+ * Either way, once the modal is up Ori's callout sits beside it, pointing at
+ * each field, without dimming anything, because there the user works in
+ * several fields at once, and Ori's panel sits under every modal's backdrop. A
+ * screen too narrow to fit the callout beside the dialog keeps to the panel.
  *
  * What it is:
  *   - Deterministic. Every string here is host copy written in this file. No
@@ -39,6 +41,8 @@
 
   var QUEST_ID = 'meet-assistant';
   var QUEST_PARAM = 'meet-assistant';
+  // The Create Agent modal's mode while it holds the preset (agents-roster.js).
+  var HIRE_MODE = 'assistant-hire';
 
   // Step 1 is on Home (meet-assistant-home-prompt.js): Ori points at the Agents
   // nav entry and the user clicks it. This page carries on from Step 2.
@@ -69,6 +73,9 @@
     detoured: false,
     // The steps are presented in Ori's layer rather than in Ori's panel.
     spotlight: false,
+    // The layer found no room beside the dialog once: the rest of the mission
+    // stays in Ori's panel.
+    noRoom: false,
     // The step Ori's layer is showing, or 0.
     layerStep: 0,
     bound: false
@@ -249,8 +256,8 @@
     state.paused = true;
   }
 
-  // The steps of a mission the user arrived through: New Agent lit on a dimmed
-  // page, then Ori's callout beside the form, pointing at each field.
+  // New Agent lit on a dimmed page (a mission the user arrived through), then
+  // Ori's callout beside the modal, pointing at each field.
   function presentInLayer(step, focus) {
     var layer = spotlightLayer();
     if (!layer) return false;
@@ -273,7 +280,7 @@
     if (step === STEP_NEW_AGENT) {
       shown = layer.showSpotlight(opts);
     } else {
-      opts.anchor = '#createPanel';
+      opts.anchor = '#addAgentModal .modal-dialog';
       opts.choices = choicesFor(step);
       opts.onChoice = function (id) {
         onQuestChoice({ detail: { quest: QUEST_ID, choice: id } });
@@ -282,10 +289,12 @@
     }
     shown.then(function (ok) {
       if (ok || !state.active || state.layerStep !== step) return;
-      // Nothing to point at, or no room beside the form (a phone-width sheet):
-      // say it in Ori's panel instead, for the rest of the mission.
+      // Nothing to point at, or no room beside the dialog (a phone): say it in
+      // Ori's panel instead. No room beside the dialog is for the rest of the
+      // mission; the modal's next opening asks the layer again otherwise.
       state.layerStep = 0;
       state.spotlight = false;
+      if (step !== STEP_NEW_AGENT) state.noRoom = true;
       layer.close();
       openPanel();
       present(step, focus);
@@ -329,12 +338,19 @@
     present(step, focus);
   }
 
+  // The Create Agent modal in the roster's personal-assistant mode, with the
+  // hire form in it (not a repair view).
   function presetOpen() {
     if (typeof document === 'undefined' || typeof document.getElementById !== 'function') {
       return false;
     }
-    var panel = document.getElementById('createPanel');
-    return !!(panel && !panel.hidden && document.getElementById('cr-focus-group'));
+    var modal = document.getElementById('addAgentModal');
+    return !!(
+      modal &&
+      modal.dataset &&
+      modal.dataset.agentCreateMode === HIRE_MODE &&
+      document.getElementById('cr-focus-group')
+    );
   }
 
   /* ---- lifecycle ----------------------------------------------------------- */
@@ -347,11 +363,14 @@
     state.step = 0;
     state.paused = false;
     state.detoured = false;
+    state.noRoom = false;
     // Arrived through the mission: the one-click step stays a spotlight.
     state.spotlight = (requestedAtLoad || guidedAtLoad) && !!spotlightLayer();
 
-    // A New Agent press that beat this start already opened the preset.
+    // A New Agent press that beat this start already opened the preset, whose
+    // modal backdrop Ori's panel would sit under.
     var first = presetOpen() ? STEP_NAME : STEP_NEW_AGENT;
+    if (first === STEP_NAME && spotlightLayer()) state.spotlight = true;
     if (!state.spotlight) openPanel();
     if (first === STEP_NAME) present(STEP_NAME, false);
     else present(STEP_NEW_AGENT);
@@ -387,6 +406,12 @@
       return;
     }
     state.detoured = false;
+    // New Agent's dimmed page would lie over the modal, and block it, for as
+    // long as the callout takes to find room beside the dialog, or not.
+    if (state.layerStep === STEP_NEW_AGENT) closeLayer();
+    // The preset is a modal, and Ori's panel sits under its backdrop: the
+    // form's steps are said beside the dialog, however the user arrived.
+    if (!state.noRoom && spotlightLayer()) state.spotlight = true;
     if (state.step < STEP_NAME) {
       present(STEP_NAME);
       return;
@@ -396,7 +421,7 @@
 
   function insidePreset(target) {
     return (
-      !!(target && typeof target.closest === 'function' && target.closest('#createForm')) &&
+      !!(target && typeof target.closest === 'function' && target.closest('#addAgentForm')) &&
       presetOpen()
     );
   }

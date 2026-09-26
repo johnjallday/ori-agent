@@ -474,10 +474,10 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect(page.locator('#newAgentBtn')).toHaveClass(/is-ori-coachmark/);
     await page.locator('#newAgentBtn').click();
 
-    // The form's steps on a phone: the Inspector is a full-screen sheet with no
-    // room beside it for Ori's callout, so the walkthrough carries on in Ori's
-    // panel (under the sheet), and the form alone moves it on, one step per
-    // signal.
+    // The form's steps on a phone: the Create Agent modal fills the width, with
+    // no room beside it for Ori's callout, so the walkthrough carries on in
+    // Ori's panel (under the modal), and the form alone moves it on, one step
+    // per signal.
     const reply = page.locator('#oriGuideReply');
     const step = reply.locator('.ori-guide__quest-step');
     await expect(step).toHaveText('Step 3 of 6');

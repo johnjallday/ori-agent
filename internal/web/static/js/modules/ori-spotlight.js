@@ -288,6 +288,15 @@ function onKeydown(event) {
   }
 }
 
+// A pointer press on the callout does not take focus. The page may be holding
+// focus in a dialog the callout stands beside (Bootstrap's modal focus trap
+// answers focus leaving by moving it to the dialog's first control, its close
+// button). The click still lands; focus stays where the user was working, or
+// goes where the step then sends it. Keyboard focus is unaffected.
+function keepFocusOnPress(button) {
+  button.addEventListener('mousedown', event => event.preventDefault());
+}
+
 function nudge() {
   const target = current && (current.callout || current.card);
   if (!target || reducedMotion()) return;
@@ -532,6 +541,7 @@ function present(target, key, opts, mode) {
     const notNow = el('button', 'ori-spotlight__callout-later', opts.laterLabel || 'Not now');
     notNow.type = 'button';
     notNow.dataset.oriSpotlight = 'later';
+    keepFocusOnPress(notNow);
     notNow.addEventListener('click', () => later());
     head.append(notNow);
   }
@@ -550,6 +560,7 @@ function present(target, key, opts, mode) {
       const button = el('button', 'ori-spotlight__choice', label);
       button.type = 'button';
       button.dataset.oriSpotlightChoice = id;
+      keepFocusOnPress(button);
       button.addEventListener('click', () => opts.onChoice?.(id));
       row.append(button);
     }

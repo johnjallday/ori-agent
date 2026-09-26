@@ -17,7 +17,11 @@
 (function () {
   'use strict';
 
-  // key -> { routes, selector, label, local }
+  // key -> { routes, selector, label, local, group }
+  //
+  // `group: true` marks a key whose selector names a group of controls (a
+  // fieldset, an editor) rather than one control. The mark goes on the group;
+  // focus goes to the control inside it that Tab would reach (focusTarget).
   //
   // `routes` records which pages own the control. A key is only honoured on its
   // own route, so a stale key from a previous page cannot mark a same-named
@@ -122,8 +126,8 @@
     },
     // Mission 01, "Meet your assistant" (meet-assistant-quest.js). All local:
     // no server topic names them. Home's prompt points at the Agents nav entry;
-    // on the Agents page the walkthrough marks each control of the New Agent
-    // panel's assistant preset in turn. The preset's controls exist only while
+    // on the Agents page the walkthrough marks each control of the Create Agent
+    // modal's assistant preset in turn. The preset's controls exist only while
     // it is open, which resolve() handles: an absent target yields no mark.
     nav_agents: {
       routes: ['/'],
@@ -141,13 +145,15 @@
       routes: ['/agents'],
       selector: '#cr-appearance-host',
       label: "your assistant's face",
-      local: true
+      local: true,
+      group: true
     },
     assistant_focus: {
       routes: ['/agents'],
       selector: '#cr-focus-group',
       label: 'what your assistant helps with',
-      local: true
+      local: true,
+      group: true
     },
     assistant_hire: {
       routes: ['/agents'],
@@ -212,6 +218,37 @@
     return el;
   }
 
+  var CONTROL_SELECTOR = [
+    'input:not([type="hidden"]):not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    'button:not([disabled])',
+    'a[href]',
+    '[tabindex]:not([tabindex="-1"])'
+  ].join(', ');
+
+  // focusTarget returns what a coachmark focuses for the element resolve()
+  // found: the element itself, or for a group, the control inside it that Tab
+  // would reach — the checked radio of a radio group, otherwise the first
+  // visible control. A group with no control inside yields the group itself,
+  // whose focus() is then a harmless no-op.
+  function focusTarget(key, el) {
+    var entry = entryFor(key);
+    if (!el || !entry || !entry.group || typeof el.querySelectorAll !== 'function') return el;
+    var controls = Array.prototype.filter.call(el.querySelectorAll(CONTROL_SELECTOR), function (c) {
+      return typeof c.getClientRects !== 'function' || c.getClientRects().length > 0;
+    });
+    var first = controls[0];
+    if (!first) return el;
+    if (first.type === 'radio') {
+      var checked = controls.filter(function (c) {
+        return c.type === 'radio' && c.name === first.name && c.checked;
+      })[0];
+      if (checked) return checked;
+    }
+    return first;
+  }
+
   function labelFor(key) {
     var entry = entryFor(key);
     return entry ? entry.label : '';
@@ -232,6 +269,7 @@
   var api = {
     supports: supports,
     resolve: resolve,
+    focusTarget: focusTarget,
     labelFor: labelFor,
     keys: keys,
     serverKeys: serverKeys,

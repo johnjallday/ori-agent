@@ -948,6 +948,24 @@
     }
   }
 
+  // Whether focus is on the marked element, or on a control inside it (a
+  // group's coachmark focuses one of its controls).
+  function coachmarkHoldsFocus(el) {
+    var active = document.activeElement;
+    if (!active) return false;
+    return active === el || (typeof el.contains === 'function' && el.contains(active));
+  }
+
+  // Focuses what a coachmark focuses: the control itself, or the control inside
+  // a group that Tab would reach (OriGuideCoachmarks.focusTarget).
+  function focusCoachmark(key, el, preventScroll) {
+    var registry = window.OriGuideCoachmarks;
+    var target =
+      registry && typeof registry.focusTarget === 'function' ? registry.focusTarget(key, el) : el;
+    if (target && typeof target.focus === 'function')
+      target.focus({ preventScroll: preventScroll });
+  }
+
   // Keeps the mark on the live node when the page re-renders the control under
   // it. Returns false when the control is genuinely gone, in which case the
   // mark (and its pointer) are dropped rather than left pointing at a ghost.
@@ -957,7 +975,7 @@
     if (typeof document.contains !== 'function' || document.contains(el)) {
       // Remembered every frame, because once the node is swapped out it is too
       // late to ask whether it had focus.
-      state.coachmarkHeldFocus = document.activeElement === el;
+      state.coachmarkHeldFocus = coachmarkHoldsFocus(el);
       return true;
     }
 
@@ -978,12 +996,8 @@
     // mark only when nothing else has it: it never leaves a control the user
     // moved to.
     var active = document.activeElement;
-    if (
-      state.coachmarkHeldFocus &&
-      (!active || active === document.body) &&
-      typeof fresh.focus === 'function'
-    ) {
-      fresh.focus({ preventScroll: true });
+    if (state.coachmarkHeldFocus && (!active || active === document.body)) {
+      focusCoachmark(state.coachmarkKey, fresh, true);
     }
     return true;
   }
@@ -1003,8 +1017,8 @@
     applyPointer(el);
     emit('coachmark', { key: key, resolved: true });
     var moveFocus = !(opts && opts.focus === false);
-    if (moveFocus && typeof el.focus === 'function') el.focus({ preventScroll: false });
-    state.coachmarkHeldFocus = document.activeElement === el;
+    if (moveFocus) focusCoachmark(key, el, false);
+    state.coachmarkHeldFocus = coachmarkHoldsFocus(el);
     if (typeof el.scrollIntoView === 'function') {
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
