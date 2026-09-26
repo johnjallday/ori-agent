@@ -8,6 +8,23 @@ import (
 	"github.com/johnjallday/ori-agent/internal/database"
 )
 
+// BenchmarkOpenClone excludes the one-time template initialization. Like the
+// baseline, each iteration includes allocation, a seed-row check and close.
+func BenchmarkOpenClone(b *testing.B) {
+	if _, err := pristineImage(); err != nil {
+		b.Fatal(err)
+	}
+	for b.Loop() {
+		db := Open(b)
+		var localUsers int
+		queryErr := db.QueryRow("SELECT COUNT(*) FROM users WHERE id = 'local'").Scan(&localUsers)
+		closeErr := db.Close()
+		if queryErr != nil || localUsers != 1 || closeErr != nil {
+			b.Fatalf("cloned fixture: local users=%d, query=%v, close=%v", localUsers, queryErr, closeErr)
+		}
+	}
+}
+
 // BenchmarkOpenFresh retains the real initialization path as a performance
 // baseline. It includes setup, a seed-row check, and close, not compilation.
 // Use -benchtime=3x -count=3 -race for bounded, fresh-execution comparisons.
