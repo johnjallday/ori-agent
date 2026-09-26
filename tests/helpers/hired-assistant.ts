@@ -31,3 +31,25 @@ export async function mockHiredAssistant(page: Page): Promise<void> {
     })
   );
 }
+
+/**
+ * mockUnhiredAssistant answers GET /api/personal-assistant with a relationship
+ * that still needs its hire, so New Agent opens Mission 01's preset. Registered
+ * after mockHiredAssistant (a spec file's beforeEach), it wins: Playwright runs
+ * the most recently registered matching route first.
+ */
+export async function mockUnhiredAssistant(page: Page): Promise<void> {
+  await page.route(/\/api\/personal-assistant$/, route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        personal_assistant: {
+          state: 'needs_hire',
+          state_version: 1,
+          availability: { model: { status: 'not_configured', available: false } }
+        }
+      })
+    })
+  );
+}

@@ -474,6 +474,86 @@ test('a quest step with focus:false marks without moving focus', () => {
   assert.equal(hire.focused, true);
 });
 
+// A group coachmark: the mark on the group, focus on one of its controls.
+function makeGroup(id, controls) {
+  return makeElement(id, {
+    // A div or fieldset: focus() does nothing.
+    focus() {},
+    querySelectorAll: () => controls,
+    contains: node => controls.includes(node)
+  });
+}
+
+test('a group coachmark focuses the control inside it that Tab would reach', () => {
+  const { coachmarks } = load();
+  const hiddenInput = makeElement('hidden-radio', { type: 'radio', getClientRects: () => [] });
+  const generated = makeElement('generated', { type: 'radio', name: 'source' });
+  const character = makeElement('character', { type: 'radio', name: 'source', checked: true });
+  const color = makeElement('color', { type: 'color' });
+
+  // A radio group hands focus to its checked radio, as Tab would, and a
+  // control that is not rendered is skipped.
+  const face = makeGroup('cr-appearance-host', [hiddenInput, generated, character, color]);
+  assert.equal(coachmarks.focusTarget('assistant_face', face), character);
+
+  // Otherwise the first control.
+  const plan = makeElement('plan', { type: 'checkbox' });
+  const focusGroup = makeGroup('cr-focus-group', [
+    plan,
+    makeElement('email', { type: 'checkbox' })
+  ]);
+  assert.equal(coachmarks.focusTarget('assistant_focus', focusGroup), plan);
+
+  // A group with nothing inside, and a key that is not a group, focus the
+  // element itself.
+  const empty = makeGroup('cr-focus-group', []);
+  assert.equal(coachmarks.focusTarget('assistant_focus', empty), empty);
+  const hire = makeElement('createSubmit');
+  assert.equal(coachmarks.focusTarget('assistant_hire', hire), hire);
+});
+
+test('a quest step on a group marks the group and focuses its control', () => {
+  const plan = makeElement('plan', { type: 'checkbox' });
+  const group = makeGroup('cr-focus-group', [plan]);
+  const { guide } = questGuide({ route: '/agents', selectors: { '#cr-focus-group': group } });
+
+  const result = guide.presentQuestStep({
+    quest: 'meet-assistant',
+    answer: 'What should they help with?',
+    coachmark: 'assistant_focus'
+  });
+
+  assert.equal(result.coachmarkResolved, true);
+  assert.ok(group.classList.contains('is-ori-coachmark'), 'the group carries the mark');
+  assert.equal(plan.focused, true, 'focus went to the group’s first control');
+});
+
+test('focus inside a re-rendered group follows the mark to the new group', () => {
+  const oldPlan = makeElement('plan-old', { type: 'checkbox' });
+  const stale = makeGroup('focus-old', [oldPlan]);
+  const freshPlan = makeElement('plan-new', { type: 'checkbox' });
+  const fresh = makeGroup('focus-new', [freshPlan]);
+  const ctx = questGuide({ route: '/agents', selectors: { '#cr-focus-group': stale } });
+  const { guide, registerSelector, runFrame, sandbox } = ctx;
+  const doc = sandbox.document;
+
+  guide.presentQuestStep({
+    quest: 'meet-assistant',
+    answer: 'What should they help with?',
+    coachmark: 'assistant_focus'
+  });
+  doc.activeElement = oldPlan;
+  runFrame();
+
+  stale._detached = true;
+  doc.activeElement = doc.body;
+  registerSelector('#cr-focus-group', fresh);
+  runFrame();
+
+  assert.ok(fresh.classList.contains('is-ori-coachmark'));
+  assert.equal(freshPlan.focused, true, 'focus moved to the live group’s control');
+});
+
 test('a fixed quest step renders a user-controlled name as text, never markup', () => {
   const { guide, reply } = questGuide();
   guide.presentQuestStep({

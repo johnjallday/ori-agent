@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
-import { mockHiredAssistant } from './helpers/hired-assistant';
+import { mockHiredAssistant, mockUnhiredAssistant } from './helpers/hired-assistant';
 
 // Happy-path regression for the game-inspired Agents page (roster + stage).
 // Assumes a running server; create/cleanup a throwaway agent via the API so the
@@ -1139,20 +1139,7 @@ test.describe('Agents single-agent editing', () => {
         body: JSON.stringify({ needs_onboarding: false, completed: true })
       })
     );
-    // Registered after beforeEach's hired assistant, so it wins.
-    await page.route(/\/api\/personal-assistant$/, route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          personal_assistant: {
-            state: 'needs_hire',
-            state_version: 1,
-            availability: { model: { status: 'not_configured', available: false } }
-          }
-        })
-      })
-    );
+    await mockUnhiredAssistant(page);
     await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#rosterList')).toBeVisible();
 
@@ -1189,6 +1176,46 @@ test.describe('Agents single-agent editing', () => {
     await expect(modal).toBeHidden();
     await expect(title).toHaveText('Create New Agent');
     await expect(page.locator('#createSubmit')).toHaveCount(0);
+  });
+
+  // Ori's callout stands beside the modal, outside Bootstrap's focus trap. A
+  // press on one of its choices must not hand focus to the trap (which puts it
+  // on the modal's close button); focus goes to the control the step names.
+  test('Ori’s callout choices beside the preset move focus to the control they name', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    await mockUnhiredAssistant(page);
+    await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#rosterList')).toBeVisible();
+
+    await page.locator('#newAgentBtn').click();
+    const callout = page.locator('#oriSpotlight .ori-spotlight__callout');
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Give them a name');
+    await expect(page.locator('#cr-name')).toBeFocused();
+    const close = page.locator('#addAgentModal .btn-close');
+
+    await callout.locator('[data-ori-spotlight-choice="keep-name"]').click();
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Pick a face');
+    // The face editor's selected source, as Tab would reach it.
+    await expect(page.locator('#cr-appearance-host input[type="radio"]:checked')).toBeFocused();
+    await expect(close).not.toBeFocused();
+
+    await callout.locator('[data-ori-spotlight-choice="keep-face"]').click();
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Choose their focus');
+    await expect(page.locator('#cr-focus-group input').first()).toBeFocused();
+    await expect(page.locator('#cr-focus-group')).toHaveClass(/is-ori-coachmark/);
+
+    await callout.locator('[data-ori-spotlight-choice="done-choosing"]').click();
+    await expect(callout.locator('.ori-spotlight__callout-title')).toHaveText('Hire them');
+    await expect(page.locator('#createSubmit')).toBeFocused();
   });
 
   test('a failed detail request is reported without breaking the collection', async ({
