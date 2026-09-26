@@ -471,7 +471,10 @@ function showAddAgentModal(options = {}) {
     agentsLog.debug('addAgentModal not available on this page');
     return;
   }
-  const modal = new bootstrap.Modal(modalElement);
+  // The page's one instance: the Agents page opens this form in place of its
+  // personal-assistant preset while the modal is already up, and a second
+  // instance would show a second backdrop.
+  const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
   const agentNameInput = document.getElementById('agentName');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
   const agentModelInput = document.getElementById('agentModel');
@@ -1457,8 +1460,11 @@ function describeAgentCreationFollowUp(summary) {
 async function createNewAgent() {
   // In workspace-draft mode sessions.js owns this modal's submit and stages the
   // values for the final atomic workspace request. This backstop ensures a
-  // listener-order regression can never persist an agent early.
-  if (document.getElementById('addAgentModal')?.dataset.agentCreateMode === 'workspace-draft') {
+  // listener-order regression can never persist an agent early. The Agents
+  // page's personal-assistant preset hires through its own button; an Enter in
+  // one of its fields must not create an ordinary agent instead.
+  const pageOwnedMode = document.getElementById('addAgentModal')?.dataset.agentCreateMode;
+  if (pageOwnedMode === 'workspace-draft' || pageOwnedMode === 'assistant-hire') {
     return;
   }
   const sharedForm = ensureStandaloneAgentCreateForm();

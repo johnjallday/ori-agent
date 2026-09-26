@@ -122,8 +122,8 @@
     },
     // Mission 01, "Meet your assistant" (meet-assistant-quest.js). All local:
     // no server topic names them. Home's prompt points at the Agents nav entry;
-    // on the Agents page the walkthrough marks each control of the New Agent
-    // panel's assistant preset in turn. The preset's controls exist only while
+    // on the Agents page the walkthrough marks each control of the Create Agent
+    // modal's assistant preset in turn. The preset's controls exist only while
     // it is open, which resolve() handles: an absent target yields no mark.
     nav_agents: {
       routes: ['/'],

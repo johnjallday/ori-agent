@@ -1096,12 +1096,14 @@ test.describe('Agents single-agent editing', () => {
       await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('#rosterList')).toBeVisible();
 
-      // The ordinary create is the shared modal, not a panel in the Inspector.
-      // Cancelling leaves the collection and the Inspector untouched.
+      // With an assistant hired, New Agent opens the shared modal with the
+      // ordinary form. Cancelling leaves the collection and the Inspector
+      // untouched.
       const modal = page.locator('#addAgentModal');
       await page.locator('#newAgentBtn').click();
       await expect(modal).toBeVisible();
-      await expect(page.locator('#createPanel')).toBeHidden();
+      await expect(page.locator('#createAgentBtn')).toBeVisible();
+      await expect(page.locator('#createSubmit')).toHaveCount(0);
       await page.locator('#cancelAgentBtn').click();
       await expect(modal).toBeHidden();
 
@@ -1125,6 +1127,68 @@ test.describe('Agents single-agent editing', () => {
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
         .catch(() => undefined);
     }
+  });
+
+  test('before the hire, New Agent opens the same modal in the assistant preset', async ({
+    page
+  }) => {
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    // Registered after beforeEach's hired assistant, so it wins.
+    await page.route(/\/api\/personal-assistant$/, route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          personal_assistant: {
+            state: 'needs_hire',
+            state_version: 1,
+            availability: { model: { status: 'not_configured', available: false } }
+          }
+        })
+      })
+    );
+    await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#rosterList')).toBeVisible();
+
+    const modal = page.locator('#addAgentModal');
+    const title = page.locator('#addAgentModalTitleText');
+    await page.locator('#newAgentBtn').click();
+    await expect(modal).toBeVisible();
+    await expect(title).toHaveText('Hire your personal assistant');
+    await expect(page.locator('#cr-name')).toBeFocused();
+    await expect(page.locator('#createSubmit')).toHaveText('Hire assistant');
+    // The preset's fields only: the ordinary form's step aside.
+    await expect(page.locator('#createAgentBtn')).toBeHidden();
+    await expect(page.locator('#agentName')).toHaveCount(0);
+    await expect(page.locator('#agentCreateCapabilitiesSection')).toBeHidden();
+    // The Inspector is not where creating happens any more.
+    await expect(page.locator('#inspector .inspector-kicker')).toHaveText('Selected agent');
+
+    // The ordinary form takes the preset's place in the same open modal.
+    await page.locator('#cr-standard-form').click();
+    await expect(title).toHaveText('Create New Agent');
+    await expect(page.locator('#agentName')).toBeVisible();
+    await expect(page.locator('#createAgentBtn')).toBeVisible();
+    await expect(page.locator('#createSubmit')).toHaveCount(0);
+    await expect(page.locator('.modal-backdrop')).toHaveCount(1);
+
+    // Closed, the modal is whole again, and the preset opens next time.
+    await page.locator('#cancelAgentBtn').click();
+    await expect(modal).toBeHidden();
+    await expect(modal).not.toHaveClass(/is-assistant-hire/);
+    await page.locator('#newAgentBtn').click();
+    await expect(title).toHaveText('Hire your personal assistant');
+    await expect(page.locator('#createSubmit')).toBeVisible();
+    await page.locator('#cancelAgentBtn').click();
+    await expect(modal).toBeHidden();
+    await expect(title).toHaveText('Create New Agent');
+    await expect(page.locator('#createSubmit')).toHaveCount(0);
   });
 
   test('a failed detail request is reported without breaking the collection', async ({
