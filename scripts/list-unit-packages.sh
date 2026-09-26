@@ -56,8 +56,12 @@ filter_out_of_scope() {
 		grep -vE '^github\.com/johnjallday/ori-agent/(tests|test)(/|$)'
 }
 
+# Capture `go list` before filtering: under pipefail a failed listing with no
+# output would otherwise surface grep's "no lines selected" status (1) instead
+# of the toolchain's own exit status.
 if [[ "$scope" == "all" ]]; then
-	go list ./... | filter_out_of_scope
+	packages="$(go list ./...)"
+	printf '%s\n' "$packages" | filter_out_of_scope
 	exit 0
 fi
 
@@ -81,7 +85,8 @@ darwin_gated_tests=(
 	github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/app
 )
 
+platform_packages="$(go list -e -f '{{if or .IgnoredGoFiles .IgnoredOtherFiles}}{{.ImportPath}}{{end}}' ./...)"
 {
-	go list -e -f '{{if or .IgnoredGoFiles .IgnoredOtherFiles}}{{.ImportPath}}{{end}}' ./...
+	printf '%s\n' "$platform_packages"
 	printf '%s\n' "${darwin_gated_tests[@]}"
 } | awk 'NF' | filter_out_of_scope | sort -u
