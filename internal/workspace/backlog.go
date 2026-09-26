@@ -20,6 +20,9 @@ const (
 	BacklogSourceAssistant    = "assistant"
 	BacklogSourceActionCenter = "action_center"
 	BacklogSourceBacklogFile  = "backlog_markdown"
+	// BacklogSourceHomeQuickCapture marks an idea captured from Home's Quick
+	// Capture dialog into the designated Personal HQ's backlog (FR102).
+	BacklogSourceHomeQuickCapture = "home_quick_capture"
 )
 
 // BacklogCreateInput describes a manual/assistant/Action Center/file capture

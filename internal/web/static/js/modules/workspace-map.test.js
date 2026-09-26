@@ -2646,7 +2646,11 @@ test('the Home-only empty presentation renders a real blank canvas without legac
   assert.doesNotMatch(container.innerHTML, /No workspaces yet/);
   assert.doesNotMatch(container.innerHTML, /data-ws-map-create/);
   assert.equal((container.innerHTML.match(/cockpit-empty-map-actions/g) || []).length, 1);
-  assert.match(container.innerHTML, /role="group" aria-label="Create or import a workspace"/);
+  // The invitation is named by its own visible heading.
+  assert.match(
+    container.innerHTML,
+    /role="group" aria-labelledby="cockpitMapInviteTitle" data-map-invitation="empty"><p class="cockpit-empty-map-title" id="cockpitMapInviteTitle">Add a workspace to your map<\/p>/
+  );
   assert.match(
     container.innerHTML,
     /data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">New Workspace/
@@ -2674,6 +2678,32 @@ test('the zero-workspace actions survive a late Personal HQ landmark remount exa
   assert.equal((container.innerHTML.match(/>New Workspace<\/button>/g) || []).length, 1);
   assert.equal((container.innerHTML.match(/>Import Folder<\/button>/g) || []).length, 1);
   assert.doesNotMatch(container.innerHTML, /No workspaces yet/);
+});
+
+test('a host-decided HQ-only invitation draws once beside the HQ, and an empty string means none', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['hq-1'] });
+  const common = { hideChrome: true, selectOnly: true, noAutoSelect: true };
+  map.mount(container, {
+    ...common,
+    workspaces: [{ id: 'hq-1', name: 'My HQ' }],
+    emptyPresentation: 'legacy',
+    invitation: 'hq-only'
+  });
+  assert.equal((container.innerHTML.match(/cockpit-empty-map-actions/g) || []).length, 1);
+  assert.match(container.innerHTML, /data-map-invitation="hq-only"/);
+  assert.match(container.innerHTML, /Your Personal HQ is set up\./);
+  assert.equal((container.innerHTML.match(/>New Workspace<\/button>/g) || []).length, 1);
+  assert.match(container.innerHTML, /data-ws-id="hq-1"/, 'the HQ building still draws');
+
+  // The host withdrew it (say, a second workspace arrived): nothing is inferred.
+  map.mount(container, {
+    ...common,
+    workspaces: [],
+    emptyPresentation: 'canvas',
+    invitation: ''
+  });
+  assert.doesNotMatch(container.innerHTML, /cockpit-empty-map-actions/);
 });
 
 test('the Home empty canvas remounts cleanly when a real workspace arrives', () => {
@@ -3351,9 +3381,17 @@ function createCameraHarness({
         getAttribute: k => (k in attrs ? attrs[k] : null),
         // The selection bar owns a live count element inside it.
         querySelector: inner => control(name + ' ' + inner),
-        focus: () => {},
+        // Counted so a test can see where the map sent focus.
+        focusCount: 0,
+        focus: () => {
+          controls[name].focusCount += 1;
+        },
+        // The latest listener per type: a settled re-mount re-binds the same
+        // control, and a real re-mount would have replaced the element.
+        on: {},
         addEventListener: (type, fn) => {
           if (type === 'click') controls[name].click = fn;
+          controls[name].on[type] = fn;
         }
       };
     }
@@ -9034,14 +9072,16 @@ test('the legacy launcher mode behaves exactly like the cockpit', async () => {
 
 // --- the framing buttons moved into the menu (#317) --------------------------
 
-test('the control strip keeps zoom only — Fit all, Center and Reset left it', async () => {
+test('the control strip keeps zoom plus Home’s one visible Fit all — Center and Reset view stay on the menu', async () => {
   const { harness } = await menuHarness();
   const html = harness.container.innerHTML;
   assert.match(html, /data-map-zoom-out/, 'zoom out stays');
   assert.match(html, /data-map-zoom-in/, 'zoom in stays');
   assert.match(html, /data-map-zoom-readout/, 'and the readout');
-  assert.doesNotMatch(html, /data-map-fit/, 'Fit all is on the canvas menu now');
-  assert.doesNotMatch(html, /data-map-center/, 'so is Center selected');
+  // Home's dock brings Fit all back as a button (home-workspace-map-ui-refresh);
+  // it is the menu's action, not a second framing rule.
+  assert.match(html, /<button[^>]*data-map-fit[^>]*>Fit all<\/button>/, 'Fit all is visible');
+  assert.doesNotMatch(html, /data-map-center/, 'Center selected stays on the menu');
   assert.doesNotMatch(html, /data-map-reset-view/, 'and Reset view');
   // The placement cluster is untouched: those are not framing actions.
   assert.match(html, /data-map-build/);
@@ -9531,7 +9571,7 @@ test('the scoped district is still resolved for placement even though it is not 
   }
 });
 
-test('a group map docks both control clusters together; Home keeps them apart', () => {
+test('a group map docks both control clusters together, unchanged by Home’s dock', () => {
   const map = loadMapForMount();
   const { container } = createMapHarness();
   map.mount(container, scopedMountState());
@@ -9544,18 +9584,195 @@ test('a group map docks both control clusters together; Home keeps them apart', 
   assert.equal((container.innerHTML.match(/class="ws-map-controls"/g) || []).length, 1);
   assert.equal((container.innerHTML.match(/class="ws-map-actions"/g) || []).length, 1);
 
-  map.unmount(container);
+  // The group dock is exactly what it was: no Home-only Fit all or Arrange.
+  assert.doesNotMatch(container.innerHTML, /data-map-fit|data-map-arrange/);
+  assert.doesNotMatch(container.innerHTML, /ws-map-control-dock is-home/);
+});
+
+test('Home docks its camera and tools bottom-left and discloses placement under Arrange', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
   map.mount(container, { workspaces: SCOPED_WORLD, hideChrome: true, noAutoSelect: true });
-  assert.doesNotMatch(container.innerHTML, /ws-map-control-dock/);
-  // Home's order is unchanged: placement actions, help, then the zoom cluster.
+  const html = container.innerHTML;
+
+  // One dock: zoom, readout, Fit all — then Arrange and help, each followed
+  // directly by its own disclosure so Tab moves from a trigger into its panel.
+  assert.equal((html.match(/ws-map-control-dock/g) || []).length, 1);
   assert.match(
-    container.innerHTML,
-    /class="ws-map-actions"[\s\S]*data-map-help-panel|class="ws-map-actions"[\s\S]*class="ws-map-controls"/
+    html,
+    /<div class="ws-map-control-dock is-home" data-map-dock><div class="ws-map-controls"[^>]*>[\s\S]*?data-map-zoom-out[\s\S]*?data-map-zoom-readout[\s\S]*?data-map-zoom-in[\s\S]*?data-map-fit[^>]*>Fit all<\/button><\/div><div class="ws-map-dock-tools"[^>]*><button[^>]*data-map-arrange[^>]*>[\s\S]*?<\/button><div[^>]*data-map-arrange-panel[\s\S]*?<\/div><button[^>]*data-map-help[^>]*>\?<\/button><div class="ws-map-help ws-map-dock-panel"/
   );
-  assert.ok(
-    container.innerHTML.indexOf('class="ws-map-actions"') <
-      container.innerHTML.indexOf('class="ws-map-controls"')
+  // Nothing is left over to compete with the assistant's corner.
+  assert.doesNotMatch(html, /class="ws-map-actions"/);
+
+  // Arrange is a closed, named disclosure that owns the placement actions.
+  const arrange = html.match(/<button[^>]*data-map-arrange[^>]*>/)[0];
+  assert.match(arrange, /aria-expanded="false"/);
+  assert.match(arrange, /aria-controls="wsMapArrangePanel"/);
+  assert.match(arrange, /data-move="off"/);
+  const panel = html.match(/<div[^>]*data-map-arrange-panel[\s\S]*?<\/div>/)[0];
+  assert.match(panel, /id="wsMapArrangePanel"/);
+  assert.match(panel, /\shidden>/, 'closed on mount — hidden controls are not focusable');
+  for (const hook of [
+    'data-map-drag',
+    'data-map-snap',
+    'data-map-reset-layout',
+    'data-map-undo-reset'
+  ]) {
+    assert.match(panel, new RegExp(hook), hook + ' lives under Arrange');
+  }
+  // Reset layout keeps its own wording, apart from any camera reset.
+  assert.match(panel, />Reset layout…</);
+  assert.doesNotMatch(panel, /Reset view/);
+
+  // Help is the dock's other disclosure, closed and addressable by its trigger.
+  assert.match(html, /<button[^>]*data-map-help[^>]*aria-controls="wsMapHelpPanel"/);
+  assert.match(
+    html,
+    /<div class="ws-map-help ws-map-dock-panel" id="wsMapHelpPanel" data-map-help-panel hidden/
   );
+});
+
+test('the legacy launcher keeps its split clusters, with no Home dock', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  // No hideChrome: the /workspaces launcher's mount.
+  map.mount(container, { workspaces: SCOPED_WORLD });
+  assert.doesNotMatch(container.innerHTML, /ws-map-control-dock|data-map-fit|data-map-arrange/);
+  assert.match(container.innerHTML, /class="ws-map-actions"/);
+  assert.match(container.innerHTML, /class="ws-map-controls"/);
+});
+
+test('Home’s Fit all button is the menu’s Fit all, and it saves only the camera', async () => {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      patches.push(JSON.parse(init.body));
+      return jsonResponse({ schema_version: 1, revision: 2, positions: WIDE_POSITIONS });
+    }
+    return jsonResponse({ schema_version: 1, revision: 1, positions: WIDE_POSITIONS });
+  });
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  mountWithCamera(map, harness, [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ]);
+  await flush();
+  const live = harness.container.querySelector('[data-map-live]');
+
+  harness.control('[data-map-fit]').click();
+  const viaButton = { ...map.getCamera() };
+  assert.ok(viaButton.zoom < 0.5, 'the button reached the same wide framing (#307)');
+  assert.equal(live.textContent, 'Showing every workspace', 'and announces like the menu');
+
+  harness.fire('keydown', keyEvent('0'));
+  assert.notDeepEqual({ ...map.getCamera() }, viaButton, 'Reset view moved the camera away');
+  harness.fire('keydown', keyEvent('f'));
+  assert.deepEqual(
+    { ...map.getCamera() },
+    viaButton,
+    'the keyboard/menu fit lands in the same place'
+  );
+
+  await new Promise(resolve => setTimeout(resolve, 750));
+  await flush();
+  const ops = patches.flatMap(patch => patch.operations.map(operation => operation.op));
+  assert.ok(ops.length > 0, 'the camera is saved');
+  assert.deepEqual([...new Set(ops)], ['set_viewport'], 'and nothing about any building is');
+  assert.deepEqual({ ...map.getLayoutState().positions['ws-2'] }, WIDE_POSITIONS['ws-2']);
+});
+
+test('Arrange only discloses: Move stays off until chosen, and Move on outlives the panel', async () => {
+  const { map, harness, patches } = await mountedDrag({ enableDrag: false });
+  const arrange = harness.control('[data-map-arrange]');
+  const panel = harness.control('[data-map-arrange-panel]');
+  const move = harness.control('[data-map-drag]');
+
+  arrange.click();
+  assert.equal(panel.hidden, false);
+  assert.equal(arrange.getAttribute('aria-expanded'), 'true');
+  assert.equal(move.getAttribute('aria-pressed'), 'false', 'opening Arrange moves nothing');
+  assert.equal(harness.classes.has('is-drag-enabled'), false);
+
+  move.click();
+  assert.equal(arrange.getAttribute('data-move'), 'on');
+  assert.equal(
+    harness.control('[data-map-arrange-state]').hidden,
+    false,
+    '“Move on” is spelled out'
+  );
+
+  arrange.click();
+  assert.equal(panel.hidden, true);
+  assert.equal(arrange.getAttribute('aria-expanded'), 'false');
+  assert.equal(arrange.getAttribute('data-move'), 'on', 'closing Arrange does not hide the mode');
+  assert.equal(move.getAttribute('aria-pressed'), 'true', 'or change it');
+
+  // A refresh re-mount renders the same truth into fresh markup.
+  mountWithCamera(map, harness, [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ]);
+  assert.match(harness.container.innerHTML, /data-map-arrange[^>]*data-move="on"/);
+  assert.equal(patches.length, 0, 'none of this wrote anything');
+});
+
+test('help and Arrange are exclusive, survive a re-mount, and Escape returns focus to the trigger', async () => {
+  const { map, harness } = await mountedDrag({ enableDrag: false });
+  const arrange = harness.control('[data-map-arrange]');
+  const help = harness.control('[data-map-help]');
+  const arrangePanel = harness.control('[data-map-arrange-panel]');
+  const helpPanel = harness.control('[data-map-help-panel]');
+
+  arrange.click();
+  help.click();
+  assert.equal(arrangePanel.hidden, true, 'opening help closes Arrange');
+  assert.equal(helpPanel.hidden, false);
+  assert.equal(arrange.getAttribute('aria-expanded'), 'false');
+  assert.equal(help.getAttribute('aria-expanded'), 'true');
+
+  // Home re-mounts on nearly every refresh; the open disclosure is re-rendered open.
+  mountWithCamera(map, harness, [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ]);
+  const html = harness.container.innerHTML;
+  assert.match(html, /id="wsMapHelpPanel" data-map-help-panel role="region"/, 'still open');
+  assert.match(html, /data-map-help aria-controls="wsMapHelpPanel" aria-expanded="true"/);
+  assert.match(
+    html,
+    /id="wsMapArrangePanel" data-map-arrange-panel role="group" aria-label="Arrange buildings" hidden/
+  );
+
+  let stopped = 0;
+  const focusBefore = help.focusCount;
+  harness
+    .control('[data-map-dock]')
+    .on.keydown(keyEvent('Escape', { stopPropagation: () => (stopped += 1) }));
+  assert.equal(helpPanel.hidden, true, 'Escape closes the open disclosure');
+  assert.equal(help.focusCount, focusBefore + 1, 'and focus goes back to its trigger');
+  assert.equal(stopped, 1, 'one Escape closes one thing');
+
+  harness
+    .control('[data-map-dock]')
+    .on.keydown(keyEvent('Escape', { stopPropagation: () => (stopped += 1) }));
+  assert.equal(stopped, 1, 'with nothing open, Escape is left for others');
+});
+
+test('an active drag keeps Escape ahead of closing Arrange', async () => {
+  const { harness } = await mountedDrag();
+  const arrange = harness.control('[data-map-arrange]');
+  const panel = harness.control('[data-map-arrange-panel]');
+  arrange.click();
+  assert.equal(panel.hidden, false);
+
+  const tile = harness.tile('ws-1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(100, 80));
+  assert.equal(tile.classList.contains('is-dragging'), true);
+
+  panel.on.keydown(keyEvent('Escape'));
+  assert.equal(panel.hidden, false, 'the drag, not the panel, owns this Escape');
 });
 
 test('an empty group says what its ground is for, in screen space, and Home does not', () => {

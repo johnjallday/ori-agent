@@ -92,6 +92,8 @@ test('#346 Reset layout clears the arrangement, keeps the colours, and Undo rest
   await expect(sizedDistrict).toHaveClass(/ws-map-accent-moss/);
 
   // FR-186: Reset clears geometry and collapse, and keeps every chosen preset.
+  // Home's Reset layout lives under Arrange in the bottom-left dock.
+  await page.locator('[data-map-arrange]').click();
   await page.locator('[data-map-reset-layout]').click();
   await page.waitForTimeout(800);
 

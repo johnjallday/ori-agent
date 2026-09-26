@@ -146,7 +146,8 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect
       .poll(async () => page.evaluate(() => window.OriWorkspaceMap?.getCamera?.()?.zoom ?? null))
       .not.toBeNull();
-    const strip = page.locator('.ws-map-actions');
+    // Home's bottom-left control dock is the strip now.
+    const strip = page.locator('.ws-map-control-dock');
     await expect(strip).toBeVisible();
     const siteBox = await site.boundingBox();
     const stripBox = await strip.boundingBox();

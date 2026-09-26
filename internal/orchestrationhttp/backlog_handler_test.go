@@ -89,6 +89,25 @@ func TestBacklogHandler_CreateAndList(t *testing.T) {
 		}
 	})
 
+	// Home's Quick Capture posts exactly this body. Before the source was on the
+	// ticket allowlist, every Home capture came back 400.
+	t.Run("home quick capture keeps its provenance", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/orchestration/backlog",
+			strings.NewReader(`{"workspace_id":"`+ws.ID+`","description":"Book the venue","details":"for June","source_type":"home_quick_capture"}`))
+		rec := httptest.NewRecorder()
+		bh.BacklogListHandler(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+		}
+		var created backlogItemEnvelope
+		if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if created.Item.Task.SourceType != workspace.BacklogSourceHomeQuickCapture {
+			t.Fatalf("SourceType = %q, want %q", created.Item.Task.SourceType, workspace.BacklogSourceHomeQuickCapture)
+		}
+	})
+
 	t.Run("list requires workspace_id", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/orchestration/backlog", nil)
 		rec := httptest.NewRecorder()

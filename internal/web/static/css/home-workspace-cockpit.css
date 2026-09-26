@@ -29,14 +29,16 @@
  * Workspace area
  * ----------------------------------------------------------------------- */
 
-/* Four explicit rows: header, signal filters, the Quick Capture disclosure,
-   then the Map/Tree slot as the only flexible one. Every non-flexible row must
-   be declared — when the filters sat on an implicit track they collapsed to
-   0px, so the chips overlapped the map and could not be clicked. Quick Capture
-   moved into this area with its button (FR88/FR101) and needs the same. */
+/* Two explicit rows: the header zone (which also carries the signal filters
+   in its readout row) and the Map/Tree slot as the only flexible one. Every
+   non-flexible row must be declared — when the filters sat on an implicit
+   track they collapsed to 0px, so the chips overlapped the map and could not
+   be clicked. Quick Capture used to take a row here and push the map down
+   whenever it opened; it is a dialog now, so nothing between the header and
+   the map ever changes size. */
 .cockpit-workspace-area {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
   min-height: 0;
@@ -58,19 +60,119 @@
   position: relative;
 }
 
+/* Two rows (dashboard.tmpl): identity + actions, then the quieter readout row.
+   Every header control shares one height so the rows read as rows rather than
+   a ragged line of differently sized chips; touch pointers get the full 44px.
+   Both rows wrap deliberately — groups move down whole rather than clipping a
+   label or pushing the page sideways (FR135). */
 .cockpit-area-header {
+  --cockpit-control-h: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 14px 0;
+}
+
+@media (pointer: coarse) {
+  .cockpit-area-header {
+    --cockpit-control-h: 44px;
+  }
+}
+
+.cockpit-area-main {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 11px 14px 0;
+  gap: 10px 16px;
+  min-width: 0;
+}
+
+.cockpit-area-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  min-width: 0;
+}
+
+.cockpit-area-actions,
+.cockpit-area-actions__secondary,
+.cockpit-area-actions__create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cockpit-area-actions {
+  gap: 8px 12px;
+}
+
+/* Creation is its own group: a rule before it separates "make something" from
+   the capture and Summary actions without adding another visual weight. */
+.cockpit-area-actions__create {
+  padding-left: 12px;
+  border-left: 1px solid var(--hc-line);
+}
+
+/* Vertical padding is zeroed on purpose: common.css enlarges .modern-btn-sm's
+   padding on small screens, which made these 41px beside 32px neighbours. The
+   shared min-height (44px on touch) is what guarantees the target size. */
+.cockpit-area-actions .modern-btn {
+  justify-content: center;
+  min-height: var(--cockpit-control-h);
+  padding: 0 12px;
+  /* The cockpit's square-cut frame rather than the app-wide pill, so actions
+     and readouts read as one header (3.4). Ask Ori keeps its pill on purpose:
+     it is a different role. */
+  border-radius: 2px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* The app-wide primary gradient ends at #2a8762, where white text is about
+   4.4:1. Home's primary creation actions sit on the gradient's darker end as
+   a solid fill instead (6.4:1). */
+.cockpit-area-actions .modern-btn-primary,
+.cockpit-map .cockpit-empty-map-actions .modern-btn-primary {
+  background: #1f6b4e;
+  color: #fff;
+}
+
+.cockpit-area-actions .modern-btn-primary:hover,
+.cockpit-map .cockpit-empty-map-actions .modern-btn-primary:hover {
+  background: #175a41;
+}
+
+/* On a phone-width cockpit the groups wrap under each other; a divider left at
+   the start of a wrapped line reads as a stray rule, so it goes. */
+@container cockpit (max-width: 560px) {
+  .cockpit-area-actions__create {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+/* The readout row: App Guide and filters on the left (clear of the personal
+   assistant panel, which opens over the right), Updates/Quests/resources on
+   the right. A hairline marks it as subordinate to the row above. */
+.cockpit-area-utility {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--hc-line) 70%, transparent);
 }
 
 .cockpit-area-eyebrow {
   display: block;
   color: var(--hc-signal);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -86,11 +188,16 @@
   text-transform: uppercase;
 }
 
+/* Right-aligned even when the filters beside it are hidden (Tree, loading), so
+   the readouts keep one stable home. */
 .cockpit-area-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
+  margin-left: auto;
 }
 
 .cockpit-view-toggle {
@@ -102,12 +209,13 @@
 /* Sentence case: switching the view is an action. See .cockpit-area-eyebrow
    above for the labels that keep uppercase. */
 .cockpit-view-btn {
-  padding: 5px 12px;
+  min-width: 52px;
+  padding: 0 12px;
   border: 0;
   background: transparent;
   color: var(--hc-ink-dim);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.2px;
   cursor: pointer;
@@ -141,63 +249,97 @@
    Every color is an --hc-* token, so both themes come for free — none of these
    values may be hardcoded, and --border-light in particular inverts between
    themes and is not used anywhere in this block. */
+/* One compact group, three segments: Craft | Harvest | Energy. A single frame
+   instead of three separate plates keeps the resources reading as one readout
+   rather than three more buttons competing with the actions above. */
 .cockpit-economy {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.cockpit-economy__chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  padding: 5px 10px;
+  align-items: stretch;
   border: 1px solid var(--hc-line);
   background: var(--hc-panel-deep);
+}
+
+.cockpit-economy__chip,
+.cockpit-economy__energy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--cockpit-control-h, 32px);
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--hc-ink);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.2px;
   white-space: nowrap;
   cursor: help;
 }
 
+.cockpit-economy > button + button {
+  border-left: 1px solid var(--hc-line);
+}
+
 .cockpit-economy__chip:hover,
 .cockpit-economy__energy:hover {
-  border-color: var(--hc-line-bright);
+  background: color-mix(in srgb, var(--hc-signal) 8%, transparent);
 }
 
 .cockpit-economy__chip:focus-visible,
 .cockpit-economy__energy:focus-visible {
+  position: relative;
+  z-index: 1;
   outline: 2px solid var(--hc-signal);
   outline-offset: 2px;
 }
 
-/* The open element keeps its state visible while its panel is up. */
+/* The open element keeps its state visible while its panel is up: a tint AND
+   an underline, so it never rests on color alone. */
 .cockpit-economy__chip[aria-expanded="true"],
 .cockpit-economy__energy[aria-expanded="true"] {
-  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 16%, transparent);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
 }
 
 .cockpit-economy__chip-label {
   color: var(--hc-ink-dim);
+  font-weight: 500;
 }
 
 .cockpit-economy__chip-value {
   color: var(--hc-ink);
   font-size: 12px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-/* One accent per resource, matching what earns it: Craft is made by hand
-   (amber), Harvest is grown and collected (moss). The accent is a left edge
-   rather than the text color, so the number keeps full ink contrast. */
-.cockpit-economy__chip[data-economy-chip="craft"] {
-  box-shadow: inset 2px 0 0 var(--hc-amber);
+/* An authoritative zero is real data, so it stays on screen as "0" — just
+   quieter than a balance that is actually doing something. (An UNAVAILABLE
+   economy hides the whole group instead; it never reads as a zero.) */
+.cockpit-economy__chip-value[data-zero="true"],
+.cockpit-economy__energy[data-idle="true"] .cockpit-economy__energy-text {
+  color: var(--hc-ink-dim);
+  font-weight: 500;
 }
 
-.cockpit-economy__chip[data-economy-chip="harvest"] {
-  box-shadow: inset 2px 0 0 var(--hc-signal);
+/* One accent per resource, matching what earns it: Craft is made by hand
+   (amber), Harvest is grown and collected (moss). The accent is a small mark
+   before the label rather than the text color, so the number keeps its full
+   ink contrast. */
+.cockpit-economy__chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 1px;
+  background: var(--hc-amber);
+}
+
+.cockpit-economy__chip[data-economy-chip="harvest"]::before {
+  background: var(--hc-signal);
 }
 
 /* A resource arriving is worth a glance, not an interruption: no toast for
@@ -222,22 +364,12 @@
   }
 }
 
-/* Energy bar (FR31): 120px of track, filled against the user's daily figure.
-   A button like its neighbours, but with no plate of its own — the bar is the
-   affordance. */
-.cockpit-economy__energy {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  cursor: help;
-}
-
+/* Energy bar (FR31): a short track filled against the user's daily figure,
+   always labelled "Energy" so the percentage beside it is never an unnamed
+   number. It shares the segment styling above. */
 .cockpit-economy__energy-track {
   display: block;
-  width: 120px;
+  width: 64px;
   height: 6px;
   overflow: hidden;
   border: 1px solid var(--hc-line);
@@ -259,10 +391,10 @@
 }
 
 .cockpit-economy__energy-text {
-  color: var(--hc-ink-dim);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
-  font-weight: 600;
+  color: var(--hc-ink);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -272,20 +404,19 @@
   }
 }
 
-/* On a narrow header the labels are the first thing to go: the accent edge and
-   the title attribute still say which number is which. */
-@media (max-width: 900px) {
-  .cockpit-economy__chip-label {
+/* On a narrower cockpit the bar collapses to its percentage (PRD §6). The
+   labels stay: the header wraps instead, so no number is ever left unnamed. */
+@container cockpit (max-width: 1100px) {
+  .cockpit-economy__energy-track {
     display: none;
   }
 }
 
-/* Narrower still: the bar collapses to its percentage label (PRD §6). The
-   number is the part that carries meaning; 120px of track is the part that does
-   not fit. */
-@media (max-width: 1200px) {
-  .cockpit-economy__energy-track {
-    display: none;
+@supports not (container-type: inline-size) {
+  @media (max-width: 1200px) {
+    .cockpit-economy__energy-track {
+      display: none;
+    }
   }
 }
 
@@ -296,16 +427,18 @@
 }
 
 /* The resource help panel.
-   Anchored under the HUD in the header zone, which is already
-   position: relative for the Updates/Quests flyouts — so this uses the same
-   containing block and the same non-modal, dismiss-on-outside-click behavior. */
+   Anchored under the readout row on the right, where the resources live, in the
+   header zone — already position: relative for the Updates/Quests flyouts — so
+   it uses the same containing block, opens over the map rather than pushing
+   it, and keeps the same non-modal, dismiss-on-outside-click behavior. */
 .cockpit-economy-help {
   position: absolute;
-  top: calc(100% - 4px);
-  left: 12px;
+  top: 100%;
+  right: 14px;
   z-index: 40;
   width: 320px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100% - 28px);
+  margin-top: 8px;
   padding: 12px 14px;
   border: 1px solid var(--hc-line-bright);
   background: var(--hc-panel-raised);
@@ -406,15 +539,22 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
+  min-height: var(--cockpit-control-h, 32px);
+  padding: 0 12px;
   border: 1px solid var(--hc-line);
   background: var(--hc-panel-deep);
   color: var(--hc-ink-dim);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.2px;
+  white-space: nowrap;
   cursor: pointer;
+}
+
+.cockpit-flyout-toggle:hover {
+  border-color: var(--hc-line-bright);
+  color: var(--hc-ink);
 }
 
 .cockpit-flyout-toggle[aria-expanded="true"] {
@@ -460,6 +600,13 @@
 
 .cockpit-flyout-toggle--quests .cockpit-flyout-toggle__summary:empty {
   display: none;
+}
+
+/* Every quest done is an achievement, not a call to action: the text ("All
+   complete") stays, the signal color steps back so it stops drawing the eye. */
+.cockpit-flyout-toggle--quests[data-complete="true"] .cockpit-flyout-toggle__summary {
+  color: var(--hc-ink-dim);
+  font-weight: 600;
 }
 
 /* --------------------------------------------------------------------------
@@ -571,8 +718,26 @@
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  padding: 12px;
+  padding: 12px 12px calc(12px + var(--home-assistant-clearance, 0px));
   overflow-y: auto;
+}
+
+/* On a narrow screen the personal assistant's fixed launcher spans the bottom
+   of the viewport, and a flyout that runs to the end of the page ends beneath
+   it. This much extra scroll room lets the last row scroll clear of it rather
+   than staying permanently covered. Wider screens need none. */
+@media (max-width: 760px) {
+  body.home-command-page {
+    /* Home's compact launcher (ori-guide.css) is at most ~56px tall, plus its
+       12px margin. */
+    --home-assistant-clearance: 80px;
+  }
+
+  /* The same room below the page, so scrolling to the end brings the map's
+     bottom-left dock up clear of the launcher instead of parking it under it. */
+  body.home-command-page .home-command-main {
+    padding-bottom: calc(14px + var(--home-assistant-clearance));
+  }
 }
 
 .cockpit-flyout-body > * {
@@ -599,11 +764,13 @@
  * Signal filters (FR31-FR34)
  * ----------------------------------------------------------------------- */
 
+/* The filters sit at the start of the header's readout row; the row supplies
+   the horizontal padding. */
 .cockpit-signal-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 14px;
+  min-width: 0;
 }
 
 .cockpit-signal-filters[hidden] {
@@ -616,22 +783,39 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 9px;
+  min-height: var(--cockpit-control-h, 32px);
+  padding: 0 10px;
   border: 1px solid var(--hc-line);
   background: var(--hc-panel-deep);
   color: var(--hc-ink-dim);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9.5px;
+  font-size: 11px;
   letter-spacing: 0.2px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-/* The active filter is marked by a filled chip AND a leading check glyph, so
-   it never depends on color alone (FR131). */
+.cockpit-signal-chip:hover {
+  border-color: var(--hc-line-bright);
+  color: var(--hc-ink);
+}
+
+/* Nothing matches: still a working filter, just not asking for attention.
+   The frame steps back; the text keeps AA contrast (--hc-ink-dim). */
+.cockpit-signal-chip[data-zero="true"]:not([aria-pressed="true"]) {
+  border-color: color-mix(in srgb, var(--hc-line) 60%, transparent);
+  background: transparent;
+}
+
+/* The active filter is marked by a filled chip, a heavier frame, AND a leading
+   check glyph, so it never depends on color alone (FR131) — including when
+   its count is zero. */
 .cockpit-signal-chip[aria-pressed="true"] {
   border-color: var(--hc-signal);
   background: color-mix(in srgb, var(--hc-signal) 16%, var(--hc-panel));
+  box-shadow: inset 0 -2px 0 var(--hc-signal);
   color: var(--hc-ink);
+  font-weight: 600;
 }
 
 .cockpit-signal-chip[aria-pressed="true"] .cockpit-signal-label::before {
@@ -644,14 +828,26 @@
 }
 
 .cockpit-signal-count {
+  min-width: 18px;
   padding: 0 4px;
   border: 1px solid var(--hc-line);
   color: var(--hc-ink);
   font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
+.cockpit-signal-chip[data-zero="true"] .cockpit-signal-count {
+  border-color: transparent;
+  color: var(--hc-ink-dim);
+  font-weight: 500;
+}
+
+/* Unavailable is not zero: an em dash in a dashed frame. --hc-ink-dim rather
+   than -faint, which falls under 4.5:1 on the light theme's deep panel. */
 .cockpit-signal-count[data-unavailable="true"] {
-  color: var(--hc-ink-faint);
+  border-style: dashed;
+  color: var(--hc-ink-dim);
   font-weight: 400;
 }
 
@@ -667,13 +863,12 @@
   filter: none;
 }
 
-/* Pinned to the flexible track rather than trusting source order. Quick Capture
-   sits above this and is `hidden` almost always, and a display:none element is
-   not a grid item — so auto-placement slid the body up onto an `auto` row and
-   left the minmax(0, 1fr) row empty below it. The map then fell back to its
-   320px min-height with the rest of the panel blank. */
+/* Pinned to the flexible track rather than trusting source order: when a
+   hidden element sat above this row, auto-placement slid the body onto an
+   `auto` row and left the minmax(0, 1fr) row empty below it, and the map fell
+   back to its 320px min-height with the rest of the panel blank. */
 .cockpit-area-body {
-  grid-row: 4;
+  grid-row: 2;
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -726,29 +921,150 @@
    steps attached to the canvas without turning the rest of this overlay into
    a pointer-blocking sheet. The top-left placement stays clear of the compass,
    bottom control clusters, and the centrally framed Personal HQ landmark. */
+/* home-workspace-map-ui-refresh 3.2: the same two actions, now a small
+   invitation card — a heading that says what they are for, an optional line
+   of context (the HQ-only map), and the buttons. Still no sheet: only the
+   buttons take the pointer, so dragging across the card still pans. */
 .cockpit-map .cockpit-empty-map-actions {
   position: absolute;
   top: 14px;
   left: 16px;
   z-index: 8;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
-  max-width: calc(100% - 88px);
-  padding: 6px;
+  max-width: min(340px, calc(100% - 88px));
+  padding: 10px 12px;
   border: 1px solid var(--hc-line);
-  background: color-mix(in srgb, var(--hc-panel-raised) 92%, transparent);
+  background: color-mix(in srgb, var(--hc-panel-raised) 94%, transparent);
   box-shadow: var(--hc-shadow);
   pointer-events: none;
 }
 
-.cockpit-map .cockpit-empty-map-actions > button {
+.cockpit-empty-map-title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.cockpit-empty-map-detail {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cockpit-empty-map-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cockpit-map .cockpit-empty-map-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 2px;
+  font-size: 12.5px;
   pointer-events: auto;
 }
 
-.cockpit-map .cockpit-empty-map-actions > button:focus-visible {
+.cockpit-map .cockpit-empty-map-actions button:focus-visible {
   outline: 2px solid var(--hc-signal);
   outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .cockpit-map .cockpit-empty-map-actions button {
+    min-height: 44px;
+  }
+}
+
+/* On a phone-width cockpit the card spans the map, so it stays one heading
+   and one row of buttons; the optional context line goes. That keeps it clear
+   of the framed HQ below it, and of the compass beside it. */
+@container cockpit (max-width: 560px) {
+  .cockpit-map .cockpit-empty-map-actions {
+    gap: 6px;
+    max-width: calc(100% - 72px);
+    padding: 8px 10px;
+  }
+
+  .cockpit-empty-map-detail {
+    display: none;
+  }
+
+  .cockpit-empty-map-buttons {
+    gap: 6px;
+  }
+
+  .cockpit-map .cockpit-empty-map-actions button {
+    padding: 0 9px;
+    font-size: 12px;
+  }
+}
+
+/* Home map labels (3.3): the same artwork, with metadata that can be read.
+   The mode line used --ws-ink-faint at 9px, about 3:1 on the map in either
+   theme; --ws-ink-dim clears 4.5:1 in both. Sizes grow a step, not a scale,
+   so tile boxes, hit areas, and Fit all bounds are unchanged. */
+.cockpit-map .ws-map-tile-flag {
+  font-size: 10px;
+}
+
+/* The dock's zoom readout is a measurement people read, not decoration. */
+.cockpit-map .ws-map-zoom {
+  color: var(--ws-ink-dim);
+}
+
+.cockpit-map .ws-map-tile-type {
+  color: var(--ws-ink-dim);
+  font-size: 10px;
+}
+
+.cockpit-map .ws-map-tile-meta {
+  color: var(--ws-ink);
+  font-size: 10.5px;
+}
+
+/* The Personal HQ reads as the capital: its name in Home's text-safe amber
+   (--hc-amber: 5:1+ on the map in light, far more in dark), a larger badge,
+   and a warm ground glow on the built HQ's existing artwork. */
+.cockpit-map .ws-map-tile.is-hq .ws-map-tile-name,
+.cockpit-map .ws-map-hq-site .ws-map-tile-name {
+  color: var(--hc-amber);
+}
+
+.cockpit-map .ws-map-tile-hq-badge {
+  padding: 1px 6px;
+  font-size: 10px;
+}
+
+[data-bs-theme="light"] .cockpit-map .ws-map-tile-hq-badge {
+  border-color: var(--hc-amber);
+  background: var(--ws-field-bg);
+  color: var(--hc-amber);
+}
+
+.cockpit-map .ws-map-tile.is-hq .ws-map-struct {
+  filter: drop-shadow(0 12px 12px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 12px rgba(232, 181, 75, 0.3));
+}
+
+[data-bs-theme="light"] .cockpit-map .ws-map-tile.is-hq .ws-map-struct {
+  filter: var(--ws-struct-shadow) drop-shadow(0 0 12px rgba(138, 90, 21, 0.28));
+}
+
+/* The status flag and the HQ badge share the tile's top-right corner, and at
+   readable sizes they collide. The flag steps left instead of shrinking: past
+   the badge on the built HQ (the bulk-select box owns the top-left there), and
+   to the left edge on the unbuilt site, which has no bulk-select box. */
+.cockpit-map .ws-map-tile.is-hq .ws-map-tile-flag {
+  right: 42px;
+}
+
+.cockpit-map .ws-map-hq-site .ws-map-tile-flag {
+  right: auto;
+  left: 0;
 }
 
 /* On a narrow screen, the HQ landmark, creation group, and two map-control
@@ -757,7 +1073,9 @@
    hiding content; populated Map and Tree sizing remains unchanged. */
 @media (max-width: 700px) {
   .home-cockpit[data-state="empty-map"] .cockpit-area-body,
-  .home-cockpit[data-state="empty-map"] .cockpit-map {
+  .home-cockpit[data-state="empty-map"] .cockpit-map,
+  .home-cockpit[data-invitation="hq-only"] .cockpit-area-body,
+  .home-cockpit[data-invitation="hq-only"] .cockpit-map {
     min-height: 520px;
   }
 }
@@ -1240,15 +1558,16 @@ body.home-command-page .ori-guide__launcher {
   outline-offset: 2px;
 }
 
-.cockpit-view-btn,
-.cockpit-signal-chip,
 .cockpit-tree-action,
 .cockpit-tree-caret {
   min-height: 24px;
 }
 
+/* Header controls share one height (see .cockpit-area-header): 32px, or the
+   full 44px on a touch pointer. */
+.cockpit-view-btn,
 .cockpit-area-controls button {
-  min-height: 28px;
+  min-height: var(--cockpit-control-h, 32px);
 }
 
 @media (max-width: 575.98px), (max-height: 620px) {
@@ -1291,7 +1610,9 @@ body.home-command-page .ori-guide__launcher {
   .home-cockpit *::before,
   .home-cockpit *::after,
   .cockpit-context-modal,
-  .cockpit-context-modal * {
+  .cockpit-context-modal *,
+  .cockpit-capture-modal,
+  .cockpit-capture-modal * {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
@@ -1804,43 +2125,130 @@ body.home-command-page .ori-guide__launcher {
   font-size: 11px;
 }
 
-.cockpit-capture[hidden] {
-  display: none;
+/* --------------------------------------------------------------------------
+ * Quick Capture dialog (home-workspace-map-ui-refresh group 4)
+ *
+ * Bootstrap owns dialog semantics, focus containment, Escape, the backdrop,
+ * and body scrolling, exactly as for the context modal above; these rules
+ * give it the cockpit's visual language and a compact, responsive size. On a
+ * short or narrow screen the body scrolls inside the dialog while the header
+ * (with Close) and the footer (with Add to backlog) stay reachable.
+ * ----------------------------------------------------------------------- */
+
+.cockpit-capture-modal {
+  --bs-modal-width: 520px;
+  --bs-modal-margin: 1rem;
 }
 
-/* Quick Capture is a workspace-area row beneath the header, separate from
-   blocking context and its independently scrolling body. */
-.cockpit-capture {
-  margin: 0 14px;
-  padding: 10px 12px;
-  border: 1px solid var(--hc-line);
-  background: var(--hc-panel-raised);
+.cockpit-capture-modal .modal-dialog {
+  max-width: min(var(--bs-modal-width), calc(100vw - 2rem));
 }
 
-.cockpit-capture[hidden] {
-  display: none;
+.cockpit-capture-modal__content {
+  max-height: calc(100dvh - 2rem);
+  border: 1px solid var(--hc-line) !important;
+  border-radius: 2px;
+  background: var(--cozy-paper-raised, #fff) !important;
+  color: var(--hc-ink);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 42%) !important;
+  backdrop-filter: none !important;
 }
 
-.cockpit-capture-form {
+.cockpit-capture-modal__header {
+  align-items: flex-start;
+  gap: 16px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--hc-line) !important;
+  background: var(--cozy-paper, #f4efe3) !important;
+  backdrop-filter: none !important;
+}
+
+.cockpit-capture-modal__heading {
+  min-width: 0;
+}
+
+.cockpit-capture-modal__title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+}
+
+.cockpit-capture-modal__title:focus {
+  outline: none;
+}
+
+.cockpit-capture-modal__title:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 3px;
+}
+
+/* The destination is always spelled out: Quick Capture has exactly one, and
+   a selected workspace elsewhere never changes it. */
+.cockpit-capture-modal__destination {
+  margin: 4px 0 0;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.2px;
+}
+
+.cockpit-capture-modal__body {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.cockpit-capture-label {
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cockpit-capture-optional {
+  color: var(--hc-ink-dim);
+  font-weight: 400;
+}
+
+.cockpit-capture-title,
+.cockpit-capture-details {
+  width: 100%;
+  font-size: 14px;
+}
+
+.cockpit-capture-title[aria-invalid="true"] {
+  border-color: var(--hc-alert) !important;
+}
+
+.cockpit-capture-details {
+  min-height: 96px;
+  resize: vertical;
+}
+
+/* A disclosure, not a second primary action: text-weight, with its state in
+   aria-expanded and in the words ("Add details" / "Hide details"). */
+.cockpit-capture-details-toggle {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hc-signal);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.cockpit-capture-details-group {
   display: grid;
   gap: 6px;
 }
 
-.cockpit-capture-label {
-  color: var(--hc-ink-dim);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9.5px;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-}
-
-.cockpit-capture-details {
-  resize: vertical;
-}
-
-.cockpit-capture-actions {
-  display: flex;
-  gap: 6px;
+.cockpit-capture-details-group[hidden] {
+  display: none;
 }
 
 .cockpit-capture-status:empty {
@@ -1849,17 +2257,192 @@ body.home-command-page .ori-guide__launcher {
 
 .cockpit-capture-status {
   margin: 0;
-  color: var(--hc-ink-faint);
-  font-size: 11px;
+  color: var(--hc-ink-dim);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+/* Errors are stated in words and marked with a rule, not by colour alone. */
+.cockpit-capture-status[data-kind="error"],
+.cockpit-capture-status[data-kind="invalid"] {
+  padding-left: 8px;
+  border-left: 3px solid var(--hc-alert);
+  color: var(--hc-ink);
 }
 
 .cockpit-capture-hq {
+  min-height: 32px;
+  padding: 0;
   border: 0;
   background: none;
   color: var(--hc-signal);
-  font-size: 11px;
+  font-size: 12.5px;
+  font-weight: 600;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.cockpit-capture-modal__footer {
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--hc-line) !important;
+  background: transparent !important;
+}
+
+.cockpit-capture-modal__footer .modern-btn {
+  justify-content: center;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 14px;
+  border-radius: 2px;
+  font-size: 13px;
+}
+
+.cockpit-capture-modal__footer .modern-btn-primary {
+  background: #1f6b4e;
+  color: #fff;
+}
+
+.cockpit-capture-modal__footer .modern-btn-primary:hover:not(:disabled) {
+  background: #175a41;
+}
+
+.cockpit-capture-modal__footer .modern-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cockpit-capture-modal .btn-close {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+[data-bs-theme="dark"] .cockpit-capture-modal .cockpit-capture-modal__content {
+  background: var(--cozy-paper-raised, #303337) !important;
+}
+
+[data-bs-theme="dark"] .cockpit-capture-modal .cockpit-capture-modal__header {
+  background: var(--cozy-paper, #26282b) !important;
+}
+
+[data-bs-theme="dark"] .cockpit-capture-modal .btn-close {
+  filter: var(--bs-btn-close-white-filter);
+}
+
+.cockpit-capture-modal button:focus-visible,
+.cockpit-capture-modal input:focus-visible,
+.cockpit-capture-modal textarea:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
+@media (max-width: 575.98px), (max-height: 620px) {
+  .cockpit-capture-modal {
+    --bs-modal-margin: 0.5rem;
+  }
+
+  .cockpit-capture-modal .modal-dialog {
+    max-width: none;
+    margin: 0.5rem;
+  }
+
+  .cockpit-capture-modal__content {
+    max-height: calc(100dvh - 1rem);
+  }
+}
+
+@media (pointer: coarse) {
+  .cockpit-capture-modal__footer .modern-btn,
+  .cockpit-capture-details-toggle,
+  .cockpit-capture-hq,
+  .cockpit-capture-modal .btn-close {
+    min-height: 44px;
+  }
+
+  .cockpit-capture-modal .btn-close {
+    min-width: 44px;
+  }
+}
+
+/* The success receipt: over the top of the map area, centred, so it never
+   shifts layout and never lands in the assistant's bottom-right corner. */
+.cockpit-capture-receipt {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--hc-signal);
+  background: var(--hc-panel-raised);
+  box-shadow: var(--hc-shadow);
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 600;
+  transform: translateX(-50%);
+}
+
+.cockpit-capture-receipt[hidden] {
+  display: none;
+}
+
+/* On a phone-width invited map the add-a-workspace card spans the top of the
+   map, exactly where the receipt would land — and HQ-only is when a new user
+   is most likely to capture something. There the receipt sits low instead,
+   above the (two-row) dock and below the framed HQ. */
+@container cockpit (max-width: 560px) {
+  .home-cockpit[data-invitation="empty"] .cockpit-capture-receipt,
+  .home-cockpit[data-invitation="hq-only"] .cockpit-capture-receipt {
+    top: auto;
+    bottom: 164px;
+  }
+}
+
+.cockpit-capture-receipt::before {
+  content: "✓";
+  color: var(--hc-signal);
+  font-weight: 700;
+}
+
+.cockpit-capture-receipt__link {
+  color: var(--hc-signal);
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cockpit-capture-receipt__link[hidden] {
+  display: none;
+}
+
+.cockpit-capture-receipt__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--hc-line);
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cockpit-capture-receipt__link:focus-visible,
+.cockpit-capture-receipt__close:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .cockpit-capture-receipt__close {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 /* --------------------------------------------------------------------------
