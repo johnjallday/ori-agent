@@ -2,7 +2,6 @@
 # Capture once, report once. The existing runner owns/cleans test sandboxes;
 # this wrapper owns a separate, newly allocated evidence directory.
 set -euo pipefail
-umask 077
 if [[ $# -ne 0 ]]; then
   printf 'Usage: ./scripts/run-unit-tests.sh (RUNNER_OS=macOS selects platform scope)\n' >&2
   exit 2
@@ -15,6 +14,7 @@ case "$parent" in
   /|*$'\n'*|*$'\r'*) printf 'Unsafe unit artifact parent\n' >&2; exit 2 ;;
 esac
 artifacts="$(mktemp -d "$parent/ori-unit.XXXXXX")"
+chmod 700 "$artifacts"
 printf 'Unit artifacts: %q\n' "$artifacts"
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   printf 'artifact-dir=%s\n' "$artifacts" >> "$GITHUB_OUTPUT"
@@ -23,6 +23,8 @@ child=""
 reporter="$artifacts/testtiming"
 scope="not selected"
 package_count=0
+reporter_build_seconds="not completed"
+test_command_seconds="not run"
 
 finish() {
   local test_status="$1" report_status=1 output_status="${2:-0}"
@@ -41,6 +43,7 @@ finish() {
     printf '## Unit tests did not complete\n\nSetup/capture exited %s. See raw artifacts.\n' "$test_status" > "$artifacts/summary.md" || output_status=1
   fi
   printf '\nSelection: %s (%s packages). Full-suite coverage comes from Ubuntu; macOS runs only the platform subset.\n' "$scope" "$package_count" >> "$artifacts/summary.md" || output_status=1
+  printf '\nWall clocks: reporter build %s s; test command %s s (includes compilation). Setup/cache/save and whole job are timed by Actions step/job timers; package durations overlap.\n' "$reporter_build_seconds" "$test_command_seconds" >> "$artifacts/summary.md" || output_status=1
   printf '\nTest command exit status: %s. Reporter exit status: %s. Diagnostic/output status: %s.\n' "$test_status" "$report_status" "$output_status" >> "$artifacts/summary.md" || output_status=1
   cat "$artifacts/summary.md" || output_status=1
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
@@ -80,7 +83,8 @@ run_owned() {
 
 start=$SECONDS
 if run_owned go build -o "$reporter" ./scripts/testtiming > "$artifacts/reporter-build.log" 2>&1; then
-  printf 'reporter_build_seconds=%s\n' "$((SECONDS-start))" > "$artifacts/metadata.txt"
+  reporter_build_seconds="$((SECONDS-start))"
+  printf 'reporter_build_seconds=%s\n' "$reporter_build_seconds" > "$artifacts/metadata.txt"
 else
   status=$?
   finish "$status"
@@ -122,5 +126,6 @@ run_owned bash -c '
     > "$artifacts/events.json" 2> "$artifacts/stderr.txt"
 ' unit-capture "$artifacts" "${packages[@]}" || test_status=$?
 metadata_status=0
-printf 'test_command_seconds=%s\ntest_exit=%s\n' "$((SECONDS-start))" "$test_status" >> "$artifacts/metadata.txt" || metadata_status=1
+test_command_seconds="$((SECONDS-start))"
+printf 'test_command_seconds=%s\ntest_exit=%s\n' "$test_command_seconds" "$test_status" >> "$artifacts/metadata.txt" || metadata_status=1
 finish "$test_status" "$metadata_status"

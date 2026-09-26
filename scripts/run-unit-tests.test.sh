@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-umask 077
 script_dir="$(cd "$(dirname "$0")" && pwd -P)"
 root="$(mktemp -d "${TMPDIR:-/tmp}/ori-unit-wrapper-test.XXXXXX")"
 trap 'rm -rf -- "$root"' EXIT
@@ -33,6 +32,7 @@ case "$1" in
   test)
     printf '%s\n' "$@" > "$TEST_ARGUMENTS"
     printf '%s\n' "$ORI_TEST_RUN_DIR" > "$TEST_SANDBOX"
+    umask > "$TEST_UMASK"
     printf '%s\n' '{"Action":"start","Package":"fixture"}'
     printf 'synthetic compiler diagnostic\n' >&2
     if [[ "${WAIT_FOR_SIGNAL:-0}" -eq 1 ]]; then
@@ -54,7 +54,7 @@ STUB
 chmod +x "$root/reporter" "$root/bin/go" "$root/bin/git" "$root/repo/scripts/"*.sh
 export PATH="$root/bin:$PATH" TEST_REPORTER="$root/reporter"
 export TMPDIR="$root/tmp" ORI_SKIP_CACHE_PRUNE=1 ORI_UNIT_ARTIFACT_PARENT="$root/artifacts"
-export TEST_ARGUMENTS="$root/arguments" TEST_SANDBOX="$root/sandbox" TEST_CHILD_PID="$root/child-pid"
+export TEST_ARGUMENTS="$root/arguments" TEST_SANDBOX="$root/sandbox" TEST_CHILD_PID="$root/child-pid" TEST_UMASK="$root/umask"
 export GITHUB_OUTPUT="$root/outputs" GITHUB_STEP_SUMMARY="$root/summary"
 runner="$root/repo/scripts/run-unit-tests.sh"
 
@@ -63,11 +63,15 @@ check_case() {
   TEST_STATUS="$test_status" REPORT_STATUS="$report_status" "$runner" > "$root/$name.log" 2>&1 || status=$?
   [[ "$status" -eq "$expected" ]] || { printf '%s: status %s, expected %s\n' "$name" "$status" "$expected" >&2; exit 1; }
   grep -q 'Fixture timing summary' "$root/$name.log"
+  grep -q 'Wall clocks: reporter build .* test command .* (includes compilation)' "$root/$name.log"
   local sandbox
   IFS= read -r sandbox < "$TEST_SANDBOX"
   [[ ! -e "$sandbox" ]] || { printf 'Leaked test sandbox\n' >&2; exit 1; }
 }
 check_case success 0 0 0
+expected_umask="$(umask)"
+IFS= read -r actual_umask < "$TEST_UMASK"
+[[ "$actual_umask" == "$expected_umask" ]]
 check_case assertion 17 1 17
 check_case build-test 1 1 1
 check_case timeout 124 1 124

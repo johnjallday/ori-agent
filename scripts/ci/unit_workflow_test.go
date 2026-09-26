@@ -57,8 +57,12 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 	for i, step := range job.Steps {
 		steps[step.Name] = step
 		order[step.Name] = i
-		if step.Name != "Upload coverage to Codecov" && step.ContinueOnError != nil && step.ContinueOnError != false {
-			t.Fatalf("%s hides failure", step.Name)
+		if step.ContinueOnError == true {
+			switch step.Name {
+			case "Restore unit modules", "Restore unit build cache", "Save unit modules", "Save unit build cache", "Preserve unit timing evidence", "Upload coverage to Codecov":
+			default:
+				t.Fatalf("%s hides failure", step.Name)
+			}
 		}
 	}
 	setup := steps["Set up Go"]
@@ -75,6 +79,9 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 	for _, step := range []unitStep{modules, build} {
 		if step.Uses != "actions/cache/restore@v4" {
 			t.Fatal("restore/save must be explicit, not a post-action race")
+		}
+		if step.ContinueOnError != true {
+			t.Fatal("optional cache restore failure must not break test correctness")
 		}
 		key, ok := step.With["key"].(string)
 		if !ok {
@@ -102,7 +109,7 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 	}
 	for _, pair := range [][2]string{{"Save unit modules", "unit_modules"}, {"Save unit build cache", "unit_build"}} {
 		save := steps[pair[0]]
-		if save.Uses != "actions/cache/save@v4" || save.If != "success() && steps.unit.outcome == 'success' && steps."+pair[1]+".outputs.cache-hit != 'true'" {
+		if save.Uses != "actions/cache/save@v4" || save.If != "success() && steps.unit.outcome == 'success' && steps."+pair[1]+".outcome == 'success' && steps."+pair[1]+".outputs.cache-hit != 'true'" || save.ContinueOnError != true {
 			t.Fatal("failed/cancelled tests could publish cache")
 		}
 		if save.With["key"] != "${{ steps."+pair[1]+".outputs.cache-primary-key }}" {
@@ -124,7 +131,7 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 		t.Fatal("Linux coverage upload contract changed")
 	}
 	artifacts := steps["Preserve unit timing evidence"]
-	if artifacts.If != "always() && steps.unit.outputs.artifact-dir != ''" || artifacts.Uses != "actions/upload-artifact@v4" || artifacts.With["retention-days"] != 7 {
+	if artifacts.If != "always() && steps.unit.outputs.artifact-dir != ''" || artifacts.Uses != "actions/upload-artifact@v4" || artifacts.With["retention-days"] != 7 || artifacts.ContinueOnError != true {
 		t.Fatal("timing evidence must survive test failures with bounded retention")
 	}
 	for _, name := range []string{"test-integration", "test-e2e"} {

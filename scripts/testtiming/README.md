@@ -11,13 +11,15 @@ coverage to Codecov. There is no package sharding, new exclusion or test retry.
 
 The wrapper builds the reporter, uses `run-test-command.sh` for sandbox
 ownership/cleanup, and creates a **separate, new, private** `ori-unit.*` evidence
-directory under `ORI_UNIT_ARTIFACT_PARENT`, `RUNNER_TEMP`, or `TMPDIR` (in that
-order). It prints that path and sets the `artifact-dir` action output. It never
-overwrites/removes a caller's directory. Raw JSON, stderr, coverage, package
+directory (mode 0700) under `ORI_UNIT_ARTIFACT_PARENT`, `RUNNER_TEMP`, or
+`TMPDIR` (in that order). It does not change the caller's umask or test
+filesystem permissions. It prints that path and sets the `artifact-dir` action
+output. It never overwrites/removes a caller's directory. Raw JSON, stderr, coverage, package
 selection, metadata and summaries are retained; the reporter executable is not
-uploaded. CI retains evidence artifacts for seven days. Local evidence remains
-at the printed path for inspection and explicit owner cleanup; this is not an
-OS sandbox, and existing tests remain responsible for fixture isolation.
+uploaded. CI attempts evidence-artifact upload for seven days; GitHub storage
+failure is non-gating, while the inline step summary remains. Local evidence
+remains at the printed path for inspection and explicit owner cleanup; this is
+not an OS sandbox, and existing tests remain responsible for fixture isolation.
 
 Successful migration chatter stays in JSON instead of flooding the job log.
 Failed-test and package output gets bounded diagnostic tails, with raw artifacts
@@ -71,6 +73,9 @@ existing behavior. Explicit restore/save actions own two non-overlapping paths:
 as a fallback; it is not the changing weekly `ImageVersion`. Go's own content
 hashing still validates individual build entries. All tests execute freshly.
 Both saves require successful tests **and** reporting, and skip exact-key hits.
+Cache restore/save and evidence-artifact upload are best-effort: service/quota
+failure cannot turn a correct test result into a red check. Saves also require
+a successful restore step, so they cannot run with a missing primary key.
 Failed/cancelled jobs cannot publish partially compiled work. Cache pruning is
 disabled in this ephemeral CI job so it cannot erase restored work before save.
 

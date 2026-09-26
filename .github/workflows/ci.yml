@@ -253,6 +253,7 @@ jobs:
         with:
           path: ${{ steps.unit_cache_identity.outputs.modules }}
           key: ori-unit-mod-v1-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}
+        continue-on-error: true
 
       - name: Restore unit build cache
         id: unit_build
@@ -262,6 +263,7 @@ jobs:
           key: ori-unit-build-v1-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             ori-unit-build-v1-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-
+        continue-on-error: true
 
       - name: Download dependencies
         run: go mod download
@@ -289,18 +291,20 @@ jobs:
       # no privileged workflow_run promotion or cross-workflow restore prefix.
       # Only successful tests AND reporting publish newly compiled work.
       - name: Save unit modules
-        if: success() && steps.unit.outcome == 'success' && steps.unit_modules.outputs.cache-hit != 'true'
+        if: success() && steps.unit.outcome == 'success' && steps.unit_modules.outcome == 'success' && steps.unit_modules.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ steps.unit_cache_identity.outputs.modules }}
           key: ${{ steps.unit_modules.outputs.cache-primary-key }}
+        continue-on-error: true
 
       - name: Save unit build cache
-        if: success() && steps.unit.outcome == 'success' && steps.unit_build.outputs.cache-hit != 'true'
+        if: success() && steps.unit.outcome == 'success' && steps.unit_build.outcome == 'success' && steps.unit_build.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ steps.unit_cache_identity.outputs.build }}
           key: ${{ steps.unit_build.outputs.cache-primary-key }}
+        continue-on-error: true
 
       - name: Preserve unit timing evidence
         if: always() && steps.unit.outputs.artifact-dir != ''
@@ -314,6 +318,7 @@ jobs:
             ${{ steps.unit.outputs.artifact-dir }}/*.log
           retention-days: 7
           if-no-files-found: error
+        continue-on-error: true
 
       # Linux only: Darwin covers only the platform subset, and uploading it
       # under the same flag would look like a spurious coverage drop.
