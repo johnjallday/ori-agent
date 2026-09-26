@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -14,11 +13,7 @@ import (
 
 func TestPersonalHQMailboxLinkStatusUnlink(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
-	if err != nil {
-		t.Fatalf("database.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := newFixtureDatabase(t)
 
 	profiles := userprofile.NewSQLiteStore(db)
 	sessionStore := session.NewSQLiteStore(db)
@@ -96,11 +91,7 @@ func TestPersonalHQMailboxLinkStatusUnlink(t *testing.T) {
 
 func TestPersonalHQMailboxLinkRejectsUnknownAccount(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
-	if err != nil {
-		t.Fatalf("database.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := newFixtureDatabase(t)
 	profiles := userprofile.NewSQLiteStore(db)
 	sessionStore := session.NewSQLiteStore(db)
 	hq := personalhq.NewService(profiles, sessionStore)

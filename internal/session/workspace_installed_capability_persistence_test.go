@@ -1,11 +1,10 @@
 package session
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -35,15 +34,9 @@ func fileJanitorInstall(now time.Time) workspace.InstalledCapability {
 // this, so an install that only reached workspace.json would read back as
 // "not installed" through every SQLite-primary code path.
 func TestWorkspaceInstalledCapabilityPersistence(t *testing.T) {
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
+	db := testdb.Open(t)
 	store := NewHybridStoreWithDB(db, 50)
-	defer func() { _ = store.Close() }()
+	defer cleanupTestOwner(t, store)()
 	adapter := NewWorkspaceStoreAdapter(store)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -136,15 +129,8 @@ func TestWorkspaceInstalledCapabilityPersistence(t *testing.T) {
 // back as nil (no data), never as a phantom install, and never as a non-nil
 // empty slice — the merge and preservation guards distinguish those.
 func TestWorkspaceInstalledCapability_AbsentReadsAsNoData(t *testing.T) {
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	store := NewHybridStoreWithDB(db, 50)
-	defer func() { _ = store.Close() }()
+	store, cleanup := setupHybridStore(t, 50)
+	defer cleanup()
 	adapter := NewWorkspaceStoreAdapter(store)
 
 	now := time.Now().UTC().Truncate(time.Second)

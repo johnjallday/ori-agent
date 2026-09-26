@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/config"
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -273,11 +272,7 @@ func TestUserSetupQuestBindingLocksProtectedTemplateMutations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := database.Open(context.Background(), &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
+	db := newFixtureDatabase(t)
 	store := setupjourney.NewSQLiteStore(db)
 	if _, _, err := store.ClaimUserTemplateBinding(context.Background(), setupjourney.UserTemplateBinding{
 		UserID: "other-user", TemplateID: template.ID,

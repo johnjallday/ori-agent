@@ -5,18 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 )
 
 func setupHybridStore(t *testing.T, cacheSize int) (HybridStore, func()) {
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-
+	t.Helper()
+	db := testdb.Open(t)
 	store := NewHybridStoreWithDB(db, cacheSize)
-	return store, func() { _ = store.Close() }
+	return store, cleanupTestOwner(t, store)
 }
 
 func TestHybridStore_CreateAndGet(t *testing.T) {
