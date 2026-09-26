@@ -7,28 +7,25 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
-// createTestHandler creates a handler with an in-memory store for testing.
+// createTestHandler creates a handler with an isolated database for testing.
 func createTestHandler(t *testing.T) (*Handler, func()) {
 	t.Helper()
 
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-
+	db := testdb.Open(t)
 	store := session.NewHybridStoreWithDB(db, 50)
+	cleanup := cleanupTestHybridStore(t, store)
 	handler := New(store)
 	agentStorePath := filepath.Join(t.TempDir(), "agents.json")
 	agentStore, err := agentstore.NewFileStore(agentStorePath, types.Settings{})
@@ -37,9 +34,21 @@ func createTestHandler(t *testing.T) (*Handler, func()) {
 	}
 	handler.SetAgentStore(agentStore)
 
-	return handler, func() {
-		_ = store.Close()
-	}
+	return handler, cleanup
+}
+
+// Preserve explicit fixture cleanup while also closing on early setup failure.
+// The hybrid store drains/flushes before closing its database; no second owner
+// closes the DB, even when both defer and testing cleanup invoke this function.
+func cleanupTestHybridStore(t *testing.T, store session.HybridStore) func() {
+	t.Helper()
+	cleanup := sync.OnceFunc(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close test hybrid store: %v", err)
+		}
+	})
+	t.Cleanup(cleanup)
+	return cleanup
 }
 
 // TestHandler_CreateSession tests session creation via API.

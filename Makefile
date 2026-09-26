@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-unit-verbose test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-reset-dev test-list-unit-packages test-test-maintenance ci-local ci-local-quick test-ci-local lint lint-fix lint-new lint-js lint-js-fix fmt fmt-js check-js check-wails-modes vet clean clean-test-artifacts prune-test-cache cache-report reset-dev server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
+.PHONY: help build run test test-unit test-unit-verbose test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-reset-dev test-list-unit-packages test-unit-tools test-test-maintenance ci-local ci-local-quick test-ci-local lint lint-fix lint-new lint-js lint-js-fix fmt fmt-js check-js check-wails-modes vet clean clean-test-artifacts prune-test-cache cache-report reset-dev server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
 
 # Default target
 .DEFAULT_GOAL := help
@@ -334,7 +334,10 @@ test-run-test-command: ## Test run-owned sandbox cleanup and opt-outs
 test-list-unit-packages: ## Test the shared unit-package selection contract
 	@./scripts/list-unit-packages.test.sh
 
-test-test-maintenance: test-clean-test-artifacts test-prune-test-cache test-run-test-command test-list-unit-packages ## Test all test-maintenance helpers
+test-unit-tools: ## Test unit timing, orchestration, and workflow contracts
+	$(TEST_RUNNER) go test ./scripts/testtiming ./scripts/ci
+
+test-test-maintenance: test-clean-test-artifacts test-prune-test-cache test-run-test-command test-list-unit-packages test-unit-tools ## Test all test-maintenance helpers
 
 ci-local: ## Run CI's gates locally, in CI's order, with CI's pins (wt pr runs this first); CI_LOCAL_ARGS="--readme" etc.
 	@bash scripts/ci-local.sh $(CI_LOCAL_ARGS)

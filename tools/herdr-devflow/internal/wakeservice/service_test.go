@@ -3,6 +3,7 @@ package wakeservice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -212,10 +213,16 @@ func startTestServer(t *testing.T, service *Service, socket string) (context.Can
 	go func() {
 		errorsChannel <- service.Serve(ctx)
 	}()
+	// Serve creates the socket with Listen and only then narrows it to 0600,
+	// so existence alone would let a caller observe the pre-chmod mode.
 	deadline := time.Now().Add(2 * time.Second)
+	lastMode := "absent"
 	for {
-		if _, err := os.Lstat(socket); err == nil {
-			return cancel, errorsChannel
+		if info, err := os.Lstat(socket); err == nil {
+			if info.Mode().Perm() == 0600 {
+				return cancel, errorsChannel
+			}
+			lastMode = fmt.Sprintf("%04o", info.Mode().Perm())
 		}
 		select {
 		case err := <-errorsChannel:
@@ -225,7 +232,7 @@ func startTestServer(t *testing.T, service *Service, socket string) (context.Can
 		}
 		if time.Now().After(deadline) {
 			cancel()
-			t.Fatal("timed out waiting for wake socket")
+			t.Fatalf("timed out waiting for secured wake socket (last mode %s, want 0600)", lastMode)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

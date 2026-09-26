@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -28,12 +28,13 @@ type folderLinkerFixture struct {
 func newFolderLinkerFixture(t *testing.T) *folderLinkerFixture {
 	t.Helper()
 	root := t.TempDir()
-	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(root, "sessions.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	sessions := session.NewHybridStoreWithDB(db, 10)
-	t.Cleanup(func() { _ = sessions.Close() })
+	t.Cleanup(func() {
+		if err := sessions.Close(); err != nil {
+			t.Errorf("close test sessions: %v", err)
+		}
+	})
 	files, err := workspace.NewFileStore(filepath.Join(root, "workspaces"))
 	if err != nil {
 		t.Fatal(err)

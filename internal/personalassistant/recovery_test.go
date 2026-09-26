@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -52,12 +51,8 @@ func (s recoveryBriefStub) GetConfig(context.Context, string) (*dailybrief.Confi
 
 func newRecoveryStore(t *testing.T) *SQLiteStore {
 	t.Helper()
-	db, err := database.Open(context.Background(), &database.Config{InMemory: true, WALMode: false})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return NewSQLiteStore(db)
+	store, _ := newTestStore(t)
+	return store
 }
 
 func recoveryFixture(t *testing.T) (*RecoveryCoordinator, *SQLiteStore, *recoveryProfilesStub, *recoveryWorkspacesStub, *recoveryHQStub, *recoveryBriefStub) {

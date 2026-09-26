@@ -6,20 +6,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 )
 
 // TestCleanup_InactiveSessions tests cleanup of inactive sessions.
 func TestCleanup_InactiveSessions(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	store := NewHybridStoreWithDB(db, 50)
-	defer func() { _ = store.Close() }()
+	store, cleanup := setupHybridStore(t, 50)
+	defer cleanup()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -79,14 +73,8 @@ func TestCleanup_InactiveSessions(t *testing.T) {
 // TestCleanup_GetInactiveSessions tests getting inactive sessions without deleting.
 func TestCleanup_GetInactiveSessions(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	store := NewHybridStoreWithDB(db, 50)
-	defer func() { _ = store.Close() }()
+	store, cleanup := setupHybridStore(t, 50)
+	defer cleanup()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -119,7 +107,7 @@ func TestCleanup_GetInactiveSessions(t *testing.T) {
 	// Verify the update worked by checking raw count
 	var count int
 	cutoff := time.Now().AddDate(0, 0, -30).Format(time.RFC3339)
-	err = hs.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE updated_at < ?", cutoff).Scan(&count)
+	err := hs.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE updated_at < ?", cutoff).Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to count old sessions: %v", err)
 	}
@@ -150,11 +138,7 @@ func TestCleanup_GetInactiveSessions(t *testing.T) {
 // TestCleanup_EnforceMaxSessions tests the max sessions limit enforcement.
 func TestCleanup_EnforceMaxSessions(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := testdb.Open(t)
 
 	// Create store with small max sessions config
 	store := &hybridStore{
@@ -167,7 +151,7 @@ func TestCleanup_EnforceMaxSessions(t *testing.T) {
 			MaxTotalSessions: 5,
 		},
 	}
-	defer func() { _ = store.Close() }()
+	defer cleanupTestOwner(t, store)()
 
 	// Create 10 sessions (more than max)
 	for i := 0; i < 10; i++ {
@@ -210,14 +194,8 @@ func TestCleanup_EnforceMaxSessions(t *testing.T) {
 // TestStorageStats tests storage statistics retrieval.
 func TestStorageStats(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	store := NewHybridStoreWithDB(db, 50)
-	defer func() { _ = store.Close() }()
+	store, cleanup := setupHybridStore(t, 50)
+	defer cleanup()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -286,14 +264,8 @@ func TestStorageStats(t *testing.T) {
 // TestCleanup_CacheConsistency tests that cleanup properly updates cache.
 func TestCleanup_CacheConsistency(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	store := NewHybridStoreWithDB(db, 50)
-	defer func() { _ = store.Close() }()
+	store, cleanup := setupHybridStore(t, 50)
+	defer cleanup()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -343,14 +315,8 @@ func TestCleanup_CacheConsistency(t *testing.T) {
 // TestCleanup_WithMessages tests that cleanup also removes associated messages.
 func TestCleanup_WithMessages(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	store := NewHybridStoreWithDB(db, 50)
-	defer func() { _ = store.Close() }()
+	store, cleanup := setupHybridStore(t, 50)
+	defer cleanup()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -381,7 +347,7 @@ func TestCleanup_WithMessages(t *testing.T) {
 
 	// Verify messages exist
 	var msgCount int
-	err = hs.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages WHERE session_id = ?", sess.ID).Scan(&msgCount)
+	err := hs.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM messages WHERE session_id = ?", sess.ID).Scan(&msgCount)
 	if err != nil {
 		t.Fatalf("Failed to count messages: %v", err)
 	}
@@ -412,11 +378,7 @@ func TestCleanup_WithMessages(t *testing.T) {
 // TestEnforceStorageLimits tests the combined storage limit enforcement.
 func TestEnforceStorageLimits(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := testdb.Open(t)
 
 	store := &hybridStore{
 		cache:  NewMemoryCache(50),
@@ -429,7 +391,7 @@ func TestEnforceStorageLimits(t *testing.T) {
 			MaxTotalSessions:     5,
 		},
 	}
-	defer func() { _ = store.Close() }()
+	defer cleanupTestOwner(t, store)()
 
 	// Create sessions
 	for i := 0; i < 10; i++ {
