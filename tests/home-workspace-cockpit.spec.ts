@@ -2004,6 +2004,130 @@ test.describe('Quick Capture dialog', () => {
     await expect(title(page)).toHaveValue('Idea before HQ');
   });
 
+  test('a dialog asked for while capture fades in or out waits for it instead of stacking', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await routeHQ(page, HQ_STATUS);
+    await page.goto('/');
+    const creator = page.locator('#addFolderModal');
+    const askForCreator = () =>
+      page.evaluate(() =>
+        (window as any).bootstrap.Modal.getOrCreateInstance(
+          document.getElementById('addFolderModal')
+        ).show()
+      );
+
+    // Fading out: Escape, then immediately another dialog.
+    await openCapture(page);
+    await page.keyboard.press('Escape');
+    await askForCreator();
+    await expect(creator).toBeVisible();
+    await expect(modal(page)).toBeHidden();
+    await page.waitForTimeout(400);
+    await expect(page.locator('.modal-backdrop')).toHaveCount(1);
+    await expect(page.locator('body')).toHaveClass(/modal-open/);
+    await page.evaluate(() =>
+      (window as any).bootstrap.Modal.getInstance(document.getElementById('addFolderModal')).hide()
+    );
+    await expect(creator).toBeHidden();
+    await noDialogResidue(page);
+
+    // Fading in: open capture and ask for the other dialog in the same beat.
+    await page.locator('#cockpitCaptureBtn').click();
+    await askForCreator();
+    await expect(creator).toBeVisible();
+    await expect(modal(page)).toBeHidden();
+    await page.waitForTimeout(400);
+    await expect(page.locator('.modal-backdrop')).toHaveCount(1);
+    await page.evaluate(() =>
+      (window as any).bootstrap.Modal.getInstance(document.getElementById('addFolderModal')).hide()
+    );
+    await noDialogResidue(page);
+    // Escape still belongs to the header flyouts afterwards.
+    await page.locator('#cockpitRailToggle').click();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
+  });
+
+  test('while setup gates workspaces, capture says so instead of checking forever', async ({
+    page
+  }) => {
+    await page.unroute('**/api/onboarding/status');
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
+    );
+    await page.goto('/');
+    await expect(page.locator('#homeCockpit')).toHaveAttribute(
+      'data-state',
+      'onboarding-unavailable'
+    );
+    await openCapture(page, { ready: false });
+    await title(page).fill('Kept while gated');
+    await expect(page.locator('#cockpitCaptureStatus')).toContainText("aren't available");
+    await expect(page.locator('#cockpitCaptureStatus')).not.toContainText('Checking');
+    await expect(page.locator('#cockpitCaptureSave')).toBeDisabled();
+  });
+
+  test('on an invited map, help opens over the card and a phone receipt stays clear of it', async ({
+    page
+  }) => {
+    await page.route('**/api/workspaces?tree=true', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          folders: [
+            { id: 'hq-mock', name: 'Personal HQ', kind: 'workspace', folder_slug: 'personal-hq' }
+          ]
+        })
+      })
+    );
+    await routeHQ(page, HQ_STATUS);
+    await routeBacklogPosts(page, () => ({ status: 201 }));
+    await page.route('**/api/workspace-map/layout', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          layout: { schema_version: 1, revision: 1, snap_to_grid: true, positions: {} }
+        })
+      })
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    const card = page.locator('.cockpit-empty-map-actions');
+    await expect(card).toHaveAttribute('data-map-invitation', 'hq-only');
+
+    // Help's heading is the topmost thing where it is drawn, card or not.
+    await page.locator('[data-map-help]').click();
+    const heading = page.locator('#wsMapHelpPanel h4');
+    await expect(heading).toBeVisible();
+    const onTop = await heading.evaluate(el => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!hit && el.closest('#wsMapHelpPanel')!.contains(hit);
+    });
+    expect(onTop, 'help is not hidden behind the invitation card').toBe(true);
+    await page.locator('[data-map-help]').click();
+
+    // A capture on this map shows its receipt clear of the card.
+    await openCapture(page);
+    await title(page).fill('First idea');
+    await page.keyboard.press('Enter');
+    const receipt = page.locator('#cockpitCaptureReceipt');
+    await expect(receipt).toBeVisible();
+    const [a, b] = await Promise.all([receipt.boundingBox(), card.boundingBox()]);
+    const overlap =
+      a!.x < b!.x + b!.width &&
+      b!.x < a!.x + a!.width &&
+      a!.y < b!.y + b!.height &&
+      b!.y < a!.y + a!.height;
+    expect(overlap, 'the receipt leaves the invitation readable').toBe(false);
+  });
+
   test('an HQ status that cannot be read is not reported as a missing HQ', async ({ page }) => {
     await ensureWorkspace(page);
     let fail = true;

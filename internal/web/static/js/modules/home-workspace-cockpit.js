@@ -2920,10 +2920,21 @@ import {
     return !!els.captureModal && els.captureModal.classList.contains('show');
   }
 
+  /**
+   * Capture owns the page from the moment its show proceeds until it has
+   * fully hidden — including the fade in (no `.show` class yet) and the fade
+   * out (`.show` already gone). Handoffs key off this, not the class.
+   */
+  function captureIsActive() {
+    return captureOpening || captureVisible || captureIsOpen();
+  }
+
   /** Open Quick Capture (window.OriHomeCockpit.openCapture and the header). */
   function showCaptureModal() {
     const modal = getCaptureModalInstance();
-    if (!modal) return;
+    // Already opening or open: nothing to do — and a close queued during the
+    // fade-in must survive a second activation of the trigger.
+    if (!modal || captureIsActive()) return;
     hideCaptureAfterShow = false;
     // Bootstrap does not stack blocking dialogs. A visible context modal is
     // settled first by the document-level show.bs.modal handoff below.
@@ -2945,8 +2956,13 @@ import {
   /** Close capture, then run `callback` — for a dialog that must not stack. */
   function handoffAfterCaptureHide(callback) {
     pendingCaptureHandoff = callback;
+    if (!captureIsActive()) {
+      runCaptureHandoff();
+      return;
+    }
+    // Opening or open: close it (queued if still fading in). Already fading
+    // out: hidden.bs.modal runs the handoff when it is really gone.
     if (captureIsOpen() || captureOpening) hideCaptureModal();
-    else runCaptureHandoff();
   }
 
   function runCaptureHandoff() {
@@ -2995,9 +3011,19 @@ import {
     if (availability.canSave) {
       // An HQ that just became valid clears its own availability line, but a
       // retained validation or save error stays until the user acts on it.
-      if (['needs-hq', 'checking', 'hq-unavailable'].includes(captureStatusKind)) {
+      if (['needs-hq', 'checking', 'hq-unavailable', 'blocked'].includes(captureStatusKind)) {
         setCaptureStatus('');
       }
+      return;
+    }
+    if (state.hqStatusState === 'blocked') {
+      // The onboarding gate (setup still required, or its status unreadable)
+      // holds every workspace read, the HQ status included, so there is
+      // nothing to check yet — say so instead of "checking" forever.
+      setCaptureStatus(
+        "Your workspaces aren't available until Ori's setup is done, so this can't be added yet. Your text is kept.",
+        'blocked'
+      );
       return;
     }
     if (state.hqStatusState === 'loading') {
@@ -3005,10 +3031,9 @@ import {
       return;
     }
     if (state.hqStatusState === 'error') {
-      captureStatusKind = 'hq-unavailable';
-      els.captureStatus.dataset.kind = captureStatusKind;
-      els.captureStatus.replaceChildren(
-        'Your Personal HQ could not be checked, so this cannot be added yet. Your text is kept. '
+      setCaptureStatus(
+        'Your Personal HQ could not be checked, so this cannot be added yet. Your text is kept. ',
+        'hq-unavailable'
       );
       const retry = document.createElement('button');
       retry.type = 'button';
@@ -3023,9 +3048,7 @@ import {
       els.captureStatus.append(retry);
       return;
     }
-    captureStatusKind = 'needs-hq';
-    els.captureStatus.dataset.kind = captureStatusKind;
-    els.captureStatus.replaceChildren(`${availability.message} `);
+    setCaptureStatus(`${availability.message} `, 'needs-hq');
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'cockpit-capture-hq';
@@ -3180,19 +3203,27 @@ import {
 
     const modal = els.captureModal;
     if (!modal) return;
-    modal.addEventListener('show.bs.modal', () => {
-      captureOpening = true;
-      // A blocking dialog owns the page: header flyouts and resource help go.
-      closePanel({ focus: false });
-      hideEconomyHelp({ restoreFocus: false });
-      hideCaptureReceipt();
-      // A retained draft with details reopens them; collapsing never erased.
-      const hasDetails = !!(els.captureDetails && els.captureDetails.value.trim());
-      setCaptureDetailsOpen(
-        hasDetails || (els.captureDetailsGroup && !els.captureDetailsGroup.hidden)
-      );
-      refreshCaptureAvailability();
-      els.captureBtn?.setAttribute('aria-expanded', 'true');
+    modal.addEventListener('show.bs.modal', event => {
+      // The document-level context handoff may cancel this show as it bubbles
+      // up (it replays it after context closes). Dispatch is synchronous, so
+      // by the next microtask the verdict is final — only a show that really
+      // proceeds counts as opening, or a cancelled one would leave capture
+      // "opening" forever and swallow every Escape.
+      queueMicrotask(() => {
+        if (event.defaultPrevented) return;
+        captureOpening = true;
+        // A blocking dialog owns the page: header flyouts and resource help go.
+        closePanel({ focus: false });
+        hideEconomyHelp({ restoreFocus: false });
+        hideCaptureReceipt();
+        // A retained draft with details reopens them; collapsing never erased.
+        const hasDetails = !!(els.captureDetails && els.captureDetails.value.trim());
+        setCaptureDetailsOpen(
+          hasDetails || (els.captureDetailsGroup && !els.captureDetailsGroup.hidden)
+        );
+        refreshCaptureAvailability();
+        els.captureBtn?.setAttribute('aria-expanded', 'true');
+      });
     });
     modal.addEventListener('shown.bs.modal', () => {
       captureOpening = false;
@@ -3227,7 +3258,12 @@ import {
 
   /** Personal HQ status, used by Quick Capture. Additive and non-blocking. */
   async function refreshHQStatus() {
-    if (!canHydrateWorkspaceData()) return;
+    if (!canHydrateWorkspaceData()) {
+      state.hqStatusState = 'blocked';
+      refreshCaptureAvailability();
+      return;
+    }
+    if (state.hqStatusState === 'blocked') state.hqStatusState = 'loading';
     const hadSite = hqSiteVisible(state.hqStatus);
     const hadInvitation = currentInvitation();
     try {
@@ -3828,7 +3864,7 @@ import {
     if (
       !target ||
       target === els.captureModal ||
-      !captureIsOpen() ||
+      !captureIsActive() ||
       !window.bootstrap ||
       !window.bootstrap.Modal
     ) {
@@ -3940,6 +3976,10 @@ import {
       mountTreeView();
       renderToday();
       renderRail({ announceChange: false });
+      // Capture stays reachable, but the HQ status is gated with everything
+      // else: say so rather than "checking" forever.
+      state.hqStatusState = 'blocked';
+      refreshCaptureAvailability();
       return state.onboardingGate;
     }
 

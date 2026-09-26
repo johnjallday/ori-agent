@@ -600,7 +600,7 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`id="cockpitSignalFilters"`,
 		`id="cockpitSummaryBtn"`,
 		`id="cockpitCaptureBtn"`,
-		`id="cockpitCapturePanel"`,
+		`id="cockpitCaptureModal"`,
 		// Updates: header-anchored flyout, never a rail column (Issue #334 FR1-FR25).
 		`id="cockpitRailToggle"`,
 		`aria-controls="cockpitUpdatesFlyout"`,
@@ -685,6 +685,9 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`id="cockpitRail"`,
 		`data-rail-open=`,
 		`cockpit-flyout-toggle__label">Today<`,
+		// home-workspace-map-ui-refresh: Quick Capture is a dialog now, not a
+		// row in the workspace area that pushed the map down.
+		`id="cockpitCapturePanel"`,
 	} {
 		if strings.Contains(html, gone) {
 			t.Errorf("rendered Home page still contains retired element %q", gone)

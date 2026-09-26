@@ -456,6 +456,13 @@
   border: 1px solid var(--ws-line-bright);
   background: var(--ws-bg-2);
 }
+/* The dock is its own stacking context (position + z-index), so its help and
+   Arrange disclosures can only draw above what the dock itself is above.
+   Home's add-a-workspace card sits at z-index 8 in the same theatre, and help
+   opening upward must cover it rather than hide its first lines behind it. */
+.ws-map-control-dock.is-home {
+  z-index: 9;
+}
 /* An open disclosure's trigger reads as open by shape as well as colour: a
    filled face and a bar along its lower edge. */
 .ws-map-control-dock.is-home .ws-map-ctl[aria-expanded="true"] {

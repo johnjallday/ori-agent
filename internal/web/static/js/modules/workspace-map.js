@@ -9829,7 +9829,8 @@
     if (!target || target.hidden || target.disabled) {
       target = container.querySelector('[data-map-arrange]');
     }
-    if (target && typeof target.focus === 'function') target.focus();
+    // A background re-render must not scroll the page back to the dock.
+    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
   }
 
   // ---------- build mode ----------

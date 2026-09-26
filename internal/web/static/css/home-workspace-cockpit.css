@@ -2389,6 +2389,18 @@ body.home-command-page .ori-guide__launcher {
   display: none;
 }
 
+/* On a phone-width invited map the add-a-workspace card spans the top of the
+   map, exactly where the receipt would land — and HQ-only is when a new user
+   is most likely to capture something. There the receipt sits low instead,
+   above the (two-row) dock and below the framed HQ. */
+@container cockpit (max-width: 560px) {
+  .home-cockpit[data-invitation="empty"] .cockpit-capture-receipt,
+  .home-cockpit[data-invitation="hq-only"] .cockpit-capture-receipt {
+    top: auto;
+    bottom: 164px;
+  }
+}
+
 .cockpit-capture-receipt::before {
   content: "✓";
   color: var(--hc-signal);
