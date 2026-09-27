@@ -571,21 +571,21 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 	if getQueue.Code != http.StatusOK || !strings.Contains(getQueue.Body.String(), queueID) {
 		t.Fatalf("owner queue read: %d %s", getQueue.Code, getQueue.Body.String())
 	}
-	queueAction := func(fn func(http.ResponseWriter, *http.Request), body string) (int, string) {
+	queueAction := func(fn func(http.ResponseWriter, *http.Request), body string) int {
 		t.Helper()
 		request := assistantProgramRequest(http.MethodPost, "/library/queue/"+queueID, station.ID, body)
 		request.SetPathValue("queueID", queueID)
 		response := httptest.NewRecorder()
 		fn(response, request)
-		return response.Code, response.Body.String()
+		return response.Code
 	}
-	if code, _ := queueAction(handler.ProgressAssistantLibraryQueue, `{"entry_id":"`+queueCatalogIDs[0]+`","action":"connected","if_revision":1,"request_key":"forged-child"}`); code != http.StatusConflict {
+	if code := queueAction(handler.ProgressAssistantLibraryQueue, `{"entry_id":"`+queueCatalogIDs[0]+`","action":"connected","if_revision":1,"request_key":"forged-child"}`); code != http.StatusConflict {
 		t.Fatalf("HTTP caller fabricated connected child: %d", code)
 	}
-	if code, _ := queueAction(handler.DiscardAssistantLibraryQueue, `{"if_revision":1,"request_key":"discard","confirm":false}`); code != http.StatusBadRequest {
+	if code := queueAction(handler.DiscardAssistantLibraryQueue, `{"if_revision":1,"request_key":"discard","confirm":false}`); code != http.StatusBadRequest {
 		t.Fatalf("queue discard without owner confirmation: %d", code)
 	}
-	if code, _ := queueAction(handler.DiscardAssistantLibraryQueue, `{"if_revision":1,"request_key":"discard","confirm":true}`); code != http.StatusOK {
+	if code := queueAction(handler.DiscardAssistantLibraryQueue, `{"if_revision":1,"request_key":"discard","confirm":true}`); code != http.StatusOK {
 		t.Fatalf("owner could not discard navigation-only queue: %d", code)
 	}
 	doc, err = projectlibrary.NewStore(store).Read(scope)
