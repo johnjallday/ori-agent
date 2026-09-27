@@ -310,6 +310,33 @@ test('Enter sends, Shift+Enter does not, and a busy pane disables the composer',
   assert.equal(input.disabled, false);
 });
 
+test('focus moves from the dialog to the composer, never out of a form field', () => {
+  const { pane, document, root, modal } = loadPane();
+  modal.className = 'modal';
+  modal.appendChild(root);
+  pane.mount({ assistant });
+  const input = root.querySelectorAll('textarea')[0];
+  modal.focus();
+  assert.equal(pane.focusComposer(), true);
+  assert.equal(document.activeElement, input, 'the dialog itself gives focus up');
+
+  const nameField = new FakeElement('input', document);
+  modal.appendChild(nameField);
+  nameField.focus();
+  assert.equal(pane.focusComposer(), false);
+  pane.setBusy(true);
+  pane.setBusy(false);
+  assert.equal(
+    document.activeElement,
+    nameField,
+    'a finished turn does not pull focus off the form'
+  );
+
+  pane.collapse();
+  modal.focus();
+  assert.equal(pane.focusComposer(), false, 'a collapsed pane takes no focus');
+});
+
 test('the transcript shows the last twelve entries until Show earlier is chosen', () => {
   const { pane, root } = loadPane();
   pane.mount({ assistant });

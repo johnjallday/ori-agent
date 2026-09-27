@@ -446,12 +446,20 @@
     render();
     // Focus returns to the composer after a turn, never to a step heading the
     // wizard just advanced to (FR a11y: advancing never steals focus).
-    if (!state.busy && state.root && !state.collapsed) {
-      const active = document.activeElement;
-      if (!active || active === document.body || state.root.contains?.(active)) {
-        state.els.input?.focus?.();
-      }
+    if (!state.busy) focusComposer();
+  }
+
+  // focusComposer puts focus in the composer unless the user has moved it
+  // into the form: only the page, the dialog itself, or the pane give it up.
+  function focusComposer() {
+    if (!state.root || state.collapsed || state.busy) return false;
+    const active = document.activeElement;
+    const dialog = state.root.closest?.('.modal') || null;
+    if (active && active !== document.body && active !== dialog && !state.root.contains?.(active)) {
+      return false;
     }
+    state.els.input?.focus?.();
+    return true;
   }
 
   // showLine adds a pane-only assistant line, optionally with chips that
@@ -526,6 +534,7 @@
     mount,
     applySession,
     setBusy,
+    focusComposer,
     showLine,
     removeLine,
     collapse,

@@ -4601,6 +4601,36 @@ test('“create it” with a gate still closed says why and submits nothing', as
   assert.equal(created, 1, 'with every gate open it runs the Create submit');
 });
 
+test('an assistant that can no longer build steps aside and leaves the form as it is', async () => {
+  const { manager, nameInput } = loadBuildWizard();
+  const lines = [];
+  const collapsed = [];
+  nameInput.value = 'Newsletter Desk';
+  manager.workspaceBuild.session = { id: 'b-1', version: 3, status: 'open' };
+  manager.workspaceBuild.context = { entryPoint: 'home_cockpit_create' };
+  manager.workspaceBuildPane = () => ({
+    COPY: { unavailable: 'I can’t help right now — the form still works.' },
+    showLine: text => lines.push(text),
+    setBusy: () => {}
+  });
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.setWorkspaceBuildBusy = () => {};
+  manager.collapseWorkspaceBuild = options => collapsed.push(options);
+  manager.workspaceBuildApi = () => ({
+    turn: async () => ({ ok: false, status: 409, body: { code: 'unavailable' } })
+  });
+  let applied = 0;
+  manager.applyWorkspaceBuildSession = async () => {
+    applied += 1;
+  };
+  await manager.sendWorkspaceBuildTurn({ text: 'a newsletter workspace' });
+  assert.deepEqual(lines, ['I can’t help right now — the form still works.']);
+  assert.equal(collapsed.length, 1);
+  assert.equal(collapsed[0].withdraw, true, 'the pane collapses and withdraws');
+  assert.equal(applied, 0, 'nothing from the failed turn reaches the form');
+  assert.equal(nameInput.value, 'Newsletter Desk', 'what was already filled in stays');
+});
+
 test('an assistant team waits for the blueprint’s plan before it is applied', async () => {
   const { manager, window } = loadBuildWizard();
   const applied = [];

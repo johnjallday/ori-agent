@@ -153,6 +153,7 @@ func buildTestCatalog() []WorkspaceBuildCatalogEntry {
 			Template:  projecttemplates.Template{ID: "blocked-blueprint", Name: "Blocked Blueprint"},
 			Readiness: blueprintreadiness.Readiness{State: blueprintreadiness.State("unavailable")},
 		},
+		readyEntry(projecttemplates.Template{ID: "personal-ops", Name: "Personal HQ", Builtin: true}),
 		readyEntry(projecttemplates.Template{
 			ID: "studio-song", Name: "Studio Song", Tags: []string{"music"},
 			Agents:           []projecttemplates.AgentSpec{{Name: "Producer"}},
@@ -331,9 +332,11 @@ func TestWorkspaceBuild_ATurnFillsBlueprintNameAndDescription(t *testing.T) {
 	if len(got.Why) != 1 || len(got.Alternatives) != 1 || got.Alternatives[0].Label != "Research Project" {
 		t.Fatalf("why/alternatives %+v %+v", got.Why, got.Alternatives)
 	}
-	// The model saw the catalog and the user's words, never a path.
+	// The model saw the catalog and the user's words, never a path, and never
+	// a readiness-blocked blueprint or the Personal HQ the user already has.
 	system := f.provider.systems[0]
-	if !strings.Contains(system, `"id":"content-production"`) || strings.Contains(system, "blocked-blueprint") {
+	if !strings.Contains(system, `"id":"content-production"`) || strings.Contains(system, "blocked-blueprint") ||
+		strings.Contains(system, `"id":"personal-ops"`) {
 		t.Fatalf("catalog in prompt: %s", system)
 	}
 	if last := f.provider.messages[0]; last[len(last)-1].Content != "a newsletter from my research notes every monday" {

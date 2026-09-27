@@ -10990,6 +10990,11 @@ const sessionManager = {
     modal.addEventListener('workspace-build-action', event => {
       void this.runWorkspaceBuildAction(event?.detail?.action);
     });
+    // Bootstrap focuses the dialog once it is shown; in build mode the
+    // conversation is where the user starts, so focus moves to the composer.
+    modal.addEventListener('shown.bs.modal', () => {
+      if (this.workspaceBuild) this.workspaceBuildPane()?.focusComposer?.();
+    });
     // The user's own edits take the "Chosen by" tag off that field. Captured,
     // so a field's own handler cannot stop it first.
     for (const type of ['input', 'change']) {
@@ -11150,6 +11155,16 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
+    try {
+      await this.performWorkspaceBuildAction(build, pane, action);
+    } finally {
+      // The chip that ran the action may be gone (Resume removes its line);
+      // focus goes back to the composer rather than to the page.
+      if (this.workspaceBuild === build) pane.focusComposer?.();
+    }
+  },
+
+  async performWorkspaceBuildAction(build, pane, action) {
     if (action === 'resume' && build.session) {
       pane.removeLine?.(build.resumeLine);
       build.resumeLine = '';
@@ -11250,6 +11265,12 @@ const sessionManager = {
       // Another tab or an edit moved the build on. Take the current session
       // and let the user send again from there.
       await this.reloadWorkspaceBuildSession();
+      return;
+    }
+    if (result?.status === 409 && result.body?.code === 'unavailable') {
+      // The assistant can no longer build (its model went away): say so and
+      // step aside; everything already on the form stays (FR43).
+      this.failWorkspaceBuild();
       return;
     }
     const session = result?.body?.session || null;

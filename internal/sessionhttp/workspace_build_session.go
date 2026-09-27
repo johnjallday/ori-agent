@@ -15,6 +15,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -71,6 +72,15 @@ func (h *Handler) SetWorkspaceBuild(deps WorkspaceBuildDeps) {
 // tests use it.
 func (h *Handler) WorkspaceBuildWired() bool {
 	return h != nil && h.workspaceBuild != nil
+}
+
+// WorkspaceBuildAvailable reports, for the current user, what the
+// availability endpoint would: a hired assistant with a model it can reach.
+func (h *Handler) WorkspaceBuildAvailable(ctx context.Context) bool {
+	if h == nil || h.workspaceBuild == nil {
+		return false
+	}
+	return h.workspaceBuildReadiness(ctx, h.workspaceBuildUserID(ctx)).available
 }
 
 // The openers that may start a build (FR1.3). Every other surface keeps the
@@ -513,6 +523,11 @@ func offerableCatalog(catalog []WorkspaceBuildCatalogEntry) []WorkspaceBuildCata
 	validation := buildValidation{}
 	for _, entry := range catalog {
 		if strings.TrimSpace(entry.Template.ID) == "" || !validation.offerable(entry) {
+			continue
+		}
+		// Building requires a hired assistant, who already has its Personal
+		// HQ; that blueprint is not something to build a second of.
+		if entry.Template.ID == personalhq.PersonalHQTemplateID {
 			continue
 		}
 		out = append(out, entry)

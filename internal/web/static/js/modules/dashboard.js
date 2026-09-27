@@ -10387,8 +10387,46 @@
     return null;
   }
 
+  // openBuildWithAssistant opens Create Workspace in build mode with the user's
+  // sentence as the assistant's first turn, when the assistant can build here
+  // (hired, with a model). It reports whether it did; the caller keeps its own
+  // path otherwise.
+  async function openBuildWithAssistant(firstMessage) {
+    var manager = window.sessionManager;
+    if (!manager || typeof manager.showAddWorkspaceModal !== 'function') return false;
+    if (!document.getElementById('addFolderModal')) return false;
+    var panelState =
+      window.PersonalAssistantPanel &&
+      window.PersonalAssistantPanel._state &&
+      window.PersonalAssistantPanel._state.personalAssistant;
+    var state = String((panelState && panelState.state) || '');
+    if (state !== 'active' && state !== 'paused') return false;
+    try {
+      var response = await fetch('/api/workspaces/build-sessions/availability', {
+        headers: { Accept: 'application/json' }
+      });
+      var availability = await response.json();
+      if (!response.ok || !availability || availability.available !== true) return false;
+    } catch (_) {
+      return false;
+    }
+    if (
+      window.PersonalAssistantPanel &&
+      typeof window.PersonalAssistantPanel.close === 'function'
+    ) {
+      window.PersonalAssistantPanel.close({ restoreFocus: false });
+    }
+    manager.showAddWorkspaceModal({
+      entryPoint: 'personal_assistant_ask',
+      buildFirstMessage: String(firstMessage || '').slice(0, 2000)
+    });
+    return true;
+  }
+
   // confirmHomeAction shows an explicit confirm/cancel step before executing a
   // state-changing action; on confirm it re-calls /ask with confirmed_action.
+  // A build_workspace confirmation is the exception: the server never runs it,
+  // and Confirm opens the assistant's build in this browser (FR41).
   function confirmHomeAction(confirmation, routeContext, intent) {
     appendHomeAssistantMessage('assistant', String(confirmation.summary || 'Confirm this change?'));
     setHomeAssistantRoutingSummary('Confirm', 'Review and confirm this change.');
@@ -10397,7 +10435,15 @@
       {
         label: 'Confirm',
         variant: 'primary',
-        onClick: function () {
+        onClick: async function () {
+          if (confirmation.action_type === 'build_workspace') {
+            var first = String(args.first_message || homeAssistantState.pendingPrompt || '');
+            if (await openBuildWithAssistant(first)) return;
+            // The assistant stopped being able to build meanwhile: open the
+            // ordinary dialog seeded with the name instead.
+            await createWorkspaceByName(String(args.name || ''), first);
+            return;
+          }
           var confirmedAction = {
             id: confirmation.action_id,
             type: confirmation.action_type,
@@ -13005,6 +13051,9 @@
     }
 
     if (directWorkspaceCommand && directWorkspaceCommand.name) {
+      // The assistant builds it with the user when it can (FR40); the whole
+      // sentence is its first turn. Otherwise the seeded dialog opens as before.
+      if (await openBuildWithAssistant(text)) return;
       await createWorkspaceByName(directWorkspaceCommand.name, text);
       return;
     }
