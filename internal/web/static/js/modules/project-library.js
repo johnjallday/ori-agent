@@ -1294,6 +1294,13 @@ export class ProjectLibraryPanel {
       fields.append(nameLabel);
       const choice = node('select', 'form-select');
       choice.required = true;
+      if ((eligibility.project_files || []).length !== 1) {
+        const placeholder = node('option', '', 'Choose the authoritative file…');
+        placeholder.value = '';
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        choice.append(placeholder);
+      }
       for (const filename of eligibility.project_files || []) {
         const option = node('option', '', filename);
         option.value = filename;
@@ -1602,6 +1609,86 @@ export class ProjectLibraryPanel {
     const action = node('input', 'form-control');
     action.maxLength = 240;
     action.value = detail.fields.next_action || '';
+    const purpose = node('input', 'form-control');
+    purpose.maxLength = 240;
+    purpose.value = detail.fields.purpose || '';
+    const sessionDate = node('input', 'form-control');
+    sessionDate.type = 'date';
+    sessionDate.value = detail.fields.session_date || '';
+    const releaseDate = node('input', 'form-control');
+    releaseDate.type = 'date';
+    releaseDate.value = detail.fields.release_date || '';
+    const blockers = node('textarea', 'form-control');
+    blockers.rows = 3;
+    blockers.maxLength = 4096;
+    blockers.value = (detail.fields.blockers || []).join('\n');
+    const deliverables = node('textarea', 'form-control');
+    deliverables.rows = 3;
+    deliverables.maxLength = 4096;
+    deliverables.value = (detail.fields.deliverables || []).join('\n');
+    for (const list of [blockers, deliverables])
+      list.addEventListener('input', () => list.setCustomValidity(''));
+    const archive = node('select', 'form-select');
+    for (const [value, text] of [
+      ['', 'Not recorded'],
+      ['not_ready', 'Not ready'],
+      ['ready', 'Ready for review'],
+      ['reviewed', 'Reviewed']
+    ]) {
+      const option = node('option', '', text);
+      option.value = value;
+      archive.append(option);
+    }
+    archive.value = detail.fields.archive_review_state || '';
+    const milestones = node('fieldset', 'project-library-milestones');
+    milestones.append(node('legend', '', 'Milestones (user-entered, up to 16)'));
+    const milestoneList = node('div', 'project-library-milestone-list');
+    const addMilestone = node('button', 'modern-btn modern-btn-secondary', 'Add milestone');
+    addMilestone.type = 'button';
+    const milestoneControls = [];
+    const newMilestone = saved => {
+      if (milestoneList.children.length >= 16) return;
+      const row = node('div', 'project-library-milestone');
+      const title = node('input', 'form-control');
+      title.required = true;
+      title.maxLength = 240;
+      title.value = saved?.label || '';
+      const date = node('input', 'form-control');
+      date.type = 'date';
+      date.value = saved?.due_date || '';
+      const complete = node('input');
+      complete.type = 'checkbox';
+      complete.checked = !!saved?.complete;
+      for (const [caption, control] of [
+        ['Milestone', title],
+        ['Due date', date],
+        ['Complete', complete]
+      ]) {
+        const labelNode = node('label', '', caption);
+        labelNode.append(control);
+        row.append(labelNode);
+      }
+      const remove = node('button', 'modern-btn modern-btn-secondary', 'Remove milestone');
+      remove.type = 'button';
+      remove.addEventListener('click', () => {
+        row.remove();
+        addMilestone.disabled = false;
+      });
+      row.append(remove);
+      milestoneList.append(row);
+      milestoneControls.push({
+        id: saved?.id || operationKey('milestone'),
+        row,
+        title,
+        date,
+        complete
+      });
+      addMilestone.disabled = milestoneList.children.length >= 16;
+      if (!saved) title.focus();
+    };
+    for (const saved of detail.fields.milestones || []) newMilestone(saved);
+    addMilestone.addEventListener('click', () => newMilestone());
+    milestones.append(milestoneList, addMilestone);
     const priority = node('select', 'form-select');
     for (const [value, name] of [
       ['', 'Unset'],
@@ -1615,13 +1702,20 @@ export class ProjectLibraryPanel {
     for (const [name, control] of [
       ['Production stage', stage],
       ['Administrative status', status],
+      ['Project purpose (user-entered)', purpose],
       ['Next action', action],
-      ['Priority', priority]
+      ['Priority', priority],
+      ['Session date (user-entered)', sessionDate],
+      ['Release date (user-entered)', releaseDate],
+      ['Blockers (one per line, up to 16)', blockers],
+      ['Deliverables (one per line, up to 16)', deliverables],
+      ['Archive review (metadata only; does not move files)', archive]
     ]) {
       const labelNode = node('label', '', name);
       labelNode.append(control);
       fields.append(labelNode);
     }
+    fields.append(milestones);
     const actions = node('div', 'assistant-program-dialog-actions');
     const cancel = node('button', 'modern-btn modern-btn-secondary', 'Cancel');
     cancel.type = 'button';
@@ -1652,14 +1746,52 @@ export class ProjectLibraryPanel {
     form.addEventListener('submit', event => {
       event.preventDefault();
       const patch = {};
+      const listChanges = [];
+      for (const [field, input] of [
+        ['blockers', blockers],
+        ['deliverables', deliverables]
+      ]) {
+        const entries = input.value
+          .split(/\r?\n/)
+          .map(value => value.trim())
+          .filter(Boolean);
+        if (entries.length > 16 || entries.some(value => value.length > 240)) {
+          input.setCustomValidity('Use no more than 16 entries, each at most 240 characters.');
+          input.reportValidity();
+          return;
+        }
+        if (JSON.stringify(entries) !== JSON.stringify(detail.fields[field] || []))
+          listChanges.push([field, entries]);
+      }
       for (const [name, input, previous] of [
         ['stage', stage, detail.fields.stage || ''],
         ['status', status, detail.fields.status || ''],
-        ['next_action', action, detail.fields.next_action || '']
+        ['purpose', purpose, detail.fields.purpose || ''],
+        ['next_action', action, detail.fields.next_action || ''],
+        ['session_date', sessionDate, detail.fields.session_date || ''],
+        ['release_date', releaseDate, detail.fields.release_date || ''],
+        ['archive_review_state', archive, detail.fields.archive_review_state || '']
       ]) {
         const value = input.value === 'unknown' ? '' : input.value;
         if (value !== previous) patch[name] = value;
       }
+      for (const [field, entries] of listChanges) patch[field] = entries;
+      const currentMilestones = milestoneControls
+        .filter(control => milestoneList.contains(control.row))
+        .map(control => ({
+          id: control.id,
+          label: control.title.value.trim(),
+          due_date: control.date.value,
+          complete: control.complete.checked
+        }));
+      const normalizedMilestones = (detail.fields.milestones || []).map(item => ({
+        id: item.id,
+        label: item.label,
+        due_date: item.due_date || '',
+        complete: !!item.complete
+      }));
+      if (JSON.stringify(currentMilestones) !== JSON.stringify(normalizedMilestones))
+        patch.milestones = currentMilestones;
       const beforePriority = detail.fields.priority == null ? '' : String(detail.fields.priority);
       if (priority.value !== beforePriority) {
         if (priority.value === '') patch.clear_priority = true;
@@ -1686,9 +1818,13 @@ export class ProjectLibraryPanel {
           'Save these project notes?',
           [
             detail.row.name,
-            ...Object.keys(patch).map(
-              key => `${label(key)}: ${key === 'clear_priority' ? 'Unset' : String(patch[key])}`
-            )
+            ...Object.entries(patch).map(
+              ([key, value]) =>
+                `${label(key)}: ${key === 'clear_priority' ? 'Unset' : key === 'milestones' ? value.map(item => `${item.label}${item.due_date ? ` · ${item.due_date}` : ''} · ${item.complete ? 'complete' : 'open'}`).join('; ') || 'None' : Array.isArray(value) ? value.join('; ') || 'None' : String(value || 'Not set')}`
+            ),
+            ...(patch.archive_review_state != null
+              ? ['Archive review is a note, not a file move.']
+              : [])
           ],
           'Save notes',
           trigger

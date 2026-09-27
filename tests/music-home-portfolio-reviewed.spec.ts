@@ -521,6 +521,140 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await page.reload();
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeHidden();
     expect((await json(await request.get(`${base}/projects/${albumID}/sessions`))).total).toBe(1);
+
+    // A later separately reviewed rescan finds an alternative .rpp in the
+    // *same* project folder, not an extra song. The browser must not silently
+    // select the first filename or create a child when the review is canceled.
+    const alternate = join(documents, 'Album-4', 'Alternate.rpp');
+    writeFileSync(alternate, 'fixture-alternate; metadata-only', { mode: 0o600 });
+    const alternateHash = createHash('sha256').update(readFileSync(alternate)).digest('hex');
+    await shelf
+      .locator('#projectLibraryRoots')
+      .getByRole('button', { name: 'Review scan' })
+      .click();
+    const rescanReview = page.getByRole('dialog', { name: 'Scan this discovery folder once?' });
+    await expect(rescanReview).toBeVisible();
+    expect((await json(await request.get(`${base}/projects`))).total).toBe(5);
+    await rescanReview.getByRole('button', { name: 'Scan metadata' }).click();
+    await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
+    await shelf
+      .locator('#projectLibraryRows')
+      .getByRole('button', { name: 'Review Album-4' })
+      .click();
+    const ambiguous = page.getByRole('dialog', { name: 'Album-4' });
+    await expect(ambiguous).toContainText('Choose the authoritative project file');
+    await expect(ambiguous).toContainText('Alternate.rpp');
+    await expect(ambiguous).toContainText('Song.rpp');
+    await ambiguous.getByRole('button', { name: 'Review project setup' }).click();
+    const fileForm = page.getByRole('dialog', { name: 'Set up Album-4' });
+    const fileChoice = fileForm.getByRole('combobox', { name: 'Authoritative project file' });
+    await expect(fileChoice).toHaveValue('');
+    await fileForm.getByRole('button', { name: 'Review this project' }).click();
+    await expect(fileForm).toBeVisible(); // Browser validation requires an explicit choice.
+    await fileChoice.selectOption('Alternate.rpp');
+    await fileForm.getByRole('button', { name: 'Review this project' }).click();
+    const alternateReview = page.getByRole('dialog', { name: 'Connect this one project?' });
+    await expect(alternateReview).toContainText('Authoritative file: Alternate.rpp');
+    await shot(page, '29-reviewed-ambiguous-authoritative-file');
+    await alternateReview.getByRole('button', { name: 'Cancel' }).click();
+    expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+      workspacesBefore.length + 2
+    );
+    expect((await json(await request.get(`${base}/projects`))).total).toBe(5);
+    expect(createHash('sha256').update(readFileSync(alternate)).digest('hex')).toBe(alternateHash);
+
+    // The same Home owns user notes even for a catalog-only, ambiguous song.
+    await shelf
+      .locator('#projectLibraryRows')
+      .getByRole('button', { name: 'Review Album-4' })
+      .click();
+    await page
+      .getByRole('dialog', { name: 'Album-4' })
+      .getByRole('button', { name: 'Edit project notes' })
+      .click();
+    const notes = page.getByRole('dialog', { name: 'Edit Album-4' });
+    await notes
+      .getByRole('textbox', { name: 'Project purpose (user-entered)' })
+      .fill('Record a scratch vocal');
+    await notes.getByLabel('Session date (user-entered)').fill('2026-10-12');
+    await notes
+      .getByRole('textbox', { name: /Blockers/ })
+      .fill('Need a microphone\nConfirm the key');
+    await notes.getByRole('textbox', { name: /Deliverables/ }).fill('One scratch take');
+    await notes.getByRole('combobox', { name: /Archive review/ }).selectOption('ready');
+    await notes.getByRole('button', { name: 'Add milestone' }).click();
+    await notes.getByRole('textbox', { name: 'Milestone', exact: true }).fill('Record guide vocal');
+    await notes.getByLabel('Due date').fill('2026-10-13');
+    await notes.getByRole('button', { name: 'Review changes' }).click();
+    const notesReview = page.getByRole('dialog', { name: 'Save these project notes?' });
+    await expect(notesReview).toContainText('Record a scratch vocal');
+    await expect(notesReview).toContainText('2026-10-12');
+    await expect(notesReview).toContainText('Need a microphone; Confirm the key');
+    await expect(notesReview).toContainText('Record guide vocal · 2026-10-13 · open');
+    await expect(notesReview).toContainText('Archive review is a note, not a file move.');
+    await shot(page, '30-reviewed-portfolio-metadata-fields');
+    await notesReview.getByRole('button', { name: 'Save notes' }).click();
+    const savedEntry = (await json(await request.get(`${base}/projects`))).rows.find(
+      (row: { name: string }) => row.name === 'Album-4'
+    );
+    await expect
+      .poll(async () => {
+        const state = await json(await request.get(`${base}/projects/${savedEntry.id}`));
+        return state.fields.purpose;
+      })
+      .toBe('Record a scratch vocal');
+    await shelf
+      .locator('#projectLibraryRows')
+      .getByRole('button', { name: 'Review Album-4' })
+      .click();
+    const savedNotes = page.getByRole('dialog', { name: 'Album-4' });
+    await expect(savedNotes).toContainText('Next action: Not set');
+    const savedFields = (await json(await request.get(`${base}/projects/${savedEntry.id}`))).fields;
+    expect(savedFields).toMatchObject({
+      purpose: 'Record a scratch vocal',
+      session_date: '2026-10-12',
+      blockers: ['Need a microphone', 'Confirm the key'],
+      deliverables: ['One scratch take'],
+      milestones: [{ label: 'Record guide vocal', due_date: '2026-10-13' }],
+      archive_review_state: 'ready'
+    });
+    await savedNotes.getByRole('button', { name: 'Close' }).click();
+    const milestoneID = savedFields.milestones[0].id;
+    await page.reload();
+    await shelf
+      .locator('#projectLibraryRows')
+      .getByRole('button', { name: 'Review Album-4' })
+      .click();
+    await page
+      .getByRole('dialog', { name: 'Album-4' })
+      .getByRole('button', { name: 'Edit project notes' })
+      .click();
+    const milestoneEdit = page.getByRole('dialog', { name: 'Edit Album-4' });
+    await expect(
+      milestoneEdit.getByRole('textbox', { name: 'Milestone', exact: true })
+    ).toHaveValue('Record guide vocal');
+    await milestoneEdit.getByRole('checkbox', { name: 'Complete' }).check();
+    const changedRequest = page.waitForRequest(
+      req =>
+        req.url().endsWith(`/projects/${savedEntry.id}/fields/review`) && req.method() === 'POST'
+    );
+    await milestoneEdit.getByRole('button', { name: 'Review changes' }).click();
+    const sparse = (await changedRequest).postDataJSON();
+    expect(Object.keys(sparse.patch)).toEqual(['milestones']);
+    const milestoneReview = page.getByRole('dialog', { name: 'Save these project notes?' });
+    await expect(milestoneReview).toContainText('Record guide vocal · 2026-10-13 · complete');
+    await milestoneReview.getByRole('button', { name: 'Save notes' }).click();
+    await expect
+      .poll(async () => {
+        const state = await json(await request.get(`${base}/projects/${savedEntry.id}`));
+        return state.fields.milestones[0].complete;
+      })
+      .toBe(true);
+    const updatedFields = (await json(await request.get(`${base}/projects/${savedEntry.id}`)))
+      .fields;
+    expect(updatedFields.milestones[0].id).toBe(milestoneID);
+    expect(updatedFields.purpose).toBe('Record a scratch vocal');
+    expect(createHash('sha256').update(readFileSync(alternate)).digest('hex')).toBe(alternateHash);
   }
   expect(songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))).toEqual(
     before

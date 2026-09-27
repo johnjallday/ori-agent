@@ -984,6 +984,31 @@
   display: grid;
   gap: 0.25rem;
 }
+.project-library-milestones {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--assistant-line);
+}
+.project-library-milestone-list {
+  display: grid;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+.project-library-milestone {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 10rem) auto;
+  gap: 0.5rem;
+  align-items: end;
+}
+.project-library-milestone label:first-child,
+.project-library-milestone > button {
+  grid-column: 1 / -1;
+}
+@media (max-width: 480px) {
+  .project-library-milestone {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 @media (max-width: 700px) {
   .project-library-root {
     align-items: flex-start;
