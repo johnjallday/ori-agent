@@ -247,7 +247,7 @@ test('paired candidates preserve order and create only the declared local projec
   );
 });
 
-test('a confirmed folder offer connects one existing file, then separately reviews its Home association', async ({
+test('a confirmed folder offer connects one existing file without staffing or Home association', async ({
   page,
   request
 }) => {
@@ -330,6 +330,8 @@ test('a confirmed folder offer connects one existing file, then separately revie
   const journey = (await committed.json()).setup_journey;
   const existingID = journey.receipts.project_workspace_id;
   expect(existingID).toBeTruthy();
+  expect(journey).toMatchObject({ run_kind: 'root', journey: { source: 'plugin' } });
+  expect(journey.run_id).toBeTruthy();
   await page.waitForURL(/\/workspaces\/existing-documents-song(?:\/|\?|$)/);
   const existing = workspaceFile(existingID).data;
   expect(existing.shared_data.project_entry).toMatchObject({
@@ -340,6 +342,10 @@ test('a confirmed folder offer connects one existing file, then separately revie
     expect.arrayContaining([expect.objectContaining({ path: realpathSync(documents) })])
   );
   expect(existing.assistant_project_link.station_workspace_id).toBe(saved.homeID);
+  expect(
+    existing.assistant_project_link.project_roles.map((role: { id: string }) => role.id)
+  ).toEqual(['reaper-assistant']);
+  expect(existing.assistant_project_link.project_bindings.bindings || []).toEqual([]);
   // The wizard's agent choice is not itself a reviewed staffing commit for
   // this independently connected child. Its own staffing remains separate.
   expect(existing.agent_instances || []).toEqual([]);
@@ -362,16 +368,152 @@ test('a confirmed folder offer connects one existing file, then separately revie
   expect(pendingBefore.rows).toEqual([
     { workspace_id: existingID, name: 'Existing Documents Song' }
   ]);
-  // The normal creator navigated straight to its child. Return through the
-  // durable offer receipt, not a browser-guessed Home slug or a scan grant.
+  const offerView = (await json(await request.get('/api/personal-assistant/folder-digest')))
+    .folder_digest.offer;
+  expect(offerView).toMatchObject({ id: scanned.offer.id, status: 'awaiting_outcome' });
+  // The canonical child is durable, but a staged wizard choice does not fill
+  // its declared role or finish the setup run. Keep the offer available until
+  // the distinct child staffing review is completed by its owner.
+  await screenshot(page, 'guidance-existing-file-awaiting-staffing');
+  writeFileSync(
+    receipt,
+    JSON.stringify({
+      ...saved,
+      existingID,
+      song,
+      sourceHash,
+      setupRunID: journey.run_id,
+      offerID: scanned.offer.id
+    }),
+    { mode: 0o600 }
+  );
+});
+
+test('only a distinct reviewed child staffing action fills the existing-file project role', async ({
+  page,
+  request
+}) => {
+  test.skip(restart, 'the first run owns staffing');
+  const saved = stored(receipt);
+  const runURL = `/api/setup-quests/reaper-plugin/reaper_setup/runs/${saved.setupRunID}`;
+  const run = (await json(await request.get(runURL))).setup_journey;
+  expect(run.receipts.project_workspace_id).toBe(saved.existingID);
+  const step = run.steps.find(
+    (item: { kind: string }) => item.kind === 'assistant_program_staffing'
+  );
+  expect(step.actions.map((action: { id: string }) => action.id)).toContain(
+    'review_project_staffing'
+  );
+  expect(workspaceFile(saved.existingID).data.agent_instances || []).toEqual([]);
+  expect(existsSync(join(sandbox, 'workspace-staging', 'Agents', 'Existing Song Assistant'))).toBe(
+    false
+  );
+  const homeBefore = await json(
+    await request.get(`/api/workspaces/${saved.homeID}/assistant-program`)
+  );
+  const siblingBefore = workspaceFile(saved.projectID).data.agent_instances;
+  const catalogURL = `/api/workspaces/${saved.homeID}/assistant-program/library/projects`;
+  const catalogBefore = await json(await request.get(catalogURL));
+  const runtimeBefore = workspaceFile(saved.existingID).data.runtime_state;
+  expect(runtimeBefore).toMatchObject({ selected_mode_id: 'file_only' });
+  // Return through the owner-visible unfinished folder offer. Its Continue
+  // action reopens this exact quest and retains the offer ID for the later
+  // verified project outcome; no caller-supplied workspace ID is trusted.
+  await page.goto('/?panel=today&folder=show');
+  const pendingCard = page.locator('#personalAssistantFolderOffer');
+  await expect(pendingCard).toContainText('Documents looks like a REAPER project');
+  await pendingCard.locator('[data-folder-action="resume"]').click();
+  const quest = page.locator('#specialistSetupJourneyModal');
+  await expect(quest).toBeVisible();
+  await quest.getByRole('button', { name: 'Manage Team and Extras' }).click();
+  await quest.locator('[data-action="review_project_staffing"]').click();
+  const form = quest.locator('.setup-journey__form');
+  await form.getByLabel('Profile name').fill('Existing Song Assistant');
+  const reviewed = page.waitForResponse(
+    response =>
+      response.url().endsWith('/actions/review_project_staffing') &&
+      response.request().method() === 'POST'
+  );
+  await form.getByRole('button', { name: 'Review scoped staffing' }).click();
+  const reviewedResponse = await reviewed;
+  expect(reviewedResponse.ok(), await reviewedResponse.text()).toBeTruthy();
+  expect((await reviewedResponse.json()).review).toMatchObject({
+    commit_action: 'add_project_staffing',
+    staffing: { scopes: [{ scope: 'project', workspace_id: saved.existingID }] }
+  });
+  const review = quest.locator('.setup-journey__review-list');
+  await expect(review).toContainText('Existing Documents Song');
+  await expect(review).toContainText('Existing Song Assistant');
+  await expect(review).toContainText('Project');
+  // Reviewing and backing out still creates no profile, binding or permission.
+  expect(workspaceFile(saved.existingID).data.agent_instances || []).toEqual([]);
+  await screenshot(page, 'guidance-existing-file-staffing-review');
+  await quest
+    .locator('.setup-journey__review-controls')
+    .getByRole('button', { name: 'Back' })
+    .click();
+  expect(workspaceFile(saved.existingID).data.agent_instances || []).toEqual([]);
+  expect(existsSync(join(sandbox, 'workspace-staging', 'Agents', 'Existing Song Assistant'))).toBe(
+    false
+  );
+  await form.getByRole('button', { name: 'Review scoped staffing' }).click();
+  await expect(review).toContainText('Existing Song Assistant');
+  const staffingCommit = page.waitForResponse(
+    response =>
+      response.url().endsWith('/actions/add_project_staffing') &&
+      response.request().method() === 'POST'
+  );
+  await quest
+    .locator('.setup-journey__review-controls')
+    .getByRole('button', { name: 'Confirm this change' })
+    .click();
+  expect((await staffingCommit).ok()).toBeTruthy();
+  const staffed = await json(
+    await request.get(`/api/workspaces/${saved.existingID}/assistant-program`)
+  );
+  expect(staffed.roster.map((role: { role_id: string }) => role.role_id)).toEqual([
+    'reaper-assistant'
+  ]);
+  const child = workspaceFile(saved.existingID).data;
+  expect(child.agent_instances.map((agent: { role_id: string }) => agent.role_id)).toEqual([
+    'reaper-assistant'
+  ]);
+  expect(child.assistant_project_link.project_bindings.bindings).toEqual([
+    expect.objectContaining({ role_id: 'reaper-assistant', agent_name: 'Existing Song Assistant' })
+  ]);
+  expect(child.runtime_state).toEqual(runtimeBefore);
+  expect(workspaceFile(saved.projectID).data.agent_instances).toEqual(siblingBefore);
+  expect(
+    await json(await request.get(`/api/workspaces/${saved.homeID}/assistant-program`))
+  ).toMatchObject({ roster: homeBefore.roster });
+  expect(await json(await request.get(catalogURL))).toMatchObject({
+    rows: catalogBefore.rows,
+    total: 0
+  });
+  expect(createHash('sha256').update(readFileSync(saved.song)).digest('hex')).toBe(
+    saved.sourceHash
+  );
+  await screenshot(page, 'guidance-existing-file-staffed-child');
+  // The staffed quest may now finish its original offer receipt. This is
+  // separate from Home association: no discovery root or catalog entry was
+  // created by either the wizard choice or the staffing action.
+  await expect
+    .poll(
+      async () =>
+        (await json(await request.get('/api/personal-assistant/folder-digest'))).folder_digest.offer
+          ?.status
+    )
+    .toBe('resolved');
   const offerView = (await json(await request.get('/api/personal-assistant/folder-digest')))
     .folder_digest.offer;
   const homeRoute = `/workspaces/${(await json(await request.get('/api/workspaces'))).folders.find((row: { id: string }) => row.id === saved.homeID).folder_slug}/assistant#projectLibraryPanel`;
   expect(offerView).toMatchObject({
-    id: scanned.offer.id,
+    id: saved.offerID,
     status: 'resolved',
-    outcome: { workspace_id: existingID, home_route: homeRoute }
+    outcome: { workspace_id: saved.existingID, home_route: homeRoute }
   });
+  // The normal creator navigated straight to the child. Use the persisted
+  // outcome's Home link, not a browser-guessed slug or a discovery grant.
   await page.goto('/?panel=today&folder=show');
   const followUp = page.locator('#personalAssistantFolderOffer');
   await expect(followUp).toContainText("Here's what I set up:");
@@ -390,11 +532,11 @@ test('a confirmed folder offer connects one existing file, then separately revie
     name: 'Add Existing Documents Song to this shelf?'
   });
   await expect(association).toContainText('link-only metadata without a discovery folder grant');
-  expect((await json(await request.get(`${base}/projects`))).total).toBe(0);
+  expect((await json(await request.get(catalogURL))).total).toBe(0);
   await screenshot(page, 'guidance-existing-file-association-review');
   await association.getByRole('button', { name: 'Cancel' }).click();
   await expect(shelf.locator('#projectLibraryPendingLinks')).toBeVisible();
-  expect((await json(await request.get(`${base}/projects`))).total).toBe(0);
+  expect((await json(await request.get(catalogURL))).total).toBe(0);
   await shelf
     .getByRole('button', { name: 'Review Existing Documents Song for this shelf' })
     .click();
@@ -403,21 +545,18 @@ test('a confirmed folder offer connects one existing file, then separately revie
     .getByRole('button', { name: 'Add linked project' })
     .click();
   await expect(shelf.locator('#projectLibraryCount')).toHaveText('1 of 1 projects');
+  const base = `/api/workspaces/${saved.homeID}/assistant-program/library`;
   expect((await json(await request.get(`${base}/linked-projects/pending`))).total).toBe(0);
-  const catalog = await json(await request.get(`${base}/projects`));
+  const catalog = await json(await request.get(catalogURL));
   expect(catalog.rows).toEqual([
     expect.objectContaining({ name: 'Existing Documents Song', connection: 'connected' })
   ]);
   expect((await json(await request.get(`${base}/roots`))).total_roots).toBe(0);
-  expect(createHash('sha256').update(readFileSync(song)).digest('hex')).toBe(sourceHash);
-  await screenshot(page, 'guidance-existing-file-associated-home');
-  writeFileSync(
-    receipt,
-    JSON.stringify({ ...saved, existingID, song, sourceHash, offerHomeRoute: homeRoute }),
-    {
-      mode: 0o600
-    }
+  expect(createHash('sha256').update(readFileSync(saved.song)).digest('hex')).toBe(
+    saved.sourceHash
   );
+  await screenshot(page, 'guidance-existing-file-associated-home');
+  writeFileSync(receipt, JSON.stringify({ ...saved, offerHomeRoute: homeRoute }), { mode: 0o600 });
 });
 
 test('restart preserves exact candidate identities for both children and the reviewed association', async ({
@@ -475,7 +614,17 @@ test('restart preserves exact candidate identities for both children and the rev
     await request.get(`/api/workspaces/${saved.existingID}/assistant-program`)
   );
   expect(imported).toMatchObject({ station_id: saved.homeID, project_provider_available: true });
-  expect(workspaceFile(saved.existingID).data.agent_instances || []).toEqual([]);
+  expect(imported.roster.map((binding: { role_id: string }) => binding.role_id)).toEqual([
+    'reaper-assistant'
+  ]);
+  expect(
+    workspaceFile(saved.existingID).data.agent_instances.map(
+      (agent: { role_id: string }) => agent.role_id
+    )
+  ).toEqual(['reaper-assistant']);
+  expect(workspaceFile(saved.existingID).data.runtime_state).toMatchObject({
+    selected_mode_id: 'file_only'
+  });
   expect(createHash('sha256').update(readFileSync(saved.song)).digest('hex')).toBe(
     saved.sourceHash
   );

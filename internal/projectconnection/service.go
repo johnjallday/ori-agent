@@ -706,6 +706,13 @@ func templateProvenance(template projecttemplates.Template, now time.Time, snaps
 		snapshot = snapshots[0]
 	}
 	program := template.AssistantProgram
+	var projectRoles []workspace.AssistantProgramRoleSpec
+	if template.AssistantProject != nil {
+		// The split blueprint owns the child's required roster. Saving only the
+		// independent Home declaration makes staffing appear complete with zero
+		// project roles, even though the reviewed blueprint declares them.
+		projectRoles = template.AssistantProject.ProgramRoles()
+	}
 	if program == nil && snapshot != nil && snapshot.SelectedComposition == workspace.GroupRequirementCompositionGrouped {
 		// Split blueprints resolve the independent Home during the reviewed
 		// group operation. Persist that canonical declaration on the project;
@@ -718,7 +725,7 @@ func templateProvenance(template projecttemplates.Template, now time.Time, snaps
 		AutomationRecipes: template.AutomationRecipes, IntakeRequirements: template.IntakeRequirements, CapabilityRequirements: template.CapabilityRequirements,
 		Plugins: template.Tools.Plugins, PluginSources: template.Tools.PluginSources,
 		RuntimeRequirements: template.RuntimeRequirements, SetupWizard: template.SetupWizard,
-		AssistantProgram: workspace.CloneAssistantProgramDeclaration(program), GroupRequirement: snapshot,
+		AssistantProgram: workspace.CloneAssistantProgramDeclaration(program), AssistantProjectRoles: projectRoles, GroupRequirement: snapshot,
 	}
 }
 
