@@ -514,7 +514,30 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(queuedReview).toContainText('Queue item 2 of 2');
     await expect(queuedReview).toContainText('Starts File-only');
     await shot(page, '27-reviewed-second-song-in-serial-queue');
+    const album2ID = projects.rows.find((row: { name: string }) => row.name === 'Album-2')?.id;
+    expect(album2ID).toBeTruthy();
+    const commitRoute = `**/projects/${album2ID}/activation/commit`;
+    // Let the real creator and Home association finish, but drop the reply to
+    // this browser tab. A confirmed pending retry survives reload; the fresh
+    // reciprocal-link read must advance without submitting another creator.
+    await page.route(commitRoute, async route => {
+      const serverReply = await route.fetch();
+      expect(serverReply.ok(), await serverReply.text()).toBeTruthy();
+      await route.abort('failed');
+    });
     await queuedReview.getByRole('button', { name: 'Connect project' }).click();
+    await expect(shelf.locator('#projectLibraryStatus')).toContainText('Queue paused');
+    await expect
+      .poll(async () => {
+        const page = await json(await request.get(`${base}/projects`));
+        return page.rows.find((row: { id: string }) => row.id === album2ID)?.connection;
+      })
+      .toBe('connected');
+    await shot(page, '27b-confirmed-project-lost-browser-reply');
+    await page.unroute(commitRoute);
+    await page.reload();
+    await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
+    await shelf.locator('#projectLibraryQueueResume').click();
     await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('Choose at least two');
     const queueProjects = await json(await request.get(`${base}/projects`));
     expect(

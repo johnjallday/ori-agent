@@ -316,7 +316,7 @@ func (s *ActivationService) Commit(ctx context.Context, scope Scope, entryID, to
 		}
 		return ActivationResult{EntryID: entryID, WorkspaceID: entry.Link.WorkspaceID, LinkID: entry.Link.LinkID, Replay: true}, nil
 	}
-	if review.ConsumedAt != nil || !review.ExpiresAt.After(a.library.now().UTC()) || review.Revision != doc.Revision {
+	if review.ConsumedAt != nil || review.Revision != doc.Revision {
 		return ActivationResult{}, ErrConflict
 	}
 	template, provider, err := a.providerFor(scope, binding.BlueprintID)
@@ -340,6 +340,13 @@ func (s *ActivationService) Commit(ctx context.Context, scope Scope, entryID, to
 	// run before deciding to re-preview; the source resolver, provider, Home,
 	// reciprocal link and document review are still rechecked below.
 	result, found := creator.ObservedResult(creatorScope, scope.HomeID, "")
+	// A confirmed creator can outlive its short-lived Home review when the
+	// independent catalog write fails. Expiry must prevent any *new* child,
+	// but cannot strand that exact already-linked run on retry. All source,
+	// provider and reciprocal-link checks below still apply to recovery.
+	if !found && !review.ExpiresAt.After(a.library.now().UTC()) {
+		return ActivationResult{}, ErrConflict
+	}
 	if !found {
 		preview, previewErr := creator.Preview(ctx, creatorScope, request)
 		if previewErr != nil || preview.InputDigest != binding.CreatorInputDigest || preview.OwnerDigest != binding.CreatorOwnerDigest ||
@@ -398,7 +405,8 @@ func (s *ActivationService) Commit(ctx context.Context, scope Scope, entryID, to
 			for i := range current.Reviews {
 				r := &current.Reviews[i]
 				if r.Token == token && r.Action == "activate_project" && r.ConsumedAt == nil &&
-					r.Digest == digest && r.Revision == current.Revision && r.ExpiresAt.After(a.library.now().UTC()) {
+					r.Digest == digest && r.Revision == current.Revision &&
+					(found || r.ExpiresAt.After(a.library.now().UTC())) {
 					now := a.library.now().UTC()
 					r.ConsumedAt = &now
 					accepted = ExactLink{WorkspaceID: child.ID, LinkID: link.ID, Revision: link.StateRevision}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
@@ -266,6 +267,10 @@ func TestActivation_RealCreatorRecoversAfterHomeWriteFailsAndStoreRestarts(t *te
 		t.Fatal(err)
 	}
 	library := NewStore(restarted).WithProviderEvidence(originalLibrary.providerEvidence)
+	// The original confirmation crossed the creator boundary, but its Home
+	// review expired while the catalog write was interrupted. An exact-run
+	// retry must repair the link, never preview another child.
+	library.now = func() time.Time { return review.ExpiresAt.Add(time.Second) }
 	a.library, a.roots.library, a.owners = library, library, restarted
 	service = NewActivationService(a, realActivationCreator(t, scope, restarted, installed))
 	result, err := service.Commit(t.Context(), scope, "single", review.Token, "resume-real-creator")
@@ -279,6 +284,24 @@ func TestActivation_RealCreatorRecoversAfterHomeWriteFailsAndStoreRestarts(t *te
 	ids, err = restarted.List()
 	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
 		t.Fatalf("recovery duplicated a workspace or changed source: %v %v", ids, err)
+	}
+	// Expiration alone must never permit a first creator commit. The other
+	// catalog-only folder still has no exact run to recover.
+	doc, err = library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unused, err := service.Review(t.Context(), scope, "alternates", doc.Revision, "Take A.rpp", "Another song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	library.now = func() time.Time { return unused.ExpiresAt.Add(time.Second) }
+	if _, err := service.Commit(t.Context(), scope, "alternates", unused.Token, "expired-without-child"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("expired review created a new child: %v", err)
+	}
+	ids, err = restarted.List()
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("expired review changed workspace count: %v %v", ids, err)
 	}
 }
 
