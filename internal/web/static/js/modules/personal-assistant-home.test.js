@@ -9,6 +9,7 @@ import {
   personalAssistantLauncherCue,
   personalAssistantLauncherCueTone,
   personalAssistantTodayView,
+  resumeWorkspaceBuild,
   safeTodayRoute,
   specialistSetupView,
   studioSectionView,
@@ -17,6 +18,40 @@ import {
   todayThreeSectionView,
   todaySectionRows
 } from './personal-assistant-home.js';
+
+test('an unfinished build keeps its id and only the controls Today knows', () => {
+  const [build, other] = todaySectionItems({
+    items: [
+      {
+        id: 'build-1',
+        kind: 'workspace_build',
+        title: 'Finish building Newsletter Desk',
+        actions: ['resume', 'discard', 'delete_everything']
+      },
+      { id: 'o1', kind: 'folder_offer', title: 'Look at Documents', actions: ['resume'] }
+    ]
+  });
+  assert.equal(build.id, 'build-1');
+  assert.deepEqual(build.actions, ['resume', 'discard']);
+  assert.equal('actions' in other, false, 'other rows stay links');
+  assert.equal('id' in other, false);
+});
+
+test('Resume opens the dialog in build mode, or goes Home where the dialog is', () => {
+  const opened = [];
+  const withDialog = {
+    sessionManager: { showAddWorkspaceModal: options => opened.push(options) },
+    document: { getElementById: id => (id === 'addFolderModal' ? {} : null) },
+    PersonalAssistantPanel: { close() {} },
+    location: { href: '/agents' }
+  };
+  assert.equal(resumeWorkspaceBuild(withDialog), 'opened');
+  assert.deepEqual(opened, [{ entryPoint: 'personal_assistant_ask', buildResume: true }]);
+
+  const withoutDialog = { document: { getElementById: () => null }, location: { href: '/agents' } };
+  assert.equal(resumeWorkspaceBuild(withoutDialog), 'navigated');
+  assert.equal(withoutDialog.location.href, '/?build=resume');
+});
 
 test('three Today sections hide empty rows and report unavailable sources only once in the footer', () => {
   assert.equal(todayLabel('waiting_for_choice'), 'Waiting for your choice');

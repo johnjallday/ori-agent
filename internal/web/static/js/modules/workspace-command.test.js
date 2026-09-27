@@ -5758,3 +5758,25 @@ test('a parcel opens the result card, and a blocked bubble opens its question be
   });
   assert.deepEqual(calls, [['assist', 't9']], 'the question, not the unit sheet');
 });
+
+test('How this was set up shows the assistant, the request, and each reason, escaped', () => {
+  assert.equal(view.buildSummaryHTML({}), '', 'a workspace built on the form shows nothing');
+  const html = view.buildSummaryHTML({
+    build_summary: {
+      assistant_name: 'Luna',
+      created_at: '2026-09-27T07:50:00Z',
+      user_request: 'a newsletter <b>every</b> monday',
+      decisions: [
+        { section: 'blueprint', text: 'It already has a drafting flow.' },
+        { section: 'team', text: 'Luna leads, as you asked.' },
+        { section: 'team', text: '' }
+      ]
+    }
+  });
+  assert.match(html, /<details class="ws-cmd-build-summary">/);
+  assert.match(html, /<summary>How this was set up<\/summary>/);
+  assert.match(html, /Built with Luna · /);
+  assert.match(html, /a newsletter &lt;b&gt;every&lt;\/b&gt; monday/);
+  assert.equal((html.match(/<li>/g) || []).length, 2, 'blank reasons are left out');
+  assert.match(html, /<strong>Blueprint<\/strong> It already has a drafting flow\./);
+});

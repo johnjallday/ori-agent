@@ -117,6 +117,14 @@
       // stageBlueprintRoles proposes the blueprint's whole team once in the draft.
       stageBlueprintRoles: Boolean(options.stageBlueprintRoles),
       blueprintRolesStaged: false,
+      // buildSession is the assistant's build session for this open, or null
+      // for the manual wizard. buildFirstMessage is a sentence the opener
+      // already heard (the assistant's Ask tab), posted as the first turn.
+      buildSession: null,
+      buildFirstMessage: String(options.buildFirstMessage || '').trim(),
+      // buildResume opens straight into the open build: the user already
+      // chose Resume (from the assistant's Today).
+      buildResume: Boolean(options.buildResume),
       drafts: {
         workspace: cloneDraft(options.drafts?.workspace),
         group: cloneDraft(options.drafts?.group)
@@ -177,12 +185,128 @@
     return payload;
   }
 
+  // ----- Build with your assistant -----
+
+  // The openers that start the creator as a conversation with the assistant.
+  // Every other opener — a folder offer's Adjust…, specialist setup, a guided
+  // journey, import, a group template, a blueprint deep link, a page that
+  // locks the parent — keeps today's manual wizard unchanged.
+  const BUILD_ENTRY_POINTS = [
+    'home_cockpit_create',
+    'workspace_map_build',
+    'workspace_hub_create',
+    'personal_assistant_ask'
+  ];
+
+  function buildEntryPointEligible(options = {}) {
+    const entryPoint = String(options.entryPoint || '').trim();
+    if (!BUILD_ENTRY_POINTS.includes(entryPoint)) return false;
+    if (options.importMode || modeFor(options) !== 'ordinary') return false;
+    if (kind(options.kind) === 'group' || String(options.fixedKind || '') === 'group') return false;
+    if (options.parentLocked) return false;
+    // A blueprint chosen by the opener (a deep link) or a folder offer is a
+    // decision already made; the conversation would only second-guess it.
+    if (String(options.blueprint || '').trim()) return false;
+    if (String(options.folderOfferId || '').trim()) return false;
+    return true;
+  }
+
+  // buildModeEligible is the whole offer rule: an eligible opener, a hired
+  // assistant (active or paused, the same rule Today uses), and a model the
+  // server can reach for it.
+  function buildModeEligible(options = {}) {
+    if (!buildEntryPointEligible(options)) return false;
+    const state = String(options.assistantState || '').trim();
+    if (state !== 'active' && state !== 'paused') return false;
+    return Boolean(options.availability && options.availability.available === true);
+  }
+
+  // buildStepFor is the furthest wizard step a build draft has earned. The
+  // wizard's own gates are the facts passed in; the model's opinion of
+  // readiness is not one of them. The result never goes below the current
+  // step: the assistant advances the wizard, it never pulls the user back.
+  function buildStepFor(draft, facts = {}) {
+    const current = Math.min(4, Math.max(1, Number(facts.current) || 1));
+    const value = draft && typeof draft === 'object' ? draft : {};
+    let step = 1;
+    const hasBlueprint = value.blank === true || String(value.template_id || '').trim() !== '';
+    if (hasBlueprint && facts.blueprintReady !== false) {
+      step = 2;
+      const hasIdentity =
+        String(value.name || '').trim() !== '' && String(value.description || '').trim() !== '';
+      if (hasIdentity && facts.nameValid !== false && facts.inputsValid !== false) {
+        step = 3;
+        if (facts.teamSet || facts.agentless) step = 4;
+      }
+    }
+    return Math.max(current, step);
+  }
+
+  // The draft fields a build turn can report as set, mapped to the create
+  // request keys the wizard applies. "team" is applied through the team draft,
+  // not through this patch.
+  const BUILD_PATCH_FIELDS = {
+    name: ['name'],
+    description: ['description'],
+    inputs: ['blueprint_inputs'],
+    parent: ['parent_id'],
+    color: ['color'],
+    tags: ['tags']
+  };
+
+  // The server leaves an emptied field out of the draft. When a turn reports
+  // it set one of these and the key is gone, the assistant cleared it.
+  const BUILD_CLEARED_VALUES = {
+    description: '',
+    parent_id: '',
+    color: '',
+    tags: []
+  };
+
+  function clonePlain(value) {
+    if (value === null || typeof value !== 'object') return value;
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  // buildPatchFromSession picks the fields a session reports as just set from
+  // its draft. With no field list it picks every field the draft holds, which
+  // is how a resumed build restores the whole form.
+  function buildPatchFromSession(session, fields) {
+    const draft = session?.draft && typeof session.draft === 'object' ? session.draft : {};
+    const wanted = Array.isArray(fields)
+      ? fields
+      : ['blueprint', ...Object.keys(BUILD_PATCH_FIELDS)].filter(field => {
+          if (field === 'blueprint') return draft.blank === true || 'template_id' in draft;
+          return BUILD_PATCH_FIELDS[field].some(key => key in draft);
+        });
+    const patch = {};
+    for (const field of wanted) {
+      if (field === 'blueprint') {
+        if (draft.blank === true) patch.blank = true;
+        else if ('template_id' in draft) patch.template_id = String(draft.template_id || '');
+        continue;
+      }
+      for (const key of BUILD_PATCH_FIELDS[field] || []) {
+        if (key in draft) patch[key] = clonePlain(draft[key]);
+        else if (Array.isArray(fields) && key in BUILD_CLEARED_VALUES) {
+          patch[key] = clonePlain(BUILD_CLEARED_VALUES[key]);
+        }
+      }
+    }
+    return patch;
+  }
+
   window.WorkspaceCreatorState = {
     createCreatorContext,
     creatorSteps,
     switchCreatorKind,
     buildOrdinaryGroupPayload,
     teamLockReason,
-    lockedRenameRefusal
+    lockedRenameRefusal,
+    BUILD_ENTRY_POINTS,
+    buildEntryPointEligible,
+    buildModeEligible,
+    buildStepFor,
+    buildPatchFromSession
   };
 })();

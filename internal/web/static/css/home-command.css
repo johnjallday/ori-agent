@@ -855,6 +855,42 @@ body.home-command-page .home-command-bridge * {
   letter-spacing: 0.01em;
 }
 
+/* An unfinished workspace build is finished or discarded in place. */
+.personal-assistant-today__build {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  list-style: none;
+  border: 1px solid var(--hc-line);
+  border-radius: 10px;
+}
+
+.personal-assistant-today__build li > span {
+  display: block;
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+.personal-assistant-today__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.personal-assistant-today__action {
+  padding: 3px 10px;
+  border: 1px solid var(--hc-line, currentColor);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+}
+
+.personal-assistant-today__action--primary {
+  border-color: var(--hc-signal, currentColor);
+  color: var(--hc-signal, inherit);
+  font-weight: 650;
+}
+
 .personal-assistant-today #homeDailyBrief {
   margin-top: 14px;
   border-radius: 12px;

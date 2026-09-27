@@ -379,6 +379,12 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 	}
 	handler := agenthttp.NewHomeAssistantAskHandler(sources, llmFactory, systemModel)
 	handler.SetTraceEmitter(agenthttp.NewLoggingHomeAskTraceEmitter())
+	// A request to create a workspace is offered as a build with the
+	// assistant while it can build (FR41).
+	if s.Handlers != nil && s.Handlers.Session != nil && s.Handlers.Session.WorkspaceBuildWired() {
+		session := s.Handlers.Session
+		handler.SetWorkspaceBuildAvailable(session.WorkspaceBuildAvailable)
+	}
 	if s.Storage != nil && s.Storage.PersonalAssistant != nil {
 		handler.SetPersonalAssistantContextProvider(personalAssistantContextAdapter{
 			relationship: s.Storage.PersonalAssistant,

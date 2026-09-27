@@ -277,6 +277,10 @@ func (h *Handler) buildWorkspaceDetailResponse(workspace *session.Workspace) map
 			if status := agentworkspace.EvaluateGroupRequirementLifecycle(canonical, h.workspaceStore.Get); status != nil {
 				payload["group_requirement_status"] = status
 			}
+			// "How this was set up", for a workspace built with the assistant.
+			if provenance := canonical.GetTemplateProvenance(); provenance != nil && provenance.BuildSummary != nil {
+				payload["build_summary"] = provenance.BuildSummary
+			}
 		}
 	}
 

@@ -71,6 +71,13 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimPrefix(path, "/api/workspaces")
 	path = strings.TrimPrefix(path, "/")
 
+	// "Build with your assistant" sessions are not workspaces; route them
+	// before "build-sessions" could be read as a workspace id.
+	if path == "build-sessions" || strings.HasPrefix(path, "build-sessions/") {
+		h.handleWorkspaceBuildSessions(w, r, strings.TrimPrefix(path, "build-sessions"))
+		return
+	}
+
 	// Import routes must be handled before generic workspace-id routing.
 	switch path {
 	case "import":
@@ -311,6 +318,11 @@ type createWorkspaceRequest struct {
 	// travels here; the server holds it against the offer.
 	EntryPoint    string `json:"entry_point,omitempty"`
 	FolderOfferID string `json:"folder_offer_id,omitempty"`
+	// BuildSessionID names the "Build with your assistant" session this create
+	// finishes. It is a reference only: it never changes what is created. After
+	// the workspace exists the session is marked created and its summary is
+	// recorded on the workspace.
+	BuildSessionID string `json:"build_session_id,omitempty"`
 }
 
 // folderDigestEntryPoint is the EntryPoint a "show me a folder" create sends.
@@ -920,6 +932,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug, "kind": ws.Kind})
+
+	// A create that finishes a "Build with your assistant" session closes it
+	// and records how the workspace was set up. Last, so no later write of the
+	// workspace can drop the record; best-effort, so it never fails a create.
+	h.finishWorkspaceBuild(r.Context(), req.BuildSessionID, ws.ID, createdBuildDraft(req))
 
 	response := map[string]any{
 		"success": true,
