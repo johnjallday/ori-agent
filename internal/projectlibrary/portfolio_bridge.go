@@ -130,6 +130,13 @@ func (b *ManagedPortfolioBridge) List(stationID string) ([]workspace.AssistantPo
 	for _, id := range state.LinkedProjectIDs {
 		linkID := workspace.AssistantProjectLinkID(scope.HomeID, id)
 		entry, child, linkErr := b.linked(scope, doc, state, linkID)
+		if errors.Is(linkErr, workspace.ErrAssistantPortfolioLinkNotFound) {
+			// A normal creator can durably attach a reciprocal child after the
+			// Home library is initialized. It belongs on the separate, reviewed
+			// pending-link shelf until the owner associates it; legacy portfolio
+			// reads must not hide the Home or silently adopt its catalog identity.
+			continue
+		}
 		if linkErr != nil {
 			return nil, workspace.ErrAssistantPortfolioConflict
 		}

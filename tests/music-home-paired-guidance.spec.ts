@@ -118,6 +118,23 @@ test('paired candidates preserve order and create only the declared local projec
   expect(homeSummary.roster.map((role: { role_id: string }) => role.role_id)).toEqual([
     'portfolio_manager'
   ]);
+  // Initialize an empty Home library BEFORE normal single-project intake.
+  // Later association must be an explicit review, not an initialization copy
+  // or a best-effort creator observer silently mutating the catalog.
+  const libraryBase = `/api/workspaces/${homeID}/assistant-program/library`;
+  await page.goto(`/workspaces/${homes[0].folder_slug}/assistant`);
+  const shelf = page.locator('#projectLibraryPanel');
+  await expect(shelf).toBeVisible();
+  await shelf.locator('#projectLibraryInitialize').click();
+  await page
+    .getByRole('dialog', { name: 'Start a Home project library?' })
+    .getByRole('button', { name: 'Start library' })
+    .click();
+  await expect
+    .poll(async () => (await json(await request.get(`${libraryBase}/roots`))).initialized)
+    .toBe(true);
+  expect((await json(await request.get(`${libraryBase}/projects`))).total).toBe(0);
+  expect((await json(await request.get(`${libraryBase}/roots`))).total_roots).toBe(0);
   // Open the normal creator and select the installed REAPER template. The
   // declared single project role is staffed there, not inherited from Home.
   await page.goto('/');
@@ -190,6 +207,32 @@ test('paired candidates preserve order and create only the declared local projec
   expect(assistant.roster.map((binding: { role_id: string }) => binding.role_id)).toEqual(
     roles.map(role => role.id)
   );
+  expect((await json(await request.get(`${libraryBase}/projects`))).total).toBe(0);
+  // The normal wizard navigates to the child to present its separate REAPER
+  // setup journey, even with OS-open unchecked. Let navigation settle, then
+  // leave without choosing a live-control mode or granting DAW access.
+  await page.waitForURL(/\/workspaces\/paired-guidance-song(?:\/|\?|$)/);
+  await page.waitForLoadState('domcontentloaded');
+  await page.goto(`/workspaces/${homes[0].folder_slug}/assistant`);
+  // A blueprint-scaffolded managed_workspace file is NOT an independently
+  // picked, existing directory-reference source. Do not invent a discovery
+  // grant or link-only catalog identity from this different child contract.
+  // But the managed portfolio bridge must keep the Home readable while the
+  // normal creator has appended the reciprocal child to Home membership.
+  const homeAfterCreator = await json(
+    await request.get(`/api/workspaces/${homeID}/assistant-program`)
+  );
+  expect(homeAfterCreator.projects.map((row: { id: string }) => row.id)).toEqual([projectID]);
+  expect(homeAfterCreator.portfolio || []).toEqual([]);
+  await expect(shelf).toBeVisible();
+  await expect(shelf.locator('#projectLibraryCount')).toHaveText('0 of 0 projects');
+  const pending = await json(await request.get(`${libraryBase}/linked-projects/pending`));
+  expect(pending.total).toBe(0);
+  await expect(page.locator('#projectLibraryPendingLinks')).toBeHidden();
+  expect((await json(await request.get(`${libraryBase}/projects`))).total).toBe(0);
+  expect((await json(await request.get(`${libraryBase}/roots`))).total_roots).toBe(0);
+  expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe(sha256);
+  await screenshot(page, 'guidance-managed-child-home-remains-readable');
   writeFileSync(
     receipt,
     JSON.stringify({ homeID, projectID, sha256, file, roles: roles.map(role => role.id) }),
@@ -209,6 +252,19 @@ test('restart preserves exact candidate identities and the one declared project 
   );
   const home = await json(await request.get(`/api/workspaces/${saved.homeID}/assistant-program`));
   expect(home).toMatchObject({ home_provider_available: true, is_station: true });
+  expect(home.projects.map((row: { id: string }) => row.id)).toEqual([saved.projectID]);
+  expect(home.portfolio || []).toEqual([]);
+  const roots = await json(
+    await request.get(`/api/workspaces/${saved.homeID}/assistant-program/library/roots`)
+  );
+  expect(roots).toMatchObject({ initialized: true, total_roots: 0 });
+  expect(
+    (
+      await json(
+        await request.get(`/api/workspaces/${saved.homeID}/assistant-program/library/projects`)
+      )
+    ).total
+  ).toBe(0);
   const project = await json(
     await request.get(`/api/workspaces/${saved.projectID}/assistant-program`)
   );

@@ -10,6 +10,48 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+func TestPortfolioBridge_NewNormalCreatorLinkIsPendingNotAnImplicitCatalogRecord(t *testing.T) {
+	file, scope, existing := legacyMusicHome(t)
+	library := NewStore(file)
+	initializeLibrary(t, library, scope)
+	key := workspace.AssistantProgramKey{OwnerUserID: scope.OwnerUserID,
+		PluginID: scope.ProviderID, ProgramID: scope.ProgramID}
+	child := &workspace.Workspace{ID: "normal-creator-after-init", Name: "Unreviewed creator child",
+		OwnerUserID: scope.OwnerUserID, Status: workspace.StatusActive,
+		CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	child.SetAssistantProjectLink(&workspace.AssistantProjectLink{ID: workspace.AssistantProjectLinkID(scope.HomeID, child.ID),
+		Key: key, StationWorkspaceID: scope.HomeID, StateRevision: 1})
+	if err := file.Save(child); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.LinkedProjectIDs = append(state.LinkedProjectIDs, child.ID)
+		state.StateRevision++
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bridge := NewManagedPortfolioBridge(file)
+	legacy := workspace.NewAssistantPortfolioService(file).WithManagedLibrary(bridge)
+	list, err := legacy.List(scope.HomeID)
+	if err != nil || len(list) != 1 || list[0].ProjectWorkspaceID != existing.ID {
+		t.Fatalf("pending creator link hid Home or became an implicit portfolio entry: %+v %v", list, err)
+	}
+	doc, err := library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Review(scope.HomeID, workspace.AssistantProjectLinkID(scope.HomeID, child.ID), doc.Revision,
+		list[0].Fields); !errors.Is(err, workspace.ErrAssistantPortfolioLinkNotFound) {
+		t.Fatalf("unassociated child gained metadata edit authority: %v", err)
+	}
+	if len(doc.Entries) != 1 || doc.Entries[0].Link.WorkspaceID != existing.ID {
+		t.Fatalf("read imported an unreviewed child: %+v %v", doc, err)
+	}
+}
+
 func TestPortfolioBridge_ProviderLossBetweenReviewAndCommitBlocksDirectServiceWrite(t *testing.T) {
 	file, scope, _ := legacyMusicHome(t)
 	initializeLibrary(t, NewStore(file), scope)
