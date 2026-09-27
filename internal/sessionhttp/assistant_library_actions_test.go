@@ -543,6 +543,55 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 	if err != nil || len(doc.Entries) != 3 {
 		t.Fatalf("follow-up did not add only the deeper song: %+v %v", doc, err)
 	}
+	var queueCatalogIDs []string
+	for _, entry := range doc.Entries {
+		if entry.Link == nil {
+			queueCatalogIDs = append(queueCatalogIDs, entry.ID)
+		}
+	}
+	if len(queueCatalogIDs) < 2 {
+		t.Fatalf("queue fixture needs two catalog-only entries: %+v", doc.Entries)
+	}
+	queueIDs, err := json.Marshal(queueCatalogIDs[:2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueBody := `{"ids":` + string(queueIDs) + `,"request_key":"owner-queue"}`
+	if code, _ := libraryAction(t, handler.StartAssistantLibraryQueue, project.ID, "", queueBody); code != http.StatusNotFound {
+		t.Fatalf("child URL wrote Home queue: %d", code)
+	}
+	code, started := libraryAction(t, handler.StartAssistantLibraryQueue, station.ID, "", queueBody)
+	queueResult, _ := started["queue"].(map[string]any)
+	queueID, _ := queueResult["id"].(string)
+	if code != http.StatusOK || queueID == "" {
+		t.Fatalf("owner queue start: %d %+v", code, started)
+	}
+	getQueue := httptest.NewRecorder()
+	handler.GetAssistantLibraryQueue(getQueue, assistantProgramRequest(http.MethodGet, "/library/queue", station.ID, ""))
+	if getQueue.Code != http.StatusOK || !strings.Contains(getQueue.Body.String(), queueID) {
+		t.Fatalf("owner queue read: %d %s", getQueue.Code, getQueue.Body.String())
+	}
+	queueAction := func(fn func(http.ResponseWriter, *http.Request), body string) (int, string) {
+		t.Helper()
+		request := assistantProgramRequest(http.MethodPost, "/library/queue/"+queueID, station.ID, body)
+		request.SetPathValue("queueID", queueID)
+		response := httptest.NewRecorder()
+		fn(response, request)
+		return response.Code, response.Body.String()
+	}
+	if code, _ := queueAction(handler.ProgressAssistantLibraryQueue, `{"entry_id":"`+queueCatalogIDs[0]+`","action":"connected","if_revision":1,"request_key":"forged-child"}`); code != http.StatusConflict {
+		t.Fatalf("HTTP caller fabricated connected child: %d", code)
+	}
+	if code, _ := queueAction(handler.DiscardAssistantLibraryQueue, `{"if_revision":1,"request_key":"discard","confirm":false}`); code != http.StatusBadRequest {
+		t.Fatalf("queue discard without owner confirmation: %d", code)
+	}
+	if code, _ := queueAction(handler.DiscardAssistantLibraryQueue, `{"if_revision":1,"request_key":"discard","confirm":true}`); code != http.StatusOK {
+		t.Fatalf("owner could not discard navigation-only queue: %d", code)
+	}
+	doc, err = projectlibrary.NewStore(store).Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if code, _, _ := scopeList(station.ID, rootID, "if_revision="+strconv.FormatInt(doc.Revision, 10)+"&offset=100"); code != http.StatusOK {
 		t.Fatalf("out-of-page read should be inert: %d", code)
 	}
