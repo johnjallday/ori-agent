@@ -1030,6 +1030,43 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))
     ).toEqual(before);
 
+    // The bound Manager may point to discovery controls, but never pass a
+    // path, root ID, picker receipt or scan grant. The owner views the
+    // current revoked root; nothing is selected or reviewed automatically.
+    const discoverySuggestion = await json(
+      await request.post('/api/chat', {
+        data: {
+          agent_name: manager.name,
+          route_context: {
+            surface: 'workspace_detail',
+            workspace_id: homeID,
+            page_path: `/workspaces/${homes[0].folder_slug}/assistant`
+          },
+          question: `/tool home_library_propose_root_review ${JSON.stringify({
+            reason: 'Check current discovery controls; do not renew consent.',
+            request_key: `browser-root-navigation-${homeID}`
+          })}`
+        }
+      })
+    );
+    expect(discoverySuggestion.success, JSON.stringify(discoverySuggestion)).toBe(true);
+    expect(discoverySuggestion.response).toContain('Navigation suggestion saved only');
+    await page.reload();
+    const rootSuggestions = page.locator('#projectLibraryProposals');
+    await expect(rootSuggestions).toContainText('No folder was selected, approved or scanned');
+    await rootSuggestions.getByRole('button', { name: 'View discovery folder options' }).click();
+    const rootOptions = page.locator('#projectLibraryRoots');
+    await expect(rootOptions).toBeFocused();
+    await expect(rootOptions).toContainText('Disconnected · historical entries retained');
+    await expect(rootOptions.getByRole('button', { name: 'Review scan' })).toHaveCount(0);
+    await shot(page, '41-reviewed-manager-discovery-navigation-revoked');
+    expect((await json(await request.get('/api/workspaces'))).folders.length).toBe(
+      childCountBeforeNavigation
+    );
+    expect(
+      songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))
+    ).toEqual(before);
+
     // A revoked root blocks project review, not an explicit queue Skip. Save
     // the later Album-4 item, then forget it separately below and require a
     // second Skip rather than silently deleting the remaining queue order.

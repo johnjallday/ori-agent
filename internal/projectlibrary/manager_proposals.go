@@ -14,7 +14,7 @@ import (
 // Only an owner can request a separate canonical field review/commit.
 type ManagerProposal struct {
 	ID               string     `json:"id"`
-	Kind             string     `json:"kind,omitempty"` // empty: next_action; project_review: navigation; session_goal: editable draft
+	Kind             string     `json:"kind,omitempty"` // empty: next_action; project_review/root_review: navigation; session_goal: draft
 	EntryID          string     `json:"entry_id"`
 	EntryRevision    int64      `json:"entry_revision,omitempty"`
 	FieldsRevision   int64      `json:"fields_revision"`
@@ -24,6 +24,7 @@ type ManagerProposal struct {
 	NextAction       string     `json:"next_action"`
 	Goal             *GoalInput `json:"goal,omitempty"`
 	GoalSessionCount int        `json:"goal_session_count,omitempty"`
+	RootSetDigest    string     `json:"root_set_digest,omitempty"`
 	Reason           string     `json:"reason,omitempty"`
 	Digest           string     `json:"digest"`
 	CreatedAt        time.Time  `json:"created_at"`
@@ -140,6 +141,116 @@ func (s *Store) ProposeNextAction(authority ManagerAuthority, entryID string, fi
 		return ManagerProposal{}, false, ErrConflict
 	}
 	return proposal, false, nil
+}
+
+// ProposeRootReview suggests only navigation to the owner's current discovery
+// controls. It accepts no structured path, picker token, root ID or grant. The private
+// root-set witness invalidates the suggestion when connections change; the
+// Manager never receives the root list or its paths.
+func (s *Store) ProposeRootReview(authority ManagerAuthority, reason, requestKey string) (ManagerProposal, bool, error) {
+	if !validText(reason, 500) || requestKey == "" || !validText(requestKey, 160) {
+		return ManagerProposal{}, false, ErrConflict
+	}
+	scope, err := s.authorizeManager(authority)
+	if err != nil {
+		return ManagerProposal{}, false, err
+	}
+	doc, state, err := s.readSnapshot(scope)
+	if err != nil {
+		return ManagerProposal{}, false, err
+	}
+	bindingRev := state.HomeBindings.StateRevision
+	roots := managerRootSetDigest(doc.Roots)
+	digest := rootReviewProposalDigest(scope, authority, reason, roots, bindingRev)
+	for _, receipt := range doc.Operations {
+		if receipt.Key != requestKey {
+			continue
+		}
+		if receipt.Action != "propose_root_review" || receipt.Digest != digest {
+			return ManagerProposal{}, false, ErrConflict
+		}
+		for _, proposal := range doc.Proposals {
+			if proposal.ID == receipt.ConsequenceID && proposal.Digest == digest && proposal.ExpiresAt.After(s.now().UTC()) {
+				return proposal, true, nil
+			}
+		}
+		return ManagerProposal{}, false, ErrConflict
+	}
+	at := s.now().UTC()
+	proposal := ManagerProposal{ID: newID(), Kind: "root_review", BindingRevision: bindingRev,
+		AgentInstanceID: authority.AgentInstanceID, AgentName: authority.AgentName, RootSetDigest: roots,
+		Reason: reason, Digest: digest, CreatedAt: at, ExpiresAt: at.Add(24 * time.Hour)}
+	receipt, replay, err := s.mutateWithHomePolicy(scope, doc.Revision,
+		operation{key: requestKey, action: "propose_root_review", digest: digest},
+		func(current *workspace.AssistantProgramState, home *workspace.Workspace) bool {
+			return current.HomeBindings.StateRevision == bindingRev && boundManager(current, home, authority)
+		}, func(current *Document) (string, error) {
+			if managerRootSetDigest(current.Roots) != roots {
+				return "", ErrConflict
+			}
+			kept := current.Proposals[:0]
+			for _, old := range current.Proposals {
+				if old.ExpiresAt.After(at) {
+					kept = append(kept, old)
+				}
+			}
+			current.Proposals = kept
+			if len(current.Proposals) >= maxProposals {
+				return "", ErrLimit
+			}
+			current.Proposals = append(current.Proposals, proposal)
+			return proposal.ID, nil
+		})
+	if err != nil {
+		return ManagerProposal{}, false, err
+	}
+	if replay {
+		fresh, readErr := s.Read(scope)
+		if readErr != nil {
+			return ManagerProposal{}, false, readErr
+		}
+		for _, row := range fresh.Proposals {
+			if row.ID == receipt.ConsequenceID && row.Digest == digest {
+				return row, true, nil
+			}
+		}
+		return ManagerProposal{}, false, ErrConflict
+	}
+	return proposal, false, nil
+}
+
+// Only IDs, revisions and revocation state are hashed. No root path, source
+// file, picker reference or review receipt is copied into the proposal.
+func managerRootSetDigest(roots []Root) string {
+	rows := make([]struct {
+		ID       string `json:"id"`
+		Revision int64  `json:"revision"`
+		Revoked  bool   `json:"revoked"`
+	}, 0, len(roots))
+	for _, root := range roots {
+		rows = append(rows, struct {
+			ID       string `json:"id"`
+			Revision int64  `json:"revision"`
+			Revoked  bool   `json:"revoked"`
+		}{root.ID, root.Revision, root.RevokedAt != nil})
+	}
+	// The Home document preserves insertion order; new grants and revocations
+	// change this witness, while unrelated notes or sessions do not.
+	data, _ := json.Marshal(rows)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func rootReviewProposalDigest(scope Scope, authority ManagerAuthority, reason, rootSet string, bindingRev int64) string {
+	data, _ := json.Marshal(struct {
+		Scope      Scope            `json:"scope"`
+		Authority  ManagerAuthority `json:"authority"`
+		Reason     string           `json:"reason"`
+		RootSet    string           `json:"root_set"`
+		BindingRev int64            `json:"binding_rev"`
+	}{scope, authority, reason, rootSet, bindingRev})
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // Project-review navigation has no creator token or file/root input. The
@@ -355,29 +466,35 @@ func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal Manage
 	if !proposal.ExpiresAt.After(s.now().UTC()) {
 		return "expired"
 	}
-	entry := sessionEntry(doc, proposal.EntryID)
-	if entry == nil {
-		return "stale"
-	}
-	if proposal.Kind == "project_review" {
-		if entry.Link != nil || entry.Revision != proposal.EntryRevision {
+	if proposal.Kind == "root_review" {
+		if managerRootSetDigest(doc.Roots) != proposal.RootSetDigest {
 			return "stale"
 		}
-	} else if proposal.Kind == "session_goal" {
-		if entry.Revision != proposal.EntryRevision {
+	} else {
+		entry := sessionEntry(doc, proposal.EntryID)
+		if entry == nil {
 			return "stale"
 		}
-		count := 0
-		for _, session := range doc.Sessions {
-			if session.EntryID == proposal.EntryID {
-				count++
+		if proposal.Kind == "project_review" {
+			if entry.Link != nil || entry.Revision != proposal.EntryRevision {
+				return "stale"
 			}
-		}
-		if count != proposal.GoalSessionCount {
+		} else if proposal.Kind == "session_goal" {
+			if entry.Revision != proposal.EntryRevision {
+				return "stale"
+			}
+			count := 0
+			for _, session := range doc.Sessions {
+				if session.EntryID == proposal.EntryID {
+					count++
+				}
+			}
+			if count != proposal.GoalSessionCount {
+				return "stale"
+			}
+		} else if entry.Fields.Revision != proposal.FieldsRevision {
 			return "stale"
 		}
-	} else if entry.Fields.Revision != proposal.FieldsRevision {
-		return "stale"
 	}
 	authority := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: proposal.AgentInstanceID,
 		AgentName: proposal.AgentName}
@@ -390,7 +507,12 @@ func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal Manage
 		state.GetAssistantProgramState().HomeBindings.StateRevision != proposal.BindingRevision {
 		return "stale"
 	}
-	if proposal.Kind == "project_review" {
+	if proposal.Kind == "root_review" {
+		if proposal.Digest != rootReviewProposalDigest(scope, authority, proposal.Reason,
+			proposal.RootSetDigest, proposal.BindingRevision) {
+			return "stale"
+		}
+	} else if proposal.Kind == "project_review" {
 		if proposal.Digest != projectReviewProposalDigest(scope, authority, proposal.EntryID,
 			proposal.Reason, proposal.EntryRevision, proposal.BindingRevision) {
 			return "stale"
@@ -431,6 +553,9 @@ func (s *Store) ListManagerProposals(scope Scope) (ManagerProposalPage, error) {
 	for i := len(doc.Proposals) - 1; i >= 0 && len(page.Rows) < 20; i-- {
 		proposal := doc.Proposals[i]
 		name := "Saved project"
+		if proposal.Kind == "root_review" {
+			name = "Discovery folders"
+		}
 		if entry := sessionEntry(doc, proposal.EntryID); entry != nil {
 			if projected := s.projectSearchRow(scope, *entry, roots, linked, inactive).Name; projected != "" {
 				name = projected

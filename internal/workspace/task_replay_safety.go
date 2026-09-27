@@ -151,6 +151,7 @@ var mutatingToolNames = map[string]struct{}{
 	"home_library_propose_next_action":    {},
 	"home_library_propose_project_review": {},
 	"home_library_propose_session_goal":   {},
+	"home_library_propose_root_review":    {},
 }
 
 // ClassifyToolSideEffect classifies a tool call for replay purposes. The
@@ -178,7 +179,7 @@ func ClassifyToolSideEffect(toolName string, declared SideEffect) ToolSideEffect
 		return ToolSideEffectRead
 	}
 	if _, ok := mutatingToolNames[name]; ok {
-		if name == "mail_draft_reply" || name == "home_library_propose_next_action" || name == "home_library_propose_project_review" || name == "home_library_propose_session_goal" {
+		if name == "mail_draft_reply" || name == "home_library_propose_next_action" || name == "home_library_propose_project_review" || name == "home_library_propose_session_goal" || name == "home_library_propose_root_review" {
 			return ToolSideEffectConfirm
 		}
 		return ToolSideEffectWrite

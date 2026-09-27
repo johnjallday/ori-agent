@@ -103,6 +103,86 @@ func TestManagerProposal_ProjectReviewNavigationIsInertBoundAndStalesOnEntryChan
 	}
 }
 
+func TestManagerProposal_RootNavigationCannotGrantAndStalesAfterRealDisconnect(t *testing.T) {
+	a, scope, roots, file, tree, _ := activationFixture(t)
+	store := a.library
+	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
+		home.AgentInstances = []workspace.AgentInstance{{ID: "local-manager", Name: "Manager", RoleID: "manager"}}
+		state := home.GetAssistantProgramState()
+		state.Declaration = &workspace.AssistantProgramDeclaration{Roles: []workspace.AssistantProgramRoleSpec{{
+			ID: "manager", Scope: workspace.AssistantRoleScopeHome, Required: true, Primary: true,
+		}}}
+		state.HomeBindings = workspace.AssistantRoleBindingSet{StateRevision: 1, Bindings: []workspace.AssistantRoleBinding{{
+			RoleID: "manager", AgentInstanceID: "local-manager", AgentName: "Manager",
+		}}}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.SaveWorkspaceAgent(scope.HomeID, "Manager", &agent.Agent{}); err != nil {
+		t.Fatal(err)
+	}
+	authority := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: "local-manager", AgentName: "Manager"}
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	doc, err := store.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := doc.Roots[0]
+	scanCount := len(doc.Scans)
+	proposal, replay, err := store.ProposeRootReview(authority, "Maybe revisit your discovery options", "root-navigation")
+	if err != nil || replay || proposal.Kind != "root_review" || proposal.EntryID != "" ||
+		proposal.RootSetDigest == "" || proposal.Goal != nil {
+		t.Fatalf("root suggestion was not navigation only: %+v %t %v", proposal, replay, err)
+	}
+	if _, err := store.ReviewProposedNextAction(scope, proposal.ID, scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("root navigation granted a field review: %v", err)
+	}
+	if _, _, err := store.CommitProposedNextAction(scope, proposal.ID, "fake", "fake-root-grant", scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("root navigation granted a commit: %v", err)
+	}
+	if _, _, err := store.ProposeNextAction(authority, "single", 0, "Wrong tool", "", "root-navigation"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("root navigation key crossed a field suggestion: %v", err)
+	}
+	path, err := file.GetFolderPath(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := workspace.NewFileStore(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store = NewStore(reopened).WithProviderEvidence(func(_ Scope, _ *workspace.Workspace) bool { return true })
+	roots.library = store
+	page, err := store.ListManagerProposals(scope)
+	if err != nil || page.Total != 1 || page.Rows[0].Status != "ready" || page.Rows[0].Name != "Discovery folders" {
+		t.Fatalf("root suggestion did not survive restart: %+v %v", page, err)
+	}
+	if again, replay, err := store.ProposeRootReview(authority, proposal.Reason, "root-navigation"); err != nil || !replay || again.ID != proposal.ID {
+		t.Fatalf("root suggestion retry duplicated: %+v %t %v", again, replay, err)
+	}
+	if _, _, err := store.ProposeRootReview(authority, "Changed", "root-navigation"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed root suggestion reused key: %v", err)
+	}
+	doc, err = store.Read(scope)
+	if err != nil || len(doc.Roots) != 1 || doc.Roots[0].Revision != root.Revision || len(doc.Scans) != scanCount ||
+		fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("navigation changed discovery or source: %+v %v", doc, err)
+	}
+	review, err := roots.ReviewRevoke(scope, root.ID, doc.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := roots.CommitRevoke(scope, root.ID, review.Token, "owner-root-disconnect"); err != nil {
+		t.Fatal(err)
+	}
+	page, err = store.ListManagerProposals(scope)
+	if err != nil || page.Rows[0].Status != "stale" || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("actual owner disconnect did not stale navigation: %+v %v", page, err)
+	}
+}
+
 func TestManagerProposal_SessionGoalIsEditableDraftUntilSeparateOwnerReviewAndCommit(t *testing.T) {
 	a, scope, _, file, tree, _ := activationFixture(t)
 	store := a.library

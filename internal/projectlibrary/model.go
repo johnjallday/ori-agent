@@ -470,7 +470,7 @@ func (d Document) valid(scope Scope) bool {
 	proposals := map[string]bool{}
 	for _, proposal := range d.Proposals {
 		if proposal.ID == "" || proposals[proposal.ID] || !validText(proposal.ID, 160) ||
-			!entries[proposal.EntryID] || proposal.FieldsRevision < 0 || proposal.BindingRevision < 1 ||
+			(proposal.Kind != "root_review" && !entries[proposal.EntryID]) || proposal.FieldsRevision < 0 || proposal.BindingRevision < 1 ||
 			proposal.AgentInstanceID == "" || !validText(proposal.AgentInstanceID, 160) ||
 			proposal.AgentName == "" || !validText(proposal.AgentName, 160) ||
 			!validText(proposal.Reason, 500) || !validDigest(proposal.Digest) ||
@@ -479,17 +479,23 @@ func (d Document) valid(scope Scope) bool {
 		}
 		switch proposal.Kind {
 		case "": // Existing saved next-action suggestions retain their original digest.
-			if proposal.EntryRevision != 0 || proposal.Goal != nil || proposal.GoalSessionCount != 0 ||
+			if proposal.RootSetDigest != "" || proposal.EntryRevision != 0 || proposal.Goal != nil || proposal.GoalSessionCount != 0 ||
 				proposal.NextAction == "" || !validText(proposal.NextAction, 240) {
 				return false
 			}
+		case "root_review":
+			if proposal.EntryID != "" || proposal.EntryRevision != 0 || proposal.FieldsRevision != 0 ||
+				proposal.NextAction != "" || proposal.Goal != nil || proposal.GoalSessionCount != 0 ||
+				!validDigest(proposal.RootSetDigest) {
+				return false
+			}
 		case "project_review":
-			if proposal.EntryRevision < 1 || proposal.FieldsRevision != 0 || proposal.NextAction != "" ||
+			if proposal.RootSetDigest != "" || proposal.EntryRevision < 1 || proposal.FieldsRevision != 0 || proposal.NextAction != "" ||
 				proposal.Goal != nil || proposal.GoalSessionCount != 0 {
 				return false
 			}
 		case "session_goal":
-			if proposal.EntryRevision < 1 || proposal.FieldsRevision != 0 || proposal.NextAction != "" ||
+			if proposal.RootSetDigest != "" || proposal.EntryRevision < 1 || proposal.FieldsRevision != 0 || proposal.NextAction != "" ||
 				proposal.Goal == nil || !proposal.Goal.valid() || proposal.Goal.PlannedDate != "" ||
 				proposal.GoalSessionCount < 0 || proposal.GoalSessionCount > maxSessions {
 				return false

@@ -88,7 +88,8 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	search := findLibraryTool(provider.Tools(), "home_library_search")
 	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil || findLibraryTool(provider.Tools(), "home_library_propose_next_action") == nil ||
 		findLibraryTool(provider.Tools(), "home_library_propose_project_review") == nil ||
-		findLibraryTool(provider.Tools(), "home_library_propose_session_goal") == nil {
+		findLibraryTool(provider.Tools(), "home_library_propose_session_goal") == nil ||
+		findLibraryTool(provider.Tools(), "home_library_propose_root_review") == nil {
 		t.Fatal("bound Manager's library reads not registered")
 	}
 	output, err := search.Call(context.Background(), `{"text":"Private"}`)
@@ -166,6 +167,20 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if current, err := library.Read(scope); err != nil || len(current.Sessions) != 1 || len(current.Proposals) != 2 {
 		t.Fatalf("goal suggestion directly created a Home session: %+v %v", current, err)
 	}
+	rootTool := findLibraryTool(provider.Tools(), "home_library_propose_root_review")
+	rootSuggestion, err := rootTool.Call(context.Background(), `{"reason":"Check discovery options without selecting a folder","request_key":"model-root-navigation"}`)
+	if err != nil || !strings.Contains(rootSuggestion, "Navigation suggestion saved only") || strings.Contains(rootSuggestion, sandbox) {
+		t.Fatalf("Manager navigation exposed a path or failed: %s %v", rootSuggestion, err)
+	}
+	if replayed, err := rootTool.Call(context.Background(), `{"reason":"Check discovery options without selecting a folder","request_key":"model-root-navigation"}`); err != nil || !strings.Contains(replayed, `"replay":true`) {
+		t.Fatalf("root navigation retry duplicated a suggestion: %s %v", replayed, err)
+	}
+	if _, err := rootTool.Call(context.Background(), `{"root_id":"foreign","request_key":"root-foreign"}`); err == nil {
+		t.Fatal("Manager selected a root instead of navigation")
+	}
+	if current, err := library.Read(scope); err != nil || len(current.Proposals) != 3 || len(current.Sessions) != 1 {
+		t.Fatalf("root navigation changed Home state beyond one suggestion: %+v %v", current, err)
+	}
 	if findLibraryTool(provider.Tools(), "home_library_commit") != nil {
 		t.Fatal("model was given a user confirmation tool")
 	}
@@ -193,6 +208,9 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	if _, err := goalTool.Call(context.Background(), goalArgs); err == nil {
 		t.Fatal("previously registered goal tool bypassed removed runtime instance")
+	}
+	if _, err := rootTool.Call(context.Background(), `{"request_key":"unbound-root"}`); err == nil {
+		t.Fatal("previously registered root navigation tool bypassed removed runtime instance")
 	}
 	provider.SetExecutingInstanceID("sample-instance")
 	provider.SetExecutingAgent("Sample")

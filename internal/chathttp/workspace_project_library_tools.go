@@ -137,6 +137,37 @@ func (p *WorkspaceToolProvider) libraryProposeNextActionTool() toolapi.Tool {
 	}
 }
 
+func (p *WorkspaceToolProvider) libraryProposeRootReviewTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{Name: "home_library_propose_root_review",
+			Description: "Save an inert navigation suggestion to the exact Home owner's current discovery-folder controls. No root ID, path parameter, picker selection, scope, scan, access grant, review token or confirmation can be provided by the Manager. The owner must separately select and review any folder or scan. Bound to the locally resolved primary Home Manager; no model recommendation is required.",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"reason":      map[string]any{"type": "string", "description": "Optional untrusted note, up to 500 bytes; not a path or grant."},
+				"request_key": map[string]any{"type": "string", "description": "Stable idempotency key, up to 160 bytes."},
+			}, "required": []string{"request_key"}}},
+		call: func(_ context.Context, raw string) (string, error) {
+			var input struct {
+				Reason     string `json:"reason"`
+				RequestKey string `json:"request_key"`
+			}
+			if err := decodeLibraryToolArgs(raw, &input); err != nil {
+				return "", err
+			}
+			proposal, replay, err := p.libraryStore().ProposeRootReview(p.managerAuthority(), input.Reason, input.RequestKey)
+			if err != nil {
+				return "", fmt.Errorf("home discovery navigation suggestion not saved: %w", err)
+			}
+			encoded, err := json.Marshal(map[string]any{"proposal_id": proposal.ID, "expires_at": proposal.ExpiresAt,
+				"replay": replay, "review_destination": fmt.Sprintf("/workspaces/%s#projectLibraryProposals", p.workspaceID),
+				"effect": "Navigation suggestion saved only; Home owner must separately inspect and review discovery controls."})
+			if err != nil || len(encoded) > 4096 {
+				return "", fmt.Errorf("home discovery suggestion result exceeded its limit")
+			}
+			return string(encoded), nil
+		},
+	}
+}
+
 func (p *WorkspaceToolProvider) libraryProposeSessionGoalTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{Name: "home_library_propose_session_goal",

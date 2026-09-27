@@ -145,7 +145,7 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     panel.request = async path => {
       assert.equal(path, '/proposals');
       return {
-        total: 4,
+        total: 5,
         rows: [
           {
             name: '<svg onload=alert(1)>',
@@ -194,13 +194,26 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
                 time_minutes: 20
               }
             }
+          },
+          {
+            name: 'Discovery folders',
+            status: 'ready',
+            proposal: {
+              id: 'root-id',
+              kind: 'root_review',
+              digest: 'root-draft',
+              reason: '<script>untrusted</script>',
+              agent_name: 'Manager'
+            }
           }
         ]
       };
     };
     await panel.renderProposals();
     assert.equal(elements.get('projectLibraryProposals').hidden, false);
-    const [ready, stale, navigation, goal] = elements.get('projectLibraryProposalRows').children;
+    const [ready, stale, navigation, goal, root] = elements.get(
+      'projectLibraryProposalRows'
+    ).children;
     assert.equal(ready.children[0].textContent, '<svg onload=alert(1)>');
     assert.equal(
       ready.children[1].textContent,
@@ -218,6 +231,12 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     assert.deepEqual(destinations, ['entry-4']); // only normal owner Details, no creator call
     assert.equal(goal.children[1].textContent.includes('<script>do not execute</script>'), true);
     assert.equal(goal.children[4].textContent, 'Edit Album-1 suggested goal');
+    assert.match(root.children[1].textContent, /No folder was selected, approved or scanned/);
+    assert.equal(
+      root.children[2].textContent,
+      "Manager's reason (untrusted note): <script>untrusted</script>"
+    );
+    assert.equal(root.children[4].textContent, 'View discovery folder options');
     panel.state.provider_read_only = true;
     await panel.renderProposals();
     assert.equal(
@@ -226,6 +245,40 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
         .children[0].children.filter(child => child.tag === 'button').length,
       0
     );
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+test('Manager discovery suggestion focuses only current owner controls after freshness check', async () => {
+  const original = globalThis.document;
+  const events = [];
+  const roots = {
+    setAttribute: (...args) => events.push(args),
+    scrollIntoView: () => events.push('scroll'),
+    focus: () => events.push('focus')
+  };
+  globalThis.document = { getElementById: id => (id === 'projectLibraryRoots' ? roots : null) };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const row = { proposal: { id: 'root', digest: 'exact', kind: 'root_review' } };
+    let status = 'ready';
+    let refreshes = 0;
+    panel.run = async (_trigger, _message, work) => work();
+    panel.refresh = async () => {
+      refreshes++;
+    };
+    panel.status = text => events.push(text);
+    panel.request = async path => {
+      assert.equal(path, '/proposals');
+      return { rows: [{ ...row, status }] };
+    };
+    await panel.viewRootProposal(row, null);
+    assert.equal(refreshes, 1);
+    assert.deepEqual(events.slice(0, 3), [['tabindex', '-1'], 'scroll', 'focus']);
+    status = 'stale';
+    await assert.rejects(() => panel.viewRootProposal(row, null), /Discovery folders changed/);
+    assert.equal(events.filter(event => event === 'focus').length, 1);
   } finally {
     globalThis.document = original;
   }

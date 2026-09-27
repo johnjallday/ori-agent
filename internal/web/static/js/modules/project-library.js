@@ -359,6 +359,7 @@ export class ProjectLibraryPanel {
       const proposal = row.proposal;
       const navigation = proposal.kind === 'project_review';
       const sessionGoal = proposal.kind === 'session_goal';
+      const rootReview = proposal.kind === 'root_review';
       const card = node('article', 'project-library-resume-card');
       card.append(
         node('h4', '', row.name),
@@ -369,7 +370,9 @@ export class ProjectLibraryPanel {
             ? 'Suggested navigation: inspect this song’s current project setup options. No setup was reviewed or authorized.'
             : sessionGoal
               ? `Suggested studio goal: ${proposal.goal.goal}. Desired outcome: ${proposal.goal.desired_outcome || 'Not set'}. Estimated effort: ${proposal.goal.time_minutes ? `${proposal.goal.time_minutes} minutes` : 'Not estimated'}. No session was saved.`
-              : `Suggested next action: ${proposal.next_action}`
+              : rootReview
+                ? 'Suggested navigation: inspect current discovery folder options. No folder was selected, approved or scanned.'
+                : `Suggested next action: ${proposal.next_action}`
         ),
         node(
           'p',
@@ -392,7 +395,9 @@ export class ProjectLibraryPanel {
             ? `View ${row.name} setup options`
             : sessionGoal
               ? `Edit ${row.name} suggested goal`
-              : `Review ${row.name} suggestion`
+              : rootReview
+                ? 'View discovery folder options'
+                : `Review ${row.name} suggestion`
         );
         button.type = 'button';
         button.addEventListener('click', () =>
@@ -400,7 +405,9 @@ export class ProjectLibraryPanel {
             ? void this.details(proposal.entry_id, button)
             : sessionGoal
               ? void this.editGoalProposal(row, button)
-              : void this.reviewProposal(row, button)
+              : rootReview
+                ? void this.viewRootProposal(row, button)
+                : void this.reviewProposal(row, button)
         );
         card.append(button);
       }
@@ -414,6 +421,25 @@ export class ProjectLibraryPanel {
           `Showing the latest ${(page.rows || []).length} of ${page.total} saved suggestions.`
         )
       );
+  }
+
+  async viewRootProposal(row, trigger) {
+    await this.run(trigger, 'Checking current discovery options…', async () => {
+      await this.refresh(); // Render the owner's current root state, not the Manager's snapshot.
+      const suggestions = await this.request('/proposals');
+      const current = suggestions.rows?.find(
+        item => item.proposal.id === row.proposal.id && item.proposal.digest === row.proposal.digest
+      );
+      if (!current || current.status !== 'ready' || current.proposal.kind !== 'root_review')
+        throw new Error('Discovery folders changed. Review the current Home controls instead.');
+      const roots = document.getElementById('projectLibraryRoots');
+      roots.setAttribute('tabindex', '-1');
+      roots.scrollIntoView({ block: 'center' });
+      roots.focus();
+      this.status(
+        'Current discovery folder options are in focus. Separate owner reviews are required.'
+      );
+    });
   }
 
   async editGoalProposal(row, trigger) {
