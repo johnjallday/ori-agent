@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"slices"
 	"time"
@@ -165,6 +166,9 @@ func (s *Store) PendingLinkedProjects(scope Scope) (PendingLinks, error) {
 			continue
 		}
 		child, _, _, _, linkErr := s.exactLinkedChild(scope, state, id)
+		if errors.Is(linkErr, ErrMirrorDiverged) {
+			return PendingLinks{}, linkErr // A split child mirror is not an empty pending shelf.
+		}
 		if linkErr != nil || !validText(child.Name, 160) || child.Name == "" {
 			continue // A broken/foreign link is not a candidate to adopt.
 		}

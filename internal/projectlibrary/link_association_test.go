@@ -236,8 +236,14 @@ func TestLinkedAssociation_SQLitePrimaryRejectsChangedChildMirrorAndRetriesFinal
 	if _, err := library.CommitLinkedProject(scope, childID, review.Token, "sqlite-associate"); !errors.Is(err, ErrMirrorDiverged) {
 		t.Fatalf("split child mirror was accepted: %v", err)
 	}
+	if pending, err := library.PendingLinkedProjects(scope); !errors.Is(err, ErrMirrorDiverged) || pending.Total != 0 {
+		t.Fatalf("split child mirror was misreported as an empty pending shelf: %+v %v", pending, err)
+	}
 	if err := file.Save(child); err != nil {
 		t.Fatal(err)
+	}
+	if pending, err := library.PendingLinkedProjects(scope); err != nil || pending.Total != 1 || pending.Rows[0].WorkspaceID != childID {
+		t.Fatalf("restored child did not return as a pending exact link: %+v %v", pending, err)
 	}
 	broken := NewStore(workspace.NewSyncStore(&failingLibrarySave{Store: primary}, file)).WithProviderEvidence(
 		func(_ Scope, _ *workspace.Workspace) bool { return true })
