@@ -45,14 +45,17 @@ type Manager struct {
 	reg            MCPRegistrar
 	skillNameGuard SkillNameGuard
 	changeObserver func(PluginChange)
-	store          *Store
-	marketplaces   *MarketplaceStore
-	artifacts      *ArtifactInstaller
-	surfaces       contributionLifecycle
-	pluginsDir     string
-	cloneDir       string
-	previewDir     string
-	skillDirs      skillDirCache
+	// replacementGuard is host-owned and runs under operationMu before a
+	// replacement changes artifacts, the registry or an installed surface.
+	replacementGuard func(InstalledPlugin, string, string) error
+	store            *Store
+	marketplaces     *MarketplaceStore
+	artifacts        *ArtifactInstaller
+	surfaces         contributionLifecycle
+	pluginsDir       string
+	cloneDir         string
+	previewDir       string
+	skillDirs        skillDirCache
 }
 
 // NewManager builds a plugin manager backed by the managed pluginsDir (which
@@ -69,6 +72,30 @@ func NewManager(reg MCPRegistrar, pluginsDir, cloneDir string) *Manager {
 		cloneDir:     cloneDir,
 		previewDir:   filepath.Join(pluginsDir, "preview"),
 	}
+}
+
+// SetReplacementGuard adds an optional host-owned safety check for changes
+// to an installed plugin. The guard must not call this Manager: it runs under
+// operationMu and only reads independent workspace state. It cannot rebind
+// existing Home/child snapshots or act as an update confirmation.
+func (m *Manager) SetReplacementGuard(guard func(InstalledPlugin, string, string) error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	m.replacementGuard = guard
+}
+
+func (m *Manager) guardReplacement(name, nextVersion, nextFingerprint string) error {
+	if m.replacementGuard == nil {
+		return nil
+	}
+	existing, found, err := m.store.Get(name)
+	if err != nil {
+		return err
+	}
+	if !found || (existing.Version == nextVersion && existing.ComponentFingerprint == nextFingerprint) {
+		return nil
+	}
+	return m.replacementGuard(existing, nextVersion, nextFingerprint)
 }
 
 // FreshPersistencePaths reports only managed plugin state. Linked source paths
@@ -161,6 +188,9 @@ func (m *Manager) install(source string, prefer SourceFormat, confirm ConfirmFun
 	}
 	componentFingerprint := trustedComponentFingerprint(d)
 	if err := m.checkSkillNames(d); err != nil {
+		return InstalledPlugin{}, err
+	}
+	if err := m.guardReplacement(d.Name, d.Version, componentFingerprint); err != nil {
 		return InstalledPlugin{}, err
 	}
 
@@ -507,6 +537,10 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 		return InstalledPlugin{}, err
 	}
 	componentFingerprint := trustedComponentFingerprint(d)
+	if err := m.guardReplacement(existing.Name, d.Version, componentFingerprint); err != nil {
+		restoreSurface()
+		return InstalledPlugin{}, err
+	}
 	if (existing.ComponentFingerprint != componentFingerprint || componentsChanged(existing, d)) && confirm != nil && !confirm(BuildTrustReport(d)) {
 		restoreSurface()
 		return InstalledPlugin{}, ErrInstallDeclined
@@ -616,6 +650,9 @@ func (m *Manager) UpdateFromSource(name, source string, prefer SourceFormat, con
 		return InstalledPlugin{}, err
 	}
 	componentFingerprint := trustedComponentFingerprint(candidate)
+	if err := m.guardReplacement(existing.Name, candidate.Version, componentFingerprint); err != nil {
+		return InstalledPlugin{}, err
+	}
 	report := BuildTrustReport(candidate)
 	if confirm == nil || !confirm(report) {
 		return InstalledPlugin{}, ErrInstallDeclined

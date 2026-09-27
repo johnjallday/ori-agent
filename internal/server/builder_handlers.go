@@ -634,6 +634,9 @@ func (b *ServerBuilder) initializeHandlers() {
 		pluginsDir := filepath.Join(config.DefaultDataDir(), "plugins")
 		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, pluginsDir)
 		b.pluginHandler.UpdateChecker().SetAdmissionGate(b.resetWork)
+		b.pluginHandler.Manager().SetReplacementGuard(func(current plugin.InstalledPlugin, nextVersion, nextFingerprint string) error {
+			return refuseUnreviewedHomeReplacement(b.workspaceStore, current, nextVersion, nextFingerprint)
+		})
 		b.wirePluginSkills()
 		// The Workspace Directory's plugin list (Plugins.json) records every
 		// install, update, and uninstall, and is filled from this machine's
