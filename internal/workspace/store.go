@@ -558,13 +558,14 @@ func atomicWriteFile(path string, data []byte) error {
 		_ = os.Remove(tmpPath)
 		return err
 	}
+	// #nosec G703 -- both paths come from the canonical workspace.json parent; tmpPath was created above in that same directory.
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		return err
 	}
 	// If directory durability fails after rename the caller receives an error;
 	// retry must first inspect the Home's persisted operation receipt.
-	parent, err := os.Open(dir) // #nosec G304 -- dir is the canonical workspace config parent, not a request path.
+	parent, err := os.Open(dir) // #nosec G304 G703 -- dir is the canonical workspace config parent, not a request path.
 	if err != nil {
 		return err
 	}
