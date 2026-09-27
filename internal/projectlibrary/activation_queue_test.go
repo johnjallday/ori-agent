@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,11 +65,56 @@ func TestActivationQueue_DurableOrderSkipNoCreatorAndReplay(t *testing.T) {
 	if _, _, err := other.ProgressActivationQueue(scope, queue.ID, "single", "skip", "skip-two", 2); err != nil {
 		t.Fatal(err)
 	}
-	if view, err := other.CurrentActivationQueue(scope); err != nil || view.Queue != nil {
-		t.Fatalf("completed queue still active: %+v %v", view, err)
+	if view, err := other.CurrentActivationQueue(scope); err != nil || view.Queue != nil || len(view.Recent) != 1 ||
+		view.Recent[0].Status != "complete" || view.Recent[0].SkippedCount != 2 {
+		t.Fatalf("completed queue lacked a bounded Home outcome: %+v %v", view, err)
 	}
 	if _, _, err := other.StartActivationQueue(scope, []string{"single", "alternates"}, "new-queue"); err != nil {
 		t.Fatal(err)
+	}
+	view, err = other.CurrentActivationQueue(scope)
+	if err != nil || view.Queue == nil || len(view.Recent) != 1 || view.Recent[0].ID != queue.ID {
+		t.Fatalf("new queue lost earlier outcome: %+v %v", view, err)
+	}
+	history, err := json.Marshal(view.Recent)
+	if err != nil || strings.Contains(string(history), "alternates") || strings.Contains(string(history), "single") ||
+		strings.Contains(string(history), tree.single) {
+		t.Fatalf("queue outcome history retained source/entry identity: %s %v", history, err)
+	}
+}
+
+func TestActivationQueue_OutcomeHistoryIsBoundedAndDoesNotRetainEntryIDs(t *testing.T) {
+	a, scope, _, _, _, _ := activationFixture(t)
+	s := a.library
+	firstID := ""
+	for i := 0; i < maxQueueOutcomes+4; i++ {
+		q, _, err := s.StartActivationQueue(scope, []string{"single", "alternates"}, fmt.Sprintf("history-start-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			firstID = q.ID
+		}
+		if _, err := s.DiscardActivationQueue(scope, q.ID, fmt.Sprintf("history-discard-%d", i), 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	doc, err := s.Read(scope)
+	if err != nil || len(doc.QueueHistory) != maxQueueOutcomes || doc.QueueHistory[0].ID == firstID {
+		t.Fatalf("outcome history was not bounded to the latest %d: %+v %v", maxQueueOutcomes, doc.QueueHistory, err)
+	}
+	for _, outcome := range doc.QueueHistory {
+		if !outcome.valid() || outcome.Status != "discarded" || outcome.SelectedCount != 2 || outcome.SkippedCount != 0 || outcome.ConnectedCount != 0 {
+			t.Fatalf("discarded queue claimed project setup: %+v", outcome)
+		}
+	}
+	view, err := s.CurrentActivationQueue(scope)
+	if err != nil || view.Queue != nil || len(view.Recent) != 5 || view.Recent[0].ID != doc.Queue.ID {
+		t.Fatalf("bounded owner read omitted the latest terminal queue: %+v %v", view, err)
+	}
+	history, err := json.Marshal(doc.QueueHistory)
+	if err != nil || strings.Contains(string(history), "single") || strings.Contains(string(history), "alternates") {
+		t.Fatalf("history retained catalog IDs instead of summaries: %s %v", history, err)
 	}
 }
 

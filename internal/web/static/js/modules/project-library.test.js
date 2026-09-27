@@ -218,6 +218,54 @@ test('serial queue recovery retains only bounded Home-scoped navigation and exac
   }
 });
 
+test('Home queue outcomes show bounded counts without retaining song identity', async () => {
+  const original = globalThis.document;
+  const section = { hidden: true };
+  const rows = {
+    children: [],
+    replaceChildren() {
+      this.children = [];
+    },
+    append(child) {
+      this.children.push(child);
+    }
+  };
+  globalThis.document = {
+    createElement: tag => ({ tag, textContent: '' }),
+    getElementById: id =>
+      ({ projectLibraryQueueHistory: section, projectLibraryQueueHistoryRows: rows })[id]
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.recentQueues = [
+      {
+        status: 'complete',
+        finished_at: '2026-09-27T12:00:00Z',
+        connected_count: 1,
+        skipped_count: 2
+      },
+      {
+        status: 'discarded',
+        finished_at: '2026-09-26T12:00:00Z',
+        connected_count: 0,
+        skipped_count: 0
+      }
+    ];
+    panel.renderQueueHistory();
+    assert.equal(section.hidden, false);
+    assert.equal(rows.children.length, 2);
+    assert.match(rows.children[0].textContent, /1 connected · 2 skipped/);
+    assert.match(rows.children[1].textContent, /Unreviewed songs were not activated/);
+    assert.doesNotMatch(rows.children[0].textContent, /private|Song\.rpp/);
+    panel.recentQueues = [];
+    panel.renderQueueHistory();
+    assert.equal(section.hidden, true);
+    assert.equal(rows.children.length, 0);
+  } finally {
+    globalThis.document = original;
+  }
+});
+
 test('Home queue restores order after browser storage loss and never treats local state as authority', async () => {
   const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
   const serverQueue = {

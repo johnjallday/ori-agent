@@ -68,9 +68,38 @@ func (q ActivationQueue) valid() bool {
 	return true
 }
 
+// ActivationQueueOutcome deliberately omits entry IDs and source evidence.
+// A forgotten Home record cannot be reconstructed from earlier queue history.
+type ActivationQueueOutcome struct {
+	ID             string    `json:"id"`
+	Status         string    `json:"status"` // complete, discarded
+	SelectedCount  int       `json:"selected_count"`
+	SkippedCount   int       `json:"skipped_count"`
+	ConnectedCount int       `json:"connected_count"`
+	StartedAt      time.Time `json:"started_at"`
+	FinishedAt     time.Time `json:"finished_at"`
+}
+
+const maxQueueOutcomes = 16
+
+func (o ActivationQueueOutcome) valid() bool {
+	if o.ID == "" || !validText(o.ID, 160) || o.SelectedCount < 2 || o.SelectedCount > 100 ||
+		o.SkippedCount < 0 || o.ConnectedCount < 0 || o.SkippedCount+o.ConnectedCount > o.SelectedCount ||
+		o.StartedAt.IsZero() || o.FinishedAt.Before(o.StartedAt) {
+		return false
+	}
+	return (o.Status == "complete" && o.SkippedCount+o.ConnectedCount == o.SelectedCount) || o.Status == "discarded"
+}
+
+func (q ActivationQueue) outcome() ActivationQueueOutcome {
+	return ActivationQueueOutcome{ID: q.ID, Status: q.Status, SelectedCount: len(q.IDs),
+		SkippedCount: len(q.Skipped), ConnectedCount: len(q.Connected), StartedAt: q.CreatedAt, FinishedAt: q.UpdatedAt}
+}
+
 type ActivationQueueView struct {
-	Revision int64            `json:"revision"`
-	Queue    *ActivationQueue `json:"queue,omitempty"`
+	Revision int64                    `json:"revision"`
+	Queue    *ActivationQueue         `json:"queue,omitempty"`
+	Recent   []ActivationQueueOutcome `json:"recent,omitempty"`
 }
 
 func queueDigest(scope Scope, action, id, entryID string, revision int64, ids []string) string {
@@ -92,6 +121,15 @@ func (s *Store) CurrentActivationQueue(scope Scope) (ActivationQueueView, error)
 		return ActivationQueueView{}, err
 	}
 	view := ActivationQueueView{Revision: doc.Revision}
+	for i := len(doc.QueueHistory) - 1; i >= 0 && len(view.Recent) < 5; i-- {
+		view.Recent = append(view.Recent, doc.QueueHistory[i])
+	}
+	if doc.Queue != nil && doc.Queue.Status != "active" {
+		view.Recent = append([]ActivationQueueOutcome{doc.Queue.outcome()}, view.Recent...)
+		if len(view.Recent) > 5 {
+			view.Recent = view.Recent[:5]
+		}
+	}
 	if doc.Queue != nil && doc.Queue.Status == "active" {
 		q := *doc.Queue
 		q.IDs = append([]string(nil), q.IDs...)
@@ -152,6 +190,12 @@ func (s *Store) StartActivationQueue(scope Scope, ids []string, key string) (Act
 				entry := sessionEntry(*current, id)
 				if entry == nil || entry.Link != nil {
 					return "", ErrConflict
+				}
+			}
+			if current.Queue != nil {
+				current.QueueHistory = append(current.QueueHistory, current.Queue.outcome())
+				if len(current.QueueHistory) > maxQueueOutcomes {
+					current.QueueHistory = current.QueueHistory[len(current.QueueHistory)-maxQueueOutcomes:]
 				}
 			}
 			current.Queue = &queue

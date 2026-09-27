@@ -116,6 +116,7 @@ export class ProjectLibraryPanel {
     this.busy = false;
     this.selectedProjects = new Set();
     this.queue = readActivationQueue(this.workspaceId);
+    this.recentQueues = [];
     const fromOffer =
       new URLSearchParams(globalThis.location?.search || '').get('folder_offer_id') || '';
     this.offerID = fromOffer.length <= 160 ? fromOffer : '';
@@ -748,6 +749,24 @@ export class ProjectLibraryPanel {
 
   // Browser storage is only an optional same-tab, previously confirmed creator
   // retry key. Home order, skips and connection receipts come from the server.
+  renderQueueHistory() {
+    if (typeof document === 'undefined') return;
+    const section = document.getElementById('projectLibraryQueueHistory');
+    const rows = document.getElementById('projectLibraryQueueHistoryRows');
+    if (!section || !rows) return;
+    rows.replaceChildren();
+    section.hidden = !this.recentQueues.length;
+    for (const outcome of this.recentQueues.slice(0, 5)) {
+      rows.append(
+        node(
+          'li',
+          '',
+          `${outcome.status === 'complete' ? 'Completed' : 'Discarded'} ${new Date(outcome.finished_at).toLocaleDateString()} · ${outcome.connected_count} connected · ${outcome.skipped_count} skipped. ${outcome.status === 'discarded' ? 'Unreviewed songs were not activated.' : 'Every song was handled individually.'}`
+        )
+      );
+    }
+  }
+
   saveQueue() {
     const key = `ori:library-queue:${this.workspaceId}`;
     try {
@@ -763,7 +782,8 @@ export class ProjectLibraryPanel {
 
   async restoreQueue() {
     const local = readActivationQueue(this.workspaceId);
-    const { queue } = await this.request('/queue');
+    const { queue, recent } = await this.request('/queue');
+    this.recentQueues = Array.isArray(recent) ? recent.slice(0, 5) : [];
     if (queue?.status === 'expired') {
       this.queue = {
         ...queue,
@@ -789,6 +809,7 @@ export class ProjectLibraryPanel {
       this.queue = local && !local.id ? local : null;
     }
     this.saveQueue();
+    this.renderQueueHistory();
   }
 
   async progressQueue(action, entryID) {
@@ -867,6 +888,7 @@ export class ProjectLibraryPanel {
       }
       this.queue = null;
       this.saveQueue();
+      await this.restoreQueue();
       this.status('Saved review queue discarded. Connected projects were not changed.');
     } catch (error) {
       await this.restoreQueue().catch(() => {});
@@ -968,6 +990,7 @@ export class ProjectLibraryPanel {
             if (this.queue?.index === this.queue.ids.length) {
               this.queue = null;
               this.saveQueue();
+              await this.restoreQueue();
               this.status('Review queue complete. Only separately confirmed songs were connected.');
               return;
             }
@@ -1051,6 +1074,7 @@ export class ProjectLibraryPanel {
           if (!this.queue || this.queue.index === this.queue.ids.length) {
             this.queue = null;
             this.saveQueue();
+            await this.restoreQueue();
             this.status('Review queue complete. Only separately confirmed songs were connected.');
             if (typeof document !== 'undefined')
               document.getElementById('projectLibraryStatus')?.focus();

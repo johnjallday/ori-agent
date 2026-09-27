@@ -56,20 +56,21 @@ func (s Scope) valid() bool {
 // Document is stored in the Home's canonical assistant-program envelope. Its
 // independent revision covers observations as well as reviewed user edits.
 type Document struct {
-	SchemaVersion int                `json:"schema_version"`
-	OwnerUserID   string             `json:"owner_user_id"`
-	HomeID        string             `json:"home_id"`
-	ProviderID    string             `json:"provider_id"`
-	ProgramID     string             `json:"program_id"`
-	Revision      int64              `json:"revision"`
-	Roots         []Root             `json:"roots,omitempty"`
-	Entries       []Entry            `json:"entries,omitempty"`
-	Scans         []Scan             `json:"scans,omitempty"`
-	Sessions      []StudioSession    `json:"sessions,omitempty"`
-	Queue         *ActivationQueue   `json:"activation_queue,omitempty"`
-	Proposals     []ManagerProposal  `json:"proposals,omitempty"`
-	Reviews       []ReviewReceipt    `json:"reviews,omitempty"`
-	Operations    []OperationReceipt `json:"operations,omitempty"`
+	SchemaVersion int                      `json:"schema_version"`
+	OwnerUserID   string                   `json:"owner_user_id"`
+	HomeID        string                   `json:"home_id"`
+	ProviderID    string                   `json:"provider_id"`
+	ProgramID     string                   `json:"program_id"`
+	Revision      int64                    `json:"revision"`
+	Roots         []Root                   `json:"roots,omitempty"`
+	Entries       []Entry                  `json:"entries,omitempty"`
+	Scans         []Scan                   `json:"scans,omitempty"`
+	Sessions      []StudioSession          `json:"sessions,omitempty"`
+	Queue         *ActivationQueue         `json:"activation_queue,omitempty"`
+	QueueHistory  []ActivationQueueOutcome `json:"queue_history,omitempty"`
+	Proposals     []ManagerProposal        `json:"proposals,omitempty"`
+	Reviews       []ReviewReceipt          `json:"reviews,omitempty"`
+	Operations    []OperationReceipt       `json:"operations,omitempty"`
 }
 
 type Root struct {
@@ -332,7 +333,8 @@ func (d Document) valid(scope Scope) bool {
 		d.OwnerUserID != scope.OwnerUserID || d.HomeID != scope.HomeID ||
 		d.ProviderID != scope.ProviderID || d.ProgramID != scope.ProgramID ||
 		len(d.Roots) > maxRoots || len(d.Entries) > maxEntries || len(d.Scans) > maxScans ||
-		len(d.Sessions) > maxSessions || len(d.Proposals) > maxProposals || len(d.Reviews) > maxReviews || len(d.Operations) > maxOperations {
+		len(d.Sessions) > maxSessions || len(d.Proposals) > maxProposals || len(d.QueueHistory) > maxQueueOutcomes ||
+		len(d.Reviews) > maxReviews || len(d.Operations) > maxOperations {
 		return false
 	}
 	roots := make(map[string]bool, len(d.Roots))
@@ -454,6 +456,16 @@ func (d Document) valid(scope Scope) bool {
 	}
 	if d.Queue != nil && !d.Queue.valid() {
 		return false
+	}
+	queueIDs := map[string]bool{}
+	if d.Queue != nil {
+		queueIDs[d.Queue.ID] = true
+	}
+	for _, outcome := range d.QueueHistory {
+		if !outcome.valid() || queueIDs[outcome.ID] {
+			return false
+		}
+		queueIDs[outcome.ID] = true
 	}
 	proposals := map[string]bool{}
 	for _, proposal := range d.Proposals {

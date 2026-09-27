@@ -574,7 +574,17 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
     await shelf.locator('#projectLibraryQueueResume').click();
     await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('Choose at least two');
-    expect((await json(await request.get(`${base}/queue`))).queue).toBeUndefined();
+    const firstOutcome = await json(await request.get(`${base}/queue`));
+    expect(firstOutcome.queue).toBeUndefined();
+    expect(firstOutcome.recent[0]).toMatchObject({
+      status: 'complete',
+      selected_count: 2,
+      connected_count: 1,
+      skipped_count: 1
+    });
+    await expect(shelf.locator('#projectLibraryQueueHistory')).toContainText(
+      '1 connected · 1 skipped'
+    );
     const queueProjects = await json(await request.get(`${base}/projects`));
     expect(
       queueProjects.rows.filter((row: { connection: string }) => row.connection === 'connected')
@@ -920,7 +930,15 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(forgottenQueue.getByRole('button', { name: 'Pause queue' })).toBeFocused();
     await forgottenQueue.getByRole('button', { name: 'Skip this song' }).press('Enter');
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeHidden();
-    expect((await json(await request.get(`${base}/queue`))).queue).toBeUndefined();
+    const secondOutcome = await json(await request.get(`${base}/queue`));
+    expect(secondOutcome.queue).toBeUndefined();
+    expect(secondOutcome.recent.slice(0, 2)).toMatchObject([
+      { status: 'complete', selected_count: 2, connected_count: 0, skipped_count: 2 },
+      { status: 'complete', selected_count: 2, connected_count: 1, skipped_count: 1 }
+    ]);
+    await expect(shelf.locator('#projectLibraryQueueHistory')).toContainText(
+      '0 connected · 2 skipped'
+    );
 
     // A provider loss cannot authorize new setup/skip, but the owner must
     // still be able to discard *only* the pending Home navigation metadata.
@@ -948,7 +966,18 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     );
     await discardReview.getByRole('button', { name: 'Discard queue' }).click();
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeHidden();
-    expect((await json(await request.get(`${base}/queue`))).queue).toBeUndefined();
+    const discardedOutcome = await json(await request.get(`${base}/queue`));
+    expect(discardedOutcome.queue).toBeUndefined();
+    expect(discardedOutcome.recent.slice(0, 3)).toMatchObject([
+      { status: 'discarded', selected_count: 2, connected_count: 0, skipped_count: 0 },
+      { status: 'complete', connected_count: 0, skipped_count: 2 },
+      { status: 'complete', connected_count: 1, skipped_count: 1 }
+    ]);
+    await expect(shelf.locator('#projectLibraryQueueHistory')).toContainText(
+      'Unreviewed songs were not activated'
+    );
+    await shelf.locator('#projectLibraryQueueHistory').scrollIntoViewIfNeeded();
+    await shot(page, '37-reviewed-queue-outcome-history');
     const reenableAfterQueue = await request.post('/api/plugins/music-project-management/enable', {
       headers: { 'X-Requested-With': 'XMLHttpRequest' }
     });

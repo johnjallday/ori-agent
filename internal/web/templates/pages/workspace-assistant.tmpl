@@ -158,6 +158,10 @@
                   <button id="projectLibraryQueueResume" class="modern-btn modern-btn-secondary" type="button" hidden>Resume review queue</button>
                   <button id="projectLibraryQueueDiscard" class="modern-btn modern-btn-secondary" type="button" hidden>Discard queue</button>
                 </div>
+                <section id="projectLibraryQueueHistory" class="project-library-queue-history" aria-labelledby="projectLibraryQueueHistoryTitle" hidden>
+                  <h3 id="projectLibraryQueueHistoryTitle">Recent review outcomes</h3>
+                  <ul id="projectLibraryQueueHistoryRows"></ul>
+                </section>
                 <div class="project-library-table-wrap" tabindex="0" aria-label="Project library results" aria-describedby="projectLibraryStatus">
                   <table class="project-library-table"><thead><tr><th scope="col">Pick</th><th scope="col">Project</th><th scope="col">Stage / status</th><th scope="col">Connection</th><th scope="col">Last observed source</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="projectLibraryRows"></tbody></table>
                 </div>
