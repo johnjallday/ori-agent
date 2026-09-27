@@ -426,6 +426,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       .click();
     const projectReview = page.getByRole('dialog', { name: 'Connect this one project?' });
     await expect(projectReview).toContainText('No other catalog projects are created');
+    await expect(projectReview).toContainText('Starts File-only');
     await expect(projectReview).toContainText(
       'Project-role staffing and live access require separate reviews'
     );

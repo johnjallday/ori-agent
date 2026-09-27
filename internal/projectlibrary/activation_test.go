@@ -174,9 +174,8 @@ func TestActivation_RecoversExactCreatorRunBeforeRepreviewAfterInterruptedCatalo
 	}
 }
 
-func TestActivation_RealCreatorPreviewsAndAttachesOnePinnedSongWithoutStaffing(t *testing.T) {
-	a, scope, _, file, tree, installed := activationFixture(t)
-	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+func realActivationCreator(t *testing.T, scope Scope, file *workspace.FileStore, installed activationPlugins) ActivationCreatorFactory {
+	t.Helper()
 	homeDecl := &workspace.AssistantProgramDeclaration{SchemaVersion: workspace.AssistantProgramSchemaVersion,
 		ID: scope.ProgramID, StationName: "Music Home",
 		Roles: []workspace.AssistantProgramRoleSpec{{ID: "portfolio_manager", Label: "Portfolio Manager",
@@ -211,11 +210,82 @@ func TestActivation_RealCreatorPreviewsAndAttachesOnePinnedSongWithoutStaffing(t
 		return grouprequirements.IndependentHomeResolution{Key: home.GetAssistantProgramState().Key,
 			Declaration: homeDecl, Owner: home.GetAssistantProgramState().HomeProvider, ProjectOwner: projectOwner}, nil
 	})
-	service := NewActivationService(a, func(resolver projectconnection.SelectionResolver) ActivationCreator {
+	return func(resolver projectconnection.SelectionResolver) ActivationCreator {
 		creator := projectconnection.NewService(file, resolver)
 		creator.SetGroupRequirementService(grouping)
 		return creator
-	})
+	}
+}
+
+type failActivationHomeWrite struct {
+	workspace.Store
+	homeID  string
+	pending bool
+}
+
+func (s *failActivationHomeWrite) Update(id string, fn func(*workspace.Workspace) error) error {
+	if id == s.homeID && s.pending {
+		s.pending = false
+		return errors.New("injected Home catalog persistence interruption")
+	}
+	return s.Store.Update(id, fn)
+}
+
+func TestActivation_RealCreatorRecoversAfterHomeWriteFailsAndStoreRestarts(t *testing.T) {
+	a, scope, _, file, tree, installed := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	creator := realActivationCreator(t, scope, file, installed)
+	service := NewActivationService(a, creator)
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalLibrary := a.library
+	interrupted := &failActivationHomeWrite{Store: file, homeID: scope.HomeID, pending: true}
+	a.library = NewStore(interrupted).WithProviderEvidence(originalLibrary.providerEvidence)
+	if _, err := service.Commit(t.Context(), scope, "single", review.Token, "resume-real-creator"); err == nil || interrupted.pending {
+		t.Fatalf("commit did not stop after canonical creator success: %v", err)
+	}
+	if doc, err := originalLibrary.Read(scope); err != nil || sessionEntry(doc, "single").Link != nil {
+		t.Fatalf("failed Home write associated the child: %+v %v", doc, err)
+	}
+	ids, err := file.List()
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("canonical creator did not preserve exactly one child: %v %v", ids, err)
+	}
+	root, err := file.GetFolderPath(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := workspace.NewFileStore(filepath.Dir(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	library := NewStore(restarted).WithProviderEvidence(originalLibrary.providerEvidence)
+	a.library, a.roots.library, a.owners = library, library, restarted
+	service = NewActivationService(a, realActivationCreator(t, scope, restarted, installed))
+	result, err := service.Commit(t.Context(), scope, "single", review.Token, "resume-real-creator")
+	if err != nil || result.WorkspaceID == "" || result.LinkID == "" {
+		t.Fatalf("creator success was not reconciled after restart: %+v %v", result, err)
+	}
+	replay, err := service.Commit(t.Context(), scope, "single", review.Token, "resume-real-creator")
+	if err != nil || !replay.Replay || replay.WorkspaceID != result.WorkspaceID {
+		t.Fatalf("recovered receipt did not replay: %+v %v", replay, err)
+	}
+	ids, err = restarted.List()
+	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("recovery duplicated a workspace or changed source: %v %v", ids, err)
+	}
+}
+
+func TestActivation_RealCreatorPreviewsAndAttachesOnePinnedSongWithoutStaffing(t *testing.T) {
+	a, scope, _, file, tree, installed := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
 	doc, err := a.library.Read(scope)
 	if err != nil {
 		t.Fatal(err)
@@ -250,8 +320,70 @@ func TestActivation_RealCreatorPreviewsAndAttachesOnePinnedSongWithoutStaffing(t
 	}
 }
 
+func TestActivation_SameNamedConnectedRootsKeepTheirOwnReviewedSource(t *testing.T) {
+	a, scope, roots, file, tree, _ := activationFixture(t)
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := doc.Roots[0]
+	other := filepath.Join(t.TempDir(), filepath.Base(tree.root))
+	if err := os.MkdirAll(filepath.Join(other, "Single"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	otherSong := filepath.Join(other, "Single", "Song.rpp")
+	if err := os.WriteFile(otherSong, []byte("separate source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	picker := roots.picker.(*testRootPicker)
+	picker.path, err = filepath.EvalSymlinks(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	picked, err := roots.Pick(t.Context(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootReview, err := roots.Review(scope, picked, doc.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRoot, _, err := roots.Commit(scope, rootReview.Token, "grant-identical-basename")
+	if err != nil || otherRoot.ID == original.ID || filepath.Base(otherRoot.Path) != filepath.Base(original.Path) {
+		t.Fatalf("two exact roots were not independently approved: %+v %v", otherRoot, err)
+	}
+	commits := 0
+	service := NewActivationService(a, func(resolver projectconnection.SelectionResolver) ActivationCreator {
+		return &activationCreatorTest{store: file, resolver: resolver, homeID: scope.HomeID, commits: &commits}
+	})
+	doc, err = a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err = a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, ok := findReview(doc, review.Token, "activate_project")
+	if !ok || bound.Activation == nil || bound.Activation.RootID != original.ID || bound.Activation.RootID == otherRoot.ID {
+		t.Fatalf("review adopted a same-named but unrelated root: %+v", bound)
+	}
+	originalHash := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	otherHash := fileDigest(t, otherSong)
+	if result, err := service.Commit(t.Context(), scope, "single", review.Token, "single-origin-only"); err != nil || result.LinkID == "" || commits != 1 {
+		t.Fatalf("reviewed origin could not attach: %+v %v", result, err)
+	}
+	if fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != originalHash || fileDigest(t, otherSong) != otherHash {
+		t.Fatal("connecting one root modified source files")
+	}
+}
+
 func TestActivation_RevocationAndSameNamedReplacementRefuseReviewedCreator(t *testing.T) {
-	for _, pathChange := range []string{"replace-folder", "replace-file", "revoke"} {
+	for _, pathChange := range []string{"replace-folder", "replace-file", "replace-regular-file", "revoke"} {
 		t.Run(pathChange, func(t *testing.T) {
 			a, scope, roots, file, tree, _ := activationFixture(t)
 			commits := 0
@@ -282,6 +414,13 @@ func TestActivation_RevocationAndSameNamedReplacementRefuseReviewedCreator(t *te
 					t.Fatal(err)
 				}
 				if err := os.Symlink(filepath.Join(tree.single, "Song.rpp-old"), filepath.Join(tree.single, "Song.rpp")); err != nil {
+					t.Fatal(err)
+				}
+			case "replace-regular-file":
+				if err := os.Rename(filepath.Join(tree.single, "Song.rpp"), filepath.Join(tree.single, "Song.rpp-old")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(tree.single, "Song.rpp"), []byte("same name, different inode"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			case "revoke":

@@ -192,6 +192,7 @@ type ActivationBinding struct {
 	RelativeFolder      string    `json:"relative_folder"`
 	FolderIdentity      string    `json:"folder_identity"`
 	ProjectFile         string    `json:"project_file"`
+	ProjectFileIdentity string    `json:"project_file_identity"`
 	WorkspaceName       string    `json:"workspace_name"`
 	BlueprintID         string    `json:"blueprint_id"`
 	ProviderFingerprint string    `json:"provider_fingerprint"`
@@ -206,6 +207,7 @@ func (b ActivationBinding) valid() bool {
 		b.RootID != "" && validText(b.RootID, 160) && b.RootRevision > 0 &&
 		validRelative(b.RelativeFolder) && b.FolderIdentity != "" && validText(b.FolderIdentity, 160) &&
 		b.ProjectFile != "" && len(b.ProjectFile) <= 255 && validText(b.ProjectFile, 255) &&
+		b.ProjectFileIdentity != "" && validText(b.ProjectFileIdentity, 160) &&
 		filepath.Base(b.ProjectFile) == b.ProjectFile && !strings.ContainsAny(b.ProjectFile, `/\\`) &&
 		b.WorkspaceName != "" && validText(b.WorkspaceName, 128) &&
 		b.BlueprintID != "" && validText(b.BlueprintID, 160) &&

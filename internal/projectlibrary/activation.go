@@ -153,7 +153,8 @@ func (r activationResolver) Resolve(token string) (string, error) {
 		return "", projectconnection.ErrUnavailable
 	}
 	for _, row := range rows {
-		if row.Name == r.binding.ProjectFile && !row.IsDir && !row.IsLink && !row.Unreadable {
+		if row.Name == r.binding.ProjectFile && !row.IsDir && !row.IsLink && !row.Unreadable &&
+			row.Identity == r.binding.ProjectFileIdentity {
 			return filepath.Join(root.Path, r.binding.RelativeFolder), nil
 		}
 	}
@@ -206,6 +207,23 @@ func (s *ActivationService) Review(ctx context.Context, scope Scope, entryID str
 	if observed == nil {
 		return ActivationReview{}, ErrConflict
 	}
+	// The selected *file*, not only its containing folder and basename, must
+	// remain the same object throughout review, creator preview and commit. A
+	// same-named regular-file replacement cannot inherit an earlier review.
+	rows, partial, err := readPinnedDirectory(ctx, root, observed.RelativeFolder, observed.FileIdentity, 5000)
+	if err != nil || partial {
+		return ActivationReview{}, ErrUnavailable
+	}
+	fileIdentity := ""
+	for _, row := range rows {
+		if row.Name == selectedFile && !row.IsDir && !row.IsLink && !row.Unreadable {
+			fileIdentity = row.Identity
+			break
+		}
+	}
+	if fileIdentity == "" {
+		return ActivationReview{}, ErrConflict
+	}
 	template, provider, err := a.providerFor(scope, eligible.BlueprintID)
 	if err != nil {
 		return ActivationReview{}, err
@@ -213,7 +231,7 @@ func (s *ActivationService) Review(ctx context.Context, scope Scope, entryID str
 	token, runID := newID(), newID()
 	binding := ActivationBinding{EntryID: entryID, EntryRevision: entry.Revision,
 		RootID: root.ID, RootRevision: root.Revision, RelativeFolder: observed.RelativeFolder,
-		FolderIdentity: observed.FileIdentity, ProjectFile: selectedFile, WorkspaceName: workspaceName,
+		FolderIdentity: observed.FileIdentity, ProjectFile: selectedFile, ProjectFileIdentity: fileIdentity, WorkspaceName: workspaceName,
 		BlueprintID: eligible.BlueprintID, ProviderFingerprint: provider.ComponentFingerprint,
 		ProviderGeneration: provider.EvidenceGeneration(), ProviderInstalledAt: provider.InstalledAt}
 	resolver := activationResolver{inspector: a, scope: scope, token: token, binding: binding, ctx: ctx}
@@ -255,7 +273,7 @@ func (s *ActivationService) Review(ctx context.Context, scope Scope, entryID str
 	}
 	return ActivationReview{Token: token, EntryID: entryID, WorkspaceName: workspaceName,
 		ProjectFile: selectedFile, BlueprintID: eligible.BlueprintID, ProjectRoleLabels: eligible.ProjectRoleLabels,
-		Statement: "Creates one exact linked project in this Home through reviewed existing-file setup. Source files are not changed. Project-role staffing and live access require separate reviews.",
+		Statement: "Creates one exact linked project in this Home through reviewed existing-file setup. Starts File-only: source files are not changed, no app is launched and no live access is granted. Project-role staffing and live access require separate reviews.",
 		ExpiresAt: review.ExpiresAt}, nil
 }
 
