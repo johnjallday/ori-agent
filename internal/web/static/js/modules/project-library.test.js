@@ -2,6 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ProjectLibraryPanel, libraryQuery, readActivationQueue } from './project-library.js';
 
+test('canceling a reviewed scan or disconnect refreshes the Home revision before retry', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { revision: 1 };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.status = () => {};
+  panel.confirm = async () => false;
+  const calls = [];
+  panel.post = async (path, body) => {
+    calls.push({ path, body });
+    if (!path.endsWith('/review')) throw new Error('cancel must never commit');
+    return {
+      token: 'inert-review',
+      root_path: '/sandbox/Documents',
+      entry_count: 5,
+      max_entries: 5000
+    };
+  };
+  panel.refresh = async () => {
+    panel.state.revision++;
+  };
+  await panel.revokeRoot({ id: 'root', path: '/sandbox/Documents' });
+  await panel.scanRootFlow('root');
+  assert.deepEqual(calls, [
+    { path: '/roots/root/revoke/review', body: { if_revision: 1 } },
+    { path: '/roots/root/scans/review', body: { if_revision: 2 } }
+  ]);
+  assert.equal(panel.state.revision, 3);
+});
+
 test('serial queue recovery retains only bounded Home-scoped navigation and exact pending retry', () => {
   const now = Date.now();
   const key = 'ori:library-queue:home';
@@ -565,6 +594,10 @@ test('a saved narrower scope requires its own review and never sends a browser p
     };
   };
   panel.confirm = async () => false;
+  panel.refresh = async () => {
+    panel.state.revision++;
+  };
+  panel.status = () => {};
   await panel.scanRootFlow('root-1', null, 'server-scope-id');
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], [
@@ -584,9 +617,8 @@ test('a saved narrower scope requires its own review and never sends a browser p
       };
     return { status: 'complete', entries_seen: 1, skipped_links: 0, skipped_other: 0 };
   };
-  panel.refresh = async () => {};
-  panel.status = () => {};
   await panel.scanRootFlow('root-1', null, 'server-scope-id');
+  assert.deepEqual(calls[1][1], { if_revision: 8, scope_id: 'server-scope-id' });
   assert.equal(calls[2][0], '/roots/root-1/scans/commit');
   assert.equal(calls[2][1].scope_id, 'server-scope-id');
   assert.equal(calls[2][1].confirm, true);

@@ -997,8 +997,11 @@ export class ProjectLibraryPanel {
         'Scan metadata',
         trigger
       ))
-    )
+    ) {
+      await this.refresh(); // The inert review still advances the Home document revision.
+      this.status('Scan canceled. The folder was not read.');
       return;
+    }
     const receipt = await this.post(`/roots/${encodeURIComponent(rootID)}/scans/commit`, {
       review_token: review.token,
       idempotency_key: operationKey('scan'),
@@ -1027,8 +1030,11 @@ export class ProjectLibraryPanel {
           'Disconnect folder',
           trigger
         ))
-      )
+      ) {
+        await this.refresh(); // A canceled review is not a revoke, but it changes the revision.
+        this.status('Disconnect canceled. Discovery consent is unchanged.');
         return;
+      }
       await this.post(`/roots/${encodeURIComponent(root.id)}/revoke/commit`, {
         review_token: review.token,
         idempotency_key: operationKey('revoke'),

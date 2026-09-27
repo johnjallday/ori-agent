@@ -662,6 +662,66 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       .fields;
     expect(updatedFields.milestones[0].id).toBe(milestoneID);
     expect(updatedFields.purpose).toBe('Record a scratch vocal');
+
+    // Disconnecting discovery is not a project revoke or deletion. Cancel is
+    // inert; confirmation ends future root reads but retains saved Home notes
+    // and the independently reviewed Album-3/Album-2 workspace links.
+    await shelf.locator('#projectLibraryRoots').getByRole('button', { name: 'Disconnect' }).click();
+    const disconnect = page.getByRole('dialog', { name: 'Disconnect this discovery folder?' });
+    await expect(disconnect).toContainText('5 catalog records retain their historical notes');
+    await shot(page, '31-reviewed-discovery-disconnect-impact');
+    await disconnect.getByRole('button', { name: 'Cancel' }).click();
+    expect((await json(await request.get(`${base}/roots`))).roots[0].revoked_at).toBeFalsy();
+    await shelf.locator('#projectLibraryRoots').getByRole('button', { name: 'Disconnect' }).click();
+    await page
+      .getByRole('dialog', { name: 'Disconnect this discovery folder?' })
+      .getByRole('button', { name: 'Disconnect folder' })
+      .click();
+    await expect(shelf.locator('#projectLibraryRoots')).toContainText(
+      'Disconnected · historical entries retained'
+    );
+    const afterDisconnect = await json(await request.get(`${base}/projects`));
+    expect(afterDisconnect.total).toBe(5);
+    expect(
+      afterDisconnect.rows.filter((row: { connection: string }) => row.connection === 'connected')
+    ).toHaveLength(2);
+    const blockedSetup = await json(
+      await request.get(`${base}/projects/${savedEntry.id}/activation`)
+    );
+    expect(blockedSetup.state).toBe('revoked_source');
+    const linkedSetup = await json(await request.get(`${base}/projects/${albumID}/activation`));
+    expect(linkedSetup).toMatchObject({ state: 'connected', workspace_id: committed.workspace_id });
+    await expect(
+      shelf.locator('#projectLibraryResume').getByRole('button', { name: 'Open Album-3 workspace' })
+    ).toBeVisible();
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}`))).fields
+    ).toMatchObject({
+      purpose: 'Record a scratch vocal',
+      milestones: [{ id: milestoneID, complete: true }]
+    });
+    await shelf
+      .locator('#projectLibraryRows')
+      .getByRole('button', { name: 'Review Album-4' })
+      .click();
+    const revokedDetails = page.getByRole('dialog', { name: 'Album-4' });
+    await expect(revokedDetails).toContainText('Discovery consent ended');
+    await revokedDetails.getByRole('button', { name: 'Plan a session' }).click();
+    const revokedPlan = page.getByRole('dialog', { name: 'Plan a studio session' });
+    await revokedPlan
+      .getByRole('textbox', { name: 'Session goal' })
+      .fill('Review my saved notes without the folder');
+    await revokedPlan.getByRole('button', { name: 'Review session' }).click();
+    await page
+      .getByRole('dialog', { name: 'Save this goal?' })
+      .getByRole('button', { name: 'Save goal' })
+      .click();
+    await expect(shelf.locator('#projectLibraryResume')).toContainText(
+      'Review my saved notes without the folder'
+    );
+    expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+      workspacesBefore.length + 2
+    );
     expect(createHash('sha256').update(readFileSync(alternate)).digest('hex')).toBe(alternateHash);
   }
   expect(songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))).toEqual(
