@@ -13,7 +13,8 @@
  *              the hole and says what to press.
  *
  * Starting a mission from its briefing opens the hole where the briefing was,
- * so the user sees Ori point at the first click.
+ * so the user sees Ori point at the first click. Both hold the page still: it
+ * does not scroll under the dimmed layer.
  *
  * What it is not:
  *   - It never clicks, fills, selects or submits. The spotlit control is the
@@ -135,6 +136,27 @@ export function besideWidth(anchor, viewport, { gap = 18, gutter = 16 } = {}) {
   return room >= 260 ? Math.min(340, room) : 0;
 }
 
+/* ---- page scroll ----------------------------------------------------------- */
+
+/*
+ * lockPageScroll holds the page still under the dimmed layer, the way a modal
+ * does. Ori's hand is placed in page coordinates, and the control it points at
+ * may sit in a sticky header: a page scrolling under the layer carried the hand
+ * off the control and snapped it back every frame. A classic scrollbar keeps
+ * its gutter, so hiding it does not shift the page, and the control in the
+ * hole, sideways. It returns the restore.
+ */
+export function lockPageScroll(root, viewportWidth) {
+  const style = root.style;
+  const saved = { overflow: style.overflow, scrollbarGutter: style.scrollbarGutter };
+  style.overflow = 'hidden';
+  if (viewportWidth - root.clientWidth > 0) style.scrollbarGutter = 'stable';
+  return () => {
+    style.overflow = saved.overflow;
+    style.scrollbarGutter = saved.scrollbarGutter;
+  };
+}
+
 /* ---- DOM ------------------------------------------------------------------- */
 
 const ROOT_ID = 'oriSpotlight';
@@ -217,6 +239,21 @@ function makePageInert() {
   };
 }
 
+// The briefing and the spotlight hold the page still. A callout leaves the page
+// alone, scrolling included: the user is working in the form it stands beside.
+function holdPage(layer) {
+  if (!layer.restoreScroll) {
+    layer.restoreScroll = lockPageScroll(doc().documentElement, win().innerWidth);
+  }
+}
+
+function releasePage(layer) {
+  if (layer.restoreScroll) {
+    layer.restoreScroll();
+    layer.restoreScroll = null;
+  }
+}
+
 function ensureRoot() {
   if (current) return current;
   const root = el('div', 'ori-spotlight');
@@ -243,6 +280,7 @@ function ensureRoot() {
     callout: null,
     frame: 0,
     restoreInert: null,
+    restoreScroll: null,
     onLater: null,
     key: '',
     selector: '',
@@ -327,6 +365,7 @@ export function close() {
   stopTracking();
   doc().removeEventListener('keydown', onKeydown, true);
   if (current.restoreInert) current.restoreInert();
+  releasePage(current);
   if (current.key) win().OriGuide?.clearControlMark?.();
   current.root.remove();
   current = null;
@@ -360,6 +399,7 @@ export function showBriefing(opts = {}) {
   layer.callout?.remove();
   layer.callout = null;
   if (!layer.restoreInert) layer.restoreInert = makePageInert();
+  holdPage(layer);
 
   const card = el('section', 'ori-spotlight__briefing');
   card.setAttribute('role', 'dialog');
@@ -514,6 +554,8 @@ function present(target, key, opts, mode) {
   layer.anchor = opts.anchor || '';
   // A callout leaves the page alone; a spotlight dims it around the control.
   layer.scrim.hidden = mode === 'callout';
+  if (mode === 'callout') releasePage(layer);
+  else holdPage(layer);
   // The page must be reachable again: the control is the way on.
   if (layer.restoreInert) {
     layer.restoreInert();
