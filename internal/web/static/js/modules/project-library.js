@@ -359,6 +359,7 @@ export class ProjectLibraryPanel {
       const proposal = row.proposal;
       const navigation = proposal.kind === 'project_review';
       const sessionGoal = proposal.kind === 'session_goal';
+      const sessionRecap = proposal.kind === 'session_recap';
       const rootReview = proposal.kind === 'root_review';
       const card = node('article', 'project-library-resume-card');
       card.append(
@@ -370,9 +371,11 @@ export class ProjectLibraryPanel {
             ? 'Suggested navigation: inspect this song’s current project setup options. No setup was reviewed or authorized.'
             : sessionGoal
               ? `Suggested studio goal: ${proposal.goal.goal}. Desired outcome: ${proposal.goal.desired_outcome || 'Not set'}. Estimated effort: ${proposal.goal.time_minutes ? `${proposal.goal.time_minutes} minutes` : 'Not estimated'}. No session was saved.`
-              : rootReview
-                ? 'Suggested navigation: inspect current discovery folder options. No folder was selected, approved or scanned.'
-                : `Suggested next action: ${proposal.next_action}`
+              : sessionRecap
+                ? `Suggested studio recap: ${proposal.recap}. This is not evidence that work happened, a task finished or a DAW ran. No recap was saved.`
+                : rootReview
+                  ? 'Suggested navigation: inspect current discovery folder options. No folder was selected, approved or scanned.'
+                  : `Suggested next action: ${proposal.next_action}`
         ),
         node(
           'p',
@@ -395,9 +398,11 @@ export class ProjectLibraryPanel {
             ? `View ${row.name} setup options`
             : sessionGoal
               ? `Edit ${row.name} suggested goal`
-              : rootReview
-                ? 'View discovery folder options'
-                : `Review ${row.name} suggestion`
+              : sessionRecap
+                ? `Edit ${row.name} suggested recap`
+                : rootReview
+                  ? 'View discovery folder options'
+                  : `Review ${row.name} suggestion`
         );
         button.type = 'button';
         button.addEventListener('click', () =>
@@ -405,9 +410,11 @@ export class ProjectLibraryPanel {
             ? void this.details(proposal.entry_id, button)
             : sessionGoal
               ? void this.editGoalProposal(row, button)
-              : rootReview
-                ? void this.viewRootProposal(row, button)
-                : void this.reviewProposal(row, button)
+              : sessionRecap
+                ? void this.editRecapProposal(row, button)
+                : rootReview
+                  ? void this.viewRootProposal(row, button)
+                  : void this.reviewProposal(row, button)
         );
         card.append(button);
       }
@@ -421,6 +428,43 @@ export class ProjectLibraryPanel {
           `Showing the latest ${(page.rows || []).length} of ${page.total} saved suggestions.`
         )
       );
+  }
+
+  async editRecapProposal(row, trigger) {
+    await this.run(
+      trigger,
+      'Checking this suggested studio recap against the current Home…',
+      async () => {
+        const suggestions = await this.request('/proposals');
+        const current = suggestions.rows?.find(
+          item =>
+            item.proposal.id === row.proposal.id && item.proposal.digest === row.proposal.digest
+        );
+        if (!current || current.status !== 'ready' || current.proposal.kind !== 'session_recap')
+          throw new Error('The suggested recap is no longer current. Review saved sessions first.');
+        const proposal = current.proposal;
+        const detail = await this.request(`/projects/${encodeURIComponent(proposal.entry_id)}`);
+        if (
+          detail.entry_revision !== proposal.entry_revision ||
+          detail.row.fields_revision !== proposal.fields_revision
+        )
+          throw new Error('This song changed. Review its current Details before wrapping up.');
+        const session = await this.request(
+          `/projects/${encodeURIComponent(proposal.entry_id)}/sessions/${encodeURIComponent(proposal.session_id)}`
+        );
+        if (
+          session.entry_id !== proposal.entry_id ||
+          session.id !== proposal.session_id ||
+          session.revision !== proposal.session_revision ||
+          session.state !== 'accepted' ||
+          session.recap
+        )
+          throw new Error(
+            'This saved session changed. Reopen its current history before wrapping up.'
+          );
+        this.sessionForm(detail, session, trigger, null, proposal.recap);
+      }
+    );
   }
 
   async viewRootProposal(row, trigger) {
@@ -1906,7 +1950,7 @@ export class ProjectLibraryPanel {
     });
   }
 
-  sessionForm(detail, session, trigger, suggestedGoal = null) {
+  sessionForm(detail, session, trigger, suggestedGoal = null, suggestedRecap = null) {
     const wrapping = Boolean(session);
     const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
     const form = node('form');
@@ -1919,6 +1963,7 @@ export class ProjectLibraryPanel {
     notes.maxLength = wrapping ? 2000 : 500;
     notes.rows = wrapping ? 5 : 3;
     if (!wrapping && suggestedGoal) notes.value = suggestedGoal.goal;
+    if (wrapping && suggestedRecap) notes.value = suggestedRecap;
     const extra = node(wrapping ? 'input' : 'textarea', 'form-control');
     extra.maxLength = wrapping ? 240 : 500;
     if (!wrapping) extra.rows = 2;
@@ -1977,7 +2022,9 @@ export class ProjectLibraryPanel {
         '',
         suggestedGoal
           ? 'Manager suggestion (untrusted draft). Edit it before your separate review and confirmation. Cancel saves no studio session, task or DAW work.'
-          : 'Your notes do not start a task, open a DAW, or prove work happened.'
+          : suggestedRecap
+            ? 'Manager suggestion (untrusted draft, not evidence of work). Edit and separately review/confirm it. No actual date, decisions, next action or project note was supplied. Cancel saves nothing.'
+            : 'Your notes do not start a task, open a DAW, or prove work happened.'
       ),
       fields,
       actions

@@ -138,6 +138,7 @@ func TestClassifyToolSideEffect(t *testing.T) {
 		{"Home project-review navigation needs owner review", "home_library_propose_project_review", "", ToolSideEffectConfirm},
 		{"Home studio goal suggestion needs owner review", "home_library_propose_session_goal", "", ToolSideEffectConfirm},
 		{"Home discovery navigation suggestion needs owner review", "home_library_propose_root_review", "", ToolSideEffectConfirm},
+		{"Home studio recap suggestion needs owner review", "home_library_propose_session_recap", "", ToolSideEffectConfirm},
 		{"known write", "move_file", "", ToolSideEffectWrite},
 		{"draft is confirm-gated", "mail_draft_reply", "", ToolSideEffectConfirm},
 

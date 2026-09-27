@@ -145,7 +145,7 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     panel.request = async path => {
       assert.equal(path, '/proposals');
       return {
-        total: 5,
+        total: 6,
         rows: [
           {
             name: '<svg onload=alert(1)>',
@@ -205,13 +205,25 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
               reason: '<script>untrusted</script>',
               agent_name: 'Manager'
             }
+          },
+          {
+            name: 'Album-4',
+            status: 'ready',
+            proposal: {
+              id: 'recap-id',
+              kind: 'session_recap',
+              entry_id: 'entry-4',
+              digest: 'recap-draft',
+              recap: '<script>untrusted recap</script>',
+              agent_name: 'Manager'
+            }
           }
         ]
       };
     };
     await panel.renderProposals();
     assert.equal(elements.get('projectLibraryProposals').hidden, false);
-    const [ready, stale, navigation, goal, root] = elements.get(
+    const [ready, stale, navigation, goal, root, recap] = elements.get(
       'projectLibraryProposalRows'
     ).children;
     assert.equal(ready.children[0].textContent, '<svg onload=alert(1)>');
@@ -237,6 +249,9 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
       "Manager's reason (untrusted note): <script>untrusted</script>"
     );
     assert.equal(root.children[4].textContent, 'View discovery folder options');
+    assert.match(recap.children[1].textContent, /<script>untrusted recap<\/script>/);
+    assert.match(recap.children[1].textContent, /not evidence that work happened/);
+    assert.equal(recap.children[4].textContent, 'Edit Album-4 suggested recap');
     panel.state.provider_read_only = true;
     await panel.renderProposals();
     assert.equal(
@@ -282,6 +297,56 @@ test('Manager discovery suggestion focuses only current owner controls after fre
   } finally {
     globalThis.document = original;
   }
+});
+
+test('Manager recap draft rechecks entry and exact accepted session before editable owner form', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  const row = {
+    proposal: {
+      id: 'draft',
+      digest: 'exact',
+      kind: 'session_recap',
+      entry_id: 'song',
+      entry_revision: 2,
+      fields_revision: 3,
+      session_id: 'session',
+      session_revision: 1,
+      recap: '<script>inert</script>'
+    }
+  };
+  let status = 'ready';
+  let fields = 3;
+  let sessionRevision = 1;
+  const opened = [];
+  panel.run = async (_trigger, _message, work) => work();
+  panel.request = async path => {
+    if (path === '/proposals') return { rows: [{ ...row, status }] };
+    if (path === '/projects/song')
+      return { entry_revision: 2, row: { id: 'song', fields_revision: fields } };
+    assert.equal(path, '/projects/song/sessions/session');
+    return {
+      id: 'session',
+      entry_id: 'song',
+      revision: sessionRevision,
+      state: 'accepted',
+      recap: ''
+    };
+  };
+  panel.sessionForm = (...args) => opened.push(args);
+  await panel.editRecapProposal(row, null);
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][1].id, 'session');
+  assert.equal(opened[0][3], null);
+  assert.equal(opened[0][4], '<script>inert</script>'); // Data only, not a saved recap.
+  status = 'stale';
+  await assert.rejects(() => panel.editRecapProposal(row, null), /no longer current/);
+  status = 'ready';
+  fields = 4;
+  await assert.rejects(() => panel.editRecapProposal(row, null), /song changed/);
+  fields = 3;
+  sessionRevision = 2;
+  await assert.rejects(() => panel.editRecapProposal(row, null), /saved session changed/);
+  assert.equal(opened.length, 1);
 });
 
 test('Manager goal suggestion rechecks freshness then opens only the editable owner form', async () => {

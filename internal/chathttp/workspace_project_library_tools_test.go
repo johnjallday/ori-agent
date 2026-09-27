@@ -74,7 +74,8 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := library.CommitGoal(scope, doc.Entries[0].ID, goalReview.Token, "manager-session", doc.Entries[0].Revision, goal, scope.OwnerUserID); err != nil {
+	savedGoal, _, err := library.CommitGoal(scope, doc.Entries[0].ID, goalReview.Token, "manager-session", doc.Entries[0].Revision, goal, scope.OwnerUserID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	provider := NewWorkspaceToolProvider(nil, file, home.ID)
@@ -89,7 +90,8 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil || findLibraryTool(provider.Tools(), "home_library_propose_next_action") == nil ||
 		findLibraryTool(provider.Tools(), "home_library_propose_project_review") == nil ||
 		findLibraryTool(provider.Tools(), "home_library_propose_session_goal") == nil ||
-		findLibraryTool(provider.Tools(), "home_library_propose_root_review") == nil {
+		findLibraryTool(provider.Tools(), "home_library_propose_root_review") == nil ||
+		findLibraryTool(provider.Tools(), "home_library_propose_session_recap") == nil {
 		t.Fatal("bound Manager's library reads not registered")
 	}
 	output, err := search.Call(context.Background(), `{"text":"Private"}`)
@@ -181,6 +183,25 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if current, err := library.Read(scope); err != nil || len(current.Proposals) != 3 || len(current.Sessions) != 1 {
 		t.Fatalf("root navigation changed Home state beyond one suggestion: %+v %v", current, err)
 	}
+	recapTool := findLibraryTool(provider.Tools(), "home_library_propose_session_recap")
+	recapArgs := fmt.Sprintf(`{"entry_id":%q,"entry_revision":%d,"fields_revision":%d,"session_id":%q,"session_revision":%d,"recap":"A possible draft, not an observed outcome","request_key":"model-recap-draft"}`,
+		result.Rows[0].ID, savedDetail.EntryRevision, savedDetail.Row.FieldsRevision, savedGoal.ID, savedGoal.Revision)
+	recapSuggestion, err := recapTool.Call(context.Background(), recapArgs)
+	if err != nil || !strings.Contains(recapSuggestion, "Session recap suggestion saved only") || strings.Contains(recapSuggestion, sandbox) {
+		t.Fatalf("Manager could not save an inert recap draft: %s %v", recapSuggestion, err)
+	}
+	if replayed, err := recapTool.Call(context.Background(), recapArgs); err != nil || !strings.Contains(replayed, `"replay":true`) {
+		t.Fatalf("exact recap retry duplicated a suggestion: %s %v", replayed, err)
+	}
+	if _, err := recapTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","session_id":"`+savedGoal.ID+`","recap":"Unsafe","request_key":"missing-recap-revisions"}`); err == nil {
+		t.Fatal("Manager recap omitted saved entry/session revisions")
+	}
+	if _, err := recapTool.Call(context.Background(), `{"entry_id":"`+child.ID+`","entry_revision":1,"fields_revision":0,"session_id":"`+savedGoal.ID+`","session_revision":1,"recap":"Unsafe","request_key":"foreign-recap"}`); err == nil {
+		t.Fatal("child ID proposed a Home recap")
+	}
+	if current, err := library.Read(scope); err != nil || len(current.Proposals) != 4 || len(current.Sessions) != 1 || current.Sessions[0].Recap != "" {
+		t.Fatalf("recap suggestion directly edited a Home session: %+v %v", current, err)
+	}
 	if findLibraryTool(provider.Tools(), "home_library_commit") != nil {
 		t.Fatal("model was given a user confirmation tool")
 	}
@@ -211,6 +232,9 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	if _, err := rootTool.Call(context.Background(), `{"request_key":"unbound-root"}`); err == nil {
 		t.Fatal("previously registered root navigation tool bypassed removed runtime instance")
+	}
+	if _, err := recapTool.Call(context.Background(), recapArgs); err == nil {
+		t.Fatal("previously registered recap tool bypassed removed runtime instance")
 	}
 	provider.SetExecutingInstanceID("sample-instance")
 	provider.SetExecutingAgent("Sample")

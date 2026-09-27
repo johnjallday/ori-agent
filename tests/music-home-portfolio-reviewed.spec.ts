@@ -1030,6 +1030,122 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))
     ).toEqual(before);
 
+    // An exact saved session may receive only an inert recap draft. The
+    // Manager cannot supply dates, decisions, a project next-action patch or
+    // a completion claim. The owner edits and separately confirms the recap.
+    const savedAfterGoal = await json(
+      await request.get(`${base}/projects/${savedEntry.id}/sessions`)
+    );
+    const savedGoal = savedAfterGoal.rows.find(
+      (row: { goal: string }) => row.goal === 'Review two vocal takes together'
+    );
+    expect(savedGoal?.id).toBeTruthy();
+    const beforeRecapDetail = await json(await request.get(`${base}/projects/${savedEntry.id}`));
+    const recapDraft = 'Consider writing down what to check on the next take';
+    const recapSuggestion = await json(
+      await request.post('/api/chat', {
+        data: {
+          agent_name: manager.name,
+          route_context: {
+            surface: 'workspace_detail',
+            workspace_id: homeID,
+            page_path: `/workspaces/${homes[0].folder_slug}/assistant`
+          },
+          question: `/tool home_library_propose_session_recap ${JSON.stringify({
+            entry_id: savedEntry.id,
+            entry_revision: beforeRecapDetail.entry_revision,
+            fields_revision: beforeRecapDetail.row.fields_revision,
+            session_id: savedGoal.id,
+            session_revision: savedGoal.revision,
+            recap: recapDraft,
+            reason: 'An editable note only; no work or DAW progress observed.',
+            request_key: `browser-recap-draft-${homeID}`
+          })}`
+        }
+      })
+    );
+    expect(recapSuggestion.success, JSON.stringify(recapSuggestion)).toBe(true);
+    expect(recapSuggestion.response).toContain('Session recap suggestion saved only');
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}/sessions/${savedGoal.id}`)))
+        .recap
+    ).toBeFalsy();
+    await page.reload();
+    const recapSuggestions = page.locator('#projectLibraryProposals');
+    const recapButton = recapSuggestions.getByRole('button', {
+      name: 'Edit Album-4 suggested recap'
+    });
+    await expect(recapSuggestions).toContainText(recapDraft);
+    await recapButton.click();
+    const recapForm = page.getByRole('dialog', { name: 'Wrap up studio session' });
+    await expect(recapForm).toContainText(
+      'Manager suggestion (untrusted draft, not evidence of work)'
+    );
+    await expect(recapForm.getByRole('textbox', { name: 'Your recap' })).toHaveValue(recapDraft);
+    await expect(
+      recapForm.getByRole('checkbox', {
+        name: 'Also update this project’s saved next action (separate from the session note)'
+      })
+    ).not.toBeChecked();
+    await expect(recapForm.getByRole('textbox', { name: 'Proposed next action' })).toHaveValue('');
+    await shot(page, '42-reviewed-manager-editable-recap-draft');
+    await recapForm.getByRole('button', { name: 'Cancel' }).click();
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}/sessions/${savedGoal.id}`)))
+        .recap
+    ).toBeFalsy();
+    await recapButton.click();
+    await page
+      .getByRole('dialog', { name: 'Wrap up studio session' })
+      .getByRole('textbox', { name: 'Your recap' })
+      .fill('User chose two take names to revisit');
+    await page
+      .getByRole('dialog', { name: 'Wrap up studio session' })
+      .getByRole('button', { name: 'Review session' })
+      .click();
+    const ownerRecapReview = page.getByRole('dialog', { name: 'Save this recap?' });
+    await expect(ownerRecapReview).toContainText('User chose two take names to revisit');
+    await ownerRecapReview.getByRole('button', { name: 'Cancel' }).click();
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}/sessions/${savedGoal.id}`)))
+        .recap
+    ).toBeFalsy();
+    await recapButton.click();
+    await page
+      .getByRole('dialog', { name: 'Wrap up studio session' })
+      .getByRole('textbox', { name: 'Your recap' })
+      .fill('User chose two take names to revisit');
+    await page
+      .getByRole('dialog', { name: 'Wrap up studio session' })
+      .getByRole('button', { name: 'Review session' })
+      .click();
+    await page
+      .getByRole('dialog', { name: 'Save this recap?' })
+      .getByRole('button', { name: 'Save recap' })
+      .click();
+    await expect
+      .poll(
+        async () =>
+          (
+            await json(
+              await request.get(`${base}/projects/${savedEntry.id}/sessions/${savedGoal.id}`)
+            )
+          ).recap
+      )
+      .toBe('User chose two take names to revisit');
+    await expect(
+      recapSuggestions.locator('.project-library-resume-card').filter({ hasText: recapDraft })
+    ).toContainText('Not actionable (stale)');
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}`))).fields.next_action
+    ).toBe(beforeRecapDetail.fields.next_action);
+    expect((await json(await request.get('/api/workspaces'))).folders.length).toBe(
+      childCountBeforeNavigation
+    );
+    expect(
+      songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))
+    ).toEqual(before);
+
     // The bound Manager may point to discovery controls, but never pass a
     // path, root ID, picker receipt or scan grant. The owner views the
     // current revoked root; nothing is selected or reviewed automatically.

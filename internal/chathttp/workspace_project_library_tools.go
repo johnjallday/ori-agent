@@ -137,6 +137,55 @@ func (p *WorkspaceToolProvider) libraryProposeNextActionTool() toolapi.Tool {
 	}
 }
 
+func (p *WorkspaceToolProvider) libraryProposeSessionRecapTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{Name: "home_library_propose_session_recap",
+			Description: "Save an inert editable recap suggestion for one exact already accepted Home studio session of the locally bound primary Home Manager. The text is NOT evidence of DAW work or a completed task. No structured decisions, blockers, actual date, Ticket citation, next-action edit, review token or confirmation is supplied. The owner must separately edit, review and confirm through the canonical Wrap up form; no agent commit is available.",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"entry_id":         map[string]any{"type": "string", "description": "Exact Home catalog entry ID from home_library_detail."},
+				"entry_revision":   map[string]any{"type": "integer", "description": "Current entry_revision from home_library_detail."},
+				"fields_revision":  map[string]any{"type": "integer", "description": "Current row.fields_revision from home_library_detail."},
+				"session_id":       map[string]any{"type": "string", "description": "Existing accepted studio session ID from home_library_sessions."},
+				"session_revision": map[string]any{"type": "integer", "description": "Exact revision of that accepted studio session."},
+				"recap":            map[string]any{"type": "string", "description": "Untrusted editable text, up to 2000 bytes; not a claim of observed work."},
+				"reason":           map[string]any{"type": "string", "description": "Optional inert explanation, up to 500 bytes."},
+				"request_key":      map[string]any{"type": "string", "description": "Stable idempotency key, up to 160 bytes."},
+			}, "required": []string{"entry_id", "entry_revision", "fields_revision", "session_id", "session_revision", "recap", "request_key"}}},
+		call: func(_ context.Context, raw string) (string, error) {
+			var input struct {
+				EntryID         string `json:"entry_id"`
+				EntryRevision   *int64 `json:"entry_revision"`
+				FieldsRevision  *int64 `json:"fields_revision"`
+				SessionID       string `json:"session_id"`
+				SessionRevision *int64 `json:"session_revision"`
+				Recap           string `json:"recap"`
+				Reason          string `json:"reason"`
+				RequestKey      string `json:"request_key"`
+			}
+			if err := decodeLibraryToolArgs(raw, &input); err != nil {
+				return "", err
+			}
+			if input.EntryRevision == nil || input.FieldsRevision == nil || input.SessionRevision == nil {
+				return "", fmt.Errorf("entry_revision, fields_revision and session_revision are required")
+			}
+			proposal, replay, err := p.libraryStore().ProposeSessionRecap(p.managerAuthority(), input.EntryID,
+				*input.EntryRevision, *input.FieldsRevision, input.SessionID, *input.SessionRevision,
+				input.Recap, input.Reason, input.RequestKey)
+			if err != nil {
+				return "", fmt.Errorf("home session recap suggestion not saved: %w", err)
+			}
+			encoded, err := json.Marshal(map[string]any{"proposal_id": proposal.ID, "entry_id": proposal.EntryID,
+				"session_id": proposal.SessionID, "expires_at": proposal.ExpiresAt, "replay": replay,
+				"review_destination": fmt.Sprintf("/workspaces/%s#projectLibraryProposals", p.workspaceID),
+				"effect":             "Session recap suggestion saved only; Home owner must separately edit, review and confirm a recap."})
+			if err != nil || len(encoded) > 4096 {
+				return "", fmt.Errorf("home session recap result exceeded its limit")
+			}
+			return string(encoded), nil
+		},
+	}
+}
+
 func (p *WorkspaceToolProvider) libraryProposeRootReviewTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{Name: "home_library_propose_root_review",

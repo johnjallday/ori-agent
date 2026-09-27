@@ -14,7 +14,7 @@ import (
 // Only an owner can request a separate canonical field review/commit.
 type ManagerProposal struct {
 	ID               string     `json:"id"`
-	Kind             string     `json:"kind,omitempty"` // empty: next_action; project_review/root_review: navigation; session_goal: draft
+	Kind             string     `json:"kind,omitempty"` // empty: next_action; *_review: navigation; session_goal/session_recap: drafts
 	EntryID          string     `json:"entry_id"`
 	EntryRevision    int64      `json:"entry_revision,omitempty"`
 	FieldsRevision   int64      `json:"fields_revision"`
@@ -24,6 +24,9 @@ type ManagerProposal struct {
 	NextAction       string     `json:"next_action"`
 	Goal             *GoalInput `json:"goal,omitempty"`
 	GoalSessionCount int        `json:"goal_session_count,omitempty"`
+	SessionID        string     `json:"session_id,omitempty"`
+	SessionRevision  int64      `json:"session_revision,omitempty"`
+	Recap            string     `json:"recap,omitempty"`
 	RootSetDigest    string     `json:"root_set_digest,omitempty"`
 	Reason           string     `json:"reason,omitempty"`
 	Digest           string     `json:"digest"`
@@ -337,6 +340,123 @@ func (s *Store) ProposeProjectReview(authority ManagerAuthority, entryID string,
 	return proposal, false, nil
 }
 
+// ProposeSessionRecap saves only a suggested draft for one accepted Home
+// session. No structured date, decision, blocker, Ticket citation or next-action
+// update is proposed. Text is untrusted, not DAW evidence or a completion claim;
+// the owner still edits, reviews and confirms the canonical recap.
+func (s *Store) ProposeSessionRecap(authority ManagerAuthority, entryID string, entryRevision, fieldsRevision int64,
+	sessionID string, sessionRevision int64, recap, reason, requestKey string) (ManagerProposal, bool, error) {
+	if entryID == "" || !validText(entryID, 160) || entryRevision < 1 || fieldsRevision < 0 ||
+		sessionID == "" || !validText(sessionID, 160) || sessionRevision < 1 ||
+		!(RecapInput{Recap: recap}).valid() || !validText(reason, 500) ||
+		requestKey == "" || !validText(requestKey, 160) {
+		return ManagerProposal{}, false, ErrConflict
+	}
+	scope, err := s.authorizeManager(authority)
+	if err != nil {
+		return ManagerProposal{}, false, err
+	}
+	doc, state, err := s.readSnapshot(scope)
+	if err != nil {
+		return ManagerProposal{}, false, err
+	}
+	if !matchesRecapProposal(doc, entryID, entryRevision, fieldsRevision, sessionID, sessionRevision) {
+		return ManagerProposal{}, false, ErrConflict
+	}
+	bindingRev := state.HomeBindings.StateRevision
+	digest := sessionRecapProposalDigest(scope, authority, entryID, sessionID, entryRevision,
+		fieldsRevision, sessionRevision, recap, reason, bindingRev)
+	for _, receipt := range doc.Operations {
+		if receipt.Key != requestKey {
+			continue
+		}
+		if receipt.Action != "propose_session_recap" || receipt.Digest != digest {
+			return ManagerProposal{}, false, ErrConflict
+		}
+		for _, proposal := range doc.Proposals {
+			if proposal.ID == receipt.ConsequenceID && proposal.Digest == digest && proposal.ExpiresAt.After(s.now().UTC()) {
+				return proposal, true, nil
+			}
+		}
+		return ManagerProposal{}, false, ErrConflict
+	}
+	at := s.now().UTC()
+	proposal := ManagerProposal{ID: newID(), Kind: "session_recap", EntryID: entryID,
+		EntryRevision: entryRevision, FieldsRevision: fieldsRevision, SessionID: sessionID,
+		SessionRevision: sessionRevision, Recap: recap, BindingRevision: bindingRev,
+		AgentInstanceID: authority.AgentInstanceID, AgentName: authority.AgentName,
+		Reason: reason, Digest: digest, CreatedAt: at, ExpiresAt: at.Add(24 * time.Hour)}
+	receipt, replay, err := s.mutateWithHomePolicy(scope, doc.Revision,
+		operation{key: requestKey, action: "propose_session_recap", digest: digest},
+		func(current *workspace.AssistantProgramState, home *workspace.Workspace) bool {
+			return current.HomeBindings.StateRevision == bindingRev && boundManager(current, home, authority)
+		}, func(current *Document) (string, error) {
+			if !matchesRecapProposal(*current, entryID, entryRevision, fieldsRevision, sessionID, sessionRevision) {
+				return "", ErrConflict
+			}
+			kept := current.Proposals[:0]
+			for _, old := range current.Proposals {
+				if old.ExpiresAt.After(at) {
+					kept = append(kept, old)
+				}
+			}
+			current.Proposals = kept
+			if len(current.Proposals) >= maxProposals {
+				return "", ErrLimit
+			}
+			current.Proposals = append(current.Proposals, proposal)
+			return proposal.ID, nil
+		})
+	if err != nil {
+		return ManagerProposal{}, false, err
+	}
+	if replay {
+		fresh, readErr := s.Read(scope)
+		if readErr != nil {
+			return ManagerProposal{}, false, readErr
+		}
+		for _, row := range fresh.Proposals {
+			if row.ID == receipt.ConsequenceID && row.Digest == digest {
+				return row, true, nil
+			}
+		}
+		return ManagerProposal{}, false, ErrConflict
+	}
+	return proposal, false, nil
+}
+
+func matchesRecapProposal(doc Document, entryID string, entryRev, fieldsRev int64, sessionID string, sessionRev int64) bool {
+	entry := sessionEntry(doc, entryID)
+	if entry == nil || entry.Revision != entryRev || entry.Fields.Revision != fieldsRev {
+		return false
+	}
+	for _, session := range doc.Sessions {
+		if session.ID == sessionID && session.EntryID == entryID && session.Revision == sessionRev &&
+			session.State == "accepted" && session.Recap == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionRecapProposalDigest(scope Scope, authority ManagerAuthority, entryID, sessionID string,
+	entryRev, fieldsRev, sessionRev int64, recap, reason string, bindingRev int64) string {
+	data, _ := json.Marshal(struct {
+		Scope      Scope            `json:"scope"`
+		Authority  ManagerAuthority `json:"authority"`
+		EntryID    string           `json:"entry_id"`
+		SessionID  string           `json:"session_id"`
+		EntryRev   int64            `json:"entry_rev"`
+		FieldsRev  int64            `json:"fields_rev"`
+		SessionRev int64            `json:"session_rev"`
+		Recap      string           `json:"recap"`
+		Reason     string           `json:"reason"`
+		BindingRev int64            `json:"binding_rev"`
+	}{scope, authority, entryID, sessionID, entryRev, fieldsRev, sessionRev, recap, reason, bindingRev})
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 // ProposeSessionGoal stores a bounded suggestion, not a goal review or session.
 // Planned dates are owner-entered only. A new accepted Home goal invalidates
 // this draft even when the catalog entry revision did not change.
@@ -475,7 +595,12 @@ func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal Manage
 		if entry == nil {
 			return "stale"
 		}
-		if proposal.Kind == "project_review" {
+		if proposal.Kind == "session_recap" {
+			if !matchesRecapProposal(doc, proposal.EntryID, proposal.EntryRevision, proposal.FieldsRevision,
+				proposal.SessionID, proposal.SessionRevision) {
+				return "stale"
+			}
+		} else if proposal.Kind == "project_review" {
 			if entry.Link != nil || entry.Revision != proposal.EntryRevision {
 				return "stale"
 			}
@@ -515,6 +640,12 @@ func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal Manage
 	} else if proposal.Kind == "project_review" {
 		if proposal.Digest != projectReviewProposalDigest(scope, authority, proposal.EntryID,
 			proposal.Reason, proposal.EntryRevision, proposal.BindingRevision) {
+			return "stale"
+		}
+	} else if proposal.Kind == "session_recap" {
+		if proposal.Digest != sessionRecapProposalDigest(scope, authority, proposal.EntryID, proposal.SessionID,
+			proposal.EntryRevision, proposal.FieldsRevision, proposal.SessionRevision, proposal.Recap,
+			proposal.Reason, proposal.BindingRevision) {
 			return "stale"
 		}
 	} else if proposal.Kind == "session_goal" {

@@ -183,6 +183,116 @@ func TestManagerProposal_RootNavigationCannotGrantAndStalesAfterRealDisconnect(t
 	}
 }
 
+func TestManagerProposal_RecapDraftNeedsOwnerReviewAndBecomesStaleAfterAcceptance(t *testing.T) {
+	a, scope, _, file, tree, _ := activationFixture(t)
+	store := a.library
+	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
+		home.AgentInstances = []workspace.AgentInstance{{ID: "local-manager", Name: "Manager", RoleID: "manager"}}
+		state := home.GetAssistantProgramState()
+		state.Declaration = &workspace.AssistantProgramDeclaration{Roles: []workspace.AssistantProgramRoleSpec{{
+			ID: "manager", Scope: workspace.AssistantRoleScopeHome, Required: true, Primary: true,
+		}}}
+		state.HomeBindings = workspace.AssistantRoleBindingSet{StateRevision: 1, Bindings: []workspace.AssistantRoleBinding{{
+			RoleID: "manager", AgentInstanceID: "local-manager", AgentName: "Manager",
+		}}}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.SaveWorkspaceAgent(scope.HomeID, "Manager", &agent.Agent{}); err != nil {
+		t.Fatal(err)
+	}
+	authority := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: "local-manager", AgentName: "Manager"}
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	doc, err := store.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := sessionEntry(doc, "single")
+	goal := GoalInput{Goal: "Review a vocal take"}
+	goalReview, err := store.ReviewGoal(scope, entry.ID, entry.Revision, goal, scope.OwnerUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptedGoal, _, err := store.CommitGoal(scope, entry.ID, goalReview.Token, "owner-goal-before-recap", entry.Revision, goal, scope.OwnerUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := "A possible review note, not an observed DAW outcome"
+	proposal, replay, err := store.ProposeSessionRecap(authority, entry.ID, entry.Revision, entry.Fields.Revision,
+		acceptedGoal.ID, acceptedGoal.Revision, text, "Only an editable suggestion", "manager-recap")
+	if err != nil || replay || proposal.Kind != "session_recap" || proposal.Recap != text || proposal.NextAction != "" || proposal.SessionID != acceptedGoal.ID {
+		t.Fatalf("Manager draft gained owner authority: %+v %t %v", proposal, replay, err)
+	}
+	if _, err := store.ReviewProposedNextAction(scope, proposal.ID, scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("recap draft yielded a field review: %v", err)
+	}
+	if _, _, err := store.CommitProposedNextAction(scope, proposal.ID, "fake", "fake-manager-commit", scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("recap draft yielded a field commit: %v", err)
+	}
+	if _, _, err := store.ProposeSessionRecap(authority, entry.ID, entry.Revision, entry.Fields.Revision,
+		"foreign-session", acceptedGoal.Revision, text, "", "foreign-recap"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Manager fabricated a Home session: %v", err)
+	}
+	if _, _, err := store.ProposeSessionRecap(authority, entry.ID, entry.Revision, entry.Fields.Revision,
+		acceptedGoal.ID, acceptedGoal.Revision, "", "", "empty-recap"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Manager saved an empty recap: %v", err)
+	}
+	if _, _, err := store.ProposeSessionGoal(authority, entry.ID, entry.Revision, goal, "", "manager-recap"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("recap key crossed to a goal suggestion: %v", err)
+	}
+	path, err := file.GetFolderPath(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := workspace.NewFileStore(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store = NewStore(reopened).WithProviderEvidence(func(_ Scope, _ *workspace.Workspace) bool { return true })
+	page, err := store.ListManagerProposals(scope)
+	if err != nil || page.Total != 1 || page.Rows[0].Status != "ready" {
+		t.Fatalf("recap draft did not survive restart: %+v %v", page, err)
+	}
+	if again, replay, err := store.ProposeSessionRecap(authority, entry.ID, entry.Revision, entry.Fields.Revision,
+		acceptedGoal.ID, acceptedGoal.Revision, text, proposal.Reason, "manager-recap"); err != nil || !replay || again.ID != proposal.ID {
+		t.Fatalf("exact recap retry duplicated the draft: %+v %t %v", again, replay, err)
+	}
+	if _, _, err := store.ProposeSessionRecap(authority, entry.ID, entry.Revision, entry.Fields.Revision,
+		acceptedGoal.ID, acceptedGoal.Revision, "different", proposal.Reason, "manager-recap"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed recap reused the same key: %v", err)
+	}
+	beforeUser, err := store.GetSession(scope, entry.ID, acceptedGoal.ID)
+	if err != nil || beforeUser.Recap != "" || beforeUser.Revision != acceptedGoal.Revision {
+		t.Fatalf("Manager draft edited saved goal: %+v %v", beforeUser, err)
+	}
+	userInput := RecapInput{Recap: "User reviewed the practice notes"}
+	userReview, err := store.ReviewRecap(scope, acceptedGoal.ID, acceptedGoal.Revision, entry.Fields.Revision, userInput, scope.OwnerUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeUser, err = store.GetSession(scope, entry.ID, acceptedGoal.ID)
+	if err != nil || beforeUser.Recap != "" {
+		t.Fatalf("owner recap review changed session: %+v %v", beforeUser, err)
+	}
+	accepted, replay, err := store.CommitRecap(scope, acceptedGoal.ID, userReview.Token, "owner-confirmed-recap",
+		acceptedGoal.Revision, entry.Fields.Revision, userInput, scope.OwnerUserID)
+	if err != nil || replay || accepted.Recap != userInput.Recap || accepted.Revision != acceptedGoal.Revision+1 ||
+		accepted.Next != "" || accepted.Author != scope.OwnerUserID {
+		t.Fatalf("canonical owner recap was not accepted: %+v %t %v", accepted, replay, err)
+	}
+	page, err = store.ListManagerProposals(scope)
+	if err != nil || page.Rows[0].Status != "stale" {
+		t.Fatalf("accepted recap left draft actionable: %+v %v", page, err)
+	}
+	doc, err = store.Read(scope)
+	if err != nil || sessionEntry(doc, entry.ID).Fields.NextAction != "" || len(doc.Sessions) != 1 ||
+		fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("recap draft altered project/source/count: %+v %v", doc, err)
+	}
+}
+
 func TestManagerProposal_SessionGoalIsEditableDraftUntilSeparateOwnerReviewAndCommit(t *testing.T) {
 	a, scope, _, file, tree, _ := activationFixture(t)
 	store := a.library
