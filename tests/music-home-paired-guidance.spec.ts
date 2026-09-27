@@ -1,5 +1,12 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -240,7 +247,160 @@ test('paired candidates preserve order and create only the declared local projec
   );
 });
 
-test('restart preserves exact candidate identities and the one declared project role', async ({
+test('a confirmed folder offer connects one existing file, then separately reviews its Home association', async ({
+  page,
+  request
+}) => {
+  test.skip(restart, 'the first run owns construction');
+  const saved = stored(receipt);
+  const documents = join(sandbox, 'Documents');
+  mkdirSync(documents, { recursive: true, mode: 0o750 });
+  const song = join(documents, 'Existing Song.rpp');
+  writeFileSync(song, '<REAPER_PROJECT 0.1 "7.0" 1234\n>\n', { mode: 0o600 });
+  const sourceHash = createHash('sha256').update(readFileSync(song)).digest('hex');
+  const initial = (await json(await request.get('/api/personal-assistant'))).personal_assistant;
+  await json(
+    await request.post('/api/personal-assistant/hire', {
+      data: {
+        request_id: 'paired-existing-file-hire',
+        if_version: initial.state_version,
+        display_name: 'Atlas',
+        mandate: 'Help review my projects.',
+        focus_areas: ['plan_my_day']
+      }
+    })
+  );
+  const hired = (await json(await request.get('/api/personal-assistant'))).personal_assistant;
+  await json(
+    await request.post('/api/personal-assistant/hq', {
+      data: {
+        request_id: 'paired-existing-file-hq',
+        if_version: hired.state_version,
+        name: 'My HQ'
+      }
+    })
+  );
+  const scanned = await json(
+    await request.post('/api/personal-assistant/folder-digest/scan', {
+      data: { chip: 'documents' }
+    })
+  );
+  expect(scanned.offer).toMatchObject({
+    status: 'pending',
+    capability: { setup_source: 'plugin' }
+  });
+  await page.goto('/?panel=today&folder=show');
+  const offerCard = page.locator('#personalAssistantFolderOffer');
+  await expect(offerCard).toContainText('Documents looks like a REAPER project');
+  await offerCard.locator('[data-folder-action="setup"]').click();
+  const quest = page.locator('#specialistSetupJourneyModal');
+  await expect(quest).toBeVisible();
+  await expect(quest).toContainText('Create New Workspace');
+  await quest.getByRole('button', { name: 'Create New Workspace', exact: true }).click();
+  const creator = page.locator('#addFolderModal');
+  await expect(creator).toBeVisible();
+  expect(await creator.locator('#workspaceJourneyReview').count()).toBe(1);
+  await expect(creator.locator('#workspaceJourneyProjectChoice select').last()).toHaveValue(
+    'existing_project'
+  );
+  await creator.locator('#folderNameInput').fill('Existing Documents Song');
+  await creator.locator('#wizardNextBtn').click();
+  const projectRole = creator.locator('.ws-role-row[data-role-id="reaper-assistant"]');
+  await expect(projectRole).toContainText('REAPER Assistant');
+  await projectRole.getByRole('button', { name: 'Create an agent for REAPER Assistant' }).click();
+  await page.locator('[data-agent-create-field="name"]').fill('Existing Song Assistant');
+  await page.locator('#createAgentBtn').click();
+  await expect(page.locator('#addAgentModal')).toBeHidden();
+  await creator.locator('#wizardNextBtn').click();
+  await expect(creator.locator('#workspaceJourneyReview')).toContainText(
+    'Project file: Existing Song.rpp'
+  );
+  await expect(creator.locator('#workspaceJourneyReview')).toContainText('File-only mode');
+  const open = creator.locator('#projectTemplateOpenAfterCreateToggle');
+  if (await open.isChecked()) await open.uncheck();
+  await screenshot(page, 'guidance-existing-file-creator-review');
+  const projectCommit = page.waitForResponse(
+    response =>
+      response.url().includes('/actions/connect_existing_project') &&
+      response.request().method() === 'POST'
+  );
+  await creator.locator('#createFolderBtn').click();
+  const committed = await projectCommit;
+  expect(committed.ok(), await committed.text()).toBeTruthy();
+  const journey = (await committed.json()).setup_journey;
+  const existingID = journey.receipts.project_workspace_id;
+  expect(existingID).toBeTruthy();
+  await page.waitForURL(/\/workspaces\/existing-documents-song(?:\/|\?|$)/);
+  const existing = workspaceFile(existingID).data;
+  expect(existing.shared_data.project_entry).toMatchObject({
+    kind: 'directory_reference',
+    relative_path: 'Existing Song.rpp'
+  });
+  expect(existing.directory_references).toEqual(
+    expect.arrayContaining([expect.objectContaining({ path: realpathSync(documents) })])
+  );
+  expect(existing.assistant_project_link.station_workspace_id).toBe(saved.homeID);
+  // The wizard's agent choice is not itself a reviewed staffing commit for
+  // this independently connected child. Its own staffing remains separate.
+  expect(existing.agent_instances || []).toEqual([]);
+  const unassociatedHome = await json(
+    await request.get(`/api/workspaces/${saved.homeID}/assistant-program`)
+  );
+  expect(unassociatedHome.projects.map((row: { id: string }) => row.id).sort()).toEqual(
+    [saved.projectID, existingID].sort()
+  );
+  expect(unassociatedHome.portfolio || []).toEqual([]);
+  expect(unassociatedHome.roster.map((role: { role_id: string }) => role.role_id)).toEqual([
+    'portfolio_manager'
+  ]);
+  expect(createHash('sha256').update(readFileSync(song)).digest('hex')).toBe(sourceHash);
+  const base = `/api/workspaces/${saved.homeID}/assistant-program/library`;
+  const rootsBefore = await json(await request.get(`${base}/roots`));
+  expect(rootsBefore).toMatchObject({ initialized: true, total_roots: 0 });
+  expect((await json(await request.get(`${base}/projects`))).total).toBe(0);
+  const pendingBefore = await json(await request.get(`${base}/linked-projects/pending`));
+  expect(pendingBefore.rows).toEqual([
+    { workspace_id: existingID, name: 'Existing Documents Song' }
+  ]);
+  await page.goto(
+    `/workspaces/${(await json(await request.get('/api/workspaces'))).folders.find((row: { id: string }) => row.id === saved.homeID).folder_slug}/assistant`
+  );
+  const shelf = page.locator('#projectLibraryPanel');
+  await expect(shelf.locator('#projectLibraryPendingLinks')).toBeVisible();
+  await shelf
+    .getByRole('button', { name: 'Review Existing Documents Song for this shelf' })
+    .click();
+  const association = page.getByRole('dialog', {
+    name: 'Add Existing Documents Song to this shelf?'
+  });
+  await expect(association).toContainText('link-only metadata without a discovery folder grant');
+  expect((await json(await request.get(`${base}/projects`))).total).toBe(0);
+  await screenshot(page, 'guidance-existing-file-association-review');
+  await association.getByRole('button', { name: 'Cancel' }).click();
+  await expect(shelf.locator('#projectLibraryPendingLinks')).toBeVisible();
+  expect((await json(await request.get(`${base}/projects`))).total).toBe(0);
+  await shelf
+    .getByRole('button', { name: 'Review Existing Documents Song for this shelf' })
+    .click();
+  await page
+    .getByRole('dialog', { name: 'Add Existing Documents Song to this shelf?' })
+    .getByRole('button', { name: 'Add linked project' })
+    .click();
+  await expect(shelf.locator('#projectLibraryCount')).toHaveText('1 of 1 projects');
+  expect((await json(await request.get(`${base}/linked-projects/pending`))).total).toBe(0);
+  const catalog = await json(await request.get(`${base}/projects`));
+  expect(catalog.rows).toEqual([
+    expect.objectContaining({ name: 'Existing Documents Song', connection: 'connected' })
+  ]);
+  expect((await json(await request.get(`${base}/roots`))).total_roots).toBe(0);
+  expect(createHash('sha256').update(readFileSync(song)).digest('hex')).toBe(sourceHash);
+  await screenshot(page, 'guidance-existing-file-associated-home');
+  writeFileSync(receipt, JSON.stringify({ ...saved, existingID, song, sourceHash }), {
+    mode: 0o600
+  });
+});
+
+test('restart preserves exact candidate identities for both children and the reviewed association', async ({
   request
 }) => {
   test.skip(!restart, 'run by reaper-demo.sh after its controlled restart');
@@ -248,12 +408,16 @@ test('restart preserves exact candidate identities and the one declared project 
   const homes = (await json(await request.get('/api/workspaces'))).folders;
   expect(homes.filter((row: { kind: string }) => row.kind === 'group')).toHaveLength(1);
   expect(homes.filter((row: { parent_id: string }) => row.parent_id === saved.homeID)).toHaveLength(
-    1
+    2
   );
   const home = await json(await request.get(`/api/workspaces/${saved.homeID}/assistant-program`));
   expect(home).toMatchObject({ home_provider_available: true, is_station: true });
-  expect(home.projects.map((row: { id: string }) => row.id)).toEqual([saved.projectID]);
-  expect(home.portfolio || []).toEqual([]);
+  expect(home.projects.map((row: { id: string }) => row.id).sort()).toEqual(
+    [saved.projectID, saved.existingID].sort()
+  );
+  expect(
+    (home.portfolio || []).map((row: { project_workspace_id: string }) => row.project_workspace_id)
+  ).toEqual([saved.existingID]);
   const roots = await json(
     await request.get(`/api/workspaces/${saved.homeID}/assistant-program/library/roots`)
   );
@@ -262,6 +426,15 @@ test('restart preserves exact candidate identities and the one declared project 
     (
       await json(
         await request.get(`/api/workspaces/${saved.homeID}/assistant-program/library/projects`)
+      )
+    ).total
+  ).toBe(1);
+  expect(
+    (
+      await json(
+        await request.get(
+          `/api/workspaces/${saved.homeID}/assistant-program/library/linked-projects/pending`
+        )
       )
     ).total
   ).toBe(0);
@@ -277,4 +450,12 @@ test('restart preserves exact candidate identities and the one declared project 
     saved.roles
   );
   expect(createHash('sha256').update(readFileSync(saved.file)).digest('hex')).toBe(saved.sha256);
+  const imported = await json(
+    await request.get(`/api/workspaces/${saved.existingID}/assistant-program`)
+  );
+  expect(imported).toMatchObject({ station_id: saved.homeID, project_provider_available: true });
+  expect(workspaceFile(saved.existingID).data.agent_instances || []).toEqual([]);
+  expect(createHash('sha256').update(readFileSync(saved.song)).digest('hex')).toBe(
+    saved.sourceHash
+  );
 });
