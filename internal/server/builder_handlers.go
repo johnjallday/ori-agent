@@ -651,6 +651,9 @@ func (b *ServerBuilder) initializeHandlers() {
 	if b.sessionHandler != nil {
 		if b.pluginHandler != nil {
 			b.sessionHandler.SetInstalledPluginLister(b.pluginHandler.Manager())
+			if b.chatHandler != nil {
+				b.chatHandler.SetProjectLibraryEvidence(b.sessionHandler.AssistantLibraryProviderEvidence)
+			}
 		}
 		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))
 		b.sessionHandler.SetAgentToolApplier(makeAgentToolApplier(b))

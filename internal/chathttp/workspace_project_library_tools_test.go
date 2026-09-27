@@ -1,0 +1,132 @@
+package chathttp
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
+	"github.com/johnjallday/ori-agent/internal/workspace"
+)
+
+func findLibraryTool(tools []toolapi.Tool, name string) toolapi.Tool {
+	for _, candidate := range tools {
+		if candidate.Definition().Name == name {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t *testing.T) {
+	sandbox := t.TempDir()
+	file, err := workspace.NewFileStore(sandbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Music Home"})
+	home.OwnerUserID = "local"
+	key := workspace.AssistantProgramKey{OwnerUserID: home.OwnerUserID, PluginID: "music-project-management", ProgramID: "music-producer-assistant"}
+	child := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Private user text"})
+	child.OwnerUserID = home.OwnerUserID
+	child.SetAssistantProjectLink(&workspace.AssistantProjectLink{ID: workspace.AssistantProjectLinkID(home.ID, child.ID),
+		SchemaVersion: 1, StationWorkspaceID: home.ID, Key: key, StateRevision: 1})
+	if err := file.Save(child); err != nil {
+		t.Fatal(err)
+	}
+	home.AgentInstances = []workspace.AgentInstance{{ID: "manager-instance", Name: "Manager", RoleID: "portfolio_manager"},
+		{ID: "sample-instance", Name: "Sample", RoleID: "sample_library_manager"}}
+	home.SetAssistantProgramState(&workspace.AssistantProgramState{
+		SchemaVersion: workspace.AssistantProgramStateSchemaVersion, PluginAvailable: true, Key: key,
+		Declaration: &workspace.AssistantProgramDeclaration{Roles: []workspace.AssistantProgramRoleSpec{
+			{ID: "portfolio_manager", Scope: workspace.AssistantRoleScopeHome, Required: true, Primary: true},
+			{ID: "sample_library_manager", Scope: workspace.AssistantRoleScopeHome}}},
+		HomeBindings: workspace.AssistantRoleBindingSet{StateRevision: 1, Bindings: []workspace.AssistantRoleBinding{
+			{RoleID: "portfolio_manager", AgentInstanceID: "manager-instance", AgentName: "Manager"},
+			{RoleID: "sample_library_manager", AgentInstanceID: "sample-instance", AgentName: "Sample"}}},
+		LinkedProjectIDs: []string{child.ID},
+	})
+	if err := file.Save(home); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.SaveWorkspaceAgent(home.ID, "Manager", &agent.Agent{}); err != nil {
+		t.Fatal(err)
+	}
+	scope := projectlibrary.Scope{OwnerUserID: home.OwnerUserID, HomeID: home.ID, ProviderID: key.PluginID, ProgramID: key.ProgramID}
+	library := projectlibrary.NewStore(file)
+	review, err := library.ReviewInitialize(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := library.CommitInitialize(scope, review.Token, "manager-init"); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewWorkspaceToolProvider(nil, file, home.ID)
+	provider.SetExecutingAgent("Manager")
+	available := true
+	provider.SetProjectLibraryEvidence(func(_ projectlibrary.Scope, _ *workspace.Workspace) bool { return available })
+	if findLibraryTool(provider.Tools(), "home_library_search") != nil {
+		t.Fatal("name-only task factory acquired Manager access before proving an instance")
+	}
+	provider.SetExecutingInstanceID("manager-instance")
+	search := findLibraryTool(provider.Tools(), "home_library_search")
+	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil {
+		t.Fatal("bound Manager's library reads not registered")
+	}
+	output, err := search.Call(context.Background(), `{"text":"Private"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result projectlibrary.SearchPage
+	if err := json.Unmarshal([]byte(output), &result); err != nil || len(result.Rows) != 1 || result.Rows[0].Name != child.Name ||
+		strings.Contains(output, sandbox) {
+		t.Fatalf("bounded read projected path or omitted linked song: %+v %v", result, err)
+	}
+	detailTool := findLibraryTool(provider.Tools(), "home_library_detail")
+	detail, err := detailTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`)
+	if err != nil || strings.Contains(detail, sandbox) || strings.Contains(detail, "\"sources\"") {
+		t.Fatalf("detail leaked project files or source paths: %s %v", detail, err)
+	}
+	if _, err := search.Call(context.Background(), `{"workspace_id":"other-home"}`); err == nil {
+		t.Fatal("model supplied a foreign Home ID")
+	}
+	provider.SetExecutingInstanceID("") // Global-agent fallback with the same name.
+	if findLibraryTool(provider.Tools(), "home_library_search") != nil {
+		t.Fatal("global fallback acquired Manager tools")
+	}
+	if _, err := search.Call(context.Background(), `{}`); err == nil {
+		t.Fatal("previously registered tool bypassed removed runtime instance")
+	}
+	if _, err := detailTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`); err == nil {
+		t.Fatal("previously registered detail tool bypassed removed runtime instance")
+	}
+	provider.SetExecutingInstanceID("sample-instance")
+	provider.SetExecutingAgent("Sample")
+	if findLibraryTool(provider.Tools(), "home_library_search") != nil {
+		t.Fatal("optional specialist acquired Manager tools")
+	}
+	provider.SetExecutingInstanceID("manager-instance")
+	provider.SetExecutingAgent("Manager")
+	available = false
+	if _, err := search.Call(context.Background(), `{}`); err == nil {
+		t.Fatal("previously registered tool ignored provider disable")
+	}
+	if findLibraryTool(provider.Tools(), "home_library_search") != nil {
+		t.Fatal("disabled provider kept tools registered")
+	}
+	available = true
+	if err := file.Update(home.ID, func(current *workspace.Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.HomeBindings.Bindings = state.HomeBindings.Bindings[1:]
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := search.Call(context.Background(), `{}`); err == nil {
+		t.Fatal("previously registered tool ignored removed Manager binding")
+	}
+}

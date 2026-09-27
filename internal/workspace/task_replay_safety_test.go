@@ -131,6 +131,8 @@ func TestClassifyToolSideEffect(t *testing.T) {
 		// Undeclared falls back to known names.
 		{"known read", "read_file", "", ToolSideEffectRead},
 		{"known read, mail", "mail_search_threads", "", ToolSideEffectRead},
+		{"Home library search", "home_library_search", "", ToolSideEffectRead},
+		{"Home library detail", "home_library_detail", "", ToolSideEffectRead},
 		{"known write", "move_file", "", ToolSideEffectWrite},
 		{"draft is confirm-gated", "mail_draft_reply", "", ToolSideEffectConfirm},
 

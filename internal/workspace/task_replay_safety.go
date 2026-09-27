@@ -121,6 +121,8 @@ var readOnlyToolNames = map[string]struct{}{
 	"web_fetch":                {},
 	"mail_search_threads":      {},
 	"mail_get_thread":          {},
+	"home_library_search":      {},
+	"home_library_detail":      {},
 	"list_notes":               {},
 	"read_note":                {},
 	"list_tasks":               {},

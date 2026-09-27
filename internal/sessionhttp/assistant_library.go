@@ -18,6 +18,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// AssistantLibraryProviderEvidence exposes the host's installed-package
+// witness to the local-agent tool adapter. It is not an authorization decision
+// on its own: the projectlibrary service independently verifies the executing
+// Home Manager's local instance and binding on every tool invocation.
+func (h *Handler) AssistantLibraryProviderEvidence(scope projectlibrary.Scope, home *workspace.Workspace) bool {
+	return h.assistantLibraryProviderEvidence(scope, home)
+}
+
 // The Home's pinned provider generation, package fingerprint, declaration and
 // packaged role evidence must all match the installed enabled contribution.
 // A similarly named or newly reinstalled plugin never inherits old grants.

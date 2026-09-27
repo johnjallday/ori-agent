@@ -574,6 +574,10 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(rescanReview).toBeVisible();
     expect((await json(await request.get(`${base}/projects`))).total).toBe(5);
     await rescanReview.getByRole('button', { name: 'Scan metadata' }).click();
+    await expect(shelf.locator('#projectLibraryStatus')).toContainText(
+      'complete scan · 11 entries seen'
+    );
+    await expect(shelf).toHaveAttribute('aria-busy', 'false');
     await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
     await shelf
       .locator('#projectLibraryRows')

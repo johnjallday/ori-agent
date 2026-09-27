@@ -26,6 +26,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -54,25 +55,26 @@ const (
 )
 
 type Handler struct {
-	utilityRegistry       *UtilityToolRegistry
-	utilityTelemetry      *utilitytelemetry.Tracker
-	settingsMu            sync.RWMutex
-	browserMCPPref        string
-	store                 store.Store
-	clientFactory         *client.Factory
-	llmFactory            *llm.Factory
-	commandHandler        *CommandHandler
-	orchestrator          *orchestration.Orchestrator
-	costTracker           *llm.CostTracker
-	sessionStore          session.HybridStore
-	workspaceStore        workspace.Store
-	fileStore             *workspace.FileStore
-	userProfileStore      userprofile.UserStore
-	userProvider          userprofile.UserProvider
-	reviewedMemory        workspace.ReviewedMemoryReader
-	runtimeResolver       chatRuntimeResolver
-	toolCallStore         session.ToolCallStore
-	calendarOpsPreference chatCalendarOpsPreference
+	utilityRegistry        *UtilityToolRegistry
+	utilityTelemetry       *utilitytelemetry.Tracker
+	settingsMu             sync.RWMutex
+	browserMCPPref         string
+	store                  store.Store
+	clientFactory          *client.Factory
+	llmFactory             *llm.Factory
+	commandHandler         *CommandHandler
+	orchestrator           *orchestration.Orchestrator
+	costTracker            *llm.CostTracker
+	sessionStore           session.HybridStore
+	workspaceStore         workspace.Store
+	fileStore              *workspace.FileStore
+	userProfileStore       userprofile.UserStore
+	userProvider           userprofile.UserProvider
+	reviewedMemory         workspace.ReviewedMemoryReader
+	runtimeResolver        chatRuntimeResolver
+	projectLibraryEvidence func(projectlibrary.Scope, *workspace.Workspace) bool
+	toolCallStore          session.ToolCallStore
+	calendarOpsPreference  chatCalendarOpsPreference
 	// planOpener starts a durable Plan for chat requests that need one. It is
 	// deliberately one method wide: chat may open a plan and link to it, never
 	// edit, review, or approve one (FR-19, FR-149).

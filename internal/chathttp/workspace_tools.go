@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/skills"
@@ -39,6 +40,10 @@ type WorkspaceToolProvider struct {
 	// executingAgent is the name of the agent driving this provider. It gates
 	// coordinator-only tools (delegate_task) to the workspace coordinator.
 	executingAgent string
+	// An exact runtime-resolved LOCAL instance is required for library tools;
+	// a global agent fallback with the same name cannot substitute for it.
+	executingInstanceID    string
+	projectLibraryEvidence func(projectlibrary.Scope, *workspace.Workspace) bool
 
 	// Optional dependencies for management tools (Phase 2)
 	agentStore    store.Store
@@ -244,6 +249,10 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	// the tool, so their cross-workspace visibility remains unchanged.
 	if p.hqOverviewEnabled() {
 		tools = append(tools, p.hqOverviewTool())
+	}
+
+	if p.libraryReadEnabled() {
+		tools = append(tools, p.librarySearchTool(), p.libraryDetailTool())
 	}
 
 	// Coordinator-only: the entry agent can delegate work to specialists.
