@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -243,6 +244,62 @@ func TestAssistantStaffingAdapter_IndependentHomeRoleGrantsExactPersonalSkill(t 
 	}
 	if len(grants.grantCalls) != 0 || len(grants.personalGrantCalls) != 1 || grants.personalGrantCalls[0] != "Personal Home Guide\x00home-skill" {
 		t.Fatalf("grant calls: general=%#v personal=%#v", grants.grantCalls, grants.personalGrantCalls)
+	}
+}
+
+func TestAssistantStaffingAdapter_PreFixSplitChildCannotCompleteWithoutRoleSnapshot(t *testing.T) {
+	adapter, workspaces, scope, grants := staffingFixture(t)
+	if err := workspaces.Update(scope.HomeWorkspaceID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.HomeProvider = &workspace.AssistantProgramHomeOwner{PluginID: "home-provider"}
+		state.Declaration.Roles = state.Declaration.Roles[:2] // Only the Home-owned roles.
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.StaffRoleOnWorkspace(context.Background(), scope.HomeWorkspaceID, []RoleFill{{
+		RoleID: "home_guide", Name: "Ready Home Guide", Provider: "openai", Model: "gpt-4o-mini",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	home, err := workspaces.Get(scope.HomeWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaces.Update(scope.ProjectWorkspaceID, func(project *workspace.Workspace) error {
+		provenance := project.GetTemplateProvenance()
+		provenance.AssistantProgram = workspace.CloneAssistantProgramDeclaration(home.GetAssistantProgramState().Declaration)
+		provenance.AssistantProjectRoles = nil // The original bug also omitted the portable snapshot.
+		project.SetTemplateProvenance(provenance)
+		link := project.GetAssistantProjectLink()
+		link.ProjectProvider = &workspace.AssistantProjectProviderOwner{PluginID: "project-provider"}
+		link.ProjectRoles = nil // A child saved before the split-roster fix.
+		project.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := workspaces.Get(scope.ProjectWorkspaceID)
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil || read.Complete || read.BlockedReason != ReasonProjectRoleSnapshotMissing || len(read.AvailableActions) != 0 {
+		t.Fatalf("pre-fix split child falsely completes staffing: %#v, %v", read, err)
+	}
+	input := json.RawMessage(`{"roles":[{"role_id":"catalog_guide","name":"Unapproved Guide","provider":"openai","model":"gpt-4o-mini"}]}`)
+	if _, err := adapter.Review(context.Background(), scope, ActionReviewOptionalHomeStaffing, input); err != ErrConflict {
+		t.Fatalf("review without a complete declaration = %v", err)
+	}
+	if err := adapter.StaffRolesFromReviewedWorkspaceSetup(context.Background(), scope.ProjectWorkspaceID, []RoleFill{{
+		RoleID: "catalog_guide", Name: "Unapproved Guide", Provider: "openai", Model: "gpt-4o-mini",
+	}}); err != ErrConflict {
+		t.Fatalf("workspace setup staffed a Home role before noticing the missing project roles: %v", err)
+	}
+	if _, found := adapter.profiles.GetAgent("Unapproved Guide"); found || len(grants.granted) != 0 {
+		t.Fatal("missing project declaration created a profile or skill grant")
+	}
+	after, _ := workspaces.Get(scope.ProjectWorkspaceID)
+	if !reflect.DeepEqual(before.GetAssistantProjectLink(), after.GetAssistantProjectLink()) || len(after.GetAgentInstances()) != 0 {
+		t.Fatal("read or refused review changed the pre-fix child")
 	}
 }
 

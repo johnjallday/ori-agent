@@ -22,6 +22,8 @@ import (
 
 const maxStaffingRoles = workspace.AssistantProgramMaxRoles
 
+var errProjectRoleSnapshotMissing = errors.New("split project role snapshot is missing")
+
 // StaffingProjection is safe response-only staffing state. Stable agent
 // instance IDs, prompts, memories, credentials, histories, paths, and runtime
 // grants are deliberately absent.
@@ -673,7 +675,7 @@ func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx cont
 		return ErrConflict
 	}
 	state := station.GetAssistantProgramState()
-	if state == nil || state.Declaration == nil {
+	if state == nil || state.Declaration == nil || missingSplitProjectRoleSnapshot(state, link) {
 		return ErrConflict
 	}
 	roles := append([]workspace.AssistantProgramRoleSpec(nil), state.Declaration.Roles...)
@@ -896,6 +898,9 @@ func (a *AssistantStaffingAdapter) owner(scope ReadScope) (*staffingOwner, error
 	if link == nil || link.SchemaVersion < workspace.AssistantProjectLinkSchemaVersion || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() {
 		return nil, workspace.ErrAssistantProgramVersionConflict
 	}
+	if missingSplitProjectRoleSnapshot(state, link) {
+		return nil, errProjectRoleSnapshotMissing
+	}
 	homeProviderAvailable, projectProviderAvailable := true, true
 	if a.providerAvailable != nil && (state.HomeProvider != nil || link.ProjectProvider != nil) {
 		homeProviderAvailable, projectProviderAvailable = a.providerAvailable(state.HomeProvider, link.ProjectProvider)
@@ -921,6 +926,24 @@ func (a *AssistantStaffingAdapter) owner(scope ReadScope) (*staffingOwner, error
 		station: station, project: project, declaration: declaration,
 		homeProviderAvailable: homeProviderAvailable, projectProviderAvailable: projectProviderAvailable,
 	}, nil
+}
+
+// A split project blueprint declares at least one required project role. Older
+// children sometimes retained the Home and project provider pins but lost the
+// blueprint's role snapshot on both the link and portable provenance. Never
+// treat their empty project roster as completed staffing or fill roles from the
+// Home. An owner-reviewed, exact-provider repair must restore the declaration
+// before any ordinary staffing action can run.
+func missingSplitProjectRoleSnapshot(state *workspace.AssistantProgramState, link *workspace.AssistantProjectLink) bool {
+	if state == nil || state.Declaration == nil || state.HomeProvider == nil || link == nil || link.ProjectProvider == nil || len(link.ProjectRoles) != 0 {
+		return false
+	}
+	for _, role := range state.Declaration.Roles {
+		if role.Scope == workspace.AssistantRoleScopeProject {
+			return false // Combined programs retain their own roster.
+		}
+	}
+	return true
 }
 
 func roleTarget(owner *staffingOwner, targetScope workspace.AssistantRoleScope) *workspace.Workspace {
@@ -1271,6 +1294,8 @@ func isStaffingAction(action ActionID) bool {
 
 func staffingReason(err error) ReasonCode {
 	switch {
+	case errors.Is(err, errProjectRoleSnapshotMissing):
+		return ReasonProjectRoleSnapshotMissing
 	case errors.Is(err, workspace.ErrAssistantStationNotFound):
 		return ReasonHomeUnavailable
 	case errors.Is(err, workspace.ErrAssistantProgramVersionConflict):
