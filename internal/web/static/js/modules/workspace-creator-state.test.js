@@ -173,3 +173,114 @@ test('ordinary Group payload declares its reviewed roster without leaking Worksp
     assert.equal(key in payload, false, `${key} must not be sent for an ordinary Group`);
   }
 });
+
+const buildApi = creatorState();
+
+test('build mode is offered only from its four openers, for a hired assistant with a model', () => {
+  const ready = {
+    entryPoint: 'home_cockpit_create',
+    assistantState: 'active',
+    availability: { available: true }
+  };
+  assert.equal(buildApi.buildModeEligible(ready), true);
+  for (const entryPoint of [
+    'workspace_map_build',
+    'workspace_hub_create',
+    'personal_assistant_ask'
+  ]) {
+    assert.equal(buildApi.buildModeEligible({ ...ready, entryPoint }), true, entryPoint);
+  }
+  assert.equal(buildApi.buildModeEligible({ ...ready, assistantState: 'paused' }), true);
+  for (const entryPoint of ['folder_digest', 'specialist_setup', 'workspace_hub_import', '']) {
+    assert.equal(buildApi.buildModeEligible({ ...ready, entryPoint }), false, entryPoint);
+  }
+  for (const assistantState of ['needs_hire', 'needs_hq', 'hiring', 'repair_needed', '']) {
+    assert.equal(buildApi.buildModeEligible({ ...ready, assistantState }), false, assistantState);
+  }
+  assert.equal(buildApi.buildModeEligible({ ...ready, availability: { available: false } }), false);
+  assert.equal(buildApi.buildModeEligible({ ...ready, availability: null }), false);
+});
+
+test('manual openers keep the wizard: import, guided, specialist, groups, locks, deep links', () => {
+  const ready = {
+    entryPoint: 'home_cockpit_create',
+    assistantState: 'active',
+    availability: { available: true }
+  };
+  const refused = [
+    { importMode: true },
+    { mode: 'guided' },
+    { mode: 'specialist' },
+    { kind: 'group' },
+    { fixedKind: 'group' },
+    { parentLocked: true, parentId: 'group-1' },
+    { blueprint: 'content-production' },
+    { folderOfferId: 'offer-1' }
+  ];
+  for (const extra of refused) {
+    assert.equal(buildApi.buildModeEligible({ ...ready, ...extra }), false, JSON.stringify(extra));
+  }
+});
+
+test('a build draft advances the wizard only as far as the gates allow, never backwards', () => {
+  const { buildStepFor } = buildApi;
+  assert.equal(buildStepFor({}, { current: 1 }), 1);
+  assert.equal(buildStepFor({ template_id: 'content-production' }, { current: 1 }), 2);
+  assert.equal(buildStepFor({ blank: true }, { current: 1 }), 2);
+  assert.equal(
+    buildStepFor({ template_id: 'content-production' }, { current: 1, blueprintReady: false }),
+    1
+  );
+  const named = { template_id: 'content-production', name: 'Desk', description: 'Drafts' };
+  assert.equal(buildStepFor(named, { current: 1 }), 3);
+  assert.equal(buildStepFor({ ...named, description: '' }, { current: 1 }), 2);
+  assert.equal(buildStepFor(named, { current: 1, nameValid: false }), 2);
+  assert.equal(buildStepFor(named, { current: 1, inputsValid: false }), 2);
+  assert.equal(buildStepFor(named, { current: 1, teamSet: true }), 4);
+  assert.equal(buildStepFor(named, { current: 1, agentless: true }), 4);
+  assert.equal(
+    buildStepFor({ template_id: 'x' }, { current: 3 }),
+    3,
+    'never below the current step'
+  );
+});
+
+test('a session patch carries only the fields the turn set, or the whole draft to resume', () => {
+  const session = {
+    draft: {
+      template_id: 'content-production',
+      name: 'Newsletter Desk',
+      description: 'Drafts the Monday newsletter',
+      blueprint_inputs: { cadence: 'weekly' },
+      parent_id: '',
+      tags: ['writing']
+    },
+    applied: ['blueprint', 'name']
+  };
+  assert.deepEqual(asData(buildApi.buildPatchFromSession(session, session.applied)), {
+    template_id: 'content-production',
+    name: 'Newsletter Desk'
+  });
+  assert.deepEqual(asData(buildApi.buildPatchFromSession(session)), {
+    template_id: 'content-production',
+    name: 'Newsletter Desk',
+    description: 'Drafts the Monday newsletter',
+    blueprint_inputs: { cadence: 'weekly' },
+    parent_id: '',
+    tags: ['writing']
+  });
+  assert.deepEqual(
+    asData(buildApi.buildPatchFromSession({ draft: { blank: true } }, ['blueprint'])),
+    { blank: true }
+  );
+  assert.deepEqual(asData(buildApi.buildPatchFromSession(null, ['name'])), {});
+});
+
+test('a creator context carries the first sentence for a build, and no session yet', () => {
+  const context = buildApi.createCreatorContext({
+    entryPoint: 'personal_assistant_ask',
+    buildFirstMessage: '  a newsletter from my notes  '
+  });
+  assert.equal(context.buildFirstMessage, 'a newsletter from my notes');
+  assert.equal(context.buildSession, null);
+});

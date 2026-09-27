@@ -177,6 +177,15 @@ const sessionManager = {
 
     this.loadCollapsedFolders();
     this.bindEvents();
+    this.initWorkspaceBuildListeners();
+    // Build prototype stub (?buildStub=1) — removed with the real API.
+    try {
+      if (new URLSearchParams(window.location?.search || '').get('buildStub') === '1') {
+        this.workspaceBuildTransport = this.workspaceBuildStubTransport();
+      }
+    } catch (_) {
+      /* the stub is a development aid only */
+    }
     this.bindNoteEvents();
     this.setupKeyboardShortcuts();
     this.restoreSidebarState();
@@ -804,6 +813,9 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingMapOrigin;
       delete addFolderModal.dataset.pendingParentId;
       delete addFolderModal.dataset.pendingParentLocked;
+      // Build with your assistant is decided per open, after the form above
+      // is reset; an ineligible open leaves the manual wizard untouched.
+      void this.maybeStartWorkspaceBuild(this.workspaceCreatorContext);
     });
 
     // A dismissed creator must not leave a fixed selected-member Group or a
@@ -864,6 +876,10 @@ const sessionManager = {
       if (addFolderModal.dataset.suspendedForAgentSetup) return;
       if (addFolderModal.dataset.suspendedForMapPlacement) return;
       this.abandonWorkspaceMapPlacement();
+      // The build session itself stays open on the server: closing is never
+      // abandoning, and the build can be resumed from the assistant's Today.
+      this.flushWorkspaceBuildDraft?.();
+      this.teardownWorkspaceBuild();
       this.discardWorkspaceTeamDraft();
       // A confirmed Group Template change whose response was lost may already
       // be durable; closing must reveal canonical state rather than hide it.
@@ -6773,6 +6789,7 @@ const sessionManager = {
       return;
     }
     this.workspaceRoleAssigning = '';
+    this.noteWorkspaceBuildRoleEdit(roleId);
     this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();
     this.renderExistingAgentRoster();
@@ -6790,6 +6807,7 @@ const sessionManager = {
       return;
     }
     if (!api.clearRoleFill(draft, roleId)) return;
+    this.noteWorkspaceBuildRoleEdit(roleId);
     this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();
     this.renderExistingAgentRoster();
@@ -7803,6 +7821,7 @@ const sessionManager = {
     }
     this.renderWorkspaceTeamRoster();
     if (!groupRoster) this.renderBlueprintAgentSummary();
+    this.syncWorkspaceBuildChosenTags();
     window.SetupWorkspaceCreator?.refreshReview();
   },
 
@@ -8948,6 +8967,10 @@ const sessionManager = {
     this.restoreWorkspaceCreatorDetailsDraft(nextContext.kind);
     this.syncWorkspaceCreatorPresentation();
     this.refreshWizardChrome();
+    // The build belongs to the Workspace draft; its context moves along with
+    // the kind switch so returning to Workspace finds the same build.
+    if (this.workspaceBuild) this.workspaceBuild.context = nextContext;
+    this.syncWorkspaceBuildKind();
     document.getElementById(`wizardStep${this.wizardStep}Title`)?.focus();
     return true;
   },
@@ -9158,7 +9181,11 @@ const sessionManager = {
       // The last transition always names Review, regardless of whether Team is
       // in this operation's sequence.
       nextBtn.textContent = this.nextWizardStep() === finalStep ? 'Review →' : 'Continue →';
-      nextBtn.disabled = this.usesTeamRosterCreator() && step === 3 && this.hasBlockingTeamIssue();
+      // While the assistant is working on the form, the user waits for it
+      // rather than advancing past a step it is still filling.
+      nextBtn.disabled =
+        Boolean(this.workspaceBuild?.busy) ||
+        (this.usesTeamRosterCreator() && step === 3 && this.hasBlockingTeamIssue());
     }
     if (backBtn) backBtn.hidden = importMode || onFirstStep;
     if (createBtn) {
@@ -9173,13 +9200,14 @@ const sessionManager = {
         // Groups have no blueprint/team/project readiness dependency. Workspace
         // blockers remain exactly as before.
         createBtn.disabled =
-          !importMode &&
-          ((this.usesManagedGroupTemplate() && !window.GroupTemplateCreator.canSubmit(this)) ||
-            (this.usesTeamRosterCreator() && this.hasBlockingTeamIssue()) ||
-            (this.isWorkspaceCreator() &&
-              (this.blueprintSelectionBlocked() ||
-                this.groupRequirementBlocked() ||
-                window.SetupWorkspaceCreator?.canSubmit() === false)));
+          Boolean(this.workspaceBuild?.busy) ||
+          (!importMode &&
+            ((this.usesManagedGroupTemplate() && !window.GroupTemplateCreator.canSubmit(this)) ||
+              (this.usesTeamRosterCreator() && this.hasBlockingTeamIssue()) ||
+              (this.isWorkspaceCreator() &&
+                (this.blueprintSelectionBlocked() ||
+                  this.groupRequirementBlocked() ||
+                  window.SetupWorkspaceCreator?.canSubmit() === false))));
       }
     }
     if (onFinalStep && this.isWorkspaceCreator()) this.renderReviewReadiness();
@@ -9214,6 +9242,7 @@ const sessionManager = {
       }
     }
     if (onFinalStep) this.refreshWorkspaceReview();
+    this.syncWorkspaceBuildChosenTags();
     this.announceWorkspaceCreatorStep();
   },
 
@@ -10640,7 +10669,10 @@ const sessionManager = {
   // Moves the wizard to a step and re-renders chrome. Scrolls the modal body to
   // the top and moves focus to the new step heading — or, when a step's own
   // validation refuses the move, to the control that has to be fixed first.
-  goToWizardStep(step) {
+  // The assistant's build passes { focus: false }: it advances the wizard
+  // while the user is typing to it, and must never take the caret away.
+  goToWizardStep(step, options = {}) {
+    const moveFocus = options.focus !== false;
     const visibleSteps = this.creatorWizardSteps();
     const requestedStep = Number(step) || visibleSteps[0];
     // Callers that know only the old numeric step IDs still land on a visible
@@ -10752,6 +10784,7 @@ const sessionManager = {
     this.refreshWizardChrome();
     const body = document.querySelector('#addFolderModal .modal-body');
     if (body) body.scrollTop = 0;
+    if (!moveFocus) return;
     const heading = document.getElementById(`wizardStep${this.wizardStep}Title`);
     if (heading) heading.focus();
     else if (this.wizardStep === 2) document.getElementById('folderNameInput')?.focus();
@@ -10897,6 +10930,1103 @@ const sessionManager = {
     return result;
   },
 
+  // ----- Build with your assistant -----
+  //
+  // In build mode the Personal Assistant fills this wizard through a
+  // conversation (create-workspace-build-pane.js). The server holds the build
+  // session, and its draft is the request collectCreatePayload() returns.
+  // This controller is the only code that talks to the session or changes the
+  // form for it: a turn goes out, the session comes back, and its draft is
+  // applied through the same setters a click or a keystroke uses. The wizard's
+  // own gates still decide every step and the Create itself.
+
+  workspaceBuild: null,
+  workspaceBuildGeneration: 0,
+  workspaceBuildApplyDepth: 0,
+
+  // The session requests. Tests and the stub replace this; everything else
+  // goes through it so no build request is made anywhere else.
+  workspaceBuildTransport: null,
+
+  workspaceBuildApi() {
+    if (this.workspaceBuildTransport) return this.workspaceBuildTransport;
+    const call = async (method, url, body) => {
+      const options = { method, headers: { Accept: 'application/json' } };
+      if (body !== undefined) {
+        options.headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify(body);
+      }
+      const response = await fetch(url, options);
+      const data = await response.json().catch(() => ({}));
+      return { ok: response.ok, status: response.status, body: data || {} };
+    };
+    const base = '/api/workspaces/build-sessions';
+    const sessionURL = (id, suffix) => `${base}/${encodeURIComponent(String(id || ''))}/${suffix}`;
+    return {
+      assistant: async () =>
+        (await call('GET', '/api/personal-assistant')).body?.personal_assistant || null,
+      availability: async () => (await call('GET', `${base}/availability`)).body || null,
+      create: body => call('POST', base, body),
+      turn: (id, body) => call('POST', sessionURL(id, 'turns'), body),
+      draft: (id, body) => call('PATCH', sessionURL(id, 'draft'), body),
+      abandon: (id, body) => call('POST', sessionURL(id, 'abandon'), body || {})
+    };
+  },
+
+  workspaceBuildPane() {
+    return window.WorkspaceBuildPane || null;
+  },
+
+  workspaceBuildAssistantName() {
+    const name = String(this.workspaceBuild?.assistant?.display_name || '').trim();
+    return name || this.workspaceBuildPane()?.COPY?.fallbackName || 'Your assistant';
+  },
+
+  initWorkspaceBuildListeners() {
+    const modal = document.getElementById('addFolderModal');
+    if (!modal?.addEventListener) return;
+    modal.addEventListener('workspace-build-turn', event => {
+      void this.sendWorkspaceBuildTurn(event?.detail || {});
+    });
+    modal.addEventListener('workspace-build-collapse', () => this.collapseWorkspaceBuild());
+    modal.addEventListener('workspace-build-expand', () => this.expandWorkspaceBuild());
+    modal.addEventListener('workspace-build-start-over', () => {
+      void this.startOverWorkspaceBuild();
+    });
+    modal.addEventListener('workspace-build-action', event => {
+      void this.runWorkspaceBuildAction(event?.detail?.action);
+    });
+    // The user's own edits take the "Chosen by" tag off that field. Captured,
+    // so a field's own handler cannot stop it first.
+    for (const type of ['input', 'change']) {
+      modal.addEventListener(type, event => this.noteWorkspaceBuildUserEdit(event), true);
+    }
+    modal.addEventListener(
+      'click',
+      event => {
+        if (event?.target?.closest?.('.folder-color-btn')) this.noteWorkspaceBuildUserEdit(event);
+      },
+      true
+    );
+    modal.addEventListener('workspace-template-selected', event => {
+      this.noteWorkspaceBuildBlueprintSelected(event?.detail?.template || null);
+    });
+    modal.addEventListener('workspace-tags-changed', () => {
+      if (this.workspaceBuildApplyDepth === 0) this.clearWorkspaceBuildChosen('tags');
+    });
+  },
+
+  // maybeStartWorkspaceBuild runs on every open. Build mode is offered only
+  // from its openers, and only once the two reads it depends on answer: the
+  // assistant's relationship and whether a model is reachable for it. Both are
+  // made here, on open, never on page load. Any other outcome leaves the
+  // manual wizard exactly as it was, with no pane and nothing else requested.
+  async maybeStartWorkspaceBuild(context) {
+    this.teardownWorkspaceBuild();
+    const api = window.WorkspaceCreatorState;
+    const pane = this.workspaceBuildPane();
+    if (!context || !pane || typeof api?.buildEntryPointEligible !== 'function') return false;
+    const facts = {
+      entryPoint: context.entryPoint,
+      kind: context.kind,
+      fixedKind: context.fixedKind,
+      mode: context.mode,
+      importMode: Boolean(this.importModeEnabled || context.mode === 'import'),
+      parentLocked: context.parentLocked,
+      blueprint: context.blueprint,
+      folderOfferId: context.folderOfferId
+    };
+    if (!api.buildEntryPointEligible(facts)) return false;
+    const transport = this.workspaceBuildApi();
+    let assistant = null;
+    let availability = null;
+    try {
+      [assistant, availability] = await Promise.all([
+        transport.assistant(),
+        transport.availability()
+      ]);
+    } catch (_) {
+      return false;
+    }
+    // The dialog may have closed, or reopened for another opener, meanwhile.
+    if (this.workspaceCreatorContext !== context) return false;
+    if (!api.buildModeEligible({ ...facts, assistantState: assistant?.state, availability })) {
+      return false;
+    }
+    this.workspaceBuildGeneration += 1;
+    this.workspaceBuild = {
+      generation: this.workspaceBuildGeneration,
+      context,
+      assistant,
+      session: null,
+      busy: false,
+      collapsed: false,
+      kindHidden: false,
+      lastTurn: null,
+      resumeLine: '',
+      chosen: new Map(),
+      chosenRoles: new Set()
+    };
+    this.mountWorkspaceBuildPane();
+    await this.openWorkspaceBuildSession({ firstMessage: context.buildFirstMessage });
+    return true;
+  },
+
+  mountWorkspaceBuildPane() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build || !pane) return;
+    pane.mount({ assistant: build.assistant });
+    document.getElementById('addFolderModal')?.classList?.add('workspace-create-modal--build');
+  },
+
+  // openWorkspaceBuildSession asks the server for this user's build. A build
+  // already open elsewhere is never silently replaced: the user chooses to
+  // resume it or start over.
+  async openWorkspaceBuildSession({ firstMessage = '', fresh = false } = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build || !pane) return;
+    const message = String(firstMessage || '')
+      .trim()
+      .slice(0, 2000);
+    const body = { entry_point: build.context.entryPoint };
+    const parentID = String(build.context.parentId || '').trim();
+    if (parentID) body.parent_id = parentID;
+    if (message) body.first_message = message;
+    this.setWorkspaceBuildBusy(true, message);
+    let result;
+    try {
+      result = await this.workspaceBuildApi().create(body);
+    } catch (_) {
+      result = { ok: false, status: 0, body: {} };
+    }
+    if (this.workspaceBuild !== build) return;
+    this.setWorkspaceBuildBusy(false);
+    const session = result?.body?.session || null;
+    if (!result?.ok || !session) {
+      this.failWorkspaceBuild();
+      return;
+    }
+    build.session = session;
+    this.rememberWorkspaceBuildSession(session);
+    if (result.body.resumed && !fresh) {
+      const name = String(session.draft?.name || '').trim();
+      build.resumeLine = pane.showLine(pane.COPY.resumeQuestion(name), {
+        chips: [
+          { id: 'resume', label: pane.COPY.resume },
+          { id: 'start_over', label: pane.COPY.startOver }
+        ]
+      });
+      // A sentence heard in the Ask tab waits for the choice: Start over
+      // builds from it, Resume keeps the build that was already open.
+      build.pendingFirstMessage = message;
+      return;
+    }
+    await this.applyWorkspaceBuildSession(session);
+  },
+
+  rememberWorkspaceBuildSession(session) {
+    const context = this.workspaceCreatorContext;
+    if (!context || this.workspaceBuild?.context !== context) return;
+    context.buildSession = session?.id
+      ? { id: String(session.id), version: Number(session.version) || 0 }
+      : null;
+  },
+
+  async runWorkspaceBuildAction(action) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build || !pane) return;
+    if (action === 'resume' && build.session) {
+      pane.removeLine?.(build.resumeLine);
+      build.resumeLine = '';
+      build.pendingFirstMessage = '';
+      await this.applyWorkspaceBuildSession(build.session, { resume: true });
+      return;
+    }
+    if (action === 'start_over') {
+      await this.startOverWorkspaceBuild();
+      return;
+    }
+    if (action === 'try_again' && build.lastTurn) {
+      await this.sendWorkspaceBuildTurn(build.lastTurn.detail || {}, { retry: true });
+    }
+  },
+
+  // Start over abandons the open build, clears the wizard, and asks the
+  // opening question again. Closing the dialog never does this; only the
+  // user's explicit choice does.
+  async startOverWorkspaceBuild() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build || !pane || build.busy) return;
+    const firstMessage = build.pendingFirstMessage || '';
+    const session = build.session;
+    if (session?.id && session.status !== 'created') {
+      try {
+        await this.workspaceBuildApi().abandon(session.id, { version: session.version });
+      } catch (_) {
+        // The server expires an abandoned build on its own; a failed abandon
+        // must not trap the user in it.
+      }
+    }
+    if (this.workspaceBuild !== build) return;
+    build.session = null;
+    build.lastTurn = null;
+    build.pendingFirstMessage = '';
+    build.chosen = new Map();
+    build.chosenRoles = new Set();
+    this.rememberWorkspaceBuildSession(null);
+    this.workspaceBuildApplyDepth += 1;
+    try {
+      this.resetAddWorkspaceModalForm({ preserveAskOri: true });
+    } finally {
+      this.workspaceBuildApplyDepth -= 1;
+    }
+    this.refreshWizardChrome();
+    this.mountWorkspaceBuildPane();
+    await this.openWorkspaceBuildSession({ firstMessage, fresh: true });
+  },
+
+  setWorkspaceBuildBusy(busy, pendingText = '') {
+    const build = this.workspaceBuild;
+    if (!build) return;
+    build.busy = Boolean(busy);
+    this.workspaceBuildPane()?.setBusy(build.busy, { pendingText: build.busy ? pendingText : '' });
+    this.refreshWizardChrome();
+  },
+
+  // sendWorkspaceBuildTurn posts one answer: a sentence or a chip. The user's
+  // form edits are sent first, so the assistant answers the form as it is.
+  async sendWorkspaceBuildTurn(detail = {}, options = {}) {
+    const build = this.workspaceBuild;
+    if (!build?.session || build.busy) return;
+    const choiceID = String(detail.choiceId || '').trim();
+    const text = String(detail.text || '')
+      .trim()
+      .slice(0, 2000);
+    if (!choiceID && !text) return;
+    await this.flushWorkspaceBuildDraft?.();
+    if (this.workspaceBuild !== build || !build.session) return;
+    const body = choiceID ? { choice_id: choiceID } : { text };
+    body.version = Number(build.session.version) || 0;
+    build.lastTurn = { detail: { ...detail } };
+    this.setWorkspaceBuildBusy(true, choiceID ? '' : text);
+    let result;
+    try {
+      result = await this.workspaceBuildApi().turn(build.session.id, body);
+    } catch (_) {
+      result = { ok: false, status: 0, body: {} };
+    }
+    if (this.workspaceBuild !== build) return;
+    this.setWorkspaceBuildBusy(false);
+    if (result?.status === 409 && result.body?.code === 'version' && !options.retry) {
+      // Another tab or an edit moved the build on. Take the current session
+      // and let the user send again from there.
+      await this.reloadWorkspaceBuildSession();
+      return;
+    }
+    const session = result?.body?.session || null;
+    if (!result?.ok || !session) {
+      this.showWorkspaceBuildFailure();
+      return;
+    }
+    await this.applyWorkspaceBuildSession(session);
+  },
+
+  async reloadWorkspaceBuildSession() {
+    const build = this.workspaceBuild;
+    if (!build) return;
+    let result;
+    try {
+      result = await this.workspaceBuildApi().create({ entry_point: build.context.entryPoint });
+    } catch (_) {
+      result = null;
+    }
+    if (this.workspaceBuild !== build) return;
+    const session = result?.body?.session || null;
+    if (!result?.ok || !session) {
+      this.failWorkspaceBuild();
+      return;
+    }
+    await this.applyWorkspaceBuildSession(session, { resume: true });
+  },
+
+  // A request that never reached the server gets the same fixed line a model
+  // failure does, with a Try again that resends the same answer.
+  showWorkspaceBuildFailure() {
+    const pane = this.workspaceBuildPane();
+    if (!pane || !this.workspaceBuild) return;
+    pane.showLine(pane.COPY.modelFailure, {
+      chips: [{ id: 'try_again', label: pane.COPY.tryAgain }]
+    });
+  },
+
+  // failWorkspaceBuild ends build mode for this open when the assistant can no
+  // longer help: the form keeps everything already filled in.
+  failWorkspaceBuild() {
+    const pane = this.workspaceBuildPane();
+    if (!pane || !this.workspaceBuild) return;
+    pane.showLine(pane.COPY.unavailable);
+    this.collapseWorkspaceBuild({ withdraw: true });
+  },
+
+  // applyWorkspaceBuildSession shows the session and does its work on the
+  // form. A resumed build restores the whole draft; an ordinary turn applies
+  // only the fields the turn reports it set.
+  async applyWorkspaceBuildSession(session, options = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    const api = window.WorkspaceCreatorState;
+    if (!build || !pane || !session) return;
+    build.session = session;
+    this.rememberWorkspaceBuildSession(session);
+    pane.applySession(session);
+    const resume = Boolean(options.resume);
+    const applied = Array.isArray(session.applied) ? session.applied : [];
+    const patch = api?.buildPatchFromSession
+      ? api.buildPatchFromSession(session, resume ? undefined : applied)
+      : {};
+    const name = this.workspaceBuildAssistantName();
+    await this.applyBuildPatchToWizard(patch, name, { animate: !resume });
+    if (this.workspaceBuild !== build) return;
+    if (session.team_patch && (resume || applied.includes('team'))) {
+      await this.applyWorkspaceBuildTeamPatch(session.team_patch, name, { animate: !resume });
+    }
+    if (this.workspaceBuild !== build) return;
+    this.advanceWorkspaceBuildWizard(session, { resume });
+    if (session.create_now && !resume) await this.createFromWorkspaceBuild?.();
+  },
+
+  collapseWorkspaceBuild({ withdraw = false } = {}) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build || !pane) return;
+    build.collapsed = true;
+    pane.collapse({ withdraw });
+    document.getElementById('addFolderModal')?.classList?.remove('workspace-create-modal--build');
+    if (withdraw) this.workspaceBuild.withdrawn = true;
+  },
+
+  expandWorkspaceBuild() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build || !pane || build.withdrawn || build.kindHidden) return;
+    build.collapsed = false;
+    pane.expand();
+    document.getElementById('addFolderModal')?.classList?.add('workspace-create-modal--build');
+  },
+
+  // Build mode is for a Workspace. Choosing Group hides the pane and its
+  // button; choosing Workspace again brings back the same build, unless the
+  // user had already chosen to do it themselves.
+  syncWorkspaceBuildKind() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build || !pane) return;
+    const group = this.creatorKind() === 'group';
+    build.kindHidden = group;
+    if (group) {
+      pane.collapse({ withdraw: true });
+      document.getElementById('addFolderModal')?.classList?.remove('workspace-create-modal--build');
+      return;
+    }
+    if (build.withdrawn) return;
+    if (build.collapsed) {
+      pane.collapse();
+      return;
+    }
+    pane.expand();
+    document.getElementById('addFolderModal')?.classList?.add('workspace-create-modal--build');
+  },
+
+  teardownWorkspaceBuild() {
+    const pane = this.workspaceBuildPane();
+    const active = Boolean(this.workspaceBuild) || Boolean(pane?.isMounted?.());
+    this.workspaceBuild = null;
+    if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
+    this.workspaceBuildTimer = null;
+    // A manual open never mounted anything, so it has nothing to take down.
+    if (!active) return;
+    pane?.destroy();
+    document.querySelectorAll?.('[data-build-chosen]')?.forEach(tag => tag.remove());
+    document.getElementById('addFolderModal')?.classList?.remove('workspace-create-modal--build');
+  },
+
+  prefersReducedMotion() {
+    try {
+      return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
+    } catch (_) {
+      return false;
+    }
+  },
+
+  // The card for a blueprint id, including a plugin's namespaced id; '' is
+  // the Blank card.
+  workspaceBuildBlueprintCard(id) {
+    const value = String(id ?? '').trim();
+    if (!value) {
+      return document.querySelector('.workspace-template-card[data-template-id=""]') || null;
+    }
+    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(value) : value;
+    return (
+      document.querySelector(
+        `.workspace-template-card[data-template-id="${escaped}"], .workspace-template-row[data-template-id="${escaped}"]`
+      ) ||
+      document.querySelector(
+        `.workspace-template-card[data-template-id$=":${escaped}"], .workspace-template-row[data-template-id$=":${escaped}"]`
+      )
+    );
+  },
+
+  workspaceBuildBlueprintSelected(id) {
+    const selected = window.ProjectTemplateCard?.getSelectedTemplate?.() || null;
+    if (!selected) return false;
+    const value = String(id ?? '').trim();
+    if (!value) return Boolean(selected.blank);
+    const selectedID = String(selected.id || '');
+    return selectedID === value || selectedID.endsWith(`:${value}`);
+  },
+
+  // Selecting a card is asynchronous: the picker renders after the dialog
+  // opens and may re-render to Blank once. Retry until the choice sticks.
+  selectWorkspaceBuildBlueprint(id) {
+    return new Promise(resolve => {
+      let attempts = 0;
+      const step = () => {
+        if (this.workspaceBuildBlueprintSelected(id)) {
+          resolve(true);
+          return;
+        }
+        this.workspaceBuildBlueprintCard(id)?.click?.();
+        if (this.workspaceBuildBlueprintSelected(id)) {
+          resolve(true);
+          return;
+        }
+        if (attempts++ >= 40) {
+          resolve(false);
+          return;
+        }
+        setTimeout(step, 75);
+      };
+      step();
+    });
+  },
+
+  // Where each "Chosen by" tag sits, and which control it describes.
+  workspaceBuildChosenTarget(key) {
+    if (key === 'blueprint') {
+      const card = this.workspaceBuildBlueprintCard(this.workspaceBuild?.chosenBlueprint ?? '');
+      return { anchor: card, field: card, block: true };
+    }
+    if (key === 'name') {
+      return {
+        anchor: document.getElementById('folderNameLabel'),
+        field: document.getElementById('folderNameInput')
+      };
+    }
+    if (key === 'description') {
+      return {
+        anchor: document.getElementById('folderDescriptionLabel'),
+        field: document.getElementById('folderDescriptionInput')
+      };
+    }
+    if (key === 'parent') {
+      return {
+        anchor: document.getElementById('folderParentLabel'),
+        field: document.getElementById('folderParentSelect')
+      };
+    }
+    if (key === 'color') {
+      return {
+        anchor: document.getElementById('folderColorLabel'),
+        field: document.getElementById('folderColorOptions')
+      };
+    }
+    if (key === 'tags') {
+      const mount = document.getElementById('folderTagsMount');
+      return { anchor: mount?.previousElementSibling || null, field: mount };
+    }
+    if (key.startsWith('input:')) {
+      const id = key.slice('input:'.length);
+      const control = document.getElementById(this.blueprintInputControlID(id));
+      return {
+        anchor: control?.closest?.('[data-input-id]')?.querySelector?.('label'),
+        field: control
+      };
+    }
+    if (key.startsWith('role:')) {
+      const id = key.slice('role:'.length);
+      const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id;
+      const row = document.querySelector(`#workspaceRoleRoster [data-role-id="${escaped}"]`);
+      return { anchor: row, field: row, block: true };
+    }
+    return { anchor: null, field: null };
+  },
+
+  markWorkspaceBuildChosen(key, assistantName, { animate = true } = {}) {
+    const build = this.workspaceBuild;
+    if (!build || typeof document.createElement !== 'function') return;
+    build.chosen.set(key, assistantName);
+    this.renderWorkspaceBuildChosen(key, { animate });
+  },
+
+  renderWorkspaceBuildChosen(key, { animate = false } = {}) {
+    const build = this.workspaceBuild;
+    const name = build?.chosen?.get(key);
+    if (!name || typeof document.createElement !== 'function') return;
+    const { anchor, field, block } = this.workspaceBuildChosenTarget(key);
+    if (!anchor) return;
+    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(key) : key;
+    anchor.querySelectorAll?.(`[data-build-chosen="${escaped}"]`)?.forEach(tag => tag.remove());
+    const tag = document.createElement('span');
+    tag.className = block
+      ? 'workspace-build-chosen workspace-build-chosen--block'
+      : 'workspace-build-chosen';
+    tag.dataset.buildChosen = key;
+    tag.textContent = this.workspaceBuildPane()?.COPY?.chosenBy?.(name) || `Chosen by ${name}`;
+    anchor.appendChild(tag);
+    if (field?.dataset) field.dataset.chosenBy = name;
+    if (animate && field?.classList && !this.prefersReducedMotion()) {
+      field.classList.remove('workspace-build-applied');
+      // Restart the highlight even when the same field is set twice in a row.
+      void field.offsetWidth;
+      field.classList.add('workspace-build-applied');
+      setTimeout(() => field.classList?.remove('workspace-build-applied'), 700);
+    }
+  },
+
+  clearWorkspaceBuildChosen(key) {
+    const build = this.workspaceBuild;
+    if (!build?.chosen?.has(key)) return false;
+    build.chosen.delete(key);
+    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(key) : key;
+    document.querySelectorAll(`[data-build-chosen="${escaped}"]`).forEach(tag => tag.remove());
+    const { field } = this.workspaceBuildChosenTarget(key);
+    if (field?.dataset) delete field.dataset.chosenBy;
+    return true;
+  },
+
+  // The field an input or change event belongs to, as a chosen-tag key.
+  workspaceBuildKeyForTarget(target) {
+    if (!target) return '';
+    if (target.closest?.('#workspaceBuildPane')) return '';
+    const id = String(target.id || '');
+    if (id === 'folderNameInput') return 'name';
+    if (id === 'folderDescriptionInput') return 'description';
+    if (id === 'folderParentSelect') return 'parent';
+    if (target.closest?.('.folder-color-btn')) return 'color';
+    const inputID = target.closest?.('[data-input-id]')?.dataset?.inputId;
+    if (inputID && target.closest?.('#workspaceBlueprintInputsFields')) return `input:${inputID}`;
+    return '';
+  },
+
+  noteWorkspaceBuildUserEdit(event) {
+    if (!this.workspaceBuild || this.workspaceBuildApplyDepth > 0) return;
+    const key = this.workspaceBuildKeyForTarget(event?.target);
+    if (!key) return;
+    this.clearWorkspaceBuildChosen(key);
+    this.scheduleWorkspaceBuildDraft?.();
+  },
+
+  noteWorkspaceBuildBlueprintSelected(template) {
+    const build = this.workspaceBuild;
+    if (!build) return;
+    // The card tag is rebuilt whenever the picker re-renders the grid.
+    const id = template?.blank ? '' : String(template?.id || '');
+    const assistantChoice = build.chosenBlueprint;
+    const same =
+      assistantChoice !== undefined &&
+      (id === assistantChoice || id.endsWith(`:${assistantChoice}`) || (!id && !assistantChoice));
+    if (this.workspaceBuildApplyDepth > 0 || same) {
+      setTimeout(() => this.renderWorkspaceBuildChosen('blueprint'), 0);
+      return;
+    }
+    this.clearWorkspaceBuildChosen('blueprint');
+    build.chosenBlueprint = undefined;
+    this.noteWorkspaceBuildBlueprintChanged?.(template);
+  },
+
+  // applyBuildPatchToWizard writes the fields the assistant set into the form
+  // through the wizard's own setters, marks each one "Chosen by <Name>", and
+  // briefly highlights it so the work is visible. The blueprint goes first:
+  // selecting it resets its inputs and prefills Details, and everything after
+  // it must land on the new blueprint. Returns the keys it applied.
+  async applyBuildPatchToWizard(patch = {}, assistantName = '', options = {}) {
+    const build = this.workspaceBuild;
+    const value = patch && typeof patch === 'object' ? patch : {};
+    const name = String(assistantName || '').trim() || this.workspaceBuildAssistantName();
+    const animate = options.animate !== false;
+    const applied = [];
+    const has = key => Object.prototype.hasOwnProperty.call(value, key);
+    const setField = (element, text, eventType) => {
+      if (!element) return false;
+      element.value = text;
+      element.dispatchEvent?.(new Event(eventType, { bubbles: true }));
+      return true;
+    };
+    this.workspaceBuildApplyDepth += 1;
+    try {
+      if (value.blank === true || has('template_id')) {
+        const id = value.blank === true ? '' : String(value.template_id || '').trim();
+        if (build) build.chosenBlueprint = id;
+        const selected = await this.selectWorkspaceBuildBlueprint(id);
+        if (selected) {
+          applied.push('blueprint');
+          this.markWorkspaceBuildChosen('blueprint', name, { animate });
+          this.workspaceBuildBlueprintCard(id)?.scrollIntoView?.({
+            block: 'nearest',
+            behavior: animate && !this.prefersReducedMotion() ? 'smooth' : 'auto'
+          });
+        }
+      }
+      if (has('name')) {
+        const input = document.getElementById('folderNameInput');
+        if (setField(input, String(value.name || ''), 'input')) {
+          if (input.dataset) input.dataset.autofillName = '';
+          applied.push('name');
+          this.markWorkspaceBuildChosen('name', name, { animate });
+        }
+      }
+      if (has('description')) {
+        const input = document.getElementById('folderDescriptionInput');
+        if (setField(input, String(value.description || ''), 'input')) {
+          if (input.dataset) input.dataset.autofillDescription = '';
+          applied.push('description');
+          this.markWorkspaceBuildChosen('description', name, { animate });
+        }
+      }
+      if (value.blueprint_inputs && typeof value.blueprint_inputs === 'object') {
+        const values = this.blueprintInputsDraft?.values || {};
+        for (const [id, raw] of Object.entries(value.blueprint_inputs)) {
+          if (!(id in values)) continue;
+          const text = raw === null || raw === undefined ? '' : String(raw);
+          this.setBlueprintInputValue(id, text);
+          const control = document.getElementById(this.blueprintInputControlID(id));
+          if (control) control.value = text;
+          applied.push(`input:${id}`);
+          this.markWorkspaceBuildChosen(`input:${id}`, name, { animate });
+        }
+      }
+      if (has('parent_id') && !this.lockedParentId()) {
+        const select = document.getElementById('folderParentSelect');
+        const wanted = String(value.parent_id || '');
+        const options = Array.from(select?.options || []);
+        const known = !wanted || options.some(option => option.value === wanted);
+        if (select && known && setField(select, wanted, 'change')) {
+          applied.push('parent');
+          this.markWorkspaceBuildChosen('parent', name, { animate });
+        }
+      }
+      if (has('color')) {
+        const wanted = String(value.color || '');
+        const button = Array.from(
+          document.querySelectorAll('#addFolderModal .folder-color-btn') || []
+        ).find(candidate => String(candidate.dataset?.color || '') === wanted);
+        if (button) {
+          button.click();
+          applied.push('color');
+          this.markWorkspaceBuildChosen('color', name, { animate });
+        }
+      }
+      if (Array.isArray(value.tags) && window.WorkspaceTagsCard?.setTags) {
+        window.WorkspaceTagsCard.setTags(value.tags.map(tag => String(tag || '')).filter(Boolean));
+        applied.push('tags');
+        this.markWorkspaceBuildChosen('tags', name, { animate });
+      }
+    } finally {
+      this.workspaceBuildApplyDepth -= 1;
+    }
+    if (applied.length) {
+      this.invalidateGroupRequirementReview();
+      this.updateBehaviorHint();
+      this.refreshWorkspaceReview();
+    }
+    return applied;
+  },
+
+  // A team patch uses the Team step's own draft operations: filling a role by
+  // creating or assigning an agent, adding a saved teammate, or choosing no
+  // agents for a Blank workspace. The blueprint's plan (and the saved roster
+  // for an assignment) must be loaded first; the patch waits for them.
+  async applyWorkspaceBuildTeamPatch(teamPatch, assistantName = '', options = {}) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const build = this.workspaceBuild;
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (!api || !draft || !teamPatch || typeof teamPatch !== 'object') return [];
+    const ready = await this.waitForWorkspaceBuildTeam(teamPatch);
+    if (!ready || this.workspaceBuild !== build) return [];
+    const name = String(assistantName || '').trim() || this.workspaceBuildAssistantName();
+    const filled = api.applyTeamPatch ? api.applyTeamPatch(draft, teamPatch) : [];
+    if (build) {
+      for (const roleId of filled) build.chosenRoles.add(roleId);
+      if (filled.length) build.teamSet = true;
+      if (teamPatch.mode === 'agentless' && draft.agentless) build.teamSet = true;
+    }
+    this.invalidateGroupRequirementReview();
+    this.refreshWorkspaceReview();
+    this.renderExistingAgentRoster();
+    for (const roleId of filled) this.markWorkspaceBuildChosen(`role:${roleId}`, name, options);
+    if (options.animate !== false) this.staggerWorkspaceBuildRosterRows();
+    return filled;
+  },
+
+  // Resolves once the blueprint's plan is ready and, when the patch assigns a
+  // saved agent, the saved roster too. Gives up after a few seconds rather
+  // than applying a team to a plan it cannot see.
+  async waitForWorkspaceBuildTeam(teamPatch) {
+    const needsRoster =
+      (Array.isArray(teamPatch.roles) && teamPatch.roles.some(role => role?.mode === 'assign')) ||
+      (Array.isArray(teamPatch.saved_agents) && teamPatch.saved_agents.length > 0);
+    if (needsRoster && !this.existingAgentRosterLoaded && !this.existingAgentRosterLoading) {
+      void this.loadExistingAgentRoster();
+    }
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const draft = this.teamDraft;
+      const planReady = draft?.plan?.status === 'ready';
+      const rosterReady = !needsRoster || draft?.savedRoster?.status === 'ready';
+      if (planReady && rosterReady) return true;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return false;
+  },
+
+  staggerWorkspaceBuildRosterRows() {
+    if (this.prefersReducedMotion()) return;
+    const rows = document.querySelectorAll(
+      '#workspaceRoleRoster [data-role-id], #workspaceTeamRoster > li'
+    );
+    Array.from(rows || []).forEach((row, index) => {
+      row.classList?.remove('workspace-build-row-enter');
+      if (row.style) row.style.animationDelay = `${index * 120}ms`;
+      void row.offsetWidth;
+      row.classList?.add('workspace-build-row-enter');
+    });
+  },
+
+  // The wizard rewrites its labels and re-renders the Team rows wholesale on
+  // every refresh, which drops the tags inside them. Each refresh puts the
+  // tags for the assistant's current choices back.
+  syncWorkspaceBuildChosenTags() {
+    const build = this.workspaceBuild;
+    if (!build?.chosen?.size) return;
+    for (const key of build.chosen.keys()) this.renderWorkspaceBuildChosen(key);
+  },
+
+  // A role the user changes is no longer the assistant's choice.
+  noteWorkspaceBuildRoleEdit(roleId) {
+    const build = this.workspaceBuild;
+    if (!build || this.workspaceBuildApplyDepth > 0) return;
+    if (build.chosenRoles.delete(String(roleId || ''))) {
+      this.clearWorkspaceBuildChosen(`role:${roleId}`);
+    }
+    this.scheduleWorkspaceBuildDraft?.();
+  },
+
+  // Whether every declared input holds an allowed value, without rendering
+  // errors on a form the assistant is still filling.
+  workspaceBuildInputsValid() {
+    if (!this.blueprintInputsAvailable()) return true;
+    const fields = this.blueprintInputsDraft?.declaration?.fields || [];
+    return fields.every(field => !this.blueprintInputProblem(String(field?.id || '')));
+  },
+
+  // advanceWorkspaceBuildWizard moves the wizard forward to the furthest step
+  // the draft has earned under the wizard's own gates, never backwards, and
+  // without taking focus from the conversation.
+  advanceWorkspaceBuildWizard(session, { resume = false } = {}) {
+    const api = window.WorkspaceCreatorState;
+    const build = this.workspaceBuild;
+    if (!api?.buildStepFor || !build || !this.isWorkspaceCreator()) return;
+    const draft = {
+      ...(session?.draft || {}),
+      ...this.collectCreatePayload()
+    };
+    const view = this.usesTeamRosterCreator() ? this.teamView() : null;
+    const canLeaveTeam = Boolean(view?.canContinueFromTeam) && !this.hasBlockingTeamIssue();
+    let target = api.buildStepFor(draft, {
+      current: this.wizardStep,
+      blueprintReady: !this.blueprintSelectionBlocked(),
+      nameValid: !this.workspaceIdentityProblem() && !this.existingProjectProblem(),
+      inputsValid: this.workspaceBuildInputsValid(),
+      teamSet: Boolean(build.teamSet) && canLeaveTeam,
+      agentless: Boolean(this.teamDraft?.agentless)
+    });
+    if (resume) {
+      const furthest = Math.min(4, Math.max(1, Number(session?.furthest_step) || 1));
+      target = Math.min(Math.max(target, furthest), canLeaveTeam ? 4 : Math.max(target, 3));
+    }
+    if (target > this.wizardStep) this.goToWizardStep(target, { focus: false });
+  },
+
+  // ----- Build prototype stub (?buildStub=1) — removed with the real API -----
+
+  workspaceBuildStubTransport() {
+    const saved = () => {
+      const agents = this.teamDraft?.savedRoster?.agents || [];
+      const attachable = agents.find(agent => agent?.source === 'user' || agent?.name);
+      return String(attachable?.name || 'Luna');
+    };
+    let session = null;
+    const now = () => new Date().toISOString();
+    const say = (text, choices) => ({
+      role: 'assistant',
+      text,
+      at: now(),
+      ...(choices ? { choices } : {})
+    });
+    const turnScript = [
+      body => ({
+        say: 'Content Production fits — it already has a drafting flow. I named it Newsletter Desk.',
+        ask: {
+          question: 'Should I link your research folder so it can read the notes?',
+          choices: [
+            { id: 'folder_choose', label: 'Choose a folder' },
+            { id: 'folder_none', label: 'No folder' }
+          ]
+        },
+        draft: {
+          template_id: 'content-production',
+          name: 'Newsletter Desk',
+          description:
+            `Drafts the Monday newsletter from research notes. (${body.text || ''})`.trim()
+        },
+        applied: ['blueprint', 'name', 'description']
+      }),
+      () => ({
+        say: `No folder, then. ${saved()} could lead this team.`,
+        ask: {
+          question: `Assign ${saved()} as the Content Lead, or make a new one?`,
+          choices: [
+            { id: 'assign_saved', label: `Assign ${saved()}` },
+            { id: 'create_new', label: 'Make a new one' }
+          ]
+        },
+        applied: []
+      }),
+      body => ({
+        say:
+          body.choice_id === 'create_new'
+            ? 'I’ll create a new Content Lead. Ready — check the review on the left, or just tell me “create it”.'
+            : `${saved()} leads it. Ready — check the review on the left, or just tell me “create it”.`,
+        team_patch: {
+          mode: 'staffed',
+          roles: [
+            body.choice_id === 'create_new'
+              ? { role_id: 'content-lead', mode: 'create', agent_name: 'Content Lead' }
+              : { role_id: 'content-lead', mode: 'assign', agent_name: saved() }
+          ]
+        },
+        applied: ['team']
+      }),
+      () => ({
+        say: 'This is the prototype, so I stop here. In the real build I would create it now.',
+        applied: []
+      })
+    ];
+    const respond = body => {
+      const index = Math.min(session.turns, turnScript.length - 1);
+      const step = turnScript[index](body);
+      session.turns += 1;
+      const chosenChoice = body.choice_id
+        ? session.pending_question?.choices?.find(choice => choice.id === body.choice_id)
+        : null;
+      if (chosenChoice) {
+        const last = [...session.transcript].reverse().find(entry => entry.role === 'assistant');
+        if (last) last.chosen = chosenChoice.id;
+      }
+      session.transcript.push({
+        role: 'user',
+        text: chosenChoice ? chosenChoice.label : body.text,
+        at: now()
+      });
+      session.transcript.push(
+        say(step.ask ? `${step.say} ${step.ask.question}` : step.say, step.ask?.choices)
+      );
+      session.pending_question = step.ask ? { ...step.ask, allow_free_text: true } : null;
+      session.draft = { ...session.draft, ...(step.draft || {}) };
+      session.applied = step.applied;
+      session.team_patch = step.team_patch || session.team_patch || null;
+      session.version += 1;
+      return { ok: true, status: 200, body: { session: JSON.parse(JSON.stringify(session)) } };
+    };
+    const delay = value => new Promise(resolve => setTimeout(() => resolve(value), 450));
+    return {
+      assistant: async () =>
+        window.PersonalAssistantPanel?._state?.personalAssistant?.display_name
+          ? { ...window.PersonalAssistantPanel._state.personalAssistant, state: 'active' }
+          : { state: 'active', display_name: 'Luna', appearance: {} },
+      availability: async () => ({ available: true }),
+      create: async body => {
+        session = {
+          id: 'stub-build',
+          status: 'open',
+          version: 1,
+          turns: 0,
+          entry_point: body.entry_point,
+          draft: {},
+          transcript: [],
+          pending_question: null,
+          applied: [],
+          furthest_step: 1
+        };
+        if (body.first_message) return delay(respond({ text: body.first_message }));
+        return { ok: true, status: 201, body: { session: JSON.parse(JSON.stringify(session)) } };
+      },
+      turn: async (_id, body) => delay(respond(body)),
+      draft: async () => ({ ok: true, status: 200, body: { session } }),
+      abandon: async () => ({ ok: true, status: 200, body: {} })
+    };
+  },
+
+  // collectCreatePayload assembles the request Create sends from the wizard's
+  // current state, and nothing else: no request, no navigation, no change to
+  // the form. createFolder() posts what it returns, and a build session records
+  // the same object as its draft, so the conversation and the form can never
+  // describe two different workspaces. Callers that snapshot a value earlier
+  // (createFolder reads the team before its readiness recheck) pass it in;
+  // anything omitted is read from the form now.
+  collectCreatePayload(values = {}) {
+    const importEnabled =
+      values.importEnabled ??
+      (this.importModeEnabled || Boolean(document.getElementById('folderImportToggle')?.checked));
+    const ordinaryGroup = !importEnabled && this.isOrdinaryGroupCreator();
+    const requiresReviewedRoster = !importEnabled && this.usesTeamRosterCreator();
+    const name =
+      values.name ?? String(document.getElementById('folderNameInput')?.value || '').trim();
+    const description =
+      values.description ??
+      String(document.getElementById('folderDescriptionInput')?.value || '').trim();
+    const parentId =
+      values.parentId ??
+      (this.lockedParentId() ||
+        String(document.getElementById('folderParentSelect')?.value || '').trim());
+    const color =
+      values.color ??
+      (document.querySelector('#addFolderModal .folder-color-btn.active')?.dataset.color || '');
+    const workspaceBootstrap = ordinaryGroup
+      ? null
+      : values.workspaceBootstrap || this.getWorkspaceBootstrapFromModal();
+    const teamPayload =
+      values.teamPayload || (requiresReviewedRoster ? this.teamView()?.payload || {} : {});
+    const creatorContext = this.workspaceCreatorContext;
+
+    const payload = ordinaryGroup
+      ? this.ordinaryGroupPayload({
+          name,
+          description,
+          parent_id: parentId,
+          color
+        })
+      : {
+          name,
+          description,
+          parent_id: parentId,
+          color
+        };
+    if (!ordinaryGroup && workspaceBootstrap.hasAny) {
+      payload.workspace_bootstrap = {
+        goal: workspaceBootstrap.description || workspaceBootstrap.goal,
+        systems: workspaceBootstrap.systems,
+        context: workspaceBootstrap.context
+      };
+    }
+    // Agent behavior profile (mapped from the Starting point or manually
+    // overridden). Sent for both create and import; the backend maps it via
+    // workspacesettings.ProfileDefaults.
+    if (!ordinaryGroup) {
+      payload.workspace_preset =
+        document.getElementById('folderPresetSelect')?.value?.trim() || 'general';
+    }
+    let endpoint = '/api/workspaces';
+    let assistantHireConfig = null;
+    if (importEnabled) {
+      endpoint = '/api/workspaces/import';
+      payload.path = values.importPath ?? '';
+      payload.allow_duplicate = Boolean(this.importAllowDuplicate);
+      payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
+    } else if (requiresReviewedRoster || !ordinaryGroup) {
+      // A create opened for a "show me a folder" offer names the offer so
+      // the server can attach that folder afterwards (FR28). The folder's
+      // path is never part of this request.
+      const folderOfferId = String(creatorContext?.folderOfferId || '').trim();
+      if (folderOfferId) {
+        payload.entry_point = 'folder_digest';
+        payload.folder_offer_id = folderOfferId;
+      }
+      if (!ordinaryGroup && window.ProjectTemplateCard) {
+        // Optional project scaffolding from the template picker
+        // (template_id/template_path). The scaffolded project folder name
+        // defaults to the workspace name server-side.
+        const templateFields = window.ProjectTemplateCard.getPayloadFields();
+        Object.assign(payload, templateFields);
+        // An existing project replaces the scaffold: the server attaches the
+        // folder behind the picker's token instead of creating project files.
+        const projectConnection = this.existingProjectPayload();
+        if (projectConnection) payload.project_connection = projectConnection;
+        // Only ever sent for a new project: the card is hidden for an
+        // existing one, and blueprintInputsPayload returns nothing then.
+        const blueprintInputs = this.blueprintInputsPayload();
+        if (blueprintInputs) payload.blueprint_inputs = blueprintInputs;
+        // Blank blueprint (no template_id/path, no ad-hoc folder override):
+        // tell the backend to seed the synthetic single-agent roster.
+        if (
+          window.ProjectTemplateCard.getSelectedTemplate?.()?.blank &&
+          !templateFields.template_id &&
+          !templateFields.template_path
+        ) {
+          payload.blank = true;
+        }
+      }
+      // The whole team composition is converted from the draft here, at submit
+      // time, and nowhere else. Because it comes from the same derived view the
+      // Team and Review steps rendered, the request cannot describe a different
+      // team than the one the user just confirmed: a selection the blueprint
+      // also contributes is sent once, the order matches what Team showed,
+      // staged customizations ride the existing override field, and
+      // entry_agent_name is set only when the resolved primary is genuinely one
+      // of the saved selections — the server's requirement for that field.
+      if (teamPayload.assistant_hire) {
+        assistantHireConfig = { ...teamPayload.assistant_hire };
+      }
+      if (typeof teamPayload.create_template_agents === 'boolean') {
+        payload.create_template_agents = teamPayload.create_template_agents;
+      }
+      if (Array.isArray(teamPayload.template_agent_overrides)) {
+        payload.template_agent_overrides = teamPayload.template_agent_overrides;
+      }
+      if (teamPayload.template_agent_review) {
+        payload.template_agent_review = {
+          version: teamPayload.template_agent_review.version,
+          plan_revision: teamPayload.template_agent_review.plan_revision,
+          expectations: teamPayload.template_agent_review.expectations.map(expectation => ({
+            ...expectation
+          }))
+        };
+      }
+      if (!this.usesGroupRosterCreator() && teamPayload.team_intent) {
+        payload.team_intent = { ...teamPayload.team_intent };
+      }
+      // Strict project intent always carries the explicit array, including
+      // when empty. A Group Roster instead uses template_agent_review; this
+      // preserves the server boundary that rejects team_intent for groups.
+      if (!this.usesGroupRosterCreator() && Array.isArray(teamPayload.role_staffing)) {
+        payload.role_staffing = teamPayload.role_staffing.map(entry => ({ ...entry }));
+      }
+      if (Array.isArray(teamPayload.existing_agent_names)) {
+        payload.existing_agent_names = [...teamPayload.existing_agent_names];
+      }
+      if (teamPayload.entry_agent_name) {
+        payload.entry_agent_name = teamPayload.entry_agent_name;
+      }
+      if (window.WorkspaceTagsCard) {
+        Object.assign(payload, window.WorkspaceTagsCard.getPayloadFields());
+      }
+    }
+    return { payload, endpoint, assistantHireConfig };
+  },
+
   // Create folder
   async createFolder(options = {}) {
     if (this.isCreatingFolder) return;
@@ -11013,33 +12143,16 @@ const sessionManager = {
     }
 
     try {
-      const payload = ordinaryGroup
-        ? this.ordinaryGroupPayload({
-            name,
-            description,
-            parent_id: parentId,
-            color
-          })
-        : {
-            name,
-            description,
-            parent_id: parentId,
-            color
-          };
-      if (!ordinaryGroup && workspaceBootstrap.hasAny) {
-        payload.workspace_bootstrap = {
-          goal: workspaceBootstrap.description || workspaceBootstrap.goal,
-          systems: workspaceBootstrap.systems,
-          context: workspaceBootstrap.context
-        };
-      }
-      // Agent behavior profile (mapped from the Starting point or manually
-      // overridden). Sent for both create and import; the backend maps it via
-      // workspacesettings.ProfileDefaults.
-      if (!ordinaryGroup) {
-        payload.workspace_preset =
-          document.getElementById('folderPresetSelect')?.value?.trim() || 'general';
-      }
+      const { payload, endpoint, assistantHireConfig } = this.collectCreatePayload({
+        importEnabled,
+        importPath,
+        name,
+        description,
+        parentId,
+        color,
+        workspaceBootstrap,
+        teamPayload: confirmedTeamPayload
+      });
       const buildSlugConflictMessage = conflict => {
         const requestedSlug =
           typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
@@ -11062,92 +12175,6 @@ const sessionManager = {
         }
         return parts.join('\n\n');
       };
-      let endpoint = '/api/workspaces';
-      let assistantHireConfig = null;
-      if (importEnabled) {
-        endpoint = '/api/workspaces/import';
-        payload.path = importPath;
-        payload.allow_duplicate = Boolean(this.importAllowDuplicate);
-        payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
-      } else if (requiresReviewedRoster || !ordinaryGroup) {
-        // A create opened for a "show me a folder" offer names the offer so
-        // the server can attach that folder afterwards (FR28). The folder's
-        // path is never part of this request.
-        const folderOfferId = String(creatorContext?.folderOfferId || '').trim();
-        if (folderOfferId) {
-          payload.entry_point = 'folder_digest';
-          payload.folder_offer_id = folderOfferId;
-        }
-        if (!ordinaryGroup && window.ProjectTemplateCard) {
-          // Optional project scaffolding from the template picker
-          // (template_id/template_path). The scaffolded project folder name
-          // defaults to the workspace name server-side.
-          const templateFields = window.ProjectTemplateCard.getPayloadFields();
-          Object.assign(payload, templateFields);
-          // An existing project replaces the scaffold: the server attaches the
-          // folder behind the picker's token instead of creating project files.
-          const projectConnection = this.existingProjectPayload();
-          if (projectConnection) payload.project_connection = projectConnection;
-          // Only ever sent for a new project: the card is hidden for an
-          // existing one, and blueprintInputsPayload returns nothing then.
-          const blueprintInputs = this.blueprintInputsPayload();
-          if (blueprintInputs) payload.blueprint_inputs = blueprintInputs;
-          // Blank blueprint (no template_id/path, no ad-hoc folder override):
-          // tell the backend to seed the synthetic single-agent roster.
-          if (
-            window.ProjectTemplateCard.getSelectedTemplate?.()?.blank &&
-            !templateFields.template_id &&
-            !templateFields.template_path
-          ) {
-            payload.blank = true;
-          }
-        }
-        // The whole team composition is converted from the draft here, at submit
-        // time, and nowhere else. Because it comes from the same derived view the
-        // Team and Review steps rendered, the request cannot describe a different
-        // team than the one the user just confirmed: a selection the blueprint
-        // also contributes is sent once, the order matches what Team showed,
-        // staged customizations ride the existing override field, and
-        // entry_agent_name is set only when the resolved primary is genuinely one
-        // of the saved selections — the server's requirement for that field.
-        const teamPayload = confirmedTeamPayload;
-        if (teamPayload.assistant_hire) {
-          assistantHireConfig = { ...teamPayload.assistant_hire };
-        }
-        if (typeof teamPayload.create_template_agents === 'boolean') {
-          payload.create_template_agents = teamPayload.create_template_agents;
-        }
-        if (Array.isArray(teamPayload.template_agent_overrides)) {
-          payload.template_agent_overrides = teamPayload.template_agent_overrides;
-        }
-        if (teamPayload.template_agent_review) {
-          payload.template_agent_review = {
-            version: teamPayload.template_agent_review.version,
-            plan_revision: teamPayload.template_agent_review.plan_revision,
-            expectations: teamPayload.template_agent_review.expectations.map(expectation => ({
-              ...expectation
-            }))
-          };
-        }
-        if (!this.usesGroupRosterCreator() && teamPayload.team_intent) {
-          payload.team_intent = { ...teamPayload.team_intent };
-        }
-        // Strict project intent always carries the explicit array, including
-        // when empty. A Group Roster instead uses template_agent_review; this
-        // preserves the server boundary that rejects team_intent for groups.
-        if (!this.usesGroupRosterCreator() && Array.isArray(teamPayload.role_staffing)) {
-          payload.role_staffing = teamPayload.role_staffing.map(entry => ({ ...entry }));
-        }
-        if (Array.isArray(teamPayload.existing_agent_names)) {
-          payload.existing_agent_names = [...teamPayload.existing_agent_names];
-        }
-        if (teamPayload.entry_agent_name) {
-          payload.entry_agent_name = teamPayload.entry_agent_name;
-        }
-        if (window.WorkspaceTagsCard) {
-          Object.assign(payload, window.WorkspaceTagsCard.getPayloadFields());
-        }
-      }
 
       const requestsMapPlacement =
         !importEnabled &&

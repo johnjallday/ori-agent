@@ -39,6 +39,13 @@ export function wtcGetPayloadFields() {
   return tags.length > 0 ? { tags } : {};
 }
 
+// wtcSetTags replaces the tags, for a caller that fills the form on the
+// user's behalf (the assistant's build). The user can still edit them.
+export function wtcSetTags(tags) {
+  const widget = wtcEnsureWidget();
+  widget?.setTags(Array.isArray(tags) ? tags : []);
+}
+
 export function wtcReset() {
   wtcWidget?.setTags([]);
   wtcRenderTemplateTagsHint([]);
@@ -78,6 +85,7 @@ function wtcInit() {
 if (typeof window !== 'undefined') {
   window.WorkspaceTagsCard = {
     getPayloadFields: wtcGetPayloadFields,
+    setTags: wtcSetTags,
     reset: wtcReset
   };
   if (typeof document !== 'undefined') {
