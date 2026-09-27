@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -230,6 +231,136 @@ func (s *failActivationHomeWrite) Update(id string, fn func(*workspace.Workspace
 		return errors.New("injected Home catalog persistence interruption")
 	}
 	return s.Store.Update(id, fn)
+}
+
+// Pause only after the real shared creator has durably made its child. The
+// outer Home library write has not yet happened, so a racing queue Skip must
+// wait rather than persisting "skipped" and stranding that child.
+type pauseAfterActivationCreator struct {
+	ActivationCreator
+	created chan struct{}
+	release chan struct{}
+}
+
+func (p *pauseAfterActivationCreator) Commit(ctx context.Context, scope projectconnection.Scope, request projectconnection.Request, input, owner string) (projectconnection.CommitResult, error) {
+	result, err := p.ActivationCreator.Commit(ctx, scope, request, input, owner)
+	if err == nil {
+		close(p.created)
+		<-p.release
+	}
+	return result, err
+}
+
+func TestActivationQueue_CreatorAndSkipSerializeAcrossDurableChildBoundary(t *testing.T) {
+	a, scope, _, file, tree, installed := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	queue, _, err := a.library.StartActivationQueue(scope, []string{"single", "alternates"}, "race-start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseCreator := realActivationCreator(t, scope, file, installed)
+	created, release := make(chan struct{}), make(chan struct{})
+	releaseCreator := sync.OnceFunc(func() { close(release) })
+	defer releaseCreator()
+	service := NewActivationService(a, func(resolver projectconnection.SelectionResolver) ActivationCreator {
+		return &pauseAfterActivationCreator{ActivationCreator: baseCreator(resolver), created: created, release: release}
+	})
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		value ActivationResult
+		err   error
+	}
+	creatorDone := make(chan result, 1)
+	go func() {
+		value, commitErr := service.Commit(t.Context(), scope, "single", review.Token, "race-creator")
+		creatorDone <- result{value, commitErr}
+	}()
+	select {
+	case <-created:
+	case <-time.After(10 * time.Second):
+		t.Fatal("creator did not persist its child")
+	}
+	ids, err := file.List()
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("creator has not committed exactly one child: %v %v", ids, err)
+	}
+	skipStarted := make(chan struct{})
+	skipDone := make(chan error, 1)
+	go func() {
+		close(skipStarted)
+		_, _, skipErr := a.library.ProgressActivationQueue(scope, queue.ID, "single", "skip", "racing-skip", 1)
+		skipDone <- skipErr
+	}()
+	<-skipStarted
+	select {
+	case skipErr := <-skipDone:
+		t.Fatalf("Skip overtook the already committed child: %v", skipErr)
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseCreator()
+	select {
+	case committed := <-creatorDone:
+		if committed.err != nil || committed.value.WorkspaceID == "" {
+			t.Fatalf("creator lost its Home association: %+v", committed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("creator hung after allowing Home association")
+	}
+	select {
+	case skipErr := <-skipDone:
+		if !errors.Is(skipErr, ErrConflict) {
+			t.Fatalf("a now-connected song was skipped: %v", skipErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Skip remained blocked after creator returned")
+	}
+	view, err := a.library.CurrentActivationQueue(scope)
+	if err != nil || view.Queue == nil || view.Queue.Index != 0 || len(view.Queue.Skipped) != 0 {
+		t.Fatalf("queue claimed the connected song was skipped: %+v %v", view, err)
+	}
+	progress, replay, err := a.library.ProgressActivationQueue(scope, queue.ID, "single", "connected", "race-connected", 1)
+	if err != nil || replay || progress.Index != 1 || len(progress.Connected) != 1 {
+		t.Fatalf("separate linked receipt did not advance: %+v %t %v", progress, replay, err)
+	}
+	ids, err = file.List()
+	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("race duplicated the child or changed the source: %v %v", ids, err)
+	}
+}
+
+func TestActivationQueue_SkipBeforeCreatorRefusesStaleReview(t *testing.T) {
+	a, scope, _, file, tree, installed := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	queue, _, err := a.library.StartActivationQueue(scope, []string{"single", "alternates"}, "skip-first-start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.library.ProgressActivationQueue(scope, queue.ID, "single", "skip", "skip-first", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Commit(t.Context(), scope, "single", review.Token, "stale-after-skip"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale review created a child after Skip: %v", err)
+	}
+	ids, err := file.List()
+	if err != nil || len(ids) != 1 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("Skip-before-creator created a child or changed source: %v %v", ids, err)
+	}
 }
 
 func TestActivation_RealCreatorRecoversAfterHomeWriteFailsAndStoreRestarts(t *testing.T) {

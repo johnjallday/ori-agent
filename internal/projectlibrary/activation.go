@@ -286,6 +286,9 @@ func (s *ActivationService) Commit(ctx context.Context, scope Scope, entryID, to
 		return ActivationResult{}, ErrConflict
 	}
 	a := s.inspector
+	queueGate := activationQueueCommitGuard(scope)
+	queueGate.Lock()
+	defer queueGate.Unlock()
 	gate := rootAccessGate(scope)
 	gate.RLock()
 	defer gate.RUnlock()

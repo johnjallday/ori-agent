@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -81,6 +82,19 @@ type ActivationQueueOutcome struct {
 }
 
 const maxQueueOutcomes = 16
+
+// The creator writes a child before it can write the Home catalog. Serialize
+// *local* queue navigation with that interval so Skip cannot invalidate its
+// Home CAS and claim the same song was never connected. This is not a
+// cross-process transaction: a split mirror/remote creator still requires
+// exact-link recovery and independent owner review.
+var activationQueueCommitGuards sync.Map // [owner, Home, provider, program] -> *sync.Mutex
+
+func activationQueueCommitGuard(scope Scope) *sync.Mutex {
+	key := [4]string{scope.OwnerUserID, scope.HomeID, scope.ProviderID, scope.ProgramID}
+	gate, _ := activationQueueCommitGuards.LoadOrStore(key, &sync.Mutex{})
+	return gate.(*sync.Mutex)
+}
 
 func (o ActivationQueueOutcome) valid() bool {
 	if o.ID == "" || !validText(o.ID, 160) || o.SelectedCount < 2 || o.SelectedCount > 100 ||
@@ -213,6 +227,9 @@ func (s *Store) StartActivationQueue(scope Scope, ids []string, key string) (Act
 		}
 		seen[id] = true
 	}
+	gate := activationQueueCommitGuard(scope)
+	gate.Lock()
+	defer gate.Unlock()
 	doc, _, err := s.readSnapshot(scope)
 	if err != nil {
 		return ActivationQueue{}, false, err
@@ -274,6 +291,9 @@ func (s *Store) ProgressActivationQueue(scope Scope, queueID, entryID, action, k
 		!validText(key, 160) || expected < 1 || (action != "skip" && action != "connected") {
 		return ActivationQueue{}, false, ErrConflict
 	}
+	gate := activationQueueCommitGuard(scope)
+	gate.Lock()
+	defer gate.Unlock()
 	doc, state, err := s.readSnapshot(scope)
 	if err != nil {
 		return ActivationQueue{}, false, err
@@ -293,8 +313,12 @@ func (s *Store) ProgressActivationQueue(scope Scope, queueID, entryID, action, k
 		doc.Queue.IDs[doc.Queue.Index] != entryID {
 		return ActivationQueue{}, false, ErrConflict
 	}
-	if action == "connected" && !s.queueLinkCurrent(scope, doc, state, entryID) {
-		return ActivationQueue{}, false, ErrConflict
+	if action == "connected" {
+		if !s.queueLinkCurrent(scope, doc, state, entryID) {
+			return ActivationQueue{}, false, ErrConflict
+		}
+	} else if entry := sessionEntry(doc, entryID); entry != nil && entry.Link != nil {
+		return ActivationQueue{}, false, ErrConflict // Connected items must be acknowledged as connected.
 	}
 	var updated ActivationQueue
 	_, replay, err := s.mutateWithHomePolicy(scope, doc.Revision,
@@ -320,6 +344,9 @@ func (s *Store) ProgressActivationQueue(scope Scope, queueID, entryID, action, k
 				return "", ErrConflict
 			}
 			if action == "skip" {
+				if entry := sessionEntry(*current, entryID); entry != nil && entry.Link != nil {
+					return "", ErrConflict
+				}
 				q.Skipped = append(q.Skipped, entryID)
 			} else {
 				entry := sessionEntry(*current, entryID)
@@ -353,6 +380,9 @@ func (s *Store) DiscardActivationQueue(scope Scope, queueID, key string, expecte
 	if queueID == "" || key == "" || !validText(queueID, 160) || !validText(key, 160) || expected < 1 {
 		return false, ErrConflict
 	}
+	gate := activationQueueCommitGuard(scope)
+	gate.Lock()
+	defer gate.Unlock()
 	doc, _, err := s.readSnapshot(scope)
 	if err != nil {
 		return false, err
