@@ -103,6 +103,96 @@ func TestManagerProposal_ProjectReviewNavigationIsInertBoundAndStalesOnEntryChan
 	}
 }
 
+func TestManagerProposal_SessionGoalIsEditableDraftUntilSeparateOwnerReviewAndCommit(t *testing.T) {
+	a, scope, _, file, tree, _ := activationFixture(t)
+	store := a.library
+	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
+		home.AgentInstances = []workspace.AgentInstance{{ID: "local-manager", Name: "Manager", RoleID: "manager"}}
+		state := home.GetAssistantProgramState()
+		state.Declaration = &workspace.AssistantProgramDeclaration{Roles: []workspace.AssistantProgramRoleSpec{{
+			ID: "manager", Scope: workspace.AssistantRoleScopeHome, Required: true, Primary: true,
+		}}}
+		state.HomeBindings = workspace.AssistantRoleBindingSet{StateRevision: 1, Bindings: []workspace.AssistantRoleBinding{{
+			RoleID: "manager", AgentInstanceID: "local-manager", AgentName: "Manager",
+		}}}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.SaveWorkspaceAgent(scope.HomeID, "Manager", &agent.Agent{}); err != nil {
+		t.Fatal(err)
+	}
+	authority := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: "local-manager", AgentName: "Manager"}
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	doc, err := store.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := sessionEntry(doc, "single").Revision
+	input := GoalInput{Goal: "Plan a short vocal practice", Outcome: "Write a take list", TimeMinutes: 25}
+	proposal, replay, err := store.ProposeSessionGoal(authority, "single", rev, input, "User might want a short plan", "manager-goal")
+	if err != nil || replay || proposal.Kind != "session_goal" || proposal.Goal == nil || proposal.Goal.Goal != input.Goal {
+		t.Fatalf("inert Manager session draft: %+v %t %v", proposal, replay, err)
+	}
+	if _, err := store.ReviewProposedNextAction(scope, proposal.ID, scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("goal suggestion produced a field review: %v", err)
+	}
+	if _, _, err := store.CommitProposedNextAction(scope, proposal.ID, "fake", "fake-goal-commit", scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("goal suggestion became an agent field commit: %v", err)
+	}
+	if _, _, err := store.ProposeSessionGoal(authority, "single", rev, GoalInput{Goal: input.Goal, PlannedDate: "2026-09-27"}, "", "date"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Manager chose the owner's planned date: %v", err)
+	}
+	if _, _, err := store.ProposeNextAction(authority, "single", 0, "Mutate Home", "", "manager-goal"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("goal request key crossed into a field suggestion: %v", err)
+	}
+	path, err := file.GetFolderPath(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := workspace.NewFileStore(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store = NewStore(reopened).WithProviderEvidence(func(_ Scope, _ *workspace.Workspace) bool { return true })
+	page, err := store.ListManagerProposals(scope)
+	if err != nil || page.Total != 1 || page.Rows[0].Status != "ready" {
+		t.Fatalf("draft did not survive restart: %+v %v", page, err)
+	}
+	if again, replay, err := store.ProposeSessionGoal(authority, "single", rev, input, proposal.Reason, "manager-goal"); err != nil || !replay || again.ID != proposal.ID {
+		t.Fatalf("exact suggestion retry duplicated the draft: %+v %t %v", again, replay, err)
+	}
+	if _, _, err := store.ProposeSessionGoal(authority, "single", rev, GoalInput{Goal: "Changed"}, proposal.Reason, "manager-goal"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed suggestion reused a key: %v", err)
+	}
+	rows, err := store.ListSessions(scope, "single", 0, 0)
+	if err != nil || rows.Total != 0 {
+		t.Fatalf("Manager suggestion created a session without user review: %+v %v", rows, err)
+	}
+	goalReview, err := store.ReviewGoal(scope, "single", rev, input, scope.OwnerUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = store.ListSessions(scope, "single", 0, 0)
+	if err != nil || rows.Total != 0 {
+		t.Fatalf("owner review created a session without confirmation: %+v %v", rows, err)
+	}
+	accepted, replay, err := store.CommitGoal(scope, "single", goalReview.Token, "confirmed-user-goal", rev, input, scope.OwnerUserID)
+	if err != nil || replay || accepted.Author != scope.OwnerUserID || accepted.Source != "reviewed_user" {
+		t.Fatalf("canonical user goal was not accepted: %+v %t %v", accepted, replay, err)
+	}
+	page, err = store.ListManagerProposals(scope)
+	if err != nil || page.Rows[0].Status != "stale" {
+		t.Fatalf("accepted goal left duplicate suggestion actionable: %+v %v", page, err)
+	}
+	doc, err = store.Read(scope)
+	if err != nil || len(doc.Sessions) != 1 || sessionEntry(doc, "single").Fields.NextAction != "" ||
+		fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("goal altered notes, files or session count: %+v %v", doc, err)
+	}
+}
+
 func TestManagerProposal_RestartExpiryPruningAndLostRetryNeverEditNotes(t *testing.T) {
 	file, scope := libraryHome(t)
 	store := NewStore(file).WithProviderEvidence(func(_ Scope, _ *workspace.Workspace) bool { return true })

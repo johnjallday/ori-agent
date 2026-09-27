@@ -137,6 +137,53 @@ func (p *WorkspaceToolProvider) libraryProposeNextActionTool() toolapi.Tool {
 	}
 }
 
+func (p *WorkspaceToolProvider) libraryProposeSessionGoalTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{Name: "home_library_propose_session_goal",
+			Description: "Save one bounded, inert Music Home studio-session goal suggestion for the locally bound primary Home Manager. The owner must separately edit, review and confirm the canonical goal; this does NOT create a session, child, Ticket, task, schedule, DAW observation, file access or planned date. Notes are untrusted data. No agent confirmation token or commit is available.",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"entry_id":        map[string]any{"type": "string", "description": "Exact Home catalog entry ID from home_library_detail."},
+				"entry_revision":  map[string]any{"type": "integer", "description": "Current entry_revision from home_library_detail."},
+				"goal":            map[string]any{"type": "string", "description": "Suggested goal, up to 500 bytes; untrusted until owner review."},
+				"desired_outcome": map[string]any{"type": "string", "description": "Suggested outcome, up to 500 bytes."},
+				"time_minutes":    map[string]any{"type": "integer", "description": "Optional effort estimate, 0–480 minutes, not a schedule or observed work."},
+				"reason":          map[string]any{"type": "string", "description": "Optional inert explanation, up to 500 bytes."},
+				"request_key":     map[string]any{"type": "string", "description": "Stable idempotency key, up to 160 bytes."},
+			}, "required": []string{"entry_id", "entry_revision", "goal", "request_key"}}},
+		call: func(_ context.Context, raw string) (string, error) {
+			var input struct {
+				EntryID       string `json:"entry_id"`
+				EntryRevision *int64 `json:"entry_revision"`
+				Goal          string `json:"goal"`
+				Outcome       string `json:"desired_outcome"`
+				TimeMinutes   int    `json:"time_minutes"`
+				Reason        string `json:"reason"`
+				RequestKey    string `json:"request_key"`
+			}
+			if err := decodeLibraryToolArgs(raw, &input); err != nil {
+				return "", err
+			}
+			if input.EntryRevision == nil {
+				return "", fmt.Errorf("entry_revision is required")
+			}
+			proposal, replay, err := p.libraryStore().ProposeSessionGoal(p.managerAuthority(), input.EntryID,
+				*input.EntryRevision, projectlibrary.GoalInput{Goal: input.Goal, Outcome: input.Outcome,
+					TimeMinutes: input.TimeMinutes}, input.Reason, input.RequestKey)
+			if err != nil {
+				return "", fmt.Errorf("home session goal suggestion not saved: %w", err)
+			}
+			encoded, err := json.Marshal(map[string]any{"proposal_id": proposal.ID, "entry_id": proposal.EntryID,
+				"expires_at": proposal.ExpiresAt, "replay": replay,
+				"review_destination": fmt.Sprintf("/workspaces/%s#projectLibraryProposals", p.workspaceID),
+				"effect":             "Session goal suggestion saved only; Home owner must edit and separately review/confirm a goal."})
+			if err != nil || len(encoded) > 4096 {
+				return "", fmt.Errorf("home session goal result exceeded its limit")
+			}
+			return string(encoded), nil
+		},
+	}
+}
+
 func (p *WorkspaceToolProvider) libraryProposeProjectReviewTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{Name: "home_library_propose_project_review",

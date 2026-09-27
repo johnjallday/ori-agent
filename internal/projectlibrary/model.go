@@ -479,11 +479,19 @@ func (d Document) valid(scope Scope) bool {
 		}
 		switch proposal.Kind {
 		case "": // Existing saved next-action suggestions retain their original digest.
-			if proposal.EntryRevision != 0 || proposal.NextAction == "" || !validText(proposal.NextAction, 240) {
+			if proposal.EntryRevision != 0 || proposal.Goal != nil || proposal.GoalSessionCount != 0 ||
+				proposal.NextAction == "" || !validText(proposal.NextAction, 240) {
 				return false
 			}
 		case "project_review":
-			if proposal.EntryRevision < 1 || proposal.FieldsRevision != 0 || proposal.NextAction != "" {
+			if proposal.EntryRevision < 1 || proposal.FieldsRevision != 0 || proposal.NextAction != "" ||
+				proposal.Goal != nil || proposal.GoalSessionCount != 0 {
+				return false
+			}
+		case "session_goal":
+			if proposal.EntryRevision < 1 || proposal.FieldsRevision != 0 || proposal.NextAction != "" ||
+				proposal.Goal == nil || !proposal.Goal.valid() || proposal.Goal.PlannedDate != "" ||
+				proposal.GoalSessionCount < 0 || proposal.GoalSessionCount > maxSessions {
 				return false
 			}
 		default:

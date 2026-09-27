@@ -145,7 +145,7 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     panel.request = async path => {
       assert.equal(path, '/proposals');
       return {
-        total: 3,
+        total: 4,
         rows: [
           {
             name: '<svg onload=alert(1)>',
@@ -177,13 +177,30 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
               reason: '<script>untrusted setup note</script>',
               agent_name: 'Manager'
             }
+          },
+          {
+            name: 'Album-1',
+            status: 'ready',
+            proposal: {
+              id: 'goal-id',
+              kind: 'session_goal',
+              entry_id: 'entry-1',
+              entry_revision: 2,
+              digest: 'exact-draft',
+              agent_name: 'Manager',
+              goal: {
+                goal: '<script>do not execute</script>',
+                desired_outcome: 'Draft only',
+                time_minutes: 20
+              }
+            }
           }
         ]
       };
     };
     await panel.renderProposals();
     assert.equal(elements.get('projectLibraryProposals').hidden, false);
-    const [ready, stale, navigation] = elements.get('projectLibraryProposalRows').children;
+    const [ready, stale, navigation, goal] = elements.get('projectLibraryProposalRows').children;
     assert.equal(ready.children[0].textContent, '<svg onload=alert(1)>');
     assert.equal(
       ready.children[1].textContent,
@@ -199,6 +216,8 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     assert.equal(navigation.children[4].textContent, 'View Album-4 setup options');
     navigation.children[4].click();
     assert.deepEqual(destinations, ['entry-4']); // only normal owner Details, no creator call
+    assert.equal(goal.children[1].textContent.includes('<script>do not execute</script>'), true);
+    assert.equal(goal.children[4].textContent, 'Edit Album-1 suggested goal');
     panel.state.provider_read_only = true;
     await panel.renderProposals();
     assert.equal(
@@ -210,6 +229,45 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
   } finally {
     globalThis.document = original;
   }
+});
+
+test('Manager goal suggestion rechecks freshness then opens only the editable owner form', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  const goal = {
+    goal: '<script>untrusted</script>',
+    desired_outcome: 'Write a take list',
+    time_minutes: 20
+  };
+  const row = {
+    proposal: {
+      id: 'suggestion',
+      digest: 'exact',
+      kind: 'session_goal',
+      entry_id: 'entry',
+      entry_revision: 2,
+      goal
+    }
+  };
+  let status = 'ready';
+  let revision = 2;
+  const opened = [];
+  panel.run = async (_trigger, _message, work) => work();
+  panel.request = async path => {
+    if (path === '/proposals') return { rows: [{ ...row, status }] };
+    assert.equal(path, '/projects/entry');
+    return { entry_revision: revision, row: { id: 'entry' } };
+  };
+  panel.sessionForm = (...args) => opened.push(args);
+  await panel.editGoalProposal(row, null);
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][1], null); // Not a recap or an automatic save.
+  assert.deepEqual(opened[0][3], goal);
+  status = 'stale';
+  await assert.rejects(() => panel.editGoalProposal(row, null), /no longer current/);
+  status = 'ready';
+  revision = 3;
+  await assert.rejects(() => panel.editGoalProposal(row, null), /song changed/);
+  assert.equal(opened.length, 1);
 });
 
 test('serial queue recovery retains only bounded Home-scoped navigation and exact pending retry', () => {

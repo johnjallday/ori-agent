@@ -87,7 +87,8 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	provider.SetExecutingInstanceID("manager-instance")
 	search := findLibraryTool(provider.Tools(), "home_library_search")
 	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil || findLibraryTool(provider.Tools(), "home_library_propose_next_action") == nil ||
-		findLibraryTool(provider.Tools(), "home_library_propose_project_review") == nil {
+		findLibraryTool(provider.Tools(), "home_library_propose_project_review") == nil ||
+		findLibraryTool(provider.Tools(), "home_library_propose_session_goal") == nil {
 		t.Fatal("bound Manager's library reads not registered")
 	}
 	output, err := search.Call(context.Background(), `{"text":"Private"}`)
@@ -142,6 +143,29 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if _, err := navigate.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","request_key":"missing-revision"}`); err == nil {
 		t.Fatal("navigation without an entry revision was accepted")
 	}
+	goalTool := findLibraryTool(provider.Tools(), "home_library_propose_session_goal")
+	var savedDetail projectlibrary.Detail
+	if err := json.Unmarshal([]byte(detail), &savedDetail); err != nil {
+		t.Fatal(err)
+	}
+	goalArgs := fmt.Sprintf(`{"entry_id":%q,"entry_revision":%d,"goal":"Sketch a rough vocal plan","desired_outcome":"Write a take list","time_minutes":20,"request_key":"model-goal-draft"}`,
+		result.Rows[0].ID, savedDetail.EntryRevision)
+	goalSuggestion, err := goalTool.Call(context.Background(), goalArgs)
+	if err != nil || !strings.Contains(goalSuggestion, "Session goal suggestion saved only") || strings.Contains(goalSuggestion, sandbox) {
+		t.Fatalf("Manager could not save an inert goal draft: %s %v", goalSuggestion, err)
+	}
+	if replayed, err := goalTool.Call(context.Background(), goalArgs); err != nil || !strings.Contains(replayed, `"replay":true`) {
+		t.Fatalf("exact goal retry duplicated a suggestion: %s %v", replayed, err)
+	}
+	if _, err := goalTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","goal":"Unsafe","request_key":"missing-goal-revision"}`); err == nil {
+		t.Fatal("goal suggestion omitted its current entry revision")
+	}
+	if _, err := goalTool.Call(context.Background(), `{"entry_id":"`+child.ID+`","entry_revision":1,"goal":"Unsafe","request_key":"foreign-goal"}`); err == nil {
+		t.Fatal("child ID proposed a Home session")
+	}
+	if current, err := library.Read(scope); err != nil || len(current.Sessions) != 1 || len(current.Proposals) != 2 {
+		t.Fatalf("goal suggestion directly created a Home session: %+v %v", current, err)
+	}
 	if findLibraryTool(provider.Tools(), "home_library_commit") != nil {
 		t.Fatal("model was given a user confirmation tool")
 	}
@@ -166,6 +190,9 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	if _, err := navigate.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","entry_revision":1,"request_key":"unbound-navigation"}`); err == nil {
 		t.Fatal("previously registered navigation tool bypassed removed runtime instance")
+	}
+	if _, err := goalTool.Call(context.Background(), goalArgs); err == nil {
+		t.Fatal("previously registered goal tool bypassed removed runtime instance")
 	}
 	provider.SetExecutingInstanceID("sample-instance")
 	provider.SetExecutingAgent("Sample")

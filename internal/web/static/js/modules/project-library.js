@@ -358,6 +358,7 @@ export class ProjectLibraryPanel {
     for (const row of page.rows || []) {
       const proposal = row.proposal;
       const navigation = proposal.kind === 'project_review';
+      const sessionGoal = proposal.kind === 'session_goal';
       const card = node('article', 'project-library-resume-card');
       card.append(
         node('h4', '', row.name),
@@ -366,7 +367,9 @@ export class ProjectLibraryPanel {
           '',
           navigation
             ? 'Suggested navigation: inspect this song’s current project setup options. No setup was reviewed or authorized.'
-            : `Suggested next action: ${proposal.next_action}`
+            : sessionGoal
+              ? `Suggested studio goal: ${proposal.goal.goal}. Desired outcome: ${proposal.goal.desired_outcome || 'Not set'}. Estimated effort: ${proposal.goal.time_minutes ? `${proposal.goal.time_minutes} minutes` : 'Not estimated'}. No session was saved.`
+              : `Suggested next action: ${proposal.next_action}`
         ),
         node(
           'p',
@@ -385,13 +388,19 @@ export class ProjectLibraryPanel {
         const button = node(
           'button',
           'modern-btn modern-btn-secondary',
-          navigation ? `View ${row.name} setup options` : `Review ${row.name} suggestion`
+          navigation
+            ? `View ${row.name} setup options`
+            : sessionGoal
+              ? `Edit ${row.name} suggested goal`
+              : `Review ${row.name} suggestion`
         );
         button.type = 'button';
         button.addEventListener('click', () =>
           navigation
             ? void this.details(proposal.entry_id, button)
-            : void this.reviewProposal(row, button)
+            : sessionGoal
+              ? void this.editGoalProposal(row, button)
+              : void this.reviewProposal(row, button)
         );
         card.append(button);
       }
@@ -405,6 +414,28 @@ export class ProjectLibraryPanel {
           `Showing the latest ${(page.rows || []).length} of ${page.total} saved suggestions.`
         )
       );
+  }
+
+  async editGoalProposal(row, trigger) {
+    await this.run(
+      trigger,
+      'Checking this suggested studio goal against the current Home…',
+      async () => {
+        const suggestions = await this.request('/proposals');
+        const current = suggestions.rows?.find(
+          item =>
+            item.proposal.id === row.proposal.id && item.proposal.digest === row.proposal.digest
+        );
+        if (!current || current.status !== 'ready' || current.proposal.kind !== 'session_goal')
+          throw new Error(
+            'The suggested goal is no longer current. Refresh the Home before planning.'
+          );
+        const detail = await this.request(`/projects/${encodeURIComponent(row.proposal.entry_id)}`);
+        if (detail.entry_revision !== row.proposal.entry_revision)
+          throw new Error('This song changed. Review its current Details before planning.');
+        this.sessionForm(detail, null, trigger, current.proposal.goal);
+      }
+    );
   }
 
   async reviewProposal(row, trigger) {
@@ -1849,7 +1880,7 @@ export class ProjectLibraryPanel {
     });
   }
 
-  sessionForm(detail, session, trigger) {
+  sessionForm(detail, session, trigger, suggestedGoal = null) {
     const wrapping = Boolean(session);
     const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
     const form = node('form');
@@ -1861,9 +1892,11 @@ export class ProjectLibraryPanel {
     notes.required = true;
     notes.maxLength = wrapping ? 2000 : 500;
     notes.rows = wrapping ? 5 : 3;
+    if (!wrapping && suggestedGoal) notes.value = suggestedGoal.goal;
     const extra = node(wrapping ? 'input' : 'textarea', 'form-control');
     extra.maxLength = wrapping ? 240 : 500;
     if (!wrapping) extra.rows = 2;
+    if (!wrapping && suggestedGoal) extra.value = suggestedGoal.desired_outcome || '';
     const date = node('input', 'form-control');
     date.type = 'date';
     const labeled = (text, input) => {
@@ -1901,6 +1934,7 @@ export class ProjectLibraryPanel {
       time.min = '1';
       time.max = '480';
       time.placeholder = 'Optional';
+      if (suggestedGoal?.time_minutes) time.value = String(suggestedGoal.time_minutes);
       labeled('Available minutes (optional, 1–480)', time);
     }
     const actions = node('div', 'assistant-program-dialog-actions');
@@ -1912,7 +1946,13 @@ export class ProjectLibraryPanel {
     actions.append(cancel, review);
     form.append(
       heading,
-      node('p', '', 'Your notes do not start a task, open a DAW, or prove work happened.'),
+      node(
+        'p',
+        '',
+        suggestedGoal
+          ? 'Manager suggestion (untrusted draft). Edit it before your separate review and confirmation. Cancel saves no studio session, task or DAW work.'
+          : 'Your notes do not start a task, open a DAW, or prove work happened.'
+      ),
       fields,
       actions
     );

@@ -936,6 +936,100 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       'Review my saved notes without the folder'
     );
 
+    // A direct Manager suggestion is only an editable Home draft. The owner
+    // separately opens the canonical goal form, cancels once, edits the goal
+    // and explicitly reviews/confirms it; a revoked source grants no access.
+    const beforeGoalSuggestion = await json(await request.get(`${base}/projects/${savedEntry.id}`));
+    const sessionsBeforeGoal = await json(
+      await request.get(`${base}/projects/${savedEntry.id}/sessions`)
+    );
+    const goalDraft = 'Map a short vocal take review';
+    const goalReply = await json(
+      await request.post('/api/chat', {
+        data: {
+          agent_name: manager.name,
+          route_context: {
+            surface: 'workspace_detail',
+            workspace_id: homeID,
+            page_path: `/workspaces/${homes[0].folder_slug}/assistant`
+          },
+          question: `/tool home_library_propose_session_goal ${JSON.stringify({
+            entry_id: savedEntry.id,
+            entry_revision: beforeGoalSuggestion.entry_revision,
+            goal: goalDraft,
+            desired_outcome: 'List candidate takes without opening a DAW',
+            time_minutes: 20,
+            reason: 'An optional planning draft; no session has been saved.',
+            request_key: `browser-goal-draft-${homeID}`
+          })}`
+        }
+      })
+    );
+    expect(goalReply.success, JSON.stringify(goalReply)).toBe(true);
+    expect(goalReply.response).toContain('Session goal suggestion saved only');
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}/sessions`))).total
+    ).toBe(sessionsBeforeGoal.total);
+    await page.reload();
+    const goalSuggestions = page.locator('#projectLibraryProposals');
+    const goalButton = goalSuggestions.getByRole('button', { name: 'Edit Album-4 suggested goal' });
+    await expect(goalSuggestions).toContainText(goalDraft);
+    await goalButton.click();
+    const draftedGoal = page.getByRole('dialog', { name: 'Plan a studio session' });
+    await expect(draftedGoal).toContainText('Manager suggestion (untrusted draft)');
+    await expect(draftedGoal.getByRole('textbox', { name: 'Session goal' })).toHaveValue(goalDraft);
+    await expect(draftedGoal.getByRole('textbox', { name: 'Desired outcome' })).toHaveValue(
+      'List candidate takes without opening a DAW'
+    );
+    await expect(
+      draftedGoal.getByRole('spinbutton', { name: 'Available minutes (optional, 1–480)' })
+    ).toHaveValue('20');
+    await shot(page, '40-reviewed-manager-editable-goal-draft');
+    await draftedGoal.getByRole('button', { name: 'Cancel' }).click();
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}/sessions`))).total
+    ).toBe(sessionsBeforeGoal.total);
+    await goalButton.click();
+    const editedGoal = page.getByRole('dialog', { name: 'Plan a studio session' });
+    await editedGoal
+      .getByRole('textbox', { name: 'Session goal' })
+      .fill('Review two vocal takes together');
+    await editedGoal.getByRole('button', { name: 'Review session' }).click();
+    const ownerGoalReview = page.getByRole('dialog', { name: 'Save this goal?' });
+    await expect(ownerGoalReview).toContainText('Review two vocal takes together');
+    await ownerGoalReview.getByRole('button', { name: 'Cancel' }).click();
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}/sessions`))).total
+    ).toBe(sessionsBeforeGoal.total);
+    await goalButton.click();
+    await page
+      .getByRole('dialog', { name: 'Plan a studio session' })
+      .getByRole('textbox', { name: 'Session goal' })
+      .fill('Review two vocal takes together');
+    await page
+      .getByRole('dialog', { name: 'Plan a studio session' })
+      .getByRole('button', { name: 'Review session' })
+      .click();
+    await page
+      .getByRole('dialog', { name: 'Save this goal?' })
+      .getByRole('button', { name: 'Save goal' })
+      .click();
+    await expect
+      .poll(
+        async () =>
+          (await json(await request.get(`${base}/projects/${savedEntry.id}/sessions`))).total
+      )
+      .toBe(sessionsBeforeGoal.total + 1);
+    await expect(
+      goalSuggestions.locator('.project-library-resume-card').filter({ hasText: goalDraft })
+    ).toContainText('Not actionable (stale)');
+    expect((await json(await request.get('/api/workspaces'))).folders.length).toBe(
+      childCountBeforeNavigation
+    );
+    expect(
+      songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))
+    ).toEqual(before);
+
     // A revoked root blocks project review, not an explicit queue Skip. Save
     // the later Album-4 item, then forget it separately below and require a
     // second Skip rather than silently deleting the remaining queue order.
@@ -973,7 +1067,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       .getByRole('button', { name: 'Review forgetting this Home record' })
       .click();
     const forget = page.getByRole('dialog', { name: 'Forget Album-4 from this Home?' });
-    await expect(forget).toContainText('1 saved studio session(s)');
+    await expect(forget).toContainText('2 saved studio session(s)');
     await expect(forget).toContainText('song 2 in the saved review queue');
     await expect(forget.getByRole('button', { name: 'Cancel' })).toBeFocused();
     await shot(page, '32-reviewed-historical-record-forget-impact');
