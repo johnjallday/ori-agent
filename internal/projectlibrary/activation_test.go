@@ -587,6 +587,142 @@ func TestActivation_SQLitePrimarySplitHomeMirrorRefusesCreatorRepairUntilExplici
 	}
 }
 
+// Fail only the first SQLite Home save after the creator has linked its child.
+// SyncStore has already written the new folder mirror by that point and must
+// roll it back rather than leaving a deceptively successful catalog receipt.
+type failSQLiteHomeAssociation struct {
+	workspace.Store
+	homeID    string
+	failNext  bool
+	triggered bool
+}
+
+func (f *failSQLiteHomeAssociation) Save(item *workspace.Workspace) error {
+	if item.ID == f.homeID && f.failNext {
+		f.failNext = false
+		f.triggered = true
+		return os.ErrPermission
+	}
+	return f.Store.Save(item)
+}
+
+func TestActivation_SQLitePrimaryFailedFinalSaveRollsBackFolderAndRetriesExactRun(t *testing.T) {
+	a, scope, _, file, tree, installed := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "failed-final-write.db"), WALMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close SQLite fixture: %v", err)
+		}
+	}()
+	primary := session.NewWorkspaceStoreAdapter(session.NewHybridStoreWithDB(db, 10))
+	home, err := file.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.Save(home); err != nil {
+		t.Fatal(err)
+	}
+	failing := &failSQLiteHomeAssociation{Store: primary, homeID: scope.HomeID}
+	synced := workspace.NewSyncStore(failing, file)
+	original := a.library
+	library := NewStore(synced).WithProviderEvidence(original.providerEvidence)
+	a.library, a.roots.library, a.owners = library, library, synced
+	queue, _, err := library.StartActivationQueue(scope, []string{"single", "alternates"}, "failed-save-queue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := realActivationCreator(t, scope, synced, installed)
+	created, release := make(chan struct{}), make(chan struct{})
+	releaseCreator := sync.OnceFunc(func() { close(release) })
+	defer releaseCreator()
+	service := NewActivationService(a, func(resolver projectconnection.SelectionResolver) ActivationCreator {
+		return &pauseAfterActivationCreator{ActivationCreator: factory(resolver), created: created, release: release}
+	})
+	doc, err := library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := make(chan error, 1)
+	go func() {
+		_, commitErr := service.Commit(t.Context(), scope, "single", review.Token, "failed-sqlite-final-write")
+		completed <- commitErr
+	}()
+	select {
+	case <-created:
+	case <-time.After(15 * time.Second):
+		t.Fatal("canonical creator did not persist its child")
+	}
+	failing.failNext = true // No SQLite write happens until the paused creator is released.
+	releaseCreator()
+	select {
+	case commitErr := <-completed:
+		if commitErr == nil || !failing.triggered {
+			t.Fatalf("final SQLite write failure was hidden: %v triggered=%t", commitErr, failing.triggered)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Home write failure deadlocked")
+	}
+	for _, backing := range []workspace.Store{primary, file, synced} {
+		saved, readErr := NewStore(backing).Read(scope)
+		if readErr != nil || saved.Revision != prior.Revision || sessionEntry(saved, "single").Link != nil ||
+			saved.Queue == nil || saved.Queue.ID != queue.ID || saved.Queue.Index != 0 {
+			t.Fatalf("failed SQLite save left a split or connected Home: %+v %v", saved, readErr)
+		}
+	}
+	folderPath, err := file.GetFolderPath(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedFile, err := workspace.NewFileStore(filepath.Dir(folderPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := NewStore(workspace.NewSyncStore(primary, reopenedFile)).Read(scope)
+	if err != nil || fresh.Revision != prior.Revision || sessionEntry(fresh, "single").Link != nil {
+		t.Fatalf("fresh folder handle retained a failed catalog association: %+v %v", fresh, err)
+	}
+	pending, err := library.PendingLinkedProjects(scope)
+	if err != nil || pending.Total != 1 || len(pending.Rows) != 1 {
+		t.Fatalf("independently durable child was not reviewable: %+v %v", pending, err)
+	}
+	ids, err := synced.List()
+	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("final write failure duplicated child or changed source: %v %v", ids, err)
+	}
+	result, err := service.Commit(t.Context(), scope, "single", review.Token, "failed-sqlite-final-write")
+	if err != nil || result.WorkspaceID != pending.Rows[0].WorkspaceID {
+		t.Fatalf("confirmed run could not retry after rollback: %+v %v", result, err)
+	}
+	if _, _, err := library.ProgressActivationQueue(scope, queue.ID, "single", "skip", "skip-linked-after-retry", 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Skip misreported a linked child after recovery: %v", err)
+	}
+	if _, _, err := library.ProgressActivationQueue(scope, queue.ID, "single", "connected", "connected-after-retry", 1); err != nil {
+		t.Fatalf("exact connected receipt failed: %v", err)
+	}
+	for _, backing := range []workspace.Store{primary, file, synced} {
+		saved, readErr := NewStore(backing).Read(scope)
+		if readErr != nil || sessionEntry(saved, "single").Link == nil || saved.Queue.Index != 1 || len(saved.Queue.Connected) != 1 {
+			t.Fatalf("retry failed to mirror one confirmed link/queue receipt: %+v %v", saved, readErr)
+		}
+	}
+	ids, err = synced.List()
+	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("retry duplicated child or edited project source: %v %v", ids, err)
+	}
+}
+
 func TestActivation_NormalSingleIntakeWinsAfterLibraryReviewWithoutDuplicatingChild(t *testing.T) {
 	a, scope, _, file, tree, installed := activationFixture(t)
 	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
