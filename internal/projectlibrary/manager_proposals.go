@@ -166,16 +166,30 @@ func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal Manage
 // do not prune or mutate; a disabled/unbound Manager cannot keep its suggestion
 // actionable, and the Home still retains already saved user metadata.
 func (s *Store) ListManagerProposals(scope Scope) (ManagerProposalPage, error) {
-	doc, _, err := s.readSnapshot(scope)
+	doc, state, err := s.readSnapshot(scope)
 	if err != nil {
 		return ManagerProposalPage{}, err
+	}
+	roots := make(map[string]Root, len(doc.Roots))
+	for _, root := range doc.Roots {
+		roots[root.ID] = root
+	}
+	linked := make(map[string]bool, len(state.LinkedProjectIDs))
+	for _, id := range state.LinkedProjectIDs {
+		linked[id] = true
+	}
+	inactive := make(map[string]bool, len(state.ProjectLibraryInactiveRoots))
+	for _, id := range state.ProjectLibraryInactiveRoots {
+		inactive[id] = true
 	}
 	page := ManagerProposalPage{Revision: doc.Revision, Rows: []ManagerProposalRow{}, Total: len(doc.Proposals)}
 	for i := len(doc.Proposals) - 1; i >= 0 && len(page.Rows) < 20; i-- {
 		proposal := doc.Proposals[i]
 		name := "Saved project"
-		if entry := sessionEntry(doc, proposal.EntryID); entry != nil && entry.Fields.DisplayName != "" {
-			name = entry.Fields.DisplayName
+		if entry := sessionEntry(doc, proposal.EntryID); entry != nil {
+			if projected := s.projectSearchRow(scope, *entry, roots, linked, inactive).Name; projected != "" {
+				name = projected
+			}
 		}
 		page.Rows = append(page.Rows, ManagerProposalRow{Proposal: proposal, Name: name,
 			Status: s.managerProposalStatus(scope, doc, proposal)})

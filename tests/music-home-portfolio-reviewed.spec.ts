@@ -755,6 +755,67 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(shelf.locator('#projectLibraryResume')).toContainText(
       'Review my saved notes without the folder'
     );
+
+    // A direct native tool invocation exercises the production chat/tool
+    // adapter without a model. The Manager only saves an inert suggestion;
+    // the Home owner must separately review and confirm the canonical note.
+    const home = await json(await request.get(`/api/workspaces/${homeID}`));
+    const manager = home.agent_instances.find(
+      (instance: { role_id: string }) => instance.role_id === 'portfolio_manager'
+    );
+    expect(manager?.name).toBeTruthy();
+    const beforeSuggestion = await json(await request.get(`${base}/projects/${savedEntry.id}`));
+    const suggestedAction = 'Choose one vocal take to revisit';
+    const direct = await json(
+      await request.post('/api/chat', {
+        data: {
+          agent_name: manager.name,
+          route_context: {
+            surface: 'workspace_detail',
+            workspace_id: homeID,
+            page_path: `/workspaces/${homes[0].folder_slug}/assistant`
+          },
+          question: `/tool home_library_propose_next_action ${JSON.stringify({
+            entry_id: savedEntry.id,
+            fields_revision: beforeSuggestion.row.fields_revision,
+            next_action: suggestedAction,
+            reason: 'Only a Home suggestion; no DAW progress inferred.',
+            request_key: `browser-suggestion-${homeID}`
+          })}`
+        }
+      })
+    );
+    expect(direct.success, JSON.stringify(direct)).toBe(true);
+    expect(direct.response).toContain('Suggestion saved only');
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}`))).fields.next_action
+    ).toBe(beforeSuggestion.fields.next_action);
+    await page.reload();
+    const suggestions = page.locator('#projectLibraryProposals');
+    await expect(suggestions).toContainText(suggestedAction);
+    await expect(suggestions).toContainText('Only a Home suggestion; no DAW progress inferred.');
+    await suggestions.getByRole('button', { name: 'Review Album-4 suggestion' }).click();
+    const proposalReview = page.getByRole('dialog', {
+      name: "Save Album-4's suggested next action?"
+    });
+    await expect(proposalReview).toContainText(beforeSuggestion.fields.next_action || 'Not set');
+    await shot(page, '33-reviewed-manager-suggestion');
+    await proposalReview.getByRole('button', { name: 'Cancel' }).click();
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}`))).fields.next_action
+    ).toBe(beforeSuggestion.fields.next_action);
+    await suggestions.getByRole('button', { name: 'Review Album-4 suggestion' }).click();
+    await page
+      .getByRole('dialog', { name: "Save Album-4's suggested next action?" })
+      .getByRole('button', { name: 'Save next action' })
+      .click();
+    await expect(suggestions).toContainText('Not actionable (stale)');
+    expect(
+      (await json(await request.get(`${base}/projects/${savedEntry.id}`))).fields.next_action
+    ).toBe(suggestedAction);
+    await expect(shelf.locator('#projectLibraryResume')).toContainText(
+      'Review my saved notes without the folder'
+    );
     await shelf
       .locator('#projectLibraryRows')
       .getByRole('button', { name: 'Review Album-4' })
