@@ -551,6 +551,9 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 			return FolderDigestView{}, err
 		}
 	}
+	if pending == nil {
+		pending = recentProjectHomeNavigation(doc, s.now())
+	}
 	view := FolderDigestView{Chips: s.availableChips(), Paused: binding.Paused}
 	view.PromptFirstFolder = !binding.Paused && doc.FirstPromptShownAt == nil &&
 		s.deps.MissionUnresolved != nil && s.deps.MissionUnresolved("pa-show-folder")
@@ -567,6 +570,27 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 		view.Offer = &offer
 	}
 	return view, nil
+}
+
+// The normal project creator navigates to the child as soon as it succeeds.
+// Keep only the most recent, host-verified Home navigation receipt visible for
+// a short return to Today; this is not a new folder offer, scan, link or grant.
+// Pending/awaiting offers always take precedence, including after restart.
+func recentProjectHomeNavigation(doc FolderDigestDocument, now time.Time) *FolderOffer {
+	const window = time.Hour
+	var latest *FolderOffer
+	for i := range doc.Offers {
+		o := &doc.Offers[i]
+		if o.Status != FolderOfferResolved || o.Portfolio != nil || o.Choice != FolderChoiceProject ||
+			o.Outcome == nil || o.Outcome.Kind != FolderChoiceProject || o.Outcome.HomeRoute == "" ||
+			o.ResolvedAt == nil || o.ResolvedAt.After(now) || !o.ResolvedAt.Add(window).After(now) {
+			continue
+		}
+		if latest == nil || o.ResolvedAt.After(*latest.ResolvedAt) {
+			latest = o
+		}
+	}
+	return latest
 }
 
 // MarkFirstPromptShown consumes the one-time hand-over on the server, not in

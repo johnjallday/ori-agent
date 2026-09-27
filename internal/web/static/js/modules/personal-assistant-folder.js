@@ -250,10 +250,11 @@ export function folderOfferView(offer, options = {}) {
   if (
     status === 'resolved' &&
     offer?.outcome?.kind === 'project' &&
-    offer?.outcome?.receipt?.length
+    folderReceiptView(offer).visible
   ) {
     view.question = "Here's what I set up:";
     view.reason = '';
+    view.capabilityDetail = ''; // the pre-setup install promise is no longer true
   }
   // A yes needs the folder's path, and a dialog-chosen folder is held in
   // memory only: after a server restart the card asks for the folder again
@@ -387,10 +388,24 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirm 
 export function folderReceiptView(offer) {
   if (offer?.status !== 'resolved' || offer?.outcome?.kind !== 'project') return { visible: false };
   const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
-  if (!rows.length) return { visible: false }; // an older stored offer
   const workspace = rows.find(row => row.kind === 'workspace');
   const route = resolvedRouteFor(offer);
   const homeRoute = String(offer?.outcome?.home_route || '').trim();
+  const verifiedHomeRoute =
+    /^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/.test(homeRoute)
+      ? homeRoute
+      : '';
+  // A reviewed plugin quest records its exact child/Home route but does not
+  // create the older folder-link receipt rows. Route-only follow-up is inert.
+  if (
+    !rows.length &&
+    !(
+      offer?.capability?.setup_source === 'plugin' &&
+      /^\/workspaces\/[a-z0-9][a-z0-9-]*\/?$/.test(route) &&
+      verifiedHomeRoute
+    )
+  )
+    return { visible: false };
   return {
     visible: true,
     rows: rows.map(row => ({
@@ -399,9 +414,7 @@ export function folderReceiptView(offer) {
       detail: String(row.detail || '')
     })),
     route,
-    homeRoute: /^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/.test(homeRoute)
-      ? homeRoute
-      : '',
+    homeRoute: verifiedHomeRoute,
     openLabel: `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`
   };
 }

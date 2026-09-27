@@ -487,6 +487,42 @@ func TestFolderDigest_ReviewedJourneyResolvesOnlyCanonicalProject(t *testing.T) 
 	if err != nil || replayed.Status != FolderOfferResolved || replayed.Outcome.HomeRoute != verifier.homeRoute || verifier.calls != 2 {
 		t.Fatalf("replay = %+v, calls = %d, err = %v", replayed, verifier.calls, err)
 	}
+	// The creator navigates away immediately; the saved Home route must still
+	// be reachable on return to Today, even after process restart. This GET
+	// neither replays the journey nor changes the offer document.
+	version, err := f.store.Read(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err = f.newService().Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.ID != offer.ID ||
+		current.Offer.Status != FolderOfferResolved || current.Offer.Outcome.HomeRoute != verifier.homeRoute {
+		t.Fatalf("recent resolved navigation after restart = %+v, %v", current.Offer, err)
+	}
+	unchanged, err := f.store.Read(ctx, "local")
+	if err != nil || unchanged.Version != version.Version || verifier.calls != 2 {
+		t.Fatalf("navigation read wrote or reverified the creator: %v, calls=%d", err, verifier.calls)
+	}
+	other, err := restarted.ScanChip(ctx, "local", "downloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err = restarted.Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.ID != other.ID || current.Offer.Status != FolderOfferPending {
+		t.Fatalf("new offer must outrank recent Home navigation: %+v, %v", current.Offer, err)
+	}
+	if _, err := restarted.Decide(ctx, "local", other.ID, FolderDecisionInput{Decision: FolderDecisionLater, RequestID: "later"}); err != nil {
+		t.Fatal(err)
+	}
+	current, err = restarted.Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.ID != offer.ID {
+		t.Fatalf("recent Home navigation after a postponed offer: %+v, %v", current.Offer, err)
+	}
+	f.now = f.now.Add(time.Hour)
+	expired, err := f.newService().Current(ctx, "local")
+	if err != nil || expired.Offer != nil {
+		t.Fatalf("expired Home navigation remained a current offer: %+v, %v", expired.Offer, err)
+	}
 }
 
 func TestFolderDigest_ReviewedProjectNeverCreatesABlankPlaceholder(t *testing.T) {

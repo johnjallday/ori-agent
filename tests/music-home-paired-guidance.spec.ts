@@ -362,9 +362,25 @@ test('a confirmed folder offer connects one existing file, then separately revie
   expect(pendingBefore.rows).toEqual([
     { workspace_id: existingID, name: 'Existing Documents Song' }
   ]);
-  await page.goto(
-    `/workspaces/${(await json(await request.get('/api/workspaces'))).folders.find((row: { id: string }) => row.id === saved.homeID).folder_slug}/assistant`
-  );
+  // The normal creator navigated straight to its child. Return through the
+  // durable offer receipt, not a browser-guessed Home slug or a scan grant.
+  const offerView = (await json(await request.get('/api/personal-assistant/folder-digest')))
+    .folder_digest.offer;
+  const homeRoute = `/workspaces/${(await json(await request.get('/api/workspaces'))).folders.find((row: { id: string }) => row.id === saved.homeID).folder_slug}/assistant#projectLibraryPanel`;
+  expect(offerView).toMatchObject({
+    id: scanned.offer.id,
+    status: 'resolved',
+    outcome: { workspace_id: existingID, home_route: homeRoute }
+  });
+  await page.goto('/?panel=today&folder=show');
+  const followUp = page.locator('#personalAssistantFolderOffer');
+  await expect(followUp).toContainText("Here's what I set up:");
+  const homeLink = followUp.getByRole('link', { name: 'Review this link in the Home library' });
+  await expect(homeLink).toHaveAttribute('href', homeRoute);
+  await homeLink.scrollIntoViewIfNeeded();
+  await screenshot(page, 'guidance-existing-file-home-navigation');
+  await homeLink.click();
+  await page.waitForURL(url => url.pathname + url.hash === homeRoute);
   const shelf = page.locator('#projectLibraryPanel');
   await expect(shelf.locator('#projectLibraryPendingLinks')).toBeVisible();
   await shelf
@@ -395,12 +411,17 @@ test('a confirmed folder offer connects one existing file, then separately revie
   expect((await json(await request.get(`${base}/roots`))).total_roots).toBe(0);
   expect(createHash('sha256').update(readFileSync(song)).digest('hex')).toBe(sourceHash);
   await screenshot(page, 'guidance-existing-file-associated-home');
-  writeFileSync(receipt, JSON.stringify({ ...saved, existingID, song, sourceHash }), {
-    mode: 0o600
-  });
+  writeFileSync(
+    receipt,
+    JSON.stringify({ ...saved, existingID, song, sourceHash, offerHomeRoute: homeRoute }),
+    {
+      mode: 0o600
+    }
+  );
 });
 
 test('restart preserves exact candidate identities for both children and the reviewed association', async ({
+  page,
   request
 }) => {
   test.skip(!restart, 'run by reaper-demo.sh after its controlled restart');
@@ -458,4 +479,27 @@ test('restart preserves exact candidate identities for both children and the rev
   expect(createHash('sha256').update(readFileSync(saved.song)).digest('hex')).toBe(
     saved.sourceHash
   );
+  const resumedOffer = (await json(await request.get('/api/personal-assistant/folder-digest')))
+    .folder_digest.offer;
+  expect(resumedOffer).toMatchObject({
+    status: 'resolved',
+    outcome: { workspace_id: saved.existingID, home_route: saved.offerHomeRoute }
+  });
+  await page.goto('/?panel=today&folder=show');
+  const homeLink = page
+    .locator('#personalAssistantFolderOffer')
+    .getByRole('link', { name: 'Review this link in the Home library' });
+  await expect(homeLink).toHaveAttribute('href', saved.offerHomeRoute);
+  await homeLink.click();
+  await page.waitForURL(url => url.pathname + url.hash === saved.offerHomeRoute);
+  await expect(page.locator('#projectLibraryCount')).toHaveText('1 of 1 projects');
+  expect(
+    (
+      await json(
+        await request.get(
+          `/api/workspaces/${saved.homeID}/assistant-program/library/linked-projects/pending`
+        )
+      )
+    ).total
+  ).toBe(0);
 });

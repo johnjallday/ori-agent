@@ -119,6 +119,44 @@ test('resolved project receipt names only server rows and offers the canonical w
   assert.equal(folderReceiptView({ ...offer, outcome: { kind: 'tidy' } }).visible, false);
 });
 
+test('a verified plugin quest offers its Home review route without a legacy folder-link receipt', () => {
+  const offer = {
+    status: 'resolved',
+    verdict: 'project',
+    subject: { name: 'Song' },
+    capability: { setup_source: 'plugin' },
+    outcome: {
+      kind: 'project',
+      route: '/workspaces/single-song',
+      home_route: '/workspaces/music-home/assistant#projectLibraryPanel'
+    }
+  };
+  assert.deepEqual(folderReceiptView(offer), {
+    visible: true,
+    rows: [],
+    route: '/workspaces/single-song',
+    homeRoute: '/workspaces/music-home/assistant#projectLibraryPanel',
+    openLabel: 'Open Song'
+  });
+  assert.equal(folderOfferView(offer).question, "Here's what I set up:");
+  assert.equal(
+    folderOfferView({
+      ...offer,
+      capability: { ...offer.capability, integration: 'Setup will install REAPER' }
+    }).capabilityDetail,
+    ''
+  );
+  assert.equal(folderReceiptView({ ...offer, capability: undefined }).visible, false);
+  assert.equal(
+    folderReceiptView({ ...offer, outcome: { ...offer.outcome, route: '//evil' } }).visible,
+    false
+  );
+  assert.equal(
+    folderReceiptView({ ...offer, outcome: { ...offer.outcome, home_route: '//evil' } }).visible,
+    false
+  );
+});
+
 test('the first-folder hand-over is an active-only server receipt, never a pre-HQ prompt', () => {
   assert.deepEqual(firstFolderPromptView({ prompt_first_folder: true }, true), {
     expand: true,
