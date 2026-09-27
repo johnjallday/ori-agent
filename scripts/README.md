@@ -118,6 +118,11 @@ Source it (don't execute) so `cd` affects your current shell.
 `wt demo` removes its exact sandbox when the demo exits. Set
 `ORI_KEEP_DEMO_SANDBOX=1` when the sandbox needs to be retained for debugging.
 
+`wt demo` passes your Codex home (`$CODEX_HOME`, else `~/.codex`, when it
+exists) to the sandboxed server, so Ori's `codex` provider can run the Codex
+CLI on your own login; Codex then logs each turn in that home's `sessions/`.
+Set `ORI_DEMO_NO_CODEX=1` for a demo that shares nothing with your real home.
+
 #### `wt plan --issue <N> [--issue <N> ...]` — plan one unit
 
 Planning and implementation are separate stages. One `--issue` preserves the
