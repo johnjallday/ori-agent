@@ -106,6 +106,33 @@ func (s *Store) SearchForManager(authority ManagerAuthority, query Search) (Sear
 	return page, nil
 }
 
+// ManagerSessions is the latest three user-authored summaries for one entry,
+// never child transcripts, Ticket bodies, private decision/blocker lists or
+// DAW activity. There is no agent paging into older Home history.
+type ManagerSessions struct {
+	Revision int64            `json:"revision"`
+	Total    int              `json:"total"`
+	Rows     []SessionSummary `json:"rows"`
+}
+
+func (s *Store) SessionsForManager(authority ManagerAuthority, entryID string) (ManagerSessions, error) {
+	scope, err := s.authorizeManager(authority)
+	if err != nil {
+		return ManagerSessions{}, err
+	}
+	page, err := s.ListSessions(scope, entryID, 0, 0)
+	if err != nil {
+		return ManagerSessions{}, err
+	}
+	if _, err := s.authorizeManager(authority); err != nil {
+		return ManagerSessions{}, err
+	}
+	if len(page.Rows) > 3 {
+		page.Rows = page.Rows[:3]
+	}
+	return ManagerSessions{Revision: page.Revision, Total: page.Total, Rows: page.Rows}, nil
+}
+
 // DetailForManager excludes directory sources and project file alternatives;
 // even a root ID from a prior authorized row is not a grant to inspect files.
 func (s *Store) DetailForManager(authority ManagerAuthority, entryID string) (Detail, error) {

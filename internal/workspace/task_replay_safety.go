@@ -123,6 +123,7 @@ var readOnlyToolNames = map[string]struct{}{
 	"mail_get_thread":          {},
 	"home_library_search":      {},
 	"home_library_detail":      {},
+	"home_library_sessions":    {},
 	"list_notes":               {},
 	"read_note":                {},
 	"list_tasks":               {},

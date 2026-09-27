@@ -252,7 +252,7 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	}
 
 	if p.libraryReadEnabled() {
-		tools = append(tools, p.librarySearchTool(), p.libraryDetailTool())
+		tools = append(tools, p.librarySearchTool(), p.libraryDetailTool(), p.librarySessionsTool())
 	}
 
 	// Coordinator-only: the entry agent can delegate work to specialists.

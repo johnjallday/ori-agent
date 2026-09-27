@@ -56,12 +56,24 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 		t.Fatal(err)
 	}
 	scope := projectlibrary.Scope{OwnerUserID: home.OwnerUserID, HomeID: home.ID, ProviderID: key.PluginID, ProgramID: key.ProgramID}
-	library := projectlibrary.NewStore(file)
+	library := projectlibrary.NewStore(file).WithProviderEvidence(func(_ projectlibrary.Scope, _ *workspace.Workspace) bool { return true })
 	review, err := library.ReviewInitialize(scope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := library.CommitInitialize(scope, review.Token, "manager-init"); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := library.Read(scope)
+	if err != nil || len(doc.Entries) != 1 {
+		t.Fatalf("expected exact linked entry for session: %+v %v", doc, err)
+	}
+	goal := projectlibrary.GoalInput{Goal: "Untrusted lyric idea", Outcome: "Draft a chorus"}
+	goalReview, err := library.ReviewGoal(scope, doc.Entries[0].ID, doc.Entries[0].Revision, goal, scope.OwnerUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := library.CommitGoal(scope, doc.Entries[0].ID, goalReview.Token, "manager-session", doc.Entries[0].Revision, goal, scope.OwnerUserID); err != nil {
 		t.Fatal(err)
 	}
 	provider := NewWorkspaceToolProvider(nil, file, home.ID)
@@ -73,7 +85,7 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	provider.SetExecutingInstanceID("manager-instance")
 	search := findLibraryTool(provider.Tools(), "home_library_search")
-	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil {
+	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil {
 		t.Fatal("bound Manager's library reads not registered")
 	}
 	output, err := search.Call(context.Background(), `{"text":"Private"}`)
@@ -90,6 +102,14 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if err != nil || strings.Contains(detail, sandbox) || strings.Contains(detail, "\"sources\"") {
 		t.Fatalf("detail leaked project files or source paths: %s %v", detail, err)
 	}
+	sessionTool := findLibraryTool(provider.Tools(), "home_library_sessions")
+	sessions, err := sessionTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`)
+	if err != nil || !strings.Contains(sessions, "Untrusted lyric idea") || strings.Contains(sessions, sandbox) || strings.Contains(sessions, "decisions") {
+		t.Fatalf("session tool must read only bounded Home summaries: %s %v", sessions, err)
+	}
+	if _, err := sessionTool.Call(context.Background(), `{"entry_id":"`+child.ID+`"}`); err == nil {
+		t.Fatal("child workspace ID read Home session history")
+	}
 	if _, err := search.Call(context.Background(), `{"workspace_id":"other-home"}`); err == nil {
 		t.Fatal("model supplied a foreign Home ID")
 	}
@@ -102,6 +122,9 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	if _, err := detailTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`); err == nil {
 		t.Fatal("previously registered detail tool bypassed removed runtime instance")
+	}
+	if _, err := sessionTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`); err == nil {
+		t.Fatal("previously registered session tool bypassed removed runtime instance")
 	}
 	provider.SetExecutingInstanceID("sample-instance")
 	provider.SetExecutingAgent("Sample")

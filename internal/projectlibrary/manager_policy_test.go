@@ -2,8 +2,10 @@ package projectlibrary
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -66,6 +68,24 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	doc, err = store.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = store.mutate(scope, doc.Revision, operation{key: "manager-fixture-sessions", action: "fixture", digest: "fixture"}, func(current *Document) (string, error) {
+		at := time.Now().UTC().Add(-time.Hour)
+		for i := 0; i < 4; i++ {
+			current.Sessions = append(current.Sessions, StudioSession{ID: fmt.Sprintf("session-%d", i),
+				EntryID: "song", Revision: 1, Goal: fmt.Sprintf("User goal %d", i),
+				Decisions: []string{"Private decision"}, Blockers: []string{"Private blocker"},
+				Author: scope.OwnerUserID, State: "accepted", CreatedAt: at, AcceptedAt: &at,
+				UpdatedAt: at.Add(time.Duration(i) * time.Minute)})
+		}
+		return "song", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	manager := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: "manager-instance", AgentName: "Manager"}
 	page, err := store.SearchForManager(manager, Search{PageSize: 100, Sort: "name"})
 	if err != nil || len(page.Rows) != 1 || page.Rows[0].Name != "Private user note" {
@@ -74,6 +94,13 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 	detail, err := store.DetailForManager(manager, "song")
 	if err != nil || detail.Row.ID != "song" || len(detail.Sources) != 0 || detail.Fields.Purpose != "Untrusted lyrics" {
 		t.Fatalf("bounded Home-only detail: %+v %v", detail, err)
+	}
+	sessions, err := store.SessionsForManager(manager, "song")
+	if err != nil || sessions.Total != 4 || len(sessions.Rows) != 3 || sessions.Rows[0].Goal != "User goal 3" {
+		t.Fatalf("Manager read more or fewer than the latest three Home notes: %+v %v", sessions, err)
+	}
+	if _, err := store.SessionsForManager(manager, child.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("child workspace ID obtained Home sessions: %v", err)
 	}
 	for name, denied := range map[string]ManagerAuthority{
 		"global fallback without instance": {HomeID: scope.HomeID, AgentName: "Manager"},
@@ -84,6 +111,9 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 	} {
 		if _, err := store.SearchForManager(denied, Search{}); !errors.Is(err, ErrUnavailable) {
 			t.Errorf("%s acquired Manager access: %v", name, err)
+		}
+		if _, err := store.SessionsForManager(denied, "song"); !errors.Is(err, ErrUnavailable) {
+			t.Errorf("%s acquired session history: %v", name, err)
 		}
 	}
 	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {

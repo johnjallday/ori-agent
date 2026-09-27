@@ -133,6 +133,7 @@ func TestClassifyToolSideEffect(t *testing.T) {
 		{"known read, mail", "mail_search_threads", "", ToolSideEffectRead},
 		{"Home library search", "home_library_search", "", ToolSideEffectRead},
 		{"Home library detail", "home_library_detail", "", ToolSideEffectRead},
+		{"Home session summaries", "home_library_sessions", "", ToolSideEffectRead},
 		{"known write", "move_file", "", ToolSideEffectWrite},
 		{"draft is confirm-gated", "mail_draft_reply", "", ToolSideEffectConfirm},
 
