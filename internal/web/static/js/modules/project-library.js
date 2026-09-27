@@ -570,7 +570,7 @@ export class ProjectLibraryPanel {
       this.saveQueue();
       this.selectedProjects.clear();
       this.renderRows();
-      await this.continueQueue(trigger);
+      await this.continueQueue(document.getElementById('projectLibraryQueueResume') || trigger);
     } catch (error) {
       this.queue = null;
       this.status(error.message);
@@ -734,6 +734,8 @@ export class ProjectLibraryPanel {
             this.queue = null;
             this.saveQueue();
             this.status('Review queue complete. Only separately confirmed songs were connected.');
+            if (typeof document !== 'undefined')
+              document.getElementById('projectLibraryStatus')?.focus();
             return;
           }
           this.saveQueue();

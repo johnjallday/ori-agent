@@ -128,6 +128,114 @@ test('serial activation persists a distinct confirmed key before each creator co
   assert.notEqual(storedBeforeCommit[0].key, storedBeforeCommit[1].key);
 });
 
+test('serial queue resumes after a lost creator response without creating the connected song twice', async () => {
+  const previousStorage = globalThis.sessionStorage;
+  const values = new Map();
+  globalThis.sessionStorage = {
+    getItem: key => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key)
+  };
+  try {
+    let connected = false;
+    let commits = 0;
+    let lastStatus = '';
+    const configure = panel => {
+      panel.state = { provider_read_only: false };
+      panel.run = async (_trigger, _message, work) => work();
+      panel.status = message => {
+        lastStatus = message;
+      };
+      panel.refresh = async () => {};
+      panel.renderQueueControls = () => {};
+      panel.request = async path =>
+        path.endsWith('/activation')
+          ? { state: 'review_available' }
+          : {
+              row: {
+                id: path.split('/')[2],
+                name: 'Album',
+                connection: connected ? 'connected' : 'catalog_only'
+              }
+            };
+    };
+    const first = new ProjectLibraryPanel({ workspaceId: 'home' });
+    configure(first);
+    first.queue = {
+      home_id: 'home',
+      ids: ['first', 'second'],
+      index: 0,
+      created_at: Date.now(),
+      pending: null
+    };
+    first.queueChoice = async () => 'review';
+    first.activationInput = async () => ({ workspace_name: 'Album', project_file: 'Song.rpp' });
+    first.confirm = async () => true;
+    first.post = async path => {
+      if (path.endsWith('/review'))
+        return { token: 'exact-review', workspace_name: 'Album', project_file: 'Song.rpp' };
+      commits++;
+      connected = true;
+      throw new Error('response lost after creator committed');
+    };
+    await first.continueQueue();
+    assert.equal(commits, 1, lastStatus);
+    assert.equal(first.queue.index, 0);
+    const persisted = readActivationQueue('home', globalThis.sessionStorage);
+    assert.equal(persisted.pending.id, 'first');
+    assert.equal(persisted.pending.token, 'exact-review');
+
+    const resumed = new ProjectLibraryPanel({ workspaceId: 'home' });
+    configure(resumed);
+    resumed.queueChoice = async () => 'skip';
+    resumed.post = async () => {
+      throw new Error('no creator or review request permitted on replay');
+    };
+    await resumed.continueQueue();
+    assert.equal(commits, 1);
+    assert.equal(connected, true);
+    assert.equal(resumed.queue, null);
+    assert.equal(values.has('ori:library-queue:home'), false);
+  } finally {
+    globalThis.sessionStorage = previousStorage;
+  }
+});
+
+test('serial queue retries the exact confirmed operation after creator success but absent Home association', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { provider_read_only: false };
+  panel.queue = {
+    home_id: 'home',
+    ids: ['first', 'second'],
+    index: 0,
+    created_at: Date.now(),
+    pending: { id: 'first', token: 'review-1', key: 'first-confirmed-key' }
+  };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.saveQueue = () => {};
+  panel.status = () => {};
+  panel.refresh = async () => {};
+  panel.request = async path =>
+    path.endsWith('/activation')
+      ? { state: 'review_available' }
+      : { row: { id: path.split('/')[2], name: 'Album', connection: 'catalog_only' } };
+  panel.queueChoice = async () => 'pause';
+  const attempts = [];
+  panel.post = async (path, body) => {
+    attempts.push({ path, body });
+    return { workspace_id: 'creator-child' };
+  };
+  await panel.continueQueue();
+  assert.deepEqual(attempts, [
+    {
+      path: '/projects/first/activation/commit',
+      body: { review_token: 'review-1', idempotency_key: 'first-confirmed-key', confirm: true }
+    }
+  ]);
+  assert.equal(panel.queue.index, 1);
+  assert.equal(panel.queue.pending, null);
+});
+
 test('Home resume renders only bounded saved-user cards with trusted detail navigation', async () => {
   const previousDocument = globalThis.document;
   const makeElement = tag => ({
