@@ -122,14 +122,14 @@ const workspaceBuildMaxBody = 256 * 1024
 
 func (h *Handler) handleWorkspaceBuildSessions(w http.ResponseWriter, r *http.Request, rest string) {
 	rest = strings.Trim(rest, "/")
-	switch {
-	case rest == "availability":
+	switch rest {
+	case "availability":
 		if r.Method != http.MethodGet {
 			_ = orihttp.RespondMethodNotAllowed(w)
 			return
 		}
 		h.getWorkspaceBuildAvailability(w, r)
-	case rest == "":
+	case "":
 		if r.Method != http.MethodPost {
 			_ = orihttp.RespondMethodNotAllowed(w)
 			return

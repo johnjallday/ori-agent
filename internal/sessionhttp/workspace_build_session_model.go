@@ -326,7 +326,7 @@ func relevantCatalog(catalog []WorkspaceBuildCatalogEntry, conversation string) 
 func buildWords(text string) map[string]bool {
 	words := map[string]bool{}
 	for _, word := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	}) {
 		if len(word) >= 3 {
 			words[word] = true

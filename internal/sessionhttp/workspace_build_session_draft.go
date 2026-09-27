@@ -59,7 +59,11 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 	validation := buildValidation{catalog: catalog, groups: h.workspaceBuildGroups(ctx, userID)}
 	draft, err := normalizeFormDraft(req.Draft, validation)
 	if err != nil {
-		_ = orihttp.RespondBadRequest(w, err.Error())
+		message := "Invalid build draft"
+		if errors.Is(err, errBuildDraftTooLong) {
+			message = "The draft is too long"
+		}
+		_ = orihttp.RespondBadRequest(w, message)
 		return
 	}
 
@@ -149,13 +153,19 @@ func needsHomeLabel(name string) string {
 	return "its own group"
 }
 
+// Why a form draft is refused; the handler says each in the user's words.
+var (
+	errBuildDraftTooLong = errors.New("build draft too long")
+	errBuildDraftInvalid = errors.New("build draft invalid")
+)
+
 // normalizeFormDraft bounds the user's draft the way the store requires and
 // keeps a blueprint only if this user can create from it.
 func normalizeFormDraft(draft personalassistant.BuildDraft, validation buildValidation) (personalassistant.BuildDraft, error) {
 	draft.Name = strings.TrimSpace(draft.Name)
 	draft.Description = strings.TrimSpace(draft.Description)
 	if utf8.RuneCountInString(draft.Name) > 200 || utf8.RuneCountInString(draft.Description) > personalassistant.WorkspaceBuildMaxText {
-		return draft, errors.New("The draft is too long")
+		return draft, errBuildDraftTooLong
 	}
 	if draft.TemplateID = strings.TrimSpace(draft.TemplateID); draft.TemplateID != "" {
 		if _, ok := validation.lookup(draft.TemplateID); !ok {
@@ -168,7 +178,7 @@ func normalizeFormDraft(draft personalassistant.BuildDraft, validation buildVali
 	}
 	for _, raw := range []json.RawMessage{draft.WorkspaceBootstrap, draft.ProjectConnection, draft.TeamIntent, draft.RoleStaffing, draft.TemplateAgentOverrides, draft.TemplateAgentReview} {
 		if len(raw) > 0 && !json.Valid(raw) {
-			return draft, errors.New("Invalid build draft")
+			return draft, errBuildDraftInvalid
 		}
 	}
 	return draft, nil

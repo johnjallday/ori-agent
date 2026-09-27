@@ -38,7 +38,7 @@ func (b *ServerBuilder) wireWorkspaceBuild(knowledge *personalassistant.Knowledg
 			}
 			entries := make([]sessionhttp.WorkspaceBuildCatalogEntry, 0, len(snapshot.Entries))
 			for _, entry := range snapshot.Entries {
-				if !snapshot.Active[entry.Template.ID] {
+				if !snapshot.Active[entry.ID] {
 					continue
 				}
 				entries = append(entries, sessionhttp.WorkspaceBuildCatalogEntry{Template: entry.Template, Readiness: entry.Readiness})
