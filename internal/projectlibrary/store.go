@@ -177,7 +177,8 @@ func (s *Store) mutateWithHomePolicy(scope Scope, expected int64, op operation, 
 		}
 		// Revoking an existing grant is a reductive owner action. It must
 		// remain possible when the installed provider has disappeared.
-		if ((op.action != "review_revoke_root" && op.action != "revoke_root" && op.action != "scan_finish") &&
+		if ((op.action != "review_revoke_root" && op.action != "revoke_root" && op.action != "scan_finish" &&
+			op.action != "review_forget_entry" && op.action != "forget_entry") &&
 			!s.providerWritable(scope, home)) || (policy != nil && !policy(state, home)) {
 			return ErrUnavailable
 		}

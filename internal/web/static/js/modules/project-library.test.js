@@ -31,6 +31,27 @@ test('canceling a reviewed scan or disconnect refreshes the Home revision before
   assert.equal(panel.state.revision, 3);
 });
 
+test('forget cancellation erases no saved Home record or session', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { provider_read_only: true };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.status = () => {};
+  panel.confirm = async () => false;
+  let refreshes = 0;
+  panel.refresh = async () => {
+    refreshes++;
+  };
+  const calls = [];
+  panel.post = async (path, body) => {
+    calls.push({ path, body });
+    if (path.endsWith('/commit')) throw new Error('canceled forget must not commit');
+    return { project_name: 'Album-0', source_count: 1, session_count: 2 };
+  };
+  await panel.forgetRecord({ revision: 8, row: { id: 'album' } });
+  assert.deepEqual(calls, [{ path: '/projects/album/forget/review', body: { revision: 8 } }]);
+  assert.equal(refreshes, 1);
+});
+
 test('pending direct links require a separate review and never commit on cancellation', async () => {
   const original = globalThis.document;
   const elements = new Map();

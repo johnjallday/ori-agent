@@ -753,6 +753,36 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(shelf.locator('#projectLibraryResume')).toContainText(
       'Review my saved notes without the folder'
     );
+    await shelf
+      .locator('#projectLibraryRows')
+      .getByRole('button', { name: 'Review Album-4' })
+      .click();
+    await page
+      .getByRole('dialog', { name: 'Album-4' })
+      .getByRole('button', { name: 'Review forgetting this Home record' })
+      .click();
+    const forget = page.getByRole('dialog', { name: 'Forget Album-4 from this Home?' });
+    await expect(forget).toContainText('1 saved studio session(s)');
+    await shot(page, '32-reviewed-historical-record-forget-impact');
+    await forget.getByRole('button', { name: 'Cancel' }).click();
+    expect((await json(await request.get(`${base}/projects`))).total).toBe(5);
+    await shelf
+      .locator('#projectLibraryRows')
+      .getByRole('button', { name: 'Review Album-4' })
+      .click();
+    await page
+      .getByRole('dialog', { name: 'Album-4' })
+      .getByRole('button', { name: 'Review forgetting this Home record' })
+      .click();
+    await page
+      .getByRole('dialog', { name: 'Forget Album-4 from this Home?' })
+      .getByRole('button', { name: 'Forget saved Home record' })
+      .click();
+    await expect(shelf.locator('#projectLibraryCount')).toHaveText('4 of 4 projects');
+    expect((await json(await request.get(`${base}/projects`))).total).toBe(4);
+    await expect(shelf.locator('#projectLibraryResume')).not.toContainText(
+      'Review my saved notes without the folder'
+    );
     expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
       workspacesBefore.length + 2
     );

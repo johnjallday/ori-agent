@@ -1293,6 +1293,22 @@ export class ProjectLibraryPanel {
         });
         actions.append(activate);
       }
+      if (
+        detail.row.connection === 'catalog_only' &&
+        (detail.row.last_observed_availability || detail.row.availability) === 'revoked_source'
+      ) {
+        const forget = node(
+          'button',
+          'modern-btn modern-btn-secondary',
+          'Review forgetting this Home record'
+        );
+        forget.type = 'button';
+        forget.addEventListener('click', () => {
+          dialog.close();
+          void this.forgetRecord(detail, trigger);
+        });
+        actions.append(forget);
+      }
       if (!this.readOnly) {
         const plan = node('button', 'modern-btn modern-btn-secondary', 'Plan a session');
         plan.type = 'button';
@@ -1330,6 +1346,40 @@ export class ProjectLibraryPanel {
       );
       dialog.showModal();
       close.focus();
+    });
+  }
+
+  async forgetRecord(detail, trigger) {
+    await this.run(trigger, 'Reviewing the saved Home record and its sessions…', async () => {
+      const id = encodeURIComponent(detail.row.id);
+      const review = await this.post(`/projects/${id}/forget/review`, {
+        revision: detail.revision
+      });
+      if (
+        !(await this.confirm(
+          `Forget ${review.project_name} from this Home?`,
+          [
+            `${review.source_count} historical discovery source(s) will be removed from this Home record.`,
+            `${review.session_count} saved studio session(s) and this project's Home notes will be erased.`,
+            'Project files, other catalog records, discovery root grants and any separate workspace are not deleted. This cannot be undone.'
+          ],
+          'Forget saved Home record',
+          trigger
+        ))
+      ) {
+        await this.refresh();
+        this.status('Forget canceled. Your saved project record is unchanged.');
+        return;
+      }
+      await this.post(`/projects/${id}/forget/commit`, {
+        review_token: review.token,
+        idempotency_key: operationKey('forget-entry'),
+        confirm: true
+      });
+      await this.refresh();
+      this.status(
+        `${review.project_name} was forgotten from this Home. Source files and grants were not changed.`
+      );
     });
   }
 
