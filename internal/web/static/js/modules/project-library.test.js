@@ -289,6 +289,64 @@ test('Home resume renders only bounded saved-user cards with trusted detail navi
   }
 });
 
+test('resume workspace action refuses navigation after the exact link changes', async () => {
+  const previousDocument = globalThis.document;
+  const makeElement = tag => ({
+    tag,
+    children: [],
+    textContent: '',
+    hidden: false,
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener(name, callback) {
+      this[name] = callback;
+    }
+  });
+  const section = makeElement('section');
+  const container = makeElement('div');
+  globalThis.document = {
+    createElement: makeElement,
+    getElementById(id) {
+      return { projectLibraryResume: section, projectLibraryResumeCards: container }[id];
+    }
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.run = async (_trigger, _message, work) => work();
+    const messages = [];
+    panel.status = message => messages.push(message);
+    const requests = [];
+    panel.request = async path => {
+      requests.push(path);
+      if (path.endsWith('/activation'))
+        return { state: 'link_needs_review', workspace_id: 'stale-child' };
+      return {
+        cards: [
+          {
+            entry_id: 'saved-song',
+            name: 'Song',
+            workspace_id: 'stale-child',
+            session: { goal: 'Listen', updated_at: '2026-09-27T00:00:00Z' }
+          }
+        ]
+      };
+    };
+    await panel.renderResume();
+    const workspace = container.children[0].children.at(-1);
+    assert.equal(workspace.textContent, 'Open Song workspace');
+    workspace.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(requests, ['/resume', '/projects/saved-song/activation', '/resume']);
+    assert.match(messages.at(-1), /link changed/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test('libraryQuery includes only bounded search fields and cursor', () => {
   const params = new URLSearchParams(
     libraryQuery({

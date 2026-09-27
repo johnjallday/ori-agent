@@ -114,6 +114,48 @@ func TestStudioSessions_ReviewedCatalogOnlyGoalAndAtomicRecapSurviveRestart(t *t
 	}
 }
 
+func TestStudioSessions_ResumeWorkspaceOnlyForCurrentReciprocalLink(t *testing.T) {
+	a, scope, _, file, _, installed := activationFixture(t)
+	s := a.library
+	goalInput := GoalInput{Goal: "Return to this song"}
+	review, err := s.ReviewGoal(scope, "single", 1, goalInput, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = s.CommitGoal(scope, "single", review.Token, "goal-before-project", 1, goalInput, "local"); err != nil {
+		t.Fatal(err)
+	}
+	activation := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := s.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setup, err := activation.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := activation.Commit(t.Context(), scope, "single", setup.Token, "resume-linked-song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.Resume(scope)
+	if err != nil || len(view.Cards) != 1 || view.Cards[0].WorkspaceID != child.WorkspaceID {
+		t.Fatalf("current exact link not resumable: %+v %v", view, err)
+	}
+	if err := file.Update(child.WorkspaceID, func(project *workspace.Workspace) error {
+		link := project.GetAssistantProjectLink()
+		link.StationWorkspaceID = "other-home"
+		project.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view, err = s.Resume(scope)
+	if err != nil || len(view.Cards) != 1 || view.Cards[0].WorkspaceID != "" || view.Cards[0].Session.Goal != goalInput.Goal {
+		t.Fatalf("broken link revealed child or lost user notes: %+v %v", view, err)
+	}
+}
+
 func TestStudioSessions_RecapConflictsWithConcurrentProjectEditWithoutPartialWrite(t *testing.T) {
 	a, scope, _, _, _, _ := activationFixture(t)
 	s := a.library

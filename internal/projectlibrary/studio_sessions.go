@@ -58,6 +58,7 @@ type ResumeCard struct {
 	EntryID           string         `json:"entry_id"`
 	Name              string         `json:"name"`
 	ProjectNextAction string         `json:"project_next_action,omitempty"`
+	WorkspaceID       string         `json:"workspace_id,omitempty"` // Only a freshly verified reciprocal link.
 	Session           SessionSummary `json:"session"`
 }
 
@@ -75,9 +76,13 @@ func sessionSummary(row StudioSession) SessionSummary {
 // Resume is a read-only Home-wide view of at most three distinct catalog
 // entries. It never traverses roots or joins project transcripts/Tickets.
 func (s *Store) Resume(scope Scope) (ResumeView, error) {
-	doc, err := s.Read(scope)
+	doc, state, err := s.readSnapshot(scope)
 	if err != nil {
 		return ResumeView{}, err
+	}
+	linked := make(map[string]bool, len(state.LinkedProjectIDs))
+	for _, id := range state.LinkedProjectIDs {
+		linked[id] = true
 	}
 	latest := make(map[string]StudioSession)
 	for _, record := range doc.Sessions {
@@ -125,8 +130,12 @@ func (s *Store) Resume(scope Scope) (ResumeView, error) {
 		if name == "" {
 			name = "Untitled project"
 		}
-		view.Cards = append(view.Cards, ResumeCard{EntryID: id, Name: name,
-			ProjectNextAction: entry.Fields.NextAction, Session: sessionSummary(latest[id])})
+		card := ResumeCard{EntryID: id, Name: name,
+			ProjectNextAction: entry.Fields.NextAction, Session: sessionSummary(latest[id])}
+		if row := s.projectSearchRow(scope, *entry, nil, linked, nil); row.Connection == "connected" {
+			card.WorkspaceID = entry.Link.WorkspaceID
+		}
+		view.Cards = append(view.Cards, card)
 	}
 	return view, nil
 }

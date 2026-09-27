@@ -470,6 +470,14 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       linkedDetail.getByRole('link', { name: 'Open connected workspace' })
     ).toHaveAttribute('href', `/workspaces/${committed.workspace_id}`);
     await linkedDetail.getByRole('button', { name: 'Close' }).click();
+    const returnToHome = page.url();
+    await shelf
+      .locator('#projectLibraryResume')
+      .getByRole('button', { name: 'Open Album-3 workspace' })
+      .click();
+    await page.waitForURL(new RegExp(`/workspaces/${committed.workspace_id}$`));
+    await page.goto(returnToHome);
+    await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
     expect(
       afterRestartView.rows.filter((row: { connection: string }) => row.connection === 'connected')
     ).toHaveLength(1);

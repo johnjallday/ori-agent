@@ -298,6 +298,31 @@ export class ProjectLibraryPanel {
       open.type = 'button';
       open.addEventListener('click', () => void this.details(card.entry_id, open));
       item.append(open);
+      if (card.workspace_id) {
+        const workspace = node(
+          'button',
+          'modern-btn modern-btn-secondary',
+          `Open ${card.name} workspace`
+        );
+        workspace.type = 'button';
+        workspace.addEventListener(
+          'click',
+          () =>
+            void this.run(workspace, 'Checking the saved project link…', async () => {
+              // The card is a hint. Never navigate from a stale or foreign link.
+              const current = await this.request(
+                `/projects/${encodeURIComponent(card.entry_id)}/activation`
+              );
+              if (current.state !== 'connected' || current.workspace_id !== card.workspace_id) {
+                this.status('That saved link changed. Reopen project details to review it.');
+                await this.renderResume();
+                return;
+              }
+              globalThis.location.assign(`/workspaces/${encodeURIComponent(current.workspace_id)}`);
+            })
+        );
+        item.append(workspace);
+      }
       container.append(item);
     }
   }
