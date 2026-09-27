@@ -349,6 +349,9 @@ test('a reviewed file project uses the same card and never the blank creator', (
   assert.ok(!view.actions.some(action => action.create || action.modal));
   const waiting = folderOfferView({ ...offer, status: 'awaiting_outcome' });
   assert.equal(waiting.resume, true);
+  assert.match(waiting.question, /setup has not finished/);
+  assert.match(waiting.capabilityDetail, /does not by itself create another workspace/);
+  assert.doesNotMatch(waiting.capabilityDetail, /install the Ori integration plugin/);
   assert.equal(waiting.actions[0].id, 'resume');
   assert.equal(waiting.actions[0].journey, true);
 });

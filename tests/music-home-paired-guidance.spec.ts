@@ -20,6 +20,8 @@ const reaperPath = process.env.ORI_REAPER_PLUGIN_PATH || '';
 const firstPath = process.env.ORI_MUSIC_REAPER_FIRST_SNAPSHOT || '';
 const finalPath = process.env.ORI_MUSIC_REAPER_FINAL_SNAPSHOT || '';
 const restart = process.env.ORI_MUSIC_REAPER_RESTART_CHECK === '1';
+const constructionOnly = process.env.ORI_MUSIC_REAPER_CONSTRUCTION_ONLY === '1';
+const staffingAfterRestart = process.env.ORI_MUSIC_REAPER_STAFFING_AFTER_RESTART === '1';
 const evidence = process.env.ORI_MUSIC_REAPER_EVIDENCE_DIR || '';
 const receipt = join(sandbox, 'evidence', 'guidance-state.json');
 const blueprintID = 'plugin:reaper-plugin:reaper-song';
@@ -393,11 +395,20 @@ test('only a distinct reviewed child staffing action fills the existing-file pro
   page,
   request
 }) => {
-  test.skip(restart, 'the first run owns staffing');
+  test.skip(
+    constructionOnly || (restart && !staffingAfterRestart),
+    'staffing runs after construction, optionally in a restarted process'
+  );
   const saved = stored(receipt);
   const runURL = `/api/setup-quests/reaper-plugin/reaper_setup/runs/${saved.setupRunID}`;
   const run = (await json(await request.get(runURL))).setup_journey;
   expect(run.receipts.project_workspace_id).toBe(saved.existingID);
+  const pendingOffer = (await json(await request.get('/api/personal-assistant/folder-digest')))
+    .folder_digest.offer;
+  expect(pendingOffer).toMatchObject({ id: saved.offerID, status: 'awaiting_outcome' });
+  // The Documents chip is a user-approved convenience, revalidated after
+  // restart. A picker-only source must instead request a fresh selection.
+  expect(pendingOffer.needs_pick || false).toBe(false);
   const step = run.steps.find(
     (item: { kind: string }) => item.kind === 'assistant_program_staffing'
   );
@@ -422,7 +433,13 @@ test('only a distinct reviewed child staffing action fills the existing-file pro
   await page.goto('/?panel=today&folder=show');
   const pendingCard = page.locator('#personalAssistantFolderOffer');
   await expect(pendingCard).toContainText('Documents looks like a REAPER project');
-  await pendingCard.locator('[data-folder-action="resume"]').click();
+  await expect(pendingCard).toContainText('Project setup has not finished.');
+  await expect(pendingCard).toContainText('it does not by itself create another workspace');
+  const continueSetup = pendingCard.locator('[data-folder-action="resume"]');
+  await expect(continueSetup).toHaveText('Continue setup');
+  await continueSetup.scrollIntoViewIfNeeded();
+  await screenshot(page, 'guidance-existing-file-resume-staffing');
+  await continueSetup.click();
   const quest = page.locator('#specialistSetupJourneyModal');
   await expect(quest).toBeVisible();
   await quest.getByRole('button', { name: 'Manage Team and Extras' }).click();
@@ -563,7 +580,10 @@ test('restart preserves exact candidate identities for both children and the rev
   page,
   request
 }) => {
-  test.skip(!restart, 'run by reaper-demo.sh after its controlled restart');
+  test.skip(
+    !restart || staffingAfterRestart,
+    'run by reaper-demo.sh after confirmed staffing and its controlled restart'
+  );
   const saved = stored(receipt);
   const homes = (await json(await request.get('/api/workspaces'))).folders;
   expect(homes.filter((row: { kind: string }) => row.kind === 'group')).toHaveLength(1);

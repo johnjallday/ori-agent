@@ -247,6 +247,11 @@ export function folderOfferView(offer, options = {}) {
     needsPick: offer.needs_pick === true
   };
   const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
+  if (status === 'awaiting_outcome' && offer?.capability && !offer.portfolio) {
+    view.question = 'Project setup has not finished. Continue to review its current steps.';
+    view.capabilityDetail =
+      'Opening setup checks its current steps; it does not by itself create another workspace or enable live project control.';
+  }
   if (
     status === 'resolved' &&
     offer?.outcome?.kind === 'project' &&
