@@ -3,6 +3,7 @@ package personalassistant
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -84,11 +85,14 @@ func (s *renameWorkspaces) Save(ws *workspace.Workspace) error {
 }
 
 type renameProfiles struct {
+	mu       sync.Mutex
 	agents   map[string]*agent.Agent
 	failNext bool
 }
 
 func (s *renameProfiles) ListAgents() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := make([]string, 0, len(s.agents))
 	for name := range s.agents {
 		out = append(out, name)
@@ -96,10 +100,14 @@ func (s *renameProfiles) ListAgents() []string {
 	return out
 }
 func (s *renameProfiles) GetAgent(name string) (*agent.Agent, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ag, ok := s.agents[name]
 	return ag, ok
 }
 func (s *renameProfiles) RenameAgent(oldName, newName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.failNext {
 		s.failNext = false
 		return errors.New("simulated crash boundary")
