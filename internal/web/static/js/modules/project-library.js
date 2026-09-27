@@ -25,6 +25,8 @@ export function libraryQuery({
   text = '',
   stage = '',
   status = '',
+  format = '',
+  rootID = '',
   connection = '',
   availability = '',
   priority = '',
@@ -37,6 +39,8 @@ export function libraryQuery({
     text: text.trim(),
     stage,
     status,
+    format,
+    root_id: rootID,
     connection,
     availability,
     priority,
@@ -263,6 +267,19 @@ export class ProjectLibraryPanel {
     const container = document.getElementById('projectLibraryRoots');
     container.replaceChildren();
     const roots = Array.isArray(this.state?.roots) ? this.state.roots : [];
+    const filter = document.getElementById('projectLibraryRoot');
+    if (filter) {
+      const selected = filter.value;
+      const all = node('option', '', 'All discovery folders');
+      all.value = '';
+      const choices = roots.map(root => {
+        const option = node('option', '', root.path);
+        option.value = root.id;
+        return option;
+      });
+      filter.replaceChildren(all, ...choices);
+      filter.value = choices.some(choice => choice.value === selected) ? selected : '';
+    }
     for (const root of roots) {
       const card = node('article', 'project-library-root');
       const copy = node('div');
@@ -338,6 +355,8 @@ export class ProjectLibraryPanel {
       text: document.getElementById('projectLibrarySearch')?.value || '',
       stage: document.getElementById('projectLibraryStage')?.value || '',
       status: document.getElementById('projectLibraryStatusFilter')?.value || '',
+      format: document.getElementById('projectLibraryFormat')?.value || '',
+      rootID: document.getElementById('projectLibraryRoot')?.value || '',
       connection: document.getElementById('projectLibraryConnection')?.value || '',
       availability: document.getElementById('projectLibraryAvailability')?.value || '',
       priority: document.getElementById('projectLibraryPriority')?.value || '',

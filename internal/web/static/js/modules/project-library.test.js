@@ -60,6 +60,8 @@ test('libraryQuery includes only bounded search fields and cursor', () => {
     libraryQuery({
       text: '  Mix  ',
       stage: 'mixing',
+      format: 'reaper',
+      rootID: 'server-root-id',
       availability: 'available',
       priority: '0',
       sort: 'scanned_at',
@@ -70,6 +72,8 @@ test('libraryQuery includes only bounded search fields and cursor', () => {
   assert.equal(params.get('text'), 'Mix');
   assert.equal(params.get('page_size'), '25');
   assert.equal(params.get('stage'), 'mixing');
+  assert.equal(params.get('format'), 'reaper');
+  assert.equal(params.get('root_id'), 'server-root-id');
   assert.equal(params.get('availability'), 'available');
   assert.equal(params.get('priority'), '0');
   assert.equal(params.get('sort'), 'scanned_at');
