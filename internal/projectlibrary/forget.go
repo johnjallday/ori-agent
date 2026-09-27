@@ -173,6 +173,16 @@ func (s *Store) CommitForget(scope Scope, entryID, token, key string) (bool, err
 							break
 						}
 					}
+					if current.Queue != nil && current.Queue.Status != "active" {
+						for _, id := range current.Queue.IDs {
+							if id == entryID {
+								archiveTerminalQueue(current)
+								break
+							}
+						}
+					} else {
+						redactHandledQueueEntry(current, entryID, s.now().UTC())
+					}
 					kept := current.Sessions[:0]
 					for _, session := range current.Sessions {
 						if session.EntryID != entryID {

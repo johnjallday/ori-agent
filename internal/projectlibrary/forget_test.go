@@ -110,6 +110,71 @@ func TestForget_RevokedUnlinkedHomeRecordRequiresReviewAndPreservesExternalFiles
 	}
 }
 
+func TestForget_RedactsHandledQueueIDsAndCompactsTerminalOutcome(t *testing.T) {
+	for _, terminal := range []bool{false, true} {
+		t.Run(map[bool]string{false: "active_skipped", true: "terminal"}[terminal], func(t *testing.T) {
+			inspector, scope, roots, _, tree, _ := activationFixture(t)
+			s := inspector.library
+			before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+			doc, err := s.Read(scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			revoke, err := roots.ReviewRevoke(scope, doc.Roots[0].ID, doc.Revision)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := roots.CommitRevoke(scope, doc.Roots[0].ID, revoke.Token, "redact-root"); err != nil {
+				t.Fatal(err)
+			}
+			q, _, err := s.StartActivationQueue(scope, []string{"single", "alternates"}, "redact-queue")
+			if err != nil {
+				t.Fatal(err)
+			}
+			skipped, _, err := s.ProgressActivationQueue(scope, q.ID, "single", "skip", "redact-skip", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if terminal {
+				if _, _, err := s.ProgressActivationQueue(scope, q.ID, "alternates", "skip", "redact-last", skipped.Revision); err != nil {
+					t.Fatal(err)
+				}
+			}
+			doc, err = s.Read(scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			review, err := s.ReviewForget(scope, "single", doc.Revision)
+			if err != nil || review.QueuedAt != 0 {
+				t.Fatalf("already handled item misreported as pending: %+v %v", review, err)
+			}
+			if _, err := s.CommitForget(scope, "single", review.Token, "redact-forget"); err != nil {
+				t.Fatal(err)
+			}
+			doc, err = s.Read(scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if terminal {
+				if doc.Queue != nil || len(doc.QueueHistory) != 1 || doc.QueueHistory[0].SkippedCount != 2 || doc.QueueHistory[0].SelectedCount != 2 {
+					t.Fatalf("terminal queue retained forgotten catalog IDs: %+v", doc)
+				}
+			} else {
+				if doc.Queue == nil || doc.Queue.Index != 1 || doc.Queue.IDs[0] == "single" ||
+					doc.Queue.Skipped[0] != doc.Queue.IDs[0] || doc.Queue.IDs[1] != "alternates" || doc.Queue.Revision <= skipped.Revision {
+					t.Fatalf("active queue retained forgotten skipped ID or lost remaining item: %+v", doc.Queue)
+				}
+				if _, _, err := s.ProgressActivationQueue(scope, q.ID, "alternates", "skip", "after-redact", doc.Queue.Revision); err != nil {
+					t.Fatalf("redacting a handled ID prevented later explicit skip: %v", err)
+				}
+			}
+			if fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+				t.Fatal("forget/redaction modified external project")
+			}
+		})
+	}
+}
+
 func TestForget_RefusesLinkedProjectEvenAfterDiscoveryRevoked(t *testing.T) {
 	inspector, scope, roots, file, tree, plugins := activationFixture(t)
 	childID := connectExistingSong(t, scope, file, plugins, tree.single)

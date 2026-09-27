@@ -96,6 +96,63 @@ func (q ActivationQueue) outcome() ActivationQueueOutcome {
 		SkippedCount: len(q.Skipped), ConnectedCount: len(q.Connected), StartedAt: q.CreatedAt, FinishedAt: q.UpdatedAt}
 }
 
+// archiveTerminalQueue drops the detailed IDs once no navigation is left. It
+// runs when another queue begins and when an owner forgets one of its entries.
+// Active queues retain pending IDs until the owner explicitly skips/discards.
+func archiveTerminalQueue(doc *Document) {
+	if doc.Queue == nil || doc.Queue.Status == "active" {
+		return
+	}
+	doc.QueueHistory = append(doc.QueueHistory, doc.Queue.outcome())
+	if len(doc.QueueHistory) > maxQueueOutcomes {
+		doc.QueueHistory = doc.QueueHistory[len(doc.QueueHistory)-maxQueueOutcomes:]
+	}
+	doc.Queue = nil
+}
+
+// A skipped item is no longer needed to navigate an active queue. Forget
+// replaces its durable queue identifier with a non-catalog placeholder while
+// preserving only the skip count/order. Future items stay pending until the
+// owner explicitly skips or discards the queue.
+func redactHandledQueueEntry(doc *Document, entryID string, at time.Time) {
+	q := doc.Queue
+	if q == nil || q.Status != "active" {
+		return
+	}
+	for i := 0; i < q.Index; i++ {
+		if q.IDs[i] != entryID {
+			continue
+		}
+		found := false
+		for _, skipped := range q.Skipped {
+			if skipped == entryID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return
+		} // a connected entry cannot be forgotten here
+		var alias string
+		for {
+			alias = newID()
+			if !slices.Contains(q.IDs, alias) {
+				break
+			}
+		}
+		q.IDs[i] = alias
+		for j := range q.Skipped {
+			if q.Skipped[j] == entryID {
+				q.Skipped[j] = alias
+				break
+			}
+		}
+		q.Revision++
+		q.UpdatedAt = at
+		return
+	}
+}
+
 type ActivationQueueView struct {
 	Revision int64                    `json:"revision"`
 	Queue    *ActivationQueue         `json:"queue,omitempty"`
@@ -192,12 +249,7 @@ func (s *Store) StartActivationQueue(scope Scope, ids []string, key string) (Act
 					return "", ErrConflict
 				}
 			}
-			if current.Queue != nil {
-				current.QueueHistory = append(current.QueueHistory, current.Queue.outcome())
-				if len(current.QueueHistory) > maxQueueOutcomes {
-					current.QueueHistory = current.QueueHistory[len(current.QueueHistory)-maxQueueOutcomes:]
-				}
-			}
+			archiveTerminalQueue(current)
 			current.Queue = &queue
 			return queue.ID, nil
 		})
