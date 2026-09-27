@@ -60,6 +60,9 @@ const (
 	buildMaxTag         = 32
 	buildMaxAgentName   = 100
 	buildMaxPrompt      = 4000
+	// The store keeps at most 32 of each list; these leave room.
+	buildMaxSavedAgents = 16
+	buildMaxRejections  = 16
 )
 
 // buildValidation is what the host checks the assistant's proposal against:
@@ -425,6 +428,12 @@ func validateBuildTeam(draft personalassistant.BuildDraft, template projecttempl
 					result.reject("team.agents."+agent.Name, buildReasonTooLong)
 					continue
 				}
+				// As for roles below: a saved agent's name is assigned, not
+				// made again, whatever model or prompt was proposed with it.
+				if canonical, ok := v.savedAgent(name); ok {
+					role.Mode, role.AgentName = "assign", canonical
+					break
+				}
 				role.Mode, role.AgentName = "create", name
 				if provider, model := strings.TrimSpace(agent.Provider), strings.TrimSpace(agent.Model); provider != "" || model != "" {
 					if v.modelOK == nil || !v.modelOK(provider, model) {
@@ -466,16 +475,29 @@ func validateBuildTeam(draft personalassistant.BuildDraft, template projecttempl
 				result.reject("team.roles."+id, buildReasonTooLong)
 				continue
 			}
+			// The form never makes a second agent with a saved agent's name:
+			// it assigns the saved one. Say so here too, so the transcript's
+			// "On the form:" line matches the form.
+			if canonical, ok := v.savedAgent(name); ok {
+				addRole(personalassistant.BuildRole{RoleID: id, Mode: "assign", AgentName: canonical})
+				continue
+			}
 			addRole(personalassistant.BuildRole{RoleID: id, Mode: "create", AgentName: name})
 		}
 	}
 
+	seenSaved := map[string]bool{}
 	for _, name := range team.SavedAgents {
 		canonical, ok := v.savedAgent(name)
 		if !ok {
 			result.reject("team.saved_agents."+strings.TrimSpace(name), unknownAgentReason(name))
 			continue
 		}
+		key := strings.ToLower(canonical)
+		if seenSaved[key] || len(out.SavedAgents) == buildMaxSavedAgents {
+			continue
+		}
+		seenSaved[key] = true
 		out.SavedAgents = append(out.SavedAgents, canonical)
 	}
 	if len(out.Roles) == 0 && len(out.SavedAgents) == 0 {

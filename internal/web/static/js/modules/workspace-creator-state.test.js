@@ -252,7 +252,6 @@ test('a session patch carries only the fields the turn set, or the whole draft t
       name: 'Newsletter Desk',
       description: 'Drafts the Monday newsletter',
       blueprint_inputs: { cadence: 'weekly' },
-      parent_id: '',
       tags: ['writing']
     },
     applied: ['blueprint', 'name']
@@ -261,14 +260,19 @@ test('a session patch carries only the fields the turn set, or the whole draft t
     template_id: 'content-production',
     name: 'Newsletter Desk'
   });
+  // Resuming restores what the draft holds; an absent key is left alone.
   assert.deepEqual(asData(buildApi.buildPatchFromSession(session)), {
     template_id: 'content-production',
     name: 'Newsletter Desk',
     description: 'Drafts the Monday newsletter',
     blueprint_inputs: { cadence: 'weekly' },
-    parent_id: '',
     tags: ['writing']
   });
+  // The server omits an emptied field, so a turn that set it cleared it.
+  assert.deepEqual(
+    asData(buildApi.buildPatchFromSession(session, ['parent', 'color', 'description'])),
+    { parent_id: '', color: '', description: 'Drafts the Monday newsletter' }
+  );
   assert.deepEqual(
     asData(buildApi.buildPatchFromSession({ draft: { blank: true } }, ['blueprint'])),
     { blank: true }

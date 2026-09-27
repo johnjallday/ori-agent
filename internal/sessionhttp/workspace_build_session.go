@@ -1,11 +1,13 @@
 package sessionhttp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -327,6 +329,9 @@ type buildTurnRequest struct {
 	Text     string `json:"text,omitempty"`
 	ChoiceID string `json:"choice_id,omitempty"`
 	Version  int64  `json:"version"`
+	// Auto marks a turn the client sends on the user's behalf (after they
+	// switched the blueprint on the form); it is never their request.
+	Auto bool `json:"auto,omitempty"`
 }
 
 func (h *Handler) postWorkspaceBuildTurn(w http.ResponseWriter, r *http.Request, id string) {
@@ -442,7 +447,9 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		if session.Status != personalassistant.WorkspaceBuildOpen {
 			return errBuildTurn{http.StatusConflict, "closed"}
 		}
-		finishBuildTurn(session, outcome, validation, deps.Store.Now())
+		// The user may have edited the form while the model was thinking;
+		// their edit stands over a reply written without it.
+		finishBuildTurn(session, withoutFormEdits(outcome, staged.Draft, session.Draft), validation, deps.Store.Now())
 		result = *session
 		return nil
 	})
@@ -494,11 +501,58 @@ func stageBuildUserTurn(session *personalassistant.WorkspaceBuildSession, req bu
 	session.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleUser, Text: text, At: now})
 	session.PendingQuestion = nil
 	session.TurnCount++
-	if session.FirstRequest == "" && req.ChoiceID == "" {
+	if session.FirstRequest == "" && req.ChoiceID == "" && !req.Auto {
 		session.FirstRequest = truncateRunes(text, personalassistant.WorkspaceBuildMaxFirstRequest)
 	}
 	session.Retry = retry
 	return nil
+}
+
+// withoutFormEdits drops, from a reply, the fields the user changed on the
+// form while the model was working (before is the draft the model saw, after
+// the draft now). Everything else in the reply still applies.
+func withoutFormEdits(outcome buildOutcome, before, after personalassistant.BuildDraft) buildOutcome {
+	if outcome.kind != "reply" {
+		return outcome
+	}
+	edited := map[string]bool{
+		buildFieldBlueprint:   before.Blank != after.Blank || before.TemplateID != after.TemplateID,
+		buildFieldName:        before.Name != after.Name,
+		buildFieldDescription: before.Description != after.Description,
+		buildFieldInputs:      !reflect.DeepEqual(before.BlueprintInputs, after.BlueprintInputs),
+		buildFieldParent:      before.ParentID != after.ParentID,
+		buildFieldTags:        !reflect.DeepEqual(before.Tags, after.Tags),
+		buildFieldColor:       before.Color != after.Color,
+		buildFieldTeam: !bytes.Equal(before.RoleStaffing, after.RoleStaffing) ||
+			!reflect.DeepEqual(before.ExistingAgentNames, after.ExistingAgentNames),
+	}
+	patch := outcome.reply.Patch
+	kept := []string{}
+	dropped := false
+	for _, field := range []string{
+		buildFieldBlueprint, buildFieldName, buildFieldDescription, buildFieldInputs, buildFieldParent,
+		buildFieldAskFolder, buildFieldTeam, buildFieldTags, buildFieldColor,
+	} {
+		if !patch.sets(field) {
+			continue
+		}
+		if edited[field] {
+			dropped = true
+			continue
+		}
+		kept = append(kept, field)
+	}
+	if !dropped {
+		return outcome
+	}
+	if len(kept) == 0 {
+		// An empty list reads as "whatever is filled in"; this one names
+		// nothing, so the reply sets nothing.
+		kept = []string{"none"}
+	}
+	patch.Set = kept
+	outcome.reply.Patch = patch
+	return outcome
 }
 
 // markBuildChoice records which chip answered the newest question.
@@ -661,7 +715,10 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 	session.Applied = result.applied
 	session.AskFolder = result.askFolder
 	session.Ready = reply.Ready
-	session.CreateNow = reply.CreateNow
+	// "Create it" counts only once the user has seen a filled form: never on
+	// the first turn, even when that first message says to create (the Ask
+	// tab's confirmation promises a check before anything is created).
+	session.CreateNow = reply.CreateNow && session.TurnCount > 1
 	session.Retry = nil
 	mergeBuildWhy(session, reply.Why)
 	session.Alternatives = buildAlternatives(reply.Alternatives, validation, session.Draft.TemplateID)
@@ -689,6 +746,9 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 	}
 	question = truncateRunes(question, personalassistant.WorkspaceBuildMaxSay)
 	say := truncateRunes(reply.Say, personalassistant.WorkspaceBuildMaxSay)
+	if len(session.Rejections) > buildMaxRejections {
+		session.Rejections = session.Rejections[:buildMaxRejections]
+	}
 	// The model wrote its line before the host checked the proposal, so a
 	// refused part gets a fixed note rather than standing as a claim, and a
 	// team change is stated as the form now holds it.
@@ -707,6 +767,8 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 	if text == "" {
 		text = "Done."
 	}
+	// The line, with the host's notes, must fit the store's bound for one entry.
+	text = truncateRunes(text, personalassistant.WorkspaceBuildMaxText)
 	session.Append(personalassistant.BuildTranscriptEntry{Role: personalassistant.BuildRoleAssistant, Text: text, Choices: choices, At: now})
 	if question != "" {
 		session.PendingQuestion = &personalassistant.BuildQuestion{
@@ -906,25 +968,46 @@ func (h *Handler) workspaceBuildGroups(ctx context.Context, userID string) []bui
 	return out
 }
 
+// createdBuildDraft is the part of a create request that "How this was set
+// up" describes: what was actually created, whatever the session last heard.
+func createdBuildDraft(req createWorkspaceRequest) personalassistant.BuildDraft {
+	draft := personalassistant.BuildDraft{
+		TemplateID:         strings.TrimSpace(req.TemplateID),
+		Blank:              req.Blank,
+		ParentID:           strings.TrimSpace(req.ParentID),
+		ExistingAgentNames: append([]string(nil), req.ExistingAgentNames...),
+	}
+	if len(req.RoleStaffing) > 0 {
+		if data, err := json.Marshal(req.RoleStaffing); err == nil {
+			draft.RoleStaffing = data
+		}
+	}
+	return draft
+}
+
 // finishWorkspaceBuild closes the build a create finished (FR28): the session
 // is marked created with the workspace id, and the workspace's provenance
-// records how it was set up. A session id that is unknown, belongs to another
-// user's store, or is already closed is logged and ignored; a create is never
-// refused over it.
-func (h *Handler) finishWorkspaceBuild(ctx context.Context, sessionID, workspaceID string) {
+// records how it was set up, from the create request itself. A session id
+// that is unknown, belongs to another user's store, or is already closed is
+// logged and ignored; a create is never refused over it.
+func (h *Handler) finishWorkspaceBuild(ctx context.Context, sessionID, workspaceID string, created personalassistant.BuildDraft) {
 	sessionID, workspaceID = strings.TrimSpace(sessionID), strings.TrimSpace(workspaceID)
 	deps := h.workspaceBuild
 	if sessionID == "" || workspaceID == "" || deps == nil {
 		return
 	}
 	var finished personalassistant.WorkspaceBuildSession
+	recorded := false
 	_, err := deps.Store.Mutate(ctx, h.workspaceBuildUserID(ctx), func(doc *personalassistant.WorkspaceBuildDocument) error {
+		recorded = false
 		session := doc.Session(sessionID)
 		if session == nil {
 			return errBuildTurn{http.StatusNotFound, "not_found"}
 		}
 		if session.Status == personalassistant.WorkspaceBuildCreated && session.CreatedWorkspaceID == workspaceID {
-			finished = *session
+			// A retried create: the record was written the first time, from
+			// the session before it settled.
+			recorded = true
 			return nil
 		}
 		if session.Status != personalassistant.WorkspaceBuildOpen {
@@ -935,18 +1018,22 @@ func (h *Handler) finishWorkspaceBuild(ctx context.Context, sessionID, workspace
 		session.PendingQuestion = nil
 		session.CreateNow = false
 		session.Touch(deps.Store.Now())
-		finished = *session
+		finished = cloneBuildSession(*session)
+		session.Settle()
 		return nil
 	})
 	if err != nil {
 		logger.Info("Workspace build not recorded for a create", logger.Fields{"session_id": sessionID, "workspace_id": workspaceID, "reason": err.Error()})
 		return
 	}
+	if recorded {
+		return
+	}
 	logger.Info("Workspace build created", logger.Fields{"session_id": sessionID, "workspace_id": workspaceID, "turns": finished.TurnCount})
 	if h.workspaceTaskStore == nil {
 		return
 	}
-	summary := buildSummaryFor(finished)
+	summary := buildSummaryFor(finished, created)
 	if err := h.workspaceTaskStore.Update(workspaceID, func(w *agentworkspace.Workspace) error {
 		provenance := w.GetTemplateProvenance()
 		if provenance == nil {
@@ -962,8 +1049,9 @@ func (h *Handler) finishWorkspaceBuild(ctx context.Context, sessionID, workspace
 
 // buildSummaryFor is the "How this was set up" record: the assistant, the
 // user's own request, and the reasons behind each choice, never the whole
-// conversation.
-func buildSummaryFor(session personalassistant.WorkspaceBuildSession) *agentworkspace.BuildSummary {
+// conversation. created is the create request: the assistant's reason for a
+// blueprint or a placement the user then changed is not kept.
+func buildSummaryFor(session personalassistant.WorkspaceBuildSession, created personalassistant.BuildDraft) *agentworkspace.BuildSummary {
 	summary := &agentworkspace.BuildSummary{
 		AssistantName: session.Assistant.DisplayName,
 		SessionID:     session.ID,
@@ -971,12 +1059,17 @@ func buildSummaryFor(session personalassistant.WorkspaceBuildSession) *agentwork
 		TurnCount:     session.TurnCount,
 		UserRequest:   truncateRunes(session.FirstRequest, personalassistant.WorkspaceBuildMaxFirstRequest),
 	}
+	stale := map[string]bool{
+		"blueprint": created.Blank != session.Draft.Blank || created.TemplateID != session.Draft.TemplateID,
+		"placement": created.ParentID != session.Draft.ParentID,
+	}
 	// The team line states the team the workspace was created with, taken from
 	// the create request itself; the model's own sentence about the team may
 	// not match what the user finally confirmed.
-	team := teamDecisionFromDraft(session.Draft)
+	team := teamDecisionFromDraft(created)
+	stale["team"] = team != ""
 	for _, why := range session.Why {
-		if why.Section == "team" && team != "" {
+		if stale[why.Section] {
 			continue
 		}
 		summary.Decisions = append(summary.Decisions, agentworkspace.BuildDecision{Section: why.Section, Text: why.Text})

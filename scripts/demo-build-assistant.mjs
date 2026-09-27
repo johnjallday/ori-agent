@@ -5,6 +5,9 @@
  *   node scripts/demo-build-assistant.mjs <baseUrl> <outDir> [--size WxH] [--path /]
  *        [--reduced-motion] <step> ...
  *
+ * A bare <outDir> name (no slash) goes under the temp dir, $TMPDIR/build-demo/<name>,
+ * so an invocation needs no shell variable in front of it.
+ *
  * Steps run in order:
  *   open                 click Home's "New Workspace" and wait for the pane
  *   open:<selector>      click another opener instead
@@ -27,11 +30,13 @@
  */
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const args = process.argv.slice(2);
 const baseUrl = args.shift();
-const outDir = args.shift();
+let outDir = args.shift();
+if (outDir && !outDir.includes('/')) outDir = join(tmpdir(), 'build-demo', outDir);
 let size = '1440x900';
 let path = '/';
 let reducedMotion = 'no-preference';
@@ -48,6 +53,7 @@ if (!baseUrl || !outDir || args.length === 0) {
   process.exit(1);
 }
 mkdirSync(resolve(outDir), { recursive: true });
+console.log(`screenshots: ${resolve(outDir)}`);
 const [width, height] = size.split('x').map(Number);
 
 const browser = await chromium.launch();

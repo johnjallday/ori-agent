@@ -86,7 +86,9 @@ func TestWorkspaceBuildStore_AbandonsAWeekOldBuildOnRead(t *testing.T) {
 	ctx := context.Background()
 	store, _, now := newWorkspaceBuildStoreFixture(t)
 	if _, err := store.Mutate(ctx, "local", func(doc *WorkspaceBuildDocument) error {
-		doc.Add(openBuild("build-1", *now))
+		build := openBuild("build-1", *now)
+		build.Transcript = []BuildTranscriptEntry{{Role: BuildRoleUser, Text: "notes for my course", At: *now}}
+		doc.Add(build)
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -102,6 +104,9 @@ func TestWorkspaceBuildStore_AbandonsAWeekOldBuildOnRead(t *testing.T) {
 	}
 	if doc.Open() != nil || doc.Session("build-1").Status != WorkspaceBuildAbandoned {
 		t.Fatalf("expired build = %+v", doc.Session("build-1"))
+	}
+	if expired := doc.Session("build-1"); len(expired.Transcript) != 0 || expired.TeamState != nil {
+		t.Fatalf("an expired build keeps only what a settled one needs: %+v", expired)
 	}
 	// The next write records it, and a new build can open.
 	written, err := store.Mutate(ctx, "local", func(doc *WorkspaceBuildDocument) error {

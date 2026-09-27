@@ -247,6 +247,23 @@ func transcriptBytes(entries []BuildTranscriptEntry) int {
 	return total
 }
 
+// Settle drops what only an open build needs — the conversation, the form's
+// team state, the pending question — once it is created or abandoned. A
+// settled build keeps its id, status, and counters, so the file stays small
+// however many builds a user finishes.
+func (s *WorkspaceBuildSession) Settle() {
+	s.Transcript = []BuildTranscriptEntry{}
+	s.TeamState = nil
+	s.TeamPatch = nil
+	s.PendingQuestion = nil
+	s.Why = nil
+	s.Alternatives = nil
+	s.Rejections = nil
+	s.Applied = nil
+	s.Retry = nil
+	s.Draft = BuildDraft{Name: s.Draft.Name}
+}
+
 // Expired reports whether an open build has gone untouched past the expiry.
 func (s *WorkspaceBuildSession) Expired(now time.Time) bool {
 	return s.Status == WorkspaceBuildOpen && !s.UpdatedAt.IsZero() && now.Sub(s.UpdatedAt) > WorkspaceBuildExpiry
@@ -307,6 +324,7 @@ func (d *WorkspaceBuildDocument) ExpireStale(now time.Time) bool {
 	for i := range d.Sessions {
 		if d.Sessions[i].Expired(now) {
 			d.Sessions[i].Status = WorkspaceBuildAbandoned
+			d.Sessions[i].Settle()
 			d.Sessions[i].Touch(now)
 			changed = true
 		}

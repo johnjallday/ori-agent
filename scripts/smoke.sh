@@ -2295,6 +2295,9 @@ print("ok   %s has no agent type" % label)' "$1"
 #   availability             print GET /api/workspaces/build-sessions/availability
 smoke_build_session() {
   local stage="${3:-availability}"
+  # A demo server started in the background a moment ago may still be
+  # building; wait for it here rather than in a hand-written polling loop.
+  smoke_show_wait
   case "$stage" in
   seed)
     local provider="${4:-openai}" model="${5:-gpt-5-nano}" name

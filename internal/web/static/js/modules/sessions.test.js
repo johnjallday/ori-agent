@@ -4601,6 +4601,138 @@ test('“create it” with a gate still closed says why and submits nothing', as
   assert.equal(created, 1, 'with every gate open it runs the Create submit');
 });
 
+test('the picker’s own default is never the user’s edit, and the assistant’s blueprint goes back', async () => {
+  const { manager } = loadBuildWizard();
+  const scheduled = [];
+  const reselected = [];
+  manager.scheduleWorkspaceBuildDraft = options => scheduled.push(options);
+  manager.selectWorkspaceBuildBlueprint = async id => {
+    reselected.push(id);
+    return true;
+  };
+  manager.renderWorkspaceBuildChosen = () => {};
+
+  // Nothing chosen yet (the build is still asking Resume or Start over).
+  manager.noteWorkspaceBuildBlueprintSelected({ blank: true }, { programmatic: true });
+  assert.equal(scheduled.length, 0);
+  assert.equal(reselected.length, 0);
+
+  manager.workspaceBuild.chosenBlueprint = 'content-production';
+  manager.noteWorkspaceBuildBlueprintSelected({ blank: true }, { programmatic: true });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(reselected, ['content-production']);
+  assert.equal(scheduled.length, 0, 'a catalog load is not said back as the user’s edit');
+  assert.equal(manager.workspaceBuildApplyDepth, 0);
+
+  manager.noteWorkspaceBuildBlueprintSelected({ id: 'research-project' });
+  assert.equal(scheduled.length, 1, 'a card the user picks still is');
+  assert.equal(scheduled[0].user, true);
+});
+
+test('an unanswered Resume question does not tie the dialog’s create to the paused build', async () => {
+  const { manager } = loadBuildWizard();
+  const context = { entryPoint: 'home_cockpit_create', buildSession: null };
+  manager.workspaceCreatorContext = context;
+  manager.workspaceBuild.context = context;
+  const lines = [];
+  manager.workspaceBuildPane = () => ({
+    COPY: {
+      resumeQuestion: name => `Resume building ${name}?`,
+      resume: 'Resume',
+      startOver: 'Start over'
+    },
+    showLine: text => lines.push(text) || 'line-1',
+    setBusy: () => {}
+  });
+  manager.setWorkspaceBuildBusy = () => {};
+  manager.workspaceBuildApi = () => ({
+    create: async () => ({
+      ok: true,
+      status: 200,
+      body: {
+        resumed: true,
+        session: { id: 'b-1', version: 4, status: 'open', draft: { name: 'Desk' } }
+      }
+    })
+  });
+  await manager.openWorkspaceBuildSession();
+  assert.deepEqual(lines, ['Resume building Desk?']);
+  assert.equal(
+    context.buildSession,
+    null,
+    'a hand-made workspace would not finish the paused build'
+  );
+
+  let applied = 0;
+  manager.applyWorkspaceBuildSession = async () => {
+    applied += 1;
+  };
+  manager.workspaceBuildPane = () => ({ removeLine: () => {}, focusComposer: () => {} });
+  await manager.runWorkspaceBuildAction('resume');
+  assert.equal(applied, 1, 'Resume puts the draft on the form, which then names the build');
+});
+
+test('a blueprint switched during a turn is re-staffed after it, as an automatic turn', async () => {
+  const { manager } = loadBuildWizard();
+  const sent = [];
+  manager.workspaceBuild.session = { id: 'b-1', version: 3, status: 'open' };
+  manager.workspaceBuildPane = () => ({ applySession: () => {}, setBusy: () => {} });
+  manager.setWorkspaceBuildBusy = busy => {
+    manager.workspaceBuild.busy = busy;
+  };
+  manager.rememberWorkspaceBuildSession = () => {};
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.applyWorkspaceBuildSession = async () => {};
+  manager.workspaceBuildApi = () => ({
+    turn: async (_id, body) => {
+      sent.push(body);
+      return {
+        ok: true,
+        status: 200,
+        body: { session: { id: 'b-1', version: 5, status: 'open' } }
+      };
+    }
+  });
+  // The switch arrived while a turn was in flight.
+  manager.workspaceBuild.restaffPending = true;
+  await manager.sendWorkspaceBuildTurn({ text: 'only a Content Lead' });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].text, 'only a Content Lead');
+  assert.equal(sent[0].auto, undefined);
+  assert.equal(sent[1].text, '(I changed the blueprint)');
+  assert.equal(sent[1].auto, true, 'the automatic turn is never the user’s request');
+  assert.equal(manager.workspaceBuild.restaffPending, false);
+});
+
+test('a closed build’s blueprint retries stop instead of clicking the next dialog', async () => {
+  const { manager } = loadBuildWizard();
+  let clicks = 0;
+  manager.workspaceBuildBlueprintSelected = () => false;
+  manager.workspaceBuildBlueprintCard = () => ({
+    click: () => {
+      clicks += 1;
+    }
+  });
+  const pending = manager.selectWorkspaceBuildBlueprint('content-production');
+  manager.workspaceBuild = null;
+  assert.equal(await pending, false);
+  assert.ok(clicks <= 1, `clicked ${clicks} times after the build closed`);
+});
+
+test('nothing on the form reaches a paused build until Resume or Start over is chosen', () => {
+  const { manager } = loadBuildWizard();
+  manager.workspaceBuild.session = { id: 'b-1', version: 2, status: 'open' };
+  manager.workspaceBuild.resumeLine = 'line-1';
+  manager.scheduleWorkspaceBuildDraft({ user: true });
+  assert.equal(manager.workspaceBuildTimer ?? null, null);
+  assert.equal(manager.workspaceBuild.draftUser, undefined);
+
+  manager.workspaceBuild.resumeLine = '';
+  manager.scheduleWorkspaceBuildDraft({ user: true });
+  assert.equal(manager.workspaceBuild.draftUser, true);
+  clearTimeout(manager.workspaceBuildTimer);
+});
+
 test('an assistant that can no longer build steps aside and leaves the form as it is', async () => {
   const { manager, nameInput } = loadBuildWizard();
   const lines = [];

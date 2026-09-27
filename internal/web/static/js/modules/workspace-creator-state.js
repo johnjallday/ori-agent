@@ -254,6 +254,15 @@
     tags: ['tags']
   };
 
+  // The server leaves an emptied field out of the draft. When a turn reports
+  // it set one of these and the key is gone, the assistant cleared it.
+  const BUILD_CLEARED_VALUES = {
+    description: '',
+    parent_id: '',
+    color: '',
+    tags: []
+  };
+
   function clonePlain(value) {
     if (value === null || typeof value !== 'object') return value;
     return JSON.parse(JSON.stringify(value));
@@ -279,6 +288,9 @@
       }
       for (const key of BUILD_PATCH_FIELDS[field] || []) {
         if (key in draft) patch[key] = clonePlain(draft[key]);
+        else if (Array.isArray(fields) && key in BUILD_CLEARED_VALUES) {
+          patch[key] = clonePlain(BUILD_CLEARED_VALUES[key]);
+        }
       }
     }
     return patch;

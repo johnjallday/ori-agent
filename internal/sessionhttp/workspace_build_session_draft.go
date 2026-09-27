@@ -82,6 +82,7 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 		if !req.Sync {
 			lines = describeFormEdit(before, draft, validation)
 			blueprintChanged = before.Blank != draft.Blank || before.TemplateID != draft.TemplateID
+			dropOverriddenWhy(session, before, draft)
 		}
 		session.Draft = draft
 		if len(req.TeamState) > 0 {
@@ -118,6 +119,27 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	respondBuildSession(w, http.StatusOK, &result, map[string]any{"blueprint_changed": blueprintChanged})
+}
+
+// dropOverriddenWhy forgets the assistant's reason for a section the user has
+// since changed on the form, so "How this was set up" never explains a choice
+// the user replaced.
+func dropOverriddenWhy(session *personalassistant.WorkspaceBuildSession, before, after personalassistant.BuildDraft) {
+	blueprint := before.Blank != after.Blank || before.TemplateID != after.TemplateID
+	overridden := map[string]bool{
+		"blueprint": blueprint,
+		"details":   before.Name != after.Name || before.Description != after.Description,
+		"placement": before.ParentID != after.ParentID,
+		// A new blueprint changes what the team can be.
+		"team": blueprint || !bytes.Equal(before.RoleStaffing, after.RoleStaffing),
+	}
+	kept := session.Why[:0]
+	for _, why := range session.Why {
+		if !overridden[why.Section] {
+			kept = append(kept, why)
+		}
+	}
+	session.Why = kept
 }
 
 func needsHomeLabel(name string) string {
@@ -320,7 +342,7 @@ func (h *Handler) abandonWorkspaceBuildSession(w http.ResponseWriter, r *http.Re
 		}
 		if session.Status == personalassistant.WorkspaceBuildOpen {
 			session.Status = personalassistant.WorkspaceBuildAbandoned
-			session.PendingQuestion = nil
+			session.Settle()
 			session.Touch(deps.Store.Now())
 		}
 		result = *session

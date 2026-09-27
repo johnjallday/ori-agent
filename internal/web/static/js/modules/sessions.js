@@ -11008,7 +11008,9 @@ const sessionManager = {
       true
     );
     modal.addEventListener('workspace-template-selected', event => {
-      this.noteWorkspaceBuildBlueprintSelected(event?.detail?.template || null);
+      this.noteWorkspaceBuildBlueprintSelected(event?.detail?.template || null, {
+        programmatic: Boolean(event?.detail?.programmatic)
+      });
     });
     modal.addEventListener('workspace-tags-changed', () => {
       if (this.workspaceBuildApplyDepth > 0) return;
@@ -11122,7 +11124,9 @@ const sessionManager = {
       return;
     }
     build.session = session;
-    this.rememberWorkspaceBuildSession(session);
+    // The dialog's create request names this build only once its draft is on
+    // the form: an unanswered "Resume building …?" must not tie a workspace
+    // the user makes by hand to the paused build.
     if (result.body.resumed && !fresh && build.context.buildResume) {
       await this.applyWorkspaceBuildSession(session, { resume: true });
       return;
@@ -11177,7 +11181,7 @@ const sessionManager = {
       return;
     }
     if (action === 'try_again' && build.lastTurn) {
-      await this.sendWorkspaceBuildTurn(build.lastTurn.detail || {}, { retry: true });
+      await this.sendWorkspaceBuildTurn(build.lastTurn.detail || {});
       return;
     }
     if (action === 'folder_again') {
@@ -11210,6 +11214,8 @@ const sessionManager = {
     build.session = null;
     build.lastTurn = null;
     build.pendingFirstMessage = '';
+    build.resumeLine = '';
+    build.chosenBlueprint = undefined;
     build.chosen = new Map();
     build.chosenRoles = new Set();
     this.rememberWorkspaceBuildSession(null);
@@ -11234,7 +11240,7 @@ const sessionManager = {
 
   // sendWorkspaceBuildTurn posts one answer: a sentence or a chip. The user's
   // form edits are sent first, so the assistant answers the form as it is.
-  async sendWorkspaceBuildTurn(detail = {}, options = {}) {
+  async sendWorkspaceBuildTurn(detail = {}) {
     const build = this.workspaceBuild;
     if (!build?.session || build.busy) return;
     const choiceID = String(detail.choiceId || '').trim();
@@ -11251,6 +11257,7 @@ const sessionManager = {
     if (this.workspaceBuild !== build || !build.session) return;
     const body = choiceID ? { choice_id: choiceID } : { text };
     body.version = Number(build.session.version) || 0;
+    if (detail.auto) body.auto = true;
     build.lastTurn = { detail: { ...detail } };
     this.setWorkspaceBuildBusy(true, choiceID ? '' : text);
     let result;
@@ -11261,9 +11268,11 @@ const sessionManager = {
     }
     if (this.workspaceBuild !== build) return;
     this.setWorkspaceBuildBusy(false);
-    if (result?.status === 409 && result.body?.code === 'version' && !options.retry) {
-      // Another tab or an edit moved the build on. Take the current session
-      // and let the user send again from there.
+    if (result?.status === 409 && result.body?.code === 'version') {
+      // Another tab or an edit moved the build on — or the server kept this
+      // very answer before a failure the browser never heard back from. Take
+      // the current session and let the user go on from there; resending
+      // would only meet the same conflict.
       await this.reloadWorkspaceBuildSession();
       return;
     }
@@ -11279,6 +11288,16 @@ const sessionManager = {
       return;
     }
     await this.applyWorkspaceBuildSession(session);
+    if (this.workspaceBuild === build && build.restaffPending) {
+      await this.sendWorkspaceBuildRestaff(build);
+    }
+  },
+
+  // The automatic turn after the user switched the blueprint on the form.
+  sendWorkspaceBuildRestaff(build) {
+    if (this.workspaceBuild !== build) return undefined;
+    build.restaffPending = false;
+    return this.sendWorkspaceBuildTurn({ text: '(I changed the blueprint)', auto: true });
   },
 
   async reloadWorkspaceBuildSession() {
@@ -11447,9 +11466,16 @@ const sessionManager = {
   // Selecting a card is asynchronous: the picker renders after the dialog
   // opens and may re-render to Blank once. Retry until the choice sticks.
   selectWorkspaceBuildBlueprint(id) {
+    const build = this.workspaceBuild;
     return new Promise(resolve => {
       let attempts = 0;
       const step = () => {
+        // A closed or restarted build stops here: its retries must never
+        // click a card in the next, possibly manual, dialog.
+        if (this.workspaceBuild !== build) {
+          resolve(false);
+          return;
+        }
         if (this.workspaceBuildBlueprintSelected(id)) {
           resolve(true);
           return;
@@ -11585,7 +11611,7 @@ const sessionManager = {
     this.scheduleWorkspaceBuildDraft?.();
   },
 
-  noteWorkspaceBuildBlueprintSelected(template) {
+  noteWorkspaceBuildBlueprintSelected(template, options = {}) {
     const build = this.workspaceBuild;
     if (!build) return;
     // The card tag is rebuilt whenever the picker re-renders the grid.
@@ -11598,9 +11624,27 @@ const sessionManager = {
       setTimeout(() => this.renderWorkspaceBuildChosen('blueprint'), 0);
       return;
     }
+    if (options.programmatic) {
+      // The picker fell back to its default after loading its catalog, which
+      // can finish after the build arrived. That is not the user's choice: the
+      // assistant's blueprint goes back on the form, and nothing is recorded.
+      if (assistantChoice !== undefined) void this.reselectWorkspaceBuildBlueprint(build);
+      return;
+    }
     this.clearWorkspaceBuildChosen('blueprint');
     build.chosenBlueprint = undefined;
     this.noteWorkspaceBuildBlueprintChanged?.(template);
+  },
+
+  async reselectWorkspaceBuildBlueprint(build) {
+    if (this.workspaceBuild !== build || build.chosenBlueprint === undefined) return;
+    this.workspaceBuildApplyDepth += 1;
+    try {
+      await this.selectWorkspaceBuildBlueprint(build.chosenBlueprint);
+    } finally {
+      this.workspaceBuildApplyDepth -= 1;
+    }
+    if (this.workspaceBuild === build) this.renderWorkspaceBuildChosen('blueprint');
   },
 
   // applyBuildPatchToWizard writes the fields the assistant set into the form
@@ -11836,7 +11880,7 @@ const sessionManager = {
     if (!api?.buildStepFor || !build || !this.isWorkspaceCreator()) return;
     const draft = {
       ...(session?.draft || {}),
-      ...this.collectCreatePayload()
+      ...(this.collectCreatePayload()?.payload || {})
     };
     const view = this.usesTeamRosterCreator() ? this.teamView() : null;
     const canLeaveTeam = Boolean(view?.canContinueFromTeam) && !this.hasBlockingTeamIssue();
@@ -11902,6 +11946,9 @@ const sessionManager = {
   scheduleWorkspaceBuildDraft(options = {}) {
     const build = this.workspaceBuild;
     if (!build?.session || build.session.status !== 'open') return;
+    // Until the user answers Resume or Start over, the form is not this
+    // build's form, and nothing on it may overwrite the paused draft.
+    if (build.resumeLine) return;
     build.draftUser = Boolean(build.draftUser || options.user !== false);
     if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
     this.workspaceBuildTimer = setTimeout(() => {
@@ -11949,9 +11996,11 @@ const sessionManager = {
       this.rememberWorkspaceBuildSession(session);
       this.workspaceBuildPane()?.applySession(session);
       // Switching the blueprint changes what the team can be, so the
-      // assistant re-staffs it without being asked (FR17).
-      if (result.body.blueprint_changed && !build.busy) {
-        void this.sendWorkspaceBuildTurn({ text: '(I changed the blueprint)' });
+      // assistant re-staffs it without being asked (FR17), after the turn in
+      // flight if there is one.
+      if (result.body.blueprint_changed) {
+        if (build.busy) build.restaffPending = true;
+        else void this.sendWorkspaceBuildRestaff(build);
       }
     };
     build.draftInFlight = send();

@@ -660,9 +660,16 @@ func TestWorkspaceBuild_TheFolderChipOnlyForBlueprintsThatLinkOne(t *testing.T) 
 
 func TestWorkspaceBuild_CreateItIsOnlyAFlag(t *testing.T) {
 	createIt := strings.Replace(describeReply, `"create_now":false`, `"create_now":true`, 1)
-	f := newBuildFixture(t, true, createIt)
+	f := newBuildFixture(t, true, createIt, createIt)
 	build := f.start(t)
-	_, body := f.turn(t, build, map[string]any{"text": "create it"})
+	// The user has not seen the form yet: a first message that says "create
+	// it" still gets a filled form to check, never an immediate create.
+	_, body := f.turn(t, build, map[string]any{"text": "create a newsletter workspace"})
+	build = sessionOf(t, body)
+	if build.CreateNow {
+		t.Fatal("create_now honoured before the user saw the form")
+	}
+	_, body = f.turn(t, build, map[string]any{"text": "create it"})
 	if got := sessionOf(t, body); !got.CreateNow || got.Status != personalassistant.WorkspaceBuildOpen {
 		t.Fatalf("create_now %+v", got)
 	}
@@ -680,11 +687,15 @@ func TestWorkspaceBuild_ACreateClosesTheBuildAndRecordsHowItWasSetUp(t *testing.
 	_, body := f.turn(t, build, map[string]any{"text": "a newsletter from my research notes every monday"})
 	build = sessionOf(t, body)
 
-	f.handler.finishWorkspaceBuild(context.Background(), build.ID, ws.ID)
+	created := personalassistant.BuildDraft{TemplateID: build.Draft.TemplateID}
+	f.handler.finishWorkspaceBuild(context.Background(), build.ID, ws.ID, created)
 	doc, _ := f.store.Read(context.Background(), "local")
 	closed := doc.Session(build.ID)
 	if closed.Status != personalassistant.WorkspaceBuildCreated || closed.CreatedWorkspaceID != ws.ID {
 		t.Fatalf("session %+v", closed)
+	}
+	if len(closed.Transcript) != 0 || closed.TeamState != nil || closed.Draft.TemplateID != "" {
+		t.Fatalf("a created build keeps only what it needs: %+v", closed)
 	}
 	stored, _ := workspaces.Get(ws.ID)
 	summary := stored.GetTemplateProvenance().BuildSummary
@@ -695,18 +706,26 @@ func TestWorkspaceBuild_ACreateClosesTheBuildAndRecordsHowItWasSetUp(t *testing.
 	}
 	// The team line comes from what was created, not from the model's words.
 	decided := buildSummaryFor(personalassistant.WorkspaceBuildSession{
-		Why: []personalassistant.BuildWhy{{Section: "team", Text: "Assigned Luna, as you asked."}},
-		Draft: personalassistant.BuildDraft{
-			RoleStaffing:       json.RawMessage(`[{"role_id":"research-lead","mode":"create","name":"Research Lead"}]`),
-			ExistingAgentNames: []string{"Scout"},
+		Why: []personalassistant.BuildWhy{
+			{Section: "team", Text: "Assigned Luna, as you asked."},
+			{Section: "blueprint", Text: "Research Project fits notes."},
 		},
+		Draft: personalassistant.BuildDraft{TemplateID: "research-project"},
+	}, personalassistant.BuildDraft{
+		TemplateID:         "content-production",
+		RoleStaffing:       json.RawMessage(`[{"role_id":"research-lead","mode":"create","name":"Research Lead"}]`),
+		ExistingAgentNames: []string{"Scout"},
 	})
+	// The blueprint's reason is dropped: the user created another blueprint.
 	if len(decided.Decisions) != 1 || decided.Decisions[0].Text != "Research lead: a new agent, “Research Lead”; Scout joins the team" {
 		t.Fatalf("team decision %+v", decided.Decisions)
 	}
 	// Idempotent for the same workspace; ignored for an unknown or closed build.
-	f.handler.finishWorkspaceBuild(context.Background(), build.ID, ws.ID)
-	f.handler.finishWorkspaceBuild(context.Background(), "unknown", ws.ID)
+	f.handler.finishWorkspaceBuild(context.Background(), build.ID, ws.ID, created)
+	f.handler.finishWorkspaceBuild(context.Background(), "unknown", ws.ID, created)
+	if stored, _ := workspaces.Get(ws.ID); len(stored.GetTemplateProvenance().BuildSummary.Decisions) != 1 {
+		t.Fatal("a retried create must not rewrite the record from the settled build")
+	}
 	if again := f.start(t); again.ID == build.ID {
 		t.Fatal("a created build is never resumed")
 	}
@@ -797,5 +816,70 @@ func TestWorkspaceBuildValidation_ANewBlueprintClearsWhatBelongedToTheOld(t *tes
 	}
 	if session.NeedsHome == nil || session.NeedsHome.Label != "Studio Home" {
 		t.Fatalf("needs home %+v", session.NeedsHome)
+	}
+}
+
+func TestWorkspaceBuildValidation_ASavedAgentsNameIsAssignedNotMadeAgain(t *testing.T) {
+	content := personalassistant.BuildDraft{TemplateID: "content-production", Name: "Desk"}
+	session, result := applyTestPatch(t, content, buildReplyPatch{Set: []string{"team"}, Team: buildReplyTeam{
+		Roles:       []buildReplyRole{{RoleID: "content-editor", Mode: "create", AgentName: "luna"}},
+		Agents:      []buildReplyAgent{{Name: "Content Lead", Action: "create", Rename: "Scout", Provider: "openai", Model: "gpt-5"}},
+		SavedAgents: []string{"Luna", "luna", "Scout"},
+	}})
+	if strings.Join(result.applied, ",") != "team" || len(result.rejections) != 0 {
+		t.Fatalf("applied %v rejected %v", result.applied, result.rejections)
+	}
+	roles := map[string]personalassistant.BuildRole{}
+	for _, role := range session.TeamPatch.Roles {
+		roles[role.RoleID] = role
+	}
+	if role := roles["content-editor"]; role.Mode != "assign" || role.AgentName != "Luna" {
+		t.Fatalf("content editor %+v", role)
+	}
+	if role := roles["content-lead"]; role.Mode != "assign" || role.AgentName != "Scout" || role.Model != "" {
+		t.Fatalf("content lead %+v", role)
+	}
+	if got := strings.Join(session.TeamPatch.SavedAgents, ","); got != "Luna,Scout" {
+		t.Fatalf("saved agents %q", got)
+	}
+	receipt := buildTeamReceipt(session.TeamPatch, buildValidation{catalog: buildTestCatalog()}, session.Draft)
+	if strings.Contains(receipt, "a new agent") {
+		t.Fatalf("receipt claims a new agent: %q", receipt)
+	}
+}
+
+func TestWorkspaceBuild_AFormEditMadeDuringTheCallStands(t *testing.T) {
+	before := personalassistant.BuildDraft{TemplateID: "content-production", Name: "Desk"}
+	after := before
+	after.Name = "Field Notes"
+	reply := buildOutcome{kind: "reply", reply: buildReply{Patch: buildReplyPatch{
+		Set: []string{"name", "description"}, Name: "Newsletter Desk", Description: "Weekly notes.",
+	}}}
+	kept := withoutFormEdits(reply, before, after).reply.Patch
+	if kept.sets(buildFieldName) || !kept.sets(buildFieldDescription) {
+		t.Fatalf("set %v", kept.Set)
+	}
+	// A plain-chat reply names its fields by filling them in; dropping them
+	// all must not turn it back into "whatever is filled in".
+	plain := buildOutcome{kind: "reply", reply: buildReply{Patch: buildReplyPatch{Name: "Newsletter Desk"}}}
+	if left := withoutFormEdits(plain, before, after).reply.Patch; left.sets(buildFieldName) {
+		t.Fatalf("set %v", left.Set)
+	}
+	if unchanged := withoutFormEdits(reply, before, before); strings.Join(unchanged.reply.Patch.Set, ",") != "name,description" {
+		t.Fatalf("an untouched form keeps the whole reply: %v", unchanged.reply.Patch.Set)
+	}
+}
+
+func TestWorkspaceBuild_AnAutomaticTurnIsNotTheUsersRequest(t *testing.T) {
+	f := newBuildFixture(t, true, describeReply, describeReply)
+	build := f.start(t)
+	_, body := f.turn(t, build, map[string]any{"text": "(I changed the blueprint)", "auto": true})
+	build = sessionOf(t, body)
+	if build.FirstRequest != "" {
+		t.Fatalf("first request %q", build.FirstRequest)
+	}
+	_, body = f.turn(t, build, map[string]any{"text": "a newsletter from my notes"})
+	if got := sessionOf(t, body).FirstRequest; got != "a newsletter from my notes" {
+		t.Fatalf("first request %q", got)
 	}
 }

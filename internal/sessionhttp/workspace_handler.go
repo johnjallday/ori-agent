@@ -936,7 +936,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// A create that finishes a "Build with your assistant" session closes it
 	// and records how the workspace was set up. Last, so no later write of the
 	// workspace can drop the record; best-effort, so it never fails a create.
-	h.finishWorkspaceBuild(r.Context(), req.BuildSessionID, ws.ID)
+	h.finishWorkspaceBuild(r.Context(), req.BuildSessionID, ws.ID, createdBuildDraft(req))
 
 	response := map[string]any{
 		"success": true,
