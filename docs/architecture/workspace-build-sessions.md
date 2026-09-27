@@ -193,4 +193,5 @@ message text or draft values.
   `build_workspace` hand-off). Run it against a fresh sandbox.
 - Live demos: `scripts/demo-build-assistant.mjs` drives the real pane against a demo
   server with a real model; `scripts/smoke.sh build-session <url> seed` hires an assistant
-  and seeds two saved agents and a system model.
+  and seeds two saved agents and a system model (by default the Codex CLI with
+  `gpt-5.6-luna`, which needs the demo server started with `CODEX_HOME="$HOME/.codex"`).

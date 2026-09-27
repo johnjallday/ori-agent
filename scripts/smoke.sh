@@ -2286,13 +2286,18 @@ if hits:
 print("ok   %s has no agent type" % label)' "$1"
 }
 
-# smoke_agent_type_api checks that an API client still posting the retired
 # smoke_build_session prepares and checks "Build with your assistant"
 # (tasks/prd-build-with-your-assistant.md) on a running demo server:
 #   seed [provider] [model]  hire the assistant, build its HQ, add two saved
 #                            agents (Luna, Scout), and set the system model
-#                            (default openai / gpt-5-nano) so a build can talk
+#                            (default codex / gpt-5.6-luna) so a build can talk
 #   availability             print GET /api/workspaces/build-sessions/availability
+#
+# The default runs the assistant on the Codex CLI with your own Codex login.
+# A demo sandbox has its own HOME, so start the server with your Codex home:
+#   CODEX_HOME="$HOME/.codex" ./scripts/demo-server.sh 8941 "$TMPDIR/ori-demo.build"
+# Codex then records each turn in that home's sessions/. Another model:
+#   ./scripts/smoke.sh build-session <url> seed openai gpt-5-nano   (OPENAI_API_KEY)
 smoke_build_session() {
   local stage="${3:-availability}"
   # A demo server started in the background a moment ago may still be
@@ -2300,7 +2305,7 @@ smoke_build_session() {
   smoke_show_wait
   case "$stage" in
   seed)
-    local provider="${4:-openai}" model="${5:-gpt-5-nano}" name
+    local provider="${4:-codex}" model="${5:-gpt-5.6-luna}" name availability
     smoke_show_folder build-session "$BASE_URL" hq
     for name in Luna Scout; do
       curl -s -o /dev/null -w "%{http_code} saved agent $name\n" -X POST "$BASE_URL/api/agents" \
@@ -2308,8 +2313,12 @@ smoke_build_session() {
     done
     curl -s -o /dev/null -w "%{http_code} system model $provider/$model\n" -X POST "$BASE_URL/api/settings/system-model" \
       -H 'Content-Type: application/json' -d "{\"provider\":\"$provider\",\"model\":\"$model\"}"
-    curl -s "$BASE_URL/api/workspaces/build-sessions/availability"
-    echo
+    availability=$(curl -s "$BASE_URL/api/workspaces/build-sessions/availability")
+    echo "$availability"
+    if [[ "$provider" == codex && "$availability" != *'"available":true'* ]]; then
+      echo "hint: the codex provider registers only when the server finds your Codex login;" >&2
+      echo "      restart it with CODEX_HOME=\"\$HOME/.codex\" ./scripts/demo-server.sh <port> <sandbox>" >&2
+    fi
     ;;
   availability)
     curl -s "$BASE_URL/api/workspaces/build-sessions/availability"
@@ -2319,6 +2328,7 @@ smoke_build_session() {
   esac
 }
 
+# smoke_agent_type_api checks that an API client still posting the retired
 # "type" key succeeds, and that no agent or model response echoes it
 # (retire-agent-type, PRD FR11-FR13).
 smoke_agent_type_api() {
