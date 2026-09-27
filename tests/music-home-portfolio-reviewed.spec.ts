@@ -856,7 +856,17 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(revokedQueue).toContainText('Project setup is unavailable');
     await expect(revokedQueue.getByRole('button', { name: 'Review this song' })).toHaveCount(0);
     await shot(page, '34-revoked-queue-skip-only');
-    await revokedQueue.getByRole('button', { name: 'Skip this song' }).click();
+    await expect(revokedQueue.getByRole('button', { name: 'Pause queue' })).toBeFocused();
+    await revokedQueue.getByRole('button', { name: 'Pause queue' }).press('Enter');
+    expect((await json(await request.get(`${base}/queue`))).queue).toMatchObject({ index: 0 });
+    await expect(shelf).toHaveAttribute('aria-busy', 'false');
+    await expect(shelf.locator('#projectLibraryQueueResume')).toBeEnabled();
+    await shelf.locator('#projectLibraryQueueResume').press('Enter');
+    await expect(page.getByRole('dialog', { name: 'Song 1 of 2 · Album-1' })).toBeVisible();
+    await page
+      .getByRole('dialog', { name: 'Song 1 of 2 · Album-1' })
+      .getByRole('button', { name: 'Skip this song' })
+      .press('Enter');
     const pausedForForget = page.getByRole('dialog', { name: 'Song 2 of 2 · Album-4' });
     await expect(pausedForForget.getByRole('button', { name: 'Review this song' })).toHaveCount(0);
     await pausedForForget.getByRole('button', { name: 'Pause queue' }).click();
@@ -907,7 +917,8 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(forgottenQueue).toContainText('Project setup is unavailable');
     await expect(forgottenQueue.getByRole('button', { name: 'Review this song' })).toHaveCount(0);
     await shot(page, '35-forgotten-queue-skip-only');
-    await forgottenQueue.getByRole('button', { name: 'Skip this song' }).click();
+    await expect(forgottenQueue.getByRole('button', { name: 'Pause queue' })).toBeFocused();
+    await forgottenQueue.getByRole('button', { name: 'Skip this song' }).press('Enter');
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeHidden();
     expect((await json(await request.get(`${base}/queue`))).queue).toBeUndefined();
     await expect(shelf.locator('#projectLibraryResume')).not.toContainText(
