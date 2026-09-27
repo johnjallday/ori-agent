@@ -168,6 +168,7 @@ test('serial queue resumes after a lost creator response without creating the co
   try {
     let connected = false;
     let commits = 0;
+    let refreshes = 0;
     let lastStatus = '';
     const configure = panel => {
       panel.state = { provider_read_only: false };
@@ -175,7 +176,9 @@ test('serial queue resumes after a lost creator response without creating the co
       panel.status = message => {
         lastStatus = message;
       };
-      panel.refresh = async () => {};
+      panel.refresh = async () => {
+        refreshes++;
+      };
       panel.renderQueueControls = () => {};
       panel.request = async path =>
         path.endsWith('/activation')
@@ -210,6 +213,8 @@ test('serial queue resumes after a lost creator response without creating the co
     await first.continueQueue();
     assert.equal(commits, 1, lastStatus);
     assert.equal(first.queue.index, 0);
+    assert.equal(refreshes, 1);
+    assert.match(lastStatus, /resume to reconcile this confirmed song/);
     const persisted = readActivationQueue('home', globalThis.sessionStorage);
     assert.equal(persisted.pending.id, 'first');
     assert.equal(persisted.pending.token, 'exact-review');

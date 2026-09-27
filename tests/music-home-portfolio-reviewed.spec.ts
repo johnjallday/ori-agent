@@ -533,6 +533,13 @@ test('the reviewed release resolves a real portfolio offer, then separate review
         return page.rows.find((row: { id: string }) => row.id === album2ID)?.connection;
       })
       .toBe('connected');
+    await expect(
+      shelf.locator('#projectLibraryRows tr').filter({ hasText: 'Album-2' })
+    ).toContainText('connected');
+    await page.evaluate(() => {
+      const status = document.getElementById('projectLibraryQueueStatus');
+      if (status) scrollTo(0, scrollY + status.getBoundingClientRect().top - 160);
+    });
     await shot(page, '27b-confirmed-project-lost-browser-reply');
     await page.unroute(commitRoute);
     await page.reload();

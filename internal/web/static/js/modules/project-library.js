@@ -765,9 +765,23 @@ export class ProjectLibraryPanel {
           }
           this.saveQueue();
         } catch (error) {
-          this.status(
-            `${error.message || 'Project setup needs a fresh review.'} Queue paused; previously confirmed projects remain connected.`
-          );
+          if (this.queue?.pending) {
+            // A lost HTTP reply does not prove the creator failed. Refresh
+            // the saved link projection before showing the paused queue;
+            // resume still reconciles the exact confirmed operation key.
+            try {
+              await this.refresh();
+            } catch (_) {
+              // Keep the retry key. The next explicit resume rechecks it.
+            }
+            this.status(
+              `${error.message || 'The result is uncertain'}. Review the saved link above. Queue paused; resume to reconcile this confirmed song without creating another.`
+            );
+          } else {
+            this.status(
+              `${error.message || 'Project setup needs a fresh review.'} Queue paused; previously confirmed projects remain connected.`
+            );
+          }
           return;
         }
       }
