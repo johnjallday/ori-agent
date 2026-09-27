@@ -4511,7 +4511,7 @@ function loadBuildWizard() {
     chosen: new Map(),
     chosenRoles: new Set()
   };
-  return { manager, nodes, nameInput, nameLabel, parentSelect, allTags, calls };
+  return { manager, window, nodes, nameInput, nameLabel, parentSelect, allTags, calls };
 }
 
 test('an assistant patch fills the form through its setters and tags each field', async () => {
@@ -4569,6 +4569,64 @@ test('the user’s first edit removes the tag; the assistant’s own edits do no
   assert.equal(tagFor(), undefined);
   assert.equal('chosenBy' in nameInput.dataset, false);
   assert.equal(manager.workspaceBuild.chosen.has('name'), false);
+});
+
+test('“create it” with a gate still closed says why and submits nothing', async () => {
+  const { manager } = loadBuildWizard();
+  const lines = [];
+  manager.workspaceBuild.session = { id: 'b-1', version: 3, status: 'open' };
+  manager.workspaceBuildPane = () => ({
+    COPY: { gateFailurePrefix: 'Not yet — ' },
+    showLine: text => lines.push(text)
+  });
+  let created = 0;
+  manager.createFolder = async () => {
+    created += 1;
+  };
+  manager.blueprintSelectionBlocked = () => false;
+  manager.workspaceIdentityProblem = () => 'Workspace name is required';
+  await manager.createFromWorkspaceBuild();
+  assert.deepEqual(lines, ['Not yet — Workspace name is required']);
+  assert.equal(created, 0);
+
+  manager.workspaceIdentityProblem = () => '';
+  manager.existingProjectProblem = () => '';
+  manager.blueprintInputsAvailable = () => false;
+  manager.usesTeamRosterCreator = () => false;
+  manager.groupRequirementBlocked = () => false;
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.creatorWizardSteps = () => [1, 2, 3, 4];
+  manager.wizardStep = 4;
+  await manager.createFromWorkspaceBuild();
+  assert.equal(created, 1, 'with every gate open it runs the Create submit');
+});
+
+test('an assistant team waits for the blueprint’s plan before it is applied', async () => {
+  const { manager, window } = loadBuildWizard();
+  const applied = [];
+  window.CreateWorkspaceTeamDraft = {
+    applyTeamPatch: (_draft, patch) => {
+      applied.push(patch);
+      return ['content-lead'];
+    }
+  };
+  manager.teamDraft = { plan: { status: 'loading' }, savedRoster: { status: 'ready' } };
+  manager.ensureWorkspaceTeamDraft = () => manager.teamDraft;
+  manager.renderExistingAgentRoster = () => {};
+  manager.markWorkspaceBuildChosen = () => {};
+  manager.existingAgentRosterLoaded = true;
+  const pending = manager.applyWorkspaceBuildTeamPatch(
+    { roles: [{ role_id: 'content-lead', mode: 'assign', agent_name: 'Luna' }] },
+    'Luna',
+    { animate: false }
+  );
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(applied.length, 0, 'nothing is applied to a plan that is still loading');
+  manager.teamDraft.plan.status = 'ready';
+  const filled = await pending;
+  assert.equal(applied.length, 1);
+  assert.deepEqual([...filled], ['content-lead']);
+  assert.equal(manager.workspaceBuild.chosenRoles.has('content-lead'), true);
 });
 
 test('collectCreatePayload returns exactly what Create posts, without a request', () => {

@@ -10776,6 +10776,8 @@ const sessionManager = {
     this.refreshWizardChrome();
     const body = document.querySelector('#addFolderModal .modal-body');
     if (body) body.scrollTop = 0;
+    // A build remembers the furthest step, to resume there.
+    if (this.workspaceBuild) this.scheduleWorkspaceBuildDraft({ user: false });
     if (!moveFocus) return;
     const heading = document.getElementById(`wizardStep${this.wizardStep}Title`);
     if (heading) heading.focus();
@@ -11004,8 +11006,22 @@ const sessionManager = {
       this.noteWorkspaceBuildBlueprintSelected(event?.detail?.template || null);
     });
     modal.addEventListener('workspace-tags-changed', () => {
-      if (this.workspaceBuildApplyDepth === 0) this.clearWorkspaceBuildChosen('tags');
+      if (this.workspaceBuildApplyDepth > 0) return;
+      this.clearWorkspaceBuildChosen('tags');
+      this.scheduleWorkspaceBuildDraft({ user: true });
     });
+    // Team edits happen through many buttons (create, customize, add a saved
+    // agent). Any click the user makes on Details or Team is followed by a
+    // debounced draft write; one that changed nothing says nothing.
+    modal.addEventListener(
+      'click',
+      event => {
+        if (!this.workspaceBuild || this.workspaceBuildApplyDepth > 0) return;
+        if (!event?.target?.closest?.('#wizardStep2, #wizardStep3')) return;
+        setTimeout(() => this.scheduleWorkspaceBuildDraft({ user: true }), 0);
+      },
+      true
+    );
   },
 
   // maybeStartWorkspaceBuild runs on every open. Build mode is offered only
@@ -11143,6 +11159,14 @@ const sessionManager = {
     }
     if (action === 'try_again' && build.lastTurn) {
       await this.sendWorkspaceBuildTurn(build.lastTurn.detail || {}, { retry: true });
+      return;
+    }
+    if (action === 'folder_again') {
+      await this.chooseWorkspaceBuildFolder();
+      return;
+    }
+    if (action === 'folder_skip') {
+      await this.sendWorkspaceBuildTurn({ text: pane.COPY.noFolder });
     }
   },
 
@@ -11199,7 +11223,12 @@ const sessionManager = {
       .trim()
       .slice(0, 2000);
     if (!choiceID && !text) return;
-    await this.flushWorkspaceBuildDraft?.();
+    // Choosing a folder happens on the form, never as a turn.
+    if (choiceID === 'folder_choose') {
+      await this.chooseWorkspaceBuildFolder();
+      return;
+    }
+    await this.flushWorkspaceBuildDraft();
     if (this.workspaceBuild !== build || !build.session) return;
     const body = choiceID ? { choice_id: choiceID } : { text };
     body.version = Number(build.session.version) || 0;
@@ -11288,7 +11317,13 @@ const sessionManager = {
     }
     if (this.workspaceBuild !== build) return;
     this.advanceWorkspaceBuildWizard(session, { resume });
-    if (session.create_now && !resume) await this.createFromWorkspaceBuild?.();
+    // The session learns what applying the turn did to the form (the team
+    // keys the Team step derived, the step reached) without calling it the
+    // user's edit. Sent at once, so a click right after cannot claim it.
+    this.scheduleWorkspaceBuildDraft({ user: false });
+    await this.flushWorkspaceBuildDraft();
+    if (this.workspaceBuild !== build) return;
+    if (session.create_now && !resume) await this.createFromWorkspaceBuild();
   },
 
   collapseWorkspaceBuild({ withdraw = false } = {}) {
@@ -11752,6 +11787,216 @@ const sessionManager = {
     if (target > this.wizardStep) this.goToWizardStep(target, { focus: false });
   },
 
+  // The create-request keys a build session's draft holds (FR12). Anything
+  // else collectCreatePayload returns (the entry point, a folder offer) is
+  // about this open, not about the workspace, and stays out of the draft.
+  workspaceBuildDraftKeys: [
+    'template_id',
+    'blank',
+    'name',
+    'description',
+    'blueprint_inputs',
+    'parent_id',
+    'color',
+    'tags',
+    'workspace_preset',
+    'workspace_bootstrap',
+    'project_connection',
+    'team_intent',
+    'role_staffing',
+    'template_agent_overrides',
+    'template_agent_review',
+    'existing_agent_names',
+    'entry_agent_name',
+    'create_template_agents'
+  ],
+
+  workspaceBuildDraftBody(sync) {
+    const { payload } = this.collectCreatePayload();
+    const draft = {};
+    for (const key of this.workspaceBuildDraftKeys) {
+      const value = payload[key];
+      if (value === undefined || value === null || value === '') continue;
+      draft[key] = value;
+    }
+    const teamState = window.CreateWorkspaceTeamDraft?.serialize?.(this.teamDraft) || null;
+    const body = { draft, version: Number(this.workspaceBuild?.session?.version) || 0 };
+    if (teamState) body.team_state = teamState;
+    if (this.wizardStep >= 1 && this.wizardStep <= 4) body.step = this.wizardStep;
+    if (sync) body.sync = true;
+    return body;
+  },
+
+  // scheduleWorkspaceBuildDraft sends the form to the session shortly after it
+  // settles (FR16). A user's own edit is said back in the transcript; a sync
+  // only records what applying the assistant's turn did to the form. A user
+  // edit in the same window wins, so it is never mistaken for a sync.
+  scheduleWorkspaceBuildDraft(options = {}) {
+    const build = this.workspaceBuild;
+    if (!build?.session || build.session.status !== 'open') return;
+    build.draftUser = Boolean(build.draftUser || options.user !== false);
+    if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
+    this.workspaceBuildTimer = setTimeout(() => {
+      this.workspaceBuildTimer = null;
+      void this.flushWorkspaceBuildDraft();
+    }, 500);
+  },
+
+  async flushWorkspaceBuildDraft() {
+    const build = this.workspaceBuild;
+    if (this.workspaceBuildTimer) {
+      clearTimeout(this.workspaceBuildTimer);
+      this.workspaceBuildTimer = null;
+    }
+    if (!build?.session || build.session.status !== 'open') return;
+    if (build.draftInFlight) await build.draftInFlight;
+    if (this.workspaceBuild !== build || build.draftUser === undefined) return;
+    const user = Boolean(build.draftUser);
+    build.draftUser = undefined;
+    const body = this.workspaceBuildDraftBody(!user);
+    const key = JSON.stringify({ draft: body.draft, team: body.team_state, step: body.step });
+    if (key === build.lastDraftKey) return;
+    const send = async (retry = false) => {
+      let result;
+      try {
+        result = await this.workspaceBuildApi().draft(build.session.id, body);
+      } catch (_) {
+        return;
+      }
+      if (this.workspaceBuild !== build) return;
+      if (result?.status === 409 && result.body?.code === 'version' && !retry) {
+        const reloaded = await this.workspaceBuildApi()
+          .create({ entry_point: build.context.entryPoint })
+          .catch(() => null);
+        if (this.workspaceBuild !== build || !reloaded?.body?.session) return;
+        build.session = reloaded.body.session;
+        body.version = Number(build.session.version) || 0;
+        await send(true);
+        return;
+      }
+      const session = result?.body?.session;
+      if (!result?.ok || !session) return;
+      build.session = session;
+      build.lastDraftKey = key;
+      this.rememberWorkspaceBuildSession(session);
+      this.workspaceBuildPane()?.applySession(session);
+      // Switching the blueprint changes what the team can be, so the
+      // assistant re-staffs it without being asked (FR17).
+      if (result.body.blueprint_changed && !build.busy) {
+        void this.sendWorkspaceBuildTurn({ text: '(I changed the blueprint)' });
+      }
+    };
+    build.draftInFlight = send();
+    try {
+      await build.draftInFlight;
+    } finally {
+      if (this.workspaceBuild === build) build.draftInFlight = null;
+    }
+  },
+
+  noteWorkspaceBuildBlueprintChanged() {
+    this.scheduleWorkspaceBuildDraft({ user: true });
+  },
+
+  // The folder chip opens the Details step's own picker; the browser never
+  // sends a path (FR20). Choosing a folder there is the user's answer, so the
+  // conversation continues from it once Ori has read the folder.
+  async chooseWorkspaceBuildFolder() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build || !pane) return;
+    if (!this.existingProjectChoiceAvailable()) {
+      pane.showLine(pane.COPY.folderLater);
+      return;
+    }
+    if (this.wizardStep !== 2) this.goToWizardStep(2, { focus: false });
+    this.setExistingProjectMode('existing_project');
+    await this.chooseExistingProjectFolder();
+    if (this.workspaceBuild !== build) return;
+    for (
+      let attempt = 0;
+      attempt < 50 && this.existingProjectChoice?.review?.state === 'checking';
+      attempt++
+    ) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    if (this.workspaceBuild !== build) return;
+    if (this.usesExistingProject() && !this.existingProjectProblem()) {
+      this.scheduleWorkspaceBuildDraft({ user: true });
+      await this.sendWorkspaceBuildTurn({ text: pane.COPY.folderChosen });
+      return;
+    }
+    pane.showLine(pane.COPY.folderNotChosen, {
+      chips: [
+        { id: 'folder_again', label: pane.COPY.chooseFolder },
+        { id: 'folder_skip', label: pane.COPY.noFolder }
+      ]
+    });
+  },
+
+  // The first gate the wizard would refuse Create on, in the wizard's own
+  // words, or '' when Create can go ahead.
+  workspaceBuildGateProblem() {
+    if (this.blueprintSelectionBlocked()) {
+      return (
+        window.ProjectTemplateCard?.getSelectedReadiness?.()?.summary ||
+        'This blueprint isn’t ready yet.'
+      );
+    }
+    const identity = this.workspaceIdentityProblem();
+    if (identity) return identity;
+    const project = this.existingProjectProblem();
+    if (project) return typeof project === 'string' ? project : project.message || '';
+    const fields = this.blueprintInputsAvailable()
+      ? this.blueprintInputsDraft?.declaration?.fields || []
+      : [];
+    for (const field of fields) {
+      const problem = this.blueprintInputProblem(String(field?.id || ''));
+      if (problem) return problem;
+    }
+    if (this.usesTeamRosterCreator() && this.hasBlockingTeamIssue()) {
+      return this.teamView()?.blockingIssues?.[0]?.message || 'The team needs attention.';
+    }
+    if (this.groupRequirementBlocked()) {
+      return 'Choose grouped or standalone placement before creating.';
+    }
+    return '';
+  },
+
+  // "Create it" runs the Create button's own submit (FR24). When a gate would
+  // refuse, nothing is submitted and the pane says why, in the gate's words.
+  async createFromWorkspaceBuild() {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!build || !pane || this.isCreatingFolder) return;
+    const problem = this.workspaceBuildGateProblem();
+    if (problem) {
+      pane.showLine(`${pane.COPY.gateFailurePrefix}${problem}`);
+      return;
+    }
+    await this.flushWorkspaceBuildDraft();
+    if (this.workspaceBuild !== build) return;
+    const steps = this.creatorWizardSteps();
+    const review = steps[steps.length - 1];
+    if (this.wizardStep !== review) this.goToWizardStep(review, { focus: false });
+    await this.createFolder();
+  },
+
+  // A refused create is also said in the conversation, with the same words the
+  // wizard shows, so the user can answer it there (FR24).
+  mirrorWorkspaceBuildError(message) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    const text = String(message || '').trim();
+    if (!build || !pane || !text || build.collapsed) return;
+    // A server refusal is seen once when it arrives and again when Create
+    // gives up on it; the conversation says it once.
+    if (build.lastMirrored === text && build.lastMirroredVersion === build.session?.version) return;
+    build.lastMirrored = text;
+    build.lastMirroredVersion = build.session?.version;
+    pane.showLine(text);
+  },
+
   // collectCreatePayload assembles the request Create sends from the wizard's
   // current state, and nothing else: no request, no navigation, no change to
   // the form. createFolder() posts what it returns, and a build session records
@@ -11895,6 +12140,11 @@ const sessionManager = {
       if (window.WorkspaceTagsCard) {
         Object.assign(payload, window.WorkspaceTagsCard.getPayloadFields());
       }
+      // A create that finishes a build names it, so the server can close the
+      // session and record how the workspace was set up. It changes nothing
+      // about what is created.
+      const buildSessionID = String(creatorContext?.buildSession?.id || '').trim();
+      if (buildSessionID && !ordinaryGroup) payload.build_session_id = buildSessionID;
     }
     return { payload, endpoint, assistantHireConfig };
   },
@@ -12116,6 +12366,7 @@ const sessionManager = {
         } catch (parseErr) {
           result = {};
         }
+        if (!response.ok) this.mirrorWorkspaceBuildError(result.error || result.message);
 
         if (response.status === 409 && importEnabled && result.duplicate) {
           this.showImportDuplicateWarning(result.duplicate);
@@ -12699,6 +12950,7 @@ const sessionManager = {
       // The modal stays open and the draft is untouched, so the user can fix the
       // problem and resubmit rather than rebuilding the team from scratch.
       if (!importEnabled) this.showWorkspaceCreateError(message);
+      if (!error?.status) this.mirrorWorkspaceBuildError(message);
     } finally {
       this.isCreatingFolder = false;
       if (

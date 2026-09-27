@@ -116,6 +116,39 @@ type TemplateProvenance struct {
 	// AssistantSetup is present only when the server-only reviewed creator seam
 	// supplied the operation descriptor. Ordinary browser creation cannot set it.
 	AssistantSetup *AssistantSetupCreation `json:"assistant_setup,omitempty"`
+	// BuildSummary records how the Personal Assistant set this workspace up,
+	// when it was built in conversation: who, when, what the user asked for,
+	// and the reasons behind each choice. Recording it installs, enables, or
+	// attaches nothing.
+	BuildSummary *BuildSummary `json:"build_summary,omitempty"`
+}
+
+// BuildSummary is the "How this was set up" record of a workspace built with
+// the assistant.
+type BuildSummary struct {
+	AssistantName string          `json:"assistant_name"`
+	SessionID     string          `json:"session_id"`
+	CreatedAt     time.Time       `json:"created_at"`
+	TurnCount     int             `json:"turn_count"`
+	UserRequest   string          `json:"user_request,omitempty"`
+	Decisions     []BuildDecision `json:"decisions,omitempty"`
+}
+
+// BuildDecision is one reason, for one section of the workspace (blueprint,
+// details, team, or placement).
+type BuildDecision struct {
+	Section string `json:"section"`
+	Text    string `json:"text"`
+}
+
+// Clone returns a detached copy.
+func (s *BuildSummary) Clone() *BuildSummary {
+	if s == nil {
+		return nil
+	}
+	cp := *s
+	cp.Decisions = append([]BuildDecision(nil), s.Decisions...)
+	return &cp
 }
 
 // cloneCapabilityRequirements returns a defensive copy, including each
@@ -177,6 +210,7 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 		creation := *src.AssistantSetup
 		dst.AssistantSetup = &creation
 	}
+	dst.BuildSummary = src.BuildSummary.Clone()
 }
 
 // RuntimeRequirementsSnapshot returns a defensive copy of the runtime contract

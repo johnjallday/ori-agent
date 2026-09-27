@@ -31,6 +31,12 @@
     placeholder: 'Type a reply…',
     showEarlier: 'Show earlier',
     resume: 'Resume',
+    chooseFolder: 'Choose a folder',
+    noFolder: 'No folder',
+    folderChosen: 'I chose a folder.',
+    folderNotChosen: 'No folder was linked. Try again, or go on without one.',
+    folderLater:
+      'This blueprint can’t link a folder you already have — after you create it, use “Explore a folder” on Home.',
     fallbackName: 'Your assistant',
     chosenBy: name => `Chosen by ${name}`,
     buildWith: name => `Build with ${name}`,

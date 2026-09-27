@@ -318,6 +318,11 @@ type createWorkspaceRequest struct {
 	// travels here; the server holds it against the offer.
 	EntryPoint    string `json:"entry_point,omitempty"`
 	FolderOfferID string `json:"folder_offer_id,omitempty"`
+	// BuildSessionID names the "Build with your assistant" session this create
+	// finishes. It is a reference only: it never changes what is created. After
+	// the workspace exists the session is marked created and its summary is
+	// recorded on the workspace.
+	BuildSessionID string `json:"build_session_id,omitempty"`
 }
 
 // folderDigestEntryPoint is the EntryPoint a "show me a folder" create sends.
@@ -927,6 +932,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Workspace created", logger.Fields{"id": ws.ID, "name": req.Name, "folder_slug": ws.FolderSlug, "kind": ws.Kind})
+
+	// A create that finishes a "Build with your assistant" session closes it
+	// and records how the workspace was set up. Last, so no later write of the
+	// workspace can drop the record; best-effort, so it never fails a create.
+	h.finishWorkspaceBuild(r.Context(), req.BuildSessionID, ws.ID)
 
 	response := map[string]any{
 		"success": true,

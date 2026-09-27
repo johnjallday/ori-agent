@@ -23,6 +23,10 @@ type patchBuildDraftRequest struct {
 	Version   int64                        `json:"version"`
 	// Step is the wizard step the user has reached, for resuming there.
 	Step int `json:"step,omitempty"`
+	// Sync marks a write that only reports what applying the assistant's own
+	// turn did to the form (the team keys it derived, the step it reached).
+	// It is recorded, but never said back as the user's edit.
+	Sync bool `json:"sync,omitempty"`
 }
 
 const buildMaxTeamState = 32 * 1024
@@ -74,8 +78,11 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 		}
 		now := deps.Store.Now()
 		before := session.Draft
-		lines := describeFormEdit(before, draft, validation)
-		blueprintChanged = before.Blank != draft.Blank || before.TemplateID != draft.TemplateID
+		var lines []string
+		if !req.Sync {
+			lines = describeFormEdit(before, draft, validation)
+			blueprintChanged = before.Blank != draft.Blank || before.TemplateID != draft.TemplateID
+		}
 		session.Draft = draft
 		if len(req.TeamState) > 0 {
 			session.TeamState = append(json.RawMessage(nil), req.TeamState...)

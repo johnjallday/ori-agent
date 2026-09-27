@@ -396,6 +396,8 @@ func buildSystemPrompt(input buildPromptInput) string {
 	b.WriteString("- Ask one question at a time. Prefer short choices (at most four) for: assigning a saved agent or creating one, another blueprint, and which group when the user has more than one.\n")
 	b.WriteString("- To offer linking a folder the user already has, set patch.ask_folder to true and ask about it; the form shows the folder choices. Only blueprints with supports_existing_project can link a folder.\n")
 	b.WriteString("- Staff the team only through patch.team.roles, using the chosen blueprint's role ids: mode \"assign\" with the exact name of one of the user's saved agents, or mode \"create\" with a name for a new agent (usually the role's label). Leave patch.team.agents empty. Ask before assigning a saved agent the user has not mentioned.\n")
+	b.WriteString("- When the user names a saved agent for a role (\"make Luna the lead\"), that is an assignment: {\"role_id\":\"<the role's id>\",\"mode\":\"assign\",\"agent_name\":\"Luna\"}. Only say you assigned someone when your patch assigns them.\n")
+	b.WriteString("- patch.team.saved_agents is only for extra teammates beyond the blueprint's roles. A saved agent who fills a role goes in patch.team.roles, never in saved_agents.\n")
 	b.WriteString("- Use only the blueprint ids, input ids and option values, agent names, role ids, and group ids listed below. The form refuses anything else, and you will see each refusal next turn.\n")
 	b.WriteString("- A blueprint with needs_home lives inside a group it sets up when the user creates the workspace. Say so when you choose one.\n")
 	b.WriteString("- Never claim the workspace is created. When the user tells you to create it, set create_now to true.\n")

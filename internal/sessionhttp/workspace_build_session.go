@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/session"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Build with your assistant: the Personal Assistant fills the Create
@@ -95,6 +96,7 @@ const (
 	buildCopyFolderAsk    = "Should I link a folder you already have?"
 	buildCopyChooseFolder = "Choose a folder"
 	buildCopyNoFolder     = "No folder"
+	buildCopyFolderLater  = "This blueprint can’t link a folder you already have — after you create it, use “Explore a folder” on Home."
 )
 
 // Chip ids the host reserves.
@@ -673,9 +675,15 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 	question = truncateRunes(question, personalassistant.WorkspaceBuildMaxSay)
 	say := truncateRunes(reply.Say, personalassistant.WorkspaceBuildMaxSay)
 	// The model wrote its line before the host checked the proposal, so a
-	// refused part gets a fixed note rather than standing as a claim.
+	// refused part gets a fixed note rather than standing as a claim, and a
+	// team change is stated as the form now holds it.
 	if note := buildRefusalNote(result.rejections); note != "" {
 		say = strings.TrimSpace(say + " " + note)
+	}
+	if result.teamPatch != nil {
+		if receipt := buildTeamReceipt(result.teamPatch, validation, session.Draft); receipt != "" {
+			say = strings.TrimSpace(say + " " + receipt)
+		}
 	}
 	text := strings.TrimSpace(say + " " + question)
 	if say != "" && question != "" && strings.Contains(say, question) {
@@ -696,15 +704,56 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 	session.Touch(now)
 }
 
+// buildTeamReceipt states the team the host accepted, in the form's terms:
+// "On the form: Briefing Editor — Luna; Researcher — a new agent, Scout added."
+// It is written from the accepted patch, never from the model's sentence.
+func buildTeamReceipt(team *personalassistant.BuildTeamPatch, validation buildValidation, draft personalassistant.BuildDraft) string {
+	if team == nil {
+		return ""
+	}
+	if team.Mode == "agentless" {
+		return "On the form: no agents."
+	}
+	labels := map[string]string{}
+	if template, ok := validation.currentTemplate(draft); ok {
+		for _, role := range buildRoleDeclarations(template) {
+			labels[role.RoleID] = role.Label
+		}
+	}
+	parts := []string{}
+	for _, role := range team.Roles {
+		label := labels[role.RoleID]
+		if label == "" {
+			label = role.RoleID
+		}
+		if role.Mode == "assign" {
+			parts = append(parts, fmt.Sprintf("%s — %s", label, role.AgentName))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s — a new agent, “%s”", label, role.AgentName))
+		}
+	}
+	for _, name := range team.SavedAgents {
+		parts = append(parts, name+" added")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "On the form: " + strings.Join(parts, "; ") + "."
+}
+
 // buildRefusalNote names, in plain words, the parts of the form the host did
 // not accept this turn: "(The form didn't take the team yet — I'll adjust it.)"
 func buildRefusalNote(rejections []personalassistant.BuildRejection) string {
 	parts := []string{}
 	seen := map[string]bool{}
+	folder := ""
 	for _, rejection := range rejections {
 		field := rejection.Field
 		part := ""
 		switch {
+		case field == buildFieldAskFolder:
+			// A folder this blueprint cannot link has one fixed way forward.
+			folder = buildCopyFolderLater
 		case field == buildFieldBlueprint:
 			part = "the blueprint"
 		case field == buildFieldName:
@@ -715,8 +764,6 @@ func buildRefusalNote(rejections []personalassistant.BuildRejection) string {
 			part = "a setting"
 		case field == buildFieldParent:
 			part = "the group"
-		case field == buildFieldAskFolder:
-			part = "the folder"
 		case strings.HasPrefix(field, buildFieldTeam):
 			part = "the team"
 		case field == buildFieldTags:
@@ -729,15 +776,16 @@ func buildRefusalNote(rejections []personalassistant.BuildRejection) string {
 			parts = append(parts, part)
 		}
 	}
+	note := ""
 	switch len(parts) {
 	case 0:
-		return ""
 	case 1:
-		return fmt.Sprintf("(The form didn’t take %s yet — I’ll adjust it.)", parts[0])
+		note = fmt.Sprintf("(The form didn’t take %s yet — I’ll adjust it.)", parts[0])
 	default:
-		return fmt.Sprintf("(The form didn’t take %s or %s yet — I’ll adjust them.)",
+		note = fmt.Sprintf("(The form didn’t take %s or %s yet — I’ll adjust them.)",
 			strings.Join(parts[:len(parts)-1], ", "), parts[len(parts)-1])
 	}
+	return strings.TrimSpace(note + " " + folder)
 }
 
 // buildDraftStep is the step the draft has reached, for resuming; the wizard's
@@ -841,6 +889,77 @@ func (h *Handler) workspaceBuildGroups(ctx context.Context, userID string) []bui
 		}
 	}
 	return out
+}
+
+// finishWorkspaceBuild closes the build a create finished (FR28): the session
+// is marked created with the workspace id, and the workspace's provenance
+// records how it was set up. A session id that is unknown, belongs to another
+// user's store, or is already closed is logged and ignored; a create is never
+// refused over it.
+func (h *Handler) finishWorkspaceBuild(ctx context.Context, sessionID, workspaceID string) {
+	sessionID, workspaceID = strings.TrimSpace(sessionID), strings.TrimSpace(workspaceID)
+	deps := h.workspaceBuild
+	if sessionID == "" || workspaceID == "" || deps == nil {
+		return
+	}
+	var finished personalassistant.WorkspaceBuildSession
+	_, err := deps.Store.Mutate(ctx, h.workspaceBuildUserID(ctx), func(doc *personalassistant.WorkspaceBuildDocument) error {
+		session := doc.Session(sessionID)
+		if session == nil {
+			return errBuildTurn{http.StatusNotFound, "not_found"}
+		}
+		if session.Status == personalassistant.WorkspaceBuildCreated && session.CreatedWorkspaceID == workspaceID {
+			finished = *session
+			return nil
+		}
+		if session.Status != personalassistant.WorkspaceBuildOpen {
+			return errBuildTurn{http.StatusConflict, "closed"}
+		}
+		session.Status = personalassistant.WorkspaceBuildCreated
+		session.CreatedWorkspaceID = workspaceID
+		session.PendingQuestion = nil
+		session.CreateNow = false
+		session.Touch(deps.Store.Now())
+		finished = *session
+		return nil
+	})
+	if err != nil {
+		logger.Info("Workspace build not recorded for a create", logger.Fields{"session_id": sessionID, "workspace_id": workspaceID, "reason": err.Error()})
+		return
+	}
+	logger.Info("Workspace build created", logger.Fields{"session_id": sessionID, "workspace_id": workspaceID, "turns": finished.TurnCount})
+	if h.workspaceTaskStore == nil {
+		return
+	}
+	summary := buildSummaryFor(finished)
+	if err := h.workspaceTaskStore.Update(workspaceID, func(w *agentworkspace.Workspace) error {
+		provenance := w.GetTemplateProvenance()
+		if provenance == nil {
+			provenance = &agentworkspace.TemplateProvenance{}
+		}
+		provenance.BuildSummary = summary
+		w.SetTemplateProvenance(provenance)
+		return nil
+	}); err != nil {
+		logger.Warn("Workspace build summary could not be recorded", logger.Fields{"workspace_id": workspaceID, "error": err})
+	}
+}
+
+// buildSummaryFor is the "How this was set up" record: the assistant, the
+// user's own request, and the reasons behind each choice, never the whole
+// conversation.
+func buildSummaryFor(session personalassistant.WorkspaceBuildSession) *agentworkspace.BuildSummary {
+	summary := &agentworkspace.BuildSummary{
+		AssistantName: session.Assistant.DisplayName,
+		SessionID:     session.ID,
+		CreatedAt:     session.UpdatedAt,
+		TurnCount:     session.TurnCount,
+		UserRequest:   truncateRunes(session.FirstRequest, personalassistant.WorkspaceBuildMaxFirstRequest),
+	}
+	for _, why := range session.Why {
+		summary.Decisions = append(summary.Decisions, agentworkspace.BuildDecision{Section: why.Section, Text: why.Text})
+	}
+	return summary
 }
 
 // workspaceNameTaken applies the create path's duplicate-folder rule to a

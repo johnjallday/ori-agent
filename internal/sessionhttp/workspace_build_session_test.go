@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // memoryBuildStore is an in-memory WorkspaceBuildStore with the same rules as
@@ -362,6 +363,10 @@ func TestWorkspaceBuild_AChipAnswersWithItsLabel(t *testing.T) {
 		team.Roles[0].AgentName != "Luna" || strings.Join(team.SavedAgents, ",") != "Scout" {
 		t.Fatalf("team %+v", team)
 	}
+	// The team is stated as the form holds it, whatever the model said.
+	if last := got.Transcript[len(got.Transcript)-1]; !strings.Contains(last.Text, "On the form: Content Lead — Luna; Scout added.") {
+		t.Fatalf("team receipt missing: %q", last.Text)
+	}
 	if status, _ := f.turn(t, got, map[string]any{"choice_id": "c9-9"}); status != http.StatusConflict {
 		t.Fatalf("a chip that is not offered: %d", status)
 	}
@@ -560,6 +565,136 @@ func TestWorkspaceBuild_FormEditsAreSaidInPlainWords(t *testing.T) {
 	})
 	if status != http.StatusBadRequest {
 		t.Fatalf("a draft key outside the create request is refused: %d", status)
+	}
+}
+
+func TestWorkspaceBuild_ASyncRecordsTheFormWithoutCallingItTheUsers(t *testing.T) {
+	f := newBuildFixture(t, true, describeReply)
+	build := f.start(t)
+	_, body := f.turn(t, build, map[string]any{"text": "a newsletter"})
+	build = sessionOf(t, body)
+	draft := build.Draft
+	draft.RoleStaffing = json.RawMessage(`[{"role_id":"content-lead","mode":"assign","name":"Luna"}]`)
+	draft.ExistingAgentNames = []string{"Luna"}
+	status, body := f.do(t, http.MethodPatch, "/api/workspaces/build-sessions/"+build.ID+"/draft", map[string]any{
+		"draft": draft, "version": build.Version, "sync": true, "step": 3,
+		"team_state": map[string]any{"version": 1, "blueprint_key": "template:content-production"},
+	})
+	if status != http.StatusOK || body["blueprint_changed"] != false {
+		t.Fatalf("sync %d %v", status, body)
+	}
+	got := sessionOf(t, body)
+	if last := got.Transcript[len(got.Transcript)-1]; last.Role == "form" {
+		t.Fatalf("a sync must not be said as the user's edit: %+v", last)
+	}
+	if len(got.Draft.RoleStaffing) == 0 || got.FurthestStep != 3 || len(got.TeamState) == 0 {
+		t.Fatalf("sync not recorded: %+v", got)
+	}
+	// The same change sent as the user's names the person added.
+	draft.ExistingAgentNames = []string{"Luna", "Scout"}
+	_, body = f.do(t, http.MethodPatch, "/api/workspaces/build-sessions/"+build.ID+"/draft", map[string]any{
+		"draft": draft, "version": got.Version,
+	})
+	if last := sessionOf(t, body).Transcript; last[len(last)-1].Text != "You added Scout." {
+		t.Fatalf("user edit line: %+v", last[len(last)-1])
+	}
+}
+
+func TestWorkspaceBuild_TheModelHearsTheUsersOwnEdit(t *testing.T) {
+	f := newBuildFixture(t, true, describeReply, describeReply)
+	build := f.start(t)
+	_, body := f.turn(t, build, map[string]any{"text": "a newsletter"})
+	build = sessionOf(t, body)
+	draft := build.Draft
+	draft.TemplateID = "code-project"
+	_, body = f.do(t, http.MethodPatch, "/api/workspaces/build-sessions/"+build.ID+"/draft", map[string]any{
+		"draft": draft, "version": build.Version,
+	})
+	build = sessionOf(t, body)
+	if build.TeamPatch != nil {
+		t.Fatal("the old blueprint's team goes with it")
+	}
+	f.turn(t, build, map[string]any{"text": "(I changed the blueprint)"})
+	messages := f.provider.messages[1]
+	found := false
+	for _, message := range messages {
+		if message.Content == "[I edited the form myself] You switched the blueprint to Code Project." {
+			found = true
+		}
+	}
+	if !found || messages[len(messages)-1].Content != "(I changed the blueprint)" {
+		t.Fatalf("the model must see the user's edit: %+v", messages)
+	}
+	if !strings.Contains(f.provider.systems[1], `"blueprint_id":"code-project"`) {
+		t.Fatal("the prompt's form must show the user's blueprint")
+	}
+}
+
+func TestWorkspaceBuild_TheFolderChipOnlyForBlueprintsThatLinkOne(t *testing.T) {
+	folder := `{"say":"Code Project fits.","ask":{"question":"Link the repository you already have?","choices":[],"allow_free_text":true},
+"patch":{"set":["blueprint_id","name","description","ask_folder"],"blueprint_id":"%s","name":"Field Notes","description":"Tracks the code.","inputs":[],"parent_id":"","ask_folder":true,"team":{"mode":"","agents":[],"roles":[],"saved_agents":[]},"tags":[],"color":""},
+"why":[],"alternatives":[],"ready":false,"create_now":false}`
+	f := newBuildFixture(t, true, strings.ReplaceAll(folder, "%s", "code-project"))
+	build := f.start(t)
+	_, body := f.turn(t, build, map[string]any{"text": "my code"})
+	got := sessionOf(t, body)
+	if !got.AskFolder || len(got.PendingQuestion.Choices) != 2 || got.PendingQuestion.Choices[0].ID != "folder_choose" || got.PendingQuestion.Choices[1].ID != "folder_none" {
+		t.Fatalf("folder chips %+v", got.PendingQuestion)
+	}
+	if status, _ := f.turn(t, got, map[string]any{"choice_id": "folder_choose"}); status != http.StatusBadRequest {
+		t.Fatalf("choosing a folder is never a turn: %d", status)
+	}
+
+	f = newBuildFixture(t, true, strings.ReplaceAll(folder, "%s", "content-production"))
+	build = f.start(t)
+	_, body = f.turn(t, build, map[string]any{"text": "my notes"})
+	got = sessionOf(t, body)
+	last := got.Transcript[len(got.Transcript)-1]
+	if got.AskFolder || !strings.Contains(last.Text, "use “Explore a folder” on Home") {
+		t.Fatalf("refused folder: ask=%v %q", got.AskFolder, last.Text)
+	}
+}
+
+func TestWorkspaceBuild_CreateItIsOnlyAFlag(t *testing.T) {
+	createIt := strings.Replace(describeReply, `"create_now":false`, `"create_now":true`, 1)
+	f := newBuildFixture(t, true, createIt)
+	build := f.start(t)
+	_, body := f.turn(t, build, map[string]any{"text": "create it"})
+	if got := sessionOf(t, body); !got.CreateNow || got.Status != personalassistant.WorkspaceBuildOpen {
+		t.Fatalf("create_now %+v", got)
+	}
+}
+
+func TestWorkspaceBuild_ACreateClosesTheBuildAndRecordsHowItWasSetUp(t *testing.T) {
+	f := newBuildFixture(t, true, describeReply)
+	workspaces := agentworkspace.NewInMemoryStore()
+	f.handler.SetWorkspaceTaskStore(workspaces)
+	ws := agentworkspace.NewWorkspace(agentworkspace.CreateWorkspaceParams{Name: "Newsletter Desk"})
+	if err := workspaces.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	build := f.start(t)
+	_, body := f.turn(t, build, map[string]any{"text": "a newsletter from my research notes every monday"})
+	build = sessionOf(t, body)
+
+	f.handler.finishWorkspaceBuild(context.Background(), build.ID, ws.ID)
+	doc, _ := f.store.Read(context.Background(), "local")
+	closed := doc.Session(build.ID)
+	if closed.Status != personalassistant.WorkspaceBuildCreated || closed.CreatedWorkspaceID != ws.ID {
+		t.Fatalf("session %+v", closed)
+	}
+	stored, _ := workspaces.Get(ws.ID)
+	summary := stored.GetTemplateProvenance().BuildSummary
+	if summary == nil || summary.AssistantName != "Luna" || summary.TurnCount != 1 ||
+		summary.UserRequest != "a newsletter from my research notes every monday" ||
+		len(summary.Decisions) != 1 || summary.Decisions[0].Section != "blueprint" {
+		t.Fatalf("summary %+v", summary)
+	}
+	// Idempotent for the same workspace; ignored for an unknown or closed build.
+	f.handler.finishWorkspaceBuild(context.Background(), build.ID, ws.ID)
+	f.handler.finishWorkspaceBuild(context.Background(), "unknown", ws.ID)
+	if again := f.start(t); again.ID == build.ID {
+		t.Fatal("a created build is never resumed")
 	}
 }
 
