@@ -179,6 +179,7 @@ export class ProjectLibraryPanel {
         );
         return;
       }
+      this.renderFormats();
       this.renderRoots();
       await this.renderResume();
       await this.search(false);
@@ -261,6 +262,21 @@ export class ProjectLibraryPanel {
       this.state.next_offset = page.next_offset || 0;
       this.renderRoots();
     });
+  }
+
+  renderFormats() {
+    const filter = document.getElementById('projectLibraryFormat');
+    if (!filter) return;
+    const selected = filter.value;
+    const all = node('option', '', 'All formats');
+    all.value = '';
+    const choices = (this.state?.formats || []).slice(0, 16).map(format => {
+      const option = node('option', '', format.label);
+      option.value = format.id;
+      return option;
+    });
+    filter.replaceChildren(all, ...choices);
+    filter.value = choices.some(choice => choice.value === selected) ? selected : '';
   }
 
   renderRoots() {

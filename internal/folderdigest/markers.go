@@ -69,6 +69,27 @@ func (m Marker) matches(name string, isDir bool) bool {
 	return false
 }
 
+// ProjectFormatOption describes a catalog-only marker choice, not an
+// installed blueprint, project creator, or permission to read a DAW file.
+type ProjectFormatOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// ProjectFormatOptions exposes bounded choices from the same marker table
+// used by discovery/validation, without hardcoding plugin names in the Home.
+func ProjectFormatOptions() []ProjectFormatOption {
+	options := make([]ProjectFormatOption, 0, 8)
+	seen := make(map[string]bool)
+	for _, marker := range Markers {
+		if marker.ProjectFormat != "" && !seen[marker.ProjectFormat] && len(options) < 16 {
+			options = append(options, ProjectFormatOption{ID: marker.ProjectFormat, Label: marker.Label})
+			seen[marker.ProjectFormat] = true
+		}
+	}
+	return options
+}
+
 // MatchMarker returns the highest-precedence marker row that one entry
 // satisfies, if any. Callers keep the first hit across a folder's entries in
 // table order, which markerRank makes cheap.

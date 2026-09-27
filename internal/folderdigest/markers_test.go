@@ -2,6 +2,20 @@ package folderdigest
 
 import "testing"
 
+func TestProjectFormatOptions_AreBoundedUniqueAndDrawnFromDiscovery(t *testing.T) {
+	options := ProjectFormatOptions()
+	if len(options) == 0 || len(options) > 16 {
+		t.Fatalf("format options are missing or unbounded: %d", len(options))
+	}
+	seen := make(map[string]bool)
+	for _, option := range options {
+		if option.Label == "" || !KnownProjectFormat(option.ID) || seen[option.ID] {
+			t.Fatalf("format not derived exactly once from marker table: %+v", option)
+		}
+		seen[option.ID] = true
+	}
+}
+
 func TestMatchMarker_TableRows(t *testing.T) {
 	cases := []struct {
 		name  string

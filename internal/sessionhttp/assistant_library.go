@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/plugin"
@@ -255,7 +256,7 @@ func (h *Handler) ListAssistantLibraryRoots(w http.ResponseWriter, r *http.Reque
 		rows = append(rows, row)
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"initialized": true, "revision": doc.Revision,
-		"total_roots": len(doc.Roots), "roots": rows, "next_offset": func() int {
+		"total_roots": len(doc.Roots), "roots": rows, "formats": folderdigest.ProjectFormatOptions(), "next_offset": func() int {
 			if offset+len(rows) < len(doc.Roots) {
 				return offset + len(rows)
 			}
