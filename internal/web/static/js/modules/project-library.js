@@ -850,7 +850,7 @@ export class ProjectLibraryPanel {
               // Keep the retry key. The next explicit resume rechecks it.
             }
             this.status(
-              `${error.message || 'The result is uncertain'}. Review the saved link above. Queue paused; resume to reconcile this confirmed song without creating another.`
+              `${error.message || 'The result is uncertain'}. Review the saved link above. Queue paused; resume with this tab’s confirmed key. If this tab closes after a child was created but before the Home recorded it, return to this Home’s Review linked projects shelf to separately review its exact reciprocal link. Queue order and skips do not survive tab closure.`
             );
           } else {
             this.status(

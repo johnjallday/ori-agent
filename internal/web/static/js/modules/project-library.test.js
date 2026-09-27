@@ -298,7 +298,8 @@ test('serial queue resumes after a lost creator response without creating the co
     assert.equal(commits, 1, lastStatus);
     assert.equal(first.queue.index, 0);
     assert.equal(refreshes, 1);
-    assert.match(lastStatus, /resume to reconcile this confirmed song/);
+    assert.match(lastStatus, /resume with this tab’s confirmed key/);
+    assert.match(lastStatus, /Review linked projects shelf/);
     const persisted = readActivationQueue('home', globalThis.sessionStorage);
     assert.equal(persisted.pending.id, 'first');
     assert.equal(persisted.pending.token, 'exact-review');

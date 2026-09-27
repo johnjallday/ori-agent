@@ -305,6 +305,61 @@ func TestActivation_RealCreatorRecoversAfterHomeWriteFailsAndStoreRestarts(t *te
 	}
 }
 
+// A tab can close after the canonical creator succeeds but before Ori saves
+// the catalog association. Losing the tab's activation token/key must not
+// strand its child: the independently durable reciprocal link is reviewable
+// through the Home's pending-link shelf without a new creator request.
+func TestActivation_LostBrowserKeyRecoversThroughExplicitHomeLinkReview(t *testing.T) {
+	a, scope, _, file, tree, installed := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activationReview, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := a.library
+	broken := &failActivationHomeWrite{Store: file, homeID: scope.HomeID, pending: true}
+	a.library = NewStore(broken).WithProviderEvidence(original.providerEvidence)
+	if _, err := service.Commit(t.Context(), scope, "single", activationReview.Token, "lost-browser-key"); err == nil || broken.pending {
+		t.Fatalf("did not fail strictly after canonical creator: %v", err)
+	}
+	path, err := file.GetFolderPath(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := workspace.NewFileStore(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	library := NewStore(restarted).WithProviderEvidence(original.providerEvidence)
+	pending, err := library.PendingLinkedProjects(scope)
+	if err != nil || pending.Total != 1 || len(pending.Rows) != 1 {
+		t.Fatalf("lost confirmation stranded linked child: %+v %v", pending, err)
+	}
+	// Browser state is intentionally absent here. The user selects exactly
+	// the Home-listed reciprocal link and confirms a fresh association review.
+	linkReview, err := library.ReviewLinkedProject(scope, pending.Rows[0].WorkspaceID, pending.Revision)
+	if err != nil || linkReview.EntryID != "single" || linkReview.LinkOnly {
+		t.Fatalf("failed to match the unchanged scanned source: %+v %v", linkReview, err)
+	}
+	result, err := library.CommitLinkedProject(scope, pending.Rows[0].WorkspaceID, linkReview.Token, "new-review-after-lost-key")
+	if err != nil || result.EntryID != "single" {
+		t.Fatalf("user re-review did not reconcile the Home: %+v %v", result, err)
+	}
+	page, err := library.PendingLinkedProjects(scope)
+	if err != nil || page.Total != 0 {
+		t.Fatalf("associated child still appeared in pending shelf: %+v %v", page, err)
+	}
+	ids, err := restarted.List()
+	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("lost-key repair created a child or touched the project file: %v %v", ids, err)
+	}
+}
+
 func TestActivation_RealCreatorPreviewsAndAttachesOnePinnedSongWithoutStaffing(t *testing.T) {
 	a, scope, _, file, tree, installed := activationFixture(t)
 	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
