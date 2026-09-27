@@ -956,10 +956,59 @@ func buildSummaryFor(session personalassistant.WorkspaceBuildSession) *agentwork
 		TurnCount:     session.TurnCount,
 		UserRequest:   truncateRunes(session.FirstRequest, personalassistant.WorkspaceBuildMaxFirstRequest),
 	}
+	// The team line states the team the workspace was created with, taken from
+	// the create request itself; the model's own sentence about the team may
+	// not match what the user finally confirmed.
+	team := teamDecisionFromDraft(session.Draft)
 	for _, why := range session.Why {
+		if why.Section == "team" && team != "" {
+			continue
+		}
 		summary.Decisions = append(summary.Decisions, agentworkspace.BuildDecision{Section: why.Section, Text: why.Text})
 	}
+	if team != "" {
+		summary.Decisions = append(summary.Decisions, agentworkspace.BuildDecision{Section: "team", Text: team})
+	}
 	return summary
+}
+
+// teamDecisionFromDraft says who staffs the workspace, from the role staffing
+// and saved teammates the create request carried.
+func teamDecisionFromDraft(draft personalassistant.BuildDraft) string {
+	parts := []string{}
+	var staffing []struct {
+		RoleID string `json:"role_id"`
+		Mode   string `json:"mode"`
+		Name   string `json:"name"`
+	}
+	_ = json.Unmarshal(draft.RoleStaffing, &staffing)
+	for _, fill := range staffing {
+		role := humanizeRoleID(fill.RoleID)
+		name := strings.TrimSpace(fill.Name)
+		if role == "" || name == "" {
+			continue
+		}
+		if fill.Mode == "assign" {
+			parts = append(parts, fmt.Sprintf("%s: %s", role, name))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s: a new agent, “%s”", role, name))
+		}
+	}
+	for _, name := range draft.ExistingAgentNames {
+		if name = strings.TrimSpace(name); name != "" && !strings.Contains(strings.Join(parts, "\n"), ": "+name) {
+			parts = append(parts, name+" joins the team")
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// humanizeRoleID reads a role id as words: "research-lead" → "Research lead".
+func humanizeRoleID(id string) string {
+	words := strings.ReplaceAll(strings.TrimSpace(id), "-", " ")
+	if words == "" {
+		return ""
+	}
+	return strings.ToUpper(words[:1]) + words[1:]
 }
 
 // workspaceNameTaken applies the create path's duplicate-folder rule to a

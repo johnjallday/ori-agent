@@ -11118,6 +11118,10 @@ const sessionManager = {
     }
     build.session = session;
     this.rememberWorkspaceBuildSession(session);
+    if (result.body.resumed && !fresh && build.context.buildResume) {
+      await this.applyWorkspaceBuildSession(session, { resume: true });
+      return;
+    }
     if (result.body.resumed && !fresh) {
       const name = String(session.draft?.name || '').trim();
       build.resumeLine = pane.showLine(pane.COPY.resumeQuestion(name), {
@@ -11312,7 +11316,10 @@ const sessionManager = {
     const name = this.workspaceBuildAssistantName();
     await this.applyBuildPatchToWizard(patch, name, { animate: !resume });
     if (this.workspaceBuild !== build) return;
-    if (session.team_patch && (resume || applied.includes('team'))) {
+    if (resume && session.team_state) {
+      // The serialized team holds the user's own team edits too.
+      await this.restoreWorkspaceBuildTeam(session.team_state, session.team_patch, name);
+    } else if (session.team_patch && (resume || applied.includes('team'))) {
       await this.applyWorkspaceBuildTeamPatch(session.team_patch, name, { animate: !resume });
     }
     if (this.workspaceBuild !== build) return;
@@ -11697,6 +11704,46 @@ const sessionManager = {
     for (const roleId of filled) this.markWorkspaceBuildChosen(`role:${roleId}`, name, options);
     if (options.animate !== false) this.staggerWorkspaceBuildRosterRows();
     return filled;
+  },
+
+  // restoreWorkspaceBuildTeam puts a resumed build's team back through the
+  // team draft's own restore, once the blueprint's plan (and the saved roster)
+  // are loaded. Roles the assistant filled keep their "Chosen by" tag.
+  async restoreWorkspaceBuildTeam(teamState, teamPatch, assistantName = '') {
+    const api = window.CreateWorkspaceTeamDraft;
+    const build = this.workspaceBuild;
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (!api?.restore || !draft || !teamState) return false;
+    const needsRoster =
+      (teamState.role_fills || []).some(fill => fill?.mode === 'assign') ||
+      (teamState.saved_selections || []).length > 0;
+    const ready = await this.waitForWorkspaceBuildTeam({
+      roles: needsRoster ? [{ mode: 'assign' }] : [],
+      saved_agents: []
+    });
+    if (!ready || this.workspaceBuild !== build) return false;
+    this.workspaceBuildApplyDepth += 1;
+    let restored = false;
+    try {
+      restored = api.restore(draft, teamState);
+    } finally {
+      this.workspaceBuildApplyDepth -= 1;
+    }
+    if (build && restored) {
+      const name = String(assistantName || '').trim() || this.workspaceBuildAssistantName();
+      for (const role of teamPatch?.roles || []) {
+        const fill = api.getRoleFill?.(draft, role.role_id);
+        if (fill && String(fill.name).toLowerCase() === String(role.agent_name).toLowerCase()) {
+          build.chosenRoles.add(role.role_id);
+          build.chosen.set(`role:${role.role_id}`, name);
+        }
+      }
+      build.teamSet = (teamState.role_fills || []).length > 0 || Boolean(teamState.agentless);
+    }
+    this.invalidateGroupRequirementReview();
+    this.refreshWorkspaceReview();
+    this.renderExistingAgentRoster();
+    return restored;
   },
 
   // Resolves once the blueprint's plan is ready and, when the patch assigns a
@@ -17953,6 +18000,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
     const openCreate = params.get('create') === '1';
     const openImport = params.get('import') === '1';
+    // Resume from the assistant's Today, on a page without the dialog.
+    if (params.get('build') === 'resume') {
+      params.delete('build');
+      const qs = params.toString();
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash
+      );
+      requestAnimationFrame(() =>
+        sessionManager.showAddWorkspaceModal({
+          entryPoint: 'personal_assistant_ask',
+          buildResume: true
+        })
+      );
+    }
     if (openCreate || openImport) {
       const blueprint = String(params.get('blueprint') || '').trim();
       params.delete('create');

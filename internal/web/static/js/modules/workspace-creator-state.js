@@ -122,6 +122,9 @@
       // already heard (the assistant's Ask tab), posted as the first turn.
       buildSession: null,
       buildFirstMessage: String(options.buildFirstMessage || '').trim(),
+      // buildResume opens straight into the open build: the user already
+      // chose Resume (from the assistant's Today).
+      buildResume: Boolean(options.buildResume),
       drafts: {
         workspace: cloneDraft(options.drafts?.workspace),
         group: cloneDraft(options.drafts?.group)

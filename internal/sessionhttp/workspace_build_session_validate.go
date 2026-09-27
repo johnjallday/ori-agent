@@ -38,6 +38,16 @@ const (
 	buildReasonColor          = "not one of the offered colors"
 )
 
+// unknownAgentReason names the agent the assistant tried to assign, so its
+// next turn can correct the name instead of repeating it.
+func unknownAgentReason(name string) string {
+	name = truncateRunes(name, 60)
+	if name == "" {
+		return buildReasonUnknownAgent + ": no name given"
+	}
+	return buildReasonUnknownAgent + ": " + name
+}
+
 // buildColors are the swatches the wizard offers; "" is the default.
 var buildColors = map[string]bool{
 	"": true, "#ef4444": true, "#f59e0b": true, "#22c55e": true, "#3b82f6": true, "#8b5cf6": true, "#ec4899": true,
@@ -402,7 +412,7 @@ func validateBuildTeam(draft personalassistant.BuildDraft, template projecttempl
 				}
 				canonical, ok := v.savedAgent(name)
 				if !ok {
-					result.reject("team.agents."+agent.Name, buildReasonUnknownAgent)
+					result.reject("team.agents."+agent.Name, unknownAgentReason(name))
 					continue
 				}
 				role.Mode, role.AgentName = "assign", canonical
@@ -444,7 +454,7 @@ func validateBuildTeam(draft personalassistant.BuildDraft, template projecttempl
 		case "assign", "reuse":
 			canonical, ok := v.savedAgent(name)
 			if !ok {
-				result.reject("team.roles."+id, buildReasonUnknownAgent)
+				result.reject("team.roles."+id, unknownAgentReason(name))
 				continue
 			}
 			addRole(personalassistant.BuildRole{RoleID: id, Mode: "assign", AgentName: canonical})
@@ -463,7 +473,7 @@ func validateBuildTeam(draft personalassistant.BuildDraft, template projecttempl
 	for _, name := range team.SavedAgents {
 		canonical, ok := v.savedAgent(name)
 		if !ok {
-			result.reject("team.saved_agents."+strings.TrimSpace(name), buildReasonUnknownAgent)
+			result.reject("team.saved_agents."+strings.TrimSpace(name), unknownAgentReason(name))
 			continue
 		}
 		out.SavedAgents = append(out.SavedAgents, canonical)

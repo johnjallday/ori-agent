@@ -63,14 +63,56 @@ export function todayLabel(value) {
     : text;
 }
 
+// The controls an unfinished workspace build may offer from Today (FR42).
+const WORKSPACE_BUILD_ACTIONS = ['resume', 'discard'];
+
 export function todaySectionItems(section) {
-  return (Array.isArray(section?.items) ? section.items : []).slice(0, 10).map(item => ({
-    title: String(item?.title || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
-    detail: String(item?.detail || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
-    attribution: String(item?.attribution || '').trim(),
-    route: safeTodayRoute(item?.route) ? String(item.route) : '',
-    kind: String(item?.kind || '')
-  }));
+  return (Array.isArray(section?.items) ? section.items : []).slice(0, 10).map(item => {
+    const row = {
+      title: String(item?.title || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
+      detail: String(item?.detail || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
+      attribution: String(item?.attribution || '').trim(),
+      route: safeTodayRoute(item?.route) ? String(item.route) : '',
+      kind: String(item?.kind || '')
+    };
+    // An unfinished build is acted on in place, so it keeps its id and the
+    // controls the server named; every other row is a link and keeps neither.
+    if (row.kind === 'workspace_build') {
+      row.id = String(item?.id || '').trim();
+      row.actions = (Array.isArray(item?.actions) ? item.actions : []).filter(action =>
+        WORKSPACE_BUILD_ACTIONS.includes(action)
+      );
+    }
+    return row;
+  });
+}
+
+// Resume opens the Create Workspace dialog in build mode on the open build.
+// A page without the dialog goes Home, which has it.
+export function resumeWorkspaceBuild(win = window) {
+  const manager = win.sessionManager;
+  if (manager?.showAddWorkspaceModal && win.document?.getElementById?.('addFolderModal')) {
+    win.PersonalAssistantPanel?.close?.({ restoreFocus: false });
+    manager.showAddWorkspaceModal({ entryPoint: 'personal_assistant_ask', buildResume: true });
+    return 'opened';
+  }
+  win.location.href = '/?build=resume';
+  return 'navigated';
+}
+
+async function discardWorkspaceBuild(id, button) {
+  if (!id) return;
+  if (button) button.disabled = true;
+  try {
+    await fetch(`/api/workspaces/build-sessions/${encodeURIComponent(id)}/abandon`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: '{}'
+    });
+  } catch (_) {
+    // Today re-reads either way; an item that is still open simply stays.
+  }
+  void loadToday();
 }
 
 export function todayThreeSectionView(today) {
@@ -425,6 +467,27 @@ function elements() {
   };
 }
 
+// An unfinished workspace build is the user's own work in progress, so it
+// leads Needs you instead of waiting in the collapsed queue behind the
+// assistant's suggestions.
+function renderUnfinishedBuild(els, rows) {
+  const host = els?.needsCards;
+  if (!host) return;
+  const builds = rows.filter(row => row.kind === 'workspace_build');
+  let list = document.getElementById('personalAssistantNeedsYouBuild');
+  if (!builds.length) {
+    list?.remove();
+    return;
+  }
+  if (!list) {
+    list = document.createElement('ul');
+    list.id = 'personalAssistantNeedsYouBuild';
+    list.className = 'personal-assistant-today__build';
+  }
+  host.prepend(list);
+  renderCompactRows(list, builds);
+}
+
 function renderCompactRows(list, rows, skipCards = false) {
   if (!list) return;
   list.replaceChildren();
@@ -449,6 +512,26 @@ function renderCompactRows(list, rows, skipCards = false) {
       by.className = 'personal-assistant-today__attribution';
       by.textContent = row.attribution;
       li.append(by);
+    }
+    if (row.kind === 'workspace_build' && row.actions?.length) {
+      const actions = document.createElement('div');
+      actions.className = 'personal-assistant-today__actions';
+      for (const action of row.actions) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className =
+          action === 'resume'
+            ? 'personal-assistant-today__action personal-assistant-today__action--primary'
+            : 'personal-assistant-today__action';
+        button.dataset.workspaceBuildAction = action;
+        button.textContent = action === 'resume' ? 'Resume' : 'Discard';
+        button.addEventListener('click', () => {
+          if (action === 'resume') resumeWorkspaceBuild();
+          else void discardWorkspaceBuild(row.id, button);
+        });
+        actions.append(button);
+      }
+      li.append(actions);
     }
     if (row.kind === 'hq_setup') {
       const details = document.createElement('details');
@@ -694,7 +777,12 @@ function renderToday(today) {
     els.workingContent?.append(els.setup);
   } else if (els.setup) els.needsQueueCards?.append(els.setup);
   renderCompactRows(els.workingItems, sections.working);
-  renderCompactRows(els.needsItems, sections.needs, true);
+  renderUnfinishedBuild(els, sections.needs);
+  renderCompactRows(
+    els.needsItems,
+    sections.needs.filter(row => row.kind !== 'workspace_build'),
+    true
+  );
   renderCompactRows(els.doneItems, sections.done);
   const queueCount = syncNeedsQueue(els);
   if (els.workingSection)

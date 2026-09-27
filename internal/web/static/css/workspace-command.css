@@ -385,6 +385,36 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* "How this was set up": the assistant's build, read-only. */
+.ws-cmd-build-summary {
+  margin-top: 8px;
+  max-width: 72ch;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-cmd-build-summary summary {
+  cursor: pointer;
+  color: var(--ws-ink);
+  font-weight: 600;
+}
+.ws-cmd-build-summary-meta,
+.ws-cmd-build-summary-request {
+  margin: 6px 0 0;
+}
+.ws-cmd-build-summary-request span {
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-build-summary-decisions {
+  margin: 6px 0 0;
+  padding-left: 16px;
+}
+.ws-cmd-build-summary-decisions li + li {
+  margin-top: 3px;
+}
+.ws-cmd-build-summary-decisions strong {
+  color: var(--ws-ink);
+  font-weight: 600;
+}
 .ws-cmd-mini-btn {
   flex: 0 0 auto;
   padding: 4px 7px;

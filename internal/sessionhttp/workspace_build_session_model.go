@@ -79,9 +79,9 @@ type buildReplyAgent struct {
 }
 
 type buildReplyRole struct {
-	RoleID    string `json:"role_id"`
-	Mode      string `json:"mode" jsonschema_description:"create or assign."`
-	AgentName string `json:"agent_name"`
+	RoleID    string `json:"role_id" jsonschema_description:"The role's id, from the chosen blueprint's roles."`
+	Mode      string `json:"mode" jsonschema_description:"assign (a saved agent fills the role) or create (a new agent fills it)."`
+	AgentName string `json:"agent_name" jsonschema_description:"Never empty. For assign: the exact name of one of the user's saved agents, such as Luna. For create: the new agent's name."`
 }
 
 type buildReplyWhy struct {

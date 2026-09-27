@@ -135,6 +135,47 @@ func TestTodayService_ThreeSectionsOrderCardsAndSummarizeResults(t *testing.T) {
 	}
 }
 
+type stubWorkspaceBuilds struct{ doc WorkspaceBuildDocument }
+
+func (s stubWorkspaceBuilds) Read(context.Context, string) (WorkspaceBuildDocument, error) {
+	return s.doc, nil
+}
+
+func TestTodayService_AnUnfinishedBuildAsksToBeFinished(t *testing.T) {
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	store, _ := newTodayWorkspace(t, now)
+	service := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()}, stubTodayBrief{}, store, stubTodayFollowUps{})
+	service.now = func() time.Time { return now }
+	open := WorkspaceBuildSession{ID: "build-1", Status: WorkspaceBuildOpen, Version: 2, UpdatedAt: now,
+		Draft: BuildDraft{Name: "Newsletter Desk"}}
+	service.SetWorkspaceBuildReader(stubWorkspaceBuilds{doc: WorkspaceBuildDocument{Sessions: []WorkspaceBuildSession{open}}})
+	got, err := service.Get(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.NeedsYou.Items) != 1 {
+		t.Fatalf("needs you = %+v", got.NeedsYou.Items)
+	}
+	item := got.NeedsYou.Items[0]
+	if item.Kind != "workspace_build" || item.ID != "build-1" || item.Title != "Finish building Newsletter Desk" ||
+		strings.Join(item.Actions, ",") != "resume,discard" {
+		t.Fatalf("build item = %+v", item)
+	}
+
+	unnamed := open
+	unnamed.Draft.Name = ""
+	service.SetWorkspaceBuildReader(stubWorkspaceBuilds{doc: WorkspaceBuildDocument{Sessions: []WorkspaceBuildSession{unnamed}}})
+	if got, _ := service.Get(context.Background(), "local"); got.NeedsYou.Items[0].Title != "Finish building your workspace" {
+		t.Fatalf("unnamed build = %+v", got.NeedsYou.Items[0])
+	}
+	created := open
+	created.Status = WorkspaceBuildCreated
+	service.SetWorkspaceBuildReader(stubWorkspaceBuilds{doc: WorkspaceBuildDocument{Sessions: []WorkspaceBuildSession{created}}})
+	if got, _ := service.Get(context.Background(), "local"); len(got.NeedsYou.Items) != 0 {
+		t.Fatalf("a created build asks for nothing: %+v", got.NeedsYou.Items)
+	}
+}
+
 func TestTodayService_CandidatesAndTodaysCompletedFollowUpsHaveSeparateActions(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	store, hq := newTodayWorkspace(t, now)

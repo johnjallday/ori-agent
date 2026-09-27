@@ -690,6 +690,17 @@ func TestWorkspaceBuild_ACreateClosesTheBuildAndRecordsHowItWasSetUp(t *testing.
 		len(summary.Decisions) != 1 || summary.Decisions[0].Section != "blueprint" {
 		t.Fatalf("summary %+v", summary)
 	}
+	// The team line comes from what was created, not from the model's words.
+	decided := buildSummaryFor(personalassistant.WorkspaceBuildSession{
+		Why: []personalassistant.BuildWhy{{Section: "team", Text: "Assigned Luna, as you asked."}},
+		Draft: personalassistant.BuildDraft{
+			RoleStaffing:       json.RawMessage(`[{"role_id":"research-lead","mode":"create","name":"Research Lead"}]`),
+			ExistingAgentNames: []string{"Scout"},
+		},
+	})
+	if len(decided.Decisions) != 1 || decided.Decisions[0].Text != "Research lead: a new agent, “Research Lead”; Scout joins the team" {
+		t.Fatalf("team decision %+v", decided.Decisions)
+	}
 	// Idempotent for the same workspace; ignored for an unknown or closed build.
 	f.handler.finishWorkspaceBuild(context.Background(), build.ID, ws.ID)
 	f.handler.finishWorkspaceBuild(context.Background(), "unknown", ws.ID)
