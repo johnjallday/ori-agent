@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -32,19 +33,21 @@ type Handler struct {
 	// for task mutations such as the entry-agent claim sweep. It must be the same
 	// store orchestration reads from (SQLite primary + disk write-through), not
 	// the raw folder store, or task changes won't be visible to task reads.
-	workspaceTaskStore        workspace.Store
-	workspaceRootResolver     func() string
-	templatesRootResolver     func() string // resolves the project templates library directory
-	projectTemplateResolver   func(templateID, templatePath string) (projecttemplates.Template, error)
-	groupRequirements         *grouprequirements.Service
-	groupTemplateCatalog      GroupTemplateCatalog
-	currentUserID             func(context.Context) (string, error)
-	templateCapabilityService *workspacecapability.Service
-	installedPluginLister     installedPluginLister
-	assistantReflectionModel  workspace.AssistantReflectionModel
-	assistantModelValidator   func(provider, model string) error
-	assistantHomeRemoved      func(workspaceID string) error
-	assistantReviewedStaffer  func(context.Context, string, string, string, string) error
+	workspaceTaskStore            workspace.Store
+	assistantLibraryRoots         *projectlibrary.Roots // host native chooser; never accepts a browser path
+	assistantLibraryOfferResolver projectlibrary.PortfolioRootResolver
+	workspaceRootResolver         func() string
+	templatesRootResolver         func() string // resolves the project templates library directory
+	projectTemplateResolver       func(templateID, templatePath string) (projecttemplates.Template, error)
+	groupRequirements             *grouprequirements.Service
+	groupTemplateCatalog          GroupTemplateCatalog
+	currentUserID                 func(context.Context) (string, error)
+	templateCapabilityService     *workspacecapability.Service
+	installedPluginLister         installedPluginLister
+	assistantReflectionModel      workspace.AssistantReflectionModel
+	assistantModelValidator       func(provider, model string) error
+	assistantHomeRemoved          func(workspaceID string) error
+	assistantReviewedStaffer      func(context.Context, string, string, string, string) error
 	// assistantRoleStaffer commits exactly the roles the user filled on an
 	// assistant-program blueprint. Separate from assistantReviewedStaffer,
 	// which staffs every required role: under the vacancy model a role the user

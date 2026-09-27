@@ -32,6 +32,7 @@ Options:
   --music-source DIR    Clean Music Project Management candidate worktree.
   --install-order MODE  music-first, reaper-first, or reaper-only. Providing a
                         music source defaults to music-first.
+  --suite NAME          legacy (default) or guidance (paired candidate test only).
   --port PORT           Server port (default: 8931).
   --sandbox DIR         Use and preserve this data directory instead of a temp one.
   --keep                Preserve the generated temporary sandbox after exit.
@@ -72,6 +73,7 @@ open_browser=0
 reaper_source="${ORI_REAPER_PLUGIN_SOURCE:-}"
 music_source="${ORI_MUSIC_PLUGIN_SOURCE:-}"
 install_order="${ORI_MUSIC_REAPER_INSTALL_ORDER:-}"
+test_suite="legacy"
 playwright_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -89,6 +91,11 @@ while [[ $# -gt 0 ]]; do
 	--install-order)
 		[[ $# -ge 2 ]] || fail "--install-order needs a value"
 		install_order="$2"
+		shift 2
+		;;
+	--suite)
+		[[ $# -ge 2 ]] || fail "--suite needs legacy or guidance"
+		test_suite="$2"
 		shift 2
 		;;
 	--port)
@@ -143,6 +150,10 @@ if [[ "$install_order" == "reaper-only" && -n "$music_source" ]]; then
 fi
 if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
+fi
+[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" ]] || fail "--suite needs legacy or guidance"
+if [[ "$test_suite" == "guidance" && ( "$mode" != "test" || -z "$music_source" || "$install_order" == "reaper-only" ) ]]; then
+	fail "guidance suite requires test with --music-source and a paired installation order"
 fi
 if [[ "$mode" != "serve" && "$open_browser" -eq 1 ]]; then
 	fail "--open is only valid with the serve command"
@@ -414,7 +425,11 @@ fi
 if [[ "$mode" == "test" ]]; then
 	set +e
 	if [[ -n "$install_order" ]]; then
-		printf 'Running exact Music/REAPER candidate acceptance (%s)...\n' "$install_order"
+		printf 'Running exact Music/REAPER %s acceptance (%s)...\n' "$test_suite" "$install_order"
+		playwright_file="tests/music-project-management-home.spec.ts"
+		if [[ "$test_suite" == "guidance" ]]; then
+			playwright_file="tests/music-home-paired-guidance.spec.ts"
+		fi
 		env PLAYWRIGHT_BASE_URL="$base_url" \
 			ORI_MUSIC_REAPER_ACCEPTANCE=1 \
 			ORI_MUSIC_REAPER_INSTALL_ORDER="$install_order" \
@@ -426,7 +441,7 @@ if [[ "$mode" == "test" ]]; then
 			ORI_MUSIC_REAPER_FINAL_SNAPSHOT="$final_snapshot" \
 			ORI_MUSIC_REAPER_EVIDENCE_DIR="$sandbox/evidence/screenshots" \
 			ORI_MUSIC_REAPER_SANDBOX="$sandbox" \
-			npx playwright test tests/music-project-management-home.spec.ts \
+			npx playwright test "$playwright_file" \
 			--project=chromium --workers=1 ${playwright_args[@]+"${playwright_args[@]}"}
 	else
 		printf 'Running coordinated REAPER browser tests...\n'
@@ -457,7 +472,7 @@ if [[ "$mode" == "test" ]]; then
 			ORI_MUSIC_PLUGIN_REVISION="$music_revision" \
 			ORI_MUSIC_REAPER_EVIDENCE_DIR="$sandbox/evidence/screenshots" \
 			ORI_MUSIC_REAPER_SANDBOX="$sandbox" \
-			npx playwright test tests/music-project-management-home.spec.ts \
+			npx playwright test "$playwright_file" \
 			--project=chromium --workers=1 --grep 'restart preserves exact candidate identities'
 		test_status=$?
 	fi

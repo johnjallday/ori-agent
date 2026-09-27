@@ -306,6 +306,34 @@ func TestFolderDigest_PortfolioResolvesOnlyReviewedHomeAfterConfirm(t *testing.T
 	if replay, err := restarted.ResolvePortfolio(ctx, "local", offer.ID, FolderResolveInput{HomeID: "new-home", RequestID: "ready"}); err != nil || replay.Status != FolderOfferResolved || verifier.calls != 2 {
 		t.Fatalf("replay = %+v, calls=%d, %v", replay, verifier.calls, err)
 	}
+	if selected, identity, err := restarted.PortfolioRoot(ctx, "local", offer.ID, "new-home"); err != nil || selected != root || identity == "" {
+		t.Fatalf("reviewed Home could not reuse its verified source: %q %v", selected, err)
+	}
+	if _, _, err := restarted.PortfolioRoot(ctx, "local", offer.ID, "foreign"); !errors.Is(err, ErrFolderWorkspaceRefused) {
+		t.Fatalf("foreign Home claimed source: %v", err)
+	}
+	if _, _, err := restarted.PortfolioRoot(ctx, "other", offer.ID, "new-home"); err == nil {
+		t.Fatal("foreign owner claimed source")
+	}
+	persisted, err := restarted.store.Read(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := persisted.Offer(offer.ID)
+	restarted.deps.Now = func() time.Time { return resolved.ResolvedAt.Add(portfolioRootHandoffTTL + time.Second) }
+	if _, _, err := restarted.PortfolioRoot(ctx, "local", offer.ID, "new-home"); !errors.Is(err, ErrFolderPathLost) {
+		t.Fatalf("expired offer reused a stale root selection: %v", err)
+	}
+	restarted.deps.Now = func() time.Time { return resolved.ResolvedAt.Add(time.Minute) }
+	if err := os.Rename(root, root+"-old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := restarted.PortfolioRoot(ctx, "local", offer.ID, "new-home"); !errors.Is(err, ErrFolderPathLost) {
+		t.Fatalf("replacement directory inherited the earlier offer: %v", err)
+	}
 }
 
 func TestFolderDigest_DomainDeclineRevivesOnceAndMigratesAppAnswer(t *testing.T) {

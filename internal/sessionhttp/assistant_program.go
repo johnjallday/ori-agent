@@ -334,7 +334,7 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 		return summary.Projects[i].Name < summary.Projects[j].Name
 	})
 	if state.SchemaVersion >= workspace.AssistantProgramStateSchemaVersion {
-		summary.Portfolio, err = workspace.NewAssistantPortfolioService(h.workspaceTaskStore).List(station.ID)
+		summary.Portfolio, err = h.portfolioService().List(station.ID)
 		if err != nil {
 			return assistantProgramSummary{}, err
 		}

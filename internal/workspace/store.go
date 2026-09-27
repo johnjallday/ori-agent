@@ -531,7 +531,8 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 // atomicWriteFile writes data to path via a temp file + rename so a crash
 // mid-write cannot leave a truncated/corrupt file behind.
 func atomicWriteFile(path string, data []byte) error {
-	const perm os.FileMode = 0644
+	// workspace.json may contain private library paths and user notes.
+	const perm os.FileMode = 0600
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
 	if err != nil {
@@ -548,6 +549,11 @@ func atomicWriteFile(path string, data []byte) error {
 		_ = os.Remove(tmpPath)
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath)
 		return err
@@ -556,7 +562,17 @@ func atomicWriteFile(path string, data []byte) error {
 		_ = os.Remove(tmpPath)
 		return err
 	}
-	return nil
+	// If directory durability fails after rename the caller receives an error;
+	// retry must first inspect the Home's persisted operation receipt.
+	parent, err := os.Open(dir) // #nosec G304 -- dir is the canonical workspace config parent, not a request path.
+	if err != nil {
+		return err
+	}
+	if err := parent.Sync(); err != nil {
+		_ = parent.Close()
+		return err
+	}
+	return parent.Close()
 }
 
 func pathExists(path string) (bool, error) {

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -29,6 +30,7 @@ var (
 	ErrAssistantPortfolioConflict      = errors.New("assistant portfolio state changed")
 	ErrAssistantPortfolioReviewExpired = errors.New("assistant portfolio review expired")
 	ErrAssistantPortfolioIdempotency   = errors.New("assistant portfolio idempotency conflict")
+	ErrAssistantPortfolioLibraryOwned  = errors.New("project library owns this Home's portfolio; legacy API cannot edit it")
 	assistantPortfolioMu               sync.Mutex
 )
 
@@ -74,13 +76,31 @@ type AssistantPortfolioReceipt struct {
 	Replayed           bool      `json:"replayed,omitempty"`
 }
 
+// AssistantPortfolioManagedLibrary is the optional, host-owned adapter used
+// only after an explicit Home library authority switch. Legacy Homes retain
+// their existing service unchanged. Without the adapter, managed Homes fail
+// closed rather than writing two versions of the same fields.
+type AssistantPortfolioManagedLibrary interface {
+	List(string) ([]AssistantPortfolioProjectProjection, error)
+	Review(string, string, int64, AssistantPortfolioUpdate) (*AssistantPortfolioReview, error)
+	Commit(string, string, string, AssistantPortfolioUpdate) (*AssistantPortfolioReceipt, error)
+}
+
 type AssistantPortfolioService struct {
-	store Store
-	now   func() time.Time
+	store   Store
+	now     func() time.Time
+	managed AssistantPortfolioManagedLibrary
 }
 
 func NewAssistantPortfolioService(store Store) *AssistantPortfolioService {
 	return &AssistantPortfolioService{store: store, now: time.Now}
+}
+
+func (service *AssistantPortfolioService) WithManagedLibrary(adapter AssistantPortfolioManagedLibrary) *AssistantPortfolioService {
+	if service != nil {
+		service.managed = adapter
+	}
+	return service
 }
 
 func (service *AssistantPortfolioService) SetClock(now func() time.Time) {
@@ -91,6 +111,9 @@ func (service *AssistantPortfolioService) SetClock(now func() time.Time) {
 
 func (service *AssistantPortfolioService) List(stationID string) ([]AssistantPortfolioProjectProjection, error) {
 	station, state, err := service.station(stationID)
+	if errors.Is(err, ErrAssistantPortfolioLibraryOwned) && service.managed != nil {
+		return service.managed.List(stationID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +156,13 @@ func (service *AssistantPortfolioService) Review(stationID, linkID string, expec
 		return nil, err
 	}
 	station, state, err := service.station(stationID)
-	if err != nil || state.Portfolio.StateRevision != expectedRevision {
+	if errors.Is(err, ErrAssistantPortfolioLibraryOwned) && service.managed != nil {
+		return service.managed.Review(stationID, linkID, expectedRevision, normalized)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if state.Portfolio.StateRevision != expectedRevision {
 		return nil, ErrAssistantPortfolioConflict
 	}
 	project, _, err := service.linkedProject(station, state, linkID)
@@ -148,6 +177,9 @@ func (service *AssistantPortfolioService) Review(stationID, linkID string, expec
 	}
 	if err := service.store.Update(station.ID, func(current *Workspace) error {
 		currentState := current.GetAssistantProgramState()
+		if assistantPortfolioLibraryOwned(service.store, current) {
+			return ErrAssistantPortfolioLibraryOwned
+		}
 		if currentState == nil || currentState.Portfolio.StateRevision != expectedRevision {
 			return ErrAssistantPortfolioConflict
 		}
@@ -173,6 +205,9 @@ func (service *AssistantPortfolioService) Commit(stationID, token, idempotencyKe
 		return nil, err
 	}
 	station, state, err := service.station(stationID)
+	if errors.Is(err, ErrAssistantPortfolioLibraryOwned) && service.managed != nil {
+		return service.managed.Commit(stationID, token, idempotencyKey, normalized)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +242,9 @@ func (service *AssistantPortfolioService) Commit(stationID, token, idempotencyKe
 	var result AssistantPortfolioReceipt
 	err = service.store.Update(station.ID, func(current *Workspace) error {
 		currentState := current.GetAssistantProgramState()
+		if assistantPortfolioLibraryOwned(service.store, current) {
+			return ErrAssistantPortfolioLibraryOwned
+		}
 		if currentState == nil || currentState.Portfolio.StateRevision != review.StateRevision {
 			return ErrAssistantPortfolioConflict
 		}
@@ -259,6 +297,84 @@ func (service *AssistantPortfolioService) Commit(stationID, token, idempotencyKe
 	return &result, nil
 }
 
+// AssistantProgramLibraryInputsMatch checks the legacy inputs to a reviewed
+// library authority switch across Home mirrors. A folder-first interrupted
+// portfolio edit must not be overwritten by copying stale primary fields.
+func AssistantProgramLibraryInputsMatch(primary, folder *AssistantProgramState) bool {
+	if primary == nil || folder == nil || primary.Key.Normalize() != folder.Key.Normalize() ||
+		primary.StateRevision != folder.StateRevision || primary.PluginAvailable != folder.PluginAvailable {
+		return false
+	}
+	payload := func(state *AssistantProgramState) ([]byte, error) {
+		return json.Marshal(struct {
+			LinkedProjects []string                            `json:"linked_projects"`
+			Portfolio      AssistantPortfolioState             `json:"portfolio"`
+			InitReviews    []AssistantProjectLibraryInitReview `json:"init_reviews"`
+			InactiveRoots  []string                            `json:"inactive_roots"`
+		}{state.LinkedProjectIDs, state.Portfolio, state.ProjectLibraryInitReviews,
+			state.ProjectLibraryInactiveRoots})
+	}
+	first, err := payload(primary)
+	if err != nil {
+		return false
+	}
+	second, err := payload(folder)
+	return err == nil && bytes.Equal(first, second)
+}
+
+// AssistantProgramLibraryMirrorsAgree is used before lifecycle consequences
+// as well as library reads: removing/restoring a stale primary Home must not
+// discard a newer folder-only catalog or operation receipt.
+func AssistantProgramLibraryMirrorsAgree(store Store, home *Workspace) bool {
+	if home == nil {
+		return false
+	}
+	mirror, ok := store.(MirrorWorkspaceProvider)
+	if !ok {
+		return true
+	}
+	folder, mirrored, err := mirror.GetMirrorWorkspace(home.ID)
+	if !mirrored {
+		return true
+	}
+	if err != nil || folder == nil || !AssistantProgramLibraryInputsMatch(home.GetAssistantProgramState(), folder.GetAssistantProgramState()) {
+		return false
+	}
+	first, second := home.GetAssistantProgramState().ProjectLibrary, folder.GetAssistantProgramState().ProjectLibrary
+	if len(first) == 0 || len(second) == 0 {
+		return len(first) == len(second)
+	}
+	var canonicalFirst, canonicalSecond bytes.Buffer
+	return json.Compact(&canonicalFirst, first) == nil && json.Compact(&canonicalSecond, second) == nil &&
+		bytes.Equal(canonicalFirst.Bytes(), canonicalSecond.Bytes())
+}
+
+// assistantPortfolioLibraryOwned fails closed when the primary is stale after
+// a folder-first SyncStore save. Without this check a crash could resurrect the
+// legacy writer while the canonical Home folder already has a library marker.
+func assistantPortfolioLibraryOwned(store Store, home *Workspace) bool {
+	if home == nil {
+		return true
+	}
+	state := home.GetAssistantProgramState()
+	if state != nil && len(state.ProjectLibrary) != 0 {
+		return true
+	}
+	mirror, ok := store.(MirrorWorkspaceProvider)
+	if !ok {
+		return false
+	}
+	folder, mirrored, err := mirror.GetMirrorWorkspace(home.ID)
+	if !mirrored {
+		return false
+	}
+	if err != nil || folder == nil {
+		return true
+	}
+	folderState := folder.GetAssistantProgramState()
+	return folderState == nil || len(folderState.ProjectLibrary) != 0 || !AssistantProgramLibraryInputsMatch(state, folderState)
+}
+
 func (service *AssistantPortfolioService) station(stationID string) (*Workspace, *AssistantProgramState, error) {
 	if service == nil || service.store == nil || strings.TrimSpace(stationID) == "" {
 		return nil, nil, ErrAssistantPortfolioInvalid
@@ -270,6 +386,11 @@ func (service *AssistantPortfolioService) station(stationID string) (*Workspace,
 	state := station.GetAssistantProgramState()
 	if state == nil || state.SchemaVersion < AssistantProgramStateSchemaVersion {
 		return nil, nil, ErrAssistantProgramUnavailable
+	}
+	if assistantPortfolioLibraryOwned(service.store, station) {
+		// Until the compatibility adapter delegates to the one library service,
+		// even legacy reads must not present a stale editable second portfolio.
+		return nil, nil, ErrAssistantPortfolioLibraryOwned
 	}
 	return station, state, nil
 }
@@ -299,6 +420,12 @@ func (service *AssistantPortfolioService) linkedProject(station *Workspace, stat
 		return nil, nil, ErrAssistantPortfolioLinkNotFound
 	}
 	return foundProject, foundLink, nil
+}
+
+// ProjectProjection uses the same ticket and archive guidance projection for
+// either metadata authority. Its caller must already have verified the link.
+func (service *AssistantPortfolioService) ProjectProjection(project *Workspace, linkID string, revision int64, fields AssistantPortfolioUpdate) AssistantPortfolioProjectProjection {
+	return service.projectProjection(project, linkID, revision, fields)
 }
 
 func (service *AssistantPortfolioService) projectProjection(project *Workspace, linkID string, revision int64, fields AssistantPortfolioUpdate) AssistantPortfolioProjectProjection {

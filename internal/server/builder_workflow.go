@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -855,6 +856,9 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	// journey, sample libraries) reuse it rather than creating their own.
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetTrustedPathSelectionResolver(b.pathSelectionStore)
+		guards := filejanitor.DefaultRootGuards()
+		guards.WorkspaceRoot = resolveWorkspaceRoot(b.configManager)
+		b.sessionHandler.ConfigureAssistantLibraryRoots(nativeFolderPicker{}, b.pathSelectionStore, guards)
 	}
 	if b.workspaceFileStore != nil {
 		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)

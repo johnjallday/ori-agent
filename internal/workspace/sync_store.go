@@ -47,6 +47,22 @@ func NewSyncStore(primary Store, fileSync *FileStore) *SyncStore {
 	return &SyncStore{primary: primary, fileSync: fileSync}
 }
 
+// MirrorWorkspaceProvider is implemented only by a store with a distinct
+// folder-write mirror. A normal FileStore's GetFolderWorkspace reads itself
+// and must not be called recursively while its own Update holds the lock.
+// Decorators forward this capability without confusing it with folder reads.
+type MirrorWorkspaceProvider interface {
+	GetMirrorWorkspace(string) (folder *Workspace, mirrored bool, err error)
+}
+
+func (s *SyncStore) GetMirrorWorkspace(id string) (*Workspace, bool, error) {
+	if s == nil || s.fileSync == nil {
+		return nil, false, nil
+	}
+	folder, err := s.GetFolderWorkspace(id)
+	return folder, true, err
+}
+
 // FileStore returns the underlying FileStore used for disk sync.
 func (s *SyncStore) FileStore() *FileStore {
 	return s.fileSync

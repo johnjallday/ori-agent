@@ -45,6 +45,16 @@ func (s *AgentSnapshotStore) GetFolderWorkspace(id string) (*Workspace, error) {
 	return nil, fmt.Errorf("wrapped store does not support GetFolderWorkspace")
 }
 
+// GetMirrorWorkspace keeps split-mirror detection reachable through the
+// production snapshot decorator, without making a bare FileStore appear to
+// have a second Home document.
+func (s *AgentSnapshotStore) GetMirrorWorkspace(id string) (*Workspace, bool, error) {
+	if mirror, ok := s.Store.(MirrorWorkspaceProvider); ok {
+		return mirror.GetMirrorWorkspace(id)
+	}
+	return nil, false, nil
+}
+
 // MoveWorkspaceFolder preserves the topology owner's physical move through the
 // decorator. Falling back to an ordinary Save after ParentID changes can create
 // a second folder instead of relocating the canonical workspace.

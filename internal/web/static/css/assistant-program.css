@@ -728,3 +728,257 @@
     flex-direction: column;
   }
 }
+
+/* Studio ledger: the library is a quiet, full-width shelf within the Home. */
+.project-library-panel {
+  grid-column: 1 / -1;
+  min-width: 0; /* Let the results table scroll inside its labelled wrapper, not the page. */
+  border-top: 4px solid var(--assistant-amber);
+  background:
+    linear-gradient(115deg, rgba(217, 130, 25, 0.055), transparent 34%), var(--assistant-panel);
+}
+.project-library-panel button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.project-library-intro,
+.project-library-status,
+.project-library-empty {
+  color: var(--assistant-muted);
+  line-height: 1.55;
+}
+.project-library-status {
+  min-height: 1.5rem;
+  margin: 0.8rem 0;
+}
+.project-library-empty {
+  border-left: 3px solid var(--assistant-amber);
+  padding: 0.75rem 1rem;
+}
+.project-library-roots {
+  display: grid;
+  gap: 0.7rem;
+  margin: 1rem 0 1.5rem;
+}
+.project-library-root {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  background: rgba(36, 27, 18, 0.045);
+  border: 1px solid var(--assistant-line);
+  border-radius: 3px;
+}
+.project-library-root strong,
+.project-library-root small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.project-library-root small {
+  color: var(--assistant-muted);
+  margin-top: 0.25rem;
+}
+.project-library-root-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.project-library-toolbar {
+  padding: 1rem 0 1.2rem;
+  border-top: 1px solid var(--assistant-line);
+}
+.project-library-toolbar label {
+  font: 600 0.75rem/1.2 var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+.project-library-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.6rem;
+}
+.project-library-toolbar-row input {
+  flex: 2 1 15rem;
+}
+.project-library-toolbar-row select {
+  flex: 1 1 12rem;
+  min-width: 12rem; /* Keep observed-state labels readable as the filters wrap. */
+}
+.project-library-toolbar-row button {
+  margin-left: auto;
+}
+.project-library-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.project-library-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 640px;
+}
+.project-library-table th {
+  font: 600 0.67rem/1.3 var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--assistant-muted);
+}
+.project-library-table th,
+.project-library-table td {
+  text-align: left;
+  padding: 0.8rem 0.6rem;
+  border-bottom: 1px solid var(--assistant-line);
+  vertical-align: middle;
+}
+.project-library-table td:first-child {
+  font-weight: 650;
+}
+.project-library-table small {
+  display: block;
+  color: var(--assistant-muted);
+  font-weight: 400;
+}
+.project-library-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.9rem;
+  color: var(--assistant-muted);
+}
+.project-library-dialog form {
+  max-width: min(92vw, 42rem);
+}
+.project-library-detail-dialog {
+  padding: clamp(1.5rem, 4vw, 3rem);
+  color: var(--assistant-ink);
+  font:
+    400 0.95rem/1.55 system-ui,
+    sans-serif;
+}
+.project-library-detail-dialog h2,
+.project-library-detail-dialog h3 {
+  margin: 0 0 0.8rem;
+  font-family: "Chakra Petch", sans-serif;
+  line-height: 1.2;
+}
+.project-library-detail-dialog h2 {
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+}
+.project-library-detail-dialog > ul {
+  padding-left: 1.35rem;
+}
+.project-library-setup-preview {
+  margin: 1.5rem 0;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid var(--assistant-line);
+  border-left: 3px solid var(--assistant-amber);
+  border-radius: 3px 12px 12px 3px;
+  background: var(--assistant-panel);
+}
+.project-library-setup-preview p:last-child {
+  margin-bottom: 0;
+}
+.project-library-resume {
+  margin: 1.35rem 0;
+  padding: 1.2rem;
+  border: 1px solid var(--assistant-line);
+  border-left: 3px solid var(--assistant-amber);
+  background: var(--assistant-panel);
+}
+.project-library-resume h3 {
+  margin: 0 0 1rem;
+  font-family: "Chakra Petch", sans-serif;
+}
+.project-library-resume-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 0.75rem;
+}
+.project-library-resume-card {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--assistant-line);
+  border-radius: 3px 12px 12px 3px;
+  background: #fffdf7;
+  overflow-wrap: anywhere;
+}
+.project-library-resume-card h4 {
+  margin: 0 0 0.6rem;
+  font-family: "Chakra Petch", sans-serif;
+}
+.project-library-resume-card small {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: var(--assistant-muted);
+}
+.project-library-session-history {
+  margin: 1.5rem 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--assistant-line);
+}
+.project-library-session-history ul {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+.project-library-session-history li {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--assistant-line);
+  border-radius: 3px 12px 12px 3px;
+  background: var(--assistant-panel);
+}
+.project-library-session-history strong,
+.project-library-session-history small {
+  display: block;
+}
+.project-library-session-history small {
+  color: var(--assistant-muted);
+}
+.project-library-dialog p,
+.project-library-dialog li {
+  overflow-wrap: anywhere;
+}
+.project-library-dialog ul {
+  max-height: 40vh;
+  overflow: auto;
+}
+.project-library-scope-list {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0;
+  list-style: none;
+}
+.project-library-scope-list button {
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.project-library-fields {
+  display: grid;
+  gap: 0.7rem;
+  margin: 1rem 0;
+}
+.project-library-fields label {
+  display: grid;
+  gap: 0.25rem;
+}
+@media (max-width: 700px) {
+  .project-library-root {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .project-library-toolbar-row input,
+  .project-library-toolbar-row select,
+  .project-library-toolbar-row button {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .project-library-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

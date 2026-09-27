@@ -11,9 +11,11 @@ usage() {
 	cat <<'EOF'
 Usage: ./scripts/music-home-demo.sh [serve|test] --source DIR [options] [-- playwright args]
 
-Stage an exact clean Music Project Management commit, build this Ori worktree,
-start it with disposable HOME/ORI_DATA_DIR state, and install and enable the
-staged package through the real plugin API.
+Export an exact clean Music Project Management commit, build this Ori worktree,
+and start it with disposable HOME/ORI_DATA_DIR state. By default, install and
+enable that local export through the real plugin API. With --provider reviewed,
+leave the plugin uninstalled so the portfolio UI can review and install the
+published release from Ori's built-in registry instead.
 
 Commands:
   serve       Launch the prepared manual demo (default); Ctrl-C stops it.
@@ -21,9 +23,14 @@ Commands:
 
 Options:
   --source DIR      Clean Music Project Management candidate worktree.
+  --reaper-source DIR  Optional clean REAPER candidate, exported and built only in the
+                       disposable sandbox for the paired portfolio-reviewed test.
   --port PORT       Server port (default: 8931).
   --sandbox DIR     Use and preserve this sandbox instead of a temporary one.
   --keep            Preserve the generated temporary sandbox after exit.
+  --suite NAME      Browser test suite: home (default), portfolio (local refusal),
+                    or portfolio-reviewed (published release; test only).
+  --provider MODE   local (default) or reviewed (portfolio-reviewed only).
   --open            Open the manual demo in the default browser (macOS).
   -h, --help        Show this help.
 
@@ -32,9 +39,11 @@ Environment:
   ORI_MUSIC_HOME_DEMO_PORT=PORT  Change the default port.
   ORI_KEEP_MUSIC_SANDBOX=1       Preserve generated state after exit.
 
-The script prints and records the exact candidate commit, Git tree, archive
-SHA-256, and package-validator output. It creates no branch, commit, tag,
-release, registry entry, or real user installation.
+The script prints and records the exact local candidate commit, Git tree,
+archive SHA-256, and validator output. In reviewed mode the export is NOT
+installed: Ori must resolve and install its published reviewed release after
+browser confirmation. The script creates no branch, commit, tag, release,
+registry entry, or real user installation.
 EOF
 }
 
@@ -52,9 +61,12 @@ serve | test)
 esac
 
 plugin_source="${ORI_MUSIC_PLUGIN_SOURCE:-}"
+reaper_source=""
 port="${ORI_MUSIC_HOME_DEMO_PORT:-8931}"
 sandbox=""
 keep_sandbox="${ORI_KEEP_MUSIC_SANDBOX:-0}"
+test_suite="home"
+provider_mode="local"
 open_browser=0
 playwright_args=()
 
@@ -63,6 +75,11 @@ while [[ $# -gt 0 ]]; do
 	--source)
 		[[ $# -ge 2 ]] || fail "--source needs a directory"
 		plugin_source="$2"
+		shift 2
+		;;
+	--reaper-source)
+		[[ $# -ge 2 ]] || fail "--reaper-source needs a directory"
+		reaper_source="$2"
 		shift 2
 		;;
 	--port)
@@ -79,6 +96,16 @@ while [[ $# -gt 0 ]]; do
 	--keep)
 		keep_sandbox=1
 		shift
+		;;
+	--suite)
+		[[ $# -ge 2 ]] || fail "--suite needs a name"
+		test_suite="$2"
+		shift 2
+		;;
+	--provider)
+		[[ $# -ge 2 ]] || fail "--provider needs local or reviewed"
+		provider_mode="$2"
+		shift 2
 		;;
 	--open)
 		open_browser=1
@@ -100,12 +127,25 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$plugin_source" ]] || fail "--source or ORI_MUSIC_PLUGIN_SOURCE is required"
+if [[ -n "$reaper_source" && ( "$mode" != "test" || "$test_suite" != "portfolio-reviewed" || "$provider_mode" != "reviewed" ) ]]; then
+	fail "--reaper-source needs test --suite portfolio-reviewed --provider reviewed"
+fi
 [[ "$port" =~ ^[0-9]+$ ]] || fail "port must be numeric"
 ((port >= 1 && port <= 65535)) || fail "port must be between 1 and 65535"
 [[ "$keep_sandbox" == "0" || "$keep_sandbox" == "1" ]] || \
 	fail "ORI_KEEP_MUSIC_SANDBOX must be 0 or 1"
 if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
+fi
+[[ "$test_suite" == "home" || "$test_suite" == "portfolio" || "$test_suite" == "portfolio-reviewed" ]] || \
+	fail "--suite needs home, portfolio or portfolio-reviewed"
+[[ "$provider_mode" == "local" || "$provider_mode" == "reviewed" ]] || fail "--provider needs local or reviewed"
+if [[ "$mode" != "test" && "$test_suite" != "home" ]]; then
+	fail "--suite is only valid with the test command"
+fi
+if [[ "$test_suite" == "portfolio-reviewed" && "$provider_mode" != "reviewed" ]] || \
+	[[ "$provider_mode" == "reviewed" && ( "$mode" != "test" || "$test_suite" != "portfolio-reviewed" ) ]]; then
+	fail "portfolio-reviewed requires test --provider reviewed; other suites require local"
 fi
 if [[ "$mode" != "serve" && "$open_browser" -eq 1 ]]; then
 	fail "--open is only valid with the serve command"
@@ -125,6 +165,16 @@ git -C "$plugin_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
 
 candidate_revision="$(git -C "$plugin_root" rev-parse HEAD)"
 candidate_tree="$(git -C "$plugin_root" rev-parse HEAD^{tree})"
+reaper_root=""
+reaper_revision=""
+reaper_tree=""
+if [[ -n "$reaper_source" ]]; then
+	reaper_root="$(CDPATH= cd -- "$reaper_source" 2>/dev/null && pwd)" || fail "REAPER source is unavailable"
+	[[ -z "$(git -C "$reaper_root" status --porcelain --untracked-files=all)" ]] || fail "REAPER source must be clean"
+	[[ -x "$reaper_root/scripts/build-local-artifact.sh" ]] || fail "REAPER source cannot build its sandbox artifact"
+	reaper_revision="$(git -C "$reaper_root" rev-parse HEAD)"
+	reaper_tree="$(git -C "$reaper_root" rev-parse HEAD^{tree})"
+fi
 
 base_url="http://127.0.0.1:$port"
 if curl -fsS -o /dev/null --max-time 1 "$base_url/health" 2>/dev/null; then
@@ -166,9 +216,37 @@ mkdir -p "$bundled_plugin"
 tar -xf "$archive" -C "$bundled_plugin"
 "$bundled_plugin/scripts/validate-package.py" "$bundled_plugin" \
 	| tee "$sandbox/evidence/package-validation.txt"
+candidate_version="$(python3 - "$bundled_plugin/.ori-plugin/plugin.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    print(json.load(handle)['version'])
+PY
+)"
 printf '%s\n' "$candidate_revision" >"$sandbox/evidence/candidate-revision.txt"
 printf '%s\n' "$candidate_tree" >"$sandbox/evidence/candidate-tree.txt"
 printf '%s\n' "$archive_sha256" >"$sandbox/evidence/candidate-archive-sha256.txt"
+
+bundled_reaper=""
+if [[ -n "$reaper_root" ]]; then
+	reaper_archive="$sandbox/evidence/reaper-plugin.tar"
+	bundled_reaper="$sandbox/plugin-source/reaper-plugin"
+	git -C "$reaper_root" archive --format=tar --output="$reaper_archive" "$reaper_revision"
+	mkdir -p "$bundled_reaper"
+	tar -xf "$reaper_archive" -C "$bundled_reaper"
+	(cd "$bundled_reaper" && ./scripts/build-local-artifact.sh) >"$sandbox/evidence/reaper-artifact-build.txt"
+	python3 - "$bundled_reaper/.ori-plugin/plugin.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+data['services'][0]['artifacts'][0]['source'] = {'kind': 'bundled', 'path': 'artifacts/reaper-plugin-darwin-arm64'}
+path.write_text(json.dumps(data, indent=2) + '\n')
+PY
+	printf '%s\n' "$reaper_revision" >"$sandbox/evidence/reaper-candidate-revision.txt"
+	printf '%s\n' "$reaper_tree" >"$sandbox/evidence/reaper-candidate-tree.txt"
+fi
 
 cd "$repo_root"
 printf 'Building Ori server...\n'
@@ -200,6 +278,10 @@ if ((ready == 0)); then
 	exit 1
 fi
 
+# A reviewed-run export is validated as evidence but is never installed.
+skill_root="$bundled_plugin/skills/music-project-management"
+[[ -f "$skill_root/SKILL.md" ]] || fail "packaged skill is missing from the disposable plugin export"
+if [[ "$provider_mode" == "local" ]]; then
 install_body="$(python3 - "$bundled_plugin" <<'PY'
 import json
 import sys
@@ -212,33 +294,67 @@ curl -fsS -X POST "$base_url/api/plugins/install" \
 curl -fsS -X POST "$base_url/api/plugins/music-project-management/enable" \
 	-H 'X-Requested-With: XMLHttpRequest' >"$sandbox/evidence/plugin-enable.json"
 
-skill_root="$sandbox/.agents/skills/music-project-management"
-[[ -f "$skill_root/SKILL.md" ]] || fail "Ori did not stage the packaged skill under disposable HOME"
-[[ -f "$skill_root/.ori-plugin-skill.json" ]] || fail "staged skill has no ownership receipt"
-source_skill_sha256="$(shasum -a 256 "$bundled_plugin/skills/music-project-management/SKILL.md" | awk '{print $1}')"
+# Installed plugin skills are read in place from the package folder. Ori no
+# longer copies them into ~/.agents/skills or writes legacy ownership receipts.
+# Verify that the real install API recorded exactly this disposable export.
+python3 - "$sandbox/evidence/plugin-install.json" "$sandbox/evidence/plugin-enable.json" "$bundled_plugin" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    installed = json.load(handle)
+with open(sys.argv[2], encoding="utf-8") as handle:
+    enabled = json.load(handle)
+plugin = installed.get("plugin") or {}
+assert installed.get("installed") is True, "plugin install did not succeed"
+assert os.path.realpath(plugin.get("install_dir", "")) == os.path.realpath(sys.argv[3]), "install escaped disposable export"
+assert plugin.get("skill_paths", {}).get("music-project-management") == "skills/music-project-management", "plugin did not register the packaged skill"
+assert enabled.get("enabled") is True and enabled.get("name") == plugin.get("name"), "plugin enable failed"
+PY
+fi
+source_skill_sha256="$(shasum -a 256 "$plugin_root/skills/music-project-management/SKILL.md" | awk '{print $1}')"
 staged_skill_sha256="$(shasum -a 256 "$skill_root/SKILL.md" | awk '{print $1}')"
-[[ "$source_skill_sha256" == "$staged_skill_sha256" ]] || fail "staged skill differs from the candidate"
+[[ "$source_skill_sha256" == "$staged_skill_sha256" ]] || fail "disposable exported skill differs from clean candidate"
 
 printf 'SANDBOX=%s\n' "$sandbox"
 printf 'ORI_URL=%s\n' "$base_url"
 printf 'ORI_LOG=%s\n' "$server_log"
 printf 'MUSIC_PLUGIN_SOURCE=%s\n' "$bundled_plugin"
 printf 'MUSIC_PLUGIN_REVISION=%s\n' "$candidate_revision"
+printf 'MUSIC_PLUGIN_VERSION=%s\n' "$candidate_version"
 printf 'MUSIC_PLUGIN_TREE=%s\n' "$candidate_tree"
 printf 'MUSIC_PLUGIN_ARCHIVE_SHA256=%s\n' "$archive_sha256"
 printf 'MUSIC_SKILL_SHA256=%s\n' "$staged_skill_sha256"
+printf 'MUSIC_PROVIDER_MODE=%s\n' "$provider_mode"
+if [[ -n "$bundled_reaper" ]]; then
+	printf 'REAPER_PLUGIN_SOURCE=%s\nREAPER_PLUGIN_REVISION=%s\nREAPER_PLUGIN_TREE=%s\n' "$bundled_reaper" "$reaper_revision" "$reaper_tree"
+fi
+if [[ "$provider_mode" == "reviewed" ]]; then
+	printf 'Local export was validated but NOT installed; the browser must review the published release.\n'
+fi
 
 if [[ "$mode" == "test" ]]; then
-	printf 'Running Music Production Home real-candidate acceptance...\n'
+	printf 'Running Music Production Home %s acceptance (provider: %s)...\n' "$test_suite" "$provider_mode"
+	playwright_file="tests/music-home-candidate.spec.ts"
+	if [[ "$test_suite" == "portfolio" ]]; then
+		playwright_file="tests/music-home-portfolio.spec.ts"
+	elif [[ "$test_suite" == "portfolio-reviewed" ]]; then
+		playwright_file="tests/music-home-portfolio-reviewed.spec.ts"
+	fi
 	set +e
 	env PLAYWRIGHT_BASE_URL="$base_url" \
+		ORI_MUSIC_HOME_SANDBOX="$sandbox" \
 		ORI_MUSIC_HOME_ACCEPTANCE=1 \
+		ORI_MUSIC_PROVIDER_MODE="$provider_mode" \
+		ORI_REAPER_PLUGIN_PATH="$bundled_reaper" \
 		ORI_MUSIC_PLUGIN_PATH="$bundled_plugin" \
 		ORI_MUSIC_PLUGIN_REVISION="$candidate_revision" \
+		ORI_MUSIC_PLUGIN_VERSION="$candidate_version" \
 		ORI_MUSIC_PLUGIN_TREE="$candidate_tree" \
 		ORI_MUSIC_PLUGIN_ARCHIVE_SHA256="$archive_sha256" \
 		ORI_MUSIC_HOME_EVIDENCE_DIR="$sandbox/evidence/screenshots" \
-		npx playwright test tests/music-home-candidate.spec.ts \
+		npx playwright test "$playwright_file" \
 		--project=chromium --workers=1 ${playwright_args[@]+"${playwright_args[@]}"}
 	test_status=$?
 	set -e

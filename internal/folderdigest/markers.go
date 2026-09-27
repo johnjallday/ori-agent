@@ -40,6 +40,12 @@ type Marker struct {
 	// Label is the plain-words name used in reason lines and evidence
 	// summaries ("marker: git repository").
 	Label string
+	// ProjectFormat is inert, host-owned catalog identity for a recognized
+	// project marker. It grants no plugin, project connection or execution.
+	ProjectFormat string
+	// ProjectBundle allows a recognized project format to be a directory
+	// marker. Other project-format globs match regular files only.
+	ProjectBundle bool
 }
 
 // The Markers table itself lives in tables.go, the package's data-only file.
@@ -52,6 +58,9 @@ func (m Marker) matches(name string, isDir bool) bool {
 	case MarkerDir:
 		return isDir && name == m.Name
 	case MarkerGlob:
+		if m.ProjectFormat != "" && isDir && !m.ProjectBundle {
+			return false
+		}
 		// Project extension globs match case-insensitively,
 		// while exact-name manifests above keep their original case.
 		ok, err := filepath.Match(strings.ToLower(m.Name), strings.ToLower(name))
@@ -63,6 +72,20 @@ func (m Marker) matches(name string, isDir bool) bool {
 // MatchMarker returns the highest-precedence marker row that one entry
 // satisfies, if any. Callers keep the first hit across a folder's entries in
 // table order, which markerRank makes cheap.
+// KnownProjectFormat validates a catalog format against the one host-owned
+// marker table, rather than hardcoding any plugin domain into callers.
+func KnownProjectFormat(format string) bool {
+	if format == "" {
+		return false
+	}
+	for _, marker := range Markers {
+		if marker.ProjectFormat == format {
+			return true
+		}
+	}
+	return false
+}
+
 func MatchMarker(name string, isDir bool) (Marker, bool) {
 	for _, m := range Markers {
 		if m.matches(name, isDir) {

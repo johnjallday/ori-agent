@@ -10,11 +10,47 @@ import {
   folderOfferView,
   folderOutcomeNote,
   folderReceiptView,
-  folderProjectModalOptions
+  folderProjectModalOptions,
+  portfolioLibraryURL
 } from './personal-assistant-folder.js';
 
 const headlineText = view => view.headline.map(part => part.text).join('');
 const strongText = view => view.headline.filter(part => part.strong).map(part => part.text);
+
+test('portfolio continuation carries only a canonical Home route and opaque offer ID', () => {
+  assert.equal(
+    portfolioLibraryURL({
+      id: 'offer-123',
+      status: 'resolved',
+      outcome: { kind: 'home', route: '/workspaces/music-home' }
+    }),
+    '/workspaces/music-home/assistant?folder_offer_id=offer-123#projectLibraryPanel'
+  );
+  assert.equal(
+    portfolioLibraryURL({
+      id: 'offer-123',
+      status: 'awaiting_outcome',
+      outcome: { kind: 'home', route: '/workspaces/music-home' }
+    }),
+    ''
+  );
+  assert.equal(
+    portfolioLibraryURL({
+      id: 'offer-123',
+      status: 'resolved',
+      outcome: { kind: 'home', route: '//external' }
+    }),
+    ''
+  );
+  assert.equal(
+    portfolioLibraryURL({
+      id: 'offer-123',
+      status: 'resolved',
+      outcome: { kind: 'project', route: '/workspaces/song' }
+    }),
+    ''
+  );
+});
 
 test('the action is offered only to an active or paused assistant', () => {
   assert.equal(folderActionAvailable({ state: 'active' }), true);

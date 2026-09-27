@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -726,6 +727,10 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		s.mu.Unlock()
 	}()
 
+	// A portfolio offer may later hand off this server-held source to the
+	// library. Record its directory identity before and after the scan so a
+	// replacement at the same path cannot inherit the original selection.
+	beforeIdentity, _ := portfolioDirectoryIdentity(root)
 	result, err := s.deps.Scan(root)
 	if err != nil {
 		switch {
@@ -766,6 +771,16 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 					offer.Portfolio = nil
 				}
 			}
+		}
+	}
+	if offer.Portfolio != nil {
+		afterIdentity, identityErr := portfolioDirectoryIdentity(root)
+		if (identityErr != nil && !errors.Is(identityErr, projectlibrary.ErrUnavailable)) ||
+			(beforeIdentity != "" && beforeIdentity != afterIdentity) {
+			return FolderOfferView{}, ErrFolderPathLost
+		}
+		if beforeIdentity != "" {
+			offer.RootIdentity = afterIdentity
 		}
 	}
 	if fileShape != "" && offer.Status == FolderOfferPending {
@@ -1297,6 +1312,56 @@ func (s *FolderDigestService) ResolvePortfolio(ctx context.Context, userID, offe
 	// A portfolio Home is not a project workspace and must not enter the
 	// dossier's folder→project fact or first-project mission observers.
 	return s.view(ctx, resolved, binding.Paused), nil
+}
+
+const portfolioRootHandoffTTL = 30 * time.Minute
+
+// PortfolioRoot permits a fresh, separate library-root review after a
+// canonical portfolio Home was created. It is a server-only origin proof: a
+// browser may name the offer, but never supplies a path or turns the earlier
+// folder scan into a durable grant. Expired picker memory requires re-picking.
+func (s *FolderDigestService) PortfolioRoot(ctx context.Context, userID, offerID, homeID string) (string, string, error) {
+	if s == nil || s.store == nil || userID == "" || offerID == "" || homeID == "" {
+		return "", "", ErrFolderOutcomeUnavailable
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return "", "", err
+	}
+	offer := doc.Offer(offerID)
+	if offer == nil {
+		return "", "", ErrFolderOfferNotFound
+	}
+	if offer.Status != FolderOfferResolved || offer.Portfolio == nil || offer.DecidedAt == nil ||
+		offer.Outcome == nil || offer.Outcome.Kind != FolderChoiceHome ||
+		offer.Outcome.WorkspaceID != homeID || !offer.Subject.IsRoot {
+		return "", "", ErrFolderWorkspaceRefused
+	}
+	if offer.ResolvedAt == nil || s.now().Before(*offer.ResolvedAt) ||
+		s.now().Sub(*offer.ResolvedAt) > portfolioRootHandoffTTL {
+		return "", "", ErrFolderPathLost
+	}
+	root, ok := s.rootPath(*offer)
+	if !ok {
+		return "", "", ErrFolderPathLost
+	}
+	canonical, err := s.deps.ValidateRoot(root)
+	if err != nil || canonical != root || FolderKey(canonical) != offer.FolderKey || offer.RootIdentity == "" {
+		return "", "", ErrFolderPathLost
+	}
+	identity, err := portfolioDirectoryIdentity(canonical)
+	if err != nil || identity != offer.RootIdentity {
+		return "", "", ErrFolderPathLost
+	}
+	return canonical, offer.RootIdentity, nil
+}
+
+func portfolioDirectoryIdentity(path string) (string, error) {
+	info, err := os.Lstat(path) // #nosec G703 G304 -- canonical server-held chip or picker root, never browser input
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", ErrFolderPathLost
+	}
+	return projectlibrary.DirectoryIdentity(info)
 }
 
 // PortfolioProvider returns the Home provider for a confirmed collection

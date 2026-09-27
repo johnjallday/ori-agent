@@ -857,6 +857,7 @@ async function startPortfolioSetup(offer) {
     if (!result.ok)
       throw new Error('That Home was not created for this offer. Pick another collection.');
     render();
+    continuePortfolioToLibrary(result.payload?.offer);
     return;
   }
   if (template.availability?.state !== 'creatable')
@@ -876,6 +877,7 @@ async function startPortfolioSetup(offer) {
           'The Home was built, but its folder offer is still open. Continue setup to reconcile it.'
         );
       render();
+      continuePortfolioToLibrary(result.payload?.offer);
     }
   });
   const context = manager.workspaceCreatorContext;
@@ -884,6 +886,27 @@ async function startPortfolioSetup(offer) {
   }
   if (manager.workspaceCreatorContext !== context || !picker.select(manager, template.id)) {
     throw new Error('The exact Home template could not be selected. Nothing was created.');
+  }
+}
+
+// This is navigation only. Resolving the portfolio offer never grants a root
+// or starts a scan; the Home's separate review UI owns those decisions.
+export function portfolioLibraryURL(offer) {
+  if (offer?.outcome?.kind !== 'home') return '';
+  const route = resolvedRouteFor(offer);
+  if (!/^\/workspaces\/[^/?#]+\/?$/.test(route) || !offer?.id) return '';
+  return `${route.replace(/\/$/, '')}/assistant?folder_offer_id=${encodeURIComponent(offer.id)}#projectLibraryPanel`;
+}
+
+function continuePortfolioToLibrary(offer) {
+  const url = portfolioLibraryURL(offer);
+  if (
+    url &&
+    window.confirm(
+      'The Home is ready. Continue to Project Library to review this folder? No scan or project connection starts automatically.'
+    )
+  ) {
+    window.location.assign(url);
   }
 }
 

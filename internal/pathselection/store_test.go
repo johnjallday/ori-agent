@@ -39,6 +39,9 @@ func TestStoreBindsScopedSelectionsAndCannotUpgradeUnscopedTokens(t *testing.T) 
 	if got, err := store.ResolveFor(scoped, "workspace-1"); err != nil || got != selected {
 		t.Fatalf("scoped resolve = %q, %v", got, err)
 	}
+	if _, err := store.Resolve(scoped); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("scoped token downgraded through unscoped Resolve: %v", err)
+	}
 	if _, err := store.ResolveFor(scoped, "workspace-2"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("cross-workspace resolve error = %v", err)
 	}
@@ -48,5 +51,8 @@ func TestStoreBindsScopedSelectionsAndCannotUpgradeUnscopedTokens(t *testing.T) 
 	}
 	if _, err := store.ResolveFor(unscoped, "workspace-1"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("unscoped upgrade error = %v", err)
+	}
+	if got, err := store.Resolve(unscoped); err != nil || got != selected {
+		t.Fatalf("legacy unscoped selection changed: %q %v", got, err)
 	}
 }

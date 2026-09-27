@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -92,6 +93,63 @@ func TestAssistantPortfolioHTTPReviewCommitAndHandoff(t *testing.T) {
 	handler.GetAssistantPortfolio(listRecorder, assistantProgramRequest(http.MethodGet, "/portfolio", project.ID, ""))
 	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"project_workspace_id":"`+project.ID+`"`) || !strings.Contains(listRecorder.Body.String(), `"status":"active"`) {
 		t.Fatalf("portfolio list = %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+}
+
+func TestAssistantPortfolioHTTPUsesOneManagedLibraryAfterReviewedSwitch(t *testing.T) {
+	handler, store, station, project := assistantPortfolioHTTPFixture(t)
+	state := station.GetAssistantProgramState()
+	scope := projectlibrary.Scope{OwnerUserID: station.OwnerUserID, HomeID: station.ID,
+		ProviderID: state.Key.PluginID, ProgramID: state.Key.ProgramID}
+	library := projectlibrary.NewStore(store)
+	reviewInit, err := library.ReviewInitialize(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := library.CommitInitialize(scope, reviewInit.Token, "http-library-init"); err != nil {
+		t.Fatal(err)
+	}
+	project, err = store.Get(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkID := project.GetAssistantProjectLink().ID
+	list := httptest.NewRecorder()
+	handler.GetAssistantPortfolio(list, assistantProgramRequest(http.MethodGet, "/portfolio", station.ID, ""))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"project_workspace_id":"`+project.ID+`"`) {
+		t.Fatalf("managed Home list = %d: %s", list.Code, list.Body.String())
+	}
+	doc, err := library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := `{"status":"active","priority":0,"archive_review_state":"not_ready"}`
+	reviewRequest := `{"link_id":"` + linkID + `","if_revision":` + strconv.FormatInt(doc.Revision, 10) + `,"fields":` + fields + `}`
+	reviewResponse := httptest.NewRecorder()
+	handler.ReviewAssistantPortfolio(reviewResponse, assistantProgramRequest(http.MethodPost, "/portfolio/review", station.ID, reviewRequest))
+	if reviewResponse.Code != http.StatusOK {
+		t.Fatalf("managed Home review = %d: %s", reviewResponse.Code, reviewResponse.Body.String())
+	}
+	var approved workspace.AssistantPortfolioReview
+	if err := json.Unmarshal(reviewResponse.Body.Bytes(), &approved); err != nil || approved.Token == "" {
+		t.Fatalf("review receipt: %+v %v", approved, err)
+	}
+	commit := httptest.NewRecorder()
+	payload := `{"review_token":"` + approved.Token + `","idempotency_key":"managed-http-fields","fields":` + fields + `}`
+	handler.CommitAssistantPortfolio(commit, assistantProgramRequest(http.MethodPost, "/portfolio/commit", station.ID, payload))
+	if commit.Code != http.StatusOK {
+		t.Fatalf("managed Home commit = %d: %s", commit.Code, commit.Body.String())
+	}
+	doc, err = library.Read(scope)
+	if err != nil || len(doc.Entries) != 1 || doc.Entries[0].Fields.Status != "active" ||
+		doc.Entries[0].Fields.Priority == nil || *doc.Entries[0].Fields.Priority != 0 {
+		t.Fatalf("old HTTP write bypassed library: %+v %v", doc, err)
+	}
+	list = httptest.NewRecorder()
+	handler.GetAssistantPortfolio(list, assistantProgramRequest(http.MethodGet, "/portfolio", station.ID, ""))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"status":"active"`) ||
+		strings.Contains(list.Body.String(), "project_library") {
+		t.Fatalf("managed Home response leaked/missed metadata = %d: %s", list.Code, list.Body.String())
 	}
 }
 

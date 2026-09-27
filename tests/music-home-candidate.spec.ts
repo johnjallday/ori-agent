@@ -8,10 +8,13 @@ const ENABLED = process.env.ORI_MUSIC_HOME_ACCEPTANCE === '1';
 const SHOTS = process.env.ORI_MUSIC_HOME_EVIDENCE_DIR || 'test-results/music-home-candidate';
 const PLUGIN_PATH = process.env.ORI_MUSIC_PLUGIN_PATH || '';
 const REVISION = process.env.ORI_MUSIC_PLUGIN_REVISION || '';
+const VERSION = process.env.ORI_MUSIC_PLUGIN_VERSION || '';
 const RUN = Date.now().toString(36);
 const GROUP_NAME = `Music Studio ${RUN}`;
 const RENAMED_GROUP = `Renamed Music Studio ${RUN}`;
 const MANAGER_NAME = 'Portfolio Manager';
+let createdHomeID = '';
+let createdHomeSlug = '';
 
 interface WorkspaceSummary {
   id: string;
@@ -75,6 +78,7 @@ async function evidence(page: Page, name: string) {
 test('the exact candidate installs as one content-only Home provider', async ({ request }) => {
   expect(PLUGIN_PATH).toBeTruthy();
   expect(REVISION).toMatch(/^[a-f0-9]{40}$/);
+  expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/);
 
   const body = await json(await request.get('/api/plugins'));
   const plugins = Array.isArray(body) ? body : body.plugins || [];
@@ -83,7 +87,7 @@ test('the exact candidate installs as one content-only Home provider', async ({ 
   );
   expect(music, JSON.stringify(plugins)).toMatchObject({
     name: 'music-project-management',
-    version: '0.1.0',
+    version: VERSION,
     enabled: true,
     skills: ['music-project-management']
   });
@@ -97,7 +101,7 @@ test('the exact candidate installs as one content-only Home provider', async ({ 
     provider: {
       kind: 'plugin',
       plugin_id: 'music-project-management',
-      plugin_version: '0.1.0'
+      plugin_version: VERSION
     },
     availability: { state: 'creatable' }
   });
@@ -152,7 +156,7 @@ test('Create Group reviews, staffs, replays, renames, and reuses one empty Home'
   const music = creator.locator('.workspace-group-template-option', {
     hasText: 'Music Production Home'
   });
-  await expect(music).toContainText('Plugin: music-project-management 0.1.0');
+  await expect(music).toContainText(`Plugin: music-project-management ${VERSION}`);
   await expect(music).toContainText('Group roles: Music Portfolio Manager (required)');
   await expect(music).toContainText('Optional: Sample Library Manager');
   await expect(music).toContainText('Packaged skills: music-project-management');
@@ -179,7 +183,7 @@ test('Create Group reviews, staffs, replays, renames, and reuses one empty Home'
   await creator.getByRole('button', { name: 'Review →' }).click();
   const summary = creator.locator('#workspaceReviewSummary');
   await expect(summary).toContainText(
-    'Template: Music Production Home · Plugin: music-project-management 0.1.0'
+    `Template: Music Production Home · Plugin: music-project-management ${VERSION}`
   );
   await expect(summary).toContainText(
     'No project, team, schedule, tool access, or runtime setup is created'
@@ -197,6 +201,8 @@ test('Create Group reviews, staffs, replays, renames, and reuses one empty Home'
   expect(created[0]).toMatchObject({ name: GROUP_NAME, kind: 'group' });
   expect(created[0].parent_id || '').toBe('');
   const homeID = created[0].id;
+  createdHomeID = homeID;
+  createdHomeSlug = created[0].folder_slug;
   const home = await json(await request.get(`/api/workspaces/${homeID}`));
   expect(home.agent_instances).toHaveLength(1);
   expect(home.agent_instances[0]).toMatchObject({
@@ -281,6 +287,7 @@ test('Create Group reviews, staffs, replays, renames, and reuses one empty Home'
   const finalWorkspaces = await workspaces(request);
   expect(finalWorkspaces).toHaveLength(1);
   expect(finalWorkspaces[0]).toMatchObject({ id: homeID, name: RENAMED_GROUP, kind: 'group' });
+  createdHomeSlug = finalWorkspaces[0].folder_slug;
   const finalHome = await json(await request.get(`/api/workspaces/${homeID}`));
   expect(finalHome.agent_instances).toHaveLength(1);
   const finalAssistant = await json(
@@ -288,4 +295,124 @@ test('Create Group reviews, staffs, replays, renames, and reuses one empty Home'
   );
   expect(finalAssistant.projects || []).toEqual([]);
   expect(finalAssistant.roster).toHaveLength(1);
+});
+
+test('Home project shelf initializes by review without a scan or a model', async ({
+  page,
+  request
+}) => {
+  expect(createdHomeID).toBeTruthy();
+  await page.goto(`/workspaces/${encodeURIComponent(createdHomeSlug)}/assistant`);
+  const shelf = page.locator('#projectLibraryPanel');
+  await expect(shelf).toBeVisible();
+  await expect(shelf.locator('#projectLibraryStatus')).toContainText('No library yet');
+  await evidence(page, '07-project-library-before-initialization');
+  await shelf.locator('#projectLibraryInitialize').click();
+  const review = page.getByRole('dialog', { name: 'Start a Home project library?' });
+  await expect(review).toContainText('Saved user notes are copied once');
+  await review.getByRole('button', { name: 'Start library' }).click();
+  await expect(shelf.locator('#projectLibraryContent')).toBeVisible();
+  await expect(shelf.locator('#projectLibraryTitle')).toBeFocused();
+  await expect(shelf.locator('#projectLibraryStatus')).toContainText(
+    'native folder picker is unavailable'
+  );
+  const roots = await json(
+    await request.get(`/api/workspaces/${createdHomeID}/assistant-program/library/roots`)
+  );
+  expect(roots).toMatchObject({ initialized: true, total_roots: 0, provider_read_only: false });
+  const projects = await json(
+    await request.get(`/api/workspaces/${createdHomeID}/assistant-program/library/projects`)
+  );
+  expect(projects).toMatchObject({ total: 0 });
+  await evidence(page, '08-project-library-empty');
+  await expect(shelf.locator('#projectLibraryAdd')).toBeDisabled();
+  expect(
+    (
+      await json(
+        await request.get(`/api/workspaces/${createdHomeID}/assistant-program/library/roots`)
+      )
+    ).total_roots
+  ).toBe(0);
+  await evidence(page, '09-project-library-picker-unavailable');
+
+  // The real Home shelf still has a usable manual search with no model or
+  // native picker, including keyboard submission on a phone-sized viewport.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shelf.scrollIntoViewIfNeeded();
+  const search = shelf.getByRole('searchbox', { name: 'Search projects' });
+  await search.fill('no such project');
+  await search.press('Enter');
+  await expect(shelf.locator('#projectLibraryStatus')).toContainText('No projects match');
+  await expect(shelf.locator('#projectLibraryCount')).toContainText('0 of 0 projects');
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  expect(overflow, 'phone-sized Home should not scroll sideways').toBeLessThanOrEqual(1);
+  for (const select of await shelf.locator('#projectLibrarySearchForm select').all()) {
+    const bounds = await select.boundingBox();
+    expect(
+      bounds?.width || 0,
+      'mobile filter labels should not be truncated into narrow columns'
+    ).toBeGreaterThan(250);
+  }
+  await evidence(page, '09a-project-library-mobile-search');
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  const disable = await request.post('/api/plugins/music-project-management/disable', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  expect(disable.ok(), await disable.text()).toBeTruthy();
+  await page.reload();
+  const saved = await json(
+    await request.get(`/api/workspaces/${createdHomeID}/assistant-program/library/roots`)
+  );
+  expect(saved).toMatchObject({ initialized: true, total_roots: 0, provider_read_only: true });
+  await expect(page.locator('#projectLibraryPanel')).toBeVisible();
+  await expect(page.locator('#projectLibraryAdd')).toBeHidden();
+  await expect(page.locator('#projectLibraryStatus')).toContainText('Saved records are readable');
+  await page.locator('#projectLibraryPanel').scrollIntoViewIfNeeded();
+  await evidence(page, '10-project-library-provider-read-only');
+
+  // Re-enabling the same installation is not a new provider identity.
+  const reenable = await request.post('/api/plugins/music-project-management/enable', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  expect(reenable.ok(), await reenable.text()).toBeTruthy();
+  const reenabled = await json(
+    await request.get(`/api/workspaces/${createdHomeID}/assistant-program/library/roots`)
+  );
+  expect(reenabled).toMatchObject({ initialized: true, total_roots: 0, provider_read_only: false });
+
+  // Uninstall/reinstall deliberately uses the *same* clean package inside the
+  // disposable sandbox: content fingerprints can collide across install epochs.
+  const uninstall = await request.delete('/api/plugins/music-project-management', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  expect(uninstall.ok(), await uninstall.text()).toBeTruthy();
+  const removed = await json(
+    await request.get(`/api/workspaces/${createdHomeID}/assistant-program/library/roots`)
+  );
+  expect(removed).toMatchObject({ initialized: true, total_roots: 0, provider_read_only: true });
+  const reinstall = await request.post('/api/plugins/install', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    data: { source: PLUGIN_PATH, format: 'claude', confirm: true }
+  });
+  expect(reinstall.ok(), await reinstall.text()).toBeTruthy();
+  const enableAgain = await request.post('/api/plugins/music-project-management/enable', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  });
+  expect(enableAgain.ok(), await enableAgain.text()).toBeTruthy();
+  const newlyInstalled = await json(
+    await request.get(`/api/workspaces/${createdHomeID}/assistant-program/library/roots`)
+  );
+  expect(newlyInstalled).toMatchObject({
+    initialized: true,
+    total_roots: 0,
+    provider_read_only: true
+  });
+  await page.reload();
+  await expect(page.locator('#projectLibraryPanel')).toBeVisible();
+  await expect(page.locator('#projectLibraryAdd')).toBeHidden();
+  await page.locator('#projectLibraryPanel').scrollIntoViewIfNeeded();
+  await evidence(page, '11-project-library-reinstall-still-read-only');
 });

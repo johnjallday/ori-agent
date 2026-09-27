@@ -73,9 +73,9 @@ var capabilityRows = []CapabilityRow{
 	{
 		Shape: ShapeAudio,
 		Markers: []Marker{
-			{Name: "*.rpp", Kind: MarkerGlob, Shape: ShapeAudio, Label: "REAPER session"},
-			{Name: "*.logicx", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Logic Pro project"},
-			{Name: "*.als", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Ableton Live set"},
+			{Name: "*.rpp", Kind: MarkerGlob, Shape: ShapeAudio, Label: "REAPER session", ProjectFormat: "reaper"},
+			{Name: "*.logicx", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Logic Pro project", ProjectFormat: "logic", ProjectBundle: true},
+			{Name: "*.als", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Ableton Live set", ProjectFormat: "ableton"},
 		},
 		Tools: []Tool{
 			{Match: ToolByExtension, Value: ".rpp", ToolID: "reaper", ToolName: "REAPER", HypothesisText: "REAPER may be one of the tools you use."},
