@@ -551,7 +551,7 @@ func atomicWriteFile(path string, data []byte) error {
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath was created in the canonical workspace.json directory above; this only cleans it up.
 		return err
 	}
 	if err := tmp.Close(); err != nil {
