@@ -305,6 +305,82 @@ func TestActivation_RealCreatorRecoversAfterHomeWriteFailsAndStoreRestarts(t *te
 	}
 }
 
+func TestActivation_NormalSingleIntakeWinsAfterLibraryReviewWithoutDuplicatingChild(t *testing.T) {
+	a, scope, _, file, tree, installed := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	childID := connectExistingSong(t, scope, file, installed, tree.single)
+	if _, err := service.Commit(t.Context(), scope, "single", review.Token, "late-library-creator"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("library review claimed an independently connected folder: %v", err)
+	}
+	ids, err := file.List()
+	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("competing creator duplicated child or edited source: %v %v", ids, err)
+	}
+	pending, err := a.library.PendingLinkedProjects(scope)
+	if err != nil || pending.Total != 1 || pending.Rows[0].WorkspaceID != childID {
+		t.Fatalf("independent child lacked a reviewable exact Home link: %+v %v", pending, err)
+	}
+	linkReview, err := a.library.ReviewLinkedProject(scope, childID, pending.Revision)
+	if err != nil || linkReview.EntryID != "single" || linkReview.LinkOnly {
+		t.Fatalf("normal intake was not matched to its scanned song: %+v %v", linkReview, err)
+	}
+	if _, err := a.library.CommitLinkedProject(scope, childID, linkReview.Token, "normal-intake-won"); err != nil {
+		t.Fatal(err)
+	}
+	final, err := a.library.Read(scope)
+	if err != nil || sessionEntry(final, "single") == nil || sessionEntry(final, "single").Link == nil ||
+		sessionEntry(final, "single").Link.WorkspaceID != childID || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("explicit owner reconciliation lost the song or source: %+v %v", final, err)
+	}
+	ids, err = file.List()
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("reconciliation created a second project: %v %v", ids, err)
+	}
+}
+
+func TestActivation_UnrelatedHomeReviewInvalidatesCreatorBeforeCreation(t *testing.T) {
+	a, scope, _, file, tree, installed := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	service := NewActivationService(a, realActivationCreator(t, scope, file, installed))
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := "Focus on lyrics"
+	patch := FieldsPatch{NextAction: &action}
+	fieldReview, err := a.library.ReviewFields(scope, "alternates", 0, patch, scope.OwnerUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.library.CommitFields(scope, "alternates", fieldReview.Token, "different-song-edit", 0, patch, scope.OwnerUserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Commit(t.Context(), scope, "single", review.Token, "stale-creator"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale reviewed creator crossed a changed Home revision: %v", err)
+	}
+	ids, err := file.List()
+	if err != nil || len(ids) != 1 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("stale review created a child or edited the source: %v %v", ids, err)
+	}
+	doc, err = a.library.Read(scope)
+	if err != nil || sessionEntry(doc, "single").Link != nil || sessionEntry(doc, "alternates").Fields.NextAction != action {
+		t.Fatalf("unrelated user edit was lost or stale link attached: %+v %v", doc, err)
+	}
+}
+
 // A tab can close after the canonical creator succeeds but before Ori saves
 // the catalog association. Losing the tab's activation token/key must not
 // strand its child: the independently durable reciprocal link is reviewable
@@ -326,6 +402,21 @@ func TestActivation_LostBrowserKeyRecoversThroughExplicitHomeLinkReview(t *testi
 	a.library = NewStore(broken).WithProviderEvidence(original.providerEvidence)
 	if _, err := service.Commit(t.Context(), scope, "single", activationReview.Token, "lost-browser-key"); err == nil || broken.pending {
 		t.Fatalf("did not fail strictly after canonical creator: %v", err)
+	}
+	// Another user saves an unrelated Home note before the browser can retry.
+	// The old creator review is stale, yet a fresh exact-link owner review must
+	// still recover the one independently durable child without losing notes.
+	action := "Review the alternate melody"
+	patch := FieldsPatch{NextAction: &action}
+	fieldReview, err := original.ReviewFields(scope, "alternates", 0, patch, scope.OwnerUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := original.CommitFields(scope, "alternates", fieldReview.Token, "unrelated-after-child", 0, patch, scope.OwnerUserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Commit(t.Context(), scope, "single", activationReview.Token, "lost-browser-key"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale creator review unexpectedly wrote a Home association: %v", err)
 	}
 	path, err := file.GetFolderPath(scope.HomeID)
 	if err != nil {
@@ -357,6 +448,10 @@ func TestActivation_LostBrowserKeyRecoversThroughExplicitHomeLinkReview(t *testi
 	ids, err := restarted.List()
 	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
 		t.Fatalf("lost-key repair created a child or touched the project file: %v %v", ids, err)
+	}
+	final, err := library.Read(scope)
+	if err != nil || sessionEntry(final, "alternates").Fields.NextAction != action {
+		t.Fatalf("link recovery overwrote another Home edit: %+v %v", final, err)
 	}
 }
 
