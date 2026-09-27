@@ -28,6 +28,8 @@ Options:
   --port PORT       Server port (default: 8931).
   --sandbox DIR     Use and preserve this sandbox instead of a temporary one.
   --keep            Preserve the generated temporary sandbox after exit.
+  --restart-check   In the paired reviewed test only, restart this sandbox's
+                    server once when the browser requests it (never user state).
   --suite NAME      Browser test suite: home (default), portfolio (local refusal),
                     or portfolio-reviewed (published release; test only).
   --provider MODE   local (default) or reviewed (portfolio-reviewed only).
@@ -67,6 +69,7 @@ sandbox=""
 keep_sandbox="${ORI_KEEP_MUSIC_SANDBOX:-0}"
 test_suite="home"
 provider_mode="local"
+restart_check=0
 open_browser=0
 playwright_args=()
 
@@ -95,6 +98,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--keep)
 		keep_sandbox=1
+		shift
+		;;
+	--restart-check)
+		restart_check=1
 		shift
 		;;
 	--suite)
@@ -150,6 +157,9 @@ fi
 if [[ "$mode" != "serve" && "$open_browser" -eq 1 ]]; then
 	fail "--open is only valid with the serve command"
 fi
+if ((restart_check == 1)) && [[ "$mode" != "test" || "$test_suite" != "portfolio-reviewed" || "$provider_mode" != "reviewed" || -z "$reaper_source" ]]; then
+	fail "--restart-check requires test --suite portfolio-reviewed --provider reviewed --reaper-source"
+fi
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null || true)"
@@ -188,12 +198,22 @@ else
 	sandbox="$(mktemp -d "${TMPDIR:-/tmp}/ori-music-home-demo.XXXXXX")"
 fi
 mkdir -p "$sandbox/evidence" "$sandbox/plugin-source"
+if ((restart_check == 1)) && { [[ -e "$sandbox/evidence/restart.request" ]] ||
+	[[ -e "$sandbox/evidence/restart.inprogress" ]] || [[ -e "$sandbox/evidence/restart.done" ]] ||
+	[[ -e "$sandbox/evidence/restart.failed" ]]; }; then
+	fail "--restart-check needs a fresh sandbox without prior restart markers"
+fi
 server_log="$sandbox/ori.log"
 server_pid=""
+test_pid=""
 
 cleanup() {
 	status=$?
 	trap - EXIT HUP INT TERM
+	if [[ -n "$test_pid" ]] && kill -0 "$test_pid" 2>/dev/null; then
+		kill "$test_pid" 2>/dev/null || true
+		wait "$test_pid" 2>/dev/null || true
+	fi
 	if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
 		kill "$server_pid" 2>/dev/null || true
 		wait "$server_pid" 2>/dev/null || true
@@ -342,21 +362,84 @@ if [[ "$mode" == "test" ]]; then
 	elif [[ "$test_suite" == "portfolio-reviewed" ]]; then
 		playwright_file="tests/music-home-portfolio-reviewed.spec.ts"
 	fi
+	run_music_acceptance() {
+		env PLAYWRIGHT_BASE_URL="$base_url" \
+			ORI_MUSIC_HOME_SANDBOX="$sandbox" \
+			ORI_MUSIC_HOME_ACCEPTANCE=1 \
+			ORI_MUSIC_PROVIDER_MODE="$provider_mode" \
+			ORI_MUSIC_RESTART_TEST="$restart_check" \
+			ORI_REAPER_PLUGIN_PATH="$bundled_reaper" \
+			ORI_MUSIC_PLUGIN_PATH="$bundled_plugin" \
+			ORI_MUSIC_PLUGIN_REVISION="$candidate_revision" \
+			ORI_MUSIC_PLUGIN_VERSION="$candidate_version" \
+			ORI_MUSIC_PLUGIN_TREE="$candidate_tree" \
+			ORI_MUSIC_PLUGIN_ARCHIVE_SHA256="$archive_sha256" \
+			ORI_MUSIC_HOME_EVIDENCE_DIR="$sandbox/evidence/screenshots" \
+			npx playwright test "$playwright_file" \
+			--project=chromium --workers=1 ${playwright_args[@]+"${playwright_args[@]}"}
+	}
 	set +e
-	env PLAYWRIGHT_BASE_URL="$base_url" \
-		ORI_MUSIC_HOME_SANDBOX="$sandbox" \
-		ORI_MUSIC_HOME_ACCEPTANCE=1 \
-		ORI_MUSIC_PROVIDER_MODE="$provider_mode" \
-		ORI_REAPER_PLUGIN_PATH="$bundled_reaper" \
-		ORI_MUSIC_PLUGIN_PATH="$bundled_plugin" \
-		ORI_MUSIC_PLUGIN_REVISION="$candidate_revision" \
-		ORI_MUSIC_PLUGIN_VERSION="$candidate_version" \
-		ORI_MUSIC_PLUGIN_TREE="$candidate_tree" \
-		ORI_MUSIC_PLUGIN_ARCHIVE_SHA256="$archive_sha256" \
-		ORI_MUSIC_HOME_EVIDENCE_DIR="$sandbox/evidence/screenshots" \
-		npx playwright test "$playwright_file" \
-		--project=chromium --workers=1 ${playwright_args[@]+"${playwright_args[@]}"}
-	test_status=$?
+	if ((restart_check == 0)); then
+		run_music_acceptance
+		test_status=$?
+	else
+		# The browser writes only a request marker in this disposable sandbox.
+		# The parent shell owns the child server PID and restarts exactly once.
+		run_music_acceptance &
+		test_pid=$!
+		restarts=0
+		restart_failed=0
+		while kill -0 "$test_pid" 2>/dev/null; do
+			if [[ -f "$sandbox/evidence/restart.request" ]]; then
+				mv "$sandbox/evidence/restart.request" "$sandbox/evidence/restart.inprogress"
+				if ((restarts != 0)); then
+					printf 'duplicate restart request\n' >"$sandbox/evidence/restart.failed"
+					restart_failed=1
+					break
+				fi
+				restarts=1
+				if ! kill -0 "$server_pid" 2>/dev/null; then
+					printf 'sandbox server exited before restart request\n' >"$sandbox/evidence/restart.failed"
+					restart_failed=1
+					break
+				fi
+				old_server_pid=$server_pid
+				kill "$server_pid" 2>/dev/null
+				wait "$server_pid" 2>/dev/null
+				server_pid=""
+				(
+					cd "$sandbox" || exit 1
+					exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1 \
+						"$repo_root/bin/ori-agent"
+				) >>"$server_log" 2>&1 &
+				server_pid=$!
+				restarted=0
+				for _ in {1..120}; do
+					if curl -fsS -o /dev/null --max-time 1 "$base_url/health" 2>/dev/null; then
+						restarted=1
+						break
+					fi
+					if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
+					sleep 0.25
+				done
+				if ((restarted == 0)); then
+					printf 'sandbox server failed to restart; see ori.log\n' >"$sandbox/evidence/restart.failed"
+					restart_failed=1
+					break
+				fi
+				printf 'server restarted once with the same HOME and ORI_DATA_DIR: %s -> %s\n' \
+					"$old_server_pid" "$server_pid" >"$sandbox/evidence/restart.done"
+			fi
+			sleep 0.1
+		done
+		wait "$test_pid"
+		test_status=$?
+		test_pid=""
+		if ((restarts != 1 || restart_failed != 0)); then
+			printf 'music-home-demo: restart check did not complete once (requests: %d)\n' "$restarts" >&2
+			test_status=1
+		fi
+	fi
 	set -e
 	exit "$test_status"
 fi

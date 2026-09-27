@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Run only in a disposable HOME, with NO local provider preinstalled. The UI
@@ -14,7 +14,7 @@ test.skip(
     !sandbox,
   'requires music-home-demo.sh test --suite portfolio-reviewed --provider reviewed'
 );
-test.setTimeout(120_000); // Released-source resolution and clone require network.
+test.setTimeout(180_000); // Released-source resolution and optional process restart require time.
 
 async function json(response: Awaited<ReturnType<APIRequestContext['get']>>) {
   const text = await response.text();
@@ -524,6 +524,45 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       expect(JSON.parse(newHint || 'null')).toMatchObject({ index: 1, pending: null });
     } finally {
       await freshContext.close();
+    }
+    if (process.env.ORI_MUSIC_RESTART_TEST === '1') {
+      // Only the opt-in wrapper restarts its own disposable server process.
+      // Leave the browser open with a pending item; no creator confirmation
+      // or source access is stored in the Home queue.
+      writeFileSync(join(sandbox, 'evidence', 'restart.request'), 'pending browser queue\n', {
+        mode: 0o600
+      });
+      await expect
+        .poll(
+          () => {
+            if (existsSync(join(sandbox, 'evidence', 'restart.failed'))) return 'failed';
+            if (existsSync(join(sandbox, 'evidence', 'restart.done'))) return 'ready';
+            return 'pending';
+          },
+          { timeout: 45_000 }
+        )
+        .toBe('ready');
+      const processEvidence = readFileSync(join(sandbox, 'evidence', 'restart.done'), 'utf8');
+      const processIDs = processEvidence.match(/same HOME and ORI_DATA_DIR: (\d+) -> (\d+)/);
+      expect(processIDs).toBeTruthy();
+      expect(processIDs?.[1]).not.toBe(processIDs?.[2]);
+      await page.reload();
+      await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('1 skipped');
+      expect((await json(await request.get(`${base}/queue`))).queue).toMatchObject({
+        id: savedQueue.queue.id,
+        index: 1,
+        skipped: savedQueue.queue.skipped
+      });
+      expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+        workspacesBefore.length + 1
+      );
+      expect(
+        songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))
+      ).toEqual(before);
+      await expect(page.locator('#assistantProgramPage')).toHaveAttribute('aria-busy', 'false');
+      await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
+      await shelf.locator('#projectLibraryQueueStatus').scrollIntoViewIfNeeded();
+      await shot(page, '39-actual-server-restart-queue-pending');
     }
     await page.evaluate(() => sessionStorage.clear()); // no local queue survives
     await page.reload();
