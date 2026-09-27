@@ -1,11 +1,15 @@
 package projectlibrary
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -64,6 +68,72 @@ func TestActivationQueue_DurableOrderSkipNoCreatorAndReplay(t *testing.T) {
 	}
 	if _, _, err := other.StartActivationQueue(scope, []string{"single", "alternates"}, "new-queue"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestActivationQueue_SQLitePrimaryAndFolderMirrorDivergenceRefusesProgress(t *testing.T) {
+	a, scope, _, file, tree, _ := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	db, err := database.Open(context.Background(), &database.Config{Path: filepath.Join(t.TempDir(), "queue.db"), WALMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close SQLite queue fixture: %v", err)
+		}
+	}()
+	primary := session.NewWorkspaceStoreAdapter(session.NewHybridStoreWithDB(db, 10))
+	home, err := file.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.Save(home); err != nil {
+		t.Fatal(err)
+	}
+	mirrored := NewStore(workspace.NewSyncStore(primary, file)).WithProviderEvidence(a.library.providerEvidence)
+	q, _, err := mirrored.StartActivationQueue(scope, []string{"single", "alternates"}, "mirror-queue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, backing := range []workspace.Store{primary, file} {
+		view, readErr := NewStore(backing).CurrentActivationQueue(scope)
+		if readErr != nil || view.Queue == nil || view.Queue.ID != q.ID || view.Queue.Index != 0 {
+			t.Fatalf("queue was not saved to both Home mirrors: %+v %v", view, readErr)
+		}
+	}
+	// Emulate a process interruption after folder persistence but before the
+	// SQLite-primary write. Both individually valid mirrors now disagree;
+	// neither a GET nor a skip may treat the folder copy as authority.
+	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		var changed Document
+		if err := json.Unmarshal(state.ProjectLibrary, &changed); err != nil {
+			return err
+		}
+		changed.Queue.Status = "discarded"
+		changed.Queue.Revision++
+		changed.Queue.UpdatedAt = changed.Queue.UpdatedAt.Add(time.Second)
+		changed.Revision++
+		encoded, err := json.Marshal(changed)
+		if err != nil {
+			return err
+		}
+		state.ProjectLibrary = encoded
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mirrored.CurrentActivationQueue(scope); !errors.Is(err, ErrMirrorDiverged) {
+		t.Fatalf("split queue mirror was shown as authoritative: %v", err)
+	}
+	if _, _, err := mirrored.ProgressActivationQueue(scope, q.ID, "single", "skip", "split-skip", 1); !errors.Is(err, ErrMirrorDiverged) {
+		t.Fatalf("split queue mirror accepted skip: %v", err)
+	}
+	view, err := NewStore(primary).CurrentActivationQueue(scope)
+	if err != nil || view.Queue == nil || view.Queue.Index != 0 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("split mirror modified primary queue or source: %+v %v", view, err)
 	}
 }
 
