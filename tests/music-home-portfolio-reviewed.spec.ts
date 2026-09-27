@@ -921,6 +921,39 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await forgottenQueue.getByRole('button', { name: 'Skip this song' }).press('Enter');
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeHidden();
     expect((await json(await request.get(`${base}/queue`))).queue).toBeUndefined();
+
+    // A provider loss cannot authorize new setup/skip, but the owner must
+    // still be able to discard *only* the pending Home navigation metadata.
+    await shelf.getByRole('checkbox', { name: 'Select Album-0 for serial project review' }).check();
+    await shelf.getByRole('checkbox', { name: 'Select Album-1 for serial project review' }).check();
+    await shelf.locator('#projectLibraryQueueStart').click();
+    await page
+      .getByRole('dialog', { name: 'Song 1 of 2 · Album-0' })
+      .getByRole('button', { name: 'Pause queue' })
+      .click();
+    await expect(shelf).toHaveAttribute('aria-busy', 'false');
+    const disableForQueue = await request.post('/api/plugins/music-project-management/disable', {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
+    expect(disableForQueue.ok(), await disableForQueue.text()).toBeTruthy();
+    await page.reload();
+    await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('0 of 2 handled');
+    await expect(shelf.locator('#projectLibraryQueueResume')).toBeDisabled();
+    await shelf.locator('#projectLibraryQueueStatus').scrollIntoViewIfNeeded();
+    await shot(page, '36-provider-disabled-queue-discard');
+    await shelf.locator('#projectLibraryQueueDiscard').click();
+    const discardReview = page.getByRole('dialog', { name: 'Discard this review queue?' });
+    await expect(discardReview).toContainText(
+      'Any project you separately confirmed stays connected'
+    );
+    await discardReview.getByRole('button', { name: 'Discard queue' }).click();
+    await expect(shelf.locator('#projectLibraryQueueResume')).toBeHidden();
+    expect((await json(await request.get(`${base}/queue`))).queue).toBeUndefined();
+    const reenableAfterQueue = await request.post('/api/plugins/music-project-management/enable', {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
+    expect(reenableAfterQueue.ok(), await reenableAfterQueue.text()).toBeTruthy();
+    await page.reload();
     await expect(shelf.locator('#projectLibraryResume')).not.toContainText(
       'Review my saved notes without the folder'
     );
