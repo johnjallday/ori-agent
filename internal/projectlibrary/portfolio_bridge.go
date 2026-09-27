@@ -201,7 +201,7 @@ func (b *ManagedPortfolioBridge) Commit(stationID, token, key string,
 	}
 	changed, replay, err := b.library.commitFields(scope, entry.ID, token, key, review.FieldsRevision,
 		portfolioBridgePatch(update), scope.OwnerUserID,
-		func(current *workspace.AssistantProgramState) bool {
+		func(current *workspace.AssistantProgramState, _ *workspace.Workspace) bool {
 			_, _, linkErr := b.linked(scope, doc, current, entry.Link.LinkID)
 			return linkErr == nil
 		})

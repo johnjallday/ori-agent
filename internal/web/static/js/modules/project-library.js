@@ -240,6 +240,7 @@ export class ProjectLibraryPanel {
       this.renderQueueControls();
       await this.renderResume();
       await this.renderPendingLinks();
+      await this.renderProposals();
       await this.search(false);
       if (!this.readOnly && this.state.picker_available === false && !this.offerID)
         this.status(
@@ -328,6 +329,101 @@ export class ProjectLibraryPanel {
           `${pending.total - pending.rows.length} more linked projects remain; review these first and refresh.`
         )
       );
+  }
+
+  async renderProposals() {
+    const section = document.getElementById('projectLibraryProposals');
+    const container = document.getElementById('projectLibraryProposalRows');
+    if (!section || !container) return;
+    container.replaceChildren();
+    section.hidden = true;
+    let page;
+    try {
+      page = await this.request('/proposals');
+    } catch (_) {
+      return; // An unavailable provider/binding never creates a review action.
+    }
+    if (!page.total) return;
+    section.hidden = false;
+    for (const row of page.rows || []) {
+      const proposal = row.proposal;
+      const card = node('article', 'project-library-resume-card');
+      card.append(
+        node('h4', '', row.name),
+        node('p', '', `Suggested next action: ${proposal.next_action}`),
+        node(
+          'p',
+          '',
+          proposal.reason
+            ? `Manager's reason (untrusted note): ${proposal.reason}`
+            : 'No reason provided.'
+        ),
+        node(
+          'small',
+          '',
+          `Suggested by ${proposal.agent_name} · ${row.status === 'ready' ? 'Ready for your separate review' : `Not actionable (${row.status})`}`
+        )
+      );
+      if (row.status === 'ready' && !this.readOnly) {
+        const button = node(
+          'button',
+          'modern-btn modern-btn-secondary',
+          `Review ${row.name} suggestion`
+        );
+        button.type = 'button';
+        button.addEventListener('click', () => void this.reviewProposal(row, button));
+        card.append(button);
+      }
+      container.append(card);
+    }
+    if (page.total > (page.rows || []).length)
+      container.append(
+        node(
+          'p',
+          '',
+          `Showing the latest ${(page.rows || []).length} of ${page.total} saved suggestions.`
+        )
+      );
+  }
+
+  async reviewProposal(row, trigger) {
+    await this.run(
+      trigger,
+      'Checking this Manager suggestion against the current Home…',
+      async () => {
+        const path = `/proposals/${encodeURIComponent(row.proposal.id)}`;
+        const review = await this.post(`${path}/review`);
+        if (
+          !(await this.confirm(
+            `Save ${row.name}'s suggested next action?`,
+            [
+              `Current Home next action: ${review.before.next_action || 'Not set'}`,
+              `Proposed Home next action: ${review.after.next_action}`,
+              `Manager's reason (untrusted note): ${row.proposal.reason || 'None provided'}`,
+              'This saves one user-reviewed Home note only. No scan, project task, agent, DAW or source file is opened or changed.'
+            ],
+            'Save next action',
+            trigger
+          ))
+        ) {
+          await this.refresh(); // The review advanced the Home revision, but saved no field.
+          this.status('Suggestion canceled. Saved Home notes are unchanged.');
+          return;
+        }
+        try {
+          await this.post(`${path}/commit`, {
+            review_token: review.token,
+            idempotency_key: operationKey('manager-next-action'),
+            confirm: true
+          });
+        } catch (error) {
+          await this.refresh();
+          throw error;
+        }
+        await this.refresh();
+        this.status(`Saved the reviewed next action for ${row.name}. No project task was started.`);
+      }
+    );
   }
 
   async renderResume() {

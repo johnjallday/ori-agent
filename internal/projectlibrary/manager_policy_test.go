@@ -102,6 +102,57 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 	if _, err := store.SessionsForManager(manager, child.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("child workspace ID obtained Home sessions: %v", err)
 	}
+	proposal, replay, err := store.ProposeNextAction(manager, "song", 0, "Review verse two", "User's note suggests a chorus", "suggestion-1")
+	if err != nil || replay || proposal.ID == "" {
+		t.Fatalf("locally bound Manager failed to save inert suggestion: %+v replay=%v %v", proposal, replay, err)
+	}
+	doc, err = store.Read(scope)
+	if err != nil || sessionEntry(doc, "song").Fields.NextAction != "" || len(doc.Proposals) != 1 {
+		t.Fatalf("suggestion edited a Home field without owner review: %+v %v", doc, err)
+	}
+	again, replay, err := store.ProposeNextAction(manager, "song", 0, "Review verse two", "User's note suggests a chorus", "suggestion-1")
+	if err != nil || !replay || again.ID != proposal.ID {
+		t.Fatalf("exact suggestion replay duplicated proposal: %+v %v %v", again, replay, err)
+	}
+	if _, _, err := store.ProposeNextAction(manager, "song", 0, "Different action", "", "suggestion-1"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("colliding suggestion key accepted changed payload: %v", err)
+	}
+	listed, err := store.ListManagerProposals(scope)
+	if err != nil || listed.Total != 1 || listed.Rows[0].Status != "ready" {
+		t.Fatalf("owner cannot review bounded suggestions: %+v %v", listed, err)
+	}
+	if _, err := store.ReviewProposedNextAction(scope, "foreign", scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("foreign proposal got a review: %v", err)
+	}
+	// An unrelated Home revision must not make a current field proposal
+	// appear stale. Its exact entry field revision remains the authority.
+	unrelated, err := store.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.mutate(scope, unrelated.Revision, operation{key: "unrelated-home-revision", action: "fixture", digest: "fixture"},
+		func(*Document) (string, error) { return "song", nil }); err != nil {
+		t.Fatal(err)
+	}
+	fieldReview, err := store.ReviewProposedNextAction(scope, proposal.ID, scope.OwnerUserID)
+	if err != nil || fieldReview.Before.NextAction != "" || fieldReview.After.NextAction != proposal.NextAction {
+		t.Fatalf("owner review did not use canonical fields: %+v %v", fieldReview, err)
+	}
+	if _, _, err := store.CommitProposedNextAction(scope, proposal.ID, "forged", "commit-suggestion", scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("forged field review committed suggestion: %v", err)
+	}
+	entry, replay, err := store.CommitProposedNextAction(scope, proposal.ID, fieldReview.Token, "commit-suggestion", scope.OwnerUserID)
+	if err != nil || replay || entry.Fields.NextAction != proposal.NextAction || entry.Fields.Author != scope.OwnerUserID {
+		t.Fatalf("user confirmation did not write exact reviewed Home note: %+v %v %v", entry, replay, err)
+	}
+	entry, replay, err = store.CommitProposedNextAction(scope, proposal.ID, fieldReview.Token, "commit-suggestion", scope.OwnerUserID)
+	if err != nil || !replay || entry.Fields.NextAction != proposal.NextAction {
+		t.Fatalf("lost owner reply failed canonical replay: %+v %v %v", entry, replay, err)
+	}
+	listed, err = store.ListManagerProposals(scope)
+	if err != nil || listed.Rows[0].Status != "stale" {
+		t.Fatalf("confirmed suggestion still actionable: %+v %v", listed, err)
+	}
 	for name, denied := range map[string]ManagerAuthority{
 		"global fallback without instance": {HomeID: scope.HomeID, AgentName: "Manager"},
 		"another Home":                     {HomeID: "other-home", AgentInstanceID: "manager-instance", AgentName: "Manager"},
@@ -115,9 +166,22 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 		if _, err := store.SessionsForManager(denied, "song"); !errors.Is(err, ErrUnavailable) {
 			t.Errorf("%s acquired session history: %v", name, err)
 		}
+		if _, _, err := store.ProposeNextAction(denied, "song", entry.Fields.Revision, "Unsafe", "", "denied-"+name); !errors.Is(err, ErrUnavailable) {
+			t.Errorf("%s stored a Manager proposal: %v", name, err)
+		}
+	}
+	pending, _, err := store.ProposeNextAction(manager, "song", entry.Fields.Revision,
+		"Later unapproved suggestion", "", "suggestion-before-binding-removal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingReview, err := store.ReviewProposedNextAction(scope, pending.ID, scope.OwnerUserID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
 		state := home.GetAssistantProgramState()
+		state.HomeBindings.StateRevision++
 		state.HomeBindings.Bindings = state.HomeBindings.Bindings[1:] // remove only Manager binding
 		home.SetAssistantProgramState(state)
 		return nil
@@ -127,8 +191,13 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 	if _, err := store.SearchForManager(manager, Search{}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("removed role binding retained access: %v", err)
 	}
+	if _, _, err := store.CommitProposedNextAction(scope, pending.ID, pendingReview.Token,
+		"removed-binding-commit", scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("removed binding allowed previously reviewed proposal to commit: %v", err)
+	}
 	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
 		state := home.GetAssistantProgramState()
+		state.HomeBindings.StateRevision++
 		state.HomeBindings.Bindings = append(state.HomeBindings.Bindings, workspace.AssistantRoleBinding{
 			RoleID: "portfolio_manager", AgentInstanceID: "manager-instance", AgentName: "Manager"})
 		home.SetAssistantProgramState(state)
@@ -136,7 +205,21 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.ReviewProposedNextAction(scope, pending.ID, scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("restored but changed binding inherited old suggestion: %v", err)
+	}
 	available = false
+	listed, err = store.ListManagerProposals(scope)
+	if err != nil || listed.Rows[0].Status != "unavailable" {
+		t.Fatalf("disabled provider exposed an actionable Manager suggestion: %+v %v", listed, err)
+	}
+	if _, _, err := store.ProposeNextAction(manager, "song", entry.Fields.Revision,
+		"Unavailable", "", "after-provider-loss"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("provider loss allowed Manager to save a suggestion: %v", err)
+	}
+	if _, err := store.ReviewProposedNextAction(scope, pending.ID, scope.OwnerUserID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("provider loss allowed owner to review a stale Manager suggestion: %v", err)
+	}
 	if _, err := store.SearchForManager(manager, Search{}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("provider loss retained tool read: %v", err)
 	}

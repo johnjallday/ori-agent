@@ -137,17 +137,18 @@ var readOnlyToolNames = map[string]struct{}{
 // failed mutation is recognized as ambiguous even when its binding carried no
 // side-effect classification.
 var mutatingToolNames = map[string]struct{}{
-	"write_file":       {},
-	"edit_file":        {},
-	"move_file":        {},
-	"create_directory": {},
-	"delete_file":      {},
-	"save_note":        {},
-	"update_note":      {},
-	"create_task":      {},
-	"update_task":      {},
-	"write_memory":     {},
-	"mail_draft_reply": {},
+	"write_file":                       {},
+	"edit_file":                        {},
+	"move_file":                        {},
+	"create_directory":                 {},
+	"delete_file":                      {},
+	"save_note":                        {},
+	"update_note":                      {},
+	"create_task":                      {},
+	"update_task":                      {},
+	"write_memory":                     {},
+	"mail_draft_reply":                 {},
+	"home_library_propose_next_action": {},
 }
 
 // ClassifyToolSideEffect classifies a tool call for replay purposes. The
@@ -175,7 +176,7 @@ func ClassifyToolSideEffect(toolName string, declared SideEffect) ToolSideEffect
 		return ToolSideEffectRead
 	}
 	if _, ok := mutatingToolNames[name]; ok {
-		if name == "mail_draft_reply" {
+		if name == "mail_draft_reply" || name == "home_library_propose_next_action" {
 			return ToolSideEffectConfirm
 		}
 		return ToolSideEffectWrite

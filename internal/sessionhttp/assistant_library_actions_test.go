@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/plugin"
@@ -383,6 +384,82 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 	}
 	if contents, err := os.ReadFile(marker); err != nil || string(contents) != "test-only marker" {
 		t.Fatalf("source file changed: %q %v", contents, err)
+	}
+	// A bound Manager can suggest a Home note but cannot confirm it. The
+	// owner-only HTTP routes must recheck current proposal and use exactly
+	// the same field review/commit receipts as the manual editor above.
+	if err := store.Update(station.ID, func(home *workspace.Workspace) error {
+		home.AgentInstances = append(home.AgentInstances, workspace.AgentInstance{ID: "http-manager", Name: "Guide", RoleID: "guide"})
+		state := home.GetAssistantProgramState()
+		state.HomeBindings = workspace.AssistantRoleBindingSet{StateRevision: 1, Bindings: []workspace.AssistantRoleBinding{{
+			RoleID: "guide", AgentInstanceID: "http-manager", AgentName: "Guide",
+		}}}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveWorkspaceAgent(station.ID, "Guide", &agent.Agent{}); err != nil {
+		t.Fatal(err)
+	}
+	proposalStore := projectlibrary.NewStore(store).WithProviderEvidence(handler.assistantLibraryProviderEvidence)
+	current, err := proposalStore.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proposalFieldsRevision int64
+	for _, row := range current.Entries {
+		if row.ID == entryID {
+			proposalFieldsRevision = row.Fields.Revision
+		}
+	}
+	proposal, replay, err := proposalStore.ProposeNextAction(projectlibrary.ManagerAuthority{
+		HomeID: station.ID, AgentInstanceID: "http-manager", AgentName: "Guide",
+	}, entryID, proposalFieldsRevision, "Check the chorus edit", "Untrusted artist note", "http-manager-suggestion")
+	if err != nil || replay {
+		t.Fatalf("bound Manager proposal: %+v %v %v", proposal, replay, err)
+	}
+	proposalList := httptest.NewRecorder()
+	handler.ListAssistantLibraryProposals(proposalList, assistantProgramRequest(http.MethodGet, "/library/proposals", station.ID, ""))
+	if proposalList.Code != http.StatusOK || !strings.Contains(proposalList.Body.String(), `"status":"ready"`) ||
+		!strings.Contains(proposalList.Body.String(), "Check the chorus edit") {
+		t.Fatalf("owner could not list an inert Manager suggestion: %d %s", proposalList.Code, proposalList.Body.String())
+	}
+	proposalID := proposal.ID
+	proposeReview := func(w http.ResponseWriter, r *http.Request) {
+		r.SetPathValue("proposalID", proposalID)
+		handler.ReviewAssistantLibraryProposal(w, r)
+	}
+	proposeCommit := func(w http.ResponseWriter, r *http.Request) {
+		r.SetPathValue("proposalID", proposalID)
+		handler.CommitAssistantLibraryProposal(w, r)
+	}
+	if code, _ := libraryAction(t, proposeReview, project.ID, "", `{}`); code != http.StatusNotFound {
+		t.Fatalf("child workspace accessed Home proposal review: %d", code)
+	}
+	if code, _ := libraryAction(t, proposeReview, station.ID, "", `{"next_action":"Forged from browser"}`); code != http.StatusBadRequest {
+		t.Fatalf("browser changed stored suggestion in owner review: %d", code)
+	}
+	if code, _ := libraryAction(t, proposeCommit, station.ID, "", `{"confirm":true,"review_token":"forged","idempotency_key":"forged","patch":{"next_action":"Forged"}}`); code != http.StatusBadRequest {
+		t.Fatalf("browser supplied a different proposal patch: %d", code)
+	}
+	if code, _ := libraryAction(t, proposeCommit, station.ID, "", `{"confirm":true,"review_token":"forged","idempotency_key":"forged"}`); code != http.StatusConflict {
+		t.Fatalf("forged owner commit accepted: %d", code)
+	}
+	code, ownerReview := libraryAction(t, proposeReview, station.ID, "", `{}`)
+	if code != http.StatusOK || ownerReview["before"].(map[string]any)["next_action"] != "Print stems" ||
+		ownerReview["after"].(map[string]any)["next_action"] != "Check the chorus edit" {
+		t.Fatalf("owner field review was not proposal-derived: %d %+v", code, ownerReview)
+	}
+	if code, _ := libraryAction(t, proposeCommit, station.ID, "", `{"confirm":false,"review_token":"`+ownerReview["token"].(string)+`","idempotency_key":"http-proposal"}`); code != http.StatusBadRequest {
+		t.Fatalf("unconfirmed proposal committed: %d", code)
+	}
+	for i := 0; i < 2; i++ {
+		code, result := libraryAction(t, proposeCommit, station.ID, "", `{"confirm":true,"review_token":"`+ownerReview["token"].(string)+`","idempotency_key":"http-proposal"}`)
+		if code != http.StatusOK || result["replay"] != (i != 0) ||
+			result["fields"].(map[string]any)["next_action"] != "Check the chorus edit" {
+			t.Fatalf("owner proposal commit/replay %d: %d %+v", i, code, result)
+		}
 	}
 	rootsResponse := httptest.NewRecorder()
 	handler.ListAssistantLibraryRoots(rootsResponse,

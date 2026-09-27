@@ -168,7 +168,7 @@ func (s *Store) CommitFields(scope Scope, entryID, token, key string,
 
 func (s *Store) commitFields(scope Scope, entryID, token, key string,
 	expectedFieldsRevision int64, patch FieldsPatch, author string,
-	livePolicy func(*workspace.AssistantProgramState) bool) (Entry, bool, error) {
+	livePolicy func(*workspace.AssistantProgramState, *workspace.Workspace) bool) (Entry, bool, error) {
 	if s == nil || entryID == "" || token == "" || key == "" || expectedFieldsRevision < 0 ||
 		!validText(key, 160) || !validText(token, 160) {
 		return Entry{}, false, ErrConflict
@@ -211,13 +211,13 @@ func (s *Store) commitFields(scope Scope, entryID, token, key string,
 	}
 	var changed Entry
 	var linkStale bool
-	_, replay, err := s.mutateWithPolicy(scope, doc.Revision,
+	_, replay, err := s.mutateWithHomePolicy(scope, doc.Revision,
 		operation{key: key, action: "edit_fields", digest: digest},
-		func(state *workspace.AssistantProgramState) bool {
+		func(state *workspace.AssistantProgramState, home *workspace.Workspace) bool {
 			if !state.PluginAvailable {
 				return false
 			}
-			if livePolicy != nil && !livePolicy(state) {
+			if livePolicy != nil && !livePolicy(state, home) {
 				linkStale = true
 				return false
 			}

@@ -23,6 +23,7 @@ const (
 	maxScans         = 512
 	maxKnownScopes   = 1024
 	maxSessions      = 4096
+	maxProposals     = 256  // Agent suggestions are bounded; expired entries are pruned only on a later proposal.
 	maxReviews       = 4096 // Keep consumed reviews for replay; bounded by the 8-MiB Home record.
 	maxOperations    = 8192 // Never evict a retryable consequence to make a replay unsafe.
 )
@@ -65,6 +66,7 @@ type Document struct {
 	Entries       []Entry            `json:"entries,omitempty"`
 	Scans         []Scan             `json:"scans,omitempty"`
 	Sessions      []StudioSession    `json:"sessions,omitempty"`
+	Proposals     []ManagerProposal  `json:"proposals,omitempty"`
 	Reviews       []ReviewReceipt    `json:"reviews,omitempty"`
 	Operations    []OperationReceipt `json:"operations,omitempty"`
 }
@@ -329,7 +331,7 @@ func (d Document) valid(scope Scope) bool {
 		d.OwnerUserID != scope.OwnerUserID || d.HomeID != scope.HomeID ||
 		d.ProviderID != scope.ProviderID || d.ProgramID != scope.ProgramID ||
 		len(d.Roots) > maxRoots || len(d.Entries) > maxEntries || len(d.Scans) > maxScans ||
-		len(d.Sessions) > maxSessions || len(d.Reviews) > maxReviews || len(d.Operations) > maxOperations {
+		len(d.Sessions) > maxSessions || len(d.Proposals) > maxProposals || len(d.Reviews) > maxReviews || len(d.Operations) > maxOperations {
 		return false
 	}
 	roots := make(map[string]bool, len(d.Roots))
@@ -448,6 +450,19 @@ func (d Document) valid(scope Scope) bool {
 			return false
 		}
 		sessions[session.ID] = true
+	}
+	proposals := map[string]bool{}
+	for _, proposal := range d.Proposals {
+		if proposal.ID == "" || proposals[proposal.ID] || !validText(proposal.ID, 160) ||
+			!entries[proposal.EntryID] || proposal.FieldsRevision < 0 || proposal.BindingRevision < 1 ||
+			proposal.AgentInstanceID == "" || !validText(proposal.AgentInstanceID, 160) ||
+			proposal.AgentName == "" || !validText(proposal.AgentName, 160) ||
+			proposal.NextAction == "" || !validText(proposal.NextAction, 240) ||
+			!validText(proposal.Reason, 500) || !validDigest(proposal.Digest) ||
+			proposal.CreatedAt.IsZero() || !proposal.ExpiresAt.After(proposal.CreatedAt) {
+			return false
+		}
+		proposals[proposal.ID] = true
 	}
 	used := map[string]bool{}
 	for _, review := range d.Reviews {

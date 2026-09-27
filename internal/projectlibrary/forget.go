@@ -171,6 +171,13 @@ func (s *Store) CommitForget(scope Scope, entryID, token, key string) (bool, err
 						}
 					}
 					current.Sessions = kept
+					remaining := current.Proposals[:0]
+					for _, proposal := range current.Proposals {
+						if proposal.EntryID != entryID {
+							remaining = append(remaining, proposal)
+						}
+					}
+					current.Proposals = remaining
 					return entryID, nil
 				}
 			}

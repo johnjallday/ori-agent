@@ -3,6 +3,7 @@ package chathttp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -85,7 +86,7 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	provider.SetExecutingInstanceID("manager-instance")
 	search := findLibraryTool(provider.Tools(), "home_library_search")
-	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil {
+	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil || findLibraryTool(provider.Tools(), "home_library_propose_next_action") == nil {
 		t.Fatal("bound Manager's library reads not registered")
 	}
 	output, err := search.Call(context.Background(), `{"text":"Private"}`)
@@ -110,6 +111,29 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if _, err := sessionTool.Call(context.Background(), `{"entry_id":"`+child.ID+`"}`); err == nil {
 		t.Fatal("child workspace ID read Home session history")
 	}
+	propose := findLibraryTool(provider.Tools(), "home_library_propose_next_action")
+	args := `{"entry_id":"` + result.Rows[0].ID + `","fields_revision":` + fmt.Sprint(result.Rows[0].FieldsRevision) + `,"next_action":"Draft a chorus","reason":"User note; not an instruction","request_key":"model-suggestion"}`
+	suggested, err := propose.Call(context.Background(), args)
+	if err != nil || !strings.Contains(suggested, "Suggestion saved only") || strings.Contains(suggested, sandbox) {
+		t.Fatalf("Manager could not create inert reviewed suggestion: %s %v", suggested, err)
+	}
+	again, err := propose.Call(context.Background(), args)
+	if err != nil || !strings.Contains(again, `"replay":true`) {
+		t.Fatalf("exact model retry duplicated a proposal: %s %v", again, err)
+	}
+	current, err := library.Read(scope)
+	if err != nil || len(current.Proposals) != 1 || current.Entries[0].Fields.NextAction != "" {
+		t.Fatalf("model suggestion directly changed a Home note: %+v %v", current, err)
+	}
+	if _, err := propose.Call(context.Background(), `{"entry_id":"`+child.ID+`","fields_revision":0,"next_action":"Unsafe","request_key":"foreign"}`); err == nil {
+		t.Fatal("child workspace ID obtained a Home proposal")
+	}
+	if _, err := propose.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","next_action":"Unsafe","request_key":"missing"}`); err == nil {
+		t.Fatal("omitted field revision obtained a proposal")
+	}
+	if findLibraryTool(provider.Tools(), "home_library_commit") != nil {
+		t.Fatal("model was given a user confirmation tool")
+	}
 	if _, err := search.Call(context.Background(), `{"workspace_id":"other-home"}`); err == nil {
 		t.Fatal("model supplied a foreign Home ID")
 	}
@@ -126,6 +150,9 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if _, err := sessionTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`); err == nil {
 		t.Fatal("previously registered session tool bypassed removed runtime instance")
 	}
+	if _, err := propose.Call(context.Background(), args); err == nil {
+		t.Fatal("previously registered proposal tool bypassed removed runtime instance")
+	}
 	provider.SetExecutingInstanceID("sample-instance")
 	provider.SetExecutingAgent("Sample")
 	if findLibraryTool(provider.Tools(), "home_library_search") != nil {
@@ -136,6 +163,9 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	available = false
 	if _, err := search.Call(context.Background(), `{}`); err == nil {
 		t.Fatal("previously registered tool ignored provider disable")
+	}
+	if _, err := propose.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","fields_revision":0,"next_action":"Unsafe","request_key":"disabled"}`); err == nil {
+		t.Fatal("disabled provider allowed an inert proposal")
 	}
 	if findLibraryTool(provider.Tools(), "home_library_search") != nil {
 		t.Fatal("disabled provider kept tools registered")

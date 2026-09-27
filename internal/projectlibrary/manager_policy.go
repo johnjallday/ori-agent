@@ -31,8 +31,7 @@ func (s *Store) authorizeManager(authority ManagerAuthority) (Scope, error) {
 		return Scope{}, ErrUnavailable
 	}
 	state := home.GetAssistantProgramState()
-	if state == nil || state.Declaration == nil || state.Key.Normalize().OwnerUserID != home.OwnerUserID ||
-		state.HomeBindings.StateRevision < 1 {
+	if !boundManager(state, home, authority) {
 		return Scope{}, ErrUnavailable
 	}
 	scope := Scope{OwnerUserID: home.OwnerUserID, HomeID: home.ID, ProviderID: state.Key.PluginID,
@@ -40,19 +39,39 @@ func (s *Store) authorizeManager(authority ManagerAuthority) (Scope, error) {
 	if !scope.valid() || !s.providerWritable(scope, home) {
 		return Scope{}, ErrUnavailable
 	}
+	// A workspace-local snapshot is independent of the Home envelope; check
+	// it outside the atomic Home callback, never by taking a second store lock.
+	local, found, err := s.workspaces.GetWorkspaceAgent(home.ID, authority.AgentName)
+	if err != nil || !found || local == nil || local.Status == types.AgentStatusDisabled {
+		return Scope{}, ErrUnavailable
+	}
+	if _, _, err := s.readSnapshot(scope); err != nil {
+		return Scope{}, err
+	}
+	return scope, nil
+}
+
+// boundManager checks the identity on the *current Home snapshot*, and can
+// safely be used inside a Home update callback without recursive store reads.
+func boundManager(state *workspace.AssistantProgramState, home *workspace.Workspace, authority ManagerAuthority) bool {
+	if state == nil || home == nil || state.Declaration == nil ||
+		state.Key.Normalize().OwnerUserID != home.OwnerUserID || state.HomeBindings.StateRevision < 1 ||
+		home.ID != authority.HomeID || home.OwnerUserID == "" {
+		return false
+	}
 	var instance *workspace.AgentInstance
 	for _, current := range home.GetAgentInstances() {
 		if current.ID != authority.AgentInstanceID {
 			continue
 		}
 		if instance != nil || strings.TrimSpace(current.Name) != authority.AgentName {
-			return Scope{}, ErrUnavailable
+			return false
 		}
 		copy := current
 		instance = &copy
 	}
 	if instance == nil || instance.RoleID == "" {
-		return Scope{}, ErrUnavailable
+		return false
 	}
 	var matched int
 	for _, role := range state.Declaration.Roles {
@@ -64,19 +83,7 @@ func (s *Store) authorizeManager(authority ManagerAuthority) (Scope, error) {
 			}
 		}
 	}
-	if matched != 1 {
-		return Scope{}, ErrUnavailable
-	}
-	// An instance entry can remain after its workspace-local definition is
-	// removed. Never fall back to an unrelated global agent with the same name.
-	local, found, err := s.workspaces.GetWorkspaceAgent(home.ID, authority.AgentName)
-	if err != nil || !found || local == nil || local.Status == types.AgentStatusDisabled {
-		return Scope{}, ErrUnavailable
-	}
-	if _, _, err := s.readSnapshot(scope); err != nil {
-		return Scope{}, err
-	}
-	return scope, nil
+	return matched == 1
 }
 
 // CanReadAsManager is only a conservative tool-exposure hint. Every tool

@@ -115,6 +115,82 @@ test('pending direct links require a separate review and never commit on cancell
   }
 });
 
+test('Manager suggestions render as inert text and stale rows have no confirmation action', async () => {
+  const original = globalThis.document;
+  const elements = new Map();
+  const makeNode = tag => ({
+    tag,
+    children: [],
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener(_event, fn) {
+      this.click = fn;
+    }
+  });
+  elements.set('projectLibraryProposals', makeNode('section'));
+  elements.set('projectLibraryProposalRows', makeNode('div'));
+  globalThis.document = {
+    createElement: makeNode,
+    getElementById: id => elements.get(id) || null
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = { provider_read_only: false };
+    panel.request = async path => {
+      assert.equal(path, '/proposals');
+      return {
+        total: 2,
+        rows: [
+          {
+            name: '<svg onload=alert(1)>',
+            status: 'ready',
+            proposal: {
+              id: 'ready-id',
+              next_action: '<script>untrusted</script>',
+              reason: 'Just a suggestion',
+              agent_name: 'Manager'
+            }
+          },
+          {
+            name: 'Old',
+            status: 'stale',
+            proposal: {
+              id: 'stale-id',
+              next_action: 'Old note',
+              reason: '',
+              agent_name: 'Manager'
+            }
+          }
+        ]
+      };
+    };
+    await panel.renderProposals();
+    assert.equal(elements.get('projectLibraryProposals').hidden, false);
+    const [ready, stale] = elements.get('projectLibraryProposalRows').children;
+    assert.equal(ready.children[0].textContent, '<svg onload=alert(1)>');
+    assert.equal(
+      ready.children[1].textContent,
+      'Suggested next action: <script>untrusted</script>'
+    );
+    assert.equal(ready.children[4].tag, 'button');
+    assert.equal(stale.children.filter(child => child.tag === 'button').length, 0);
+    panel.state.provider_read_only = true;
+    await panel.renderProposals();
+    assert.equal(
+      elements
+        .get('projectLibraryProposalRows')
+        .children[0].children.filter(child => child.tag === 'button').length,
+      0
+    );
+  } finally {
+    globalThis.document = original;
+  }
+});
+
 test('serial queue recovery retains only bounded Home-scoped navigation and exact pending retry', () => {
   const now = Date.now();
   const key = 'ori:library-queue:home';
@@ -713,6 +789,55 @@ test('a saved narrower scope requires its own review and never sends a browser p
   assert.equal(calls[2][1].scope_id, 'server-scope-id');
   assert.equal(calls[2][1].confirm, true);
   assert.equal(Object.hasOwn(calls[2][1], 'relative_folder'), false);
+});
+
+test('Manager suggestion requires a separate owner review and confirmation to edit the Home note', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.run = async (_trigger, _message, work) => work();
+  panel.status = () => {};
+  const calls = [];
+  panel.post = async (path, body) => {
+    calls.push({ path, body });
+    if (path.endsWith('/review'))
+      return {
+        token: 'owner-review',
+        before: { next_action: 'Current note' },
+        after: { next_action: 'Proposed note' }
+      };
+    return { fields: { next_action: 'Proposed note' } };
+  };
+  panel.refresh = async () => {
+    calls.push({ path: 'refresh' });
+  };
+  const row = {
+    name: 'Song',
+    proposal: {
+      id: 'server-proposal',
+      next_action: 'Proposed note',
+      reason: 'Untrusted text <script>'
+    }
+  };
+  panel.confirm = async (_title, lines) => {
+    assert.ok(lines.some(line => line.includes('Untrusted text <script>')));
+    return false;
+  };
+  await panel.reviewProposal(row);
+  assert.deepEqual(
+    calls.map(call => call.path),
+    ['/proposals/server-proposal/review', 'refresh']
+  );
+  calls.length = 0;
+  panel.confirm = async () => true;
+  await panel.reviewProposal(row);
+  assert.deepEqual(
+    calls.map(call => call.path),
+    ['/proposals/server-proposal/review', '/proposals/server-proposal/commit', 'refresh']
+  );
+  assert.deepEqual(Object.keys(calls[1].body).sort(), [
+    'confirm',
+    'idempotency_key',
+    'review_token'
+  ]);
 });
 
 test('manual edit review cannot commit without a second user confirmation', async () => {

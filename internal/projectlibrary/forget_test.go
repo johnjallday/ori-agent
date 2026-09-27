@@ -3,7 +3,9 @@ package projectlibrary
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -43,6 +45,21 @@ func TestForget_RevokedUnlinkedHomeRecordRequiresReviewAndPreservesExternalFiles
 	if err != nil {
 		t.Fatal(err)
 	}
+	at := library.now().UTC()
+	_, _, err = library.mutate(scope, doc.Revision, operation{key: "forget-fixture-proposal", action: "fixture", digest: "fixture"},
+		func(current *Document) (string, error) {
+			current.Proposals = append(current.Proposals, ManagerProposal{ID: "suggestion", EntryID: "single",
+				BindingRevision: 1, AgentInstanceID: "manager", AgentName: "Manager", NextAction: "Old suggestion",
+				Digest: strings.Repeat("a", 64), CreatedAt: at, ExpiresAt: at.Add(time.Hour)})
+			return "suggestion", nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err = library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
 	library.WithProviderEvidence(func(_ Scope, _ *workspace.Workspace) bool { return false })
 	review, err := library.ReviewForget(scope, "single", doc.Revision)
 	if err != nil || review.ProjectName != "Single" || review.SourceCount != 1 || review.SessionCount != 1 {
@@ -69,7 +86,8 @@ func TestForget_RevokedUnlinkedHomeRecordRequiresReviewAndPreservesExternalFiles
 	}
 	persisted, err := NewStore(reopened).Read(scope)
 	if err != nil || len(persisted.Roots) != 1 || len(persisted.Entries) != len(doc.Entries)-1 ||
-		len(persisted.Sessions) != 0 || sessionEntry(persisted, "single") != nil || fileDigest(t, song) != before {
+		len(persisted.Sessions) != 0 || len(persisted.Proposals) != 0 ||
+		sessionEntry(persisted, "single") != nil || fileDigest(t, song) != before {
 		t.Fatalf("forget modified source, grant or other Home history: %+v %v", persisted, err)
 	}
 	if _, err := NewStore(reopened).GetSession(scope, "single", goalReview.Session.ID); !errors.Is(err, ErrConflict) {
