@@ -162,8 +162,9 @@ func TestFolderDigest_CapabilityOfferUsesEvidenceAndSilentInstallLookup(t *testi
 }
 
 type fakeJourneyVerifier struct {
-	folder string
-	calls  int
+	folder    string
+	homeRoute string
+	calls     int
 }
 
 func (v *fakeJourneyVerifier) VerifiedProject(_ context.Context, userID, runID, folderPath, blueprintID, integrationKey string, after time.Time) (FolderCreateResult, error) {
@@ -171,7 +172,7 @@ func (v *fakeJourneyVerifier) VerifiedProject(_ context.Context, userID, runID, 
 	if userID != "local" || runID != "new-run" || folderPath != v.folder || blueprintID != "reaper-song" || integrationKey != "ori_reaper" || after.IsZero() {
 		return FolderCreateResult{}, ErrFolderWorkspaceRefused
 	}
-	return FolderCreateResult{WorkspaceID: "quest-project", Route: "/workspaces/quest-project"}, nil
+	return FolderCreateResult{WorkspaceID: "quest-project", Route: "/workspaces/quest-project", HomeRoute: v.homeRoute}, nil
 }
 
 func TestFolderDigest_PortfolioPrecedesProjectsAndSuppressesExistingHome(t *testing.T) {
@@ -443,7 +444,7 @@ func TestFolderDigest_ReviewedJourneyResolvesOnlyCanonicalProject(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(folder, "Song.rpp"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	verifier := &fakeJourneyVerifier{folder: folder}
+	verifier := &fakeJourneyVerifier{folder: folder, homeRoute: "/workspaces/music-home/assistant#projectLibraryPanel"}
 	f.service.deps.Journey = verifier
 	offer, err := f.service.scanRoot(ctx, "local", folder, "")
 	if err != nil {
@@ -478,11 +479,12 @@ func TestFolderDigest_ReviewedJourneyResolvesOnlyCanonicalProject(t *testing.T) 
 		t.Fatalf("re-picking shown root = %+v, err = %v", resumed, err)
 	}
 	got, err := restarted.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "new-run", RequestID: "ready"})
-	if err != nil || got.Status != FolderOfferResolved || got.Outcome == nil || got.Outcome.WorkspaceID != "quest-project" || got.Outcome.Blueprint != "reaper-song" {
+	if err != nil || got.Status != FolderOfferResolved || got.Outcome == nil || got.Outcome.WorkspaceID != "quest-project" || got.Outcome.Blueprint != "reaper-song" ||
+		got.Outcome.HomeRoute != verifier.homeRoute {
 		t.Fatalf("verified journey = %+v, err = %v", got, err)
 	}
 	replayed, err := restarted.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "new-run", RequestID: "ready"})
-	if err != nil || replayed.Status != FolderOfferResolved || verifier.calls != 2 {
+	if err != nil || replayed.Status != FolderOfferResolved || replayed.Outcome.HomeRoute != verifier.homeRoute || verifier.calls != 2 {
 		t.Fatalf("replay = %+v, calls = %d, err = %v", replayed, verifier.calls, err)
 	}
 }

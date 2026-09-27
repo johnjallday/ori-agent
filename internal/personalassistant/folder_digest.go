@@ -190,6 +190,9 @@ type FolderCreateResult struct {
 	WorkspaceID string
 	// Route is the workspace page to open.
 	Route string
+	// HomeRoute is present only when the canonical journey verified the
+	// child's exact reciprocal Home link; it does not associate a catalog entry.
+	HomeRoute string
 	// Created is false when a workspace made for this offer already existed
 	// (a retried click) and was reused.
 	Created bool
@@ -1457,7 +1460,8 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 		}
 		item.Status = FolderOfferResolved
 		item.ResolvedAt = &now
-		item.Outcome = &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: verified.WorkspaceID, Route: verified.Route, Blueprint: row.Blueprint.BlueprintID}
+		item.Outcome = &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: verified.WorkspaceID, Route: verified.Route,
+			HomeRoute: verified.HomeRoute, Blueprint: row.Blueprint.BlueprintID}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: offerID, Action: "journey", At: now})
 		pruneFolderDigest(d)
 		resolved = *item

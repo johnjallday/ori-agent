@@ -101,6 +101,7 @@ type FolderOutcome struct {
 	Kind        string `json:"kind"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Route       string `json:"route,omitempty"`
+	HomeRoute   string `json:"home_route,omitempty"`
 	Blueprint   string `json:"blueprint,omitempty"`
 	Remembered  bool   `json:"remembered,omitempty"`
 	Note        string `json:"note,omitempty"`

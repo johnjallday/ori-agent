@@ -161,7 +161,53 @@ func (v folderJourneyVerifier) VerifiedProject(ctx context.Context, userID, runI
 	if err != nil || row == nil || row.OwnerUserID != userID || row.IsGroup() || strings.TrimSpace(row.FolderSlug) == "" {
 		return personalassistant.FolderCreateResult{}, refused
 	}
-	return personalassistant.FolderCreateResult{WorkspaceID: id, Route: "/workspaces/" + row.FolderSlug}, nil
+	return personalassistant.FolderCreateResult{WorkspaceID: id, Route: "/workspaces/" + row.FolderSlug,
+		HomeRoute: v.verifiedProjectHomeRoute(ctx, userID, project)}, nil
+}
+
+// An offer cannot infer a Home from its name or selected folder. Only a
+// current, reciprocal child link to the owner's real Home supplies a route to
+// the library's explicit association review. This is navigation, not adoption.
+func (v folderJourneyVerifier) verifiedProjectHomeRoute(ctx context.Context, owner string, child *workspace.Workspace) string {
+	b := v.builder
+	if b == nil || child == nil || b.workspaceStore == nil || b.workspaceFileStore == nil || b.sessionStore == nil {
+		return ""
+	}
+	primary, err := b.workspaceStore.Get(child.ID)
+	if err != nil || primary == nil || primary.OwnerUserID != owner {
+		return ""
+	}
+	folder, err := b.workspaceFileStore.Get(child.ID)
+	if err != nil || folder == nil || folder.OwnerUserID != owner {
+		return ""
+	}
+	link, folderLink := primary.GetAssistantProjectLink(), folder.GetAssistantProjectLink()
+	if link == nil || folderLink == nil || link.ID != folderLink.ID || link.StateRevision != folderLink.StateRevision ||
+		link.Key.Normalize() != folderLink.Key.Normalize() || link.StationWorkspaceID != folderLink.StationWorkspaceID ||
+		link.ID != workspace.AssistantProjectLinkID(link.StationWorkspaceID, child.ID) {
+		return ""
+	}
+	home, err := b.workspaceStore.Get(link.StationWorkspaceID)
+	if err != nil || home == nil || home.OwnerUserID != owner || home.Status == workspace.StatusTrashed ||
+		home.Status == workspace.StatusMissing {
+		return ""
+	}
+	state := home.GetAssistantProgramState()
+	if state == nil || state.Key.Normalize() != link.Key.Normalize() || state.Key.Normalize().OwnerUserID != owner {
+		return ""
+	}
+	listed := false
+	for _, id := range state.LinkedProjectIDs {
+		listed = listed || id == child.ID
+	}
+	if !listed {
+		return ""
+	}
+	row, err := b.sessionStore.GetWorkspace(ctx, home.ID)
+	if err != nil || row == nil || row.OwnerUserID != owner || !row.IsGroup() || strings.TrimSpace(row.FolderSlug) == "" {
+		return ""
+	}
+	return "/workspaces/" + row.FolderSlug + "/assistant#projectLibraryPanel"
 }
 
 func freshJourneyProject(journey *setupjourney.JourneyProjection, runID string, acceptedAfter time.Time) bool {

@@ -91,11 +91,29 @@ test('resolved project receipt names only server rows and offers the canonical w
       { kind: 'task', name: 'Summarize current draft', detail: '' }
     ],
     route: '/workspaces/thesis',
+    homeRoute: '',
     openLabel: 'Open <Thesis>'
   });
   assert.equal(folderOfferView(offer).question, "Here's what I set up:");
   assert.equal(
     folderReceiptView({ ...offer, outcome: { ...offer.outcome, route: '//evil' } }).route,
+    ''
+  );
+  assert.equal(
+    folderReceiptView({
+      ...offer,
+      outcome: {
+        ...offer.outcome,
+        home_route: '/workspaces/music-home/assistant#projectLibraryPanel'
+      }
+    }).homeRoute,
+    '/workspaces/music-home/assistant#projectLibraryPanel'
+  );
+  assert.equal(
+    folderReceiptView({
+      ...offer,
+      outcome: { ...offer.outcome, home_route: '//evil/assistant#projectLibraryPanel' }
+    }).homeRoute,
     ''
   );
   assert.equal(folderReceiptView({ ...offer, outcome: { kind: 'tidy' } }).visible, false);

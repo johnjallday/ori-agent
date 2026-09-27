@@ -31,6 +31,69 @@ test('canceling a reviewed scan or disconnect refreshes the Home revision before
   assert.equal(panel.state.revision, 3);
 });
 
+test('pending direct links require a separate review and never commit on cancellation', async () => {
+  const original = globalThis.document;
+  const elements = new Map();
+  const makeNode = tag => ({
+    tag,
+    children: [],
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener(_event, fn) {
+      this.click = fn;
+    }
+  });
+  elements.set('projectLibraryPendingLinks', makeNode('section'));
+  elements.set('projectLibraryPendingRows', makeNode('div'));
+  globalThis.document = {
+    createElement: makeNode,
+    getElementById: id => elements.get(id) || null
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = { provider_read_only: false };
+    panel.run = async (_trigger, _message, work) => work();
+    const calls = [];
+    let refreshes = 0;
+    panel.refresh = async () => {
+      refreshes++;
+    };
+    panel.status = () => {};
+    panel.request = async path => {
+      assert.equal(path, '/linked-projects/pending');
+      return { revision: 6, total: 1, rows: [{ name: 'Song', workspace_id: 'child' }] };
+    };
+    panel.post = async (path, body) => {
+      calls.push({ path, body });
+      if (path.endsWith('/review'))
+        return { token: 'review-token', project_name: 'Song', link_only: true };
+      return { entry_id: 'association' };
+    };
+    panel.confirm = async () => false;
+    await panel.renderPendingLinks();
+    assert.equal(elements.get('projectLibraryPendingLinks').hidden, false);
+    elements.get('projectLibraryPendingRows').children[0].children[1].click();
+    await new Promise(setImmediate);
+    assert.deepEqual(calls, [{ path: '/linked-projects/child/review', body: { revision: 6 } }]);
+    assert.equal(refreshes, 1); // Canceled reviews still advance the Home revision.
+    panel.confirm = async () => true;
+    await panel.renderPendingLinks();
+    elements.get('projectLibraryPendingRows').children[0].children[1].click();
+    await new Promise(setImmediate);
+    assert.equal(calls[2].path, '/linked-projects/child/commit');
+    assert.equal(calls[2].body.review_token, 'review-token');
+    assert.equal(calls[2].body.confirm, true);
+    assert.match(calls[2].body.idempotency_key, /^library-associate-linked-project-/);
+    assert.equal(refreshes, 2);
+  } finally {
+    globalThis.document = original;
+  }
+});
+
 test('serial queue recovery retains only bounded Home-scoped navigation and exact pending retry', () => {
   const now = Date.now();
   const key = 'ori:library-queue:home';

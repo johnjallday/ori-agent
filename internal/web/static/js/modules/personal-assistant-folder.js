@@ -390,6 +390,7 @@ export function folderReceiptView(offer) {
   if (!rows.length) return { visible: false }; // an older stored offer
   const workspace = rows.find(row => row.kind === 'workspace');
   const route = resolvedRouteFor(offer);
+  const homeRoute = String(offer?.outcome?.home_route || '').trim();
   return {
     visible: true,
     rows: rows.map(row => ({
@@ -398,6 +399,9 @@ export function folderReceiptView(offer) {
       detail: String(row.detail || '')
     })),
     route,
+    homeRoute: /^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/.test(homeRoute)
+      ? homeRoute
+      : '',
     openLabel: `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`
   };
 }
@@ -676,14 +680,22 @@ function renderOffer() {
   }
   if (els.actions) {
     els.actions.replaceChildren();
-    els.actions.hidden = view.decided && !receipt.route && !view.resume;
+    els.actions.hidden = view.decided && !receipt.route && !receipt.homeRoute && !view.resume;
     if (receipt.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
       open.href = receipt.route;
       open.textContent = receipt.openLabel;
       els.actions.append(open);
-    } else if (!view.decided || view.resume) {
+    }
+    if (receipt.homeRoute) {
+      const home = document.createElement('a');
+      home.className = 'btn btn-sm btn-outline-secondary';
+      home.href = receipt.homeRoute;
+      home.textContent = 'Review this link in the Home library';
+      els.actions.append(home);
+    }
+    if (!receipt.route && !receipt.homeRoute && (!view.decided || view.resume)) {
       view.actions.forEach(action => {
         const button = document.createElement('button');
         button.type = 'button';

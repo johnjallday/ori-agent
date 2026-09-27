@@ -239,6 +239,7 @@ export class ProjectLibraryPanel {
       this.renderRoots();
       this.renderQueueControls();
       await this.renderResume();
+      await this.renderPendingLinks();
       await this.search(false);
       if (!this.readOnly && this.state.picker_available === false && !this.offerID)
         this.status(
@@ -253,6 +254,80 @@ export class ProjectLibraryPanel {
       document.getElementById('projectLibrarySetup').hidden = true;
       document.getElementById('projectLibraryContent').hidden = true;
     }
+  }
+
+  async renderPendingLinks() {
+    const section = document.getElementById('projectLibraryPendingLinks');
+    const container = document.getElementById('projectLibraryPendingRows');
+    if (!section || !container) return;
+    container.replaceChildren();
+    section.hidden = true;
+    let pending;
+    try {
+      pending = await this.request('/linked-projects/pending');
+    } catch (_) {
+      return; // A failed verification never suggests an unverified association.
+    }
+    if (!pending.total || this.readOnly) return;
+    section.hidden = false;
+    for (const project of pending.rows || []) {
+      const card = node('article', 'project-library-resume-card');
+      const heading = node('h4', '', project.name);
+      const button = node(
+        'button',
+        'modern-btn modern-btn-secondary',
+        `Review ${project.name} for this shelf`
+      );
+      button.type = 'button';
+      button.addEventListener(
+        'click',
+        () =>
+          void this.run(button, 'Checking the exact linked project…', async () => {
+            const id = encodeURIComponent(project.workspace_id);
+            const review = await this.post(`/linked-projects/${id}/review`, {
+              revision: pending.revision
+            });
+            if (
+              !(await this.confirm(
+                `Add ${review.project_name} to this shelf?`,
+                [
+                  review.link_only
+                    ? 'No approved scan matched this project. Add link-only metadata without a discovery folder grant.'
+                    : 'Reuse the exact saved discovery record; preserve its notes and observations.',
+                  'The project workspace is already connected. This does not create a project, scan, read its file, staff an agent, or open a DAW.'
+                ],
+                'Add linked project',
+                button
+              ))
+            ) {
+              await this.refresh(); // Even a canceled review advances Home revision.
+              return;
+            }
+            try {
+              await this.post(`/linked-projects/${id}/commit`, {
+                review_token: review.token,
+                idempotency_key: operationKey('associate-linked-project'),
+                confirm: true
+              });
+            } catch (error) {
+              await this.refresh();
+              throw error;
+            }
+            await this.refresh();
+            this.status(`${review.project_name} is now represented on this shelf.`);
+          })
+      );
+      card.append(heading, button);
+      container.append(card);
+    }
+    if (pending.total > pending.rows.length)
+      container.append(
+        node(
+          'p',
+          '',
+          `${pending.total - pending.rows.length} more linked projects remain; review these first and refresh.`
+        )
+      );
   }
 
   async renderResume() {
