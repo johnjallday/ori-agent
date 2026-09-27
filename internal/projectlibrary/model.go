@@ -66,6 +66,7 @@ type Document struct {
 	Entries       []Entry            `json:"entries,omitempty"`
 	Scans         []Scan             `json:"scans,omitempty"`
 	Sessions      []StudioSession    `json:"sessions,omitempty"`
+	Queue         *ActivationQueue   `json:"activation_queue,omitempty"`
 	Proposals     []ManagerProposal  `json:"proposals,omitempty"`
 	Reviews       []ReviewReceipt    `json:"reviews,omitempty"`
 	Operations    []OperationReceipt `json:"operations,omitempty"`
@@ -450,6 +451,9 @@ func (d Document) valid(scope Scope) bool {
 			return false
 		}
 		sessions[session.ID] = true
+	}
+	if d.Queue != nil && !d.Queue.valid() {
+		return false
 	}
 	proposals := map[string]bool{}
 	for _, proposal := range d.Proposals {

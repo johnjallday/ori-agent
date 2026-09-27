@@ -483,9 +483,9 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     ).toHaveLength(1);
     expect((await json(await request.get(`${base}/projects/${albumID}/sessions`))).total).toBe(1);
 
-    // The browser queue is only a navigation aid. Skip and pause must not
-    // prepare placeholder workspaces; resuming asks for the *next* song's
-    // independent review and confirmation, even after reloading the tab.
+    // Home owns queue order and skip receipts. A browser key is only an
+    // optional same-tab creator retry; clearing it must not lose the next
+    // song after a skip. Each song still needs its own review/confirmation.
     await shelf.getByRole('checkbox', { name: 'Select Album-1 for serial project review' }).check();
     await shelf.getByRole('checkbox', { name: 'Select Album-2 for serial project review' }).check();
     await shelf.locator('#projectLibraryQueueStart').click();
@@ -495,11 +495,22 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     const secondInQueue = page.getByRole('dialog', { name: 'Song 2 of 2 · Album-2' });
     await secondInQueue.getByRole('button', { name: 'Pause queue' }).click();
     await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('1 of 2 handled');
+    const savedQueue = await json(await request.get(`${base}/queue`));
+    expect(savedQueue.queue).toMatchObject({
+      ids: [
+        projects.rows.find((r: { name: string }) => r.name === 'Album-1')?.id,
+        projects.rows.find((r: { name: string }) => r.name === 'Album-2')?.id
+      ],
+      index: 1,
+      skipped: [projects.rows.find((r: { name: string }) => r.name === 'Album-1')?.id]
+    });
     expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
       workspacesBefore.length + 1
     );
     await shot(page, '26-reviewed-queue-paused-after-skip');
+    await page.evaluate(() => sessionStorage.clear()); // close-tab equivalent: no local queue survives
     await page.reload();
+    await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('1 skipped');
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
     await shelf.locator('#projectLibraryQueueResume').click();
     await page
@@ -546,6 +557,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
     await shelf.locator('#projectLibraryQueueResume').click();
     await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('Choose at least two');
+    expect((await json(await request.get(`${base}/queue`))).queue).toBeUndefined();
     const queueProjects = await json(await request.get(`${base}/projects`));
     expect(
       queueProjects.rows.filter((row: { connection: string }) => row.connection === 'connected')

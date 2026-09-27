@@ -218,6 +218,50 @@ test('serial queue recovery retains only bounded Home-scoped navigation and exac
   }
 });
 
+test('Home queue restores order after browser storage loss and never treats local state as authority', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  const serverQueue = {
+    id: 'home-queue',
+    ids: ['first', 'second'],
+    index: 1,
+    skipped: ['first'],
+    revision: 2,
+    status: 'active',
+    created_at: new Date().toISOString()
+  };
+  panel.request = async path => {
+    assert.equal(path, '/queue');
+    return { queue: serverQueue };
+  };
+  panel.saveQueue = () => true; // no storage needed for Home queue navigation
+  await panel.restoreQueue();
+  assert.equal(panel.queue.id, 'home-queue');
+  assert.equal(panel.queue.index, 1);
+  assert.deepEqual(panel.queue.skipped, ['first']);
+  assert.equal(panel.queue.pending, null);
+  let outcome = 'none';
+  panel.post = async (path, input) => {
+    assert.equal(path, '/queue/home-queue/progress');
+    assert.equal(input.entry_id, 'second');
+    assert.equal(input.action, 'skip');
+    assert.equal(input.if_revision, 2);
+    outcome = 'skip';
+    return {
+      queue: {
+        ...serverQueue,
+        index: 2,
+        skipped: ['first', 'second'],
+        revision: 3,
+        status: 'complete'
+      }
+    };
+  };
+  await panel.progressQueue('skip', 'second');
+  assert.equal(outcome, 'skip');
+  assert.equal(panel.queue.index, 2);
+  assert.equal(panel.queue.revision, 3);
+});
+
 test('serial activation pauses after a skip without issuing even a review request', async () => {
   const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
   panel.state = { provider_read_only: false };
@@ -229,7 +273,8 @@ test('serial activation pauses after a skip without issuing even a review reques
     pending: null
   };
   panel.run = async (_trigger, _message, work) => work();
-  panel.saveQueue = () => {};
+  panel.saveQueue = () => true;
+  panel.restoreQueue = async () => {};
   panel.status = () => {};
   const requests = [];
   panel.request = async path => {
@@ -273,6 +318,7 @@ test('serial activation persists a distinct confirmed key before each creator co
   panel.run = async (_trigger, _message, work) => work();
   panel.status = () => {};
   panel.refresh = async () => {};
+  panel.restoreQueue = async () => {};
   panel.queueChoice = async () => 'review';
   panel.activationInput = async detail => ({
     workspace_name: detail.row.name,
@@ -296,6 +342,7 @@ test('serial activation persists a distinct confirmed key before each creator co
   let lastSaved = null;
   panel.saveQueue = () => {
     lastSaved = panel.queue && structuredClone(panel.queue);
+    return true;
   };
   panel.post = async (path, body) => {
     if (path.endsWith('/review'))
@@ -340,6 +387,7 @@ test('serial queue resumes after a lost creator response without creating the co
         refreshes++;
       };
       panel.renderQueueControls = () => {};
+      panel.restoreQueue = async () => {};
       panel.request = async path =>
         path.endsWith('/activation')
           ? { state: 'review_available' }
@@ -407,7 +455,8 @@ test('serial queue retries the exact confirmed operation after creator success b
     pending: { id: 'first', token: 'review-1', key: 'first-confirmed-key' }
   };
   panel.run = async (_trigger, _message, work) => work();
-  panel.saveQueue = () => {};
+  panel.saveQueue = () => true;
+  panel.restoreQueue = async () => {};
   panel.status = () => {};
   panel.refresh = async () => {};
   panel.request = async path =>

@@ -71,7 +71,12 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
       now - saved.created_at > 24 * 60 * 60 * 1000 ||
       saved.created_at > now ||
       new Set(saved.ids).size !== saved.ids.length ||
-      saved.ids.some(id => typeof id !== 'string' || !id || id.length > 160)
+      saved.ids.some(id => typeof id !== 'string' || !id || id.length > 160) ||
+      (saved.id &&
+        (typeof saved.id !== 'string' ||
+          saved.id.length > 160 ||
+          !Number.isInteger(saved.revision) ||
+          saved.revision < 1))
     )
       return null;
     const pending = saved.pending;
@@ -85,6 +90,7 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
       return null;
     return {
       home_id: homeID,
+      ...(saved.id ? { id: saved.id, revision: saved.revision } : {}),
       ids: [...saved.ids],
       index: saved.index,
       created_at: saved.created_at,
@@ -237,6 +243,7 @@ export class ProjectLibraryPanel {
       }
       this.renderFormats();
       this.renderRoots();
+      await this.restoreQueue();
       this.renderQueueControls();
       await this.renderResume();
       await this.renderPendingLinks();
@@ -723,28 +730,85 @@ export class ProjectLibraryPanel {
     const discard = document.getElementById('projectLibraryQueueDiscard');
     if (!message || !start || !resume || !discard) return;
     const pending = this.queue;
-    message.textContent = pending
-      ? `${pending.index} of ${pending.ids.length} handled · each remaining song needs its own review. Already connected songs stay connected.`
-      : this.selectedProjects.size
-        ? `${this.selectedProjects.size} selected · no project will be created until each one is confirmed.`
-        : 'Choose at least two catalog-only projects to review one at a time.';
+    message.textContent =
+      pending?.status === 'expired'
+        ? 'Saved queue expired. Discard it before starting a new review; no project was created by expiry.'
+        : pending
+          ? `${pending.index} of ${pending.ids.length} handled · ${pending.skipped?.length || 0} skipped · order and skips saved on this Home. Each remaining song needs its own review; already connected songs stay connected.`
+          : this.selectedProjects.size
+            ? `${this.selectedProjects.size} selected · no project will be created until each one is confirmed.`
+            : 'Choose at least two catalog-only projects to review one at a time.';
     start.disabled = this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
     resume.hidden = discard.hidden = !pending;
-    resume.disabled = this.busy || this.readOnly;
+    resume.disabled = this.busy || this.readOnly || pending?.status === 'expired';
     discard.disabled = this.busy;
   }
 
+  // Browser storage is only an optional same-tab, previously confirmed creator
+  // retry key. Home order, skips and connection receipts come from the server.
   saveQueue() {
     const key = `ori:library-queue:${this.workspaceId}`;
     try {
       if (this.queue) globalThis.sessionStorage.setItem(key, JSON.stringify(this.queue));
       else globalThis.sessionStorage.removeItem(key);
+      this.renderQueueControls();
+      return true;
     } catch (_) {
-      throw new Error(
-        'This browser cannot retain the review queue. Use one-project setup instead.'
-      );
+      this.renderQueueControls();
+      return false;
     }
-    this.renderQueueControls();
+  }
+
+  async restoreQueue() {
+    const local = readActivationQueue(this.workspaceId);
+    const { queue } = await this.request('/queue');
+    if (queue?.status === 'expired') {
+      this.queue = {
+        ...queue,
+        home_id: this.workspaceId,
+        created_at: Date.parse(queue.created_at),
+        pending: null
+      };
+      this.status(
+        'Saved review queue expired. Discard it before starting another. No project was created by expiry.'
+      );
+    } else if (queue?.status === 'active') {
+      this.queue = {
+        ...queue,
+        home_id: this.workspaceId,
+        created_at: Date.parse(queue.created_at),
+        pending:
+          local?.id === queue.id && local.ids[local.index] === queue.ids[queue.index]
+            ? local.pending
+            : null
+      };
+    } else {
+      // A legacy tab-only queue is never promoted to authority.
+      this.queue = local && !local.id ? local : null;
+    }
+    this.saveQueue();
+  }
+
+  async progressQueue(action, entryID) {
+    if (!this.queue?.id) {
+      this.queue.index++; // legacy tab-only queue, never a new queue
+      this.queue.pending = null;
+      return;
+    }
+    const queue = this.queue;
+    const result = await this.post(`/queue/${encodeURIComponent(queue.id)}/progress`, {
+      entry_id: entryID,
+      action,
+      if_revision: queue.revision,
+      request_key: operationKey(`queue-${action}`)
+    });
+    this.queue = {
+      ...this.queue,
+      ...result.queue,
+      created_at: Date.parse(result.queue.created_at),
+      pending: null
+    };
+    this.saveQueue();
   }
 
   async startQueue(trigger) {
@@ -756,11 +820,14 @@ export class ProjectLibraryPanel {
     )
       return;
     try {
-      this.queue = {
-        home_id: this.workspaceId,
+      const { queue } = await this.post('/queue', {
         ids: [...this.selectedProjects],
-        index: 0,
-        created_at: Date.now(),
+        request_key: operationKey('queue-start')
+      });
+      this.queue = {
+        ...queue,
+        home_id: this.workspaceId,
+        created_at: Date.parse(queue.created_at),
         pending: null
       };
       this.saveQueue();
@@ -768,7 +835,7 @@ export class ProjectLibraryPanel {
       this.renderRows();
       await this.continueQueue(document.getElementById('projectLibraryQueueResume') || trigger);
     } catch (error) {
-      this.queue = null;
+      await this.restoreQueue().catch(() => {});
       this.status(error.message);
       this.renderQueueControls();
     }
@@ -781,7 +848,7 @@ export class ProjectLibraryPanel {
       !(await this.confirm(
         'Discard this review queue?',
         [
-          'This removes only the local queue. Any project you separately confirmed stays connected.'
+          'This discards the saved Home queue and its skip/order history. Any project you separately confirmed stays connected.'
         ],
         'Discard queue',
         trigger
@@ -789,10 +856,18 @@ export class ProjectLibraryPanel {
     )
       return;
     try {
+      if (this.queue.id) {
+        await this.post(`/queue/${encodeURIComponent(this.queue.id)}/discard`, {
+          if_revision: this.queue.revision,
+          request_key: operationKey('queue-discard'),
+          confirm: true
+        });
+      }
       this.queue = null;
       this.saveQueue();
-      this.status('Local review queue discarded. Connected projects were not changed.');
+      this.status('Saved review queue discarded. Connected projects were not changed.');
     } catch (error) {
+      await this.restoreQueue().catch(() => {});
       this.status(error.message);
     }
   }
@@ -849,22 +924,28 @@ export class ProjectLibraryPanel {
   async continueQueue(trigger) {
     if (!this.queue || this.readOnly || this.busy) return;
     await this.run(trigger, 'Checking the next saved project before review…', async () => {
+      await this.restoreQueue();
+      if (this.queue?.status === 'expired') {
+        this.status(
+          'Queue expired. Discard it and start a new review; no project was created by expiry.'
+        );
+        return;
+      }
+      if (!this.queue) return;
       while (this.queue && this.queue.index < this.queue.ids.length) {
         const id = this.queue.ids[this.queue.index];
         const path = `/projects/${encodeURIComponent(id)}`;
         try {
           const detail = await this.request(path);
           if (detail.row.connection === 'connected') {
-            this.queue.pending = null;
-            this.queue.index++;
+            await this.progressQueue('connected', id);
           } else if (this.queue.pending) {
             await this.post(`${path}/activation/commit`, {
               review_token: this.queue.pending.token,
               idempotency_key: this.queue.pending.key,
               confirm: true
             });
-            this.queue.pending = null;
-            this.queue.index++;
+            await this.progressQueue('connected', id);
             await this.refresh();
           } else {
             const eligibility = await this.request(`${path}/activation`);
@@ -885,7 +966,7 @@ export class ProjectLibraryPanel {
               return;
             }
             if (action === 'skip') {
-              this.queue.index++;
+              await this.progressQueue('skip', id);
             } else {
               const input = await this.activationInput(detail, eligibility, trigger);
               if (!input) {
@@ -915,18 +996,21 @@ export class ProjectLibraryPanel {
                 token: review.token,
                 key: operationKey('queue-activation')
               };
-              this.saveQueue(); // Persist the exact retry *before* crossing the creator boundary.
+              if (!this.saveQueue()) {
+                throw new Error(
+                  'This tab cannot retain a confirmed creator retry key; no project was created. Use one-project review instead.'
+                );
+              }
               await this.post(`${path}/activation/commit`, {
                 review_token: review.token,
                 idempotency_key: this.queue.pending.key,
                 confirm: true
               });
-              this.queue.pending = null;
-              this.queue.index++;
+              await this.progressQueue('connected', id);
               await this.refresh();
             }
           }
-          if (this.queue.index === this.queue.ids.length) {
+          if (!this.queue || this.queue.index === this.queue.ids.length) {
             this.queue = null;
             this.saveQueue();
             this.status('Review queue complete. Only separately confirmed songs were connected.');
@@ -946,7 +1030,7 @@ export class ProjectLibraryPanel {
               // Keep the retry key. The next explicit resume rechecks it.
             }
             this.status(
-              `${error.message || 'The result is uncertain'}. Review the saved link above. Queue paused; resume with this tab’s confirmed key. If this tab closes after a child was created but before the Home recorded it, return to this Home’s Review linked projects shelf to separately review its exact reciprocal link. Queue order and skips do not survive tab closure.`
+              `${error.message || 'The result is uncertain'}. Review the saved link above. Queue paused; resume with this tab’s confirmed key. If this tab closes after a child was created but before the Home recorded it, return to this Home’s Review linked projects shelf to separately review its exact reciprocal link. Home queue order and skips survive tab closure; only this tab’s confirmed retry key does not.`
             );
           } else {
             this.status(
