@@ -2,6 +2,7 @@ package projectlibrary
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -176,7 +179,10 @@ func TestActivation_RecoversExactCreatorRunBeforeRepreviewAfterInterruptedCatalo
 	}
 }
 
-func realActivationCreator(t *testing.T, scope Scope, file *workspace.FileStore, installed activationPlugins) ActivationCreatorFactory {
+func realActivationCreator(t *testing.T, scope Scope, file interface {
+	workspace.Store
+	GetFolderPath(string) (string, error)
+}, installed activationPlugins) ActivationCreatorFactory {
 	t.Helper()
 	homeDecl := &workspace.AssistantProgramDeclaration{SchemaVersion: workspace.AssistantProgramSchemaVersion,
 		ID: scope.ProgramID, StationName: "Music Home",
@@ -433,6 +439,151 @@ func TestActivation_RealCreatorRecoversAfterHomeWriteFailsAndStoreRestarts(t *te
 	ids, err = restarted.List()
 	if err != nil || len(ids) != 2 {
 		t.Fatalf("expired review changed workspace count: %v %v", ids, err)
+	}
+}
+
+func TestActivation_SQLitePrimarySplitHomeMirrorRefusesCreatorRepairUntilExplicitReconciliation(t *testing.T) {
+	a, scope, _, file, tree, installed := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "activation.db"), WALMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close SQLite activation fixture: %v", err)
+		}
+	}()
+	primary := session.NewWorkspaceStoreAdapter(session.NewHybridStoreWithDB(db, 10))
+	home, err := file.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.Save(home); err != nil {
+		t.Fatal(err)
+	}
+	synced := workspace.NewSyncStore(primary, file)
+	original := a.library
+	library := NewStore(synced).WithProviderEvidence(original.providerEvidence)
+	a.library, a.roots.library, a.owners = library, library, synced
+	queue, _, err := library.StartActivationQueue(scope, []string{"single", "alternates"}, "sqlite-activation-queue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	creatorFactory := realActivationCreator(t, scope, synced, installed)
+	created, release := make(chan struct{}), make(chan struct{})
+	releaseCreator := sync.OnceFunc(func() { close(release) })
+	defer releaseCreator()
+	service := NewActivationService(a, func(resolver projectconnection.SelectionResolver) ActivationCreator {
+		return &pauseAfterActivationCreator{ActivationCreator: creatorFactory(resolver), created: created, release: release}
+	})
+	doc, err := library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, commitErr := service.Commit(t.Context(), scope, "single", review.Token, "sqlite-exact-creator")
+		done <- commitErr
+	}()
+	select {
+	case <-created:
+	case <-time.After(15 * time.Second):
+		t.Fatal("SQLite-backed creator did not durably link one child")
+	}
+	// Emulate a crash between the folder-mirror and SQLite-primary Home writes.
+	// Only the library document differs; the independently durable reciprocal
+	// child and Home membership are identical and must never be undone here.
+	if err := file.Update(scope.HomeID, func(folderHome *workspace.Workspace) error {
+		state := folderHome.GetAssistantProgramState()
+		var changed Document
+		if err := json.Unmarshal(state.ProjectLibrary, &changed); err != nil {
+			return err
+		}
+		changed.Revision++
+		if !changed.valid(scope) {
+			return ErrCorrupt
+		}
+		encoded, err := json.Marshal(changed)
+		if err != nil {
+			return err
+		}
+		state.ProjectLibrary = encoded
+		folderHome.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	releaseCreator()
+	select {
+	case commitErr := <-done:
+		if !errors.Is(commitErr, ErrMirrorDiverged) && !errors.Is(commitErr, ErrUnavailable) {
+			t.Fatalf("creator repair claimed success across divergent Home mirrors: %v", commitErr)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("creator hung on split Home mirrors")
+	}
+	if _, err := library.PendingLinkedProjects(scope); !errors.Is(err, ErrMirrorDiverged) {
+		t.Fatalf("split Home exposed pending-link navigation: %v", err)
+	}
+	folderPath, err := file.GetFolderPath(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedFile, err := workspace.NewFileStore(filepath.Dir(folderPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewStore(workspace.NewSyncStore(primary, reopenedFile)).Read(scope); !errors.Is(err, ErrMirrorDiverged) {
+		t.Fatalf("fresh FileStore silently accepted a persistent split Home: %v", err)
+	}
+	if _, _, err := library.ProgressActivationQueue(scope, queue.ID, "single", "skip", "split-creator-skip", 1); !errors.Is(err, ErrMirrorDiverged) {
+		t.Fatalf("split Home allowed Skip to invalidate exact creator: %v", err)
+	}
+	ids, err := synced.List()
+	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("split Home changed child count or project source: %v %v", ids, err)
+	}
+	primaryHome, err := primary.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	primaryDoc, err := NewStore(primary).Read(scope)
+	if err != nil || sessionEntry(primaryDoc, "single").Link != nil || primaryDoc.Queue.Index != 0 {
+		t.Fatalf("SQLite primary silently adopted the split folder receipt: %+v %v", primaryDoc, err)
+	}
+	// Test-only operator reconciliation from the unchanged primary: production
+	// deliberately offers no automatic winner or migration for split mirrors.
+	if err := file.Update(scope.HomeID, func(folderHome *workspace.Workspace) error {
+		state := folderHome.GetAssistantProgramState()
+		state.ProjectLibrary = append([]byte(nil), primaryHome.GetAssistantProgramState().ProjectLibrary...)
+		folderHome.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := library.PendingLinkedProjects(scope)
+	if err != nil || pending.Total != 1 {
+		t.Fatalf("exact child not reviewable after external repair: %+v %v", pending, err)
+	}
+	result, err := service.Commit(t.Context(), scope, "single", review.Token, "sqlite-exact-creator")
+	if err != nil || result.WorkspaceID != pending.Rows[0].WorkspaceID {
+		t.Fatalf("exact confirmed run failed to repair without duplication: %+v %v", result, err)
+	}
+	view, err := library.CurrentActivationQueue(scope)
+	if err != nil || view.Queue == nil || view.Queue.Index != 0 {
+		t.Fatalf("queue order lost during exact repair: %+v %v", view, err)
+	}
+	if _, _, err := library.ProgressActivationQueue(scope, queue.ID, "single", "connected", "sqlite-exact-connected", 1); err != nil {
+		t.Fatalf("reviewed connection did not advance its own queue receipt: %v", err)
+	}
+	ids, err = synced.List()
+	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("recovery duplicated child or edited project source: %v %v", ids, err)
 	}
 }
 
