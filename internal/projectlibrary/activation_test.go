@@ -20,12 +20,18 @@ type activationCreatorTest struct {
 	homeID   string
 	commits  *int
 	result   projectconnection.CommitResult
+	// A real creator refuses to preview a newly created project as an empty
+	// folder; simulate that to catch a recovery path that re-previews first.
+	refusePreviewAfterCommit bool
 }
 
 func (c *activationCreatorTest) HomePreparation(projectconnection.Scope) (projectconnection.HomePreparation, error) {
 	return projectconnection.HomePreparation{Exists: true, HomeID: c.homeID}, nil
 }
 func (c *activationCreatorTest) Preview(_ context.Context, _ projectconnection.Scope, request projectconnection.Request) (projectconnection.Preview, error) {
+	if c.refusePreviewAfterCommit && c.result.ProjectWorkspaceID != "" {
+		return projectconnection.Preview{}, projectconnection.ErrChanged
+	}
 	path, err := c.resolver.Resolve(request.SelectionToken)
 	if err != nil {
 		return projectconnection.Preview{}, err
@@ -114,6 +120,57 @@ func TestActivation_ReviewedSelectionAndCanonicalReceiptNeverUseBrowserPath(t *t
 	if err != nil || len(saved.Entries) != 3 || sessionEntry(saved, "single").Link == nil ||
 		fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
 		t.Fatalf("catalog association or source changed: %+v %v", saved, err)
+	}
+}
+
+func TestActivation_RecoversExactCreatorRunBeforeRepreviewAfterInterruptedCatalogWrite(t *testing.T) {
+	a, scope, _, file, tree, _ := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	commits := 0
+	creator := &activationCreatorTest{store: file, homeID: scope.HomeID, commits: &commits, refusePreviewAfterCommit: true}
+	service := NewActivationService(a, func(resolver projectconnection.SelectionResolver) ActivationCreator {
+		creator.resolver = resolver
+		return creator
+	})
+	doc, err := a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := service.Review(t.Context(), scope, "single", doc.Revision, "Song.rpp", "Song")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err = a.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedReview, ok := findReview(doc, review.Token, "activate_project")
+	if !ok {
+		t.Fatal("review receipt not saved")
+	}
+	creatorScope := projectconnection.Scope{OwnerUserID: scope.OwnerUserID, RunID: savedReview.TargetID}
+	result, err := creator.Commit(t.Context(), creatorScope, activationRequest(review.Token, *savedReview.Activation),
+		savedReview.Activation.CreatorInputDigest, savedReview.Activation.CreatorOwnerDigest)
+	if err != nil || commits != 1 || result.ProjectWorkspaceID == "" {
+		t.Fatalf("canonical creator succeeded before catalog association: %+v %v", result, err)
+	}
+	// Reconstruct the service against persisted state as on restart. The
+	// deterministic run and its exact link survive; the Home entry did not
+	// receive its library receipt yet. A second preview would now fail.
+	service = NewActivationService(a, func(resolver projectconnection.SelectionResolver) ActivationCreator {
+		creator.resolver = resolver
+		return creator
+	})
+	recovered, err := service.Commit(t.Context(), scope, "single", review.Token, "recovered-run")
+	if err != nil || commits != 1 || recovered.WorkspaceID != result.ProjectWorkspaceID || recovered.LinkID == "" {
+		t.Fatalf("interrupted catalog association was not reconciled: %+v commits=%d err=%v", recovered, commits, err)
+	}
+	if _, err := service.Commit(t.Context(), scope, "single", review.Token, "new-run"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("other key reused consumed review: %v", err)
+	}
+	ids, err := file.List()
+	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("creator duplicated project or modified source: %v %v", ids, err)
 	}
 }
 

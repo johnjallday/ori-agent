@@ -317,16 +317,17 @@ func (s *ActivationService) Commit(ctx context.Context, scope Scope, entryID, to
 		return ActivationResult{}, ErrUnavailable
 	}
 	request := activationRequest(token, binding)
-	preview, err := creator.Preview(ctx, creatorScope, request)
-	if err != nil || preview.InputDigest != binding.CreatorInputDigest || preview.OwnerDigest != binding.CreatorOwnerDigest ||
-		preview.Projection.HomeWillBeCreated || preview.Projection.EntryName != binding.ProjectFile {
-		return ActivationResult{}, ErrConflict
-	}
-	// A prior attempt may have created the child before the Home's catalog
-	// receipt was saved. Recover that run only after the same source/owner/
-	// blueprint checks above, and never invoke creator.Commit twice for it.
+	// A prior creator success changes folder ownership, so its fresh Preview
+	// would correctly refuse a *new* child. Observe this exact deterministic
+	// run before deciding to re-preview; the source resolver, provider, Home,
+	// reciprocal link and document review are still rechecked below.
 	result, found := creator.ObservedResult(creatorScope, scope.HomeID, "")
 	if !found {
+		preview, previewErr := creator.Preview(ctx, creatorScope, request)
+		if previewErr != nil || preview.InputDigest != binding.CreatorInputDigest || preview.OwnerDigest != binding.CreatorOwnerDigest ||
+			preview.Projection.HomeWillBeCreated || preview.Projection.EntryName != binding.ProjectFile {
+			return ActivationResult{}, ErrConflict
+		}
 		result, err = creator.Commit(ctx, creatorScope, request, binding.CreatorInputDigest, binding.CreatorOwnerDigest)
 		if err != nil {
 			return ActivationResult{}, err
