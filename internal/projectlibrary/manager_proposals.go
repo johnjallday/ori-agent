@@ -14,7 +14,9 @@ import (
 // Only an owner can request a separate canonical field review/commit.
 type ManagerProposal struct {
 	ID              string    `json:"id"`
+	Kind            string    `json:"kind,omitempty"` // empty: legacy next_action; project_review: navigation only
 	EntryID         string    `json:"entry_id"`
+	EntryRevision   int64     `json:"entry_revision,omitempty"`
 	FieldsRevision  int64     `json:"fields_revision"`
 	BindingRevision int64     `json:"binding_revision"`
 	AgentInstanceID string    `json:"agent_instance_id"`
@@ -138,12 +140,116 @@ func (s *Store) ProposeNextAction(authority ManagerAuthority, entryID string, fi
 	return proposal, false, nil
 }
 
+// Project-review navigation has no creator token or file/root input. The
+// Manager can only point the owner to Details; that surface must recheck the
+// installed blueprint, approved source and canonical creator separately.
+// ProposeProjectReview saves an inert, short-lived suggestion to visit the
+// exact Home entry's current Details. Neither the proposal nor its replay
+// reads a source, issues an activation review or grants creator permission.
+func (s *Store) ProposeProjectReview(authority ManagerAuthority, entryID string, entryRevision int64,
+	reason, requestKey string) (ManagerProposal, bool, error) {
+	if entryID == "" || !validText(entryID, 160) || entryRevision < 1 ||
+		!validText(reason, 500) || requestKey == "" || !validText(requestKey, 160) {
+		return ManagerProposal{}, false, ErrConflict
+	}
+	scope, err := s.authorizeManager(authority)
+	if err != nil {
+		return ManagerProposal{}, false, err
+	}
+	doc, state, err := s.readSnapshot(scope)
+	if err != nil || state == nil {
+		return ManagerProposal{}, false, ErrUnavailable
+	}
+	entry := sessionEntry(doc, entryID)
+	if entry == nil || entry.Revision != entryRevision || entry.Link != nil {
+		return ManagerProposal{}, false, ErrConflict
+	}
+	bindingRev := state.HomeBindings.StateRevision
+	digest := projectReviewProposalDigest(scope, authority, entryID, reason, entryRevision, bindingRev)
+	for _, receipt := range doc.Operations {
+		if receipt.Key != requestKey {
+			continue
+		}
+		if receipt.Action != "propose_project_review" || receipt.Digest != digest {
+			return ManagerProposal{}, false, ErrConflict
+		}
+		for _, proposal := range doc.Proposals {
+			if proposal.ID == receipt.ConsequenceID && proposal.Digest == digest && proposal.ExpiresAt.After(s.now().UTC()) {
+				return proposal, true, nil
+			}
+		}
+		return ManagerProposal{}, false, ErrConflict
+	}
+	at := s.now().UTC()
+	proposal := ManagerProposal{ID: newID(), Kind: "project_review", EntryID: entryID, EntryRevision: entryRevision,
+		BindingRevision: bindingRev, AgentInstanceID: authority.AgentInstanceID, AgentName: authority.AgentName,
+		Reason: reason, Digest: digest, CreatedAt: at, ExpiresAt: at.Add(24 * time.Hour)}
+	receipt, replay, err := s.mutateWithHomePolicy(scope, doc.Revision,
+		operation{key: requestKey, action: "propose_project_review", digest: digest},
+		func(current *workspace.AssistantProgramState, home *workspace.Workspace) bool {
+			return current.HomeBindings.StateRevision == bindingRev && boundManager(current, home, authority)
+		}, func(current *Document) (string, error) {
+			selected := sessionEntry(*current, entryID)
+			if selected == nil || selected.Link != nil || selected.Revision != entryRevision {
+				return "", ErrConflict
+			}
+			kept := current.Proposals[:0]
+			for _, old := range current.Proposals {
+				if old.ExpiresAt.After(at) {
+					kept = append(kept, old)
+				}
+			}
+			current.Proposals = kept
+			if len(current.Proposals) >= maxProposals {
+				return "", ErrLimit
+			}
+			current.Proposals = append(current.Proposals, proposal)
+			return proposal.ID, nil
+		})
+	if err != nil {
+		return ManagerProposal{}, false, err
+	}
+	if replay {
+		fresh, readErr := s.Read(scope)
+		if readErr != nil {
+			return ManagerProposal{}, false, readErr
+		}
+		for _, row := range fresh.Proposals {
+			if row.ID == receipt.ConsequenceID && row.Digest == digest {
+				return row, true, nil
+			}
+		}
+		return ManagerProposal{}, false, ErrConflict
+	}
+	return proposal, false, nil
+}
+
+func projectReviewProposalDigest(scope Scope, authority ManagerAuthority, entryID, reason string, entryRev, bindingRev int64) string {
+	data, _ := json.Marshal(struct {
+		Scope      Scope            `json:"scope"`
+		Authority  ManagerAuthority `json:"authority"`
+		EntryID    string           `json:"entry_id"`
+		EntryRev   int64            `json:"entry_rev"`
+		BindingRev int64            `json:"binding_rev"`
+		Reason     string           `json:"reason"`
+	}{scope, authority, entryID, entryRev, bindingRev, reason})
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal ManagerProposal) string {
 	if !proposal.ExpiresAt.After(s.now().UTC()) {
 		return "expired"
 	}
 	entry := sessionEntry(doc, proposal.EntryID)
-	if entry == nil || entry.Fields.Revision != proposal.FieldsRevision {
+	if entry == nil {
+		return "stale"
+	}
+	if proposal.Kind == "project_review" {
+		if entry.Link != nil || entry.Revision != proposal.EntryRevision {
+			return "stale"
+		}
+	} else if entry.Fields.Revision != proposal.FieldsRevision {
 		return "stale"
 	}
 	authority := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: proposal.AgentInstanceID,
@@ -154,9 +260,16 @@ func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal Manage
 	}
 	state, getErr := s.workspaces.Get(scope.HomeID)
 	if getErr != nil || state == nil || state.GetAssistantProgramState() == nil ||
-		state.GetAssistantProgramState().HomeBindings.StateRevision != proposal.BindingRevision ||
-		proposal.Digest != proposalDigest(scope, authority, proposal.EntryID, proposal.NextAction,
-			proposal.Reason, proposal.FieldsRevision, proposal.BindingRevision) {
+		state.GetAssistantProgramState().HomeBindings.StateRevision != proposal.BindingRevision {
+		return "stale"
+	}
+	if proposal.Kind == "project_review" {
+		if proposal.Digest != projectReviewProposalDigest(scope, authority, proposal.EntryID,
+			proposal.Reason, proposal.EntryRevision, proposal.BindingRevision) {
+			return "stale"
+		}
+	} else if proposal.Digest != proposalDigest(scope, authority, proposal.EntryID, proposal.NextAction,
+		proposal.Reason, proposal.FieldsRevision, proposal.BindingRevision) {
 		return "stale"
 	}
 	return "ready"
@@ -205,6 +318,9 @@ func (s *Store) ReviewProposedNextAction(scope Scope, proposalID, author string)
 	if err != nil {
 		return FieldReview{}, err
 	}
+	if proposal.Kind != "" {
+		return FieldReview{}, ErrConflict // navigation never yields a field/creator review token
+	}
 	return s.ReviewFields(scope, proposal.EntryID, proposal.FieldsRevision,
 		FieldsPatch{NextAction: &proposal.NextAction}, author)
 }
@@ -246,7 +362,7 @@ func (s *Store) CommitProposedNextAction(scope Scope, proposalID, reviewToken, k
 			break
 		}
 	}
-	if saved == nil {
+	if saved == nil || saved.Kind != "" {
 		return Entry{}, false, ErrConflict
 	}
 	proposal := *saved

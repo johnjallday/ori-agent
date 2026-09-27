@@ -357,10 +357,17 @@ export class ProjectLibraryPanel {
     section.hidden = false;
     for (const row of page.rows || []) {
       const proposal = row.proposal;
+      const navigation = proposal.kind === 'project_review';
       const card = node('article', 'project-library-resume-card');
       card.append(
         node('h4', '', row.name),
-        node('p', '', `Suggested next action: ${proposal.next_action}`),
+        node(
+          'p',
+          '',
+          navigation
+            ? 'Suggested navigation: inspect this song’s current project setup options. No setup was reviewed or authorized.'
+            : `Suggested next action: ${proposal.next_action}`
+        ),
         node(
           'p',
           '',
@@ -378,10 +385,14 @@ export class ProjectLibraryPanel {
         const button = node(
           'button',
           'modern-btn modern-btn-secondary',
-          `Review ${row.name} suggestion`
+          navigation ? `View ${row.name} setup options` : `Review ${row.name} suggestion`
         );
         button.type = 'button';
-        button.addEventListener('click', () => void this.reviewProposal(row, button));
+        button.addEventListener('click', () =>
+          navigation
+            ? void this.details(proposal.entry_id, button)
+            : void this.reviewProposal(row, button)
+        );
         card.append(button);
       }
       container.append(card);

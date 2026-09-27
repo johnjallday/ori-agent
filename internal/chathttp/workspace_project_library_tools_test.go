@@ -86,7 +86,8 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	provider.SetExecutingInstanceID("manager-instance")
 	search := findLibraryTool(provider.Tools(), "home_library_search")
-	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil || findLibraryTool(provider.Tools(), "home_library_propose_next_action") == nil {
+	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil || findLibraryTool(provider.Tools(), "home_library_propose_next_action") == nil ||
+		findLibraryTool(provider.Tools(), "home_library_propose_project_review") == nil {
 		t.Fatal("bound Manager's library reads not registered")
 	}
 	output, err := search.Call(context.Background(), `{"text":"Private"}`)
@@ -131,6 +132,16 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if _, err := propose.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","next_action":"Unsafe","request_key":"missing"}`); err == nil {
 		t.Fatal("omitted field revision obtained a proposal")
 	}
+	navigate := findLibraryTool(provider.Tools(), "home_library_propose_project_review")
+	if _, err := navigate.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","entry_revision":1,"request_key":"linked-navigation"}`); err == nil {
+		t.Fatal("already linked project received a new creator navigation proposal")
+	}
+	if _, err := navigate.Call(context.Background(), `{"entry_id":"`+child.ID+`","entry_revision":1,"request_key":"foreign-navigation"}`); err == nil {
+		t.Fatal("child workspace ID produced a Home navigation proposal")
+	}
+	if _, err := navigate.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","request_key":"missing-revision"}`); err == nil {
+		t.Fatal("navigation without an entry revision was accepted")
+	}
 	if findLibraryTool(provider.Tools(), "home_library_commit") != nil {
 		t.Fatal("model was given a user confirmation tool")
 	}
@@ -152,6 +163,9 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	if _, err := propose.Call(context.Background(), args); err == nil {
 		t.Fatal("previously registered proposal tool bypassed removed runtime instance")
+	}
+	if _, err := navigate.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","entry_revision":1,"request_key":"unbound-navigation"}`); err == nil {
+		t.Fatal("previously registered navigation tool bypassed removed runtime instance")
 	}
 	provider.SetExecutingInstanceID("sample-instance")
 	provider.SetExecutingAgent("Sample")

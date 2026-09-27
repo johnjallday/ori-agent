@@ -856,6 +856,47 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       'Review my saved notes without the folder'
     );
 
+    // A second direct Manager tool can suggest only Details navigation. A
+    // revoked source still cannot produce a project-setup review or child.
+    const beforeNavigation = await json(await request.get(`${base}/projects/${savedEntry.id}`));
+    const childCountBeforeNavigation = (await json(await request.get('/api/workspaces'))).folders
+      .length;
+    const navigation = await json(
+      await request.post('/api/chat', {
+        data: {
+          agent_name: manager.name,
+          route_context: {
+            surface: 'workspace_detail',
+            workspace_id: homeID,
+            page_path: `/workspaces/${homes[0].folder_slug}/assistant`
+          },
+          question: `/tool home_library_propose_project_review ${JSON.stringify({
+            entry_id: savedEntry.id,
+            entry_revision: beforeNavigation.entry_revision,
+            reason: 'Look at current setup options; no source permission implied.',
+            request_key: `browser-navigation-${homeID}`
+          })}`
+        }
+      })
+    );
+    expect(navigation.success, JSON.stringify(navigation)).toBe(true);
+    expect(navigation.response).toContain('Navigation suggestion saved only');
+    await page.reload();
+    const navSuggestions = page.locator('#projectLibraryProposals');
+    await expect(navSuggestions).toContainText('No setup was reviewed or authorized');
+    await navSuggestions.getByRole('button', { name: 'View Album-4 setup options' }).click();
+    const navDetails = page.getByRole('dialog', { name: 'Album-4' });
+    await expect(navDetails).toContainText('Discovery consent ended');
+    await expect(navDetails.getByRole('button', { name: 'Review project setup' })).toHaveCount(0);
+    await shot(page, '38-reviewed-manager-navigation-revoked');
+    await navDetails.getByRole('button', { name: 'Close' }).click();
+    expect((await json(await request.get('/api/workspaces'))).folders.length).toBe(
+      childCountBeforeNavigation
+    );
+    await expect(shelf.locator('#projectLibraryResume')).toContainText(
+      'Review my saved notes without the folder'
+    );
+
     // A revoked root blocks project review, not an explicit queue Skip. Save
     // the later Album-4 item, then forget it separately below and require a
     // second Skip rather than silently deleting the remaining queue order.

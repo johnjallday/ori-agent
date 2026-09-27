@@ -140,10 +140,12 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
   try {
     const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
     panel.state = { provider_read_only: false };
+    const destinations = [];
+    panel.details = id => destinations.push(id);
     panel.request = async path => {
       assert.equal(path, '/proposals');
       return {
-        total: 2,
+        total: 3,
         rows: [
           {
             name: '<svg onload=alert(1)>',
@@ -164,13 +166,24 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
               reason: '',
               agent_name: 'Manager'
             }
+          },
+          {
+            name: 'Album-4',
+            status: 'ready',
+            proposal: {
+              id: 'navigation-id',
+              kind: 'project_review',
+              entry_id: 'entry-4',
+              reason: '<script>untrusted setup note</script>',
+              agent_name: 'Manager'
+            }
           }
         ]
       };
     };
     await panel.renderProposals();
     assert.equal(elements.get('projectLibraryProposals').hidden, false);
-    const [ready, stale] = elements.get('projectLibraryProposalRows').children;
+    const [ready, stale, navigation] = elements.get('projectLibraryProposalRows').children;
     assert.equal(ready.children[0].textContent, '<svg onload=alert(1)>');
     assert.equal(
       ready.children[1].textContent,
@@ -178,6 +191,14 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     );
     assert.equal(ready.children[4].tag, 'button');
     assert.equal(stale.children.filter(child => child.tag === 'button').length, 0);
+    assert.match(navigation.children[1].textContent, /No setup was reviewed or authorized/);
+    assert.equal(
+      navigation.children[2].textContent,
+      "Manager's reason (untrusted note): <script>untrusted setup note</script>"
+    );
+    assert.equal(navigation.children[4].textContent, 'View Album-4 setup options');
+    navigation.children[4].click();
+    assert.deepEqual(destinations, ['entry-4']); // only normal owner Details, no creator call
     panel.state.provider_read_only = true;
     await panel.renderProposals();
     assert.equal(

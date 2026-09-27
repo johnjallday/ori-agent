@@ -473,9 +473,20 @@ func (d Document) valid(scope Scope) bool {
 			!entries[proposal.EntryID] || proposal.FieldsRevision < 0 || proposal.BindingRevision < 1 ||
 			proposal.AgentInstanceID == "" || !validText(proposal.AgentInstanceID, 160) ||
 			proposal.AgentName == "" || !validText(proposal.AgentName, 160) ||
-			proposal.NextAction == "" || !validText(proposal.NextAction, 240) ||
 			!validText(proposal.Reason, 500) || !validDigest(proposal.Digest) ||
 			proposal.CreatedAt.IsZero() || !proposal.ExpiresAt.After(proposal.CreatedAt) {
+			return false
+		}
+		switch proposal.Kind {
+		case "": // Existing saved next-action suggestions retain their original digest.
+			if proposal.EntryRevision != 0 || proposal.NextAction == "" || !validText(proposal.NextAction, 240) {
+				return false
+			}
+		case "project_review":
+			if proposal.EntryRevision < 1 || proposal.FieldsRevision != 0 || proposal.NextAction != "" {
+				return false
+			}
+		default:
 			return false
 		}
 		proposals[proposal.ID] = true
