@@ -71,6 +71,13 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimPrefix(path, "/api/workspaces")
 	path = strings.TrimPrefix(path, "/")
 
+	// "Build with your assistant" sessions are not workspaces; route them
+	// before "build-sessions" could be read as a workspace id.
+	if path == "build-sessions" || strings.HasPrefix(path, "build-sessions/") {
+		h.handleWorkspaceBuildSessions(w, r, strings.TrimPrefix(path, "build-sessions"))
+		return
+	}
+
 	// Import routes must be handled before generic workspace-id routing.
 	switch path {
 	case "import":

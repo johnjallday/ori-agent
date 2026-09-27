@@ -856,28 +856,7 @@ func (h *Handler) registeredWorkspaceSlugOwner(ctx context.Context, slug, exclud
 
 func (h *Handler) globalWorkspaceSlugConflict(ctx context.Context, requestedSlug, excludeID, parentDir string) *agentworkspace.FolderSlugConflictError {
 	base := agentworkspace.Slugify(requestedSlug)
-	occupied := make(map[string]string)
-	if rows, err := h.store.ListWorkspaces(ctx); err == nil {
-		for i := range rows {
-			ws := &rows[i]
-			if ws.ID == excludeID || ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
-				continue
-			}
-			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
-				occupied[strings.ToLower(ws.FolderSlug)] = ws.ID
-			}
-		}
-	}
-	if h.workspaceStore != nil {
-		for id, ws := range h.workspaceStore.CachedWorkspaces() {
-			if id == excludeID || ws.Status == agentworkspace.StatusTrashed || ws.Status == agentworkspace.StatusMissing {
-				continue
-			}
-			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
-				occupied[strings.ToLower(ws.FolderSlug)] = id
-			}
-		}
-	}
+	occupied := h.occupiedWorkspaceSlugs(ctx, excludeID)
 
 	suggested := ""
 	for suffix := 2; suffix < 1002; suffix++ {
@@ -901,6 +880,36 @@ func (h *Handler) globalWorkspaceSlugConflict(ctx context.Context, requestedSlug
 		SuggestedSlug: suggested,
 		ParentDir:     parentDir,
 	}
+}
+
+// occupiedWorkspaceSlugs maps every live workspace folder slug (lowercased) to
+// its workspace id, from both the registered rows and the folder store. The
+// create path's folder_slug conflict and the assistant's name pre-check read
+// the same set.
+func (h *Handler) occupiedWorkspaceSlugs(ctx context.Context, excludeID string) map[string]string {
+	occupied := make(map[string]string)
+	if rows, err := h.store.ListWorkspaces(ctx); err == nil {
+		for i := range rows {
+			ws := &rows[i]
+			if ws.ID == excludeID || ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
+				continue
+			}
+			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+				occupied[strings.ToLower(ws.FolderSlug)] = ws.ID
+			}
+		}
+	}
+	if h.workspaceStore != nil {
+		for id, ws := range h.workspaceStore.CachedWorkspaces() {
+			if id == excludeID || ws.Status == agentworkspace.StatusTrashed || ws.Status == agentworkspace.StatusMissing {
+				continue
+			}
+			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+				occupied[strings.ToLower(ws.FolderSlug)] = id
+			}
+		}
+	}
+	return occupied
 }
 
 func writeWorkspaceCreateSlugConflict(w http.ResponseWriter, workspaceName string, conflict *agentworkspace.FolderSlugConflictError) {

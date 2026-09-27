@@ -290,6 +290,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		resolver := personalassistant.NewKnowledgeResolver(b.personalAssistantStore, b.personalHQService, profileReader)
 		knowledge := personalassistant.NewKnowledgeStore(resolver, b.workspaceFileStore)
 		b.wireFolderDigest(knowledge)
+		b.wireWorkspaceBuild(knowledge)
 		var janitorEvidence *janitorKnowledgeReader
 		if b.fileJanitorService != nil {
 			janitorEvidence = &janitorKnowledgeReader{

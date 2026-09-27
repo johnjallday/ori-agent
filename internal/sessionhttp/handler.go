@@ -96,6 +96,10 @@ type Handler struct {
 	// designation. See PersonalHQDesignator.
 	personalHQDesignator PersonalHQDesignator
 
+	// workspaceBuild wires "Build with your assistant" sessions; nil leaves
+	// the Create Workspace wizard manual everywhere.
+	workspaceBuild *WorkspaceBuildDeps
+
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
 	// walks; lastRescanAt backs the cooldown for background-initiated rescans.
