@@ -140,11 +140,13 @@ export class ProjectLibraryPanel {
     });
     const result = await payload(response);
     if (!response.ok) {
-      throw new Error(
+      const error = new Error(
         typeof result.error === 'string'
           ? result.error
           : result.error?.message || result.message || `Library request failed (${response.status})`
       );
+      error.status = response.status;
+      throw error;
     }
     return result;
   }
@@ -872,7 +874,7 @@ export class ProjectLibraryPanel {
     }
   }
 
-  queueChoice(name, position, count, trigger) {
+  queueChoice(name, position, count, trigger, reason = '') {
     return new Promise(resolve => {
       const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
       const form = node('form');
@@ -892,16 +894,23 @@ export class ProjectLibraryPanel {
         choice = 'skip';
         dialog.close();
       });
-      form.addEventListener('submit', () => {
+      form.addEventListener('submit', event => {
+        if (reason) {
+          event.preventDefault(); // an unavailable item can be skipped, never reviewed
+          return;
+        }
         choice = 'review';
       });
-      actions.append(pause, skip, proceed);
+      actions.append(pause, skip);
+      if (!reason) actions.append(proceed);
       form.append(
         heading,
         node(
           'p',
           '',
-          'This song needs its own authoritative-file choice and final confirmation. Skipping creates nothing; pausing keeps the remaining IDs for this tab.'
+          reason
+            ? `${reason} Project setup is unavailable. Skip this song or pause the saved Home queue; neither action creates a project.`
+            : 'This song needs its own authoritative-file choice and final confirmation. Skipping creates nothing; pausing keeps the saved Home queue.'
         ),
         actions
       );
@@ -936,7 +945,35 @@ export class ProjectLibraryPanel {
         const id = this.queue.ids[this.queue.index];
         const path = `/projects/${encodeURIComponent(id)}`;
         try {
-          const detail = await this.request(path);
+          let detail;
+          try {
+            detail = await this.request(path);
+          } catch (error) {
+            if (error.status !== 404) throw error;
+            // An explicit Home forget may remove the current catalog record.
+            // It cannot silently abandon later queued songs: only a new Skip
+            // gesture may advance, and no review/creator path is offered.
+            const action = await this.queueChoice(
+              'No longer in this Home library',
+              this.queue.index + 1,
+              this.queue.ids.length,
+              trigger,
+              'This saved catalog record was removed.'
+            );
+            if (action === 'pause') {
+              this.status('Review queue paused; no other song was connected.');
+              return;
+            }
+            await this.progressQueue('skip', id);
+            if (this.queue?.index === this.queue.ids.length) {
+              this.queue = null;
+              this.saveQueue();
+              this.status('Review queue complete. Only separately confirmed songs were connected.');
+              return;
+            }
+            this.saveQueue();
+            continue;
+          }
           if (detail.row.connection === 'connected') {
             await this.progressQueue('connected', id);
           } else if (this.queue.pending) {
@@ -949,17 +986,15 @@ export class ProjectLibraryPanel {
             await this.refresh();
           } else {
             const eligibility = await this.request(`${path}/activation`);
-            if (!['review_available', 'file_choice_required'].includes(eligibility.state)) {
-              this.status(
-                `${detail.row.name}: ${eligibility.reason || 'Project setup needs a fresh review.'} Queue paused.`
-              );
-              return;
-            }
+            const canReview = ['review_available', 'file_choice_required'].includes(
+              eligibility.state
+            );
             const action = await this.queueChoice(
               detail.row.name,
               this.queue.index + 1,
               this.queue.ids.length,
-              trigger
+              trigger,
+              canReview ? '' : eligibility.reason || 'Project setup needs a fresh review.'
             );
             if (action === 'pause') {
               this.status('Review queue paused; no other song was connected.');
@@ -967,6 +1002,9 @@ export class ProjectLibraryPanel {
             }
             if (action === 'skip') {
               await this.progressQueue('skip', id);
+            } else if (!canReview) {
+              this.status(`${detail.row.name}: project setup is unavailable. Queue paused.`);
+              return;
             } else {
               const input = await this.activationInput(detail, eligibility, trigger);
               if (!input) {
@@ -1545,6 +1583,11 @@ export class ProjectLibraryPanel {
           [
             `${review.source_count} historical discovery source(s) will be removed from this Home record.`,
             `${review.session_count} saved studio session(s) and this project's Home notes will be erased.`,
+            ...(review.queued_at
+              ? [
+                  `This is song ${review.queued_at} in the saved review queue. The queue stays in order, but setup for this record becomes unavailable; you must separately skip it or discard the queue.`
+                ]
+              : []),
             'Project files, other catalog records, discovery root grants and any separate workspace are not deleted. This cannot be undone.'
           ],
           'Forget saved Home record',

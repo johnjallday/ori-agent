@@ -29,7 +29,8 @@ async function shot(page: Page, name: string) {
 
 test('the reviewed release resolves a real portfolio offer, then separate reviews grant and scan its folder', async ({
   page,
-  request
+  request,
+  browser
 }) => {
   const documents = join(sandbox, 'Documents');
   const songs: string[] = [];
@@ -508,7 +509,23 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       workspacesBefore.length + 1
     );
     await shot(page, '26-reviewed-queue-paused-after-skip');
-    await page.evaluate(() => sessionStorage.clear()); // close-tab equivalent: no local queue survives
+    // A distinct browser context has no sessionStorage or creator retry key.
+    // The exact Home still owns order and skip receipts, not the old tab.
+    const freshContext = await browser.newContext();
+    try {
+      const freshPage = await freshContext.newPage();
+      await freshPage.goto(page.url());
+      await expect(freshPage.locator('#projectLibraryQueueStatus')).toContainText('1 skipped');
+      await expect(freshPage.locator('#projectLibraryQueueResume')).toBeVisible();
+      const newHint = await freshPage.evaluate(
+        id => sessionStorage.getItem(`ori:library-queue:${id}`),
+        homeID
+      );
+      expect(JSON.parse(newHint || 'null')).toMatchObject({ index: 1, pending: null });
+    } finally {
+      await freshContext.close();
+    }
+    await page.evaluate(() => sessionStorage.clear()); // no local queue survives
     await page.reload();
     await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('1 skipped');
     await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
@@ -828,6 +845,25 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(shelf.locator('#projectLibraryResume')).toContainText(
       'Review my saved notes without the folder'
     );
+
+    // A revoked root blocks project review, not an explicit queue Skip. Save
+    // the later Album-4 item, then forget it separately below and require a
+    // second Skip rather than silently deleting the remaining queue order.
+    await shelf.getByRole('checkbox', { name: 'Select Album-1 for serial project review' }).check();
+    await shelf.getByRole('checkbox', { name: 'Select Album-4 for serial project review' }).check();
+    await shelf.locator('#projectLibraryQueueStart').click();
+    const revokedQueue = page.getByRole('dialog', { name: 'Song 1 of 2 · Album-1' });
+    await expect(revokedQueue).toContainText('Project setup is unavailable');
+    await expect(revokedQueue.getByRole('button', { name: 'Review this song' })).toHaveCount(0);
+    await shot(page, '34-revoked-queue-skip-only');
+    await revokedQueue.getByRole('button', { name: 'Skip this song' }).click();
+    const pausedForForget = page.getByRole('dialog', { name: 'Song 2 of 2 · Album-4' });
+    await expect(pausedForForget.getByRole('button', { name: 'Review this song' })).toHaveCount(0);
+    await pausedForForget.getByRole('button', { name: 'Pause queue' }).click();
+    expect((await json(await request.get(`${base}/queue`))).queue).toMatchObject({
+      index: 1,
+      skipped: [afterDisconnect.rows.find((r: { name: string }) => r.name === 'Album-1')?.id]
+    });
     await shelf
       .locator('#projectLibraryRows')
       .getByRole('button', { name: 'Review Album-4' })
@@ -838,6 +874,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       .click();
     const forget = page.getByRole('dialog', { name: 'Forget Album-4 from this Home?' });
     await expect(forget).toContainText('1 saved studio session(s)');
+    await expect(forget).toContainText('song 2 in the saved review queue');
     await expect(forget.getByRole('button', { name: 'Cancel' })).toBeFocused();
     await shot(page, '32-reviewed-historical-record-forget-impact');
     await forget.getByRole('button', { name: 'Cancel' }).press('Enter');
@@ -856,6 +893,23 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       .press('Enter');
     await expect(shelf.locator('#projectLibraryCount')).toHaveText('4 of 4 projects');
     expect((await json(await request.get(`${base}/projects`))).total).toBe(4);
+    expect((await json(await request.get(`${base}/queue`))).queue).toMatchObject({
+      index: 1,
+      ids: [
+        afterDisconnect.rows.find((r: { name: string }) => r.name === 'Album-1')?.id,
+        savedEntry.id
+      ]
+    });
+    await shelf.locator('#projectLibraryQueueResume').click();
+    const forgottenQueue = page.getByRole('dialog', {
+      name: 'Song 2 of 2 · No longer in this Home library'
+    });
+    await expect(forgottenQueue).toContainText('Project setup is unavailable');
+    await expect(forgottenQueue.getByRole('button', { name: 'Review this song' })).toHaveCount(0);
+    await shot(page, '35-forgotten-queue-skip-only');
+    await forgottenQueue.getByRole('button', { name: 'Skip this song' }).click();
+    await expect(shelf.locator('#projectLibraryQueueResume')).toBeHidden();
+    expect((await json(await request.get(`${base}/queue`))).queue).toBeUndefined();
     await expect(shelf.locator('#projectLibraryResume')).not.toContainText(
       'Review my saved notes without the folder'
     );

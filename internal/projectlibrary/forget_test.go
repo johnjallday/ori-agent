@@ -56,13 +56,20 @@ func TestForget_RevokedUnlinkedHomeRecordRequiresReviewAndPreservesExternalFiles
 	if err != nil {
 		t.Fatal(err)
 	}
+	queue, _, err := library.StartActivationQueue(scope, []string{"alternates", "single"}, "forget-queue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := library.ProgressActivationQueue(scope, queue.ID, "alternates", "skip", "forget-queue-skip-first", 1); err != nil {
+		t.Fatal(err)
+	}
 	doc, err = library.Read(scope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	library.WithProviderEvidence(func(_ Scope, _ *workspace.Workspace) bool { return false })
 	review, err := library.ReviewForget(scope, "single", doc.Revision)
-	if err != nil || review.ProjectName != "Single" || review.SourceCount != 1 || review.SessionCount != 1 {
+	if err != nil || review.ProjectName != "Single" || review.SourceCount != 1 || review.SessionCount != 1 || review.QueuedAt != 2 {
 		t.Fatalf("review omitted destructive impact: %+v %v", review, err)
 	}
 	current, err := library.Read(scope)
@@ -92,6 +99,14 @@ func TestForget_RevokedUnlinkedHomeRecordRequiresReviewAndPreservesExternalFiles
 	}
 	if _, err := NewStore(reopened).GetSession(scope, "single", goalReview.Session.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("forgotten session remained readable: %v", err)
+	}
+	queueStore := NewStore(reopened)
+	if view, err := queueStore.CurrentActivationQueue(scope); err != nil || view.Queue == nil || view.Queue.ID != queue.ID || view.Queue.Index != 1 {
+		t.Fatalf("forget silently removed the saved queue or changed skip order: %+v %v", view, err)
+	}
+	if completed, _, err := queueStore.ProgressActivationQueue(scope, queue.ID, "single", "skip", "forget-queue-skip-gone", 2); err != nil || completed.Status != "complete" ||
+		fileDigest(t, song) != before {
+		t.Fatalf("explicitly skipping forgotten item changed source or failed: %+v %v", completed, err)
 	}
 }
 

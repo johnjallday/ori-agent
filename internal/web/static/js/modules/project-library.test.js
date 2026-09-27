@@ -305,6 +305,78 @@ test('serial activation pauses after a skip without issuing even a review reques
   ]);
 });
 
+test('saved queue can explicitly skip revoked or forgotten songs without offering creator review', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { provider_read_only: false };
+  panel.queue = {
+    home_id: 'home',
+    id: 'saved-queue',
+    ids: ['revoked', 'forgotten'],
+    index: 0,
+    revision: 1,
+    status: 'active',
+    skipped: [],
+    created_at: Date.now(),
+    pending: null
+  };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.restoreQueue = async () => {};
+  panel.saveQueue = () => true;
+  panel.status = () => {};
+  const requests = [],
+    choices = [],
+    progress = [];
+  panel.request = async path => {
+    requests.push(path);
+    if (path === '/projects/revoked')
+      return { row: { name: 'Revoked song', connection: 'catalog_only' } };
+    if (path === '/projects/revoked/activation')
+      return { state: 'revoked_source', reason: 'Discovery folder disconnected' };
+    const error = new Error('No saved record');
+    error.status = 404;
+    throw error;
+  };
+  panel.queueChoice = async (_name, position, _count, _trigger, reason) => {
+    choices.push({ position, reason });
+    return choices.length === 1 ? 'pause' : 'skip';
+  };
+  panel.post = async (path, body) => {
+    assert.equal(path, '/queue/saved-queue/progress');
+    assert.equal(body.action, 'skip');
+    assert.equal(body.entry_id, panel.queue.ids[panel.queue.index]);
+    progress.push(body.entry_id);
+    return {
+      queue: {
+        ...panel.queue,
+        index: panel.queue.index + 1,
+        revision: panel.queue.revision + 1,
+        skipped: [...panel.queue.skipped, body.entry_id],
+        status: panel.queue.index === 1 ? 'complete' : 'active',
+        created_at: new Date().toISOString()
+      }
+    };
+  };
+  await panel.continueQueue();
+  assert.deepEqual(progress, []);
+  assert.equal(panel.queue.index, 0);
+  await panel.continueQueue();
+  assert.deepEqual(progress, ['revoked', 'forgotten']);
+  assert.equal(panel.queue, null);
+  assert.deepEqual(
+    choices.map(choice => choice.position),
+    [1, 1, 2]
+  );
+  assert.match(choices[0].reason, /Discovery folder disconnected/);
+  assert.match(choices[2].reason, /catalog record was removed/);
+  assert.deepEqual(requests, [
+    '/projects/revoked',
+    '/projects/revoked/activation',
+    '/projects/revoked',
+    '/projects/revoked/activation',
+    '/projects/forgotten'
+  ]);
+});
+
 test('serial activation persists a distinct confirmed key before each creator commit', async () => {
   const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
   panel.state = { provider_read_only: false };

@@ -19,6 +19,7 @@ type ForgetReview struct {
 	ProjectName  string    `json:"project_name"`
 	SourceCount  int       `json:"source_count"`
 	SessionCount int       `json:"session_count"`
+	QueuedAt     int       `json:"queued_at,omitempty"` // 1-based pending position, never queue authority
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
@@ -62,6 +63,14 @@ func forgetImpact(doc Document, state *workspace.AssistantProgramState, entryID 
 	for _, session := range doc.Sessions {
 		if session.EntryID == entry.ID {
 			impact.SessionCount++
+		}
+	}
+	if doc.Queue != nil && doc.Queue.Status == "active" {
+		for i := doc.Queue.Index; i < len(doc.Queue.IDs); i++ {
+			if doc.Queue.IDs[i] == entry.ID {
+				impact.QueuedAt = i + 1
+				break
+			}
 		}
 	}
 	// Hash the entire record and related sessions: both user notes and history
