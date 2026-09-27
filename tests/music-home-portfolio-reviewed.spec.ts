@@ -461,6 +461,15 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     ).toEqual(before);
     await page.reload();
     const afterRestartView = await json(await request.get(`${base}/projects`));
+    await shelf
+      .locator('#projectLibraryRows')
+      .getByRole('button', { name: 'Review Album-3' })
+      .click();
+    const linkedDetail = page.getByRole('dialog', { name: 'Album-3' });
+    await expect(
+      linkedDetail.getByRole('link', { name: 'Open connected workspace' })
+    ).toHaveAttribute('href', `/workspaces/${committed.workspace_id}`);
+    await linkedDetail.getByRole('button', { name: 'Close' }).click();
     expect(
       afterRestartView.rows.filter((row: { connection: string }) => row.connection === 'connected')
     ).toHaveLength(1);

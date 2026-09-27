@@ -1151,6 +1151,15 @@ export class ProjectLibraryPanel {
       close.addEventListener('click', () => dialog.close());
       actions.append(close);
       if (
+        activation.state === 'connected' &&
+        detail.row.connection === 'connected' &&
+        activation.workspace_id
+      ) {
+        const open = node('a', 'modern-btn modern-btn-secondary', 'Open connected workspace');
+        open.href = `/workspaces/${encodeURIComponent(activation.workspace_id)}`;
+        actions.append(open);
+      }
+      if (
         !this.readOnly &&
         ['review_available', 'file_choice_required'].includes(activation.state)
       ) {
