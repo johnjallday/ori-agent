@@ -292,8 +292,8 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await shelf.locator('#projectLibrarySearchForm').getByRole('button', { name: 'Find' }).click();
   await expect(shelf.locator('#projectLibraryCount')).toHaveText('1 of 1 projects');
   await expect(shelf.locator('#projectLibraryRows')).toContainText('Album-3');
-  await expect(shelf.locator('#projectLibraryRows').locator('td').nth(1)).toContainText('mixing');
-  await expect(shelf.locator('#projectLibraryRows').locator('td').nth(1)).toContainText('active');
+  await expect(shelf.locator('#projectLibraryRows').locator('td').nth(2)).toContainText('mixing');
+  await expect(shelf.locator('#projectLibraryRows').locator('td').nth(2)).toContainText('active');
   await shelf.locator('#projectLibraryStatusFilter').selectOption('unknown');
   await shelf.locator('#projectLibrarySearchForm').getByRole('button', { name: 'Find' }).click();
   await expect(shelf.locator('#projectLibraryCount')).toHaveText('0 of 0 projects');
@@ -464,6 +464,53 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(
       afterRestartView.rows.filter((row: { connection: string }) => row.connection === 'connected')
     ).toHaveLength(1);
+    expect((await json(await request.get(`${base}/projects/${albumID}/sessions`))).total).toBe(1);
+
+    // The browser queue is only a navigation aid. Skip and pause must not
+    // prepare placeholder workspaces; resuming asks for the *next* song's
+    // independent review and confirmation, even after reloading the tab.
+    await shelf.getByRole('checkbox', { name: 'Select Album-1 for serial project review' }).check();
+    await shelf.getByRole('checkbox', { name: 'Select Album-2 for serial project review' }).check();
+    await shelf.locator('#projectLibraryQueueStart').click();
+    const firstInQueue = page.getByRole('dialog', { name: 'Song 1 of 2 · Album-1' });
+    await expect(firstInQueue).toContainText('Skipping creates nothing');
+    await firstInQueue.getByRole('button', { name: 'Skip this song' }).click();
+    const secondInQueue = page.getByRole('dialog', { name: 'Song 2 of 2 · Album-2' });
+    await secondInQueue.getByRole('button', { name: 'Pause queue' }).click();
+    await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('1 of 2 handled');
+    expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+      workspacesBefore.length + 1
+    );
+    await shot(page, '26-reviewed-queue-paused-after-skip');
+    await page.reload();
+    await expect(shelf.locator('#projectLibraryQueueResume')).toBeVisible();
+    await shelf.locator('#projectLibraryQueueResume').click();
+    await page
+      .getByRole('dialog', { name: 'Song 2 of 2 · Album-2' })
+      .getByRole('button', { name: 'Review this song' })
+      .click();
+    await page
+      .getByRole('dialog', { name: 'Set up Album-2' })
+      .getByRole('button', { name: 'Review this project' })
+      .click();
+    const queuedReview = page.getByRole('dialog', { name: 'Connect this one project?' });
+    await expect(queuedReview).toContainText('Queue item 2 of 2');
+    await expect(queuedReview).toContainText('Starts File-only');
+    await shot(page, '27-reviewed-second-song-in-serial-queue');
+    await queuedReview.getByRole('button', { name: 'Connect project' }).click();
+    await expect(shelf.locator('#projectLibraryQueueStatus')).toContainText('Choose at least two');
+    const queueProjects = await json(await request.get(`${base}/projects`));
+    expect(
+      queueProjects.rows.filter((row: { connection: string }) => row.connection === 'connected')
+    ).toHaveLength(2);
+    expect(
+      queueProjects.rows.filter((row: { connection: string }) => row.connection === 'catalog_only')
+    ).toHaveLength(3);
+    const afterQueue = (await json(await request.get('/api/workspaces'))).folders;
+    expect(afterQueue).toHaveLength(workspacesBefore.length + 2);
+    await shot(page, '28-serial-queue-confirmed-second-song');
+    await page.reload();
+    await expect(shelf.locator('#projectLibraryQueueResume')).toBeHidden();
     expect((await json(await request.get(`${base}/projects/${albumID}/sessions`))).total).toBe(1);
   }
   expect(songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))).toEqual(

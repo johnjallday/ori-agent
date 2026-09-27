@@ -809,6 +809,19 @@
 .project-library-toolbar-row button {
   margin-left: auto;
 }
+.project-library-queue {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.9rem;
+  padding: 0.8rem 0;
+  border-top: 1px solid var(--assistant-line);
+  color: var(--assistant-muted);
+  font: 500 0.8rem/1.5 var(--font-mono, monospace);
+}
+.project-library-queue > span {
+  flex: 1 1 16rem;
+}
 .project-library-table-wrap {
   overflow-x: auto;
   max-width: 100%;
@@ -831,8 +844,13 @@
   border-bottom: 1px solid var(--assistant-line);
   vertical-align: middle;
 }
-.project-library-table td:first-child {
+.project-library-table td:nth-child(2) {
   font-weight: 650;
+}
+.project-library-table th:first-child,
+.project-library-table td:first-child {
+  width: 3rem;
+  text-align: center;
 }
 .project-library-table small {
   display: block;

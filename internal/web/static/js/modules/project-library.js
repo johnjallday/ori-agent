@@ -51,6 +51,50 @@ export function libraryQuery({
   return query.toString();
 }
 
+// Only queue navigation (opaque entry IDs and a user-confirmed retry) lives in
+// this browser tab. Every item still requires a fresh server review and a
+// distinct user confirmation; storage never grants folder/creator authority.
+const QUEUE_LIMIT = 100;
+export function readActivationQueue(homeID, storage = globalThis.sessionStorage, now = Date.now()) {
+  try {
+    const saved = JSON.parse(storage?.getItem(`ori:library-queue:${homeID}`) || 'null');
+    if (
+      !saved ||
+      saved.home_id !== homeID ||
+      !Array.isArray(saved.ids) ||
+      saved.ids.length < 2 ||
+      saved.ids.length > QUEUE_LIMIT ||
+      !Number.isInteger(saved.index) ||
+      saved.index < 0 ||
+      saved.index >= saved.ids.length ||
+      !Number.isFinite(saved.created_at) ||
+      now - saved.created_at > 24 * 60 * 60 * 1000 ||
+      saved.created_at > now ||
+      new Set(saved.ids).size !== saved.ids.length ||
+      saved.ids.some(id => typeof id !== 'string' || !id || id.length > 160)
+    )
+      return null;
+    const pending = saved.pending;
+    if (
+      pending &&
+      (pending.id !== saved.ids[saved.index] ||
+        ![pending.token, pending.key].every(
+          value => typeof value === 'string' && value.length > 0 && value.length <= 160
+        ))
+    )
+      return null;
+    return {
+      home_id: homeID,
+      ids: [...saved.ids],
+      index: saved.index,
+      created_at: saved.created_at,
+      pending: pending ? { id: pending.id, token: pending.token, key: pending.key } : null
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 // This panel belongs to the exact Home. No browser path, child workspace ID,
 // source-file content, or model call is accepted as an authority input.
 export class ProjectLibraryPanel {
@@ -64,6 +108,8 @@ export class ProjectLibraryPanel {
     this.searchGeneration = 0;
     this.searchInFlight = false;
     this.busy = false;
+    this.selectedProjects = new Set();
+    this.queue = readActivationQueue(this.workspaceId);
     const fromOffer =
       new URLSearchParams(globalThis.location?.search || '').get('folder_offer_id') || '';
     this.offerID = fromOffer.length <= 160 ? fromOffer : '';
@@ -115,6 +161,7 @@ export class ProjectLibraryPanel {
       this.status(error.message || 'The library could not be updated. Nothing was confirmed.');
     } finally {
       this.busy = false;
+      this.renderQueueControls();
       this.panel?.setAttribute('aria-busy', 'false');
       if (trigger?.isConnected) {
         trigger.disabled =
@@ -155,6 +202,15 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibraryMore')
       ?.addEventListener('click', () => void this.search(true));
+    document.getElementById('projectLibraryQueueStart')?.addEventListener('click', event => {
+      void this.startQueue(event.currentTarget);
+    });
+    document.getElementById('projectLibraryQueueResume')?.addEventListener('click', event => {
+      void this.continueQueue(event.currentTarget);
+    });
+    document.getElementById('projectLibraryQueueDiscard')?.addEventListener('click', event => {
+      void this.discardQueue(event.currentTarget);
+    });
     document
       .getElementById('projectLibraryMoreRoots')
       ?.addEventListener('click', event => void this.moreRoots(event.currentTarget));
@@ -181,6 +237,7 @@ export class ProjectLibraryPanel {
       }
       this.renderFormats();
       this.renderRoots();
+      this.renderQueueControls();
       await this.renderResume();
       await this.search(false);
       if (!this.readOnly && this.state.picker_available === false && !this.offerID)
@@ -386,6 +443,7 @@ export class ProjectLibraryPanel {
       this.rows.push(...(page.rows || []));
       this.cursor = page.next_cursor || '';
       this.renderRows();
+      this.renderQueueControls();
       moreButton.hidden = !this.cursor;
       document.getElementById('projectLibraryCount').textContent =
         `${this.rows.length} of ${page.total} projects`;
@@ -414,6 +472,24 @@ export class ProjectLibraryPanel {
     tbody.replaceChildren();
     for (const row of this.rows) {
       const tr = node('tr');
+      const pick = node('td');
+      if (!this.readOnly && row.connection === 'catalog_only') {
+        const checkbox = node('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = this.selectedProjects.has(row.id);
+        checkbox.setAttribute('aria-label', `Select ${row.name} for serial project review`);
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked && this.selectedProjects.size >= QUEUE_LIMIT) {
+            checkbox.checked = false;
+            this.status(`Review at most ${QUEUE_LIMIT} projects per queue.`);
+            return;
+          }
+          if (checkbox.checked) this.selectedProjects.add(row.id);
+          else this.selectedProjects.delete(row.id);
+          this.renderQueueControls();
+        });
+        pick.append(checkbox);
+      }
       const name = node('td');
       name.append(
         node('strong', '', row.name),
@@ -439,9 +515,236 @@ export class ProjectLibraryPanel {
       button.setAttribute('aria-label', `Review ${row.name}`);
       button.addEventListener('click', () => void this.details(row.id, button));
       action.append(button);
-      tr.append(name, stage, connection, observed, action);
+      tr.append(pick, name, stage, connection, observed, action);
       tbody.append(tr);
     }
+  }
+
+  renderQueueControls() {
+    const message = document.getElementById('projectLibraryQueueStatus');
+    const start = document.getElementById('projectLibraryQueueStart');
+    const resume = document.getElementById('projectLibraryQueueResume');
+    const discard = document.getElementById('projectLibraryQueueDiscard');
+    if (!message || !start || !resume || !discard) return;
+    const pending = this.queue;
+    message.textContent = pending
+      ? `${pending.index} of ${pending.ids.length} handled · each remaining song needs its own review. Already connected songs stay connected.`
+      : this.selectedProjects.size
+        ? `${this.selectedProjects.size} selected · no project will be created until each one is confirmed.`
+        : 'Choose at least two catalog-only projects to review one at a time.';
+    start.disabled = this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
+    resume.hidden = discard.hidden = !pending;
+    resume.disabled = this.busy || this.readOnly;
+    discard.disabled = this.busy;
+  }
+
+  saveQueue() {
+    const key = `ori:library-queue:${this.workspaceId}`;
+    try {
+      if (this.queue) globalThis.sessionStorage.setItem(key, JSON.stringify(this.queue));
+      else globalThis.sessionStorage.removeItem(key);
+    } catch (_) {
+      throw new Error(
+        'This browser cannot retain the review queue. Use one-project setup instead.'
+      );
+    }
+    this.renderQueueControls();
+  }
+
+  async startQueue(trigger) {
+    if (
+      this.queue ||
+      this.readOnly ||
+      this.selectedProjects.size < 2 ||
+      this.selectedProjects.size > QUEUE_LIMIT
+    )
+      return;
+    try {
+      this.queue = {
+        home_id: this.workspaceId,
+        ids: [...this.selectedProjects],
+        index: 0,
+        created_at: Date.now(),
+        pending: null
+      };
+      this.saveQueue();
+      this.selectedProjects.clear();
+      this.renderRows();
+      await this.continueQueue(trigger);
+    } catch (error) {
+      this.queue = null;
+      this.status(error.message);
+      this.renderQueueControls();
+    }
+  }
+
+  async discardQueue(trigger) {
+    if (
+      !this.queue ||
+      this.busy ||
+      !(await this.confirm(
+        'Discard this review queue?',
+        [
+          'This removes only the local queue. Any project you separately confirmed stays connected.'
+        ],
+        'Discard queue',
+        trigger
+      ))
+    )
+      return;
+    try {
+      this.queue = null;
+      this.saveQueue();
+      this.status('Local review queue discarded. Connected projects were not changed.');
+    } catch (error) {
+      this.status(error.message);
+    }
+  }
+
+  queueChoice(name, position, count, trigger) {
+    return new Promise(resolve => {
+      const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
+      const form = node('form');
+      form.method = 'dialog';
+      const heading = node('h2', '', `Song ${position} of ${count} · ${name}`);
+      heading.id = operationKey('queue-heading');
+      dialog.setAttribute('aria-labelledby', heading.id);
+      const actions = node('div', 'assistant-program-dialog-actions');
+      const pause = node('button', 'modern-btn modern-btn-secondary', 'Pause queue');
+      const skip = node('button', 'modern-btn modern-btn-secondary', 'Skip this song');
+      const proceed = node('button', 'modern-btn modern-btn-primary', 'Review this song');
+      pause.type = skip.type = 'button';
+      proceed.type = 'submit';
+      let choice = 'pause';
+      pause.addEventListener('click', () => dialog.close());
+      skip.addEventListener('click', () => {
+        choice = 'skip';
+        dialog.close();
+      });
+      form.addEventListener('submit', () => {
+        choice = 'review';
+      });
+      actions.append(pause, skip, proceed);
+      form.append(
+        heading,
+        node(
+          'p',
+          '',
+          'This song needs its own authoritative-file choice and final confirmation. Skipping creates nothing; pausing keeps the remaining IDs for this tab.'
+        ),
+        actions
+      );
+      dialog.append(form);
+      document.body.append(dialog);
+      dialog.addEventListener(
+        'close',
+        () => {
+          dialog.remove();
+          trigger?.focus?.();
+          resolve(choice);
+        },
+        { once: true }
+      );
+      dialog.showModal();
+      pause.focus();
+    });
+  }
+
+  async continueQueue(trigger) {
+    if (!this.queue || this.readOnly || this.busy) return;
+    await this.run(trigger, 'Checking the next saved project before review…', async () => {
+      while (this.queue && this.queue.index < this.queue.ids.length) {
+        const id = this.queue.ids[this.queue.index];
+        const path = `/projects/${encodeURIComponent(id)}`;
+        try {
+          const detail = await this.request(path);
+          if (detail.row.connection === 'connected') {
+            this.queue.pending = null;
+            this.queue.index++;
+          } else if (this.queue.pending) {
+            await this.post(`${path}/activation/commit`, {
+              review_token: this.queue.pending.token,
+              idempotency_key: this.queue.pending.key,
+              confirm: true
+            });
+            this.queue.pending = null;
+            this.queue.index++;
+            await this.refresh();
+          } else {
+            const eligibility = await this.request(`${path}/activation`);
+            if (!['review_available', 'file_choice_required'].includes(eligibility.state)) {
+              this.status(
+                `${detail.row.name}: ${eligibility.reason || 'Project setup needs a fresh review.'} Queue paused.`
+              );
+              return;
+            }
+            const action = await this.queueChoice(
+              detail.row.name,
+              this.queue.index + 1,
+              this.queue.ids.length,
+              trigger
+            );
+            if (action === 'pause') {
+              this.status('Review queue paused; no other song was connected.');
+              return;
+            }
+            if (action === 'skip') {
+              this.queue.index++;
+            } else {
+              const input = await this.activationInput(detail, eligibility, trigger);
+              if (!input) {
+                this.status('Review queue paused before project setup.');
+                return;
+              }
+              const review = await this.post(`${path}/activation/review`, input);
+              if (
+                !(await this.confirm(
+                  'Connect this one project?',
+                  [
+                    `Queue item ${this.queue.index + 1} of ${this.queue.ids.length}: ${review.workspace_name}`,
+                    `Authoritative file: ${review.project_file}`,
+                    `Installed project roles: ${(review.project_role_labels || []).join(', ')}`,
+                    review.statement,
+                    'Other queued songs remain untouched until separately confirmed.'
+                  ],
+                  'Connect project',
+                  trigger
+                ))
+              ) {
+                this.status('Review queue paused without connecting this song.');
+                return;
+              }
+              this.queue.pending = {
+                id,
+                token: review.token,
+                key: operationKey('queue-activation')
+              };
+              this.saveQueue(); // Persist the exact retry *before* crossing the creator boundary.
+              await this.post(`${path}/activation/commit`, {
+                review_token: review.token,
+                idempotency_key: this.queue.pending.key,
+                confirm: true
+              });
+              this.queue.pending = null;
+              this.queue.index++;
+              await this.refresh();
+            }
+          }
+          if (this.queue.index === this.queue.ids.length) {
+            this.queue = null;
+            this.saveQueue();
+            this.status('Review queue complete. Only separately confirmed songs were connected.');
+            return;
+          }
+          this.saveQueue();
+        } catch (error) {
+          this.status(
+            `${error.message || 'Project setup needs a fresh review.'} Queue paused; previously confirmed projects remain connected.`
+          );
+          return;
+        }
+      }
+    });
   }
 
   confirm(title, lines, action, trigger) {
@@ -958,68 +1261,77 @@ export class ProjectLibraryPanel {
   }
 
   activationForm(detail, eligibility, trigger) {
-    const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
-    const form = node('form');
-    const heading = node('h2', '', `Set up ${detail.row.name}`);
-    heading.id = operationKey('activate-heading');
-    dialog.setAttribute('aria-labelledby', heading.id);
-    const fields = node('div', 'project-library-fields');
-    const name = node('input', 'form-control');
-    name.required = true;
-    name.maxLength = 128;
-    name.value = detail.row.name.slice(0, 128);
-    const nameLabel = node('label', '', 'Project workspace name');
-    nameLabel.append(name);
-    fields.append(nameLabel);
-    const choice = node('select', 'form-select');
-    choice.required = true;
-    for (const filename of eligibility.project_files || []) {
-      const option = node('option', '', filename);
-      option.value = filename;
-      choice.append(option);
-    }
-    const fileLabel = node('label', '', 'Authoritative project file');
-    fileLabel.append(choice);
-    fields.append(fileLabel);
-    const actions = node('div', 'assistant-program-dialog-actions');
-    const cancel = node('button', 'modern-btn modern-btn-secondary', 'Cancel');
-    cancel.type = 'button';
-    cancel.addEventListener('click', () => dialog.close());
-    const review = node('button', 'modern-btn modern-btn-primary', 'Review this project');
-    review.type = 'submit';
-    actions.append(cancel, review);
-    form.append(
-      heading,
-      node(
-        'p',
-        '',
-        'One saved song only. The selected file remains in place. No agent, live connection or file-opening action is granted here.'
-      ),
-      fields,
-      actions
-    );
-    dialog.append(form);
-    document.body.append(dialog);
-    dialog.addEventListener(
-      'close',
-      () => {
-        dialog.remove();
-        if (!document.querySelector('dialog[open]')) trigger?.focus?.();
-      },
-      { once: true }
-    );
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      const input = {
-        workspace_name: name.value.trim(),
-        project_file: choice.value,
-        if_revision: detail.revision
-      };
-      dialog.close();
-      void this.saveActivation(detail, input, trigger);
+    void this.activationInput(detail, eligibility, trigger).then(input => {
+      if (input) void this.saveActivation(detail, input, trigger);
     });
-    dialog.showModal();
-    choice.focus();
+  }
+
+  activationInput(detail, eligibility, trigger) {
+    return new Promise(resolve => {
+      const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
+      const form = node('form');
+      const heading = node('h2', '', `Set up ${detail.row.name}`);
+      heading.id = operationKey('activate-heading');
+      dialog.setAttribute('aria-labelledby', heading.id);
+      const fields = node('div', 'project-library-fields');
+      const name = node('input', 'form-control');
+      name.required = true;
+      name.maxLength = 128;
+      name.value = detail.row.name.slice(0, 128);
+      const nameLabel = node('label', '', 'Project workspace name');
+      nameLabel.append(name);
+      fields.append(nameLabel);
+      const choice = node('select', 'form-select');
+      choice.required = true;
+      for (const filename of eligibility.project_files || []) {
+        const option = node('option', '', filename);
+        option.value = filename;
+        choice.append(option);
+      }
+      const fileLabel = node('label', '', 'Authoritative project file');
+      fileLabel.append(choice);
+      fields.append(fileLabel);
+      const actions = node('div', 'assistant-program-dialog-actions');
+      const cancel = node('button', 'modern-btn modern-btn-secondary', 'Cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => dialog.close());
+      const review = node('button', 'modern-btn modern-btn-primary', 'Review this project');
+      review.type = 'submit';
+      actions.append(cancel, review);
+      form.append(
+        heading,
+        node(
+          'p',
+          '',
+          'One saved song only. The selected file remains in place. No agent, live connection or file-opening action is granted here.'
+        ),
+        fields,
+        actions
+      );
+      dialog.append(form);
+      document.body.append(dialog);
+      let input = null;
+      dialog.addEventListener(
+        'close',
+        () => {
+          dialog.remove();
+          if (!document.querySelector('dialog[open]')) trigger?.focus?.();
+          resolve(input);
+        },
+        { once: true }
+      );
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        input = {
+          workspace_name: name.value.trim(),
+          project_file: choice.value,
+          if_revision: detail.revision
+        };
+        dialog.close();
+      });
+      dialog.showModal();
+      choice.focus();
+    });
   }
 
   async saveActivation(detail, input, trigger) {

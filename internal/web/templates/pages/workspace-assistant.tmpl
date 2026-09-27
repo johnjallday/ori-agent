@@ -142,8 +142,14 @@
                     <button class="modern-btn modern-btn-secondary" type="submit">Find</button>
                   </div>
                 </form>
+                <div class="project-library-queue" aria-label="Selected project setup queue">
+                  <span id="projectLibraryQueueStatus" role="status" aria-live="polite">Choose catalog-only projects to review one at a time.</span>
+                  <button id="projectLibraryQueueStart" class="modern-btn modern-btn-secondary" type="button" disabled>Review selected projects</button>
+                  <button id="projectLibraryQueueResume" class="modern-btn modern-btn-secondary" type="button" hidden>Resume review queue</button>
+                  <button id="projectLibraryQueueDiscard" class="modern-btn modern-btn-secondary" type="button" hidden>Discard queue</button>
+                </div>
                 <div class="project-library-table-wrap" tabindex="0" aria-label="Project library results" aria-describedby="projectLibraryStatus">
-                  <table class="project-library-table"><thead><tr><th scope="col">Project</th><th scope="col">Stage / status</th><th scope="col">Connection</th><th scope="col">Last observed source</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="projectLibraryRows"></tbody></table>
+                  <table class="project-library-table"><thead><tr><th scope="col">Pick</th><th scope="col">Project</th><th scope="col">Stage / status</th><th scope="col">Connection</th><th scope="col">Last observed source</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="projectLibraryRows"></tbody></table>
                 </div>
                 <div class="project-library-footer"><span id="projectLibraryCount"></span><button id="projectLibraryMore" class="modern-btn modern-btn-secondary" type="button" hidden>More projects</button></div>
               </div>

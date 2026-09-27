@@ -1,6 +1,132 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ProjectLibraryPanel, libraryQuery } from './project-library.js';
+import { ProjectLibraryPanel, libraryQuery, readActivationQueue } from './project-library.js';
+
+test('serial queue recovery retains only bounded Home-scoped navigation and exact pending retry', () => {
+  const now = Date.now();
+  const key = 'ori:library-queue:home';
+  const values = new Map();
+  const storage = { getItem: id => values.get(id) || null };
+  const valid = {
+    home_id: 'home',
+    ids: ['one', 'two'],
+    index: 1,
+    created_at: now,
+    pending: { id: 'two', token: 'review-token', key: 'confirmed-key' }
+  };
+  values.set(key, JSON.stringify(valid));
+  assert.deepEqual(readActivationQueue('home', storage, now), valid);
+  assert.equal(readActivationQueue('foreign', storage, now), null);
+  for (const changed of [
+    { ids: ['one', 'one'] },
+    { ids: Array.from({ length: 101 }, (_, i) => `id-${i}`) },
+    { index: 2 },
+    { pending: { id: 'one', token: 'review-token', key: 'confirmed-key' } },
+    { created_at: now - 25 * 60 * 60 * 1000 }
+  ]) {
+    values.set(key, JSON.stringify({ ...valid, ...changed }));
+    assert.equal(readActivationQueue('home', storage, now), null);
+  }
+});
+
+test('serial activation pauses after a skip without issuing even a review request', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { provider_read_only: false };
+  panel.queue = {
+    home_id: 'home',
+    ids: ['first', 'second'],
+    index: 0,
+    created_at: Date.now(),
+    pending: null
+  };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.saveQueue = () => {};
+  panel.status = () => {};
+  const requests = [];
+  panel.request = async path => {
+    requests.push(path);
+    return path.endsWith('/activation')
+      ? { state: 'review_available' }
+      : {
+          row: {
+            id: path.split('/').at(-1),
+            name: path.split('/').at(-1),
+            connection: 'catalog_only'
+          }
+        };
+  };
+  panel.post = async () => {
+    throw new Error('skip/pause must not create a review or project');
+  };
+  const actions = ['skip', 'pause'];
+  panel.queueChoice = async () => actions.shift();
+  await panel.continueQueue();
+  assert.equal(panel.queue.index, 1);
+  assert.equal(panel.queue.pending, null);
+  assert.deepEqual(requests, [
+    '/projects/first',
+    '/projects/first/activation',
+    '/projects/second',
+    '/projects/second/activation'
+  ]);
+});
+
+test('serial activation persists a distinct confirmed key before each creator commit', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { provider_read_only: false };
+  panel.queue = {
+    home_id: 'home',
+    ids: ['first', 'second'],
+    index: 0,
+    created_at: Date.now(),
+    pending: null
+  };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.status = () => {};
+  panel.refresh = async () => {};
+  panel.queueChoice = async () => 'review';
+  panel.activationInput = async detail => ({
+    workspace_name: detail.row.name,
+    project_file: 'Song.rpp',
+    if_revision: detail.revision
+  });
+  panel.confirm = async () => true;
+  const connected = new Set();
+  panel.request = async path =>
+    path.endsWith('/activation')
+      ? { state: 'review_available' }
+      : {
+          revision: 1,
+          row: {
+            id: path.split('/').at(-1),
+            name: path.split('/').at(-1),
+            connection: connected.has(path.split('/').at(-1)) ? 'connected' : 'catalog_only'
+          }
+        };
+  const storedBeforeCommit = [];
+  let lastSaved = null;
+  panel.saveQueue = () => {
+    lastSaved = panel.queue && structuredClone(panel.queue);
+  };
+  panel.post = async (path, body) => {
+    if (path.endsWith('/review'))
+      return {
+        token: path,
+        workspace_name: path.split('/')[2],
+        project_file: 'Song.rpp',
+        statement: 'File-only'
+      };
+    storedBeforeCommit.push(lastSaved?.pending);
+    assert.equal(lastSaved?.pending?.key, body.idempotency_key);
+    connected.add(path.split('/')[2]);
+    return { workspace_id: 'child' };
+  };
+  await panel.continueQueue();
+  assert.equal(panel.queue, null);
+  assert.equal(connected.size, 2);
+  assert.equal(storedBeforeCommit.length, 2);
+  assert.notEqual(storedBeforeCommit[0].key, storedBeforeCommit[1].key);
+});
 
 test('Home resume renders only bounded saved-user cards with trusted detail navigation', async () => {
   const previousDocument = globalThis.document;
