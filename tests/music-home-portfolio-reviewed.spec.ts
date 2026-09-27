@@ -688,7 +688,9 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await milestoneReview.getByRole('button', { name: 'Save notes' }).click();
     await expect
       .poll(async () => {
-        const state = await json(await request.get(`${base}/projects/${savedEntry.id}`));
+        const response = await request.get(`${base}/projects/${savedEntry.id}`);
+        if (!response.ok()) return false; // Retry a transient workspace-mirror read while the UI commits.
+        const state = await json(response);
         return state.fields.milestones[0].complete;
       })
       .toBe(true);
@@ -763,8 +765,9 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       .click();
     const forget = page.getByRole('dialog', { name: 'Forget Album-4 from this Home?' });
     await expect(forget).toContainText('1 saved studio session(s)');
+    await expect(forget.getByRole('button', { name: 'Cancel' })).toBeFocused();
     await shot(page, '32-reviewed-historical-record-forget-impact');
-    await forget.getByRole('button', { name: 'Cancel' }).click();
+    await forget.getByRole('button', { name: 'Cancel' }).press('Enter');
     expect((await json(await request.get(`${base}/projects`))).total).toBe(5);
     await shelf
       .locator('#projectLibraryRows')
@@ -777,7 +780,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await page
       .getByRole('dialog', { name: 'Forget Album-4 from this Home?' })
       .getByRole('button', { name: 'Forget saved Home record' })
-      .click();
+      .press('Enter');
     await expect(shelf.locator('#projectLibraryCount')).toHaveText('4 of 4 projects');
     expect((await json(await request.get(`${base}/projects`))).total).toBe(4);
     await expect(shelf.locator('#projectLibraryResume')).not.toContainText(

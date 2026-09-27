@@ -863,7 +863,7 @@ export class ProjectLibraryPanel {
     });
   }
 
-  confirm(title, lines, action, trigger) {
+  confirm(title, lines, action, trigger, { destructive = false } = {}) {
     return new Promise(resolve => {
       const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
       const form = node('form');
@@ -876,7 +876,11 @@ export class ProjectLibraryPanel {
       const actions = node('div', 'assistant-program-dialog-actions');
       const cancel = node('button', 'modern-btn modern-btn-secondary', 'Cancel');
       cancel.type = 'button';
-      const accept = node('button', 'modern-btn modern-btn-primary', action);
+      const accept = node(
+        'button',
+        `modern-btn ${destructive ? 'project-library-destructive' : 'modern-btn-primary'}`,
+        action
+      );
       accept.type = 'submit';
       actions.append(cancel, accept);
       form.append(heading, list, actions);
@@ -1364,7 +1368,8 @@ export class ProjectLibraryPanel {
             'Project files, other catalog records, discovery root grants and any separate workspace are not deleted. This cannot be undone.'
           ],
           'Forget saved Home record',
-          trigger
+          trigger,
+          { destructive: true }
         ))
       ) {
         await this.refresh();
