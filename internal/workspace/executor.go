@@ -298,6 +298,9 @@ func (te *TaskExecutor) reconcileTasksAtBoot() {
 			continue
 		}
 
+		if err := RequireWorkspaceExecution(context.Background(), te.workspaceStore, ws.ID, true); err != nil {
+			continue
+		}
 		current, err := te.workspaceStore.Get(ws.ID)
 		if err != nil || !hasBootReconcilableTasks(current, holdBacklog) {
 			continue
@@ -460,6 +463,9 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 	// be ordered before claiming.
 	var candidates []taskCandidate
 	for _, wsID := range workspaceIDs {
+		if err := RequireWorkspaceExecution(context.Background(), te.workspaceStore, wsID, true); err != nil {
+			continue
+		}
 		ws, err := te.workspaceStore.Get(wsID)
 		if err != nil || ws.Status != StatusActive {
 			continue
@@ -553,6 +559,13 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProvid
 		te.mu.Unlock()
 		cancel()
 		release()
+	}
+
+	// Recheck after candidate collection, before status, runtime inputs or a
+	// provider callback. A portable assigned flag never grants this authority.
+	if err := RequireWorkspaceExecution(ctx, te.workspaceStore, ws.ID, true); err != nil {
+		cleanup()
+		return
 	}
 
 	// Track running task

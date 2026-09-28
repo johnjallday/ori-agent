@@ -10,6 +10,10 @@ import {
 } from './onboarding-gate.js';
 
 const source = readFileSync(new URL('./sessions.js', import.meta.url), 'utf8');
+const continuitySource = readFileSync(
+  new URL('./workspace-continuity.js', import.meta.url),
+  'utf8'
+);
 
 function loadSessionManager(
   fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
@@ -17,6 +21,8 @@ function loadSessionManager(
   documentOverrides = {}
 ) {
   const window = { ...windowOverrides };
+  // Loaded before sessions.js, as in base.tmpl.
+  vm.runInNewContext(continuitySource, { window }, { filename: 'workspace-continuity.js' });
   const document = {
     addEventListener() {},
     getElementById() {},
@@ -37,6 +43,135 @@ function loadSessionManager(
   );
   return window.sessionManager;
 }
+
+test('a copied workspace this build cannot restore blocks the ordinary import and says why', async () => {
+  const elements = new Map([
+    ['folderImportPathInput', { value: '/synthetic/selected' }],
+    ['folderImportContinuityNotice', { hidden: true }],
+    ['folderImportContinuityTitle', { textContent: '' }],
+    ['folderImportContinuityText', { textContent: '' }],
+    ['createFolderBtn', { disabled: false }],
+    ['folderImportDuplicateWarning', { style: {} }],
+    ['folderImportDuplicateText', { textContent: '' }]
+  ]);
+  const manager = loadSessionManager(
+    async () => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        continuity: {
+          status: 'review_required',
+          import_supported: false,
+          contains_modern_child: true,
+          saved_work: {
+            tasks: 2,
+            completed_tasks: 1,
+            interrupted_tasks: 1,
+            collaboration_messages: 1,
+            attachments: 1,
+            owned_files: 1,
+            external_references: 1
+          }
+        },
+        duplicate: { found: true, workspace_id: 'different' }
+      })
+    }),
+    {},
+    { getElementById: id => elements.get(id) || null }
+  );
+  manager.importModeEnabled = true;
+  await manager.checkImportDuplicate('/synthetic/selected');
+  // The ordinary Import Folder button never runs over a copied checkpoint.
+  assert.equal(elements.get('createFolderBtn').disabled, true);
+  assert.equal(elements.get('folderImportContinuityNotice').hidden, false);
+  assert.match(
+    elements.get('folderImportContinuityTitle').textContent,
+    /Restoring saved work is not available here/
+  );
+  assert.match(elements.get('folderImportContinuityText').textContent, /Nothing was imported/);
+  assert.equal(elements.get('folderImportDuplicateWarning').style.display, 'none');
+  manager.clearImportContinuityReview();
+  assert.equal(elements.get('createFolderBtn').disabled, false);
+  assert.equal(elements.get('folderImportContinuityNotice').hidden, true);
+});
+
+test('an importable assistant copy offers Import and continue and renders untrusted names as text', () => {
+  const list = {
+    hidden: true,
+    children: [],
+    replaceChildren() {
+      this.children = [];
+    },
+    appendChild(child) {
+      this.children.push(child);
+    }
+  };
+  const elements = new Map([
+    ['folderImportContinuityNotice', { hidden: true, dataset: {} }],
+    ['folderImportContinuityTitle', { textContent: '' }],
+    ['folderImportContinuityText', { textContent: '' }],
+    ['folderImportContinuityList', list],
+    ['createFolderBtn', { disabled: false }]
+  ]);
+  const manager = loadSessionManager(
+    async () => {},
+    {},
+    {
+      getElementById: id => elements.get(id) || null,
+      createElement: () => ({ textContent: '', className: '' })
+    }
+  );
+  manager.importModeEnabled = true;
+  manager.showImportContinuityReview('/synthetic/hq', {
+    status: 'review_required',
+    import_supported: true,
+    actions: ['continue', 'workspace_only'],
+    recommended_action: 'continue',
+    history: { sessions: 3, messages: 12, follow_ups: 2, brief_revisions: 4, notes: 1, uploads: 1 },
+    saved_work: { tasks: 5 },
+    assistant_candidates: [{ display_name: '<img src=x onerror=alert(1)>' }]
+  });
+  const title = elements.get('folderImportContinuityTitle').textContent;
+  const notice = elements.get('folderImportContinuityText').textContent;
+  assert.match(title, /Continue with <img src=x onerror=alert\(1\)>\?/);
+  assert.match(notice, /3 conversations, 12 messages, 2 follow-ups, 4 Daily Briefs/);
+  // Each further fact is its own line, not part of one dense paragraph.
+  const facts = list.children.map(child => child.textContent);
+  assert.equal(list.hidden, false);
+  assert.ok(facts.some(line => /Background routines stay off/.test(line)));
+  assert.ok(facts.some(line => /private conversations/.test(line)));
+  assert.ok(!facts.some(line => line === ''), 'no empty section heading');
+  assert.equal(elements.get('folderImportContinuityNotice').dataset.mode, 'review');
+  assert.equal(elements.get('createFolderBtn').disabled, true);
+});
+
+test('stale async folder inspection cannot relabel a newly selected import path', async () => {
+  let finish;
+  const response = new Promise(resolve => {
+    finish = resolve;
+  });
+  const elements = new Map([
+    ['folderImportPathInput', { value: '/synthetic/old' }],
+    ['folderImportContinuityNotice', { hidden: true }],
+    ['folderImportContinuityText', { textContent: '' }],
+    ['createFolderBtn', { disabled: false }]
+  ]);
+  const manager = loadSessionManager(
+    () => response,
+    {},
+    { getElementById: id => elements.get(id) || null }
+  );
+  manager.importModeEnabled = true;
+  const pending = manager.checkImportDuplicate('/synthetic/old');
+  elements.get('folderImportPathInput').value = '/synthetic/new';
+  finish({
+    ok: true,
+    json: async () => ({ success: true, continuity: { status: 'review_required' } })
+  });
+  await pending;
+  assert.equal(elements.get('folderImportContinuityNotice').hidden, true);
+  assert.equal(elements.get('createFolderBtn').disabled, false);
+});
 
 test('agent setup retries workspace suspension after an opening transition', () => {
   const listeners = new Map();

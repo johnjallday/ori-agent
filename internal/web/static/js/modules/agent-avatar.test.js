@@ -464,6 +464,24 @@ test('a requested upload renders as a lazily decoded image', () => {
   assert.ok(!html.includes('agent-avatar__initials'));
 });
 
+test('workspace uploads use exact encoded scope rather than the global image URL', () => {
+  const profile = agent({
+    name: 'Guide & Co',
+    appearance: appearance('uploaded', { image: 'face.png' })
+  });
+  const html = AgentAvatar.markup(profile, { workspaceId: 'project-one', size: 72 });
+  assert.ok(
+    html.includes('src="/avatars/face.png?studio_id=project-one&amp;agent=Guide%20%26%20Co"')
+  );
+  assert.ok(!html.includes('src="/avatars/face.png"'));
+  const hostile = AgentAvatar.markup(
+    agent({ name: '"><script>', appearance: appearance('uploaded', { image: 'face.png' }) }),
+    { workspaceId: '"&agent=Other' }
+  );
+  assert.ok(hostile.includes('studio_id=%22%26agent%3DOther&amp;agent=%22%3E%3Cscript%3E'));
+  assert.ok(!hostile.includes('<script>'));
+});
+
 test('an uploaded image reserves its box and defers decoding', () => {
   const html = AgentAvatar.markup(
     agent({ appearance: appearance('uploaded', { image: 'atlas.png' }) }),

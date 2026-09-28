@@ -310,6 +310,14 @@ func (h *Handler) requestGeneration(w http.ResponseWriter, r *http.Request, trig
 		}
 	}
 
+	// An imported workspace keeps its saved briefs readable but generates no
+	// new first-open brief until the user enables its routines here.
+	if err := h.service.CheckAdmission(r.Context(), workspaceID, trigger); err != nil {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"status": "not_enabled", "code": "routines_off",
+			"error": "Background routines are off for this imported workspace. Its saved briefs are still available."})
+		return
+	}
+
 	// Register the detached child before returning 202. Acquiring inside the
 	// goroutine creates an unowned launch gap after the request permit ends.
 	childRelease, err := h.admissionGate.Enter()

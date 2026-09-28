@@ -1,0 +1,102 @@
+/* Workspace continuity: Import Folder review/result and the workspace's
+   "Ready to move" status. Colors come from the shared theme variables. */
+
+.workspace-continuity-review {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.06));
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.workspace-continuity-review[data-mode="blocked"] {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.workspace-continuity-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: var(--text-primary);
+}
+
+.workspace-continuity-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+
+.workspace-continuity-list {
+  font-size: 12px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-primary);
+}
+
+.workspace-continuity-list .workspace-continuity-section {
+  list-style: none;
+  margin: 8px 0 2px -18px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.workspace-continuity-progress {
+  font-size: 12px;
+  margin-top: 6px;
+  color: var(--text-secondary);
+}
+
+.workspace-continuity-dialog {
+  max-width: 520px;
+  width: calc(100% - 32px);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 18px 20px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary);
+}
+
+.workspace-continuity-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.workspace-continuity-status-label {
+  font-weight: 600;
+  font-size: 13px;
+  margin: 0 0 4px;
+}
+
+.workspace-continuity-confirm {
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  padding: 10px;
+  margin: 6px 0;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.workspace-continuity-chip[data-state="ready"] {
+  border-color: rgba(34, 197, 94, 0.5);
+}
+
+.workspace-continuity-chip[data-state="unavailable"] {
+  border-color: rgba(245, 158, 11, 0.6);
+}
+
+/* In the Command view header, beside the Personal HQ badge. */
+.ws-cmd-continuity-mount {
+  display: inline-flex;
+  align-self: center;
+}
+
+.ws-cmd-continuity-mount .workspace-continuity-chip {
+  margin-top: 4px;
+  padding: 3px 8px;
+  font-family: var(--ws-font-mono, inherit);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  border: 1px solid var(--ws-line-bright, var(--border-color));
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}

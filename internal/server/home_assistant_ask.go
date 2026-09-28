@@ -162,7 +162,7 @@ func (m homeActionMutator) CreateWorkspace(ctx context.Context, name, descriptio
 		InitialData: map[string]any{},
 	})
 	_ = ws.SetEntryAgentName(agentName)
-	if err := m.workspaces.Save(ws); err != nil {
+	if err := workspace.CreateNativeWorkspace(ctx, m.workspaces, ws); err != nil {
 		return "", "", err
 	}
 	return ws.ID, "/workspaces/" + url.PathEscape(ws.FolderSlug), nil

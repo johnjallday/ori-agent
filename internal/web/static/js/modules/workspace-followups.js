@@ -123,7 +123,10 @@ export function renderManagementPanel(doc, mount, view, act, focusID = '') {
   h.textContent = 'Follow-ups';
   const sub = doc.createElement('p');
   sub.className = 'workspace-followup-sub';
-  sub.textContent = 'Track what you owe and what you are waiting on. Managed here in Email Ops.';
+  // Any workspace can own follow-ups (Email Ops, or one imported with its
+  // history), so the copy names this workspace rather than one of them.
+  sub.textContent =
+    'Track what you owe and what you are waiting on. Managed here in this workspace.';
   head.append(h, sub);
   mount.appendChild(head);
 

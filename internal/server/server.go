@@ -17,6 +17,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/assistantsetup"
 	"github.com/johnjallday/ori-agent/internal/blueprintintake"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
+	"github.com/johnjallday/ori-agent/internal/continuityprep"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -60,8 +61,11 @@ type Server struct {
 	assistantSetupRetries    *assistantsetup.RetryRunner
 	workspaceSurfaceServices *workspacesurface.ServiceManager
 	workspaceFileStore       *workspace.FileStore
-	projectTemplateCatalog   projecttemplates.RuntimeCatalog
-	setupJourneyStore        *setupjourney.SQLiteStore
+	// continuityWorker keeps each local workspace folder's portable
+	// checkpoint current. Stopped before stores close.
+	continuityWorker       *continuityprep.Worker
+	projectTemplateCatalog projecttemplates.RuntimeCatalog
+	setupJourneyStore      *setupjourney.SQLiteStore
 	// reviewedReleases finds and verifies reviewed releases. Blueprint recovery
 	// uses it to install a reviewed Home provider; nil when plugins are off.
 	reviewedReleases *reviewedIntegrationUpdates
@@ -129,6 +133,9 @@ func (s *Server) Start() {
 	if s.Workflow != nil {
 		s.Workflow.Start()
 	}
+	if s.continuityWorker != nil {
+		s.continuityWorker.Start()
+	}
 }
 
 // cleanupStaleWorkspaceManagerAgents removes leftover workspace-manager agents
@@ -193,6 +200,10 @@ func (s *Server) shutdownBackground(ctx context.Context) error {
 			s.Handlers.Plugin.UpdateChecker().Stop()
 		}
 
+		// Checkpoint preparation reads every domain store; stop it before any.
+		if s.continuityWorker != nil {
+			s.continuityWorker.Stop()
+		}
 		// Automatic plans dispatch through the task machinery, so stop them first.
 		if s.workspacePlanAuto != nil {
 			s.workspacePlanAuto.Stop()
@@ -1046,7 +1057,36 @@ func (s *Server) serveAvatarFiles(w http.ResponseWriter, r *http.Request) {
 	if s.Storage != nil {
 		agents = s.Storage.AgentStore
 	}
-	content, ok := agenthttp.ReadAvatarFile(agents, filename)
+	var content []byte
+	var ok bool
+	query, queryErr := url.ParseQuery(r.URL.RawQuery)
+	if queryErr != nil {
+		orihttp.BadRequest(w, "Invalid image scope")
+		return
+	}
+	workspaceID, scoped := query["studio_id"]
+	profile, named := query["agent"]
+	if scoped || named {
+		// A scoped request never falls back to a same-named global image, even
+		// when the local definition, byte payload or private owner is unavailable.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			orihttp.MethodNotAllowed(w)
+			return
+		}
+		if len(workspaceID) != 1 || workspaceID[0] == "" || len(profile) != 1 || profile[0] == "" {
+			orihttp.BadRequest(w, "Workspace and profile are required")
+			return
+		}
+		if s.Storage != nil {
+			if reader, supported := s.Storage.WorkspaceStore.(workspace.WorkspaceAppearanceReader); supported {
+				var err error
+				content, err = reader.ReadWorkspaceAppearance(r.Context(), workspaceID[0], profile[0], filename)
+				ok = err == nil
+			}
+		}
+	} else {
+		content, ok = agenthttp.ReadAvatarFile(agents, filename)
+	}
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -1067,9 +1107,16 @@ func (s *Server) serveAvatarFiles(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
 
-	// Cache avatars for 1 hour
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	orihttp.WriteBytes(w, content)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if scoped || named {
+		// These are private workspace content, not global catalog assets.
+		w.Header().Set("Cache-Control", "private, no-store")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+	}
+	if r.Method != http.MethodHead {
+		orihttp.WriteBytes(w, content)
+	}
 }
 
 // HTTPServerWrapper wraps http.Server to provide graceful shutdown capabilities

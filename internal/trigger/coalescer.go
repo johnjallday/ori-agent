@@ -37,7 +37,7 @@ type Coalescer struct {
 	debounceFor func(Trigger) time.Duration
 
 	mu     sync.Mutex
-	states map[string]*coalesceState // trigger ID → state
+	states map[string]*coalesceState // runtimeTriggerKey → state
 	closed bool
 	// runs tracks live run goroutines so WaitIdle can drain them (tests,
 	// graceful teardown diagnostics). Close intentionally does not wait: a
@@ -84,16 +84,20 @@ func (c *Coalescer) Observe(t Trigger, ev Event) string {
 			release()
 		}
 	}()
+	if err := c.store.requireExecution(t.WorkspaceID, true); err != nil {
+		return ""
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return ""
 	}
 
-	st := c.states[t.ID]
+	key := runtimeTriggerKey(t.WorkspaceID, t.ID)
+	st := c.states[key]
 	if st == nil {
 		st = &coalesceState{}
-		c.states[t.ID] = st
+		c.states[key] = st
 	}
 	if st.ownershipRelease == nil {
 		st.ownershipRelease = release
@@ -121,12 +125,16 @@ func (c *Coalescer) Observe(t Trigger, ev Event) string {
 // either dispatches immediately or merges into the persisted pending fire if
 // a run is already in flight.
 func (c *Coalescer) closeWindow(wsID, triggerID string) {
+	if err := c.store.requireExecution(wsID, true); err != nil {
+		c.Drop(wsID, triggerID) // discard only volatile observations, not durable history
+		return
+	}
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
 		return
 	}
-	st := c.states[triggerID]
+	st := c.states[runtimeTriggerKey(wsID, triggerID)]
 	if st == nil || st.window == nil {
 		c.mu.Unlock()
 		return
@@ -163,13 +171,18 @@ func (c *Coalescer) closeWindow(wsID, triggerID string) {
 func (c *Coalescer) run(wsID, triggerID string, fire PendingFire) {
 	defer c.runs.Done()
 	for {
+		if err := c.store.requireExecution(wsID, true); err != nil {
+			c.Drop(wsID, triggerID)
+			c.clearInFlight(wsID, triggerID)
+			return
+		}
 		t, err := c.store.Get(wsID, triggerID)
 		if err != nil {
 			// Trigger deleted while a fire was queued — drop it.
 			logger.Debug("trigger coalescer: trigger gone, dropping fire", logger.Fields{
 				"trigger_id": triggerID, "workspace_id": wsID,
 			})
-			c.clearInFlight(triggerID)
+			c.clearInFlight(wsID, triggerID)
 			return
 		}
 		if t.Enabled {
@@ -180,6 +193,13 @@ func (c *Coalescer) run(wsID, triggerID string, fire PendingFire) {
 			})
 		}
 
+		// A completed native run does not authorize draining another queued
+		// event after revocation. Leave the durable pending slot untouched.
+		if err := c.store.requireExecution(wsID, true); err != nil {
+			c.Drop(wsID, triggerID)
+			c.clearInFlight(wsID, triggerID)
+			return
+		}
 		c.mu.Lock()
 		next, err := c.takePending(wsID, triggerID)
 		if err != nil && err != ErrNotFound {
@@ -190,7 +210,7 @@ func (c *Coalescer) run(wsID, triggerID string, fire PendingFire) {
 			return
 		}
 		if next == nil {
-			release := c.clearInFlightLocked(triggerID)
+			release := c.clearInFlightLocked(wsID, triggerID)
 			c.mu.Unlock()
 			if release != nil {
 				release()
@@ -223,17 +243,17 @@ func (c *Coalescer) takePending(wsID, triggerID string) (*PendingFire, error) {
 
 // clearInFlight releases the in-flight marker so a future event can start a
 // new run for this trigger.
-func (c *Coalescer) clearInFlight(triggerID string) {
+func (c *Coalescer) clearInFlight(wsID, triggerID string) {
 	c.mu.Lock()
-	release := c.clearInFlightLocked(triggerID)
+	release := c.clearInFlightLocked(wsID, triggerID)
 	c.mu.Unlock()
 	if release != nil {
 		release()
 	}
 }
 
-func (c *Coalescer) clearInFlightLocked(triggerID string) func() {
-	st := c.states[triggerID]
+func (c *Coalescer) clearInFlightLocked(wsID, triggerID string) func() {
+	st := c.states[runtimeTriggerKey(wsID, triggerID)]
 	if st == nil {
 		return nil
 	}
@@ -254,6 +274,9 @@ func (c *Coalescer) RestorePending() {
 		if t.PendingFire == nil {
 			continue
 		}
+		if err := c.store.requireExecution(t.WorkspaceID, true); err != nil {
+			continue // no pending claim/clear on an inactive or detached owner
+		}
 		release, err := c.admissionGate.Enter()
 		if err != nil {
 			continue
@@ -264,10 +287,11 @@ func (c *Coalescer) RestorePending() {
 			release()
 			return
 		}
-		st := c.states[t.ID]
+		key := runtimeTriggerKey(t.WorkspaceID, t.ID)
+		st := c.states[key]
 		if st == nil {
 			st = &coalesceState{}
-			c.states[t.ID] = st
+			c.states[key] = st
 		}
 		if st.inFlight || st.ownershipRelease != nil {
 			c.mu.Unlock()
@@ -282,7 +306,7 @@ func (c *Coalescer) RestorePending() {
 			continue // retain ownership: durable pending state is uncertain
 		}
 		if fire == nil {
-			release = c.clearInFlightLocked(t.ID)
+			release = c.clearInFlightLocked(t.WorkspaceID, t.ID)
 			c.mu.Unlock()
 			if release != nil {
 				release()
@@ -301,9 +325,9 @@ func (c *Coalescer) RestorePending() {
 // Drop discards any open window for a trigger (used when a trigger is
 // disabled or deleted). In-flight runs complete; the persisted pending fire
 // is the caller's responsibility (deletion removes it with the trigger).
-func (c *Coalescer) Drop(triggerID string) {
+func (c *Coalescer) Drop(wsID, triggerID string) {
 	c.mu.Lock()
-	st := c.states[triggerID]
+	st := c.states[runtimeTriggerKey(wsID, triggerID)]
 	if st == nil {
 		c.mu.Unlock()
 		return

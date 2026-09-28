@@ -14,6 +14,13 @@ import (
 // identifier supplied by a browser. Return a copy so callers cannot broaden it.
 func ResetRecordTables() []string {
 	return []string{
+		// Reset deletes this list in reverse. Clear dirty tracking LAST because
+		// deleting canonical domains fires their transactional dirty triggers.
+		// Portable files survive, but local receipts/admission never do.
+		"continuity_dirty", "continuity_operations", "continuity_attachments",
+		"continuity_components", "continuity_records", "continuity_installs", "continuity_retained_records", "continuity_file_mutations", "followup_continuity_source_refs",
+		// Encrypted local credentials/grants are not part of retained folders.
+		"workspace_local_config",
 		"users", "user_preference_revisions", "workspaces", "sessions", "messages", "session_tags", "tool_calls",
 		"review_issues", "review_runs", "session_review_status", "session_tasks",
 		"scheduled_task_reminders", "smart_input_overrides", "workspace_notes",

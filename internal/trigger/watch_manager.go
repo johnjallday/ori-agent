@@ -19,7 +19,7 @@ import (
 const watchValidateInterval = time.Minute
 
 // WatchManager owns the file-watch side of triggers: it holds a dedicated
-// filewatcher.Watcher instance (watch keys are trigger IDs, completely
+// filewatcher.Watcher instance (watch keys are workspace/trigger pairs, completely
 // separate from the session watcher used by DirectorySyncManager), filters
 // raw events per trigger, and feeds matches into the coalescer.
 type WatchManager struct {
@@ -89,11 +89,14 @@ func (m *WatchManager) Add(t Trigger) error {
 	if t.Type != TypeFileWatch || t.FileWatch == nil {
 		return nil
 	}
+	if err := m.store.requireExecution(t.WorkspaceID, true); err != nil {
+		return err // no path probe, disabled flag, history, or failure finding
+	}
 	if err := t.CheckWatchPath(); err != nil {
 		m.markWatchBroken(t, err)
 		return err
 	}
-	if err := m.watcher.Watch(t.ID, t.FileWatch.Path); err != nil {
+	if err := m.watcher.Watch(runtimeTriggerKey(t.WorkspaceID, t.ID), t.FileWatch.Path); err != nil {
 		m.markWatchBroken(t, err)
 		return err
 	}
@@ -102,18 +105,18 @@ func (m *WatchManager) Add(t Trigger) error {
 
 // Remove stops watching for one trigger (disable or delete) and drops any
 // open coalescing window.
-func (m *WatchManager) Remove(triggerID string) {
+func (m *WatchManager) Remove(workspaceID, triggerID string) {
 	release, err := m.admissionGate.Enter()
 	if err != nil {
 		return
 	}
 	defer release()
-	if err := m.watcher.Unwatch(triggerID); err != nil {
+	if err := m.watcher.Unwatch(runtimeTriggerKey(workspaceID, triggerID)); err != nil {
 		logger.Debug("trigger watch manager: unwatch", logger.Fields{
 			"trigger_id": triggerID, "error": err,
 		})
 	}
-	m.coalescer.Drop(triggerID)
+	m.coalescer.Drop(workspaceID, triggerID)
 }
 
 // Close tears down all watches and stops the loops.
@@ -152,6 +155,10 @@ func (m *WatchManager) handleEvent(ev filewatcher.WatchEvent) {
 	dir := filepath.Dir(ev.FilePath)
 	for _, t := range m.store.ListAll() {
 		if t.Type != TypeFileWatch || !t.Enabled || t.FileWatch == nil {
+			continue
+		}
+		if err := m.store.requireExecution(t.WorkspaceID, true); err != nil {
+			m.Remove(t.WorkspaceID, t.ID)
 			continue
 		}
 		// Watches are non-recursive: the event's parent dir must be the
@@ -199,11 +206,15 @@ func (m *WatchManager) validateWatches() {
 		if t.Type != TypeFileWatch || !t.Enabled {
 			continue
 		}
+		if err := m.store.requireExecution(t.WorkspaceID, true); err != nil {
+			m.Remove(t.WorkspaceID, t.ID)
+			continue
+		}
 		if err := t.CheckWatchPath(); err != nil {
 			logger.Warn("trigger watch manager: watched path lost", logger.Fields{
 				"trigger_id": t.ID, "workspace_id": t.WorkspaceID, "path": t.FileWatch.Path, "error": err,
 			})
-			m.Remove(t.ID)
+			m.Remove(t.WorkspaceID, t.ID)
 			m.markWatchBroken(t, err)
 		}
 	}
@@ -215,6 +226,9 @@ func (m *WatchManager) validateWatches() {
 // sweep from re-reporting the same loss every minute; re-enabling re-runs
 // the path check.
 func (m *WatchManager) markWatchBroken(t Trigger, cause error) {
+	if err := m.store.requireExecution(t.WorkspaceID, true); err != nil {
+		return
+	}
 	msg := fmt.Sprintf("file watch stopped: %v", cause)
 	_, err := m.store.Update(t.WorkspaceID, t.ID, func(tr *Trigger) error {
 		tr.Enabled = false

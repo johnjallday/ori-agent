@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 )
 
 // Store manages workspace persistence and retrieval
@@ -76,13 +78,15 @@ type SlugResolver interface {
 // FileStore implements Store using folder-based persistence.
 // Each workspace is a folder: workspaces/{slug}/workspace.json
 type FileStore struct {
-	basePath string
-	cache    map[string]*Workspace
-	idToPath map[string]string // maps workspace ID → relative folder path from basePath
-	slugToID map[string]string // maps the current globally unique folder slug → workspace ID
-	index    *Index            // optional global index (nil if not configured)
-	mu       sync.RWMutex
-	locks    LockTable // serializes Update calls per workspace
+	basePath    string
+	cache       map[string]*Workspace
+	idToPath    map[string]string // maps workspace ID → relative folder path from basePath
+	slugToID    map[string]string // maps the current globally unique folder slug → workspace ID
+	index       *Index            // optional global index (nil if not configured)
+	mu          sync.RWMutex
+	locks       LockTable         // serializes Update calls per workspace
+	localConfig *LocalConfigStore // immutable after construction; never inferred from folder markers
+	continuity  ContinuityGuard   // immutable after construction; nil keeps legacy discovery
 }
 
 // Lock acquires a per-workspace write lock used to serialize Update calls.
@@ -93,6 +97,11 @@ func (s *FileStore) Lock(wsID string) func() { return s.locks.Lock(wsID) }
 // Update applies fn to the workspace and persists the result, atomic against
 // other Update calls on the same workspace. See Store.Update.
 func (s *FileStore) Update(wsID string, fn func(*Workspace) error) error {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	return CanonicalUpdate(s, wsID, fn)
 }
 
@@ -131,16 +140,31 @@ func (e *FolderSlugConflictError) Unwrap() error {
 
 // NewFileStore creates a new file-based workspace store
 func NewFileStore(basePath string) (*FileStore, error) {
+	return newFileStore(basePath, nil, nil)
+}
+
+// NewFileStoreWithContinuity is the ordinary store plus the portable-continuity
+// discovery guard and local execution admission. A folder that carries a
+// continuity checkpoint is loaded only after the guard says it belongs to this
+// installation, so copying one into the Workspace Directory never registers,
+// migrates or schedules it before a reviewed import.
+func NewFileStoreWithContinuity(basePath string, guard ContinuityGuard) (*FileStore, error) {
+	return newFileStore(basePath, nil, guard)
+}
+
+func newFileStore(basePath string, local *LocalConfigStore, guard ContinuityGuard) (*FileStore, error) {
 	// Ensure base directory exists
 	if err := os.MkdirAll(basePath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create workspace directory: %w", err)
 	}
 
 	store := &FileStore{
-		basePath: basePath,
-		cache:    make(map[string]*Workspace),
-		idToPath: make(map[string]string),
-		slugToID: make(map[string]string),
+		basePath:    basePath,
+		localConfig: local,
+		continuity:  guard,
+		cache:       make(map[string]*Workspace),
+		idToPath:    make(map[string]string),
+		slugToID:    make(map[string]string),
 	}
 
 	// Try to open the global index
@@ -180,6 +204,11 @@ func NewFileStore(basePath string) (*FileStore, error) {
 // Save persists a workspace to disk inside its folder.
 // If the workspace has no FolderSlug, one is derived from the Name.
 func (s *FileStore) Save(ws *Workspace) error {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -274,23 +303,19 @@ func (s *FileStore) Save(ws *Workspace) error {
 		}
 	}
 
-	// Create workspace folder with files and notes subdirectories
-	if err := os.MkdirAll(filepath.Join(folderPath, FilesDir), 0755); err != nil {
+	// The name was canonicalized by Slugify above; parents and any explicit
+	// absolute destination come only from this store's local path registry.
+	if err := os.MkdirAll(filepath.Join(folderPath, FilesDir), 0750); err != nil { // #nosec G703 -- canonical slug and locally registered parent/destination, not a portable path
 		return fmt.Errorf("failed to create workspace folder: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(folderPath, NotesDir), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(folderPath, NotesDir), 0750); err != nil { // #nosec G703 -- same canonical local destination as the files directory
 		return fmt.Errorf("failed to create workspace notes folder: %w", err)
 	}
 
-	// Serialize workspace
-	data, err := ws.ToJSON()
-	if err != nil {
-		return fmt.Errorf("failed to serialize workspace: %w", err)
-	}
-
-	// Write workspace.json inside the folder
+	// Persist through the canonical private/portable boundary.
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	if err := atomicWriteFile(configPath, data); err != nil {
+	data, err := s.writeWorkspaceConfigLocked(ws, configPath)
+	if err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -338,6 +363,11 @@ func (s *FileStore) Save(ws *Workspace) error {
 // SaveAt creates a workspace folder at a custom location (outside the default root).
 // The workspace is registered in the index with its absolute path.
 func (s *FileStore) SaveAt(ws *Workspace, location string) error {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -370,20 +400,17 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 	}
 
 	// Create workspace folder with files and notes subdirectories
-	if err := os.MkdirAll(filepath.Join(folderPath, FilesDir), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(folderPath, FilesDir), 0750); err != nil {
 		return fmt.Errorf("failed to create workspace folder: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(folderPath, NotesDir), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(folderPath, NotesDir), 0750); err != nil {
 		return fmt.Errorf("failed to create workspace notes folder: %w", err)
 	}
 
-	// Serialize and write workspace.json
-	data, err := ws.ToJSON()
-	if err != nil {
-		return fmt.Errorf("failed to serialize workspace: %w", err)
-	}
+	// Serialize and write workspace.json through its local configuration owner.
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	if err := atomicWriteFile(configPath, data); err != nil {
+	data, err := s.writeWorkspaceConfigLocked(ws, configPath)
+	if err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -422,6 +449,11 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 // If the folder already contains a workspace.json for the same workspace, the
 // disk copy is used as a source for fields that are not mirrored into SQLite.
 func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	if ws == nil {
 		return fmt.Errorf("workspace is required")
 	}
@@ -460,7 +492,7 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 		}
 	}
 	if readErr == nil {
-		diskWorkspace, parseErr := FromJSON(data)
+		diskWorkspace, parseErr := s.workspaceForRead(normalizedPath, data, merged.ID)
 		if parseErr != nil {
 			return fmt.Errorf("failed to read existing workspace file: %w", parseErr)
 		}
@@ -490,11 +522,8 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 		return fmt.Errorf("failed to create workspace notes folder: %w", err)
 	}
 
-	data, err = merged.ToJSON()
+	data, err = s.writeWorkspaceConfigLocked(merged, configPath)
 	if err != nil {
-		return fmt.Errorf("failed to serialize workspace: %w", err)
-	}
-	if err := atomicWriteFile(configPath, data); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
@@ -660,7 +689,15 @@ func cloneWorkspaceForRebind(ws *Workspace) (*Workspace, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone workspace for rebind: %w", err)
 	}
-	clone, err := FromJSON(data)
+	var clone *Workspace
+	if ws.WorkspaceLocalConfigID != "" {
+		clone, err = decodeLocalWorkspace(data, ws.ID)
+		if err == nil {
+			initializeDecodedWorkspace(clone)
+		}
+	} else {
+		clone, err = FromJSON(data)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode cloned workspace for rebind: %w", err)
 	}
@@ -751,9 +788,15 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 	}
 
 	configPath := filepath.Join(folder, WorkspaceConfigFile)
-	data, err := os.ReadFile(configPath)
+	var data []byte
+	var err error
+	if s.localConfig != nil && s.localConfig.native(context.Background(), id) != nil {
+		data, err = workspacecontinuity.ReadCanonicalFile(context.Background(), folder, WorkspaceConfigFile, maxNativeWorkspaceBytes)
+	} else {
+		data, err = readNativeWorkspaceFile(folder)
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) || errors.Is(err, workspacecontinuity.ErrIncomplete) {
 			// Folder was removed externally — clean up mappings.
 			s.mu.Lock()
 			s.removeSlugMappingLocked(id)
@@ -765,7 +808,7 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 		return nil, fmt.Errorf("failed to read workspace file: %w", err)
 	}
 
-	ws, err := FromJSON(data)
+	ws, err := s.workspaceForRead(folder, data, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deserialize workspace: %w", err)
 	}
@@ -987,6 +1030,11 @@ func reviewedRollbackHasReciprocalMembership(workspaces map[string]*Workspace, c
 }
 
 func (s *FileStore) DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus string) error {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	relPath, ok := s.idToPath[id]
@@ -1067,6 +1115,11 @@ func (s *FileStore) DeleteReviewedGroupRequirement(id, operationDigest string) e
 }
 
 func (s *FileStore) deleteWorkspaceFolder(id, reviewedOperationDigest string) error {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1128,6 +1181,11 @@ func (s *FileStore) TrashReviewedGroupRequirement(id, operationDigest string) (o
 }
 
 func (s *FileStore) trashWorkspaceFolder(id, reviewedOperationDigest string) (originalPath string, trashedPath string, err error) {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return "", "", workErr
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1168,6 +1226,11 @@ func (s *FileStore) trashWorkspaceFolder(id, reviewedOperationDigest string) (or
 // trashedPath may be empty for folders that were only unregistered (outside the
 // managed root); in that case the original folder is simply re-imported.
 func (s *FileStore) RestoreFromTrash(originalPath, trashedPath string) (*Workspace, error) {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return nil, workErr
+	}
+	defer release()
 	if originalPath == "" {
 		return nil, fmt.Errorf("original path is required to restore a workspace")
 	}
@@ -1295,6 +1358,11 @@ func (s *FileStore) Rename(id, newName string) error {
 // workspace (the renamed node and, when its folder physically moved, every
 // nested member) so callers can fix up path-keyed references.
 func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) ([]MovedWorkspace, error) {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return nil, workErr
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1316,13 +1384,23 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) ([]MovedWo
 		return nil, conflict
 	}
 
-	// If the slug hasn't changed, just update the display name
+	// Rename must load the full native record, not persist the lean metadata
+	// cache (which can omit history and contains only projected private fields).
+	data, err := workspacecontinuity.ReadCanonicalFile(context.Background(), oldFolderPath, WorkspaceConfigFile, maxNativeWorkspaceBytes)
+	if err != nil {
+		return nil, err
+	}
+	ws, err := s.workspaceForRead(oldFolderPath, data, id)
+	if err != nil {
+		return nil, err
+	}
+	// If the slug hasn't changed, just update the display name.
 	if newSlug == filepath.Base(oldFolderPath) {
-		if ws, ok := s.cache[id]; ok {
-			ws.Name = newName
-			ws.FolderSlug = newSlug
-			return nil, s.persistWorkspaceLocked(ws)
+		ws.Name, ws.FolderSlug = newName, newSlug
+		if err := s.persistWorkspaceLocked(ws); err != nil {
+			return nil, err
 		}
+		s.cacheMeta(ws)
 		return nil, nil
 	}
 
@@ -1357,20 +1435,7 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) ([]MovedWo
 		}
 	}
 
-	// Update the workspace metadata
-	ws, ok := s.cache[id]
-	if !ok {
-		configPath := filepath.Join(newFolderPath, WorkspaceConfigFile)
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read workspace after rename: %w", err)
-		}
-		ws, err = FromJSON(data)
-		if err != nil {
-			return nil, fmt.Errorf("failed to deserialize workspace after rename: %w", err)
-		}
-	}
-
+	// Update the complete record loaded before moving the folder.
 	ws.Name = newName
 	ws.FolderSlug = newSlug
 
@@ -1429,6 +1494,16 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) ([]MovedWo
 // the workspaces root, it is registered in-place. Otherwise, it is copied into
 // the workspaces root. Returns a warning message if project_path cannot be resolved.
 func (s *FileStore) Import(folderPath string) (*Workspace, string, error) {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return nil, "", workErr
+	}
+	defer release()
+	if s.hasLocalConfig() {
+		// This legacy copy/register path carries no reviewed receipt or local
+		// attachment. The private composition must use the reviewed coordinator.
+		return nil, "", ErrReviewedWorkspaceImportRequired
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1745,18 +1820,46 @@ func (s *FileStore) Close() error {
 // GetWorkspaceAgent returns a workspace-local agent snapshot, or (nil, false, nil)
 // when the workspace has no snapshot for the named agent.
 func (s *FileStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
-	folder, err := s.GetFolderPath(workspaceID)
-	if err != nil {
-		return nil, false, err
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	path, ok := s.idToPath[workspaceID]
+	if !ok {
+		return nil, false, fmt.Errorf("workspace %s not found", workspaceID)
+	}
+	folder := s.resolveFolder(path)
+	if s.localConfig != nil {
+		ag, err := s.localConfig.ReadAgentFile(context.Background(), folder, workspaceID, agentName)
+		if errors.Is(err, workspacecontinuity.ErrIncomplete) {
+			return nil, false, nil
+		}
+		if err == nil && s.localConfig.native(context.Background(), workspaceID) == nil {
+			migrateSnapshotAppearance(folder, agentName, ag)
+		}
+		return ag, err == nil, err
 	}
 	return readWorkspaceAgent(folder, agentName)
 }
 
 // SaveWorkspaceAgent writes an agent snapshot inside the workspace folder.
 func (s *FileStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
-	folder, err := s.GetFolderPath(workspaceID)
-	if err != nil {
-		return err
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	path, ok := s.idToPath[workspaceID]
+	if !ok {
+		return fmt.Errorf("workspace %s not found", workspaceID)
+	}
+	folder := s.resolveFolder(path)
+	if s.localConfig != nil {
+		if ag == nil {
+			return ErrLocalConfigInvalid
+		}
+		ag.EnsureAppearance()
+		return s.localConfig.WriteAgentFile(context.Background(), folder, workspaceID, agentName, ag)
 	}
 	return writeWorkspaceAgent(folder, agentName, ag)
 }
@@ -1796,15 +1899,9 @@ func (s *FileStore) persistWorkspaceLocked(ws *Workspace) error {
 	if !ok {
 		relPath = ws.FolderSlug
 	}
-	data, err := ws.ToJSON()
-	if err != nil {
-		return fmt.Errorf("failed to serialize workspace: %w", err)
-	}
 	configPath := filepath.Join(s.resolveFolder(relPath), WorkspaceConfigFile)
-	if err := atomicWriteFile(configPath, data); err != nil {
-		return fmt.Errorf("failed to write workspace file: %w", err)
-	}
-	return nil
+	_, err := s.writeWorkspaceConfigLocked(ws, configPath)
+	return err
 }
 
 // getNestingDepth returns the nesting depth of a workspace by traversing ParentID.
@@ -1844,12 +1941,7 @@ func (s *FileStore) migrateIfNeeded(ws *Workspace, _ string) bool {
 
 // persistMigration saves a migrated workspace back to disk.
 func (s *FileStore) persistMigration(ws *Workspace, configPath string) {
-	data, err := ws.ToJSON()
-	if err != nil {
-		logger.Error("failed to serialize migrated workspace", logger.Fields{"err": err, "workspace_id": ws.ID})
-		return
-	}
-	if err := atomicWriteFile(configPath, data); err != nil {
+	if _, err := s.writeWorkspaceConfigLocked(ws, configPath); err != nil {
 		logger.Error("failed to persist migrated workspace", logger.Fields{"workspace_id": ws.ID, "err": err})
 		return
 	}
@@ -1964,6 +2056,9 @@ func (s *FileStore) reconcileWorkspaceSlugsLocked() (bool, error) {
 
 	groups := make(map[string][]workspaceSlugMigrationEntry)
 	for id, ws := range s.cache {
+		if s.localConfig != nil && s.localConfig.native(context.Background(), id) != nil {
+			continue // Discovery is not permission to migrate a copied folder.
+		}
 		pathValue, ok := s.idToPath[id]
 		if !ok {
 			return false, fmt.Errorf("workspace %s has no registered folder", id)
@@ -2070,19 +2165,15 @@ func (s *FileStore) reconcileWorkspaceSlugsLocked() (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("workspace %s cannot read metadata in folder %q: %w", entry.id, filepath.Base(oldPath), err)
 		}
-		full, err := FromJSON(data)
+		full, err := s.workspaceForRead(oldPath, data, entry.id)
 		if err != nil {
 			return false, fmt.Errorf("workspace %s has invalid metadata in folder %q: %w", entry.id, filepath.Base(oldPath), err)
 		}
 		full.FolderSlug = entry.targetSlug
-		updated, err := full.ToJSON()
-		if err != nil {
-			return false, fmt.Errorf("workspace %s cannot encode migrated slug: %w", entry.id, err)
-		}
 		// Persist intent before moving the folder. If the rename fails, the next
 		// startup observes the intended slug and retries rather than adding a
 		// second suffix.
-		if err := atomicWriteFile(configPath, updated); err != nil {
+		if _, err := s.writeWorkspaceConfigLocked(full, configPath); err != nil {
 			return false, fmt.Errorf("workspace %s cannot persist migrated slug in folder %q: %w", entry.id, filepath.Base(oldPath), err)
 		}
 		if filepath.Clean(newPath) != oldPath {
@@ -2187,6 +2278,11 @@ type RootChange struct {
 // Reload so folders that arrived out of band are discovered, reusing the
 // already-open index instead of rebuilding a second handle on the same database.
 func (s *FileStore) SetBasePath(newBasePath string) (RootChange, error) {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return RootChange{}, workErr
+	}
+	defer release()
 	target, err := normalizeWorkspaceRootPath(newBasePath)
 	if err != nil {
 		return RootChange{}, err
@@ -2376,7 +2472,11 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 		// Boot parses metadata only: the cache is metadata-only, so building chat
 		// history for every workspace just to drop it is wasted work (item 3.0/C).
 		ws, err := FromJSONMetadata(data)
+		guarded := s.continuity != nil && HasContinuityCheckpoint(folderPath)
 		if err != nil {
+			if s.localConfig != nil || guarded {
+				continue // Unreviewed/corrupt inputs are not ours to quarantine.
+			}
 			// Quarantine the corrupt file so it isn't silently skipped on
 			// every subsequent boot. The renamed file remains for forensic
 			// recovery; the workspace will surface as unregistered.
@@ -2397,6 +2497,13 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 			continue
 		}
 
+		// A copied folder with a continuity checkpoint is private history from
+		// another installation (or one retained across a local reset). It is not
+		// migrated, cached or recursed into until a reviewed import owns it.
+		if guarded && !s.continuity.AdmitDiscovered(ws.ID) {
+			continue
+		}
+
 		// Ensure FolderSlug is set
 		if ws.FolderSlug == "" {
 			ws.FolderSlug = entry.Name()
@@ -2411,8 +2518,9 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 		// Run migrations. A migration rewrites workspace.json, so re-parse with the
 		// full record (chat history included) before persisting — the metadata-only
 		// ws has no Messages and would otherwise wipe them from disk.
-		if s.migrateIfNeeded(ws, configPath) {
-			if full, ferr := FromJSON(data); ferr == nil {
+		canMigrate := s.localConfig == nil || s.localConfig.native(context.Background(), ws.ID) == nil
+		if canMigrate && s.migrateIfNeeded(ws, configPath) {
+			if full, ferr := s.workspaceForRead(folderPath, data, ws.ID); ferr == nil {
 				if full.FolderSlug == "" {
 					full.FolderSlug = entry.Name()
 				}
@@ -2426,6 +2534,11 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 					"error": ferr.Error(),
 				})
 			}
+		}
+
+		ws, err = s.cachePrivateConfig(ws)
+		if err != nil {
+			return err
 		}
 
 		// Compute relative path from basePath

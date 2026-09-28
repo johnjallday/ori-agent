@@ -141,6 +141,13 @@ func FromJSON(data []byte) (*Workspace, error) {
 	if err := json.Unmarshal(data, &ws); err != nil {
 		return nil, err
 	}
+	initializeDecodedWorkspace(&ws)
+	return &ws, nil
+}
+
+// initializeDecodedWorkspace applies native read migrations without forcing a
+// second JSON decode that would round exact authored numbers in private files.
+func initializeDecodedWorkspace(ws *Workspace) {
 	ws.NormalizeAgentInstances()        // Collapse duplicate agent instances to one per profile
 	ws.NormalizeInstalledCapabilities() // Canonicalize IDs, drop unusable records, one per capability
 	ws.MigrateScheduledTasksToTasks()   // Auto-migrate legacy scheduled tasks
@@ -148,7 +155,6 @@ func FromJSON(data []byte) (*Workspace, error) {
 		ws.Folders = []Folder{}
 	}
 	ws.rebuildTaskIndex() // Build index for O(1) task lookups
-	return &ws, nil
 }
 
 // discardJSON is a json.Unmarshaler that ignores its input. It lets a decode skip

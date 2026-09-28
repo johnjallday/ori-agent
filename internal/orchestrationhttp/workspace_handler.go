@@ -312,8 +312,8 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 		InitialData: req.InitialData,
 	})
 
-	// Save workspace
-	if err := wh.workspaceStore.Save(ws); err != nil {
+	// Only explicit creation crosses native admission; ordinary updates do not.
+	if err := workspace.CreateNativeWorkspace(r.Context(), wh.workspaceStore, ws); err != nil {
 		logger.Error("Error saving workspace", logger.Fields{"error": err})
 		orihttp.InternalError(w, "Failed to save workspace: "+err.Error())
 		return

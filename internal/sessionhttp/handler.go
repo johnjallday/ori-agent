@@ -96,6 +96,12 @@ type Handler struct {
 	// designation. See PersonalHQDesignator.
 	personalHQDesignator PersonalHQDesignator
 
+	// continuity holds the reviewed modern import's dependencies; nil keeps
+	// modern folders reviewable but not importable.
+	continuity                 *continuityImporter
+	continuityStatus           ContinuityStatusProvider
+	continuityAdmissionChanged func(workspaceID string)
+
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
 	// walks; lastRescanAt backs the cooldown for background-initiated rescans.

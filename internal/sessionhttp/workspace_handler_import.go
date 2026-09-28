@@ -3,6 +3,7 @@ package sessionhttp
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
@@ -51,6 +53,33 @@ func (h *Handler) handleWorkspaceImportCheck(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	review, err := inspectContinuityImportTree(r.Context(), normalizedPath)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, "Cannot safely inspect the selected workspace tree")
+		return
+	}
+	if review.TreeDigest != "" {
+		// One read-only SQL view; an HTTP preview is never the transaction
+		// that later owns an import receipt. A missing DB fails closed.
+		if h.store == nil || h.store.DB() == nil {
+			_ = orihttp.RespondInternalError(w, "Cannot inspect the destination for workspace continuity")
+			return
+		}
+		tx, txErr := h.store.DB().BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+		if txErr != nil {
+			_ = orihttp.RespondInternalError(w, "Cannot inspect the destination for workspace continuity")
+			return
+		}
+		review.DestinationDigest, err = workspacecontinuity.DestinationDigest(r.Context(), tx, userprofile.LocalUserID)
+		if err == nil && h.continuity != nil {
+			err = analyzeContinuityDestination(r.Context(), tx, &review)
+		}
+		rollbackErr := tx.Rollback()
+		if err != nil || rollbackErr != nil {
+			_ = orihttp.RespondInternalError(w, "Cannot inspect the destination for workspace continuity")
+			return
+		}
+	}
 	duplicate, err := h.findDuplicateImportedWorkspace(r.Context(), normalizedPath)
 	if err != nil {
 		logger.Error("Failed duplicate check for workspace import", logger.Fields{"error": err})
@@ -62,6 +91,7 @@ func (h *Handler) handleWorkspaceImportCheck(w http.ResponseWriter, r *http.Requ
 		"success":         true,
 		"normalized_path": normalizedPath,
 		"duplicate":       duplicate,
+		"continuity":      review,
 	})
 }
 
@@ -102,6 +132,22 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	}
 	if !info.IsDir() {
 		_ = orihttp.RespondBadRequest(w, "path must be a directory")
+		return
+	}
+
+	// A checkpoint needs reviewed restoration, never the legacy upsert/rebind
+	// path. Detect a modern child under a legacy parent before mutation too.
+	review, err := inspectContinuityImportTree(r.Context(), normalizedPath)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, "Cannot safely inspect the selected workspace tree")
+		return
+	}
+	if !review.ImportSupported {
+		if review.Status == "unavailable" {
+			_ = orihttp.RespondConflict(w, "Workspace continuity checkpoint is incomplete or damaged; no legacy import was performed")
+		} else {
+			_ = orihttp.RespondConflict(w, "Workspace continuity requires reviewed restoration; legacy Import Folder cannot restore this checkpoint")
+		}
 		return
 	}
 

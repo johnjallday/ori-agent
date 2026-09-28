@@ -1,6 +1,7 @@
 package chathttp
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -19,7 +20,7 @@ func routeNeedsWorkspace(mode UtilityRouteMode) bool {
 }
 
 // ensureWorkspaceForRoute returns an active workspace for the agent, creating one when needed.
-func (h *Handler) ensureWorkspaceForRoute(agentName, request string, decision UtilityRouteDecision, routeCtx normalizedChatRouteContext) (*workspace.Workspace, bool, error) {
+func (h *Handler) ensureWorkspaceForRoute(ctx context.Context, agentName, request string, decision UtilityRouteDecision, routeCtx normalizedChatRouteContext) (*workspace.Workspace, bool, error) {
 	if h == nil || h.commandHandler == nil || h.commandHandler.workspaceStore == nil {
 		return nil, false, nil
 	}
@@ -61,7 +62,7 @@ func (h *Handler) ensureWorkspaceForRoute(agentName, request string, decision Ut
 		},
 	})
 
-	if err := h.commandHandler.workspaceStore.Save(ws); err != nil {
+	if err := workspace.CreateNativeWorkspace(ctx, h.commandHandler.workspaceStore, ws); err != nil {
 		return nil, false, fmt.Errorf("save auto-created workspace: %w", err)
 	}
 

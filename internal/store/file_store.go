@@ -515,6 +515,9 @@ func (s *fileStore) GetAgent(name string) (*agent.Agent, bool) {
 // reloads the agent and refuses with ErrAgentChangedOnDisk; a retry then
 // starts from what is really there.
 func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
+	if ag != nil && ag.WorkspaceLocalConfigID != "" {
+		return ErrWorkspaceOwnedAgent
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.unreadableErrorUnlocked(name); err != nil {
@@ -620,6 +623,9 @@ type persistedDefinition struct {
 // encodeDefinition serializes an agent in the stable on-disk form: two-space
 // indent, struct-order keys (maps sort their keys), one trailing newline.
 func encodeDefinition(ag *agent.Agent) ([]byte, error) {
+	if ag != nil && ag.WorkspaceLocalConfigID != "" {
+		return nil, ErrWorkspaceOwnedAgent
+	}
 	// Canonicalize immediately before serializing, so a record written by any
 	// code path — not just the migrating load path — is canonical on disk.
 	ag.EnsureAppearance()
@@ -679,6 +685,9 @@ func (s *fileStore) decodeAgentUnlocked(name string, data []byte) (*agent.Agent,
 	var ag agent.Agent
 	if err := json.Unmarshal(data, &ag); err != nil {
 		return nil, err
+	}
+	if ag.WorkspaceLocalConfigID != "" {
+		return nil, ErrWorkspaceOwnedAgent
 	}
 	var shim pausedShim
 	_ = json.Unmarshal(data, &shim)
@@ -771,6 +780,9 @@ func (s *fileStore) persistAgentUnlocked(name string) error {
 	ag, ok := s.agents[name]
 	if !ok || ag == nil {
 		return nil
+	}
+	if ag.WorkspaceLocalConfigID != "" {
+		return ErrWorkspaceOwnedAgent
 	}
 	if err := s.persistStateUnlocked(name); err != nil {
 		return err
