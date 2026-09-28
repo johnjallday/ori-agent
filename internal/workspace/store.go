@@ -154,7 +154,7 @@ func NewFileStoreWithContinuity(basePath string, guard ContinuityGuard) (*FileSt
 
 func newFileStore(basePath string, local *LocalConfigStore, guard ContinuityGuard) (*FileStore, error) {
 	// Ensure base directory exists
-	if err := os.MkdirAll(basePath, 0755); err != nil {
+	if err := os.MkdirAll(basePath, 0755); err != nil { // #nosec G301 -- 0755 is this package's established workspace-folder permission (see backlog_markdown_synchronizer.go)
 		return nil, fmt.Errorf("failed to create workspace directory: %w", err)
 	}
 
@@ -515,10 +515,10 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Join(normalizedPath, FilesDir), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(normalizedPath, FilesDir), 0755); err != nil { // #nosec G301 -- 0755 is this package's established workspace-folder permission
 		return fmt.Errorf("failed to create workspace files folder: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(normalizedPath, NotesDir), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(normalizedPath, NotesDir), 0755); err != nil { // #nosec G301 -- same workspace-folder permission as the files folder
 		return fmt.Errorf("failed to create workspace notes folder: %w", err)
 	}
 
@@ -559,6 +559,10 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 
 // atomicWriteFile writes data to path via a temp file + rename so a crash
 // mid-write cannot leave a truncated/corrupt file behind.
+//
+// Every caller passes a path this package built: a registered workspace folder
+// joined with a fixed file name (workspace.json, tasks.md, a backlog file).
+// tmpPath is the file os.CreateTemp just created beside it.
 func atomicWriteFile(path string, data []byte) error {
 	const perm os.FileMode = 0644
 	dir := filepath.Dir(path)
@@ -569,27 +573,29 @@ func atomicWriteFile(path string, data []byte) error {
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // #nosec G703 -- our own temp file; see atomicWriteFile
 		return err
 	}
 	if err := tmp.Chmod(perm); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // #nosec G703 -- our own temp file; see atomicWriteFile
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // #nosec G703 -- our own temp file; see atomicWriteFile
 		return err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := os.Rename(tmpPath, path); err != nil { // #nosec G703 -- package-built path; see atomicWriteFile
+		_ = os.Remove(tmpPath) // #nosec G703 -- our own temp file; see atomicWriteFile
 		return err
 	}
 	return nil
 }
 
+// pathExists is called only with paths this package built from a registered
+// parent folder and a slugified or registered folder name.
 func pathExists(path string) (bool, error) {
-	_, err := os.Stat(path)
+	_, err := os.Stat(path) // #nosec G703 -- package-built path; see pathExists
 	if err == nil {
 		return true, nil
 	}
@@ -1511,7 +1517,7 @@ func (s *FileStore) Import(folderPath string) (*Workspace, string, error) {
 
 	// Validate the folder contains a workspace.json
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) // #nosec G304 -- fixed file name in the local folder the user chose to import
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid workspace folder: %s not found", WorkspaceConfigFile)
 	}
@@ -1693,7 +1699,7 @@ func (s *FileStore) preflightImportSlugsLocked(rootPath string) error {
 // importSubWorkspace registers a sub-workspace found during import. Caller must hold s.mu.
 func (s *FileStore) importSubWorkspace(folderPath, parentID string) {
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) // #nosec G304 -- fixed file name in a subfolder of the imported folder
 	if err != nil {
 		return
 	}
@@ -1737,7 +1743,9 @@ func (s *FileStore) importSubWorkspace(folderPath, parentID string) {
 	}
 }
 
-// copyDir recursively copies a directory tree.
+// copyDir recursively copies a directory tree. Its sources are the folder the
+// user chose to import and a store-owned workspace folder being moved; both
+// are the user's own local files, so it is not a privilege boundary.
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -1754,11 +1762,11 @@ func copyDir(src, dst string) error {
 			return os.MkdirAll(target, info.Mode())
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G122 G304 -- walks the user's own chosen or store-owned folder; see copyDir
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, info.Mode())
+		return os.WriteFile(target, data, info.Mode()) // #nosec G703 -- target is dst joined with a path relative to src; see copyDir
 	})
 }
 
@@ -2466,7 +2474,7 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 		configPath := filepath.Join(folderPath, WorkspaceConfigFile)
 
 		// Check if this directory contains a workspace.json
-		data, err := os.ReadFile(configPath)
+		data, err := os.ReadFile(configPath) // #nosec G304 -- fixed file name in a folder found scanning the store's own directory
 		if err != nil {
 			continue // Not a workspace folder, skip
 		}

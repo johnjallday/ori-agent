@@ -36,7 +36,7 @@ func readWorkspaceAgent(workspaceFolder, agentName string) (*agent.Agent, bool, 
 		return nil, false, err
 	}
 	path := filepath.Join(dir, WorkspaceAgentConfigFile)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- fixed file name under the workspace folder and a slugified agent name
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, false, nil
