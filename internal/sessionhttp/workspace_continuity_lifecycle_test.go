@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"bytes"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -192,6 +193,67 @@ func TestContinuityImportRefusesStaleReview(t *testing.T) {
 	}
 	if code, payload := importWorkspaceOnly(t, dest, copied, review); code != http.StatusConflict {
 		t.Fatalf("destination change after review was ignored: %d %v", code, payload)
+	}
+}
+
+// An upload that cannot be written interrupts the import instead of being
+// skipped; the retry installs it exactly once with the original bytes.
+func TestContinuityImportResumesAfterUploadWriteFailure(t *testing.T) {
+	ctx := t.Context()
+	at := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	source := newContinuityInstallation(t, "source")
+	ws := agentworkspace.NewWorkspace(agentworkspace.CreateWorkspaceParams{Name: "Field Recordings"})
+	ws.OwnerUserID, ws.FolderSlug, ws.CreatedAt, ws.UpdatedAt = "local", "field-recordings", at, at
+	if err := source.sync.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.store.CreateSession(ctx, &session.Session{ID: "chat-rain", Title: "Rain takes", AgentName: "Engineer",
+		FolderID: ws.ID, CreatedAt: at, UpdatedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	take := []byte("rain take 3 notes")
+	entry, err := source.uploads.AddFileFromReader("chat-rain", bytes.NewReader(take), "take-3.txt", int64(len(take)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, err := source.worker.PrepareNow(ctx, ws.ID); err != nil || status.State != continuityprep.StateReady {
+		t.Fatalf("source not ready: %+v %v", status, err)
+	}
+	folder, _ := source.files.GetFolderPath(ws.ID)
+	copied := copyContinuityFolder(t, folder)
+
+	dest := newContinuityInstallation(t, "destination")
+	review := reviewContinuityFolder(t, dest, copied)
+	uploadsRoot := dest.uploads.BasePath()
+	if err := os.MkdirAll(uploadsRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(uploadsRoot, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(uploadsRoot, 0o750) })
+	code, payload := importWorkspaceOnly(t, dest, copied, review)
+	report, _ := payload["import"].(map[string]any)
+	operation, _ := report["operation_id"].(string)
+	if code < 400 || operation == "" || report["status"] == "complete" {
+		t.Fatalf("an unwritable upload did not interrupt the import: %d %v", code, payload)
+	}
+	if err := os.Chmod(uploadsRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if code, payload = dest.request(t, http.MethodPost, "/api/workspaces/import/continuity/"+operation+"/retry", nil); code != http.StatusCreated {
+		t.Fatalf("retry: %d %v", code, payload)
+	}
+	files, err := dest.uploads.ListFiles("chat-rain")
+	if err != nil || len(files) != 1 || files[0].ID != entry.ID {
+		t.Fatalf("retry lost or duplicated the upload: %+v %v", files, err)
+	}
+	path, err := dest.uploads.GetFilePath("chat-rain", entry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path); err != nil || !bytes.Equal(data, take) {
+		t.Fatal("restored upload bytes differ", err)
 	}
 }
 
