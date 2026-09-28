@@ -1880,3 +1880,104 @@ test('issue ordering puts blockers ahead of advisories', () => {
   assert.ok(view.advisoryIssues.some(issue => issue.id === 'saved-roster-error'));
   assert.equal(view.canContinueFromTeam, false, 'a blocker stops Team continuation');
 });
+
+// ---- Build with your assistant ----------------------------------------------
+
+function contentTeam() {
+  return withSavedRoster(
+    readyDraft(
+      [
+        planAgent('Content Lead', { entry_point: true }),
+        planAgent('Brand Copywriter'),
+        planAgent('Content Editor')
+      ],
+      'template:content-production'
+    ),
+    [
+      { name: 'Luna', role: 'orchestrator' },
+      { name: 'Scout', role: 'specialist' }
+    ]
+  );
+}
+
+test('an assistant team patch fills roles through the Team step’s own operations', () => {
+  const draft = contentTeam();
+  const filled = Draft.applyTeamPatch(draft, {
+    mode: 'staffed',
+    roles: [
+      { role_id: 'content-lead', mode: 'assign', agent_name: 'luna' },
+      { role_id: 'brand-copywriter', mode: 'create', agent_name: 'Brand Copywriter' },
+      { role_id: 'not-a-role', mode: 'create', agent_name: 'Ghost' }
+    ],
+    saved_agents: ['Scout', 'Nobody']
+  });
+  assert.deepEqual(filled, ['content-lead', 'brand-copywriter']);
+  assert.deepEqual(Draft.getRoleFill(draft, 'content-lead'), { mode: 'assign', name: 'Luna' });
+  assert.equal(Draft.getRoleFill(draft, 'brand-copywriter').mode, 'create');
+  assert.deepEqual(draft.savedSelections, ['Scout']);
+  const payload = Draft.toCreatePayload(draft);
+  assert.ok(payload.role_staffing.some(entry => entry.role_id === 'content-lead'));
+});
+
+test('a create for a name a saved agent already has becomes an assignment', () => {
+  const draft = contentTeam();
+  const filled = Draft.applyTeamPatch(draft, {
+    roles: [{ role_id: 'content-lead', mode: 'create', agent_name: 'Luna' }]
+  });
+  assert.deepEqual(filled, ['content-lead']);
+  assert.deepEqual(Draft.getRoleFill(draft, 'content-lead'), { mode: 'assign', name: 'Luna' });
+});
+
+test('a later team patch replaces a role the assistant filled, and a refused one keeps it', () => {
+  const draft = contentTeam();
+  Draft.applyTeamPatch(draft, {
+    roles: [{ role_id: 'content-lead', mode: 'assign', agent_name: 'Luna' }]
+  });
+  Draft.applyTeamPatch(draft, {
+    roles: [{ role_id: 'content-lead', mode: 'assign', agent_name: 'Scout' }]
+  });
+  assert.equal(Draft.getRoleFill(draft, 'content-lead').name, 'Scout');
+  const refused = Draft.applyTeamPatch(draft, {
+    roles: [{ role_id: 'content-lead', mode: 'assign', agent_name: 'Unknown Agent' }]
+  });
+  assert.deepEqual(refused, []);
+  assert.equal(Draft.getRoleFill(draft, 'content-lead').name, 'Scout', 'kept, not emptied');
+});
+
+test('agentless applies only to Blank, as the Team step allows', () => {
+  const content = contentTeam();
+  Draft.applyTeamPatch(content, { mode: 'agentless' });
+  assert.equal(content.agentless, false);
+  const blank = readyDraft([planAgent('Ask Ori', { entry_point: true })], 'blank', {
+    template_id: 'blank'
+  });
+  Draft.applyTeamPatch(blank, { mode: 'agentless' });
+  assert.equal(blank.agentless, true);
+});
+
+test('a serialized team restores onto the same blueprint and never onto another', () => {
+  const draft = contentTeam();
+  Draft.applyTeamPatch(draft, {
+    roles: [
+      { role_id: 'content-lead', mode: 'assign', agent_name: 'Luna' },
+      { role_id: 'content-editor', mode: 'create', agent_name: 'Content Editor' }
+    ],
+    saved_agents: ['Scout']
+  });
+  const state = JSON.parse(JSON.stringify(Draft.serialize(draft)));
+  assert.equal(state.blueprint_key, 'template:content-production');
+
+  const reopened = contentTeam();
+  assert.equal(Draft.restore(reopened, state), true);
+  assert.deepEqual(Draft.getRoleFill(reopened, 'content-lead'), { mode: 'assign', name: 'Luna' });
+  assert.equal(Draft.getRoleFill(reopened, 'content-editor').mode, 'create');
+  assert.deepEqual(reopened.savedSelections, ['Scout']);
+  assert.deepEqual(Draft.toCreatePayload(reopened), Draft.toCreatePayload(draft));
+
+  const other = withSavedRoster(
+    readyDraft([planAgent('Engineer', { entry_point: true })], 'template:code-project'),
+    [{ name: 'Luna' }]
+  );
+  assert.equal(Draft.restore(other, state), false);
+  assert.equal(other.roleFills.size, 0);
+});

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/connections"
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/vault"
 )
 
@@ -13,11 +12,7 @@ const testConnVaultPassword = "test-vault-password"
 
 func newTestVaultStore(t *testing.T) *vault.Store {
 	t.Helper()
-	db, err := database.Open(context.Background(), &database.Config{InMemory: true, WALMode: false})
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := newFixtureDatabase(t)
 	return vault.NewStore(db, vault.StoreOptions{VaultFilesBaseDir: t.TempDir()})
 }
 

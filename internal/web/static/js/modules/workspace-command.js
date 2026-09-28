@@ -1417,6 +1417,70 @@ export class WorkspaceCommandView {
     return ' style="' + escapeHtml(vars.join('; ')) + '"';
   }
 
+  // "How this was set up": for a workspace the Personal Assistant built in
+  // conversation, who built it and when, what the user asked for, and the
+  // reason behind each choice. Read-only; it records what happened and
+  // controls nothing.
+  buildSummaryHTML(ws) {
+    const summary = ws && ws.build_summary;
+    if (!summary || typeof summary !== 'object') return '';
+    const assistant = String(summary.assistant_name || '').trim() || 'Your assistant';
+    const when = summary.created_at ? new Date(summary.created_at) : null;
+    const date =
+      when && !Number.isNaN(when.getTime())
+        ? when.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+        : '';
+    const request = String(summary.user_request || '').trim();
+    const sections = {
+      blueprint: 'Blueprint',
+      details: 'Details',
+      team: 'Team',
+      placement: 'Placement'
+    };
+    const decisions = (Array.isArray(summary.decisions) ? summary.decisions : [])
+      .filter(decision => decision && String(decision.text || '').trim())
+      .slice(0, 8);
+    return (
+      '<details class="ws-cmd-build-summary"' +
+      (this.buildSummaryOpen ? ' open' : '') +
+      '>' +
+      '<summary>How this was set up</summary>' +
+      '<p class="ws-cmd-build-summary-meta">Built with ' +
+      escapeHtml(assistant) +
+      (date ? ' · ' + escapeHtml(date) : '') +
+      '</p>' +
+      (request
+        ? '<p class="ws-cmd-build-summary-request"><span>You asked</span> “' +
+          escapeHtml(request) +
+          '”</p>'
+        : '') +
+      (decisions.length
+        ? '<ul class="ws-cmd-build-summary-decisions">' +
+          decisions
+            .map(
+              decision =>
+                '<li><strong>' +
+                escapeHtml(sections[decision.section] || String(decision.section || '')) +
+                '</strong> ' +
+                escapeHtml(String(decision.text)) +
+                '</li>'
+            )
+            .join('') +
+          '</ul>'
+        : '') +
+      '</details>'
+    );
+  }
+
+  // The block keeps its open state across the Command view's re-renders.
+  bindBuildSummary() {
+    const details = this.container?.querySelector?.('.ws-cmd-build-summary');
+    if (!details) return;
+    details.addEventListener('toggle', () => {
+      this.buildSummaryOpen = details.open;
+    });
+  }
+
   commandBarHTML(ws, name, mode, stats) {
     const description = String((ws && ws.description) || '').trim();
     const isGroup = this.isGroupWorkspace();
@@ -1507,6 +1571,7 @@ export class WorkspaceCommandView {
           '</button>'
         : '') +
       '</div>' +
+      this.buildSummaryHTML(ws) +
       '<div class="ws-cmd-tags-row">' +
       '<div class="ws-cmd-tags">' +
       this.commandTagsHTML(tags) +
@@ -1885,6 +1950,7 @@ export class WorkspaceCommandView {
       this.loadoutAddModalHTML(this.loadoutAddAgent);
 
     this.bindIdentityControls();
+    this.bindBuildSummary();
     this.bindReadout();
     this.bindMissionPanel();
     if (this.viewMode === 'map') {

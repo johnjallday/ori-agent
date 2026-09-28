@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/mailbox"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -41,11 +40,7 @@ func (r *recordingSender) SendReply(ctx context.Context, a mailbox.Account, p ma
 func newReplyFixture(t *testing.T) (*replyService, *recordingSender, string) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
-	if err != nil {
-		t.Fatalf("db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := newFixtureDatabase(t)
 	profiles := userprofile.NewSQLiteStore(db)
 	sessionStore := session.NewSQLiteStore(db)
 	hq := personalhq.NewService(profiles, sessionStore)

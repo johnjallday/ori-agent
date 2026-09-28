@@ -22,6 +22,7 @@ http://localhost:8765/api
 - [Updates API](#updates-api)
 - [Tags API](#tags-api)
 - [Workspace Groups](#workspace-groups)
+- [Workspace Build Sessions API](#workspace-build-sessions-api)
 - [Personal Assistant Folder Digest API](#personal-assistant-folder-digest-api)
 - [Scheduler Nodes API](#scheduler-nodes-api)
 - [Workspace Map Activity API](#workspace-map-activity-api)
@@ -406,6 +407,22 @@ new agent, add it to a workspace, and remove it.
 }
 ```
 The client confirms by re-calling the endpoint with `confirmed_action` set to a `HomeAction` of that type and arguments. The server executes only known mutation types after confirmation; the model is never given write tools. `start_task` runs the task through the same orchestrator path as the workspace UI (coordinator assignment and the delegation loop apply), executing asynchronously so the response returns immediately.
+
+When the Personal Assistant can build a workspace with the user (see [Workspace Build Sessions API](#workspace-build-sessions-api) — hired, with a model), a `create_workspace` request is proposed as `build_workspace` instead, and the store is never written:
+
+```json
+{
+  "requires_confirmation": true,
+  "confirmation": {
+    "action_id": "build-workspace",
+    "action_type": "build_workspace",
+    "summary": "Build this workspace with Atlas? You'll see it set up the form and check it before anything is created.",
+    "arguments": { "name": "Q3 Planning", "first_message": "create a workspace called Q3 Planning" }
+  }
+}
+```
+
+The client does not send `build_workspace` back. Confirm opens Create Workspace in build mode (entry point `personal_assistant_ask`) with `first_message` as the assistant's first turn. If build mode stopped being available in the meantime, the client opens the ordinary dialog seeded with `name` instead.
 
 ## Settings API
 
@@ -1223,6 +1240,124 @@ DELETE /api/workspaces/{id}?confirm=true
 ```
 
 An unreviewed `DELETE` returns `409` with code `group_requirement_review_required`. The review is inert and expires after 15 minutes. It succeeds only when the canonical Required contract is structurally valid and the project has no live child link, Home reciprocal membership, or Assistant Home state. The returned impact names whether the exact request will use Trash or permanent deletion. The repeated `DELETE` consumes a token bound to the owner, workspace ID, complete contract snapshot, immutable contract operation digest, `delete_sessions` choice, and Trash/permanent mode. Changing any of those facts requires a new review. Ordinary Assistant disconnect/Home-removal review still runs first, and the existing external-folder deletion boundary remains unchanged.
+
+## Workspace Build Sessions API
+
+"Build with your assistant" (`tasks/prd-build-with-your-assistant.md`, architecture in `docs/architecture/workspace-build-sessions.md`): the Personal Assistant fills the Create Workspace wizard through a conversation in a pane beside it. A build session is a server-held draft that **is** the create request. The model proposes; the host validates every field; the wizard renders it through its own setters; the user confirms with the ordinary Create (`POST /api/workspaces` with `build_session_id`). Nothing here creates a workspace.
+
+Bodies are capped at 256 KiB and must be one JSON object with only the fields named below (`400` otherwise). Errors carry a stable `code`:
+
+| Status | `code` | Meaning |
+| --- | --- | --- |
+| `409` | `unavailable` | The assistant cannot build now (`reason`: `assistant_not_ready` or `no_model`), or the session store failed outside a turn. The client steps aside and the wizard stays manual. |
+| `409` | `version` | The session changed since this `version` was read. Reload it (`POST /api/workspaces/build-sessions` returns the open one) and retry. |
+| `409` | `closed` | The session was created or abandoned. |
+| `409` | `choice` | The chip id is not the one currently offered. |
+| `404` | `not_found` | Unknown session id. |
+| `503` | `unavailable` | A turn could not be stored; it can be retried. |
+
+### Check Availability
+
+**Endpoint:** `GET /api/workspaces/build-sessions/availability`
+
+```json
+{ "available": false, "reason": "no_model" }
+```
+
+`available` is true when the assistant's relationship is `active` or `paused` and a model resolves: the assistant's own global agent profile (provider and model), then the system model. `reason` (only when unavailable) is `assistant_not_ready` or `no_model`. The dialog reads this and `GET /api/personal-assistant` when an eligible opener shows it; nothing else is requested before build mode starts.
+
+### Create or Resume
+
+**Endpoint:** `POST /api/workspaces/build-sessions`
+
+```json
+{ "entry_point": "home_cockpit_create", "parent_id": "group-7", "first_message": "a newsletter from my research notes" }
+```
+
+- `entry_point` (required): `home_cockpit_create`, `workspace_map_build`, `workspace_hub_create`, or `personal_assistant_ask`. Any other opener is `400`.
+- `parent_id` (optional): the group the opener was inside; kept only when it is one of the user's groups.
+- `first_message` (optional, ≤ 2,000 characters): run as the first turn (the Ask tab's sentence).
+
+There is at most one open build per user. When one is open it is returned unchanged with `200` and `"resumed": true`, and `first_message` is not run (the client asks Resume or Start over). Otherwise `201` with the new session:
+
+```json
+{
+  "session": {
+    "id": "7f0c…",
+    "status": "open",
+    "version": 3,
+    "entry_point": "home_cockpit_create",
+    "assistant": { "display_name": "Atlas", "appearance": { "…": "…" } },
+    "draft": { "template_id": "content-production", "name": "Newsletter Desk", "description": "…" },
+    "transcript": [
+      { "role": "user", "text": "a newsletter from my research notes", "at": "…" },
+      {
+        "role": "assistant",
+        "text": "I picked Content Production. Who should staff it?",
+        "choices": [ { "id": "c1-1", "label": "Assign Luna as Content Lead" } ],
+        "at": "…"
+      }
+    ],
+    "pending_question": { "question": "Who should staff it?", "choices": [ "…" ], "allow_free_text": true },
+    "applied": ["blueprint", "name", "description"],
+    "team_patch": null,
+    "team_state": null,
+    "why": [ { "section": "blueprint", "text": "…" } ],
+    "rejections": [],
+    "needs_home": null,
+    "furthest_step": 2,
+    "ready": false,
+    "create_now": false,
+    "turn_count": 1
+  }
+}
+```
+
+- `draft` holds only create-request keys: `template_id`/`blank`, `name`, `description`, `blueprint_inputs`, `parent_id`, `color`, `tags`, `workspace_preset`, `workspace_bootstrap`, `project_connection`, `team_intent`, `role_staffing`, `template_agent_overrides`, `template_agent_review`, `existing_agent_names`, `entry_agent_name`, `create_template_agents`.
+- `transcript` entries have `role` `user`, `assistant`, or `form` (the user's own form edits, said in plain words). Chip ids are the server's (`c<turn>-<n>`, plus the reserved `try_again`, `folder_choose`, `folder_none`); an answered question records `chosen`. The transcript keeps the last 40 entries and 32 KiB.
+- `applied` names what the last turn set on the form (`blueprint`, `name`, `description`, `inputs`, `parent`, `color`, `tags`, `team`); `team_patch` is the assistant's staffing (`mode`, `roles[]` with `role_id`, `mode` `assign`/`create`, `agent_name`, and optional `provider`/`model`/`system_prompt`, `saved_agents[]`). `team_state` is the serialized Team step, restored on resume.
+- `rejections` are the fields the host refused on the last turn, with a reason; the assistant sees them on its next turn and the transcript says so.
+- `ready` is the model's opinion only; the wizard's own gates decide Create. `create_now` means the user said "create it": the client runs the ordinary Create submit and reports a closed gate in the pane instead of submitting. It is never set on the first turn, even when the first message asks to create — the user always sees a filled form first.
+
+### Send a Turn
+
+**Endpoint:** `POST /api/workspaces/build-sessions/{id}/turns`
+
+```json
+{ "text": "only a Content Lead", "version": 3 }
+```
+
+or
+
+```json
+{ "choice_id": "c1-1", "version": 3 }
+```
+
+Exactly one of `text` (≤ 2,000 characters) or `choice_id`. A chip is answered with its label. `"auto": true` marks the turn the client sends on its own after the user switched the blueprint on the form; it is never recorded as the user's request. Fields the user edited on the form while the model was working keep the user's value; the rest of the reply still applies. The user's turn is stored before the model runs, so a failed model call keeps it: the transcript then carries the fixed line "I couldn’t reach my model just now. Keep going on the form, or try again." with a `try_again` chip. A reply that neither changes the form nor asks a question is retried once, then replaced with "Which of these is closest?" and three blueprint chips. `folder_choose` is `400` (choosing a folder happens on the form). Returns `200` with `{ "session": … }`.
+
+### Report Form Edits
+
+**Endpoint:** `PATCH /api/workspaces/build-sessions/{id}/draft`
+
+```json
+{ "draft": { "template_id": "research-project", "name": "Field Notes" }, "team_state": { "…": "…" }, "step": 2, "version": 4 }
+```
+
+The client sends the form's current create payload (only the draft keys above) about half a second after the user stops editing. The server keeps a blueprint only if this user can create from it. Each change is written once to the transcript as a `form` entry ("You renamed it to Field Notes"), which the assistant reads on its next turn. `"sync": true` marks a write that only reports what applying the assistant's own turn did to the form; it is recorded but never said back. `step` (1–4) records the furthest wizard step for resume; `team_state` is at most 32 KiB. The response is `{ "session": …, "blueprint_changed": true|false }`; the client answers a changed blueprint with an automatic turn so the assistant re-staffs the team.
+
+### Abandon
+
+**Endpoint:** `POST /api/workspaces/build-sessions/{id}/abandon`
+
+```json
+{ "version": 5 }
+```
+
+Ends an open build without creating anything (Start over, or Discard from Today). Abandoning twice is harmless. A created or abandoned build keeps only its id, status, name, and counters; its conversation and draft are dropped. Closing the dialog never abandons: the build stays open for a week from its last change and is offered again from any eligible opener and from the assistant's Today view ("Finish building …").
+
+### Create from a Build
+
+`POST /api/workspaces` accepts `build_session_id`. After the workspace is created the session is marked `created` and a short summary is stored in the workspace's `template_provenance.build_summary`: `assistant_name`, `session_id`, `created_at`, `turn_count`, `user_request` (the first thing the user asked for), and `decisions` (one `{section, text}` per section — blueprint, details, team, placement). The team line describes the team in the create request, not the model's claim, and the assistant's reason for a section the user later changed on the form is left out. The build is named in the create request only once its draft is on the form: while "Resume building …?" is unanswered, a workspace made by hand is not tied to the paused build. `GET /api/orchestration/workspace?id=…` and the sessionhttp workspace detail return it as `build_summary`, and the workspace page shows it under "How this was set up". An unknown or closed `build_session_id` never blocks the create.
 
 ## Personal Assistant Folder Digest API
 

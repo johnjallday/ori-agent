@@ -191,6 +191,41 @@ func TestAsk_ExecuteConfirmedCreateWorkspace(t *testing.T) {
 	}
 }
 
+func TestAsk_CreateWorkspaceIsOfferedAsABuildWhenTheAssistantCanBuild(t *testing.T) {
+	h := newAskHandlerWithProvider(t, "irrelevant")
+	mut := &fakeMutator{}
+	h.SetMutator(mut)
+	h.SetWorkspaceBuildAvailable(func(context.Context) bool { return true })
+
+	resp := h.Ask(context.Background(), HomeAssistantAskRequest{Prompt: "create a workspace called Beta", Intent: "app_introspection"})
+	if !resp.RequiresConfirmation || resp.Confirmation == nil || resp.Confirmation.ActionType != HomeActionBuildWorkspace {
+		t.Fatalf("expected a build_workspace confirmation, got %+v", resp.Confirmation)
+	}
+	if got, _ := resp.Confirmation.Arguments["first_message"].(string); got != "create a workspace called Beta" {
+		t.Fatalf("first_message = %q", got)
+	}
+	if got, _ := resp.Confirmation.Arguments["name"].(string); got != "Beta" {
+		t.Fatalf("name = %q", got)
+	}
+
+	// Accepting a build is the browser's job: the server never creates
+	// anything for it, even if it is sent back as a confirmed action.
+	resp = h.Ask(context.Background(), HomeAssistantAskRequest{
+		Intent:          "app_introspection",
+		ConfirmedAction: &HomeAction{Type: HomeActionBuildWorkspace, Arguments: resp.Confirmation.Arguments},
+	})
+	if mut.created != "" {
+		t.Fatalf("the store was written for a build: %q", mut.created)
+	}
+
+	// Unavailable, the direct create is unchanged.
+	h.SetWorkspaceBuildAvailable(func(context.Context) bool { return false })
+	resp = h.Ask(context.Background(), HomeAssistantAskRequest{Prompt: "create a workspace called Beta", Intent: "app_introspection"})
+	if resp.Confirmation == nil || resp.Confirmation.ActionType != HomeActionCreateWorkspace {
+		t.Fatalf("unavailable build keeps create_workspace, got %+v", resp.Confirmation)
+	}
+}
+
 func TestAsk_ModelUnavailableGuidesToSettings(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	h := NewHomeAssistantAskHandler(HomeSnapshotSources{Workspaces: store, Now: time.Now}, nil, nil)

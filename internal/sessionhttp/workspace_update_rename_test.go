@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/types"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -31,19 +31,15 @@ type renameFixtureCase struct {
 	programKey *agentworkspace.AssistantProgramKey
 }
 
-// newUpdateRenameHandler builds a Handler backed by an in-memory SQLite store
+// newUpdateRenameHandler builds a Handler backed by an isolated SQLite store
 // (the "primary") that write-throughs to a FileStore rooted at root via a
 // SyncStore, mirroring the production wiring that turns a SQLite-only rename
 // into a second folder on disk.
 func newUpdateRenameHandler(t *testing.T, root string) (*Handler, *agentworkspace.SyncStore) {
 	t.Helper()
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	hybrid := session.NewHybridStoreWithDB(db, 20)
-	t.Cleanup(func() { _ = hybrid.Close() })
+	cleanupTestHybridStore(t, hybrid)
 
 	fileStore, err := agentworkspace.NewFileStore(root)
 	if err != nil {

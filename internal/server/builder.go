@@ -350,12 +350,15 @@ type ServerBuilder struct {
 	// personalAssistantFolderDigest is "show me a folder": chooser, scan,
 	// offers, and decisions over the HQ sidecar.
 	personalAssistantFolderDigest *personalassistant.FolderDigestService
-	personalAssignment            *personalassistant.AssignmentService
-	personalAssistantHandler      *personalassistanthttp.Handler
-	assistantSetupStore           *assistantsetup.SQLiteStore
-	assistantSetupService         *assistantsetup.Service
-	assistantSetupRetries         *assistantsetup.RetryRunner
-	setupJourneyStore             *setupjourney.SQLiteStore
+	// workspaceBuildStore holds "Build with your assistant" sessions over the
+	// same HQ sidecar directory.
+	workspaceBuildStore      *personalassistant.WorkspaceBuildStore
+	personalAssignment       *personalassistant.AssignmentService
+	personalAssistantHandler *personalassistanthttp.Handler
+	assistantSetupStore      *assistantsetup.SQLiteStore
+	assistantSetupService    *assistantsetup.Service
+	assistantSetupRetries    *assistantsetup.RetryRunner
+	setupJourneyStore        *setupjourney.SQLiteStore
 	// integrationReleases resolves the latest reviewed integration release for
 	// both the guided setup and the Plugins page update check.
 	integrationReleases  *integrationrelease.Resolver

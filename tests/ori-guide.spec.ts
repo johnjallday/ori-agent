@@ -366,9 +366,9 @@ test.describe('Ori Guide coachmarks', () => {
     await expect(target).toHaveClass(/is-ori-coachmark/);
     await expect(target).toBeFocused();
 
-    // The whole point: pointing at New Agent must not open the create panel
-    // (FR-42).
-    await expect(page.locator('#createPanel')).toBeHidden();
+    // The whole point: pointing at New Agent must not open the Create Agent
+    // modal (FR-42).
+    await expect(page.locator('#addAgentModal')).toBeHidden();
   });
 
   test('a coachmark is not offered from a route that does not own the control', async ({

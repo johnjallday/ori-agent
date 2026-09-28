@@ -474,6 +474,11 @@ func TestCreateWorkspaceTeamDraftLoadsBeforeSessions(t *testing.T) {
 	helpers := []string{
 		`/js/modules/create-workspace-team-draft.js`,
 		`/js/modules/create-workspace-placement-draft.js`,
+		// The operation context (build-mode eligibility, step rules) and the
+		// assistant's build pane: build mode opens from the assistant's Ask
+		// tab on every page, so every page that mounts the modal needs both.
+		`/js/modules/workspace-creator-state.js`,
+		`/js/modules/create-workspace-build-pane.js`,
 	}
 	const sessions = `/js/modules/sessions.js`
 

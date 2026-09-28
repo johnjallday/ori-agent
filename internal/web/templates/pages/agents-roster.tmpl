@@ -263,7 +263,7 @@
           <aside class="inspector" id="inspector" aria-label="Selected agent">
             <div class="inspector-scroll" id="inspectorScroll">
               <div class="inspector-topline">
-                <span class="inspector-kicker" id="inspectorKicker">Selected agent</span>
+                <span class="inspector-kicker">Selected agent</span>
                 <button type="button" class="inspector-close" id="inspectorClose"
                   aria-label="Close inspector" title="Close inspector">
                   <span aria-hidden="true">×</span>
@@ -342,21 +342,6 @@
                   </section>
                 </div>
               </article>
-
-              <!-- Mission 01's hire preset, which the header "New Agent" button
-                   opens here while there is no assistant to keep. The ordinary
-                   create form is the shared Create Agent modal (modals.tmpl,
-                   included below), not this panel: that form wants more width
-                   than the Inspector has, and a card click while it is open
-                   must not throw a half-written draft away. The topline kicker
-                   names this panel while it is open, so it has no heading of
-                   its own. -->
-              <article class="create-panel" id="createPanel" hidden aria-label="New agent">
-                <header class="create-panel__head">
-                  <button type="button" id="createCancel" class="btn-ghost">Cancel</button>
-                </header>
-                <div class="create-panel__body" id="createBody"></div>
-              </article>
             </div>
           </aside>
         </div>
@@ -433,8 +418,9 @@
     </main>
   </div>
 
-  <!-- The shared Create Agent modal: what New Agent opens once an assistant
-       is hired. The partial brings the form fragment and its script along. -->
+  <!-- The shared Create Agent modal: what New Agent opens, in the personal-
+       assistant preset until an assistant is hired (Mission 01). The partial
+       brings the form fragment and its script along. -->
   {{template "modals.tmpl" .}}
 
   {{template "theme-init.tmpl" .}}

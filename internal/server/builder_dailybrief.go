@@ -298,6 +298,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		resolver := personalassistant.NewKnowledgeResolver(b.personalAssistantStore, b.personalHQService, profileReader)
 		knowledge := personalassistant.NewKnowledgeStore(resolver, b.workspaceFileStore)
 		b.wireFolderDigest(knowledge)
+		b.wireWorkspaceBuild(knowledge)
 		var janitorEvidence *janitorKnowledgeReader
 		if b.fileJanitorService != nil {
 			janitorEvidence = &janitorKnowledgeReader{
@@ -397,6 +398,10 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		todayService.SetInterviewPreferences(interviewReader)
 	}
 	todayService.SetFollowUpWorkspaceSource(workspaceSource)
+	// A workspace the assistant is still building asks to be finished.
+	if b.workspaceBuildStore != nil {
+		todayService.SetWorkspaceBuildReader(b.workspaceBuildStore)
+	}
 	// File Janitor's recent results join Today's Results section (starter
 	// missions FR36). The service is wired in Phase 17, before this runs.
 	if b.fileJanitorService != nil && b.workspaceFileStore != nil {

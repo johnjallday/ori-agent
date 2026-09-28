@@ -55,7 +55,6 @@
     // (PRD FR-30/FR-31).
     rendered: [],
     focusIndex: -1,
-    creating: false,
     providers: null,
     // Whether the Inspector is showing. Closing it is a presentation change:
     // the focused agent, its history, and the checked set all survive
@@ -132,10 +131,6 @@
       stageFullPage: document.getElementById('stageFullPage'),
       stageFavoriteToggle: document.getElementById('stageFavoriteToggle'),
       newAgentBtn: document.getElementById('newAgentBtn'),
-      inspectorKicker: document.getElementById('inspectorKicker'),
-      createPanel: document.getElementById('createPanel'),
-      createBody: document.getElementById('createBody'),
-      createCancel: document.getElementById('createCancel'),
       selectAll: document.getElementById('rosterSelectAll'),
       clearSelection: document.getElementById('rosterClearSelection'),
       bulkBar: document.getElementById('bulkBar'),
@@ -264,13 +259,13 @@
     els.list.addEventListener('touchend', cancelLongPress);
     els.list.addEventListener('touchcancel', cancelLongPress);
     els.newAgentBtn.addEventListener('click', openCreate);
-    els.createCancel.addEventListener('click', closeCreate);
-    // Bootstrap leaves focus on <body> when the Create Agent modal closes. Hand
-    // it back to the button that opens the modal, unless the roster has
-    // focused something since (the created agent's card, say).
-    var createModal = document.getElementById('addAgentModal');
+    var createModal = createModalElement();
     if (createModal) {
       createModal.addEventListener('hidden.bs.modal', function () {
+        leaveHireMode();
+        // Bootstrap leaves focus on <body> when the modal closes. Hand it back
+        // to the button that opens the modal, unless the roster has focused
+        // something since (the created agent's card, say).
         if (!document.activeElement || document.activeElement === document.body) {
           els.newAgentBtn.focus();
         }
@@ -1965,12 +1960,6 @@
     if (isSheetMode() && els.inspectorClose) els.inspectorClose.focus();
   }
 
-  // The topline says what the Inspector holds: the focused agent, or the hire
-  // preset while it is open.
-  function setInspectorKicker(text) {
-    if (els.inspectorKicker) els.inspectorKicker.textContent = text;
-  }
-
   // Closing hands the reclaimed width back to the collection. It deliberately
   // does not clear the focused agent, its history entry, or the checked set —
   // reopening restores the same context (PRD FR51).
@@ -2022,9 +2011,6 @@
 
   function renderStage(name) {
     var listItem = state.byName[name];
-    // A card opened while the hire preset is showing takes its place. (The
-    // ordinary create is a modal, so no card click can dismiss it.)
-    if (state.creating) closeCreate();
     els.placeholder.hidden = true;
     els.stage.hidden = false;
 
@@ -2555,11 +2541,12 @@
 
   /* ---- create agent -------------------------------------------------------- */
 
-  // New Agent opens the personal-assistant preset in the Inspector while there
-  // is no assistant to keep (Mission 01), and the shared Create Agent modal
-  // otherwise. A press that lands before the one relationship read answers
-  // waits for it briefly, so it still opens the right surface; a read that
-  // fails or never answers opens the modal.
+  // New Agent opens the shared Create Agent modal (modals.tmpl, driven by
+  // modules/agents.js) — the same one Home and the workspace pages open. While
+  // there is no assistant to keep (Mission 01) it opens in the personal-
+  // assistant preset. A press that lands before the one relationship read
+  // answers waits for it briefly, so it still opens the right form; a read that
+  // fails or never answers opens the ordinary one.
   function openCreate() {
     if (assistant.known || !assistant.pending) {
       renderCreate(assistantCreateMode());
@@ -2575,11 +2562,9 @@
     setTimeout(open, 1500);
   }
 
-  // renderCreate opens the surface a create mode calls for. 'assistant' fills
-  // the Inspector's create panel with Mission 01's preset (or its reconnect /
-  // resume / blocked view) and announces it so Ori's walkthrough can anchor on
-  // the freshly rendered controls. Anything else is the ordinary create, which
-  // is the modal — including an 'assistant' request the relationship no longer
+  // renderCreate opens the form a create mode calls for. 'assistant' is Mission
+  // 01's preset (or its reconnect / resume / blocked view). Anything else is the
+  // ordinary form — including an 'assistant' request the relationship no longer
   // has a preset for.
   function renderCreate(mode) {
     var view = assistantPresetView();
@@ -2587,30 +2572,15 @@
       openCreateModal();
       return;
     }
-    state.creating = true;
-    els.stage.hidden = true;
-    els.placeholder.hidden = true;
-    els.createPanel.hidden = false;
-    setInspectorKicker('New agent');
-    // The create panel lives in the Inspector, so creating has to open it —
-    // otherwise the New Agent button appears to do nothing (PRD FR4/FR65).
-    openInspector(els.newAgentBtn);
-    if (view.mode === 'form') renderAssistantCreate(view);
-    else renderAssistantRepair(view);
-    window.dispatchEvent(
-      new CustomEvent('ori:agent-create-opened', { detail: { mode: 'assistant' } })
-    );
+    openHireModal(view);
   }
 
-  // The ordinary create form is the shared Create Agent modal (modals.tmpl,
-  // driven by modules/agents.js) — the same one Home and the workspace pages
-  // open — not a panel in the Inspector: that form wants more width than the
-  // Inspector column has, and a card click while it is open must not throw a
-  // half-written draft away. The Inspector keeps whatever it was showing, and
+  // The ordinary create form. The Inspector keeps whatever it was showing, and
   // the created agent is focused in the collection once the modal closes
-  // (FR65).
+  // (FR65). Coming from the preset ("Create a different kind of agent
+  // instead"), the open modal swaps its content in place.
   function openCreateModal() {
-    if (state.creating) closeCreate();
+    leaveHireMode();
     // As a sheet the Inspector covers the whole page, above the modal's layer.
     if (isSheetMode() && state.inspectorOpen) closeInspector();
     // Announced as a standard create so Ori's walkthrough stops pointing at a
@@ -2679,20 +2649,112 @@
       .filter(Boolean);
   }
 
-  function closeCreate() {
-    state.creating = false;
+  /* ---- personal assistant preset (Mission 01) ------------------------------ */
+
+  // The preset is a mode of the shared Create Agent modal, as a workspace
+  // role's Create is (workspace-command.js): the ordinary form's sections step
+  // aside (agents-roster.css), the modal's body holds the hire's fields, and
+  // its footer holds Hire in place of Create Agent. Leaving the mode hands the
+  // modal back exactly as it was.
+  var HIRE_MODE = 'assistant-hire';
+  // The modal's own title, put back when the mode ends.
+  var createModalTitle = '';
+
+  function createModalElement() {
+    return document.getElementById('addAgentModal');
+  }
+
+  function inHireMode() {
+    var modal = createModalElement();
+    return !!modal && modal.dataset.agentCreateMode === HIRE_MODE;
+  }
+
+  // openHireModal shows a preset view in the modal: opening it, or re-rendering
+  // it in place when it is already up (a failed attempt that found a repair to
+  // offer). The preset is announced once it is on screen, so Ori's walkthrough
+  // anchors on controls that are really there.
+  function openHireModal(view) {
+    var modal = createModalElement();
+    var host = document.getElementById('agentCreateFormHost');
+    if (!modal || !host || typeof bootstrap === 'undefined') {
+      console.error('[roster] the Create Agent modal is not available on this page');
+      return;
+    }
+    // As a sheet the Inspector covers the whole page, above the modal's layer.
+    if (isSheetMode() && state.inspectorOpen) closeInspector();
+    enterHireMode(modal, view);
+    if (view.mode === 'form') renderAssistantCreate(view, host);
+    else renderAssistantRepair(view, host);
+
+    var announce = function () {
+      // A show that never finished leaves this waiting for the next one, which
+      // may be the ordinary form.
+      if (!inHireMode()) return;
+      var first = document.getElementById('cr-name') || document.getElementById('createSubmit');
+      if (first) first.focus();
+      window.dispatchEvent(
+        new CustomEvent('ori:agent-create-opened', { detail: { mode: 'assistant' } })
+      );
+    };
+    if (modal.classList.contains('show')) {
+      announce();
+      return;
+    }
+    // Bootstrap focuses the dialog itself once it has shown, so the first
+    // control is focused after that, not before.
+    modal.addEventListener('shown.bs.modal', announce, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modal).show();
+  }
+
+  function enterHireMode(modal, view) {
+    var title = document.getElementById('addAgentModalTitleText');
+    if (!inHireMode()) {
+      modal.dataset.agentCreateMode = HIRE_MODE;
+      modal.classList.add('is-assistant-hire');
+      if (title) createModalTitle = title.textContent;
+    }
+    if (title) title.textContent = view.title;
+  }
+
+  // leaveHireMode puts the ordinary form back in the modal's body and Create
+  // Agent back in its footer. It runs when the modal closes, and when the preset
+  // gives way to the ordinary form in place.
+  function leaveHireMode() {
+    var modal = createModalElement();
+    if (!modal || !inHireMode()) return;
     if (createAppearanceEditor && createAppearanceEditor.destroy) createAppearanceEditor.destroy();
     createAppearanceEditor = null;
-    els.createPanel.hidden = true;
-    setInspectorKicker('Selected agent');
-    if (state.selected) {
-      els.stage.hidden = false;
+    delete modal.dataset.agentCreateMode;
+    modal.classList.remove('is-assistant-hire');
+    var title = document.getElementById('addAgentModalTitleText');
+    if (title && createModalTitle) title.textContent = createModalTitle;
+    setHireButton('', null);
+    if (typeof window.resetStandaloneAgentCreateForm === 'function') {
+      window.resetStandaloneAgentCreateForm();
     } else {
-      els.placeholder.hidden = false;
+      var host = document.getElementById('agentCreateFormHost');
+      if (host) host.replaceChildren();
     }
   }
 
-  /* ---- personal assistant preset (Mission 01) ------------------------------ */
+  // The footer's Hire button, beside the modal's Create Agent button, which
+  // stays hidden while the preset is up and is never re-wired: its handler in
+  // modules/agents.js creates an ordinary agent. No label, no button (the
+  // blocked view has nothing to press).
+  function setHireButton(label, onClick) {
+    var previous = document.getElementById('createSubmit');
+    if (previous) previous.remove();
+    var create = document.getElementById('createAgentBtn');
+    if (!label || !create || !create.parentNode) return null;
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'createSubmit';
+    button.className = 'modern-btn modern-btn-primary';
+    button.textContent = label;
+    if (onClick) button.addEventListener('click', onClick);
+    create.parentNode.insertBefore(button, create.nextSibling);
+    return button;
+  }
 
   // The shared hire module (personal-assistant-hire.js) publishes this seam. It
   // is read at use time, never at load, so script order cannot leave it unset.
@@ -2738,94 +2800,78 @@
     }
   }
 
-  function assistantSaveBar(buttonLabel) {
-    return (
-      '<div class="save-bar" id="savebar-create">' +
-      '<span class="save-status is-muted"></span>' +
-      '<button type="button" class="btn-ghost" id="createCancel2">Cancel</button>' +
-      (buttonLabel
-        ? '<button type="button" class="btn-primary" id="createSubmit">' +
-          esc(buttonLabel) +
-          '</button>'
-        : '') +
-      '</div>'
-    );
-  }
-
-  // renderAssistantCreate fills the create panel with Mission 01's hire preset.
-  // (A relationship that already has an assistant to keep gets the one-button
-  // reconnect / resume view, or the blocked status with no button, from
-  // renderAssistantRepair instead.)
-  function renderAssistantCreate(view) {
+  // renderAssistantCreate fills the modal with Mission 01's hire preset: the
+  // ordinary form's Name and Appearance, and the assistant's focus in place of
+  // its role, model and profile. (A relationship that already has an assistant
+  // to keep gets the one-button reconnect / resume view, or the blocked status
+  // with no button, from renderAssistantRepair instead.)
+  function renderAssistantCreate(view, host) {
     var api = hireApi();
     var current = assistant.state || {};
     var chosen = Array.isArray(current.focus_areas) && current.focus_areas.length;
     var selected = new Set(chosen ? current.focus_areas : []);
     var focusBoxes = api.FOCUS_AREAS.map(function (option) {
       var on = chosen ? selected.has(option.value) : option.selected;
+      var id = 'cr-focus-' + esc(option.value);
       return (
-        '<label class="check"><input type="checkbox" name="cr-focus" value="' +
+        '<div class="form-check"><input class="form-check-input" type="checkbox" name="cr-focus" id="' +
+        id +
+        '" value="' +
         esc(option.value) +
         '"' +
         (on ? ' checked' : '') +
-        '> ' +
+        '><label class="form-check-label" for="' +
+        id +
+        '">' +
         esc(option.label) +
-        '</label>'
+        '</label></div>'
       );
     }).join('');
     var name = String(current.display_name || '').trim() || api.DEFAULT_ASSISTANT_NAME;
 
-    els.createBody.innerHTML =
-      '<form class="stage-form create-preset" id="createForm" novalidate>' +
-      '<div class="create-preset__intro">' +
-      '<h2 class="create-preset__title">' +
-      esc(view.title) +
-      '</h2>' +
-      '<p class="create-preset__lead">' +
+    host.innerHTML =
+      '<div class="create-preset" id="cr-hire">' +
+      '<p class="form-helper create-preset__lead">' +
       esc(view.message) +
       '</p>' +
+      '<div class="mb-3">' +
+      '<label class="form-label" for="cr-name">Name</label>' +
+      '<input id="cr-name" class="modern-input w-100" type="text" value="' +
+      esc(name) +
+      '" maxlength="' +
+      api.ASSISTANT_NAME_MAX_LENGTH +
+      '" required autocomplete="off" spellcheck="false">' +
       '</div>' +
-      field(
-        'Name',
-        '<input id="cr-name" type="text" value="' +
-          esc(name) +
-          '" maxlength="' +
-          api.ASSISTANT_NAME_MAX_LENGTH +
-          '" required autocomplete="off" spellcheck="false">',
-        'cr-name'
-      ) +
       // The same Appearance editor as the ordinary form, with a face already
       // suggested for an orchestrator. No upload: the hire takes one request.
-      '<div class="field field--appearance"><div class="field__control" id="cr-appearance-host"></div></div>' +
-      '<fieldset class="field create-preset__focus" id="cr-focus-group">' +
-      '<legend class="field__label">What should they help with?</legend>' +
-      '<div class="field__control create-preset__focus-grid">' +
+      '<div class="mb-3" id="cr-appearance-host"></div>' +
+      '<fieldset class="mb-3 create-preset__focus" id="cr-focus-group">' +
+      '<legend class="form-label">What should they help with?</legend>' +
+      '<div class="create-preset__focus-grid">' +
       focusBoxes +
       '</div></fieldset>' +
-      field(
-        'What would make them useful this week? (optional)',
-        '<textarea id="cr-mandate" rows="2" maxlength="' +
-          api.ASSISTANT_MANDATE_MAX_LENGTH +
-          '" placeholder="' +
-          esc(api.MANDATE_PLACEHOLDER) +
-          '">' +
-          esc(current.mandate || '') +
-          '</textarea>',
-        'cr-mandate'
-      ) +
-      '<p class="create-preset__boundary">' +
+      '<div class="mb-3">' +
+      '<label class="form-label" for="cr-mandate">What would make them useful this week? (optional)</label>' +
+      '<textarea id="cr-mandate" class="modern-input w-100" rows="2" maxlength="' +
+      api.ASSISTANT_MANDATE_MAX_LENGTH +
+      '" placeholder="' +
+      esc(api.MANDATE_PLACEHOLDER) +
+      '">' +
+      esc(current.mandate || '') +
+      '</textarea>' +
+      '</div>' +
+      '<p class="form-helper create-preset__boundary">' +
       esc(api.HIRE_BOUNDARY_COPY) +
       '</p>' +
       '<div class="create-preset__error" id="createError" role="alert" tabindex="-1" hidden></div>' +
-      '</form>' +
-      assistantSaveBar(view.buttonLabel) +
-      '<p class="create-panel__switch"><button type="button" class="roster-linkbtn" id="cr-standard-form">' +
-      'Create a different kind of agent instead</button></p>';
+      '<p class="create-preset__switch"><button type="button" class="roster-linkbtn" id="cr-standard-form">' +
+      'Create a different kind of agent instead</button></p>' +
+      '</div>';
 
     mountCreateAppearanceEditor({ role: 'orchestrator', allowedModes: ['generated', 'character'] });
 
     var nameInput = document.getElementById('cr-name');
-    var submit = document.getElementById('createSubmit');
+    var submit = setHireButton(view.buttonLabel, submitAssistantHire);
     // Hire is enabled whenever there is a name (PRD FR23); pressing it is the
     // one confirmation the hire needs.
     var syncSubmit = function () {
@@ -2833,34 +2879,27 @@
     };
     nameInput.addEventListener('input', syncSubmit);
     syncSubmit();
-    submit.addEventListener('click', submitAssistantHire);
-    document.getElementById('createCancel2').addEventListener('click', closeCreate);
     document.getElementById('cr-standard-form').addEventListener('click', openCreateModal);
-    nameInput.focus();
   }
 
-  function renderAssistantRepair(view) {
-    els.createBody.innerHTML =
+  // The view's title is the modal's (enterHireMode); the body says why.
+  function renderAssistantRepair(view, host) {
+    if (createAppearanceEditor && createAppearanceEditor.destroy) createAppearanceEditor.destroy();
+    createAppearanceEditor = null;
+    host.innerHTML =
       '<div class="create-preset create-preset--repair" id="cr-repair">' +
-      '<h2 class="create-preset__title">' +
-      esc(view.title) +
-      '</h2>' +
-      '<p class="create-preset__lead">' +
+      '<p class="create-preset__message">' +
       esc(view.message) +
       '</p>' +
-      (view.detail ? '<p class="create-preset__boundary">' + esc(view.detail) + '</p>' : '') +
+      (view.detail
+        ? '<p class="form-helper create-preset__boundary">' + esc(view.detail) + '</p>'
+        : '') +
       '<div class="create-preset__error" id="createError" role="alert" tabindex="-1" hidden></div>' +
-      '</div>' +
-      assistantSaveBar(view.buttonLabel);
-    document.getElementById('createCancel2').addEventListener('click', closeCreate);
-    var submit = document.getElementById('createSubmit');
-    if (submit) {
-      submit.addEventListener(
-        'click',
-        view.mode === 'reconnect' ? submitAssistantRepair : submitAssistantResume
-      );
-      submit.focus();
-    }
+      '</div>';
+    setHireButton(
+      view.buttonLabel,
+      view.mode === 'reconnect' ? submitAssistantRepair : submitAssistantResume
+    );
   }
 
   function showCreateError(message) {
@@ -4665,16 +4704,6 @@
     syncUrl(state.selected, false);
   }
 
-  /* ---- form field builders ------------------------------------------------- */
-
-  function field(label, control, forId) {
-    // Associate the label with its control (forId) for a11y; controls that carry
-    // their own wrapping label (e.g. the checkbox) pass no forId and get a span.
-    var lab = forId
-      ? '<label class="field__label" for="' + forId + '">' + esc(label) + '</label>'
-      : '<span class="field__label">' + esc(label) + '</span>';
-    return '<div class="field">' + lab + '<div class="field__control">' + control + '</div></div>';
-  }
   /* ---- misc helpers -------------------------------------------------------- */
 
   function val(id) {

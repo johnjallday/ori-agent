@@ -1848,6 +1848,105 @@
     return derive(draft).payload;
   }
 
+  // ---- Build with your assistant --------------------------------------------
+  //
+  // The assistant staffs the team through the same operations the Team step's
+  // controls call. There is no second path: a fill the Team step would refuse
+  // (a role already held, an agent that cannot be attached) is refused here too.
+
+  // applyTeamPatch applies an assistant's team: "agentless" for a Blank
+  // workspace with no agents, role fills (create or assign), and saved
+  // teammates to add. It returns the role ids it filled. A create fill for a
+  // name a saved agent already has becomes an assignment, as the guided
+  // staging does, rather than a duplicate agent.
+  function applyTeamPatch(draft, patch) {
+    const filled = [];
+    if (!draft || !patch || typeof patch !== 'object') return filled;
+    if (text(patch.mode) === 'agentless') {
+      setAgentless(draft, true);
+      return filled;
+    }
+    if (draft.agentless && text(patch.mode) === 'staffed') setAgentless(draft, false);
+    for (const role of Array.isArray(patch.roles) ? patch.roles : []) {
+      const roleId = text(role && role.role_id);
+      const name = text(role && role.agent_name);
+      if (!roleId || !name) continue;
+      let mode = text(role.mode) === FILL_ASSIGN ? FILL_ASSIGN : FILL_CREATE;
+      const saved = findSavedAgent(draft, name);
+      if (mode === FILL_CREATE && saved && isAttachableSavedAgent(saved)) mode = FILL_ASSIGN;
+      const fill =
+        mode === FILL_ASSIGN
+          ? { mode, name }
+          : {
+              mode,
+              name,
+              provider: text(role.provider),
+              model: text(role.model),
+              systemPrompt: text(role.system_prompt)
+            };
+      const current = getRoleFill(draft, roleId);
+      if (current && current.mode === mode && agentKey(current.name) === agentKey(name)) {
+        filled.push(roleId);
+        continue;
+      }
+      if (current) clearRoleFill(draft, roleId);
+      if (setRoleFill(draft, roleId, fill)) filled.push(roleId);
+      else if (current) setRoleFill(draft, roleId, current);
+    }
+    for (const name of Array.isArray(patch.saved_agents) ? patch.saved_agents : []) {
+      addSavedAgent(draft, text(name));
+    }
+    return filled;
+  }
+
+  // serialize is the part of the draft a person decided, as plain JSON: which
+  // roles are filled and how, the saved teammates, the chosen primary, and
+  // whether the workspace has no agents. The plan, the saved roster, and
+  // review state are re-read from the server rather than stored.
+  function serialize(draft) {
+    if (!draft) return null;
+    return {
+      version: 1,
+      blueprint_key: text(draft.plan && draft.plan.blueprintKey),
+      role_fills: Array.from(draft.roleFills || []).map(([roleId, fill]) => ({
+        role_id: roleId,
+        ...fill
+      })),
+      saved_selections: [...(draft.savedSelections || [])],
+      explicit_primary: text(draft.explicitPrimary),
+      agentless: Boolean(draft.agentless),
+      include_blueprint_team: draft.includeBlueprintTeam !== false,
+      assistant_hire: draft.assistantHire ? { ...draft.assistantHire } : null
+    };
+  }
+
+  // restore puts a serialized team back onto a draft whose plan for the same
+  // blueprint is loaded, through the same mutators. A state for a different
+  // blueprint restores nothing: its role ids name slots that do not exist.
+  function restore(draft, state) {
+    if (!draft || !state || typeof state !== 'object') return false;
+    const key = text(state.blueprint_key);
+    if (key && key !== text(draft.plan && draft.plan.blueprintKey)) return false;
+    if (state.agentless) {
+      setAgentless(draft, true);
+      return true;
+    }
+    if (state.include_blueprint_team === false) setIncludeBlueprintTeam(draft, false);
+    for (const entry of Array.isArray(state.role_fills) ? state.role_fills : []) {
+      const roleId = text(entry && entry.role_id);
+      if (!roleId || getRoleFill(draft, roleId)) continue;
+      setRoleFill(draft, roleId, entry);
+    }
+    for (const name of Array.isArray(state.saved_selections) ? state.saved_selections : []) {
+      addSavedAgent(draft, text(name));
+    }
+    if (text(state.explicit_primary)) setExplicitPrimary(draft, text(state.explicit_primary));
+    if (state.assistant_hire && typeof state.assistant_hire === 'object') {
+      setAssistantHire(draft, state.assistant_hire);
+    }
+    return true;
+  }
+
   window.CreateWorkspaceTeamDraft = {
     PLAN_IDLE,
     PLAN_LOADING,
@@ -1903,6 +2002,9 @@
     identityFrom,
     agentKey,
     derive,
-    toCreatePayload
+    toCreatePayload,
+    applyTeamPatch,
+    serialize,
+    restore
   };
 })();

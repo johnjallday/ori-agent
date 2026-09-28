@@ -1,11 +1,10 @@
 package session
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -15,15 +14,9 @@ import (
 // lost on restart. They must now round-trip through Save/Get, survive an Upsert
 // (the mission/Action Center write path), and persist to the DB.
 func TestWorkspaceOpportunityPersistence(t *testing.T) {
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
+	db := testdb.Open(t)
 	store := NewHybridStoreWithDB(db, 50)
-	defer func() { _ = store.Close() }()
+	defer cleanupTestOwner(t, store)()
 	adapter := NewWorkspaceStoreAdapter(store)
 
 	now := time.Now().UTC().Truncate(time.Second)

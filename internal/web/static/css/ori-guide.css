@@ -861,11 +861,14 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   pointer-events: auto;
 }
 
+/* Dim only, no backdrop-filter. Home already stacks blurred layers (the navbar,
+   its buttons) over a map that keeps animating, and a full-viewport blur on top
+   made the browser re-blur all of it every frame: the page flickered behind
+   Ori's step, and dropped to a fraction of its frame rate without a GPU. */
 .ori-spotlight__scrim {
   position: absolute;
   inset: 0;
   background: var(--ori-spotlight-dim);
-  backdrop-filter: blur(2px);
   animation: ori-spotlight-fade 180ms ease-out;
 }
 

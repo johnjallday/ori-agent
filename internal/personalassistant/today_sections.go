@@ -12,6 +12,32 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// unfinishedBuildItem is the one "Finish building …" item while a workspace
+// build is open (FR42). A build past its expiry already reads as abandoned.
+func (s *TodayService) unfinishedBuildItem(ctx context.Context, userID string, out *TodayProjection) (TodayItem, bool) {
+	if s.workspaceBuilds == nil {
+		return TodayItem{}, false
+	}
+	doc, err := s.workspaceBuilds.Read(ctx, userID)
+	if err != nil {
+		out.UnavailableSources = appendSource(out.UnavailableSources, "workspace builds")
+		return TodayItem{}, false
+	}
+	open := doc.Open()
+	if open == nil {
+		return TodayItem{}, false
+	}
+	name := strings.TrimSpace(open.Draft.Name)
+	if name == "" {
+		name = "your workspace"
+	}
+	return TodayItem{
+		ID: open.ID, Kind: "workspace_build", Title: "Finish building " + name,
+		Detail: "Your assistant kept what you set up so far.", SourceAt: open.UpdatedAt,
+		Actions: []string{"resume", "discard"},
+	}, true
+}
+
 // buildTodaySections composes the three user-facing regions from the same
 // bounded, canonical reads used by the legacy fields. Offer cards keep their
 // independent controllers; their items here are placement signals, not a
@@ -27,6 +53,9 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		} else if view.Offer != nil && (view.Offer.Status == FolderOfferPending || view.Offer.Status == FolderOfferAwaitingOutcome) {
 			needs = append(needs, TodayItem{ID: view.Offer.ID, Kind: "folder_offer", Title: "Look at " + view.Offer.Folder})
 		}
+	}
+	if item, ok := s.unfinishedBuildItem(ctx, userID, out); ok {
+		needs = append(needs, item)
 	}
 	if out.SpecialistSetup != nil {
 		switch out.SpecialistSetup.Lifecycle {

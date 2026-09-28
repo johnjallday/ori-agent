@@ -1,4 +1,5 @@
-// Tests for ori-spotlight.js — the geometry of Ori's blocking layer. The DOM
+// Tests for ori-spotlight.js — the geometry of Ori's blocking layer, and how it
+// holds the page still. The DOM
 // itself is driven in a real browser by scripts/demo-meet-assistant.mjs and the
 // personal-assistant-foundation Playwright spec.
 //   node --test internal/web/static/js/modules/ori-spotlight.test.js
@@ -8,6 +9,7 @@ import assert from 'node:assert/strict';
 import {
   besideWidth,
   holeFor,
+  lockPageScroll,
   placeBeside,
   placeCallout,
   roundedRectPath,
@@ -115,4 +117,23 @@ test('beside a form: a field near the bottom keeps the callout on screen', () =>
   const place = placeBeside(form, hire, view, { width: 340, height: 150 });
   assert.equal(place.top, 900 - 16 - 150);
   assert.ok(place.arrow <= 150 - 20);
+});
+
+test('the page holds still under the layer, and gets its own styles back', () => {
+  const root = { clientWidth: 1280, style: { overflow: 'auto', scrollbarGutter: '' } };
+  const restore = lockPageScroll(root, 1280);
+  assert.equal(root.style.overflow, 'hidden');
+  // An overlay scrollbar takes no width: nothing to keep.
+  assert.equal(root.style.scrollbarGutter, '');
+  restore();
+  assert.deepEqual(root.style, { overflow: 'auto', scrollbarGutter: '' });
+});
+
+test('a classic scrollbar keeps its gutter, so the page does not shift sideways', () => {
+  const root = { clientWidth: 1265, style: { overflow: '', scrollbarGutter: '' } };
+  const restore = lockPageScroll(root, 1280);
+  assert.equal(root.style.overflow, 'hidden');
+  assert.equal(root.style.scrollbarGutter, 'stable');
+  restore();
+  assert.deepEqual(root.style, { overflow: '', scrollbarGutter: '' });
 });

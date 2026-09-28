@@ -5,6 +5,9 @@
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
       <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
         <h6 id="folderModalTitle" class="modal-title" style="color: var(--text-primary);">Create Workspace</h6>
+        <!-- Reopens the assistant's build pane after "I'll do it myself".
+             Shown only while build mode is available for this open. -->
+        <button type="button" id="workspaceBuildWithBtn" class="workspace-build-with-btn" hidden></button>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close create workspace"></button>
       </div>
       <div class="modal-body workspace-create-modal-body">
@@ -593,6 +596,12 @@
         <button type="button" id="wizardNextBtn" class="modern-btn modern-btn-primary">Next →</button>
         <button type="button" id="createFolderBtn" class="modern-btn modern-btn-primary" hidden>Create Workspace</button>
       </div>
+      <!-- Build with your assistant: the conversation that fills the form
+           beside it. Rendered by create-workspace-build-pane.js; it comes after
+           the footer so keyboard order reaches it once the wizard is done. Its
+           ids are build-scoped on purpose — the global assistant panel is
+           mounted on every page and must never be duplicated here. -->
+      <aside id="workspaceBuildPane" class="workspace-build-pane" aria-label="Build with your assistant" hidden></aside>
     </div>
   </div>
 </div>

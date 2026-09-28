@@ -204,11 +204,7 @@ type emailOpsQuestHarness struct {
 func newEmailOpsQuestHarness(t *testing.T, conn *connections.Connection) *emailOpsQuestHarness {
 	t.Helper()
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := newFixtureDatabase(t)
 	store := emailOpsQuestWorkspaceStore(t, false)
 	conns := connectionStore(t, conn)
 	accounts := healthyAccount()
@@ -496,11 +492,7 @@ func TestEmailOpsQuestReadyMatchesWorkspaceEmailStatus(t *testing.T) {
 func questLifecycleFor(t *testing.T, store *workspace.InMemoryStore, evaluator *emailReadinessEvaluator) setupjourney.LifecycleState {
 	t.Helper()
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := newFixtureDatabase(t)
 	readers := make(map[specialist.SetupStepKind]setupjourney.CanonicalReader)
 	for _, kind := range specialist.SetupStepKinds() {
 		readers[kind] = setupjourney.CanonicalReaderFunc(func(context.Context, setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {

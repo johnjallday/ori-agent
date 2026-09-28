@@ -3,20 +3,31 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/vaultref"
 )
 
 func setupTestDB(t *testing.T) (*database.DB, func()) {
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-	return db, func() { _ = db.Close() }
+	t.Helper()
+	db := testdb.Open(t)
+	return db, cleanupTestOwner(t, db)
+}
+
+func cleanupTestOwner(t *testing.T, owner io.Closer) func() {
+	t.Helper()
+	cleanup := sync.OnceFunc(func() {
+		if err := owner.Close(); err != nil {
+			t.Errorf("close test store: %v", err)
+		}
+	})
+	t.Cleanup(cleanup)
+	return cleanup
 }
 
 func TestSQLiteStore_RenameSessionsByAgentPreservesSessionIdentity(t *testing.T) {

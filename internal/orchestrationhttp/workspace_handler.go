@@ -185,6 +185,12 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		if status := workspace.EvaluateGroupRequirementLifecycle(groupContractWorkspace, wh.workspaceStore.Get); status != nil {
 			response["group_requirement_status"] = status
 		}
+		// "How this was set up", for a workspace built with the assistant.
+		// Provenance is portable workspace.json state, read from the canonical
+		// folder copy.
+		if provenance := groupContractWorkspace.GetTemplateProvenance(); provenance != nil && provenance.BuildSummary != nil {
+			response["build_summary"] = provenance.BuildSummary
+		}
 
 		// Add sessions if session store is available
 		if wh.sessionStore != nil {

@@ -442,11 +442,14 @@ function ptcGetSelectedTemplate() {
   return ptcSelected;
 }
 
-function ptcEmitSelection() {
+// A programmatic selection is the picker's own: its default after a reset or a
+// catalog load, not a card the user picked. Listeners that treat a selection
+// as the user's choice (build mode) tell the two apart by this flag.
+function ptcEmitSelection(options) {
   const modal = document.getElementById('addFolderModal');
   modal?.dispatchEvent(
     new CustomEvent('workspace-template-selected', {
-      detail: { template: ptcSelected }
+      detail: { template: ptcSelected, programmatic: Boolean(options && options.programmatic) }
     })
   );
 }
@@ -514,7 +517,7 @@ function ptcHandleOptionKeydown(event) {
   target.click();
 }
 
-function ptcSelect(template, cardEl) {
+function ptcSelect(template, cardEl, options) {
   ptcSelected = template || PTC_BLANK;
   const els = ptcElements();
   // A refusal message belongs to the attempt that produced it. Choosing a
@@ -529,7 +532,7 @@ function ptcSelect(template, cardEl) {
   // selecting Blank keeps a typed path so it can act as the override.
   if (els.pathInput && !ptcSelected.blank) els.pathInput.value = '';
   ptcUpdateUI();
-  ptcEmitSelection();
+  ptcEmitSelection(options);
 }
 
 // Attaches the shared behavior every blueprint control has, whichever shape it
@@ -1336,7 +1339,7 @@ function ptcBlankCard() {
 function ptcReset() {
   const els = ptcElements();
   if (els.pathInput) els.pathInput.value = '';
-  ptcSelect(PTC_BLANK, ptcBlankCard());
+  ptcSelect(PTC_BLANK, ptcBlankCard(), { programmatic: true });
 }
 
 function ptcSyncImportVisibility() {
@@ -1450,8 +1453,8 @@ async function ptcPopulate(options) {
     }
   }
 
-  if (restoredTemplate) ptcSelect(restoredTemplate, restored);
-  else ptcSelect(PTC_BLANK, blankCard);
+  if (restoredTemplate) ptcSelect(restoredTemplate, restored, { programmatic: true });
+  else ptcSelect(PTC_BLANK, blankCard, { programmatic: true });
 }
 
 // ptcSelectionKey identifies a blueprint across a catalog reload. A
