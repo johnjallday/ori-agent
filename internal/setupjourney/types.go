@@ -128,6 +128,7 @@ const (
 	ReasonStaffingRequired           ReasonCode = "staffing_required"
 	ReasonStaffingNeedsAttention     ReasonCode = "staffing_needs_attention"
 	ReasonProjectRoleSnapshotMissing ReasonCode = "project_role_snapshot_missing"
+	ReasonProjectRoleMirrorDiverged  ReasonCode = "project_role_mirror_diverged"
 
 	// Account-link shape reasons. Each maps from one mailbox readiness verdict
 	// that blocks progress; unfinished first-time setup (connect Google, enable
@@ -153,7 +154,7 @@ var validReasonCodes = map[ReasonCode]struct{}{
 	ReasonBlueprintUnavailable:               {}, ReasonAssistantProgramMismatch: {},
 	ReasonProjectSelectionRequired: {}, ReasonProjectScopeInvalid: {}, ReasonProjectAlreadyConnected: {},
 	ReasonProjectUnavailable: {}, ReasonRuntimeSetupRequired: {}, ReasonRuntimeNeedsAttention: {},
-	ReasonHomeUnavailable: {}, ReasonHomeProviderMissing: {}, ReasonStaffingRequired: {}, ReasonStaffingNeedsAttention: {}, ReasonProjectRoleSnapshotMissing: {},
+	ReasonHomeUnavailable: {}, ReasonHomeProviderMissing: {}, ReasonStaffingRequired: {}, ReasonStaffingNeedsAttention: {}, ReasonProjectRoleSnapshotMissing: {}, ReasonProjectRoleMirrorDiverged: {},
 	ReasonWorkspaceRequired: {}, ReasonAccountConnectionNotConfigured: {},
 	ReasonAccountReconnectRequired: {}, ReasonAccountVaultRepairRequired: {},
 	ReasonMailboxLinkRequired: {}, ReasonMailboxAccountUnavailable: {},

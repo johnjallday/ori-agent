@@ -22,7 +22,10 @@ import (
 
 const maxStaffingRoles = workspace.AssistantProgramMaxRoles
 
-var errProjectRoleSnapshotMissing = errors.New("split project role snapshot is missing")
+var (
+	errProjectRoleSnapshotMissing = errors.New("split project role snapshot is missing")
+	errProjectRoleMirrorDiverged  = errors.New("split project role mirror diverged")
+)
 
 // StaffingProjection is safe response-only staffing state. Stable agent
 // instance IDs, prompts, memories, credentials, histories, paths, and runtime
@@ -675,7 +678,7 @@ func (a *AssistantStaffingAdapter) StaffRolesFromReviewedWorkspaceSetup(ctx cont
 		return ErrConflict
 	}
 	state := station.GetAssistantProgramState()
-	if state == nil || state.Declaration == nil || missingSplitProjectRoleSnapshot(state, link) {
+	if state == nil || state.Declaration == nil || !splitProjectRoleMirrorsAgree(a.workspaces, project, state, link) || missingSplitProjectRoleSnapshot(state, link) {
 		return ErrConflict
 	}
 	roles := append([]workspace.AssistantProgramRoleSpec(nil), state.Declaration.Roles...)
@@ -898,6 +901,9 @@ func (a *AssistantStaffingAdapter) owner(scope ReadScope) (*staffingOwner, error
 	if link == nil || link.SchemaVersion < workspace.AssistantProjectLinkSchemaVersion || link.StationWorkspaceID != station.ID || link.Key.Normalize() != state.Key.Normalize() {
 		return nil, workspace.ErrAssistantProgramVersionConflict
 	}
+	if !splitProjectRoleMirrorsAgree(a.workspaces, project, state, link) {
+		return nil, errProjectRoleMirrorDiverged
+	}
 	if missingSplitProjectRoleSnapshot(state, link) {
 		return nil, errProjectRoleSnapshotMissing
 	}
@@ -926,6 +932,33 @@ func (a *AssistantStaffingAdapter) owner(scope ReadScope) (*staffingOwner, error
 		station: station, project: project, declaration: declaration,
 		homeProviderAvailable: homeProviderAvailable, projectProviderAvailable: projectProviderAvailable,
 	}, nil
+}
+
+// A split project's role and binding snapshots must agree across SQLite's
+// primary record and the portable workspace folder. A folder-first partial
+// write cannot turn an old, roleless child into a staffed project (or vice
+// versa). A plain FileStore has no distinct mirror and needs no second read.
+func splitProjectRoleMirrorsAgree(store workspace.Store, project *workspace.Workspace, state *workspace.AssistantProgramState, link *workspace.AssistantProjectLink) bool {
+	if project == nil || state == nil || state.HomeProvider == nil || link == nil || link.ProjectProvider == nil {
+		return true
+	}
+	mirror, ok := store.(workspace.MirrorWorkspaceProvider)
+	if !ok {
+		return true
+	}
+	folder, mirrored, err := mirror.GetMirrorWorkspace(project.ID)
+	if err != nil {
+		return false
+	}
+	if !mirrored {
+		return true
+	}
+	if folder == nil || folder.ID != project.ID || folder.OwnerUserID != project.OwnerUserID || folder.ParentID != project.ParentID || folder.Status != project.Status || folder.GetAssistantProjectLink() == nil {
+		return false
+	}
+	primaryLink, primaryErr := json.Marshal(link)
+	folderLink, folderErr := json.Marshal(folder.GetAssistantProjectLink())
+	return primaryErr == nil && folderErr == nil && bytes.Equal(primaryLink, folderLink)
 }
 
 // A split project blueprint declares at least one required project role. Older
@@ -1296,6 +1329,8 @@ func staffingReason(err error) ReasonCode {
 	switch {
 	case errors.Is(err, errProjectRoleSnapshotMissing):
 		return ReasonProjectRoleSnapshotMissing
+	case errors.Is(err, errProjectRoleMirrorDiverged):
+		return ReasonProjectRoleMirrorDiverged
 	case errors.Is(err, workspace.ErrAssistantStationNotFound):
 		return ReasonHomeUnavailable
 	case errors.Is(err, workspace.ErrAssistantProgramVersionConflict):

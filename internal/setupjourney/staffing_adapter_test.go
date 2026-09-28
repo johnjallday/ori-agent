@@ -303,6 +303,115 @@ func TestAssistantStaffingAdapter_PreFixSplitChildCannotCompleteWithoutRoleSnaps
 	}
 }
 
+func TestAssistantStaffingAdapter_DivergentSplitProjectRolesRefuseStaffing(t *testing.T) {
+	adapter, primary, scope, _ := staffingFixture(t)
+	home, err := primary.Get(scope.HomeWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := home.GetAssistantProgramState()
+	var projectRoles []workspace.AssistantProgramRoleSpec
+	var homeRoles []workspace.AssistantProgramRoleSpec
+	for _, role := range state.Declaration.Roles {
+		if role.Scope == workspace.AssistantRoleScopeProject {
+			projectRoles = append(projectRoles, role)
+		} else {
+			homeRoles = append(homeRoles, role)
+		}
+	}
+	if err := primary.Update(scope.HomeWorkspaceID, func(current *workspace.Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.Declaration.Roles = homeRoles
+		state.HomeProvider = &workspace.AssistantProgramHomeOwner{PluginID: "home-provider"}
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.Update(scope.ProjectWorkspaceID, func(current *workspace.Workspace) error {
+		link := current.GetAssistantProjectLink()
+		link.ProjectRoles = projectRoles
+		link.ProjectProvider = &workspace.AssistantProjectProviderOwner{PluginID: "project-provider"}
+		current.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := workspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{scope.HomeWorkspaceID, scope.ProjectWorkspaceID} {
+		current, getErr := primary.Get(id)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if saveErr := folder.Save(current); saveErr != nil {
+			t.Fatal(saveErr)
+		}
+	}
+	adapter.workspaces = workspace.NewSyncStore(primary, folder)
+	if read, err := adapter.Read(context.Background(), scope); err != nil || read.BlockedReason != "" || read.Complete {
+		t.Fatalf("intact split roles should permit separate staffing: %#v, %v", read, err)
+	}
+	if err := folder.Update(scope.ProjectWorkspaceID, func(current *workspace.Workspace) error {
+		link := current.GetAssistantProjectLink()
+		link.ProjectRoles = nil // Simulate a folder-first partial save with stale role evidence.
+		current.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	read, err := adapter.Read(context.Background(), scope)
+	if err != nil || read.BlockedReason != ReasonProjectRoleMirrorDiverged || read.Complete || len(read.AvailableActions) != 0 {
+		t.Fatalf("divergent split roles were trusted: %#v, %v", read, err)
+	}
+	input := json.RawMessage(`{"roles":[{"role_id":"project_reviewer","name":"Not Staffed","provider":"openai","model":"gpt-4o-mini"}]}`)
+	if _, err := adapter.Review(context.Background(), scope, ActionReviewProjectStaffing, input); err != ErrConflict {
+		t.Fatalf("divergent mirror review = %v", err)
+	}
+	if err := adapter.StaffRolesFromReviewedWorkspaceSetup(context.Background(), scope.ProjectWorkspaceID, []RoleFill{{
+		RoleID: "project_reviewer", Name: "Not Staffed", Provider: "openai", Model: "gpt-4o-mini",
+	}}); err != ErrConflict {
+		t.Fatalf("divergent mirror workspace setup = %v", err)
+	}
+	if err := adapter.StaffRoleOnWorkspace(context.Background(), scope.ProjectWorkspaceID, []RoleFill{{
+		RoleID: "project_reviewer", Name: "Not Staffed", Provider: "openai", Model: "gpt-4o-mini",
+	}}); err != ErrConflict {
+		t.Fatalf("divergent mirror direct project staffing = %v", err)
+	}
+	if _, found := adapter.profiles.GetAgent("Not Staffed"); found {
+		t.Fatal("divergent mirror staffed a profile")
+	}
+	// Only a test owner restores the exact unchanged primary into the folder;
+	// a GET or review must never choose this recovery winner in production.
+	canonical, err := primary.Get(scope.ProjectWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := folder.Save(canonical); err != nil {
+		t.Fatal(err)
+	}
+	if read, err := adapter.Read(context.Background(), scope); err != nil || read.BlockedReason != "" {
+		t.Fatalf("exact test restoration should permit review: %#v, %v", read, err)
+	}
+	if err := primary.Update(scope.ProjectWorkspaceID, func(current *workspace.Workspace) error {
+		link := current.GetAssistantProjectLink()
+		link.ProjectRoles = nil // Reverse split: the folder has more than the primary.
+		current.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	read, err = adapter.Read(context.Background(), scope)
+	if err != nil || read.BlockedReason != ReasonProjectRoleMirrorDiverged || read.Complete || len(read.AvailableActions) != 0 {
+		t.Fatalf("stale primary was trusted over the folder: %#v, %v", read, err)
+	}
+	if _, err := adapter.Review(context.Background(), scope, ActionReviewProjectStaffing, input); err != ErrConflict {
+		t.Fatalf("reverse split mirror review = %v", err)
+	}
+}
+
 func TestAssistantStaffingAdapter_WorkspaceRoleUsesLinkOwnedProjectRoles(t *testing.T) {
 	adapter, workspaces, scope, grants := staffingFixture(t)
 	grants.personal = map[string]bool{"project-skill": true}
