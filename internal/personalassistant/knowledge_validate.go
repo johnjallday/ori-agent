@@ -176,3 +176,20 @@ func cloneKnowledge(doc KnowledgeDocument) KnowledgeDocument {
 	copyDoc.Present = doc.Present
 	return copyDoc
 }
+
+// encodeKnowledge is the sidecar's on-disk form. It is platform-neutral:
+// continuity projection uses it on every OS, not only the Unix store.
+func encodeKnowledge(doc KnowledgeDocument) ([]byte, error) {
+	if err := validateKnowledge(doc); err != nil {
+		return nil, err
+	}
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	data = append(data, '\n')
+	if len(data) > knowledgeMaxBytes {
+		return nil, ErrKnowledgeLimit
+	}
+	return data, nil
+}
