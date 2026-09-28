@@ -791,7 +791,9 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 	var data []byte
 	var err error
 	if s.localConfig != nil && s.localConfig.native(context.Background(), id) != nil {
-		data, err = workspacecontinuity.ReadCanonicalFile(context.Background(), folder, WorkspaceConfigFile, maxNativeWorkspaceBytes)
+		data, err = readLiveWorkspaceFile(func() ([]byte, error) {
+			return workspacecontinuity.ReadCanonicalFile(context.Background(), folder, WorkspaceConfigFile, maxNativeWorkspaceBytes)
+		})
 	} else {
 		data, err = readNativeWorkspaceFile(folder)
 	}

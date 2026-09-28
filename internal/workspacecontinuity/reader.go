@@ -141,6 +141,9 @@ func readFileBounded(root *os.Root, path string, limit int64) ([]byte, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrIncomplete
 		}
+		if errors.Is(err, ErrChanged) {
+			return nil, ErrChanged // replaced while opening, e.g. by an atomic save
+		}
 		return nil, ErrUnsafe
 	}
 	defer func() { _ = file.Close() }()

@@ -31,6 +31,9 @@ func OpenCanonicalFile(directory, path string) (*os.File, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, os.ErrNotExist
 		}
+		if errors.Is(err, ErrChanged) {
+			return nil, ErrChanged // replaced while opening, e.g. by an atomic save
+		}
 		return nil, ErrUnsafe
 	}
 	return file, nil

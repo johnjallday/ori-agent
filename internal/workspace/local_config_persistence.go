@@ -60,10 +60,35 @@ func decodeLocalReference(data []byte, reference *string) error {
 	return nil
 }
 
+// liveWorkspaceReadAttempts bounds readLiveWorkspaceFile's retries.
+const liveWorkspaceReadAttempts = 5
+
+// readLiveWorkspaceFile runs read again while it reports ErrChanged. Every save
+// replaces workspace.json atomically (write, then rename), so a read that
+// overlaps one sees the path move to a new file. The replacement is complete,
+// so read it rather than failing the caller — os.ReadFile, which the strict
+// readers replaced, never failed here, and callers such as ListActive and boot
+// task reconciliation silently skip a workspace whose read fails.
+func readLiveWorkspaceFile(read func() ([]byte, error)) ([]byte, error) {
+	var err error
+	for range liveWorkspaceReadAttempts {
+		var data []byte
+		data, err = read()
+		if !errors.Is(err, workspacecontinuity.ErrChanged) {
+			return data, err
+		}
+	}
+	return nil, err
+}
+
 // readNativeWorkspaceFile keeps the legacy live-document size semantics while
 // confining the fixed filename and refusing symlinks. Import/preparation readers
 // remain separately bounded; canonical local history need not fit a checkpoint.
 func readNativeWorkspaceFile(folder string) ([]byte, error) {
+	return readLiveWorkspaceFile(func() ([]byte, error) { return readNativeWorkspaceFileOnce(folder) })
+}
+
+func readNativeWorkspaceFileOnce(folder string) ([]byte, error) {
 	root, err := os.OpenRoot(folder)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, os.ErrNotExist

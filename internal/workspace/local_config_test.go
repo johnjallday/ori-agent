@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -592,6 +593,65 @@ func TestLocalConfigNativeReadersRefuseLinksAndAmbiguousReferences(t *testing.T)
 	}
 	if _, err := legacyWorkspaceReference(folder); !errors.Is(err, workspacecontinuity.ErrUnsafe) {
 		t.Fatal("native ownership guard followed a workspace.json symlink")
+	}
+}
+
+// A save replaces workspace.json by rename. A read that overlaps one must
+// return a complete document, not ErrChanged or ErrUnsafe: callers such as
+// ListActive and boot task reconciliation treat a read error as "skip this
+// workspace". Both of Get's readers are covered.
+func TestLiveWorkspaceReadSurvivesConcurrentAtomicSaves(t *testing.T) {
+	readers := map[string]func(folder string) ([]byte, error){
+		"native": readNativeWorkspaceFile,
+		"canonical": func(folder string) ([]byte, error) {
+			return readLiveWorkspaceFile(func() ([]byte, error) {
+				return workspacecontinuity.ReadCanonicalFile(context.Background(), folder, WorkspaceConfigFile, maxNativeWorkspaceBytes)
+			})
+		},
+	}
+	for name, read := range readers {
+		t.Run(name, func(t *testing.T) {
+			folder := t.TempDir()
+			path := filepath.Join(folder, WorkspaceConfigFile)
+			versions := [][]byte{[]byte(`{"id":"ws","name":"before"}`), []byte(`{"id":"ws","name":"after, longer"}`)}
+			localConfigMust(t, atomicWriteFile(path, versions[0]))
+
+			done := make(chan struct{})
+			writerErr := make(chan error, 1)
+			go func() {
+				defer close(writerErr)
+				for i := 0; ; i++ {
+					select {
+					case <-done:
+						return
+					default:
+					}
+					if err := atomicWriteFile(path, versions[i%2]); err != nil {
+						writerErr <- err
+						return
+					}
+				}
+			}()
+			var readErr error
+			for range 2000 {
+				data, err := read(folder)
+				if err != nil {
+					readErr = fmt.Errorf("read during concurrent saves: %w", err)
+					break
+				}
+				if !bytes.Equal(data, versions[0]) && !bytes.Equal(data, versions[1]) {
+					readErr = fmt.Errorf("read a torn document: %q", data)
+					break
+				}
+			}
+			close(done)
+			if err := <-writerErr; err != nil {
+				t.Fatalf("writer: %v", err)
+			}
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+		})
 	}
 }
 
