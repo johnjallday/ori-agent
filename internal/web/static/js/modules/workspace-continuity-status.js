@@ -157,12 +157,13 @@
     );
     // Preparation runs in the background; keep the label current, checking
     // sooner while a save is still being folded into the folder.
-    const refresh = async () => {
-      if (document.visibilityState !== 'hidden' && !state.busy) await load();
+    // The first load always runs, even in a background tab.
+    const refresh = async (first = false) => {
+      if (first || (document.visibilityState !== 'hidden' && !state.busy)) await load();
       const settled = ['ready', 'unavailable'].includes(state.status?.state || '');
       setTimeout(refresh, settled ? 30000 : 6000);
     };
-    void refresh();
+    void refresh(true);
   }
 
   if (document.readyState === 'loading') {

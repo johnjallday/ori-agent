@@ -43,6 +43,10 @@
              above the command view so it stays visible (the command view locks
              body scroll for map panning). -->
         <div id="workspaceFollowupMount" class="workspace-followup-mount" hidden></div>
+        <!-- A workspace's own Daily Brief history, read-only: populated by
+             workspace-daily-briefs.js only for a workspace that owns briefs
+             and is not the Personal HQ here (imported with its history). -->
+        <section id="workspaceBriefHistoryMount" class="workspace-brief-history" aria-label="Daily Brief history" hidden></section>
         <style>
           .workspace-group-requirement-status { display: grid; gap: 0.2rem; margin: 0 0 1rem; padding: 0.85rem 1rem; border: 1px solid rgba(37, 99, 235, 0.28); border-radius: 12px; background: rgba(37, 99, 235, 0.08); color: var(--text-primary); }
           .workspace-group-requirement-status[data-state="group_requirement_unfulfilled"], .workspace-group-requirement-status[data-state="contract_invalid"] { border-color: rgba(217, 119, 6, 0.38); background: rgba(217, 119, 6, 0.1); }
@@ -9184,6 +9188,8 @@
   <script type="module" src="/js/modules/personal-hq-email-setup.js"></script>
   <!-- Follow-up management panel for a workspace that owns follow-ups (Email Ops). -->
   <script type="module" src="/js/modules/workspace-followups.js"></script>
+  <!-- Read-only Daily Brief history of a workspace that is not the HQ here. -->
+  <script type="module" src="/js/modules/workspace-daily-briefs.js"></script>
 
   <!-- Workspace Detail Page -->
   <script type="module">

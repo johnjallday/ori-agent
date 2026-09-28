@@ -100,3 +100,55 @@
   color: inherit;
   cursor: pointer;
 }
+
+/* A workspace's own Daily Brief history (workspace-daily-briefs.js). */
+.workspace-brief-history {
+  margin-bottom: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.workspace-brief-history-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.workspace-brief-history-sub {
+  margin: 0.15rem 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.workspace-brief-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.workspace-brief-history-entry > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.workspace-brief-history-body {
+  padding: 0.5rem 0 0.25rem 1rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.workspace-brief-history-body h3 {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.workspace-brief-history-body ul {
+  margin: 0;
+  padding-left: 1rem;
+}

@@ -206,6 +206,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-command.js',
       'internal/web/static/js/modules/workspace-execution-controller.js',
       'internal/web/static/js/modules/workspace-followups.js',
+      'internal/web/static/js/modules/workspace-daily-briefs.js',
       'internal/web/static/js/modules/workspace-map-snapshot.js',
       'internal/web/static/js/modules/workspace-overlay-coordinator.js',
       'internal/web/static/js/modules/workspace-surface-bridge.js',
