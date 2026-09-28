@@ -616,41 +616,43 @@ func TestLiveWorkspaceReadSurvivesConcurrentAtomicSaves(t *testing.T) {
 			versions := [][]byte{[]byte(`{"id":"ws","name":"before"}`), []byte(`{"id":"ws","name":"after, longer"}`)}
 			localConfigMust(t, atomicWriteFile(path, versions[0]))
 
-			done := make(chan struct{})
+			// Saves arrive every millisecond while the reader reads back to
+			// back, so nearly every save lands inside some read. That is far
+			// busier than real use, but not a save stream with no gap at all,
+			// which no bounded retry could read through.
+			stop := make(chan struct{})
 			writerErr := make(chan error, 1)
 			go func() {
 				defer close(writerErr)
-				for i := 0; ; i++ {
-					select {
-					case <-done:
-						return
-					default:
-					}
+				defer close(stop)
+				for i := range 200 {
 					if err := atomicWriteFile(path, versions[i%2]); err != nil {
 						writerErr <- err
 						return
 					}
+					time.Sleep(time.Millisecond)
 				}
 			}()
 			var readErr error
-			for range 2000 {
+			for readErr == nil {
+				select {
+				case <-stop:
+					if err := <-writerErr; err != nil {
+						t.Fatalf("writer: %v", err)
+					}
+					return
+				default:
+				}
 				data, err := read(folder)
-				if err != nil {
+				switch {
+				case err != nil:
 					readErr = fmt.Errorf("read during concurrent saves: %w", err)
-					break
-				}
-				if !bytes.Equal(data, versions[0]) && !bytes.Equal(data, versions[1]) {
+				case !bytes.Equal(data, versions[0]) && !bytes.Equal(data, versions[1]):
 					readErr = fmt.Errorf("read a torn document: %q", data)
-					break
 				}
 			}
-			close(done)
-			if err := <-writerErr; err != nil {
-				t.Fatalf("writer: %v", err)
-			}
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
+			<-stop
+			t.Fatal(readErr)
 		})
 	}
 }
