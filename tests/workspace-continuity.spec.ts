@@ -16,6 +16,9 @@ import { test, expect, type Page } from '@playwright/test';
  * review, import, restored views and status all come from the server.
  */
 const folder = process.env.CONTINUITY_FOLDER || '';
+// An older copy: the same folder without its .ori/continuity checkpoint, e.g.
+//   rsync -a --exclude '.ori/continuity' <folder>/ "$TMPDIR/ori-cont-legacy/garden-hq/"
+const legacyFolder = process.env.LEGACY_CONTINUITY_FOLDER || '';
 
 async function appears(locator: ReturnType<Page['locator']>, timeout: number): Promise<boolean> {
   return locator
@@ -97,5 +100,47 @@ test.describe('Portable workspace continuity', () => {
     });
     expect(status.imported).toBe(true);
     expect(status.background_allowed).toBe(false);
+  });
+});
+
+test.describe('Older copies without a checkpoint', () => {
+  test.skip(!legacyFolder, 'set LEGACY_CONTINUITY_FOLDER to a checkpoint-less copied HQ folder');
+
+  test('explains what an older HQ copy lacks and continues with its assistant when chosen', async ({
+    page
+  }) => {
+    await page.goto('/');
+    await finishFirstRun(page);
+
+    await page.getByRole('button', { name: 'Import Folder' }).first().click();
+    const path = page.getByRole('textbox', { name: 'Folder path' });
+    await path.fill(legacyFolder);
+    await path.press('Tab');
+
+    const notice = page.getByRole('region', { name: 'Older copy' });
+    await expect(notice).toBeVisible({ timeout: 15000 });
+    await expect(notice).toContainText(
+      'conversations, follow-ups, Daily Briefs and uploaded files are not in it'
+    );
+    const choice = notice.getByRole('checkbox', {
+      name: 'Continue with Ada as my personal assistant'
+    });
+    await expect(choice).toBeChecked();
+    // An older copy uses the ordinary import button (setup review, then import).
+    const action = page.locator('#createFolderBtn');
+    await expect(action).toBeEnabled();
+    await action.click();
+    await expect(action).toHaveText('Import Folder', { timeout: 30000 });
+    await action.click();
+    await expect(page.getByText('Ada is your personal assistant again')).toBeVisible({
+      timeout: 30000
+    });
+
+    const assistant = await page.evaluate(async () => {
+      const response = await fetch('/api/personal-assistant');
+      return (await response.json()).personal_assistant;
+    });
+    expect(assistant.state).toBe('paused');
+    expect(assistant.display_name).toBe('Ada');
   });
 });
