@@ -34,7 +34,7 @@ func (o *Orchestrator) ExecutePlannedTask(ctx context.Context, mainAgent, reques
 	})
 
 	ws.SetPlannerDecision(&decision)
-	if err := o.workspaceStore.Save(ws); err != nil {
+	if err := workspace.CreateNativeWorkspace(ctx, o.workspaceStore, ws); err != nil {
 		return nil, fmt.Errorf("failed to create workspace: %w", err)
 	}
 	o.publishEvent(workspace.EventPlannerDecision, ws.ID, map[string]any{

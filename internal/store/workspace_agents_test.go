@@ -40,6 +40,31 @@ func compositeWithWorkspaces(t *testing.T, entries ...WorkspaceAgentEntry) (*Com
 	return c, f, source
 }
 
+func TestWorkspaceAgentExactNeverReadsSameNamedRosterOrNeighbor(t *testing.T) {
+	c, _, _ := compositeWithWorkspaces(t,
+		workspaceCopy("hq-2", "Copied HQ", "Ada", "owned source prompt"),
+		workspaceCopy("hq-1", "Native HQ", "Ada", "unrelated prompt"),
+	)
+	if err := c.CreateAgent("Ada", &CreateAgentConfig{SystemPrompt: "root roster prompt"}); err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := c.WorkspaceAgentExact("hq-2", "Ada")
+	if !ok || entry.Settings.SystemPrompt != "owned source prompt" {
+		t.Fatal("selected a global or neighboring agent", entry)
+	}
+	entry.Settings.SystemPrompt = "local edit on detached copy"
+	again, ok := c.WorkspaceAgentExact("hq-2", "Ada")
+	if !ok || again.Settings.SystemPrompt != "owned source prompt" {
+		t.Fatal("returned mutable shared definition", again)
+	}
+	if _, ok := c.WorkspaceAgentExact("hq-2", "ada"); ok {
+		t.Fatal("case alias claimed a different canonical name")
+	}
+	if _, ok := c.WorkspaceAgentExact("other", "Ada"); ok {
+		t.Fatal("foreign workspace agent selected")
+	}
+}
+
 func TestRosterIsTheUnionWithEachNameOnce(t *testing.T) {
 	c, _, _ := compositeWithWorkspaces(t,
 		workspaceCopy("ws-b", "Studio", "scout", "studio's scout"), // a customisation, other case

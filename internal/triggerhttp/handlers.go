@@ -7,7 +7,9 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/trigger"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Handler serves the trigger management API and the webhook ingestion
@@ -316,6 +318,10 @@ func writeTriggerError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, trigger.ErrNotFound):
 		orihttp.NotFound(w, "trigger not found")
+	case errors.Is(err, workspace.ErrWorkspaceExecutionInactive):
+		orihttp.Conflict(w, "Workspace local activation is required for this trigger operation")
+	case errors.Is(err, resetstate.ErrWorkFenced), errors.Is(err, resetstate.ErrWorkUntracked):
+		orihttp.ServiceUnavailable(w, "Trigger work is currently unavailable")
 	default:
 		// Validation and watch-path failures are user-fixable input errors.
 		orihttp.BadRequest(w, err.Error())

@@ -176,6 +176,10 @@ type Workspace struct {
 	// defaults OFF; an agent must also opt in (Settings.AllowNativeMCPTools).
 	AllowNativeMCPCLI bool `json:"allow_native_mcp_cli,omitempty"`
 
+	// WorkspaceLocalConfigID references installation-only encrypted binding
+	// configuration. The copied ID is neither a secret nor execution authority.
+	WorkspaceLocalConfigID string `json:"ori_local_config_id,omitempty"`
+
 	// Designation is a synced projection of the personalhq designation records
 	// (internal/personalhq), not the source of truth itself. The per-user
 	// designation record — "who has designated which workspace" — lives in the
@@ -1018,7 +1022,8 @@ type MCPBinding struct {
 	// explicit empty list means no tools are exposed. A nil value (the
 	// default, and every binding authored before this field existed)
 	// preserves legacy all-tools behavior. See AllowsAllTools/ToolAllowed.
-	AllowedTools []string `json:"allowed_tools,omitempty"`
+	// Do not omit an empty list: decoding omission as nil would grant all tools.
+	AllowedTools []string `json:"allowed_tools"`
 	// CapabilityMappings binds this server's concrete tools onto Ori's
 	// abstract capability contracts (e.g. "calendar") so consuming code can
 	// invoke semantic operations without knowing which connector is bound.

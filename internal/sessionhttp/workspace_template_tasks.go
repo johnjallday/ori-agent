@@ -152,6 +152,15 @@ func (h *Handler) handleTemplateSetupStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if err := agentworkspace.RequireWorkspaceExecution(r.Context(), store, workspaceID, true); err != nil {
+		reason := "admission_unavailable"
+		if errors.Is(err, agentworkspace.ErrWorkspaceExecutionInactive) {
+			reason = "local_activation_required"
+		}
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": reason})
+		return
+	}
+
 	// A blueprint that declares a Setup Wizard owns its own setup. Auto-starting
 	// the help task here would put an agent — and its autonomy prompt — on top of
 	// the deterministic setup dialog, which is the collision this feature exists

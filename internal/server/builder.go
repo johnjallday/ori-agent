@@ -25,6 +25,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/connections"
 	"github.com/johnjallday/ori-agent/internal/connectionshttp"
+	"github.com/johnjallday/ori-agent/internal/continuityprep"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
@@ -104,6 +105,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 	"github.com/johnjallday/ori-agent/internal/workspacemap"
 	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
@@ -181,10 +183,16 @@ type ServerBuilder struct {
 	workspaceStore        workspace.Store
 	workspaceFileStore    *workspace.FileStore
 	workspaceAllowlist    *workspace.Allowlist
-	groupRequirements     *grouprequirements.Service
-	pathSelectionStore    *pathselection.Store
-	runtimeResolver       *workspace.AgentRuntimeResolver
-	taskHandler           *workspace.LLMTaskHandler
+
+	// continuityLocal is this installation's continuity attachment/receipt
+	// store; nil without a database. continuityWorker prepares checkpoints.
+	continuityLocal  *workspacecontinuity.LocalStore
+	continuityWorker *continuityprep.Worker
+
+	groupRequirements  *grouprequirements.Service
+	pathSelectionStore *pathselection.Store
+	runtimeResolver    *workspace.AgentRuntimeResolver
+	taskHandler        *workspace.LLMTaskHandler
 	// emailReadiness evaluates the deterministic mailbox-connection state. It is
 	// built in Phase 18 (needs the workspace + vault stores) but consumed in
 	// Phase 21 by the orchestration task handler, so it is stashed here rather
@@ -756,6 +764,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Handlers = handlers
 	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices
 	b.server.workspaceFileStore = b.workspaceFileStore
+	b.server.continuityWorker = b.continuityWorker
 	b.server.setupJourneyStore = b.setupJourneyStore
 	b.server.projectTemplateCatalog = templateRuntimeCatalog{
 		capabilities: b.workspaceCapabilityRegistry,

@@ -1543,6 +1543,9 @@ export class WorkspaceCommandView {
       '</h2>' +
       groupBadge +
       hqBadge +
+      // Portability status ("Ready to move", imported/routines off) is owned by
+      // workspace-continuity-status.js, which keeps its chip in this mount.
+      '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>' +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
       '</div>' +
       this.groupTemplateStatusHTML() +

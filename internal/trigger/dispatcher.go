@@ -49,8 +49,10 @@ type Dispatcher struct {
 
 // NewDispatcher constructs a Dispatcher. mission and opportunities may be nil;
 // the corresponding behaviors degrade gracefully (mission fires fail with a
-// recorded error; findings are skipped).
+// recorded error; findings are skipped). Construction binds the store's runtime
+// admission owner and must precede concurrent use of that store.
 func NewDispatcher(store *Store, wsStore workspace.Store, mission MissionRunner, opps workspace.OpportunityStore) *Dispatcher {
+	store.executionOwner = wsStore
 	return &Dispatcher{
 		store:          store,
 		workspaceStore: wsStore,
@@ -65,11 +67,20 @@ func (d *Dispatcher) SetAdmissionGate(gate *resetstate.WorkGate) { d.admissionGa
 
 // Dispatch executes one fire for a trigger. Implements DispatchFunc.
 func (d *Dispatcher) Dispatch(t Trigger, fire PendingFire) {
+	_, _ = d.dispatch(t, fire)
+}
+
+// dispatch also returns admission/persistence failures to synchronous TestFire
+// callers, rather than returning an unrelated old history record as success.
+func (d *Dispatcher) dispatch(t Trigger, fire PendingFire) (FireRecord, error) {
 	release, err := d.admissionGate.Enter()
 	if err != nil {
-		return
+		return FireRecord{}, err
 	}
 	defer release()
+	if err := d.store.requireExecution(t.WorkspaceID, true); err != nil {
+		return FireRecord{}, err // no history/finding mutation on refusal
+	}
 	firedAt := time.Now()
 	evCtx := buildEventContext(t, fire, firedAt)
 
@@ -101,9 +112,10 @@ func (d *Dispatcher) Dispatch(t Trigger, fire PendingFire) {
 		rec.Error = fmt.Sprintf("unknown action kind %q", t.Action.Kind)
 	}
 
-	if err := d.store.RecordFire(t.WorkspaceID, t.ID, rec); err != nil && err != ErrNotFound {
+	recordErr := d.store.RecordFire(t.WorkspaceID, t.ID, rec)
+	if recordErr != nil && recordErr != ErrNotFound {
 		logger.Warn("trigger dispatcher: record fire", logger.Fields{
-			"trigger_id": t.ID, "workspace_id": t.WorkspaceID, "error": err,
+			"trigger_id": t.ID, "workspace_id": t.WorkspaceID, "error": recordErr,
 		})
 	}
 
@@ -118,6 +130,7 @@ func (d *Dispatcher) Dispatch(t Trigger, fire PendingFire) {
 			"run_id": rec.RunID, "task_id": rec.TaskID, "events": rec.EventCount,
 		})
 	}
+	return rec, recordErr
 }
 
 // DomainScanHandler is an in-process handler for ActionDomainScan. It is given

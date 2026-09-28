@@ -10,7 +10,7 @@ import (
 // spend per trigger (PRD #25).
 const DefaultWebhookRatePerMin = 60
 
-// rateLimiter is a per-key token bucket. Keys are trigger IDs. The bucket
+// rateLimiter is a per-key token bucket. Keys scope workspace and trigger IDs. The bucket
 // refills continuously at ratePerMin/60 tokens per second up to a burst of
 // ratePerMin, so a caller may spend a full minute's allowance at once but no
 // more than ratePerMin within any rolling minute.

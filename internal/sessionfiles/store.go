@@ -19,6 +19,7 @@ type Store struct {
 	basePath  string
 	manifests map[string]*Manifest
 	mu        sync.RWMutex
+	onChange  func(sessionID string)
 }
 
 // NewStore creates a new session files store
@@ -98,7 +99,11 @@ func (s *Store) saveManifest(sessionID string) error {
 	}
 
 	manifestPath := s.getManifestPath(sessionID)
-	return SaveManifest(m, manifestPath)
+	if err := SaveManifest(m, manifestPath); err != nil {
+		return err
+	}
+	s.notifyChange(sessionID)
+	return nil
 }
 
 // AddFile copies a file into the session folder
@@ -548,8 +553,23 @@ func (s *Store) DeleteSession(sessionID string) error {
 	}
 
 	logger.Info("Deleted session files", logger.Fields{"session_id": sessionID})
+	s.notifyChange(sessionID)
 
 	return nil
+}
+
+// SetOnChange registers a callback run after a session's uploads change on
+// disk. Workspace continuity uses it to mark the owning workspace's portable
+// checkpoint out of date; it must not block or call back into the store.
+// Initialization-only, before concurrent use.
+func (s *Store) SetOnChange(fn func(sessionID string)) {
+	s.onChange = fn
+}
+
+func (s *Store) notifyChange(sessionID string) {
+	if s.onChange != nil {
+		s.onChange(sessionID)
+	}
 }
 
 // detectMimeType returns the MIME type for a file based on its extension

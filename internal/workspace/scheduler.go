@@ -193,6 +193,9 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 			continue
 		}
 
+		if err := RequireWorkspaceExecution(context.Background(), ts.workspaceStore, ws.ID, true); err != nil {
+			continue
+		}
 		// Check each task with an enabled schedule
 		// Use pointer iteration to allow in-place modifications of task state
 		for i := range ws.Tasks {
@@ -275,6 +278,9 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 			ts.wg.Go(func() {
 				defer finishReflection()
 				defer ts.releaseAssistantReflection(stationID)
+				if err := RequireWorkspaceExecution(context.Background(), ts.workspaceStore, stationID, true); err != nil {
+					return
+				}
 				if err := ts.assistantReflectionTrigger.TriggerAssistantReflection(context.Background(), stationID); err != nil {
 					logger.Warn("Assistant reflection schedule failed", logger.Fields{"station_id": stationID, "error": err})
 				}
@@ -451,6 +457,9 @@ func (ts *TaskScheduler) checkLegacyScheduledTasks(ws *Workspace, now time.Time)
 // executeTaskSchedule resets a task and queues it for re-execution based on its schedule.
 // This is the new approach where schedule is directly on the task.
 func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time.Time) {
+	if err := RequireWorkspaceExecution(context.Background(), ts.workspaceStore, ws.ID, true); err != nil {
+		return
+	}
 	logger.Debug("📅 Executing scheduled task", logger.Fields{"task_id": task.ID, "name": task.ScheduleName})
 
 	// A Backlog task cannot legitimately carry a schedule (see
@@ -595,6 +604,9 @@ func (ts *TaskScheduler) recordTaskScheduleFailure(ws *Workspace, task *Task, er
 // 4. Auto-disable on failure threshold (5 consecutive failures)
 // 5. Event publishing for UI updates
 func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) {
+	if err := RequireWorkspaceExecution(context.Background(), ts.workspaceStore, ws.ID, true); err != nil {
+		return
+	}
 	logger.Debug("📅 Executing scheduled task", logger.Fields{"task_id": st.ID, "name": st.Name})
 
 	now := time.Now()

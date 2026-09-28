@@ -30,6 +30,8 @@ const sessionManager = {
   isCreatingFolder: false,
   importModeEnabled: false,
   importAllowDuplicate: false,
+  importContinuityStatus: '',
+  importContinuityPath: '',
   importDuplicateWorkspaceId: '',
   importDuplicateWorkspaceSlug: '',
   importDuplicateWorkspaceName: '',
@@ -654,6 +656,7 @@ const sessionManager = {
     const importPathInput = document.getElementById('folderImportPathInput');
     importPathInput?.addEventListener('input', event => {
       this.importAllowDuplicate = false;
+      this.clearImportContinuityReview();
       this.clearImportDuplicateWarning();
       this.prefillWorkspaceNameFromImportPath(event?.target?.value || '');
     });
@@ -3794,6 +3797,7 @@ const sessionManager = {
 
     if (!this.importModeEnabled) {
       this.importAllowDuplicate = false;
+      this.clearImportContinuityReview();
       this.clearImportDuplicateWarning();
       this.scheduleTemplateAgentPlanRefresh();
     } else {
@@ -3828,8 +3832,267 @@ const sessionManager = {
     this.importDuplicateWorkspaceName = duplicate.workspace_name || '';
   },
 
+  clearImportContinuityReview() {
+    this.importContinuityStatus = '';
+    this.importContinuityPath = '';
+    this.importContinuityReview = null;
+    this.importLegacyAdopt = false;
+    const notice = document.getElementById('folderImportContinuityNotice');
+    if (notice) notice.hidden = true;
+    for (const id of [
+      'folderImportContinuityTitle',
+      'folderImportContinuityText',
+      'folderImportContinuityProgress'
+    ]) {
+      const element = document.getElementById(id);
+      if (element) element.textContent = '';
+    }
+    this.renderContinuityList([]);
+    this.renderContinuityActions([]);
+    const button = document.getElementById('createFolderBtn');
+    if (button && this.importModeEnabled && !this.isCreatingFolder) button.disabled = false;
+  },
+
+  // A copied workspace with saved history is imported through the reviewed
+  // continuity path (its own buttons); the ordinary Import Folder button
+  // stays for plain folders only.
+  showImportContinuityReview(path, review) {
+    const notice = document.getElementById('folderImportContinuityNotice');
+    const title = document.getElementById('folderImportContinuityTitle');
+    const text = document.getElementById('folderImportContinuityText');
+    const progress = document.getElementById('folderImportContinuityProgress');
+    this.importContinuityPath = path;
+    this.importContinuityStatus = review?.status || 'unavailable';
+    this.importContinuityReview = review || null;
+    const view = window.WorkspaceContinuity?.describeReview?.(review) || {
+      mode: this.importContinuityStatus === 'legacy' ? 'legacy' : 'blocked',
+      title: 'This folder cannot be imported here',
+      lines: ['Nothing was imported.'],
+      actions: []
+    };
+    // An older copy imports through the ordinary button; its notice only
+    // explains (and may offer its assistant). Everything else is reviewed.
+    const blocked = view.mode !== 'legacy';
+    if (notice) {
+      notice.hidden = !blocked && view.lines.length === 0;
+      if (notice.dataset) notice.dataset.mode = view.mode;
+    }
+    if (title) title.textContent = view.title || '';
+    // The first line leads; each further fact (date, assistant, routines,
+    // credentials, privacy) gets its own line rather than one dense paragraph.
+    if (text) text.textContent = view.lines[0] || '';
+    if (progress) {
+      progress.hidden = true;
+      progress.textContent = '';
+    }
+    this.renderContinuityList([{ title: '', items: view.lines.slice(1) }]);
+    this.importContinuityWorkspaceId = view.workspaceId || '';
+    this.renderContinuityActions(view.actions);
+    this.renderLegacyAdoptChoice(view.adopt);
+    const button = document.getElementById('createFolderBtn');
+    if (button && this.importModeEnabled && !this.isCreatingFolder) button.disabled = blocked;
+  },
+
+  // The one explicit choice an older HQ copy offers: continue with the
+  // assistant its files prove. Checked by default; sent with the import.
+  renderLegacyAdoptChoice(adopt) {
+    this.importLegacyAdopt = Boolean(adopt);
+    if (!adopt || typeof document.createElement !== 'function') return;
+    const container = document.getElementById('folderImportContinuityActions');
+    if (!container) return;
+    const label = document.createElement('label');
+    label.className = 'form-check-label d-flex gap-2 align-items-center';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'form-check-input';
+    box.id = 'folderImportLegacyAdopt';
+    box.checked = true;
+    box.addEventListener('change', () => {
+      this.importLegacyAdopt = box.checked;
+    });
+    const text = document.createElement('span');
+    text.textContent = adopt.label;
+    label.append(box, text);
+    container.appendChild(label);
+    container.hidden = false;
+  },
+
+  renderContinuityList(sections) {
+    const list = document.getElementById('folderImportContinuityList');
+    if (!list) return;
+    if (typeof list.replaceChildren === 'function') list.replaceChildren();
+    const items = sections.filter(section => section.items.length > 0);
+    list.hidden = items.length === 0;
+    if (typeof document.createElement !== 'function') return;
+    for (const section of items) {
+      if (section.title) {
+        const heading = document.createElement('li');
+        heading.className = 'workspace-continuity-section';
+        heading.textContent = section.title;
+        list.appendChild(heading);
+      }
+      for (const item of section.items) {
+        const entry = document.createElement('li');
+        entry.textContent = item;
+        list.appendChild(entry);
+      }
+    }
+  },
+
+  renderContinuityActions(actions, handler) {
+    const container = document.getElementById('folderImportContinuityActions');
+    if (!container) return;
+    if (typeof container.replaceChildren === 'function') container.replaceChildren();
+    container.hidden = actions.length === 0;
+    if (typeof document.createElement !== 'function') return;
+    for (const action of actions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `modern-btn ${action.primary ? 'modern-btn-primary' : 'modern-btn-secondary'}`;
+      button.textContent = action.label;
+      button.dataset.continuityAction = action.action;
+      button.addEventListener('click', () =>
+        (handler || (value => this.confirmContinuityImport(value)))(action.action)
+      );
+      container.appendChild(button);
+    }
+  },
+
+  openImportedWorkspace(workspaceId) {
+    const target = String(workspaceId || '').trim();
+    if (!target) return;
+    const modalElement = document.getElementById('addFolderModal');
+    const modals = typeof bootstrap === 'undefined' ? window.bootstrap : bootstrap;
+    modals?.Modal?.getInstance?.(modalElement)?.hide?.();
+    this.resetAddWorkspaceModalForm?.();
+    window.location.href = `/workspaces/${encodeURIComponent(target)}`;
+  },
+
+  async confirmContinuityImport(action) {
+    if (action === 'open') {
+      this.openImportedWorkspace(this.importContinuityWorkspaceId);
+      return;
+    }
+    const continuity = window.WorkspaceContinuity;
+    const review = this.importContinuityReview;
+    const path = this.importContinuityPath;
+    if (!continuity || !review || !path || this.importContinuityBusy) return;
+    this.importContinuityBusy = true;
+    const progress = document.getElementById('folderImportContinuityProgress');
+    const container = document.getElementById('folderImportContinuityActions');
+    container?.querySelectorAll?.('button').forEach(button => {
+      button.disabled = true;
+    });
+    if (progress) {
+      progress.hidden = false;
+      progress.textContent =
+        'Importing… Restoring saved history can take a while for large workspaces. Keep Ori open.';
+    }
+    try {
+      const { ok, result } = await continuity.confirmImport(fetch, path, review, action);
+      if (result?.import) {
+        this.showContinuityImportResult(result.import, ok ? '' : result.error);
+      } else {
+        this.showContinuityImportFailure(result?.error);
+      }
+      if (ok) await this.refreshAfterContinuityImport();
+    } catch (error) {
+      console.error('Workspace import failed:', error);
+      this.showContinuityImportFailure();
+    } finally {
+      this.importContinuityBusy = false;
+    }
+  },
+
+  async retryContinuityImport(operationId) {
+    if (this.importContinuityBusy) return;
+    this.importContinuityBusy = true;
+    const progress = document.getElementById('folderImportContinuityProgress');
+    if (progress) {
+      progress.hidden = false;
+      progress.textContent = 'Retrying… Work already restored will not be added twice.';
+    }
+    try {
+      // Sent as JSON: the server refuses non-JSON consent requests (CSRF).
+      const response = await fetch(
+        `/api/workspaces/import/continuity/${encodeURIComponent(operationId)}/retry`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (result?.import) {
+        this.showContinuityImportResult(result.import, response.ok ? '' : result.error);
+      } else {
+        this.showContinuityImportFailure(result?.error);
+      }
+      if (response.ok) await this.refreshAfterContinuityImport();
+    } catch (error) {
+      console.error('Workspace import retry failed:', error);
+      this.showContinuityImportFailure();
+    } finally {
+      this.importContinuityBusy = false;
+    }
+  },
+
+  showContinuityImportFailure(message) {
+    const title = document.getElementById('folderImportContinuityTitle');
+    const text = document.getElementById('folderImportContinuityText');
+    const progress = document.getElementById('folderImportContinuityProgress');
+    if (title) title.textContent = 'The import did not start';
+    if (text)
+      text.textContent =
+        typeof message === 'string' && message
+          ? message
+          : 'Nothing was changed. Check the folder and try again.';
+    if (progress) progress.hidden = true;
+    this.renderContinuityActions([]);
+  },
+
+  showContinuityImportResult(report, error) {
+    const continuity = window.WorkspaceContinuity;
+    if (!continuity) return;
+    const view = continuity.describeReport(report);
+    const title = document.getElementById('folderImportContinuityTitle');
+    const text = document.getElementById('folderImportContinuityText');
+    const progress = document.getElementById('folderImportContinuityProgress');
+    if (title) title.textContent = view.title;
+    if (text) text.textContent = typeof error === 'string' ? error : '';
+    if (progress) {
+      progress.hidden = false;
+      progress.textContent = view.complete ? 'Import complete.' : 'Import interrupted.';
+    }
+    this.renderContinuityList([
+      { title: 'Restored work', items: view.restored },
+      { title: 'Missing from this copy', items: view.missing },
+      { title: 'Set up here', items: view.setup }
+    ]);
+    const operationId = report?.operation_id || '';
+    // Workspace pages are addressed by folder slug.
+    const workspaceId = report?.workspace_slug || report?.workspace_id || '';
+    const actions = view.complete
+      ? [{ action: 'open', label: 'Open workspace', primary: true }]
+      : [{ action: 'retry', label: 'Retry import', primary: true }];
+    this.renderContinuityActions(actions, value => {
+      if (value === 'open') this.openImportedWorkspace(workspaceId);
+      else void this.retryContinuityImport(operationId);
+    });
+    const button = document.getElementById('createFolderBtn');
+    if (button) button.disabled = true;
+  },
+
+  async refreshAfterContinuityImport() {
+    try {
+      await this.loadFolders?.();
+    } catch (error) {
+      console.warn('Workspace list refresh after import failed:', error);
+    }
+    window.dispatchEvent?.(
+      new CustomEvent('ori:workspaces-changed', { detail: { reason: 'import' } })
+    );
+  },
+
   async checkImportDuplicate(pathValue) {
     const path = String(pathValue || '').trim();
+    this.clearImportContinuityReview();
     if (!path || !this.importModeEnabled) {
       this.clearImportDuplicateWarning();
       return;
@@ -3838,19 +4101,35 @@ const sessionManager = {
     try {
       const response = await fetch(`/api/workspaces/import/check?path=${encodeURIComponent(path)}`);
       const result = await response.json().catch(() => ({}));
+      // An older async inspection must never relabel a newly selected folder.
+      if (
+        !this.importModeEnabled ||
+        document.getElementById('folderImportPathInput')?.value.trim() !== path
+      )
+        return;
       if (!response.ok || !result.success) {
         this.clearImportDuplicateWarning();
+        this.showImportContinuityReview(path, { status: 'unavailable' });
         return;
       }
 
-      if (result.duplicate && result.duplicate.found) {
+      this.showImportContinuityReview(path, result.continuity);
+      if (this.importContinuityStatus !== 'legacy') {
+        this.clearImportDuplicateWarning();
+      } else if (result.duplicate && result.duplicate.found) {
         this.showImportDuplicateWarning(result.duplicate);
       } else {
         this.clearImportDuplicateWarning();
       }
     } catch (error) {
       console.error('Failed to check import duplicate:', error);
+      if (
+        !this.importModeEnabled ||
+        document.getElementById('folderImportPathInput')?.value.trim() !== path
+      )
+        return;
       this.clearImportDuplicateWarning();
+      this.showImportContinuityReview(path, { status: 'unavailable' });
     }
   },
 
@@ -9193,6 +9472,11 @@ const sessionManager = {
         // blockers remain exactly as before.
         createBtn.disabled =
           Boolean(this.workspaceBuild?.busy) ||
+          (importMode &&
+            this.importContinuityStatus !== '' &&
+            this.importContinuityStatus !== 'legacy' &&
+            this.importContinuityPath ===
+              document.getElementById('folderImportPathInput')?.value.trim()) ||
           (!importMode &&
             ((this.usesManagedGroupTemplate() && !window.GroupTemplateCreator.canSubmit(this)) ||
               (this.usesTeamRosterCreator() && this.hasBlockingTeamIssue()) ||
@@ -12180,6 +12464,7 @@ const sessionManager = {
       payload.path = values.importPath ?? '';
       payload.allow_duplicate = Boolean(this.importAllowDuplicate);
       payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
+      if (this.importLegacyAdopt) payload.adopt_assistant = true;
     } else if (requiresReviewedRoster || !ordinaryGroup) {
       // A create opened for a "show me a folder" offer names the offer so
       // the server can attach that folder afterwards (FR28). The folder's
@@ -12709,6 +12994,21 @@ const sessionManager = {
         result.agent_reuse_notices
           .filter(msg => typeof msg === 'string' && msg)
           .forEach(msg => this.showToast(msg, 'info'));
+      }
+      // An older HQ copy imported with "continue with its assistant".
+      const adoption = importEnabled ? result.assistant_adoption : null;
+      if (adoption?.adopted) {
+        this.showToast(
+          `${adoption.display_name || 'Your assistant'} is your personal assistant again. It starts paused; choose its focus when you resume it.`,
+          'success'
+        );
+      } else if (adoption) {
+        this.showToast(
+          adoption.reason === 'existing_assistant'
+            ? 'Imported as a workspace: this computer already has a personal assistant.'
+            : 'Imported as a workspace: its assistant could not be verified from this copy.',
+          'warning'
+        );
       }
       if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
       if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();

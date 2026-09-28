@@ -230,6 +230,9 @@
        an adaptive Workspace/Group draft. -->
   <script defer src="/js/modules/workspace-creator-state.js"></script>
   <script defer src="/js/modules/group-template-creator.js"></script>
+  <!-- Must precede sessions.js: Import Folder renders a copied workspace's
+       review and result through window.WorkspaceContinuity. -->
+  <script defer src="/js/modules/workspace-continuity.js"></script>
   <!-- Build with your assistant: the conversation pane sessions.js mounts
        beside the wizard. Must precede sessions.js. -->
   <script defer src="/js/modules/create-workspace-build-pane.js"></script>

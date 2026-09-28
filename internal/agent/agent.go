@@ -23,6 +23,11 @@ type Agent struct {
 	Settings     types.Settings                           `json:"Settings"`
 	Messages     []openai.ChatCompletionMessageParamUnion `json:"-"` // in-memory only
 
+	// WorkspaceLocalConfigID is a non-secret reference to encrypted configuration
+	// in this installation's DB. It is used only by workspace persistence; the
+	// global agent library does not inherit it. A copied reference grants nothing.
+	WorkspaceLocalConfigID string `json:"ori_local_config_id,omitempty"`
+
 	// Dashboard-specific fields (optional for backward compatibility)
 	Status     types.AgentStatus      `json:"status,omitempty"`     // Operational status (active, idle, error, disabled)
 	Statistics *types.AgentStatistics `json:"statistics,omitempty"` // Usage and performance metrics

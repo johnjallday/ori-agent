@@ -32,6 +32,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
@@ -267,7 +268,18 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	workspaceDir := resolveWorkspaceRoot(b.configManager)
 	startupMaintenanceApproved := b.workspaceStartupMaintenanceApproved()
 	agentRehydrationApproved := !b.resetPolicy.SuppressAgentRehydration
-	fileStore, err := workspace.NewFileStore(workspaceDir)
+	var fileStore *workspace.FileStore
+	var err error
+	if b.sessionStore != nil && b.sessionStore.DB() != nil {
+		// Continuity: a copied folder carrying a checkpoint (or one retained
+		// across an app-record reset) stays out of the folder store until a
+		// reviewed import registers it, and imported work runs only once the
+		// user enables it here.
+		b.continuityLocal = workspacecontinuity.NewLocalStore(b.sessionStore.DB())
+		fileStore, err = workspace.NewFileStoreWithContinuity(workspaceDir, b.continuityLocal)
+	} else {
+		fileStore, err = workspace.NewFileStore(workspaceDir)
+	}
 	if err != nil {
 		if errors.Is(err, workspace.ErrWorkspaceSlugMigration) {
 			return fmt.Errorf("workspace slug integrity check failed: %w", err)
@@ -285,6 +297,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 
 		b.workspaceFileStore = fileStore
+		b.initializeContinuity(fileStore)
 		if startupMaintenanceApproved {
 			// The template-intake engine is gone; remove any of its per-workspace
 			// session sidecars left on disk. Best-effort and non-fatal.
@@ -994,6 +1007,7 @@ func (b *ServerBuilder) initializeTriggerService(opportunityStore workspace.Oppo
 	// they are wired here rather than at handler-construction time.
 	b.wireFileJanitorAutomation()
 	b.wireBlueprintReintake()
+	b.wireContinuityTriggers()
 	// Note: b.server.Handlers is rebuilt after this phase, so the handler is
 	// attached to the facade in finalizeHandlers (alongside ActionCenter),
 	// not here.

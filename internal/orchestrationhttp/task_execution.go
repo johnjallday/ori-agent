@@ -142,6 +142,9 @@ func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
 		return err
 	}
 	defer release()
+	if err := workspace.RequireWorkspaceExecution(context.Background(), th.workspaceStore, workspaceID, true); err != nil {
+		return err
+	}
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
 		return fmt.Errorf("workspace %s not found: %w", workspaceID, err)
@@ -167,6 +170,9 @@ func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
 	}
 
 	return th.startTaskWork(func() {
+		if err := workspace.RequireWorkspaceExecution(context.Background(), th.workspaceStore, workspaceID, true); err != nil {
+			return
+		}
 		ws, err := th.workspaceStore.Get(workspaceID)
 		if err != nil {
 			logger.Error("Failed to reload workspace for async task start", logger.Fields{"workspace_id": workspaceID, "error": err})
@@ -246,6 +252,10 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if err := workspace.RequireWorkspaceExecution(r.Context(), th.workspaceStore, foundWorkspace.ID, false); err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusConflict, "Workspace is not admitted for manual execution", err)
+		return
+	}
 	if err := workspace.RequireTaskNotBacklog(foundTask, "cannot run task"); err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
@@ -839,6 +849,9 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 }
 
 func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task *workspace.Task) (string, error) {
+	if err := workspace.RequireWorkspaceExecution(context.Background(), th.workspaceStore, ws.ID, false); err != nil {
+		return "", err
+	}
 	const manual = true
 
 	if err := workspace.RequireTaskNotBacklog(task, "cannot execute task"); err != nil {

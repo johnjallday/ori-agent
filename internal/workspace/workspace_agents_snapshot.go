@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 )
 
 // workspaceAgentDir returns <workspace>/agents/<slug> for a given agent name.
@@ -34,7 +36,7 @@ func readWorkspaceAgent(workspaceFolder, agentName string) (*agent.Agent, bool, 
 		return nil, false, err
 	}
 	path := filepath.Join(dir, WorkspaceAgentConfigFile)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- fixed file name under the workspace folder and a slugified agent name
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, false, nil
@@ -44,6 +46,11 @@ func readWorkspaceAgent(workspaceFolder, agentName string) (*agent.Agent, bool, 
 	var ag agent.Agent
 	if err := json.Unmarshal(data, &ag); err != nil {
 		return nil, false, fmt.Errorf("decode workspace agent %q: %w", agentName, err)
+	}
+	if ag.WorkspaceLocalConfigID != "" {
+		// Only the installation-local owner can hydrate this profile. Returning
+		// the denied file projection would silently discard a native user's key.
+		return nil, false, ErrLocalConfigUnavailable
 	}
 	// A snapshot written by an older build still carries the retired
 	// avatar/character fields. Migrating on read — through the exact same
@@ -79,12 +86,31 @@ func writeWorkspaceAgent(workspaceFolder, agentName string, ag *agent.Agent) err
 	if ag == nil {
 		return errors.New("nil agent")
 	}
+	if ag.WorkspaceLocalConfigID != "" {
+		return ErrLocalConfigUnavailable
+	}
 	dir, err := workspaceAgentDir(workspaceFolder, agentName)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("create workspace agent dir: %w", err)
+	// #nosec G703 -- The caller selects the canonical workspace root; all agent-derived descendants are slugged and confined with os.Root below.
+	if err := os.MkdirAll(workspaceFolder, 0750); err != nil {
+		return fmt.Errorf("create workspace folder: %w", err)
+	}
+	path := filepath.ToSlash(filepath.Join(WorkspaceAgentsDir, filepath.Base(dir), WorkspaceAgentConfigFile))
+	current, err := workspacecontinuity.ReadCanonicalFile(context.Background(), workspaceFolder, path, workspacecontinuity.MaxRecordBytes)
+	expected := ""
+	if err == nil {
+		var reference string
+		if err := decodeLocalReference(current, &reference); err != nil {
+			return err
+		}
+		if reference != "" {
+			return ErrLocalConfigUnavailable
+		}
+		expected = workspacecontinuity.Digest(current)
+	} else if !errors.Is(err, workspacecontinuity.ErrIncomplete) {
+		return err
 	}
 	// Canonical on the way out too, so a snapshot can never be the one record
 	// that keeps the retired schema alive (FR-77).
@@ -93,11 +119,7 @@ func writeWorkspaceAgent(workspaceFolder, agentName string, ag *agent.Agent) err
 	if err != nil {
 		return fmt.Errorf("encode workspace agent %q: %w", agentName, err)
 	}
-	path := filepath.Join(dir, WorkspaceAgentConfigFile)
-	if err := atomicWriteFile(path, data); err != nil {
-		return fmt.Errorf("write workspace agent %q: %w", agentName, err)
-	}
-	return nil
+	return workspacecontinuity.ReplaceCanonicalFile(context.Background(), workspaceFolder, path, expected, data)
 }
 
 // ReadWorkspaceAgentFromFolder is the exported form of readWorkspaceAgent for

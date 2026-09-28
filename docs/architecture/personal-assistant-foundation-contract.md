@@ -18,6 +18,27 @@ created or captured for Email Ops. Today and Daily Brief may show both as
 read-only projections under the saved workspace scope; this never moves,
 clones, re-keys, or expands the lifecycle authority over either record.
 
+Amendment 3 — Reviewed portable workspace import: the
+[workspace continuity contract](workspace-continuity-contract.md) defines a new,
+explicit import/adoption boundary, distinct from orphan recovery and hiring.
+One confirmed eligible HQ import may restore its exact workspace-local assistant,
+agreement and supported history without a second Hire/Build/Reconnect. Another
+local assistant (including a pending hire/HQ setup) or designation is never
+replaced. Workspace-only imports retain inert incoming evidence and readable
+history without becoming the local personal assistant. Credentials and execution
+grants do not travel, and imported automation requires separate local activation.
+This is an implementation contract: characterization tests of legacy imports
+must not be described as completed portable restoration.
+
+Confirmed legacy import may accept independently verified identity without Daily
+Brief configuration. It reports that component as Not configured and missing
+agreement fields as Unknown; defaults are new choices, not recovered values.
+This exception does not relax `RecoveryCoordinator.Inspect` or authorize startup
+repair. Imported profile access and rename must resolve the exact workspace and
+stable entry instance, never a same-named global roster entry. The global-profile
+lookup and rename descriptions below remain the native-hire path, not permission
+to promote an imported agent or rename unrelated sessions.
+
 ## Purpose
 
 Ori exposes one user-chosen, durable personal-assistant relationship. The
@@ -1014,14 +1035,17 @@ Its exact Personal Assistant Foundation effects are:
 |---|---|
 | Settings | Removes provider/preferences configuration only. The relationship, assistant profile, Personal HQ, and records remain; model readiness can become `not_configured`. |
 | Agents | Removes global agent profiles but not the relationship, Personal HQ, or its persisted entry-agent instance. The relationship read therefore keeps the same stable binding; profile-dependent management such as rename can report the missing profile and must never silently rebind by name. |
-| Sessions | Removes `sessions.db` and session files, including the PAF relationship row. If the file-backed owned assistant profile and/or external Personal HQ provenance survives and is rediscovered, restart reports bounded relationship recovery instead of `needs_hire`. A complete validated relationship is explicitly restored as `paused`; a profile-only relationship resumes at `needs_hq`. |
-| Onboarding | Resets only onboarding progress. It preserves the relationship, stable IDs, agent, Personal HQ, records, and history. A `needs_hq` relationship survives the reset and resumes at the HQ quest rather than offering a second hire or creating another profile. |
+| Conversation & app records | Clears the enumerated shared-database domains, including relationship, HQ registration, chats, follow-ups and briefs, and removes owned uploads. Retains workspace backing files and suppresses automatic workspace adoption, profile seeding and external MCP import. Retained provenance alone is not startup consent to restore. Explicit portable import can restore only an individually reviewed directory; it must not clear global suppression or overwrite its retained checkpoint with empty backfill. |
+| Setup steps | Resets only onboarding progress. It preserves the relationship, stable IDs, agent, Personal HQ, records, and history. A `needs_hq` relationship survives the reset and resumes at the HQ quest rather than offering a second hire or creating another profile. |
 | All categories | Applies every selected deletion. If no PAF provenance survives, restarted onboarding offers a fresh hire. Any surviving incomplete or contradictory provenance blocks automatic recovery and hire rather than guessing or creating a duplicate. |
 
-A reset response describes filesystem work completed in the current process;
-callers must not treat in-memory projections as rehydrated until the required
-restart. None of these options changes external accounts, grants new tools, or
-deletes external-provider data.
+Settings Reset stages a reviewed operation, fences/drains participating writers,
+and applies/verifies it before normal stores open after restart. The suppression
+policy in `internal/settingsreset/policy.go` is authoritative; a folder marker
+cannot override it. The reset review must disclose private portable history that
+remains in retained folders. Deliberate private-data deletion and Forget remain
+effective, unlike a retained-folder reset. None of these options changes external
+accounts, grants new tools, or deletes external-provider data.
 
 ## Compatibility
 

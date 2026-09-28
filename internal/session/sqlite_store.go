@@ -278,10 +278,10 @@ func (s *SQLiteStore) AddMessage(ctx context.Context, sessionID string, message 
 // GetMessages retrieves all messages for a session.
 func (s *SQLiteStore) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, session_id, role, content, model, tokens_used, created_at
+		SELECT id, session_id, role, content, model, tokens_used, created_at, continuity_source_sequence
 		FROM messages
 		WHERE session_id = ?
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, COALESCE(continuity_source_sequence, rowid) ASC, rowid ASC
 	`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get messages: %w", err)
@@ -292,16 +292,20 @@ func (s *SQLiteStore) GetMessages(ctx context.Context, sessionID string) ([]Mess
 	for rows.Next() {
 		var msg Message
 		var model sql.NullString
+		var sourceSequence sql.NullInt64
 
 		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content,
-			&model, &msg.TokensUsed, &msg.CreatedAt); err != nil {
+			&model, &msg.TokensUsed, &msg.CreatedAt, &sourceSequence); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %w", err)
 		}
 
 		msg.Model = model.String
+		msg.Imported = sourceSequence.Valid
 		messages = append(messages, msg)
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate messages: %w", err)
+	}
 	return messages, nil
 }
 
@@ -317,15 +321,18 @@ func (s *SQLiteStore) Search(ctx context.Context, query string, filter *SessionF
 	// Build filter clause
 	whereClause, filterArgs := s.buildWhereClause(filter)
 
-	// Full-text search query
-	// We join with the FTS table and add ranking
+	// Full-text search works with or without a workspace/agent filter. Do not
+	// append a bare AND after the join when the caller asks for all sessions.
+	matchClause := "WHERE sessions_fts MATCH ?"
+	if whereClause != "" {
+		matchClause = whereClause + " AND sessions_fts MATCH ?"
+	}
 	countQuery := fmt.Sprintf(`
 		SELECT COUNT(DISTINCT s.id)
 		FROM sessions s
 		INNER JOIN sessions_fts fts ON s.id = fts.session_id
 		%s
-		AND sessions_fts MATCH ?
-	`, strings.Replace(whereClause, "WHERE", "WHERE 1=1 AND", 1))
+	`, matchClause)
 
 	// Add query for FTS
 	allArgs := append(filterArgs, query)
@@ -347,10 +354,9 @@ func (s *SQLiteStore) Search(ctx context.Context, query string, filter *SessionF
 		FROM sessions s
 		INNER JOIN sessions_fts fts ON s.id = fts.session_id
 		%s
-		AND sessions_fts MATCH ?
 		ORDER BY rank
 		LIMIT ? OFFSET ?
-	`, strings.Replace(whereClause, "WHERE", "WHERE 1=1 AND", 1))
+	`, matchClause)
 
 	allArgs = append(allArgs, opts.Limit, opts.Offset)
 	rows, err := s.db.QueryContext(ctx, searchQuery, allArgs...)
@@ -450,7 +456,7 @@ func (s *SQLiteStore) getSessionPreview(ctx context.Context, sessionID string) s
 		SELECT SUBSTR(content, 1, 100)
 		FROM messages
 		WHERE session_id = ?
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, COALESCE(continuity_source_sequence, rowid) ASC, rowid ASC
 		LIMIT 1
 	`, sessionID).Scan(&content)
 

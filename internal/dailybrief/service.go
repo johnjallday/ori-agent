@@ -46,6 +46,7 @@ type Generator interface {
 // atomically flipping the current pointer.
 type Service struct {
 	admissionGate *resetstate.WorkGate
+	admission     func(ctx context.Context, workspaceID string, automatic bool) error
 	store         Store
 	generator     Generator
 
@@ -78,6 +79,29 @@ func NewService(store Store, generator Generator) *Service {
 
 // SetAdmissionGate is initialization-only, before requests or scheduler ticks.
 func (s *Service) SetAdmissionGate(gate *resetstate.WorkGate) { s.admissionGate = gate }
+
+// ErrGenerationNotAdmitted means this installation has not enabled the
+// workspace's routines (for example, an imported workspace not yet activated).
+var ErrGenerationNotAdmitted = errors.New("daily brief generation is not enabled for this workspace")
+
+// SetExecutionAdmission installs the installation-local workspace admission
+// check (automatic=true for first-open/scheduled generation). Initialization
+// only; nil keeps the previous behavior.
+func (s *Service) SetExecutionAdmission(check func(ctx context.Context, workspaceID string, automatic bool) error) {
+	s.admission = check
+}
+
+// CheckAdmission reports whether trigger may generate for workspaceID now,
+// so a caller can answer synchronously instead of starting refused work.
+func (s *Service) CheckAdmission(ctx context.Context, workspaceID string, trigger Trigger) error {
+	if s.admission == nil {
+		return nil
+	}
+	if err := s.admission(ctx, workspaceID, trigger != TriggerManual); err != nil {
+		return fmt.Errorf("%w: %v", ErrGenerationNotAdmitted, err)
+	}
+	return nil
+}
 
 func (s *Service) enterMutation() (func(), error) { return s.admissionGate.Enter() }
 
@@ -204,6 +228,14 @@ func (s *Service) GenerateFirstAssignmentBrief(ctx context.Context, cfg Config, 
 }
 
 func (s *Service) requestGeneration(ctx context.Context, cfg Config, userID string, trigger Trigger, localDate, requestID string) (*Revision, error) {
+	if s.admission != nil {
+		// First-open and scheduled briefs are background work: an imported
+		// workspace runs them only after the user enables routines here.
+		// A manual refresh is an explicit request and needs manual admission.
+		if err := s.admission(ctx, cfg.WorkspaceID, trigger != TriggerManual); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrGenerationNotAdmitted, err)
+		}
+	}
 	if !s.tryLockWorkspace(cfg.WorkspaceID) {
 		return nil, ErrGenerationInProgress
 	}

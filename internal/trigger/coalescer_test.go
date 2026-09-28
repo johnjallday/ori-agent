@@ -175,7 +175,7 @@ func TestCoalescerDropDiscardsWindow(t *testing.T) {
 	c, _, trg := newTestCoalescer(t, rec)
 
 	c.Observe(trg, Event{Kind: "file", FileEvent: "create", FileName: "a.txt", Timestamp: time.Now()})
-	c.Drop(trg.ID)
+	c.Drop(trg.WorkspaceID, trg.ID)
 
 	time.Sleep(3 * testDebounce)
 	if rec.count() != 0 {

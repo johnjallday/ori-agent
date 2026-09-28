@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -95,6 +96,39 @@ func (s *Service) Start() error {
 	return nil
 }
 
+// ReconcileWorkspace brings one workspace's loaded triggers, webhook tokens
+// and file watches in line with its current local admission, without a
+// restart: after an import, and after its routines are turned on or off here.
+func (s *Service) ReconcileWorkspace(workspaceID string) error {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
+	for _, t := range s.store.List(workspaceID) {
+		if t.Type == TypeFileWatch {
+			s.watch.Remove(workspaceID, t.ID)
+		}
+	}
+	triggers, err := s.store.ReloadWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if s.store.requireExecution(workspaceID, true) != nil {
+		return nil
+	}
+	for _, t := range triggers {
+		if t.Type == TypeFileWatch && t.Enabled {
+			if err := s.watch.Add(t); err != nil {
+				logger.Warn("trigger service: watch registration after admission change failed", logger.Fields{
+					"trigger_id": t.ID, "workspace_id": workspaceID, "error": err,
+				})
+			}
+		}
+	}
+	return nil
+}
+
 // Close tears down watching and stops accepting new events. In-flight
 // dispatches finish on their own; queued pending fires stay persisted.
 func (s *Service) Close() {
@@ -132,7 +166,7 @@ func (s *Service) Create(t Trigger) (Trigger, error) {
 	if err != nil {
 		return Trigger{}, err
 	}
-	if created.Type == TypeFileWatch && created.Enabled {
+	if created.Type == TypeFileWatch && created.Enabled && s.store.requireExecution(created.WorkspaceID, true) == nil {
 		if werr := s.watch.Add(created); werr != nil {
 			// Add already disabled the trigger and recorded the failure;
 			// return the reloaded state so the caller sees enabled=false.
@@ -155,8 +189,8 @@ func (s *Service) Update(workspaceID, triggerID string, fn func(*Trigger) error)
 		return Trigger{}, err
 	}
 	// Reconcile watch: simplest correct approach is stop-then-(maybe)-start.
-	s.watch.Remove(triggerID)
-	if updated.Type == TypeFileWatch && updated.Enabled {
+	s.watch.Remove(workspaceID, triggerID)
+	if updated.Type == TypeFileWatch && updated.Enabled && s.store.requireExecution(updated.WorkspaceID, true) == nil {
 		if werr := s.watch.Add(updated); werr != nil {
 			reloaded, _ := s.store.Get(workspaceID, triggerID)
 			return reloaded, werr
@@ -168,7 +202,7 @@ func (s *Service) Update(workspaceID, triggerID string, fn func(*Trigger) error)
 // SetEnabled toggles a trigger, validating the watch path on enable.
 func (s *Service) SetEnabled(workspaceID, triggerID string, enabled bool) (Trigger, error) {
 	return s.Update(workspaceID, triggerID, func(t *Trigger) error {
-		if enabled && t.Type == TypeFileWatch {
+		if enabled && t.Type == TypeFileWatch && s.store.requireExecution(workspaceID, true) == nil {
 			if err := t.CheckWatchPath(); err != nil {
 				return err
 			}
@@ -205,8 +239,11 @@ func (s *Service) Delete(workspaceID, triggerID string) error {
 		return err
 	}
 	defer release()
-	s.watch.Remove(triggerID)
-	s.rateLimiter.forget(triggerID)
+	if err := s.store.requireExecution(workspaceID, false); err != nil {
+		return err
+	}
+	s.watch.Remove(workspaceID, triggerID)
+	s.rateLimiter.forget(runtimeTriggerKey(workspaceID, triggerID))
 	return s.store.Delete(workspaceID, triggerID)
 }
 
@@ -225,12 +262,15 @@ func (s *Service) IngestWebhook(token, secret string, ev Event) (string, IngestR
 	if !ok || !t.Enabled || t.Type != TypeWebhook {
 		return "", IngestNotFound
 	}
+	if err := s.store.requireExecution(t.WorkspaceID, true); err != nil {
+		return "", IngestNotFound // inactive tokens confer no endpoint authority
+	}
 	if t.Webhook != nil && t.Webhook.Secret != "" {
 		if !SecureCompare(t.Webhook.Secret, secret) {
 			return "", IngestUnauthorized
 		}
 	}
-	if !s.rateLimiter.allow(t.ID) {
+	if !s.rateLimiter.allow(runtimeTriggerKey(t.WorkspaceID, t.ID)) {
 		return "", IngestRateLimited
 	}
 	fireID := s.coalescer.Observe(t, ev)
@@ -249,6 +289,11 @@ func (s *Service) TestFire(workspaceID, triggerID string) (FireRecord, error) {
 		return FireRecord{}, err
 	}
 	defer release()
+	// Testing a trigger exercises its automatic action pipeline. It is not
+	// a manual-task bypass for a workspace whose routines are inactive.
+	if err := s.store.requireExecution(workspaceID, true); err != nil {
+		return FireRecord{}, err
+	}
 	t, err := s.store.Get(workspaceID, triggerID)
 	if err != nil {
 		return FireRecord{}, err
@@ -258,16 +303,7 @@ func (s *Service) TestFire(workspaceID, triggerID string) (FireRecord, error) {
 		Events:    []Event{{Kind: "test", Timestamp: time.Now()}},
 		CreatedAt: time.Now(),
 	}
-	s.dispatcher.Dispatch(t, fire)
-	// Return the just-recorded fire (last in history).
-	reloaded, err := s.store.Get(workspaceID, triggerID)
-	if err != nil {
-		return FireRecord{}, err
-	}
-	if n := len(reloaded.FireHistory); n > 0 {
-		return reloaded.FireHistory[n-1], nil
-	}
-	return FireRecord{FireID: fire.FireID}, nil
+	return s.dispatcher.dispatch(t, fire)
 }
 
 // WebhookEventFromRequest builds a webhook Event from an HTTP request body,

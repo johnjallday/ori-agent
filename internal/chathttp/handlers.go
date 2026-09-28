@@ -1050,7 +1050,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	if invokedSkill == nil && routeNeedsWorkspace(routeDecision.Mode) {
 		hadWorkspaceContext := strings.TrimSpace(normalizedRouteContext.WorkspaceID) != ""
-		autoWorkspace, created, wsErr := h.ensureWorkspaceForRoute(current, originalQuery, routeDecision, normalizedRouteContext)
+		autoWorkspace, created, wsErr := h.ensureWorkspaceForRoute(ctx, current, originalQuery, routeDecision, normalizedRouteContext)
 		if wsErr != nil {
 			logger.Warn("Failed to ensure workspace for routed chat request", logger.Fields{
 				"agent":        current,

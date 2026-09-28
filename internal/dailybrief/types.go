@@ -117,11 +117,14 @@ type Revision struct {
 // list: same-day revisions collapse to their current (or latest) one, while
 // the full revision rows remain queryable for audit/debug.
 type HistorySummary struct {
-	LocalDate         string           `json:"local_date"`
-	CurrentRevisionID string           `json:"current_revision_id"`
-	RevisionCount     int              `json:"revision_count"`
-	Status            GenerationStatus `json:"status"`
-	GeneratedAt       time.Time        `json:"generated_at"`
+	LocalDate         string `json:"local_date"`
+	CurrentRevisionID string `json:"current_revision_id"`
+	// LatestRevisionID is the date's newest readable (succeeded or partial)
+	// revision; only one date at a time holds the current revision.
+	LatestRevisionID string           `json:"latest_revision_id,omitempty"`
+	RevisionCount    int              `json:"revision_count"`
+	Status           GenerationStatus `json:"status"`
+	GeneratedAt      time.Time        `json:"generated_at"`
 }
 
 // NotificationRecord tracks whether an Action Center notification was

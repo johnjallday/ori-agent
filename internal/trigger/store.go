@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // TriggersFileName is the per-workspace triggers file, a sibling of
@@ -37,8 +38,9 @@ type triggersFile struct {
 // Store persists triggers in each workspace's folder and maintains an
 // in-memory cache plus a token → trigger index for webhook lookup.
 type Store struct {
-	admissionGate *resetstate.WorkGate
-	source        WorkspaceSource
+	admissionGate  *resetstate.WorkGate
+	source         WorkspaceSource
+	executionOwner workspace.Store // runtime owner, wired before concurrent use
 
 	mu          sync.RWMutex
 	byWorkspace map[string][]*Trigger // workspaceID → triggers (cache of disk state)
@@ -79,6 +81,10 @@ func (s *Store) LoadAll() error {
 	s.tokenIndex = make(map[string]*Trigger)
 
 	for _, wsID := range ids {
+		// Discovery is not consent to load a retained executable definition.
+		if err := s.requireExecution(wsID, false); err != nil {
+			continue
+		}
 		triggers, err := s.readWorkspaceFile(wsID)
 		if err != nil {
 			logger.Warn("trigger store: skipping unreadable triggers.json", logger.Fields{
@@ -93,6 +99,42 @@ func (s *Store) LoadAll() error {
 		s.indexLocked(triggers)
 	}
 	return nil
+}
+
+// ReloadWorkspace re-reads one workspace's triggers.json after its local
+// admission changed (a workspace imported, or its routines turned on or off
+// here) and re-indexes its webhook tokens under the current admission. It
+// returns the triggers now loaded for that workspace.
+func (s *Store) ReloadWorkspace(wsID string) ([]Trigger, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	var triggers []*Trigger
+	if s.requireExecution(wsID, false) == nil {
+		if triggers, err = s.readWorkspaceFile(wsID); err != nil {
+			return nil, err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, t := range s.tokenIndex {
+		if t.WorkspaceID == wsID {
+			delete(s.tokenIndex, token)
+		}
+	}
+	if len(triggers) == 0 {
+		delete(s.byWorkspace, wsID)
+	} else {
+		s.byWorkspace[wsID] = triggers
+		s.indexLocked(triggers)
+	}
+	out := make([]Trigger, 0, len(triggers))
+	for _, t := range triggers {
+		out = append(out, *t)
+	}
+	return out, nil
 }
 
 // readWorkspaceFile loads and parses one workspace's triggers.json. Returns
@@ -122,6 +164,10 @@ func (s *Store) readWorkspaceFile(wsID string) ([]*Trigger, error) {
 // indexLocked adds webhook tokens to the token index. Caller holds s.mu.
 func (s *Store) indexLocked(triggers []*Trigger) {
 	for _, t := range triggers {
+		// Inactive copied tokens must not shadow an admitted workspace's token.
+		if err := s.requireExecution(t.WorkspaceID, true); err != nil {
+			continue
+		}
 		if t.Type == TypeWebhook && t.Webhook != nil && t.Webhook.Token != "" {
 			s.tokenIndex[t.Webhook.Token] = t
 		}
@@ -225,6 +271,9 @@ func (s *Store) Create(t Trigger) (Trigger, error) {
 		return Trigger{}, err
 	}
 	defer release()
+	if err := s.requireExecution(t.WorkspaceID, false); err != nil {
+		return Trigger{}, err
+	}
 	if t.ID == "" {
 		t.ID = "trg-" + uuid.NewString()
 	}
@@ -251,6 +300,9 @@ func (s *Store) Create(t Trigger) (Trigger, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.findLocked(t.WorkspaceID, t.ID) != nil {
+		return Trigger{}, errors.New("trigger identity already exists in workspace")
+	}
 	stored := t
 	s.byWorkspace[t.WorkspaceID] = append(s.byWorkspace[t.WorkspaceID], &stored)
 	if err := s.persistLocked(t.WorkspaceID); err != nil {
@@ -272,6 +324,9 @@ func (s *Store) Update(wsID, triggerID string, fn func(*Trigger) error) (Trigger
 		return Trigger{}, err
 	}
 	defer release()
+	if err := s.requireExecution(wsID, false); err != nil {
+		return Trigger{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.findLocked(wsID, triggerID)
@@ -286,6 +341,10 @@ func (s *Store) Update(wsID, triggerID string, fn func(*Trigger) error) (Trigger
 	if err := fn(t); err != nil {
 		*t = before
 		return Trigger{}, err
+	}
+	if t.WorkspaceID != wsID || t.ID != before.ID {
+		*t = before
+		return Trigger{}, errors.New("trigger identity cannot be changed by an update")
 	}
 	t.UpdatedAt = time.Now()
 	if err := t.Validate(); err != nil {
@@ -302,12 +361,10 @@ func (s *Store) Update(wsID, triggerID string, fn func(*Trigger) error) (Trigger
 		newToken = t.Webhook.Token
 	}
 	if oldToken != newToken {
-		if oldToken != "" {
+		if oldToken != "" && s.tokenIndex[oldToken] == t {
 			delete(s.tokenIndex, oldToken)
 		}
-		if newToken != "" {
-			s.tokenIndex[newToken] = t
-		}
+		s.indexLocked([]*Trigger{t})
 	}
 	return *t, nil
 }
@@ -319,6 +376,9 @@ func (s *Store) Delete(wsID, triggerID string) error {
 		return err
 	}
 	defer release()
+	if err := s.requireExecution(wsID, false); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ts := s.byWorkspace[wsID]
@@ -338,7 +398,7 @@ func (s *Store) Delete(wsID, triggerID string) error {
 		s.byWorkspace[wsID] = ts // restore
 		return err
 	}
-	if removed.Webhook != nil && removed.Webhook.Token != "" {
+	if removed.Webhook != nil && removed.Webhook.Token != "" && s.tokenIndex[removed.Webhook.Token] == removed {
 		delete(s.tokenIndex, removed.Webhook.Token)
 	}
 	return nil
@@ -363,17 +423,24 @@ func (s *Store) SetPendingFire(wsID, triggerID string, pf *PendingFire) error {
 	return err
 }
 
-// FindByID locates a trigger by ID across all workspaces (used by the watch
-// manager, whose watch keys carry only the trigger ID).
+// FindByID is a legacy unscoped lookup; scoped runtime consumers use Get.
+// Ambiguous copied IDs cannot identify one canonical owner.
 func (s *Store) FindByID(triggerID string) (Trigger, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	var found *Trigger
 	for _, ts := range s.byWorkspace {
 		for _, t := range ts {
 			if t.ID == triggerID {
-				return *t, true
+				if found != nil {
+					return Trigger{}, false
+				}
+				found = t
 			}
 		}
+	}
+	if found != nil {
+		return *found, true
 	}
 	return Trigger{}, false
 }
