@@ -142,6 +142,7 @@ stable. A mismatch never falls back to a name search.
 | Hire apply/resume | Requires a request ID. `last_hire_request_id` returns the existing outcome on replay; state transitions use compare-and-swap `state_version`. Creates the owned profile and relationship only. Persisted pre-amendment auto-HQ operations are distinguishable by payload version and resume through their old safe finalization path; they are never abandoned or duplicated. |
 | HQ setup apply/resume | Requires the current `state_version` and a stable HQ request ID bound to a normalized payload hash. The client supplies only the bounded HQ form fields — never assistant, profile, or workspace identity. Replay returns the same canonical result; a changed payload under the same request ID, or a stale version, returns `409`. Partial results are durable, bounded, and resumable with a safe repair step code that carries no provider or database text. |
 | Missing-relationship recovery | `GET /api/personal-assistant` may project one server-discovered orphan as `repair_needed` without writing it. `POST /api/personal-assistant/repair` accepts only `if_version: 0`; clients cannot select assistant, profile, workspace, or instance IDs. Repair reruns the complete identity proof and inserts exactly one relationship only if no row exists. A complete HQ returns `paused`; a profile-only recovery returns `needs_hq`. Any stale, ambiguous, incomplete, or contradictory evidence fails closed. |
+| Recovery fixes | `GET /api/personal-assistant/repair/diagnosis` names the first failed check (`issue`), the evidence, the fixes that are safe for exactly that issue, and a `digest` of the evidence; it never writes. `POST /api/personal-assistant/repair/resolve` (JSON only) takes `fix_id` and `evidence_digest`: evidence that changed since review is `409`, a fix the current diagnosis does not offer is `400`. One fix edits only ownership markers, the HQ designation, or a new schedule-off Daily Brief configuration, never deletes, then reconnects `paused` once the records agree or returns the next diagnosis. |
 | Pause/resume | Requires current `state_version`; stale writes return conflict and the current version. |
 | Profile/working-agreement edit | Requires current state version; profile and memory fields additionally use their canonical validators. |
 | First-assignment preview | Creates one journal row keyed by opaque preview ID and stores normalized payload/hash only. Repeated identical request IDs return that preview. |
@@ -208,8 +209,10 @@ is no room beside the form (a phone-width sheet). A plain Home visit shows
 nothing and makes no request. `/?quest=meet-assistant` on an install that needs
 a repair goes to the Agents page; on a hired install it does nothing. A provable
 orphan identity (`relationship_recovery`) opens the same panel's reconnect view
-with one Reconnect button; `relationship_recovery_blocked` shows the status and
-no button; a partial hire shows one Finish setup button that replays the same
+with one Reconnect button; `relationship_recovery_blocked` opens the fix view:
+what does not match, what Ori found, and the server's safe fixes (one Apply fix
+button, the recommended fix preselected), or what to change by hand when no fix
+is safe; a partial hire shows one Finish setup button that replays the same
 request. A successful hire goes to `/?panel=today`, where the hired assistant proposes
 its Personal HQ in a confirm card. The old `/?quest=build-hq` Map briefing is
 still available by explicit choice; it is not the default.
@@ -945,6 +948,20 @@ names, Daily Brief schedule fields, mandate text, paths, or quest copy.
   owner, stale designation, mismatched entry agent, or mismatched Daily Brief
   owner projects `relationship_recovery_blocked`. Automatic repair and hire are
   both unavailable; Ori never guesses by display name.
+- A blocked recovery is explained, not guessed at. The diagnosis names the first
+  failed check (`profile_missing`, `profile_duplicate`, `profile_incomplete`,
+  `profile_role`, `designation_without_hq`, `hq_duplicate`, `hq_marker_invalid`,
+  `hq_foreign_owner`, `assistant_mismatch`, `designation_mismatch`,
+  `entry_mismatch`, `brief_missing`, `brief_mismatch`) and offers only fixes
+  derived from the evidence it read: point the HQ marker at the one assistant
+  profile, keep one of several marked profiles or HQs (the others lose only
+  their marker), designate the marked HQ, mark the HQ's orchestrator lead as the
+  assistant, rewrite a damaged profile marker, create schedule-off Daily Brief
+  settings, or clear a designation whose workspace has no HQ marker. The user
+  chooses and applies each fix; HQ markers are written to both the database and
+  `workspace.json` so a rebuilt database does not bring the disagreement back.
+  Foreign owners, a mismatched lead agent, a non-orchestrator profile, and
+  another owner's brief settings have no automatic fix.
 
 ## Test matrix
 
@@ -957,6 +974,8 @@ The package/API/browser suites must pin at least these cases:
 | Missing relationship with one owned profile and no HQ | `repair_needed` / `relationship_recovery`; repair restores `needs_hq` without creating a profile |
 | Missing relationship with one fully matching owned profile and HQ | `repair_needed` / `relationship_recovery`; repair restores the same IDs as `paused` without creating a profile or workspace |
 | Missing relationship with ambiguous or contradictory PAF provenance | `repair_needed` / `relationship_recovery_blocked`; no automatic repair and no hire |
+| Blocked recovery, HQ marker names an earlier hire | diagnosis `assistant_mismatch` with one recommended `link_hq`; applying it rewrites the marker in both stores and reconnects `paused`, creating nothing |
+| Recovery fix reviewed against changed evidence | `409`; nothing written |
 | Active binding | same chosen identity on Home, Ask Ori, and HQ |
 | Active binding with no model | “Hired — choose a model to chat”; deterministic assignment/brief actions enabled |
 | Paused binding | reads/profile edits allowed; proactive runs suppressed |

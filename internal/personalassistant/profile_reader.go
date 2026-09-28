@@ -23,7 +23,35 @@ func NewAgentStoreProfileReader(agents store.Store) *AgentStoreProfileReader {
 var (
 	_ ProfileReader         = (*AgentStoreProfileReader)(nil)
 	_ RecoveryProfileLister = (*AgentStoreProfileReader)(nil)
+	_ RecoveryProfileFinder = (*AgentStoreProfileReader)(nil)
 )
+
+// PersonalAssistantRecoveryProfileByName reads one profile whether or not it
+// carries an assistant marker, with the same bounded fields as the recovery
+// scan. A recovery fix uses it to offer a Personal HQ's lead agent.
+func (r *AgentStoreProfileReader) PersonalAssistantRecoveryProfileByName(name string) (RecoveryProfile, bool) {
+	name = strings.TrimSpace(name)
+	if r == nil || r.agents == nil || name == "" {
+		return RecoveryProfile{}, false
+	}
+	record, found := r.agents.GetAgent(name)
+	if !found || record == nil {
+		return RecoveryProfile{}, false
+	}
+	var tags []string
+	if record.Metadata != nil {
+		tags = record.Metadata.Tags
+	}
+	provenance, _ := recoveryProfileProvenance(name, tags)
+	profile := RecoveryProfile{
+		Name: name, AssistantID: provenance.AssistantID, HireRequestID: provenance.HireRequestID,
+		Role: record.Role, Appearance: record.Appearance.Clone(),
+	}
+	if record.Statistics != nil {
+		profile.CreatedAt = record.Statistics.CreatedAt
+	}
+	return profile, true
+}
 
 // PersonalAssistantProfileProvenance returns bounded ownership for the profile
 // stored under name.

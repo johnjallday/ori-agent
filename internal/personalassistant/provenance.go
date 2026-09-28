@@ -92,6 +92,20 @@ func EnsureProfileMarkers(tags []string, assistantID, hireRequestID string) ([]s
 	return out, nil
 }
 
+// WithoutProfileMarkers returns tags minus every assistant and hire marker,
+// keeping the order of the tags the user added.
+func WithoutProfileMarkers(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if strings.HasPrefix(trimmed, ProfileAssistantMarkerPrefix) || strings.HasPrefix(trimmed, ProfileHireMarkerPrefix) {
+			continue
+		}
+		out = append(out, tag)
+	}
+	return out
+}
+
 // ProfileReader resolves bounded ownership for one global agent profile.
 //
 // It is intentionally narrower than the agent store: the read projection needs

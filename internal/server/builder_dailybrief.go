@@ -246,6 +246,12 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		personalassistant.NewSessionRecoveryWorkspaceReader(b.sessionStore),
 		b.personalHQService, store,
 	)
+	// Fixes for records that disagree: the session handler edits ownership
+	// markers in both workspace stores and on profiles; designation and Daily
+	// Brief settings go through their canonical owners.
+	if b.sessionHandler != nil && b.personalHQService != nil {
+		recovery.WithResolver(b.sessionHandler, b.personalHQService, briefService, profileReader)
+	}
 	b.personalAssistantService = personalassistant.NewService(
 		b.personalAssistantStore,
 		b.personalHQService,

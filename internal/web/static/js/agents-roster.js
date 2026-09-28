@@ -2886,6 +2886,10 @@
   function renderAssistantRepair(view, host) {
     if (createAppearanceEditor && createAppearanceEditor.destroy) createAppearanceEditor.destroy();
     createAppearanceEditor = null;
+    if (view.mode === 'blocked') {
+      renderAssistantResolver(host);
+      return;
+    }
     host.innerHTML =
       '<div class="create-preset create-preset--repair" id="cr-repair">' +
       '<p class="create-preset__message">' +
@@ -2900,6 +2904,163 @@
       view.buttonLabel,
       view.mode === 'reconnect' ? submitAssistantRepair : submitAssistantResume
     );
+  }
+
+  // The fix view for records that do not agree. The server says what differs
+  // and which fixes are safe; this only shows that and sends back the one fix
+  // chosen, with the digest of the records it was chosen from.
+  var resolverDigest = '';
+
+  function resolverShell(message) {
+    return (
+      '<div class="create-preset create-preset--repair" id="cr-repair">' +
+      '<p class="create-preset__message">' +
+      esc(message) +
+      '</p>' +
+      '<div class="create-preset__error" id="createError" role="alert" tabindex="-1" hidden></div>' +
+      '</div>'
+    );
+  }
+
+  // notice: a status line above the diagnosis (after a fix that left another
+  // step); error: a failure to keep on screen once the diagnosis is reloaded.
+  function renderAssistantResolver(host, notice, error) {
+    var api = hireApi();
+    if (!api) return;
+    host.innerHTML = resolverShell('Checking your assistant records…');
+    setHireButton('', null);
+    api.fetchRecoveryDiagnosis().then(function (result) {
+      if (!inHireMode() || !document.getElementById('cr-repair')) return;
+      if (!result.ok) {
+        // The relationship exists again (another tab fixed it), or there is
+        // nothing left to recover: the view the new state calls for takes over.
+        if (result.status === 409) {
+          loadAssistantState().then(function () {
+            var view = assistantPresetView();
+            if (view.mode === 'standard') {
+              host.innerHTML = resolverShell(
+                'Your assistant is connected. Close this window to continue.'
+              );
+              return;
+            }
+            if (view.mode !== 'blocked') openHireModal(view);
+            else showCreateError(result.error);
+          });
+          return;
+        }
+        showCreateError(result.error);
+        return;
+      }
+      if (!result.diagnosis || !result.diagnosis.issue) {
+        // The records agree now: the ordinary one-button reconnect applies.
+        loadAssistantState().then(function () {
+          var view = assistantPresetView();
+          if (view.mode !== 'blocked' && view.mode !== 'standard') openHireModal(view);
+        });
+        return;
+      }
+      showResolverDiagnosis(host, result.diagnosis, notice);
+      if (error) showCreateError(error);
+    });
+  }
+
+  function showResolverDiagnosis(host, diagnosis, notice) {
+    var api = hireApi();
+    var copy = api.describeRecoveryDiagnosis(diagnosis);
+    resolverDigest = String(diagnosis.digest || '');
+    var fixes = copy.fixes;
+    var checked = fixes.filter(function (fix) {
+      return fix.recommended;
+    })[0];
+    var checkedId = (checked || fixes[0] || {}).id;
+    var li = function (text) {
+      return '<li>' + esc(text) + '</li>';
+    };
+    var fixItems = fixes
+      .map(function (fix, index) {
+        var id = 'cr-fix-' + index;
+        return (
+          '<div class="create-preset__fix">' +
+          '<input class="form-check-input" type="radio" name="cr-fix" id="' +
+          id +
+          '" value="' +
+          esc(fix.id) +
+          '"' +
+          (fix.id === checkedId ? ' checked' : '') +
+          '>' +
+          '<label class="create-preset__fix-label" for="' +
+          id +
+          '"><span class="create-preset__fix-title">' +
+          esc(fix.label) +
+          '</span>' +
+          (fix.recommended ? '<span class="create-preset__fix-badge">Recommended</span>' : '') +
+          '<ul class="create-preset__fix-changes">' +
+          fix.changes.map(li).join('') +
+          '</ul></label></div>'
+        );
+      })
+      .join('');
+    host.innerHTML =
+      '<div class="create-preset create-preset--repair create-preset--resolver" id="cr-repair">' +
+      (notice ? '<p class="create-preset__notice" role="status">' + esc(notice) + '</p>' : '') +
+      '<p class="create-preset__message">' +
+      esc(copy.problem) +
+      '</p>' +
+      '<h3 class="create-preset__heading">What Ori found</h3>' +
+      '<ul class="create-preset__found">' +
+      copy.found.map(li).join('') +
+      '</ul>' +
+      (fixes.length
+        ? '<fieldset class="create-preset__fixes"><legend class="create-preset__heading">Choose a fix</legend>' +
+          fixItems +
+          '</fieldset>' +
+          '<p class="form-helper create-preset__boundary">' +
+          esc(api.RECOVERY_BOUNDARY_COPY) +
+          '</p>'
+        : '<p class="form-helper create-preset__boundary">' + esc(copy.guidance) + '</p>') +
+      '<div class="create-preset__error" id="createError" role="alert" tabindex="-1" hidden></div>' +
+      '<p class="create-preset__switch"><button type="button" class="roster-linkbtn" id="cr-resolver-recheck">' +
+      'Check again</button></p>' +
+      '</div>';
+    document.getElementById('cr-resolver-recheck').addEventListener('click', function () {
+      renderAssistantResolver(host);
+    });
+    setHireButton(fixes.length ? 'Apply fix' : '', submitAssistantFix);
+  }
+
+  function submitAssistantFix() {
+    var api = hireApi();
+    var host = document.getElementById('agentCreateFormHost');
+    if (!api || !host) return;
+    var chosen = document.querySelector('#cr-repair input[name="cr-fix"]:checked');
+    if (!chosen) {
+      showCreateError('Choose a fix first.');
+      return;
+    }
+    showCreateError('');
+    setAssistantBusy(true, 'Applying fix…');
+    api.submitRecoveryFix({ fixId: chosen.value, digest: resolverDigest }).then(function (result) {
+      if (result.ok && result.reconnected) {
+        window.location.href = result.needsHQ ? api.HQ_CARD_ROUTE : '/';
+        return;
+      }
+      setAssistantBusy(false);
+      if (result.ok && result.diagnosis) {
+        showResolverDiagnosis(
+          host,
+          result.diagnosis,
+          'That fix was applied. One more thing needs attention before your assistant can be reconnected.'
+        );
+        return;
+      }
+      if (result.ok || result.status === 409) {
+        // Applied with no next step to show, or the records changed under the
+        // review: look again rather than apply anything more.
+        renderAssistantResolver(host, '', result.error);
+        return;
+      }
+      showCreateError(result.error);
+    });
   }
 
   function showCreateError(message) {

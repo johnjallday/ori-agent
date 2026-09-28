@@ -14,6 +14,8 @@ import {
   MEET_ASSISTANT_QUEST_ROUTE,
   buildPersonalAssistantHirePayload,
   clearHireRequestId,
+  describeRecoveryDiagnosis,
+  fetchRecoveryDiagnosis,
   getOrCreateHireRequestId,
   personalAssistantCanOpenHireFlow,
   personalAssistantNeedsHQ,
@@ -21,6 +23,7 @@ import {
   personalAssistantResumeMessage,
   presetView,
   submitHire,
+  submitRecoveryFix,
   submitRepair
 } from './personal-assistant-hire.js';
 
@@ -131,7 +134,9 @@ test('the routes and flags are the ones the rest of the app links to', () => {
   assert.equal(HQ_QUEST_ROUTE, '/?quest=build-hq');
   assert.equal(HQ_CARD_ROUTE, '/?panel=today');
   const roster = readFileSync(new URL('../agents-roster.js', import.meta.url), 'utf8');
-  assert.equal((roster.match(/api\.HQ_CARD_ROUTE/g) || []).length, 3);
+  // Hire, resume, reconnect, and a fix that reconnects: each hands a
+  // relationship with no HQ yet to the HQ card.
+  assert.equal((roster.match(/api\.HQ_CARD_ROUTE/g) || []).length, 4);
   assert.equal(roster.includes('api.HQ_QUEST_ROUTE'), false);
   // Mission 01's action URL, the same string the server's quest carries: the
   // walkthrough from its first step, on Home.
@@ -317,6 +322,191 @@ test('submitRepair names no identity and reports the reconnected state', async (
   });
   assert.equal(offline.ok, false);
   assert.match(offline.error, /nothing was changed/i);
+});
+
+// The reported case: an HQ kept from an earlier hire names another assistant.
+const MISMATCH_DIAGNOSIS = {
+  issue: 'assistant_mismatch',
+  profiles: [
+    {
+      name: 'Assistant',
+      assistant_id: '70fb3ae4-3e87-4396-99d9-ddff708f7bb0',
+      marker_valid: true,
+      orchestrator: true
+    }
+  ],
+  hqs: [
+    {
+      workspace_id: 'hq-1',
+      name: 'My HQ',
+      assistant_id: '4877dbba-3b6b-4f71-8e97-beb02d4d76c2',
+      marker_valid: true,
+      owned_by_user: true,
+      entry_agents: ['Assistant'],
+      designated: true
+    }
+  ],
+  designation: { workspace_id: 'hq-1', workspace_name: 'My HQ', valid: true },
+  fixes: [
+    {
+      id: 'link_hq:hq-1',
+      kind: 'link_hq',
+      profile_name: 'Assistant',
+      workspace_id: 'hq-1',
+      workspace_name: 'My HQ',
+      recommended: true
+    }
+  ],
+  digest: 'digest-1'
+};
+
+test('describeRecoveryDiagnosis names the mismatch, what was found, and the one fix', () => {
+  const copy = describeRecoveryDiagnosis(MISMATCH_DIAGNOSIS);
+  assert.equal(
+    copy.problem,
+    '“My HQ” was set up for a different assistant than “Assistant”. This happens when an assistant is hired again and the earlier Personal HQ is kept.'
+  );
+  assert.deepEqual(copy.found, [
+    'Agent “Assistant” is marked as your assistant (assistant 70fb3ae4).',
+    'Workspace “My HQ” is marked as a Personal HQ for assistant 4877dbba, led by “Assistant”. It is your current Personal HQ.'
+  ]);
+  assert.deepEqual(copy.fixes, [
+    {
+      id: 'link_hq:hq-1',
+      recommended: true,
+      label: 'Connect “Assistant” to “My HQ”',
+      changes: [
+        '“My HQ”’s Personal HQ record will name “Assistant” as its assistant.',
+        '“Assistant” is reconnected as your assistant.'
+      ]
+    }
+  ]);
+  assert.equal(copy.guidance, '');
+});
+
+test('describeRecoveryDiagnosis lists every choice for duplicates and hides IDs otherwise', () => {
+  const duplicate = describeRecoveryDiagnosis({
+    issue: 'profile_duplicate',
+    profiles: [
+      { name: 'Assistant', assistant_id: 'aaaaaaaa-1', marker_valid: true, orchestrator: true },
+      { name: 'Atlas', assistant_id: 'bbbbbbbb-2', marker_valid: true, orchestrator: true }
+    ],
+    hqs: [],
+    designation: {},
+    fixes: [
+      {
+        id: 'keep_profile:Assistant',
+        kind: 'keep_profile',
+        profile_name: 'Assistant',
+        recommended: true
+      },
+      { id: 'keep_profile:Atlas', kind: 'keep_profile', profile_name: 'Atlas' }
+    ]
+  });
+  assert.match(
+    duplicate.problem,
+    /2 agents are each marked as your assistant: “Assistant” and “Atlas”/
+  );
+  assert.equal(duplicate.fixes[1].label, 'Keep “Atlas” as your assistant');
+  assert.deepEqual(duplicate.fixes[1].changes, [
+    '“Assistant” stop being marked as your assistant and stay as ordinary agents.'
+  ]);
+  assert.ok(duplicate.found.includes('No workspace is set as your Personal HQ.'));
+
+  const brief = describeRecoveryDiagnosis({
+    ...MISMATCH_DIAGNOSIS,
+    issue: 'brief_missing',
+    fixes: [{ id: 'create_brief:hq-1', kind: 'create_brief', workspace_name: 'My HQ' }]
+  });
+  assert.doesNotMatch(brief.found.join(' '), /70fb3ae4|4877dbba/);
+  assert.equal(brief.fixes[0].label, 'Create Daily Brief settings for “My HQ”');
+});
+
+test('describeRecoveryDiagnosis explains what to do by hand when no fix is safe', () => {
+  const copy = describeRecoveryDiagnosis({
+    ...MISMATCH_DIAGNOSIS,
+    issue: 'entry_mismatch',
+    hqs: [{ ...MISMATCH_DIAGNOSIS.hqs[0], entry_agents: ['Journal'] }],
+    fixes: []
+  });
+  assert.equal(copy.problem, '“My HQ” is led by “Journal”, not by your assistant “Assistant”.');
+  assert.deepEqual(copy.fixes, []);
+  assert.equal(copy.guidance, 'Make “Assistant” the only lead agent of “My HQ”, then check again.');
+
+  const unknown = describeRecoveryDiagnosis(null);
+  assert.equal(unknown.problem, 'Personal Assistant records do not agree.');
+  assert.match(unknown.guidance, /nothing was changed/);
+});
+
+test('fetchRecoveryDiagnosis reads the diagnosis and reports refusals', async () => {
+  const found = await fetchRecoveryDiagnosis({
+    fetchImpl: async url => {
+      assert.equal(url, '/api/personal-assistant/repair/diagnosis');
+      return jsonResponse(200, { diagnosis: MISMATCH_DIAGNOSIS });
+    }
+  });
+  assert.equal(found.ok, true);
+  assert.equal(found.diagnosis.digest, 'digest-1');
+
+  const connected = await fetchRecoveryDiagnosis({
+    fetchImpl: async () => jsonResponse(409, { code: 'recovery_conflict', error: 'Changed.' })
+  });
+  assert.deepEqual(
+    [connected.ok, connected.status, connected.code, connected.error],
+    [false, 409, 'recovery_conflict', 'Changed.']
+  );
+
+  const offline = await fetchRecoveryDiagnosis({
+    fetchImpl: async () => {
+      throw new TypeError('Failed to fetch');
+    }
+  });
+  assert.equal(offline.ok, false);
+  assert.match(offline.error, /nothing was changed/i);
+});
+
+test('submitRecoveryFix sends only the chosen fix and the reviewed digest', async () => {
+  let request = null;
+  const reconnected = await submitRecoveryFix({
+    fixId: 'link_hq:hq-1',
+    digest: 'digest-1',
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return jsonResponse(200, {
+        personal_assistant: { state: 'paused' },
+        applied: 'link_hq',
+        reconnected: true
+      });
+    }
+  });
+  assert.equal(request.url, '/api/personal-assistant/repair/resolve');
+  assert.equal(request.options.method, 'POST');
+  assert.equal(request.options.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(request.options.body), {
+    fix_id: 'link_hq:hq-1',
+    evidence_digest: 'digest-1'
+  });
+  assert.equal(reconnected.ok, true);
+  assert.equal(reconnected.reconnected, true);
+  assert.equal(reconnected.applied, 'link_hq');
+  assert.equal(reconnected.diagnosis, null);
+
+  const nextStep = await submitRecoveryFix({
+    fetchImpl: async () =>
+      jsonResponse(200, {
+        personal_assistant: { state: 'repair_needed' },
+        applied: 'link_hq',
+        reconnected: false,
+        diagnosis: { issue: 'brief_missing' }
+      })
+  });
+  assert.equal(nextStep.reconnected, false);
+  assert.equal(nextStep.diagnosis.issue, 'brief_missing');
+
+  const stale = await submitRecoveryFix({
+    fetchImpl: async () => jsonResponse(409, { code: 'recovery_conflict', error: 'Review again.' })
+  });
+  assert.deepEqual([stale.ok, stale.status, stale.error], [false, 409, 'Review again.']);
 });
 
 test('presetView picks the preset only while there is no assistant to keep', () => {
