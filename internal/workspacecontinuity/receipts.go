@@ -183,9 +183,11 @@ func (s *LocalStore) Operation(ctx context.Context, id, userID string) (Operatio
 
 // ClaimRecord returns false for the exact previously restored source record.
 // Never compare against/rewrite the current canonical content on a retry: the
-// user may have edited or deleted it since this receipt completed.
+// user may have edited or deleted it since this receipt completed. Every
+// restored record passes here, so this is where an imported ID is held to
+// SafeRecordID before it can reach any view.
 func ClaimRecord(ctx context.Context, tx *sql.Tx, scope RestoreScope, domain, family, recordID, digest string) (bool, error) {
-	if tx == nil || !scope.valid() || !knownDomain(domain) || !validLabel(family) || !ValidID(recordID) || !validDigest(digest) {
+	if tx == nil || !scope.valid() || !knownDomain(domain) || !validLabel(family) || !SafeRecordID(recordID) || !validDigest(digest) {
 		return false, ErrInvalid
 	}
 	var status, attachmentState string

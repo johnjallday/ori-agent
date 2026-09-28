@@ -80,6 +80,13 @@ func (h *Handler) handleWorkspaceImportCheck(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
+	if review.Status == "legacy" && h.continuity != nil && h.store != nil && h.store.DB() != nil {
+		review.LegacyWorkspace = workspaceImportHasConfig(normalizedPath)
+		if err := h.reviewLegacyAssistant(r.Context(), normalizedPath, &review); err != nil {
+			_ = orihttp.RespondInternalError(w, "Cannot inspect the destination for workspace continuity")
+			return
+		}
+	}
 	duplicate, err := h.findDuplicateImportedWorkspace(r.Context(), normalizedPath)
 	if err != nil {
 		logger.Error("Failed duplicate check for workspace import", logger.Fields{"error": err})
@@ -103,6 +110,11 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 
 	var req createWorkspaceImportRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	// Adopting an assistant is a consent step: only a JSON request (which a
+	// page on another site cannot send without a CORS preflight) may ask.
+	if req.AdoptAssistant && !continuityJSONRequest(w, r) {
 		return
 	}
 	if trimmed := bytes.TrimSpace(req.ProjectConnection); len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) {
@@ -233,6 +245,11 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		}
 		if strings.TrimSpace(warning) != "" {
 			response["warning"] = warning
+		}
+		if req.AdoptAssistant && h.continuity != nil {
+			// The workspace is imported either way; adoption is its own
+			// all-or-nothing step, reported alongside.
+			response["assistant_adoption"] = h.adoptLegacyAssistant(r.Context(), workspace.ID)
 		}
 
 		_ = orihttp.RespondCreated(w, response)

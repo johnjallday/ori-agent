@@ -23,10 +23,13 @@
   }
 
   async function request(path, method = 'GET', body) {
+    // Every POST goes as JSON: the server refuses non-JSON consent requests,
+    // which a page on another site could otherwise send (CSRF).
+    const post = method !== 'GET';
     const response = await fetch(path, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined
+      headers: post ? { 'Content-Type': 'application/json' } : undefined,
+      body: post ? JSON.stringify(body || {}) : undefined
     });
     const result = await response.json().catch(() => ({}));
     return { ok: response.ok && result.success !== false, result };

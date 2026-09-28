@@ -152,6 +152,26 @@ func ValidID(value string) bool {
 	return true
 }
 
+// SafeRecordID is the stricter shape every restored record's own ID must have:
+// letters, digits, '.', '_' and '-', starting with a letter or digit. Ori's
+// IDs (UUIDs, provider tool-call IDs) all fit. Record IDs end up in URLs, HTML
+// attributes and inline handlers across the existing UI, so an imported ID
+// must never be able to carry quotes, brackets or other markup.
+func SafeRecordID(value string) bool {
+	if !ValidID(value) || len(value) > 128 {
+		return false
+	}
+	for i, ch := range value {
+		switch {
+		case ch >= 'a' && ch <= 'z', ch >= 'A' && ch <= 'Z', ch >= '0' && ch <= '9':
+		case (ch == '.' || ch == '_' || ch == '-') && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func validLabel(value string) bool {
 	if value == "" || len(value) > 64 {
 		return false

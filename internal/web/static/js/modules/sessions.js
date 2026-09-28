@@ -3828,6 +3828,7 @@ const sessionManager = {
     this.importContinuityStatus = '';
     this.importContinuityPath = '';
     this.importContinuityReview = null;
+    this.importLegacyAdopt = false;
     const notice = document.getElementById('folderImportContinuityNotice');
     if (notice) notice.hidden = true;
     for (const id of [
@@ -3861,9 +3862,11 @@ const sessionManager = {
       lines: ['Nothing was imported.'],
       actions: []
     };
+    // An older copy imports through the ordinary button; its notice only
+    // explains (and may offer its assistant). Everything else is reviewed.
     const blocked = view.mode !== 'legacy';
     if (notice) {
-      notice.hidden = !blocked;
+      notice.hidden = !blocked && view.lines.length === 0;
       if (notice.dataset) notice.dataset.mode = view.mode;
     }
     if (title) title.textContent = view.title || '';
@@ -3877,8 +3880,33 @@ const sessionManager = {
     this.renderContinuityList([{ title: '', items: view.lines.slice(1) }]);
     this.importContinuityWorkspaceId = view.workspaceId || '';
     this.renderContinuityActions(view.actions);
+    this.renderLegacyAdoptChoice(view.adopt);
     const button = document.getElementById('createFolderBtn');
     if (button && this.importModeEnabled && !this.isCreatingFolder) button.disabled = blocked;
+  },
+
+  // The one explicit choice an older HQ copy offers: continue with the
+  // assistant its files prove. Checked by default; sent with the import.
+  renderLegacyAdoptChoice(adopt) {
+    this.importLegacyAdopt = Boolean(adopt);
+    if (!adopt || typeof document.createElement !== 'function') return;
+    const container = document.getElementById('folderImportContinuityActions');
+    if (!container) return;
+    const label = document.createElement('label');
+    label.className = 'form-check-label d-flex gap-2 align-items-center';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'form-check-input';
+    box.id = 'folderImportLegacyAdopt';
+    box.checked = true;
+    box.addEventListener('change', () => {
+      this.importLegacyAdopt = box.checked;
+    });
+    const text = document.createElement('span');
+    text.textContent = adopt.label;
+    label.append(box, text);
+    container.appendChild(label);
+    container.hidden = false;
   },
 
   renderContinuityList(sections) {
@@ -3977,9 +4005,10 @@ const sessionManager = {
       progress.textContent = 'Retrying… Work already restored will not be added twice.';
     }
     try {
+      // Sent as JSON: the server refuses non-JSON consent requests (CSRF).
       const response = await fetch(
         `/api/workspaces/import/continuity/${encodeURIComponent(operationId)}/retry`,
-        { method: 'POST' }
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
       );
       const result = await response.json().catch(() => ({}));
       if (result?.import) {
@@ -11324,6 +11353,7 @@ const sessionManager = {
         payload.path = importPath;
         payload.allow_duplicate = Boolean(this.importAllowDuplicate);
         payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
+        if (this.importLegacyAdopt) payload.adopt_assistant = true;
       } else if (requiresReviewedRoster || !ordinaryGroup) {
         // A create opened for a "show me a folder" offer names the offer so
         // the server can attach that folder afterwards (FR28). The folder's
@@ -11697,6 +11727,21 @@ const sessionManager = {
         result.agent_reuse_notices
           .filter(msg => typeof msg === 'string' && msg)
           .forEach(msg => this.showToast(msg, 'info'));
+      }
+      // An older HQ copy imported with "continue with its assistant".
+      const adoption = importEnabled ? result.assistant_adoption : null;
+      if (adoption?.adopted) {
+        this.showToast(
+          `${adoption.display_name || 'Your assistant'} is your personal assistant again. It starts paused; choose its focus when you resume it.`,
+          'success'
+        );
+      } else if (adoption) {
+        this.showToast(
+          adoption.reason === 'existing_assistant'
+            ? 'Imported as a workspace: this computer already has a personal assistant.'
+            : 'Imported as a workspace: its assistant could not be verified from this copy.',
+          'warning'
+        );
       }
       if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
       if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();

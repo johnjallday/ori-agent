@@ -135,7 +135,7 @@ func (s *Store) writeContinuityUpload(ctx context.Context, sessionID string, ent
 	}
 	defer func() { _ = reader.Close() }()
 	temporary := filepath.Join(s.getFilesPath(sessionID), ".import-"+uuid.NewString())
-	file, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) // #nosec G304 -- a fresh .import-<uuid> name, created exclusively, inside this store's own validated session directory
 	if err != nil {
 		return err
 	}

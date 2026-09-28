@@ -29,7 +29,9 @@ computer's database, settings or upload folder.
 
 The folder contains private conversations, follow-ups, briefs and uploaded
 files. Treat every copy as personal data — Ori cannot erase a copy you have
-made somewhere else.
+made somewhere else. If your Workspace Directory is inside a git repository,
+add `.ori/continuity/` to its `.gitignore` unless you mean to commit that
+private history.
 
 ## 3. Import it on the other computer
 
@@ -78,5 +80,10 @@ a kept folder to restore it, or delete the folder to erase that copy.
 
 A folder from a version of Ori without this feature (no `.ori/continuity`
 checkpoint) imports as an ordinary folder: its workspace files come across, but
-its conversations and other history are not included. If it was a Personal HQ,
-its assistant is not reconnected automatically on the new computer.
+its conversations, follow-ups, Daily Briefs and uploaded files are not in it —
+the import review says so. If it was a Personal HQ and this computer has no
+assistant yet, the review offers **Continue with <name> as my personal
+assistant** (checked). Keep it checked to bring that assistant back, paused. The
+older copy never saved the working agreement, so focus and the brief schedule
+are new choices you make here; background routines start off as with any
+import.

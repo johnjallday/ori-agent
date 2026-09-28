@@ -18,7 +18,7 @@ func ResetRecordTables() []string {
 		// deleting canonical domains fires their transactional dirty triggers.
 		// Portable files survive, but local receipts/admission never do.
 		"continuity_dirty", "continuity_operations", "continuity_attachments",
-		"continuity_components", "continuity_records", "continuity_installs", "continuity_retained_records", "continuity_file_mutations", "followup_continuity_source_refs",
+		"continuity_components", "continuity_records", "continuity_installs", "continuity_projections", "continuity_retained_records", "continuity_file_mutations", "followup_continuity_source_refs",
 		// Encrypted local credentials/grants are not part of retained folders.
 		"workspace_local_config",
 		"users", "user_preference_revisions", "workspaces", "sessions", "messages", "session_tags", "tool_calls",

@@ -73,6 +73,14 @@ type continuityImportReview struct {
 	// History summarizes restorable saved history across the whole tree.
 	History *continuityHistoryCounts `json:"history,omitempty"`
 	Members int                      `json:"members,omitempty"`
+	// LegacyAssistant names the assistant an older (checkpoint-less) Personal
+	// HQ folder proves on its own; LegacyAdoptionBlocked says why it cannot
+	// become this installation's assistant here.
+	LegacyAssistant       *continuityLegacyAssistant `json:"legacy_assistant,omitempty"`
+	LegacyAdoptionBlocked string                     `json:"legacy_adoption_blocked,omitempty"`
+	// LegacyWorkspace marks a checkpoint-less folder that is an exported Ori
+	// workspace (it has workspace.json), as opposed to any other folder.
+	LegacyWorkspace bool `json:"legacy_workspace,omitempty"`
 
 	members []continuityImportMember
 }

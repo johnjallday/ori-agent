@@ -50,9 +50,33 @@
   // describeReview turns an /api/workspaces/import/check "continuity" object
   // into what the Import Folder modal shows. Legacy folders keep the existing
   // import path (mode 'legacy').
+  // An older Ori wrote this workspace folder without a continuity checkpoint:
+  // it imports through the ordinary path. Say what such a copy lacks and, for
+  // a Personal HQ whose own files prove its assistant, offer to continue with
+  // it — new choices stand in for the agreement that was never saved.
+  function describeLegacyReview(review) {
+    if (!review?.legacy_workspace) return { mode: 'legacy', title: '', lines: [], actions: [] };
+    const lines = [
+      'This folder was saved by an older version of Ori. Its workspace files come across; its conversations, follow-ups, Daily Briefs and uploaded files are not in it.'
+    ];
+    const name = truncate(review.legacy_assistant?.display_name, 80);
+    let adopt = null;
+    if (name && review.legacy_adoption_blocked) {
+      lines.push(
+        `It was ${name}’s Personal HQ. Your current assistant stays unchanged; this folder imports as a workspace.`
+      );
+    } else if (name) {
+      lines.push(
+        `It was ${name}’s Personal HQ. The working agreement was not saved in this copy, so ${name} starts paused, and focus and brief schedule are new choices you make here.`
+      );
+      adopt = { label: `Continue with ${name} as my personal assistant`, name };
+    }
+    return { mode: 'legacy', title: 'Older copy', lines, actions: [], adopt };
+  }
+
   function describeReview(review) {
     const status = review?.status || 'unavailable';
-    if (status === 'legacy') return { mode: 'legacy', title: '', lines: [], actions: [] };
+    if (status === 'legacy') return describeLegacyReview(review);
     if (status !== 'review_required') {
       return {
         mode: 'blocked',

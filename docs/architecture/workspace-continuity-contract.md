@@ -128,14 +128,52 @@ travels with that folder instead of being ownerless.
 `imported_rename_unavailable` rather than running the global-name rename.
 Empty directories are not carried. A workspace larger than the v1 limits, or
 containing links or names another filesystem cannot hold, reports
-Unavailable with a reason instead of Ready. A pre-checkpoint (legacy) Personal
-HQ folder still imports through the ordinary path: it is designated here, but
-its assistant reports `repair_needed` and orphan Repair refuses it, because
-the only profile evidence is the folder's own entry profile (recovery requires
-one global profile and a brief config). Explicit legacy adoption needs its own
-receipt/attachment design and is not delivered. Measured on a laptop (not a
+Unavailable with a reason instead of Ready. Measured on a laptop (not a
 guarantee): 100 conversations × 100 messages prepare in ~2.4 s and import in
 ~2.3 s (`TestContinuityLargeHistoryRoundTrip`).
+
+**Legacy Personal HQ folders (FR-28/FR-29).** A checkpoint-less folder still
+imports through the ordinary path. Review marks an exported Ori workspace
+(`legacy_workspace`) and says what such a copy lacks; for an HQ whose own
+files prove its assistant — presentation marker, single entry instance and
+that instance's workspace profile, validated by `NewContinuityBinding` — it
+offers `legacy_assistant` unless this installation already has an assistant or
+another HQ (`legacy_adoption_blocked`). Only the explicit
+`adopt_assistant: true` on the import runs `AdoptLegacyHQ`, which re-reads the
+evidence from what was installed and, in one transaction, creates the paused
+relationship with mandate/focus empty (unknown), designates the HQ and records
+an `imported_inactive`/`adopted_hq` attachment (operation-less), so the scoped
+profile reader serves the folder's own profile and routines start off. A
+missing brief config is simply not configured. Orphan recovery (`Repair`) is
+unchanged; without this confirmed import such a folder would otherwise sit in
+`repair_needed`, since recovery needs one global profile and a brief config.
+
+**Security review outcomes (2026-09-28).** Fixed on this branch:
+- **Imported IDs:** every restored record ID must be `SafeRecordID`
+  (`[A-Za-z0-9][A-Za-z0-9._-]*`, ≤128). Record IDs reach URLs, attributes
+  and inline handlers in the existing UI.
+- **Escaping:** `escapeHtml` in workspace-detail.js and dom-utils.js is now
+  quote-safe, because imported titles land in attributes.
+- **Projection is fail-closed:**
+  - each rewritten file's digest is recorded first (migration 72);
+  - a retry accepts only the reviewed or recorded bytes;
+  - a finished member re-verifies all of them, anything else is `ErrChanged`;
+  - `agents/` may hold only projected profiles and `appearance/` images, so an
+    unreviewed profile in an in-place folder refuses the import.
+- **Consent endpoints require JSON:** import, retry, prepare, activate, and
+  legacy `adopt_assistant` requests must be JSON, which a cross-site page
+  cannot send without a CORS preflight.
+
+Recorded, not changed here:
+- A checkpoint-less folder dropped into the Workspace Directory is still
+  registered by rescan, as before this feature (it never had a review step).
+- Store-node base directories and file-watch paths keep their saved values.
+  Watches start only when routines are turned on.
+- Checkpoints are written automatically, as the PRD intends. The user guide
+  says to git-ignore `.ori/continuity/` in a repository.
+- Review has per-member but no whole-tree byte/record cap.
+- A resumed operation relies on the in-transaction adoption guards rather than
+  re-checking the destination digest.
 
 **Reset disclosure.** The Conversation & app records reset review states that
 kept workspace folders still hold their private portable copy, that nothing

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -48,7 +49,7 @@ func (h *Handler) installContinuityTree(ctx context.Context, op workspacecontinu
 			return err
 		}
 		for _, p := range plan {
-			if err := h.projectContinuityMember(ctx, p, current[p.WorkspaceID], current[p.WorkspaceID], generations[p.WorkspaceID]); err != nil {
+			if err := h.projectContinuityMember(ctx, op.ID, p, current[p.WorkspaceID], current[p.WorkspaceID], generations[p.WorkspaceID]); err != nil {
 				return err
 			}
 			// The copied checkpoint may carry widened modes from the copy;
@@ -69,8 +70,15 @@ func (h *Handler) installContinuityTree(ctx context.Context, op workspacecontinu
 		final := filepath.Join(base, root.FolderSlug)
 		if _, err := os.Lstat(final); err == nil {
 			// An earlier attempt already renamed its complete copy into place.
+			// Accept it only while every file it projected still holds exactly
+			// that projection.
 			if err := requireContinuityFolder(final, root.WorkspaceID); err != nil {
 				return err
+			}
+			for _, p := range plan {
+				if err := h.verifyContinuityProjections(ctx, op.ID, p.WorkspaceID, continuityTargets(base, plan)[p.WorkspaceID]); err != nil {
+					return err
+				}
 			}
 		} else {
 			staging := filepath.Join(base, ".ori-import-"+op.ID)
@@ -88,7 +96,7 @@ func (h *Handler) installContinuityTree(ctx context.Context, op workspacecontinu
 				}
 			}
 			for _, p := range plan {
-				if err := h.projectContinuityMember(ctx, p, targets[p.WorkspaceID], p.SourceDir, generations[p.WorkspaceID]); err != nil {
+				if err := h.projectContinuityMember(ctx, op.ID, p, targets[p.WorkspaceID], p.SourceDir, generations[p.WorkspaceID]); err != nil {
 					_ = os.RemoveAll(staging)
 					return err
 				}
@@ -198,7 +206,7 @@ func copyContinuityMember(ctx context.Context, sourceDir, target string, manifes
 			return err
 		}
 		temporary := filepath.Join(filepath.Dir(destination), ".ori-import-"+uuid.NewString())
-		out, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		out, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- a fresh .ori-import-<uuid> name, created exclusively, beside a verified canonical manifest path inside operation-owned staging
 		if err != nil {
 			return err
 		}
@@ -218,12 +226,15 @@ func copyContinuityMember(ctx context.Context, sourceDir, target string, manifes
 
 // projectContinuityMember rewrites one member's source-machine-only files in
 // dir (already holding the reviewed bytes). Records come from the reviewed
-// generation in recordsDir. workspace.json is replaced last, so a folder
-// whose workspace.json no longer matches the checkpoint is fully projected.
-func (h *Handler) projectContinuityMember(ctx context.Context, p continuityPlanMember, dir, recordsDir string, generation workspacecontinuity.Generation) error {
+// generation in recordsDir. Every rewrite is recorded before it happens and
+// workspace.json is rewritten last. A retry therefore accepts a file only in
+// its reviewed or its recorded projected form; anything else changed after
+// review (a synced or edited folder) and stops the import rather than being
+// installed raw with the source machine's keys, grants or designation.
+func (h *Handler) projectContinuityMember(ctx context.Context, operationID string, p continuityPlanMember, dir, recordsDir string, generation workspacecontinuity.Generation) error {
 	manifest := generation.Manifest
 	if manifest.WorkspaceID == "" {
-		return nil // an in-place member whose projection already finished
+		return workspacecontinuity.ErrInvalid
 	}
 	files := map[string]workspacecontinuity.Fingerprint{}
 	for _, file := range manifest.Files {
@@ -235,7 +246,16 @@ func (h *Handler) projectContinuityMember(ctx context.Context, p continuityPlanM
 		return err
 	}
 	if workspacecontinuity.Digest(current) != workspaceFile.Digest {
-		return nil // workspace.json is projected last; this member is done
+		// workspace.json is projected last: done only if it and every earlier
+		// rewrite still hold exactly what this operation wrote.
+		recorded, err := h.continuityProjection(ctx, operationID, p.WorkspaceID, agentworkspace.WorkspaceConfigFile)
+		if err != nil {
+			return err
+		}
+		if recorded == "" || recorded != workspacecontinuity.Digest(current) {
+			return workspacecontinuity.ErrChanged
+		}
+		return h.verifyContinuityProjections(ctx, operationID, p.WorkspaceID, dir)
 	}
 	var record workspacecontinuity.Record
 	if err := workspacecontinuity.ReadGenerationRecords(ctx, recordsDir, generation, "workspace", func(chunk workspacecontinuity.Chunk) error {
@@ -252,6 +272,7 @@ func (h *Handler) projectContinuityMember(ctx context.Context, p continuityPlanM
 		return err
 	}
 	// Agent profiles: the denied definition replaces the copied file.
+	projected := map[string]bool{}
 	if err := workspacecontinuity.ReadGenerationRecords(ctx, recordsDir, generation, "agents", func(chunk workspacecontinuity.Chunk) error {
 		if chunk.Family != "profiles" {
 			return nil
@@ -261,29 +282,44 @@ func (h *Handler) projectContinuityMember(ctx context.Context, p continuityPlanM
 			if err != nil {
 				return err
 			}
-			if err := replaceProjectedFile(ctx, dir, filePath, files[filePath], data); err != nil {
+			if err := h.applyContinuityProjection(ctx, operationID, p.WorkspaceID, dir, filePath, files[filePath], data); err != nil {
 				return err
 			}
+			projected[filePath] = true
 		}
 		return nil
 	}); err != nil && !errors.Is(err, workspacecontinuity.ErrIncomplete) {
 		return err
 	}
+	// Nothing else under agents/ may take effect unprojected: an installed
+	// profile file without a reviewed record would be honored as it is.
+	if err := requireProjectedAgentFiles(dir, projected); err != nil {
+		return err
+	}
 	if original, ok := files[trigger.TriggersFileName]; ok {
 		data, err := workspacecontinuity.ReadCanonicalFile(ctx, dir, trigger.TriggersFileName, int(workspacecontinuity.MaxBlobBytes))
-		if err == nil && workspacecontinuity.Digest(data) == original.Digest {
-			projected, _, err := trigger.ProjectImportedTriggers(data)
+		if err != nil {
+			return err
+		}
+		if workspacecontinuity.Digest(data) != original.Digest {
+			// Reissued tokens make the projection unrepeatable: trust only
+			// what this operation recorded writing.
+			if err := h.requireRecordedProjection(ctx, operationID, p.WorkspaceID, trigger.TriggersFileName, workspacecontinuity.Digest(data)); err != nil {
+				return err
+			}
+		} else {
+			projectedTriggers, _, err := trigger.ProjectImportedTriggers(data)
 			if err != nil {
 				return err
 			}
-			if err := replaceProjectedFile(ctx, dir, trigger.TriggersFileName, original, projected); err != nil {
+			if err := h.applyContinuityProjection(ctx, operationID, p.WorkspaceID, dir, trigger.TriggersFileName, original, projectedTriggers); err != nil {
 				return err
 			}
 		}
 	}
 	if p.Disposition == workspacecontinuity.AdoptedHQ {
 		if original, ok := files[personalassistant.KnowledgeSidecarPath]; ok {
-			if err := h.projectContinuityKnowledge(ctx, recordsDir, generation, dir, p, original); err != nil {
+			if err := h.projectContinuityKnowledge(ctx, operationID, recordsDir, generation, dir, p, original); err != nil {
 				return err
 			}
 		}
@@ -300,24 +336,136 @@ func (h *Handler) projectContinuityMember(ctx context.Context, p continuityPlanM
 	if err != nil {
 		return err
 	}
-	return workspacecontinuity.ReplaceCanonicalFile(ctx, dir, agentworkspace.WorkspaceConfigFile, workspaceFile.Digest, data)
+	return h.applyContinuityProjection(ctx, operationID, p.WorkspaceID, dir, agentworkspace.WorkspaceConfigFile, workspaceFile, data)
 }
 
-// replaceProjectedFile replaces a copied file only while it still holds the
-// reviewed bytes; a different current file means an earlier attempt already
-// projected it.
-func replaceProjectedFile(ctx context.Context, dir, name string, original workspacecontinuity.Fingerprint, data []byte) error {
+// applyContinuityProjection replaces a reviewed file with its projection,
+// recording the projected digest first. A file already holding that
+// projection is done; any other content changed after review (ErrChanged).
+func (h *Handler) applyContinuityProjection(ctx context.Context, operationID, workspaceID, dir, name string,
+	original workspacecontinuity.Fingerprint, data []byte) error {
 	if original.Path == "" {
 		return workspacecontinuity.ErrIncomplete
 	}
-	err := workspacecontinuity.ReplaceCanonicalFile(ctx, dir, name, original.Digest, data)
-	if errors.Is(err, workspacecontinuity.ErrChanged) {
-		return nil
+	limit := int(original.Bytes)
+	if len(data) > limit {
+		limit = len(data)
 	}
+	current, err := workspacecontinuity.ReadCanonicalFile(ctx, dir, name, limit+1)
+	if err != nil {
+		return err
+	}
+	if workspacecontinuity.Digest(current) != original.Digest {
+		return h.requireRecordedProjection(ctx, operationID, workspaceID, name, workspacecontinuity.Digest(current))
+	}
+	if err := h.recordContinuityProjection(ctx, operationID, workspaceID, name, workspacecontinuity.Digest(data)); err != nil {
+		return err
+	}
+	return workspacecontinuity.ReplaceCanonicalFile(ctx, dir, name, original.Digest, data)
+}
+
+// requireRecordedProjection accepts a file that no longer holds its reviewed
+// bytes only when it holds exactly what this operation wrote there.
+func (h *Handler) requireRecordedProjection(ctx context.Context, operationID, workspaceID, name, currentDigest string) error {
+	recorded, err := h.continuityProjection(ctx, operationID, workspaceID, name)
+	if err != nil {
+		return err
+	}
+	if recorded == "" || recorded != currentDigest {
+		return workspacecontinuity.ErrChanged
+	}
+	return nil
+}
+
+func (h *Handler) recordContinuityProjection(ctx context.Context, operationID, workspaceID, name, digest string) error {
+	_, err := h.store.DB().ExecContext(ctx, `INSERT INTO continuity_projections(operation_id,workspace_id,path,digest) VALUES (?,?,?,?)
+		ON CONFLICT(operation_id,workspace_id,path) DO UPDATE SET digest=excluded.digest`, operationID, workspaceID, name, digest)
 	return err
 }
 
-func (h *Handler) projectContinuityKnowledge(ctx context.Context, recordsDir string, generation workspacecontinuity.Generation, dir string, p continuityPlanMember, original workspacecontinuity.Fingerprint) error {
+// continuityProjection is the digest this operation recorded for name, or "".
+func (h *Handler) continuityProjection(ctx context.Context, operationID, workspaceID, name string) (string, error) {
+	var digest string
+	err := h.store.DB().QueryRowContext(ctx, `SELECT digest FROM continuity_projections WHERE operation_id=? AND workspace_id=? AND path=?`,
+		operationID, workspaceID, name).Scan(&digest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return digest, err
+}
+
+// verifyContinuityProjections requires every file this operation rewrote in
+// dir to still hold exactly what it wrote.
+func (h *Handler) verifyContinuityProjections(ctx context.Context, operationID, workspaceID, dir string) error {
+	rows, err := h.store.DB().QueryContext(ctx, `SELECT path,digest FROM continuity_projections WHERE operation_id=? AND workspace_id=?`,
+		operationID, workspaceID)
+	if err != nil {
+		return err
+	}
+	recorded := map[string]string{}
+	for rows.Next() {
+		var name, digest string
+		if err := rows.Scan(&name, &digest); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		recorded[name] = digest
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	if recorded[agentworkspace.WorkspaceConfigFile] == "" {
+		return workspacecontinuity.ErrChanged
+	}
+	projected := map[string]bool{}
+	for name, digest := range recorded {
+		data, err := workspacecontinuity.ReadCanonicalFile(ctx, dir, name, int(workspacecontinuity.MaxBlobBytes))
+		if err != nil {
+			return err
+		}
+		if workspacecontinuity.Digest(data) != digest {
+			return workspacecontinuity.ErrChanged
+		}
+		projected[name] = true
+	}
+	return requireProjectedAgentFiles(dir, projected)
+}
+
+// requireProjectedAgentFiles allows under agents/ only projected profile
+// files and appearance images, and refuses links.
+func requireProjectedAgentFiles(dir string, projected map[string]bool) error {
+	base := filepath.Join(dir, agentworkspace.WorkspaceAgentsDir)
+	if _, err := os.Lstat(base); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return filepath.WalkDir(base, func(current string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return workspacecontinuity.ErrUnsafe
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, current)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		parts := strings.Split(rel, "/")
+		switch {
+		case len(parts) == 3 && parts[2] == agentworkspace.WorkspaceAgentConfigFile && projected[rel]:
+			return nil
+		case len(parts) == 4 && parts[2] == "appearance":
+			return nil
+		default:
+			return workspacecontinuity.ErrInvalid
+		}
+	})
+}
+
+func (h *Handler) projectContinuityKnowledge(ctx context.Context, operationID, recordsDir string, generation workspacecontinuity.Generation, dir string, p continuityPlanMember, original workspacecontinuity.Fingerprint) error {
 	var agreement personalassistant.ContinuityAgreement
 	if err := workspacecontinuity.ReadGenerationRecords(ctx, recordsDir, generation, "assistant", func(chunk workspacecontinuity.Chunk) error {
 		if chunk.Family != "agreements" || len(chunk.Records) != 1 {
@@ -334,7 +482,7 @@ func (h *Handler) projectContinuityKnowledge(ctx context.Context, recordsDir str
 		return err
 	}
 	if workspacecontinuity.Digest(data) != original.Digest {
-		return nil // already rebound by an earlier attempt
+		return h.requireRecordedProjection(ctx, operationID, p.WorkspaceID, personalassistant.KnowledgeSidecarPath, workspacecontinuity.Digest(data))
 	}
 	projected, _, err := personalassistant.ProjectContinuityKnowledge(data, personalassistant.KnowledgeBinding{
 		UserID: agreement.SourceUserID, AssistantID: agreement.AssistantID, HQWorkspaceID: p.WorkspaceID,
@@ -344,7 +492,7 @@ func (h *Handler) projectContinuityKnowledge(ctx context.Context, recordsDir str
 		// longer matches) and the report says remembered items need review.
 		return nil
 	}
-	return replaceProjectedFile(ctx, dir, personalassistant.KnowledgeSidecarPath, original, projected)
+	return h.applyContinuityProjection(ctx, operationID, p.WorkspaceID, dir, personalassistant.KnowledgeSidecarPath, original, projected)
 }
 
 // finishContinuityFileComponents records the folder-owned components once

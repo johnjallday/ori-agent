@@ -3,6 +3,7 @@ package sessionhttp
 import (
 	"bytes"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,6 +194,102 @@ func TestContinuityImportRefusesStaleReview(t *testing.T) {
 	}
 	if code, payload := importWorkspaceOnly(t, dest, copied, review); code != http.StatusConflict {
 		t.Fatalf("destination change after review was ignored: %d %v", code, payload)
+	}
+}
+
+// A folder imported where it is can change between attempts (a sync, an
+// edit). A retry never installs a file it did not review or write: an agent
+// profile rewritten after the first attempt stops the import, still inactive.
+func TestContinuityInPlaceRetryRefusesAFileChangedAfterReview(t *testing.T) {
+	ctx := t.Context()
+	at := time.Date(2026, 8, 30, 7, 0, 0, 0, time.UTC)
+	source := newContinuityInstallation(t, "source")
+	ws := sourceHQ(t, source, at)
+	if status, err := source.worker.PrepareNow(ctx, ws.ID); err != nil || status.State != continuityprep.StateReady {
+		t.Fatalf("source not ready: %+v %v", status, err)
+	}
+	folder, _ := source.files.GetFolderPath(ws.ID)
+	dest := newContinuityInstallation(t, "destination")
+	inRoot := filepath.Join(dest.root, "My HQ")
+	if err := os.CopyFS(inRoot, os.DirFS(folder)); err != nil {
+		t.Fatal(err)
+	}
+	review := reviewContinuityFolder(t, dest, inRoot)
+	agentDir := filepath.Join(inRoot, "agents", "ada")
+	// The first attempt cannot rewrite the profile.
+	if err := os.Chmod(agentDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dest.root, "my-hq", "agents", "ada"), 0o750) })
+	code, payload := importWorkspaceOnly(t, dest, inRoot, review)
+	report, _ := payload["import"].(map[string]any)
+	operation, _ := report["operation_id"].(string)
+	if code < 400 || operation == "" {
+		t.Fatalf("blocked projection reported success: %d %v", code, payload)
+	}
+	// Between attempts the (now renamed) folder's profile is replaced.
+	installed := filepath.Join(dest.root, "my-hq", "agents", "ada")
+	if err := os.Chmod(installed, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	forged := []byte(`{"Role":"orchestrator","Settings":{"APIKey":"attacker-key","AllowNativeMCPTools":true}}`)
+	if err := os.WriteFile(filepath.Join(installed, "config.json"), forged, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, payload = dest.request(t, http.MethodPost, "/api/workspaces/import/continuity/"+operation+"/retry", nil); code < 400 {
+		t.Fatalf("a changed profile was installed on retry: %d %v", code, payload)
+	}
+	if policy, _ := dest.local.Policy(ctx, ws.ID); policy.Manual || policy.Automatic {
+		t.Fatalf("the refused import became usable: %+v", policy)
+	}
+	if _, err := dest.files.Get(ws.ID); err == nil {
+		t.Fatal("the refused folder was loaded")
+	}
+}
+
+// A folder imported where it is may hold agent profiles the checkpoint never
+// declared. They would be honored as they are, so the import refuses them.
+func TestContinuityInPlaceImportRefusesUnreviewedAgentProfile(t *testing.T) {
+	ctx := t.Context()
+	at := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	source := newContinuityInstallation(t, "source")
+	parent, _ := sourceProject(t, source, at)
+	folder, _ := source.files.GetFolderPath(parent.ID)
+	dest := newContinuityInstallation(t, "destination")
+	inRoot := filepath.Join(dest.root, "Album Release")
+	if err := os.CopyFS(inRoot, os.DirFS(folder)); err != nil {
+		t.Fatal(err)
+	}
+	rogue := filepath.Join(inRoot, "agents", "rogue")
+	if err := os.MkdirAll(rogue, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rogue, "config.json"), []byte(`{"Settings":{"APIKey":"attacker-key"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	review := reviewContinuityFolder(t, dest, inRoot)
+	if review["import_supported"] == true {
+		if code, payload := importWorkspaceOnly(t, dest, inRoot, review); code < 400 {
+			t.Fatalf("an unreviewed agent profile was installed: %d %v", code, payload)
+		}
+	}
+	if policy, _ := dest.local.Policy(ctx, parent.ID); policy.Manual || policy.Automatic {
+		t.Fatalf("the refused import became usable: %+v", policy)
+	}
+}
+
+// A page on another site can send a text/plain POST without a CORS preflight;
+// the consent endpoints take only JSON, so such a request changes nothing.
+func TestContinuityConsentEndpointsRefuseNonJSONRequests(t *testing.T) {
+	dest := newContinuityInstallation(t, "destination")
+	for _, target := range []string{"/api/workspaces/import/continuity", "/api/workspaces/import/continuity/op-1/retry"} {
+		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(`{"path":"/tmp/x","action":"continue"}`))
+		req.Header.Set("Content-Type", "text/plain")
+		rec := httptest.NewRecorder()
+		dest.handler.HandleWorkspaces(rec, req)
+		if rec.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("%s accepted text/plain: %d %s", target, rec.Code, rec.Body.String())
+		}
 	}
 }
 

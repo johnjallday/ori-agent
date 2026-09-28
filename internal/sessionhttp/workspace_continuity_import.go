@@ -90,6 +90,9 @@ func (h *Handler) handleContinuityImport(w http.ResponseWriter, r *http.Request)
 			"error": "Restoring a copied workspace is not available in this build."})
 		return
 	}
+	if !continuityJSONRequest(w, r) {
+		return
+	}
 	var req continuityImportRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -109,6 +112,9 @@ func (h *Handler) handleContinuityImportOperation(w http.ResponseWriter, r *http
 	operationID, action, _ := strings.Cut(rest, "/")
 	if !workspacecontinuity.ValidID(operationID) {
 		_ = orihttp.RespondNotFound(w, "import not found")
+		return
+	}
+	if r.Method == http.MethodPost && !continuityJSONRequest(w, r) {
 		return
 	}
 	switch {

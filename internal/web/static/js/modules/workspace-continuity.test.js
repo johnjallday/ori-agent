@@ -27,7 +27,38 @@ const reviewable = {
 };
 
 test('a legacy folder keeps the ordinary import path', () => {
-  assert.equal(continuity.describeReview({ status: 'legacy' }).mode, 'legacy');
+  const plain = continuity.describeReview({ status: 'legacy' });
+  assert.equal(plain.mode, 'legacy');
+  // Any other folder (not an exported Ori workspace) gets no notice at all.
+  assert.deepEqual(plain.lines, []);
+  assert.equal(plain.adopt, undefined);
+});
+
+test('an older Ori copy says what it lacks and offers only the assistant its files prove', () => {
+  const older = continuity.describeReview({ status: 'legacy', legacy_workspace: true });
+  assert.equal(older.title, 'Older copy');
+  assert.match(
+    older.lines[0],
+    /conversations, follow-ups, Daily Briefs and uploaded files are not in it/
+  );
+  assert.equal(older.adopt, null);
+
+  const hq = continuity.describeReview({
+    status: 'legacy',
+    legacy_workspace: true,
+    legacy_assistant: { display_name: 'Ada' }
+  });
+  assert.equal(hq.adopt.label, 'Continue with Ada as my personal assistant');
+  assert.match(hq.lines.join(' '), /starts paused, and focus and brief schedule are new choices/);
+
+  const blocked = continuity.describeReview({
+    status: 'legacy',
+    legacy_workspace: true,
+    legacy_assistant: { display_name: 'Ada' },
+    legacy_adoption_blocked: 'existing_assistant'
+  });
+  assert.equal(blocked.adopt, null);
+  assert.match(blocked.lines.join(' '), /Your current assistant stays unchanged/);
 });
 
 test('a damaged or incomplete copy is blocked, never treated as a legacy success', () => {

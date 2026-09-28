@@ -186,6 +186,38 @@ func TestImportedHQRunsNoBackgroundRoutinesUntilEnabledHere(t *testing.T) {
 	}
 }
 
+// FR-29 through the real server: an older HQ copy (no checkpoint) imported
+// with "continue with its assistant" leaves a working, paused assistant — not
+// the repair loop an orphaned HQ presentation otherwise produces here.
+func TestLegacyHQCopyAdoptsAssistantInsteadOfRepairLoop(t *testing.T) {
+	source, hq := continuitySourceHQ(t)
+	copied := prepareAndCopyFolder(t, source, hq)
+	if err := os.RemoveAll(filepath.Join(copied, ".ori", "continuity")); err != nil {
+		t.Fatal(err)
+	}
+	_, handler := newDailyBriefTestServer(t)
+	code, payload := serveJSON(t, handler, http.MethodGet, "/api/workspaces/import/check?path="+url.QueryEscape(copied), nil)
+	review, _ := payload["continuity"].(map[string]any)
+	if code != http.StatusOK || review["legacy_assistant"] == nil {
+		t.Fatalf("legacy HQ not offered: %d %v", code, payload)
+	}
+	code, payload = serveJSON(t, handler, http.MethodPost, "/api/workspaces/import", map[string]any{"path": copied, "adopt_assistant": true})
+	adoption, _ := payload["assistant_adoption"].(map[string]any)
+	if code != http.StatusCreated || adoption["adopted"] != true {
+		t.Fatalf("legacy import: %d %v", code, payload)
+	}
+	code, payload = serveJSON(t, handler, http.MethodGet, "/api/personal-assistant", nil)
+	assistant, _ := payload["personal_assistant"].(map[string]any)
+	if code != http.StatusOK || assistant["state"] != "paused" || assistant["display_name"] != "Ada" {
+		t.Fatalf("adopted legacy assistant is not usable: %d %v", code, assistant)
+	}
+	code, payload = serveJSON(t, handler, http.MethodGet, "/api/personal-hq/status", nil)
+	status, _ := payload["status"].(map[string]any)
+	if code != http.StatusOK || status["valid"] != true || status["workspace_id"] != hq {
+		t.Fatalf("legacy HQ not this installation's HQ: %d %v", code, status)
+	}
+}
+
 // capturingChatProvider records every request a chat turn sends to the model.
 type capturingChatProvider struct {
 	mu       sync.Mutex

@@ -2523,6 +2523,9 @@ type createWorkspaceImportRequest struct {
 	// BlueprintInputs is decoded for the same reason: Import Folder scaffolds
 	// nothing, so there is no file for a blueprint's values to be written into.
 	BlueprintInputs json.RawMessage `json:"blueprint_inputs,omitempty"`
+	// AdoptAssistant is the user's explicit choice, for an older Personal HQ
+	// folder, to continue with the assistant that folder proves (FR-29).
+	AdoptAssistant bool `json:"adopt_assistant,omitempty"`
 }
 
 type workspaceImportDuplicate struct {

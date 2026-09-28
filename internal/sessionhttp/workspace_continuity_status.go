@@ -3,6 +3,7 @@ package sessionhttp
 import (
 	"context"
 	"errors"
+	"mime"
 	"net/http"
 
 	"github.com/johnjallday/ori-agent/internal/continuityprep"
@@ -15,6 +16,20 @@ import (
 type ContinuityStatusProvider interface {
 	Status(ctx context.Context, workspaceID string) (continuityprep.Status, error)
 	PrepareNow(ctx context.Context, workspaceID string) (continuityprep.Status, error)
+}
+
+// continuityJSONRequest requires a JSON body type on the continuity consent
+// endpoints (import, retry, prepare, turning routines on or off). A page on
+// another site can send a "simple" POST — text/plain or a form — without
+// asking first, but not a JSON one: that needs a CORS preflight, which only
+// the configured origins pass.
+func continuityJSONRequest(w http.ResponseWriter, r *http.Request) bool {
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && mediaType == "application/json" {
+		return true
+	}
+	_ = orihttp.RespondJSON(w, http.StatusUnsupportedMediaType, map[string]any{"success": false,
+		"error": "This request must be sent as JSON."})
+	return false
 }
 
 // SetContinuityStatus enables the per-workspace continuity endpoints.
@@ -41,6 +56,9 @@ func (h *Handler) handleWorkspaceContinuity(w http.ResponseWriter, r *http.Reque
 	}
 	if _, err := h.store.GetWorkspace(r.Context(), workspaceID); err != nil {
 		_ = orihttp.RespondNotFound(w, "workspace not found")
+		return
+	}
+	if r.Method == http.MethodPost && !continuityJSONRequest(w, r) {
 		return
 	}
 	switch {

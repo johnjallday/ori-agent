@@ -21,6 +21,13 @@ json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 get() { curl -sS "$BASE$1"; }
 post() { curl -sS -X POST "$BASE$1" -H 'Content-Type: application/json' -d "$2"; }
 
+# A just-started demo server takes a while to build and listen.
+for _ in $(seq 1 90); do
+  curl -s -o /dev/null "$BASE/" && break
+  sleep 2
+done
+curl -sS -o /dev/null "$BASE/" || { echo "no server at $BASE" >&2; exit 1; }
+
 post /api/onboarding/complete '{}' >/dev/null || true
 
 # Hire Ada and build her HQ through the canonical endpoints.

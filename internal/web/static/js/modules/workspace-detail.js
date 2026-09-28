@@ -17144,7 +17144,9 @@ export class WorkspaceDetailPage {
     if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
-    return div.innerHTML;
+    // Quote-safe too: many templates here place this inside attributes, and
+    // titles and names can arrive from imported (untrusted) folders.
+    return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   escapeAttribute(text) {
