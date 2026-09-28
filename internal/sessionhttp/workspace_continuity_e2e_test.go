@@ -39,6 +39,14 @@ type continuityInstallation struct {
 
 func newContinuityInstallation(t *testing.T, name string) *continuityInstallation {
 	t.Helper()
+	return newContinuityInstallationAt(t, name, "")
+}
+
+// newContinuityInstallationAt starts an installation with its own fresh
+// database whose Workspace Directory is root (a new one when empty) — e.g. the
+// same machine after an app-record reset that retained its workspace folders.
+func newContinuityInstallationAt(t *testing.T, name, root string) *continuityInstallation {
+	t.Helper()
 	base := filepath.Join(t.TempDir(), name)
 	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(base, "data", "sessions.db")})
 	if err != nil {
@@ -47,7 +55,9 @@ func newContinuityInstallation(t *testing.T, name string) *continuityInstallatio
 	store := session.NewHybridStoreWithDB(db, 50)
 	t.Cleanup(func() { _ = store.Close() })
 	local := workspacecontinuity.NewLocalStore(db)
-	root := filepath.Join(base, "Ori Workspaces")
+	if root == "" {
+		root = filepath.Join(base, "Ori Workspaces")
+	}
 	files, err := agentworkspace.NewFileStoreWithContinuity(root, local)
 	if err != nil {
 		t.Fatal(err)

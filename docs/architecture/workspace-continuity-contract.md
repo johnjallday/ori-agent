@@ -128,7 +128,18 @@ travels with that folder instead of being ownerless.
 `imported_rename_unavailable` rather than running the global-name rename.
 Empty directories are not carried. A workspace larger than the v1 limits, or
 containing links or names another filesystem cannot hold, reports
-Unavailable with a reason instead of Ready.
+Unavailable with a reason instead of Ready. A pre-checkpoint (legacy) Personal
+HQ folder still imports through the ordinary path: it is designated here, but
+its assistant reports `repair_needed` and orphan Repair refuses it, because
+the only profile evidence is the folder's own entry profile (recovery requires
+one global profile and a brief config). Explicit legacy adoption needs its own
+receipt/attachment design and is not delivered. Measured on a laptop (not a
+guarantee): 100 conversations × 100 messages prepare in ~2.4 s and import in
+~2.3 s (`TestContinuityLargeHistoryRoundTrip`).
+
+**Reset disclosure.** The Conversation & app records reset review states that
+kept workspace folders still hold their private portable copy, that nothing
+comes back on its own, and that importing restores / deleting erases it.
 
 ## Authority and consent
 

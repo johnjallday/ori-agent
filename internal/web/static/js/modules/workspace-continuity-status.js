@@ -4,10 +4,17 @@
 (function () {
   'use strict';
 
-  const state = { workspaceId: '', status: null, busy: false };
+  const state = { workspaceId: '', status: null, busy: false, chip: null };
 
   function el(id) {
     return document.getElementById(id);
+  }
+
+  // The chip is moved into the Command view header, which re-renders by
+  // replacing its markup: the chip node can be detached from the document at
+  // any time. Keep our own reference so it can always be put back.
+  function chipElement() {
+    return state.chip || el('workspaceContinuityChip');
   }
 
   function setText(id, text) {
@@ -27,7 +34,7 @@
 
   function render() {
     const view = window.WorkspaceContinuity?.describeStatus?.(state.status);
-    const chip = el('workspaceContinuityChip');
+    const chip = chipElement();
     if (!view || !chip) return;
     chip.hidden = false;
     chip.dataset.state = view.state;
@@ -118,15 +125,20 @@
 
   // The Command view header re-renders often; keep the chip in its mount.
   function place() {
-    const chip = el('workspaceContinuityChip');
+    const chip = chipElement();
     const mount = document.querySelector('[data-cmd-continuity-mount]');
     if (chip && mount && chip.parentElement !== mount) mount.appendChild(chip);
   }
 
   function wire() {
     state.workspaceId = document.body?.dataset?.workspaceId || '';
-    if (!state.workspaceId || !el('workspaceContinuityChip')) return;
-    el('workspaceContinuityChip').addEventListener('click', open);
+    state.chip = el('workspaceContinuityChip');
+    if (!state.workspaceId || !state.chip) return;
+    state.chip.addEventListener('click', open);
+    // The dialog is declared inside the Details view; a modal inside a view
+    // that is currently hidden (Map, Tickets) would open without rendering.
+    const dialog = el('workspaceContinuityDialog');
+    if (dialog && dialog.parentElement !== document.body) document.body.appendChild(dialog);
     place();
     if (typeof MutationObserver === 'function') {
       let queued = false;

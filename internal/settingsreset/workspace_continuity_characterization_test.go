@@ -20,7 +20,8 @@ import (
 // Exercise the actual reviewed/staged/restarted app-record reset, not deletion
 // of a relationship row. This pins the retained-folder boundary that continuity
 // must respect: records disappear, folder bytes survive, automatic adoption is
-// suppressed. It does not claim that explicit continuity restore exists yet.
+// suppressed. Explicitly restoring such a folder by import is covered by
+// sessionhttp's TestContinuityExplicitRestoreAfterAppRecordReset.
 func TestWorkspaceContinuityCharacterization_AppRecordResetRetainsDetachedFolder(t *testing.T) {
 	if !resetstate.Supported() {
 		t.Skip("installation lease unsupported")
@@ -57,6 +58,12 @@ func TestWorkspaceContinuityCharacterization_AppRecordResetRetainsDetachedFolder
 	}
 	if len(preview.Categories) != 1 || !strings.Contains(preview.Categories[0].Description, "separated agent keys and connector grants") {
 		t.Fatal("reset preview omitted removal of workspace-local configuration")
+	}
+	// Kept folders still hold a private portable copy; the review must say so
+	// and name both choices (restore by import, erase by deleting the folder).
+	if description := preview.Categories[0].Description; !strings.Contains(description, "private portable copy") ||
+		!strings.Contains(description, "import a kept folder") || !strings.Contains(description, "delete the folder") {
+		t.Fatal("reset preview does not disclose retained private continuity copies")
 	}
 	lifecycle := &fixtureLifecycle{drain: func(context.Context) error {
 		return errors.Join(owners.Workspaces.Close(), owners.Database.Close())

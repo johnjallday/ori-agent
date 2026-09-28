@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"bytes"
 	"net/http"
 	"net/url"
 	"os"
@@ -234,6 +235,85 @@ func TestContinuityImportLeavesSameNameAgentsAlone(t *testing.T) {
 	}
 	if policy, _ := dest.local.Policy(ctx, studio.ID); !policy.Automatic {
 		t.Fatal("import changed an unrelated native workspace's routines")
+	}
+}
+
+// FR-36: after an app-record reset that kept the workspace folders, nothing
+// comes back on its own — not the HQ, not any other retained folder. Importing
+// the retained HQ folder explicitly restores it where it is, with Ada and her
+// agreement, routines off; the folder the user did not import stays detached.
+func TestContinuityExplicitRestoreAfterAppRecordReset(t *testing.T) {
+	ctx := t.Context()
+	at := time.Date(2026, 8, 30, 7, 0, 0, 0, time.UTC)
+	before := newContinuityInstallation(t, "before-reset")
+	ws := sourceHQ(t, before, at)
+	other := agentworkspace.NewWorkspace(agentworkspace.CreateWorkspaceParams{Name: "Side Project"})
+	other.OwnerUserID, other.FolderSlug, other.CreatedAt, other.UpdatedAt = "local", "side-project", at, at
+	if err := before.sync.Save(other); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{ws.ID, other.ID} {
+		if status, err := before.worker.PrepareNow(ctx, id); err != nil || status.State != continuityprep.StateReady {
+			t.Fatalf("not ready before reset: %s %+v %v", id, status, err)
+		}
+	}
+	hqFolder, _ := before.files.GetFolderPath(ws.ID)
+	otherFolder, _ := before.files.GetFolderPath(other.ID)
+
+	// The same machine after the reset: app records gone, folders retained.
+	after := newContinuityInstallationAt(t, "after-reset", before.root)
+	if err := after.files.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{ws.ID, other.ID} {
+		if _, err := after.files.Get(id); err == nil {
+			t.Fatalf("a retained folder came back on its own: %s", id)
+		}
+	}
+	if _, err := personalassistant.NewSQLiteStore(after.db).GetState(ctx, "local"); err == nil {
+		t.Fatal("the assistant came back without an import")
+	}
+	// The empty installation never prepares over a retained checkpoint.
+	pointer := func(folder string) []byte {
+		data, err := os.ReadFile(filepath.Join(folder, ".ori", "continuity", "current.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	hqPointer, otherPointer := pointer(hqFolder), pointer(otherFolder)
+	after.worker.Pass(ctx)
+	if !bytes.Equal(pointer(hqFolder), hqPointer) || !bytes.Equal(pointer(otherFolder), otherPointer) {
+		t.Fatal("a reset installation published over a retained checkpoint")
+	}
+
+	review := reviewContinuityFolder(t, after, hqFolder)
+	if review["recommended_action"] != "continue" {
+		t.Fatalf("retained HQ should offer Import and continue: %v", review)
+	}
+	code, payload := after.request(t, http.MethodPost, "/api/workspaces/import/continuity", map[string]any{
+		"path": hqFolder, "tree_digest": review["tree_digest"], "destination_digest": review["destination_digest"], "action": "continue"})
+	if code != http.StatusCreated {
+		t.Fatalf("explicit restore: %d %v", code, payload)
+	}
+	installed, err := after.files.GetFolderPath(ws.ID)
+	if err != nil || mustEval(t, installed) != mustEval(t, hqFolder) {
+		t.Fatalf("restored somewhere other than where it was retained: %q %v", installed, err)
+	}
+	state, err := personalassistant.NewSQLiteStore(after.db).GetState(ctx, "local")
+	if err != nil || state.AssistantID != "assistant-1" || state.Status != personalassistant.StatusPaused ||
+		state.Mandate != "Keep the important work visible." {
+		t.Fatalf("assistant not restored with its agreement: %+v %v", state, err)
+	}
+	if policy, _ := after.local.Policy(ctx, ws.ID); policy.Automatic || !policy.Manual {
+		t.Fatalf("restored HQ admitted background routines: %+v", policy)
+	}
+	// Reloading after the import still leaves the other retained folder alone.
+	if _, err := after.files.Get(other.ID); err == nil {
+		t.Fatal("restoring one folder reattached another retained folder")
+	}
+	if _, err := workspacecontinuity.Inspect(ctx, otherFolder); err != nil {
+		t.Fatal("the folder the user did not import was changed", err)
 	}
 }
 
