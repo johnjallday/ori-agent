@@ -68,7 +68,55 @@ func (h *Handler) assistantLibraryProviderEvidence(scope projectlibrary.Scope, h
 }
 
 func (h *Handler) assistantLibraryStore() *projectlibrary.Store {
-	return projectlibrary.NewStore(h.workspaceTaskStore).WithProviderEvidence(h.assistantLibraryProviderEvidence)
+	return projectlibrary.NewStore(h.workspaceTaskStore).WithProviderEvidence(h.assistantLibraryProviderEvidence).
+		WithInstalledPlugins(libraryInstalledPlugins{h: h}).WithEventBus(libraryEvents{h: h})
+}
+
+// The library Roots are configured before the event system and plugin
+// manager are wired, so both adapters resolve the host service at use time
+// rather than capturing a nil one at construction.
+type libraryInstalledPlugins struct{ h *Handler }
+
+func (p libraryInstalledPlugins) List() ([]plugin.InstalledPlugin, error) {
+	if p.h == nil || p.h.installedPluginLister == nil {
+		return nil, projectlibrary.ErrUnavailable
+	}
+	return p.h.installedPluginLister.List()
+}
+
+type libraryEvents struct{ h *Handler }
+
+func (e libraryEvents) Publish(event workspace.Event) {
+	if e.h != nil && e.h.eventBus != nil {
+		e.h.eventBus.Publish(event)
+	}
+}
+
+// GetAssistantLibrarySummary is the bounded owner-Home read behind the map
+// badge, the Action Center card and the shelf's digest line. It never scans,
+// reads a discovery folder or changes the Home.
+func (h *Handler) GetAssistantLibrarySummary(w http.ResponseWriter, r *http.Request) {
+	scope, station, ok := h.assistantLibraryScope(w, r)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		_ = orihttp.RespondBadRequest(w, "Invalid library summary request")
+		return
+	}
+	summary, err := h.assistantLibraryStore().Summary(scope)
+	if err != nil {
+		respondLibraryReadError(w, err)
+		return
+	}
+	route := ""
+	if slug := station.FolderSlug; workspace.IsCanonicalWorkspaceSlug(slug) {
+		route = "/workspaces/" + url.PathEscape(slug) + "/assistant#projectLibraryProposals"
+	}
+	_ = orihttp.RespondSuccess(w, struct {
+		projectlibrary.LibrarySummary
+		Route string `json:"route"`
+	}{summary, route})
 }
 
 // ConfigureAssistantLibraryRoots binds the host's native chooser and a scoped

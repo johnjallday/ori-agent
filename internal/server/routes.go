@@ -797,6 +797,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/activate", s.Handlers.Session.ActivateAssistantProgram)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/hire", s.Handlers.Session.HireAssistantProgram)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/roots", s.Handlers.Session.ListAssistantLibraryRoots)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/summary", s.Handlers.Session.GetAssistantLibrarySummary)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/initialize/review", s.Handlers.Session.ReviewAssistantLibraryInitialize)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/initialize/commit", s.Handlers.Session.CommitAssistantLibraryInitialize)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/roots/pick", s.Handlers.Session.PickAssistantLibraryRoot)

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -381,17 +382,30 @@ func (r *Roots) finishScan(scope Scope, started Scan, observed Discovery, status
 	if err != nil {
 		return Scan{}, err
 	}
+	// The digest's setup count needs the host's installed list. Read it
+	// before taking the Home lock; the blueprint match itself is evaluated
+	// against the Home state inside the update.
+	var installed []plugin.InstalledPlugin
+	var listErr error
+	if r.library.installed != nil && (status == "complete" || status == "partial") {
+		installed, listErr = r.library.installed.List()
+	}
 	// Finalizing a failed/interrupted scan must remain possible after provider
 	// loss; check installed evidence inside the Home update before publishing
 	// candidates, not against a snapshot captured ahead of the update.
 	var finished Scan
+	var completed *LibraryDigest
 	var providerUnchanged bool
-	_, _, err = r.library.mutateWithHomePolicy(scope, doc.Revision,
+	var evidence setupEvidence
+	_, replay, err := r.library.mutateWithHomePolicy(scope, doc.Revision,
 		operation{key: started.ID + ":finish", action: "scan_finish", digest: encodedDigest},
 		func(state *workspace.AssistantProgramState, home *workspace.Workspace) bool {
 			providerUnchanged = state.StateRevision == started.ProviderRevision && r.library.providerWritable(scope, home)
+			evidence = r.library.setupEvidence(scope, state, installed, listErr)
 			return true // Record failure/cancellation even after provider loss.
 		}, func(current *Document) (string, error) {
+			completed = nil
+			var before []Entry
 			var scan *Scan
 			for i := range current.Scans {
 				if current.Scans[i].ID == started.ID && current.Scans[i].RootID == started.RootID &&
@@ -444,6 +458,7 @@ func (r *Roots) finishScan(scope Scope, started Scan, observed Discovery, status
 								r.library.workspaces, scope); reconcileErr != nil {
 								status, reason = "failed", "catalog_evidence_invalid_or_limit"
 							} else {
+								before = current.Entries
 								current.Entries = preparedDoc.Entries
 								scan.KnownScopes = prepared.KnownScopes
 							}
@@ -457,8 +472,18 @@ func (r *Roots) finishScan(scope Scope, started Scan, observed Discovery, status
 			scan.SkippedOther += observed.SkippedOther
 			scan.PartialReason, scan.ResultDigest = reason, encodedDigest
 			finished = *scan
+			if status == "complete" || status == "partial" {
+				// Written in this same fenced update, so the digest can never
+				// describe results the Home did not also record.
+				digest := buildLibraryDigest(before, current.Entries, *scan, now, status, evidence)
+				current.Digest = &digest
+				completed = &digest
+			}
 			return scan.ID, nil
 		})
+	if err == nil && !replay && completed != nil {
+		r.library.publishScanCompleted(scope, *completed)
+	}
 	return finished, err
 }
 

@@ -19,6 +19,29 @@ type Store struct {
 	workspaces       workspace.Store
 	now              func() time.Time
 	providerEvidence func(Scope, *workspace.Workspace) bool
+	installed        InstalledPluginSource
+	events           EventPublisher
+}
+
+// EventPublisher is the host's workspace event bus. A published event is a
+// notification only; every subscriber must reauthorize its own work.
+type EventPublisher interface {
+	Publish(workspace.Event)
+}
+
+// WithEventBus lets a completed scan announce its digest after the fenced
+// Home write succeeds. Call this before publishing the Store.
+func (s *Store) WithEventBus(events EventPublisher) *Store {
+	s.events = events
+	return s
+}
+
+// WithInstalledPlugins supplies the host's live plugin list so a scan's
+// digest can count entries a compatible installed blueprint could set up.
+// The count is guidance; a setup review repeats every check.
+func (s *Store) WithInstalledPlugins(installed InstalledPluginSource) *Store {
+	s.installed = installed
+	return s
 }
 
 func NewStore(workspaces workspace.Store) *Store {

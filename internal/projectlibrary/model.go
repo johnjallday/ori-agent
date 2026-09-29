@@ -65,6 +65,7 @@ type Document struct {
 	Roots         []Root                   `json:"roots,omitempty"`
 	Entries       []Entry                  `json:"entries,omitempty"`
 	Scans         []Scan                   `json:"scans,omitempty"`
+	Digest        *LibraryDigest           `json:"library_digest,omitempty"`
 	Sessions      []StudioSession          `json:"sessions,omitempty"`
 	Queue         *ActivationQueue         `json:"activation_queue,omitempty"`
 	QueueHistory  []ActivationQueueOutcome `json:"queue_history,omitempty"`
@@ -430,6 +431,9 @@ func (d Document) valid(scope Scope) bool {
 				return false
 			}
 		}
+	}
+	if d.Digest != nil && !d.Digest.valid(d.Scans) {
+		return false
 	}
 	sessions := map[string]bool{}
 	for _, session := range d.Sessions {

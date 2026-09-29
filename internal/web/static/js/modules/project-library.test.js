@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ProjectLibraryPanel, libraryQuery, readActivationQueue } from './project-library.js';
+import {
+  ProjectLibraryPanel,
+  libraryDigestText,
+  libraryQuery,
+  readActivationQueue
+} from './project-library.js';
 
 test('Show project folder requires a fresh connected Home link and never sends a path or starts a DAW', async () => {
   const requests = [];
@@ -360,6 +365,7 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     const destinations = [];
     panel.details = id => destinations.push(id);
     panel.request = async path => {
+      if (path === '/summary') return { initialized: true, digest: null, ready_proposals: 5 };
       assert.equal(path, '/proposals');
       return {
         total: 6,
@@ -1438,4 +1444,146 @@ test('manual edit review cannot commit without a second user confirmation', asyn
     null
   );
   assert.deepEqual(calls, ['/projects/entry-1/fields/review']);
+});
+
+const DIGEST = {
+  scan_id: 'scan-1',
+  root_id: 'root-1',
+  scanned_at: '2026-09-29T12:00:00Z',
+  coverage: 'complete',
+  projects: 6,
+  new: 6,
+  updated: 0,
+  unavailable: 0,
+  unsupported_format: 1,
+  activatable: 5
+};
+
+test('scan digest line names the folder, not its path, and lists only nonzero extras', () => {
+  const roots = [{ id: 'root-1', path: '/Users/owner/Music Projects' }];
+  const text = libraryDigestText(DIGEST, roots);
+  assert.match(
+    text,
+    /^Scanned Music Projects on .*2026: 6 projects, 6 new, 5 can be set up, 1 unsupported format\.$/
+  );
+  assert.equal(text.includes('/Users/owner'), false);
+  const quiet = libraryDigestText(
+    { ...DIGEST, projects: 1, new: 0, unsupported_format: 0, activatable: 1 },
+    roots
+  );
+  assert.match(quiet, /: 1 project, 1 can be set up\.$/);
+  const gone = libraryDigestText({ ...DIGEST, new: 0, unavailable: 2 }, roots);
+  assert.match(gone, /5 can be set up, 1 unsupported format, 2 no longer found\.$/);
+});
+
+test('scan digest line handles zero, partial, unknown-root and setup-unavailable digests', () => {
+  assert.equal(libraryDigestText(null, []), '');
+  assert.equal(libraryDigestText({ projects: 3 }, []), '', 'a digest without a scan is not shown');
+  const empty = libraryDigestText(
+    { ...DIGEST, projects: 0, new: 0, activatable: 0, unsupported_format: 0 },
+    []
+  );
+  assert.match(empty, /^Scanned an approved folder on .*: 0 projects, 0 can be set up\.$/);
+  const partial = libraryDigestText({ ...DIGEST, coverage: 'partial' }, []);
+  assert.match(partial, /Partial scan: folders it did not reach were left unchanged\.$/);
+  const noIntegration = libraryDigestText(
+    {
+      ...DIGEST,
+      activatable: 0,
+      unsupported_format: 0,
+      setup_note: 'project_provider_unavailable'
+    },
+    []
+  );
+  assert.match(
+    noIntegration,
+    /6 projects, 6 new, project setup needs a compatible installed integration\./
+  );
+  assert.equal(noIntegration.includes('can be set up'), false);
+  const forged = libraryDigestText(
+    { ...DIGEST, projects: -4, new: '9', activatable: 1.5, scanned_at: 'not a date' },
+    []
+  );
+  assert.match(forged, /on an unknown date: 0 projects, 0 can be set up, 1 unsupported format\./);
+});
+
+test('scan digest renders as inert text and shows the shelf even with no suggestions', async () => {
+  const original = globalThis.document;
+  const elements = new Map();
+  const makeNode = tag => ({
+    tag,
+    children: [],
+    hidden: true,
+    textContent: '',
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener() {}
+  });
+  for (const [id, tag] of [
+    ['projectLibraryProposals', 'section'],
+    ['projectLibraryProposalRows', 'div'],
+    ['projectLibraryDigest', 'p']
+  ])
+    elements.set(id, makeNode(tag));
+  globalThis.document = {
+    createElement: tag => {
+      const element = makeNode(tag);
+      element.hidden = false;
+      return element;
+    },
+    getElementById: id => elements.get(id) || null
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      provider_read_only: false,
+      roots: [{ id: 'root-1', path: '/Music/<img src=x onerror=alert(1)>' }]
+    };
+    const requests = [];
+    panel.request = async path => {
+      requests.push(path);
+      if (path === '/summary') return { initialized: true, digest: DIGEST, ready_proposals: 0 };
+      return { total: 0, rows: [] };
+    };
+    await panel.renderProposals();
+    const line = elements.get('projectLibraryDigest');
+    assert.equal(line.hidden, false);
+    assert.match(line.textContent, /^Scanned <img src=x onerror=alert\(1\)> on /);
+    assert.equal('innerHTML' in line, false, 'the digest is assigned as text, never markup');
+    assert.equal(elements.get('projectLibraryProposals').hidden, false);
+    const [empty] = elements.get('projectLibraryProposalRows').children;
+    assert.equal(empty.textContent, 'No Manager suggestions to review for this scan.');
+    assert.deepEqual(requests, ['/summary', '/proposals'], 'rendering never starts a scan');
+
+    // No digest and no suggestions: the shelf stays hidden.
+    panel.request = async path => (path === '/summary' ? { digest: null } : { total: 0 });
+    await panel.renderProposals();
+    assert.equal(elements.get('projectLibraryProposals').hidden, true);
+    assert.equal(line.hidden, true);
+
+    // An unavailable summary never hides real suggestions or invents a digest.
+    panel.request = async path => {
+      if (path === '/summary') throw new Error('unavailable');
+      return {
+        total: 1,
+        rows: [
+          {
+            name: 'Song',
+            status: 'ready',
+            proposal: { id: 'p', next_action: 'Mix', reason: '', agent_name: 'Manager' }
+          }
+        ]
+      };
+    };
+    await panel.renderProposals();
+    assert.equal(elements.get('projectLibraryProposals').hidden, false);
+    assert.equal(line.hidden, true);
+    assert.equal(elements.get('projectLibraryProposalRows').children.length, 1);
+  } finally {
+    globalThis.document = original;
+  }
 });

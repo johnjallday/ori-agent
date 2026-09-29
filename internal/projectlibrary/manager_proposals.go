@@ -668,6 +668,13 @@ func (s *Store) ListManagerProposals(scope Scope) (ManagerProposalPage, error) {
 	if err != nil {
 		return ManagerProposalPage{}, err
 	}
+	return ManagerProposalPage{Revision: doc.Revision, Rows: s.managerProposalRows(scope, doc, state),
+		Total: len(doc.Proposals)}, nil
+}
+
+// managerProposalRows projects the newest 20 proposals from one snapshot.
+// The shelf, the summary badge and the Action Center count the same rows.
+func (s *Store) managerProposalRows(scope Scope, doc Document, state *workspace.AssistantProgramState) []ManagerProposalRow {
 	roots := make(map[string]Root, len(doc.Roots))
 	for _, root := range doc.Roots {
 		roots[root.ID] = root
@@ -680,8 +687,8 @@ func (s *Store) ListManagerProposals(scope Scope) (ManagerProposalPage, error) {
 	for _, id := range state.ProjectLibraryInactiveRoots {
 		inactive[id] = true
 	}
-	page := ManagerProposalPage{Revision: doc.Revision, Rows: []ManagerProposalRow{}, Total: len(doc.Proposals)}
-	for i := len(doc.Proposals) - 1; i >= 0 && len(page.Rows) < 20; i-- {
+	rows := []ManagerProposalRow{}
+	for i := len(doc.Proposals) - 1; i >= 0 && len(rows) < 20; i-- {
 		proposal := doc.Proposals[i]
 		name := "Saved project"
 		if proposal.Kind == "root_review" {
@@ -692,10 +699,10 @@ func (s *Store) ListManagerProposals(scope Scope) (ManagerProposalPage, error) {
 				name = projected
 			}
 		}
-		page.Rows = append(page.Rows, ManagerProposalRow{Proposal: proposal, Name: name,
+		rows = append(rows, ManagerProposalRow{Proposal: proposal, Name: name,
 			Status: s.managerProposalStatus(scope, doc, proposal)})
 	}
-	return page, nil
+	return rows
 }
 
 // ReviewProposedNextAction derives the patch from the *saved* proposal, not

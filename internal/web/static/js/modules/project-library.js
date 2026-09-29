@@ -51,6 +51,46 @@ export function libraryQuery({
   return query.toString();
 }
 
+const DIGEST_SETUP_NOTES = {
+  setup_check_unavailable: 'project setup was not checked',
+  home_provider_unavailable: 'project setup needs the Home’s installed package',
+  project_provider_unavailable: 'project setup needs a compatible installed integration',
+  provider_ambiguous: 'more than one installed integration needs review before setup'
+};
+
+// libraryDigestText renders the Home's model-free scan digest. The digest
+// carries only IDs and counts; the folder name comes from the owner-only roots
+// list the shelf already loaded, reduced to its last path segment.
+export function libraryDigestText(digest, roots = []) {
+  if (!digest || typeof digest !== 'object' || !digest.scan_id) return '';
+  const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
+  const root = (Array.isArray(roots) ? roots : []).find(item => item?.id === digest.root_id);
+  const name =
+    String(root?.path || '')
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .pop() || 'an approved folder';
+  const scanned = new Date(digest.scanned_at);
+  const when = Number.isNaN(scanned.getTime())
+    ? 'an unknown date'
+    : scanned.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  const projects = count(digest.projects);
+  const parts = [`${projects} ${projects === 1 ? 'project' : 'projects'}`];
+  if (count(digest.new) > 0) parts.push(`${count(digest.new)} new`);
+  if (digest.setup_note) {
+    parts.push(DIGEST_SETUP_NOTES[digest.setup_note] || 'project setup is unavailable');
+  } else {
+    parts.push(`${count(digest.activatable)} can be set up`);
+    if (count(digest.unsupported_format) > 0)
+      parts.push(`${count(digest.unsupported_format)} unsupported format`);
+  }
+  if (count(digest.unavailable) > 0) parts.push(`${count(digest.unavailable)} no longer found`);
+  let text = `Scanned ${name} on ${when}: ${parts.join(', ')}.`;
+  if (digest.coverage === 'partial')
+    text += ' Partial scan: folders it did not reach were left unchanged.';
+  return text;
+}
+
 // Only queue navigation (opaque entry IDs and a user-confirmed retry) lives in
 // this browser tab. Every item still requires a fresh server review and a
 // distinct user confirmation; storage never grants folder/creator authority.
@@ -374,13 +414,32 @@ export class ProjectLibraryPanel {
     if (!section || !container) return;
     container.replaceChildren();
     section.hidden = true;
-    let page;
+    // The digest is a model-free summary of the last completed scan. It is
+    // shown even when the Manager has made no suggestions.
+    let summary = null;
+    try {
+      summary = await this.request('/summary');
+    } catch (_) {
+      summary = null;
+    }
+    const digestText = libraryDigestText(summary?.digest, this.state?.roots);
+    const digestLine = document.getElementById('projectLibraryDigest');
+    if (digestLine) {
+      digestLine.textContent = digestText;
+      digestLine.hidden = !digestText;
+    }
+    let page = null;
     try {
       page = await this.request('/proposals');
     } catch (_) {
-      return; // An unavailable provider/binding never creates a review action.
+      page = null; // An unavailable provider/binding never creates a review action.
     }
-    if (!page.total) return;
+    if (!page?.total) {
+      if (!digestText) return;
+      section.hidden = false;
+      container.append(node('p', '', 'No Manager suggestions to review for this scan.'));
+      return;
+    }
     section.hidden = false;
     for (const row of page.rows || []) {
       const proposal = row.proposal;
