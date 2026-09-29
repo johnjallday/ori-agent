@@ -539,6 +539,9 @@ func (b *ServerBuilder) initializeEventSystem() {
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetEventBus(b.eventBus)
 	}
+	// A completed library scan asks the Home's bound Manager for at most a
+	// few inert suggestions; it needs the bus, the store and the handlers.
+	b.wireLibraryManagerReview()
 	if b.chatHandler != nil {
 		b.chatHandler.SetProjectTemplateDeps(func() string {
 			return resolveTemplatesRoot(b.configManager)

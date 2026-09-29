@@ -209,6 +209,24 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
       /^Scanned Documents on .+: 6 projects, 6 new, project setup needs a compatible installed integration\.$/
     );
   }
+  // The scan also asked the bound Manager for a bounded review. With no
+  // model configured in this sandbox it is recorded as skipped, visibly, and
+  // nothing else happens.
+  await expect
+    .poll(async () => (await json(await request.get(`${base}/summary`))).proposal_run?.status, {
+      timeout: 15_000
+    })
+    .toBe('skipped');
+  const reviewRun = (await json(await request.get(`${base}/summary`))).proposal_run;
+  expect(reviewRun).toMatchObject({
+    scan_id: summary.digest.scan_id,
+    reason: 'no_model',
+    proposals: 0
+  });
+  await page.reload();
+  await expect(shelf.locator('#projectLibraryRun')).toHaveText(
+    'Manager review skipped: the Manager has no tool-capable model configured.'
+  );
   const suggestions = shelf.locator('#projectLibraryProposals');
   await expect(suggestions).toContainText('No Manager suggestions to review for this scan.');
   await suggestions.scrollIntoViewIfNeeded();
@@ -232,11 +250,65 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
     await page.evaluate(value => localStorage.setItem('ori-theme', value), theme);
     await page.reload();
   };
+  // The direct /tool path proves the proposal tool contract without a model:
+  // the locally bound Manager saves one inert suggestion from chat, labeled
+  // as such on the shelf, which the badge then counts.
+  const directChatSuggestion = async () => {
+    const homeRecord = await json(await request.get(`/api/workspaces/${homeID}`));
+    const manager = homeRecord.agent_instances.find(
+      (instance: { role_id: string }) => instance.role_id === 'portfolio_manager'
+    );
+    expect(manager?.name).toBeTruthy();
+    const album = (await json(await request.get(`${base}/projects`))).rows.find(
+      (row: { name: string }) => row.name === 'Album-0'
+    );
+    const direct = await json(
+      await request.post('/api/chat', {
+        data: {
+          agent_name: manager.name,
+          route_context: {
+            surface: 'workspace_detail',
+            workspace_id: homeID,
+            page_path: `/workspaces/${homes[0].folder_slug}/assistant`
+          },
+          question: `/tool home_library_propose_next_action ${JSON.stringify({
+            entry_id: album.id,
+            fields_revision: album.fields_revision,
+            next_action: 'Listen to Album-0 before choosing a mix',
+            reason: '<b>Untrusted</b> chat note',
+            request_key: `notifications-chat-${homeID}`
+          })}`
+        }
+      })
+    );
+    expect(direct.success, JSON.stringify(direct)).toBe(true);
+    expect((await json(await request.get(`${base}/summary`))).ready_proposals).toBe(1);
+    await page.goto(summary.route.replace('#projectLibraryProposals', ''));
+    const card = shelf.locator('#projectLibraryProposalRows .project-library-resume-card');
+    await expect(card).toHaveCount(1);
+    await expect(card).toContainText(
+      'Suggested next action: Listen to Album-0 before choosing a mix'
+    );
+    await expect(card).toContainText(
+      "Manager's reason (untrusted note): <b>Untrusted</b> chat note"
+    );
+    await expect(card).toContainText('From a Manager chat');
+    await card.scrollIntoViewIfNeeded();
+    await shot(
+      page,
+      reaperSource ? '10-chat-suggestion-source' : '10-chat-suggestion-no-integration'
+    );
+  };
   if (!reaperSource) {
     expect((await json(await request.get('/api/action-center/library'))).items).toHaveLength(0);
     await page.goto('/');
     await expect(page.locator(`.ws-map-district[data-group-id="${homeID}"]`)).toBeVisible();
     await expect(page.locator('[data-library-badge]')).toHaveCount(0);
+    await directChatSuggestion();
+    await page.goto('/');
+    await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText(
+      '6 new · 1 to review'
+    );
     return;
   }
   const cards = (await json(await request.get('/api/action-center/library'))).items;
@@ -302,6 +374,16 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   await expectHeadingUncovered(page, '#projectLibraryProposalsTitle');
 
   // Neither surface changed anything.
+  expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+    workspacesBeforeScan
+  );
+  expect(projectFiles.map(hash)).toEqual(before);
+
+  await directChatSuggestion();
+  await page.goto('/');
+  await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText(
+    '6 new · 5 ready · 1 to review'
+  );
   expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
     workspacesBeforeScan
   );

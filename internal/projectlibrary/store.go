@@ -200,9 +200,12 @@ func (s *Store) mutateWithHomePolicy(scope Scope, expected int64, op operation, 
 		}
 		// Revoking an existing grant is a reductive owner action. It must
 		// remain possible when the installed provider has disappeared.
+		// A scan-review receipt may record a skip or an interruption after
+		// provider loss; starting a turn still requires evidence (its policy).
 		if ((op.action != "review_revoke_root" && op.action != "revoke_root" && op.action != "scan_finish" &&
 			op.action != "review_forget_entry" && op.action != "forget_entry" &&
-			op.action != "discard_activation_queue") &&
+			op.action != "discard_activation_queue" && op.action != "proposal_run_claim" &&
+			op.action != "proposal_run_finish" && op.action != "proposal_run_sweep") &&
 			!s.providerWritable(scope, home)) || (policy != nil && !policy(state, home)) {
 			return ErrUnavailable
 		}
@@ -260,7 +263,8 @@ func (s *Store) mutateWithHomePolicy(scope Scope, expected int64, op operation, 
 		// Preserve the actionable error from the callback; never turn failed
 		// saves into success or claim an operation was recorded.
 		if errors.Is(err, ErrUnavailable) || errors.Is(err, ErrNotInitialized) || errors.Is(err, ErrCorrupt) ||
-			errors.Is(err, ErrConflict) || errors.Is(err, ErrLimit) || errors.Is(err, ErrMirrorDiverged) {
+			errors.Is(err, ErrConflict) || errors.Is(err, ErrLimit) || errors.Is(err, ErrMirrorDiverged) ||
+			errors.Is(err, ErrDuplicateProposal) || errors.Is(err, errNoRunChange) {
 			return OperationReceipt{}, false, err
 		}
 		// The shared workspace fence refused the Home write because another

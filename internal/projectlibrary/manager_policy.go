@@ -16,6 +16,9 @@ type ManagerAuthority struct {
 	HomeID          string
 	AgentInstanceID string
 	AgentName       string
+	// Run is set only by the host's scan-review turn, never from tool input.
+	// It is excluded from JSON so proposal digests stay what they were.
+	Run ManagerRunContext `json:"-"`
 }
 
 func (s *Store) authorizeManager(authority ManagerAuthority) (Scope, error) {

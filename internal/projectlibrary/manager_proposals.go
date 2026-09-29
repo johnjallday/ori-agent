@@ -32,6 +32,11 @@ type ManagerProposal struct {
 	Digest           string     `json:"digest"`
 	CreatedAt        time.Time  `json:"created_at"`
 	ExpiresAt        time.Time  `json:"expires_at"`
+	// Provenance, set only by a scan-review turn and excluded from Digest.
+	// A chat-created proposal leaves all three empty.
+	ScanID string `json:"scan_id,omitempty"`
+	Source string `json:"source,omitempty"` // "manager_model"
+	Model  string `json:"model,omitempty"`
 }
 
 type ManagerProposalRow struct {
@@ -123,6 +128,11 @@ func (s *Store) ProposeNextAction(authority ManagerAuthority, entryID string, fi
 			if len(current.Proposals) >= maxProposals {
 				return "", ErrLimit
 			}
+			// A scan-review turn stamps provenance and enforces its per-scan
+			// cap and dedupe inside this same fenced write; chat is unchanged.
+			if err := admitRunProposal(current, &proposal, authority, at); err != nil {
+				return "", err
+			}
 			current.Proposals = append(current.Proposals, proposal)
 			return proposal.ID, nil
 		})
@@ -200,6 +210,11 @@ func (s *Store) ProposeRootReview(authority ManagerAuthority, reason, requestKey
 			current.Proposals = kept
 			if len(current.Proposals) >= maxProposals {
 				return "", ErrLimit
+			}
+			// A scan-review turn stamps provenance and enforces its per-scan
+			// cap and dedupe inside this same fenced write; chat is unchanged.
+			if err := admitRunProposal(current, &proposal, authority, at); err != nil {
+				return "", err
 			}
 			current.Proposals = append(current.Proposals, proposal)
 			return proposal.ID, nil
@@ -319,6 +334,11 @@ func (s *Store) ProposeProjectReview(authority ManagerAuthority, entryID string,
 			if len(current.Proposals) >= maxProposals {
 				return "", ErrLimit
 			}
+			// A scan-review turn stamps provenance and enforces its per-scan
+			// cap and dedupe inside this same fenced write; chat is unchanged.
+			if err := admitRunProposal(current, &proposal, authority, at); err != nil {
+				return "", err
+			}
 			current.Proposals = append(current.Proposals, proposal)
 			return proposal.ID, nil
 		})
@@ -403,6 +423,11 @@ func (s *Store) ProposeSessionRecap(authority ManagerAuthority, entryID string, 
 			current.Proposals = kept
 			if len(current.Proposals) >= maxProposals {
 				return "", ErrLimit
+			}
+			// A scan-review turn stamps provenance and enforces its per-scan
+			// cap and dedupe inside this same fenced write; chat is unchanged.
+			if err := admitRunProposal(current, &proposal, authority, at); err != nil {
+				return "", err
 			}
 			current.Proposals = append(current.Proposals, proposal)
 			return proposal.ID, nil
@@ -532,6 +557,11 @@ func (s *Store) ProposeSessionGoal(authority ManagerAuthority, entryID string, e
 			if len(current.Proposals) >= maxProposals {
 				return "", ErrLimit
 			}
+			// A scan-review turn stamps provenance and enforces its per-scan
+			// cap and dedupe inside this same fenced write; chat is unchanged.
+			if err := admitRunProposal(current, &proposal, authority, at); err != nil {
+				return "", err
+			}
 			current.Proposals = append(current.Proposals, proposal)
 			return proposal.ID, nil
 		})
@@ -582,44 +612,44 @@ func projectReviewProposalDigest(scope Scope, authority ManagerAuthority, entryI
 	return hex.EncodeToString(sum[:])
 }
 
+// proposalStaleInDocument is the document-only part of a proposal's status:
+// it reads no store, so a fenced write callback can use it for dedupe.
+func proposalStaleInDocument(doc Document, proposal ManagerProposal) bool {
+	if proposal.Kind == "root_review" {
+		return managerRootSetDigest(doc.Roots) != proposal.RootSetDigest
+	}
+	entry := sessionEntry(doc, proposal.EntryID)
+	if entry == nil {
+		return true
+	}
+	switch proposal.Kind {
+	case "session_recap":
+		return !matchesRecapProposal(doc, proposal.EntryID, proposal.EntryRevision, proposal.FieldsRevision,
+			proposal.SessionID, proposal.SessionRevision)
+	case "project_review":
+		return entry.Link != nil || entry.Revision != proposal.EntryRevision
+	case "session_goal":
+		if entry.Revision != proposal.EntryRevision {
+			return true
+		}
+		count := 0
+		for _, session := range doc.Sessions {
+			if session.EntryID == proposal.EntryID {
+				count++
+			}
+		}
+		return count != proposal.GoalSessionCount
+	default:
+		return entry.Fields.Revision != proposal.FieldsRevision
+	}
+}
+
 func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal ManagerProposal) string {
 	if !proposal.ExpiresAt.After(s.now().UTC()) {
 		return "expired"
 	}
-	if proposal.Kind == "root_review" {
-		if managerRootSetDigest(doc.Roots) != proposal.RootSetDigest {
-			return "stale"
-		}
-	} else {
-		entry := sessionEntry(doc, proposal.EntryID)
-		if entry == nil {
-			return "stale"
-		}
-		if proposal.Kind == "session_recap" {
-			if !matchesRecapProposal(doc, proposal.EntryID, proposal.EntryRevision, proposal.FieldsRevision,
-				proposal.SessionID, proposal.SessionRevision) {
-				return "stale"
-			}
-		} else if proposal.Kind == "project_review" {
-			if entry.Link != nil || entry.Revision != proposal.EntryRevision {
-				return "stale"
-			}
-		} else if proposal.Kind == "session_goal" {
-			if entry.Revision != proposal.EntryRevision {
-				return "stale"
-			}
-			count := 0
-			for _, session := range doc.Sessions {
-				if session.EntryID == proposal.EntryID {
-					count++
-				}
-			}
-			if count != proposal.GoalSessionCount {
-				return "stale"
-			}
-		} else if entry.Fields.Revision != proposal.FieldsRevision {
-			return "stale"
-		}
+	if proposalStaleInDocument(doc, proposal) {
+		return "stale"
 	}
 	authority := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: proposal.AgentInstanceID,
 		AgentName: proposal.AgentName}

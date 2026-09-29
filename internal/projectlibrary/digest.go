@@ -198,6 +198,9 @@ type LibrarySummary struct {
 	Revision       int64          `json:"revision,omitempty"`
 	Digest         *LibraryDigest `json:"digest"`
 	ReadyProposals int            `json:"ready_proposals"`
+	// ProposalRun is the Manager review receipt for the digest's scan, if any:
+	// the shelf shows its skipped reason or its source.
+	ProposalRun *ProposalRun `json:"proposal_run,omitempty"`
 }
 
 // Summary returns zeros for an uninitialized Home. A digest whose root was
@@ -214,6 +217,10 @@ func (s *Store) Summary(scope Scope) (LibrarySummary, error) {
 	if doc.Digest != nil && digestRootActive(doc, state, doc.Digest.RootID) {
 		current := *doc.Digest
 		summary.Digest = &current
+		if run, ok := findProposalRun(doc, current.ScanID); ok {
+			presented := s.presentRun(run)
+			summary.ProposalRun = &presented
+		}
 	}
 	for _, row := range s.managerProposalRows(scope, doc, state) {
 		if row.Status == "ready" {

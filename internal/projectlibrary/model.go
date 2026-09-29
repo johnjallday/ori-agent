@@ -66,6 +66,7 @@ type Document struct {
 	Entries       []Entry                  `json:"entries,omitempty"`
 	Scans         []Scan                   `json:"scans,omitempty"`
 	Digest        *LibraryDigest           `json:"library_digest,omitempty"`
+	ProposalRuns  []ProposalRun            `json:"proposal_runs,omitempty"`
 	Sessions      []StudioSession          `json:"sessions,omitempty"`
 	Queue         *ActivationQueue         `json:"activation_queue,omitempty"`
 	QueueHistory  []ActivationQueueOutcome `json:"queue_history,omitempty"`
@@ -435,6 +436,9 @@ func (d Document) valid(scope Scope) bool {
 	if d.Digest != nil && !d.Digest.valid(d.Scans) {
 		return false
 	}
+	if !proposalRunsValid(d.ProposalRuns, scans) {
+		return false
+	}
 	sessions := map[string]bool{}
 	for _, session := range d.Sessions {
 		if session.ID == "" || sessions[session.ID] || !entries[session.EntryID] || session.Revision < 1 ||
@@ -484,7 +488,8 @@ func (d Document) valid(scope Scope) bool {
 			proposal.AgentInstanceID == "" || !validText(proposal.AgentInstanceID, 160) ||
 			proposal.AgentName == "" || !validText(proposal.AgentName, 160) ||
 			!validText(proposal.Reason, 500) || !validDigest(proposal.Digest) ||
-			proposal.CreatedAt.IsZero() || !proposal.ExpiresAt.After(proposal.CreatedAt) {
+			proposal.CreatedAt.IsZero() || !proposal.ExpiresAt.After(proposal.CreatedAt) ||
+			!proposal.provenanceValid() {
 			return false
 		}
 		switch proposal.Kind {

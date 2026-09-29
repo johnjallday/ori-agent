@@ -33,13 +33,19 @@ func (p *WorkspaceToolProvider) SetExecutingInstanceID(id string) {
 	p.executingInstanceID = id
 }
 
+// SetManagerRun marks every proposal these tools save as part of one
+// scan-review turn. Only the host's review runner calls it; chat never does.
+func (p *WorkspaceToolProvider) SetManagerRun(run projectlibrary.ManagerRunContext) {
+	p.managerRun = run
+}
+
 func (p *WorkspaceToolProvider) libraryStore() *projectlibrary.Store {
 	return projectlibrary.NewStore(p.workspaceStore).WithProviderEvidence(p.projectLibraryEvidence)
 }
 
 func (p *WorkspaceToolProvider) managerAuthority() projectlibrary.ManagerAuthority {
 	return projectlibrary.ManagerAuthority{HomeID: p.workspaceID, AgentInstanceID: p.executingInstanceID,
-		AgentName: p.executingAgent}
+		AgentName: p.executingAgent, Run: p.managerRun}
 }
 
 func (p *WorkspaceToolProvider) libraryReadEnabled() bool {

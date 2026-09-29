@@ -91,6 +91,52 @@ export function libraryDigestText(digest, roots = []) {
   return text;
 }
 
+const RUN_SKIP_REASONS = {
+  no_manager: 'no Manager is bound to this Home',
+  no_model: 'the Manager has no tool-capable model configured',
+  provider_unavailable: 'the Home provider is unavailable',
+  unavailable: 'the Manager’s library tools are unavailable',
+  superseded: 'a newer scan replaced this one',
+  model_error: 'the model call failed',
+  time_limit: 'the review ran out of time',
+  interrupted: 'Ori stopped during the review'
+};
+
+const RUN_STOP_REASONS = {
+  proposal_limit: 'It stopped at the three-suggestion limit.',
+  time_limit: 'It stopped at the one-minute limit.',
+  token_limit: 'It stopped at the token budget.',
+  step_limit: 'It stopped at the step limit.',
+  model_error: 'The model call failed after saving these.'
+};
+
+// libraryRunText describes the Manager's bounded review of the digest's scan.
+// It never implies a suggestion was applied.
+export function libraryRunText(run) {
+  if (!run || typeof run !== 'object') return '';
+  const count = Number.isInteger(run.proposals) && run.proposals > 0 ? run.proposals : 0;
+  if (run.status === 'started') return 'Manager review of this scan is in progress…';
+  if (run.status === 'skipped')
+    return `Manager review skipped: ${RUN_SKIP_REASONS[run.reason] || 'it could not run'}.`;
+  if (run.status !== 'finished') return '';
+  const model = String(run.model || '').trim();
+  const who = model ? `The Manager (${model})` : 'The Manager';
+  const found = count
+    ? `left ${count} ${count === 1 ? 'suggestion' : 'suggestions'} for your review`
+    : 'had no suggestions';
+  const stop = RUN_STOP_REASONS[run.reason] ? ` ${RUN_STOP_REASONS[run.reason]}` : '';
+  return `${who} reviewed this scan and ${found}.${stop}`;
+}
+
+// A suggestion's origin: the bounded scan review, or a Manager chat.
+export function proposalSourceLabel(proposal) {
+  if (proposal?.source === 'manager_model') {
+    const model = String(proposal.model || '').trim();
+    return model ? `From the scan review · ${model}` : 'From the scan review';
+  }
+  return 'From a Manager chat';
+}
+
 // Only queue navigation (opaque entry IDs and a user-confirmed retry) lives in
 // this browser tab. Every item still requires a fresh server review and a
 // distinct user confirmation; storage never grants folder/creator authority.
@@ -446,6 +492,12 @@ export class ProjectLibraryPanel {
       digestLine.textContent = digestText;
       digestLine.hidden = !digestText;
     }
+    const runText = digestText ? libraryRunText(summary?.proposal_run) : '';
+    const runLine = document.getElementById('projectLibraryRun');
+    if (runLine) {
+      runLine.textContent = runText;
+      runLine.hidden = !runText;
+    }
     let page = null;
     try {
       page = await this.request('/proposals');
@@ -491,7 +543,7 @@ export class ProjectLibraryPanel {
         node(
           'small',
           '',
-          `Suggested by ${proposal.agent_name} · ${row.status === 'ready' ? 'Ready for your separate review' : `Not actionable (${row.status})`}`
+          `Suggested by ${proposal.agent_name} · ${proposalSourceLabel(proposal)} · ${row.status === 'ready' ? 'Ready for your separate review' : `Not actionable (${row.status})`}`
         )
       );
       if (row.status === 'ready' && !this.readOnly) {

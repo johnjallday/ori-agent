@@ -4,6 +4,8 @@ import {
   ProjectLibraryPanel,
   libraryDigestText,
   libraryQuery,
+  libraryRunText,
+  proposalSourceLabel,
   readActivationQueue
 } from './project-library.js';
 
@@ -1505,6 +1507,43 @@ test('scan digest line handles zero, partial, unknown-root and setup-unavailable
     []
   );
   assert.match(forged, /on an unknown date: 0 projects, 0 can be set up, 1 unsupported format\./);
+});
+
+test('the Manager review line names skips, results and stop reasons without claiming any change', () => {
+  assert.equal(libraryRunText(null), '');
+  assert.equal(
+    libraryRunText({ status: 'skipped', reason: 'no_model' }),
+    'Manager review skipped: the Manager has no tool-capable model configured.'
+  );
+  assert.equal(
+    libraryRunText({ status: 'skipped', reason: 'interrupted' }),
+    'Manager review skipped: Ori stopped during the review.'
+  );
+  assert.equal(
+    libraryRunText({ status: 'skipped', reason: '<img src=x>' }),
+    'Manager review skipped: it could not run.',
+    'an unknown reason is never echoed'
+  );
+  assert.equal(
+    libraryRunText({
+      status: 'finished',
+      proposals: 3,
+      model: 'claude-x',
+      reason: 'proposal_limit'
+    }),
+    'The Manager (claude-x) reviewed this scan and left 3 suggestions for your review. It stopped at the three-suggestion limit.'
+  );
+  assert.equal(
+    libraryRunText({ status: 'finished', proposals: 0, reason: '' }),
+    'The Manager reviewed this scan and had no suggestions.'
+  );
+  assert.match(libraryRunText({ status: 'started' }), /in progress/);
+  assert.equal(
+    proposalSourceLabel({ source: 'manager_model', model: 'claude-x' }),
+    'From the scan review · claude-x'
+  );
+  assert.equal(proposalSourceLabel({}), 'From a Manager chat');
+  assert.equal(proposalSourceLabel({ source: 'forged' }), 'From a Manager chat');
 });
 
 test('arriving with the shelf hash focuses the suggestions heading once, after it renders', () => {
