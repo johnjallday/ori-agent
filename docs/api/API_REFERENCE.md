@@ -1436,6 +1436,68 @@ Chat and task runs in a workspace with a linked directory get two tools:
 
 Both are read-only; nothing here writes to a linked directory.
 
+## Home Project Library Notifications API
+
+After a reviewed library scan completes, a program Home keeps a small, model-free digest of what the scan found, may ask its bound Manager for at most three inert suggestions, and shows both through navigation-only entry points (PRD `library-manager-notifications`; contract in `docs/architecture/project-library.md`). Every route below is for the authenticated owner of that exact Home: any other owner, a linked project's ID, or a Home without an assistant program gets `404`. No route here scans, reads a folder, grants anything or changes notes.
+
+### Get the Library Summary
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/assistant-program/library/summary`
+
+No query string (any is `400`).
+
+```json
+{
+  "initialized": true,
+  "revision": 12,
+  "digest": {
+    "scan_id": "…", "root_id": "…", "scanned_at": "2026-09-30T00:09:19Z", "coverage": "complete",
+    "projects": 6, "new": 6, "updated": 0, "unavailable": 0,
+    "unsupported_format": 1, "activatable": 5
+  },
+  "ready_proposals": 1,
+  "proposal_run": { "scan_id": "…", "status": "skipped", "reason": "no_model", "proposals": 0, "started_at": "…", "finished_at": "…" },
+  "feedback": [ { "kind": "next_action", "accepted": 1, "dismissed": 1, "updated_at": "…" } ],
+  "route": "/workspaces/music-production-home/assistant#projectLibraryProposals"
+}
+```
+
+An uninitialized library returns `{"initialized": false, "digest": null, "ready_proposals": 0, …}`. `digest` is the latest `complete` or `partial` scan's counts, or `null` when there is none or its folder was disconnected; it never carries a path or file name. When no single compatible installed integration can be checked, `activatable` and `unsupported_format` are `0` and `setup_note` names why (`setup_check_unavailable`, `home_provider_unavailable`, `project_provider_unavailable`, `provider_ambiguous`). `activatable` is guidance from saved state; a setup review repeats every check. `ready_proposals` counts ready suggestions among the shelf's newest 20. `proposal_run` is the Manager review receipt for the digest's scan: `started`, `finished` (reason empty or `proposal_limit`, `time_limit`, `token_limit`, `step_limit`, `model_error`) or `skipped` (`no_manager`, `no_model`, `provider_unavailable`, `unavailable`, `superseded`, `model_error`, `time_limit`, `interrupted`). `feedback` counts the owner's answers per suggestion kind; it is shown only and never reaches a prompt.
+
+### Dismiss a Suggestion
+
+**Endpoint:** `POST /api/workspaces/{workspaceID}/assistant-program/library/proposals/{proposalID}/dismiss`
+
+```json
+{ "confirm": true, "idempotency_key": "…" }
+```
+
+Strict JSON: exactly these fields, no duplicates. Marks one waiting suggestion dismissed and remembers its (project, kind) for seven days so a scan review does not suggest it again; nothing else changes. Allowed while the Home provider or Manager is unavailable (the suggestion then reads `unavailable`). Returns `{ "proposal_id", "dismissed_at", "replay" }`; repeating the same key replays. `400` without `confirm: true` or for any other body; `404` for an unknown suggestion; `409` when it is no longer waiting (already dismissed under another key, confirmed, stale or expired).
+
+### List Home Library Cards
+
+**Endpoint:** `GET /api/action-center/library`
+
+```json
+{
+  "items": [
+    {
+      "home_id": "…", "home_name": "Music Production Home",
+      "route": "/workspaces/music-production-home/assistant#projectLibraryProposals",
+      "scanned_at": "…", "coverage": "complete",
+      "projects": 6, "new": 6, "activatable": 5, "ready_proposals": 0
+    }
+  ],
+  "total": 1
+}
+```
+
+One derived card per Home the current owner holds whose digest has `activatable > 0` or that has ready suggestions, newest scan first, at most 20. Cards are not opportunities: they have no dismiss, snooze or resolve and disappear once nothing is ready. A missing or failing source returns an empty list.
+
+### Event and Setting
+
+A completed or partial scan publishes one in-process `library.scan_completed` event (`home_id`, `scan_id`, `root_id`, `coverage` and the digest counts only); failed, cancelled, interrupted and replayed scans publish nothing. The optional `library_manager_token_budget` in `settings.json` lowers the token cap of the Manager's review turn below the default and maximum of 20,000.
+
 ## Workspace Memory API
 
 Each workspace keeps a curated `MEMORY.md` of durable operational knowledge (facts, decisions, dead ends, watch-state) at the root of its folder. The file on disk is canonical — there is no database copy. Memory is injected into every mission run and workspace chat (capped at ~2,000 tokens) and can be written by agents via the `memory_write` / `memory_forget` tools under every autonomy policy, including Watch.

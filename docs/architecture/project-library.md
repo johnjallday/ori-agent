@@ -206,3 +206,26 @@ The Home map draws a navigation-only badge on a program Home's district header w
 - **Provenance.** A proposal saved during the turn carries `scan_id`, `source: manager_model` and the model name, stamped inside the same fenced write. Chat-created proposals keep no provenance (shown as a Manager chat suggestion). Provenance is excluded from proposal digests, so existing proposals keep validating.
 - **Dedupe.** During a turn, a proposal for the same entry and kind as a non-expired, not-stale saved proposal is refused (and does not count toward the cap).
 - **Replay.** The turn is not a task run and creates no Task, workspace or agent record; the receipt is its replay record, and a replayed event returns the receipt without a model call.
+
+**Implemented (2026-09-30).** `internal/projectlibrary/manager_run.go` holds the receipts (`claimProposalRun`, `finishProposalRun`, `CloseInterruptedProposalRuns`), `admitRunProposal` (hooked into all five proposal writes) and the bounded loop; `internal/server/library_manager_review.go` subscribes it in `initializeEventSystem`, builds the instance-bearing tools (`WorkspaceToolProvider` with `SetManagerRun`) and resolves the Manager's own tool-capable model from its Home-local agent settings (a CLI provider that cannot round-trip tool calls is `no_model`). The startup sweep runs once when the event system is wired. Evidence: the `TestManagerRun_*` suite (scripted model; caps, allowlist, prompt contents, authority loss mid-turn, concurrency across two FileStore handles, restart, supersession, forged receipts), the chat adapter check in `TestHomeLibraryTools_*`, and the tagged fence contract (3× green with the new fields). **Model behavior with a real provider is NOT RUN**; the sandboxed browser acceptance records `skipped(no_model)` and proves the tool contract through the direct `/tool` path.
+
+### Dismissal, memory and feedback (implemented)
+
+`POST …/library/proposals/{id}/dismiss` (strict JSON, `confirm`, idempotency key) marks one waiting suggestion dismissed and appends to `proposal_dismissals`, a list bounded to 256 and pruned past seven days, because the suggestion itself expires after a day. Dismissal is reductive and is allowed after provider or Manager loss (`unavailable`), but not once a suggestion was confirmed, went stale or expired. A scan-review proposal for a (project, kind) dismissed within seven days is refused with `ErrRecentlyDismissed`, which the model sees as the tool result. The owner's answers are counted per kind on the Home's assistant learning sidecar (`proposal_feedback`, once per suggestion via a bounded ID list) after the Home write that recorded them; counting is best effort and never becomes a prompt, toolbox change or learning candidate. Only next-action suggestions have a suggestion-specific confirm route, so "accepted" counts those only.
+
+### Reads during an in-flight write (implemented)
+
+A fenced Home write replaces the folder mirror and then the primary. A library read that lands between the two sees them disagree for a few milliseconds; the scan-review receipt written right after every scan made this visible as a shelf that briefly failed to load. `Store.readSnapshot` now retries a mirror split up to five times (about 150 ms in total) and then fails closed as before; it is never called inside a Home update callback. `TestReadSnapshot_WaitsOutAnInFlightWriteButStillRefusesAPersistentSplit` covers both outcomes.
+
+### The proactive-work harness, as implemented here
+
+1. **Signal:** `library.scan_completed`, published only after the fenced write that recorded the scan and its digest.
+2. **Bounded look:** one turn per signal with the runtime-resolved instance, live provider evidence, a fixed read-and-propose allowlist, and caps on proposals, time, tokens, model calls and tool calls.
+3. **Inert proposals with provenance:** stamped and capped inside their own fenced write; deduplicated against waiting suggestions and recent dismissals.
+4. **One review surface, many entry points:** the Home's suggestions shelf; the map badge and the Action Center card only navigate to it.
+5. **Truthful degradation:** the deterministic digest always runs; every skip records a visible reason.
+6. **Feedback:** accept and dismiss counts shown to the owner, never fed back automatically.
+
+A second source (a mission finding, a folder offer) reuses this by publishing its own path-free event, writing its own bounded receipt, and filing inert records that the same shelf-style surface and navigation-only entry points can show. Extract a shared package when that second source arrives (PRD open question 5).
+
+**Still not established.** A real-provider run (model quality and token accounting per provider), a settings-page control for the token budget (settings.json only), crash-atomic feedback counting (a crash between the Home write and the sidecar write loses one count), and cross-process freshness of the badge beyond the cockpit's event-driven reads.

@@ -192,6 +192,30 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
     digest: { coverage: 'complete', projects: 6, new: 6, unavailable: 0 }
   });
   expect(JSON.stringify(summary)).not.toContain(documents);
+  // Nothing this feature does may grant, revoke or change a folder grant or
+  // staff an agent; capture both now and compare at the end.
+  const grantsAfterScan = (await json(await request.get(`${base}/roots`))).roots.map(
+    (root: { id: string; revision: number; revoked_at?: string }) => [
+      root.id,
+      root.revision,
+      root.revoked_at || ''
+    ]
+  );
+  const agentsAfterScan = (await json(await request.get(`/api/workspaces/${homeID}`)))
+    .agent_instances.length;
+  const expectNoGrantOrStaffingChange = async () => {
+    const grants = (await json(await request.get(`${base}/roots`))).roots.map(
+      (root: { id: string; revision: number; revoked_at?: string }) => [
+        root.id,
+        root.revision,
+        root.revoked_at || ''
+      ]
+    );
+    expect(grants).toEqual(grantsAfterScan);
+    expect(
+      (await json(await request.get(`/api/workspaces/${homeID}`))).agent_instances
+    ).toHaveLength(agentsAfterScan);
+  };
   const digestLine = shelf.locator('#projectLibraryDigest');
   await expect(digestLine).toBeVisible();
   if (reaperSource) {
@@ -242,6 +266,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
     workspacesBeforeScan
   );
   expect(projectFiles.map(hash)).toEqual(before);
+  await expectNoGrantOrStaffingChange();
 
   // The Home map badge and the Action Center card appear only when something
   // is ready, and both only navigate to the Home's suggestions shelf.
@@ -313,6 +338,8 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
     await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText(
       '6 new · 1 to review'
     );
+    expect(projectFiles.map(hash)).toEqual(before);
+    await expectNoGrantOrStaffingChange();
     return;
   }
   const cards = (await json(await request.get('/api/action-center/library'))).items;
@@ -348,7 +375,11 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   await shot(page, '05-map-badge-390-dark');
   await page.setViewportSize({ width: 1280, height: 900 });
   await setTheme('light');
-  await badge.click();
+  // Keyboard only: the badge is a real button and no map key handler
+  // swallows Enter on it.
+  await badge.focus();
+  await expect(badge).toBeFocused();
+  await page.keyboard.press('Enter');
   await page.waitForURL(/\/assistant#projectLibraryProposals$/);
   await expect(page.locator('#projectLibraryProposalsTitle')).toBeFocused();
   await expect(page.locator('#projectLibraryDigest')).toContainText('5 can be set up');
@@ -382,6 +413,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
     workspacesBeforeScan
   );
   expect(projectFiles.map(hash)).toEqual(before);
+  await expectNoGrantOrStaffingChange();
 
   await directChatSuggestion();
   await page.goto('/');
@@ -392,6 +424,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
     workspacesBeforeScan
   );
   expect(projectFiles.map(hash)).toEqual(before);
+  await expectNoGrantOrStaffingChange();
 
   // Dismiss one suggestion and confirm another; every surface follows, and
   // both answers survive a reload and (when requested) a server restart.
@@ -485,4 +518,5 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
     workspacesBeforeScan
   );
   expect(projectFiles.map(hash)).toEqual(before);
+  await expectNoGrantOrStaffingChange();
 });
