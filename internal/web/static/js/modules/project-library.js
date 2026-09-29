@@ -154,6 +154,33 @@ export class ProjectLibraryPanel {
   post(path, body = {}) {
     return this.request(path, { method: 'POST', body: JSON.stringify(body) });
   }
+  // An OS file-manager request needs a fresh Home provider and exact child
+  // link. The browser supplies no file path and never opens a DAW here.
+  async showConnectedFolder(entryID, workspaceID, trigger) {
+    await this.run(trigger, 'Checking the connected project folder…', async () => {
+      const roots = await this.request('/roots');
+      if (roots.provider_read_only !== false) {
+        throw new Error('This Home is read-only; the folder cannot be shown.');
+      }
+      const current = await this.request(`/projects/${encodeURIComponent(entryID)}/activation`);
+      if (current.state !== 'connected' || current.workspace_id !== workspaceID) {
+        throw new Error('The project link changed; review the current connection first.');
+      }
+      const response = await this.fetchImpl(
+        `/api/workspaces/${encodeURIComponent(workspaceID)}/project/show-folder`,
+        { method: 'POST', headers: { Accept: 'application/json' } }
+      );
+      const result = await payload(response);
+      if (!response.ok) {
+        throw new Error(
+          result.error?.message ||
+            result.error ||
+            'This computer could not show the project folder.'
+        );
+      }
+      this.status('Project folder reveal requested on this computer. No DAW was started.');
+    });
+  }
   status(message) {
     const element = document.getElementById('projectLibraryStatus');
     if (element) element.textContent = message;
@@ -584,7 +611,7 @@ export class ProjectLibraryPanel {
         node(
           'small',
           '',
-          `User-authored note · saved ${new Date(session.updated_at).toLocaleDateString()}`
+          `${session.shared_from_project ? 'User-authored linked-project recap' : 'User-authored note'} · saved ${new Date(session.updated_at).toLocaleDateString()}`
         )
       );
       const open = node('button', 'modern-btn modern-btn-secondary', `View ${card.name} session`);
@@ -1581,7 +1608,13 @@ export class ProjectLibraryPanel {
                 '',
                 `Saved by ${record.author} · ${new Date(record.updated_at).toLocaleDateString()}`
               ),
-              node('p', '', record.recap ? `User recap: ${record.recap}` : 'No recap saved yet.')
+              node(
+                'p',
+                '',
+                record.recap
+                  ? `${record.shared_from_project ? 'User-authored linked-project recap' : 'User recap'}: ${record.recap}`
+                  : 'No recap saved yet.'
+              )
             );
             if (record.next_action)
               item.append(node('p', '', `Saved session next action: ${record.next_action}`));
@@ -1638,6 +1671,20 @@ export class ProjectLibraryPanel {
         const open = node('a', 'modern-btn modern-btn-secondary', 'Open connected workspace');
         open.href = `/workspaces/${encodeURIComponent(activation.workspace_id)}`;
         actions.append(open);
+        if (!this.readOnly) {
+          const showFolder = node(
+            'button',
+            'modern-btn modern-btn-secondary',
+            'Show project folder'
+          );
+          showFolder.type = 'button';
+          showFolder.title =
+            'Show the connected project folder on this computer; do not open the project or start a DAW';
+          showFolder.addEventListener('click', () => {
+            void this.showConnectedFolder(entryID, activation.workspace_id, showFolder);
+          });
+          actions.append(showFolder);
+        }
       }
       if (
         !this.readOnly &&
@@ -1770,7 +1817,11 @@ export class ProjectLibraryPanel {
         ),
         node('p', '', `Planned date: ${record.planned_date || 'Not specified'}`),
         node('p', '', `User-entered actual date: ${record.actual_date || 'Not specified'}`),
-        node('p', '', `Saved recap: ${record.recap || 'No recap yet'}`),
+        node(
+          'p',
+          '',
+          `${record.shared_from_project ? 'User-authored linked-project recap' : 'Saved recap'}: ${record.recap || 'No recap yet'}`
+        ),
         node('p', '', `Session next action: ${record.next_action || 'Not set'}`),
         node(
           'small',
@@ -1778,6 +1829,15 @@ export class ProjectLibraryPanel {
           `User-authored by ${record.author} · saved ${new Date(record.updated_at).toLocaleDateString()}`
         )
       );
+      if (record.handoff_citation) {
+        facts.append(
+          node(
+            'p',
+            '',
+            `Prior Home handoff: Ticket #${record.handoff_citation.ticket_number || '?'} (${record.handoff_citation.ticket_id}), recorded ${new Date(record.handoff_citation.recorded_at).toLocaleDateString()}. Historical receipt only; current Ticket status and completion have not been checked.`
+          )
+        );
+      }
       for (const [title, values] of [
         ['Decisions', record.decisions || []],
         ['Blockers', record.blockers || []]
@@ -1980,6 +2040,8 @@ export class ProjectLibraryPanel {
     labeled(wrapping ? 'Actual date (optional)' : 'Planned date (optional)', date);
     let time;
     let update;
+    let share;
+    let handoff;
     let decisions;
     let blockers;
     if (wrapping) {
@@ -1999,6 +2061,51 @@ export class ProjectLibraryPanel {
         'Also update this project’s saved next action (separate from the session note)',
         update
       );
+      if (detail.row.connection === 'connected') {
+        share = node('input');
+        share.type = 'checkbox';
+        labeled(
+          'Mark this Home recap as a user-authored summary of the exact linked project (no project files, chats or tasks are read)',
+          share
+        );
+        handoff = node('select', 'form-select');
+        handoff.disabled = true;
+        const none = node('option', '', 'No handoff Ticket cited');
+        none.value = '';
+        handoff.append(none);
+        labeled(
+          'Optional prior Home handoff receipt (historical ID, not Ticket status or completion)',
+          handoff
+        );
+        const hint = node(
+          'p',
+          'project-library-help',
+          'Checking this Home’s saved handoff receipts…'
+        );
+        fields.append(hint);
+        void this.request(`/projects/${encodeURIComponent(detail.row.id)}/handoff-receipts`)
+          .then(result => {
+            if (!dialog.isConnected) return;
+            for (const receipt of result.rows || []) {
+              const option = node(
+                'option',
+                '',
+                `Ticket #${receipt.ticket_number || '?'} · ${receipt.ticket_id} · ${new Date(receipt.recorded_at).toLocaleDateString()}`
+              );
+              option.value = receipt.ticket_id;
+              handoff.append(option);
+            }
+            handoff.disabled = !(result.rows || []).length;
+            hint.textContent = handoff.disabled
+              ? 'No prior confirmed Home handoff receipts for this exact project.'
+              : 'A citation records only the prior Home handoff ID; it does not read or verify a child Ticket.';
+          })
+          .catch(() => {
+            if (dialog.isConnected)
+              hint.textContent =
+                'Handoff receipts are unavailable. You can save this recap without a Ticket citation.';
+          });
+      }
     } else {
       time = node('input', 'form-control');
       time.type = 'number';
@@ -2062,6 +2169,14 @@ export class ProjectLibraryPanel {
             : ''
         );
         if (!extra.reportValidity()) return;
+        if (handoff) {
+          handoff.setCustomValidity(
+            handoff.value && !share.checked
+              ? 'Mark linked-project attribution separately to cite a prior Home handoff.'
+              : ''
+          );
+          if (!handoff.reportValidity()) return;
+        }
       }
       const input = wrapping
         ? {
@@ -2070,7 +2185,9 @@ export class ProjectLibraryPanel {
             blockers: lines(blockers),
             next_action: extra.value.trim(),
             actual_date: date.value,
-            update_project_next_action: update.checked
+            update_project_next_action: update.checked,
+            share_linked_project: Boolean(share?.checked),
+            handoff_ticket_id: handoff?.value || ''
           }
         : {
             goal: notes.value.trim(),
@@ -2097,6 +2214,19 @@ export class ProjectLibraryPanel {
           }
         : { if_entry_revision: detail.entry_revision, goal: input };
       const preview = await this.post(`${path}/review`, request);
+      if (
+        session &&
+        input.share_linked_project &&
+        !preview.session?.shared_from_project?.workspace_id
+      )
+        throw new Error(
+          'The exact linked project could not be verified. Reopen the current Home record.'
+        );
+      if (
+        input.handoff_ticket_id &&
+        preview.session?.handoff_citation?.ticket_id !== input.handoff_ticket_id
+      )
+        throw new Error('The saved handoff receipt changed. Reopen the current Home record.');
       const consequences = session
         ? [
             detail.row.name,
@@ -2106,7 +2236,15 @@ export class ProjectLibraryPanel {
             `Next action: ${input.next_action || 'None saved'}`,
             input.update_project_next_action
               ? 'Also replaces the project’s saved next action.'
-              : 'The project’s saved next action is unchanged.'
+              : 'The project’s saved next action is unchanged.',
+            input.share_linked_project
+              ? `Mark this user-written Home recap as a summary of linked workspace ${preview.session.shared_from_project.workspace_id}. No files, chats, tasks or DAW state were read. Disconnecting the child prevents new linked summaries but keeps this accepted note.`
+              : 'Home-only note; it is not marked as a linked-project summary.',
+            ...(input.handoff_ticket_id
+              ? [
+                  `Cite this Home’s earlier reviewed handoff: Ticket #${preview.session.handoff_citation.ticket_number || '?'} (${preview.session.handoff_citation.ticket_id}). This is a historical receipt, not current child status or proof of completion.`
+                ]
+              : [])
           ]
         : [
             detail.row.name,
@@ -2132,7 +2270,9 @@ export class ProjectLibraryPanel {
       await this.refresh();
       this.status(
         session
-          ? 'Recap saved. Return to Details to resume.'
+          ? input.share_linked_project
+            ? 'User-authored Home recap saved with linked-project attribution. Return to Details to resume.'
+            : 'Recap saved. Return to Details to resume.'
           : 'Goal saved. Return to Details to wrap up later.'
       );
     });

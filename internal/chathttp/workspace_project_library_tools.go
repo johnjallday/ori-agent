@@ -331,6 +331,33 @@ func (p *WorkspaceToolProvider) librarySessionsTool() toolapi.Tool {
 	}
 }
 
+func (p *WorkspaceToolProvider) libraryHandoffReceiptsTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{Name: "home_library_handoff_receipts",
+			Description: "Read at most three historical Home-owned receipts for reviewed handoffs to one currently linked catalog entry. A receipt names a child-owned Ticket ID/number and date only; it is NOT a Ticket body, status, task result, assignment, child file read, or permission to execute work. No child ID or link may be supplied. Restricted to this exact locally bound Home Manager.",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"entry_id": map[string]any{"type": "string", "description": "Exact catalog entry ID returned by this Home's search."},
+			}, "required": []string{"entry_id"}}},
+		call: func(_ context.Context, raw string) (string, error) {
+			var input struct {
+				EntryID string `json:"entry_id"`
+			}
+			if err := decodeLibraryToolArgs(raw, &input); err != nil {
+				return "", err
+			}
+			page, err := p.libraryStore().HandoffsForManager(p.managerAuthority(), input.EntryID)
+			if err != nil {
+				return "", fmt.Errorf("home handoff receipts are unavailable or not authorized: %w", err)
+			}
+			encoded, err := json.Marshal(page)
+			if err != nil || len(encoded) > 4096 {
+				return "", fmt.Errorf("home handoff receipt result exceeds its read limit")
+			}
+			return string(encoded), nil
+		},
+	}
+}
+
 func (p *WorkspaceToolProvider) libraryDetailTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{Name: "home_library_detail",

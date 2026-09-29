@@ -134,6 +134,7 @@ func TestClassifyToolSideEffect(t *testing.T) {
 		{"Home library search", "home_library_search", "", ToolSideEffectRead},
 		{"Home library detail", "home_library_detail", "", ToolSideEffectRead},
 		{"Home session summaries", "home_library_sessions", "", ToolSideEffectRead},
+		{"Home handoff receipts", "home_library_handoff_receipts", "", ToolSideEffectRead},
 		{"Home next-action suggestion needs owner confirmation", "home_library_propose_next_action", "", ToolSideEffectConfirm},
 		{"Home project-review navigation needs owner review", "home_library_propose_project_review", "", ToolSideEffectConfirm},
 		{"Home studio goal suggestion needs owner review", "home_library_propose_session_goal", "", ToolSideEffectConfirm},

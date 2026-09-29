@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -18,8 +19,24 @@ import (
 // workspace.json and is restricted to local peers because it causes a desktop
 // side effect on the server machine.
 func (h *HTTPHandler) OpenWorkspaceProject(w http.ResponseWriter, r *http.Request) {
+	h.openOrShowWorkspaceProject(w, r, false)
+}
+
+// ShowWorkspaceProjectFolder handles POST /api/workspaces/:id/project/show-folder.
+// This explicit local action reveals only the containing folder of the exact
+// currently resolved project entry. It does not open the project in a DAW,
+// accept a path, grant a discovery root, or infer live-control readiness.
+func (h *HTTPHandler) ShowWorkspaceProjectFolder(w http.ResponseWriter, r *http.Request) {
+	h.openOrShowWorkspaceProject(w, r, true)
+}
+
+func (h *HTTPHandler) openOrShowWorkspaceProject(w http.ResponseWriter, r *http.Request, showFolder bool) {
 	if !projectOpenRequestIsLoopback(r) {
 		orihttp.Forbidden(w, "Opening a desktop project requires a local request")
+		return
+	}
+	if showFolder && r.URL.RawQuery != "" {
+		orihttp.BadRequest(w, "Show folder does not accept query parameters or file paths")
 		return
 	}
 	if requestBodyHasContent(r) {
@@ -34,13 +51,23 @@ func (h *HTTPHandler) OpenWorkspaceProject(w http.ResponseWriter, r *http.Reques
 	}
 	ws, err := h.folderWorkspaceResolver.GetFolderWorkspace(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		// Folder-store errors can include an external source path. The local
+		// reveal response must never echo it to the browser.
+		if showFolder {
+			orihttp.NotFound(w, "Workspace folder is unavailable")
+		} else {
+			orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		}
 		return
 	}
 
 	workspaceRoot, err := h.folderResolver.GetFolderPath(workspaceID)
 	if err != nil {
-		orihttp.NotFound(w, fmt.Sprintf("Workspace folder is unavailable: %v", err))
+		if showFolder {
+			orihttp.NotFound(w, "Workspace folder is unavailable")
+		} else {
+			orihttp.NotFound(w, fmt.Sprintf("Workspace folder is unavailable: %v", err))
+		}
 		return
 	}
 	resolved, err := ResolveProjectEntry(ws, workspaceRoot)
@@ -52,21 +79,37 @@ func (h *HTTPHandler) OpenWorkspaceProject(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
-	if h.openFile == nil {
-		orihttp.ServiceUnavailable(w, "Operating-system file opening is unavailable")
-		return
-	}
-	if err := h.openFile(resolved.AbsolutePath); err != nil {
-		orihttp.InternalError(w, fmt.Sprintf("Failed to open project entry: %v", err))
-		return
+	if showFolder {
+		if h.openFolder == nil {
+			orihttp.ServiceUnavailable(w, "Operating-system folder opening is unavailable")
+			return
+		}
+		if err := h.openFolder(filepath.Dir(resolved.AbsolutePath)); err != nil {
+			orihttp.InternalError(w, "Could not show the project folder on this computer")
+			return
+		}
+	} else {
+		if h.openFile == nil {
+			orihttp.ServiceUnavailable(w, "Operating-system file opening is unavailable")
+			return
+		}
+		if err := h.openFile(resolved.AbsolutePath); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to open project entry: %v", err))
+			return
+		}
 	}
 
 	logger.Info("Opened workspace project entry via OS", logger.Fields{
 		"workspace_id": workspaceID,
 		"entry_kind":   resolved.Locator.Kind,
+		"show_folder":  showFolder,
 	})
+	message := "Project open request accepted"
+	if showFolder {
+		message = "Project folder reveal requested on this computer"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"message":       "Project open request accepted",
+		"message":       message,
 		"workspace":     workspaceID,
 		"path":          resolved.Locator.RelativePath,
 		"relative_path": resolved.Locator.RelativePath,

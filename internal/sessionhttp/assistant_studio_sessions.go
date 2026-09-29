@@ -145,6 +145,25 @@ func (h *Handler) CommitAssistantStudioGoal(w http.ResponseWriter, r *http.Reque
 	_ = orihttp.RespondSuccess(w, map[string]any{"session": session, "replay": replay})
 }
 
+// Owner receipt choices are read only from this Home and its currently
+// verified project link. No child Ticket content or status is opened.
+func (h *Handler) ListAssistantStudioHandoffReceipts(w http.ResponseWriter, r *http.Request) {
+	scope, _, ok := h.assistantLibraryScope(w, r)
+	if !ok || !h.libraryEntryExists(w, scope, r.PathValue("entryID")) {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		_ = orihttp.RespondBadRequest(w, "Invalid handoff receipt request")
+		return
+	}
+	list, err := h.assistantLibraryStore().HandoffsForOwner(scope, r.PathValue("entryID"))
+	if err != nil {
+		respondLibraryReadError(w, err)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, list)
+}
+
 type studioRecapReviewRequest struct {
 	SessionRevision int64                     `json:"if_session_revision"`
 	FieldsRevision  int64                     `json:"if_fields_revision"`

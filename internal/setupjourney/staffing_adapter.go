@@ -934,31 +934,14 @@ func (a *AssistantStaffingAdapter) owner(scope ReadScope) (*staffingOwner, error
 	}, nil
 }
 
-// A split project's role and binding snapshots must agree across SQLite's
-// primary record and the portable workspace folder. A folder-first partial
-// write cannot turn an old, roleless child into a staffed project (or vice
-// versa). A plain FileStore has no distinct mirror and needs no second read.
+// Staffing and Home-library projections use the same full child-link mirror
+// guard; a folder-first role or binding write cannot be mistaken for an
+// approved project declaration by either surface.
 func splitProjectRoleMirrorsAgree(store workspace.Store, project *workspace.Workspace, state *workspace.AssistantProgramState, link *workspace.AssistantProjectLink) bool {
 	if project == nil || state == nil || state.HomeProvider == nil || link == nil || link.ProjectProvider == nil {
 		return true
 	}
-	mirror, ok := store.(workspace.MirrorWorkspaceProvider)
-	if !ok {
-		return true
-	}
-	folder, mirrored, err := mirror.GetMirrorWorkspace(project.ID)
-	if err != nil {
-		return false
-	}
-	if !mirrored {
-		return true
-	}
-	if folder == nil || folder.ID != project.ID || folder.OwnerUserID != project.OwnerUserID || folder.ParentID != project.ParentID || folder.Status != project.Status || folder.GetAssistantProjectLink() == nil {
-		return false
-	}
-	primaryLink, primaryErr := json.Marshal(link)
-	folderLink, folderErr := json.Marshal(folder.GetAssistantProjectLink())
-	return primaryErr == nil && folderErr == nil && bytes.Equal(primaryLink, folderLink)
+	return workspace.AssistantProjectLinkMirrorsAgree(store, project)
 }
 
 // A split project blueprint declares at least one required project role. Older

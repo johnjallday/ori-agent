@@ -2,6 +2,45 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ProjectLibraryPanel, libraryQuery, readActivationQueue } from './project-library.js';
 
+test('Show project folder requires a fresh connected Home link and never sends a path or starts a DAW', async () => {
+  const requests = [];
+  const panel = new ProjectLibraryPanel({
+    workspaceId: 'home',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, json: async () => ({ message: 'Folder reveal requested' }) };
+    }
+  });
+  panel.run = async (_trigger, _message, work) => work();
+  const messages = [];
+  panel.status = message => messages.push(message);
+  let providerReadOnly = false;
+  let currentChild = 'child & project';
+  panel.request = async path => {
+    if (path === '/roots') return { provider_read_only: providerReadOnly };
+    assert.equal(path, '/projects/entry/activation');
+    return { state: 'connected', workspace_id: currentChild };
+  };
+  await panel.showConnectedFolder('entry', currentChild, null);
+  assert.deepEqual(requests, [
+    {
+      url: '/api/workspaces/child%20%26%20project/project/show-folder',
+      options: { method: 'POST', headers: { Accept: 'application/json' } }
+    }
+  ]);
+  assert.match(messages.at(-1), /No DAW was started/);
+  providerReadOnly = true;
+  await assert.rejects(panel.showConnectedFolder('entry', currentChild, null), /read-only/);
+  providerReadOnly = false;
+  currentChild = 'different-child';
+  await assert.rejects(panel.showConnectedFolder('entry', 'child & project', null), /link changed/);
+  assert.equal(
+    requests.length,
+    1,
+    'provider loss or a replaced child must not contact the OS route'
+  );
+});
+
 test('canceling a reviewed scan or disconnect refreshes the Home revision before retry', async () => {
   const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
   panel.state = { revision: 1 };
@@ -50,6 +89,184 @@ test('forget cancellation erases no saved Home record or session', async () => {
   await panel.forgetRecord({ revision: 8, row: { id: 'album' } });
   assert.deepEqual(calls, [{ path: '/projects/album/forget/review', body: { revision: 8 } }]);
   assert.equal(refreshes, 1);
+});
+
+test('user-written linked recap requires its own Home review and explicit confirmation', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.run = async (_trigger, _message, work) => work();
+  panel.status = () => {};
+  let refreshes = 0;
+  panel.refresh = async () => refreshes++;
+  const calls = [];
+  panel.post = async (path, body) => {
+    calls.push({ path, body });
+    if (path.endsWith('/review'))
+      return {
+        token: 'reviewed-share',
+        session: { shared_from_project: { workspace_id: 'exact-child' } }
+      };
+    return { session: { recap: 'A shorter bridge' } };
+  };
+  const detail = { row: { id: 'song', name: 'Song', fields_revision: 0 } };
+  const session = { id: 'session', revision: 1 };
+  const input = {
+    recap: 'A shorter bridge',
+    decisions: [],
+    blockers: [],
+    next_action: '',
+    actual_date: '',
+    update_project_next_action: false,
+    share_linked_project: true
+  };
+  panel.confirm = async (_heading, consequences) => {
+    assert.ok(consequences.some(line => line.includes('exact-child') && line.includes('No files')));
+    return false;
+  };
+  await panel.saveStudioSession(detail, session, input, null);
+  assert.equal(calls.length, 1, 'canceled share writes no recap');
+  assert.equal(refreshes, 0);
+  panel.confirm = async () => true;
+  await panel.saveStudioSession(detail, session, input, null);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[1].body.recap.share_linked_project, true);
+  assert.equal(calls[2].body.review_token, 'reviewed-share');
+  assert.equal(calls[2].body.confirm, true);
+  assert.equal(refreshes, 1);
+});
+
+test('handoff citation remains a separate reviewed historical Home receipt, never child status', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.run = async (_trigger, _message, work) => work();
+  panel.status = () => {};
+  panel.refresh = async () => {};
+  const calls = [];
+  let citation = { ticket_id: 'confirmed-ticket', ticket_number: 9 };
+  panel.post = async (path, body) => {
+    calls.push({ path, body });
+    if (path.endsWith('/review'))
+      return {
+        token: 'receipt-review',
+        session: {
+          shared_from_project: { workspace_id: 'current-child' },
+          handoff_citation: citation
+        }
+      };
+    return { session: { handoff_citation: citation } };
+  };
+  const input = {
+    recap: 'Owner wrote this',
+    decisions: [],
+    blockers: [],
+    next_action: '',
+    actual_date: '',
+    update_project_next_action: false,
+    share_linked_project: true,
+    handoff_ticket_id: 'confirmed-ticket'
+  };
+  const detail = { row: { id: 'entry', name: 'Song', fields_revision: 0 } };
+  const session = { id: 'session', revision: 1 };
+  panel.confirm = async (_heading, consequences) => {
+    assert.ok(
+      consequences.some(
+        line => line.includes('Ticket #9') && line.includes('not current child status')
+      )
+    );
+    return false;
+  };
+  await panel.saveStudioSession(detail, session, input, null);
+  assert.equal(calls.length, 1, 'canceled citation must not commit a recap');
+  citation = { ticket_id: 'different-ticket', ticket_number: 9 };
+  await assert.rejects(panel.saveStudioSession(detail, session, input, null), /receipt changed/);
+  assert.equal(calls.length, 2, 'changed review must not commit');
+  citation = { ticket_id: 'confirmed-ticket', ticket_number: 9 };
+  panel.confirm = async () => true;
+  await panel.saveStudioSession(detail, session, input, null);
+  assert.equal(calls.length, 4);
+  assert.equal(calls[3].body.recap.handoff_ticket_id, 'confirmed-ticket');
+  assert.equal(calls[3].body.confirm, true);
+});
+
+test('owner Wrap up offers only selected Home handoff IDs and requires linked attribution', async () => {
+  const original = globalThis.document;
+  const elements = [];
+  const makeNode = tag => ({
+    tag,
+    children: [],
+    value: '',
+    checked: false,
+    disabled: false,
+    isConnected: false,
+    append(...items) {
+      this.children.push(...items);
+    },
+    setAttribute() {},
+    addEventListener(event, fn) {
+      this[event] = fn;
+    },
+    showModal() {},
+    close() {
+      this.isConnected = false;
+    },
+    focus() {},
+    remove() {},
+    setCustomValidity(error) {
+      this.validation = error;
+    },
+    reportValidity() {
+      return !this.validation;
+    }
+  });
+  globalThis.document = {
+    createElement: tag => {
+      const element = makeNode(tag);
+      elements.push(element);
+      return element;
+    },
+    body: {
+      append(dialog) {
+        dialog.isConnected = true;
+      }
+    },
+    querySelector: () => null
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const requests = [];
+    panel.request = async path => {
+      requests.push(path);
+      return {
+        rows: [{ ticket_id: 'saved-ticket', ticket_number: 3, recorded_at: '2026-09-28T00:00:00Z' }]
+      };
+    };
+    const saves = [];
+    panel.saveStudioSession = async (_detail, _session, input) => saves.push(input);
+    panel.sessionForm({ row: { id: 'song', connection: 'connected' } }, { id: 'session' }, null);
+    await Promise.resolve();
+    assert.deepEqual(requests, ['/projects/song/handoff-receipts']);
+    const handoff = elements.find(element => element.tag === 'select');
+    const checkboxes = elements.filter(
+      element => element.tag === 'input' && element.type === 'checkbox'
+    );
+    const form = elements.find(element => element.tag === 'form');
+    assert.equal(checkboxes.length, 2);
+    assert.equal(handoff.children.length, 2);
+    assert.equal(handoff.children[1].value, 'saved-ticket');
+    handoff.value = 'saved-ticket';
+    elements.find(element => element.tag === 'textarea').value = 'Owner wrote this';
+    form.submit({ preventDefault() {} });
+    assert.equal(
+      saves.length,
+      0,
+      'selecting a receipt does not auto-consent to project attribution'
+    );
+    checkboxes[1].checked = true;
+    form.submit({ preventDefault() {} });
+    assert.equal(saves.length, 1);
+    assert.equal(saves[0].handoff_ticket_id, 'saved-ticket');
+    assert.equal(saves[0].share_linked_project, true);
+  } finally {
+    globalThis.document = original;
+  }
 });
 
 test('pending direct links require a separate review and never commit on cancellation', async () => {

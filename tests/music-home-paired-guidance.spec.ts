@@ -573,7 +573,78 @@ test('only a distinct reviewed child staffing action fills the existing-file pro
     saved.sourceHash
   );
   await screenshot(page, 'guidance-existing-file-associated-home');
-  writeFileSync(receipt, JSON.stringify({ ...saved, offerHomeRoute: homeRoute }), { mode: 0o600 });
+  // A linked child's work is not read automatically. The owner types a
+  // bounded summary and separately confirms whether to share it with Home.
+  await shelf.getByRole('button', { name: 'Review Existing Documents Song' }).click();
+  await page
+    .getByRole('dialog', { name: 'Existing Documents Song' })
+    .getByRole('button', { name: 'Plan a session' })
+    .click();
+  const goalForm = page.getByRole('dialog', { name: 'Plan a studio session' });
+  await goalForm.getByRole('textbox', { name: 'Session goal' }).fill('Review the existing bridge');
+  await goalForm.getByRole('button', { name: 'Review session' }).click();
+  await page
+    .getByRole('dialog', { name: 'Save this goal?' })
+    .getByRole('button', { name: 'Save goal' })
+    .click();
+  await shelf.getByRole('button', { name: 'Review Existing Documents Song' }).click();
+  await page
+    .getByRole('dialog', { name: 'Existing Documents Song' })
+    .getByRole('button', { name: 'Wrap up session' })
+    .click();
+  const recapForm = page.getByRole('dialog', { name: 'Wrap up studio session' });
+  await recapForm
+    .getByRole('textbox', { name: 'Your recap' })
+    .fill('The bridge should stay quieter');
+  await recapForm.getByRole('checkbox', { name: /Mark this Home recap/ }).check();
+  await screenshot(page, 'guidance-existing-file-share-recap-choice');
+  await recapForm.getByRole('button', { name: 'Review session' }).click();
+  const shareReview = page.getByRole('dialog', { name: 'Save this recap?' });
+  await expect(shareReview).toContainText(`linked workspace ${saved.existingID}`);
+  await expect(shareReview).toContainText('No files, chats, tasks or DAW state were read');
+  await screenshot(page, 'guidance-existing-file-shared-recap-review');
+  await shareReview.getByRole('button', { name: 'Cancel' }).click();
+  const entryID = catalog.rows[0].id;
+  const sessionsURL = `${base}/projects/${entryID}/sessions`;
+  const beforeShare = await json(await request.get(sessionsURL));
+  expect(beforeShare.rows[0].recap).toBeFalsy();
+  await shelf.getByRole('button', { name: 'Review Existing Documents Song' }).click();
+  await page
+    .getByRole('dialog', { name: 'Existing Documents Song' })
+    .getByRole('button', { name: 'Wrap up session' })
+    .click();
+  const freshForm = page.getByRole('dialog', { name: 'Wrap up studio session' });
+  await freshForm
+    .getByRole('textbox', { name: 'Your recap' })
+    .fill('The bridge should stay quieter');
+  await freshForm.getByRole('checkbox', { name: /Mark this Home recap/ }).check();
+  await freshForm.getByRole('button', { name: 'Review session' }).click();
+  await page
+    .getByRole('dialog', { name: 'Save this recap?' })
+    .getByRole('button', { name: 'Save recap' })
+    .click();
+  await expect(shelf.locator('#projectLibraryResume')).toContainText(
+    'User-authored linked-project recap'
+  );
+  await expect(
+    shelf
+      .locator('#projectLibraryResume')
+      .getByRole('button', { name: 'View Existing Documents Song session' })
+  ).toBeVisible();
+  expect((await json(await request.get(sessionsURL))).rows[0].shared_from_project).toMatchObject({
+    workspace_id: saved.existingID,
+    link_id: child.assistant_project_link.id
+  });
+  await shelf.locator('#projectLibraryResume').scrollIntoViewIfNeeded();
+  await screenshot(page, 'guidance-existing-file-shared-recap-resume');
+  expect(createHash('sha256').update(readFileSync(saved.song)).digest('hex')).toBe(
+    saved.sourceHash
+  );
+  writeFileSync(
+    receipt,
+    JSON.stringify({ ...saved, offerHomeRoute: homeRoute, sharedEntryID: entryID }),
+    { mode: 0o600 }
+  );
 });
 
 test('restart preserves exact candidate identities for both children and the reviewed association', async ({
@@ -662,6 +733,23 @@ test('restart preserves exact candidate identities for both children and the rev
   await homeLink.click();
   await page.waitForURL(url => url.pathname + url.hash === saved.offerHomeRoute);
   await expect(page.locator('#projectLibraryCount')).toHaveText('1 of 1 projects');
+  const library = `/api/workspaces/${saved.homeID}/assistant-program/library`;
+  const savedSessions = await json(
+    await request.get(`${library}/projects/${saved.sharedEntryID}/sessions`)
+  );
+  expect(savedSessions.rows).toHaveLength(1);
+  expect(savedSessions.rows[0]).toMatchObject({
+    recap: 'The bridge should stay quieter',
+    shared_from_project: { workspace_id: saved.existingID }
+  });
+  await expect(page.locator('#projectLibraryResume')).toContainText(
+    'User-authored linked-project recap'
+  );
+  await expect(
+    page
+      .locator('#projectLibraryResume')
+      .getByRole('button', { name: 'View Existing Documents Song session' })
+  ).toBeVisible();
   expect(
     (
       await json(

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // GoalInput and RecapInput contain user-authored production notes only. They
@@ -19,12 +21,14 @@ type GoalInput struct {
 }
 
 type RecapInput struct {
-	Recap      string   `json:"recap"`
-	Decisions  []string `json:"decisions,omitempty"`
-	Blockers   []string `json:"blockers,omitempty"`
-	ActualDate string   `json:"actual_date,omitempty"`
-	Next       string   `json:"next_action,omitempty"`
-	UpdateNext bool     `json:"update_project_next_action,omitempty"`
+	Recap           string   `json:"recap"`
+	Decisions       []string `json:"decisions,omitempty"`
+	Blockers        []string `json:"blockers,omitempty"`
+	ActualDate      string   `json:"actual_date,omitempty"`
+	Next            string   `json:"next_action,omitempty"`
+	UpdateNext      bool     `json:"update_project_next_action,omitempty"`
+	ShareLinked     bool     `json:"share_linked_project,omitempty"`
+	HandoffTicketID string   `json:"handoff_ticket_id,omitempty"` // A selected Home receipt, not child Ticket content.
 }
 
 type SessionReview struct {
@@ -36,15 +40,17 @@ type SessionReview struct {
 // SessionSummary omits potentially large decision/blocker lists; one record
 // can be fetched separately by its exact Home-scoped ID when needed.
 type SessionSummary struct {
-	ID        string    `json:"id"`
-	EntryID   string    `json:"entry_id"`
-	Revision  int64     `json:"revision"`
-	Goal      string    `json:"goal"`
-	Outcome   string    `json:"desired_outcome,omitempty"`
-	Recap     string    `json:"recap,omitempty"`
-	Next      string    `json:"next_action,omitempty"`
-	Author    string    `json:"author"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string                 `json:"id"`
+	EntryID    string                 `json:"entry_id"`
+	Revision   int64                  `json:"revision"`
+	Goal       string                 `json:"goal"`
+	Outcome    string                 `json:"desired_outcome,omitempty"`
+	Recap      string                 `json:"recap,omitempty"`
+	Next       string                 `json:"next_action,omitempty"`
+	Author     string                 `json:"author"`
+	SharedFrom *ExactLink             `json:"shared_from_project,omitempty"`
+	Handoff    *ManagerHandoffReceipt `json:"handoff_citation,omitempty"`
+	UpdatedAt  time.Time              `json:"updated_at"`
 }
 
 type SessionPage struct {
@@ -70,7 +76,7 @@ type ResumeView struct {
 func sessionSummary(row StudioSession) SessionSummary {
 	return SessionSummary{ID: row.ID, EntryID: row.EntryID, Revision: row.Revision,
 		Goal: row.Goal, Outcome: row.Outcome, Recap: row.Recap, Next: row.Next,
-		Author: row.Author, UpdatedAt: row.UpdatedAt}
+		Author: row.Author, SharedFrom: row.SharedFrom, Handoff: row.Handoff, UpdatedAt: row.UpdatedAt}
 }
 
 // Resume is a read-only Home-wide view of at most three distinct catalog
@@ -118,7 +124,11 @@ func (s *Store) Resume(scope Scope) (ResumeView, error) {
 		if entry == nil || !validText(id, 160) {
 			return ResumeView{}, ErrCorrupt
 		}
+		row := s.projectSearchRow(scope, *entry, nil, linked, nil)
 		name := entry.Fields.DisplayName
+		if name == "" && row.Connection == "connected" {
+			name = row.Name // Exact reciprocal child name, never a path/name adoption.
+		}
 		if name == "" {
 			for _, observed := range entry.Observations {
 				if observed.RelativeFolder != "" {
@@ -132,7 +142,7 @@ func (s *Store) Resume(scope Scope) (ResumeView, error) {
 		}
 		card := ResumeCard{EntryID: id, Name: name,
 			ProjectNextAction: entry.Fields.NextAction, Session: sessionSummary(latest[id])}
-		if row := s.projectSearchRow(scope, *entry, nil, linked, nil); row.Connection == "connected" {
+		if row.Connection == "connected" {
 			card.WorkspaceID = entry.Link.WorkspaceID
 		}
 		view.Cards = append(view.Cards, card)
@@ -142,6 +152,30 @@ func (s *Store) Resume(scope Scope) (ResumeView, error) {
 
 func validSessionAuthor(author string) bool { return author != "" && validText(author, 160) }
 
+func validHistoricalLink(homeID string, link *ExactLink) bool {
+	return link != nil && link.WorkspaceID != "" && validText(link.WorkspaceID, 160) &&
+		link.LinkID == workspace.AssistantProjectLinkID(homeID, link.WorkspaceID) && link.Revision >= 1
+}
+
+// Only an exact, currently reciprocal Home/child link can be named as the
+// source of an owner-entered recap. This reads link metadata, not project
+// files, task history, transcripts or agent memory. The copied identity is
+// historical context, never permission to open the child after disconnect.
+func (s *Store) verifiedRecapShareLink(scope Scope, state *workspace.AssistantProgramState, entry *Entry) (*ExactLink, bool) {
+	if entry == nil || entry.Link == nil || !validHistoricalLink(scope.HomeID, entry.Link) || state == nil {
+		return nil, false
+	}
+	linked := make(map[string]bool, len(state.LinkedProjectIDs))
+	for _, id := range state.LinkedProjectIDs {
+		linked[id] = true
+	}
+	if s.projectSearchRow(scope, *entry, nil, linked, nil).Connection != "connected" {
+		return nil, false
+	}
+	pinned := *entry.Link
+	return &pinned, true
+}
+
 func (input GoalInput) valid() bool {
 	return input.Goal != "" && validText(input.Goal, 500) && validText(input.Outcome, 500) &&
 		input.TimeMinutes >= 0 && input.TimeMinutes <= 480 && validDate(input.PlannedDate)
@@ -150,7 +184,8 @@ func (input GoalInput) valid() bool {
 func (input RecapInput) valid() bool {
 	if input.Recap == "" || !validText(input.Recap, 2000) || !validText(input.Next, 240) ||
 		!validDate(input.ActualDate) || len(input.Decisions) > 16 || len(input.Blockers) > 16 ||
-		(input.UpdateNext && input.Next == "") {
+		(input.UpdateNext && input.Next == "") ||
+		(input.HandoffTicketID != "" && (!input.ShareLinked || !validText(input.HandoffTicketID, 160))) {
 		return false
 	}
 	for _, list := range [][]string{input.Decisions, input.Blockers} {
@@ -385,7 +420,7 @@ func (s *Store) ReviewRecap(scope Scope, sessionID string, sessionRevision, fiel
 	if sessionID == "" || sessionRevision < 1 || fieldsRevision < 0 || !input.valid() || !validSessionAuthor(author) {
 		return SessionReview{}, ErrConflict
 	}
-	doc, err := s.Read(scope)
+	doc, state, err := s.readSnapshot(scope)
 	if err != nil {
 		return SessionReview{}, err
 	}
@@ -401,11 +436,28 @@ func (s *Store) ReviewRecap(scope Scope, sessionID string, sessionRevision, fiel
 	if !found || previous.Revision != sessionRevision || entry == nil || entry.Fields.Revision != fieldsRevision {
 		return SessionReview{}, ErrConflict
 	}
+	var sharedFrom *ExactLink
+	var handoff *ManagerHandoffReceipt
+	if input.ShareLinked {
+		var verified bool
+		sharedFrom, verified = s.verifiedRecapShareLink(scope, state, entry)
+		if !verified {
+			return SessionReview{}, ErrConflict
+		}
+		if input.HandoffTicketID != "" {
+			handoff, verified = homeHandoffCitation(state, sharedFrom, input.HandoffTicketID)
+			if !verified {
+				return SessionReview{}, ErrConflict
+			}
+		}
+	}
 	now := s.now().UTC()
 	planned := previous
 	planned.Recap, planned.Decisions, planned.Blockers, planned.ActualDate, planned.Next =
 		input.Recap, append([]string(nil), input.Decisions...), append([]string(nil), input.Blockers...), input.ActualDate, input.Next
 	planned.Revision++
+	planned.SharedFrom = sharedFrom // A later Home-only recap does not claim the earlier share.
+	planned.Handoff = handoff
 	planned.State, planned.Author, planned.UpdatedAt = "reviewed", author, now
 	digest, err := sessionDigest(scope, "accept_session_recap", previous.EntryID, sessionID,
 		entry.Revision, sessionRevision, fieldsRevision, input, author)
@@ -414,7 +466,7 @@ func (s *Store) ReviewRecap(scope Scope, sessionID string, sessionRevision, fiel
 	}
 	review := ReviewReceipt{Token: newID(), Action: "accept_session_recap", TargetID: sessionID,
 		Digest: digest, Revision: doc.Revision + 1, FieldsRevision: fieldsRevision,
-		EntryRevision: entry.Revision, ExpiresAt: now.Add(10 * time.Minute)}
+		EntryRevision: entry.Revision, SharedFrom: sharedFrom, Handoff: handoff, ExpiresAt: now.Add(10 * time.Minute)}
 	_, _, err = s.mutate(scope, doc.Revision,
 		operation{key: review.Token, action: "review_session_recap", digest: digest}, func(current *Document) (string, error) {
 			if len(current.Reviews) >= maxReviews {
@@ -472,7 +524,8 @@ func (s *Store) CommitRecap(scope Scope, sessionID, token, key string, sessionRe
 	}
 	digest, err := sessionDigest(scope, "accept_session_recap", previous.EntryID, sessionID,
 		review.EntryRevision, sessionRevision, fieldsRevision, input, author)
-	if err != nil || digest != review.Digest {
+	if err != nil || digest != review.Digest || (review.SharedFrom != nil) != input.ShareLinked ||
+		(review.Handoff != nil) != (input.HandoffTicketID != "") {
 		return StudioSession{}, false, ErrConflict
 	}
 	for _, prior := range doc.Operations {
@@ -488,8 +541,13 @@ func (s *Store) CommitRecap(scope Scope, sessionID, token, key string, sessionRe
 		return StudioSession{}, false, ErrConflict
 	}
 	var committed StudioSession
-	_, replay, err := s.mutate(scope, doc.Revision,
-		operation{key: key, action: "accept_session_recap", digest: digest}, func(current *Document) (string, error) {
+	var finalState *workspace.AssistantProgramState
+	_, replay, err := s.mutateWithHomePolicy(scope, doc.Revision,
+		operation{key: key, action: "accept_session_recap", digest: digest},
+		func(state *workspace.AssistantProgramState, _ *workspace.Workspace) bool {
+			finalState = state
+			return true
+		}, func(current *Document) (string, error) {
 			for i := range current.Reviews {
 				receipt := &current.Reviews[i]
 				if receipt.Token != token || receipt.Action != "accept_session_recap" || receipt.Digest != digest ||
@@ -505,6 +563,20 @@ func (s *Store) CommitRecap(scope Scope, sessionID, token, key string, sessionRe
 					if entry == nil || entry.Fields.Revision != fieldsRevision || entry.Revision != review.EntryRevision {
 						return "", ErrConflict
 					}
+					if input.ShareLinked {
+						link, verified := s.verifiedRecapShareLink(scope, finalState, entry)
+						if !verified || receipt.SharedFrom == nil || *link != *receipt.SharedFrom ||
+							*link != *review.SharedFrom {
+							return "", ErrConflict
+						}
+						if input.HandoffTicketID != "" {
+							current, found := homeHandoffCitation(finalState, link, input.HandoffTicketID)
+							if !found || receipt.Handoff == nil || review.Handoff == nil ||
+								*current != *receipt.Handoff || *current != *review.Handoff {
+								return "", ErrConflict
+							}
+						}
+					}
 					now := s.now().UTC()
 					if input.UpdateNext {
 						patched, patchErr := (FieldsPatch{NextAction: &input.Next}).apply(entry.Fields, author, now)
@@ -516,6 +588,15 @@ func (s *Store) CommitRecap(scope Scope, sessionID, token, key string, sessionRe
 					session.Recap, session.Decisions, session.Blockers, session.ActualDate, session.Next =
 						input.Recap, append([]string(nil), input.Decisions...), append([]string(nil), input.Blockers...), input.ActualDate, input.Next
 					session.Author, session.Revision, session.UpdatedAt, session.AcceptedAt = author, session.Revision+1, now, &now
+					session.SharedFrom, session.Handoff = nil, nil
+					if input.ShareLinked {
+						pinned := *receipt.SharedFrom
+						session.SharedFrom = &pinned
+						if receipt.Handoff != nil {
+							citation := *receipt.Handoff
+							session.Handoff = &citation
+						}
+					}
 					committed = *session
 					receipt.ConsumedAt = &now
 					return sessionID, nil

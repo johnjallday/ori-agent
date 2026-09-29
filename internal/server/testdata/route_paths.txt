@@ -351,8 +351,10 @@
 /api/workspaces/x/triggers/x/fires
 /api/workspaces/x/triggers/x/regenerate-token
 /api/workspaces/x/triggers/x/test-fire
+/api/workspaces/x/assistant-program/library/projects/x/handoff-receipts
 # --- hand-rolled workspace runtime family (G2 target: routeWorkspaceRuntimeRequest) ---
 /api/workspaces/x/project/open
+/api/workspaces/x/project/show-folder
 /api/workspaces/x/events
 /api/workspaces/x/output-dir
 /api/workspaces/x/output-dir/open

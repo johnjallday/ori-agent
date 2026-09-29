@@ -275,8 +275,7 @@ func (s *Service) Commit(ctx context.Context, scope Scope, request Request, revi
 		if request.ModeID == projecttemplates.ProjectConnectionNewProject {
 			operationKind = grouprequirements.OperationCreateProject
 		}
-		operationDigest := digestStrings(scope.RunID, string(request.ModeID), reviewedInputDigest, reviewedOwnerDigest)
-		reviewDigest := digestStrings(reviewedInputDigest, reviewedOwnerDigest)
+		reviewDigest, operationDigest := CreationEvidenceDigests(scope.RunID, request.ModeID, reviewedInputDigest, reviewedOwnerDigest)
 		effective, homeID, snapshot, groupErr := s.grouping.CommitReviewed(grouprequirements.Input{
 			OwnerUserID: scope.OwnerUserID, OperationKind: operationKind, Template: scope.Template,
 			Composition: request.GroupComposition, InputDigest: current.InputDigest,
@@ -729,8 +728,14 @@ func templateProvenance(template projecttemplates.Template, now time.Time, snaps
 	}
 }
 
-func connectionChildID(runID string) string {
+// ProjectWorkspaceIDForRun derives the canonical creator child ID. This is
+// an inert identity calculation; knowing an ID cannot authorize creation.
+func ProjectWorkspaceIDForRun(runID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("ori.setup-journey.project\x00"+runID)).String()
+}
+
+func connectionChildID(runID string) string {
+	return ProjectWorkspaceIDForRun(runID)
 }
 
 func connectionReferenceID(runID string) string {
@@ -749,6 +754,13 @@ func digestJSON(value any) (string, error) {
 	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+// CreationEvidenceDigests binds the project creator's group snapshot to the
+// original reviewed input, owner evidence, run and selected project mode.
+// This is read-only evidence, never a creation or repair permission.
+func CreationEvidenceDigests(runID string, mode projecttemplates.ProjectConnectionMode, inputDigest, ownerDigest string) (reviewDigest, operationDigest string) {
+	return digestStrings(inputDigest, ownerDigest), digestStrings(runID, string(mode), inputDigest, ownerDigest)
 }
 
 func digestStrings(values ...string) string {

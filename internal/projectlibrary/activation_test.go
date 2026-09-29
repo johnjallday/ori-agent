@@ -558,12 +558,18 @@ func TestActivation_SQLitePrimarySplitHomeMirrorRefusesCreatorRepairUntilExplici
 	}
 	// Test-only operator reconciliation from the unchanged primary: production
 	// deliberately offers no automatic winner or migration for split mirrors.
-	if err := file.Update(scope.HomeID, func(folderHome *workspace.Workspace) error {
-		state := folderHome.GetAssistantProgramState()
-		state.ProjectLibrary = append([]byte(nil), primaryHome.GetAssistantProgramState().ProjectLibrary...)
-		folderHome.SetAssistantProgramState(state)
-		return nil
-	}); err != nil {
+	// The folder keeps its own portable fields; only the library document and
+	// the version come from the primary, written exactly so the shared fence
+	// sees two agreeing mirrors again rather than a further bumped folder.
+	folderHome, err := file.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	folderState := folderHome.GetAssistantProgramState()
+	folderState.ProjectLibrary = append([]byte(nil), primaryHome.GetAssistantProgramState().ProjectLibrary...)
+	folderHome.SetAssistantProgramState(folderState)
+	folderHome.Version = primaryHome.Version
+	if err := file.RestoreMirrorRecord(folderHome); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := library.PendingLinkedProjects(scope)
@@ -606,7 +612,32 @@ func (f *failSQLiteHomeAssociation) Save(item *workspace.Workspace) error {
 	return f.Store.Save(item)
 }
 
+// SaveExpecting keeps the injected refusal on the fenced (conditional) path a
+// SyncStore uses for a Home, then forwards the exact expectation to SQLite.
+func (f *failSQLiteHomeAssociation) SaveExpecting(item *workspace.Workspace, expected int64) error {
+	if item.ID == f.homeID && f.failNext {
+		f.failNext = false
+		f.triggered = true
+		return os.ErrPermission
+	}
+	if saver, ok := f.Store.(workspace.VersionedSaver); ok {
+		return saver.SaveExpecting(item, expected)
+	}
+	return f.Store.Save(item)
+}
+
 func TestActivation_SQLitePrimaryFailedFinalSaveRollsBackFolderAndRetriesExactRun(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		readOnly bool
+	}{{"injected refusal", false}, {"real SQLite query-only write failure", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			testActivation_SQLitePrimaryFailedFinalSaveRollsBackFolderAndRetriesExactRun(t, tc.readOnly)
+		})
+	}
+}
+
+func testActivation_SQLitePrimaryFailedFinalSaveRollsBackFolderAndRetriesExactRun(t *testing.T, readOnly bool) {
 	a, scope, _, file, tree, installed := activationFixture(t)
 	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
 	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "failed-final-write.db"), WALMode: true})
@@ -627,7 +658,11 @@ func TestActivation_SQLitePrimaryFailedFinalSaveRollsBackFolderAndRetriesExactRu
 		t.Fatal(err)
 	}
 	failing := &failSQLiteHomeAssociation{Store: primary, homeID: scope.HomeID}
-	synced := workspace.NewSyncStore(failing, file)
+	var primaryStore workspace.Store = failing
+	if readOnly {
+		primaryStore = primary // Force the actual SQLite UPDATE to return read-only.
+	}
+	synced := workspace.NewSyncStore(primaryStore, file)
 	original := a.library
 	library := NewStore(synced).WithProviderEvidence(original.providerEvidence)
 	a.library, a.roots.library, a.owners = library, library, synced
@@ -664,12 +699,26 @@ func TestActivation_SQLitePrimaryFailedFinalSaveRollsBackFolderAndRetriesExactRu
 	case <-time.After(15 * time.Second):
 		t.Fatal("canonical creator did not persist its child")
 	}
-	failing.failNext = true // No SQLite write happens until the paused creator is released.
+	// The creator's child and reciprocal Home link are already durable.
+	// query_only is scoped to this fixture's single SQLite connection; all
+	// reads still work, but the next real SQLite UPDATE will fail *after*
+	// SyncStore has saved the folder-side catalog association.
+	if readOnly {
+		if _, err := db.ExecContext(t.Context(), "PRAGMA query_only = ON"); err != nil {
+			t.Fatal(err)
+		}
+		var queryOnly int
+		if err := db.QueryRowContext(t.Context(), "PRAGMA query_only").Scan(&queryOnly); err != nil || queryOnly != 1 {
+			t.Fatalf("disposable SQLite connection did not enter query-only mode: %d %v", queryOnly, err)
+		}
+	} else {
+		failing.failNext = true
+	}
 	releaseCreator()
 	select {
 	case commitErr := <-completed:
-		if commitErr == nil || !failing.triggered {
-			t.Fatalf("final SQLite write failure was hidden: %v triggered=%t", commitErr, failing.triggered)
+		if commitErr == nil || (!readOnly && !failing.triggered) || (readOnly && failing.triggered) {
+			t.Fatalf("final SQLite write failure was hidden or injected instead: %v triggered=%t", commitErr, failing.triggered)
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("Home write failure deadlocked")
@@ -700,6 +749,11 @@ func TestActivation_SQLitePrimaryFailedFinalSaveRollsBackFolderAndRetriesExactRu
 	ids, err := synced.List()
 	if err != nil || len(ids) != 2 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
 		t.Fatalf("final write failure duplicated child or changed source: %v %v", ids, err)
+	}
+	if readOnly {
+		if _, err := db.ExecContext(t.Context(), "PRAGMA query_only = OFF"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	result, err := service.Commit(t.Context(), scope, "single", review.Token, "failed-sqlite-final-write")
 	if err != nil || result.WorkspaceID != pending.Rows[0].WorkspaceID {

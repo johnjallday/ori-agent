@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // ============================================================================
@@ -479,37 +480,87 @@ func (s *SQLiteStore) GetWorkspaceBySlug(ctx context.Context, slug string) (*Wor
 	return s.GetWorkspace(ctx, id)
 }
 
-// UpdateWorkspace updates workspace metadata.
-func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace) error {
-	// Serialize all JSON fields using helper
-	f := serializeWorkspaceFields(workspace)
-
-	result, err := s.db.ExecContext(ctx, `
+// updateWorkspaceSetSQL is the column list shared by every workspace update.
+const updateWorkspaceSetSQL = `
 		UPDATE workspaces
 		SET name = ?, folder_slug = ?, kind = ?, description = ?, owner_user_id = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
 			agent_instances = ?, tags = ?, shared_data = ?, status = ?, layout = ?,
 			messages_json = ?, tasks_json = ?, attachments_json = ?, folders_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?,
 			mcp_bindings_json = ?, agent_mcp_access_json = ?, skill_bindings_json = ?, agent_skill_access_json = ?, opportunities_json = ?, installed_capabilities_json = ?, toolbox_state_json = ?, mission_state_json = ?, assistant_program_json = ?,
 			ticket_migration_version = ?, ticket_sequence = ?, version = ?, allow_native_mcp_cli = ?
-		WHERE id = ?
-	`, workspace.Name, workspace.FolderSlug, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, normalizeOwnerUserID(workspace.OwnerUserID), workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
+	`
+
+func updateWorkspaceArgs(workspace *Workspace) []any {
+	f := serializeWorkspaceFields(workspace)
+	return []any{
+		workspace.Name, workspace.FolderSlug, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, normalizeOwnerUserID(workspace.OwnerUserID), workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
 		string(f.agentInstances), string(f.tags), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
 		string(f.mcpBindings), string(f.agentMCPAccess), string(f.skillBindings), string(f.agentSkillAccess), string(f.opportunities), string(f.installedCapabilities), string(f.toolboxState), nullableJSON(f.missionState), string(f.assistantProgram),
-		workspace.TicketMigrationVersion, workspace.TicketSequence, workspace.Version, workspace.AllowNativeMCPCLI, workspace.ID)
+		workspace.TicketMigrationVersion, workspace.TicketSequence, workspace.Version, workspace.AllowNativeMCPCLI,
+	}
+}
 
+// UpdateWorkspace updates workspace metadata. When the stored row is an
+// Assistant Home or a split project child the update is conditional on the
+// version the caller read (workspace.Version), so a stale generic writer
+// cannot overwrite a newer fenced record; it returns
+// ErrWorkspaceVersionConflict instead. Ordinary rows keep the unconditional
+// update they always had.
+func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace) error {
+	return s.updateWorkspace(ctx, workspace, workspace.Version, false)
+}
+
+// UpdateWorkspaceExpecting persists workspace only while the stored version
+// still equals expectedVersion. The check and the write are one statement; a
+// mismatch leaves the row untouched and returns ErrWorkspaceVersionConflict.
+func (s *SQLiteStore) UpdateWorkspaceExpecting(ctx context.Context, workspace *Workspace, expectedVersion int64) error {
+	return s.updateWorkspace(ctx, workspace, expectedVersion, true)
+}
+
+func (s *SQLiteStore) updateWorkspace(ctx context.Context, workspace *Workspace, expectedVersion int64, strict bool) error {
+	args := updateWorkspaceArgs(workspace)
+	result, err := s.db.ExecContext(ctx, updateWorkspaceSetSQL+` WHERE id = ? AND version = ?`,
+		append(append([]any{}, args...), workspace.ID, expectedVersion)...)
 	if err != nil {
 		if isWorkspaceSlugUniqueError(err) {
 			return ErrWorkspaceSlugConflict
 		}
 		return fmt.Errorf("failed to update workspace: %w", err)
 	}
-
-	if err := database.CheckRowsAffectedWithError(result, "workspace", ErrWorkspaceNotFound); err != nil {
-		return err
+	rows, rowsErr := result.RowsAffected()
+	if rowsErr != nil {
+		logger.Warn("Failed to get rows affected", logger.Fields{"entity": "workspace", "error": rowsErr.Error()})
+		return nil
+	}
+	if rows > 0 {
+		return nil
 	}
 
-	return nil
+	var storedVersion int64
+	var envelope string
+	err = s.db.QueryRowContext(ctx, `SELECT version, assistant_program_json FROM workspaces WHERE id = ?`, workspace.ID).
+		Scan(&storedVersion, &envelope)
+	if err == sql.ErrNoRows {
+		return ErrWorkspaceNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check workspace version: %w", err)
+	}
+	if strict || assistantProgramEnvelopeProtected(envelope) {
+		return fmt.Errorf("%w: workspace %s is at version %d, this write expected %d",
+			ErrWorkspaceVersionConflict, workspace.ID, storedVersion, expectedVersion)
+	}
+
+	// An ordinary workspace keeps the historical unconditional update.
+	result, err = s.db.ExecContext(ctx, updateWorkspaceSetSQL+` WHERE id = ?`, append(append([]any{}, args...), workspace.ID)...)
+	if err != nil {
+		if isWorkspaceSlugUniqueError(err) {
+			return ErrWorkspaceSlugConflict
+		}
+		return fmt.Errorf("failed to update workspace: %w", err)
+	}
+	return database.CheckRowsAffectedWithError(result, "workspace", ErrWorkspaceNotFound)
 }
 
 // DeleteWorkspace removes a workspace, moving sessions and subworkspaces to root.

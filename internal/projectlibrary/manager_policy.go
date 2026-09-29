@@ -137,6 +137,12 @@ func (s *Store) SessionsForManager(authority ManagerAuthority, entryID string) (
 	if len(page.Rows) > 3 {
 		page.Rows = page.Rows[:3]
 	}
+	// Session text is Home-owned, but historical child Ticket IDs are exposed
+	// only by the dedicated exact-live-link handoff receipt tool. Otherwise a
+	// disconnected child could bypass that tool through a saved recap.
+	for i := range page.Rows {
+		page.Rows[i].Handoff = nil
+	}
 	return ManagerSessions{Revision: page.Revision, Total: page.Total, Rows: page.Rows}, nil
 }
 

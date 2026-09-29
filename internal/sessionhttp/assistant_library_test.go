@@ -88,6 +88,16 @@ func TestAssistantLibraryHTTP_ThousandSavedProjectsStayPageBounded(t *testing.T)
 				RelativeFolder: fmt.Sprintf("Folder-%04d", i), FileIdentity: fmt.Sprintf("fixture:%d", i),
 				Format: "reaper", Availability: "available", ScanID: scanID, ScannedAt: now}}})
 	}
+	// One catalog entry also has an older discovery grant with a different
+	// format. HTTP must not combine that root with the preferred active one.
+	revokedRoot := doc.Roots[1].ID
+	doc.Roots[1].RevokedAt = &now
+	doc.Scans = append(doc.Scans, projectlibrary.Scan{ID: "revoked-scan", RootID: revokedRoot, RootRevision: 1,
+		RootDigest: strings.Repeat("0", 64), ResultDigest: strings.Repeat("0", 64),
+		Status: "complete", StartedAt: now, FinishedAt: &now})
+	doc.Entries[1].Observations = append(doc.Entries[1].Observations, projectlibrary.Observation{
+		RootID: revokedRoot, RelativeFolder: "Prior Ableton folder", FileIdentity: "fixture:old",
+		Format: "ableton", Availability: "available", ScanID: "revoked-scan", ScannedAt: now})
 	doc.Revision++
 	encoded, err := json.Marshal(doc)
 	if err != nil {
@@ -150,6 +160,25 @@ func TestAssistantLibraryHTTP_ThousandSavedProjectsStayPageBounded(t *testing.T)
 	}
 	if count != 1001 {
 		t.Fatalf("pagination lost projects: %d", count)
+	}
+	for _, tc := range []struct {
+		query, wantFormat, wantAvailability string
+		wantTotal                           int
+	}{
+		{"?root_id=other-root-00&format=ableton&availability=revoked_source", "ableton", "revoked_source", 1},
+		{"?root_id=fixture-root&format=reaper&availability=available", "reaper", "available", 1000},
+		{"?root_id=other-root-00&format=reaper", "", "", 0},
+		{"?root_id=other-root-00&availability=available", "", "", 0},
+	} {
+		response := httptest.NewRecorder()
+		handler.SearchAssistantLibrary(response, assistantProgramRequest(http.MethodGet,
+			"/library/projects"+tc.query, station.ID, ""))
+		var page projectlibrary.SearchPage
+		if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK || page.Total != tc.wantTotal ||
+			(len(page.Rows) > 0 && (page.Rows[0].Format != tc.wantFormat || page.Rows[0].Availability != tc.wantAvailability)) ||
+			strings.Contains(response.Body.String(), fixtureRoot) {
+			t.Fatalf("owner HTTP filter crossed discovery roots: query=%s code=%d page=%+v err=%v", tc.query, response.Code, page, err)
+		}
 	}
 	t.Logf("cold-to-last HTTP pagination: %s for %d saved projects", time.Since(start), count)
 }

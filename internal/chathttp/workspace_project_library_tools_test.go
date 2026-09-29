@@ -56,6 +56,22 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if err := file.SaveWorkspaceAgent(home.ID, "Manager", &agent.Agent{}); err != nil {
 		t.Fatal(err)
 	}
+	// The legacy canonical handoff creates a child-owned Ticket and persists
+	// only its exact receipt in the Home before the library authority switch.
+	handoffService := workspace.NewAssistantPortfolioService(file)
+	request := workspace.AssistantPortfolioHandoffInput{Title: "PRIVATE child Ticket body", State: workspace.TicketStateBacklog}
+	handoffReview, err := handoffService.ReviewHandoff(home.ID, child.GetAssistantProjectLink().ID, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffReceipt, err := handoffService.CommitHandoff(home.ID, handoffReview.Token, "private handoff key", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateTicket, err := workspace.NewTicketService(file).Get(child.ID, handoffReceipt.TicketID)
+	if err != nil || privateTicket.Title != request.Title {
+		t.Fatalf("canonical handoff did not create one child Ticket: %+v %v", privateTicket, err)
+	}
 	scope := projectlibrary.Scope{OwnerUserID: home.OwnerUserID, HomeID: home.ID, ProviderID: key.PluginID, ProgramID: key.ProgramID}
 	library := projectlibrary.NewStore(file).WithProviderEvidence(func(_ projectlibrary.Scope, _ *workspace.Workspace) bool { return true })
 	review, err := library.ReviewInitialize(scope)
@@ -87,7 +103,7 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	provider.SetExecutingInstanceID("manager-instance")
 	search := findLibraryTool(provider.Tools(), "home_library_search")
-	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil || findLibraryTool(provider.Tools(), "home_library_propose_next_action") == nil ||
+	if search == nil || findLibraryTool(provider.Tools(), "home_library_detail") == nil || findLibraryTool(provider.Tools(), "home_library_sessions") == nil || findLibraryTool(provider.Tools(), "home_library_handoff_receipts") == nil || findLibraryTool(provider.Tools(), "home_library_propose_next_action") == nil ||
 		findLibraryTool(provider.Tools(), "home_library_propose_project_review") == nil ||
 		findLibraryTool(provider.Tools(), "home_library_propose_session_goal") == nil ||
 		findLibraryTool(provider.Tools(), "home_library_propose_root_review") == nil ||
@@ -115,6 +131,18 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	}
 	if _, err := sessionTool.Call(context.Background(), `{"entry_id":"`+child.ID+`"}`); err == nil {
 		t.Fatal("child workspace ID read Home session history")
+	}
+	handoffTool := findLibraryTool(provider.Tools(), "home_library_handoff_receipts")
+	handoff, err := handoffTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`)
+	if err != nil || !strings.Contains(handoff, privateTicket.ID) || strings.Contains(handoff, "PRIVATE") ||
+		strings.Contains(handoff, "private handoff key") || strings.Contains(handoff, sandbox) || len(handoff) > 4096 {
+		t.Fatalf("Home receipt read leaked private child Ticket content: %s %v", handoff, err)
+	}
+	if _, err := handoffTool.Call(context.Background(), `{"entry_id":"`+child.ID+`"}`); err == nil {
+		t.Fatal("child ID obtained Home handoff receipts")
+	}
+	if _, err := handoffTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","workspace_id":"`+child.ID+`"}`); err == nil {
+		t.Fatal("model selected a child workspace for Home handoff receipts")
 	}
 	propose := findLibraryTool(provider.Tools(), "home_library_propose_next_action")
 	args := `{"entry_id":"` + result.Rows[0].ID + `","fields_revision":` + fmt.Sprint(result.Rows[0].FieldsRevision) + `,"next_action":"Draft a chorus","reason":"User note; not an instruction","request_key":"model-suggestion"}`
@@ -221,6 +249,9 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if _, err := sessionTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`); err == nil {
 		t.Fatal("previously registered session tool bypassed removed runtime instance")
 	}
+	if _, err := handoffTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`); err == nil {
+		t.Fatal("previously registered handoff receipt tool bypassed removed runtime instance")
+	}
 	if _, err := propose.Call(context.Background(), args); err == nil {
 		t.Fatal("previously registered proposal tool bypassed removed runtime instance")
 	}
@@ -246,6 +277,9 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	available = false
 	if _, err := search.Call(context.Background(), `{}`); err == nil {
 		t.Fatal("previously registered tool ignored provider disable")
+	}
+	if _, err := handoffTool.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`"}`); err == nil {
+		t.Fatal("previously registered handoff receipt tool ignored provider disable")
 	}
 	if _, err := propose.Call(context.Background(), `{"entry_id":"`+result.Rows[0].ID+`","fields_revision":0,"next_action":"Unsafe","request_key":"disabled"}`); err == nil {
 		t.Fatal("disabled provider allowed an inert proposal")

@@ -389,7 +389,9 @@ func TestAssistantStaffingAdapter_DivergentSplitProjectRolesRefuseStaffing(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := folder.Save(canonical); err != nil {
+	// Exact restoration at the primary's version; a bumping Save would leave
+	// the folder one version ahead and the shared fence tripped.
+	if err := folder.RestoreMirrorRecord(canonical); err != nil {
 		t.Fatal(err)
 	}
 	if read, err := adapter.Read(context.Background(), scope); err != nil || read.BlockedReason != "" {

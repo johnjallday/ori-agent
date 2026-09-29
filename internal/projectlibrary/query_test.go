@@ -1,11 +1,13 @@
 package projectlibrary
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -142,6 +144,79 @@ func TestQuery_BoundedRevisionCursorAtThousandRecords(t *testing.T) {
 	}
 }
 
+func TestQuery_TimestampSortAndCursorFollowChronologyAcrossFractionalSeconds(t *testing.T) {
+	file, scope := libraryHome(t)
+	s := NewStore(file)
+	initializeLibrary(t, s, scope)
+	whole := time.Date(2026, time.September, 28, 12, 0, 0, 0, time.UTC)
+	half, next := whole.Add(500*time.Millisecond), whole.Add(time.Second)
+	_, _, err := s.mutate(scope, 1, operation{key: "time-order-fixture", action: "seed", digest: "fixture"},
+		func(doc *Document) (string, error) {
+			rootID, scanID := "timestamp-root", "timestamp-scan"
+			doc.Roots = append(doc.Roots, Root{ID: rootID, Path: t.TempDir(), FileIdentity: "fixture:root", Revision: 1, ApprovedAt: whole})
+			doc.Scans = append(doc.Scans, Scan{ID: scanID, RootID: rootID, RootRevision: 1,
+				RootDigest: strings.Repeat("a", 64), ResultDigest: strings.Repeat("b", 64),
+				Status: "complete", StartedAt: whole, FinishedAt: &next})
+			for _, record := range []struct {
+				id string
+				at time.Time
+			}{{"whole", whole}, {"half", half}, {"next", next}} {
+				doc.Entries = append(doc.Entries, Entry{ID: record.id, Revision: 1,
+					Fields: Fields{DisplayName: record.id, Revision: 1, Source: "user_edit", UpdatedAt: record.at},
+					Observations: []Observation{{RootID: rootID, RelativeFolder: record.id, FileIdentity: "fixture:" + record.id,
+						Format: "reaper", ScanID: scanID, ScannedAt: record.at, Availability: "available"}}})
+			}
+			return scanID, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sortField := range []string{"scanned_at", "sourced_activity"} {
+		for _, tc := range []struct {
+			direction string
+			want      []string
+		}{{"asc", []string{"whole", "half", "next"}}, {"desc", []string{"next", "half", "whole"}}} {
+			t.Run(sortField+"_"+tc.direction, func(t *testing.T) {
+				query := Search{Sort: sortField, Direction: tc.direction, PageSize: 1}
+				var got []string
+				for {
+					page, err := s.Query(scope, query)
+					if err != nil || page.Total != 3 || len(page.Rows) != 1 {
+						t.Fatalf("chronology page %d: %+v %v", len(got), page, err)
+					}
+					got = append(got, page.Rows[0].ID)
+					if page.NextCursor == "" {
+						break
+					}
+					query.Cursor = page.NextCursor
+				}
+				if !slices.Equal(got, tc.want) {
+					t.Fatalf("%s %s sorts by text instead of observation time: got %v, want %v", sortField, tc.direction, got, tc.want)
+				}
+			})
+		}
+	}
+	// A cursor minted with the old variable-width timestamp layout is not
+	// silently resumed in a different order after an upgrade.
+	doc, err := s.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := Search{Sort: "scanned_at", Direction: "asc", PageSize: 1}
+	if err := query.normalize(doc); err != nil {
+		t.Fatal(err)
+	}
+	oldCursor, err := json.Marshal(pageCursor{Revision: doc.Revision, Query: queryDigest(query),
+		LastID: "whole", LastKey: whole.Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query.Cursor = base64.RawURLEncoding.EncodeToString(oldCursor)
+	if _, err := s.Query(scope, query); !errors.Is(err, ErrConflict) {
+		t.Fatalf("old timestamp cursor resumed with the wrong ordering: %v", err)
+	}
+}
+
 func TestQuery_ActiveObservationTakesPrecedenceOverNewerRevokedFormat(t *testing.T) {
 	file, scope := libraryHome(t)
 	s := NewStore(file)
@@ -179,6 +254,29 @@ func TestQuery_ActiveObservationTakesPrecedenceOverNewerRevokedFormat(t *testing
 	}
 	if old, err := s.Query(scope, Search{Format: "ableton"}); err != nil || old.Total != 0 {
 		t.Fatalf("revoked source unexpectedly won format filter: %+v %v", old, err)
+	}
+	for _, tc := range []struct {
+		root, format, availability, name string
+		scannedAt                        time.Time
+	}{
+		{"active-root", "reaper", "available", "Usable song", now.Add(-time.Hour)},
+		{"revoked-root", "ableton", "revoked_source", "Old unrelated label", now},
+	} {
+		t.Run(tc.root, func(t *testing.T) {
+			query := Search{RootID: tc.root, Format: tc.format, Availability: tc.availability}
+			page, err := s.Query(scope, query)
+			if err != nil || page.Total != 1 || len(page.Rows) != 1 || page.Rows[0].Format != tc.format ||
+				page.Rows[0].Availability != tc.availability || page.Rows[0].Name != tc.name ||
+				!page.Rows[0].LastScannedAt.Equal(tc.scannedAt) {
+				t.Fatalf("root-filtered row combined another root's observation: %+v %v", page, err)
+			}
+		})
+	}
+	if wrong, err := s.Query(scope, Search{RootID: "revoked-root", Format: "reaper"}); err != nil || wrong.Total != 0 {
+		t.Fatalf("revoked root inherited another root's format: %+v %v", wrong, err)
+	}
+	if wrong, err := s.Query(scope, Search{RootID: "revoked-root", Availability: "available"}); err != nil || wrong.Total != 0 {
+		t.Fatalf("revoked root inherited another root's availability: %+v %v", wrong, err)
 	}
 	detail, err := s.Detail(scope, "same-entry")
 	if err != nil || detail.Sources[0].RootID != "active-root" || detail.Sources[1].Availability != "revoked_source" {

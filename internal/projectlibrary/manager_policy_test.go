@@ -86,7 +86,54 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Legacy confirmed handoff receipts stay in the Home after explicit
+	// library initialization. They do not transfer the child Ticket body.
+	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		for i := 0; i < 4; i++ {
+			state.Portfolio.HandoffOperationReceipts = append(state.Portfolio.HandoffOperationReceipts,
+				workspace.AssistantPortfolioHandoffOperationReceipt{LinkID: child.GetAssistantProjectLink().ID,
+					ProjectWorkspaceID: child.ID, TicketID: fmt.Sprintf("home-ticket-%d", i), TicketNumber: int64(i + 1),
+					IdempotencyKey: "private handoff key", InputDigest: "private child text",
+					RecordedAt: time.Now().UTC().Add(time.Duration(i) * time.Minute)})
+		}
+		state.Portfolio.HandoffOperationReceipts = append(state.Portfolio.HandoffOperationReceipts,
+			workspace.AssistantPortfolioHandoffOperationReceipt{LinkID: "foreign-link", ProjectWorkspaceID: child.ID,
+				TicketID: "foreign-ticket", RecordedAt: time.Now().UTC()})
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	manager := ManagerAuthority{HomeID: scope.HomeID, AgentInstanceID: "manager-instance", AgentName: "Manager"}
+	// Historical owner-accepted citations stay on the Home, but Manager
+	// session summaries must not bypass the exact-link receipt-only tool.
+	currentHome, err := file.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorReceipt := currentHome.GetAssistantProgramState().Portfolio.HandoffOperationReceipts[3]
+	doc, err = store.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = store.mutate(scope, doc.Revision, operation{key: "fixture-historical-citation", action: "fixture", digest: "fixture"}, func(current *Document) (string, error) {
+		current.Sessions[3].Recap = "Owner accepted this historical citation"
+		current.Sessions[3].SharedFrom = &ExactLink{WorkspaceID: child.ID, LinkID: priorReceipt.LinkID, Revision: 1}
+		current.Sessions[3].Handoff = &ManagerHandoffReceipt{TicketID: priorReceipt.TicketID,
+			TicketNumber: priorReceipt.TicketNumber, RecordedAt: priorReceipt.RecordedAt}
+		return "song", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffs, err := store.HandoffsForManager(manager, "song")
+	if err != nil || handoffs.Total != 4 || len(handoffs.Rows) != 3 || handoffs.Rows[0].TicketID != "home-ticket-3" {
+		t.Fatalf("bounded Home-only handoff receipt read: %+v %v", handoffs, err)
+	}
+	if _, err := store.HandoffsForManager(manager, child.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("child ID read a Home handoff receipt: %v", err)
+	}
 	page, err := store.SearchForManager(manager, Search{PageSize: 100, Sort: "name"})
 	if err != nil || len(page.Rows) != 1 || page.Rows[0].Name != "Private user note" {
 		t.Fatalf("valid local Manager read: %+v %v", page, err)
@@ -96,8 +143,8 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 		t.Fatalf("bounded Home-only detail: %+v %v", detail, err)
 	}
 	sessions, err := store.SessionsForManager(manager, "song")
-	if err != nil || sessions.Total != 4 || len(sessions.Rows) != 3 || sessions.Rows[0].Goal != "User goal 3" {
-		t.Fatalf("Manager read more or fewer than the latest three Home notes: %+v %v", sessions, err)
+	if err != nil || sessions.Total != 4 || len(sessions.Rows) != 3 || sessions.Rows[0].Goal != "User goal 3" || sessions.Rows[0].Handoff != nil {
+		t.Fatalf("Manager read more or fewer than the latest three Home notes, or leaked a Ticket ID: %+v %v", sessions, err)
 	}
 	if _, err := store.SessionsForManager(manager, child.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("child workspace ID obtained Home sessions: %v", err)
@@ -166,6 +213,9 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 		if _, err := store.SessionsForManager(denied, "song"); !errors.Is(err, ErrUnavailable) {
 			t.Errorf("%s acquired session history: %v", name, err)
 		}
+		if _, err := store.HandoffsForManager(denied, "song"); !errors.Is(err, ErrUnavailable) {
+			t.Errorf("%s acquired Home handoff receipts: %v", name, err)
+		}
 		if _, _, err := store.ProposeNextAction(denied, "song", entry.Fields.Revision, "Unsafe", "", "denied-"+name); !errors.Is(err, ErrUnavailable) {
 			t.Errorf("%s stored a Manager proposal: %v", name, err)
 		}
@@ -190,6 +240,9 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 	}
 	if _, err := store.SearchForManager(manager, Search{}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("removed role binding retained access: %v", err)
+	}
+	if _, err := store.HandoffsForManager(manager, "song"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("removed role binding exposed handoff receipts: %v", err)
 	}
 	if _, _, err := store.CommitProposedNextAction(scope, pending.ID, pendingReview.Token,
 		"removed-binding-commit", scope.OwnerUserID); !errors.Is(err, ErrConflict) {
@@ -223,8 +276,47 @@ func TestManagerPolicy_RequiresExactLocalPrimaryRoleAndLiveProvider(t *testing.T
 	if _, err := store.SearchForManager(manager, Search{}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("provider loss retained tool read: %v", err)
 	}
+	if _, err := store.HandoffsForManager(manager, "song"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("provider loss exposed handoff receipts: %v", err)
+	}
 	available = true
 	if _, err := store.DetailForManager(manager, strings.Repeat("x", 161)); !errors.Is(err, ErrConflict) {
 		t.Fatalf("malformed entry ID acquired details: %v", err)
 	}
+	// Disconnect *after* the first exact-link read and before the final
+	// post-authorization check. No stale child receipt may escape this path.
+	race := &disconnectOnSecondReceiptLinkRead{Store: file, childID: child.ID}
+	race.disconnect = func() error {
+		return file.Update(child.ID, func(project *workspace.Workspace) error {
+			link := project.GetAssistantProjectLink()
+			link.StationWorkspaceID = "other-home"
+			project.SetAssistantProjectLink(link)
+			return nil
+		})
+	}
+	if _, err := NewStore(race).WithProviderEvidence(store.providerEvidence).HandoffsForManager(manager, "song"); !errors.Is(err, ErrConflict) || race.reads != 2 {
+		t.Fatalf("disconnect after first receipt link check leaked a child ID: reads=%d err=%v", race.reads, err)
+	}
+	if _, err := store.HandoffsForManager(manager, "song"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("disconnected child exposed historical handoff receipts: %v", err)
+	}
+}
+
+type disconnectOnSecondReceiptLinkRead struct {
+	workspace.Store
+	childID    string
+	reads      int
+	disconnect func() error
+}
+
+func (s *disconnectOnSecondReceiptLinkRead) Get(id string) (*workspace.Workspace, error) {
+	if id == s.childID {
+		s.reads++
+		if s.reads == 2 {
+			if err := s.disconnect(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return s.Store.Get(id)
 }

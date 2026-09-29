@@ -94,6 +94,22 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 		},
 	}
 	handler.SetInstalledPluginLister(assistantInstalledPluginLister{installed: []plugin.InstalledPlugin{installed}})
+	// A real pre-library reviewed Home handoff leaves a receipt; it does not
+	// grant the initialized library access to the private child Ticket.
+	linkedProject, err := store.Get(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffInput := workspace.AssistantPortfolioHandoffInput{Title: "Private child Ticket title", State: workspace.TicketStateBacklog}
+	handoffService := workspace.NewAssistantPortfolioService(store)
+	handoffReview, err := handoffService.ReviewHandoff(station.ID, linkedProject.GetAssistantProjectLink().ID, handoffInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffReceipt, err := handoffService.CommitHandoff(station.ID, handoffReview.Token, "before-library", handoffInput)
+	if err != nil {
+		t.Fatal(err)
+	}
 	scope := projectlibrary.Scope{OwnerUserID: station.OwnerUserID, HomeID: station.ID,
 		ProviderID: state.Key.PluginID, ProgramID: state.Key.ProgramID}
 	if !handler.assistantLibraryProviderEvidence(scope, station) {
@@ -161,6 +177,39 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 	doc, err := projectlibrary.NewStore(store).Read(scope)
 	if err != nil {
 		t.Fatal(err)
+	}
+	readHandoffs := func(homeID, catalogID, query string) (int, string) {
+		request := assistantProgramRequest(http.MethodGet, "/library/projects/"+catalogID+"/handoff-receipts"+query, homeID, "")
+		request.SetPathValue("entryID", catalogID)
+		response := httptest.NewRecorder()
+		handler.ListAssistantStudioHandoffReceipts(response, request)
+		return response.Code, response.Body.String()
+	}
+	linkedEntry := ""
+	for _, entry := range doc.Entries {
+		if entry.Link != nil && entry.Link.WorkspaceID == project.ID {
+			linkedEntry = entry.ID
+		}
+	}
+	if linkedEntry == "" {
+		t.Fatal("reviewed library initialization lost exact project link")
+	}
+	if code, body := readHandoffs(station.ID, linkedEntry, ""); code != http.StatusOK ||
+		!strings.Contains(body, handoffReceipt.TicketID) || strings.Contains(body, handoffInput.Title) ||
+		strings.Contains(body, rootPath) {
+		t.Fatalf("owner receipt list leaked private child Ticket or root: %d %s", code, body)
+	}
+	for _, denied := range []struct {
+		homeID, entryID, query string
+		code                   int
+	}{
+		{project.ID, linkedEntry, "", http.StatusNotFound},
+		{station.ID, project.ID, "", http.StatusNotFound},
+		{station.ID, linkedEntry, "?ticket_id=" + handoffReceipt.TicketID, http.StatusBadRequest},
+	} {
+		if code, body := readHandoffs(denied.homeID, denied.entryID, denied.query); code != denied.code {
+			t.Fatalf("foreign or path-bearing receipt read: %d %s", code, body)
+		}
 	}
 	if status, _ := libraryAction(t, handler.ReviewAssistantLibraryRoot, station.ID, "",
 		`{"selection_token":"`+pickToken+`","if_revision":`+strconv.FormatInt(doc.Revision, 10)+`,"path":"/tmp/foreign"}`); status != http.StatusBadRequest {
@@ -323,6 +372,13 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 	}
 	if code, replay := studio(handler.CommitAssistantStudioGoal, station.ID, activationEntryID, "", commitGoal); code != http.StatusOK || !strings.Contains(replay, `"replay":true`) {
 		t.Fatalf("goal replay: %d %s", code, replay)
+	}
+	shareBody := `{"if_session_revision":1,"if_fields_revision":0,"recap":{"recap":"Unverified project claim","share_linked_project":true}}`
+	if code, _ := studio(handler.ReviewAssistantStudioRecap, station.ID, activationEntryID, goalReview.Session.ID, shareBody); code != http.StatusConflict {
+		t.Fatalf("catalog-only Home accepted a client share flag: %d", code)
+	}
+	if code, _ := studio(handler.ReviewAssistantStudioRecap, project.ID, activationEntryID, goalReview.Session.ID, shareBody); code != http.StatusNotFound {
+		t.Fatalf("child URL reviewed another Home's project share: %d", code)
 	}
 	recapBody := `{"if_session_revision":1,"if_fields_revision":0,"recap":{"recap":"Listened to the chorus","next_action":"Record scratch vocal","update_project_next_action":true}}`
 	code, reviewedRecap := studio(handler.ReviewAssistantStudioRecap, station.ID, activationEntryID, goalReview.Session.ID, recapBody)

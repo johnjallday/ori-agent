@@ -240,6 +240,17 @@ func (s *Store) mutateWithHomePolicy(scope Scope, expected int64, op operation, 
 			errors.Is(err, ErrConflict) || errors.Is(err, ErrLimit) || errors.Is(err, ErrMirrorDiverged) {
 			return OperationReceipt{}, false, err
 		}
+		// The shared workspace fence refused the Home write because another
+		// writer (possibly another process) persisted a newer version after
+		// this callback read it, or because the two mirrors already disagree.
+		// Both are retryable only after a fresh read and review, never by
+		// repeating the same snapshot.
+		if errors.Is(err, workspace.ErrStaleWorkspaceVersion) {
+			return OperationReceipt{}, false, fmt.Errorf("%w: %w", ErrConflict, err)
+		}
+		if errors.Is(err, workspace.ErrWorkspaceMirrorsDiverged) {
+			return OperationReceipt{}, false, fmt.Errorf("%w: %w", ErrMirrorDiverged, err)
+		}
 		return OperationReceipt{}, false, fmt.Errorf("persist project library: %w", err)
 	}
 	return result, replay, nil

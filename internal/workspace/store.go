@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -83,6 +84,11 @@ type FileStore struct {
 	index    *Index            // optional global index (nil if not configured)
 	mu       sync.RWMutex
 	locks    LockTable // serializes Update calls per workspace
+	// mirrored is set once a SyncStore writes through this FileStore. The
+	// primary's version is then the sequence authority for protected records
+	// and the folder's own version is informational, because legacy handlers
+	// also write the folder directly without touching the primary.
+	mirrored atomic.Bool
 }
 
 // Lock acquires a per-workspace write lock used to serialize Update calls.
@@ -179,7 +185,26 @@ func NewFileStore(basePath string) (*FileStore, error) {
 
 // Save persists a workspace to disk inside its folder.
 // If the workspace has no FolderSlug, one is derived from the Name.
+//
+// The write holds the folder's cross-process fence and compares the caller's
+// base version with the record actually on disk: an Assistant Home or split
+// project child whose base is stale is refused with ErrStaleWorkspaceVersion,
+// while an ordinary workspace keeps the older permissive behavior and logs.
 func (s *FileStore) Save(ws *Workspace) error {
+	if ws == nil {
+		return fmt.Errorf("workspace is required")
+	}
+	fence, err := s.openFence(ws.ID)
+	if err != nil {
+		return err
+	}
+	defer fence.close()
+	return s.saveFenced(ws, fence)
+}
+
+// saveFenced is Save's body for a caller that already holds the folder fence
+// (SyncStore keeps it across both mirror writes).
+func (s *FileStore) saveFenced(ws *Workspace, fence *folderFence) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -190,17 +215,10 @@ func (s *FileStore) Save(ws *Workspace) error {
 		ws.FolderSlug = Slugify(ws.FolderSlug)
 	}
 
-	// Stale-write detection: if the in-memory cache holds a newer version
-	// than the workspace being saved, a concurrent writer beat us to it and
-	// our update is overwriting their change. Log a warning so the issue is
-	// observable; full CAS rejection requires caller-side retry logic.
-	if cached, ok := s.cache[ws.ID]; ok && cached.Version > ws.Version {
-		logger.Warn("possible lost write: saving workspace over a newer cached version",
-			logger.Fields{
-				"workspace_id":     ws.ID,
-				"incoming_version": ws.Version,
-				"cached_version":   cached.Version,
-			})
+	// Stale-write detection against the record on disk, not this process's
+	// cache: another process may have written since this cache was loaded.
+	if err := fence.refuseStale(ws); err != nil {
+		return err
 	}
 	ws.Version++
 
@@ -288,8 +306,15 @@ func (s *FileStore) Save(ws *Workspace) error {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
 	}
 
-	// Write workspace.json inside the folder
+	// Write workspace.json inside the folder. A fenced protected write first
+	// completes its durable journal with the exact bytes it is about to write.
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
+	if fence != nil && fence.onWrite != nil {
+		if err := fence.onWrite(data); err != nil {
+			ws.Version--
+			return err
+		}
+	}
 	if err := atomicWriteFile(configPath, data); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
@@ -541,12 +566,12 @@ func atomicWriteFile(path string, data []byte) error {
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath was created in the canonical workspace.json directory above; this only cleans it up.
 		return err
 	}
 	if err := tmp.Chmod(perm); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath was created in the canonical workspace.json directory above; this only cleans it up.
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
@@ -555,7 +580,7 @@ func atomicWriteFile(path string, data []byte) error {
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // #nosec G703 -- tmpPath was created in the canonical workspace.json directory above; this only cleans it up.
 		return err
 	}
 	// #nosec G703 -- both paths come from the canonical workspace.json parent; tmpPath was created above in that same directory.

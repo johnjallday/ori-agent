@@ -239,7 +239,9 @@ func TestLinkedAssociation_SQLitePrimaryRejectsChangedChildMirrorAndRetriesFinal
 	if pending, err := library.PendingLinkedProjects(scope); !errors.Is(err, ErrMirrorDiverged) || pending.Total != 0 {
 		t.Fatalf("split child mirror was misreported as an empty pending shelf: %+v %v", pending, err)
 	}
-	if err := file.Save(child); err != nil {
+	// Test-only exact restoration of the folder mirror (same version as the
+	// primary); a bumping Save would leave the fence tripped on version drift.
+	if err := file.RestoreMirrorRecord(child); err != nil {
 		t.Fatal(err)
 	}
 	if pending, err := library.PendingLinkedProjects(scope); err != nil || pending.Total != 1 || pending.Rows[0].WorkspaceID != childID {

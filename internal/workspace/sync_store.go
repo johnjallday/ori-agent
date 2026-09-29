@@ -44,6 +44,9 @@ type SyncStore struct {
 // and the file-based store. The primary store is authoritative for reads;
 // the file store provides portable workspace folders on disk.
 func NewSyncStore(primary Store, fileSync *FileStore) *SyncStore {
+	if fileSync != nil {
+		fileSync.mirrored.Store(true)
+	}
 	return &SyncStore{primary: primary, fileSync: fileSync}
 }
 
@@ -185,25 +188,95 @@ func (s *SyncStore) MoveWorkspaceFolder(workspaceID, parentID string) ([]MovedWo
 	return moved, nil
 }
 
+// ErrWorkspaceMirrorsDiverged reports that a protected workspace's folder and
+// primary records no longer carry the same version: an earlier write reached
+// one mirror and not the other. New writes fail closed until the split is
+// reconciled by an explicit, reviewed action; neither mirror is chosen here.
+var ErrWorkspaceMirrorsDiverged = errors.New("workspace mirrors diverged; reconcile before writing")
+
 // Save persists the workspace. FileStore still runs first so its monotonic
 // Version bump reaches the primary record, but disk failures are no longer
 // best-effort: slug conflicts and other folder errors abort the operation. A
 // primary failure after the disk write restores the prior folder record (or
 // removes a newly created folder), preventing split registration state.
+//
+// The folder fence is held across both mirror writes. For an Assistant Home or
+// split project child the write is conditional on the version the caller read
+// in both mirrors (a stale base is refused before anything is written and the
+// primary update is a single conditional statement), and a folder rollback
+// restores the exact previous bytes rather than a further bumped version.
 func (s *SyncStore) Save(ws *Workspace) error {
 	if s.fileSync != nil && ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing {
+		fence, err := s.fileSync.openFence(ws.ID)
+		if err != nil {
+			return fmt.Errorf("failed to fence workspace folder: %w", err)
+		}
+		defer fence.close()
+
 		var primaryBefore *Workspace
 		if existing, err := s.primary.Get(ws.ID); err == nil && existing != nil {
 			primaryBefore, _ = cloneWorkspaceForRebind(existing)
 		}
-		var diskBefore *Workspace
-		if existing, err := s.fileSync.Get(ws.ID); err == nil && existing != nil {
-			diskBefore, _ = cloneWorkspaceForRebind(existing)
-		}
+		diskBefore := fence.Before()
 
 		if resolver, ok := s.primary.(SlugResolver); ok && IsCanonicalWorkspaceSlug(ws.FolderSlug) {
 			if owner, err := resolver.ResolveSlug(ws.FolderSlug); err == nil && owner != nil && owner.ID != ws.ID {
 				return &FolderSlugConflictError{Slug: ws.FolderSlug}
+			}
+		}
+
+		base := ws.Version
+		protected := WorkspaceFenceProtected(ws) || WorkspaceFenceProtected(diskBefore) || WorkspaceFenceProtected(primaryBefore)
+
+		// An interrupted earlier protected write is classified from its durable
+		// journal and both mirrors before anything else happens.
+		var journal *fenceJournal
+		if protected && diskBefore != nil {
+			pending, err := fence.pendingJournal()
+			if err != nil {
+				return err
+			}
+			if pending != nil {
+				switch outcome := classifyFenceRecovery(pending, fence.beforeRaw, primaryBefore); outcome {
+				case FenceApplied, FenceNotApplied:
+					if err := fence.clearJournal(); err != nil {
+						return err
+					}
+				case FenceReconcileRequired:
+					return fmt.Errorf("%w: workspace %s interrupted write %s (version %d to %d) reached one mirror only",
+						ErrWorkspaceMirrorsDiverged, ws.ID, pending.OperationID, pending.BaseVersion, pending.TargetVersion)
+				default:
+					return fmt.Errorf("%w: workspace %s interrupted write %s", ErrWorkspaceFenceUnknown, ws.ID, pending.OperationID)
+				}
+			}
+			journal = fence.beginJournal(base)
+			fence.onWrite = func(data []byte) error {
+				journal.FolderAfter = fenceDigest(data)
+				return fence.writeJournal(journal)
+			}
+		}
+
+		if err := fence.refuseStale(ws); err != nil {
+			return err
+		}
+		if protected && primaryBefore != nil {
+			// The primary's version is the sequence. Refusing here, under the
+			// folder lock and before any mirror changes, keeps a stale writer from
+			// ever placing its old record on disk; the conditional primary update
+			// below remains the authoritative check.
+			if primaryBefore.Version != base {
+				return fmt.Errorf("%w: workspace %s is at version %d in the primary store, this write was based on version %d",
+					ErrStaleWorkspaceVersion, ws.ID, primaryBefore.Version, base)
+			}
+			// Both mirrors must already agree on the protected envelope; a Home
+			// or link that reached one mirror only is a split to reconcile, not
+			// something a new write may silently resolve. Only a primary with
+			// conditional saves (SQLite) hands back an independent before image;
+			// a pointer-sharing in-memory store may already reflect the update
+			// callback's mutation and cannot be compared.
+			if _, versioned := s.primary.(VersionedSaver); versioned && diskBefore != nil && !protectedEnvelopesAgree(primaryBefore, diskBefore) {
+				return fmt.Errorf("%w: workspace %s carries a different Home state or project link in its folder than in the primary store",
+					ErrWorkspaceMirrorsDiverged, ws.ID)
 			}
 		}
 
@@ -243,35 +316,51 @@ func (s *SyncStore) Save(ws *Workspace) error {
 		// a Goal the user cleared — is authoritative; only a record that
 		// predates the column has none, and that is the single case where the
 		// canonical workspace.json should refill it.
-		if portableWorkspaceStateMissing(ws) {
-			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
-				restorePortableWorkspaceState(ws, diskWorkspace)
-			}
+		if portableWorkspaceStateMissing(ws) && diskBefore != nil {
+			restorePortableWorkspaceState(ws, diskBefore)
 		}
-		if err := s.fileSync.Save(ws); err != nil {
+		if err := s.fileSync.saveFenced(ws, fence); err != nil {
 			return fmt.Errorf("failed to sync workspace to disk: %w", err)
 		}
-		if err := s.primary.Save(ws); err != nil {
-			if rollbackErr := s.rollbackFileSave(ws.ID, diskBefore); rollbackErr != nil {
-				return fmt.Errorf("primary workspace save failed: %w (folder rollback failed: %v)", err, rollbackErr)
+		var primaryErr error
+		if saver, ok := s.primary.(VersionedSaver); ok && protected {
+			primaryErr = saver.SaveExpecting(ws, base)
+		} else {
+			primaryErr = s.primary.Save(ws)
+		}
+		if primaryErr != nil {
+			if rollbackErr := fence.restore(); rollbackErr != nil {
+				// The journal stays: the next fenced write classifies this split
+				// instead of trusting either mirror.
+				return fmt.Errorf("primary workspace save failed: %w (folder rollback failed: %v)", primaryErr, rollbackErr)
+			}
+			// The folder is back at the caller's base version; keep the caller's
+			// record consistent with it so a fresh read and retry agree.
+			ws.Version = base
+			if journal != nil {
+				if err := fence.clearJournal(); err != nil {
+					return fmt.Errorf("primary workspace save failed: %w (journal not closed: %v)", primaryErr, err)
+				}
 			}
 			// primaryBefore is normally still present because the failed Save is
 			// transactional. Restore it defensively for custom primary stores.
 			if primaryBefore != nil {
 				_ = s.primary.Save(primaryBefore)
 			}
-			return err
+			return primaryErr
+		}
+		if journal != nil {
+			// Both mirrors hold the after image; a journal that outlives this
+			// point only ever classifies as applied.
+			if err := fence.clearJournal(); err != nil {
+				logger.Warn("workspace fence journal left behind after an applied write", logger.Fields{
+					"workspace_id": ws.ID, "operation_id": journal.OperationID, "error": err.Error(),
+				})
+			}
 		}
 		return nil
 	}
 	return s.primary.Save(ws)
-}
-
-func (s *SyncStore) rollbackFileSave(workspaceID string, previous *Workspace) error {
-	if previous == nil {
-		return s.fileSync.Delete(workspaceID)
-	}
-	return s.fileSync.Save(previous)
 }
 
 func portableWorkspaceStateMissing(ws *Workspace) bool {

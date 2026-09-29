@@ -252,7 +252,7 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	}
 
 	if p.libraryReadEnabled() {
-		tools = append(tools, p.librarySearchTool(), p.libraryDetailTool(), p.librarySessionsTool(),
+		tools = append(tools, p.librarySearchTool(), p.libraryDetailTool(), p.librarySessionsTool(), p.libraryHandoffReceiptsTool(),
 			p.libraryProposeNextActionTool(), p.libraryProposeProjectReviewTool(), p.libraryProposeSessionGoalTool(), p.libraryProposeRootReviewTool(), p.libraryProposeSessionRecapTool())
 	}
 

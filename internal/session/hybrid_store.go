@@ -378,6 +378,13 @@ func (h *hybridStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 	return h.sqlite.UpdateWorkspace(ctx, workspace)
 }
 
+// UpdateWorkspaceExpecting is the conditional form used by fenced saves.
+func (h *hybridStore) UpdateWorkspaceExpecting(ctx context.Context, workspace *Workspace, expectedVersion int64) error {
+	workspace.Kind = NormalizeWorkspaceKind(string(workspace.Kind))
+	workspace.UpdatedAt = time.Now()
+	return h.sqlite.UpdateWorkspaceExpecting(ctx, workspace, expectedVersion)
+}
+
 // DeleteWorkspace removes a workspace.
 func (h *hybridStore) DeleteWorkspace(ctx context.Context, id string) error {
 	if err := h.sqlite.DeleteWorkspace(ctx, id); err != nil {

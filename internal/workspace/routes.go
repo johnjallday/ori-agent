@@ -83,6 +83,7 @@ func RegisterRoutes(mux *http.ServeMux, h *HTTPHandler) {
 
 	// Workspace runtime misc (G2e).
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/project/open", h.OpenWorkspaceProject)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/project/show-folder", h.ShowWorkspaceProjectFolder)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/events", h.GetWorkspaceEvents)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/output-dir", h.GetWorkspaceOutputDir)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/output-dir/open", h.OpenWorkspaceOutputDir)

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -231,10 +233,15 @@ func TestInitialize_SplitLegacyPortfolioMirrorCannotBeOverwritten(t *testing.T) 
 
 func TestInitialize_FailedSaveLeavesLegacyAuthorityAndReviewRetryable(t *testing.T) {
 	file, scope, _ := legacyMusicHome(t)
-	primary, err := workspace.NewFileStore(t.TempDir())
+	// A real SQLite primary: production never mirrors one FileStore into
+	// another, and a second FileStore would bump its own version on every
+	// save, which the shared fence correctly treats as mirror drift.
+	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "failed-init.db"), WALMode: true})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = db.Close() }()
+	primary := session.NewWorkspaceStoreAdapter(session.NewHybridStoreWithDB(db, 10))
 	before, err := file.Get(scope.HomeID)
 	if err != nil {
 		t.Fatal(err)

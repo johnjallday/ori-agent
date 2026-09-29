@@ -165,24 +165,26 @@ type Scan struct {
 }
 
 type StudioSession struct {
-	ID          string     `json:"id"`
-	EntryID     string     `json:"entry_id"`
-	Revision    int64      `json:"revision"`
-	Goal        string     `json:"goal"`
-	Outcome     string     `json:"outcome,omitempty"` // Desired outcome, not observed DAW progress.
-	TimeMinutes int        `json:"time_minutes,omitempty"`
-	PlannedDate string     `json:"planned_date,omitempty"`
-	ActualDate  string     `json:"actual_date,omitempty"`
-	Recap       string     `json:"recap,omitempty"`
-	Decisions   []string   `json:"decisions,omitempty"`
-	Blockers    []string   `json:"blockers,omitempty"`
-	Next        string     `json:"next_action,omitempty"`
-	Author      string     `json:"author"`
-	Source      string     `json:"source,omitempty"`
-	State       string     `json:"state"`
-	CreatedAt   time.Time  `json:"created_at,omitempty"`
-	AcceptedAt  *time.Time `json:"accepted_at,omitempty"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID          string                 `json:"id"`
+	EntryID     string                 `json:"entry_id"`
+	Revision    int64                  `json:"revision"`
+	Goal        string                 `json:"goal"`
+	Outcome     string                 `json:"outcome,omitempty"` // Desired outcome, not observed DAW progress.
+	TimeMinutes int                    `json:"time_minutes,omitempty"`
+	PlannedDate string                 `json:"planned_date,omitempty"`
+	ActualDate  string                 `json:"actual_date,omitempty"`
+	Recap       string                 `json:"recap,omitempty"`
+	Decisions   []string               `json:"decisions,omitempty"`
+	Blockers    []string               `json:"blockers,omitempty"`
+	Next        string                 `json:"next_action,omitempty"`
+	Author      string                 `json:"author"`
+	Source      string                 `json:"source,omitempty"`
+	SharedFrom  *ExactLink             `json:"shared_from_project,omitempty"` // User-entered recap only; historical, never live authority.
+	Handoff     *ManagerHandoffReceipt `json:"handoff_citation,omitempty"`    // Historical Home receipt, not a current or completed child Ticket.
+	State       string                 `json:"state"`
+	CreatedAt   time.Time              `json:"created_at,omitempty"`
+	AcceptedAt  *time.Time             `json:"accepted_at,omitempty"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 // ActivationBinding persists only server-derived identities and the creator's
@@ -220,17 +222,19 @@ func (b ActivationBinding) valid() bool {
 }
 
 type ReviewReceipt struct {
-	Activation       *ActivationBinding `json:"activation,omitempty"`
-	Token            string             `json:"token"`
-	Action           string             `json:"action"`
-	Digest           string             `json:"digest"`
-	Revision         int64              `json:"revision"`
-	TargetID         string             `json:"target_id,omitempty"`
-	FieldsRevision   int64              `json:"fields_revision,omitempty"`
-	EntryRevision    int64              `json:"entry_revision,omitempty"`
-	ProviderRevision int64              `json:"provider_revision,omitempty"`
-	ExpiresAt        time.Time          `json:"expires_at"`
-	ConsumedAt       *time.Time         `json:"consumed_at,omitempty"`
+	Activation       *ActivationBinding     `json:"activation,omitempty"`
+	Token            string                 `json:"token"`
+	Action           string                 `json:"action"`
+	Digest           string                 `json:"digest"`
+	Revision         int64                  `json:"revision"`
+	TargetID         string                 `json:"target_id,omitempty"`
+	FieldsRevision   int64                  `json:"fields_revision,omitempty"`
+	EntryRevision    int64                  `json:"entry_revision,omitempty"`
+	ProviderRevision int64                  `json:"provider_revision,omitempty"`
+	SharedFrom       *ExactLink             `json:"shared_from_project,omitempty"` // Pinned, reviewed user disclosure; not a project read grant.
+	Handoff          *ManagerHandoffReceipt `json:"handoff_citation,omitempty"`
+	ExpiresAt        time.Time              `json:"expires_at"`
+	ConsumedAt       *time.Time             `json:"consumed_at,omitempty"`
 }
 
 type OperationReceipt struct {
@@ -437,7 +441,9 @@ func (d Document) valid(scope Scope) bool {
 			len(session.Blockers) > 16 || session.UpdatedAt.IsZero() ||
 			(session.AcceptedAt != nil && (session.AcceptedAt.IsZero() || session.AcceptedAt.After(session.UpdatedAt))) ||
 			(!session.CreatedAt.IsZero() && session.CreatedAt.After(session.UpdatedAt)) ||
-			(session.Source != "" && session.Source != "reviewed_user") {
+			(session.Source != "" && session.Source != "reviewed_user") ||
+			(session.SharedFrom != nil && (!validHistoricalLink(scope.HomeID, session.SharedFrom) || session.Recap == "")) ||
+			(session.Handoff != nil && (session.SharedFrom == nil || !validHandoffCitation(session.Handoff, session.SharedFrom))) {
 			return false
 		}
 		for _, list := range [][]string{session.Decisions, session.Blockers} {
@@ -522,7 +528,9 @@ func (d Document) valid(scope Scope) bool {
 			review.Revision < 0 || review.FieldsRevision < 0 || review.EntryRevision < 0 || review.ProviderRevision < 0 ||
 			(review.Action == "edit_fields" && review.TargetID == "") || review.ExpiresAt.IsZero() ||
 			(review.Action == "activate_project" && (review.Activation == nil || !review.Activation.valid() || review.TargetID == "")) ||
-			(review.Activation != nil && (review.Action != "activate_project" || !review.Activation.valid())) {
+			(review.Activation != nil && (review.Action != "activate_project" || !review.Activation.valid())) ||
+			(review.SharedFrom != nil && (review.Action != "accept_session_recap" || !validHistoricalLink(scope.HomeID, review.SharedFrom))) ||
+			(review.Handoff != nil && (review.SharedFrom == nil || !validHandoffCitation(review.Handoff, review.SharedFrom))) {
 			return false
 		}
 		used[review.Token] = true

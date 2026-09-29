@@ -309,7 +309,10 @@ func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
 	sessionActivity := latestSessionActivity(doc.Sessions)
 	rows := make([]SearchRow, 0, len(doc.Entries))
 	for _, entry := range doc.Entries {
-		row := s.projectSearchRow(scope, entry, roots, linked, inactive)
+		// A root filter scopes the displayed source, format, availability and
+		// scan time together. Otherwise a record observed under two roots could
+		// match one root while showing another root's unrelated format.
+		row := s.projectSearchRowInRoot(scope, entry, roots, linked, inactive, query.RootID)
 		row.applySessionActivity(sessionActivity[entry.ID])
 		if query.matches(row, entry) {
 			rows = append(rows, row)
@@ -365,6 +368,10 @@ func (row *SearchRow) applySessionActivity(at time.Time) {
 }
 
 func (s *Store) projectSearchRow(scope Scope, entry Entry, roots map[string]Root, linked, inactive map[string]bool) SearchRow {
+	return s.projectSearchRowInRoot(scope, entry, roots, linked, inactive, "")
+}
+
+func (s *Store) projectSearchRowInRoot(scope Scope, entry Entry, roots map[string]Root, linked, inactive map[string]bool, rootID string) SearchRow {
 	row := SearchRow{ID: entry.ID, Name: entry.Fields.DisplayName,
 		Stage: entry.Fields.Stage, Status: entry.Fields.Status, NextAction: entry.Fields.NextAction,
 		Priority: entry.Fields.Priority, FieldsRevision: entry.Fields.Revision,
@@ -381,6 +388,9 @@ func (s *Store) projectSearchRow(scope Scope, entry Entry, roots map[string]Root
 	chosenRank := 4
 	var chosenAt time.Time
 	for _, observed := range entry.Observations {
+		if rootID != "" && observed.RootID != rootID {
+			continue
+		}
 		root := roots[observed.RootID]
 		rank := 1 // An unavailable active source is better than revoked history.
 		if root.RevokedAt != nil || inactive[root.ID] {
@@ -440,20 +450,9 @@ func (s *Store) projectSearchRow(scope Scope, entry Entry, roots map[string]Root
 		row.Connection = "needs_review"
 		return row
 	}
-	if mirror, ok := s.workspaces.(workspace.MirrorWorkspaceProvider); ok {
-		folder, mirrored, folderErr := mirror.GetMirrorWorkspace(child.ID)
-		if mirrored && (folderErr != nil || folder == nil || folder.OwnerUserID != child.OwnerUserID) {
-			row.Connection = "needs_review"
-			return row
-		}
-		if mirrored {
-			folderLink := folder.GetAssistantProjectLink()
-			if folderLink == nil || folderLink.ID != link.ID || folderLink.StateRevision != link.StateRevision ||
-				folderLink.StationWorkspaceID != link.StationWorkspaceID || folderLink.Key.Normalize() != link.Key.Normalize() {
-				row.Connection = "needs_review"
-				return row
-			}
-		}
+	if !workspace.AssistantProjectLinkMirrorsAgree(s.workspaces, child) {
+		row.Connection = "needs_review"
+		return row
 	}
 	row.Connection = "connected"
 	if entry.Fields.DisplayName == "" {
@@ -487,6 +486,11 @@ func (q Search) matches(row SearchRow, entry Entry) bool {
 		strings.Contains(strings.ToLower(entry.Fields.Purpose), needle)
 }
 
+// Fixed nanosecond width makes lexicographic ordering chronological even when
+// one observation falls exactly on a whole second. RFC3339Nano removes trailing
+// zeroes, so its text ordering puts ".5Z" before "Z" at the same second.
+const searchTimestampLayout = "2006-01-02T15:04:05.000000000Z"
+
 func searchKey(row SearchRow, sortField string) string {
 	switch sortField {
 	case "status":
@@ -499,9 +503,9 @@ func searchKey(row SearchRow, sortField string) string {
 	case "next_action":
 		return strings.ToLower(row.NextAction)
 	case "sourced_activity":
-		return row.ActivityAt.UTC().Format(time.RFC3339Nano)
+		return row.ActivityAt.UTC().Format(searchTimestampLayout)
 	case "scanned_at":
-		return row.LastScannedAt.UTC().Format(time.RFC3339Nano)
+		return row.LastScannedAt.UTC().Format(searchTimestampLayout)
 	default:
 		return strings.ToLower(row.Name)
 	}

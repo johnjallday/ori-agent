@@ -254,6 +254,12 @@ type failingLibrarySave struct{ workspace.Store }
 
 func (f *failingLibrarySave) Save(*workspace.Workspace) error { return os.ErrPermission }
 
+// SaveExpecting fails the fenced path the same way, so a SyncStore over a
+// versioned primary still sees the injected primary failure.
+func (f *failingLibrarySave) SaveExpecting(*workspace.Workspace, int64) error {
+	return os.ErrPermission
+}
+
 func TestStore_RetryCASIsolationAndConcurrentClients(t *testing.T) {
 	file, scope := libraryHome(t)
 	s := NewStore(file)
