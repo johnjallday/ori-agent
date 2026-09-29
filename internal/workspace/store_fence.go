@@ -76,8 +76,8 @@ func (s *FileStore) openFence(id string) (*folderFence, error) {
 		if !ok {
 			return &folderFence{store: s, id: id}, nil
 		}
-		// #nosec G301 -- workspace folders are user-visible directories that already use 0755 elsewhere in this store.
-		if err := os.MkdirAll(folder, 0o755); err != nil {
+		// #nosec G301 G703 -- workspace folders are user-visible directories that already use 0755 elsewhere in this store; the path is store-resolved, not request input.
+		if err := os.MkdirAll(folder, 0o755); err != nil { // #nosec G301 G703 -- see above.
 			return nil, fmt.Errorf("prepare workspace folder for fence: %w", err)
 		}
 		release, err := lockWorkspaceFolder(folder)
@@ -93,7 +93,7 @@ func (s *FileStore) openFence(id string) (*folderFence, error) {
 			store: s, id: id, folder: folder, rel: rel,
 			configPath: filepath.Join(folder, WorkspaceConfigFile), release: release,
 		}
-		raw, err := os.ReadFile(fence.configPath) // #nosec G304 -- the fixed workspace.json inside the store-resolved folder, not a request path.
+		raw, err := os.ReadFile(fence.configPath) // #nosec G304 G703 -- the fixed workspace.json inside the store-resolved folder, not a request path.
 		if err != nil {
 			if os.IsNotExist(err) {
 				return fence, nil

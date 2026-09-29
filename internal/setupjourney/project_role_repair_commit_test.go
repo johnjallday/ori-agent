@@ -47,13 +47,15 @@ func newRepairCommitFixture(t *testing.T) *repairCommitFixture {
 	}
 }
 
-func (fx *repairCommitFixture) claim(t *testing.T, reviewKey, claimKey string) ProjectRoleRepairOperation {
+// claim reviews once under the fixture's fixed review key and consumes that
+// review into the claimed operation "claim-one".
+func (fx *repairCommitFixture) claim(t *testing.T) ProjectRoleRepairOperation {
 	t.Helper()
-	review, err := fx.reviewer.Review(t.Context(), fx.owner, fx.homeID, fx.projectID, reviewKey)
+	review, err := fx.reviewer.Review(t.Context(), fx.owner, fx.homeID, fx.projectID, "review-one")
 	if err != nil {
 		t.Fatalf("review: %v", err)
 	}
-	claim, err := fx.reviewer.ClaimProjectRoleRepairOperation(t.Context(), fx.owner, fx.homeID, fx.projectID, review.Token, claimKey)
+	claim, err := fx.reviewer.ClaimProjectRoleRepairOperation(t.Context(), fx.owner, fx.homeID, fx.projectID, review.Token, "claim-one")
 	if err != nil || claim.Status != "claimed" {
 		t.Fatalf("claim: %+v %v", claim, err)
 	}
@@ -92,7 +94,7 @@ func (fx *repairCommitFixture) versions(t *testing.T, id string) (int64, int64) 
 
 func TestProjectRoleRepairCommitWritesExactRolesThroughTheFenceOnce(t *testing.T) {
 	fx := newRepairCommitFixture(t)
-	claim := fx.claim(t, "review-one", "claim-one")
+	claim := fx.claim(t)
 	homePrimaryBefore, homeFolderBefore := fx.versions(t, fx.homeID)
 	childPrimaryBefore, childFolderBefore := fx.versions(t, fx.projectID)
 	expected := fx.expectedRoles(t)
@@ -160,7 +162,7 @@ func TestProjectRoleRepairCommitWritesExactRolesThroughTheFenceOnce(t *testing.T
 
 func TestProjectRoleRepairCommitCancelsWhenReviewedEvidenceMoved(t *testing.T) {
 	fx := newRepairCommitFixture(t)
-	fx.claim(t, "review-one", "claim-one")
+	fx.claim(t)
 	childPrimaryBefore, childFolderBefore := fx.versions(t, fx.projectID)
 	// An unrelated Home write after the claim changes the exact evidence the
 	// owner reviewed (Home version), so the spent consent cannot be applied.
@@ -189,7 +191,7 @@ func TestProjectRoleRepairCommitCancelsWhenReviewedEvidenceMoved(t *testing.T) {
 
 func TestProjectRoleRepairCommitSettlesAnAppliedWriteAfterLostReceipt(t *testing.T) {
 	fx := newRepairCommitFixture(t)
-	claim := fx.claim(t, "review-one", "claim-one")
+	claim := fx.claim(t)
 	expected := fx.expectedRoles(t)
 	// The write landed in both mirrors, then the process died before the
 	// receipt was recorded: the operation is still "claimed".
@@ -217,7 +219,7 @@ func TestProjectRoleRepairCommitSettlesAnAppliedWriteAfterLostReceipt(t *testing
 
 func TestProjectRoleRepairCommitRefusesSplitMirrorsAsReconcileRequired(t *testing.T) {
 	fx := newRepairCommitFixture(t)
-	fx.claim(t, "review-one", "claim-one")
+	fx.claim(t)
 	// Folder-only role change: a split the writer must never resolve by itself.
 	if err := fx.folder.Update(fx.projectID, func(child *workspace.Workspace) error {
 		link := child.GetAssistantProjectLink()
@@ -269,7 +271,7 @@ func TestProjectRoleRepairCommitMapsFenceOutcomesToTerminalStates(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newRepairCommitFixture(t)
-			fx.claim(t, "review-one", "claim-one")
+			fx.claim(t)
 			refusing := NewProjectRoleRepairReviewer(&refusingUpdateStore{SyncStore: fx.store, err: tc.err}, fx.db,
 				func() ([]plugin.InstalledPlugin, error) { return fx.installed, nil })
 			op, err := refusing.CommitProjectRoleRepairOperation(t.Context(), fx.owner, fx.homeID, fx.projectID, "claim-one")
@@ -284,7 +286,7 @@ func TestProjectRoleRepairCommitMapsFenceOutcomesToTerminalStates(t *testing.T) 
 	}
 	t.Run("uncertain failure keeps the slot claimed and settles on retry", func(t *testing.T) {
 		fx := newRepairCommitFixture(t)
-		fx.claim(t, "review-one", "claim-one")
+		fx.claim(t)
 		failing := NewProjectRoleRepairReviewer(&refusingUpdateStore{SyncStore: fx.store, err: io.ErrUnexpectedEOF}, fx.db,
 			func() ([]plugin.InstalledPlugin, error) { return fx.installed, nil })
 		op, err := failing.CommitProjectRoleRepairOperation(t.Context(), fx.owner, fx.homeID, fx.projectID, "claim-one")

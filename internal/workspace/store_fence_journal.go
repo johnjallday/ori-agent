@@ -72,7 +72,7 @@ func (f *folderFence) pendingJournal() (*fenceJournal, error) {
 	if path == "" {
 		return nil, nil
 	}
-	raw, err := os.ReadFile(path) // #nosec G304 -- a fixed journal filename inside the store-resolved workspace folder.
+	raw, err := os.ReadFile(path) // #nosec G304 G703 -- a fixed journal filename inside the store-resolved workspace folder, never a request path.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -118,10 +118,10 @@ func (f *folderFence) clearJournal() error {
 	if path == "" {
 		return nil
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) { // #nosec G703 -- the fixed journal filename inside the store-resolved workspace folder.
 		return fmt.Errorf("clear workspace fence journal: %w", err)
 	}
-	dir, err := os.Open(f.folder) // #nosec G304 -- the store-resolved workspace folder, not a request path.
+	dir, err := os.Open(f.folder) // #nosec G304 G703 -- the store-resolved workspace folder, not a request path.
 	if err != nil {
 		return nil
 	}

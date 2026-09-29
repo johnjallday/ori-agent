@@ -17,8 +17,8 @@ import (
 // replaced folder cannot redirect the lock elsewhere.
 func lockWorkspaceFolder(folder string) (func(), error) {
 	path := filepath.Join(folder, WorkspaceFenceLockFile)
-	// #nosec G304 -- a fixed lock filename inside the store-resolved workspace folder.
-	handle, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
+	// #nosec G304 G703 -- a fixed lock filename inside the store-resolved workspace folder, never a request path.
+	handle, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600) // #nosec G304 G703 -- see above.
 	if err != nil {
 		return nil, fmt.Errorf("open workspace fence %s: %w", filepath.Base(folder), err)
 	}
