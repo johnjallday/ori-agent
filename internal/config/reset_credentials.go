@@ -31,6 +31,7 @@ var installationSecretKeys = [...]vault.SecretKey{
 	vault.SecretKeyGeminiAPIKey,
 	vault.SecretKeyBraveAPIKey,
 	vault.SecretKeyVaultDEK,
+	vault.SecretKeyWorkspaceConfigDEK,
 }
 
 // ResetCredentialSlot describes presence without exposing a credential value.

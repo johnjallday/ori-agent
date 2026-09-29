@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
@@ -244,6 +245,63 @@ func (h *Handler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"history": history})
 }
 
+// GetWorkspaceHistory handles GET /api/workspaces/{workspaceID}/daily-briefs:
+// the brief history one workspace owns, read-only. It keeps the old briefs of
+// a workspace that is not this installation's Personal HQ readable — above
+// all one imported with its history while another HQ is designated here. It
+// never generates, configures or notifies.
+func (h *Handler) GetWorkspaceHistory(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if h == nil || h.service == nil {
+		orihttp.ServiceUnavailable(w, "daily brief is unavailable")
+		return
+	}
+	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
+	if workspaceID == "" || len(workspaceID) > 200 {
+		orihttp.BadRequest(w, "workspace id is required")
+		return
+	}
+	history, err := h.service.GetHistory(r.Context(), workspaceID, dailybrief.MinRetentionDays)
+	if err != nil {
+		orihttp.InternalError(w, "Failed to load daily brief history: "+err.Error())
+		return
+	}
+	if history == nil {
+		history = []dailybrief.HistorySummary{}
+	}
+	orihttp.Success(w, map[string]any{"history": history})
+}
+
+// GetWorkspaceRevision handles GET /api/workspaces/{workspaceID}/daily-briefs/{revisionID}:
+// one of that workspace's own brief revisions, read-only.
+func (h *Handler) GetWorkspaceRevision(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if h == nil || h.service == nil {
+		orihttp.ServiceUnavailable(w, "daily brief is unavailable")
+		return
+	}
+	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
+	revisionID := strings.TrimSpace(r.PathValue("revisionID"))
+	if workspaceID == "" || revisionID == "" {
+		orihttp.NotFound(w, "daily brief not found")
+		return
+	}
+	rev, err := h.service.GetRevision(r.Context(), revisionID)
+	if errors.Is(err, dailybrief.ErrRevisionNotFound) || err == nil && rev.WorkspaceID != workspaceID {
+		orihttp.NotFound(w, "daily brief not found")
+		return
+	}
+	if err != nil {
+		orihttp.InternalError(w, "Failed to load daily brief: "+err.Error())
+		return
+	}
+	orihttp.Success(w, map[string]any{"revision": rev})
+}
+
 // GetStatus handles GET /api/personal-hq/brief/status: lets a client poll a
 // first-open/scheduled generation without blocking the request that started
 // it (PRD FR56/task 7.4).
@@ -308,6 +366,14 @@ func (h *Handler) requestGeneration(w http.ResponseWriter, r *http.Request, trig
 			orihttp.InternalError(w, "Failed to initialize daily brief config: "+err.Error())
 			return
 		}
+	}
+
+	// An imported workspace keeps its saved briefs readable but generates no
+	// new first-open brief until the user enables its routines here.
+	if err := h.service.CheckAdmission(r.Context(), workspaceID, trigger); err != nil {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"status": "not_enabled", "code": "routines_off",
+			"error": "Background routines are off for this imported workspace. Its saved briefs are still available."})
+		return
 	}
 
 	// Register the detached child before returning 202. Acquiring inside the

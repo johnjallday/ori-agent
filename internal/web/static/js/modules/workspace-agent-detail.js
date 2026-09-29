@@ -224,7 +224,7 @@ export class WorkspaceAgentDetailPage {
             character:
               catalogId && window.CharacterCatalog ? window.CharacterCatalog.get(catalogId) : null
           },
-          { size: 72 }
+          { size: 72, workspaceId: profile?.appearance_workspace_id || '' }
         );
       } else {
         avatar.textContent = this.initials(name);

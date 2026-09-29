@@ -414,6 +414,16 @@
     var opts = options || {};
     var size = Number(opts.size) > 0 ? Number(opts.size) : SIZES.md;
     var uploadedImage = String((input && input.uploadedImage) || appearanceOf(input).image);
+    var imageURL = '/avatars/' + encodeURIComponent(uploadedImage);
+    if (opts.workspaceId) {
+      // Exact workspace/profile ownership; a missing asset must never select a
+      // same-named global profile. The scoped HTTP route refuses any fallback.
+      imageURL +=
+        '?studio_id=' +
+        encodeURIComponent(String(opts.workspaceId)) +
+        '&agent=' +
+        encodeURIComponent(String((input && input.name) || ''));
+    }
     var cls =
       'agent-avatar agent-avatar--image ' +
       sizeClass(opts.size) +
@@ -430,8 +440,8 @@
       (opts.id ? ' id="' + esc(opts.id) + '"' : '') +
       seedAttrs(input) +
       ' aria-hidden="true">' +
-      '<img class="agent-avatar__img" src="/avatars/' +
-      encodeURIComponent(uploadedImage) +
+      '<img class="agent-avatar__img" src="' +
+      esc(imageURL) +
       '" alt=""' +
       dims +
       ' loading="lazy" decoding="async">' +

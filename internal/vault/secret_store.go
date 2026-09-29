@@ -23,6 +23,9 @@ const (
 	SecretKeyGeminiAPIKey    SecretKey = "gemini_api_key"
 	SecretKeyBraveAPIKey     SecretKey = "brave_api_key" // #nosec G101 -- key name, not a credential
 	SecretKeyVaultDEK        SecretKey = "vault_dek"
+	// Encryption material for installation-local workspace configuration. Like
+	// the Vault DEK, this is not a provider key or a portable execution grant.
+	SecretKeyWorkspaceConfigDEK SecretKey = "workspace_config_dek"
 )
 
 type BackendKind string

@@ -61,6 +61,7 @@ func TestMigrateInstallationSecretNamespaceCopiesKnownSlotsWithoutDeletingOrOver
 		vault.SecretKeyGeminiAPIKey,
 		vault.SecretKeyBraveAPIKey,
 		vault.SecretKeyVaultDEK,
+		vault.SecretKeyWorkspaceConfigDEK,
 	} {
 		if err := source.Set(key, "source-"+string(key)); err != nil {
 			t.Fatal(err)
@@ -85,6 +86,7 @@ func TestMigrateInstallationSecretNamespaceCopiesKnownSlotsWithoutDeletingOrOver
 		vault.SecretKeyGeminiAPIKey,
 		vault.SecretKeyBraveAPIKey,
 		vault.SecretKeyVaultDEK,
+		vault.SecretKeyWorkspaceConfigDEK,
 	} {
 		if got, err := destination.Get(key); err != nil || got != "source-"+string(key) {
 			t.Fatalf("slot %s not copied: value present=%t err=%v", key, got != "", err)

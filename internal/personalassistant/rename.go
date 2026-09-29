@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 )
 
 var assistantDisplayNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_\- ]+$`)
@@ -29,10 +30,11 @@ type AssistantSessionRenamer interface {
 }
 
 type RenameCoordinator struct {
-	continuity *ContinuityService
-	profiles   AgentProfileStore
-	workspaces workspace.Store
-	sessions   AssistantSessionRenamer
+	continuity  *ContinuityService
+	profiles    AgentProfileStore
+	workspaces  workspace.Store
+	sessions    AssistantSessionRenamer
+	attachments ContinuityAttachmentReader
 }
 
 func NewRenameCoordinator(continuity *ContinuityService, profiles AgentProfileStore, workspaces workspace.Store) *RenameCoordinator {
@@ -43,6 +45,17 @@ func (c *RenameCoordinator) SetSessionRenamer(sessions AssistantSessionRenamer) 
 	if c != nil {
 		c.sessions = sessions
 	}
+}
+
+// WithContinuityAttachments refuses an imported assistant's global-name rename
+// BEFORE journaling any step. A future scoped rename must atomically coordinate
+// the exact owned profile, HQ instance and workspace-bound sessions; the legacy
+// global operation cannot do so, especially when another agent shares a name.
+func (c *RenameCoordinator) WithContinuityAttachments(attachments ContinuityAttachmentReader) *RenameCoordinator {
+	if c != nil {
+		c.attachments = attachments
+	}
+	return c
 }
 
 func (c *RenameCoordinator) Rename(ctx context.Context, userID, newName string, ifVersion int64) (*Projection, error) {
@@ -65,6 +78,15 @@ func (c *RenameCoordinator) Rename(ctx context.Context, userID, newName string, 
 	}
 	if state.Status != StatusActive && state.Status != StatusPaused {
 		return nil, ErrRepairNeeded
+	}
+	if c.attachments != nil {
+		attachment, err := c.attachments.Attachment(ctx, state.HQWorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		if attachment.Version != 0 && attachment.State != workspacecontinuity.Native {
+			return nil, ErrImportedRenameUnsupported // no global profile/session rename for imported authority
+		}
 	}
 
 	if state.RenameStep == RenameNone {

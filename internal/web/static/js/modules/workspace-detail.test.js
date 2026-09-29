@@ -917,6 +917,41 @@ test('workspace detail preserves explicit character appearances through AgentAva
   }
 });
 
+test('workspace detail forwards scoped upload identity instead of the same-named global profile', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const seen = [];
+  globalThis.window.AgentAvatar = {
+    markup(input, options) {
+      seen.push({ input, options });
+      return '<span></span>';
+    }
+  };
+  page.agentIndex = new Map([
+    [
+      'guide',
+      { name: 'Guide', appearance: { mode: 'uploaded', uploaded: { image: 'global.png' } } }
+    ]
+  ]);
+  page.workspaceAgentProfiles = new Map([
+    [
+      'guide',
+      {
+        name: 'Guide',
+        appearanceWorkspaceId: 'workspace-1',
+        appearance: { mode: 'uploaded', uploaded: { image: 'local.png' } }
+      }
+    ]
+  ]);
+  try {
+    page.getAgentAvatarPresentation('Guide').markup('local-portrait');
+    assert.equal(seen[0].input.appearance.uploaded.image, 'local.png');
+    assert.equal(seen[0].options.workspaceId, 'workspace-1');
+    assert.equal(seen[0].input.name, 'Guide');
+  } finally {
+    delete globalThis.window.AgentAvatar;
+  }
+});
+
 test('workspace detail skill summary uses workspace-effective skills', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   page.getEffectiveWorkspaceSkillNamesForAgent = () => [

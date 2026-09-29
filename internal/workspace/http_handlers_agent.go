@@ -238,6 +238,9 @@ type WorkspaceAgentProfile struct {
 	// one page used to show initials for an agent everything else showed with a
 	// character or an uploaded image (unified-agent-appearance FR-80/FR-89).
 	Appearance *types.AgentAppearance `json:"appearance,omitempty"`
+	// Set for separated profiles, including copied references with no local
+	// slot. A missing scoped image must not substitute a global agent's image.
+	AppearanceWorkspaceID string `json:"appearance_workspace_id,omitempty"`
 }
 
 // ListWorkspaceAgentProfiles handles GET /api/workspaces/:id/agents and returns
@@ -261,13 +264,18 @@ func (h *HTTPHandler) ListWorkspaceAgentProfiles(w http.ResponseWriter, r *http.
 		// Snapshot reads already migrate and normalize appearance, so this is
 		// always the canonical object by the time it gets here.
 		ag.EnsureAppearance()
+		appearanceWorkspaceID := ""
+		if ag.WorkspaceLocalConfigID != "" {
+			appearanceWorkspaceID = workspaceID
+		}
 		profiles = append(profiles, WorkspaceAgentProfile{
-			Name:       name,
-			Role:       string(ag.Role),
-			Model:      ag.Settings.Model,
-			Provider:   ag.Settings.Provider,
-			Source:     "workspace",
-			Appearance: ag.Appearance,
+			AppearanceWorkspaceID: appearanceWorkspaceID,
+			Name:                  name,
+			Role:                  string(ag.Role),
+			Model:                 ag.Settings.Model,
+			Provider:              ag.Settings.Provider,
+			Source:                "workspace",
+			Appearance:            ag.Appearance,
 		})
 	}
 

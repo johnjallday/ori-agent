@@ -122,6 +122,9 @@ func (se *StepExecutor) checkAndExecuteSteps() {
 	}
 
 	for _, wsID := range workspaceIDs {
+		if err := RequireWorkspaceExecution(context.Background(), se.workspaceStore, wsID, true); err != nil {
+			continue
+		}
 		ws, err := se.workspaceStore.Get(wsID)
 		if err != nil {
 			continue
@@ -153,6 +156,9 @@ func (se *StepExecutor) processWorkflow(ws *Workspace, workflowID string) {
 	}
 	defer release()
 
+	if err := RequireWorkspaceExecution(context.Background(), se.workspaceStore, ws.ID, true); err != nil {
+		return
+	}
 	workflow, err := ws.GetWorkflow(workflowID)
 	if err != nil {
 		return
@@ -417,6 +423,10 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 		return
 	}
 
+	if err := RequireWorkspaceExecution(context.Background(), se.workspaceStore, ws.ID, true); err != nil {
+		release()
+		return
+	}
 	timeout := step.Timeout
 	if timeout == 0 {
 		timeout = 10 * time.Minute

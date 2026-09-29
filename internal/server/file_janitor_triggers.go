@@ -156,7 +156,7 @@ func (b *ServerBuilder) wireFileJanitorAutomation() {
 		if err != nil {
 			return nil
 		}
-		return ids
+		return b.automaticWorkspaces(ids)
 	}, fileJanitorSchedulerInterval)
 }
 

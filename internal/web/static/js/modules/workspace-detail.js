@@ -4052,7 +4052,12 @@ export class WorkspaceDetailPage {
     return {
       // `size` only picks the renderer's size class; the caller's own class
       // overrides --aa-size, so the box stays exactly what the layout expects.
-      markup: className => window.AgentAvatar.markup(input, { size: 54, className }),
+      markup: className =>
+        window.AgentAvatar.markup(input, {
+          size: 54,
+          className,
+          workspaceId: profile?.appearanceWorkspaceId || ''
+        }),
       initials,
       label,
       kind: 'explicit-appearance'
@@ -12392,6 +12397,7 @@ export class WorkspaceDetailPage {
               .trim()
               .toLowerCase() || 'workspace',
           appearance: agent?.appearance || null,
+          appearanceWorkspaceId: String(agent?.appearance_workspace_id || '').trim(),
           characterId: String(agent?.appearance?.character?.catalog_id || '').trim()
         });
       });
@@ -17138,7 +17144,9 @@ export class WorkspaceDetailPage {
     if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
-    return div.innerHTML;
+    // Quote-safe too: many templates here place this inside attributes, and
+    // titles and names can arrive from imported (untrusted) folders.
+    return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   escapeAttribute(text) {

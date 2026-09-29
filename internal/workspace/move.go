@@ -45,6 +45,11 @@ type MovedWorkspace struct {
 // filesystem mutation, and uses an atomic rename with a cross-device
 // copy-then-delete fallback so a workspace is never left partially moved.
 func (s *FileStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspace, error) {
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return nil, workErr
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -91,12 +96,11 @@ func (s *FileStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspac
 	oldFolderPath := s.resolveFolder(oldRelPath)
 	// The cache intentionally omits tasks and messages. Load the canonical
 	// record before moving so rewriting ParentID cannot erase those fields.
-	configPath := filepath.Join(oldFolderPath, WorkspaceConfigFile)
-	data, err := os.ReadFile(configPath) // #nosec G304 -- path comes from the store-owned workspace index.
+	data, err := readNativeWorkspaceFile(oldFolderPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read workspace before move: %w", err)
 	}
-	fullWorkspace, err := FromJSON(data)
+	fullWorkspace, err := s.workspaceForRead(oldFolderPath, data, id)
 	if err != nil || fullWorkspace == nil || fullWorkspace.ID != id {
 		return nil, fmt.Errorf("failed to load workspace before move")
 	}

@@ -31,6 +31,24 @@ func (h *Handler) resolveEmailOpsWorkspaceID(userID string) string {
 	return id
 }
 
+// resolveManualFollowUpOwner picks the workspace that owns a follow-up the user
+// adds by hand: Email Ops when it exists (unchanged), otherwise the designated
+// Personal HQ. An owned commitment travels with its workspace folder; an
+// ownerless one would be left behind when the HQ moves to another computer.
+func (h *Handler) resolveManualFollowUpOwner(ctx context.Context, userID string) string {
+	if id := h.resolveEmailOpsWorkspaceID(userID); id != "" {
+		return id
+	}
+	if h == nil || h.service == nil {
+		return ""
+	}
+	status, err := h.service.Status(ctx, userID)
+	if err != nil || status == nil || !status.HasDesignation() || status.NeedsRepair() {
+		return ""
+	}
+	return status.WorkspaceID
+}
+
 // FollowUpAPI is the follow-up surface this handler needs, implemented by
 // *followup.Service. Kept as an interface for testability.
 type FollowUpAPI interface {
@@ -136,7 +154,7 @@ func (h *Handler) CreateFollowUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	created, err := h.followups.Capture(r.Context(), followup.CaptureInput{
-		UserID: userID, WorkspaceID: h.resolveEmailOpsWorkspaceID(userID),
+		UserID: userID, WorkspaceID: h.resolveManualFollowUpOwner(r.Context(), userID),
 		Category: cat, Direction: followup.Direction(strings.TrimSpace(req.Direction)),
 		Title: req.Title, Detail: req.Detail, Counterparty: req.Counterparty,
 		Source: followup.SourceRef{Type: "manual"}, Provenance: followup.ProvenanceManual,

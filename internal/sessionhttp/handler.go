@@ -96,6 +96,12 @@ type Handler struct {
 	// designation. See PersonalHQDesignator.
 	personalHQDesignator PersonalHQDesignator
 
+	// continuity holds the reviewed modern import's dependencies; nil keeps
+	// modern folders reviewable but not importable.
+	continuity                 *continuityImporter
+	continuityStatus           ContinuityStatusProvider
+	continuityAdmissionChanged func(workspaceID string)
+
 	// workspaceBuild wires "Build with your assistant" sessions; nil leaves
 	// the Create Workspace wizard manual everywhere.
 	workspaceBuild *WorkspaceBuildDeps

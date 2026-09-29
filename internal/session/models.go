@@ -131,6 +131,11 @@ type Message struct {
 
 	// CreatedAt is when the message was created.
 	CreatedAt time.Time `json:"created_at"`
+
+	// Imported marks receipt-owned historical content when loaded from SQLite.
+	// It is not user-authored data or a portable permission. In particular an
+	// imported system-role message is never a fresh system instruction.
+	Imported bool `json:"-"`
 }
 
 // WorkspaceStatus represents the current state of a workspace.

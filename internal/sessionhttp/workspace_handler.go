@@ -89,6 +89,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	case "import/duplicate-action":
 		h.handleWorkspaceImportDuplicateAction(w, r)
 		return
+	case "import/continuity":
+		h.handleContinuityImport(w, r)
+		return
 	case "sync-status":
 		h.handleWorkspaceSyncStatus(w, r)
 		return
@@ -106,6 +109,11 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if operation, ok := strings.CutPrefix(path, "import/continuity/"); ok {
+		h.handleContinuityImportOperation(w, r, operation)
+		return
+	}
+
 	// Handle sub-paths like {id}/agents, {id}/layout
 	if path != "" && strings.Contains(path, "/") {
 		parts := strings.SplitN(path, "/", 3)
@@ -115,6 +123,13 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		switch subPath {
 		case "settings":
 			h.handleWorkspaceSettings(w, r, id)
+			return
+		case "continuity":
+			action := ""
+			if len(parts) == 3 {
+				action = parts[2]
+			}
+			h.handleWorkspaceContinuity(w, r, id, action)
 			return
 		case "planning-policy":
 			h.handleWorkspacePlanningPolicy(w, r, id)
@@ -2525,6 +2540,9 @@ type createWorkspaceImportRequest struct {
 	// BlueprintInputs is decoded for the same reason: Import Folder scaffolds
 	// nothing, so there is no file for a blueprint's values to be written into.
 	BlueprintInputs json.RawMessage `json:"blueprint_inputs,omitempty"`
+	// AdoptAssistant is the user's explicit choice, for an older Personal HQ
+	// folder, to continue with the assistant that folder proves (FR-29).
+	AdoptAssistant bool `json:"adopt_assistant,omitempty"`
 }
 
 type workspaceImportDuplicate struct {

@@ -18,7 +18,7 @@ func TestEnsureWorkspaceForRoute_CreatesWorkspaceWhenNeeded(t *testing.T) {
 		Mode:   UtilityRouteWorkspace,
 		Reason: "prompt indicates workspace-scoped execution",
 	}
-	ws, created, err := h.ensureWorkspaceForRoute("Ori", "run tests in this repository", decision, normalizedChatRouteContext{})
+	ws, created, err := h.ensureWorkspaceForRoute(t.Context(), "Ori", "run tests in this repository", decision, normalizedChatRouteContext{})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -69,7 +69,7 @@ func TestEnsureWorkspaceForRoute_ReusesNewestActiveWorkspaceForAgent(t *testing.
 		Mode:   UtilityRouteSpecial,
 		Reason: "prompt indicates specialist handoff",
 	}
-	got, created, err := h.ensureWorkspaceForRoute("Ori", "delegate this to specialists", decision, normalizedChatRouteContext{})
+	got, created, err := h.ensureWorkspaceForRoute(t.Context(), "Ori", "delegate this to specialists", decision, normalizedChatRouteContext{})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -120,7 +120,7 @@ func TestEnsureWorkspaceForRoute_PrefersExplicitRouteWorkspace(t *testing.T) {
 		Mode:   UtilityRouteWorkspace,
 		Reason: "prompt indicates workspace-scoped execution",
 	}
-	got, created, err := h.ensureWorkspaceForRoute("Ori", "review this workspace", decision, normalizedChatRouteContext{
+	got, created, err := h.ensureWorkspaceForRoute(t.Context(), "Ori", "review this workspace", decision, normalizedChatRouteContext{
 		WorkspaceID: currentWS.ID,
 		Surface:     "workspace_detail",
 		PagePath:    "/workspaces/" + currentWS.ID,

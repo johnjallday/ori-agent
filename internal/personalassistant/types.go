@@ -47,8 +47,12 @@ var (
 	// ErrNeedsHQ means a genuinely hired relationship has no Personal HQ yet.
 	// This is an expected setup stage, not corruption — callers must never map
 	// it onto repair language or a generic "hire" prompt.
-	ErrNeedsHQ         = errors.New("personal assistant: personal hq is not built yet")
-	htmlLikeTagPattern = regexp.MustCompile(`<\s*/?\s*[A-Za-z][^>]*>`)
+	ErrNeedsHQ = errors.New("personal assistant: personal hq is not built yet")
+	// ErrImportedRenameUnsupported means the relationship belongs to an
+	// imported HQ whose profile is workspace-scoped. The global-name rename
+	// would touch same-named agents and unrelated sessions, so it is refused.
+	ErrImportedRenameUnsupported = errors.New("personal assistant: renaming an imported assistant is not available yet")
+	htmlLikeTagPattern           = regexp.MustCompile(`<\s*/?\s*[A-Za-z][^>]*>`)
 )
 
 // RelationshipStatus is the durable hire lifecycle.

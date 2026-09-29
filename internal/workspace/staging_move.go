@@ -139,6 +139,10 @@ func (r *StagedMoveResult) moveOwnedFolder(src, dst, folder, what string) bool {
 }
 
 func (r *StagedMoveResult) moveWorkspace(src, dst string) {
+	if separated, err := subtreeHasSeparatedConfiguration(src); err != nil || separated {
+		r.Warnings = append(r.Warnings, "A workspace stayed in staging because its installation-local configuration requires the canonical move owner.")
+		return
+	}
 	data, err := os.ReadFile(filepath.Join(src, WorkspaceConfigFile)) // #nosec G304 -- a folder directly under the app's staging root
 	if err != nil {
 		return // not a workspace
@@ -167,6 +171,27 @@ func (r *StagedMoveResult) moveWorkspace(src, dst string) {
 		logger.Warn("Moved workspace references could not all be updated", logger.Fields{"workspace": ws.Name, "error": err.Error()})
 	}
 	r.Moved = append(r.Moved, moved...)
+}
+
+// The legacy staging mover has no local configuration owner or reset permit.
+// Refuse BEFORE a physical move; rewriting denied files cannot rebase encrypted
+// connector roots, and a copied local reference is not permission to load them.
+func subtreeHasSeparatedConfiguration(folder string) (bool, error) {
+	root, files, err := workspaceFilesUnder(folder)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = root.Close() }()
+	for _, rel := range files {
+		reference, err := legacyWorkspaceReference(filepath.Join(folder, filepath.Dir(filepath.FromSlash(rel))))
+		if err != nil {
+			return false, err
+		}
+		if reference != "" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // moveStagedDir is moveDir with a replaceable rename, so the cross-device
@@ -266,6 +291,9 @@ func rebaseMovedWorkspaces(src, dst string) ([]MovedWorkspace, error) {
 
 // rewriteInRoot replaces one workspace.json inside root atomically.
 func rewriteInRoot(root *os.Root, rel string, ws *Workspace) error {
+	if ws.WorkspaceLocalConfigID != "" {
+		return ErrLocalConfigUnavailable
+	}
 	out, err := ws.ToJSON()
 	if err != nil {
 		return err

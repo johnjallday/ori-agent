@@ -27,6 +27,9 @@ func (ts *TaskScheduler) checkMissionCadence(ws *Workspace, now time.Time) {
 	if ws == nil || !ws.MissionEnabled {
 		return
 	}
+	if err := RequireWorkspaceExecution(context.Background(), ts.workspaceStore, ws.ID, true); err != nil {
+		return
+	}
 	if ws.NextMissionRunAt == nil {
 		return
 	}

@@ -30,12 +30,25 @@ type Store interface {
 // Service is the follow-up domain service: capture, lifecycle, staleness, and
 // projection.
 type Service struct {
-	store Store
-	now   func() time.Time
+	store     Store
+	now       func() time.Time
+	automatic func(ctx context.Context, workspaceID string) bool
 }
 
 // NewService constructs the follow-up service.
 func NewService(store Store) *Service { return &Service{store: store, now: time.Now} }
+
+// SetAutomaticAdmission limits background changes (snooze wake-ups, nudges)
+// to workspaces this installation runs routines for. An imported workspace's
+// commitments stay exactly as saved until the user enables its routines.
+// Initialization only; nil admits every workspace.
+func (s *Service) SetAutomaticAdmission(admitted func(ctx context.Context, workspaceID string) bool) {
+	s.automatic = admitted
+}
+
+func (s *Service) admitsAutomatic(ctx context.Context, workspaceID string) bool {
+	return s.automatic == nil || s.automatic(ctx, workspaceID)
+}
 
 // CaptureInput describes a follow-up to capture from a source or manual action.
 type CaptureInput struct {
@@ -240,7 +253,7 @@ func (s *Service) Wake(ctx context.Context) (int, error) {
 	now := s.now().UTC()
 	woken := 0
 	for _, f := range items {
-		if f.SnoozedUntil != nil && !f.SnoozedUntil.After(now) {
+		if f.SnoozedUntil != nil && !f.SnoozedUntil.After(now) && s.admitsAutomatic(ctx, f.WorkspaceID) {
 			f.Status = StatusActive
 			f.SnoozedUntil = nil
 			f.UpdatedAt = now
@@ -268,6 +281,9 @@ func (s *Service) DueForNudge(ctx context.Context, userID string) ([]*FollowUp, 
 			continue
 		}
 		if f.LastNudgedAt != nil && now.Sub(*f.LastNudgedAt) < NudgeWindow {
+			continue
+		}
+		if !s.admitsAutomatic(ctx, f.WorkspaceID) {
 			continue
 		}
 		out = append(out, f)

@@ -154,7 +154,7 @@ func (s *Scheduler) checkOne(ctx context.Context, w ScheduledWorkspace) {
 
 	localDate := LocalDateKey(now)
 	if _, err := s.svc.RequestGeneration(ctx, *cfg, w.UserID, TriggerScheduled, localDate); err != nil {
-		if !errors.Is(err, ErrGenerationInProgress) {
+		if !errors.Is(err, ErrGenerationInProgress) && !errors.Is(err, ErrGenerationNotAdmitted) {
 			logger.Warn("dailybrief scheduler: scheduled generation failed", logger.Fields{"workspace_id": w.WorkspaceID, "error": err})
 		}
 	}

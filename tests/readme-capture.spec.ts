@@ -608,6 +608,33 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { followups: [] });
       return;
     }
+    // Every workspace page reads its portable checkpoint and shows the result
+    // as a chip in the Command header. This is the real handler's answer for a
+    // workspace created here whose folder is prepared: native, ready, as of
+    // the fixture's last update.
+    const continuity = /^\/api\/workspaces\/([^/]+)\/continuity$/.exec(url.pathname);
+    if (continuity) {
+      await json(route, {
+        success: true,
+        continuity: {
+          workspace_id: decodeURIComponent(continuity[1]),
+          state: 'ready',
+          checkpoint_at: '2026-07-17T14:00:00.000Z',
+          attachment: 'native',
+          imported: false,
+          background_allowed: true,
+          manual_allowed: true,
+          tree_ready: true
+        }
+      });
+      return;
+    }
+    // A workspace's own Daily Brief history panel stays hidden unless it kept
+    // briefs; an empty list is the answer for one that never had any.
+    if (/^\/api\/workspaces\/[^/]+\/daily-briefs$/.test(url.pathname)) {
+      await json(route, { history: [] });
+      return;
+    }
     if (
       url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/mission`
     ) {
@@ -1163,7 +1190,14 @@ test('captures Workspace Command with agents, task state, note/file context, and
     'workspace',
     `/workspaces/${seeded!.folder_slug}`,
     '#workspaceCommandView',
-    'Launch decision brief'
+    'Launch decision brief',
+    // The portability chip joins the Command header on a short timer after the
+    // header renders; wait for it there so both captures photograph it.
+    async scenePage => {
+      await expect(
+        scenePage.locator('[data-cmd-continuity-mount] #workspaceContinuityChip')
+      ).toHaveText(/^Ready to move as of /);
+    }
   );
   await expect(page.locator('.ws-cmd-deck')).toBeVisible();
   await expect(page.locator('#workspace-command-mission-card')).toBeVisible();

@@ -252,6 +252,22 @@ func isSystemRecord(st Store, name string) bool {
 	return ok && isMarkedSystemAgent(ag)
 }
 
+// WorkspaceAgentExact reads only a trusted workspace's scoped definition.
+// Unlike GetAgent, it cannot select a same-named global/other-workspace roster
+// winner. A returned definition is a detached copy; this is not a grant of
+// execution authority and callers must separately check local admission.
+func (c *CompositeStore) WorkspaceAgentExact(workspaceID, name string) (*agent.Agent, bool) {
+	if c == nil || workspaceID == "" || strings.TrimSpace(name) == "" {
+		return nil, false
+	}
+	for _, entry := range c.workspaceAgentView().byName[strings.ToLower(strings.TrimSpace(name))] {
+		if entry.WorkspaceID == workspaceID && entry.AgentName == name && entry.Agent != nil {
+			return copyDefinition(entry.Agent), true
+		}
+	}
+	return nil, false
+}
+
 // AddWorkspaceAgent copies a trusted workspace's agent into the user's agents
 // ("Add to my agents"). It is the only way a workspace copy becomes one of the
 // user's agents; nothing does it automatically. It returns the agent's name.
@@ -290,6 +306,14 @@ func copyDefinition(src *agent.Agent) *agent.Agent {
 		Capabilities: append([]string{}, src.Capabilities...),
 		Settings:     src.Settings,
 		Status:       types.AgentStatusIdle,
+	}
+	if src.WorkspaceLocalConfigID != "" {
+		// Explicit promotion copies the definition, not workspace-scoped keys or
+		// approvals. The original local owner/credentials remain untouched.
+		dst.Settings.APIKey = ""
+		dst.Settings.AllowWebSearch = new(bool)
+		dst.Settings.AllowNativeMCPTools = new(bool)
+		dst.Settings.FallbackAllowCloud = new(bool)
 	}
 	if src.Status == types.AgentStatusDisabled {
 		dst.Status = types.AgentStatusDisabled

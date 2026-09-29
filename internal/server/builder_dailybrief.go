@@ -194,6 +194,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	}
 	briefService := dailybrief.NewService(store, synthesizer)
 	briefService.SetAdmissionGate(b.resetWork)
+	if b.continuityLocal != nil {
+		briefService.SetExecutionAdmission(b.continuityLocal.CheckExecution)
+	}
 	if b.eventBus != nil {
 		// The map shows a brief being prepared (task-run-show FR9). Bound here,
 		// where the service exists, before its scheduler can start a run.
@@ -241,6 +244,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	// routine source.
 	b.personalAssistantStore = personalassistant.NewSQLiteStore(b.sessionStore.DB())
 	profileReader := personalassistant.NewAgentStoreProfileReader(b.st)
+	if b.continuityLocal != nil {
+		// An imported (adopted) assistant's profile is its HQ workspace's own
+		// copy; read exactly that one, never a same-named global agent.
+		profileReader = personalassistant.NewContinuityAgentStoreProfileReader(b.st, b.continuityLocal)
+	}
 	recovery := personalassistant.NewRecoveryCoordinator(
 		b.personalAssistantStore, profileReader,
 		personalassistant.NewSessionRecoveryWorkspaceReader(b.sessionStore),
@@ -368,6 +376,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	)
 	if sessionRenamer, ok := b.sessionStore.(personalassistant.AssistantSessionRenamer); ok {
 		renameCoordinator.SetSessionRenamer(sessionRenamer)
+	}
+	if b.continuityLocal != nil {
+		renameCoordinator.WithContinuityAttachments(b.continuityLocal)
 	}
 	b.personalAssistantHandler.SetRenameService(renameCoordinator)
 	capabilities := personalassistant.NewCapabilityService(
