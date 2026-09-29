@@ -3,6 +3,7 @@ package sessionhttp
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
@@ -51,6 +53,40 @@ func (h *Handler) handleWorkspaceImportCheck(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	review, err := inspectContinuityImportTree(r.Context(), normalizedPath)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, "Cannot safely inspect the selected workspace tree")
+		return
+	}
+	if review.TreeDigest != "" {
+		// One read-only SQL view; an HTTP preview is never the transaction
+		// that later owns an import receipt. A missing DB fails closed.
+		if h.store == nil || h.store.DB() == nil {
+			_ = orihttp.RespondInternalError(w, "Cannot inspect the destination for workspace continuity")
+			return
+		}
+		tx, txErr := h.store.DB().BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+		if txErr != nil {
+			_ = orihttp.RespondInternalError(w, "Cannot inspect the destination for workspace continuity")
+			return
+		}
+		review.DestinationDigest, err = workspacecontinuity.DestinationDigest(r.Context(), tx, userprofile.LocalUserID)
+		if err == nil && h.continuity != nil {
+			err = analyzeContinuityDestination(r.Context(), tx, &review)
+		}
+		rollbackErr := tx.Rollback()
+		if err != nil || rollbackErr != nil {
+			_ = orihttp.RespondInternalError(w, "Cannot inspect the destination for workspace continuity")
+			return
+		}
+	}
+	if review.Status == "legacy" && h.continuity != nil && h.store != nil && h.store.DB() != nil {
+		review.LegacyWorkspace = workspaceImportHasConfig(normalizedPath)
+		if err := h.reviewLegacyAssistant(r.Context(), normalizedPath, &review); err != nil {
+			_ = orihttp.RespondInternalError(w, "Cannot inspect the destination for workspace continuity")
+			return
+		}
+	}
 	duplicate, err := h.findDuplicateImportedWorkspace(r.Context(), normalizedPath)
 	if err != nil {
 		logger.Error("Failed duplicate check for workspace import", logger.Fields{"error": err})
@@ -62,6 +98,7 @@ func (h *Handler) handleWorkspaceImportCheck(w http.ResponseWriter, r *http.Requ
 		"success":         true,
 		"normalized_path": normalizedPath,
 		"duplicate":       duplicate,
+		"continuity":      review,
 	})
 }
 
@@ -73,6 +110,11 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 
 	var req createWorkspaceImportRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	// Adopting an assistant is a consent step: only a JSON request (which a
+	// page on another site cannot send without a CORS preflight) may ask.
+	if req.AdoptAssistant && !continuityJSONRequest(w, r) {
 		return
 	}
 	if trimmed := bytes.TrimSpace(req.ProjectConnection); len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) {
@@ -102,6 +144,22 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 	}
 	if !info.IsDir() {
 		_ = orihttp.RespondBadRequest(w, "path must be a directory")
+		return
+	}
+
+	// A checkpoint needs reviewed restoration, never the legacy upsert/rebind
+	// path. Detect a modern child under a legacy parent before mutation too.
+	review, err := inspectContinuityImportTree(r.Context(), normalizedPath)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, "Cannot safely inspect the selected workspace tree")
+		return
+	}
+	if !review.ImportSupported {
+		if review.Status == "unavailable" {
+			_ = orihttp.RespondConflict(w, "Workspace continuity checkpoint is incomplete or damaged; no legacy import was performed")
+		} else {
+			_ = orihttp.RespondConflict(w, "Workspace continuity requires reviewed restoration; legacy Import Folder cannot restore this checkpoint")
+		}
 		return
 	}
 
@@ -187,6 +245,11 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		}
 		if strings.TrimSpace(warning) != "" {
 			response["warning"] = warning
+		}
+		if req.AdoptAssistant && h.continuity != nil {
+			// The workspace is imported either way; adoption is its own
+			// all-or-nothing step, reported alongside.
+			response["assistant_adoption"] = h.adoptLegacyAssistant(r.Context(), workspace.ID)
 		}
 
 		_ = orihttp.RespondCreated(w, response)
@@ -856,28 +919,7 @@ func (h *Handler) registeredWorkspaceSlugOwner(ctx context.Context, slug, exclud
 
 func (h *Handler) globalWorkspaceSlugConflict(ctx context.Context, requestedSlug, excludeID, parentDir string) *agentworkspace.FolderSlugConflictError {
 	base := agentworkspace.Slugify(requestedSlug)
-	occupied := make(map[string]string)
-	if rows, err := h.store.ListWorkspaces(ctx); err == nil {
-		for i := range rows {
-			ws := &rows[i]
-			if ws.ID == excludeID || ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
-				continue
-			}
-			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
-				occupied[strings.ToLower(ws.FolderSlug)] = ws.ID
-			}
-		}
-	}
-	if h.workspaceStore != nil {
-		for id, ws := range h.workspaceStore.CachedWorkspaces() {
-			if id == excludeID || ws.Status == agentworkspace.StatusTrashed || ws.Status == agentworkspace.StatusMissing {
-				continue
-			}
-			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
-				occupied[strings.ToLower(ws.FolderSlug)] = id
-			}
-		}
-	}
+	occupied := h.occupiedWorkspaceSlugs(ctx, excludeID)
 
 	suggested := ""
 	for suffix := 2; suffix < 1002; suffix++ {
@@ -901,6 +943,36 @@ func (h *Handler) globalWorkspaceSlugConflict(ctx context.Context, requestedSlug
 		SuggestedSlug: suggested,
 		ParentDir:     parentDir,
 	}
+}
+
+// occupiedWorkspaceSlugs maps every live workspace folder slug (lowercased) to
+// its workspace id, from both the registered rows and the folder store. The
+// create path's folder_slug conflict and the assistant's name pre-check read
+// the same set.
+func (h *Handler) occupiedWorkspaceSlugs(ctx context.Context, excludeID string) map[string]string {
+	occupied := make(map[string]string)
+	if rows, err := h.store.ListWorkspaces(ctx); err == nil {
+		for i := range rows {
+			ws := &rows[i]
+			if ws.ID == excludeID || ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
+				continue
+			}
+			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+				occupied[strings.ToLower(ws.FolderSlug)] = ws.ID
+			}
+		}
+	}
+	if h.workspaceStore != nil {
+		for id, ws := range h.workspaceStore.CachedWorkspaces() {
+			if id == excludeID || ws.Status == agentworkspace.StatusTrashed || ws.Status == agentworkspace.StatusMissing {
+				continue
+			}
+			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+				occupied[strings.ToLower(ws.FolderSlug)] = id
+			}
+		}
+	}
+	return occupied
 }
 
 func writeWorkspaceCreateSlugConflict(w http.ResponseWriter, workspaceName string, conflict *agentworkspace.FolderSlugConflictError) {

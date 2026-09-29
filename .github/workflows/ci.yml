@@ -210,6 +210,11 @@ jobs:
   test-unit:
     name: Unit Tests
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    env:
+      # Actions owns these ephemeral runner caches; do not prune them before save.
+      ORI_SKIP_CACHE_PRUNE: '1'
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -225,7 +230,40 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          # No overlapping module/build ownership with setup-go's post action.
+          cache: false
+
+      - name: Resolve unit cache identity
+        id: unit_cache_identity
+        shell: bash
+        run: |
+          {
+            echo "go=$(go env GOVERSION)"
+            echo "platform=$(go env GOOS)-$(go env GOARCH)-${ImageOS:-$RUNNER_OS}"
+            echo "modules=$(go env GOMODCACHE)"
+            echo "build=$(go env GOCACHE)"
+          } >> "$GITHUB_OUTPUT"
+
+      # Do not share an immutable setup-go key with lighter Go jobs. In the
+      # old namespace actionlint published ~24 MB first; unit jobs then never
+      # saved their race compilation. Restore only fully compatible unit work.
+      - name: Restore unit modules
+        id: unit_modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.unit_cache_identity.outputs.modules }}
+          key: ori-unit-mod-v1-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}
+        continue-on-error: true
+
+      - name: Restore unit build cache
+        id: unit_build
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.unit_cache_identity.outputs.build }}
+          key: ori-unit-build-v1-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ori-unit-build-v1-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-
+        continue-on-error: true
 
       - name: Download dependencies
         run: go mod download
@@ -243,41 +281,52 @@ jobs:
       # required check on dev: a renamed job leaves the old context pending
       # forever and wedges every PR.
       - name: Run unit tests
+        id: unit
         shell: bash
-        run: |
-          set -euo pipefail
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            packages=$(./scripts/list-unit-packages.sh --platform)
-            {
-              echo "### Darwin-scoped unit run"
-              echo
-              echo "This leg ran only the platform-conditional packages. Full-suite"
-              echo "coverage comes from \`Unit Tests (ubuntu-latest, 1.25.12)\`."
-              echo
-              echo '```'
-              echo "$packages"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            packages=$(./scripts/list-unit-packages.sh)
-          fi
-          # -timeout: internal/sessionhttp opens a fresh in-memory database per
-          # test and runs every migration against it, ~208 times. Under -race on
-          # the Linux runner it took 788s on dev and exceeded the previous 20m
-          # budget on #532 while still executing tests (no assertion failure).
-          # Preserve the full suite and allow for runner variance; the standing
-          # fix is to migrate once and reuse the schema across tests, tracked
-          # separately. Go applies this timeout per package, not to the job.
-          go test -v -short -race -timeout 30m -coverprofile=coverage.txt -covermode=atomic $packages
+        # Keeps full Ubuntu / --platform Darwin selection and the 30m per-package
+        # timeout. Fresh execution prevents cached results masquerading as speed.
+        run: ./scripts/run-unit-tests.sh
 
-      # Linux only: the macOS profile now covers a 15-package subset, and
-      # uploading it under the same flag would report the difference as a
-      # coverage drop rather than as the deliberate scope it is.
+      # GitHub's native ref scoping keeps PR caches at their merge ref. There is
+      # no privileged workflow_run promotion or cross-workflow restore prefix.
+      # Only successful tests AND reporting publish newly compiled work.
+      - name: Save unit modules
+        if: success() && steps.unit.outcome == 'success' && steps.unit_modules.outcome == 'success' && steps.unit_modules.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.unit_cache_identity.outputs.modules }}
+          key: ${{ steps.unit_modules.outputs.cache-primary-key }}
+        continue-on-error: true
+
+      - name: Save unit build cache
+        if: success() && steps.unit.outcome == 'success' && steps.unit_build.outcome == 'success' && steps.unit_build.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.unit_cache_identity.outputs.build }}
+          key: ${{ steps.unit_build.outputs.cache-primary-key }}
+        continue-on-error: true
+
+      - name: Preserve unit timing evidence
+        if: always() && steps.unit.outputs.artifact-dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-timings-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.unit.outputs.artifact-dir }}/*.json
+            ${{ steps.unit.outputs.artifact-dir }}/*.txt
+            ${{ steps.unit.outputs.artifact-dir }}/*.md
+            ${{ steps.unit.outputs.artifact-dir }}/*.log
+          retention-days: 7
+          if-no-files-found: error
+        continue-on-error: true
+
+      # Linux only: Darwin covers only the platform subset, and uploading it
+      # under the same flag would look like a spurious coverage drop.
       - name: Upload coverage to Codecov
         if: runner.os == 'Linux'
         uses: codecov/codecov-action@v4
         with:
-          file: ./coverage.txt
+          file: ${{ steps.unit.outputs.artifact-dir }}/coverage.txt
           flags: unittests
           name: codecov-${{ matrix.os }}
         continue-on-error: true

@@ -22,36 +22,92 @@
         positioned element's containing block must be an ancestor.
       -->
       <div class="cockpit-area-header-zone">
+      <!--
+        Two rows with two jobs. The first says where you are and what you can
+        make: the Workspace Map/Tree identity, the view switch, the capture and
+        Summary actions, and creation (New Workspace first, Explore a folder
+        beside it). The second is the quieter readout row: the App Guide and
+        signal filters on the left; Updates, Quests, and the city's resources
+        on the right. Every control
+        keeps its id — coachmarks, progression, setup quests, and the specs all
+        find them by it.
+      -->
       <header class="cockpit-area-header">
-        <div class="cockpit-area-heading">
-          <span class="cockpit-area-eyebrow">Workspaces</span>
-          <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>Workspace Map</h2>
+        <div class="cockpit-area-main">
+          <div class="cockpit-area-identity">
+            <div class="cockpit-area-heading">
+              <span class="cockpit-area-eyebrow">Workspaces</span>
+              <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>Workspace Map</h2>
+            </div>
+            <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
+                 active view; the visible labels carry it without color (FR24). -->
+            <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
+              <button type="button" id="cockpitViewMap" class="cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
+              <button type="button" id="cockpitViewTree" class="cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
+            </div>
+          </div>
+          <div class="cockpit-area-actions" role="group" aria-label="Workspace actions">
+            <!-- Add to backlog and Summary stay visible in the stable header so
+                 they are reachable whether context is bare, selected, or
+                 dismissed — secondary, never tucked into an overflow menu. -->
+            <div class="cockpit-area-actions__secondary">
+              <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
+                      aria-haspopup="dialog" aria-expanded="false" aria-controls="cockpitCaptureModal">Add to backlog</button>
+              <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
+                      aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal">Summary</button>
+            </div>
+            <!-- Creation. New Workspace is the primary action; Explore a folder
+                 (shown only once an assistant relationship makes it useful —
+                 see cockpitFolderActionView) sits beside it as the secondary. -->
+            <div class="cockpit-area-actions__create">
+              <button id="cockpitShowFolderBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" hidden>
+                Explore a folder
+              </button>
+              <button id="cockpitCreateWorkspaceBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button"
+                      data-bs-toggle="modal" data-bs-target="#addFolderModal"
+                      data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create"
+                      data-workspace-map-eligible="true">
+                New Workspace
+              </button>
+            </div>
+          </div>
         </div>
-        <div class="cockpit-area-controls">
+        <div class="cockpit-area-utility">
           <!--
             Ori in the cockpit (PRD FR-21). A second entry point to the *same*
             guide: it drives the one controller and the one panel, so the two
             can never disagree about open state. It is never used to represent
-            a running workspace agent (FR-78).
+            a running workspace agent (FR-78), and it is not the personal
+            assistant, which keeps its own launcher in the bottom-right corner.
 
-            It sits in the header rather than floating over the map on purpose —
-            an absolutely-positioned character there covers the map's own empty
-            and error controls and silently eats their clicks.
+            It leads this row, on the LEFT, on purpose: the personal assistant's
+            non-modal panel opens over the right-hand side of Home, and switching
+            from it to the App Guide must never mean hunting under that panel.
+            It also sits in the header rather than floating over the map — an
+            absolutely-positioned character there covers the map's own empty and
+            error controls and silently eats their clicks.
           -->
           <button
             type="button"
             class="cockpit-map-ori"
             id="oriGuideMapTrigger"
             aria-label="Ask Ori — app guide">
-            <img src="/characters/ori-guide/sprite.svg" alt="" width="26" height="26" decoding="async">
+            <img src="/characters/ori-guide/sprite.svg" alt="" width="22" height="22" decoding="async">
             <span class="cockpit-map-ori__label">Ask Ori</span>
             <!-- Home hides the floating launcher, which was the only place that
                  spelled out Ori's role. The boundary between the guide and
-                 Workspace Manager has to be readable BEFORE anything is asked
-                 (FR-22/FR-27), so the role moves onto the surviving entry
-                 point rather than disappearing with the duplicate. -->
+                 the personal assistant has to be readable BEFORE anything is
+                 asked (FR-22/FR-27), so the role stays on this entry point. -->
             <span class="cockpit-map-ori__role">App Guide</span>
           </button>
+          <!-- Map-only signal filters. Single-select and keyboard-operable;
+               counts come from the same authoritative state Map and Summary
+               read, and an unavailable count renders as an em dash rather than
+               a fake 0 (FR31-FR34). Populated by home-workspace-cockpit.js. -->
+          <div id="cockpitSignalFilters" class="cockpit-signal-filters" role="group" aria-label="Filter workspaces by signal" hidden></div>
+          <!-- Readouts and on-demand panels. Updates, Quests, and the resource
+               help open BELOW this row, over the map, and never resize it. -->
+          <div class="cockpit-area-controls">
           <!--
             Updates: a manual, non-modal flyout for the day's non-Progression
             content — attention, scheduled work, Daily Brief, Calendar,
@@ -147,6 +203,9 @@
                     data-economy-help="energy" aria-expanded="false"
                     aria-controls="cockpitEconomyHelp"
                     aria-label="Energy used today">
+              <!-- A persistent word, so the bar and its percentage are never an
+                   unlabeled number beside Craft and Harvest. -->
+              <span class="cockpit-economy__chip-label">Energy</span>
               <span class="cockpit-economy__energy-track">
                 <span class="cockpit-economy__energy-fill" data-economy-energy-fill></span>
               </span>
@@ -173,27 +232,7 @@
             <ul class="cockpit-economy-help__list" data-economy-help-earn></ul>
             <p class="cockpit-economy-help__spend" data-economy-help-spend></p>
           </div>
-          <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
-               active view; the visible labels carry it without color (FR24). -->
-          <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
-            <button type="button" id="cockpitViewMap" class="cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
-            <button type="button" id="cockpitViewTree" class="cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
           </div>
-          <!-- Add to backlog and Summary stay in the stable header so they are
-               reachable whether context is bare, selected, or dismissed. -->
-          <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
-                  aria-expanded="false" aria-controls="cockpitCapturePanel">Add to backlog</button>
-          <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
-                  aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal">Summary</button>
-          <button id="cockpitShowFolderBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button" hidden>
-            Explore a folder
-          </button>
-          <button id="cockpitCreateWorkspaceBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button"
-                  data-bs-toggle="modal" data-bs-target="#addFolderModal"
-                  data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create"
-                  data-workspace-map-eligible="true">
-            New Workspace
-          </button>
         </div>
       </header>
 
@@ -395,31 +434,20 @@
       </div>
       </div>
 
-      <!-- Quick Capture. Writes to the designated Personal HQ's backlog through
-           the existing backlog contract — never a second inbox (FR102). It is
-           a header disclosure, separate from the blocking context modal. -->
-      <div id="cockpitCapturePanel" class="cockpit-capture" hidden>
-        <form id="cockpitCaptureForm" class="cockpit-capture-form">
-          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Capture to your HQ backlog</label>
-          <input type="text" id="cockpitCaptureTitle" class="modern-input" maxlength="300" required
-                 autocomplete="off" placeholder="What's on your mind?">
-          <label class="visually-hidden" for="cockpitCaptureDetails">Optional details</label>
-          <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="2"
-                    maxlength="2000" placeholder="Optional details"></textarea>
-          <div class="cockpit-capture-actions">
-            <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary modern-btn-sm">Save</button>
-            <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary modern-btn-sm">Cancel</button>
-          </div>
-          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
-        </form>
-      </div>
-      <!-- Map-only signal filters. Single-select and keyboard-operable; counts
-           come from the same authoritative state Map and Summary read, and an
-           unavailable count renders as an em dash rather than a fake 0
-           (FR31-FR34). Populated by home-workspace-cockpit.js. -->
-      <div id="cockpitSignalFilters" class="cockpit-signal-filters" role="group" aria-label="Filter workspaces by signal" hidden></div>
-
       <div class="cockpit-area-body">
+        <!-- Quick Capture's success receipt (home-workspace-map-ui-refresh 4.7).
+             Absolutely positioned over the top of the map area, so showing it
+             never moves the map, and never in the bottom-right corner the
+             personal assistant owns. It is not a live region — the announcement
+             goes through #cockpitRailLive — and nothing here takes focus. -->
+        <div id="cockpitCaptureReceipt" class="cockpit-capture-receipt" hidden>
+          <span class="cockpit-capture-receipt__text" data-capture-receipt-text>Added to Personal HQ backlog</span>
+          <a class="cockpit-capture-receipt__link" data-capture-receipt-link href="#" hidden>View backlog</a>
+          <button type="button" class="cockpit-capture-receipt__close" data-capture-receipt-close
+                  aria-label="Dismiss">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
         <!-- Map and Tree occupy the SAME layout slot; activating one hides the
              other, never a drawer or overlay (FR18). -->
         <div id="cockpitMap" class="ws-map cockpit-map" role="region" aria-label="Workspace map" tabindex="-1" hidden></div>
@@ -513,6 +541,50 @@
         </div>
         <div id="cockpitRailContext" class="modal-body cockpit-rail-body" data-context-state="bare"></div>
       </div>
+    </div>
+  </div>
+
+  <!--
+    Quick Capture (home-workspace-map-ui-refresh group 4). A focused dialog
+    rather than a row in the workspace area, so opening it can never resize
+    the map. It writes to the designated Personal HQ's backlog through the
+    existing backlog contract — never a second inbox, never a destination
+    picker (FR102). Like the context modal it is one stable host, hoisted to
+    <body> once, so the draft in these fields survives every Map/Tree remount
+    and every dismissal until a save is confirmed. Bootstrap owns focus
+    containment, Escape, and the backdrop.
+  -->
+  <div class="modal fade cockpit-capture-modal" id="cockpitCaptureModal" tabindex="-1"
+       aria-labelledby="cockpitCaptureModalTitle" aria-describedby="cockpitCaptureDestination"
+       aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <form id="cockpitCaptureForm" class="modal-content cockpit-capture-modal__content" novalidate>
+        <div class="modal-header cockpit-capture-modal__header">
+          <div class="cockpit-capture-modal__heading">
+            <h2 class="modal-title cockpit-capture-modal__title" id="cockpitCaptureModalTitle" tabindex="-1">Add to backlog</h2>
+            <p class="cockpit-capture-modal__destination" id="cockpitCaptureDestination">Personal HQ · Backlog</p>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body cockpit-capture-modal__body">
+          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Idea or task</label>
+          <input type="text" id="cockpitCaptureTitle" class="modern-input cockpit-capture-title" maxlength="300"
+                 aria-required="true" aria-describedby="cockpitCaptureStatus" autocomplete="off"
+                 placeholder="What's on your mind?">
+          <button type="button" class="cockpit-capture-details-toggle" id="cockpitCaptureDetailsToggle"
+                  aria-expanded="false" aria-controls="cockpitCaptureDetailsGroup">Add details</button>
+          <div class="cockpit-capture-details-group" id="cockpitCaptureDetailsGroup" hidden>
+            <label class="cockpit-capture-label" for="cockpitCaptureDetails">Details <span class="cockpit-capture-optional">(optional)</span></label>
+            <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="4"
+                      maxlength="2000"></textarea>
+          </div>
+          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
+        </div>
+        <div class="modal-footer cockpit-capture-modal__footer">
+          <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary">Add to backlog</button>
+        </div>
+      </form>
     </div>
   </div>
 

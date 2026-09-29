@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -57,11 +56,7 @@ func installedReaperQuestPlugin(t *testing.T) plugin.InstalledPlugin {
 // resolves: the install quest before the plugin is installed, then the plugin's.
 func TestPersonalAssistantSetupReportingTitleFollowsTheResolvedQuest(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := newFixtureDatabase(t)
 	relationship := setupReportingRelationship{state: &personalassistant.State{
 		UserID: "local", AssistantID: "assistant-1", Status: personalassistant.StatusActive,
 		SpecialistOfferState: personalassistant.SpecialistOfferAccepted, SpecialistSlug: "music_production",
@@ -110,11 +105,7 @@ func TestPersonalAssistantSetupReportingTitleFollowsTheResolvedQuest(t *testing.
 
 func TestPersonalAssistantSetupReportingUsesCanonicalRunsAndExactLinks(t *testing.T) {
 	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := newFixtureDatabase(t)
 	journeyStore := setupjourney.NewSQLiteStore(db)
 	relationship := setupReportingRelationship{state: &personalassistant.State{
 		UserID: "local", AssistantID: "assistant-1", Status: personalassistant.StatusActive,

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -110,6 +111,11 @@ func (s *AgentSnapshotStore) ResolveSlug(slug string) (*Workspace, error) {
 // Save persists the workspace, then opportunistically backfills missing
 // referenced-agent snapshots. Snapshot failures are logged but do not fail Save.
 func (s *AgentSnapshotStore) Save(ws *Workspace) error {
+	release, err := s.FileStore().enterContinuityWork()
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := s.Store.Save(ws); err != nil {
 		return err
 	}
@@ -124,6 +130,11 @@ func (s *AgentSnapshotStore) Save(ws *Workspace) error {
 // selected mode. Snapshot the resulting agent references after the inner update
 // to retain this decorator's write hook.
 func (s *AgentSnapshotStore) Update(wsID string, fn func(*Workspace) error) error {
+	release, err := s.FileStore().enterContinuityWork()
+	if err != nil {
+		return err
+	}
+	defer release()
 	var updated *Workspace
 	if err := s.Store.Update(wsID, func(ws *Workspace) error {
 		if err := fn(ws); err != nil {
@@ -142,6 +153,11 @@ func (s *AgentSnapshotStore) Update(wsID string, fn func(*Workspace) error) erro
 // when a matching global definition exists. Exported so startup migration can
 // call it directly without re-saving the workspace.
 func (s *AgentSnapshotStore) SnapshotReferencedAgents(ws *Workspace) {
+	release, err := s.FileStore().enterContinuityWork()
+	if err != nil {
+		return
+	}
+	defer release()
 	s.snapshotReferencedAgents(ws)
 }
 
@@ -150,10 +166,6 @@ func (s *AgentSnapshotStore) snapshotReferencedAgents(ws *Workspace) {
 		return
 	}
 	for _, name := range referencedAgentNames(ws) {
-		globalAgent, ok := s.agents.GetAgent(name)
-		if !ok || globalAgent == nil {
-			continue
-		}
 		_, exists, readErr := s.GetWorkspaceAgent(ws.ID, name)
 		if readErr != nil {
 			logger.Warn("Failed to inspect workspace-local agent snapshot", logger.Fields{
@@ -166,11 +178,35 @@ func (s *AgentSnapshotStore) snapshotReferencedAgents(ws *Workspace) {
 		if exists {
 			continue
 		}
-		if err := s.SaveWorkspaceAgent(ws.ID, name, globalAgent); err != nil {
+		var globalAgent *agent.Agent
+		var ok bool
+		files := s.FileStore()
+		if files.hasLocalConfig() {
+			// A composite roster can expose another workspace's same-named
+			// profile. Native seeding must name a real global definition owner.
+			owner, owned := s.agents.(store.OwnedAgentReader)
+			if !owned {
+				continue
+			}
+			globalAgent, ok = owner.GetOwnedAgent(name)
+		} else {
+			globalAgent, ok = s.agents.GetAgent(name)
+		}
+		if !ok || globalAgent == nil {
+			continue
+		}
+		var saveErr error
+		if files.hasLocalConfig() {
+			reader, _ := s.agents.(store.OwnedAppearanceReader)
+			saveErr = files.seedNativeAgent(context.Background(), ws.ID, name, globalAgent, reader)
+		} else {
+			saveErr = s.SaveWorkspaceAgent(ws.ID, name, globalAgent)
+		}
+		if saveErr != nil {
 			logger.Warn("Failed to snapshot workspace-local agent", logger.Fields{
 				"workspace_id": ws.ID,
 				"agent":        name,
-				"error":        err.Error(),
+				"error":        saveErr.Error(),
 			})
 		}
 	}
@@ -245,6 +281,9 @@ func (s *AgentSnapshotStore) GetFolderPath(workspaceID string) (string, error) {
 func (s *AgentSnapshotStore) FileStore() *FileStore {
 	if withFileSync, ok := s.Store.(interface{ FileStore() *FileStore }); ok {
 		return withFileSync.FileStore()
+	}
+	if files, ok := s.Store.(*FileStore); ok {
+		return files
 	}
 	return nil
 }

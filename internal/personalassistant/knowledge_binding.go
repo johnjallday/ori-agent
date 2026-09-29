@@ -52,7 +52,7 @@ func (r *KnowledgeResolver) Resolve(ctx context.Context, userID string) (Knowled
 	if state.Status != StatusActive && state.Status != StatusPaused {
 		return KnowledgeBinding{}, ErrRepairNeeded
 	}
-	profile, ok := r.profiles.PersonalAssistantProfileProvenance(state.GlobalAgentProfileName)
+	profile, ok := relationshipProfileProvenance(ctx, r.profiles, state)
 	if !ok || !profile.OwnedBy(state.AssistantID) || !strings.EqualFold(profile.Name, state.GlobalAgentProfileName) {
 		return KnowledgeBinding{}, ErrRepairNeeded
 	}

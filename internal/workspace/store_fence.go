@@ -55,9 +55,11 @@ type folderFence struct {
 	before     *Workspace // parsed on-disk record; nil when none (or unreadable) existed
 	beforeRaw  []byte     // exact bytes found on disk; nil when no file existed
 	release    func()
-	// onWrite runs with the exact bytes about to replace workspace.json, before
-	// the atomic rename. SyncStore uses it to complete and persist the journal.
-	onWrite func(data []byte) error
+	// beforeWrite runs just before workspace.json is replaced; SyncStore uses
+	// it to persist the journal's intent. afterWrite runs with the bytes that
+	// are then on disk, to record the exact after digest.
+	beforeWrite func() error
+	afterWrite  func(written []byte) error
 }
 
 // openFence resolves the workspace's current folder, takes its advisory lock
@@ -159,7 +161,7 @@ func (f *folderFence) refuseStale(ws *Workspace) error {
 		return nil
 	}
 	if f.store != nil && f.store.mirrored.Load() {
-		if protected && f.onWrite == nil {
+		if protected && f.beforeWrite == nil {
 			pending, err := f.pendingJournal()
 			if err != nil {
 				return err
@@ -258,6 +260,11 @@ func (s *FileStore) RestoreMirrorRecord(ws *Workspace) error {
 	if s == nil || ws == nil || strings.TrimSpace(ws.ID) == "" {
 		return fmt.Errorf("workspace is required")
 	}
+	release, workErr := s.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	fence, err := s.openFence(ws.ID)
 	if err != nil {
 		return err
@@ -266,13 +273,13 @@ func (s *FileStore) RestoreMirrorRecord(ws *Workspace) error {
 	if fence.folder == "" {
 		return fmt.Errorf("workspace %s has no folder to restore", ws.ID)
 	}
-	data, err := ws.ToJSON()
-	if err != nil {
-		return fmt.Errorf("failed to serialize workspace: %w", err)
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := atomicWriteFile(fence.configPath, data); err != nil {
+	// Written through the canonical private/portable writer so a separated
+	// (continuity-prepared) folder keeps its format; the record is taken as
+	// given, with no version bump and no stale check.
+	data, err := s.writeWorkspaceConfigLocked(ws, fence.configPath)
+	if err != nil {
 		return fmt.Errorf("failed to restore workspace file: %w", err)
 	}
 	restored, err := FromJSON(data)

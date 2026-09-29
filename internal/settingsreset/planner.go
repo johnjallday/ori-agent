@@ -466,6 +466,8 @@ func inspectCategory(ctx context.Context, owners Owners, id CategoryID, category
 	}
 	switch id {
 	case CategorySettings:
+		// Extend new previews, not the frozen v1 Definition used by receipts.
+		category.Description += " This category covers global provider/search key slots, not workspace-specific keys."
 		if owners.Config == nil {
 			block("settings_owner_unavailable", id, "The active settings owner is unavailable.", "Restore the configuration owner before reset.")
 			unknown("Ori-saved provider/search key slots")
@@ -527,6 +529,9 @@ func inspectCategory(ctx context.Context, owners Owners, id CategoryID, category
 			category.Facts = append(category.Facts, CountFact{Name: "active agent profiles", Count: &count})
 		}
 	case CategoryAppRecords:
+		category.Description += " Installation-local workspace configuration is also removed, including separated agent keys and connector grants. Kept workspace files cannot restore those settings."
+		// Portable continuity: a kept folder carries its own private checkpoint.
+		category.Description += " Kept workspace folders still hold their private portable copy of conversations, uploads, follow-ups and briefs. Nothing comes back on its own: import a kept folder to restore it here, or delete the folder to erase that copy."
 		if owners.Config == nil {
 			block("registration_settings_unavailable", id, "Workspace registration settings are unavailable.", "Restore the settings owner so root consent can be cleared without resetting unrelated preferences or credentials.")
 		} else {

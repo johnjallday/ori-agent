@@ -7,7 +7,9 @@ import {
   meetingsSectionView,
   needsHireBanner,
   personalAssistantLauncherCue,
+  personalAssistantLauncherCueTone,
   personalAssistantTodayView,
+  resumeWorkspaceBuild,
   safeTodayRoute,
   specialistSetupView,
   studioSectionView,
@@ -16,6 +18,40 @@ import {
   todayThreeSectionView,
   todaySectionRows
 } from './personal-assistant-home.js';
+
+test('an unfinished build keeps its id and only the controls Today knows', () => {
+  const [build, other] = todaySectionItems({
+    items: [
+      {
+        id: 'build-1',
+        kind: 'workspace_build',
+        title: 'Finish building Newsletter Desk',
+        actions: ['resume', 'discard', 'delete_everything']
+      },
+      { id: 'o1', kind: 'folder_offer', title: 'Look at Documents', actions: ['resume'] }
+    ]
+  });
+  assert.equal(build.id, 'build-1');
+  assert.deepEqual(build.actions, ['resume', 'discard']);
+  assert.equal('actions' in other, false, 'other rows stay links');
+  assert.equal('id' in other, false);
+});
+
+test('Resume opens the dialog in build mode, or goes Home where the dialog is', () => {
+  const opened = [];
+  const withDialog = {
+    sessionManager: { showAddWorkspaceModal: options => opened.push(options) },
+    document: { getElementById: id => (id === 'addFolderModal' ? {} : null) },
+    PersonalAssistantPanel: { close() {} },
+    location: { href: '/agents' }
+  };
+  assert.equal(resumeWorkspaceBuild(withDialog), 'opened');
+  assert.deepEqual(opened, [{ entryPoint: 'personal_assistant_ask', buildResume: true }]);
+
+  const withoutDialog = { document: { getElementById: () => null }, location: { href: '/agents' } };
+  assert.equal(resumeWorkspaceBuild(withoutDialog), 'navigated');
+  assert.equal(withoutDialog.location.href, '/?build=resume');
+});
 
 test('three Today sections hide empty rows and report unavailable sources only once in the footer', () => {
   assert.equal(todayLabel('waiting_for_choice'), 'Waiting for your choice');
@@ -104,6 +140,35 @@ test('launcher cues are textual, bounded, and derived only from canonical states
   );
   assert.equal(personalAssistantLauncherCue({ state: 'repair_needed' }, null), 'Repair needed');
   assert.equal(personalAssistantLauncherCue(null, null), '');
+});
+
+test('only routine progress cues may rest on the compact Home launcher', () => {
+  // Every cue the launcher can produce, classified. Anything that asks the
+  // user to act must stay visible at rest (home-workspace-map-ui-refresh 3.5).
+  const cues = [
+    [{ state: 'active' }, null],
+    [{ state: 'active' }, { state: 'healthy_empty' }],
+    [{ state: 'active' }, { state: 'active' }],
+    [{ state: 'paused' }, null],
+    [{ state: 'needs_hq' }, null],
+    [{ state: 'provisioning_hq' }, null],
+    [{ state: 'repair_needed' }, null],
+    [{ state: 'active' }, { state: 'partial' }],
+    [{ state: 'active' }, { state: 'model_unavailable' }]
+  ].map(([relationship, today]) => personalAssistantLauncherCue(relationship, today));
+  const tones = Object.fromEntries(cues.map(cue => [cue, personalAssistantLauncherCueTone(cue)]));
+  assert.deepEqual(tones, {
+    'Loading Today': 'info',
+    'Today ready': 'info',
+    Paused: 'action',
+    'Build HQ': 'action',
+    'Repair needed': 'action',
+    'Sources unavailable': 'action',
+    'Model unavailable': 'action'
+  });
+  assert.equal(personalAssistantLauncherCueTone(''), '');
+  // An unknown future cue defaults to visible rather than silently hidden.
+  assert.equal(personalAssistantLauncherCueTone('Something new'), 'action');
 });
 
 test('reviewed Today recap distinguishes current fact links, existing next actions and unavailable sources', () => {

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 )
 
 // TrashSharedDataKey is the SharedData key under which trash metadata
@@ -46,6 +48,13 @@ type SyncStore struct {
 func NewSyncStore(primary Store, fileSync *FileStore) *SyncStore {
 	if fileSync != nil {
 		fileSync.mirrored.Store(true)
+		if fileSync.hasLocalConfig() {
+			// The SQLite adapter's historical snapshot path is a separate
+			// WORKSPACE_DIR/<id> folder. Do not create a second plaintext copy there.
+			if owner, ok := primary.(interface{ SetWorkspaceAgentStore(Store) }); ok {
+				owner.SetWorkspaceAgentStore(fileSync)
+			}
+		}
 	}
 	return &SyncStore{primary: primary, fileSync: fileSync}
 }
@@ -87,6 +96,14 @@ func (s *SyncStore) TrashSupported() bool {
 // It returns ErrTrashUnsupported when there is no folder store or the platform
 // has no trash, so callers can fall back to a permanent Delete.
 func (s *SyncStore) Trash(id string) error {
+	if s == nil {
+		return ErrTrashUnsupported
+	}
+	release, workErr := s.fileSync.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	if !s.TrashSupported() {
 		return ErrTrashUnsupported
 	}
@@ -155,6 +172,14 @@ func (s *SyncStore) GetFolderWorkspace(workspaceID string) (*Workspace, error) {
 // the primary parent projection. Typed domain links, not physical nesting,
 // remain authoritative for membership.
 func (s *SyncStore) MoveWorkspaceFolder(workspaceID, parentID string) ([]MovedWorkspace, error) {
+	if s == nil {
+		return nil, fmt.Errorf("workspace folder storage is unavailable")
+	}
+	release, workErr := s.fileSync.enterContinuityWork()
+	if workErr != nil {
+		return nil, workErr
+	}
+	defer release()
 	if s == nil || s.fileSync == nil || s.primary == nil {
 		return nil, fmt.Errorf("workspace folder storage is unavailable")
 	}
@@ -206,7 +231,35 @@ var ErrWorkspaceMirrorsDiverged = errors.New("workspace mirrors diverged; reconc
 // primary update is a single conditional statement), and a folder rollback
 // restores the exact previous bytes rather than a further bumped version.
 func (s *SyncStore) Save(ws *Workspace) error {
+	if s.fileSync.hasLocalConfig() && ws != nil {
+		local := s.fileSync.localConfig
+		release, err := local.enterWork()
+		if err != nil {
+			return err
+		}
+		defer release()
+		unlock := local.locks.Lock(ws.ID + ":sync-save")
+		defer unlock()
+		ctx := context.Background()
+		mutation, err := workspacecontinuity.NewLocalStore(local.db).BeginFileMutation(ctx, ws.ID, "sync-save")
+		if err != nil {
+			return err
+		}
+		// Retain the outer barrier through the primary write AND any rollback.
+		// A panic leaves it pending for explicit canonical reconciliation.
+		return local.finishFileMutation(ctx, mutation, s.save(ws))
+	}
+	return s.save(ws)
+}
+
+func (s *SyncStore) save(ws *Workspace) error {
 	if s.fileSync != nil && ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing {
+		// Lock order: continuity work gate, folder fence, then the FileStore mutex.
+		release, workErr := s.fileSync.enterContinuityWork()
+		if workErr != nil {
+			return workErr
+		}
+		defer release()
 		fence, err := s.fileSync.openFence(ws.ID)
 		if err != nil {
 			return fmt.Errorf("failed to fence workspace folder: %w", err)
@@ -250,8 +303,9 @@ func (s *SyncStore) Save(ws *Workspace) error {
 				}
 			}
 			journal = fence.beginJournal(base)
-			fence.onWrite = func(data []byte) error {
-				journal.FolderAfter = fenceDigest(data)
+			fence.beforeWrite = func() error { return fence.writeJournal(journal) }
+			fence.afterWrite = func(written []byte) error {
+				journal.FolderAfter = fenceDigest(written)
 				return fence.writeJournal(journal)
 			}
 		}
@@ -500,6 +554,11 @@ func (s *SyncStore) List() ([]string, error) {
 // DeleteReviewedGroupRequirementOperation delegates the exact-digest rollback
 // through both mirrors without exposing an unrestricted Required delete.
 func (s *SyncStore) DeleteReviewedGroupRequirementOperation(id, operationDigest, operationStatus string) error {
+	release, workErr := s.fileSync.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	if s == nil || s.primary == nil {
 		return ErrGroupRequirementProtected
 	}
@@ -539,6 +598,11 @@ func (s *SyncStore) DeleteReviewedGroupRequirementOperation(id, operationDigest,
 
 // Delete removes a workspace from the primary store and the disk folder.
 func (s *SyncStore) Delete(id string) error {
+	release, workErr := s.fileSync.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	if protected, checkErr := storeContainsProtectedAssistantProgram(s.primary, id); checkErr != nil {
 		return checkErr
 	} else if protected {
@@ -636,10 +700,16 @@ func (s *SyncStore) GetOutputsPath(workspaceID string) string {
 // FileStore (which holds the on-disk snapshot) so an imported workspace folder
 // can resolve its entry agent before the primary store is hydrated.
 func (s *SyncStore) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	if s.fileSync.hasLocalConfig() {
+		return s.fileSync.GetWorkspaceAgent(workspaceID, agentName)
+	}
 	if s.fileSync != nil {
 		if ag, ok, err := s.fileSync.GetWorkspaceAgent(workspaceID, agentName); err == nil && ok {
 			return ag, true, nil
 		} else if err != nil {
+			if errors.Is(err, ErrLocalConfigUnavailable) || errors.Is(err, ErrLocalConfigInvalid) {
+				return nil, false, err
+			}
 			logger.Debug("FileStore GetWorkspaceAgent failed, falling back to primary", logger.Fields{
 				"workspace_id": workspaceID,
 				"agent":        agentName,
@@ -661,6 +731,11 @@ func (s *SyncStore) Lock(wsID string) func() { return s.primary.Lock(wsID) }
 // already-selected runtime mode rather than constructing a grant-only state
 // from the lean SQLite projection.
 func (s *SyncStore) Update(wsID string, fn func(*Workspace) error) error {
+	release, workErr := s.fileSync.enterContinuityWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer release()
 	unlock := s.Lock(wsID)
 	defer unlock()
 
@@ -683,6 +758,9 @@ func (s *SyncStore) Update(wsID string, fn func(*Workspace) error) error {
 func (s *SyncStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
 	if ws, err := s.primary.Get(workspaceID); err == nil && ws != nil && (ws.Status == StatusTrashed || ws.Status == StatusMissing) {
 		return nil
+	}
+	if s.fileSync.hasLocalConfig() {
+		return s.fileSync.SaveWorkspaceAgent(workspaceID, agentName, ag)
 	}
 	if err := s.primary.SaveWorkspaceAgent(workspaceID, agentName, ag); err != nil {
 		return err

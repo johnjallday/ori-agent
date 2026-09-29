@@ -2286,6 +2286,48 @@ if hits:
 print("ok   %s has no agent type" % label)' "$1"
 }
 
+# smoke_build_session prepares and checks "Build with your assistant"
+# (tasks/prd-build-with-your-assistant.md) on a running demo server:
+#   seed [provider] [model]  hire the assistant, build its HQ, add two saved
+#                            agents (Luna, Scout), and set the system model
+#                            (default codex / gpt-5.6-luna) so a build can talk
+#   availability             print GET /api/workspaces/build-sessions/availability
+#
+# The default runs the assistant on the Codex CLI with your own Codex login.
+# A demo sandbox has its own HOME, so start the server with your Codex home:
+#   CODEX_HOME="$HOME/.codex" ./scripts/demo-server.sh 8941 "$TMPDIR/ori-demo.build"
+# Codex then records each turn in that home's sessions/. Another model:
+#   ./scripts/smoke.sh build-session <url> seed openai gpt-5-nano   (OPENAI_API_KEY)
+smoke_build_session() {
+  local stage="${3:-availability}"
+  # A demo server started in the background a moment ago may still be
+  # building; wait for it here rather than in a hand-written polling loop.
+  smoke_show_wait
+  case "$stage" in
+  seed)
+    local provider="${4:-codex}" model="${5:-gpt-5.6-luna}" name availability
+    smoke_show_folder build-session "$BASE_URL" hq
+    for name in Luna Scout; do
+      curl -s -o /dev/null -w "%{http_code} saved agent $name\n" -X POST "$BASE_URL/api/agents" \
+        -H 'Content-Type: application/json' -d "{\"name\":\"$name\"}"
+    done
+    curl -s -o /dev/null -w "%{http_code} system model $provider/$model\n" -X POST "$BASE_URL/api/settings/system-model" \
+      -H 'Content-Type: application/json' -d "{\"provider\":\"$provider\",\"model\":\"$model\"}"
+    availability=$(curl -s "$BASE_URL/api/workspaces/build-sessions/availability")
+    echo "$availability"
+    if [[ "$provider" == codex && "$availability" != *'"available":true'* ]]; then
+      echo "hint: the codex provider registers only when the server finds your Codex login;" >&2
+      echo "      restart it with CODEX_HOME=\"\$HOME/.codex\" ./scripts/demo-server.sh <port> <sandbox>" >&2
+    fi
+    ;;
+  availability)
+    curl -s "$BASE_URL/api/workspaces/build-sessions/availability"
+    echo
+    ;;
+  *) fail "usage: $0 build-session <base-url> <seed [provider] [model]|availability>" ;;
+  esac
+}
+
 # smoke_agent_type_api checks that an API client still posting the retired
 # "type" key succeeds, and that no agent or model response echoes it
 # (retire-agent-type, PRD FR11-FR13).
@@ -3120,6 +3162,7 @@ blueprintintake | blueprint-intake) smoke_blueprint_intake "${3:-}" ;;
 starter) smoke_starter "$@" ;;
 meetassistant) smoke_meet_assistant "$@" ;;
 showfolder) smoke_show_folder "$@" ;;
+build-session) smoke_build_session "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
 agent-type-strip) smoke_agent_type_strip "$@" ;;
 economyseed) smoke_economy_seed ;;
@@ -3168,6 +3211,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 meetassistant <base-url> <stage>      # Mission 01: onboard | status | hire [name] | demo <stage>" >&2
   echo "  $0 showfolder <base-url> <stage>         # Show me a folder: seed <sandbox> | hqcard | hq | today | scan <chip> | decide <offer> <d> [choice] | current" >&2
+  echo "  $0 build-session <base-url> <stage>      # Build with your assistant: seed [provider] [model] | availability" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
   echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2
   echo "  $0 blueprintintake <base-url> [folder]   # import Course; verify intake, optionally choose a folder via native picker" >&2

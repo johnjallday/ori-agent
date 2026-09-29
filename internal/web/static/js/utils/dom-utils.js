@@ -28,7 +28,8 @@ const DOMUtils = (function () {
     }
     const div = document.createElement('div');
     div.textContent = String(text);
-    return div.innerHTML;
+    // Quote-safe too, so a value placed inside an attribute cannot end it.
+    return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   /**

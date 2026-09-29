@@ -43,6 +43,10 @@
              above the command view so it stays visible (the command view locks
              body scroll for map panning). -->
         <div id="workspaceFollowupMount" class="workspace-followup-mount" hidden></div>
+        <!-- A workspace's own Daily Brief history, read-only: populated by
+             workspace-daily-briefs.js only for a workspace that owns briefs
+             and is not the Personal HQ here (imported with its history). -->
+        <section id="workspaceBriefHistoryMount" class="workspace-brief-history" aria-label="Daily Brief history" hidden></section>
         <style>
           .workspace-group-requirement-status { display: grid; gap: 0.2rem; margin: 0 0 1rem; padding: 0.85rem 1rem; border: 1px solid rgba(37, 99, 235, 0.28); border-radius: 12px; background: rgba(37, 99, 235, 0.08); color: var(--text-primary); }
           .workspace-group-requirement-status[data-state="group_requirement_unfulfilled"], .workspace-group-requirement-status[data-state="contract_invalid"] { border-color: rgba(217, 119, 6, 0.38); background: rgba(217, 119, 6, 0.1); }
@@ -360,6 +364,30 @@
           </div>
 
 
+          <dialog id="workspaceContinuityDialog" class="workspace-continuity-dialog" aria-labelledby="workspaceContinuityDialogTitle">
+            <h2 id="workspaceContinuityDialogTitle" class="workspace-continuity-title">Moving this workspace</h2>
+            <p id="workspaceContinuityDialogLabel" class="workspace-continuity-status-label" role="status" aria-live="polite"></p>
+            <p id="workspaceContinuityDialogDetail" class="workspace-continuity-text"></p>
+            <p class="workspace-continuity-text">
+              This folder keeps a private copy of its conversations, follow-ups, briefs, notes and uploaded files. API keys, accounts and permissions stay on this computer. Copies you make elsewhere cannot be erased remotely.
+            </p>
+            <div id="workspaceContinuityImported" hidden>
+              <p id="workspaceContinuityRoutines" class="workspace-continuity-text"></p>
+              <div id="workspaceContinuityConfirm" class="workspace-continuity-confirm" hidden>
+                <p class="workspace-continuity-text">
+                  Turning routines on here does not stop them on the other computer. Avoid running the same schedules, triggers or briefs in both places.
+                </p>
+                <button type="button" id="workspaceContinuityConfirmBtn" class="modern-btn modern-btn-primary">Turn on routines here</button>
+              </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-2">
+              <button type="button" id="workspaceContinuityPrepareBtn" class="modern-btn modern-btn-secondary">Prepare now</button>
+              <button type="button" id="workspaceContinuityActivateBtn" class="modern-btn modern-btn-secondary" hidden>Turn on background routines…</button>
+              <button type="button" id="workspaceContinuityDeactivateBtn" class="modern-btn modern-btn-secondary" hidden>Turn off background routines</button>
+              <button type="button" id="workspaceContinuityCloseBtn" class="modern-btn modern-btn-secondary">Close</button>
+            </div>
+          </dialog>
+
           <div class="modern-card workspace-detail-config-card is-collapsed mb-4" id="workspace-detail-settings-panel">
             <div class="workspace-detail-config-header">
               <div>
@@ -383,6 +411,10 @@
                        workspace-command.js relocates, so it is the setup entry
                        in Command/Map view too. -->
                   <button type="button" class="workspace-detail-config-chip" id="setupWizardStatusChip" hidden></button>
+                  <!-- Portability: whether this folder can be copied to another
+                       computer with its history right now, and (for an imported
+                       workspace) the local choice to turn its routines on. -->
+                  <button type="button" class="workspace-detail-config-chip workspace-continuity-chip" id="workspaceContinuityChip" hidden aria-haspopup="dialog"></button>
                 </div>
               </div>
               <button
@@ -9112,6 +9144,10 @@
        order, so this tag's position is the dependency contract. -->
   <script defer src="/js/modules/create-workspace-team-draft.js"></script>
   <script defer src="/js/modules/create-workspace-placement-draft.js"></script>
+  <!-- The creator's operation context and the assistant's build pane, both
+       read by sessions.js while it binds the wizard. -->
+  <script defer src="/js/modules/workspace-creator-state.js"></script>
+  <script defer src="/js/modules/create-workspace-build-pane.js"></script>
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/dashboard.js"></script>
   <script defer src="/js/modules/toast.js"></script>
@@ -9138,6 +9174,8 @@
   <script defer src="/js/modules/workspace-hub-tickets.js"></script>
   <script defer src="/js/modules/workspace-mission.js"></script>
   <script defer src="/js/modules/workspace-triggers.js"></script>
+  <script defer src="/js/modules/workspace-continuity.js"></script>
+  <script defer src="/js/modules/workspace-continuity-status.js"></script>
   <script defer src="/js/modules/plugin-lifecycle.js"></script>
   <script defer src="/js/modules/plugin-recovery-client.js"></script>
   <script defer src="/js/modules/blueprint-readiness.js"></script>
@@ -9154,6 +9192,8 @@
   <script type="module" src="/js/modules/personal-hq-email-setup.js"></script>
   <!-- Follow-up management panel for a workspace that owns follow-ups (Email Ops). -->
   <script type="module" src="/js/modules/workspace-followups.js"></script>
+  <!-- Read-only Daily Brief history of a workspace that is not the HQ here. -->
+  <script type="module" src="/js/modules/workspace-daily-briefs.js"></script>
 
   <!-- Workspace Detail Page -->
   <script type="module">

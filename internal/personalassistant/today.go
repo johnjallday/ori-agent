@@ -58,6 +58,10 @@ type TodayItem struct {
 	Ref         dailybrief.SourceRef `json:"ref"`
 	DueAt       *time.Time           `json:"due_at,omitempty"`
 	SourceAt    time.Time            `json:"source_at,omitempty"`
+	// Actions names the item's own controls, for an item Today acts on in
+	// place rather than by opening a route ("resume", "discard" for an
+	// unfinished build). Absent for every other item.
+	Actions []string `json:"actions,omitempty"`
 }
 
 type TodaySection struct {
@@ -265,6 +269,7 @@ type TodayService struct {
 	janitorResults     JanitorResultReader
 	folderReceipts     FolderReceiptReader
 	folderDigest       FolderDigestReader
+	workspaceBuilds    WorkspaceBuildReader
 	meetings           TodayMeetingReader
 	remembered         interface {
 		ReviewItems(context.Context, string) ([]KnowledgeReviewItem, error)
@@ -328,6 +333,19 @@ func (s *TodayService) SetFolderDigestReader(reader FolderDigestReader) {
 	if s != nil {
 		s.folderDigest = reader
 		s.folderReceipts = reader
+	}
+}
+
+// WorkspaceBuildReader reads the open "Build with your assistant" session.
+type WorkspaceBuildReader interface {
+	Read(ctx context.Context, userID string) (WorkspaceBuildDocument, error)
+}
+
+// SetWorkspaceBuildReader lists an unfinished build under Needs you (FR42).
+// Unset, Today is exactly what it was. Startup wiring only.
+func (s *TodayService) SetWorkspaceBuildReader(reader WorkspaceBuildReader) {
+	if s != nil {
+		s.workspaceBuilds = reader
 	}
 }
 

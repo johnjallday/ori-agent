@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 )
 
 type renameHQReader struct {
@@ -155,6 +156,25 @@ func newRenameFixture(t *testing.T) (*RenameCoordinator, *renameStateStore, *ren
 
 func validBriefConfigForRename(workspaceID string) dailybrief.Config {
 	return dailybrief.Config{WorkspaceID: workspaceID, UserID: "local", Timezone: "UTC", ScheduleDays: []string{"mon"}, ScheduleTime: "08:00", ScheduleEnabled: true, Scope: dailybrief.ScopeAll, ConfigRevision: 1}
+}
+
+func TestRenameCoordinatorImportedAssistantNeverJournalsGlobalNameRename(t *testing.T) {
+	coordinator, state, workspaces, profiles, sessions := newRenameFixture(t)
+	coordinator.WithContinuityAttachments(&scopedAttachmentFixture{attachment: workspacecontinuity.Attachment{State: workspacecontinuity.ImportedInactive, Version: 1, Disposition: workspacecontinuity.AdoptedHQ}})
+	if _, err := coordinator.Rename(t.Context(), "local", "Atlas", 1); !errors.Is(err, ErrImportedRenameUnsupported) {
+		t.Fatal("imported profile was sent to global rename", err)
+	}
+	current, err := state.GetState(t.Context(), "local")
+	if err != nil || current.StateVersion != 1 || current.RenameStep != RenameNone {
+		t.Fatal("failed rename still journaled", current, err)
+	}
+	if _, ok := profiles.agents["Ada"]; !ok || sessions.calls != 0 {
+		t.Fatal("unrelated global agent or sessions were changed")
+	}
+	ws, err := workspaces.Get("hq-local")
+	if err != nil || ws.AgentInstances[0].Name != "Ada" {
+		t.Fatal("imported HQ was changed", ws, err)
+	}
 }
 
 func TestRenameCoordinator_RetryKeepsStableIdentityAndHistory(t *testing.T) {

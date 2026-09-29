@@ -185,6 +185,12 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		if status := workspace.EvaluateGroupRequirementLifecycle(groupContractWorkspace, wh.workspaceStore.Get); status != nil {
 			response["group_requirement_status"] = status
 		}
+		// "How this was set up", for a workspace built with the assistant.
+		// Provenance is portable workspace.json state, read from the canonical
+		// folder copy.
+		if provenance := groupContractWorkspace.GetTemplateProvenance(); provenance != nil && provenance.BuildSummary != nil {
+			response["build_summary"] = provenance.BuildSummary
+		}
 
 		// Add sessions if session store is available
 		if wh.sessionStore != nil {
@@ -312,8 +318,8 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 		InitialData: req.InitialData,
 	})
 
-	// Save workspace
-	if err := wh.workspaceStore.Save(ws); err != nil {
+	// Only explicit creation crosses native admission; ordinary updates do not.
+	if err := workspace.CreateNativeWorkspace(r.Context(), wh.workspaceStore, ws); err != nil {
 		logger.Error("Error saving workspace", logger.Fields{"error": err})
 		orihttp.InternalError(w, "Failed to save workspace: "+err.Error())
 		return

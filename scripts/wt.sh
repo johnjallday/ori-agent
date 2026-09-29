@@ -1566,6 +1566,31 @@ function wt_away {
   bash "$dispatcher" "$@"
 }
 
+# wt_demo_codex_env decides whether a `wt demo` server may use your Codex
+# login. The demo's sandboxed HOME hides ~/.codex, so Ori's codex provider (the
+# Codex CLI) would never register. By default the server is given your real
+# Codex home ($CODEX_HOME, else ~/.codex) when it exists, so Codex CLI models
+# can drive the assistant in a demo. ORI_DEMO_NO_CODEX=1 keeps the demo fully
+# isolated and also drops a CODEX_HOME inherited from your shell.
+#
+# Sets WT_DEMO_CODEX_ENV, arguments to place right after `env` (an unset option
+# or one assignment, or nothing), and WT_DEMO_CODEX_NOTE, a banner line or "".
+function wt_demo_codex_env {
+  typeset -ga WT_DEMO_CODEX_ENV=()
+  typeset -g WT_DEMO_CODEX_NOTE=""
+  if [[ "${ORI_DEMO_NO_CODEX:-0}" == "1" ]]; then
+    WT_DEMO_CODEX_ENV=(-u CODEX_HOME)
+    WT_DEMO_CODEX_NOTE="Codex:        off (ORI_DEMO_NO_CODEX=1)"
+    return 0
+  fi
+  local codex_home="${CODEX_HOME:-$HOME/.codex}"
+  if [[ -d "$codex_home" ]]; then
+    WT_DEMO_CODEX_ENV=("CODEX_HOME=$codex_home")
+    WT_DEMO_CODEX_NOTE="Codex:        $codex_home (your Codex login; ORI_DEMO_NO_CODEX=1 isolates it)"
+  fi
+  return 0
+}
+
 function wt_dispatch {
   case "$1" in
   repl)
@@ -2185,6 +2210,9 @@ function wt_dispatch {
     #   - ORI_DATA_DIR is overridden so DB/vaults/templates are sandboxed
     #   - the server is launched from INSIDE the sandbox because the plugin
     #     store resolves relative to the launch directory
+    #   - the one deliberate exception: your Codex home is passed through
+    #     (see wt_demo_codex_env) so the Codex CLI can drive the assistant;
+    #     ORI_DEMO_NO_CODEX=1 turns that off
     # Foreground process: Ctrl-C stops it. The sandbox is a throwaway temp dir.
     # It does not open a browser unless ORI_DEMO_OPEN=1 is set.
     local demo_root
@@ -2206,12 +2234,14 @@ function wt_dispatch {
     echo "Demo sandbox: $demo_dir   (removed automatically on exit)"
     echo "Branch:       $(git -C "$demo_root" branch --show-current)"
     echo "URL:          http://localhost:$demo_port   (Ctrl-C to stop)"
+    wt_demo_codex_env
+    [[ -z "$WT_DEMO_CODEX_NOTE" ]] || echo "$WT_DEMO_CODEX_NOTE"
     local demo_status=0
     {
       if [[ "${ORI_DEMO_OPEN:-0}" == "1" ]]; then
-        (cd "$demo_dir" && env -u NO_BROWSER HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" ORI_NO_DESKTOP_OPEN=1 "$demo_root/bin/ori-agent") || demo_status=$?
+        (cd "$demo_dir" && env -u NO_BROWSER "${WT_DEMO_CODEX_ENV[@]}" HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" ORI_NO_DESKTOP_OPEN=1 "$demo_root/bin/ori-agent") || demo_status=$?
       else
-        (cd "$demo_dir" && env HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 "$demo_root/bin/ori-agent") || demo_status=$?
+        (cd "$demo_dir" && env "${WT_DEMO_CODEX_ENV[@]}" HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 "$demo_root/bin/ori-agent") || demo_status=$?
       fi
     } always {
       if [[ "${ORI_KEEP_DEMO_SANDBOX:-0}" == "1" ]]; then
@@ -2349,7 +2379,7 @@ function wt_dispatch {
     echo "  wt status        - Feature-first overview (--feature/--json/--no-color/--watch)"
     echo "  wt status --worktrees - Show ahead/behind/merged vs $BASE_BRANCH for all worktrees"
     echo "  wt cd <name>     - Navigate to worktree"
-    echo "  wt demo [port]   - Build + serve an isolated demo without opening a browser (ORI_DEMO_OPEN=1 opts in)"
+    echo "  wt demo [port]   - Build + serve an isolated demo without opening a browser (ORI_DEMO_OPEN=1 opts in; your Codex login is shared unless ORI_DEMO_NO_CODEX=1)"
     echo "  wt herd <sub>    - Manage the opt-in Ori-to-Herdr devflow bridge (setup, doctor, ...)"
     echo "  ./scripts/devops.sh - Open GitHub Issues and curated workflow-label filters"
     echo "                     A standalone executable; no shell or Herdr setup required."

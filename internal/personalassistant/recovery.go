@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -39,6 +41,7 @@ type RecoveryProfileLister interface {
 // and arbitrary shared data.
 type RecoveryWorkspace struct {
 	ID                string
+	Name              string
 	OwnerUserID       string
 	AssistantID       string
 	HQRequestID       string
@@ -105,8 +108,12 @@ type RecoveryCoordinator struct {
 	workspaces RecoveryWorkspaceLister
 	hq         PersonalHQReader
 	briefs     BriefConfigReader
-	now        func() time.Time
-	mu         sync.Mutex
+	// resolver is optional: without it the coordinator still explains a
+	// blocked recovery but offers no fixes (see WithResolver).
+	resolver *recoveryResolver
+	now      func() time.Time
+	newID    func() string
+	mu       sync.Mutex
 }
 
 // NewRecoveryCoordinator constructs the deterministic relationship repair path.
@@ -118,7 +125,8 @@ func NewRecoveryCoordinator(
 	briefs BriefConfigReader,
 ) *RecoveryCoordinator {
 	return &RecoveryCoordinator{
-		store: store, profiles: profiles, workspaces: workspaces, hq: hq, briefs: briefs, now: time.Now,
+		store: store, profiles: profiles, workspaces: workspaces, hq: hq, briefs: briefs,
+		now: time.Now, newID: uuid.NewString,
 	}
 }
 
@@ -131,40 +139,86 @@ type recoveryHQPresentation struct {
 
 // Inspect validates recovery evidence without mutating any store.
 func (c *RecoveryCoordinator) Inspect(ctx context.Context, userID string) (*RecoveryCandidate, error) {
+	candidate, _, issue, err := c.evaluate(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if issue != "" {
+		return nil, ErrRepairNeeded
+	}
+	return candidate, nil
+}
+
+// recoveryEvidence is everything one evaluation read. A blocked evaluation
+// keeps it so the diagnosis and its fixes describe exactly the records that
+// were judged, never a second, possibly different read.
+type recoveryEvidence struct {
+	userID     string
+	profiles   []RecoveryProfile
+	workspaces []RecoveryWorkspace
+	status     *personalhq.Status
+	// briefMissing is set only when the evaluation reached the Daily Brief
+	// check and found no configuration for the HQ.
+	briefMissing bool
+}
+
+// evaluate runs every recovery check in order and names the first one that
+// fails. A non-empty issue with a nil error means the records disagree; an
+// error means a store could not be read (or ErrNotFound: no evidence at all).
+func (c *RecoveryCoordinator) evaluate(ctx context.Context, userID string) (*RecoveryCandidate, *recoveryEvidence, RecoveryIssue, error) {
 	if c == nil || c.profiles == nil || c.workspaces == nil || c.hq == nil {
-		return nil, errors.New("personal assistant: recovery service is unavailable")
+		return nil, nil, "", errors.New("personal assistant: recovery service is unavailable")
 	}
 	userID, err := validateOpaqueID("user id", userID, true)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrValidation, err)
+		return nil, nil, "", fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
-	profiles := c.profiles.PersonalAssistantRecoveryProfiles()
-	workspaces, err := c.workspaces.PersonalAssistantRecoveryWorkspaces(ctx)
+	evidence := &recoveryEvidence{userID: userID, profiles: c.profiles.PersonalAssistantRecoveryProfiles()}
+	for i := range evidence.profiles {
+		p := &evidence.profiles[i]
+		p.Name = strings.TrimSpace(p.Name)
+		p.AssistantID = strings.TrimSpace(p.AssistantID)
+		p.HireRequestID = strings.TrimSpace(p.HireRequestID)
+	}
+	evidence.workspaces, err = c.workspaces.PersonalAssistantRecoveryWorkspaces(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
-	if len(profiles) == 0 && len(workspaces) == 0 {
-		return nil, ErrNotFound
+	for i := range evidence.workspaces {
+		w := &evidence.workspaces[i]
+		w.ID = strings.TrimSpace(w.ID)
+		w.Name = strings.TrimSpace(w.Name)
+		w.OwnerUserID = strings.TrimSpace(w.OwnerUserID)
+		w.AssistantID = strings.TrimSpace(w.AssistantID)
+		w.HQRequestID = strings.TrimSpace(w.HQRequestID)
 	}
-	if len(profiles) != 1 {
-		return nil, ErrRepairNeeded
+	if len(evidence.profiles) == 0 && len(evidence.workspaces) == 0 {
+		return nil, nil, "", ErrNotFound
 	}
-	profile := profiles[0]
-	profile.Name = strings.TrimSpace(profile.Name)
-	profile.AssistantID = strings.TrimSpace(profile.AssistantID)
-	profile.HireRequestID = strings.TrimSpace(profile.HireRequestID)
-	if profile.Name == "" || profile.AssistantID == "" || profile.HireRequestID == "" ||
-		profile.Role != types.RoleOrchestrator {
-		return nil, ErrRepairNeeded
-	}
-
+	// The designation is read before any verdict so a blocked result can
+	// always say which workspace Ori currently treats as the Personal HQ.
 	status, err := c.hq.Status(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
 	if status == nil {
-		return nil, errors.New("personal assistant: recovery hq status is unavailable")
+		return nil, nil, "", errors.New("personal assistant: recovery hq status is unavailable")
+	}
+	evidence.status = status
+
+	switch {
+	case len(evidence.profiles) == 0:
+		return nil, evidence, RecoveryIssueProfileMissing, nil
+	case len(evidence.profiles) > 1:
+		return nil, evidence, RecoveryIssueProfileDuplicate, nil
+	}
+	profile := evidence.profiles[0]
+	if profile.Name == "" || profile.AssistantID == "" || profile.HireRequestID == "" {
+		return nil, evidence, RecoveryIssueProfileIncomplete, nil
+	}
+	if profile.Role != types.RoleOrchestrator {
+		return nil, evidence, RecoveryIssueProfileRole, nil
 	}
 
 	hiredAt := profile.CreatedAt.UTC()
@@ -179,46 +233,53 @@ func (c *RecoveryCoordinator) Inspect(ctx context.Context, userID string) (*Reco
 
 	// A profile-only hire is safe only when an independent workspace scan finds
 	// no Personal HQ marker and the designation agrees that no HQ exists.
-	if len(workspaces) == 0 {
+	if len(evidence.workspaces) == 0 {
 		if status.HasDesignation() || status.Valid || status.Workspace != nil ||
 			strings.TrimSpace(status.WorkspaceID) != "" || strings.TrimSpace(status.EntryAgentInstanceID) != "" {
-			return nil, ErrRepairNeeded
+			return nil, evidence, RecoveryIssueDesignationWithoutHQ, nil
 		}
-		return candidate, nil
+		return candidate, evidence, "", nil
 	}
 	// Even two otherwise-valid HQ folders are ambiguous. A designation does not
 	// authorize silently abandoning or overwriting the other durable artifact.
-	if len(workspaces) != 1 {
-		return nil, ErrRepairNeeded
+	if len(evidence.workspaces) != 1 {
+		return nil, evidence, RecoveryIssueHQDuplicate, nil
 	}
 
-	evidence := workspaces[0]
-	evidence.ID = strings.TrimSpace(evidence.ID)
-	evidence.OwnerUserID = strings.TrimSpace(evidence.OwnerUserID)
-	evidence.AssistantID = strings.TrimSpace(evidence.AssistantID)
-	evidence.HQRequestID = strings.TrimSpace(evidence.HQRequestID)
-	if !evidence.PresentationValid || evidence.ID == "" || evidence.OwnerUserID != userID ||
-		evidence.AssistantID != profile.AssistantID || evidence.HQRequestID == "" {
-		return nil, ErrRepairNeeded
+	hq := evidence.workspaces[0]
+	switch {
+	case hq.ID == "":
+		return nil, evidence, RecoveryIssueHQMarkerInvalid, nil
+	case hq.OwnerUserID != userID:
+		return nil, evidence, RecoveryIssueHQForeignOwner, nil
+	case !hq.PresentationValid || hq.HQRequestID == "":
+		return nil, evidence, RecoveryIssueHQMarkerInvalid, nil
+	case hq.AssistantID != profile.AssistantID:
+		return nil, evidence, RecoveryIssueAssistantMismatch, nil
 	}
 	if !status.Valid || !status.HasDesignation() || status.Workspace == nil ||
 		strings.TrimSpace(status.UserID) != userID ||
-		strings.TrimSpace(status.WorkspaceID) != evidence.ID {
-		return nil, ErrRepairNeeded
+		strings.TrimSpace(status.WorkspaceID) != hq.ID {
+		return nil, evidence, RecoveryIssueDesignationMismatch, nil
 	}
 	workspace := status.Workspace
-	if strings.TrimSpace(workspace.ID) != evidence.ID || strings.TrimSpace(workspace.OwnerUserID) != userID {
-		return nil, ErrRepairNeeded
+	if strings.TrimSpace(workspace.ID) != hq.ID {
+		return nil, evidence, RecoveryIssueDesignationMismatch, nil
+	}
+	if strings.TrimSpace(workspace.OwnerUserID) != userID {
+		return nil, evidence, RecoveryIssueHQForeignOwner, nil
 	}
 	presentation, err := parseRecoveryHQPresentation(workspace)
-	if err != nil || presentation.AssistantID != profile.AssistantID ||
-		presentation.RequestID != evidence.HQRequestID {
-		return nil, ErrRepairNeeded
+	switch {
+	case err != nil || presentation.RequestID != hq.HQRequestID:
+		return nil, evidence, RecoveryIssueHQMarkerInvalid, nil
+	case presentation.AssistantID != profile.AssistantID:
+		return nil, evidence, RecoveryIssueAssistantMismatch, nil
 	}
 
-	entryID, ok := recoveryEntryAgent(evidence.EntryAgents, profile.Name)
+	entryID, ok := recoveryEntryAgent(hq.EntryAgents, profile.Name)
 	if !ok {
-		return nil, ErrRepairNeeded
+		return nil, evidence, RecoveryIssueEntryMismatch, nil
 	}
 	currentEntries := make([]RecoveryEntryAgent, 0, 1)
 	for _, instance := range workspace.AgentInstances {
@@ -229,28 +290,32 @@ func (c *RecoveryCoordinator) Inspect(ctx context.Context, userID string) (*Reco
 	currentEntryID, ok := recoveryEntryAgent(currentEntries, profile.Name)
 	if !ok || currentEntryID != entryID || strings.TrimSpace(status.EntryAgentInstanceID) != entryID ||
 		!strings.EqualFold(strings.TrimSpace(status.EntryAgentName), profile.Name) {
-		return nil, ErrRepairNeeded
+		return nil, evidence, RecoveryIssueEntryMismatch, nil
 	}
 	if c.briefs == nil {
-		return nil, errors.New("personal assistant: recovery daily brief service is unavailable")
+		return nil, nil, "", errors.New("personal assistant: recovery daily brief service is unavailable")
 	}
-	brief, err := c.briefs.GetConfig(ctx, evidence.ID)
+	brief, err := c.briefs.GetConfig(ctx, hq.ID)
 	if err != nil {
 		if errors.Is(err, dailybrief.ErrConfigNotFound) {
-			return nil, ErrRepairNeeded
+			evidence.briefMissing = true
+			return nil, evidence, RecoveryIssueBriefMissing, nil
 		}
-		return nil, err
+		return nil, nil, "", err
 	}
-	if brief == nil || strings.TrimSpace(brief.UserID) != userID ||
-		strings.TrimSpace(brief.WorkspaceID) != evidence.ID {
-		return nil, ErrRepairNeeded
+	if brief == nil {
+		evidence.briefMissing = true
+		return nil, evidence, RecoveryIssueBriefMissing, nil
+	}
+	if strings.TrimSpace(brief.UserID) != userID || strings.TrimSpace(brief.WorkspaceID) != hq.ID {
+		return nil, evidence, RecoveryIssueBriefMismatch, nil
 	}
 
 	candidate.Status = StatusPaused
-	candidate.HQRequestID = evidence.HQRequestID
-	candidate.HQWorkspaceID = evidence.ID
+	candidate.HQRequestID = hq.HQRequestID
+	candidate.HQWorkspaceID = hq.ID
 	candidate.HQEntryAgentInstanceID = entryID
-	return candidate, nil
+	return candidate, evidence, "", nil
 }
 
 func recoveryEntryAgent(entries []RecoveryEntryAgent, profileName string) (string, bool) {
@@ -294,7 +359,12 @@ func (c *RecoveryCoordinator) Repair(ctx context.Context, userID string, ifVersi
 	if err != nil {
 		return nil, err
 	}
+	return c.createRecovered(ctx, userID, candidate)
+}
 
+// createRecovered writes the relationship row for a fully validated candidate.
+// Callers hold c.mu and have confirmed that no relationship row exists.
+func (c *RecoveryCoordinator) createRecovered(ctx context.Context, userID string, candidate *RecoveryCandidate) (*State, error) {
 	state := NewState(userID)
 	state.AssistantID = candidate.AssistantID
 	state.Status = candidate.Status

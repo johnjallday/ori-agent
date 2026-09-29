@@ -1,10 +1,13 @@
 package personalassistant
 
 import (
+	"context"
 	"sort"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 )
 
 // AgentStoreProfileReader adapts the global agent store to the narrow
@@ -12,7 +15,8 @@ import (
 // on the named profile — and deliberately drops every other field of the agent
 // record so a read projection can never leak a prompt, model, or credential.
 type AgentStoreProfileReader struct {
-	agents store.Store
+	agents      store.Store
+	attachments ContinuityAttachmentReader
 }
 
 // NewAgentStoreProfileReader wraps the global agent store.
@@ -20,10 +24,79 @@ func NewAgentStoreProfileReader(agents store.Store) *AgentStoreProfileReader {
 	return &AgentStoreProfileReader{agents: agents}
 }
 
+// NewContinuityAgentStoreProfileReader opts in to receipt-owned exact profile
+// reads. Do not compose this with a legacy store that cannot resolve workspace
+// identity; absence then fails closed for imported assistant relationships.
+func NewContinuityAgentStoreProfileReader(agents store.Store, attachments ContinuityAttachmentReader) *AgentStoreProfileReader {
+	return &AgentStoreProfileReader{agents: agents, attachments: attachments}
+}
+
+func (r *AgentStoreProfileReader) ImportedProfileProvenance(ctx context.Context, workspaceID, name string) (ProfileProvenance, bool, bool) {
+	if r == nil || r.attachments == nil || !workspacecontinuity.ValidID(workspaceID) {
+		return ProfileProvenance{}, false, false
+	}
+	attachment, err := r.attachments.Attachment(ctx, workspaceID)
+	if err != nil {
+		return ProfileProvenance{}, false, true
+	}
+	// Attachment rows are written only by imports, discovery and preparation.
+	// A relationship whose HQ has none (or a native one) predates continuity
+	// and keeps its original roster provenance lookup.
+	if attachment.Version == 0 || attachment.State == workspacecontinuity.Native {
+		return ProfileProvenance{}, false, false
+	}
+	if attachment.State != workspacecontinuity.ImportedInactive && attachment.State != workspacecontinuity.ImportedActive || attachment.Disposition != workspacecontinuity.AdoptedHQ {
+		return ProfileProvenance{}, false, true
+	}
+	scoped, ok := r.agents.(interface {
+		WorkspaceAgentExact(string, string) (*agent.Agent, bool)
+	})
+	if !ok || strings.TrimSpace(name) == "" {
+		return ProfileProvenance{}, false, true
+	}
+	entry, found := scoped.WorkspaceAgentExact(workspaceID, name)
+	if !found || entry == nil {
+		return ProfileProvenance{}, false, true
+	}
+	var tags []string
+	if entry.Metadata != nil {
+		tags = entry.Metadata.Tags
+	}
+	return ProfileProvenanceFromTags(name, tags), true, true
+}
+
 var (
 	_ ProfileReader         = (*AgentStoreProfileReader)(nil)
 	_ RecoveryProfileLister = (*AgentStoreProfileReader)(nil)
+	_ RecoveryProfileFinder = (*AgentStoreProfileReader)(nil)
 )
+
+// PersonalAssistantRecoveryProfileByName reads one profile whether or not it
+// carries an assistant marker, with the same bounded fields as the recovery
+// scan. A recovery fix uses it to offer a Personal HQ's lead agent.
+func (r *AgentStoreProfileReader) PersonalAssistantRecoveryProfileByName(name string) (RecoveryProfile, bool) {
+	name = strings.TrimSpace(name)
+	if r == nil || r.agents == nil || name == "" {
+		return RecoveryProfile{}, false
+	}
+	record, found := r.agents.GetAgent(name)
+	if !found || record == nil {
+		return RecoveryProfile{}, false
+	}
+	var tags []string
+	if record.Metadata != nil {
+		tags = record.Metadata.Tags
+	}
+	provenance, _ := recoveryProfileProvenance(name, tags)
+	profile := RecoveryProfile{
+		Name: name, AssistantID: provenance.AssistantID, HireRequestID: provenance.HireRequestID,
+		Role: record.Role, Appearance: record.Appearance.Clone(),
+	}
+	if record.Statistics != nil {
+		profile.CreatedAt = record.Statistics.CreatedAt
+	}
+	return profile, true
+}
 
 // PersonalAssistantProfileProvenance returns bounded ownership for the profile
 // stored under name.

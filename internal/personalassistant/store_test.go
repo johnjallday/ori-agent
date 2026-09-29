@@ -9,15 +9,17 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 )
 
 func newTestStore(t *testing.T) (*SQLiteStore, *database.DB) {
 	t.Helper()
-	db, err := database.Open(context.Background(), &database.Config{InMemory: true, WALMode: false})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := testdb.Open(t)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	return NewSQLiteStore(db), db
 }
 

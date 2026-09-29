@@ -275,10 +275,17 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 		workspace.OrderIndex = nextIndex
 	}
 
-	// Serialize all JSON fields using helper
-	f := serializeWorkspaceFields(workspace)
+	return insertWorkspace(ctx, s.db, workspace)
+}
 
-	_, err := s.db.ExecContext(ctx, `
+// insertWorkspace preserves the caller's IDs, dates, order and version. Ordinary
+// creation prepares those above; receipt-owned restoration supplies its reviewed
+// projection and transaction instead, without creation callbacks/defaults.
+func insertWorkspace(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, workspace *Workspace) error {
+	f := serializeWorkspaceFields(workspace)
+	_, err := exec.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, folder_slug, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
 			agent_instances, tags, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,

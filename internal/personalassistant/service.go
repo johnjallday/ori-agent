@@ -385,6 +385,15 @@ func (s *Service) projectPreHQ(state *State, projection *Projection) (*Projectio
 }
 
 func (s *Service) validateHQ(ctx context.Context, userID string, state *State, projection *Projection) bool {
+	if scoped, ok := s.profiles.(ImportedProfileReader); ok {
+		profile, found, handled := scoped.ImportedProfileProvenance(ctx, state.HQWorkspaceID, state.GlobalAgentProfileName)
+		if handled && (!found || !profile.OwnedBy(state.AssistantID) || profile.Name != state.GlobalAgentProfileName) {
+			projection.Availability.PersonalHQ = unavailableSource("imported_profile_missing")
+			projection.Availability.AgentInstance = unavailableSource("imported_profile_missing")
+			projection.Availability.DailyBrief = unavailableSource("assistant_unavailable")
+			return false
+		}
+	}
 	if s.personalHQ == nil {
 		projection.Availability.PersonalHQ = dependencyErrorSource("service_unavailable")
 		projection.Availability.AgentInstance = dependencyErrorSource("hq_unavailable")

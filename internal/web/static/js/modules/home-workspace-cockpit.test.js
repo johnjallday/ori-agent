@@ -18,7 +18,6 @@ import {
   PANEL_NONE,
   PANEL_UPDATES,
   PANEL_QUESTS,
-  PANEL_CAPTURE,
   togglePanelState,
   panelTriggerId,
   updatesBadgeView,
@@ -31,6 +30,7 @@ import {
   readEconomy,
   economyMapSnapshot,
   energyBarView,
+  resourceValueView,
   formatTokens,
   resourceHelpView,
   isGroupWorkspace,
@@ -46,6 +46,7 @@ import {
   workspaceRailView,
   renderWorkspaceRailHTML,
   workspaceAreaState,
+  mapInvitationView,
   hqSiteVisible,
   workspaceHydrationAllowed,
   renderWorkspaceAreaStatusHTML,
@@ -75,6 +76,10 @@ import {
   validateCapture,
   captureRequestBody,
   captureAvailability,
+  captureDestinationView,
+  captureSuccessOutcome,
+  captureShortcutSubmits,
+  captureInitialFocus,
   askTargetDescription
 } from './home-workspace-cockpit.js';
 
@@ -624,6 +629,63 @@ test('workspaceAreaState: authoritative zero workspaces renders the map with or 
   );
 });
 
+test('mapInvitationView invites on an authoritative empty map and on a map holding only the valid HQ', () => {
+  const empty = workspaceAreaState({ workspaces: [], hqSiteVisible: true });
+  assert.deepEqual(mapInvitationView({ areaState: empty, workspaces: [] }), {
+    show: true,
+    variant: 'empty'
+  });
+  // An unbuilt HQ site is scenery, not a workspace: still the empty voice.
+  assert.equal(
+    mapInvitationView({
+      areaState: empty,
+      workspaces: [],
+      hqStatus: { valid: false, hq_onboarding_state: 'unseen' }
+    }).variant,
+    'empty'
+  );
+
+  const hq = { id: 'hq-1', name: 'Home base', kind: 'workspace' };
+  const ready = workspaceAreaState({ workspaces: [hq] });
+  assert.deepEqual(
+    mapInvitationView({
+      areaState: ready,
+      workspaces: [hq],
+      hqStatus: { valid: true, workspace_id: 'hq-1' }
+    }),
+    { show: true, variant: 'hq-only' }
+  );
+});
+
+test('mapInvitationView stays quiet whenever the state is not authoritative or not sparse', () => {
+  const hq = { id: 'hq-1', name: 'Home base' };
+  const other = { id: 'ws-2', name: 'Studio' };
+  const valid = { valid: true, workspace_id: 'hq-1' };
+  const quiet = { show: false, variant: '' };
+  const view = (areaInput, workspaces, hqStatus) =>
+    mapInvitationView({ areaState: workspaceAreaState(areaInput), workspaces, hqStatus });
+
+  // Loading, failed, and gated loads never read as empty.
+  assert.deepEqual(view({ loading: true, workspaces: [] }, [], valid), quiet);
+  assert.deepEqual(view({ error: new Error('boom'), workspaces: [] }, [], valid), quiet);
+  assert.deepEqual(
+    view({ workspaces: [], onboardingGate: { state: 'required', message: 'Finish' } }, [], valid),
+    quiet
+  );
+  // One workspace that is not the HQ, or an HQ status that has not arrived or
+  // does not validate, is not "HQ-only".
+  assert.deepEqual(view({ workspaces: [other] }, [other], valid), quiet);
+  assert.deepEqual(view({ workspaces: [hq] }, [hq], null), quiet);
+  assert.deepEqual(view({ workspaces: [hq] }, [hq], { valid: false, workspace_id: 'hq-1' }), quiet);
+  // More than one workspace — including members of a collapsed group, which
+  // the flattened list still carries — is populated.
+  const member = { id: 'ws-3', name: 'Member', parent_id: 'grp' };
+  assert.deepEqual(view({ workspaces: [hq, member] }, [hq, member], valid), quiet);
+  // A group on its own is not an HQ.
+  const group = { id: 'hq-1', name: 'Group', kind: 'group' };
+  assert.deepEqual(view({ workspaces: [group] }, [group], valid), quiet);
+});
+
 test('workspaceAreaState: the HQ site never overrides loading, error, or the onboarding gate', () => {
   // Drawing a landmark over an unresolved account would be the same lie FR114
   // exists to prevent — these states outrank it.
@@ -895,6 +957,19 @@ test('renderSignalFiltersHTML marks the active chip and flags unavailable counts
   assert.match(html, /data-cockpit-signal="running"[^>]*aria-pressed="false"/);
   assert.match(html, /data-unavailable="true"/);
   assert.match(html, /—/);
+});
+
+test('renderSignalFiltersHTML quiets a known zero but never an unavailable count', () => {
+  const html = renderSignalFiltersHTML({ attention: 2, running: 0, today: null }, '');
+  const chip = signal =>
+    html.match(new RegExp(`<button[^>]*data-cockpit-signal="${signal}"[^>]*>`))[0];
+  assert.match(chip('running'), /data-zero="true"/);
+  assert.doesNotMatch(chip('attention'), /data-zero/);
+  // "We cannot tell" is not "nothing matches": the Today chip stays unquieted.
+  assert.doesNotMatch(chip('today'), /data-zero/);
+  // A selected chip keeps its pressed state even when its count is zero.
+  const active = renderSignalFiltersHTML({ attention: 0, running: 0, today: 0 }, SIGNAL_RUNNING);
+  assert.match(active, /data-cockpit-signal="running" data-zero="true" aria-pressed="true"/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1480,6 +1555,99 @@ test('captureAvailability explains the requirement rather than failing silently'
   assert.notEqual(availability.message, '');
 });
 
+test('captureDestinationView links to the HQ backlog by slug, never by id or a guess', () => {
+  const status = {
+    valid: true,
+    workspace_id: 'hq-1',
+    workspace: { id: 'hq-1', folder_slug: 'personal-hq' }
+  };
+  assert.deepEqual(captureDestinationView(status, []), {
+    workspaceId: 'hq-1',
+    slug: 'personal-hq',
+    backlogURL: '/workspaces/personal-hq?panel=backlog'
+  });
+  // The loaded list can supply the slug when the status has no workspace.
+  assert.equal(
+    captureDestinationView({ valid: true, workspace_id: 'hq-1' }, [
+      { id: 'hq-1', folder_slug: 'home base' }
+    ]).backlogURL,
+    '/workspaces/home%20base?panel=backlog'
+  );
+  // Unresolved: no link at all — never '/workspaces/hq-1', never a guess.
+  const unresolved = captureDestinationView({ valid: true, workspace_id: 'hq-1' }, [
+    { id: 'other', folder_slug: 'other' }
+  ]);
+  assert.deepEqual(unresolved, { workspaceId: 'hq-1', slug: '', backlogURL: '' });
+  // A status workspace for a different id is not trusted for the slug.
+  assert.equal(
+    captureDestinationView(
+      { valid: true, workspace_id: 'hq-1', workspace: { id: 'hq-2', folder_slug: 'wrong' } },
+      []
+    ).backlogURL,
+    ''
+  );
+  assert.equal(captureDestinationView({ valid: false, workspace_id: 'hq-1' }, []).backlogURL, '');
+  assert.equal(captureDestinationView(null, []).workspaceId, '');
+});
+
+test('captureSuccessOutcome clears and closes only when the submitted text is still what is there', () => {
+  const snapshot = { title: 'Call Sam', details: 'about the lease' };
+  assert.deepEqual(captureSuccessOutcome(snapshot, { ...snapshot }), { clear: true, close: true });
+  // Typing after submit (or after reopening) keeps the newer text and the dialog.
+  assert.deepEqual(
+    captureSuccessOutcome(snapshot, { title: 'Call Sam today', details: 'about the lease' }),
+    {
+      clear: false,
+      close: false
+    }
+  );
+  assert.deepEqual(captureSuccessOutcome(snapshot, { title: 'Call Sam', details: '' }), {
+    clear: false,
+    close: false
+  });
+  assert.deepEqual(captureSuccessOutcome(null, { ...snapshot }), { clear: false, close: false });
+});
+
+test('captureShortcutSubmits: Cmd/Ctrl+Enter only, never a plain Enter or an IME confirmation', () => {
+  assert.equal(captureShortcutSubmits({ key: 'Enter', metaKey: true }), true);
+  assert.equal(captureShortcutSubmits({ key: 'Enter', ctrlKey: true }), true);
+  // A plain Enter in the details must stay a new line.
+  assert.equal(captureShortcutSubmits({ key: 'Enter' }), false);
+  assert.equal(captureShortcutSubmits({ key: 'Enter', shiftKey: true }), false);
+  // IME composition: Enter confirms a candidate.
+  assert.equal(captureShortcutSubmits({ key: 'Enter', metaKey: true, isComposing: true }), false);
+  assert.equal(captureShortcutSubmits({ key: 'Enter', ctrlKey: true, keyCode: 229 }), false);
+  assert.equal(captureShortcutSubmits({ key: 'a', metaKey: true }), false);
+  assert.equal(captureShortcutSubmits(null), false);
+});
+
+test('captureInitialFocus: the title on a fine pointer, the heading on touch', () => {
+  assert.equal(captureInitialFocus({ coarsePointer: false }), 'title');
+  assert.equal(captureInitialFocus({ coarsePointer: true }), 'heading');
+  assert.equal(captureInitialFocus(), 'title');
+});
+
+test('the capture dialog keeps the field limits and one stable host outside the map grid', () => {
+  const dashboard = readFileSync(
+    new URL('../../../templates/components/dashboard.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.doesNotMatch(dashboard, /cockpitCapturePanel/, 'no inline capture row remains');
+  const modal = dashboard.slice(dashboard.indexOf('id="cockpitCaptureModal"'));
+  assert.match(modal, /id="cockpitCaptureTitle"[^>]*maxlength="300"/);
+  assert.match(modal, /id="cockpitCaptureDetails"[^>]*maxlength="2000"/);
+  assert.match(modal, /Personal HQ · Backlog/);
+  // The host sits outside #homeCockpit, like the context modal.
+  assert.ok(
+    dashboard.indexOf('id="cockpitCaptureModal"') > dashboard.indexOf('id="cockpitContextModal"')
+  );
+  // The workspace area no longer reserves a capture track.
+  assert.match(
+    cockpitCSS,
+    /\.cockpit-workspace-area \{[^}]*grid-template-rows: auto minmax\(0, 1fr\)/
+  );
+});
+
 // ===========================================================================
 // Group 5 — Ask Ori in the context rail
 // ===========================================================================
@@ -1600,26 +1768,27 @@ test('contextModalShouldShow rejects bare, unavailable, and Ask Ori states', () 
 test('togglePanelState: activating a closed trigger opens only that panel (FR7)', () => {
   assert.equal(togglePanelState(PANEL_NONE, PANEL_UPDATES), PANEL_UPDATES);
   assert.equal(togglePanelState(PANEL_NONE, PANEL_QUESTS), PANEL_QUESTS);
-  assert.equal(togglePanelState(PANEL_NONE, PANEL_CAPTURE), PANEL_CAPTURE);
 });
 
 test('togglePanelState: activating the SAME open trigger closes it (FR7)', () => {
   assert.equal(togglePanelState(PANEL_UPDATES, PANEL_UPDATES), PANEL_NONE);
   assert.equal(togglePanelState(PANEL_QUESTS, PANEL_QUESTS), PANEL_NONE);
-  assert.equal(togglePanelState(PANEL_CAPTURE, PANEL_CAPTURE), PANEL_NONE);
 });
 
-test('togglePanelState: activating a DIFFERENT trigger replaces whichever was open (FR8-FR9)', () => {
+test('togglePanelState: activating a DIFFERENT trigger replaces whichever was open (FR8)', () => {
   assert.equal(togglePanelState(PANEL_UPDATES, PANEL_QUESTS), PANEL_QUESTS);
   assert.equal(togglePanelState(PANEL_QUESTS, PANEL_UPDATES), PANEL_UPDATES);
-  assert.equal(togglePanelState(PANEL_UPDATES, PANEL_CAPTURE), PANEL_CAPTURE);
-  assert.equal(togglePanelState(PANEL_CAPTURE, PANEL_QUESTS), PANEL_QUESTS);
 });
 
 test('panelTriggerId: closing a panel restores focus to the button that owns it (FR11)', () => {
   assert.equal(panelTriggerId(PANEL_UPDATES), 'cockpitRailToggle');
   assert.equal(panelTriggerId(PANEL_QUESTS), 'cockpitQuestsToggle');
-  assert.equal(panelTriggerId(PANEL_CAPTURE), 'cockpitCaptureBtn');
+});
+
+test('Quick Capture is no longer a header panel: it has no panel value or panel trigger', async () => {
+  const module = await import('./home-workspace-cockpit.js');
+  assert.equal(module.PANEL_CAPTURE, undefined);
+  assert.equal(panelTriggerId('capture'), '');
 });
 
 test('panelTriggerId: no panel open means no focus restoration target', () => {
@@ -1635,22 +1804,8 @@ test('panelTriggerId: no panel open means no focus restoration target', () => {
 // ===========================================================================
 
 test('togglePanelState: a full walk through every trigger never leaves more than one panel value at a time', () => {
-  const trail = [
-    PANEL_UPDATES,
-    PANEL_QUESTS,
-    PANEL_QUESTS,
-    PANEL_CAPTURE,
-    PANEL_UPDATES,
-    PANEL_UPDATES
-  ];
-  const expected = [
-    PANEL_UPDATES,
-    PANEL_QUESTS,
-    PANEL_NONE,
-    PANEL_CAPTURE,
-    PANEL_UPDATES,
-    PANEL_NONE
-  ];
+  const trail = [PANEL_UPDATES, PANEL_QUESTS, PANEL_QUESTS, PANEL_UPDATES, PANEL_UPDATES];
+  const expected = [PANEL_UPDATES, PANEL_QUESTS, PANEL_NONE, PANEL_UPDATES, PANEL_NONE];
   let panel = PANEL_NONE;
   const observed = trail.map(requested => {
     panel = togglePanelState(panel, requested);
@@ -1660,7 +1815,7 @@ test('togglePanelState: a full walk through every trigger never leaves more than
 });
 
 test('context modal visibility requires an explicit request, regardless of header panel data', () => {
-  for (const panel of [PANEL_NONE, PANEL_UPDATES, PANEL_QUESTS, PANEL_CAPTURE]) {
+  for (const panel of [PANEL_NONE, PANEL_UPDATES, PANEL_QUESTS]) {
     assert.equal(
       contextModalShouldShow({ railState: RAIL_WORKSPACE, requestedOpen: false }),
       false,
@@ -1771,6 +1926,37 @@ test('a day with no tokens reads as empty, not as missing', () => {
   const view = energyBarView({ usedToday: 0, dailyFigure: 1000000 });
   assert.equal(view.percent, 0);
   assert.equal(view.text, '0%');
+  // Idle is the quiet header treatment; the reading itself stays on screen.
+  assert.equal(view.idle, true);
+});
+
+test('any energy used today is not idle, with or without a figure', () => {
+  assert.equal(energyBarView({ usedToday: 1, dailyFigure: 1000000 }).idle, false);
+  assert.equal(energyBarView({ usedToday: 5000, dailyFigure: 0 }).idle, false);
+  assert.equal(energyBarView({ usedToday: 1250000, dailyFigure: 1000000 }).idle, false);
+});
+
+test('resourceValueView quiets only an authoritative zero, never an unavailable balance', () => {
+  assert.deepEqual(resourceValueView(0), { text: '0', zero: true });
+  assert.deepEqual(resourceValueView(12), { text: '12', zero: false });
+  // Unavailable renders as an em dash at full weight — never as a quiet "0".
+  for (const missing of [null, undefined, '', 'nope']) {
+    assert.deepEqual(resourceValueView(missing), { text: '—', zero: false });
+  }
+});
+
+test('the resource group labels Energy and keeps every label at narrow widths', () => {
+  const dashboard = readFileSync(
+    new URL('../../../templates/components/dashboard.tmpl', import.meta.url),
+    'utf8'
+  );
+  const energy = dashboard.slice(
+    dashboard.indexOf('data-economy-energy'),
+    dashboard.indexOf('data-economy-energy-text')
+  );
+  assert.match(energy, /class="cockpit-economy__chip-label">Energy</);
+  // The old narrow-width rule hid every resource label, leaving bare numbers.
+  assert.doesNotMatch(cockpitCSS, /\.cockpit-economy__chip-label\s*\{\s*display:\s*none/);
 });
 
 test('energy handles a missing payload without dividing by nothing', () => {

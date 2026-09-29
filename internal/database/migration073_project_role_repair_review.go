@@ -10,7 +10,7 @@ import (
 // cannot itself change an old child's link, Home or portable provenance.
 // This table authorizes no mutation until a separate typed commit/recovery
 // protocol exists; a token alone must never be accepted as a staffing review.
-func (db *DB) migration064ProjectRoleRepairReview(ctx context.Context) error {
+func (db *DB) migration073ProjectRoleRepairReview(ctx context.Context) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS project_role_repair_review (
 			token TEXT PRIMARY KEY,

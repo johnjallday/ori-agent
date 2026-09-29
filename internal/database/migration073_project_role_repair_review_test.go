@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestMigration064ProjectRoleRepairReviewHasSeparateBoundedConsentIdentity(t *testing.T) {
+func TestMigration073ProjectRoleRepairReviewHasSeparateBoundedConsentIdentity(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(ctx, &Config{InMemory: true})
 	if err != nil {
@@ -15,10 +15,10 @@ func TestMigration064ProjectRoleRepairReviewHasSeparateBoundedConsentIdentity(t 
 	}
 	defer func() { _ = db.Close() }()
 	var version int
-	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 64 {
+	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("migration not applied: %d %v", version, err)
 	}
-	if err := db.migration064ProjectRoleRepairReview(ctx); err != nil {
+	if err := db.migration073ProjectRoleRepairReview(ctx); err != nil {
 		t.Fatalf("idempotent schema migration: %v", err)
 	}
 	now := time.Now().UTC()

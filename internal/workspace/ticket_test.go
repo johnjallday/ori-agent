@@ -236,6 +236,10 @@ func TestNormalizeTicketSource(t *testing.T) {
 	if _, err := NormalizeTicketSource("telepathy"); err == nil {
 		t.Fatalf("expected error for unsupported source")
 	}
+	// Home's Quick Capture has always sent this provenance; it must be accepted.
+	if got, err := NormalizeTicketSource("home_quick_capture"); err != nil || got != TicketSourceHomeQuickCapture {
+		t.Fatalf("home quick capture source = %q, %v", got, err)
+	}
 }
 
 func TestNormalizeLinkedNoteIDs(t *testing.T) {

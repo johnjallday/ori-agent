@@ -378,6 +378,9 @@ func (s *SQLiteStore) ListHistory(ctx context.Context, workspaceID string, limit
 			(SELECT id FROM daily_brief_revision r2
 				WHERE r2.workspace_id = r.workspace_id AND r2.local_date = r.local_date AND r2.is_current = 1
 				LIMIT 1) as current_id,
+			(SELECT id FROM daily_brief_revision r3
+				WHERE r3.workspace_id = r.workspace_id AND r3.local_date = r.local_date AND r3.status IN ('succeeded','partial')
+				ORDER BY r3.revision_number DESC, r3.created_at DESC LIMIT 1) as latest_id,
 			COUNT(*) as revision_count,
 			MAX(status) as status,
 			MAX(generated_at) as generated_at
@@ -395,13 +398,14 @@ func (s *SQLiteStore) ListHistory(ctx context.Context, workspaceID string, limit
 	var out []HistorySummary
 	for rows.Next() {
 		var h HistorySummary
-		var currentID sql.NullString
+		var currentID, latestID sql.NullString
 		var status string
 		var generatedAt sql.NullString
-		if err := rows.Scan(&h.LocalDate, &currentID, &h.RevisionCount, &status, &generatedAt); err != nil {
+		if err := rows.Scan(&h.LocalDate, &currentID, &latestID, &h.RevisionCount, &status, &generatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan daily brief history row: %w", err)
 		}
 		h.CurrentRevisionID = currentID.String
+		h.LatestRevisionID = latestID.String
 		h.Status = GenerationStatus(status)
 		if generatedAt.Valid {
 			h.GeneratedAt = parseSQLiteTime(generatedAt.String)

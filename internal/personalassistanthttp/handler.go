@@ -906,6 +906,9 @@ func (h *Handler) writeContinuityServiceError(w http.ResponseWriter, r *http.Req
 		// An expected setup stage, not corruption: never reuse repair language
 		// for a relationship that just has no Personal HQ yet.
 		writeContinuityError(w, http.StatusConflict, "personal_hq_required", "Build Personal HQ before changing this setting.", nil)
+	case errors.Is(err, personalassistant.ErrImportedRenameUnsupported):
+		writeContinuityError(w, http.StatusConflict, "imported_rename_unavailable",
+			"This assistant came from an imported workspace. Renaming it here is not available yet; its name and history are unchanged.", nil)
 	case errors.Is(err, personalassistant.ErrRepairNeeded), errors.Is(err, personalassistant.ErrNotFound):
 		writeContinuityError(w, http.StatusConflict, "repair_required", "The assistant relationship needs repair before this change can continue.", nil)
 	default:

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/database"
 )
 
 // TestIntegration_SessionLifecycle tests the full lifecycle of a session:
@@ -286,12 +285,8 @@ func TestIntegration_LRUEvictionAndRestore(t *testing.T) {
 	ctx := context.Background()
 
 	// Create store with small cache (3 sessions max)
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-	store := NewHybridStoreWithDB(db, 3)
-	defer func() { _ = store.Close() }()
+	store, cleanup := setupHybridStore(t, 3)
+	defer cleanup()
 
 	// Create 5 sessions (more than cache size)
 	var sessionIDs []string
@@ -461,18 +456,9 @@ func TestIntegration_StorageStats(t *testing.T) {
 	}
 }
 
-// createTestStore creates a test hybrid store with in-memory database
+// createTestStore creates a test hybrid store with an isolated database
 func createTestStore(t *testing.T) (HybridStore, func()) {
 	t.Helper()
 
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("Failed to open test database: %v", err)
-	}
-
-	store := NewHybridStoreWithDB(db, 50)
-	return store, func() {
-		_ = store.Close()
-	}
+	return setupHybridStore(t, 50)
 }

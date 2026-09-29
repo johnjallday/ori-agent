@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { mockHiredAssistant } from './helpers/hired-assistant';
 
 /**
  * Browser suite for the coordinate-based Workspace Map
@@ -253,7 +254,16 @@ async function openMap(page: Page) {
   await page.waitForTimeout(300);
 }
 
+// Home's placement actions (Move, Snap, Reset layout) live under Arrange in the
+// bottom-left dock; opening it changes nothing on its own.
+async function openArrange(page: Page) {
+  const arrange = page.locator('[data-map-arrange]');
+  if ((await arrange.getAttribute('aria-expanded')) !== 'true') await arrange.click();
+  await expect(page.locator('[data-map-arrange-panel]')).toBeVisible();
+}
+
 async function enableMapDrag(page: Page) {
+  await openArrange(page);
   const toggle = page.locator('[data-map-drag]');
   await expect(toggle).toBeEnabled();
   if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
@@ -739,6 +749,7 @@ test.describe('Coordinate Workspace Map', () => {
     }
     await expect(page.locator('[data-map-drag]')).toHaveAttribute('aria-pressed', 'false');
 
+    await openArrange(page);
     await page.click('[data-map-drag]');
     await expect(page.locator('.ws-map-canvas')).toBeFocused();
     await page.locator('.ws-map-canvas').press('ArrowRight');
@@ -1030,7 +1041,9 @@ test.describe('Coordinate Workspace Map', () => {
     expect(Object.keys(beforePositions).length).toBeGreaterThan(0);
     const workspacesBefore = (await listWorkspaces(page)).map(ws => ws.id).sort();
 
-    // Reset Layout is a separate control from Reset View, and it confirms.
+    // Reset Layout is a separate control from Reset View, and it confirms. On
+    // Home it lives under Arrange, which stays open across the re-mount.
+    await openArrange(page);
     page.once('dialog', dialog => dialog.accept());
     await page.click('[data-map-reset-layout]');
     await page.waitForTimeout(800);
@@ -1208,7 +1221,7 @@ test.describe('Coordinate Workspace Map', () => {
         // Every building is inside the part of the canvas the control strip does
         // not cover — framed, not merely zoomed away from.
         const canvas = (await page.locator('.ws-map-canvas').boundingBox())!;
-        const strip = await page.locator('.ws-map-actions').boundingBox();
+        const strip = await page.locator('.ws-map-control-dock').boundingBox();
         const clearBottom = strip ? strip.y : canvas.y + canvas.height;
         const tiles = page.locator('.ws-map-world .ws-map-tile[data-ws-id]');
         const count = await tiles.count();
@@ -1366,6 +1379,7 @@ test.describe('Coordinate Workspace Map', () => {
 
     const toggle = page.locator('[data-map-snap]');
     await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await openArrange(page);
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
     await page.waitForTimeout(500);
@@ -1374,6 +1388,7 @@ test.describe('Coordinate Workspace Map', () => {
     await page.locator('.ws-map-world .ws-map-tile[data-ws-id]').first().waitFor();
     await expect(page.locator('[data-map-snap]')).toHaveAttribute('aria-pressed', 'false');
     // Leave the sandbox as we found it.
+    await openArrange(page);
     await page.locator('[data-map-snap]').click();
   });
 
@@ -1853,4 +1868,147 @@ test.describe('Coordinate Workspace Map', () => {
       );
     });
   });
+});
+
+/**
+ * Home's bottom-left control dock (home-workspace-map-ui-refresh group 2):
+ * zoom, a visible Fit all, Arrange (disclosing Move/Snap/Reset layout), and
+ * help — with the bottom-right corner left to the personal assistant.
+ */
+test.describe('Home control dock', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  test.beforeEach(async ({ page }) => {
+    await skipOnboarding(page);
+  });
+
+  type Box = { x: number; y: number; width: number; height: number };
+  const overlaps = (a: Box, b: Box) =>
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  const inside = (inner: Box, outer: Box) =>
+    inner.x >= outer.x - 1 &&
+    inner.y >= outer.y - 1 &&
+    inner.x + inner.width <= outer.x + outer.width + 1 &&
+    inner.y + inner.height <= outer.y + outer.height + 1;
+
+  test('Arrange is a keyboard disclosure: Tab reaches Move, Escape returns to Arrange, nothing moves', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await openMap(page);
+    const before = await anchors(page);
+    const arrange = page.locator('[data-map-arrange]');
+    const panel = page.locator('[data-map-arrange-panel]');
+
+    // Closed by default, so its controls are not in the tab order.
+    await expect(panel).toBeHidden();
+    await expect(page.locator('[data-map-drag]')).toBeHidden();
+
+    await arrange.focus();
+    await page.keyboard.press('Enter');
+    await expect(arrange).toHaveAttribute('aria-expanded', 'true');
+    await expect(panel).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('[data-map-drag]')).toBeFocused();
+    await expect(page.locator('[data-map-drag]')).toHaveAttribute('aria-pressed', 'false');
+
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await expect(arrange).toBeFocused();
+    expect(await anchors(page), 'opening and closing Arrange moved nothing').toEqual(before);
+  });
+
+  test('Fit all frames every building above the wrapped dock and saves only the camera', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openMap(page);
+    const ops: string[] = [];
+    page.on('request', request => {
+      if (request.method() !== 'PATCH' || !request.url().includes('/api/workspace-map/layout')) {
+        return;
+      }
+      const body = JSON.parse(request.postData() || '{}');
+      (body.operations || []).forEach((operation: { op: string }) => ops.push(operation.op));
+    });
+    const before = await anchors(page);
+
+    await page.locator('[data-map-fit]').click();
+    const live = page.locator('[data-map-live]');
+    await expect(live).toHaveText(/Showing every workspace|Zoomed out as far as the map goes/);
+    await page.waitForTimeout(900);
+    expect([...new Set(ops)], 'camera saves only').toEqual(ops.length ? ['set_viewport'] : []);
+    expect(await anchors(page)).toEqual(before);
+
+    // The phone-width dock wraps onto two rows; framing keeps buildings above it.
+    if ((await live.textContent())?.includes('Showing every workspace')) {
+      const dock = (await page.locator('.ws-map-control-dock').boundingBox())!;
+      const tiles = page.locator('.ws-map-world .ws-map-tile[data-ws-id]');
+      const count = await tiles.count();
+      for (let i = 0; i < count; i += 1) {
+        const box = (await tiles.nth(i).boundingBox())!;
+        expect(box.y + box.height, `tile ${i} is framed above the dock`).toBeLessThanOrEqual(
+          dock.y + 1
+        );
+      }
+    }
+  });
+
+  test('a read-only layout keeps Arrange open-able but its placement actions disabled', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.route(LAYOUT_API, route =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
+    );
+    await openMap(page);
+    await expect(page.locator('.ws-map-canvas.is-readonly')).toBeVisible();
+    await openArrange(page);
+    for (const hook of ['[data-map-drag]', '[data-map-snap]', '[data-map-reset-layout]']) {
+      await expect(page.locator(hook), hook).toBeDisabled();
+    }
+    // Fit all is a camera action, so it still works.
+    await expect(page.locator('[data-map-fit]')).toBeEnabled();
+  });
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 800 },
+    { width: 1440, height: 900 }
+  ]) {
+    test(`at ${viewport.width}px the dock and open Arrange stay inside the map and clear of the assistant`, async ({
+      page
+    }) => {
+      await mockHiredAssistant(page);
+      await ensureWorkspace(page);
+      await page.setViewportSize(viewport);
+      await openMap(page);
+      const launcher = page.locator('#personalAssistantLauncher');
+      await expect(launcher).toBeVisible();
+      await openArrange(page);
+
+      // A narrow page scrolls; its end is where the map's dock rests.
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await page.waitForTimeout(150);
+      const [dock, panel, theatre, assistant] = await Promise.all([
+        page.locator('.ws-map-control-dock').boundingBox(),
+        page.locator('[data-map-arrange-panel]').boundingBox(),
+        page.locator('.cockpit-map .ws-map-theatre').boundingBox(),
+        launcher.boundingBox()
+      ]);
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - window.innerWidth
+      );
+      expect(overflow, 'no sideways page scroll').toBeLessThanOrEqual(1);
+      for (const [name, box] of [
+        ['dock', dock],
+        ['Arrange', panel]
+      ] as const) {
+        expect(inside(box!, theatre!), `${name} stays inside the map`).toBe(true);
+        expect(overlaps(box!, assistant!), `${name} clears the assistant`).toBe(false);
+      }
+    });
+  }
 });

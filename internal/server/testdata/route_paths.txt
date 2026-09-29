@@ -264,6 +264,11 @@
 /api/workspace-map/parcels/open-by-ref
 /api/workspace-map/parcels/x/open
 /api/workspaces
+/api/workspaces/build-sessions
+/api/workspaces/build-sessions/availability
+/api/workspaces/build-sessions/x/abandon
+/api/workspaces/build-sessions/x/draft
+/api/workspaces/build-sessions/x/turns
 /api/workspaces/import
 /api/workspaces/import/check
 /api/workspaces/import/duplicate-action

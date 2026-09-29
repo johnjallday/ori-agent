@@ -348,6 +348,9 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     if (!trigger) return;
     const view = compactSummaryView(status);
     trigger.hidden = !view.visible;
+    // All-complete keeps its text but quiets in the header (CSS keys off this),
+    // so a finished quest log stops competing with work still to do.
+    trigger.dataset.complete = view.visible && view.allComplete ? 'true' : 'false';
     const summary = trigger.querySelector('[data-role="quests-summary"]');
     if (summary) summary.textContent = view.visible ? view.text : '';
   }

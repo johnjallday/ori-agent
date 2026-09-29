@@ -10,6 +10,10 @@ import {
 } from './onboarding-gate.js';
 
 const source = readFileSync(new URL('./sessions.js', import.meta.url), 'utf8');
+const continuitySource = readFileSync(
+  new URL('./workspace-continuity.js', import.meta.url),
+  'utf8'
+);
 
 function loadSessionManager(
   fetchImpl = async () => ({ ok: true, json: async () => ({}) }),
@@ -17,6 +21,8 @@ function loadSessionManager(
   documentOverrides = {}
 ) {
   const window = { ...windowOverrides };
+  // Loaded before sessions.js, as in base.tmpl.
+  vm.runInNewContext(continuitySource, { window }, { filename: 'workspace-continuity.js' });
   const document = {
     addEventListener() {},
     getElementById() {},
@@ -37,6 +43,135 @@ function loadSessionManager(
   );
   return window.sessionManager;
 }
+
+test('a copied workspace this build cannot restore blocks the ordinary import and says why', async () => {
+  const elements = new Map([
+    ['folderImportPathInput', { value: '/synthetic/selected' }],
+    ['folderImportContinuityNotice', { hidden: true }],
+    ['folderImportContinuityTitle', { textContent: '' }],
+    ['folderImportContinuityText', { textContent: '' }],
+    ['createFolderBtn', { disabled: false }],
+    ['folderImportDuplicateWarning', { style: {} }],
+    ['folderImportDuplicateText', { textContent: '' }]
+  ]);
+  const manager = loadSessionManager(
+    async () => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        continuity: {
+          status: 'review_required',
+          import_supported: false,
+          contains_modern_child: true,
+          saved_work: {
+            tasks: 2,
+            completed_tasks: 1,
+            interrupted_tasks: 1,
+            collaboration_messages: 1,
+            attachments: 1,
+            owned_files: 1,
+            external_references: 1
+          }
+        },
+        duplicate: { found: true, workspace_id: 'different' }
+      })
+    }),
+    {},
+    { getElementById: id => elements.get(id) || null }
+  );
+  manager.importModeEnabled = true;
+  await manager.checkImportDuplicate('/synthetic/selected');
+  // The ordinary Import Folder button never runs over a copied checkpoint.
+  assert.equal(elements.get('createFolderBtn').disabled, true);
+  assert.equal(elements.get('folderImportContinuityNotice').hidden, false);
+  assert.match(
+    elements.get('folderImportContinuityTitle').textContent,
+    /Restoring saved work is not available here/
+  );
+  assert.match(elements.get('folderImportContinuityText').textContent, /Nothing was imported/);
+  assert.equal(elements.get('folderImportDuplicateWarning').style.display, 'none');
+  manager.clearImportContinuityReview();
+  assert.equal(elements.get('createFolderBtn').disabled, false);
+  assert.equal(elements.get('folderImportContinuityNotice').hidden, true);
+});
+
+test('an importable assistant copy offers Import and continue and renders untrusted names as text', () => {
+  const list = {
+    hidden: true,
+    children: [],
+    replaceChildren() {
+      this.children = [];
+    },
+    appendChild(child) {
+      this.children.push(child);
+    }
+  };
+  const elements = new Map([
+    ['folderImportContinuityNotice', { hidden: true, dataset: {} }],
+    ['folderImportContinuityTitle', { textContent: '' }],
+    ['folderImportContinuityText', { textContent: '' }],
+    ['folderImportContinuityList', list],
+    ['createFolderBtn', { disabled: false }]
+  ]);
+  const manager = loadSessionManager(
+    async () => {},
+    {},
+    {
+      getElementById: id => elements.get(id) || null,
+      createElement: () => ({ textContent: '', className: '' })
+    }
+  );
+  manager.importModeEnabled = true;
+  manager.showImportContinuityReview('/synthetic/hq', {
+    status: 'review_required',
+    import_supported: true,
+    actions: ['continue', 'workspace_only'],
+    recommended_action: 'continue',
+    history: { sessions: 3, messages: 12, follow_ups: 2, brief_revisions: 4, notes: 1, uploads: 1 },
+    saved_work: { tasks: 5 },
+    assistant_candidates: [{ display_name: '<img src=x onerror=alert(1)>' }]
+  });
+  const title = elements.get('folderImportContinuityTitle').textContent;
+  const notice = elements.get('folderImportContinuityText').textContent;
+  assert.match(title, /Continue with <img src=x onerror=alert\(1\)>\?/);
+  assert.match(notice, /3 conversations, 12 messages, 2 follow-ups, 4 Daily Briefs/);
+  // Each further fact is its own line, not part of one dense paragraph.
+  const facts = list.children.map(child => child.textContent);
+  assert.equal(list.hidden, false);
+  assert.ok(facts.some(line => /Background routines stay off/.test(line)));
+  assert.ok(facts.some(line => /private conversations/.test(line)));
+  assert.ok(!facts.some(line => line === ''), 'no empty section heading');
+  assert.equal(elements.get('folderImportContinuityNotice').dataset.mode, 'review');
+  assert.equal(elements.get('createFolderBtn').disabled, true);
+});
+
+test('stale async folder inspection cannot relabel a newly selected import path', async () => {
+  let finish;
+  const response = new Promise(resolve => {
+    finish = resolve;
+  });
+  const elements = new Map([
+    ['folderImportPathInput', { value: '/synthetic/old' }],
+    ['folderImportContinuityNotice', { hidden: true }],
+    ['folderImportContinuityText', { textContent: '' }],
+    ['createFolderBtn', { disabled: false }]
+  ]);
+  const manager = loadSessionManager(
+    () => response,
+    {},
+    { getElementById: id => elements.get(id) || null }
+  );
+  manager.importModeEnabled = true;
+  const pending = manager.checkImportDuplicate('/synthetic/old');
+  elements.get('folderImportPathInput').value = '/synthetic/new';
+  finish({
+    ok: true,
+    json: async () => ({ success: true, continuity: { status: 'review_required' } })
+  });
+  await pending;
+  assert.equal(elements.get('folderImportContinuityNotice').hidden, true);
+  assert.equal(elements.get('createFolderBtn').disabled, false);
+});
 
 test('agent setup retries workspace suspension after an opening transition', () => {
   const listeners = new Map();
@@ -4271,4 +4406,532 @@ test('the create request carries blueprint_inputs only for a new project', async
 
   const plain = await runDetailsCreate({});
   assert.equal('blueprint_inputs' in plain, false, 'a blueprint that asks nothing sends nothing');
+});
+
+// A wizard state that exercises every field Create assembles, so the payload
+// the build session records and the payload Create posts can be compared.
+function loadPayloadFixtureManager(requests) {
+  const elements = new Map([
+    [
+      'folderNameInput',
+      { value: '  Field Notes  ', focus() {}, classList: { add() {}, remove() {} } }
+    ],
+    ['folderDescriptionInput', { value: ' Drafts the Monday newsletter ' }],
+    ['folderParentSelect', { value: 'group-7' }],
+    ['folderPresetSelect', { value: 'research' }],
+    ['addFolderModal', { dataset: {} }],
+    ['createFolderBtn', { textContent: 'Create workspace', disabled: false }],
+    ['folderImportToggle', { checked: false }]
+  ]);
+  const document = {
+    addEventListener() {},
+    getElementById: id => elements.get(id) || null,
+    querySelector: selector =>
+      selector === '#addFolderModal .folder-color-btn.active'
+        ? { dataset: { color: '#22c55e' } }
+        : null
+  };
+  const window = {
+    location: { href: '' },
+    ProjectTemplateCard: {
+      recheckSelection: async () => ({ state: 'ready' }),
+      getPayloadFields: () => ({ template_id: 'content-production' }),
+      getSelectedTemplate: () => ({ id: 'content-production' }),
+      shouldOpenAfterCreate: () => false,
+      reset() {}
+    },
+    WorkspaceTagsCard: { getPayloadFields: () => ({ tags: ['writing'] }), reset() {} },
+    OriTagInput: { clearTagPoolCache() {} }
+  };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document,
+      bootstrap: { Modal: { getInstance: () => ({ hide() {} }) } },
+      fetch: async (url, options) => {
+        requests.push({ url, body: JSON.parse(options.body) });
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ folder: { id: 'ws-1', folder_slug: 'field-notes' } })
+        };
+      },
+      console,
+      crypto: { randomUUID: () => 'payload-fixture' }
+    },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  manager.workspaceCreatorContext = {
+    generation: 1,
+    mode: 'ordinary',
+    kind: 'workspace',
+    folderOfferId: 'offer-9'
+  };
+  manager.getWorkspaceBootstrapFromModal = () => ({
+    hasAny: true,
+    description: 'Drafts the Monday newsletter',
+    systems: 'Mail',
+    context: 'research notes'
+  });
+  manager.existingProjectPayload = () => ({ mode: 'existing_project', selection_token: 't-1' });
+  manager.blueprintInputsPayload = () => ({ cadence: 'weekly' });
+  manager.teamView = () => ({
+    canContinueFromTeam: true,
+    payload: {
+      create_template_agents: true,
+      template_agent_overrides: [{ index: 0, name: 'Editor' }],
+      template_agent_review: {
+        version: 1,
+        plan_revision: 'rev-1',
+        expectations: [{ index: 0, action: 'create' }]
+      },
+      team_intent: { version: 1, mode: 'staffed', plan_revision: 'rev-1' },
+      role_staffing: [{ role_id: 'lead', mode: 'assign', name: 'Luna' }],
+      existing_agent_names: ['Luna'],
+      entry_agent_name: 'Luna'
+    }
+  });
+  manager.clearWorkspaceCreateError = () => {};
+  manager.showToast = () => {};
+  manager.resetAddWorkspaceModalForm = () => {};
+  return manager;
+}
+
+const expectedFixturePayload = {
+  name: 'Field Notes',
+  description: 'Drafts the Monday newsletter',
+  parent_id: 'group-7',
+  color: '#22c55e',
+  workspace_bootstrap: {
+    goal: 'Drafts the Monday newsletter',
+    systems: 'Mail',
+    context: 'research notes'
+  },
+  workspace_preset: 'research',
+  entry_point: 'folder_digest',
+  folder_offer_id: 'offer-9',
+  template_id: 'content-production',
+  project_connection: { mode: 'existing_project', selection_token: 't-1' },
+  blueprint_inputs: { cadence: 'weekly' },
+  create_template_agents: true,
+  template_agent_overrides: [{ index: 0, name: 'Editor' }],
+  template_agent_review: {
+    version: 1,
+    plan_revision: 'rev-1',
+    expectations: [{ index: 0, action: 'create' }]
+  },
+  team_intent: { version: 1, mode: 'staffed', plan_revision: 'rev-1' },
+  role_staffing: [{ role_id: 'lead', mode: 'assign', name: 'Luna' }],
+  existing_agent_names: ['Luna'],
+  entry_agent_name: 'Luna',
+  tags: ['writing']
+};
+
+test('Create posts the fixture wizard state as the expected workspace request', async () => {
+  const requests = [];
+  const manager = loadPayloadFixtureManager(requests);
+  await manager.createFolder();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/workspaces');
+  assert.deepEqual(requests[0].body, expectedFixturePayload);
+});
+
+// ----- Build with your assistant: applying the assistant's work -----
+
+class BuildNode {
+  constructor(tag, id = '') {
+    this.tagName = String(tag).toUpperCase();
+    this.id = id;
+    this.children = [];
+    this.parentNode = null;
+    this.dataset = {};
+    this.value = '';
+    this.events = [];
+    this.classes = new Set();
+    this.textContent = '';
+    this.classList = {
+      add: name => this.classes.add(name),
+      remove: name => this.classes.delete(name),
+      contains: name => this.classes.has(name)
+    };
+  }
+  set className(value) {
+    this.classes = new Set(String(value).split(/\s+/).filter(Boolean));
+  }
+  get className() {
+    return [...this.classes].join(' ');
+  }
+  appendChild(child) {
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  remove() {
+    if (!this.parentNode) return;
+    this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+    this.parentNode = null;
+  }
+  dispatchEvent(event) {
+    this.events.push(event.type);
+    this.onEvent?.(event);
+    return true;
+  }
+  closest() {
+    return null;
+  }
+  querySelectorAll(selector) {
+    const key = selector.match(/data-build-chosen="([^"]+)"/)?.[1];
+    return this.children.filter(child => key && child.dataset.buildChosen === key);
+  }
+  click() {
+    this.onClick?.();
+  }
+}
+
+function loadBuildWizard() {
+  const nodes = new Map();
+  const add = (tag, id) => {
+    const node = new BuildNode(tag, id);
+    nodes.set(id, node);
+    return node;
+  };
+  const nameInput = add('input', 'folderNameInput');
+  const nameLabel = add('label', 'folderNameLabel');
+  add('textarea', 'folderDescriptionInput');
+  add('label', 'folderDescriptionLabel');
+  const parentSelect = add('select', 'folderParentSelect');
+  parentSelect.options = [{ value: '' }, { value: 'group-7' }];
+  add('label', 'folderParentLabel');
+  let selected = { blank: true, id: '' };
+  const card = new BuildNode('button');
+  card.onClick = () => {
+    selected = { id: 'content-production', name: 'Content Production' };
+  };
+  const allTags = () =>
+    [...nodes.values()].flatMap(node => node.children).filter(child => child.dataset.buildChosen);
+  const document = {
+    addEventListener() {},
+    getElementById: id => nodes.get(id) || null,
+    createElement: tag => new BuildNode(tag),
+    querySelector: selector =>
+      selector.includes('content-production') && !selector.includes('$=') ? card : null,
+    querySelectorAll: selector => {
+      const key = selector.match(/data-build-chosen="([^"]+)"/)?.[1];
+      if (key) return allTags().filter(tag => tag.dataset.buildChosen === key);
+      return [];
+    }
+  };
+  const window = {
+    ProjectTemplateCard: { getSelectedTemplate: () => selected }
+  };
+  class Event {
+    constructor(type) {
+      this.type = type;
+    }
+  }
+  vm.runInNewContext(
+    source,
+    { window, document, Event, setTimeout, console, fetch: async () => ({}) },
+    { filename: 'sessions.js' }
+  );
+  const manager = window.sessionManager;
+  const calls = [];
+  manager.invalidateGroupRequirementReview = () => calls.push('invalidate');
+  manager.updateBehaviorHint = () => {};
+  manager.refreshWorkspaceReview = () => calls.push('review');
+  manager.workspaceBuild = {
+    assistant: { display_name: 'Luna' },
+    chosen: new Map(),
+    chosenRoles: new Set()
+  };
+  return { manager, window, nodes, nameInput, nameLabel, parentSelect, allTags, calls };
+}
+
+test('an assistant patch fills the form through its setters and tags each field', async () => {
+  const { manager, nodes, nameInput, nameLabel, parentSelect, allTags } = loadBuildWizard();
+  const applied = await manager.applyBuildPatchToWizard(
+    {
+      template_id: 'content-production',
+      name: 'Newsletter Desk',
+      description: 'Drafts the Monday newsletter',
+      parent_id: 'group-7'
+    },
+    'Luna',
+    { animate: false }
+  );
+  assert.deepEqual([...applied], ['blueprint', 'name', 'description', 'parent']);
+  assert.equal(nameInput.value, 'Newsletter Desk');
+  assert.deepEqual(nameInput.events, ['input'], 'the name travels through its own input handler');
+  assert.equal(nodes.get('folderDescriptionInput').value, 'Drafts the Monday newsletter');
+  assert.equal(parentSelect.value, 'group-7');
+  assert.deepEqual(parentSelect.events, ['change']);
+  assert.equal(nameInput.dataset.chosenBy, 'Luna');
+  const nameTag = nameLabel.children.find(child => child.dataset.buildChosen === 'name');
+  assert.equal(nameTag.textContent, 'Chosen by Luna');
+  assert.deepEqual(
+    allTags()
+      .map(tag => tag.dataset.buildChosen)
+      .sort(),
+    ['description', 'name', 'parent']
+  );
+});
+
+test('a parent the user cannot choose is left alone', async () => {
+  const { manager, parentSelect } = loadBuildWizard();
+  const applied = await manager.applyBuildPatchToWizard(
+    { parent_id: 'someone-elses-group' },
+    'Luna',
+    { animate: false }
+  );
+  assert.deepEqual([...applied], []);
+  assert.equal(parentSelect.value, '');
+});
+
+test('the user’s first edit removes the tag; the assistant’s own edits do not', async () => {
+  const { manager, nameInput, nameLabel } = loadBuildWizard();
+  await manager.applyBuildPatchToWizard({ name: 'Newsletter Desk' }, 'Luna', { animate: false });
+  const tagFor = () => nameLabel.children.find(child => child.dataset.buildChosen === 'name');
+  assert.ok(tagFor());
+
+  manager.workspaceBuildApplyDepth = 1;
+  manager.noteWorkspaceBuildUserEdit({ target: nameInput });
+  assert.ok(tagFor(), 'an edit made while applying is the assistant’s');
+  manager.workspaceBuildApplyDepth = 0;
+
+  manager.noteWorkspaceBuildUserEdit({ target: nameInput });
+  assert.equal(tagFor(), undefined);
+  assert.equal('chosenBy' in nameInput.dataset, false);
+  assert.equal(manager.workspaceBuild.chosen.has('name'), false);
+});
+
+test('“create it” with a gate still closed says why and submits nothing', async () => {
+  const { manager } = loadBuildWizard();
+  const lines = [];
+  manager.workspaceBuild.session = { id: 'b-1', version: 3, status: 'open' };
+  manager.workspaceBuildPane = () => ({
+    COPY: { gateFailurePrefix: 'Not yet — ' },
+    showLine: text => lines.push(text)
+  });
+  let created = 0;
+  manager.createFolder = async () => {
+    created += 1;
+  };
+  manager.blueprintSelectionBlocked = () => false;
+  manager.workspaceIdentityProblem = () => 'Workspace name is required';
+  await manager.createFromWorkspaceBuild();
+  assert.deepEqual(lines, ['Not yet — Workspace name is required']);
+  assert.equal(created, 0);
+
+  manager.workspaceIdentityProblem = () => '';
+  manager.existingProjectProblem = () => '';
+  manager.blueprintInputsAvailable = () => false;
+  manager.usesTeamRosterCreator = () => false;
+  manager.groupRequirementBlocked = () => false;
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.creatorWizardSteps = () => [1, 2, 3, 4];
+  manager.wizardStep = 4;
+  await manager.createFromWorkspaceBuild();
+  assert.equal(created, 1, 'with every gate open it runs the Create submit');
+});
+
+test('the picker’s own default is never the user’s edit, and the assistant’s blueprint goes back', async () => {
+  const { manager } = loadBuildWizard();
+  const scheduled = [];
+  const reselected = [];
+  manager.scheduleWorkspaceBuildDraft = options => scheduled.push(options);
+  manager.selectWorkspaceBuildBlueprint = async id => {
+    reselected.push(id);
+    return true;
+  };
+  manager.renderWorkspaceBuildChosen = () => {};
+
+  // Nothing chosen yet (the build is still asking Resume or Start over).
+  manager.noteWorkspaceBuildBlueprintSelected({ blank: true }, { programmatic: true });
+  assert.equal(scheduled.length, 0);
+  assert.equal(reselected.length, 0);
+
+  manager.workspaceBuild.chosenBlueprint = 'content-production';
+  manager.noteWorkspaceBuildBlueprintSelected({ blank: true }, { programmatic: true });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(reselected, ['content-production']);
+  assert.equal(scheduled.length, 0, 'a catalog load is not said back as the user’s edit');
+  assert.equal(manager.workspaceBuildApplyDepth, 0);
+
+  manager.noteWorkspaceBuildBlueprintSelected({ id: 'research-project' });
+  assert.equal(scheduled.length, 1, 'a card the user picks still is');
+  assert.equal(scheduled[0].user, true);
+});
+
+test('an unanswered Resume question does not tie the dialog’s create to the paused build', async () => {
+  const { manager } = loadBuildWizard();
+  const context = { entryPoint: 'home_cockpit_create', buildSession: null };
+  manager.workspaceCreatorContext = context;
+  manager.workspaceBuild.context = context;
+  const lines = [];
+  manager.workspaceBuildPane = () => ({
+    COPY: {
+      resumeQuestion: name => `Resume building ${name}?`,
+      resume: 'Resume',
+      startOver: 'Start over'
+    },
+    showLine: text => lines.push(text) || 'line-1',
+    setBusy: () => {}
+  });
+  manager.setWorkspaceBuildBusy = () => {};
+  manager.workspaceBuildApi = () => ({
+    create: async () => ({
+      ok: true,
+      status: 200,
+      body: {
+        resumed: true,
+        session: { id: 'b-1', version: 4, status: 'open', draft: { name: 'Desk' } }
+      }
+    })
+  });
+  await manager.openWorkspaceBuildSession();
+  assert.deepEqual(lines, ['Resume building Desk?']);
+  assert.equal(
+    context.buildSession,
+    null,
+    'a hand-made workspace would not finish the paused build'
+  );
+
+  let applied = 0;
+  manager.applyWorkspaceBuildSession = async () => {
+    applied += 1;
+  };
+  manager.workspaceBuildPane = () => ({ removeLine: () => {}, focusComposer: () => {} });
+  await manager.runWorkspaceBuildAction('resume');
+  assert.equal(applied, 1, 'Resume puts the draft on the form, which then names the build');
+});
+
+test('a blueprint switched during a turn is re-staffed after it, as an automatic turn', async () => {
+  const { manager } = loadBuildWizard();
+  const sent = [];
+  manager.workspaceBuild.session = { id: 'b-1', version: 3, status: 'open' };
+  manager.workspaceBuildPane = () => ({ applySession: () => {}, setBusy: () => {} });
+  manager.setWorkspaceBuildBusy = busy => {
+    manager.workspaceBuild.busy = busy;
+  };
+  manager.rememberWorkspaceBuildSession = () => {};
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.applyWorkspaceBuildSession = async () => {};
+  manager.workspaceBuildApi = () => ({
+    turn: async (_id, body) => {
+      sent.push(body);
+      return {
+        ok: true,
+        status: 200,
+        body: { session: { id: 'b-1', version: 5, status: 'open' } }
+      };
+    }
+  });
+  // The switch arrived while a turn was in flight.
+  manager.workspaceBuild.restaffPending = true;
+  await manager.sendWorkspaceBuildTurn({ text: 'only a Content Lead' });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].text, 'only a Content Lead');
+  assert.equal(sent[0].auto, undefined);
+  assert.equal(sent[1].text, '(I changed the blueprint)');
+  assert.equal(sent[1].auto, true, 'the automatic turn is never the user’s request');
+  assert.equal(manager.workspaceBuild.restaffPending, false);
+});
+
+test('a closed build’s blueprint retries stop instead of clicking the next dialog', async () => {
+  const { manager } = loadBuildWizard();
+  let clicks = 0;
+  manager.workspaceBuildBlueprintSelected = () => false;
+  manager.workspaceBuildBlueprintCard = () => ({
+    click: () => {
+      clicks += 1;
+    }
+  });
+  const pending = manager.selectWorkspaceBuildBlueprint('content-production');
+  manager.workspaceBuild = null;
+  assert.equal(await pending, false);
+  assert.ok(clicks <= 1, `clicked ${clicks} times after the build closed`);
+});
+
+test('nothing on the form reaches a paused build until Resume or Start over is chosen', () => {
+  const { manager } = loadBuildWizard();
+  manager.workspaceBuild.session = { id: 'b-1', version: 2, status: 'open' };
+  manager.workspaceBuild.resumeLine = 'line-1';
+  manager.scheduleWorkspaceBuildDraft({ user: true });
+  assert.equal(manager.workspaceBuildTimer ?? null, null);
+  assert.equal(manager.workspaceBuild.draftUser, undefined);
+
+  manager.workspaceBuild.resumeLine = '';
+  manager.scheduleWorkspaceBuildDraft({ user: true });
+  assert.equal(manager.workspaceBuild.draftUser, true);
+  clearTimeout(manager.workspaceBuildTimer);
+});
+
+test('an assistant that can no longer build steps aside and leaves the form as it is', async () => {
+  const { manager, nameInput } = loadBuildWizard();
+  const lines = [];
+  const collapsed = [];
+  nameInput.value = 'Newsletter Desk';
+  manager.workspaceBuild.session = { id: 'b-1', version: 3, status: 'open' };
+  manager.workspaceBuild.context = { entryPoint: 'home_cockpit_create' };
+  manager.workspaceBuildPane = () => ({
+    COPY: { unavailable: 'I can’t help right now — the form still works.' },
+    showLine: text => lines.push(text),
+    setBusy: () => {}
+  });
+  manager.flushWorkspaceBuildDraft = async () => {};
+  manager.setWorkspaceBuildBusy = () => {};
+  manager.collapseWorkspaceBuild = options => collapsed.push(options);
+  manager.workspaceBuildApi = () => ({
+    turn: async () => ({ ok: false, status: 409, body: { code: 'unavailable' } })
+  });
+  let applied = 0;
+  manager.applyWorkspaceBuildSession = async () => {
+    applied += 1;
+  };
+  await manager.sendWorkspaceBuildTurn({ text: 'a newsletter workspace' });
+  assert.deepEqual(lines, ['I can’t help right now — the form still works.']);
+  assert.equal(collapsed.length, 1);
+  assert.equal(collapsed[0].withdraw, true, 'the pane collapses and withdraws');
+  assert.equal(applied, 0, 'nothing from the failed turn reaches the form');
+  assert.equal(nameInput.value, 'Newsletter Desk', 'what was already filled in stays');
+});
+
+test('an assistant team waits for the blueprint’s plan before it is applied', async () => {
+  const { manager, window } = loadBuildWizard();
+  const applied = [];
+  window.CreateWorkspaceTeamDraft = {
+    applyTeamPatch: (_draft, patch) => {
+      applied.push(patch);
+      return ['content-lead'];
+    }
+  };
+  manager.teamDraft = { plan: { status: 'loading' }, savedRoster: { status: 'ready' } };
+  manager.ensureWorkspaceTeamDraft = () => manager.teamDraft;
+  manager.renderExistingAgentRoster = () => {};
+  manager.markWorkspaceBuildChosen = () => {};
+  manager.existingAgentRosterLoaded = true;
+  const pending = manager.applyWorkspaceBuildTeamPatch(
+    { roles: [{ role_id: 'content-lead', mode: 'assign', agent_name: 'Luna' }] },
+    'Luna',
+    { animate: false }
+  );
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(applied.length, 0, 'nothing is applied to a plan that is still loading');
+  manager.teamDraft.plan.status = 'ready';
+  const filled = await pending;
+  assert.equal(applied.length, 1);
+  assert.deepEqual([...filled], ['content-lead']);
+  assert.equal(manager.workspaceBuild.chosenRoles.has('content-lead'), true);
+});
+
+test('collectCreatePayload returns exactly what Create posts, without a request', () => {
+  const requests = [];
+  const manager = loadPayloadFixtureManager(requests);
+  const collected = manager.collectCreatePayload();
+  assert.equal(requests.length, 0, 'collecting the payload performs no I/O');
+  assert.equal(collected.endpoint, '/api/workspaces');
+  assert.equal(collected.assistantHireConfig, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(collected.payload)), expectedFixturePayload);
 });

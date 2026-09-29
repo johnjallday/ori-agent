@@ -60,7 +60,7 @@ func (b *ServerBuilder) wireBlueprintReintake() {
 		if err != nil {
 			return nil
 		}
-		return ids
+		return b.automaticWorkspaces(ids)
 	}, 0)
 	b.blueprintReintake = automation
 }

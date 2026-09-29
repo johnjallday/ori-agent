@@ -33,6 +33,9 @@ const (
 	HomeActionRemoveAgent       = "remove_agent"
 	HomeActionRemember          = "remember"
 	HomeActionAskFollowup       = "ask_followup"
+	// HomeActionBuildWorkspace opens "Build with your assistant" in the
+	// browser. It is deliberately not a mutation: the server never executes it.
+	HomeActionBuildWorkspace = "build_workspace"
 )
 
 // homeMutatingActionTypes are the only action types that change state and thus
@@ -148,7 +151,10 @@ type HomeAssistantAskHandler struct {
 	PersonalAssistantContext PersonalAssistantContextProvider
 	PersonalAssistantMemory  PersonalAssistantMemoryWriter
 	UserID                   string
-	now                      func() time.Time
+	// WorkspaceBuildAvailable reports whether "Build with your assistant" can
+	// take a create-workspace request; nil keeps the direct create.
+	WorkspaceBuildAvailable func(ctx context.Context) bool
+	now                     func() time.Time
 }
 
 // NewHomeAssistantAskHandler builds the handler from its data sources.
@@ -175,6 +181,38 @@ func (h *HomeAssistantAskHandler) SetPersonalAssistantContextProvider(provider P
 
 func (h *HomeAssistantAskHandler) SetPersonalAssistantMemoryWriter(writer PersonalAssistantMemoryWriter) {
 	h.PersonalAssistantMemory = writer
+}
+
+// SetWorkspaceBuildAvailable wires the "Build with your assistant" check. While
+// it reports true, a request to create a workspace is offered as a build with
+// the assistant instead of a direct create (FR41).
+func (h *HomeAssistantAskHandler) SetWorkspaceBuildAvailable(available func(ctx context.Context) bool) {
+	h.WorkspaceBuildAvailable = available
+}
+
+// buildInsteadOfCreate turns a detected create_workspace confirmation into a
+// build_workspace one when the assistant can build it: accepting it opens the
+// Create Workspace dialog in build mode with the user's sentence as the first
+// turn, which goes through the blueprint pipeline. build_workspace is not a
+// mutation, so the server never creates anything on its confirmation.
+func (h *HomeAssistantAskHandler) buildInsteadOfCreate(ctx context.Context, conf *HomeActionConfirmation, prompt string, identity *HomeAssistantIdentity) *HomeActionConfirmation {
+	if conf == nil || conf.ActionType != HomeActionCreateWorkspace || h.WorkspaceBuildAvailable == nil || !h.WorkspaceBuildAvailable(ctx) {
+		return conf
+	}
+	assistant := "your assistant"
+	if identity != nil && strings.TrimSpace(identity.DisplayName) != "" {
+		assistant = strings.TrimSpace(identity.DisplayName)
+	}
+	arguments := map[string]any{"first_message": prompt}
+	if name := actionArgString(conf.Arguments, "name"); name != "" {
+		arguments["name"] = name
+	}
+	return &HomeActionConfirmation{
+		ActionID:   "build-workspace",
+		ActionType: HomeActionBuildWorkspace,
+		Summary:    fmt.Sprintf("Build this workspace with %s? You'll see it set up the form and check it before anything is created.", assistant),
+		Arguments:  arguments,
+	}
 }
 
 func (h *HomeAssistantAskHandler) emitTrace(ctx context.Context, trace HomeAskTrace) {
@@ -269,6 +307,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	// Explicit, supported mutation request: ask for confirmation before doing
 	// anything (FR #24). Execution happens only on a follow-up with ConfirmedAction.
 	if conf := h.detectHomeMutationRequest(prompt); conf != nil {
+		conf = h.buildInsteadOfCreate(ctx, conf, prompt, identity)
 		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "confirmation_required", ConfirmedType: conf.ActionType})
 		return HomeAssistantAskResponse{
 			Response:             conf.Summary,

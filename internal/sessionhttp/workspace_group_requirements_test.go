@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -58,12 +58,9 @@ func newPolicyHandlerAt(t *testing.T, template *projecttemplates.Template, root 
 	template.Path = skeleton
 	template.HasSkeleton = true
 	template.ProjectEntry = &projecttemplates.ProjectEntry{RelativePath: "project.demo"}
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	hybrid := session.NewHybridStoreWithDB(db, 20)
+	cleanup := cleanupTestHybridStore(t, hybrid)
 	fileStore, err := agentworkspace.NewFileStore(root)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +90,7 @@ func newPolicyHandlerAt(t *testing.T, template *projecttemplates.Template, root 
 	handler.SetGroupRequirementService(grouprequirements.NewService(syncStore, grouprequirements.NewMemoryStore()), func(context.Context) (string, error) {
 		return "local", nil
 	})
-	return handler, syncStore, func() { _ = hybrid.Close() }
+	return handler, syncStore, cleanup
 }
 
 func postPolicyWorkspace(t *testing.T, handler *Handler, payload map[string]any) (int, map[string]any) {

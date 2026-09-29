@@ -2,31 +2,22 @@ package sessionhttp
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 )
 
 func createTestSmartInputHandler(t *testing.T) (*SmartInputHandler, func(), session.HybridStore) {
 	t.Helper()
 
-	ctx := context.Background()
-	db, err := database.Open(ctx, &database.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("failed to open test database: %v", err)
-	}
-
+	db := testdb.Open(t)
 	store := session.NewHybridStoreWithDB(db, 10)
+	cleanup := cleanupTestHybridStore(t, store)
 	handler := NewSmartInputHandler(store, nil, nil)
-
-	cleanup := func() {
-		_ = store.Close()
-	}
 
 	return handler, cleanup, store
 }

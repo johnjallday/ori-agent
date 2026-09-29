@@ -194,6 +194,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	}
 	briefService := dailybrief.NewService(store, synthesizer)
 	briefService.SetAdmissionGate(b.resetWork)
+	if b.continuityLocal != nil {
+		briefService.SetExecutionAdmission(b.continuityLocal.CheckExecution)
+	}
 	if b.eventBus != nil {
 		// The map shows a brief being prepared (task-run-show FR9). Bound here,
 		// where the service exists, before its scheduler can start a run.
@@ -241,11 +244,22 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	// routine source.
 	b.personalAssistantStore = personalassistant.NewSQLiteStore(b.sessionStore.DB())
 	profileReader := personalassistant.NewAgentStoreProfileReader(b.st)
+	if b.continuityLocal != nil {
+		// An imported (adopted) assistant's profile is its HQ workspace's own
+		// copy; read exactly that one, never a same-named global agent.
+		profileReader = personalassistant.NewContinuityAgentStoreProfileReader(b.st, b.continuityLocal)
+	}
 	recovery := personalassistant.NewRecoveryCoordinator(
 		b.personalAssistantStore, profileReader,
 		personalassistant.NewSessionRecoveryWorkspaceReader(b.sessionStore),
 		b.personalHQService, store,
 	)
+	// Fixes for records that disagree: the session handler edits ownership
+	// markers in both workspace stores and on profiles; designation and Daily
+	// Brief settings go through their canonical owners.
+	if b.sessionHandler != nil && b.personalHQService != nil {
+		recovery.WithResolver(b.sessionHandler, b.personalHQService, briefService, profileReader)
+	}
 	b.personalAssistantService = personalassistant.NewService(
 		b.personalAssistantStore,
 		b.personalHQService,
@@ -290,6 +304,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		resolver := personalassistant.NewKnowledgeResolver(b.personalAssistantStore, b.personalHQService, profileReader)
 		knowledge := personalassistant.NewKnowledgeStore(resolver, b.workspaceFileStore)
 		b.wireFolderDigest(knowledge)
+		b.wireWorkspaceBuild(knowledge)
 		var janitorEvidence *janitorKnowledgeReader
 		if b.fileJanitorService != nil {
 			janitorEvidence = &janitorKnowledgeReader{
@@ -362,6 +377,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	if sessionRenamer, ok := b.sessionStore.(personalassistant.AssistantSessionRenamer); ok {
 		renameCoordinator.SetSessionRenamer(sessionRenamer)
 	}
+	if b.continuityLocal != nil {
+		renameCoordinator.WithContinuityAttachments(b.continuityLocal)
+	}
 	b.personalAssistantHandler.SetRenameService(renameCoordinator)
 	capabilities := personalassistant.NewCapabilityService(
 		b.personalAssistantService, b.workspaceStore, personalAssistantEmailCapability{readiness: b.emailReadiness},
@@ -386,6 +404,10 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		todayService.SetInterviewPreferences(interviewReader)
 	}
 	todayService.SetFollowUpWorkspaceSource(workspaceSource)
+	// A workspace the assistant is still building asks to be finished.
+	if b.workspaceBuildStore != nil {
+		todayService.SetWorkspaceBuildReader(b.workspaceBuildStore)
+	}
 	// File Janitor's recent results join Today's Results section (starter
 	// missions FR36). The service is wired in Phase 17, before this runs.
 	if b.fileJanitorService != nil && b.workspaceFileStore != nil {

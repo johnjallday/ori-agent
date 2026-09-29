@@ -433,7 +433,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     const mandate = page.getByLabel('What would make them useful this week? (optional)');
     await expect(mandate).toHaveAttribute('maxlength', '1000');
     // No confirmation checkbox: the boundary line sits above the one button.
-    await expect(page.locator('#createBody')).toContainText(
+    await expect(page.locator('#addAgentModal')).toContainText(
       'Hiring creates your assistant. It does not create a workspace'
     );
     const hire = page.getByRole('button', { name: 'Hire assistant' });

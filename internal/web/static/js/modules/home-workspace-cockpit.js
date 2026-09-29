@@ -1,6 +1,7 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
+import { workspacePageURL } from './workspace-routes.js';
 import {
   normalizeKind,
   isGroupWorkspace,
@@ -212,10 +213,15 @@ export function energyBarView(energy) {
   const used = Math.max(0, Number((energy && energy.usedToday) || 0));
   const figure = Math.max(0, Number((energy && energy.dailyFigure) || 0));
 
+  // `idle` is an authoritative "nothing used yet today": the reading stays on
+  // screen, just quieter than a day that is actually burning tokens.
+  const idle = used === 0;
+
   if (!figure) {
     return {
       percent: 0,
       over: false,
+      idle,
       text: formatTokens(used),
       label: `Energy: ${formatTokens(used)} tokens used today`
     };
@@ -228,6 +234,7 @@ export function energyBarView(energy) {
     return {
       percent: 100,
       over: true,
+      idle,
       text: `${formatTokens(used)} · +${formatTokens(over)} over`,
       label:
         `Energy: ${formatTokens(used)} tokens used today, ` +
@@ -237,9 +244,21 @@ export function energyBarView(energy) {
   return {
     percent,
     over: false,
+    idle,
     text: `${percent}%`,
     label: `Energy: ${formatTokens(used)} of ${formatTokens(figure)} tokens used today`
   };
+}
+
+/**
+ * How one HUD balance reads: its text, and whether it is a known zero.
+ *
+ * Unavailable (null) is never a zero — it renders as an em dash and stays at
+ * full weight, so a quiet "0" always means the server really said zero.
+ */
+export function resourceValueView(value) {
+  const count = readCount(value);
+  return { text: formatCount(count), zero: count === 0 };
 }
 
 /**
@@ -557,8 +576,11 @@ export function renderSignalFiltersHTML(counts, activeSignal) {
     const isActive = signal === activeSignal;
     const count = counts ? counts[signal] : null;
     const label = SIGNAL_LABELS[signal];
+    // A KNOWN zero renders quieter; an unavailable count (null) never does,
+    // because "nothing matches" and "we cannot tell" are different answers.
     return (
       `<button type="button" class="cockpit-signal-chip" data-cockpit-signal="${escapeHtml(signal)}" ` +
+      (count === 0 ? 'data-zero="true" ' : '') +
       `aria-pressed="${isActive ? 'true' : 'false'}">` +
       `<span class="cockpit-signal-label">${escapeHtml(label)}</span>` +
       `<span class="cockpit-signal-count"${count === null ? ' data-unavailable="true"' : ''}>` +
@@ -837,28 +859,29 @@ export const RAIL_GROUP = 'group';
 export const RAIL_SUMMARY = 'summary';
 
 // ---------------------------------------------------------------------------
-// Header disclosure ("panel") state — Updates / Quests / Quick Capture
+// Header disclosure ("panel") state — Updates / Quests
 // ---------------------------------------------------------------------------
 //
-// One explicit state machine for the three header-owned transient
-// disclosures (Issue #334). They are siblings, not independent booleans:
-// opening one always closes whichever of the other two was open, so the three
-// controls can never drift into contradictory `hidden`/`aria-expanded`
-// states. Context kind remains separate, while Issue #366 coordinates an
-// explicit modal open by closing whichever header disclosure is active.
+// One explicit state machine for the header-owned transient disclosures
+// (Issue #334). They are siblings, not independent booleans: opening one
+// always closes the other, so the controls can never drift into
+// contradictory `hidden`/`aria-expanded` states. Context kind remains
+// separate, while Issue #366 coordinates an explicit modal open by closing
+// whichever header disclosure is active. Quick Capture used to be the third
+// member; it is a blocking dialog now (home-workspace-map-ui-refresh), and
+// opening it closes these the same way the context modal does.
 
 export const PANEL_NONE = 'none';
 export const PANEL_UPDATES = 'updates';
 export const PANEL_QUESTS = 'quests';
-export const PANEL_CAPTURE = 'capture';
 
 /**
  * The next panel state for activating `requested` from `current`.
  *
- * Activating the ALREADY-open panel closes it (FR7); activating any other
- * panel replaces whichever was open, which is what gives the three triggers
- * their mutual exclusion for free — there is only ever one open value to
- * begin with (FR8-FR9).
+ * Activating the ALREADY-open panel closes it (FR7); activating the other
+ * panel replaces whichever was open, which is what gives the triggers their
+ * mutual exclusion for free — there is only ever one open value to begin
+ * with (FR8).
  */
 export function togglePanelState(current, requested) {
   return current === requested ? PANEL_NONE : requested;
@@ -875,7 +898,6 @@ export function togglePanelState(current, requested) {
 export function panelTriggerId(panel) {
   if (panel === PANEL_UPDATES) return 'cockpitRailToggle';
   if (panel === PANEL_QUESTS) return 'cockpitQuestsToggle';
-  if (panel === PANEL_CAPTURE) return 'cockpitCaptureBtn';
   return '';
 }
 
@@ -1406,6 +1428,69 @@ export function captureRequestBody(hqWorkspaceId, draft) {
   };
 }
 
+/**
+ * Where a successful capture can send the user: the designated HQ's own
+ * workspace page, backlog panel open (workspace-url-state `panel=backlog`).
+ *
+ * Page URLs are slug-based, and the HQ status names a workspace by id, so the
+ * slug is read from the status's resolved workspace or the loaded list. When
+ * neither has it, `backlogURL` is '' — the save still succeeded, the receipt
+ * just offers no link, rather than a guessed slug or an id in a page URL.
+ */
+export function captureDestinationView(hqStatus, flattened) {
+  const workspaceId = hqStatus && hqStatus.valid ? String(hqStatus.workspace_id || '').trim() : '';
+  if (!workspaceId) return { workspaceId: '', slug: '', backlogURL: '' };
+  const fromStatus =
+    hqStatus.workspace && String(hqStatus.workspace.id || '') === workspaceId
+      ? hqStatus.workspace.folder_slug
+      : '';
+  const listed = findWorkspace(flattened, workspaceId);
+  const slug = String(fromStatus || (listed && listed.folder_slug) || '').trim();
+  return {
+    workspaceId,
+    slug,
+    backlogURL: slug ? workspacePageURL(slug, [], { search: 'panel=backlog' }) : ''
+  };
+}
+
+/**
+ * What a confirmed save does to the dialog.
+ *
+ * Only the SUBMITTED text is cleared: if the fields still hold exactly the
+ * snapshot that was sent, they clear and the dialog closes; if the user kept
+ * typing (or reopened and wrote something new) while the request was in
+ * flight, their newer text stays and the dialog is left as they have it.
+ */
+export function captureSuccessOutcome(snapshot, current) {
+  const same =
+    !!snapshot &&
+    !!current &&
+    String(current.title ?? '') === String(snapshot.title ?? '') &&
+    String(current.details ?? '') === String(snapshot.details ?? '');
+  return { clear: same, close: same };
+}
+
+/**
+ * Cmd/Ctrl+Enter submits from anywhere in the dialog — including the
+ * multi-line details, where a plain Enter must stay a new line — but never
+ * while an input method is composing, where Enter confirms a candidate.
+ */
+export function captureShortcutSubmits(event) {
+  if (!event || event.key !== 'Enter') return false;
+  if (event.isComposing || event.keyCode === 229) return false;
+  return !!(event.metaKey || event.ctrlKey);
+}
+
+/**
+ * Which element takes focus once the dialog has shown. A fine pointer goes
+ * straight to the title; a coarse (touch) pointer lands on the dialog's
+ * heading instead, so the on-screen keyboard does not jump the layout before
+ * the person has seen where the text is going.
+ */
+export function captureInitialFocus({ coarsePointer = false } = {}) {
+  return coarsePointer ? 'heading' : 'title';
+}
+
 /** What backlog capture can do right now, given the Personal HQ status. */
 export function captureAvailability(hqStatus) {
   const valid = !!(hqStatus && hqStatus.valid && hqStatus.workspace_id);
@@ -1499,6 +1584,30 @@ export function workspaceAreaState({
   return { state: 'ready', message: '', canRetry: false };
 }
 
+/**
+ * Whether the Map invites the user to add a workspace, and in which voice.
+ *
+ * Decided only from loaded, authoritative state (home-workspace-map-ui-refresh
+ * 3.1): an authoritative empty list ('empty'), or a list whose one workspace
+ * IS the designated, valid Personal HQ ('hq-only'). Every other state stays
+ * quiet — loading, a failed load, an onboarding gate, a list with groups, and
+ * an HQ status that has not arrived or does not validate. A signal filter
+ * never matters here because it dims tiles and never changes the list, and a
+ * collapsed group still lists its members. The synthetic, unbuilt HQ site is
+ * not a workspace, so a profile with only that site is 'empty', not 'hq-only'.
+ */
+export function mapInvitationView({ areaState, workspaces, hqStatus } = {}) {
+  const none = { show: false, variant: '' };
+  const state = areaState && areaState.state;
+  if (state === 'empty-map') return { show: true, variant: 'empty' };
+  if (state !== 'ready') return none;
+  const rows = (Array.isArray(workspaces) ? workspaces : []).filter(Boolean);
+  if (rows.length !== 1 || isGroupWorkspace(rows[0])) return none;
+  const hqId = hqStatus && hqStatus.valid ? String(hqStatus.workspace_id || '') : '';
+  if (!hqId || String(rows[0].id || '') !== hqId) return none;
+  return { show: true, variant: 'hq-only' };
+}
+
 export function renderWorkspaceAreaStatusHTML(status) {
   if (!status || status.state === 'ready' || status.state === 'empty-map') return '';
   if (status.state === 'onboarding-loading' || status.state === 'onboarding-required') {
@@ -1588,14 +1697,21 @@ import {
     questsToggle: document.getElementById('cockpitQuestsToggle'),
     questsFlyout: document.getElementById('cockpitQuestsFlyout'),
     questsClose: document.querySelector('#cockpitQuestsFlyout [data-cockpit-flyout-close]'),
+    // Quick Capture: a blocking dialog with its own stable host (group 4).
     captureBtn: document.getElementById('cockpitCaptureBtn'),
-    capturePanel: document.getElementById('cockpitCapturePanel'),
+    captureModal: document.getElementById('cockpitCaptureModal'),
+    captureHeading: document.getElementById('cockpitCaptureModalTitle'),
     captureForm: document.getElementById('cockpitCaptureForm'),
     captureTitle: document.getElementById('cockpitCaptureTitle'),
     captureDetails: document.getElementById('cockpitCaptureDetails'),
+    captureDetailsToggle: document.getElementById('cockpitCaptureDetailsToggle'),
+    captureDetailsGroup: document.getElementById('cockpitCaptureDetailsGroup'),
     captureSave: document.getElementById('cockpitCaptureSave'),
-    captureCancel: document.getElementById('cockpitCaptureCancel'),
     captureStatus: document.getElementById('cockpitCaptureStatus'),
+    captureReceipt: document.getElementById('cockpitCaptureReceipt'),
+    captureReceiptText: document.querySelector('[data-capture-receipt-text]'),
+    captureReceiptLink: document.querySelector('[data-capture-receipt-link]'),
+    captureReceiptClose: document.querySelector('[data-capture-receipt-close]'),
     askPanel: document.getElementById('homeAssistantThinkingModal'),
     askTarget: document.getElementById('cockpitAskTarget'),
     // City Economy HUD. Hidden until GET /api/economy answers, so an install
@@ -1624,6 +1740,12 @@ import {
   // every other top-level Bootstrap dialog; Map remounts cannot touch it.
   if (els.contextModal && els.contextModal.parentElement !== document.body) {
     document.body.append(els.contextModal);
+  }
+  // Quick Capture's dialog gets the same treatment, for the same reasons —
+  // and because a host outside the cockpit is what lets its draft outlive
+  // every Map/Tree remount.
+  if (els.captureModal && els.captureModal.parentElement !== document.body) {
+    document.body.append(els.captureModal);
   }
 
   // ---- shared state (the single source of truth for every cockpit view) ----
@@ -1667,6 +1789,9 @@ import {
     // Personal HQ status, read once and refreshed on HQ actions. Quick Capture
     // needs it to know where a capture goes (FR102/FR104).
     hqStatus: null,
+    // 'loading' | 'ready' | 'error'. A status not read yet, or not readable,
+    // is not "no Personal HQ": capture says which it is (FR120/FR121).
+    hqStatusState: 'loading',
     // City Economy. null until GET /api/economy answers successfully, so "the
     // economy is switched off" and "the user has nothing yet" stay
     // distinguishable — the first hides the HUD, the second shows two zeros
@@ -1689,14 +1814,34 @@ import {
 
   // ---- workspace area ----
 
-  function renderAreaStatus() {
-    const status = workspaceAreaState({
+  function currentAreaState() {
+    return workspaceAreaState({
       loading: state.loading,
       error: state.error,
       workspaces: state.flattened,
       onboardingGate: state.onboardingGate,
       hqSiteVisible: hqSiteVisible(state.hqStatus)
     });
+  }
+
+  /**
+   * The Map's add-a-workspace invitation variant, or '' for none. Also mirrored
+   * onto the cockpit root, where narrow-screen CSS gives an invited first-run
+   * map the same extra height the empty map already gets.
+   */
+  function currentInvitation() {
+    const view = mapInvitationView({
+      areaState: currentAreaState(),
+      workspaces: state.flattened,
+      hqStatus: state.hqStatus
+    });
+    const variant = view.show ? view.variant : '';
+    root.dataset.invitation = variant;
+    return variant;
+  }
+
+  function renderAreaStatus() {
+    const status = currentAreaState();
     if (els.areaStatus) {
       els.areaStatus.innerHTML = renderWorkspaceAreaStatusHTML(status);
       const retry = els.areaStatus.querySelector('[data-cockpit-retry]');
@@ -1715,6 +1860,7 @@ import {
     const mapRenderable = status.state === 'ready' || status.state === 'empty-map';
     if (els.map) els.map.hidden = state.view !== VIEW_MAP || !mapRenderable;
     if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
+    currentInvitation();
     return status;
   }
 
@@ -1788,6 +1934,9 @@ import {
       // Explicit Home-only contract. The shared Map keeps its legacy empty
       // prompt unless its cockpit host opts into a real buildingless canvas.
       emptyPresentation: state.flattened.length === 0 ? 'canvas' : 'legacy',
+      // The add-a-workspace invitation, decided here from authoritative state
+      // (mapInvitationView) so the Map never infers emptiness for itself.
+      invitation: currentInvitation(),
       onSelect: id =>
         selectItem(id, {
           fromMap: true,
@@ -2502,18 +2651,17 @@ import {
     els.railToggleCount.hidden = !badge.visible;
   }
 
-  // ---- header disclosure panel: Updates / Quests / Quick Capture ----
+  // ---- header disclosure panel: Updates / Quests ----
   //
   // One explicit `state.panel` value (see PANEL_* / togglePanelState above)
-  // drives all three header-owned transient disclosures, so they can never
-  // disagree about which one is open (FR7-FR9). Deliberately independent of
-  // selected context. Opening blocking context closes this transient state;
-  // data refreshes never open either surface.
+  // drives both header-owned transient disclosures, so they can never
+  // disagree about which one is open (FR7-FR8). Deliberately independent of
+  // selected context. Opening a blocking dialog — context or Quick Capture —
+  // closes this transient state; data refreshes never open either surface.
 
   function applyPanelState() {
     const openUpdates = state.panel === PANEL_UPDATES;
     const openQuests = state.panel === PANEL_QUESTS;
-    const openCapture = state.panel === PANEL_CAPTURE;
 
     if (els.railToggle) {
       els.railToggle.setAttribute('aria-expanded', openUpdates ? 'true' : 'false');
@@ -2526,10 +2674,6 @@ import {
       els.questsToggle.setAttribute('aria-label', openQuests ? 'Hide Quests' : 'Show Quests');
     }
     if (els.questsFlyout) els.questsFlyout.hidden = !openQuests;
-
-    if (els.captureBtn)
-      els.captureBtn.setAttribute('aria-expanded', openCapture ? 'true' : 'false');
-    if (els.capturePanel) els.capturePanel.hidden = !openCapture;
   }
 
   function focusPanelTrigger(panel) {
@@ -2538,18 +2682,11 @@ import {
     if (trigger) trigger.focus();
   }
 
-  /** Open `target`, idempotently — calling it again while already open just refocuses. */
-  function openPanel(target, { focus = true } = {}) {
-    if (state.panel === target) {
-      if (focus && target === PANEL_CAPTURE && els.captureTitle) els.captureTitle.focus();
-      return;
-    }
+  /** Open `target`, idempotently. */
+  function openPanel(target) {
+    if (state.panel === target) return;
     state.panel = target;
     applyPanelState();
-    if (target === PANEL_CAPTURE) {
-      refreshCaptureAvailability();
-      if (focus && els.captureTitle) els.captureTitle.focus();
-    }
   }
 
   /** Close whichever panel is open, returning focus to its trigger. */
@@ -2751,52 +2888,198 @@ import {
     });
   }
 
-  // ---- Quick Capture (FR101-FR104) ----
+  // ---- Quick Capture (FR101-FR104; home-workspace-map-ui-refresh group 4) ----
+  //
+  // A blocking Bootstrap dialog with one stable host (see dashboard.tmpl and
+  // the lifecycle note in the task list). Bootstrap owns focus containment,
+  // Escape, and the backdrop; this owns the draft, the one in-flight request,
+  // transition-safe open/close, handoffs to other dialogs, and the receipt.
 
-  /**
-   * Public Quick Capture open/close, kept for callers outside this module
-   * (window.OriHomeCockpit.openCapture). Routes through the shared header
-   * disclosure state so Quick Capture keeps participating in Updates/Quests
-   * mutual exclusion (FR9) instead of forking its own open/closed flag.
-   */
-  function setCaptureOpen(open) {
-    if (open) openPanel(PANEL_CAPTURE);
-    else closePanel();
+  let captureModalInstance = null;
+  // `captureOpening` spans show.bs.modal → shown.bs.modal: the dialog has been
+  // asked for but focus may still be on the trigger, so an Escape then never
+  // reaches the dialog and is caught at the document instead.
+  let captureOpening = false;
+  let captureVisible = false;
+  let hideCaptureAfterShow = false;
+  let pendingCaptureHandoff = null;
+  // The one in-flight save: { snapshot: { title, details } }. Every submit path
+  // runs through submitCapture, which refuses to start a second.
+  let captureSaving = null;
+  let captureStatusKind = '';
+  let captureReceiptTimer = null;
+
+  function getCaptureModalInstance() {
+    if (captureModalInstance) return captureModalInstance;
+    if (!els.captureModal || !window.bootstrap || !window.bootstrap.Modal) return null;
+    captureModalInstance = window.bootstrap.Modal.getOrCreateInstance(els.captureModal);
+    return captureModalInstance;
   }
 
-  function refreshCaptureAvailability() {
-    const availability = captureAvailability(state.hqStatus);
-    if (els.captureSave) els.captureSave.disabled = !availability.canSave;
-    if (!els.captureStatus) return;
-    if (availability.canSave) {
-      els.captureStatus.textContent = '';
-      els.captureStatus.innerHTML = '';
+  function captureIsOpen() {
+    return !!els.captureModal && els.captureModal.classList.contains('show');
+  }
+
+  /**
+   * Capture owns the page from the moment its show proceeds until it has
+   * fully hidden — including the fade in (no `.show` class yet) and the fade
+   * out (`.show` already gone). Handoffs key off this, not the class.
+   */
+  function captureIsActive() {
+    return captureOpening || captureVisible || captureIsOpen();
+  }
+
+  /** Open Quick Capture (window.OriHomeCockpit.openCapture and the header). */
+  function showCaptureModal() {
+    const modal = getCaptureModalInstance();
+    // Already opening or open: nothing to do — and a close queued during the
+    // fade-in must survive a second activation of the trigger.
+    if (!modal || captureIsActive()) return;
+    hideCaptureAfterShow = false;
+    // Bootstrap does not stack blocking dialogs. A visible context modal is
+    // settled first by the document-level show.bs.modal handoff below.
+    modal.show(els.captureBtn || undefined);
+  }
+
+  function hideCaptureModal() {
+    const modal = getCaptureModalInstance();
+    if (!modal || (!captureIsOpen() && !captureOpening)) return;
+    if (!captureVisible) {
+      // Bootstrap ignores hide() during its show transition; replay it once
+      // the dialog has shown, so a fast Escape or Cancel is never lost.
+      hideCaptureAfterShow = true;
       return;
     }
-    // FR104: explain the requirement and offer the existing establish path.
-    // The draft above is untouched.
-    els.captureStatus.innerHTML =
-      `${escapeHtml(availability.message)} ` +
-      '<button type="button" class="cockpit-capture-hq" data-cockpit-capture-hq>Set up Personal HQ</button>';
-    const btn = els.captureStatus.querySelector('[data-cockpit-capture-hq]');
-    if (btn) {
-      btn.addEventListener('click', () =>
+    modal.hide();
+  }
+
+  /** Close capture, then run `callback` — for a dialog that must not stack. */
+  function handoffAfterCaptureHide(callback) {
+    pendingCaptureHandoff = callback;
+    if (!captureIsActive()) {
+      runCaptureHandoff();
+      return;
+    }
+    // Opening or open: close it (queued if still fading in). Already fading
+    // out: hidden.bs.modal runs the handoff when it is really gone.
+    if (captureIsOpen() || captureOpening) hideCaptureModal();
+  }
+
+  function runCaptureHandoff() {
+    const handoff = pendingCaptureHandoff;
+    pendingCaptureHandoff = null;
+    if (typeof handoff === 'function') handoff();
+  }
+
+  function setCaptureDetailsOpen(open) {
+    if (els.captureDetailsGroup) els.captureDetailsGroup.hidden = !open;
+    if (els.captureDetailsToggle) {
+      els.captureDetailsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      els.captureDetailsToggle.textContent = open ? 'Hide details' : 'Add details';
+    }
+  }
+
+  function setCaptureStatus(message, kind = '') {
+    if (!els.captureStatus) return;
+    captureStatusKind = message ? kind : '';
+    els.captureStatus.textContent = message || '';
+    els.captureStatus.dataset.kind = captureStatusKind;
+    if (els.captureTitle) {
+      if (kind === 'invalid') els.captureTitle.setAttribute('aria-invalid', 'true');
+      else els.captureTitle.removeAttribute('aria-invalid');
+    }
+  }
+
+  function setCaptureBusy(busy) {
+    if (els.captureSave) {
+      els.captureSave.disabled = busy || !captureAvailability(state.hqStatus).canSave;
+      els.captureSave.setAttribute('aria-busy', busy ? 'true' : 'false');
+      els.captureSave.textContent = busy ? 'Adding…' : 'Add to backlog';
+    }
+    if (els.captureForm) els.captureForm.setAttribute('aria-busy', busy ? 'true' : 'false');
+  }
+
+  /**
+   * Keep the dialog honest about where a capture can go. Without a valid
+   * Personal HQ it explains the requirement and offers the existing setup
+   * path (FR104); the draft in the fields is never touched here.
+   */
+  function refreshCaptureAvailability() {
+    const availability = captureAvailability(state.hqStatus);
+    setCaptureBusy(!!captureSaving);
+    if (!els.captureStatus || captureSaving) return;
+    if (availability.canSave) {
+      // An HQ that just became valid clears its own availability line, but a
+      // retained validation or save error stays until the user acts on it.
+      if (['needs-hq', 'checking', 'hq-unavailable', 'blocked'].includes(captureStatusKind)) {
+        setCaptureStatus('');
+      }
+      return;
+    }
+    if (state.hqStatusState === 'blocked') {
+      // The onboarding gate (setup still required, or its status unreadable)
+      // holds every workspace read, the HQ status included, so there is
+      // nothing to check yet — say so instead of "checking" forever.
+      setCaptureStatus(
+        "Your workspaces aren't available until Ori's setup is done, so this can't be added yet. Your text is kept.",
+        'blocked'
+      );
+      return;
+    }
+    if (state.hqStatusState === 'loading') {
+      setCaptureStatus('Checking your Personal HQ…', 'checking');
+      return;
+    }
+    if (state.hqStatusState === 'error') {
+      setCaptureStatus(
+        'Your Personal HQ could not be checked, so this cannot be added yet. Your text is kept. ',
+        'hq-unavailable'
+      );
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'cockpit-capture-hq';
+      retry.textContent = 'Check again';
+      retry.addEventListener('click', () => {
+        state.hqStatusState = 'loading';
+        refreshCaptureAvailability();
+        if (els.captureTitle) els.captureTitle.focus();
+        void refreshHQStatus();
+      });
+      els.captureStatus.append(retry);
+      return;
+    }
+    setCaptureStatus(`${availability.message} `, 'needs-hq');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cockpit-capture-hq';
+    btn.textContent = 'Set up Personal HQ';
+    // HQ setup is its own dialog: close capture first (the draft stays in the
+    // fields for next time), then ask for setup.
+    btn.addEventListener('click', () =>
+      handoffAfterCaptureHide(() =>
         window.dispatchEvent(
           new CustomEvent('ori:personal-hq-action', { detail: { action: 'build' } })
         )
-      );
-    }
+      )
+    );
+    els.captureStatus.append(btn);
+  }
+
+  function readCaptureDraft() {
+    return {
+      title: els.captureTitle ? els.captureTitle.value : '',
+      details: els.captureDetails ? els.captureDetails.value : ''
+    };
   }
 
   async function submitCapture(e) {
     if (e) e.preventDefault();
-    const draft = {
-      title: els.captureTitle ? els.captureTitle.value : '',
-      details: els.captureDetails ? els.captureDetails.value : ''
-    };
+    // One request at a time, whichever way it was asked for (FR103).
+    if (captureSaving) return;
+    const draft = readCaptureDraft();
     const valid = validateCapture(draft);
     if (!valid.ok) {
-      if (els.captureStatus) els.captureStatus.textContent = valid.message;
+      setCaptureStatus(valid.message, 'invalid');
       if (els.captureTitle) els.captureTitle.focus();
       return;
     }
@@ -2805,9 +3088,11 @@ import {
       refreshCaptureAvailability();
       return;
     }
-    // Prevent a duplicate submission while the first is in flight (FR103).
-    if (els.captureSave) els.captureSave.disabled = true;
-    if (els.captureStatus) els.captureStatus.textContent = 'Saving…';
+    const destination = captureDestinationView(state.hqStatus, state.flattened);
+    captureSaving = { snapshot: draft };
+    setCaptureStatus('Adding to your Personal HQ backlog…', 'saving');
+    setCaptureBusy(true);
+    let saved = false;
     try {
       const res = await fetch('/api/orchestration/backlog', {
         method: 'POST',
@@ -2815,36 +3100,181 @@ import {
         body: JSON.stringify(captureRequestBody(availability.hqWorkspaceId, draft))
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // Only clear the draft once it is genuinely saved.
+      saved = true;
+    } catch (err) {
+      console.error('home-workspace-cockpit: capture failed', err);
+    }
+    const snapshot = captureSaving.snapshot;
+    captureSaving = null;
+    setCaptureBusy(false);
+    if (!saved) {
+      // FR103: the draft survives a failure and the retry is obvious.
+      setCaptureStatus(
+        'Could not add this to your backlog. Your text is still here — try again.',
+        'error'
+      );
+      announce('Adding to the backlog failed. Your text was kept.');
+      return;
+    }
+    const outcome = captureSuccessOutcome(snapshot, readCaptureDraft());
+    if (outcome.clear) {
       if (els.captureTitle) els.captureTitle.value = '';
       if (els.captureDetails) els.captureDetails.value = '';
-      if (els.captureStatus) els.captureStatus.textContent = 'Captured to your HQ backlog.';
-      announce('Captured to your Personal HQ backlog.');
-      fireTTFA('quick-capture');
-      void refreshQuietly();
-    } catch (err) {
-      // FR103: the draft survives a failure and the retry is obvious.
-      if (els.captureStatus) {
-        els.captureStatus.textContent = 'Could not save. Your text is still here — try again.';
-      }
-      announce('Saving to the backlog failed. Your text was kept.');
-      console.error('home-workspace-cockpit: capture failed', err);
-    } finally {
-      if (els.captureSave) els.captureSave.disabled = false;
+      setCaptureDetailsOpen(false);
+      setCaptureStatus('');
+    } else {
+      setCaptureStatus('Your earlier text was added. What you typed since is still here.');
     }
+    if (outcome.close && captureIsOpen()) hideCaptureModal();
+    showCaptureReceipt(destination);
+    announce('Added to your Personal HQ backlog.');
+    fireTTFA('quick-capture');
+    // Capture records an idea; it never starts an agent or a task run.
+    void refreshQuietly();
+  }
+
+  // ---- the receipt: confirmed saves only, over the map, never focused ----
+
+  function showCaptureReceipt(destination) {
+    if (!els.captureReceipt) return;
+    if (els.captureReceiptText) els.captureReceiptText.textContent = 'Added to Personal HQ backlog';
+    if (els.captureReceiptLink) {
+      const href = destination && destination.backlogURL;
+      els.captureReceiptLink.hidden = !href;
+      if (href) els.captureReceiptLink.setAttribute('href', href);
+      else els.captureReceiptLink.removeAttribute('href');
+    }
+    els.captureReceipt.hidden = false;
+    scheduleCaptureReceiptDismiss();
+  }
+
+  function hideCaptureReceipt() {
+    if (captureReceiptTimer) window.clearTimeout(captureReceiptTimer);
+    captureReceiptTimer = null;
+    if (els.captureReceipt) els.captureReceipt.hidden = true;
+  }
+
+  // Long enough to read and reach; paused while a pointer or focus is on it.
+  function scheduleCaptureReceiptDismiss() {
+    if (captureReceiptTimer) window.clearTimeout(captureReceiptTimer);
+    captureReceiptTimer = window.setTimeout(() => {
+      const receipt = els.captureReceipt;
+      if (receipt && (receipt.matches(':hover') || receipt.contains(document.activeElement))) {
+        scheduleCaptureReceiptDismiss();
+        return;
+      }
+      hideCaptureReceipt();
+    }, 10000);
+  }
+
+  function wireCapture() {
+    if (els.captureBtn) els.captureBtn.addEventListener('click', () => showCaptureModal());
+    if (els.captureForm) {
+      els.captureForm.addEventListener('submit', submitCapture);
+      els.captureForm.addEventListener('keydown', event => {
+        if (!captureShortcutSubmits(event)) return;
+        event.preventDefault();
+        if (typeof els.captureForm.requestSubmit === 'function') els.captureForm.requestSubmit();
+        else void submitCapture();
+      });
+    }
+    if (els.captureDetailsToggle) {
+      els.captureDetailsToggle.addEventListener('click', () => {
+        const open = els.captureDetailsGroup ? els.captureDetailsGroup.hidden : true;
+        setCaptureDetailsOpen(open);
+        if (open && els.captureDetails) els.captureDetails.focus();
+      });
+    }
+    if (els.captureTitle) {
+      els.captureTitle.addEventListener('input', () => {
+        if (captureStatusKind === 'invalid') setCaptureStatus('');
+      });
+    }
+    els.captureReceiptClose?.addEventListener('click', () => {
+      hideCaptureReceipt();
+      els.captureBtn?.focus();
+    });
+    els.captureReceipt?.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      hideCaptureReceipt();
+      els.captureBtn?.focus();
+    });
+
+    const modal = els.captureModal;
+    if (!modal) return;
+    modal.addEventListener('show.bs.modal', event => {
+      // The document-level context handoff may cancel this show as it bubbles
+      // up (it replays it after context closes). Dispatch is synchronous, so
+      // by the next microtask the verdict is final — only a show that really
+      // proceeds counts as opening, or a cancelled one would leave capture
+      // "opening" forever and swallow every Escape.
+      queueMicrotask(() => {
+        if (event.defaultPrevented) return;
+        captureOpening = true;
+        // A blocking dialog owns the page: header flyouts and resource help go.
+        closePanel({ focus: false });
+        hideEconomyHelp({ restoreFocus: false });
+        hideCaptureReceipt();
+        // A retained draft with details reopens them; collapsing never erased.
+        const hasDetails = !!(els.captureDetails && els.captureDetails.value.trim());
+        setCaptureDetailsOpen(
+          hasDetails || (els.captureDetailsGroup && !els.captureDetailsGroup.hidden)
+        );
+        refreshCaptureAvailability();
+        els.captureBtn?.setAttribute('aria-expanded', 'true');
+      });
+    });
+    modal.addEventListener('shown.bs.modal', () => {
+      captureOpening = false;
+      captureVisible = true;
+      if (hideCaptureAfterShow) {
+        hideCaptureAfterShow = false;
+        getCaptureModalInstance()?.hide();
+        return;
+      }
+      const coarse =
+        typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+      const target =
+        captureInitialFocus({ coarsePointer: coarse }) === 'heading'
+          ? els.captureHeading
+          : els.captureTitle;
+      target?.focus({ preventScroll: true });
+    });
+    modal.addEventListener('hide.bs.modal', () => {
+      els.captureBtn?.setAttribute('aria-expanded', 'false');
+    });
+    modal.addEventListener('hidden.bs.modal', () => {
+      captureOpening = false;
+      captureVisible = false;
+      hideCaptureAfterShow = false;
+      if (pendingCaptureHandoff) {
+        runCaptureHandoff();
+        return;
+      }
+      els.captureBtn?.focus({ preventScroll: true });
+    });
   }
 
   /** Personal HQ status, used by Quick Capture. Additive and non-blocking. */
   async function refreshHQStatus() {
-    if (!canHydrateWorkspaceData()) return;
+    if (!canHydrateWorkspaceData()) {
+      state.hqStatusState = 'blocked';
+      refreshCaptureAvailability();
+      return;
+    }
+    if (state.hqStatusState === 'blocked') state.hqStatusState = 'loading';
     const hadSite = hqSiteVisible(state.hqStatus);
+    const hadInvitation = currentInvitation();
     try {
       const res = await fetch('/api/personal-hq/status');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       state.hqStatus = data && data.status ? data.status : data;
+      state.hqStatusState = 'ready';
     } catch (_) {
       state.hqStatus = null;
+      state.hqStatusState = 'error';
     }
     refreshCaptureAvailability();
     // This request races the workspace load, so on a brand-new profile the area
@@ -2855,6 +3285,11 @@ import {
     if (hqSiteVisible(state.hqStatus) !== hadSite) {
       renderAreaStatus();
       renderFilters();
+      mountMap();
+    } else if (currentInvitation() !== hadInvitation) {
+      // The status is what tells an HQ-only map from any other one-workspace
+      // map, and it usually lands after the list; re-mount so the invitation
+      // appears (or leaves) without waiting for the next refresh.
       mountMap();
     }
     if (state.selectedId === HQ_SITE_ID) {
@@ -2962,8 +3397,8 @@ import {
     }
     const next = { craft: state.economy.craft, harvest: state.economy.harvest };
     const first = lastEconomyChips === null;
-    if (els.economyCraft) els.economyCraft.textContent = formatCount(next.craft);
-    if (els.economyHarvest) els.economyHarvest.textContent = formatCount(next.harvest);
+    paintResourceValue(els.economyCraft, resourceValueView(next.craft));
+    paintResourceValue(els.economyHarvest, resourceValueView(next.harvest));
     renderEnergyBar(energyBarView(state.economy.energy));
     els.economy.hidden = false;
     if (!first) {
@@ -2976,12 +3411,19 @@ import {
     if (openEconomyHelp) renderEconomyHelp(openEconomyHelp);
   }
 
+  function paintResourceValue(el, view) {
+    if (!el) return;
+    el.textContent = view.text;
+    el.dataset.zero = view.zero ? 'true' : 'false';
+  }
+
   /** Paint the Energy gauge. Never blocks or warns — it only reports (FR31). */
   function renderEnergyBar(view) {
     if (els.economyEnergyFill) els.economyEnergyFill.style.width = `${view.percent}%`;
     if (els.economyEnergyText) els.economyEnergyText.textContent = view.text;
     if (els.economyEnergy) {
       els.economyEnergy.dataset.over = view.over ? 'true' : 'false';
+      els.economyEnergy.dataset.idle = view.idle ? 'true' : 'false';
       // The spoken label carries the whole reading, because the visual is a bar
       // and a percentage that mean nothing read aloud on their own.
       els.economyEnergy.setAttribute('aria-label', view.label);
@@ -3326,9 +3768,7 @@ import {
     });
   }
 
-  if (els.captureBtn) els.captureBtn.addEventListener('click', () => togglePanel(PANEL_CAPTURE));
-  if (els.captureForm) els.captureForm.addEventListener('submit', submitCapture);
-  if (els.captureCancel) els.captureCancel.addEventListener('click', () => closePanel());
+  wireCapture();
 
   // The same Today and folder controllers serve the cockpit, the assistant
   // launcher, and the Map's empty hint. There is no second chooser here.
@@ -3416,8 +3856,36 @@ import {
     );
   });
 
+  // The same rule for Quick Capture: while it is open, any other blocking
+  // dialog (Create Workspace, HQ setup, a deep link) waits for capture to
+  // close — keeping its draft — and is then shown, rather than stacking.
+  document.addEventListener('show.bs.modal', event => {
+    const target = event.target;
+    if (
+      !target ||
+      target === els.captureModal ||
+      !captureIsActive() ||
+      !window.bootstrap ||
+      !window.bootstrap.Modal
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const relatedTarget = event.relatedTarget;
+    handoffAfterCaptureHide(() =>
+      window.bootstrap.Modal.getOrCreateInstance(target).show(relatedTarget)
+    );
+  });
+
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
+    // Quick Capture was asked for but has not shown yet: focus can still be
+    // on its trigger, so the dialog never sees this key. Queue the close.
+    if (captureOpening) {
+      e.preventDefault();
+      hideCaptureAfterShow = true;
+      return;
+    }
     // A modal owns Escape before any Home disclosure. During Bootstrap's short
     // show transition focus can still be on the invoking Map tile, so handle
     // the visible context shell here as well as on the dialog itself.
@@ -3438,9 +3906,7 @@ import {
         ? els.updatesFlyout
         : state.panel === PANEL_QUESTS
           ? els.questsFlyout
-          : state.panel === PANEL_CAPTURE
-            ? els.capturePanel
-            : null;
+          : null;
     if (openPanelEl && (!target || !target.closest || target.closest(`#${openPanelEl.id}`))) {
       closePanel();
       return;
@@ -3476,10 +3942,10 @@ import {
     clearSelection,
     showSummary,
     leaveSummary,
-    openCapture: () => setCaptureOpen(true),
+    openCapture: () => showCaptureModal(),
     // Narrow seam for progression-widget.js's own "Collapse" control to close
-    // whichever header disclosure (Updates/Quests/Quick Capture) is open,
-    // without either module importing the other (Issue #334).
+    // whichever header disclosure (Updates/Quests) is open, without either
+    // module importing the other (Issue #334).
     closeHeaderPanel: () => closePanel()
   };
 
@@ -3510,6 +3976,10 @@ import {
       mountTreeView();
       renderToday();
       renderRail({ announceChange: false });
+      // Capture stays reachable, but the HQ status is gated with everything
+      // else: say so rather than "checking" forever.
+      state.hqStatusState = 'blocked';
+      refreshCaptureAvailability();
       return state.onboardingGate;
     }
 

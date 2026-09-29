@@ -27,6 +27,8 @@ This directory contains detailed documentation for Ori Agent.
 - [Project Templates](./features/project-templates.md) - Folder-skeleton workspace templates
 - [Custom Workspace Dashboard](./features/custom-workspace-dashboard.md) - Write your own HTML
   dashboard for a workspace, reading live workspace data in a sandboxed frame
+- [Moving a Workspace](./features/moving-workspaces.md) - Copy a workspace folder to another computer
+  and continue with its history (and your assistant)
 - [Session File Management](./features/session-file-management.md) - Managing files in sessions
 - [Task Input Templating](./features/task-input-templating.md) - Templated task inputs
 - [Task Output Contracts](./features/task-output-contracts.md) - Structured task outputs
@@ -59,6 +61,7 @@ This directory contains detailed documentation for Ori Agent.
 - [PRD-to-Task Coverage Audit](./PRD_TASK_COVERAGE_AUDIT.md) - Final planning-quality check before creating a feature worktree
 - [Open-Core Boundaries](./architecture/open-core-boundaries.md) - Separation of OSS core and private services
 - [Herdr Standalone Wake v1 Contract](./architecture/herdr-standalone-wake-v1-contract.md) - Fixed installer, platform, path, ownership, and compatibility decisions
+- [Workspace Build Sessions](./architecture/workspace-build-sessions.md) - "Build with your assistant": the draft is the create request, validation, storage, privacy
 
 ### UI Documentation
 - [Form Styling Index](./ui/FORM_STYLING_INDEX.md) - Navigation guide for all form styling docs

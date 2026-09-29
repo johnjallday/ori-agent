@@ -217,21 +217,6 @@ func readKnowledge(dir *os.File, owner KnowledgeOwner) (KnowledgeDocument, error
 	return doc, nil
 }
 
-func encodeKnowledge(doc KnowledgeDocument) ([]byte, error) {
-	if err := validateKnowledge(doc); err != nil {
-		return nil, err
-	}
-	data, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	data = append(data, '\n')
-	if len(data) > knowledgeMaxBytes {
-		return nil, ErrKnowledgeLimit
-	}
-	return data, nil
-}
-
 func (s *KnowledgeStore) write(dir *os.File, data []byte) error {
 	return s.writeNamed(dir, knowledgeFileName, ".personal-assistant-knowledge-", data)
 }

@@ -47,13 +47,14 @@ function load({
     }
   };
 
-  // Just enough of the preset for presetOpen() and the form's change events.
+  // Just enough of the preset for presetOpen() and the form's change events:
+  // the Create Agent modal, in the roster's personal-assistant mode or not.
   const page = {
-    panelHidden: !presetOpen,
+    hireMode: presetOpen,
     presetMounted: presetOpen
   };
   const elements = {
-    createPanel: () => ({ hidden: page.panelHidden }),
+    addAgentModal: () => ({ dataset: { agentCreateMode: page.hireMode ? 'assistant-hire' : '' } }),
     'cr-focus-group': () => (page.presetMounted ? {} : null)
   };
 
@@ -138,20 +139,21 @@ function load({
     calls,
     page,
     store,
-    // The roster announces every create-panel render.
-    openPanel(mode = 'assistant') {
-      page.panelHidden = false;
+    // The roster announces every opening of the Create Agent modal, and every
+    // re-render of the preset in it.
+    openCreate(mode = 'assistant') {
+      page.hireMode = mode === 'assistant';
       page.presetMounted = mode === 'assistant';
       fire('window', 'ori:agent-create-opened', { mode });
     },
-    // A change event from a control inside the preset form.
+    // A change event from a control inside the modal's form.
     change(control, value = 'x') {
       const inFocus = control === 'focus';
       const target = {
         id: inFocus ? '' : control,
         value,
         closest: selector => {
-          if (selector === '#createForm') return {};
+          if (selector === '#addAgentForm') return {};
           if (selector === '#cr-focus-group') return inFocus ? {} : null;
           return null;
         }
@@ -216,7 +218,7 @@ test('the quest param is read at load and stripped on start without a history en
 test('the walkthrough never asks /api/ori-guide or any model', async () => {
   const loaded = load();
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   loaded.change('cr-name', 'Atlas');
   loaded.change('focus');
   loaded.change('cr-mandate', 'Keep it light.');
@@ -236,7 +238,7 @@ test('a New Agent press that beat the start begins at the name step', async () =
 test('each form signal advances exactly one step, in order, to Hire', async () => {
   const loaded = load();
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   assert.deepEqual(steps(loaded.calls), [2, 3]);
   assert.equal(loaded.calls.presented.at(-1).coachmark, 'assistant_name');
 
@@ -262,7 +264,7 @@ test('each form signal advances exactly one step, in order, to Hire', async () =
 test('a step the form advanced to never takes focus out of the form', async () => {
   const loaded = load();
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   loaded.change('cr-name', 'Atlas');
   loaded.change('focus');
   loaded.change('focus');
@@ -276,7 +278,7 @@ test('a step the form advanced to never takes focus out of the form', async () =
 test('the choices advance one step each and focus the control they name', async () => {
   const loaded = load();
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   // Spread: the step objects come from the vm realm, so their arrays are not
   // this realm's Array.
   assert.deepEqual(
@@ -294,7 +296,7 @@ test('the choices advance one step each and focus the control they name', async 
 test('a stale signal never moves the walkthrough backwards or sideways', async () => {
   const loaded = load();
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   loaded.change('focus');
   loaded.change('focus');
   loaded.change('focus');
@@ -313,7 +315,7 @@ test('a stale signal never moves the walkthrough backwards or sideways', async (
 test('an empty name or mandate is not progress', async () => {
   const loaded = load();
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   loaded.change('cr-name', '   ');
   loaded.change('cr-mandate', '  ');
   assert.equal(loaded.quest._state.step, 3);
@@ -322,9 +324,9 @@ test('an empty name or mandate is not progress', async () => {
 test('a re-render re-anchors the current step instead of restarting it', async () => {
   const loaded = load();
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   loaded.change('cr-name', 'Atlas');
-  loaded.openPanel();
+  loaded.openCreate();
   assert.deepEqual(steps(loaded.calls), [2, 3, 4, 4]);
   assert.equal(loaded.calls.presented.at(-1).focus, false);
 });
@@ -334,10 +336,10 @@ test('a re-render re-anchors the current step instead of restarting it', async (
 test('choosing the ordinary form stops pointing without skipping, and coming back resumes', async () => {
   const loaded = load();
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   loaded.change('cr-name', 'Atlas');
 
-  loaded.openPanel('standard');
+  loaded.openCreate('standard');
   assert.equal(loaded.calls.cleared, 1, 'the mark stays on a form that is gone');
   assert.equal(loaded.quest.isActive(), true, 'the mission was abandoned');
   // The ordinary form has a name field too; editing it is not Mission 01 progress.
@@ -346,7 +348,7 @@ test('choosing the ordinary form stops pointing without skipping, and coming bac
   assert.equal(loaded.quest._state.step, 4);
 
   const before = loaded.calls.presented.length;
-  loaded.openPanel('assistant');
+  loaded.openCreate('assistant');
   assert.equal(loaded.calls.presented.length, before + 1);
   assert.equal(loaded.calls.presented.at(-1).index, 4);
 });
@@ -354,7 +356,7 @@ test('choosing the ordinary form stops pointing without skipping, and coming bac
 test('with Ori’s panel closed the form alone still advances, and reopening resumes there', async () => {
   const loaded = load();
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   loaded.closeGuide();
 
   const before = loaded.calls.presented.length;
@@ -384,7 +386,7 @@ test('the walkthrough is inert when the guide is not on the page', async () => {
   const bare = load();
   bare.calls.presented.length = 0;
   // A page without the guide: nothing may throw.
-  assert.doesNotThrow(() => bare.openPanel());
+  assert.doesNotThrow(() => bare.openCreate());
 });
 
 /* ---- Ori's layer, for a user who arrived through the mission --------------- */
@@ -422,14 +424,37 @@ test('a plain visit to the Agents page starts in Ori’s panel', async () => {
   assert.deepEqual(steps(loaded.calls), [2]);
 });
 
-test('the form’s steps are Ori’s callout beside the form, never the panel', async () => {
+// Ori's panel sits under every modal's backdrop, so once the preset is up the
+// callout carries the walkthrough, however the user arrived.
+test('on a plain visit too, the modal’s steps are Ori’s callout beside the dialog', async () => {
+  const loaded = load({ layer: true });
+  await settle();
+  loaded.openCreate();
+  assert.deepEqual(layerSteps(loaded.calls), ['callout:3']);
+  assert.equal(loaded.calls.layer[0].anchor, '#addAgentModal .modal-dialog');
+  loaded.change('cr-name', 'Atlas');
+  assert.deepEqual(layerSteps(loaded.calls), ['callout:3', 'callout:4']);
+  assert.deepEqual(steps(loaded.calls), [2], 'a step went to the panel under the modal');
+});
+
+test('a New Agent press that beat the start begins beside the dialog', async () => {
+  const loaded = load({ layer: true, presetOpen: true });
+  await settle();
+  assert.deepEqual(layerSteps(loaded.calls), ['callout:3']);
+  assert.equal(loaded.calls.layer[0].focus, false);
+  assert.equal(loaded.calls.opened, 0, 'Ori’s panel was opened under the modal');
+});
+
+test('the form’s steps are Ori’s callout beside the dialog, never the panel', async () => {
   const loaded = load({ layer: true, session: GUIDED });
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
+  // New Agent's dimmed page goes first: left up, it would lie over the modal.
+  assert.equal(loaded.calls.layerClosed, 1);
   let step = loaded.calls.layer.at(-1);
   assert.equal(step.kind, 'callout');
   assert.equal(step.index, 3);
-  assert.equal(step.anchor, '#createPanel');
+  assert.equal(step.anchor, '#addAgentModal .modal-dialog');
   assert.equal(step.title, 'Give them a name');
   // Spread: the arrays come from the vm's realm.
   assert.deepEqual([...step.choices.map(choice => choice.id)], ['keep-name']);
@@ -466,15 +491,15 @@ test('the form’s steps are Ori’s callout beside the form, never the panel', 
 test('a re-render of the form does not show the same callout again', async () => {
   const loaded = load({ layer: true, session: GUIDED });
   await settle();
-  loaded.openPanel();
-  loaded.openPanel();
+  loaded.openCreate();
+  loaded.openCreate();
   assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2', 'callout:3']);
 });
 
 test('Not now pauses Ori; the form keeps count, and opening Ori resumes in the panel', async () => {
   const loaded = load({ layer: true, session: GUIDED });
   await settle();
-  loaded.openPanel();
+  loaded.openCreate();
   loaded.calls.layer.at(-1).onLater();
   loaded.change('cr-name', 'Atlas');
   assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2', 'callout:3']);
@@ -485,25 +510,35 @@ test('Not now pauses Ori; the form keeps count, and opening Ori resumes in the p
   assert.equal(loaded.calls.layer.length, 2, 'the layer came back after Not now');
 });
 
-test('no room beside the form: the step moves to Ori’s panel for the rest of the mission', async () => {
+test('no room beside the dialog: the steps move to Ori’s panel for the rest of the mission', async () => {
   const loaded = load({ layer: true, layerFits: false, session: GUIDED });
   await settle();
   await settle();
   // Nothing to light either: New Agent went to the panel.
   assert.deepEqual(steps(loaded.calls), [2]);
   assert.equal(loaded.calls.opened, 1);
-  loaded.openPanel();
+  // The modal asks the layer once more, and there is no room beside it.
+  loaded.openCreate();
+  await settle();
   assert.deepEqual(steps(loaded.calls), [2, 3]);
-  assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2'], 'the layer was asked again');
+  loaded.change('cr-name', 'Atlas');
+  loaded.openCreate();
+  assert.deepEqual(steps(loaded.calls), [2, 3, 4, 4]);
+  assert.deepEqual(
+    layerSteps(loaded.calls),
+    ['spotlight:2', 'callout:3'],
+    'the layer was asked again'
+  );
 });
 
 test('the ordinary form closes Ori’s layer, and coming back brings the callout back', async () => {
   const loaded = load({ layer: true, session: GUIDED });
   await settle();
-  loaded.openPanel();
-  loaded.openPanel('standard');
-  assert.equal(loaded.calls.layerClosed, 1);
-  loaded.openPanel();
+  loaded.openCreate();
+  const before = loaded.calls.layerClosed;
+  loaded.openCreate('standard');
+  assert.equal(loaded.calls.layerClosed, before + 1);
+  loaded.openCreate();
   assert.deepEqual(layerSteps(loaded.calls), ['spotlight:2', 'callout:3', 'callout:3']);
 });
 

@@ -17,13 +17,22 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 )
 
 // WorkspaceStoreAdapter implements workspace.Store using session.HybridStore.
 // This adapter bridges the session storage system with the orchestration system,
 // allowing both to share the same SQLite-backed workspace data.
 type WorkspaceStoreAdapter struct {
-	store HybridStore
+	store          HybridStore
+	agentSnapshots workspace.Store // set during composition, before concurrent use
+}
+
+// SetWorkspaceAgentStore selects the canonical snapshot owner. A private-aware
+// SyncStore calls this during construction so direct adapter consumers cannot
+// bypass local configuration or create a plaintext WORKSPACE_DIR shadow copy.
+func (a *WorkspaceStoreAdapter) SetWorkspaceAgentStore(owner workspace.Store) {
+	a.agentSnapshots = owner
 }
 
 // NewWorkspaceStoreAdapter creates a new adapter wrapping the given HybridStore.
@@ -74,6 +83,16 @@ func (a *WorkspaceStoreAdapter) save(ws *workspace.Workspace, expectedVersion in
 	sessionWS.SessionCount = existing.SessionCount // Preserve session count
 	sessionWS.ParentID = existing.ParentID         // Preserve parent relationship
 	sessionWS.Color = existing.Color               // Preserve color
+	if a.agentSnapshots != nil {
+		// The private-aware SyncStore has already published this exact version
+		// and timestamp to workspace.json. HybridStore.UpdateWorkspace would
+		// stamp a later time, making every otherwise consistent capture fail.
+		direct := NewSQLiteStore(a.store.DB())
+		if strict {
+			return translateWorkspaceVersionConflict(direct.UpdateWorkspaceExpecting(ctx, sessionWS, expectedVersion))
+		}
+		return translateWorkspaceVersionConflict(direct.UpdateWorkspace(ctx, sessionWS))
+	}
 	if strict {
 		if cas, ok := a.store.(workspaceVersionUpdater); ok {
 			return translateWorkspaceVersionConflict(cas.UpdateWorkspaceExpecting(ctx, sessionWS, expectedVersion))
@@ -935,6 +954,9 @@ func (a *WorkspaceStoreAdapter) GetOutputsPath(workspaceID string) string {
 // The session-backed adapter does not store snapshots itself; it reads from
 // the workspace folder when one is available via WORKSPACE_DIR.
 func (a *WorkspaceStoreAdapter) GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error) {
+	if a.agentSnapshots != nil {
+		return a.agentSnapshots.GetWorkspaceAgent(workspaceID, agentName)
+	}
 	folder := workspaceFolderForAdapter(workspaceID)
 	if folder == "" {
 		return nil, false, nil
@@ -944,6 +966,9 @@ func (a *WorkspaceStoreAdapter) GetWorkspaceAgent(workspaceID, agentName string)
 
 // SaveWorkspaceAgent writes a workspace-local agent snapshot to disk.
 func (a *WorkspaceStoreAdapter) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.Agent) error {
+	if a.agentSnapshots != nil {
+		return a.agentSnapshots.SaveWorkspaceAgent(workspaceID, agentName, ag)
+	}
 	folder := workspaceFolderForAdapter(workspaceID)
 	if folder == "" {
 		return fmt.Errorf("workspace folder for %s not found", workspaceID)
@@ -952,6 +977,9 @@ func (a *WorkspaceStoreAdapter) SaveWorkspaceAgent(workspaceID, agentName string
 }
 
 func workspaceFolderForAdapter(workspaceID string) string {
+	if !workspacecontinuity.ValidID(workspaceID) {
+		return ""
+	}
 	baseDir := "workspaces"
 	if p := os.Getenv("WORKSPACE_DIR"); p != "" {
 		baseDir = p

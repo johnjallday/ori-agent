@@ -184,7 +184,7 @@ func (h *HTTPHandler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save workspace
-	if err := h.store.Save(workspace); err != nil {
+	if err := CreateNativeWorkspace(r.Context(), h.store, workspace); err != nil {
 		logger.Error("Failed to save workspace", logger.Fields{"error": err})
 		orihttp.InternalError(w, "Failed to create workspace")
 		return

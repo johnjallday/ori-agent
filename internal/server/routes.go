@@ -1129,6 +1129,9 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-assistant/rename", s.Handlers.PersonalAssistant.Rename)
 		mux.HandleFunc("POST /api/personal-assistant/hire", s.Handlers.PersonalAssistant.Hire)
 		mux.HandleFunc("POST /api/personal-assistant/repair", s.Handlers.PersonalAssistant.Repair)
+		// Records that do not agree: what differs, and one reviewed fix at a time.
+		mux.HandleFunc("GET /api/personal-assistant/repair/diagnosis", s.Handlers.PersonalAssistant.GetRepairDiagnosis)
+		mux.HandleFunc("POST /api/personal-assistant/repair/resolve", s.Handlers.PersonalAssistant.ResolveRepair)
 		// The confirmed consequence of the guided Map walkthrough. The legacy
 		// POST /api/personal-hq/setup route stays exactly as it was.
 		mux.HandleFunc("POST /api/personal-assistant/hq", s.Handlers.PersonalAssistant.SetupHQ)
@@ -1291,6 +1294,10 @@ func registerDailyBriefRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/personal-hq/brief/status", s.Handlers.DailyBrief.GetStatus)
 		mux.HandleFunc("POST /api/personal-hq/brief/open", s.Handlers.DailyBrief.RequestFirstOpen)
 		mux.HandleFunc("POST /api/personal-hq/brief/refresh", s.Handlers.DailyBrief.RequestRefresh)
+		// A workspace's own brief history, readable when it is not the HQ
+		// here (e.g. imported with its history as a workspace only).
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/daily-briefs", s.Handlers.DailyBrief.GetWorkspaceHistory)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/daily-briefs/{revisionID}", s.Handlers.DailyBrief.GetWorkspaceRevision)
 	}
 }
 

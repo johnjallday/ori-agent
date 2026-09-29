@@ -262,12 +262,291 @@ export async function submitRepair({ fetchImpl = globalThis.fetch, stateVersion 
   return { ok: true, state, needsHQ: personalAssistantNeedsHQ(state), error: '' };
 }
 
+// The promise every recovery fix keeps, shown above the button that applies one.
+export const RECOVERY_BOUNDARY_COPY =
+  'Nothing is deleted. A fix changes only which agent and workspace Ori treats as your assistant and Personal HQ. A reconnected assistant starts paused.';
+
+const RECOVERY_NETWORK_ERROR = 'Ori could not reach the server. Nothing was changed.';
+
+// fetchRecoveryDiagnosis asks why the assistant cannot be reconnected as its
+// records stand, and which fixes are safe. It never changes anything.
+export async function fetchRecoveryDiagnosis({ fetchImpl = globalThis.fetch } = {}) {
+  let response;
+  try {
+    response = await fetchImpl('/api/personal-assistant/repair/diagnosis', {
+      headers: { Accept: 'application/json' }
+    });
+  } catch (_) {
+    return { ok: false, diagnosis: null, error: RECOVERY_NETWORK_ERROR };
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      ok: false,
+      diagnosis: null,
+      status: response.status,
+      code: String(body?.code || ''),
+      error: String(body?.error || '').trim() || 'Ori could not check your assistant records.'
+    };
+  }
+  return { ok: true, diagnosis: body?.diagnosis || null, error: '' };
+}
+
+// submitRecoveryFix applies the one fix the user chose. It names only that fix
+// and the evidence it was chosen from: the server re-reads the records, refuses
+// if they changed, and reconnects the assistant once they agree.
+export async function submitRecoveryFix({
+  fetchImpl = globalThis.fetch,
+  fixId = '',
+  digest = ''
+} = {}) {
+  let response;
+  try {
+    response = await fetchImpl('/api/personal-assistant/repair/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ fix_id: String(fixId || ''), evidence_digest: String(digest || '') })
+    });
+  } catch (_) {
+    return { ok: false, reconnected: false, diagnosis: null, error: RECOVERY_NETWORK_ERROR };
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      ok: false,
+      reconnected: false,
+      diagnosis: null,
+      status: response.status,
+      code: String(body?.code || ''),
+      error:
+        String(body?.error || '').trim() || 'The fix could not be applied. Nothing was changed.'
+    };
+  }
+  const state = body?.personal_assistant || null;
+  return {
+    ok: true,
+    reconnected: body?.reconnected === true,
+    applied: String(body?.applied || ''),
+    state,
+    needsHQ: personalAssistantNeedsHQ(state),
+    diagnosis: body?.diagnosis || null,
+    error: ''
+  };
+}
+
+function quoted(value, fallback = '') {
+  const text = String(value || '').trim();
+  return text ? `“${text}”` : fallback;
+}
+
+function listOf(items) {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+function shortId(id) {
+  return String(id || '').slice(0, 8);
+}
+
+function createdOn(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function recoveryProblem(issue, { profiles, hqs, designation }) {
+  const profile = quoted(profiles[0]?.name, 'your assistant');
+  const hq = quoted(hqs[0]?.name, 'Personal HQ');
+  const designated = quoted(designation.workspace_name, 'another workspace');
+  switch (issue) {
+    case 'assistant_mismatch':
+      return `${hq} was set up for a different assistant than ${profile}. This happens when an assistant is hired again and the earlier Personal HQ is kept.`;
+    case 'profile_missing':
+      return `${hq} is a Personal HQ, but no agent is marked as your assistant.`;
+    case 'profile_duplicate':
+      return `${profiles.length} agents are each marked as your assistant: ${listOf(profiles.map(p => quoted(p.name)))}. Only one can be.`;
+    case 'profile_incomplete':
+      return `${profile} is marked as your assistant, but the mark is incomplete, so Ori cannot tell which assistant it belongs to.`;
+    case 'profile_role':
+      return `${profile} is marked as your assistant, but its role is not Orchestrator.`;
+    case 'designation_without_hq':
+      return `${designated} is set as your Personal HQ, but it has no record of which assistant it belongs to.`;
+    case 'hq_duplicate':
+      return `${hqs.length} workspaces are each marked as your Personal HQ: ${listOf(hqs.map(h => quoted(h.name)))}. Only one can be.`;
+    case 'hq_marker_invalid':
+      return `${hq}’s Personal HQ record is incomplete or unreadable.`;
+    case 'hq_foreign_owner':
+      return `${hq} is marked as a Personal HQ that belongs to another user.`;
+    case 'designation_mismatch':
+      return designation.workspace_id
+        ? `${hq} belongs to your assistant, but Ori treats ${designated} as your Personal HQ.`
+        : `${hq} belongs to your assistant, but no workspace is set as your Personal HQ.`;
+    case 'entry_mismatch': {
+      const leads = (hqs[0]?.entry_agents || []).map(name => quoted(name));
+      return leads.length
+        ? `${hq} is led by ${listOf(leads)}, not by your assistant ${profile}.`
+        : `${hq} has no lead agent, so it cannot be your assistant’s home.`;
+    }
+    case 'brief_missing':
+      return `${hq} has no Daily Brief settings.`;
+    case 'brief_mismatch':
+      return `${hq}’s Daily Brief settings belong to another user or workspace.`;
+    default:
+      return 'Personal Assistant records do not agree.';
+  }
+}
+
+// What to do when no fix is safe to apply automatically.
+function recoveryGuidance(issue, { profiles, hqs }) {
+  const profile = quoted(profiles[0]?.name, 'your assistant');
+  const hq = quoted(hqs[0]?.name, 'Personal HQ');
+  switch (issue) {
+    case 'profile_role':
+      return `Open ${profile} on the Agents page, set its role to Orchestrator, then check again.`;
+    case 'entry_mismatch':
+      return `Make ${profile} the only lead agent of ${hq}, then check again.`;
+    case 'hq_foreign_owner':
+    case 'brief_mismatch':
+      return 'These records belong to someone else, so Ori will not change them.';
+    default:
+      return 'Ori will not guess between these records, so nothing was changed. What Ori found above shows what to change by hand; then check again.';
+  }
+}
+
+function recoveryFixCopy(fix, { profiles, hqs, designation }) {
+  const profile = quoted(fix.profile_name, 'your assistant');
+  const workspace = quoted(fix.workspace_name, 'this workspace');
+  switch (fix.kind) {
+    case 'link_hq':
+      return {
+        label: `Connect ${profile} to ${workspace}`,
+        changes: [
+          `${workspace}’s Personal HQ record will name ${profile} as its assistant.`,
+          `${profile} is reconnected as your assistant.`
+        ]
+      };
+    case 'keep_profile': {
+      const others = profiles.filter(p => p.name !== fix.profile_name).map(p => quoted(p.name));
+      return {
+        label: `Keep ${profile} as your assistant`,
+        changes: [
+          `${listOf(others)} stop being marked as your assistant and stay as ordinary agents.`
+        ]
+      };
+    }
+    case 'keep_hq': {
+      const others = hqs.filter(h => h.workspace_id !== fix.workspace_id).map(h => quoted(h.name));
+      const changes = [
+        `${listOf(others)} stop being marked as a Personal HQ and stay as ordinary workspaces, with everything in them.`
+      ];
+      if (designation.workspace_id !== fix.workspace_id)
+        changes.push(`${workspace} becomes your Personal HQ.`);
+      return { label: `Keep ${workspace} as your Personal HQ`, changes };
+    }
+    case 'designate_hq':
+      return {
+        label: `Make ${workspace} your Personal HQ`,
+        changes: [
+          designation.workspace_id
+            ? `${workspace} replaces ${quoted(designation.workspace_name, 'the current one')} as your Personal HQ, which stays as an ordinary workspace.`
+            : `${workspace} becomes your Personal HQ.`
+        ]
+      };
+    case 'adopt_entry_profile':
+      return {
+        label: `Make ${profile} your assistant`,
+        changes: [
+          `${profile}, the lead agent of ${workspace}, is marked as your assistant.`,
+          'Its prompt, model and tools stay as they are.'
+        ]
+      };
+    case 'restamp_profile':
+      return {
+        label: `Repair ${profile}’s assistant mark`,
+        changes: [`The incomplete mark is replaced with one naming ${workspace}’s assistant.`]
+      };
+    case 'create_brief':
+      return {
+        label: `Create Daily Brief settings for ${workspace}`,
+        changes: ['Default settings are saved with the schedule off. You can set a time later.']
+      };
+    case 'clear_designation':
+      return {
+        label: `Stop treating ${workspace} as your Personal HQ`,
+        changes: [
+          `${workspace} stays as an ordinary workspace, with everything in it.`,
+          'You can build or choose a Personal HQ again afterwards.'
+        ]
+      };
+    default:
+      return { label: 'Apply this fix', changes: [] };
+  }
+}
+
+// describeRecoveryDiagnosis turns a server diagnosis into what the fix view
+// shows: the one thing that does not match, what Ori found, the fixes (each
+// with exactly what it changes), and what to do when no fix is safe.
+export function describeRecoveryDiagnosis(diagnosis) {
+  const issue = String(diagnosis?.issue || '');
+  const facts = {
+    profiles: Array.isArray(diagnosis?.profiles) ? diagnosis.profiles : [],
+    hqs: Array.isArray(diagnosis?.hqs) ? diagnosis.hqs : [],
+    designation: diagnosis?.designation || {}
+  };
+  // Assistant IDs are only worth showing when two records disagree about one.
+  const showIds = ['assistant_mismatch', 'profile_duplicate', 'hq_duplicate'].includes(issue);
+  const found = [];
+  facts.profiles.forEach(profile => {
+    const id =
+      showIds && profile.assistant_id ? ` (assistant ${shortId(profile.assistant_id)})` : '';
+    const created = createdOn(profile.created_at);
+    let line = `Agent ${quoted(profile.name)} is marked as your assistant${id}${created ? `, created ${created}` : ''}.`;
+    if (!profile.marker_valid) line += ' Its mark is incomplete.';
+    if (!profile.orchestrator) line += ' Its role is not Orchestrator.';
+    found.push(line);
+  });
+  facts.hqs.forEach(hq => {
+    const id = showIds && hq.assistant_id ? ` for assistant ${shortId(hq.assistant_id)}` : '';
+    const leads = (hq.entry_agents || []).map(name => quoted(name));
+    let line = `Workspace ${quoted(hq.name, 'with no name')} is marked as a Personal HQ${id}, ${leads.length ? `led by ${listOf(leads)}` : 'with no lead agent'}.`;
+    if (hq.designated) line += ' It is your current Personal HQ.';
+    if (!hq.marker_valid) line += ' Its record is incomplete.';
+    if (!hq.owned_by_user) line += ' It belongs to another user.';
+    found.push(line);
+  });
+  if (!facts.hqs.some(hq => hq.designated)) {
+    const designation = facts.designation;
+    if (!designation.workspace_id) found.push('No workspace is set as your Personal HQ.');
+    else if (designation.valid)
+      found.push(
+        `Ori treats ${quoted(designation.workspace_name, 'a workspace')} as your Personal HQ.`
+      );
+    else
+      found.push(
+        'Ori’s Personal HQ setting points to a workspace that is missing or in the Trash.'
+      );
+  }
+  const fixes = (Array.isArray(diagnosis?.fixes) ? diagnosis.fixes : []).map(fix => ({
+    id: String(fix.id || ''),
+    recommended: fix.recommended === true,
+    ...recoveryFixCopy(fix, facts)
+  }));
+  return {
+    issue,
+    problem: recoveryProblem(issue, facts),
+    found,
+    fixes,
+    guidance: fixes.length ? '' : recoveryGuidance(issue, facts)
+  };
+}
+
 // presetView says what the New Agent panel shows for a relationship state.
 //
 //   form       the hire preset (not hired yet, or a hire in flight)
 //   resume     a partial hire: one button that replays the same request
 //   reconnect  an orphan identity the server can prove: one Reconnect button
-//   blocked    contradictory records: the status, and no button at all
+//   blocked    contradictory records: the fix view, which asks the server what
+//              differs and offers only the fixes it names
 //   standard   anything else, including every hired state: the ordinary form
 export function presetView(state) {
   const relationshipState = String(state?.state || '').trim();
@@ -289,9 +568,9 @@ export function presetView(state) {
   if (recovery.blocked) {
     return {
       mode: 'blocked',
-      title: 'Automatic repair unavailable',
+      title: 'Fix your assistant’s records',
       message:
-        'Ori found Personal Assistant records that do not agree. Nothing can be reconnected automatically.',
+        'Ori found Personal Assistant records that do not agree, so it cannot reconnect them on its own.',
       detail:
         'Ori will not guess from names or choose between conflicting identities. No records have been changed.',
       buttonLabel: ''
@@ -332,6 +611,7 @@ if (typeof window !== 'undefined') {
     ASSISTANT_MANDATE_MAX_LENGTH,
     MANDATE_PLACEHOLDER,
     HIRE_BOUNDARY_COPY,
+    RECOVERY_BOUNDARY_COPY,
     FOCUS_AREAS: GENERIC_FOCUS_AREAS,
     buildPersonalAssistantHirePayload,
     personalAssistantNeedsHQ,
@@ -340,6 +620,9 @@ if (typeof window !== 'undefined') {
     clearHireRequestId,
     submitHire,
     submitRepair,
+    fetchRecoveryDiagnosis,
+    submitRecoveryFix,
+    describeRecoveryDiagnosis,
     presetView
   });
 }

@@ -4,30 +4,13 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/johnjallday/ori-agent/internal/database"
 )
 
 func setupTestToolCallStore(t *testing.T) (*SQLiteToolCallStore, func()) {
 	t.Helper()
 
-	ctx := context.Background()
-	cfg := &database.Config{
-		InMemory: true,
-	}
-
-	db, err := database.Open(ctx, cfg)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-
-	store := NewSQLiteToolCallStore(db)
-
-	cleanup := func() {
-		_ = db.Close()
-	}
-
-	return store, cleanup
+	db, cleanup := setupTestDB(t)
+	return NewSQLiteToolCallStore(db), cleanup
 }
 
 func TestAddToolCall(t *testing.T) {
