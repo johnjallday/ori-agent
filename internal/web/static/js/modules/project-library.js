@@ -332,6 +332,24 @@ export class ProjectLibraryPanel {
       document.getElementById('projectLibrarySetup').hidden = true;
       document.getElementById('projectLibraryContent').hidden = true;
     }
+    this.focusArrival();
+  }
+
+  // Arriving from a map badge or an Action Center card lands on the
+  // suggestions heading once the shelf has rendered, instead of wherever the
+  // browser's early hash scroll left the page. Only the first render counts.
+  focusArrival() {
+    if (this.arrivalHandled || globalThis.location?.hash !== '#projectLibraryProposals') return;
+    this.arrivalHandled = true;
+    const section = document.getElementById('projectLibraryProposals');
+    const heading =
+      section && !section.hidden
+        ? document.getElementById('projectLibraryProposalsTitle')
+        : document.getElementById('projectLibraryTitle');
+    if (!heading) return;
+    heading.setAttribute('tabindex', '-1');
+    heading.scrollIntoView?.({ block: 'start' });
+    heading.focus?.({ preventScroll: true });
   }
 
   async renderPendingLinks() {

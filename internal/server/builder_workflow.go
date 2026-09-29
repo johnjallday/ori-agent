@@ -971,6 +971,11 @@ func (b *ServerBuilder) initializeMissionBridge() {
 	actionCenterBacklogService.SetEventBus(b.eventBus)
 	actionCenterBacklogService.SetSynchronizer(workspace.NewFileBacklogSynchronizer(b.workspaceStore))
 	b.actionCenterHandler = actioncenterhttp.NewHandler(b.workspaceStore, opportunityStore, actionCenterBacklogService)
+	// Project-library cards are derived per request from each owned Home's
+	// persisted digest and ready suggestions; nothing is stored for them.
+	if b.sessionHandler != nil {
+		b.actionCenterHandler.SetLibraryCardSource(b.sessionHandler)
+	}
 
 	// Event triggers reuse the same mission bridge (for mission_run actions)
 	// and opportunity store (for failure findings).

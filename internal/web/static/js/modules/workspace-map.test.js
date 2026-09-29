@@ -1263,6 +1263,73 @@ test('a program Home names its template type apart from its name; ordinary group
   assert.ok(!unknownKind.includes('ws-map-district-type'));
 });
 
+test('a Home library badge is a separate navigation button with an escaped, shelf-only route', () => {
+  const map = loadOriWorkspaceMap();
+  const base = { left: 0, top: 0, width: 400, height: 300, memberCount: 2 };
+  const home = { id: 'home', name: 'Music Home', group_template: { kind: 'managed_home' } };
+  assert.ok(
+    !map.districtHTML({ ...base, ws: home }, '').includes('ws-map-district-library-badge'),
+    'no snapshot, no badge'
+  );
+  map.libraryBadges.setSnapshot({
+    home: {
+      text: '6 new · 5 ready',
+      label: 'Music Home library: <b>6</b> new. Open the suggestions shelf.',
+      route: '/workspaces/music-home/assistant#projectLibraryProposals'
+    },
+    other: {
+      text: 'x',
+      label: 'x',
+      route: 'https://evil.example/assistant#projectLibraryProposals'
+    },
+    bare: { text: 'x', label: 'x', route: 'javascript:alert(1)' }
+  });
+  const html = map.districtHTML({ ...base, ws: home }, '');
+  assert.match(
+    html,
+    /<\/button><span class="ws-map-district-notice"><button type="button" class="ws-map-district-library-badge" data-library-badge="home" data-library-route="\/workspaces\/music-home\/assistant#projectLibraryProposals" aria-label="Music Home library: &lt;b&gt;6&lt;\/b&gt; new\. Open the suggestions shelf\."/,
+    'the badge follows the district tag as a sibling, never inside it'
+  );
+  assert.match(html, />6 new · 5 ready<\/button><\/span>/);
+  assert.match(html, /class="ws-map-district-header has-library-badge"/);
+  assert.match(
+    map.districtHTML({ ...base, ws: { id: 'plain', name: 'Plain' } }, ''),
+    /class="ws-map-district-header">/,
+    'a group without a badge keeps the single-row header'
+  );
+  for (const id of ['other', 'bare']) {
+    assert.ok(
+      !map.districtHTML({ ...base, ws: { id, name: id } }, '').includes('library-badge'),
+      `${id}: an off-shelf route is dropped`
+    );
+  }
+  map.libraryBadges.setSnapshot(null);
+  assert.ok(!map.districtHTML({ ...base, ws: home }, '').includes('library-badge'));
+});
+
+test('world bounds reserve the badge line above a badged Home so Fit all keeps it on screen', () => {
+  const map = loadOriWorkspaceMap();
+  const workspaces = [
+    { id: 'home', kind: 'group', name: 'Music Home' },
+    { id: 'ws', name: 'Solo' }
+  ];
+  const plain = map.computeWorldLayout(workspaces).bounds;
+  map.libraryBadges.setSnapshot({
+    home: {
+      text: '5 ready',
+      label: 'Music Home library: 5 ready to set up. Open the suggestions shelf.',
+      route: '/workspaces/music-home/assistant#projectLibraryProposals'
+    }
+  });
+  const badged = map.computeWorldLayout(workspaces).bounds;
+  assert.equal(badged.minY, plain.minY - 48, 'room for a 44px badge and its gap');
+  assert.equal(badged.maxY, plain.maxY);
+  assert.equal(badged.minX, plain.minX);
+  assert.equal(badged.maxX, plain.maxX);
+  map.libraryBadges.setSnapshot(null);
+  assert.deepEqual(map.computeWorldLayout(workspaces).bounds, plain, 'no badge, no extra room');
+});
+
 test('appearance is offered for reset only once it has been customized (#346 FR-137, FR-146)', async () => {
   const { map } = await mountedCollapsible();
   const target = { type: 'district', id: 'grp', ws: { id: 'grp', kind: 'group', name: 'Ops' } };

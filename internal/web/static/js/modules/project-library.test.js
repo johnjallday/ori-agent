@@ -1507,6 +1507,46 @@ test('scan digest line handles zero, partial, unknown-root and setup-unavailable
   assert.match(forged, /on an unknown date: 0 projects, 0 can be set up, 1 unsupported format\./);
 });
 
+test('arriving with the shelf hash focuses the suggestions heading once, after it renders', () => {
+  const originalDocument = globalThis.document;
+  const originalLocation = globalThis.location;
+  const calls = [];
+  const heading = id => ({
+    setAttribute: (name, value) => calls.push(`${id}:${name}=${value}`),
+    scrollIntoView: () => calls.push(`${id}:scroll`),
+    focus: options => calls.push(`${id}:focus:${options?.preventScroll}`)
+  });
+  const section = { hidden: false };
+  const elements = {
+    projectLibraryProposals: section,
+    projectLibraryProposalsTitle: heading('suggestions'),
+    projectLibraryTitle: heading('library')
+  };
+  globalThis.document = { getElementById: id => elements[id] || null };
+  try {
+    globalThis.location = { hash: '#projectLibraryProposals' };
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.focusArrival();
+    panel.focusArrival(); // a later refresh never steals focus again
+    assert.deepEqual(calls, [
+      'suggestions:tabindex=-1',
+      'suggestions:scroll',
+      'suggestions:focus:true'
+    ]);
+    calls.length = 0;
+    section.hidden = true; // nothing to review: land on the library heading
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, ['library:tabindex=-1', 'library:scroll', 'library:focus:true']);
+    calls.length = 0;
+    globalThis.location = { hash: '#projectLibraryPanel' };
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, [], 'other arrivals keep the page’s normal focus');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.location = originalLocation;
+  }
+});
+
 test('scan digest renders as inert text and shows the shelf even with no suggestions', async () => {
   const original = globalThis.document;
   const elements = new Map();

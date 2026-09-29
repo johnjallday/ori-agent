@@ -671,6 +671,57 @@
       pending && typeof pending === 'object' ? pending : Object.create(null);
   }
 
+  // Project-library badges, keyed by Home id, handed in by the Home host on
+  // mount (library-manager-notifications FR 11). The Map never fetches them
+  // and the badge only navigates: the host owns the click. Anything that is
+  // not a same-origin suggestions-shelf route is dropped here.
+  var libraryBadges = Object.create(null);
+  var LIBRARY_SHELF_ROUTE = /^\/workspaces\/[^/?#\s]+\/assistant#projectLibraryProposals$/;
+  // World-space room for the badge line: a 44px touch target plus the row gap.
+  var LIBRARY_BADGE_CLEARANCE = 48;
+
+  function setLibraryBadges(snapshot) {
+    libraryBadges = Object.create(null);
+    if (!snapshot || typeof snapshot !== 'object') return;
+    Object.keys(snapshot).forEach(function (id) {
+      var badge = snapshot[id];
+      if (
+        !id ||
+        !badge ||
+        typeof badge.text !== 'string' ||
+        !badge.text ||
+        typeof badge.label !== 'string' ||
+        typeof badge.route !== 'string' ||
+        !LIBRARY_SHELF_ROUTE.test(badge.route)
+      )
+        return;
+      libraryBadges[id] = { text: badge.text, label: badge.label, route: badge.route };
+    });
+  }
+
+  // A sibling of the district tag, never nested in it: a control inside a
+  // control is invalid, and selecting a group is a different intention. It
+  // gets its own line above the header row (see .ws-map-district-notice), so
+  // a one-cell Home keeps its name and its three controls exactly as before.
+  function libraryBadgeHTML(groupId) {
+    var badge = groupId ? libraryBadges[groupId] : null;
+    if (!badge) return '';
+    return (
+      '<span class="ws-map-district-notice">' +
+      '<button type="button" class="ws-map-district-library-badge" data-library-badge="' +
+      escapeHtml(groupId) +
+      '" data-library-route="' +
+      escapeHtml(badge.route) +
+      '" aria-label="' +
+      escapeHtml(badge.label) +
+      '" title="' +
+      escapeHtml(badge.label) +
+      '">' +
+      escapeHtml(badge.text) +
+      '</button></span>'
+    );
+  }
+
   /**
    * What the economy says about one workspace's tile.
    *
@@ -1897,7 +1948,11 @@
       include(node.x, node.y, CELL_W, CELL_H);
     });
     districts.forEach(function (district) {
-      include(district.x, district.y, district.width, district.height);
+      // A library badge takes its own line above the district's header, which
+      // itself sits above the frame. Reserve that line, or Fit all on a narrow
+      // screen frames the badge off the top edge of the map.
+      var badgeRoom = district && libraryBadges[district.id] ? LIBRARY_BADGE_CLEARANCE : 0;
+      include(district.x, district.y - badgeRoom, district.width, district.height + badgeRoom);
     });
     if (hqSite) include(hqSite.x, hqSite.y, CELL_W, CELL_H);
     if (minX === Infinity) {
@@ -2706,7 +2761,9 @@
       'px;height:' +
       height +
       'px">' +
-      '<div class="ws-map-district-header">' +
+      '<div class="ws-map-district-header' +
+      (libraryBadges[ws.id] ? ' has-library-badge' : '') +
+      '">' +
       '<button type="button" class="ws-map-district-tag' +
       (isSel ? ' is-selected' : '') +
       '" data-ws-id="' +
@@ -2733,6 +2790,7 @@
       escapeHtml(countLabel) +
       '</span>' +
       '</button>' +
+      libraryBadgeHTML(ws.id) +
       // Collapse is its own control with its own accurate label, distinct from
       // selecting, opening, moving, and deleting the group (#346 FR-109,
       // FR-145). aria-expanded lives here rather than on the outline because
@@ -10647,6 +10705,9 @@
     // passes none — every surface other than Home — leaves it empty, and the
     // tiles render exactly as they did before the feature (city-economy FR35).
     setEconomySnapshot(state && state.economy);
+    // Read before districtHTML runs, like the economy. A host that passes
+    // none draws no library badge.
+    setLibraryBadges(state && state.libraryBadges);
     var allWorkspaces = (state && state.workspaces) || [];
     // Scoped mode is decided before anything reads the workspace list, so
     // stats, layout, bindings, and selection all see only the group.
@@ -10944,6 +11005,12 @@
       setSnapshot: setEconomySnapshot,
       tileView: economyTileView,
       badgesHTML: economyBadgesHTML
+    },
+    // Project-library badges (library-manager-notifications FR 11), exported
+    // so the validation and markup can be asserted without a browser.
+    libraryBadges: {
+      setSnapshot: setLibraryBadges,
+      badgeHTML: libraryBadgeHTML
     },
     computeLayout: computeMapLayout,
     // The task-run show's live activity layer. The map subscribes to

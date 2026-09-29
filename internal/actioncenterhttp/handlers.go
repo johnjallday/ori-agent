@@ -11,6 +11,7 @@
 package actioncenterhttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,55 @@ type Handler struct {
 	// 26-29). Optional: AddToBacklog degrades to 503 if unset so the rest of
 	// the Action Center keeps working even in a build that hasn't wired it.
 	backlogService *workspace.BacklogService
+	// libraryCards derives the project-library cards. Optional: without it
+	// the library list is simply empty.
+	libraryCards LibraryCardSource
+}
+
+// LibraryCard is a derived, navigation-only card for one program Home whose
+// project library has something ready to review (library-manager-
+// notifications FR 13). It is never stored, dismissed, snoozed or resolved
+// here: the owner handles it on the Home's own suggestions shelf, and the
+// card disappears on its own once nothing is ready.
+type LibraryCard struct {
+	HomeID         string     `json:"home_id"`
+	HomeName       string     `json:"home_name"`
+	Route          string     `json:"route"`
+	ScannedAt      *time.Time `json:"scanned_at,omitempty"`
+	Coverage       string     `json:"coverage,omitempty"`
+	Projects       int        `json:"projects"`
+	New            int        `json:"new"`
+	Activatable    int        `json:"activatable"`
+	ReadyProposals int        `json:"ready_proposals"`
+}
+
+// LibraryCardSource derives the current owner's library cards from persisted
+// Home state only. It must scope to the authenticated owner.
+type LibraryCardSource interface {
+	LibraryCards(ctx context.Context) ([]LibraryCard, error)
+}
+
+// SetLibraryCardSource wires the project-library card source. Call it before
+// serving requests.
+func (h *Handler) SetLibraryCardSource(source LibraryCardSource) {
+	if h != nil {
+		h.libraryCards = source
+	}
+}
+
+// ListLibrary handles GET /api/action-center/library. A missing or failing
+// source degrades to an empty list so the rest of the Action Center renders.
+func (h *Handler) ListLibrary(w http.ResponseWriter, r *http.Request) {
+	items := []LibraryCard{}
+	if h != nil && h.libraryCards != nil {
+		cards, err := h.libraryCards.LibraryCards(r.Context())
+		if err != nil {
+			logger.Warn("action center: library cards unavailable", logger.Fields{"error": err})
+		} else if cards != nil {
+			items = cards
+		}
+	}
+	writeJSON(w, map[string]any{"items": items, "total": len(items)})
 }
 
 // NewHandler constructs an Action Center handler. workspaces and opps are

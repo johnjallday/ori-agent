@@ -987,6 +987,56 @@
   opacity: 0.72;
   font-size: 9px;
 }
+/* A program Home's project-library badge (library-manager-notifications
+   FR 11). Its own button, never inside the name: it only navigates to the
+   Home's suggestions shelf. It takes a line of its own ABOVE the header row
+   (order -1 on a full-width wrapper), because a one-cell Home's row is already
+   full with the name and three 44px controls; the row itself is unchanged.
+   Filled rather than outlined, so it reads as something to look at, not as
+   another header control. No animation. */
+.ws-map-district-header.has-library-badge {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+/* Full width to force the line break, but transparent to pointer input like
+   the strip itself; only the button takes clicks (FR-157). */
+.ws-map-district-header > .ws-map-district-notice {
+  order: -1;
+  flex: 0 0 100%;
+  display: flex;
+  min-width: 0;
+  pointer-events: none;
+}
+.ws-map-district-library-badge {
+  pointer-events: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid rgb(var(--ws-district-accent));
+  background: rgba(var(--ws-district-accent), 0.22);
+  color: var(--ws-ink);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 3px 9px;
+}
+.ws-map-district-library-badge:hover {
+  background: rgba(var(--ws-district-accent), 0.34);
+}
+.ws-map-district-library-badge:focus-visible {
+  outline: 2px solid rgb(var(--ws-district-accent));
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .ws-map-district-library-badge {
+    min-height: 44px;
+  }
+}
 .ws-map-district-tag:hover {
   background: rgba(var(--ws-district-accent), 0.14);
 }

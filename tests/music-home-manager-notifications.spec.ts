@@ -34,6 +34,39 @@ function hash(path: string) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
+// The page scrolls smoothly unless reduced motion is on, so wait for the
+// arrival scroll to settle with the heading on screen and not under the navbar.
+async function expectHeadingUncovered(page: Page, selector: string) {
+  await page.evaluate(
+    () =>
+      new Promise<void>(resolve => {
+        let last = -1;
+        let still = 0;
+        const tick = () => {
+          still = window.scrollY === last ? still + 1 : 0;
+          last = window.scrollY;
+          if (still >= 3) resolve();
+          else setTimeout(tick, 100);
+        };
+        tick();
+      })
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(sel => {
+          const heading = document.querySelector(sel);
+          if (!heading) return 'missing';
+          const box = heading.getBoundingClientRect();
+          if (box.top < 0 || box.bottom > innerHeight) return 'offscreen';
+          const hit = document.elementFromPoint(box.left + 4, box.top + box.height / 2);
+          return hit && heading.contains(hit) ? 'uncovered' : 'covered';
+        }, selector),
+      { timeout: 10_000 }
+    )
+    .toBe('uncovered');
+}
+
 test('a completed scan leaves a model-free digest on the Home suggestions shelf', async ({
   page,
   request
@@ -187,6 +220,88 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   await page.setViewportSize({ width: 1280, height: 900 });
 
   // The digest and summary never create workspaces or touch project files.
+  expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+    workspacesBeforeScan
+  );
+  expect(projectFiles.map(hash)).toEqual(before);
+
+  // The Home map badge and the Action Center card appear only when something
+  // is ready, and both only navigate to the Home's suggestions shelf.
+  const homeName = homes[0].name;
+  const setTheme = async (theme: 'light' | 'dark') => {
+    await page.evaluate(value => localStorage.setItem('ori-theme', value), theme);
+    await page.reload();
+  };
+  if (!reaperSource) {
+    expect((await json(await request.get('/api/action-center/library'))).items).toHaveLength(0);
+    await page.goto('/');
+    await expect(page.locator(`.ws-map-district[data-group-id="${homeID}"]`)).toBeVisible();
+    await expect(page.locator('[data-library-badge]')).toHaveCount(0);
+    return;
+  }
+  const cards = (await json(await request.get('/api/action-center/library'))).items;
+  expect(cards).toEqual([
+    expect.objectContaining({
+      home_id: homeID,
+      home_name: homeName,
+      route: summary.route,
+      new: 6,
+      activatable: 5,
+      ready_proposals: 0
+    })
+  ]);
+  await page.goto('/');
+  const badge = page.locator(`[data-library-badge="${homeID}"]`);
+  await expect(badge).toHaveText('6 new · 5 ready');
+  await expect(badge).toHaveAccessibleName(
+    `${homeName} library: 6 new projects, 5 ready to set up. Open the suggestions shelf.`
+  );
+  await shot(page, '03-map-badge-light');
+  await setTheme('dark');
+  await expect(badge).toBeVisible();
+  await shot(page, '04-map-badge-dark');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('[data-map-fit]').click();
+  // Fit all must frame the badge inside the map, not above its top edge.
+  const canvasBox = await page.locator('.ws-map-canvas').first().boundingBox();
+  const badgeBox = await badge.boundingBox();
+  expect(canvasBox && badgeBox).toBeTruthy();
+  expect(badgeBox!.y).toBeGreaterThanOrEqual(canvasBox!.y);
+  expect(badgeBox!.x).toBeGreaterThanOrEqual(canvasBox!.x);
+  expect(badgeBox!.x + badgeBox!.width).toBeLessThanOrEqual(canvasBox!.x + canvasBox!.width);
+  await shot(page, '05-map-badge-390-dark');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await setTheme('light');
+  await badge.click();
+  await page.waitForURL(/\/assistant#projectLibraryProposals$/);
+  await expect(page.locator('#projectLibraryProposalsTitle')).toBeFocused();
+  await expect(page.locator('#projectLibraryDigest')).toContainText('5 can be set up');
+  await expectHeadingUncovered(page, '#projectLibraryProposalsTitle');
+  await shot(page, '06-badge-arrival-focus');
+
+  await page.goto('/action-center');
+  const librarySection = page.locator('#action-center-library');
+  await expect(librarySection).toBeVisible();
+  await expect(librarySection).toContainText(homeName);
+  await expect(librarySection).toContainText('6 new · 5 ready to set up');
+  await expect(librarySection.getByRole('button', { name: /Dismiss|Snooze|Resolve/ })).toHaveCount(
+    0
+  );
+  await shot(page, '07-action-center-card-light');
+  await setTheme('dark');
+  await expect(librarySection).toBeVisible();
+  await shot(page, '08-action-center-card-dark');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await shot(page, '09-action-center-card-390-dark');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await setTheme('light');
+  await librarySection.getByRole('link', { name: `Open ${homeName} suggestions shelf` }).click();
+  await page.waitForURL(/\/assistant#projectLibraryProposals$/);
+  await expect(page.locator('#projectLibraryProposalsTitle')).toBeFocused();
+  await expectHeadingUncovered(page, '#projectLibraryProposalsTitle');
+
+  // Neither surface changed anything.
   expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
     workspacesBeforeScan
   );

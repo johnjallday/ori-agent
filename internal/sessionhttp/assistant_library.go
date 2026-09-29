@@ -1,13 +1,16 @@
 package sessionhttp
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -109,14 +112,95 @@ func (h *Handler) GetAssistantLibrarySummary(w http.ResponseWriter, r *http.Requ
 		respondLibraryReadError(w, err)
 		return
 	}
-	route := ""
-	if slug := station.FolderSlug; workspace.IsCanonicalWorkspaceSlug(slug) {
-		route = "/workspaces/" + url.PathEscape(slug) + "/assistant#projectLibraryProposals"
-	}
 	_ = orihttp.RespondSuccess(w, struct {
 		projectlibrary.LibrarySummary
 		Route string `json:"route"`
-	}{summary, route})
+	}{summary, librarySuggestionsRoute(station)})
+}
+
+// librarySuggestionsRoute is the Home's suggestions shelf, or "" when the
+// Home has no canonical slug to link to.
+func librarySuggestionsRoute(home *workspace.Workspace) string {
+	if home == nil || !workspace.IsCanonicalWorkspaceSlug(home.FolderSlug) {
+		return ""
+	}
+	return "/workspaces/" + url.PathEscape(home.FolderSlug) + "/assistant#projectLibraryProposals"
+}
+
+const maxLibraryCards = 20
+
+// LibraryCards is the Action Center's project-library source: one
+// navigation-only card per Home the current owner holds whose last completed
+// scan left entries ready for a setup review, or whose Manager suggestions
+// are ready for review. It reads persisted Home state only.
+func (h *Handler) LibraryCards(ctx context.Context) ([]actioncenterhttp.LibraryCard, error) {
+	if h == nil || h.workspaceTaskStore == nil || h.currentUserID == nil {
+		return nil, nil
+	}
+	owner, err := h.currentUserID(ctx)
+	if err != nil || strings.TrimSpace(owner) == "" {
+		return nil, nil
+	}
+	ids, err := h.workspaceTaskStore.List()
+	if err != nil {
+		return nil, err
+	}
+	library := h.assistantLibraryStore()
+	cards := []actioncenterhttp.LibraryCard{}
+	for _, id := range ids {
+		if len(cards) >= maxLibraryCards {
+			break
+		}
+		home, getErr := h.workspaceTaskStore.Get(id)
+		if getErr != nil || home == nil || home.OwnerUserID != owner || home.GetAssistantProjectLink() != nil {
+			continue
+		}
+		state := home.GetAssistantProgramState()
+		if state == nil || len(state.ProjectLibrary) == 0 {
+			continue
+		}
+		key := state.Key.Normalize()
+		if key.OwnerUserID != owner {
+			continue
+		}
+		summary, summaryErr := library.Summary(projectlibrary.Scope{OwnerUserID: owner, HomeID: home.ID,
+			ProviderID: key.PluginID, ProgramID: key.ProgramID})
+		if summaryErr != nil {
+			continue // A diverged or unavailable Home shows no card rather than a guess.
+		}
+		if card, ok := libraryCard(home, summary); ok {
+			cards = append(cards, card)
+		}
+	}
+	sort.SliceStable(cards, func(i, j int) bool {
+		a, b := cards[i].ScannedAt, cards[j].ScannedAt
+		if (a == nil) != (b == nil) {
+			return a != nil
+		}
+		if a != nil && !a.Equal(*b) {
+			return a.After(*b)
+		}
+		return cards[i].HomeName < cards[j].HomeName
+	})
+	return cards, nil
+}
+
+func libraryCard(home *workspace.Workspace, summary projectlibrary.LibrarySummary) (actioncenterhttp.LibraryCard, bool) {
+	activatable := 0
+	if summary.Digest != nil && summary.Digest.SetupNote == "" {
+		activatable = summary.Digest.Activatable
+	}
+	route := librarySuggestionsRoute(home)
+	if (activatable == 0 && summary.ReadyProposals == 0) || route == "" {
+		return actioncenterhttp.LibraryCard{}, false
+	}
+	card := actioncenterhttp.LibraryCard{HomeID: home.ID, HomeName: home.Name, Route: route,
+		Activatable: activatable, ReadyProposals: summary.ReadyProposals}
+	if digest := summary.Digest; digest != nil {
+		scanned := digest.ScannedAt
+		card.ScannedAt, card.Coverage, card.Projects, card.New = &scanned, digest.Coverage, digest.Projects, digest.New
+	}
+	return card, true
 }
 
 // ConfigureAssistantLibraryRoots binds the host's native chooser and a scoped

@@ -1596,6 +1596,7 @@ func registerActionCenterRoutes(mux *http.ServeMux, s *Server) {
 	// Action Center — cross-workspace triage of mission opportunities.
 	if s.Handlers.ActionCenter != nil {
 		mux.HandleFunc("GET /api/action-center/opportunities", s.Handlers.ActionCenter.List)
+		mux.HandleFunc("GET /api/action-center/library", s.Handlers.ActionCenter.ListLibrary)
 		mux.HandleFunc("GET /api/action-center/opportunities/{workspaceID}/{opportunityID}", s.Handlers.ActionCenter.Get)
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/dismiss", s.Handlers.ActionCenter.Dismiss)
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/snooze", s.Handlers.ActionCenter.Snooze)
