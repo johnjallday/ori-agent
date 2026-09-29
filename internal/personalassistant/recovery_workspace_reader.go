@@ -50,7 +50,8 @@ func (r *SessionRecoveryWorkspaceReader) PersonalAssistantRecoveryWorkspaces(ctx
 			continue
 		}
 		item := RecoveryWorkspace{
-			ID: strings.TrimSpace(workspace.ID), OwnerUserID: strings.TrimSpace(workspace.OwnerUserID),
+			ID: strings.TrimSpace(workspace.ID), Name: strings.TrimSpace(workspace.Name),
+			OwnerUserID: strings.TrimSpace(workspace.OwnerUserID),
 			EntryAgents: make([]RecoveryEntryAgent, 0, 1),
 		}
 		for _, instance := range workspace.AgentInstances {

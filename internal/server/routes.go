@@ -1090,6 +1090,9 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-assistant/rename", s.Handlers.PersonalAssistant.Rename)
 		mux.HandleFunc("POST /api/personal-assistant/hire", s.Handlers.PersonalAssistant.Hire)
 		mux.HandleFunc("POST /api/personal-assistant/repair", s.Handlers.PersonalAssistant.Repair)
+		// Records that do not agree: what differs, and one reviewed fix at a time.
+		mux.HandleFunc("GET /api/personal-assistant/repair/diagnosis", s.Handlers.PersonalAssistant.GetRepairDiagnosis)
+		mux.HandleFunc("POST /api/personal-assistant/repair/resolve", s.Handlers.PersonalAssistant.ResolveRepair)
 		// The confirmed consequence of the guided Map walkthrough. The legacy
 		// POST /api/personal-hq/setup route stays exactly as it was.
 		mux.HandleFunc("POST /api/personal-assistant/hq", s.Handlers.PersonalAssistant.SetupHQ)

@@ -845,20 +845,20 @@ function renderRelationship(personalAssistant, view) {
     els.banner.replaceChildren();
     const link = document.createElement('a');
     // Repair happens where the hire happens: the Agents page opens its
-    // reconnect, resume, or blocked view on arrival (PRD FR28). There is
-    // nothing to walk through first, so the link goes straight there.
+    // reconnect, resume, or fix view on arrival (PRD FR28). There is nothing
+    // to walk through first, so the link goes straight there.
     link.href = MEET_ASSISTANT_AGENTS_ROUTE;
     link.textContent = recoverable
       ? 'Review and reconnect'
       : blocked
-        ? 'Review repair status'
+        ? 'See what differs and fix it'
         : 'Repair personal assistant';
     const message = recoverable
       ? personalAssistant?.hq_workspace_id
         ? 'Ori found the existing assistant and Personal HQ with matching stable IDs. '
         : 'Ori found the existing assistant profile with its durable ownership marker. '
       : blocked
-        ? 'Existing Personal Assistant records do not agree, so Ori will not guess or create a duplicate. '
+        ? 'Existing Personal Assistant records do not agree. Ori will not guess or create a duplicate, but it can show you what differs and offer a safe fix. '
         : 'Your existing assistant or Personal HQ needs repair. ';
     els.banner.append(message, link);
     return;

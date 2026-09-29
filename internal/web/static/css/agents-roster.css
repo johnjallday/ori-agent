@@ -3115,6 +3115,81 @@ body.inspector-sheet-open {
   padding: 0;
 }
 
+/* The fix view for assistant records that do not agree: what differs, what Ori
+   found, and one radio card per fix listing exactly what it changes. */
+.create-preset__heading {
+  margin: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.create-preset__found {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--card-muted, #5b6472);
+}
+.create-preset__fixes {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+/* Bootstrap floats a legend full-width at a large size. */
+.create-preset__fixes > legend {
+  float: none;
+  width: auto;
+  padding: 0;
+}
+.create-preset__fix {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 10px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+}
+.create-preset__fix:has(input:checked) {
+  border-color: var(--primary-color, #4f46e5);
+}
+.create-preset__fix .form-check-input {
+  margin-top: 3px;
+}
+.create-preset__fix-label {
+  cursor: pointer;
+}
+.create-preset__fix-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.create-preset__fix-badge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 14%, transparent);
+  color: var(--primary-color, #4f46e5);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+.create-preset__fix-changes {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--card-muted, #5b6472);
+}
+.create-preset__notice {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #16a34a 12%, transparent);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
