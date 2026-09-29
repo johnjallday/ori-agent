@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Run only in a disposable HOME through the reviewed Music journey:
@@ -253,14 +253,14 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   // The direct /tool path proves the proposal tool contract without a model:
   // the locally bound Manager saves one inert suggestion from chat, labeled
   // as such on the shelf, which the badge then counts.
-  const directChatSuggestion = async () => {
+  const saveChatSuggestion = async (albumName: string) => {
     const homeRecord = await json(await request.get(`/api/workspaces/${homeID}`));
     const manager = homeRecord.agent_instances.find(
       (instance: { role_id: string }) => instance.role_id === 'portfolio_manager'
     );
     expect(manager?.name).toBeTruthy();
     const album = (await json(await request.get(`${base}/projects`))).rows.find(
-      (row: { name: string }) => row.name === 'Album-0'
+      (row: { name: string }) => row.name === albumName
     );
     const direct = await json(
       await request.post('/api/chat', {
@@ -274,14 +274,18 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
           question: `/tool home_library_propose_next_action ${JSON.stringify({
             entry_id: album.id,
             fields_revision: album.fields_revision,
-            next_action: 'Listen to Album-0 before choosing a mix',
+            next_action: `Listen to ${albumName} before choosing a mix`,
             reason: '<b>Untrusted</b> chat note',
-            request_key: `notifications-chat-${homeID}`
+            request_key: `notifications-chat-${albumName}-${homeID}`
           })}`
         }
       })
     );
     expect(direct.success, JSON.stringify(direct)).toBe(true);
+    return album;
+  };
+  const directChatSuggestion = async () => {
+    await saveChatSuggestion('Album-0');
     expect((await json(await request.get(`${base}/summary`))).ready_proposals).toBe(1);
     await page.goto(summary.route.replace('#projectLibraryProposals', ''));
     const card = shelf.locator('#projectLibraryProposalRows .project-library-resume-card');
@@ -384,6 +388,99 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
   await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText(
     '6 new · 5 ready · 1 to review'
   );
+  expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+    workspacesBeforeScan
+  );
+  expect(projectFiles.map(hash)).toEqual(before);
+
+  // Dismiss one suggestion and confirm another; every surface follows, and
+  // both answers survive a reload and (when requested) a server restart.
+  const album1 = await saveChatSuggestion('Album-1');
+  await page.goto('/');
+  await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText(
+    '6 new · 5 ready · 2 to review'
+  );
+  await page.goto(summary.route.replace('#projectLibraryProposals', ''));
+  const suggestionCards = shelf.locator('#projectLibraryProposalRows .project-library-resume-card');
+  await expect(suggestionCards).toHaveCount(2);
+  await suggestionCards
+    .filter({ hasText: 'Album-0' })
+    .getByRole('button', { name: 'Dismiss Album-0 suggestion' })
+    .click();
+  const dismissDialog = page.getByRole('dialog', { name: 'Dismiss the suggestion for Album-0?' });
+  await expect(dismissDialog).toContainText('No notes, sessions, folders or workspaces change');
+  await dismissDialog.getByRole('button', { name: 'Dismiss suggestion' }).click();
+  await expect(shelf.locator('#projectLibraryStatus')).toContainText(
+    'Dismissed the suggestion for Album-0. Nothing else changed.'
+  );
+  await expect(suggestionCards.filter({ hasText: 'Album-0' })).toContainText('Dismissed by you');
+  await suggestionCards
+    .filter({ hasText: 'Album-1' })
+    .getByRole('button', { name: 'Review Album-1 suggestion' })
+    .click();
+  await page
+    .getByRole('dialog', { name: "Save Album-1's suggested next action?" })
+    .getByRole('button', { name: 'Save next action' })
+    .click();
+  await expect(suggestionCards.filter({ hasText: 'Album-1' })).toContainText(
+    'Not actionable (stale)'
+  );
+  const answered = async () => {
+    const current = await json(await request.get(`${base}/summary`));
+    expect(current.ready_proposals).toBe(0);
+    expect(current.feedback).toEqual([
+      expect.objectContaining({ kind: 'next_action', accepted: 1, dismissed: 1 })
+    ]);
+    const album1Now = await json(await request.get(`${base}/projects/${album1.id}`));
+    expect(album1Now.fields.next_action).toBe('Listen to Album-1 before choosing a mix');
+    const album0 = (await json(await request.get(`${base}/projects`))).rows.find(
+      (row: { name: string }) => row.name === 'Album-0'
+    );
+    expect(album0.next_action || '').toBe('');
+  };
+  await answered();
+  await expect(shelf.locator('#projectLibraryFeedback')).toHaveText(
+    'Your answers to Manager suggestions so far: 1 accepted, 1 dismissed.'
+  );
+  await suggestionCards.first().scrollIntoViewIfNeeded();
+  await shot(page, '11-dismissed-and-confirmed');
+  await page.goto('/');
+  await expect(page.locator(`[data-library-badge="${homeID}"]`)).toHaveText('6 new · 5 ready');
+  await page.goto('/action-center');
+  await expect(page.locator('#action-center-library')).toContainText('6 new · 5 ready to set up');
+  await expect(page.locator('#action-center-library')).not.toContainText('to review');
+
+  if (process.env.ORI_MUSIC_RESTART_TEST === '1') {
+    writeFileSync(join(sandbox, 'evidence', 'restart.request'), 'answered suggestions\n', {
+      mode: 0o600
+    });
+    await expect
+      .poll(
+        () => {
+          if (existsSync(join(sandbox, 'evidence', 'restart.failed'))) return 'failed';
+          if (existsSync(join(sandbox, 'evidence', 'restart.done'))) return 'ready';
+          return 'pending';
+        },
+        { timeout: 45_000 }
+      )
+      .toBe('ready');
+    const restartEvidence = readFileSync(join(sandbox, 'evidence', 'restart.done'), 'utf8');
+    const pids = restartEvidence.match(/same HOME and ORI_DATA_DIR: (\d+) -> (\d+)/);
+    expect(pids?.[1]).not.toBe(pids?.[2]);
+  }
+  // Reduced motion: the shelf renders without its entrance animation.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto(summary.route.replace('#projectLibraryProposals', ''));
+  await answered();
+  await expect(suggestionCards.filter({ hasText: 'Album-0' })).toContainText('Dismissed by you');
+  await expect(shelf.locator('#projectLibraryFeedback')).toHaveText(
+    'Your answers to Manager suggestions so far: 1 accepted, 1 dismissed.'
+  );
+  await expect(shelf.locator('#projectLibraryRun')).toHaveText(
+    'Manager review skipped: the Manager has no tool-capable model configured.'
+  );
+  await shelf.locator('#projectLibraryProposals').scrollIntoViewIfNeeded();
+  await shot(page, '12-answers-after-restart');
   expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
     workspacesBeforeScan
   );

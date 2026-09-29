@@ -477,13 +477,17 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     assert.match(recap.children[1].textContent, /<script>untrusted recap<\/script>/);
     assert.match(recap.children[1].textContent, /not evidence that work happened/);
     assert.equal(recap.children[4].textContent, 'Edit Album-4 suggested recap');
+    assert.equal(ready.children[5].textContent, 'Dismiss <svg onload=alert(1)> suggestion');
+    assert.equal(stale.children.filter(child => child.tag === 'button').length, 0);
     panel.state.provider_read_only = true;
     await panel.renderProposals();
-    assert.equal(
-      elements
-        .get('projectLibraryProposalRows')
-        .children[0].children.filter(child => child.tag === 'button').length,
-      0
+    // A read-only Home offers no review, but dismissing only removes.
+    const readOnlyButtons = elements
+      .get('projectLibraryProposalRows')
+      .children[0].children.filter(child => child.tag === 'button');
+    assert.deepEqual(
+      readOnlyButtons.map(button => button.textContent),
+      ['Dismiss <svg onload=alert(1)> suggestion']
     );
   } finally {
     globalThis.document = original;
@@ -1544,6 +1548,73 @@ test('the Manager review line names skips, results and stop reasons without clai
   );
   assert.equal(proposalSourceLabel({}), 'From a Manager chat');
   assert.equal(proposalSourceLabel({ source: 'forged' }), 'From a Manager chat');
+});
+
+test('dismissal needs its own confirmation and a retry reuses the same key', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.run = async (_trigger, _message, work) => work();
+  const messages = [];
+  panel.status = message => messages.push(message);
+  let refreshes = 0;
+  panel.refresh = async () => {
+    refreshes++;
+  };
+  const posts = [];
+  let failNext = true;
+  panel.post = async (path, body) => {
+    posts.push({ path, body });
+    if (failNext) {
+      failNext = false;
+      throw new Error('network dropped the reply');
+    }
+    return { replay: posts.length > 1 };
+  };
+  const row = {
+    name: 'Song <b>',
+    status: 'ready',
+    proposal: { id: 'p 1', next_action: '<script>x</script>' }
+  };
+  let answer = false;
+  const titles = [];
+  panel.confirm = async (title, lines) => {
+    titles.push(title);
+    assert.ok(
+      lines.some(line => line.includes('No notes, sessions, folders or workspaces change'))
+    );
+    return answer;
+  };
+  await panel.dismissProposal(row, null);
+  assert.deepEqual(posts, [], 'cancelling sends nothing');
+  assert.equal(messages.at(-1), 'Nothing was dismissed.');
+  answer = true;
+  await assert.rejects(panel.dismissProposal(row, null), /network dropped/);
+  await panel.dismissProposal(row, null);
+  assert.equal(posts.length, 2);
+  assert.equal(posts[0].path, '/proposals/p%201/dismiss');
+  assert.deepEqual(Object.keys(posts[0].body).sort(), ['confirm', 'idempotency_key']);
+  assert.equal(posts[0].body.confirm, true);
+  assert.equal(
+    posts[1].body.idempotency_key,
+    posts[0].body.idempotency_key,
+    'a retried dismissal replays the same answer'
+  );
+  assert.equal(refreshes, 1);
+  assert.equal(titles[0], 'Dismiss the suggestion for Song <b>?');
+  assert.equal(panel.pendingDismissals.size, 0);
+});
+
+test('feedback line totals the owner’s answers and hides when there are none', async () => {
+  const { libraryFeedbackText } = await import('./project-library.js');
+  assert.equal(libraryFeedbackText(null), '');
+  assert.equal(libraryFeedbackText([{ kind: 'next_action', accepted: 0, dismissed: 0 }]), '');
+  assert.equal(
+    libraryFeedbackText([
+      { kind: 'next_action', accepted: 2, dismissed: 1 },
+      { kind: 'project_review', accepted: 0, dismissed: 3 },
+      { kind: 'forged', accepted: -5, dismissed: '9' }
+    ]),
+    'Your answers to Manager suggestions so far: 2 accepted, 4 dismissed.'
+  );
 });
 
 test('arriving with the shelf hash focuses the suggestions heading once, after it renders', () => {

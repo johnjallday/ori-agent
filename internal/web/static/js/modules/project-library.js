@@ -128,6 +128,20 @@ export function libraryRunText(run) {
   return `${who} reviewed this scan and ${found}.${stop}`;
 }
 
+// libraryFeedbackText totals the owner's answers across suggestion kinds.
+// It is shown to the owner only; nothing tunes itself from it.
+export function libraryFeedbackText(feedback) {
+  const count = value => (Number.isInteger(value) && value > 0 ? value : 0);
+  let accepted = 0;
+  let dismissed = 0;
+  for (const row of Array.isArray(feedback) ? feedback : []) {
+    accepted += count(row?.accepted);
+    dismissed += count(row?.dismissed);
+  }
+  if (!accepted && !dismissed) return '';
+  return `Your answers to Manager suggestions so far: ${accepted} accepted, ${dismissed} dismissed.`;
+}
+
 // A suggestion's origin: the bounded scan review, or a Manager chat.
 export function proposalSourceLabel(proposal) {
   if (proposal?.source === 'manager_model') {
@@ -498,6 +512,12 @@ export class ProjectLibraryPanel {
       runLine.textContent = runText;
       runLine.hidden = !runText;
     }
+    const feedbackText = libraryFeedbackText(summary?.feedback);
+    const feedbackLine = document.getElementById('projectLibraryFeedback');
+    if (feedbackLine) {
+      feedbackLine.textContent = feedbackText;
+      feedbackLine.hidden = !feedbackText;
+    }
     let page = null;
     try {
       page = await this.request('/proposals');
@@ -543,7 +563,13 @@ export class ProjectLibraryPanel {
         node(
           'small',
           '',
-          `Suggested by ${proposal.agent_name} · ${proposalSourceLabel(proposal)} · ${row.status === 'ready' ? 'Ready for your separate review' : `Not actionable (${row.status})`}`
+          `Suggested by ${proposal.agent_name} · ${proposalSourceLabel(proposal)} · ${
+            row.status === 'ready'
+              ? 'Ready for your separate review'
+              : row.status === 'dismissed'
+                ? 'Dismissed by you'
+                : `Not actionable (${row.status})`
+          }`
         )
       );
       if (row.status === 'ready' && !this.readOnly) {
@@ -574,6 +600,18 @@ export class ProjectLibraryPanel {
         );
         card.append(button);
       }
+      // Dismissing only removes, so it stays available when the Manager or
+      // the Home provider has gone away (the row then reads "unavailable").
+      if (row.status === 'ready' || row.status === 'unavailable') {
+        const dismiss = node(
+          'button',
+          'modern-btn modern-btn-secondary project-library-dismiss',
+          `Dismiss ${row.name} suggestion`
+        );
+        dismiss.type = 'button';
+        dismiss.addEventListener('click', () => void this.dismissProposal(row, dismiss));
+        card.append(dismiss);
+      }
       container.append(card);
     }
     if (page.total > (page.rows || []).length)
@@ -584,6 +622,38 @@ export class ProjectLibraryPanel {
           `Showing the latest ${(page.rows || []).length} of ${page.total} saved suggestions.`
         )
       );
+  }
+
+  // A dismissal is its own owner answer. The idempotency key survives a lost
+  // reply, so retrying the same dismissal replays instead of failing.
+  async dismissProposal(row, trigger) {
+    await this.run(trigger, 'Checking this suggestion…', async () => {
+      const proposal = row.proposal;
+      const confirmed = await this.confirm(
+        `Dismiss the suggestion for ${row.name}?`,
+        [
+          'Only this suggestion is marked dismissed. No notes, sessions, folders or workspaces change.',
+          'The Manager’s scan reviews will not suggest the same kind of step for this project again for seven days.'
+        ],
+        'Dismiss suggestion',
+        trigger
+      );
+      if (!confirmed) {
+        this.status('Nothing was dismissed.');
+        return;
+      }
+      this.pendingDismissals ||= new Map();
+      const key = this.pendingDismissals.get(proposal.id) || operationKey('dismiss');
+      this.pendingDismissals.set(proposal.id, key);
+      await this.post(`/proposals/${encodeURIComponent(proposal.id)}/dismiss`, {
+        confirm: true,
+        idempotency_key: key
+      });
+      this.pendingDismissals.delete(proposal.id);
+      // Refresh first: it resets the status line, and this message must stay.
+      await this.refresh();
+      this.status(`Dismissed the suggestion for ${row.name}. Nothing else changed.`);
+    });
   }
 
   async editRecapProposal(row, trigger) {

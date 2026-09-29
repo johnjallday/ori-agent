@@ -112,10 +112,15 @@ func (h *Handler) GetAssistantLibrarySummary(w http.ResponseWriter, r *http.Requ
 		respondLibraryReadError(w, err)
 		return
 	}
+	var feedback []workspace.AssistantProposalFeedback
+	if summary.Initialized {
+		feedback = h.libraryProposalFeedback(station.ID)
+	}
 	_ = orihttp.RespondSuccess(w, struct {
 		projectlibrary.LibrarySummary
-		Route string `json:"route"`
-	}{summary, librarySuggestionsRoute(station)})
+		Route    string                                `json:"route"`
+		Feedback []workspace.AssistantProposalFeedback `json:"feedback,omitempty"`
+	}{summary, librarySuggestionsRoute(station), feedback})
 }
 
 // librarySuggestionsRoute is the Home's suggestions shelf, or "" when the

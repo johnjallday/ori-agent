@@ -949,6 +949,9 @@
   color: var(--assistant-muted);
   overflow-wrap: anywhere;
 }
+.project-library-resume-card button + .project-library-dismiss {
+  margin-left: 0.5rem;
+}
 /* Arriving from a map badge or an Action Center card scrolls a shelf heading
    to the top; keep it clear of the fixed navbar (as settings.css does). */
 .project-library-panel h2,

@@ -37,6 +37,9 @@ type ManagerProposal struct {
 	ScanID string `json:"scan_id,omitempty"`
 	Source string `json:"source,omitempty"` // "manager_model"
 	Model  string `json:"model,omitempty"`
+	// DismissedAt is set only by the owner's separate dismissal; it changes
+	// nothing else about the Home.
+	DismissedAt *time.Time `json:"dismissed_at,omitempty"`
 }
 
 type ManagerProposalRow struct {
@@ -645,6 +648,9 @@ func proposalStaleInDocument(doc Document, proposal ManagerProposal) bool {
 }
 
 func (s *Store) managerProposalStatus(scope Scope, doc Document, proposal ManagerProposal) string {
+	if proposal.DismissedAt != nil {
+		return "dismissed"
+	}
 	if !proposal.ExpiresAt.After(s.now().UTC()) {
 		return "expired"
 	}

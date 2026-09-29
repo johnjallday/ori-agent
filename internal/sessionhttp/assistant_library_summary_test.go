@@ -185,6 +185,94 @@ func TestAssistantLibraryCards_OneNavigationCardPerOwnedHomeWithWorkReady(t *tes
 	}
 }
 
+func TestAssistantLibraryHTTP_DismissIsStrictOwnerScopedAndReplayable(t *testing.T) {
+	handler, store, station, _ := assistantPortfolioHTTPFixture(t)
+	handler.currentUserID = func(context.Context) (string, error) { return station.OwnerUserID, nil }
+	state := station.GetAssistantProgramState()
+	scope := projectlibrary.Scope{OwnerUserID: station.OwnerUserID, HomeID: station.ID,
+		ProviderID: state.Key.PluginID, ProgramID: state.Key.ProgramID}
+	library := projectlibrary.NewStore(store)
+	review, err := library.ReviewInitialize(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := library.CommitInitialize(scope, review.Token, "dismiss-init"); err != nil {
+		t.Fatal(err)
+	}
+	// A saved suggestion whose Manager and provider are gone reads as
+	// "unavailable" — exactly the case where dismissal must still work.
+	proposalID := "suggestion-1"
+	if err := store.Update(station.ID, func(home *workspace.Workspace) error {
+		homeState := home.GetAssistantProgramState()
+		var doc projectlibrary.Document
+		if err := json.Unmarshal(homeState.ProjectLibrary, &doc); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		doc.Proposals = append(doc.Proposals, projectlibrary.ManagerProposal{ID: proposalID,
+			EntryID: doc.Entries[0].ID, FieldsRevision: doc.Entries[0].Fields.Revision, BindingRevision: 1,
+			AgentInstanceID: "gone", AgentName: "Manager", NextAction: "<script>untrusted</script>",
+			Digest: strings.Repeat("c", 64), CreatedAt: now, ExpiresAt: now.Add(time.Hour)})
+		doc.Revision++
+		encoded, err := json.Marshal(doc)
+		if err != nil {
+			return err
+		}
+		homeState.ProjectLibrary = encoded
+		home.SetAssistantProgramState(homeState)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dismiss := func(id, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := assistantProgramRequest(http.MethodPost, "/library/proposals/"+id+"/dismiss", station.ID, body)
+		request.SetPathValue("proposalID", id)
+		response := httptest.NewRecorder()
+		handler.DismissAssistantLibraryProposal(response, request)
+		return response
+	}
+	for name, body := range map[string]string{
+		"unconfirmed":   `{"confirm":false,"idempotency_key":"k1"}`,
+		"unknown field": `{"confirm":true,"idempotency_key":"k1","entry_id":"x"}`,
+		"duplicate key": `{"confirm":true,"confirm":true,"idempotency_key":"k1"}`,
+		"not an object": `[]`,
+	} {
+		if result := dismiss(proposalID, body); result.Code != http.StatusBadRequest {
+			t.Fatalf("%s: %d %s", name, result.Code, result.Body.String())
+		}
+	}
+	if result := dismiss("no-such-suggestion", `{"confirm":true,"idempotency_key":"k0"}`); result.Code != http.StatusNotFound {
+		t.Fatalf("unknown suggestion: %d %s", result.Code, result.Body.String())
+	}
+	handler.currentUserID = func(context.Context) (string, error) { return "other-owner", nil }
+	if result := dismiss(proposalID, `{"confirm":true,"idempotency_key":"k1"}`); result.Code != http.StatusNotFound {
+		t.Fatalf("other owner dismissed a suggestion: %d", result.Code)
+	}
+	handler.currentUserID = func(context.Context) (string, error) { return station.OwnerUserID, nil }
+	first := dismiss(proposalID, `{"confirm":true,"idempotency_key":"k1"}`)
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"replay":false`) ||
+		!strings.Contains(first.Body.String(), `"dismissed_at"`) {
+		t.Fatalf("dismiss: %d %s", first.Code, first.Body.String())
+	}
+	if again := dismiss(proposalID, `{"confirm":true,"idempotency_key":"k1"}`); again.Code != http.StatusOK ||
+		!strings.Contains(again.Body.String(), `"replay":true`) {
+		t.Fatalf("exact retry: %d %s", again.Code, again.Body.String())
+	}
+	if other := dismiss(proposalID, `{"confirm":true,"idempotency_key":"k2"}`); other.Code != http.StatusConflict {
+		t.Fatalf("second dismissal under a new key: %d %s", other.Code, other.Body.String())
+	}
+	after, err := library.Read(scope)
+	if err != nil || len(after.Entries) != len(before.Entries) ||
+		after.Entries[0].Fields.NextAction != before.Entries[0].Fields.NextAction || len(after.Dismissals) != 1 {
+		t.Fatalf("dismissal changed more than the suggestion: %+v %v", after, err)
+	}
+}
+
 // The library Roots are configured before the event bus is wired, so the
 // adapter must reach the bus that exists when a scan completes.
 func TestAssistantLibraryEvents_ResolveTheBusAtPublishTime(t *testing.T) {

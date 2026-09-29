@@ -170,10 +170,12 @@ func admitRunProposal(doc *Document, proposal *ManagerProposal, authority Manage
 		return ErrLimit
 	}
 	for _, waiting := range doc.Proposals {
-		if waiting.Kind == proposal.Kind && waiting.EntryID == proposal.EntryID &&
-			waiting.ExpiresAt.After(at) && !proposalStaleInDocument(*doc, waiting) {
+		if waiting.Kind == proposal.Kind && waiting.EntryID == proposal.EntryID && proposalWaiting(*doc, waiting, at) {
 			return ErrDuplicateProposal
 		}
+	}
+	if recentlyDismissed(*doc, proposal.EntryID, proposal.Kind, at) {
+		return ErrRecentlyDismissed
 	}
 	proposal.ScanID, proposal.Source, proposal.Model = run.ScanID, sourceManagerModel, run.Model
 	return nil

@@ -28,8 +28,9 @@ Options:
   --port PORT       Server port (default: 8931).
   --sandbox DIR     Use and preserve this sandbox instead of a temporary one.
   --keep            Preserve the generated temporary sandbox after exit.
-  --restart-check   In the paired reviewed test only, restart this sandbox's
-                    server once when the browser requests it (never user state).
+  --restart-check   In a reviewed test only (portfolio-reviewed needs --reaper-source),
+                    restart this sandbox's server once when the browser requests
+                    it (never user state).
   --suite NAME      Browser test suite: home (default), portfolio (local refusal),
                     portfolio-reviewed (published release; test only), or
                     manager-notifications (scan digest, badge and Manager
@@ -164,8 +165,9 @@ fi
 if [[ "$mode" != "serve" && "$open_browser" -eq 1 ]]; then
 	fail "--open is only valid with the serve command"
 fi
-if ((restart_check == 1)) && [[ "$mode" != "test" || "$test_suite" != "portfolio-reviewed" || "$provider_mode" != "reviewed" || -z "$reaper_source" ]]; then
-	fail "--restart-check requires test --suite portfolio-reviewed --provider reviewed --reaper-source"
+if ((restart_check == 1)) && { [[ "$mode" != "test" || "$provider_mode" != "reviewed" ]] || ((reviewed_suite == 0)) ||
+	[[ "$test_suite" == "portfolio-reviewed" && -z "$reaper_source" ]]; }; then
+	fail "--restart-check requires test --provider reviewed with --suite manager-notifications, or --suite portfolio-reviewed with --reaper-source"
 fi
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

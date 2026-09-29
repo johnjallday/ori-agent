@@ -819,6 +819,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/proposals", s.Handlers.Session.ListAssistantLibraryProposals)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/proposals/{proposalID}/review", s.Handlers.Session.ReviewAssistantLibraryProposal)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/proposals/{proposalID}/commit", s.Handlers.Session.CommitAssistantLibraryProposal)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/proposals/{proposalID}/dismiss", s.Handlers.Session.DismissAssistantLibraryProposal)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects", s.Handlers.Session.SearchAssistantLibrary)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}", s.Handlers.Session.GetAssistantLibraryProject)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/forget/review", s.Handlers.Session.ReviewAssistantLibraryForget)
