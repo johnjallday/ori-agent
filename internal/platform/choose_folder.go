@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -77,7 +78,11 @@ func ChooseFolder(ctx context.Context, prompt string) (path string, chosen bool,
 	if path == "" {
 		return "", false, nil
 	}
-	return path, true, nil
+	// "POSIX path of (choose folder)" ends folder paths with a slash
+	// ("/Users/me/Music/"). Callers compare the selection against its clean
+	// and symlink-resolved forms, so hand back the clean path without
+	// resolving anything: a symlinked choice must still be visible to them.
+	return filepath.Clean(path), true, nil
 }
 
 // chooseFolderScript builds the AppleScript. The prompt is the only variable
@@ -110,7 +115,7 @@ func ChooseFile(ctx context.Context, prompt string) (path string, chosen bool, e
 	if path == "" {
 		return "", false, nil
 	}
-	return path, true, nil
+	return filepath.Clean(path), true, nil
 }
 
 func chooseFileScript(prompt string) string {

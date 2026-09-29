@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -124,9 +125,17 @@ func (r *Roots) Pick(ctx context.Context, scope Scope) (string, error) {
 		return "", ErrUnavailable
 	}
 	path, chosen, err := r.picker.Choose(ctx, "Choose one project folder to catalog")
-	if err != nil || !chosen {
+	if err != nil {
+		logger.Warn("Project library folder chooser failed", logger.Fields{"home_id": scope.HomeID, "error": err.Error()})
 		return "", ErrUnavailable
 	}
+	if !chosen {
+		return "", ErrUnavailable
+	}
+	// A native chooser may end a folder path with a separator. Cleaning only
+	// normalizes the spelling of the user's exact selection; symlinks are
+	// still refused below rather than resolved.
+	path = filepath.Clean(path)
 	gate := rootAccessGate(scope)
 	gate.RLock()
 	defer gate.RUnlock()
@@ -135,6 +144,9 @@ func (r *Roots) Pick(ctx context.Context, scope Scope) (string, error) {
 	}
 	path, _, err = r.pickedRoot(path)
 	if err != nil {
+		// The reason is logged without the selected path: a refused selection
+		// must not leak a private folder name into the server log.
+		logger.Warn("Project library refused the chosen folder", logger.Fields{"home_id": scope.HomeID, "error": err.Error()})
 		return "", err
 	}
 	return r.selections.IssueFor(path, selectionScope(scope))
