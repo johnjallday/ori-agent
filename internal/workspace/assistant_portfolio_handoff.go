@@ -67,6 +67,9 @@ func (service *AssistantPortfolioService) ReviewHandoff(stationID, linkID string
 	}
 	if err := service.store.Update(station.ID, func(current *Workspace) error {
 		currentState := current.GetAssistantProgramState()
+		if assistantPortfolioLibraryOwned(service.store, current) {
+			return ErrAssistantPortfolioLibraryOwned
+		}
 		if currentState == nil || currentState.Key.Normalize() != state.Key.Normalize() {
 			return ErrAssistantPortfolioConflict
 		}
@@ -157,6 +160,9 @@ func (service *AssistantPortfolioService) CommitHandoff(stationID, token, idempo
 	}
 	if err := service.store.Update(station.ID, func(current *Workspace) error {
 		currentState := current.GetAssistantProgramState()
+		if assistantPortfolioLibraryOwned(service.store, current) {
+			return ErrAssistantPortfolioLibraryOwned
+		}
 		if currentState == nil || currentState.Key.Normalize() != state.Key.Normalize() {
 			return ErrAssistantPortfolioConflict
 		}

@@ -101,6 +101,7 @@ type FolderOutcome struct {
 	Kind        string `json:"kind"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Route       string `json:"route,omitempty"`
+	HomeRoute   string `json:"home_route,omitempty"`
 	Blueprint   string `json:"blueprint,omitempty"`
 	Remembered  bool   `json:"remembered,omitempty"`
 	Note        string `json:"note,omitempty"`
@@ -127,10 +128,13 @@ type FolderOffer struct {
 	Chip       string            `json:"chip,omitempty"`
 	FolderKey  string            `json:"folder_key"`
 	FolderName string            `json:"folder_name"`
-	Verdict    string            `json:"verdict"`
-	Reason     string            `json:"reason"`
-	Partial    bool              `json:"partial,omitempty"`
-	ScannedAt  time.Time         `json:"scanned_at"`
+	// RootIdentity is an opaque device/inode witness from the original scan;
+	// it is not a filesystem path or a durable discovery authorization.
+	RootIdentity string    `json:"root_identity,omitempty"`
+	Verdict      string    `json:"verdict"`
+	Reason       string    `json:"reason"`
+	Partial      bool      `json:"partial,omitempty"`
+	ScannedAt    time.Time `json:"scanned_at"`
 	// Subject is what the offer asks about: the named project, or the root
 	// for a dump, ambiguous, or empty verdict.
 	Subject FolderCandidateRecord `json:"subject"`

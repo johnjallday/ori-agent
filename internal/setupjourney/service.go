@@ -193,6 +193,8 @@ var safeGuidance = map[ReasonCode]string{
 	ReasonHomeProviderMissing:         "Install the plugin that provides this Home, then check again.",
 	ReasonStaffingRequired:            "Review the required Home and project staffing to continue.",
 	ReasonStaffingNeedsAttention:      "One or more required roles need attention.",
+	ReasonProjectRoleSnapshotMissing:  "This linked project is missing its saved project-role declaration. Staffing needs a separate reviewed repair; opening setup will not infer roles from the Home or an installed plugin.",
+	ReasonProjectRoleMirrorDiverged:   "This project's saved role records disagree with its workspace folder. Ori cannot choose a winner or add agents; resolve the storage conflict before reviewing staffing.",
 
 	ReasonWorkspaceRequired:              "Create the Email Ops workspace to continue.",
 	ReasonAccountConnectionNotConfigured: "Google sign-in isn't configured on this Ori server yet. Ask whoever runs it to set up the Google connection, then check again.",

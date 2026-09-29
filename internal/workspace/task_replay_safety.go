@@ -110,41 +110,50 @@ func (e TaskAttemptEvidence) EvaluateReplaySafety() ReplaySafety {
 // explicitly — rather than inferring from a verb prefix — keeps a tool from
 // becoming replay-safe by accident when someone renames it.
 var readOnlyToolNames = map[string]struct{}{
-	"read_file":                {},
-	"list_directory":           {},
-	"list_dir":                 {},
-	"directory_tree":           {},
-	"search_files":             {},
-	"get_file_info":            {},
-	"list_allowed_directories": {},
-	"web_search":               {},
-	"web_fetch":                {},
-	"mail_search_threads":      {},
-	"mail_get_thread":          {},
-	"list_notes":               {},
-	"read_note":                {},
-	"list_tasks":               {},
-	"get_task":                 {},
-	"read_memory":              {},
-	"list_workspaces":          {},
-	"get_workspace":            {},
+	"read_file":                     {},
+	"list_directory":                {},
+	"list_dir":                      {},
+	"directory_tree":                {},
+	"search_files":                  {},
+	"get_file_info":                 {},
+	"list_allowed_directories":      {},
+	"web_search":                    {},
+	"web_fetch":                     {},
+	"mail_search_threads":           {},
+	"mail_get_thread":               {},
+	"home_library_search":           {},
+	"home_library_detail":           {},
+	"home_library_sessions":         {},
+	"home_library_handoff_receipts": {},
+	"list_notes":                    {},
+	"read_note":                     {},
+	"list_tasks":                    {},
+	"get_task":                      {},
+	"read_memory":                   {},
+	"list_workspaces":               {},
+	"get_workspace":                 {},
 }
 
 // mutatingToolNames are tools known to change state. The list exists so a
 // failed mutation is recognized as ambiguous even when its binding carried no
 // side-effect classification.
 var mutatingToolNames = map[string]struct{}{
-	"write_file":       {},
-	"edit_file":        {},
-	"move_file":        {},
-	"create_directory": {},
-	"delete_file":      {},
-	"save_note":        {},
-	"update_note":      {},
-	"create_task":      {},
-	"update_task":      {},
-	"write_memory":     {},
-	"mail_draft_reply": {},
+	"write_file":                          {},
+	"edit_file":                           {},
+	"move_file":                           {},
+	"create_directory":                    {},
+	"delete_file":                         {},
+	"save_note":                           {},
+	"update_note":                         {},
+	"create_task":                         {},
+	"update_task":                         {},
+	"write_memory":                        {},
+	"mail_draft_reply":                    {},
+	"home_library_propose_next_action":    {},
+	"home_library_propose_project_review": {},
+	"home_library_propose_session_goal":   {},
+	"home_library_propose_root_review":    {},
+	"home_library_propose_session_recap":  {},
 }
 
 // ClassifyToolSideEffect classifies a tool call for replay purposes. The
@@ -172,7 +181,7 @@ func ClassifyToolSideEffect(toolName string, declared SideEffect) ToolSideEffect
 		return ToolSideEffectRead
 	}
 	if _, ok := mutatingToolNames[name]; ok {
-		if name == "mail_draft_reply" {
+		if name == "mail_draft_reply" || name == "home_library_propose_next_action" || name == "home_library_propose_project_review" || name == "home_library_propose_session_goal" || name == "home_library_propose_root_review" || name == "home_library_propose_session_recap" {
 			return ToolSideEffectConfirm
 		}
 		return ToolSideEffectWrite

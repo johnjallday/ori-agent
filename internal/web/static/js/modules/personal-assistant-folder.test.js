@@ -10,11 +10,47 @@ import {
   folderOfferView,
   folderOutcomeNote,
   folderReceiptView,
-  folderProjectModalOptions
+  folderProjectModalOptions,
+  portfolioLibraryURL
 } from './personal-assistant-folder.js';
 
 const headlineText = view => view.headline.map(part => part.text).join('');
 const strongText = view => view.headline.filter(part => part.strong).map(part => part.text);
+
+test('portfolio continuation carries only a canonical Home route and opaque offer ID', () => {
+  assert.equal(
+    portfolioLibraryURL({
+      id: 'offer-123',
+      status: 'resolved',
+      outcome: { kind: 'home', route: '/workspaces/music-home' }
+    }),
+    '/workspaces/music-home/assistant?folder_offer_id=offer-123#projectLibraryPanel'
+  );
+  assert.equal(
+    portfolioLibraryURL({
+      id: 'offer-123',
+      status: 'awaiting_outcome',
+      outcome: { kind: 'home', route: '/workspaces/music-home' }
+    }),
+    ''
+  );
+  assert.equal(
+    portfolioLibraryURL({
+      id: 'offer-123',
+      status: 'resolved',
+      outcome: { kind: 'home', route: '//external' }
+    }),
+    ''
+  );
+  assert.equal(
+    portfolioLibraryURL({
+      id: 'offer-123',
+      status: 'resolved',
+      outcome: { kind: 'project', route: '/workspaces/song' }
+    }),
+    ''
+  );
+});
 
 test('the action is offered only to an active or paused assistant', () => {
   assert.equal(folderActionAvailable({ state: 'active' }), true);
@@ -55,6 +91,7 @@ test('resolved project receipt names only server rows and offers the canonical w
       { kind: 'task', name: 'Summarize current draft', detail: '' }
     ],
     route: '/workspaces/thesis',
+    homeRoute: '',
     openLabel: 'Open <Thesis>'
   });
   assert.equal(folderOfferView(offer).question, "Here's what I set up:");
@@ -62,7 +99,62 @@ test('resolved project receipt names only server rows and offers the canonical w
     folderReceiptView({ ...offer, outcome: { ...offer.outcome, route: '//evil' } }).route,
     ''
   );
+  assert.equal(
+    folderReceiptView({
+      ...offer,
+      outcome: {
+        ...offer.outcome,
+        home_route: '/workspaces/music-home/assistant#projectLibraryPanel'
+      }
+    }).homeRoute,
+    '/workspaces/music-home/assistant#projectLibraryPanel'
+  );
+  assert.equal(
+    folderReceiptView({
+      ...offer,
+      outcome: { ...offer.outcome, home_route: '//evil/assistant#projectLibraryPanel' }
+    }).homeRoute,
+    ''
+  );
   assert.equal(folderReceiptView({ ...offer, outcome: { kind: 'tidy' } }).visible, false);
+});
+
+test('a verified plugin quest offers its Home review route without a legacy folder-link receipt', () => {
+  const offer = {
+    status: 'resolved',
+    verdict: 'project',
+    subject: { name: 'Song' },
+    capability: { setup_source: 'plugin' },
+    outcome: {
+      kind: 'project',
+      route: '/workspaces/single-song',
+      home_route: '/workspaces/music-home/assistant#projectLibraryPanel'
+    }
+  };
+  assert.deepEqual(folderReceiptView(offer), {
+    visible: true,
+    rows: [],
+    route: '/workspaces/single-song',
+    homeRoute: '/workspaces/music-home/assistant#projectLibraryPanel',
+    openLabel: 'Open Song'
+  });
+  assert.equal(folderOfferView(offer).question, "Here's what I set up:");
+  assert.equal(
+    folderOfferView({
+      ...offer,
+      capability: { ...offer.capability, integration: 'Setup will install REAPER' }
+    }).capabilityDetail,
+    ''
+  );
+  assert.equal(folderReceiptView({ ...offer, capability: undefined }).visible, false);
+  assert.equal(
+    folderReceiptView({ ...offer, outcome: { ...offer.outcome, route: '//evil' } }).visible,
+    false
+  );
+  assert.equal(
+    folderReceiptView({ ...offer, outcome: { ...offer.outcome, home_route: '//evil' } }).visible,
+    false
+  );
 });
 
 test('the first-folder hand-over is an active-only server receipt, never a pre-HQ prompt', () => {
@@ -257,6 +349,9 @@ test('a reviewed file project uses the same card and never the blank creator', (
   assert.ok(!view.actions.some(action => action.create || action.modal));
   const waiting = folderOfferView({ ...offer, status: 'awaiting_outcome' });
   assert.equal(waiting.resume, true);
+  assert.match(waiting.question, /setup has not finished/);
+  assert.match(waiting.capabilityDetail, /does not by itself create another workspace/);
+  assert.doesNotMatch(waiting.capabilityDetail, /install the Ori integration plugin/);
   assert.equal(waiting.actions[0].id, 'resume');
   assert.equal(waiting.actions[0].journey, true);
 });

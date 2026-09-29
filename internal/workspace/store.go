@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -87,6 +88,11 @@ type FileStore struct {
 	locks       LockTable         // serializes Update calls per workspace
 	localConfig *LocalConfigStore // immutable after construction; never inferred from folder markers
 	continuity  ContinuityGuard   // immutable after construction; nil keeps legacy discovery
+	// mirrored is set once a SyncStore writes through this FileStore. The
+	// primary's version is then the sequence authority for protected records
+	// and the folder's own version is informational, because legacy handlers
+	// also write the folder directly without touching the primary.
+	mirrored atomic.Bool
 }
 
 // Lock acquires a per-workspace write lock used to serialize Update calls.
@@ -203,12 +209,32 @@ func newFileStore(basePath string, local *LocalConfigStore, guard ContinuityGuar
 
 // Save persists a workspace to disk inside its folder.
 // If the workspace has no FolderSlug, one is derived from the Name.
+//
+// The write holds the folder's cross-process fence and compares the caller's
+// base version with the record actually on disk: an Assistant Home or split
+// project child whose base is stale is refused with ErrStaleWorkspaceVersion,
+// while an ordinary workspace keeps the older permissive behavior and logs.
 func (s *FileStore) Save(ws *Workspace) error {
+	if ws == nil {
+		return fmt.Errorf("workspace is required")
+	}
 	release, workErr := s.enterContinuityWork()
 	if workErr != nil {
 		return workErr
 	}
 	defer release()
+	fence, err := s.openFence(ws.ID)
+	if err != nil {
+		return err
+	}
+	defer fence.close()
+	return s.saveFenced(ws, fence)
+}
+
+// saveFenced is Save's body for a caller that already holds the continuity
+// work gate and the folder fence (SyncStore keeps both across its mirror
+// writes). Lock order everywhere: continuity gate, folder fence, then s.mu.
+func (s *FileStore) saveFenced(ws *Workspace, fence *folderFence) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -219,17 +245,10 @@ func (s *FileStore) Save(ws *Workspace) error {
 		ws.FolderSlug = Slugify(ws.FolderSlug)
 	}
 
-	// Stale-write detection: if the in-memory cache holds a newer version
-	// than the workspace being saved, a concurrent writer beat us to it and
-	// our update is overwriting their change. Log a warning so the issue is
-	// observable; full CAS rejection requires caller-side retry logic.
-	if cached, ok := s.cache[ws.ID]; ok && cached.Version > ws.Version {
-		logger.Warn("possible lost write: saving workspace over a newer cached version",
-			logger.Fields{
-				"workspace_id":     ws.ID,
-				"incoming_version": ws.Version,
-				"cached_version":   cached.Version,
-			})
+	// Stale-write detection against the record on disk, not this process's
+	// cache: another process may have written since this cache was loaded.
+	if err := fence.refuseStale(ws); err != nil {
+		return err
 	}
 	ws.Version++
 
@@ -312,11 +331,29 @@ func (s *FileStore) Save(ws *Workspace) error {
 		return fmt.Errorf("failed to create workspace notes folder: %w", err)
 	}
 
-	// Persist through the canonical private/portable boundary.
+	// Persist through the canonical private/portable boundary. A fenced
+	// protected write records its journal before the file changes and completes
+	// it afterwards with the digest of the bytes actually on disk, so the
+	// journal is exact whichever on-disk format the writer produced.
 	configPath := filepath.Join(folderPath, WorkspaceConfigFile)
+	if fence != nil && fence.beforeWrite != nil {
+		if err := fence.beforeWrite(); err != nil {
+			ws.Version--
+			return err
+		}
+	}
 	data, err := s.writeWorkspaceConfigLocked(ws, configPath)
 	if err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
+	}
+	if fence != nil && fence.afterWrite != nil {
+		written, readErr := os.ReadFile(configPath) // #nosec G304 G703 -- the fixed workspace.json this store just wrote, not a request path.
+		if readErr != nil {
+			return fmt.Errorf("failed to read back workspace file: %w", readErr)
+		}
+		if err := fence.afterWrite(written); err != nil {
+			return err
+		}
 	}
 
 	// Reload from disk to ensure cache has fresh copy with all fields properly set
@@ -564,7 +601,8 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 // joined with a fixed file name (workspace.json, tasks.md, a backlog file).
 // tmpPath is the file os.CreateTemp just created beside it.
 func atomicWriteFile(path string, data []byte) error {
-	const perm os.FileMode = 0644
+	// workspace.json may contain private library paths and user notes.
+	const perm os.FileMode = 0600
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
 	if err != nil {
@@ -581,6 +619,11 @@ func atomicWriteFile(path string, data []byte) error {
 		_ = os.Remove(tmpPath) // #nosec G703 -- our own temp file; see atomicWriteFile
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath) // #nosec G703 -- our own temp file; see atomicWriteFile
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath) // #nosec G703 -- our own temp file; see atomicWriteFile
 		return err
@@ -589,7 +632,17 @@ func atomicWriteFile(path string, data []byte) error {
 		_ = os.Remove(tmpPath) // #nosec G703 -- our own temp file; see atomicWriteFile
 		return err
 	}
-	return nil
+	// If directory durability fails after rename the caller receives an error;
+	// retry must first inspect the Home's persisted operation receipt.
+	parent, err := os.Open(dir) // #nosec G304 G703 -- dir is the canonical workspace config parent, not a request path.
+	if err != nil {
+		return err
+	}
+	if err := parent.Sync(); err != nil {
+		_ = parent.Close()
+		return err
+	}
+	return parent.Close()
 }
 
 // pathExists is called only with paths this package built from a registered

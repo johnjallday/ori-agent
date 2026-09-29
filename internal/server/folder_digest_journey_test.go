@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/johnjallday/ori-agent/internal/session"
 	"path/filepath"
 	"testing"
 	"time"
@@ -8,6 +9,73 @@ import (
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+func TestVerifiedProjectHomeRouteRequiresCurrentReciprocalLink(t *testing.T) {
+	fixture := newFolderLinkerFixture(t)
+	fixture.seed(t, "home-1", "Music-Home", "", session.WorkspaceKindGroup)
+	fixture.seed(t, "child-1", "Single-Song", "", session.WorkspaceKindWorkspace)
+	primary := workspace.NewSyncStore(session.NewWorkspaceStoreAdapter(fixture.sessions), fixture.files)
+	key := workspace.AssistantProgramKey{OwnerUserID: "local", PluginID: "music-project-management", ProgramID: "music-producer-assistant"}
+	if err := primary.Update("home-1", func(home *workspace.Workspace) error {
+		home.SetAssistantProgramState(&workspace.AssistantProgramState{
+			SchemaVersion: workspace.AssistantProgramStateSchemaVersion, PluginAvailable: true,
+			Key: key, LinkedProjectIDs: []string{"child-1"}})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.Update("child-1", func(child *workspace.Workspace) error {
+		child.SetAssistantProjectLink(&workspace.AssistantProjectLink{
+			ID: workspace.AssistantProjectLinkID("home-1", "child-1"), SchemaVersion: 1,
+			StationWorkspaceID: "home-1", Key: key, StateRevision: 1})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	builder := &ServerBuilder{workspaceStore: primary, workspaceFileStore: fixture.files, sessionStore: fixture.sessions}
+	verifier := folderJourneyVerifier{builder: builder}
+	child, err := fixture.files.Get("child-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "/workspaces/music-home/assistant#projectLibraryPanel"
+	if got := verifier.verifiedProjectHomeRoute(t.Context(), "local", child); got != want {
+		t.Fatalf("verified direct intake Home route = %q, want %q", got, want)
+	}
+	if got := verifier.verifiedProjectHomeRoute(t.Context(), "foreign", child); got != "" {
+		t.Fatalf("foreign owner gained Home navigation: %q", got)
+	}
+	if err := primary.Update("home-1", func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.LinkedProjectIDs = nil
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := verifier.verifiedProjectHomeRoute(t.Context(), "local", child); got != "" {
+		t.Fatalf("removed Home membership kept a route: %q", got)
+	}
+	if err := primary.Update("home-1", func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.LinkedProjectIDs = []string{"child-1"}
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.files.Update("child-1", func(folder *workspace.Workspace) error {
+		link := folder.GetAssistantProjectLink()
+		link.StateRevision++
+		folder.SetAssistantProjectLink(link)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := verifier.verifiedProjectHomeRoute(t.Context(), "local", child); got != "" {
+		t.Fatalf("split child mirror kept a route: %q", got)
+	}
+}
 
 func TestFreshJourneyProjectRefusesHistoricalAndUnfinishedRuns(t *testing.T) {
 	accepted := time.Now().UTC()

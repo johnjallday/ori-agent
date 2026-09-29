@@ -92,9 +92,12 @@ func TestChooseFolder_GateAndCancel(t *testing.T) {
 		seenScript = script
 		return []byte("/Users/me/Documents/Thesis/\n"), nil
 	}
+	// "POSIX path of (choose folder)" ends folder paths with a slash; the
+	// clean spelling is what every caller compares against (a real pick was
+	// refused as long as the slash survived here).
 	path, chosen, err := ChooseFolder(context.Background(), "Pick")
-	if err != nil || !chosen || path != "/Users/me/Documents/Thesis/" {
-		t.Errorf("chosen = %q %v %v", path, chosen, err)
+	if err != nil || !chosen || path != "/Users/me/Documents/Thesis" {
+		t.Errorf("chosen = %q %v %v, want the clean path without the chooser's trailing slash", path, chosen, err)
 	}
 	if seenScript != chooseFolderScript("Pick") {
 		t.Errorf("script = %q", seenScript)

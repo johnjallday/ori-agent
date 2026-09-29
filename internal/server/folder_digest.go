@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding/detector"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/platform"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -62,6 +63,9 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		HomeJourney: folderHomeVerifier{builder: b},
 	})
 	b.personalAssistantFolderDigest = service
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetAssistantLibraryPortfolioResolver(service)
+	}
 	b.personalAssistantHandler.SetFolderDigest(service)
 	b.personalAssistantHandler.SetFolderHomeProvider(folderHomeProviderSetup{builder: b})
 	b.personalAssistantHandler.SetFolderProjectSelections(b.pathSelectionStore)
@@ -122,6 +126,10 @@ func validateShownFolder(raw string) (string, error) {
 // nativeFolderPicker runs the macOS folder dialog in the server process,
 // skipped under the desktop launch gate like every other desktop launch.
 type nativeFolderPicker struct{}
+
+// The library and folder-offer journeys share the trusted native chooser,
+// not an HTTP-supplied pathname or a picker-token resolver.
+var _ projectlibrary.FolderPicker = nativeFolderPicker{}
 
 func (nativeFolderPicker) Available() bool { return platform.ChooseFolderAvailable() }
 

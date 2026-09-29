@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -261,6 +262,18 @@ type AssistantPortfolioHandoffOperationReceipt struct {
 	RecordedAt         time.Time `json:"recorded_at"`
 }
 
+// AssistantProjectLibraryInitReview is an inert, Home-owned review on the
+// legacy side of the authority switch. A read or preview cannot create the
+// managed library marker. The receipt is kept after commit for audit/replay.
+type AssistantProjectLibraryInitReview struct {
+	Token             string     `json:"token"`
+	Digest            string     `json:"digest"`
+	PortfolioRevision int64      `json:"portfolio_revision"`
+	StateRevision     int64      `json:"state_revision"`
+	ExpiresAt         time.Time  `json:"expires_at"`
+	ConsumedAt        *time.Time `json:"consumed_at,omitempty"`
+}
+
 type AssistantPortfolioState struct {
 	StateRevision            int64                                       `json:"state_revision,omitempty"`
 	Projects                 []AssistantPortfolioProject                 `json:"projects,omitempty"`
@@ -289,8 +302,18 @@ type AssistantProgramState struct {
 	LinkedProjectIDs []string                     `json:"linked_project_ids,omitempty"`
 	HomeBindings     AssistantRoleBindingSet      `json:"home_bindings,omitempty"`
 	Portfolio        AssistantPortfolioState      `json:"portfolio,omitempty"`
-	Topology         AssistantTopologyState       `json:"topology,omitempty"`
-	Migration        AssistantMigrationState      `json:"migration,omitempty"`
+	// ProjectLibrary is a Home-owned, metadata-only document. An absent value
+	// means the legacy portfolio is still authoritative. Keep it in this same
+	// workspace envelope so the authority marker and data cannot split on save.
+	ProjectLibrary json.RawMessage `json:"project_library,omitempty"`
+	// Initialization reviews live outside ProjectLibrary until the explicit
+	// commit; otherwise merely reviewing would switch metadata authority.
+	ProjectLibraryInitReviews []AssistantProjectLibraryInitReview `json:"project_library_init_reviews,omitempty"`
+	// Removed/restored Homes keep their catalog history, but these former
+	// root IDs can never silently regain filesystem authority on restore.
+	ProjectLibraryInactiveRoots []string                `json:"project_library_inactive_roots,omitempty"`
+	Topology                    AssistantTopologyState  `json:"topology,omitempty"`
+	Migration                   AssistantMigrationState `json:"migration,omitempty"`
 	// GroupTemplate is inert creation provenance written only in the first
 	// Save of a Home created through a reviewed Group Template selection.
 	GroupTemplate *AssistantGroupTemplateProvenance `json:"group_template,omitempty"`
@@ -325,6 +348,15 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 	clone.LinkedProjectIDs = append([]string(nil), source.LinkedProjectIDs...)
 	clone.HomeBindings = CloneAssistantRoleBindingSet(source.HomeBindings)
 	clone.Portfolio = CloneAssistantPortfolioState(source.Portfolio)
+	clone.ProjectLibrary = append(json.RawMessage(nil), source.ProjectLibrary...)
+	clone.ProjectLibraryInitReviews = append([]AssistantProjectLibraryInitReview(nil), source.ProjectLibraryInitReviews...)
+	clone.ProjectLibraryInactiveRoots = append([]string(nil), source.ProjectLibraryInactiveRoots...)
+	for i := range clone.ProjectLibraryInitReviews {
+		if source.ProjectLibraryInitReviews[i].ConsumedAt != nil {
+			value := *source.ProjectLibraryInitReviews[i].ConsumedAt
+			clone.ProjectLibraryInitReviews[i].ConsumedAt = &value
+		}
+	}
 	clone.Topology = CloneAssistantTopologyState(source.Topology)
 	clone.Migration = CloneAssistantMigrationState(source.Migration)
 	clone.GroupTemplate = CloneAssistantGroupTemplateProvenance(source.GroupTemplate)

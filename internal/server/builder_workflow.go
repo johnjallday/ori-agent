@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -96,8 +97,25 @@ func (b *ServerBuilder) buildRuntimeTaskToolFactory() workspace.RuntimeTaskToolF
 	if surfaces == nil {
 		return nil
 	}
-	return func(task workspace.Task, _ string, agentInstanceID string) []toolapi.Tool {
-		return surfaces.AgentTools(context.Background(), task.WorkspaceID, agentInstanceID)
+	return func(task workspace.Task, agentName string, agentInstanceID string) []toolapi.Tool {
+		tools := surfaces.AgentTools(context.Background(), task.WorkspaceID, agentInstanceID)
+		if b.sessionHandler == nil || b.pluginHandler == nil || b.sessionStore == nil || b.workspaceStore == nil {
+			return tools
+		}
+		provider := chathttp.NewWorkspaceToolProvider(b.sessionStore, b.workspaceStore, task.WorkspaceID)
+		provider.SetExecutingAgent(agentName)
+		provider.SetExecutingInstanceID(agentInstanceID)
+		provider.SetProjectLibraryEvidence(b.sessionHandler.AssistantLibraryProviderEvidence)
+		// The ordinary task factory only knows an agent name. It must not
+		// present a Home read through a global fallback; this runtime factory
+		// receives the exact task instance and reapplies policy at tool call.
+		for _, candidate := range provider.Tools() {
+			switch candidate.Definition().Name {
+			case "home_library_search", "home_library_detail":
+				tools = append(tools, candidate)
+			}
+		}
+		return tools
 	}
 }
 
@@ -868,6 +886,9 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	// journey, sample libraries) reuse it rather than creating their own.
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetTrustedPathSelectionResolver(b.pathSelectionStore)
+		guards := filejanitor.DefaultRootGuards()
+		guards.WorkspaceRoot = resolveWorkspaceRoot(b.configManager)
+		b.sessionHandler.ConfigureAssistantLibraryRoots(nativeFolderPicker{}, b.pathSelectionStore, guards)
 	}
 	if b.workspaceFileStore != nil {
 		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)

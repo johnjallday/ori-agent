@@ -639,6 +639,40 @@ func TestCheckUpdateReportsMalformedAndUnreachableSources(t *testing.T) {
 	})
 }
 
+func TestManagerReplacementGuardRefusesEveryReplacementBeforeRegistryWrite(t *testing.T) {
+	oldRoot := makeClaudeBundle(t)
+	manager := NewManager(&fakeRegistrar{}, t.TempDir(), "")
+	installed, err := manager.Install(oldRoot, FormatClaude, func(TrustReport) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := makeClaudeBundle(t)
+	writeFile(t, filepath.Join(candidate, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.5.0"}`)
+	blocked := errors.New("existing Home needs reviewed upgrade")
+	calls := 0
+	manager.SetReplacementGuard(func(existing InstalledPlugin, nextVersion, nextFingerprint string) error {
+		calls++
+		if existing.Name != installed.Name || nextVersion != "0.5.0" || nextFingerprint == "" {
+			t.Fatalf("guard lacked exact candidate: %+v %q %q", existing, nextVersion, nextFingerprint)
+		}
+		return blocked
+	})
+	if _, err := manager.UpdateFromSource(installed.Name, candidate, FormatClaude, func(TrustReport) bool { return true }); !errors.Is(err, blocked) {
+		t.Fatalf("reviewed-source update bypassed Home guard: %v", err)
+	}
+	if _, err := manager.Install(candidate, FormatClaude, func(TrustReport) bool { return true }); !errors.Is(err, blocked) {
+		t.Fatalf("same-name Install bypassed Home guard: %v", err)
+	}
+	writeFile(t, filepath.Join(oldRoot, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.5.0"}`)
+	if _, err := manager.Update(installed.Name, func(TrustReport) bool { return true }); !errors.Is(err, blocked) {
+		t.Fatalf("recorded-source update bypassed Home guard: %v", err)
+	}
+	current, found, err := manager.store.Get(installed.Name)
+	if err != nil || !found || current.Version != installed.Version || current.Generation != installed.Generation || calls != 3 {
+		t.Fatalf("refused replacement changed installed generation: %+v found=%v calls=%d err=%v", current, found, calls, err)
+	}
+}
+
 func TestManagerUpdateFromReviewedSourceConfirmsAndKeepsEnablementSeparate(t *testing.T) {
 	oldRoot := makeClaudeBundle(t)
 	reg := &fakeRegistrar{}

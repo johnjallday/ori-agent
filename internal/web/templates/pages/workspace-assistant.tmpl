@@ -42,6 +42,7 @@
               <div class="assistant-program-status-row">
                 <span id="assistantProgramStage" class="assistant-program-stage-chip">Not hired</span>
                 <span id="assistantProgramProjectCount" class="assistant-program-project-count"></span>
+                <a id="projectLibraryJump" class="assistant-program-project-count" href="#projectLibraryPanel" hidden>Browse project library ↓</a>
               </div>
             </div>
             <div class="assistant-program-meter" aria-label="Assistant progression">
@@ -107,8 +108,69 @@
               <div id="assistantProgramLearning" class="assistant-program-learning-empty">No approved learnings yet.</div>
             </section>
 
+            <section id="projectLibraryPanel" class="assistant-program-panel project-library-panel" aria-labelledby="projectLibraryTitle" hidden>
+              <div class="assistant-program-panel-head">
+                <div><span class="assistant-program-panel-index">05 / PROJECT LIBRARY</span><h2 id="projectLibraryTitle">The project shelf</h2></div>
+                <button id="projectLibraryAdd" class="modern-btn modern-btn-primary" type="button" hidden>Add folder</button>
+              </div>
+              <p class="project-library-intro">Discover project names and formats without opening project files, launching a project application or creating workspaces. Each scan is a separate choice; planning a session saves notes only.</p>
+              <p id="projectLibraryStatus" class="project-library-status" role="status" aria-live="polite" tabindex="-1">Loading saved projects…</p>
+              <div id="projectLibrarySetup" class="project-library-empty" hidden>
+                <p>Bring your existing linked projects into one Home library. This copies saved notes and links; it does not open any folders.</p>
+                <button id="projectLibraryInitialize" class="modern-btn modern-btn-secondary" type="button">Review library setup</button>
+              </div>
+              <div id="projectLibraryContent" hidden>
+                <section id="projectLibraryResume" class="project-library-resume" aria-labelledby="projectLibraryResumeTitle" hidden>
+                  <h3 id="projectLibraryResumeTitle">Pick up where you left off</h3>
+                  <div id="projectLibraryResumeCards" class="project-library-resume-cards"></div>
+                </section>
+                <section id="projectLibraryPendingLinks" class="project-library-resume" aria-labelledby="projectLibraryPendingTitle" hidden>
+                  <h3 id="projectLibraryPendingTitle">Already linked projects</h3>
+                  <p>These projects already have their own verified Home links. Review each separately before adding it to this shelf; this does not connect a discovery folder or read project files.</p>
+                  <div id="projectLibraryPendingRows" class="project-library-resume-cards"></div>
+                </section>
+                <section id="projectLibraryProposals" class="project-library-resume" aria-labelledby="projectLibraryProposalsTitle" hidden>
+                  <h3 id="projectLibraryProposalsTitle">Manager suggestions to review</h3>
+                  <p>Manager suggestions are untrusted drafts or navigation hints. They cannot select folders, save sessions, change notes, or start project work. Review and confirm each change separately as the Home owner.</p>
+                  <div id="projectLibraryProposalRows" class="project-library-resume-cards"></div>
+                </section>
+                <div id="projectLibraryRoots" class="project-library-roots" aria-label="Approved discovery folders"></div>
+                <div class="project-library-footer"><span id="projectLibraryRootCount"></span><button id="projectLibraryMoreRoots" class="modern-btn modern-btn-secondary" type="button" hidden>More folders</button></div>
+                <form id="projectLibrarySearchForm" class="project-library-toolbar" role="search">
+                  <label for="projectLibrarySearch">Search projects</label>
+                  <div class="project-library-toolbar-row">
+                    <input id="projectLibrarySearch" class="form-control" type="search" maxlength="120" autocomplete="off" placeholder="Project name or next action">
+                    <select id="projectLibraryStage" class="form-select" aria-label="Production stage"><option value="">All stages</option><option value="unknown">Stage unknown</option><option value="idea">Idea</option><option value="writing">Writing</option><option value="recording">Recording</option><option value="editing">Editing</option><option value="mixing">Mixing</option><option value="mastering">Mastering</option></select>
+                    <select id="projectLibraryFormat" class="form-select" aria-label="Observed project format"><option value="">All formats</option></select>
+                    <select id="projectLibraryRoot" class="form-select" aria-label="Discovery folder"><option value="">All discovery folders</option></select>
+                    <select id="projectLibraryStatusFilter" class="form-select" aria-label="Administrative status"><option value="">All statuses</option><option value="unknown">Status unknown</option><option value="planning">Planning</option><option value="active">Active</option><option value="on_hold">On hold</option><option value="complete">Complete</option><option value="archived">Archived</option></select>
+                    <select id="projectLibraryConnection" class="form-select" aria-label="Project connection"><option value="">All connections</option><option value="catalog_only">Catalog only</option><option value="connected">Connected</option><option value="needs_review">Needs review</option></select>
+                    <select id="projectLibraryAvailability" class="form-select" aria-label="Last observed availability"><option value="">Any availability</option><option value="available">Available at last scan</option><option value="ambiguous">Needs file choice</option><option value="unavailable">Unavailable at last scan</option><option value="revoked_source">Discovery consent ended</option><option value="not_scanned">Not scanned</option></select>
+                    <select id="projectLibraryPriority" class="form-select" aria-label="Saved priority"><option value="">Any priority</option><option value="0">Priority 0</option><option value="1">Priority 1</option><option value="2">Priority 2</option><option value="3">Priority 3</option><option value="4">Priority 4</option><option value="5">Priority 5</option></select>
+                    <select id="projectLibrarySort" class="form-select" aria-label="Sort projects"><option value="name">Name</option><option value="status">Status</option><option value="priority">Priority</option><option value="next_action">Next action</option><option value="sourced_activity">Sourced activity</option><option value="scanned_at">Last scan</option></select>
+                    <select id="projectLibraryDirection" class="form-select" aria-label="Sort direction"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
+                    <button class="modern-btn modern-btn-secondary" type="submit">Find</button>
+                  </div>
+                </form>
+                <div class="project-library-queue" aria-label="Selected project setup queue">
+                  <span id="projectLibraryQueueStatus" role="status" aria-live="polite">Choose catalog-only projects to review one at a time.</span>
+                  <button id="projectLibraryQueueStart" class="modern-btn modern-btn-secondary" type="button" disabled>Review selected projects</button>
+                  <button id="projectLibraryQueueResume" class="modern-btn modern-btn-secondary" type="button" hidden>Resume review queue</button>
+                  <button id="projectLibraryQueueDiscard" class="modern-btn modern-btn-secondary" type="button" hidden>Discard queue</button>
+                </div>
+                <section id="projectLibraryQueueHistory" class="project-library-queue-history" aria-labelledby="projectLibraryQueueHistoryTitle" hidden>
+                  <h3 id="projectLibraryQueueHistoryTitle">Recent review outcomes</h3>
+                  <ul id="projectLibraryQueueHistoryRows"></ul>
+                </section>
+                <div class="project-library-table-wrap" tabindex="0" aria-label="Project library results" aria-describedby="projectLibraryStatus">
+                  <table class="project-library-table"><thead><tr><th scope="col">Pick</th><th scope="col">Project</th><th scope="col">Stage / status</th><th scope="col">Connection</th><th scope="col">Last observed source</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="projectLibraryRows"></tbody></table>
+                </div>
+                <div class="project-library-footer"><span id="projectLibraryCount"></span><button id="projectLibraryMore" class="modern-btn modern-btn-secondary" type="button" hidden>More projects</button></div>
+              </div>
+            </section>
+
             <section id="sampleLibraryPanel" class="assistant-program-panel sample-library-panel" aria-labelledby="sampleLibraryTitle" hidden>
-              <div class="assistant-program-panel-head"><div><span class="assistant-program-panel-index">05 / SAMPLE LIBRARY</span><h2 id="sampleLibraryTitle">Sample Library</h2></div><div class="assistant-program-project-actions"><button id="sampleLibraryRemove" class="modern-btn modern-btn-secondary" type="button">Review add-on removal</button><button id="sampleLibraryAddRoot" class="modern-btn modern-btn-primary" type="button">Connect folder</button></div></div>
+              <div class="assistant-program-panel-head"><div><span class="assistant-program-panel-index">06 / SAMPLE LIBRARY</span><h2 id="sampleLibraryTitle">Sample Library</h2></div><div class="assistant-program-project-actions"><button id="sampleLibraryRemove" class="modern-btn modern-btn-secondary" type="button">Review add-on removal</button><button id="sampleLibraryAddRoot" class="modern-btn modern-btn-primary" type="button">Connect folder</button></div></div>
               <p id="sampleLibraryStatus" class="assistant-program-learning-copy" role="status" aria-live="polite" tabindex="-1">Loading catalog…</p>
               <div id="sampleLibraryRoots" class="sample-library-roots" aria-label="Connected sample folders"></div>
               <form id="sampleLibrarySearchForm" class="sample-library-search" role="search"><label for="sampleLibrarySearch">Search the active catalog</label><div><input id="sampleLibrarySearch" class="form-control" maxlength="200" autocomplete="off"><button class="modern-btn modern-btn-secondary" type="submit">Search</button></div></form>
@@ -120,7 +182,7 @@
             <section id="assistantProgramSuggestionsPanel" class="assistant-program-panel assistant-program-suggestions-panel" aria-labelledby="assistantProgramSuggestionsTitle">
               <div class="assistant-program-panel-head">
                 <div>
-                  <span class="assistant-program-panel-index">06 / SUGGESTIONS</span>
+                  <span class="assistant-program-panel-index">07 / SUGGESTIONS</span>
                   <h2 id="assistantProgramSuggestionsTitle">For this project</h2>
                 </div>
                 <button id="assistantProgramSuggest" class="modern-btn modern-btn-secondary" type="button" disabled>Find suggestions</button>
@@ -172,12 +234,16 @@
   <script type="module">
     import { AssistantProgramPage } from '/js/modules/assistant-program.js';
     import { SampleLibraryPanel } from '/js/modules/sample-library.js';
+    import { ProjectLibraryPanel } from '/js/modules/project-library.js';
     const page = new AssistantProgramPage({
       workspaceId: {{.Extra.WorkspaceID}},
       workspaceSlug: {{.Extra.WorkspaceSlug}}
     });
     window.assistantProgramPage = page;
-    void page.init().then(() => new SampleLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init());
+    void page.init().then(() => {
+      void new SampleLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init();
+      void new ProjectLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init();
+    });
   </script>
 </body>
 </html>

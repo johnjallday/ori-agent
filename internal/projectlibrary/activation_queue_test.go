@@ -1,0 +1,225 @@
+package projectlibrary
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/workspace"
+)
+
+func TestActivationQueue_DurableOrderSkipNoCreatorAndReplay(t *testing.T) {
+	a, scope, _, file, tree, _ := activationFixture(t)
+	s := a.library
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	queue, replay, err := s.StartActivationQueue(scope, []string{"alternates", "single"}, "queue-start")
+	if err != nil || replay || queue.Index != 0 || queue.Status != "active" || queue.Revision != 1 {
+		t.Fatalf("start: %+v %t %v", queue, replay, err)
+	}
+	if same, replay, err := s.StartActivationQueue(scope, []string{"alternates", "single"}, "queue-start"); err != nil || !replay || same.ID != queue.ID {
+		t.Fatalf("start replay: %+v %t %v", same, replay, err)
+	}
+	if _, _, err := s.StartActivationQueue(scope, []string{"single", "alternates"}, "queue-start"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("reordered replay: %v", err)
+	}
+	if _, _, err := s.StartActivationQueue(scope, []string{"single", "single"}, "other-start"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate selection: %v", err)
+	}
+	if _, _, err := s.ProgressActivationQueue(scope, queue.ID, "single", "skip", "wrong-order", 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("out of order skip: %v", err)
+	}
+	if _, _, err := s.ProgressActivationQueue(scope, queue.ID, "alternates", "connected", "fabricated-link", 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("browser asserted nonexistent child: %v", err)
+	}
+	skipped, replay, err := s.ProgressActivationQueue(scope, queue.ID, "alternates", "skip", "skip-one", 1)
+	if err != nil || replay || skipped.Index != 1 || skipped.Revision != 2 || len(skipped.Skipped) != 1 || skipped.Skipped[0] != "alternates" {
+		t.Fatalf("skip receipt: %+v %t %v", skipped, replay, err)
+	}
+	if _, _, err := s.ProgressActivationQueue(scope, queue.ID, "single", "skip", "stale-skip", 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale queue revision: %v", err)
+	}
+	folder := filepath.Dir(filepath.Dir(file.GetFilesPath(scope.HomeID)))
+	reopened, err := workspace.NewFileStore(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := NewStore(reopened)
+	view, err := other.CurrentActivationQueue(scope)
+	if err != nil || view.Queue == nil || view.Queue.Index != 1 || view.Queue.ID != queue.ID || view.Queue.Skipped[0] != "alternates" ||
+		fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("lost durable skip or changed source: %+v %v", view, err)
+	}
+	if again, replay, err := other.ProgressActivationQueue(scope, queue.ID, "alternates", "skip", "skip-one", 1); err != nil || !replay || again.Index != 1 {
+		t.Fatalf("skip replay across restart: %+v %t %v", again, replay, err)
+	}
+	if _, _, err := other.ProgressActivationQueue(scope, queue.ID, "alternates", "skip", "skip-one", 2); !errors.Is(err, ErrConflict) {
+		t.Fatalf("key reused for changed revision: %v", err)
+	}
+	if _, _, err := other.ProgressActivationQueue(scope, queue.ID, "single", "skip", "skip-two", 2); err != nil {
+		t.Fatal(err)
+	}
+	if view, err := other.CurrentActivationQueue(scope); err != nil || view.Queue != nil || len(view.Recent) != 1 ||
+		view.Recent[0].Status != "complete" || view.Recent[0].SkippedCount != 2 {
+		t.Fatalf("completed queue lacked a bounded Home outcome: %+v %v", view, err)
+	}
+	if _, _, err := other.StartActivationQueue(scope, []string{"single", "alternates"}, "new-queue"); err != nil {
+		t.Fatal(err)
+	}
+	view, err = other.CurrentActivationQueue(scope)
+	if err != nil || view.Queue == nil || len(view.Recent) != 1 || view.Recent[0].ID != queue.ID {
+		t.Fatalf("new queue lost earlier outcome: %+v %v", view, err)
+	}
+	history, err := json.Marshal(view.Recent)
+	if err != nil || strings.Contains(string(history), "alternates") || strings.Contains(string(history), "single") ||
+		strings.Contains(string(history), tree.single) {
+		t.Fatalf("queue outcome history retained source/entry identity: %s %v", history, err)
+	}
+}
+
+func TestActivationQueue_OutcomeHistoryIsBoundedAndDoesNotRetainEntryIDs(t *testing.T) {
+	a, scope, _, _, _, _ := activationFixture(t)
+	s := a.library
+	firstID := ""
+	for i := 0; i < maxQueueOutcomes+4; i++ {
+		q, _, err := s.StartActivationQueue(scope, []string{"single", "alternates"}, fmt.Sprintf("history-start-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			firstID = q.ID
+		}
+		if _, err := s.DiscardActivationQueue(scope, q.ID, fmt.Sprintf("history-discard-%d", i), 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	doc, err := s.Read(scope)
+	if err != nil || len(doc.QueueHistory) != maxQueueOutcomes || doc.QueueHistory[0].ID == firstID {
+		t.Fatalf("outcome history was not bounded to the latest %d: %+v %v", maxQueueOutcomes, doc.QueueHistory, err)
+	}
+	for _, outcome := range doc.QueueHistory {
+		if !outcome.valid() || outcome.Status != "discarded" || outcome.SelectedCount != 2 || outcome.SkippedCount != 0 || outcome.ConnectedCount != 0 {
+			t.Fatalf("discarded queue claimed project setup: %+v", outcome)
+		}
+	}
+	view, err := s.CurrentActivationQueue(scope)
+	if err != nil || view.Queue != nil || len(view.Recent) != 5 || view.Recent[0].ID != doc.Queue.ID {
+		t.Fatalf("bounded owner read omitted the latest terminal queue: %+v %v", view, err)
+	}
+	history, err := json.Marshal(doc.QueueHistory)
+	if err != nil || strings.Contains(string(history), "single") || strings.Contains(string(history), "alternates") {
+		t.Fatalf("history retained catalog IDs instead of summaries: %s %v", history, err)
+	}
+}
+
+func TestActivationQueue_SQLitePrimaryAndFolderMirrorDivergenceRefusesProgress(t *testing.T) {
+	a, scope, _, file, tree, _ := activationFixture(t)
+	before := fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
+	db, err := database.Open(context.Background(), &database.Config{Path: filepath.Join(t.TempDir(), "queue.db"), WALMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close SQLite queue fixture: %v", err)
+		}
+	}()
+	primary := session.NewWorkspaceStoreAdapter(session.NewHybridStoreWithDB(db, 10))
+	home, err := file.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.Save(home); err != nil {
+		t.Fatal(err)
+	}
+	mirrored := NewStore(workspace.NewSyncStore(primary, file)).WithProviderEvidence(a.library.providerEvidence)
+	q, _, err := mirrored.StartActivationQueue(scope, []string{"single", "alternates"}, "mirror-queue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, backing := range []workspace.Store{primary, file} {
+		view, readErr := NewStore(backing).CurrentActivationQueue(scope)
+		if readErr != nil || view.Queue == nil || view.Queue.ID != q.ID || view.Queue.Index != 0 {
+			t.Fatalf("queue was not saved to both Home mirrors: %+v %v", view, readErr)
+		}
+	}
+	// Emulate a process interruption after folder persistence but before the
+	// SQLite-primary write. Both individually valid mirrors now disagree;
+	// neither a GET nor a skip may treat the folder copy as authority.
+	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		var changed Document
+		if err := json.Unmarshal(state.ProjectLibrary, &changed); err != nil {
+			return err
+		}
+		changed.Queue.Status = "discarded"
+		changed.Queue.Revision++
+		changed.Queue.UpdatedAt = changed.Queue.UpdatedAt.Add(time.Second)
+		changed.Revision++
+		encoded, err := json.Marshal(changed)
+		if err != nil {
+			return err
+		}
+		state.ProjectLibrary = encoded
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mirrored.CurrentActivationQueue(scope); !errors.Is(err, ErrMirrorDiverged) {
+		t.Fatalf("split queue mirror was shown as authoritative: %v", err)
+	}
+	if _, _, err := mirrored.ProgressActivationQueue(scope, q.ID, "single", "skip", "split-skip", 1); !errors.Is(err, ErrMirrorDiverged) {
+		t.Fatalf("split queue mirror accepted skip: %v", err)
+	}
+	view, err := NewStore(primary).CurrentActivationQueue(scope)
+	if err != nil || view.Queue == nil || view.Queue.Index != 0 || fileDigest(t, filepath.Join(tree.single, "Song.rpp")) != before {
+		t.Fatalf("split mirror modified primary queue or source: %+v %v", view, err)
+	}
+}
+
+func TestActivationQueue_ExpiryAndDiscardRequireExplicitOwnerAction(t *testing.T) {
+	a, scope, _, file, _, _ := activationFixture(t)
+	s := a.library
+	queue, _, err := s.StartActivationQueue(scope, []string{"single", "alternates"}, "queue-start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := s.now()
+	s.now = func() time.Time { return clock.Add(8 * 24 * time.Hour) }
+	if view, err := s.CurrentActivationQueue(scope); err != nil || view.Queue == nil || view.Queue.Status != "expired" {
+		t.Fatalf("expiry projection: %+v %v", view, err)
+	}
+	if _, _, err := s.ProgressActivationQueue(scope, queue.ID, "single", "skip", "late-skip", 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("expired queue progressed: %v", err)
+	}
+	if _, _, err := s.StartActivationQueue(scope, []string{"single", "alternates"}, "replacement"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("expired queue silently replaced: %v", err)
+	}
+	if _, err := s.DiscardActivationQueue(scope, queue.ID, "wrong-revision", 2); !errors.Is(err, ErrConflict) {
+		t.Fatalf("discard without current queue revision: %v", err)
+	}
+	if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
+		state := home.GetAssistantProgramState()
+		state.PluginAvailable = false
+		home.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if replay, err := s.DiscardActivationQueue(scope, queue.ID, "discard", 1); err != nil || replay {
+		t.Fatalf("discard: %t %v", replay, err)
+	}
+	if replay, err := s.DiscardActivationQueue(scope, queue.ID, "discard", 1); err != nil || !replay {
+		t.Fatalf("discard replay: %t %v", replay, err)
+	}
+	if view, err := s.CurrentActivationQueue(scope); err != nil || view.Queue != nil {
+		t.Fatalf("discarded queue visible: %+v %v", view, err)
+	}
+}

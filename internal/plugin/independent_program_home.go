@@ -23,6 +23,23 @@ func IndependentProjectProviderEvidenceAvailable(installed []InstalledPlugin, ow
 	return project != nil
 }
 
+// ExactIndependentProjectRoles returns a detached copy of the currently
+// installed blueprint's project-only roles, but only for the child's original
+// Home and project provider pins with a reciprocal declared attachment. A
+// version-compatible replacement or a Home's roles cannot reconstruct an old
+// child's missing snapshot. This read-only evidence is not a repair receipt.
+func ExactIndependentProjectRoles(installed []InstalledPlugin, home *workspace.AssistantProgramHomeOwner, project *workspace.AssistantProjectProviderOwner) ([]workspace.AssistantProgramRoleSpec, bool) {
+	if !IndependentProviderEvidenceAvailable(installed, home, project) {
+		return nil, false
+	}
+	_, declaration := matchingIndependentProject(installed, project)
+	if declaration == nil {
+		return nil, false
+	}
+	roles := declaration.ProgramRoles()
+	return roles, len(roles) > 0
+}
+
 // IndependentProviderEvidenceAvailable additionally verifies the reciprocal
 // attachment contract required by cross-provider coordination.
 func IndependentProviderEvidenceAvailable(installed []InstalledPlugin, homeOwner *workspace.AssistantProgramHomeOwner, projectOwner *workspace.AssistantProjectProviderOwner) bool {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -66,6 +67,55 @@ func TestIndependentAssistantProgramHomeAcceptsContentOnlyContribution(t *testin
 	report := BuildTrustReport(PluginDescriptor{Name: contribution.Name, SourceFormat: FormatClaude, WorkspaceSurfaces: contribution})
 	if len(report.AssistantProgramHomes) != 1 || !strings.Contains(report.String(), "music-producer-assistant") {
 		t.Fatalf("trust report = %+v\n%s", report, report.String())
+	}
+}
+
+// A new package version with a changed skill/prompt must not silently adopt an
+// existing Home just because the Home's declaration version stays at 1. Until
+// there is a separately reviewed upgrade, history remains bound to 0.1.0.
+func TestIndependentHomeUpgradeRequiresReviewedProvenanceRebind(t *testing.T) {
+	contribution, err := ParseSurfaceContribution(independentHomeContributionJSON(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := contribution.AssistantProgramHomes[0]
+	original := InstalledPlugin{
+		Name: "music-project-management", Version: "0.1.0", Enabled: true,
+		ContentGeneration: 1, ComponentFingerprint: strings.Repeat("a", 64),
+		WorkspaceSurfaces: contribution, Skills: []string{"music-project-management"},
+	}
+	owner := workspace.AssistantProgramHomeOwner{
+		PluginID: original.Name, PluginVersion: original.Version, ProgramID: home.ID,
+		HomeSchemaVersion: home.SchemaVersion, HomeVersion: home.Version,
+		PluginGeneration: original.EvidenceGeneration(), ComponentFingerprint: original.ComponentFingerprint,
+		DeclarationDigest: projecttemplates.AssistantProgramHomeDigest(home),
+	}
+	if !IndependentHomeProviderEvidenceAvailable([]InstalledPlugin{original}, &owner) {
+		t.Fatal("original provider did not match the saved Home")
+	}
+	var upgraded SurfaceContribution
+	encoded, err := json.Marshal(contribution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &upgraded); err != nil {
+		t.Fatal(err)
+	}
+	upgraded.Version = "0.1.1"
+	upgraded.AssistantProgramHomes[0].Roles[0].SystemPrompt += " Catalog-only entries are not project links."
+	replacement := original
+	replacement.Version = "0.1.1"
+	replacement.ContentGeneration++
+	replacement.ComponentFingerprint = strings.Repeat("b", 64)
+	replacement.WorkspaceSurfaces = &upgraded
+	if IndependentHomeProviderEvidenceAvailable([]InstalledPlugin{replacement}, &owner) {
+		t.Fatal("new guidance silently adopted the old Home's immutable provider snapshot")
+	}
+	if owner.PluginVersion != "0.1.0" || owner.DeclarationDigest != projecttemplates.AssistantProgramHomeDigest(home) {
+		t.Fatal("provider check rewrote the saved Home snapshot")
+	}
+	if !IndependentHomeProviderEvidenceAvailable([]InstalledPlugin{original}, &owner) {
+		t.Fatal("original package no longer matched the preserved Home")
 	}
 }
 

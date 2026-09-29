@@ -71,9 +71,10 @@ func (s *Store) issue(path, scope string) (string, error) {
 	return token, nil
 }
 
-// Resolve returns the exact picker selection while it remains live. Tokens are
-// deliberately reusable across review and commit; the durable journey review
-// receipt provides single-use commit consent.
+// Resolve returns only an unscoped picker selection while it remains live.
+// A consumer-scoped token must never be downgraded through this legacy path.
+// Tokens are reusable across review and commit; the durable review receipt
+// provides single-use commit consent.
 func (s *Store) Resolve(token string) (string, error) {
 	return s.resolve(token, "", false)
 }
@@ -96,7 +97,11 @@ func (s *Store) resolve(token, scope string, requireScope bool) (string, error) 
 		delete(s.records, token)
 		return "", ErrUnavailable
 	}
-	if requireScope && (scope == "" || candidate.scope != scope) {
+	if requireScope {
+		if scope == "" || candidate.scope != scope {
+			return "", ErrUnavailable
+		}
+	} else if candidate.scope != "" {
 		return "", ErrUnavailable
 	}
 	return candidate.path, nil

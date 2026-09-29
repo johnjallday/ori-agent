@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,17 @@ const (
 	AssistantTopologyReconnect  = "reconnect_project"
 	AssistantTopologyRemoveHome = "remove_home"
 )
+
+// AssistantHomeRootAccessGate serializes Home removal/revocation against
+// metadata-only root reads. Both workspace lifecycle and the catalog use this
+// gate, so a removal acknowledgement waits for in-flight descriptor reads.
+var assistantHomeRootAccessGates sync.Map
+
+func AssistantHomeRootAccessGate(owner, home, provider, program string) *sync.RWMutex {
+	key, _ := json.Marshal([4]string{owner, home, provider, program})
+	gate, _ := assistantHomeRootAccessGates.LoadOrStore(string(key), &sync.RWMutex{})
+	return gate.(*sync.RWMutex)
+}
 
 var (
 	ErrAssistantTopologyInvalid       = errors.New("assistant topology request is invalid")
@@ -467,11 +479,12 @@ func (service *AssistantProgramStore) ReviewHomeRemoval(stationID string, expect
 		return nil, ErrAssistantStationNotFound
 	}
 	state := station.GetAssistantProgramState()
-	if state == nil || state.StateRevision != expectedStateRevision {
+	if state == nil || state.StateRevision != expectedStateRevision ||
+		!AssistantProgramLibraryMirrorsAgree(service.store, station) {
 		return nil, ErrAssistantTopologyConflict
 	}
 	now := service.now().UTC()
-	digest := assistantHomeRemovalDigest(station.ID, state.StateRevision, state.LinkedProjectIDs)
+	digest := assistantHomeRemovalInputDigest(station.ID, state)
 	receipt := AssistantTopologyReviewReceipt{Token: uuid.NewString(), Action: AssistantTopologyRemoveHome, StateRevision: state.StateRevision, InputDigest: digest, ExpiresAt: now.Add(assistantTopologyReviewTTL)}
 	if err := service.store.Update(station.ID, func(current *Workspace) error {
 		currentState := current.GetAssistantProgramState()
@@ -488,6 +501,12 @@ func (service *AssistantProgramStore) ReviewHomeRemoval(stationID string, expect
 	removal := "The Home, its Home-scoped roles, portfolio rollup, and optional add-on state will be removed."
 	if trashes {
 		removal = "The Home moves to the Trash. Undo brings it back as an empty Home with its Home-scoped roles; its portfolio rollup and optional add-on state are not restored."
+	}
+	if len(state.ProjectLibrary) != 0 {
+		removal = "The managed project library and its Home metadata will be removed from Ori; no external project files will move."
+		if trashes {
+			removal = "The Home moves to the Trash. Undo restores its historical project library and user notes, not its previously linked projects. Old discovery roots remain inactive until a fresh folder selection, review, and grant."
+		}
 	}
 	impact := []string{
 		removal,
@@ -523,6 +542,20 @@ func (service *AssistantProgramStore) CommitHomeRemoval(stationID, token string)
 	if state == nil {
 		return nil, ErrAssistantStationNotFound
 	}
+	key := state.Key.Normalize()
+	gate := AssistantHomeRootAccessGate(key.OwnerUserID, station.ID, key.PluginID, key.ProgramID)
+	gate.Lock()
+	defer gate.Unlock()
+	// A scan/root commit can change the Home between the first read and
+	// acquiring the source gate. Never stash that stale Home snapshot.
+	station, err = service.store.Get(station.ID)
+	if err != nil || station == nil || !AssistantProgramLibraryMirrorsAgree(service.store, station) {
+		return nil, ErrAssistantTopologyConflict
+	}
+	state = station.GetAssistantProgramState()
+	if state == nil || state.Key.Normalize() != key {
+		return nil, ErrAssistantTopologyConflict
+	}
 	var review *AssistantTopologyReviewReceipt
 	for index := range state.Topology.ReviewReceipts {
 		if state.Topology.ReviewReceipts[index].Token == token {
@@ -535,7 +568,7 @@ func (service *AssistantProgramStore) CommitHomeRemoval(stationID, token string)
 	if review == nil || review.Action != AssistantTopologyRemoveHome || review.ConsumedAt != nil || !now.Before(review.ExpiresAt) {
 		return nil, ErrAssistantTopologyReviewExpired
 	}
-	if state.StateRevision != review.StateRevision || assistantHomeRemovalDigest(station.ID, state.StateRevision, state.LinkedProjectIDs) != review.InputDigest {
+	if state.StateRevision != review.StateRevision || assistantHomeRemovalInputDigest(station.ID, state) != review.InputDigest {
 		return nil, ErrAssistantTopologyConflict
 	}
 	retained := make([]assistantRetainedLink, 0, len(state.LinkedProjectIDs))
@@ -569,6 +602,12 @@ func (service *AssistantProgramStore) CommitHomeRemoval(stationID, token string)
 	// the copy owns no projects, because the retained projects just became
 	// standalone and stay that way until a reviewed reconnect.
 	stash := CloneAssistantProgramState(state)
+	// A trashed Home can be restored, but its old directory grants must
+	// never reactivate just because the Home program state is unstashed.
+	if err := freezeRemovedLibraryRoots(stash); err != nil {
+		service.restoreRemovedHomeProjects(station.ID, retained)
+		return nil, err
+	}
 	stash.LinkedProjectIDs = nil
 	stash.Topology.ReviewReceipts = nil
 	station.AssistantProgramState = nil
@@ -586,6 +625,54 @@ func (service *AssistantProgramStore) CommitHomeRemoval(stationID, token string)
 		return nil, err
 	}
 	return &AssistantHomeRemovalReceipt{StationWorkspaceID: station.ID, RetainedProjects: len(retained), RecordedAt: now, Trashed: trashed}, nil
+}
+
+func freezeRemovedLibraryRoots(state *AssistantProgramState) error {
+	if state == nil || len(state.ProjectLibrary) == 0 {
+		return nil
+	}
+	if len(state.ProjectLibrary) > 8<<20 {
+		return ErrAssistantTopologyConflict
+	}
+	var document struct {
+		Roots []struct {
+			ID        string     `json:"id"`
+			RevokedAt *time.Time `json:"revoked_at"`
+		} `json:"roots"`
+	}
+	if err := json.Unmarshal(state.ProjectLibrary, &document); err != nil ||
+		!strings.HasPrefix(strings.TrimSpace(string(state.ProjectLibrary)), "{") || len(document.Roots) > 64 ||
+		len(state.ProjectLibraryInactiveRoots) > len(document.Roots) {
+		return ErrAssistantTopologyConflict
+	}
+	inactive := map[string]bool{}
+	for _, id := range state.ProjectLibraryInactiveRoots {
+		if id == "" || inactive[id] {
+			return ErrAssistantTopologyConflict
+		}
+		inactive[id] = true
+	}
+	seen := map[string]bool{}
+	for _, root := range document.Roots {
+		if root.ID == "" || seen[root.ID] {
+			return ErrAssistantTopologyConflict
+		}
+		seen[root.ID] = true
+		if root.RevokedAt == nil {
+			inactive[root.ID] = true
+		}
+	}
+	for id := range inactive {
+		if !seen[id] {
+			return ErrAssistantTopologyConflict
+		}
+	}
+	state.ProjectLibraryInactiveRoots = state.ProjectLibraryInactiveRoots[:0]
+	for id := range inactive {
+		state.ProjectLibraryInactiveRoots = append(state.ProjectLibraryInactiveRoots, id)
+	}
+	sort.Strings(state.ProjectLibraryInactiveRoots)
+	return nil
 }
 
 // homeRemovalTrashes reports whether CommitHomeRemoval will move the Home to
@@ -633,6 +720,9 @@ func (service *AssistantProgramStore) RestoreRemovedHome(stationID string) (bool
 	if err != nil || station == nil {
 		return false, ErrAssistantStationNotFound
 	}
+	if !removedHomeStashMirrorsAgree(service.store, station) {
+		return false, ErrAssistantTopologyConflict
+	}
 	stash := removedAssistantProgramState(station)
 	if stash == nil || station.Status == StatusTrashed || station.Status == StatusMissing {
 		return false, nil
@@ -662,6 +752,31 @@ func (service *AssistantProgramStore) RestoreRemovedHome(stationID string) (bool
 		return false, err
 	}
 	return restored, nil
+}
+
+func removedHomeStashMirrorsAgree(store Store, home *Workspace) bool {
+	mirror, ok := store.(MirrorWorkspaceProvider)
+	if !ok {
+		return true
+	}
+	folder, mirrored, err := mirror.GetMirrorWorkspace(home.ID)
+	if !mirrored {
+		return true
+	}
+	if err != nil || folder == nil || folder.Status != home.Status || folder.OwnerUserID != home.OwnerUserID {
+		return false
+	}
+	first, firstOK := home.GetSharedData(RemovedAssistantProgramStateKey)
+	second, secondOK := folder.GetSharedData(RemovedAssistantProgramStateKey)
+	if firstOK != secondOK {
+		return false
+	}
+	primaryJSON, err := json.Marshal(first)
+	if err != nil {
+		return false
+	}
+	folderJSON, err := json.Marshal(second)
+	return err == nil && string(primaryJSON) == string(folderJSON)
 }
 
 // removedAssistantProgramStateValue shapes a stashed state the way it comes
@@ -721,6 +836,15 @@ func (service *AssistantProgramStore) restoreRemovedHomeProjects(_ string, retai
 			})
 		}
 	}
+}
+
+func assistantHomeRemovalInputDigest(stationID string, state *AssistantProgramState) string {
+	base := assistantHomeRemovalDigest(stationID, state.StateRevision, state.LinkedProjectIDs)
+	if len(state.ProjectLibrary) == 0 {
+		return base // Preserve the existing receipt shape for legacy Homes.
+	}
+	value := sha256.Sum256(append([]byte(base+"\x00"), state.ProjectLibrary...))
+	return hex.EncodeToString(value[:])
 }
 
 func assistantHomeRemovalDigest(stationID string, revision int64, projectIDs []string) string {

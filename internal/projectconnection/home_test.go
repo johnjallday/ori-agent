@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
+	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -100,6 +103,50 @@ func TestSplitHomeIsCreatedUnderTheResolvedProviderAndReused(t *testing.T) {
 	}
 	if ids, _ := store.List(); len(ids) != 1 {
 		t.Fatalf("Build Group created more than the Home: %v", ids)
+	}
+}
+
+func TestSplitExistingProjectPreservesDeclaredRolesForLaterReviewedStaffing(t *testing.T) {
+	service, store, _, _ := splitConnectionService(t)
+	scope := Scope{OwnerUserID: "owner-1", RunID: "existing-song-run", Template: splitConnectionTemplate(t)}
+	home, err := service.CreateHome(scope, "My Production")
+	if err != nil || home.HomeID == "" {
+		t.Fatalf("prepare Home: %+v %v", home, err)
+	}
+	folder := t.TempDir()
+	song := filepath.Join(folder, "Song.rpp")
+	if err := os.WriteFile(song, []byte("<REAPER_PROJECT>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selections := service.selections.(*pathselection.Store)
+	token, err := selections.Issue(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{ModeID: projecttemplates.ProjectConnectionExistingProject, SelectionToken: token, WorkspaceName: "Existing Song"}
+	preview, err := service.Preview(context.Background(), scope, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Commit(context.Background(), scope, request, preview.InputDigest, preview.OwnerDigest)
+	if err != nil || result.HomeWorkspaceID != home.HomeID {
+		t.Fatalf("connect: %+v %v", result, err)
+	}
+	child, err := store.Get(result.ProjectWorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := scope.Template.AssistantProject.ProgramRoles()
+	provenance := child.GetTemplateProvenance()
+	link := child.GetAssistantProjectLink()
+	if provenance == nil || link == nil || !reflect.DeepEqual(provenance.AssistantProjectRoles, want) || !reflect.DeepEqual(link.ProjectRoles, want) {
+		t.Fatalf("missing project-owned staffing declaration: provenance=%+v link=%+v", provenance, link)
+	}
+	if len(child.AgentInstances) != 0 || len(link.ProjectBindings.Bindings) != 0 {
+		t.Fatalf("reviewed project creation silently staffed a role: agents=%+v bindings=%+v", child.AgentInstances, link.ProjectBindings)
+	}
+	if bytes, err := os.ReadFile(song); err != nil || string(bytes) != "<REAPER_PROJECT>" {
+		t.Fatalf("connection changed original file: %q, %v", bytes, err)
 	}
 }
 

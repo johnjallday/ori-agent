@@ -6,6 +6,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,7 +49,21 @@ func ConvertAgentWorkspace(ws *workspace.Workspace) *Workspace {
 }
 
 // Save persists a workspace to storage by converting from workspace.Workspace to session.Workspace.
+// For an Assistant Home or split project child the SQLite update is
+// conditional on ws.Version; a stale write returns workspace.ErrStaleWorkspaceVersion.
 func (a *WorkspaceStoreAdapter) Save(ws *workspace.Workspace) error {
+	return a.save(ws, ws.Version, false)
+}
+
+// SaveExpecting implements workspace.VersionedSaver: the row is updated only
+// while its stored version still equals expectedVersion, in one conditional
+// statement. SyncStore passes the version the writer read before the folder
+// mirror bumped it.
+func (a *WorkspaceStoreAdapter) SaveExpecting(ws *workspace.Workspace, expectedVersion int64) error {
+	return a.save(ws, expectedVersion, true)
+}
+
+func (a *WorkspaceStoreAdapter) save(ws *workspace.Workspace, expectedVersion int64, strict bool) error {
 	ctx := context.Background()
 
 	// Convert workspace.Workspace to session.Workspace
@@ -72,9 +87,25 @@ func (a *WorkspaceStoreAdapter) Save(ws *workspace.Workspace) error {
 		// The private-aware SyncStore has already published this exact version
 		// and timestamp to workspace.json. HybridStore.UpdateWorkspace would
 		// stamp a later time, making every otherwise consistent capture fail.
-		return NewSQLiteStore(a.store.DB()).UpdateWorkspace(ctx, sessionWS)
+		direct := NewSQLiteStore(a.store.DB())
+		if strict {
+			return translateWorkspaceVersionConflict(direct.UpdateWorkspaceExpecting(ctx, sessionWS, expectedVersion))
+		}
+		return translateWorkspaceVersionConflict(direct.UpdateWorkspace(ctx, sessionWS))
 	}
-	return a.store.UpdateWorkspace(ctx, sessionWS)
+	if strict {
+		if cas, ok := a.store.(workspaceVersionUpdater); ok {
+			return translateWorkspaceVersionConflict(cas.UpdateWorkspaceExpecting(ctx, sessionWS, expectedVersion))
+		}
+	}
+	return translateWorkspaceVersionConflict(a.store.UpdateWorkspace(ctx, sessionWS))
+}
+
+func translateWorkspaceVersionConflict(err error) error {
+	if errors.Is(err, ErrWorkspaceVersionConflict) {
+		return fmt.Errorf("%w: %w", workspace.ErrStaleWorkspaceVersion, err)
+	}
+	return err
 }
 
 // SetWorkspaceParent updates the explicit hierarchy column without routing

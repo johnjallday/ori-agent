@@ -7,6 +7,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -37,13 +38,24 @@ type assistantHandoffCommitRequest struct {
 	State          workspace.TicketState `json:"state"`
 }
 
+// portfolioService adapts old Home field endpoints to the single reviewed
+// library owner only after an explicit Home authority switch. Handoffs remain
+// separately gated and must not inherit catalog-only authority.
+func (h *Handler) portfolioService() *workspace.AssistantPortfolioService {
+	bridge := projectlibrary.NewManagedPortfolioBridge(h.workspaceTaskStore)
+	if h.installedPluginLister != nil {
+		bridge.WithProviderEvidence(h.assistantLibraryProviderEvidence)
+	}
+	return workspace.NewAssistantPortfolioService(h.workspaceTaskStore).WithManagedLibrary(bridge)
+}
+
 func (h *Handler) GetAssistantPortfolio(w http.ResponseWriter, r *http.Request) {
 	station, _, err := h.assistantProgramStation(strings.TrimSpace(r.PathValue("workspaceID")))
 	if err != nil {
 		_ = orihttp.RespondNotFound(w, "Assistant Program Home not found")
 		return
 	}
-	projects, err := workspace.NewAssistantPortfolioService(h.workspaceTaskStore).List(station.ID)
+	projects, err := h.portfolioService().List(station.ID)
 	if err != nil {
 		_ = orihttp.RespondInternalError(w, "Assistant portfolio is unavailable")
 		return
@@ -64,7 +76,7 @@ func (h *Handler) ReviewAssistantPortfolio(w http.ResponseWriter, r *http.Reques
 	if station, ok := h.requireAssistantWritable(w, station); !ok {
 		return
 	} else {
-		review, reviewErr := workspace.NewAssistantPortfolioService(h.workspaceTaskStore).Review(station.ID, strings.TrimSpace(request.LinkID), request.IfRevision, request.Fields)
+		review, reviewErr := h.portfolioService().Review(station.ID, strings.TrimSpace(request.LinkID), request.IfRevision, request.Fields)
 		if reviewErr != nil {
 			respondAssistantPortfolioError(w, reviewErr)
 			return
@@ -86,7 +98,7 @@ func (h *Handler) CommitAssistantPortfolio(w http.ResponseWriter, r *http.Reques
 	if station, ok := h.requireAssistantWritable(w, station); !ok {
 		return
 	} else {
-		receipt, commitErr := workspace.NewAssistantPortfolioService(h.workspaceTaskStore).Commit(station.ID, request.ReviewToken, request.IdempotencyKey, request.Fields)
+		receipt, commitErr := h.portfolioService().Commit(station.ID, request.ReviewToken, request.IdempotencyKey, request.Fields)
 		if commitErr != nil {
 			respondAssistantPortfolioError(w, commitErr)
 			return
@@ -197,6 +209,8 @@ func respondAssistantPortfolioError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondBadRequest(w, "Invalid Assistant Program request")
 	case errors.Is(err, workspace.ErrAssistantPortfolioLinkNotFound):
 		_ = orihttp.RespondConflict(w, "The selected project link changed; review it again")
+	case errors.Is(err, workspace.ErrAssistantPortfolioLibraryOwned):
+		_ = orihttp.RespondConflict(w, "Project library Home mirrors or ownership changed; repair before editing")
 	case errors.Is(err, workspace.ErrAssistantPortfolioConflict),
 		errors.Is(err, workspace.ErrAssistantPortfolioReviewExpired),
 		errors.Is(err, workspace.ErrAssistantPortfolioIdempotency):

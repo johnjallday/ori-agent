@@ -37,6 +37,7 @@ func ResetRecordTables() []string {
 		"workspace_plan_execution_generations", "workspace_plan_reconciliations",
 		"setup_journey_run", "setup_journey_operation_receipt",
 		"setup_journey_declaration_migration_receipt", "setup_journey_review_receipt",
+		"project_role_repair_review", "project_role_repair_operation", // inert repair intent belongs to app records, not the retained vault
 		"setup_user_template_binding", "setup_user_template_root_claim",
 		"assistant_setup_runs", "assistant_setup_operations", "assistant_setup_resources",
 		"sample_library_state", "sample_library_root", "sample_library_entry",

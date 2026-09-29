@@ -162,8 +162,9 @@ func TestFolderDigest_CapabilityOfferUsesEvidenceAndSilentInstallLookup(t *testi
 }
 
 type fakeJourneyVerifier struct {
-	folder string
-	calls  int
+	folder    string
+	homeRoute string
+	calls     int
 }
 
 func (v *fakeJourneyVerifier) VerifiedProject(_ context.Context, userID, runID, folderPath, blueprintID, integrationKey string, after time.Time) (FolderCreateResult, error) {
@@ -171,7 +172,7 @@ func (v *fakeJourneyVerifier) VerifiedProject(_ context.Context, userID, runID, 
 	if userID != "local" || runID != "new-run" || folderPath != v.folder || blueprintID != "reaper-song" || integrationKey != "ori_reaper" || after.IsZero() {
 		return FolderCreateResult{}, ErrFolderWorkspaceRefused
 	}
-	return FolderCreateResult{WorkspaceID: "quest-project", Route: "/workspaces/quest-project"}, nil
+	return FolderCreateResult{WorkspaceID: "quest-project", Route: "/workspaces/quest-project", HomeRoute: v.homeRoute}, nil
 }
 
 func TestFolderDigest_PortfolioPrecedesProjectsAndSuppressesExistingHome(t *testing.T) {
@@ -306,6 +307,34 @@ func TestFolderDigest_PortfolioResolvesOnlyReviewedHomeAfterConfirm(t *testing.T
 	if replay, err := restarted.ResolvePortfolio(ctx, "local", offer.ID, FolderResolveInput{HomeID: "new-home", RequestID: "ready"}); err != nil || replay.Status != FolderOfferResolved || verifier.calls != 2 {
 		t.Fatalf("replay = %+v, calls=%d, %v", replay, verifier.calls, err)
 	}
+	if selected, identity, err := restarted.PortfolioRoot(ctx, "local", offer.ID, "new-home"); err != nil || selected != root || identity == "" {
+		t.Fatalf("reviewed Home could not reuse its verified source: %q %v", selected, err)
+	}
+	if _, _, err := restarted.PortfolioRoot(ctx, "local", offer.ID, "foreign"); !errors.Is(err, ErrFolderWorkspaceRefused) {
+		t.Fatalf("foreign Home claimed source: %v", err)
+	}
+	if _, _, err := restarted.PortfolioRoot(ctx, "other", offer.ID, "new-home"); err == nil {
+		t.Fatal("foreign owner claimed source")
+	}
+	persisted, err := restarted.store.Read(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := persisted.Offer(offer.ID)
+	restarted.deps.Now = func() time.Time { return resolved.ResolvedAt.Add(portfolioRootHandoffTTL + time.Second) }
+	if _, _, err := restarted.PortfolioRoot(ctx, "local", offer.ID, "new-home"); !errors.Is(err, ErrFolderPathLost) {
+		t.Fatalf("expired offer reused a stale root selection: %v", err)
+	}
+	restarted.deps.Now = func() time.Time { return resolved.ResolvedAt.Add(time.Minute) }
+	if err := os.Rename(root, root+"-old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := restarted.PortfolioRoot(ctx, "local", offer.ID, "new-home"); !errors.Is(err, ErrFolderPathLost) {
+		t.Fatalf("replacement directory inherited the earlier offer: %v", err)
+	}
 }
 
 func TestFolderDigest_DomainDeclineRevivesOnceAndMigratesAppAnswer(t *testing.T) {
@@ -415,7 +444,7 @@ func TestFolderDigest_ReviewedJourneyResolvesOnlyCanonicalProject(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(folder, "Song.rpp"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	verifier := &fakeJourneyVerifier{folder: folder}
+	verifier := &fakeJourneyVerifier{folder: folder, homeRoute: "/workspaces/music-home/assistant#projectLibraryPanel"}
 	f.service.deps.Journey = verifier
 	offer, err := f.service.scanRoot(ctx, "local", folder, "")
 	if err != nil {
@@ -450,12 +479,49 @@ func TestFolderDigest_ReviewedJourneyResolvesOnlyCanonicalProject(t *testing.T) 
 		t.Fatalf("re-picking shown root = %+v, err = %v", resumed, err)
 	}
 	got, err := restarted.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "new-run", RequestID: "ready"})
-	if err != nil || got.Status != FolderOfferResolved || got.Outcome == nil || got.Outcome.WorkspaceID != "quest-project" || got.Outcome.Blueprint != "reaper-song" {
+	if err != nil || got.Status != FolderOfferResolved || got.Outcome == nil || got.Outcome.WorkspaceID != "quest-project" || got.Outcome.Blueprint != "reaper-song" ||
+		got.Outcome.HomeRoute != verifier.homeRoute {
 		t.Fatalf("verified journey = %+v, err = %v", got, err)
 	}
 	replayed, err := restarted.ResolveJourney(ctx, "local", offer.ID, FolderJourneyInput{RunID: "new-run", RequestID: "ready"})
-	if err != nil || replayed.Status != FolderOfferResolved || verifier.calls != 2 {
+	if err != nil || replayed.Status != FolderOfferResolved || replayed.Outcome.HomeRoute != verifier.homeRoute || verifier.calls != 2 {
 		t.Fatalf("replay = %+v, calls = %d, err = %v", replayed, verifier.calls, err)
+	}
+	// The creator navigates away immediately; the saved Home route must still
+	// be reachable on return to Today, even after process restart. This GET
+	// neither replays the journey nor changes the offer document.
+	version, err := f.store.Read(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err = f.newService().Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.ID != offer.ID ||
+		current.Offer.Status != FolderOfferResolved || current.Offer.Outcome.HomeRoute != verifier.homeRoute {
+		t.Fatalf("recent resolved navigation after restart = %+v, %v", current.Offer, err)
+	}
+	unchanged, err := f.store.Read(ctx, "local")
+	if err != nil || unchanged.Version != version.Version || verifier.calls != 2 {
+		t.Fatalf("navigation read wrote or reverified the creator: %v, calls=%d", err, verifier.calls)
+	}
+	other, err := restarted.ScanChip(ctx, "local", "downloads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err = restarted.Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.ID != other.ID || current.Offer.Status != FolderOfferPending {
+		t.Fatalf("new offer must outrank recent Home navigation: %+v, %v", current.Offer, err)
+	}
+	if _, err := restarted.Decide(ctx, "local", other.ID, FolderDecisionInput{Decision: FolderDecisionLater, RequestID: "later"}); err != nil {
+		t.Fatal(err)
+	}
+	current, err = restarted.Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.ID != offer.ID {
+		t.Fatalf("recent Home navigation after a postponed offer: %+v, %v", current.Offer, err)
+	}
+	f.now = f.now.Add(time.Hour)
+	expired, err := f.newService().Current(ctx, "local")
+	if err != nil || expired.Offer != nil {
+		t.Fatalf("expired Home navigation remained a current offer: %+v, %v", expired.Offer, err)
 	}
 }
 

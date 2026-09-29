@@ -275,8 +275,7 @@ func (s *Service) Commit(ctx context.Context, scope Scope, request Request, revi
 		if request.ModeID == projecttemplates.ProjectConnectionNewProject {
 			operationKind = grouprequirements.OperationCreateProject
 		}
-		operationDigest := digestStrings(scope.RunID, string(request.ModeID), reviewedInputDigest, reviewedOwnerDigest)
-		reviewDigest := digestStrings(reviewedInputDigest, reviewedOwnerDigest)
+		reviewDigest, operationDigest := CreationEvidenceDigests(scope.RunID, request.ModeID, reviewedInputDigest, reviewedOwnerDigest)
 		effective, homeID, snapshot, groupErr := s.grouping.CommitReviewed(grouprequirements.Input{
 			OwnerUserID: scope.OwnerUserID, OperationKind: operationKind, Template: scope.Template,
 			Composition: request.GroupComposition, InputDigest: current.InputDigest,
@@ -706,6 +705,13 @@ func templateProvenance(template projecttemplates.Template, now time.Time, snaps
 		snapshot = snapshots[0]
 	}
 	program := template.AssistantProgram
+	var projectRoles []workspace.AssistantProgramRoleSpec
+	if template.AssistantProject != nil {
+		// The split blueprint owns the child's required roster. Saving only the
+		// independent Home declaration makes staffing appear complete with zero
+		// project roles, even though the reviewed blueprint declares them.
+		projectRoles = template.AssistantProject.ProgramRoles()
+	}
 	if program == nil && snapshot != nil && snapshot.SelectedComposition == workspace.GroupRequirementCompositionGrouped {
 		// Split blueprints resolve the independent Home during the reviewed
 		// group operation. Persist that canonical declaration on the project;
@@ -718,12 +724,18 @@ func templateProvenance(template projecttemplates.Template, now time.Time, snaps
 		AutomationRecipes: template.AutomationRecipes, IntakeRequirements: template.IntakeRequirements, CapabilityRequirements: template.CapabilityRequirements,
 		Plugins: template.Tools.Plugins, PluginSources: template.Tools.PluginSources,
 		RuntimeRequirements: template.RuntimeRequirements, SetupWizard: template.SetupWizard,
-		AssistantProgram: workspace.CloneAssistantProgramDeclaration(program), GroupRequirement: snapshot,
+		AssistantProgram: workspace.CloneAssistantProgramDeclaration(program), AssistantProjectRoles: projectRoles, GroupRequirement: snapshot,
 	}
 }
 
-func connectionChildID(runID string) string {
+// ProjectWorkspaceIDForRun derives the canonical creator child ID. This is
+// an inert identity calculation; knowing an ID cannot authorize creation.
+func ProjectWorkspaceIDForRun(runID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("ori.setup-journey.project\x00"+runID)).String()
+}
+
+func connectionChildID(runID string) string {
+	return ProjectWorkspaceIDForRun(runID)
 }
 
 func connectionReferenceID(runID string) string {
@@ -742,6 +754,13 @@ func digestJSON(value any) (string, error) {
 	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+// CreationEvidenceDigests binds the project creator's group snapshot to the
+// original reviewed input, owner evidence, run and selected project mode.
+// This is read-only evidence, never a creation or repair permission.
+func CreationEvidenceDigests(runID string, mode projecttemplates.ProjectConnectionMode, inputDigest, ownerDigest string) (reviewDigest, operationDigest string) {
+	return digestStrings(inputDigest, ownerDigest), digestStrings(runID, string(mode), inputDigest, ownerDigest)
 }
 
 func digestStrings(values ...string) string {

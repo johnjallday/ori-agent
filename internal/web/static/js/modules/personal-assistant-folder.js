@@ -247,13 +247,19 @@ export function folderOfferView(offer, options = {}) {
     needsPick: offer.needs_pick === true
   };
   const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
+  if (status === 'awaiting_outcome' && offer?.capability && !offer.portfolio) {
+    view.question = 'Project setup has not finished. Continue to review its current steps.';
+    view.capabilityDetail =
+      'Opening setup checks its current steps; it does not by itself create another workspace or enable live project control.';
+  }
   if (
     status === 'resolved' &&
     offer?.outcome?.kind === 'project' &&
-    offer?.outcome?.receipt?.length
+    folderReceiptView(offer).visible
   ) {
     view.question = "Here's what I set up:";
     view.reason = '';
+    view.capabilityDetail = ''; // the pre-setup install promise is no longer true
   }
   // A yes needs the folder's path, and a dialog-chosen folder is held in
   // memory only: after a server restart the card asks for the folder again
@@ -387,9 +393,24 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirm 
 export function folderReceiptView(offer) {
   if (offer?.status !== 'resolved' || offer?.outcome?.kind !== 'project') return { visible: false };
   const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
-  if (!rows.length) return { visible: false }; // an older stored offer
   const workspace = rows.find(row => row.kind === 'workspace');
   const route = resolvedRouteFor(offer);
+  const homeRoute = String(offer?.outcome?.home_route || '').trim();
+  const verifiedHomeRoute =
+    /^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/.test(homeRoute)
+      ? homeRoute
+      : '';
+  // A reviewed plugin quest records its exact child/Home route but does not
+  // create the older folder-link receipt rows. Route-only follow-up is inert.
+  if (
+    !rows.length &&
+    !(
+      offer?.capability?.setup_source === 'plugin' &&
+      /^\/workspaces\/[a-z0-9][a-z0-9-]*\/?$/.test(route) &&
+      verifiedHomeRoute
+    )
+  )
+    return { visible: false };
   return {
     visible: true,
     rows: rows.map(row => ({
@@ -398,6 +419,7 @@ export function folderReceiptView(offer) {
       detail: String(row.detail || '')
     })),
     route,
+    homeRoute: verifiedHomeRoute,
     openLabel: `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`
   };
 }
@@ -676,14 +698,22 @@ function renderOffer() {
   }
   if (els.actions) {
     els.actions.replaceChildren();
-    els.actions.hidden = view.decided && !receipt.route && !view.resume;
+    els.actions.hidden = view.decided && !receipt.route && !receipt.homeRoute && !view.resume;
     if (receipt.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
       open.href = receipt.route;
       open.textContent = receipt.openLabel;
       els.actions.append(open);
-    } else if (!view.decided || view.resume) {
+    }
+    if (receipt.homeRoute) {
+      const home = document.createElement('a');
+      home.className = 'btn btn-sm btn-outline-secondary';
+      home.href = receipt.homeRoute;
+      home.textContent = 'Review this link in the Home library';
+      els.actions.append(home);
+    }
+    if (!receipt.route && !receipt.homeRoute && (!view.decided || view.resume)) {
       view.actions.forEach(action => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -857,6 +887,7 @@ async function startPortfolioSetup(offer) {
     if (!result.ok)
       throw new Error('That Home was not created for this offer. Pick another collection.');
     render();
+    continuePortfolioToLibrary(result.payload?.offer);
     return;
   }
   if (template.availability?.state !== 'creatable')
@@ -876,6 +907,7 @@ async function startPortfolioSetup(offer) {
           'The Home was built, but its folder offer is still open. Continue setup to reconcile it.'
         );
       render();
+      continuePortfolioToLibrary(result.payload?.offer);
     }
   });
   const context = manager.workspaceCreatorContext;
@@ -884,6 +916,27 @@ async function startPortfolioSetup(offer) {
   }
   if (manager.workspaceCreatorContext !== context || !picker.select(manager, template.id)) {
     throw new Error('The exact Home template could not be selected. Nothing was created.');
+  }
+}
+
+// This is navigation only. Resolving the portfolio offer never grants a root
+// or starts a scan; the Home's separate review UI owns those decisions.
+export function portfolioLibraryURL(offer) {
+  if (offer?.outcome?.kind !== 'home') return '';
+  const route = resolvedRouteFor(offer);
+  if (!/^\/workspaces\/[^/?#]+\/?$/.test(route) || !offer?.id) return '';
+  return `${route.replace(/\/$/, '')}/assistant?folder_offer_id=${encodeURIComponent(offer.id)}#projectLibraryPanel`;
+}
+
+function continuePortfolioToLibrary(offer) {
+  const url = portfolioLibraryURL(offer);
+  if (
+    url &&
+    window.confirm(
+      'The Home is ready. Continue to Project Library to review this folder? No scan or project connection starts automatically.'
+    )
+  ) {
+    window.location.assign(url);
   }
 }
 

@@ -105,6 +105,139 @@ func TestOpenWorkspaceProjectResolvesExactDirectoryReferenceWithoutExposingAbsol
 	}
 }
 
+type pathLeakingProjectFolderResolver struct{ path string }
+
+func (r pathLeakingProjectFolderResolver) GetFolderPath(string) (string, error) {
+	return "", errors.New("unavailable folder " + r.path)
+}
+
+type pathLeakingProjectWorkspaceResolver struct{ path string }
+
+func (r pathLeakingProjectWorkspaceResolver) GetFolderWorkspace(string) (*Workspace, error) {
+	return nil, errors.New("unavailable workspace " + r.path)
+}
+
+func TestShowWorkspaceProjectFolder_ExactExternalReferenceNeverOpensDAWOrExposesSource(t *testing.T) {
+	store, ws, handler := newFolderHandlerTest(t, "ws-external-show-folder", "External Folder")
+	externalRoot := t.TempDir()
+	entryPath := filepath.Join(externalRoot, "Existing Song.RPP")
+	original := []byte("song source must remain unchanged")
+	if err := os.WriteFile(entryPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ws.ID, func(stored *Workspace) error {
+		if err := stored.AddDirectoryReference(DirectoryReference{ID: "existing-project", Name: "Song", Path: externalRoot}); err != nil {
+			return err
+		}
+		return SetProjectEntryLocator(stored.SharedData, ProjectEntryLocator{
+			SchemaVersion: ProjectEntryLocatorSchemaVersion,
+			Kind:          ProjectEntryDirectoryReference, DirectoryReferenceID: "existing-project",
+			RelativePath: "Existing Song.RPP",
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var opened string
+	handler.openFile = func(string) error { t.Error("show-folder launched project file"); return nil }
+	handler.openFolder = func(path string) error { opened = path; return nil }
+	req := localProjectOpenRequest(http.MethodPost, ws.ID, nil)
+	req.URL.Path = "/api/workspaces/" + ws.ID + "/project/show-folder"
+	rr := httptest.NewRecorder()
+	handler.ShowWorkspaceProjectFolder(rr, req)
+	contents, err := os.ReadFile(entryPath) // #nosec G304 -- disposable test-owned source.
+	if err != nil || rr.Code != http.StatusOK || opened != externalRoot || !bytes.Equal(contents, original) ||
+		strings.Contains(rr.Body.String(), externalRoot) || !strings.Contains(rr.Body.String(), `"relative_path":"Existing Song.RPP"`) {
+		t.Fatalf("reveal external source: status=%d opened=%q body=%s unchanged=%t err=%v", rr.Code, opened, rr.Body.String(), bytes.Equal(contents, original), err)
+	}
+	// The same button may not operate on a remote client, accept a typed path,
+	// or fall through to a DAW/file opener when the local folder opener is off.
+	for _, tc := range []struct {
+		name string
+		req  *http.Request
+		code int
+	}{
+		{"remote peer", func() *http.Request {
+			r := localProjectOpenRequest(http.MethodPost, ws.ID, nil)
+			r.RemoteAddr = "198.51.100.1:1234"
+			return r
+		}(), http.StatusForbidden},
+		{"browser pathname", localProjectOpenRequest(http.MethodPost, ws.ID, bytes.NewReader([]byte(`{"path":"/tmp/foreign"}`))), http.StatusBadRequest},
+		{"query pathname", func() *http.Request {
+			r := localProjectOpenRequest(http.MethodPost, ws.ID, nil)
+			r.URL.RawQuery = "path=%2Ftmp%2Fforeign"
+			return r
+		}(), http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opened = ""
+			response := httptest.NewRecorder()
+			handler.ShowWorkspaceProjectFolder(response, tc.req)
+			if response.Code != tc.code || opened != "" {
+				t.Fatalf("unsafe folder request: status=%d opened=%q", response.Code, opened)
+			}
+		})
+	}
+	handler.openFolder = func(string) error { return errors.New("desktop refused " + externalRoot) }
+	rr = httptest.NewRecorder()
+	handler.ShowWorkspaceProjectFolder(rr, localProjectOpenRequest(http.MethodPost, ws.ID, nil))
+	if rr.Code != http.StatusInternalServerError || strings.Contains(rr.Body.String(), externalRoot) {
+		t.Fatalf("OS failure leaked a source path: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	handler.openFolder = nil
+	rr = httptest.NewRecorder()
+	handler.ShowWorkspaceProjectFolder(rr, localProjectOpenRequest(http.MethodPost, ws.ID, nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("no OS folder opener must fail closed, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestShowWorkspaceProjectFolder_FolderLookupErrorsNeverEchoAbsolutePaths(t *testing.T) {
+	_, ws, handler, _ := setupProjectOpenTest(t)
+	privatePath := filepath.Join(t.TempDir(), "private-project.rpp")
+	called := false
+	handler.openFolder = func(string) error { called = true; return nil }
+	for _, tc := range []struct {
+		name string
+		set  func()
+	}{
+		{"workspace metadata read", func() { handler.folderWorkspaceResolver = pathLeakingProjectWorkspaceResolver{privatePath} }},
+		{"workspace folder lookup", func() {
+			handler.folderWorkspaceResolver = handler.store.(folderWorkspaceResolver)
+			handler.folderResolver = pathLeakingProjectFolderResolver{privatePath}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.set()
+			rr := httptest.NewRecorder()
+			handler.ShowWorkspaceProjectFolder(rr, localProjectOpenRequest(http.MethodPost, ws.ID, nil))
+			if rr.Code != http.StatusNotFound || strings.Contains(rr.Body.String(), privatePath) || called {
+				t.Fatalf("lookup exposed a source path or opened desktop: code=%d body=%s called=%t", rr.Code, rr.Body.String(), called)
+			}
+		})
+	}
+}
+
+func TestShowWorkspaceProjectFolder_RefusesChangedEntrySymlinkBeforeOpening(t *testing.T) {
+	_, ws, handler, entry := setupProjectOpenTest(t)
+	foreign := filepath.Join(t.TempDir(), "foreign.rpp")
+	if err := os.WriteFile(foreign, []byte("foreign"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(foreign, entry); err != nil {
+		t.Skipf("symlink creation is unavailable: %v", err)
+	}
+	called := false
+	handler.openFolder = func(string) error { called = true; return nil }
+	rr := httptest.NewRecorder()
+	handler.ShowWorkspaceProjectFolder(rr, localProjectOpenRequest(http.MethodPost, ws.ID, nil))
+	if rr.Code == http.StatusOK || called {
+		t.Fatalf("replaced entry opened foreign folder: status=%d called=%t body=%s", rr.Code, called, rr.Body.String())
+	}
+}
+
 func TestOpenWorkspaceProjectReadsCanonicalFolderMetadata(t *testing.T) {
 	primary := NewInMemoryStore()
 	fileStore, err := NewFileStore(t.TempDir())
