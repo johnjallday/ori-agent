@@ -104,7 +104,7 @@ func TestPersonalAssistantRecovery_FixesAnHQKeptFromAnEarlierHire(t *testing.T) 
 			RepairStep string `json:"repair_step"`
 		} `json:"personal_assistant"`
 	}
-	serveJSON(t, handler, http.MethodGet, "/api/personal-assistant", "", http.StatusOK, &blocked)
+	serveRecoveryJSON(t, handler, http.MethodGet, "/api/personal-assistant", "", http.StatusOK, &blocked)
 	if blocked.PersonalAssistant.RepairStep != "relationship_recovery_blocked" {
 		t.Fatalf("repair step = %q; want relationship_recovery_blocked", blocked.PersonalAssistant.RepairStep)
 	}
@@ -120,7 +120,7 @@ func TestPersonalAssistantRecovery_FixesAnHQKeptFromAnEarlierHire(t *testing.T) 
 			Digest string `json:"digest"`
 		} `json:"diagnosis"`
 	}
-	serveJSON(t, handler, http.MethodGet, "/api/personal-assistant/repair/diagnosis", "", http.StatusOK, &diagnosed)
+	serveRecoveryJSON(t, handler, http.MethodGet, "/api/personal-assistant/repair/diagnosis", "", http.StatusOK, &diagnosed)
 	diagnosis := diagnosed.Diagnosis
 	if diagnosis.Issue != "assistant_mismatch" || len(diagnosis.Fixes) != 1 ||
 		diagnosis.Fixes[0].ID != "link_hq:"+workspaceID || !diagnosis.Fixes[0].Recommended || diagnosis.Digest == "" {
@@ -138,7 +138,7 @@ func TestPersonalAssistantRecovery_FixesAnHQKeptFromAnEarlierHire(t *testing.T) 
 	}
 	// A fix reviewed against other records is refused, and nothing changes.
 	stale := `{"fix_id":"` + diagnosis.Fixes[0].ID + `","evidence_digest":"reviewed-something-else"}`
-	serveJSON(t, handler, http.MethodPost, "/api/personal-assistant/repair/resolve", stale, http.StatusConflict, nil)
+	serveRecoveryJSON(t, handler, http.MethodPost, "/api/personal-assistant/repair/resolve", stale, http.StatusConflict, nil)
 
 	var resolved struct {
 		Reconnected       bool   `json:"reconnected"`
@@ -149,7 +149,7 @@ func TestPersonalAssistantRecovery_FixesAnHQKeptFromAnEarlierHire(t *testing.T) 
 			WorkspaceID string `json:"hq_workspace_id"`
 		} `json:"personal_assistant"`
 	}
-	serveJSON(t, handler, http.MethodPost, "/api/personal-assistant/repair/resolve", body, http.StatusOK, &resolved)
+	serveRecoveryJSON(t, handler, http.MethodPost, "/api/personal-assistant/repair/resolve", body, http.StatusOK, &resolved)
 	if !resolved.Reconnected || resolved.Applied != "link_hq" || resolved.PersonalAssistant.State != "paused" ||
 		resolved.PersonalAssistant.WorkspaceID != workspaceID {
 		t.Fatalf("resolve = %#v", resolved)
@@ -177,7 +177,7 @@ func TestPersonalAssistantRecovery_FixesAnHQKeptFromAnEarlierHire(t *testing.T) 
 	}
 
 	// Nothing is left to fix, so the diagnosis now says the relationship exists.
-	serveJSON(t, handler, http.MethodGet, "/api/personal-assistant/repair/diagnosis", "", http.StatusConflict, nil)
+	serveRecoveryJSON(t, handler, http.MethodGet, "/api/personal-assistant/repair/diagnosis", "", http.StatusConflict, nil)
 }
 
 // hireAssistantWithHQ hires "Assistant" and builds "My HQ", returning the HQ's
@@ -277,9 +277,9 @@ func markerAssistant(shared map[string]any) string {
 	return id
 }
 
-// serveJSON sends a request (JSON when body is set), checks the status, and
+// serveRecoveryJSON sends a request (JSON when body is set), checks the status, and
 // decodes the response into out when out is non-nil.
-func serveJSON(t *testing.T, handler http.Handler, method, path, body string, wantStatus int, out any) {
+func serveRecoveryJSON(t *testing.T, handler http.Handler, method, path, body string, wantStatus int, out any) {
 	t.Helper()
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	if body != "" {
