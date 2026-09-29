@@ -406,6 +406,11 @@ async function installFixtureRoutes(page: Page) {
       await json(route, README_SCENES.action_center);
       return;
     }
+    // The README scene shows mission findings only; no Home library cards.
+    if (url.pathname === '/api/action-center/library') {
+      await json(route, { items: [], total: 0 });
+      return;
+    }
     if (url.pathname === '/api/personal-hq/email-ops') {
       await json(route, {
         status: {

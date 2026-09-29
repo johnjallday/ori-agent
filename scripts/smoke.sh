@@ -3121,6 +3121,52 @@ smoke_agents_root_verify() {
   echo "ok   no snapshot wipe or restore in the log ($log)"
 }
 
+# smoke_library_notifications runs the Library Manager notifications browser
+# acceptance (tasks/prd-library-manager-notifications.md) in a disposable
+# sandbox on the first free port in 8941-8969, so it never stops another
+# session's server. --paired also installs a clean REAPER export and restarts
+# the sandbox server once. Sources come from the environment, never a path
+# baked into the repo: ORI_MUSIC_PLUGIN_SOURCE (clean Music Project
+# Management checkout) and, for --paired, ORI_REAPER_PLUGIN_SOURCE.
+smoke_library_notifications() {
+  local paired=0 port="" log status sandbox candidate
+  shift
+  for arg in "$@"; do
+    case "$arg" in
+      --paired) paired=1 ;;
+      *) fail "usage: $0 library-notifications [--paired]" ;;
+    esac
+  done
+  [[ -n "${ORI_MUSIC_PLUGIN_SOURCE:-}" ]] ||
+    fail "set ORI_MUSIC_PLUGIN_SOURCE to a clean Music Project Management checkout"
+  for candidate in $(seq 8941 8969); do
+    if ! lsof -nP -iTCP:"$candidate" -sTCP:LISTEN >/dev/null 2>&1; then
+      port="$candidate"
+      break
+    fi
+  done
+  [[ -n "$port" ]] || fail "no free port in 8941-8969"
+  local args=(test --suite manager-notifications --provider reviewed
+    --source "$ORI_MUSIC_PLUGIN_SOURCE" --port "$port" --keep)
+  if ((paired == 1)); then
+    [[ -n "${ORI_REAPER_PLUGIN_SOURCE:-}" ]] ||
+      fail "--paired needs ORI_REAPER_PLUGIN_SOURCE (a clean REAPER 0.9.x checkout)"
+    args+=(--reaper-source "$ORI_REAPER_PLUGIN_SOURCE" --restart-check)
+  fi
+  log="${TMPDIR:-/tmp}/library-notifications-$port.log"
+  status=FAIL
+  if ./scripts/music-home-demo.sh "${args[@]}" >"$log" 2>&1; then
+    status=PASS
+  fi
+  sandbox=$(grep -o 'SANDBOX=.*' "$log" | head -1 | cut -d= -f2- || true)
+  echo "$status library-notifications (port $port, paired=$paired)"
+  echo "log: $log"
+  if [[ -n "$sandbox" ]]; then
+    echo "screenshots: $sandbox/evidence/screenshots"
+  fi
+  [[ "$status" == PASS ]]
+}
+
 # agent_state_digest fingerprints every runtime state file under a sandbox.
 agent_state_digest() {
   local dir="$1/agent_state"
@@ -3187,6 +3233,7 @@ materialize) smoke_materialize "${3:-}" ;;
 execution) smoke_execution "${3:-}" ;;
 janitor-upgrade-seed) smoke_janitor_upgrade_seed "${3:-}" ;;
 janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
+library-notifications) smoke_library_notifications "$@" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
@@ -3228,6 +3275,7 @@ janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
   echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary|hardening|packaged} <base-url> <workspace-id>" >&2
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
+  echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
   exit 2
   ;;
 esac
