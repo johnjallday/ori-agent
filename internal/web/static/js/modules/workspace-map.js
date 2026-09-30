@@ -7962,11 +7962,23 @@
       if (!anchor || nodeId === excludeId) return;
       occupied.push(anchor);
     }
+    // An expanded district is ground a workspace can be dropped onto, not a
+    // building. Its saved anchor is the frame's corner (every explicit move
+    // pins one), and an empty group's frame is a single cell, so claiming that
+    // corner would read "Occupied" over the whole frame and veto the join.
+    // Whether a drop into it is allowed is dropMembershipIntent's question.
+    // A collapsed district is drawn as a compact box, so it still occupies.
+    var openGround = Object.create(null);
+    if (lastWorldLayout) {
+      (lastWorldLayout.districts || []).forEach(function (district) {
+        if (!district.collapsed) openGround[district.id] = true;
+      });
+    }
     Object.keys(layoutState.positions).forEach(function (nodeId) {
       // Agent anchors belong to one group's own map. Home never draws them, so
       // they occupy nothing there; on the group map the drawn units below
       // claim where the agents actually stand.
-      if (isAgentNodeId(nodeId)) return;
+      if (isAgentNodeId(nodeId) || openGround[nodeId]) return;
       claim(nodeId, layoutState.positions[nodeId]);
     });
     if (lastWorldLayout) {
