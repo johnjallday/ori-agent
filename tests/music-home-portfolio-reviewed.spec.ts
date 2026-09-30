@@ -224,6 +224,58 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   );
   await expect(setup.getByRole('button', { name: /Work on this project/i })).toHaveCount(0);
   await shot(page, '22b-reviewed-portfolio-inert-project-setup');
+
+  // music-setup-onboarding, group 3. A song whose format a reviewed integration
+  // supports is labelled plainly and, where this computer can complete it, can
+  // review that integration and come back to the same song. Chip/fake chooser
+  // evidence; the install itself is NOT confirmed here.
+  await expect(setup).toContainText('Needs a project integration');
+  const offerSupported = process.platform === 'darwin' && process.arch === 'arm64';
+  const album3Entry = projects.rows.find((row: { name: string }) => row.name === 'Album-3')?.id;
+  const album3Activation = await json(
+    await request.get(`${base}/projects/${album3Entry}/activation`)
+  );
+  expect(album3Activation.observed_format).toBe('reaper');
+  expect(album3Activation.integration_offer ?? null).toEqual(
+    offerSupported
+      ? { key: 'ori_reaper', quest_id: 'install_ori_reaper', display_name: 'REAPER' }
+      : null
+  );
+  const reviewIntegration = setup.getByRole('button', { name: 'Review the REAPER integration' });
+  await expect(reviewIntegration).toHaveCount(offerSupported ? 1 : 0);
+  if (offerSupported) {
+    const pluginsBefore = (await json(await request.get('/api/plugins'))).plugins.map(
+      (row: { name: string; enabled: boolean }) => `${row.name}:${row.enabled}`
+    );
+    const workspacesBefore = (await json(await request.get('/api/workspaces'))).folders.length;
+    const homePath = new URL(page.url()).pathname;
+    await reviewIntegration.click();
+    await page.waitForURL(/\/\?setup=quest&source=host&quest=install_ori_reaper/);
+    await expect(page.locator('#specialistSetupJourneyModal')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('#specialistSetupJourneyModal')).toContainText('REAPER');
+    await shot(page, '22b1-reviewed-integration-install-quest');
+    // Nothing was confirmed: no install, no enable, no workspace.
+    expect(
+      (await json(await request.get('/api/plugins'))).plugins.map(
+        (row: { name: string; enabled: boolean }) => `${row.name}:${row.enabled}`
+      )
+    ).toEqual(pluginsBefore);
+    // Leave without confirming (or come back after finishing) and return.
+    await page.goto(homePath);
+    await expect(page.getByRole('dialog', { name: 'Album-3' })).toBeVisible({ timeout: 30_000 });
+    await expect(setup).toContainText('Needs a project integration');
+    await expect(shelf.locator('#projectLibraryStatus')).toContainText('Back on your song');
+    await shot(page, '22b2-back-on-the-same-song');
+    expect(await page.evaluate(() => sessionStorage.getItem('ori:library-return'))).toBeNull();
+    expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+      workspacesBefore
+    );
+    expect(
+      (await json(await request.get('/api/plugins'))).plugins.map(
+        (row: { name: string; enabled: boolean }) => `${row.name}:${row.enabled}`
+      )
+    ).toEqual(pluginsBefore);
+  }
   await setup.getByRole('button', { name: 'Plan a session' }).click();
   const planner = page.getByRole('dialog', { name: 'Plan a studio session' });
   await planner.getByRole('textbox', { name: 'Session goal' }).fill('Listen to the rough mix');

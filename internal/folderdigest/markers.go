@@ -90,6 +90,34 @@ func ProjectFormatOptions() []ProjectFormatOption {
 	return options
 }
 
+// IntegrationKeyForProjectFormat names the reviewed integration whose project
+// files are of this catalog format, from the same host-owned table discovery
+// uses: a marker of that format whose extension one capability offer lists as
+// supported by its integration. A format no reviewed integration supports (for
+// example Logic or Ableton today) returns false, so nothing is ever offered as
+// a cure for it.
+func IntegrationKeyForProjectFormat(format string) (string, bool) {
+	if format == "" {
+		return "", false
+	}
+	for _, row := range capabilityRows {
+		if row.Offer == nil || row.Offer.IntegrationKey == "" {
+			continue
+		}
+		for _, marker := range row.Markers {
+			if marker.ProjectFormat != format {
+				continue
+			}
+			for _, extension := range row.Offer.ProjectExtensions {
+				if strings.EqualFold(marker.Name, "*"+extension) {
+					return row.Offer.IntegrationKey, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
 // MatchMarker returns the highest-precedence marker row that one entry
 // satisfies, if any. Callers keep the first hit across a folder's entries in
 // table order, which markerRank makes cheap.

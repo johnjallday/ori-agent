@@ -894,6 +894,30 @@
   min-height: 1.5rem;
   margin: 0.8rem 0;
 }
+/* Where one saved song stands; the label is text, so it never relies on color. */
+.project-library-state {
+  display: inline-block;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.25rem 0.65rem;
+  color: var(--assistant-ink);
+  font: 600 0.8rem/1.3 var(--font-mono, "JetBrains Mono", monospace);
+  letter-spacing: 0.04em;
+  border: 1px solid var(--assistant-line);
+  border-left: 3px solid var(--assistant-amber);
+  border-radius: 3px;
+  background: var(--assistant-panel);
+}
+.project-library-note {
+  color: var(--assistant-muted);
+  font-size: 0.85rem;
+}
+.project-library-remedies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
 .project-library-empty {
   border-left: 3px solid var(--assistant-amber);
   padding: 0.75rem 1rem;

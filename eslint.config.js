@@ -118,6 +118,7 @@ export default defineConfig([
       'internal/web/static/js/modules/assistant-led-setup-presentation.js',
       'internal/web/static/js/modules/assistant-led-setup-replay.js',
       'internal/web/static/js/modules/sample-library.js',
+      'internal/web/static/js/modules/library-return.js',
       'internal/web/static/js/modules/project-library.js',
       'internal/web/static/js/modules/chat-auto-scroll.js',
       'internal/web/static/js/modules/chat-state-ui.js',

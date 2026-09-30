@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ProjectLibraryPanel,
+  activationStateLabel,
   libraryDigestText,
   libraryQuery,
   libraryRunText,
@@ -2490,4 +2491,298 @@ test('an uncertain scan with nothing recorded is an error, and a refusal is neve
   });
   await assert.rejects(refused.panel.scanRootFlow('root-1', null), /changed/);
   assert.equal(refused.log.keys.length, 1, 'a definite refusal is final');
+});
+
+function integrationPage({ pathname = '/workspaces/music-home/assistant' } = {}) {
+  const map = new Map();
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+  const originalLocation = globalThis.location;
+  const navigations = [];
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    configurable: true,
+    value: {
+      getItem: key => (map.has(key) ? map.get(key) : null),
+      setItem: (key, value) => map.set(key, String(value)),
+      removeItem: key => map.delete(key)
+    }
+  });
+  globalThis.location = { pathname, search: '', hash: '', assign: url => navigations.push(url) };
+  return {
+    map,
+    navigations,
+    restore() {
+      if (originalStorage) Object.defineProperty(globalThis, 'sessionStorage', originalStorage);
+      else delete globalThis.sessionStorage;
+      globalThis.location = originalLocation;
+    }
+  };
+}
+
+const songDetail = { row: { id: 'entry-9', name: 'Album 5' } };
+const reaperOffer = {
+  key: 'ori_reaper',
+  quest_id: 'install_ori_reaper',
+  display_name: 'REAPER'
+};
+
+test('reviewing an integration remembers only where to return and opens the reviewed install', () => {
+  const page = integrationPage();
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+    panel.status = () => {};
+    panel.startIntegrationReview(songDetail, reaperOffer);
+    assert.deepEqual(page.navigations, ['/?setup=quest&source=host&quest=install_ori_reaper']);
+    const stored = JSON.parse(page.map.get('ori:library-return'));
+    assert.equal(stored.home_id, 'home-1');
+    assert.equal(stored.entry_id, 'entry-9');
+    assert.equal(stored.quest_id, 'install_ori_reaper');
+    assert.equal(stored.return_path, '/workspaces/music-home/assistant');
+    assert.deepEqual(Object.keys(stored).sort(), [
+      'created_at',
+      'entry_id',
+      'home_id',
+      'quest_id',
+      'return_path'
+    ]);
+  } finally {
+    page.restore();
+  }
+});
+
+test('a bad quest or a page that is not a Home starts nothing and says so', () => {
+  for (const [offer, pathname] of [
+    [{ ...reaperOffer, quest_id: '../install' }, '/workspaces/music-home/assistant'],
+    [{ ...reaperOffer, quest_id: 'Install_Ori' }, '/workspaces/music-home/assistant'],
+    [reaperOffer, '/settings'],
+    [reaperOffer, '/workspaces/music-home/assistant/extra']
+  ]) {
+    const page = integrationPage({ pathname });
+    try {
+      const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+      const messages = [];
+      panel.status = message => messages.push(message);
+      panel.startIntegrationReview(songDetail, offer);
+      assert.deepEqual(page.navigations, [], `${offer.quest_id} at ${pathname}`);
+      assert.equal(page.map.size, 0, 'nothing is remembered for a refused start');
+      assert.match(messages.at(-1), /nothing was changed/i);
+    } finally {
+      page.restore();
+    }
+  }
+});
+
+function returningPanel({ request } = {}) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+  const log = { requests: [], details: [], statuses: [] };
+  panel.status = message => log.statuses.push(message);
+  panel.request = async path => {
+    log.requests.push(path);
+    if (request) return request(path);
+    return {};
+  };
+  panel.details = async (entryID, trigger) => log.details.push([entryID, trigger]);
+  return { panel, log };
+}
+
+function rememberReturn(page, patch = {}) {
+  page.map.set(
+    'ori:library-return',
+    JSON.stringify({
+      home_id: 'home-1',
+      entry_id: 'entry-9',
+      quest_id: 'install_ori_reaper',
+      return_path: '/workspaces/music-home/assistant',
+      created_at: Date.now(),
+      ...patch
+    })
+  );
+}
+
+function queuePanel({ eligibility, queueChoice }) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+  panel.state = { provider_read_only: false };
+  panel.queue = {
+    home_id: 'home-1',
+    ids: ['song-a', 'song-b'],
+    index: 0,
+    created_at: Date.now(),
+    pending: null
+  };
+  const log = { posts: [], statuses: [], choices: [], progressed: 0 };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.saveQueue = () => true;
+  panel.restoreQueue = async () => {};
+  panel.renderQueueControls = () => {};
+  panel.status = message => log.statuses.push(message);
+  panel.post = async path => {
+    log.posts.push(path);
+    throw new Error('no review, creator, or queue write is allowed here');
+  };
+  panel.progressQueue = async () => {
+    log.progressed++;
+  };
+  panel.request = async path =>
+    path.endsWith('/activation')
+      ? eligibility
+      : { row: { id: 'song-a', name: 'Album 5', connection: 'catalog_only' } };
+  panel.queueChoice = async (name, position, count, trigger, reason, offer) => {
+    log.choices.push({ name, position, count, reason, offer });
+    return queueChoice;
+  };
+  return { panel, log };
+}
+
+test('a queued song that needs an integration pauses in place while its review opens', async () => {
+  const page = integrationPage();
+  try {
+    const { panel, log } = queuePanel({
+      eligibility: {
+        state: 'project_provider_unavailable',
+        reason: 'A compatible installed project integration is required.',
+        integration_offer: reaperOffer
+      },
+      queueChoice: 'integration'
+    });
+    await panel.continueQueue();
+    assert.equal(log.choices.length, 1);
+    assert.deepEqual(log.choices[0].offer, reaperOffer, 'the dialog is told what it may offer');
+    assert.equal(panel.queue.index, 0, 'the queue stays on the same song');
+    assert.equal(log.progressed, 0, 'nothing was handled, skipped, or connected');
+    assert.deepEqual(log.posts, [], 'no review, creator, or queue request was made');
+    assert.equal(panel.queue.pending, null, 'no review token is held across the detour');
+    assert.deepEqual(page.navigations, ['/?setup=quest&source=host&quest=install_ori_reaper']);
+    assert.equal(JSON.parse(page.map.get('ori:library-return')).entry_id, 'song-a');
+    assert.match(log.statuses.at(-1), /paused on this song/);
+  } finally {
+    page.restore();
+  }
+});
+
+test('the queue offers an integration only for a song that cannot be set up yet', async () => {
+  const page = integrationPage();
+  try {
+    const eligible = queuePanel({
+      eligibility: {
+        state: 'review_available',
+        reason: '',
+        integration_offer: reaperOffer // a stray offer is ignored for a ready song
+      },
+      queueChoice: 'pause'
+    });
+    await eligible.panel.continueQueue();
+    assert.equal(eligible.log.choices[0].offer, null);
+    assert.equal(eligible.log.choices[0].reason, '');
+
+    const noOffer = queuePanel({
+      eligibility: { state: 'unsupported_format', reason: 'Catalog record only.' },
+      queueChoice: 'pause'
+    });
+    await noOffer.panel.continueQueue();
+    assert.equal(noOffer.log.choices[0].offer, null, 'Logic or Ableton get no install promise');
+    assert.deepEqual(page.navigations, [], 'neither choice started an integration review');
+  } finally {
+    page.restore();
+  }
+});
+
+test('every eligibility state has its own plain label, and none promises an install or a live check', () => {
+  const states = {
+    review_available: 'Ready to review',
+    file_choice_required: 'Needs a file choice',
+    connected: 'Connected to a project workspace',
+    link_needs_review: 'Saved link needs review',
+    revoked_source: 'Discovery consent ended',
+    unavailable: 'Not found at the last scan',
+    unsupported_format: 'Catalog record only',
+    project_provider_unavailable: 'Needs a project integration',
+    home_provider_unavailable: 'Home package unavailable',
+    provider_ambiguous: 'Integration needs review',
+    folder_owned: 'Folder already used by another workspace'
+  };
+  for (const [state, expected] of Object.entries(states)) {
+    assert.equal(activationStateLabel(state), expected, state);
+  }
+  assert.equal(new Set(Object.values(states)).size, Object.keys(states).length, 'each is distinct');
+  for (const state of ['', 'made_up', undefined, null, '__proto__', 'toString']) {
+    assert.equal(activationStateLabel(state), 'Setup status unknown', String(state));
+  }
+  for (const text of Object.values(states)) {
+    assert.doesNotMatch(text, /install (it|now)|REAPER|live|ready to (record|play)/i);
+  }
+});
+
+test('coming back reopens the same song once, after re-reading it from the server', async () => {
+  const page = integrationPage();
+  try {
+    rememberReturn(page);
+    const { panel, log } = returningPanel();
+    await panel.resumeFromIntegration();
+    assert.deepEqual(log.requests, ['/projects/entry-9'], 'the song is re-read, not trusted');
+    assert.deepEqual(log.details, [['entry-9', null]]);
+    assert.match(log.statuses.at(-1), /Its integration status was checked again/);
+    assert.equal(page.map.size, 0, 'the hint is spent');
+    await panel.resumeFromIntegration();
+    assert.equal(log.details.length, 1, 'a reload or second call never repeats the return');
+  } finally {
+    page.restore();
+  }
+});
+
+test('a hint for another Home, or a tampered or expired one, returns nowhere', async () => {
+  const page = integrationPage();
+  try {
+    rememberReturn(page, { home_id: 'some-other-home' });
+    const other = returningPanel();
+    await other.panel.resumeFromIntegration();
+    assert.deepEqual(other.log.details, []);
+    assert.deepEqual(other.log.requests, []);
+    assert.equal(page.map.size, 1, 'another Home’s hint is left for that Home');
+
+    for (const patch of [
+      { return_path: 'https://evil.example/' },
+      { quest_id: '../x' },
+      { entry_id: 'e'.repeat(161) },
+      { created_at: Date.now() - 2 * 3600 * 1000 }
+    ]) {
+      rememberReturn(page, patch);
+      const { panel, log } = returningPanel();
+      await panel.resumeFromIntegration();
+      assert.deepEqual(log.details, [], JSON.stringify(patch));
+      assert.deepEqual(log.requests, [], 'nothing is asked of the server for a bad hint');
+    }
+  } finally {
+    page.restore();
+  }
+});
+
+test('a song that is gone, or a re-check that fails, says so and creates nothing', async () => {
+  const page = integrationPage();
+  try {
+    rememberReturn(page);
+    const gone = returningPanel({
+      request: async () => {
+        throw Object.assign(new Error('missing'), { status: 404 });
+      }
+    });
+    await gone.panel.resumeFromIntegration();
+    assert.deepEqual(gone.log.details, []);
+    assert.match(gone.log.statuses.at(-1), /no longer in this library\. Nothing was changed/);
+    assert.equal(page.map.size, 0);
+
+    rememberReturn(page);
+    const down = returningPanel({
+      request: async () => {
+        throw Object.assign(new Error('boom'), { status: 503 });
+      }
+    });
+    await down.panel.resumeFromIntegration();
+    assert.deepEqual(down.log.details, []);
+    assert.match(down.log.statuses.at(-1), /could not re-check that song/);
+    // Nothing on the return path issues a review, activation, or creator call.
+    for (const path of [...gone.log.requests, ...down.log.requests]) {
+      assert.match(path, /^\/projects\/[^/]+$/);
+    }
+  } finally {
+    page.restore();
+  }
 });

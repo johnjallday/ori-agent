@@ -266,6 +266,34 @@ only when the root's recorded last scan differs from the one before the review.
   or replacement mid-review invalidates old reviews; existing Home/package
   replacement guards stay enforced.
 
+**Implemented (S5/S8).** Eligibility can only say `project_provider_unavailable`;
+it cannot tell "not installed" from "installed but disabled" and knows nothing of
+platform. So the host adds an inert `integration_offer` to the activation read,
+computed server-side only when (a) the state is `project_provider_unavailable`
+(every earlier blocker — revoked or unavailable source, Home provider, ambiguous
+provider, folder owner, existing link — returns first and never gets an offer),
+(b) the observed format maps, through the one host-owned discovery table
+(`folderdigest.IntegrationKeyForProjectFormat`), to a reviewed integration (a format
+no reviewed integration supports maps to nothing), (c) that registry entry is
+release-ready, and (d) this platform is in its `SupportedPlatforms`. The offer
+carries the registry key, the generated install quest ID and a display name,
+never a path.
+
+The Home page has no setup modal, so the song's dialog sends the person to the
+existing deep link for the reviewed install quest and records a **navigation
+hint** (`library-return.js`, per-tab `sessionStorage`): Home ID, opaque song ID,
+quest ID and the Home's own page path, valid for one hour and re-validated on
+every read (a query, hash, foreign origin, dot segment or other route is "no
+hint"). The hint never installs, connects or grants anything. In the quest, the
+summary's follow-on returns to the song **only while the open quest is the one the
+hint names**, instead of opening the plugin's own project creator (a second,
+unrelated way to create a workspace for that song). On the Home, the panel
+consumes the hint once for this exact Home, re-reads the song from the server, and
+reopens it with fresh eligibility. No child is created, no revoked root is
+restored, and nothing launches a project application or live control. A queued
+song that needs the integration pauses the queue in place (same song, no
+progress, no held review token) and starts the same review.
+
 ### S9. Pending shelf association (normal-intake child linked, not on the Home shelf)
 
 - **Owner:** `link_association` / `portfolio_bridge` exact pending link.

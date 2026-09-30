@@ -1,3 +1,6 @@
+import { clearLibraryReturn, readLibraryReturn, writeLibraryReturn } from './library-return.js';
+import { setupQuestURL } from './setup-quest-links.js';
+
 function label(value) {
   return String(value == null || value === '' ? 'Unknown' : value).replaceAll('_', ' ');
 }
@@ -72,6 +75,33 @@ export function selectionRecovery({ reason = '', continuation = null } = {}) {
         message: `Ori no longer has the folder you chose earlier. ${kept} Choose the folder again to continue.`
       };
   }
+}
+
+// A short, honest label for where one saved song stands, from the library's own
+// eligibility state. It describes the last scan and the integrations installed
+// now, never a live check of a project application, and it never promises an
+// install: a format no reviewed integration supports is simply a catalog record
+// (notes and session planning still work).
+const ACTIVATION_STATE_LABELS = {
+  review_available: 'Ready to review',
+  file_choice_required: 'Needs a file choice',
+  connected: 'Connected to a project workspace',
+  link_needs_review: 'Saved link needs review',
+  revoked_source: 'Discovery consent ended',
+  unavailable: 'Not found at the last scan',
+  unsupported_format: 'Catalog record only',
+  project_provider_unavailable: 'Needs a project integration',
+  home_provider_unavailable: 'Home package unavailable',
+  provider_ambiguous: 'Integration needs review',
+  folder_owned: 'Folder already used by another workspace'
+};
+
+export function activationStateLabel(state) {
+  // Own properties only: a state like "__proto__" or "toString" must not resolve
+  // to something inherited from Object.prototype.
+  return typeof state === 'string' && Object.hasOwn(ACTIVATION_STATE_LABELS, state)
+    ? ACTIVATION_STATE_LABELS[state]
+    : 'Setup status unknown';
 }
 
 const folderName = path =>
@@ -534,6 +564,7 @@ export class ProjectLibraryPanel {
       ?.addEventListener('click', event => void this.runSetupNext(event.currentTarget));
     await this.restoreCollectionContinuation();
     await this.refresh();
+    await this.resumeFromIntegration();
   }
 
   // Shows the one next step of an unfinished library above the roster and
@@ -1483,7 +1514,10 @@ export class ProjectLibraryPanel {
     }
   }
 
-  queueChoice(name, position, count, trigger, reason = '') {
+  // `offer` is the host's reviewed-integration offer for a song that cannot be
+  // set up yet. Choosing it pauses the queue at this same song (no progress, no
+  // creator, no review token); it resumes from here with a fresh review.
+  queueChoice(name, position, count, trigger, reason = '', offer = null) {
     return new Promise(resolve => {
       const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
       const form = node('form');
@@ -1511,6 +1545,19 @@ export class ProjectLibraryPanel {
         choice = 'review';
       });
       actions.append(pause, skip);
+      if (reason && offer?.quest_id && offer?.display_name) {
+        const integration = node(
+          'button',
+          'modern-btn modern-btn-primary',
+          `Review the ${offer.display_name} integration`
+        );
+        integration.type = 'button';
+        integration.addEventListener('click', () => {
+          choice = 'integration';
+          dialog.close();
+        });
+        actions.append(integration);
+      }
       if (!reason) actions.append(proceed);
       form.append(
         heading,
@@ -1518,7 +1565,7 @@ export class ProjectLibraryPanel {
           'p',
           '',
           reason
-            ? `${reason} Project setup is unavailable. Skip this song or pause the saved Home queue; neither action creates a project.`
+            ? `${reason} Project setup is unavailable. Skip this song or pause the saved Home queue; neither action creates a project.${offer ? ' You can also review the integration; the queue stays paused on this song until you resume it.' : ''}`
             : 'This song needs its own authoritative-file choice and final confirmation. Skipping creates nothing; pausing keeps the saved Home queue.'
         ),
         actions
@@ -1604,10 +1651,19 @@ export class ProjectLibraryPanel {
               this.queue.index + 1,
               this.queue.ids.length,
               trigger,
-              canReview ? '' : eligibility.reason || 'Project setup needs a fresh review.'
+              canReview ? '' : eligibility.reason || 'Project setup needs a fresh review.',
+              canReview ? null : eligibility.integration_offer || null
             );
             if (action === 'pause') {
               this.status('Review queue paused; no other song was connected.');
+              return;
+            }
+            if (action === 'integration' && eligibility.integration_offer) {
+              // The queue stays exactly here: same song, no progress, no creator.
+              this.status(
+                'Review queue paused on this song while you review the integration. Resume it afterwards for a fresh check.'
+              );
+              this.startIntegrationReview(detail, eligibility.integration_offer);
               return;
             }
             if (action === 'skip') {
@@ -2023,6 +2079,57 @@ export class ProjectLibraryPanel {
     });
   }
 
+  // Sends the person to the host's reviewed install quest for this song's
+  // integration, remembering only where to come back to. The quest ID comes from
+  // the server's offer (validated again by the quest link builder), never from
+  // the row; the hint is navigation only and grants nothing.
+  startIntegrationReview(detail, offer) {
+    let target;
+    try {
+      target = setupQuestURL({ source: 'host', id: offer.quest_id });
+    } catch (_) {
+      this.status('That integration review is unavailable right now. Nothing was changed.');
+      return;
+    }
+    const remembered = writeLibraryReturn({
+      homeID: this.workspaceId,
+      entryID: detail.row.id,
+      questID: offer.quest_id,
+      path: globalThis.location?.pathname || ''
+    });
+    if (!remembered) {
+      this.status(
+        'Ori could not remember where to bring you back to. Open the integration from the Plugins page instead; nothing was changed.'
+      );
+      return;
+    }
+    globalThis.location.assign(target);
+  }
+
+  // Back from the integration review (or the Plugins page): reopen the same song
+  // so it shows its fresh eligibility. The hint names the Home and an opaque
+  // song ID and is checked against this exact Home; the song, its source and
+  // its eligibility are re-read from the server like any other click. Nothing is
+  // created, no folder grant is restored, and no application is launched.
+  async resumeFromIntegration() {
+    const hint = readLibraryReturn();
+    if (!hint || hint.home_id !== this.workspaceId) return;
+    clearLibraryReturn(); // one return per hint; a reload never repeats it
+    try {
+      await this.request(`/projects/${encodeURIComponent(hint.entry_id)}`);
+    } catch (error) {
+      this.status(
+        error.status === 404
+          ? 'The song you were checking is no longer in this library. Nothing was changed.'
+          : 'Ori could not re-check that song just now. Open it from the shelf to check again.'
+      );
+      return;
+    }
+    await this.details(hint.entry_id, null);
+    // After details(): its own progress message would otherwise replace this one.
+    this.status('Back on your song. Its integration status was checked again.');
+  }
+
   async details(entryID, trigger) {
     await this.run(trigger, 'Loading this saved project…', async () => {
       const detail = await this.request(`/projects/${encodeURIComponent(entryID)}`);
@@ -2071,11 +2178,39 @@ export class ProjectLibraryPanel {
           : null;
       const next = node('p', '', `Next action: ${detail.fields.next_action || 'Not set'}`);
       const setup = node('section', 'project-library-setup-preview');
-      setup.append(node('h3', '', 'Project setup'), node('p', '', activation.reason));
+      setup.append(
+        node('h3', '', 'Project setup'),
+        node('p', 'project-library-state', activationStateLabel(activation.state)),
+        node('p', '', activation.reason),
+        node(
+          'p',
+          'project-library-note',
+          'Based on the last scan and the integrations installed now. No project application was opened or checked.'
+        )
+      );
       if (activation.state === 'project_provider_unavailable') {
+        // The host offers a reviewed integration only when it is the honest
+        // remedy for this song's observed format on this computer. Formats no
+        // reviewed integration supports get no install offer, only notes and
+        // session planning below.
+        const offer = activation.integration_offer;
+        const remedies = node('div', 'project-library-remedies');
+        if (offer?.quest_id && offer?.display_name && !this.readOnly) {
+          const review = node(
+            'button',
+            'modern-btn modern-btn-primary',
+            `Review the ${offer.display_name} integration`
+          );
+          review.type = 'button';
+          review.title =
+            'Opens the reviewed install. Nothing is installed or connected until you confirm it there; you return to this song afterwards.';
+          review.addEventListener('click', () => this.startIntegrationReview(detail, offer));
+          remedies.append(review);
+        }
         const plugins = node('a', '', 'Review integrations on the Plugins page');
         plugins.href = '/plugins';
-        setup.append(plugins);
+        remedies.append(plugins);
+        setup.append(remedies);
       }
       if (activation.project_role_labels?.length)
         setup.append(

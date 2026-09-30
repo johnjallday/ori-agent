@@ -21,6 +21,7 @@ const {
   integrationHandoffNavigation,
   integrationReleaseCheckNote,
   integrationReviewPresentation,
+  libraryReturnTarget,
   setupJourneyActionLabel,
   setupJourneyPreconditionView,
   workspaceLaunchStages,
@@ -378,6 +379,51 @@ test('an install quest renders its two steps with nothing disabled', () => {
   assert.equal(journey.journey.workspace_launch, undefined);
   assert.equal(setupJourneyCurrentStep(journey).id, 'integration');
   assert.equal(setupJourneyCurrentStep(journey, 'summary').id, 'summary');
+});
+
+test('an install quest opened from a saved song returns to it, and only that quest does', () => {
+  const hint = {
+    home_id: 'home-1',
+    entry_id: 'entry-9',
+    quest_id: 'install_ori_reaper',
+    return_path: '/workspaces/music-home/assistant',
+    created_at: Date.now()
+  };
+  assert.equal(
+    libraryReturnTarget('install_ori_reaper', hint),
+    '/workspaces/music-home/assistant#projectLibraryPanel'
+  );
+  // A hint for another quest, a blank quest, no hint, or a tampered/expired hint
+  // never redirects: the ordinary follow-on applies instead.
+  assert.equal(libraryReturnTarget('install_other', hint), '');
+  assert.equal(libraryReturnTarget('', hint), '');
+  assert.equal(libraryReturnTarget('install_ori_reaper', null), '');
+  assert.equal(
+    libraryReturnTarget('install_ori_reaper', { ...hint, return_path: 'https://evil.example/' }),
+    ''
+  );
+  assert.equal(
+    libraryReturnTarget('install_ori_reaper', {
+      ...hint,
+      created_at: Date.now() - 2 * 3600 * 1000
+    }),
+    ''
+  );
+  // Returning is navigation, not the plugin's project quest: nothing here opens it.
+  const summary = installQuestJourney({
+    handoff: {
+      source: 'plugin',
+      plugin_id: 'reaper-plugin',
+      id: 'reaper_setup',
+      title: 'Set up REAPER'
+    }
+  }).steps[1];
+  assert.notEqual(libraryReturnTarget('install_ori_reaper', hint), '');
+  assert.equal(
+    integrationHandoffNavigation(summary, 'continue_integration_setup').kind,
+    'open_quest',
+    'the ordinary follow-on still exists for people who did not come from a song'
+  );
 });
 
 test('an install summary continues into the handed-off plugin quest in place', () => {

@@ -308,7 +308,10 @@ func (h *Handler) GetAssistantLibraryActivation(w http.ResponseWriter, r *http.R
 		}
 		return
 	}
-	_ = orihttp.RespondSuccess(w, result)
+	_ = orihttp.RespondSuccess(w, libraryActivationResponse{
+		ActivationEligibility: result,
+		IntegrationOffer:      libraryIntegrationOfferFor(result, hostPlatform()),
+	})
 }
 
 // ListAssistantLibraryRoots projects at most 20 source grants and one bounded

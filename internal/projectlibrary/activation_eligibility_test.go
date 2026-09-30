@@ -181,12 +181,19 @@ func TestActivationEligibility_RefusesUnverifiedProvidersOwnersAndRoots(t *testi
 	}
 	missing := NewActivationInspector(a.library, roots, installed[:1], file)
 	if result, err := missing.Eligibility(t.Context(), scope, "single"); err != nil ||
-		result.State != "project_provider_unavailable" || !strings.Contains(result.Reason, "format: reaper") {
+		result.State != "project_provider_unavailable" || !strings.Contains(result.Reason, "format: reaper") ||
+		result.ObservedFormat != "reaper" {
 		t.Fatalf("missing project provider: %+v %v", result, err)
 	}
 	if result, err := missing.Eligibility(t.Context(), scope, "unsupported"); err != nil ||
-		result.State != "project_provider_unavailable" || !strings.Contains(result.Reason, "format: ableton") {
+		result.State != "project_provider_unavailable" || !strings.Contains(result.Reason, "format: ableton") ||
+		result.ObservedFormat != "ableton" {
 		t.Fatalf("cataloged DAW was hidden by missing provider: %+v %v", result, err)
+	}
+	// Only the provider-missing state names a format for the host to consider;
+	// every other state, including revoked or connected, carries none.
+	if result, err := a.Eligibility(t.Context(), scope, "single"); err != nil || result.ObservedFormat != "" {
+		t.Fatalf("a state with a compatible provider leaked an observed format: %+v %v", result, err)
 	}
 	changed := append(activationPlugins(nil), installed...)
 	changed[1].Version = "9.9.9"
