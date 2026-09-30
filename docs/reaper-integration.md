@@ -7,11 +7,11 @@ Ori’s REAPER integration is an optional local contribution for organizing and 
 The new source contract separates two optional providers:
 
 - **Music Project Management** owns Music Production Home, its Portfolio Manager and optional Sample Library Manager declarations, Home stages/reflection bounds, and the canonical `music-project-management` skill. It is content-only: no REAPER dependency, project blueprint, Workspace Surface, MCP server, or runtime process.
-- **REAPER Plugin** owns the Reaper Song blueprint, Producer/Mix Engineer/Songwriter project team, `.rpp` scaffold and typed inputs, project setup, REAPER skills/capabilities, and optional live-control service. It references the Home by exact provider/program identity rather than owning or bundling it.
+- **REAPER Plugin** owns the Reaper Song blueprint, its project team (one **REAPER Assistant** since 0.9.0; earlier releases declared a Producer, Mix Engineer and Songwriter), `.rpp` scaffold and typed inputs, project setup, REAPER skills/capabilities, and optional live-control service. It references the Home by exact provider/program identity rather than owning or bundling it.
 
-Both independent contribution forms require `independent_program_homes_v1`. Either package can be installed first. With REAPER installed first, both the Reaper Song card in Create Workspace and the **Set up REAPER** quest's group screen say it needs Music Production Home from the separate Music Project Management plugin, in the same words. Both offer **Install Music Project Management…** as the primary action. That installs the plugin's latest reviewed release after the usual trust review, then enables it. Ori never fetches it on its own and never creates a fallback Home. With Music installed first, the Home can be created and staffed before any REAPER project exists. An explicitly customized standalone Reaper Song remains Home-free and needs only its three project roles.
+Both independent contribution forms require `independent_program_homes_v1`. Either package can be installed first. With REAPER installed first, both the Reaper Song card in Create Workspace and the **Set up REAPER** quest's group screen say it needs Music Production Home from the separate Music Project Management plugin, in the same words. Both offer **Install Music Project Management…** as the primary action. That installs the plugin's latest reviewed release after the usual trust review, then enables it. Ori never fetches it on its own and never creates a fallback Home. With Music installed first, the Home can be created and staffed before any REAPER project exists. An explicitly customized standalone Reaper Song remains Home-free and needs only its project role.
 
-The coordinated release uses Music Project Management `v0.1.0` at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf` and REAPER `v0.8.0` / blueprint v9 at `3e3234bfae3465f909fe2aa5189f685a41c7a2ed`. Ori `v0.0.115-rc.1` supplied the compatible host before those packages were published; the reviewed floor below moves in the next release candidate before stable promotion.
+The coordinated release used Music Project Management `v0.1.0` at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf` and REAPER `v0.8.0` / blueprint v9 at `3e3234bfae3465f909fe2aa5189f685a41c7a2ed`. Ori `v0.0.115-rc.1` supplied the compatible host before those packages were published. REAPER `v0.9.0` / blueprint v10 at `0a597684f3b181735c961bfb44ed5c2b80994814` replaced the three-role team with one REAPER Assistant and is the current reviewed floor. Music Project Management `v0.1.1` is a guidance-only update that existing Homes take through the reviewed Home package upgrade (`architecture/independent-program-homes.md` §6.1).
 
 See [Independent Assistant Program Homes](architecture/independent-program-homes.md) for the exact declaration, reciprocal authorization, provenance, availability, and no-migration contract.
 
@@ -55,7 +55,7 @@ A blocked or later-regressed live check affects only live operation. Existing pr
 The music group is the canonical **Music Production Home**, not an extra wrapper. Its chosen display name does not change ownership. New independent Homes are identified by owner, Music provider, and program ID—not by the REAPER provider, parentage, or display name. They group exact linked projects without inheriting their folders or runtime grants.
 
 - Music Project Management owns the Home-scoped **Music Portfolio Manager**, which can report reviewed project status, maintain Home-owned portfolio fields, and prepare a confirmed handoff to one exact linked project.
-- REAPER owns each project's Producer, Mix Engineer, and Songwriter bindings. Their prompts, model choices, memory, task history, grants, and live state are not shared with the Home or sibling projects.
+- REAPER owns each project's role bindings (one REAPER Assistant since 0.9.0; a project created from an earlier release keeps its Producer, Mix Engineer and Songwriter). Their prompts, model choices, memory, task history, grants, and live state are not shared with the Home or sibling projects.
 - The Home and project declarations carry separate immutable provider versions, generations, fingerprints, and digests on each exact link. Both providers must be available for a handoff; Home-only edits and project-only staffing retain their narrower provider gates.
 - No configured model is required for deterministic setup and catalog operations. Chat or execution is labelled unavailable until a compatible model resolves.
 
@@ -83,9 +83,9 @@ Linked projects must be explicitly disconnected before organizational reparentin
 
 Ori’s reviewed registry entry for this integration is a **floor**, not a pin. A person reviewed the `johnjallday/reaper-plugin` repository and its minimum release; every later stable release from that repository is accepted once Ori’s automatic identity, host-feature, blueprint, program, platform and artifact checks pass. The entry in `internal/reviewedintegration/entries.go` holds:
 
-- Minimum reviewed version `0.8.0`.
-- Fallback commit `3e3234bfae3465f909fe2aa5189f685a41c7a2ed` (the annotated `v0.8.0` tag’s resolved commit), installed when the latest release cannot be checked.
-- Blueprint `reaper-song` at version 9 **or later**.
+- Minimum reviewed version `0.9.0`.
+- Fallback commit `0a597684f3b181735c961bfb44ed5c2b80994814` (the annotated `v0.9.0` tag’s resolved commit), installed when the latest release cannot be checked.
+- Blueprint `reaper-song` at version 10 **or later**.
 - Referenced Home program `music-producer-assistant` schema 1 and surface protocol 1, both **exact**.
 - Required host features `blueprint_inputs_v1`, `independent_program_homes_v1`, `setup_quests_v2`, `specialist_setup_journey_v1` and `template_group_requirements_v1`. A release may require more, as long as this Ori build has them.
 - Platform `darwin/arm64`.
@@ -135,7 +135,7 @@ ORI_INTEGRATION_RELEASES_API=http://127.0.0.1:9 ./scripts/demo-server.sh 8931
 
 ### When the floor moves
 
-A plugin release that keeps its blueprint version, program schema, protocol and required host features needs **no change to Ori**. Version 0.8.0 changed those assumptions, so this release branch moves the floor only after the compatible host RC, Music package, REAPER tag and REAPER artifact were published and verified. Future floor changes follow the same order:
+A plugin release that keeps its blueprint version, program schema, protocol and required host features needs **no change to Ori**. Version 0.8.0 changed those assumptions, so the floor moved only after the compatible host RC, Music package, REAPER tag and REAPER artifact were published and verified. Version 0.9.0 raised the blueprint to v10 (one REAPER Assistant) and moved the floor the same way, after its tag and artifact were published and verified. Future floor changes follow the same order:
 
 1. Confirm the new tag and release exist on `johnjallday/reaper-plugin`, and record the tag’s resolved commit.
 2. Download the published `darwin_arm64` asset and its checksum. Compare size and SHA-256 against the manifest at that commit, and confirm the executable reports the new version.
@@ -146,14 +146,14 @@ A locally built candidate is not release evidence. A squash merge upstream chang
 
 ### Verification evidence for the fallback release
 
-- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.8.0 (published September 22, 2026).
-- Commit: `3e3234bfae3465f909fe2aa5189f685a41c7a2ed`.
-- Published asset: `reaper-plugin_v0.8.0_darwin_arm64`, **8,780,098 bytes**, SHA-256 `1f5ab0f061bddb739461ececc088900ec8f4cee47154ea631bb05ebfdfdad08e`.
-- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/35724428852.
-- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/35724428862.
-- Manifest identity at that commit: blueprint `reaper-song` version 9, project declaration `reaper-song-team` schema/version 1 referencing Home program `music-producer-assistant` schema/version 1, setup quest `reaper_setup` version 3 with four steps, and the five required host features listed above.
+- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.9.0 (published September 25, 2026).
+- Commit: `0a597684f3b181735c961bfb44ed5c2b80994814`.
+- Published asset: `reaper-plugin_v0.9.0_darwin_arm64`, **8,780,098 bytes**, SHA-256 `dd0df90c1735e9a059e61b2aa0c69bc4f128122ffc56d9ed1f3969a261d52ed7`.
+- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/36076920735.
+- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/36076920734.
+- Manifest identity at that commit: blueprint `reaper-song` version 10 with one project role `reaper-assistant` (REAPER Assistant, primary), project declaration `reaper-song-team` schema/version 1 referencing Home program `music-producer-assistant` schema/version 1, setup quest `reaper_setup` version 4 with four steps, protocol 1, and the five required host features listed above.
 
-The published asset and checksum were downloaded and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.8.0`.
+The published asset and checksum were downloaded on September 30, 2026 and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.9.0`. The v0.8.0 floor it replaces was verified the same way (`3e3234bfae3465f909fe2aa5189f685a41c7a2ed`, SHA-256 `1f5ab0f061bddb739461ececc088900ec8f4cee47154ea631bb05ebfdfdad08e`).
 
 ### Rerun the checks
 
@@ -164,7 +164,7 @@ ORI_TEST_REVIEWED_INTEGRATION_RELEASE=1 go test ./internal/setupjourney \
   -run '^TestReviewedIntegrationPublishedRelease$' -count=1 -v
 
 # The published exact-commit source meets the host contract and the floor.
-ORI_REVIEWED_PLUGIN_CANDIDATE='https://github.com/johnjallday/reaper-plugin#sha=3e3234bfae3465f909fe2aa5189f685a41c7a2ed' \
+ORI_REVIEWED_PLUGIN_CANDIDATE='https://github.com/johnjallday/reaper-plugin#sha=0a597684f3b181735c961bfb44ed5c2b80994814' \
   go test ./internal/plugin ./internal/reviewedintegration \
   -run 'TestReviewedCandidateHostContract|TestReviewedCandidateMeetsTheFloor' -count=1 -v
 ```
@@ -176,6 +176,7 @@ The fallback run points the resolver at an unreachable loopback API and checks t
 - **0.5.0** (commit `1f494db5a39d8c13f6149943b28e6a506d19631a`, SHA-256 `2bbf6b77418119cb21e827a407c8d5886e3effdb593ec0ad274e20d7d69c2ca9`) declared no setup quest, so its install quest offered only **Open Plugins**. v0.5.1 and v0.5.2 require the retired `setup_quests_v1`, so this host refuses their manifests until the plugin is updated.
 - **0.6.0** (commit `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9`, SHA-256 `4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119`) is the first release that declares `reaper_setup` version 2 under `setup_quests_v2`, with blueprint version 7. It is below the floor, so an exact-commit installation is offered a reviewed replacement with the latest release.
 - **0.6.1** only drops the retired agent `type` key from the blueprint roles (reaper-plugin#9, following ori-agent#490). It was the previous combined-contract floor.
-- **0.8.0** separates Music-owned Home authority from REAPER-owned project authority, requires Music Project Management 0.1.0 and the independent-Home host feature, advances Reaper Song to v9 and setup quest to v3, and is the current reviewed floor.
+- **0.8.0** separates Music-owned Home authority from REAPER-owned project authority, requires Music Project Management 0.1.0 and the independent-Home host feature, advances Reaper Song to v9 and setup quest to v3. It was the reviewed floor until 0.9.0.
+- **0.9.0** (commit `0a597684f3b181735c961bfb44ed5c2b80994814`, SHA-256 `dd0df90c1735e9a059e61b2aa0c69bc4f128122ffc56d9ed1f3969a261d52ed7`) staffs one **REAPER Assistant** per project instead of a Producer, Mix Engineer and Songwriter, advances Reaper Song to v10 and setup quest to v4 (staffing copy only), keeps the project team at schema/version 1, and is the current reviewed floor. A project created from an earlier release keeps its recorded team.
 
 Local plugin development remains separate. `scripts/reaper-demo.sh` stages an isolated copy and uses an explicit process-local source override; it labels the copy **not release-verified**. Installing a local directory or setting an arbitrary override is not a production recovery path.

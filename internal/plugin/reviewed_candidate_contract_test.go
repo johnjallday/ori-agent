@@ -55,8 +55,9 @@ func TestReviewedCandidateHostContract(t *testing.T) {
 		project.Home.ProgramID != "music-producer-assistant" ||
 		project.Home.HomeSchemaVersion != projecttemplates.AssistantProgramHomeSchemaVersion ||
 		project.Home.MinHomeVersion != 1 || project.Home.MaxHomeVersion != 1 ||
-		len(project.Roles) != 3 || project.Roles[0].ID != "producer" ||
-		project.Roles[1].ID != "engineer" || project.Roles[2].ID != "songwriter" {
+		len(project.Roles) != 1 || project.Roles[0].ID != "reaper-assistant" || !project.Roles[0].Primary {
+		// 0.9.0 staffs one REAPER Assistant per project instead of a
+		// Producer, Mix Engineer and Songwriter.
 		t.Fatalf("candidate assistant project = %#v", project)
 	}
 	// The candidate's typed inputs must survive the real loader. An unusable

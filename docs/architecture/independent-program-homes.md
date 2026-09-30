@@ -20,6 +20,11 @@ The contract was revalidated on 2026-09-22 against these exact published sources
 | REAPER Plugin | release `v0.8.0`, commit `3e3234bfae3465f909fe2aa5189f685a41c7a2ed` | Reaper Song project declaration, project roles, project connection, setup quest, capabilities, inputs, skeleton, and verified service artifact. |
 | Reviewed REAPER floor | `v0.8.0` at `3e3234bfae3465f909fe2aa5189f685a41c7a2ed` | Published minimum release and immutable fallback source for the split contract. |
 
+Since 2026-09-30 the reviewed REAPER floor is `v0.9.0` at
+`0a597684f3b181735c961bfb44ed5c2b80994814` (blueprint v10, one REAPER Assistant
+project role, same project team schema/version 1), and Music Project Management
+`v0.1.1` is a guidance-only update that existing Homes take through §6.1.
+
 The design baseline, REAPER 0.7.0, used Reaper Song blueprint version 8 and one
 combined Assistant Program schema-2 declaration. That block owns both the Music
 Production Home and the Producer/Mix Engineer/Songwriter project team. Current
@@ -233,8 +238,8 @@ All roles are project-scoped by ownership of the block. V1 requires at least one
 role, every role required, and exactly one primary. It cannot declare Home roles,
 Home copy, Home skills, stages, reflection, portfolio defaults, attachment
 allowlists, capabilities owned by another provider, or a fallback Home. REAPER
-retains Producer, Mix Engineer, and Songwriter here, with their existing
-project-only prompts and REAPER skills.
+0.8.0 declared Producer, Mix Engineer, and Songwriter here; 0.9.0 declares one
+REAPER Assistant, with its project-only prompt and REAPER skills.
 
 The `home` reference is exact trusted intent, not proof that the companion is
 installed. Therefore REAPER may be installed first. Plugin install validates the

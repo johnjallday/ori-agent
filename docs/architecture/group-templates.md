@@ -212,10 +212,10 @@ automatically.
 
 ## Limitations
 
-- The reviewed REAPER floor is 0.8.0 at
-  `3e3234bfae3465f909fe2aa5189f685a41c7a2ed`, with blueprint v9 and the split
-  project declaration. Its required Home package is Music Project Management
-  0.1.0 at `5f748d2de4457ac9dd02ea1ec31e34e1493744cf`.
+- The reviewed REAPER floor is 0.9.0 at
+  `0a597684f3b181735c961bfb44ed5c2b80994814`, with blueprint v10 and the split
+  project declaration (one REAPER Assistant). It needs a Music Production Home
+  (Home schema/version 1) from Music Project Management 0.1.0 or later.
 - Disposable Chromium acceptance covers music-only, Music-first, REAPER-first,
   REAPER-only standalone, two linked projects, one reviewed inert handoff,
   provider removal/reinstall, and a controlled restart. It does not configure a

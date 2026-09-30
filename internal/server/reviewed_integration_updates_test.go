@@ -126,12 +126,12 @@ func reviewedInstall(entry reviewedintegration.Entry, version, source string) pl
 }
 
 func TestReviewedIntegrationUpdatesOfferOnlyANewerReleaseForExactOfficialCommits(t *testing.T) {
-	updates, releases, entry := reviewedUpdatesFixture("0.8.1")
-	older := reviewedInstall(entry, "0.7.0", entry.PinnedSource(strings.Repeat("a", 40)))
+	updates, releases, entry := reviewedUpdatesFixture("0.9.1")
+	older := reviewedInstall(entry, "0.8.0", entry.PinnedSource(strings.Repeat("a", 40)))
 
 	availability, ok, err := updates.availability(older)
 	if err != nil || !ok || availability != (plugin.UpdateAvailability{
-		Name: entry.PluginID, InstalledVersion: "0.7.0", AvailableVersion: "0.8.1", Available: true, ReviewedRelease: true,
+		Name: entry.PluginID, InstalledVersion: "0.8.0", AvailableVersion: "0.9.1", Available: true, ReviewedRelease: true,
 	}) {
 		t.Fatalf("availability = %+v ok=%v err=%v", availability, ok, err)
 	}
@@ -141,7 +141,7 @@ func TestReviewedIntegrationUpdatesOfferOnlyANewerReleaseForExactOfficialCommits
 
 	// Same or newer installed versions are reviewed but have nothing to offer,
 	// and the handler keeps its recorded-source path instead of downgrading.
-	for _, version := range []string{"0.8.1", "0.9.0", "unknown"} {
+	for _, version := range []string{"0.9.1", "1.0.0", "unknown"} {
 		installed := reviewedInstall(entry, version, entry.PinnedSource(strings.Repeat("c", 40)))
 		availability, ok, err := updates.availability(installed)
 		if err != nil || !ok || availability.Available || availability.AvailableVersion != version {
@@ -160,12 +160,12 @@ func TestReviewedIntegrationUpdatesOfferOnlyANewerReleaseForExactOfficialCommits
 func TestReviewedIntegrationUpdatesOfferTheReleaseToUnpinnedOfficialURLs(t *testing.T) {
 	for _, suffix := range []string{"", ".git"} {
 		t.Run("repository"+suffix, func(t *testing.T) {
-			updates, releases, entry := reviewedUpdatesFixture("0.9.0")
-			installed := reviewedInstall(entry, "0.8.0", entry.SourceRepository+suffix)
+			updates, releases, entry := reviewedUpdatesFixture("1.0.0")
+			installed := reviewedInstall(entry, "0.9.0", entry.SourceRepository+suffix)
 
 			availability, ok, err := updates.availability(installed)
 			if err != nil || !ok || availability != (plugin.UpdateAvailability{
-				Name: entry.PluginID, InstalledVersion: "0.8.0", AvailableVersion: "0.9.0", Available: true, ReviewedRelease: true,
+				Name: entry.PluginID, InstalledVersion: "0.9.0", AvailableVersion: "1.0.0", Available: true, ReviewedRelease: true,
 			}) {
 				t.Fatalf("availability = %+v ok=%v err=%v", availability, ok, err)
 			}
@@ -190,19 +190,19 @@ func TestReviewedIntegrationUpdatesAnswerUnpinnedOfficialInstallsFromReleasesOnl
 		wantAvailable string // "" when nothing is offered
 		wantSource    func(reviewedintegration.Entry) string
 	}{
-		{name: "current release while main is ahead", installed: "0.9.0"},
-		{name: "ahead of the latest release", installed: "1.0.0"},
+		{name: "current release while main is ahead", installed: "1.0.0"},
+		{name: "ahead of the latest release", installed: "1.1.0"},
 		{name: "installed version not comparable", installed: "unknown"},
-		{name: "resolver fallback at the floor", installed: "0.8.0", resolution: floorOf},
+		{name: "resolver fallback at the floor", installed: "0.9.0", resolution: floorOf},
 		{
-			name: "resolver fallback above the install", installed: "0.7.0", resolution: floorOf,
-			wantAvailable: "0.8.0", wantSource: func(entry reviewedintegration.Entry) string { return entry.FallbackSource() },
+			name: "resolver fallback above the install", installed: "0.8.0", resolution: floorOf,
+			wantAvailable: "0.9.0", wantSource: func(entry reviewedintegration.Entry) string { return entry.FallbackSource() },
 		},
 		{
-			name: "resolver source outside the repository", installed: "0.8.0",
+			name: "resolver source outside the repository", installed: "0.9.0",
 			resolution: func(entry reviewedintegration.Entry) integrationrelease.Resolution {
 				return integrationrelease.Resolution{
-					Version: "0.9.0", Tag: "v0.9.0", Commit: strings.Repeat("b", 40),
+					Version: "1.0.0", Tag: "v1.0.0", Commit: strings.Repeat("b", 40),
 					Source: "https://github.com/attacker/plugin#sha=" + strings.Repeat("b", 40),
 				}
 			},
@@ -210,7 +210,7 @@ func TestReviewedIntegrationUpdatesAnswerUnpinnedOfficialInstallsFromReleasesOnl
 	}
 	for _, item := range cases {
 		t.Run(item.name, func(t *testing.T) {
-			updates, releases, entry := reviewedUpdatesFixture("0.9.0")
+			updates, releases, entry := reviewedUpdatesFixture("1.0.0")
 			if item.resolution != nil {
 				releases.resolution = item.resolution(entry)
 			}
@@ -250,12 +250,12 @@ func (head *mutableHead) List() ([]plugin.InstalledPlugin, error) {
 
 func (head *mutableHead) CheckUpdate(name string) (plugin.UpdateAvailability, error) {
 	head.checks++
-	return plugin.UpdateAvailability{Name: name, InstalledVersion: "0.8.0", AvailableVersion: "1.0.0", Available: true}, nil
+	return plugin.UpdateAvailability{Name: name, InstalledVersion: "0.9.0", AvailableVersion: "1.1.0", Available: true}, nil
 }
 
 func TestReviewedIntegrationUpdateCheckNeverReadsTheMutableHeadOfAnOfficialInstall(t *testing.T) {
-	updates, _, entry := reviewedUpdatesFixture("0.9.0")
-	head := &mutableHead{installed: []plugin.InstalledPlugin{reviewedInstall(entry, "0.8.0", entry.SourceRepository+".git")}}
+	updates, _, entry := reviewedUpdatesFixture("1.0.0")
+	head := &mutableHead{installed: []plugin.InstalledPlugin{reviewedInstall(entry, "0.9.0", entry.SourceRepository+".git")}}
 	checker := plugin.NewUpdateChecker(head)
 	checker.SetAvailabilityOverride(updates.availability)
 	checker.Start(time.Hour)
@@ -266,29 +266,29 @@ func TestReviewedIntegrationUpdateCheckNeverReadsTheMutableHeadOfAnOfficialInsta
 	checker.Stop()
 
 	snapshot := checker.Snapshot()
-	if len(snapshot.Updates) != 1 || snapshot.Updates[0].AvailableVersion != "0.9.0" || !snapshot.Updates[0].Available {
-		t.Fatalf("snapshot = %+v, want reviewed release 0.9.0", snapshot)
+	if len(snapshot.Updates) != 1 || snapshot.Updates[0].AvailableVersion != "1.0.0" || !snapshot.Updates[0].Available {
+		t.Fatalf("snapshot = %+v, want reviewed release 1.0.0", snapshot)
 	}
 	if head.checks != 0 {
 		t.Fatalf("the recorded mutable source was checked %d times", head.checks)
 	}
-	if head.installed[0].Source != entry.SourceRepository+".git" || head.installed[0].Version != "0.8.0" {
+	if head.installed[0].Source != entry.SourceRepository+".git" || head.installed[0].Version != "0.9.0" {
 		t.Fatalf("the check rewrote the installed record: %+v", head.installed[0])
 	}
 }
 
 func TestReviewedIntegrationUpdatesLeaveOtherInstallsToTheirRecordedSource(t *testing.T) {
-	updates, releases, entry := reviewedUpdatesFixture("0.8.1")
+	updates, releases, entry := reviewedUpdatesFixture("0.9.1")
 	pinned := entry.PinnedSource(strings.Repeat("a", 40))
 	cases := map[string]plugin.InstalledPlugin{
-		"local copy":        reviewedInstall(entry, "0.8.0", "/Users/example/plugin"),
-		"other repository":  reviewedInstall(entry, "0.8.0", "https://github.com/attacker/plugin#sha="+strings.Repeat("a", 40)),
-		"other spelling":    reviewedInstall(entry, "0.8.0", entry.SourceRepository+"#ref=main"),
-		"wrong format":      {Name: entry.PluginID, Version: "0.8.0", Source: pinned, Format: plugin.FormatCodex},
-		"unreviewed plugin": {Name: "other-plugin", Version: "0.8.0", Source: pinned, Format: entry.SourceFormat},
-		"case-folded name":  {Name: strings.ToUpper(entry.PluginID), Version: "0.8.0", Source: pinned, Format: entry.SourceFormat},
+		"local copy":        reviewedInstall(entry, "0.9.0", "/Users/example/plugin"),
+		"other repository":  reviewedInstall(entry, "0.9.0", "https://github.com/attacker/plugin#sha="+strings.Repeat("a", 40)),
+		"other spelling":    reviewedInstall(entry, "0.9.0", entry.SourceRepository+"#ref=main"),
+		"wrong format":      {Name: entry.PluginID, Version: "0.9.0", Source: pinned, Format: plugin.FormatCodex},
+		"unreviewed plugin": {Name: "other-plugin", Version: "0.9.0", Source: pinned, Format: entry.SourceFormat},
+		"case-folded name":  {Name: strings.ToUpper(entry.PluginID), Version: "0.9.0", Source: pinned, Format: entry.SourceFormat},
 		"unpinned wrong format": {
-			Name: entry.PluginID, Version: "0.8.0", Source: entry.SourceRepository + ".git", Format: plugin.FormatCodex,
+			Name: entry.PluginID, Version: "0.9.0", Source: entry.SourceRepository + ".git", Format: plugin.FormatCodex,
 		},
 	}
 	for name, installed := range cases {
@@ -329,11 +329,11 @@ var installForms = []struct {
 	},
 }
 
-// walkFixture publishes 1.0.0 (c), 0.9.0 (b) and the 0.8.0 floor, newest first.
+// walkFixture publishes 1.1.0 (c), 1.0.0 (b) and the 0.9.0 floor, newest first.
 func walkFixture() (reviewedIntegrationUpdates, *fixedReleases, reviewedintegration.Entry, []integrationrelease.Resolution) {
-	updates, releases, entry := reviewedUpdatesFixture("1.0.0")
+	updates, releases, entry := reviewedUpdatesFixture("1.1.0")
 	releases.candidates = []integrationrelease.Resolution{
-		officialRelease(entry, "1.0.0", "c"), officialRelease(entry, "0.9.0", "b"), integrationrelease.Floor(entry),
+		officialRelease(entry, "1.1.0", "c"), officialRelease(entry, "1.0.0", "b"), integrationrelease.Floor(entry),
 	}
 	return updates, releases, entry, releases.candidates
 }
@@ -355,18 +355,18 @@ func TestReviewedIntegrationUpdatesStepOverReleasesThisBuildCannotLoad(t *testin
 			t.Run(refusalName+"/"+form.name, func(t *testing.T) {
 				updates, releases, entry, published := walkFixture()
 				refuse(releases, published[0].Source)
-				installed := reviewedInstall(entry, "0.8.0", form.source(entry))
+				installed := reviewedInstall(entry, "0.9.0", form.source(entry))
 
 				availability, ok, err := updates.availability(installed)
 				if err != nil || !ok || availability != (plugin.UpdateAvailability{
-					Name: entry.PluginID, InstalledVersion: "0.8.0", AvailableVersion: "0.9.0", Available: true, ReviewedRelease: true,
+					Name: entry.PluginID, InstalledVersion: "0.9.0", AvailableVersion: "1.0.0", Available: true, ReviewedRelease: true,
 				}) {
-					t.Fatalf("availability = %+v ok=%v err=%v, want the loadable 0.9.0", availability, ok, err)
+					t.Fatalf("availability = %+v ok=%v err=%v, want the loadable 1.0.0", availability, ok, err)
 				}
 				if got := updates.replacement(context.Background(), installed); got != (pluginhttp.ReviewedUpdate{Source: published[1].Source, Format: entry.SourceFormat}) {
-					t.Fatalf("replacement = %+v, want 0.9.0's exact commit", got)
+					t.Fatalf("replacement = %+v, want 1.0.0's exact commit", got)
 				}
-				// Each hook walks 1.0.0 then 0.9.0 and stops at the first loadable.
+				// Each hook walks 1.1.0 then 1.0.0 and stops at the first loadable.
 				want := []string{published[0].Source, published[1].Source, published[0].Source, published[1].Source}
 				if strings.Join(releases.inspected, " ") != strings.Join(want, " ") {
 					t.Fatalf("inspected %v, want %v", releases.inspected, want)
@@ -382,18 +382,18 @@ func TestReviewedIntegrationUpdatesOfferNothingWhenNoNewerReleaseCanLoad(t *test
 			updates, releases, entry, published := walkFixture()
 			releases.inspectErr[published[0].Source] = &plugin.ContributionError{Code: plugin.CodeHostFeatureUnsupported}
 			releases.incompatible[published[1].Source] = true
-			installed := reviewedInstall(entry, "0.8.0", form.source(entry))
+			installed := reviewedInstall(entry, "0.9.0", form.source(entry))
 
 			availability, ok, err := updates.availability(installed)
 			if err != nil || !ok || availability != (plugin.UpdateAvailability{
-				Name: entry.PluginID, InstalledVersion: "0.8.0", AvailableVersion: "0.8.0", ReviewedRelease: true,
+				Name: entry.PluginID, InstalledVersion: "0.9.0", AvailableVersion: "0.9.0", ReviewedRelease: true,
 			}) {
 				t.Fatalf("availability = %+v ok=%v err=%v, want a terminal nothing-available", availability, ok, err)
 			}
 			if got := updates.replacement(context.Background(), installed); got != form.nothing {
 				t.Fatalf("replacement = %+v, want %+v", got, form.nothing)
 			}
-			// The walk ends at the floor, which is not newer than 0.8.0: it is
+			// The walk ends at the floor, which is not newer than 0.9.0: it is
 			// never inspected.
 			for _, source := range releases.inspected {
 				if source == published[2].Source {
@@ -418,7 +418,7 @@ func TestReviewedIntegrationUpdatesNeverSlideOverAFailedInspection(t *testing.T)
 			t.Run(failureName+"/"+form.name, func(t *testing.T) {
 				updates, releases, entry, published := walkFixture()
 				fail(releases, published[0].Source)
-				installed := reviewedInstall(entry, "0.8.0", form.source(entry))
+				installed := reviewedInstall(entry, "0.9.0", form.source(entry))
 
 				if _, ok, err := updates.availability(installed); !ok || err == nil {
 					t.Fatalf("availability ok=%v err=%v, want a terminal error", ok, err)
@@ -447,7 +447,7 @@ func TestReviewedIntegrationUpdatesTreatAnIdentityMismatchAsAFailure(t *testing.
 		descriptor.Name = "impostor"
 		return descriptor, plugin.BuildTrustReport(descriptor), err
 	}
-	installed := reviewedInstall(entry, "0.8.0", entry.SourceRepository)
+	installed := reviewedInstall(entry, "0.9.0", entry.SourceRepository)
 	if _, ok, err := updates.availability(installed); !ok || err == nil {
 		t.Fatalf("availability ok=%v err=%v, want a terminal error", ok, err)
 	}
@@ -455,7 +455,7 @@ func TestReviewedIntegrationUpdatesTreatAnIdentityMismatchAsAFailure(t *testing.
 		t.Fatalf("replacement = %+v, want a refusal", got)
 	}
 	if len(releases.inspected) != 2 || releases.inspected[0] != published[0].Source || releases.inspected[1] != published[0].Source {
-		t.Fatalf("inspected %v, want only 1.0.0 once per hook", releases.inspected)
+		t.Fatalf("inspected %v, want only 1.1.0 once per hook", releases.inspected)
 	}
 }
 
@@ -463,7 +463,7 @@ func TestReviewedIntegrationUpdatesInspectNothingForAnUpToDateInstall(t *testing
 	for _, form := range installForms {
 		t.Run(form.name, func(t *testing.T) {
 			updates, releases, entry, _ := walkFixture()
-			installed := reviewedInstall(entry, "1.0.0", form.source(entry))
+			installed := reviewedInstall(entry, "1.1.0", form.source(entry))
 			if availability, ok, err := updates.availability(installed); err != nil || !ok || availability.Available {
 				t.Fatalf("availability = %+v ok=%v err=%v", availability, ok, err)
 			}
@@ -478,9 +478,9 @@ func TestReviewedIntegrationUpdatesInspectNothingForAnUpToDateInstall(t *testing
 }
 
 func TestReviewedIntegrationUpdatesFailClosedWithoutAnInspector(t *testing.T) {
-	updates, _, entry := reviewedUpdatesFixture("0.9.0")
+	updates, _, entry := reviewedUpdatesFixture("1.0.0")
 	updates.inspect = nil
-	installed := reviewedInstall(entry, "0.8.0", entry.SourceRepository+".git")
+	installed := reviewedInstall(entry, "0.9.0", entry.SourceRepository+".git")
 	if _, ok, err := updates.availability(installed); !ok || err == nil {
 		t.Fatalf("availability ok=%v err=%v, want a terminal error", ok, err)
 	}
@@ -495,7 +495,7 @@ func TestReviewedIntegrationUpdateCheckKeepsTheLastResultWhenAReleaseCannotBeVer
 	for _, form := range installForms {
 		t.Run(form.name, func(t *testing.T) {
 			updates, releases, entry, published := walkFixture()
-			head := &mutableHead{installed: []plugin.InstalledPlugin{reviewedInstall(entry, "0.8.0", form.source(entry))}}
+			head := &mutableHead{installed: []plugin.InstalledPlugin{reviewedInstall(entry, "0.9.0", form.source(entry))}}
 			checker := plugin.NewUpdateChecker(head)
 			checker.SetAvailabilityOverride(updates.availability)
 			runCheck := func() {
@@ -505,7 +505,7 @@ func TestReviewedIntegrationUpdateCheckKeepsTheLastResultWhenAReleaseCannotBeVer
 			}
 			runCheck()
 			first := checker.Snapshot()
-			if len(first.Updates) != 1 || first.Updates[0].AvailableVersion != "1.0.0" || !first.Updates[0].ReviewedRelease {
+			if len(first.Updates) != 1 || first.Updates[0].AvailableVersion != "1.1.0" || !first.Updates[0].ReviewedRelease {
 				t.Fatalf("first check = %+v", first)
 			}
 
@@ -522,9 +522,9 @@ func TestReviewedIntegrationUpdateCheckKeepsTheLastResultWhenAReleaseCannotBeVer
 }
 
 func TestReviewedIntegrationUpdatesRejectAResolverSourceOutsideTheRepository(t *testing.T) {
-	updates, releases, entry := reviewedUpdatesFixture("0.8.1")
+	updates, releases, entry := reviewedUpdatesFixture("0.9.1")
 	releases.resolution.Source = "https://github.com/attacker/plugin#sha=" + strings.Repeat("b", 40)
-	installed := reviewedInstall(entry, "0.7.0", entry.PinnedSource(strings.Repeat("a", 40)))
+	installed := reviewedInstall(entry, "0.8.0", entry.PinnedSource(strings.Repeat("a", 40)))
 	if availability, _, _ := updates.availability(installed); availability.Available {
 		t.Fatalf("untrusted resolver source was offered: %+v", availability)
 	}
