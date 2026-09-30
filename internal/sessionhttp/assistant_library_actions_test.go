@@ -35,6 +35,22 @@ func (p libraryTestPicker) Choose(context.Context, string) (string, bool, error)
 	return p.path, true, nil
 }
 
+// libraryCancelPicker is a chooser the user dismisses.
+type libraryCancelPicker struct{}
+
+func (libraryCancelPicker) Available() bool { return true }
+func (libraryCancelPicker) Choose(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+
+// libraryNoPicker is a host that cannot open a native chooser at all.
+type libraryNoPicker struct{}
+
+func (libraryNoPicker) Available() bool { return false }
+func (libraryNoPicker) Choose(context.Context, string) (string, bool, error) {
+	return "", false, errors.New("no dialog on this host")
+}
+
 func libraryAction(t *testing.T, handler func(http.ResponseWriter, *http.Request), homeID, rootID, body string) (int, map[string]any) {
 	t.Helper()
 	request := assistantProgramRequest(http.MethodPost, "/library/action", homeID, body)
@@ -166,6 +182,27 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 		`{"review_token":"`+initToken+`","idempotency_key":"init-http","confirm":true}`); status != http.StatusOK {
 		t.Fatalf("reviewed initialize = %d", status)
 	}
+	// Dismissing the chooser and a host with no chooser are different answers,
+	// and neither is a lost selection. Swap the picker in and back out; the rest
+	// of the flow keeps the original one.
+	pickRaw := func() (int, map[string]any) {
+		response := httptest.NewRecorder()
+		handler.PickAssistantLibraryRoot(response, assistantProgramRequest(http.MethodPost, "/library/roots/pick", station.ID, `{}`))
+		body := map[string]any{}
+		_ = json.Unmarshal(response.Body.Bytes(), &body)
+		return response.Code, body
+	}
+	handler.ConfigureAssistantLibraryRoots(libraryCancelPicker{}, pathselection.NewStore(), filejanitor.RootGuards{DataDir: t.TempDir()})
+	if status, body := pickRaw(); status != http.StatusOK || body["cancelled"] != true || body["selection_token"] != nil {
+		t.Fatalf("dismissing the chooser was not a plain cancellation: %d %+v", status, body)
+	}
+	handler.ConfigureAssistantLibraryRoots(libraryNoPicker{}, pathselection.NewStore(), filejanitor.RootGuards{DataDir: t.TempDir()})
+	if status, body := pickRaw(); status != http.StatusConflict || body["reason"] != "picker_unavailable" ||
+		!strings.Contains(strings.ToLower(body["error"].(string)), "picker") {
+		t.Fatalf("a host with no chooser did not say so: %d %+v", status, body)
+	}
+	handler.ConfigureAssistantLibraryRoots(libraryTestPicker{rootPath}, pathselection.NewStore(),
+		filejanitor.RootGuards{DataDir: t.TempDir()})
 	if status, _ := libraryAction(t, handler.PickAssistantLibraryOfferRoot, station.ID, "", `{"offer_id":"foreign-offer"}`); status != http.StatusConflict {
 		t.Fatalf("foreign offer provided root authority: %d", status)
 	}
@@ -245,6 +282,19 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 	rootID, _ := rootResult["root_id"].(string)
 	if status != http.StatusOK || rootID == "" {
 		t.Fatalf("reviewed root commit: %d %+v", status, rootResult)
+	}
+	// Before the grant the offer named no approved root; afterwards the same
+	// offer reports the root that already covers it, so the guided flow can go
+	// straight to that root's scan review instead of a refused duplicate grant.
+	if _, present := picked["existing_root_id"]; present {
+		t.Fatalf("an unapproved folder claimed an existing root: %+v", picked)
+	}
+	againStatus, again := libraryAction(t, handler.PickAssistantLibraryOfferRoot, station.ID, "", `{"offer_id":"saved-offer"}`)
+	if againStatus != http.StatusOK || again["existing_root_id"] != rootID || again["selection_token"] == "" {
+		t.Fatalf("approved folder not recognised on a second pick: %d %+v", againStatus, again)
+	}
+	if encoded, _ := json.Marshal(again); strings.Contains(string(encoded), rootPath) {
+		t.Fatalf("pick-offer leaked the folder path: %s", encoded)
 	}
 	doc, err = projectlibrary.NewStore(store).Read(scope)
 	if err != nil {

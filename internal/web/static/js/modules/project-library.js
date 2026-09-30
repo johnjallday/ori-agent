@@ -21,6 +21,59 @@ async function payload(response) {
   }
 }
 
+// What to tell the user when the folder they chose for this Home cannot be used
+// to continue, and whether choosing it again could help. `reason` is the
+// library's own answer (picker/Home/package unavailable); `continuation` is the
+// server's account of the carried collection (expired, lost after a restart, or
+// changed). Every message says the Home is ready and that nothing was connected,
+// because no committed result is ever lost by a lost selection, and none of these
+// is a reason to distrust a completed grant after an ordinary reload.
+export function selectionRecovery({ reason = '', continuation = null } = {}) {
+  switch (reason) {
+    case 'picker_unavailable':
+      return {
+        repick: false,
+        message:
+          'The native folder picker is unavailable on this computer, so a folder cannot be chosen here. Your Home is unchanged. Use Ori desktop to add a folder.'
+      };
+    case 'provider_unavailable':
+      return {
+        repick: false,
+        message:
+          "This Home's package is unavailable, so its library is read-only. Choosing a folder again will not help; re-enable or reinstall the package, then reopen this Home. Nothing was changed."
+      };
+    case 'home_unavailable':
+      return {
+        repick: false,
+        message: 'That Home could not be found, so nothing was connected. Reopen it from Home.'
+      };
+    default:
+  }
+  const kept = 'Your Home is ready and anything already connected is kept.';
+  switch (continuation?.reason) {
+    case 'expired':
+      return {
+        repick: true,
+        message: `The folder you chose was held for 30 minutes and that time has passed. ${kept} Choose the folder again to continue.`
+      };
+    case 'lost':
+      return {
+        repick: true,
+        message: `Ori was restarted, which clears a folder choice that has not been connected yet. ${kept} Choose the folder again to continue.`
+      };
+    case 'changed':
+      return {
+        repick: true,
+        message: `The folder at that location changed after you chose it (it was moved, replaced, or is gone). ${kept} Choose the folder again to continue.`
+      };
+    default:
+      return {
+        repick: true,
+        message: `Ori no longer has the folder you chose earlier. ${kept} Choose the folder again to continue.`
+      };
+  }
+}
+
 export function libraryQuery({
   text = '',
   stage = '',
@@ -220,6 +273,37 @@ export class ProjectLibraryPanel {
     const fromOffer =
       new URLSearchParams(globalThis.location?.search || '').get('folder_offer_id') || '';
     this.offerID = fromOffer.length <= 160 ? fromOffer : '';
+    // Collections chosen for this Home that the server reported, newest first.
+    this.continuations = [];
+  }
+
+  // A Home reopened without its query string (new tab, bookmark, an address
+  // that was rewritten) still knows which collection it was created from. The
+  // server names it only by an opaque offer ID and only while it can still vouch
+  // for the folder. Adopting that ID grants nothing: pick-offer, the root review
+  // and the commit each re-verify the Home, provider and folder. More than one
+  // ready collection is ambiguous, so none is chosen for the user.
+  async restoreCollectionContinuation({ force = false, adopt = true } = {}) {
+    if ((this.offerID && !force) || !this.workspaceId) return;
+    try {
+      const response = await this.fetchImpl(
+        `/api/personal-assistant/folder-digest/continuations?home_id=${encodeURIComponent(this.workspaceId)}`,
+        { headers: { Accept: 'application/json' } }
+      );
+      if (!response.ok) return;
+      const result = await payload(response);
+      this.continuations = (Array.isArray(result.continuations) ? result.continuations : []).filter(
+        item =>
+          item &&
+          typeof item.offer_id === 'string' &&
+          item.offer_id !== '' &&
+          item.offer_id.length <= 160
+      );
+      const ready = this.continuations.filter(item => item.state === 'ready');
+      if (adopt && ready.length === 1) this.offerID = ready[0].offer_id;
+    } catch (_) {
+      // Purely advisory: without it the user chooses the folder as before.
+    }
   }
 
   get panel() {
@@ -247,6 +331,7 @@ export class ProjectLibraryPanel {
           : result.error?.message || result.message || `Library request failed (${response.status})`
       );
       error.status = response.status;
+      error.reason = typeof result.reason === 'string' ? result.reason : '';
       throw error;
     }
     return result;
@@ -295,6 +380,15 @@ export class ProjectLibraryPanel {
       await work();
     } catch (error) {
       this.status(error.message || 'The library could not be updated. Nothing was confirmed.');
+      if (error.reason === 'stale_review') {
+        // The Home moved on while a review was open (even an inert review
+        // advances its revision). Re-read it so the next review uses the current
+        // one instead of conflicting again; nothing was granted.
+        await this.refresh();
+        this.status(
+          'The library changed while you were reviewing, so nothing was granted. It has been refreshed; review again.'
+        );
+      }
     } finally {
       this.busy = false;
       this.renderQueueControls();
@@ -350,6 +444,7 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibraryMoreRoots')
       ?.addEventListener('click', event => void this.moreRoots(event.currentTarget));
+    await this.restoreCollectionContinuation();
     await this.refresh();
   }
 
@@ -1511,19 +1606,39 @@ export class ProjectLibraryPanel {
       await this.addFolder(trigger, this.offerID);
   }
 
+  // The carried collection has been used: forget it and drop it from the address
+  // so a reload does not offer it again.
+  consumeOffer(offerID) {
+    this.offerID = '';
+    if (offerID && globalThis.history?.replaceState && globalThis.location?.href) {
+      const url = new URL(globalThis.location.href);
+      url.searchParams.delete('folder_offer_id');
+      globalThis.history.replaceState(globalThis.history.state, '', url);
+    }
+  }
+
   async addFolder(trigger, offerID = this.offerID) {
     await this.run(trigger, 'Preparing the folder selection…', async () => {
       let picked;
       if (offerID) {
         try {
           picked = await this.post('/roots/pick-offer', { offer_id: offerID });
-        } catch (_) {
+        } catch (error) {
+          // Ask the server why, rather than telling every failure "expired or
+          // changed". Package/Home/picker problems are not fixed by a new pick.
+          await this.restoreCollectionContinuation({ force: true, adopt: false });
+          const recovery = selectionRecovery({
+            reason: error.reason,
+            continuation: this.continuations.find(item => item.offer_id === offerID) || null
+          });
+          if (!recovery.repick) {
+            this.status(recovery.message);
+            return;
+          }
           if (
             !(await this.confirm(
               'Choose the folder again?',
-              [
-                'The original selection expired or changed. Your Home remains ready, but a new native selection is required.'
-              ],
+              [recovery.message],
               'Open folder picker',
               trigger
             ))
@@ -1532,6 +1647,20 @@ export class ProjectLibraryPanel {
         }
       }
       if (!picked) picked = await this.post('/roots/pick');
+      if (picked.cancelled) {
+        this.status('No folder was chosen. Nothing was connected or read.');
+        return;
+      }
+      if (picked.existing_root_id) {
+        // This Home already approved the folder. A second root review would end
+        // in a refused duplicate after the user confirmed it, so continue at that
+        // root's own scan review. The offer is spent: nothing else to grant.
+        this.consumeOffer(offerID);
+        await this.refresh();
+        this.status('This folder is already connected to your Home. Review a fresh scan of it.');
+        await this.scanRootFlow(picked.existing_root_id, trigger);
+        return;
+      }
       const review = await this.post('/roots/review', {
         selection_token: picked.selection_token,
         if_revision: this.state.revision
@@ -1547,19 +1676,19 @@ export class ProjectLibraryPanel {
           'Connect folder',
           trigger
         ))
-      )
+      ) {
+        // The inert review still advanced the Home document revision; without a
+        // refresh the next attempt would send a stale one and be refused.
+        await this.refresh();
+        this.status('Folder not connected. Nothing was granted or read.');
         return;
+      }
       const receipt = await this.post('/roots/commit', {
         review_token: review.token,
         idempotency_key: operationKey('root'),
         confirm: true
       });
-      this.offerID = '';
-      if (offerID && globalThis.history?.replaceState && globalThis.location?.href) {
-        const url = new URL(globalThis.location.href);
-        url.searchParams.delete('folder_offer_id');
-        globalThis.history.replaceState(globalThis.history.state, '', url);
-      }
+      this.consumeOffer(offerID);
       await this.refresh();
       if (
         await this.confirm(

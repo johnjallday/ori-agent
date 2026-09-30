@@ -6,7 +6,8 @@ import {
   libraryQuery,
   libraryRunText,
   proposalSourceLabel,
-  readActivationQueue
+  readActivationQueue,
+  selectionRecovery
 } from './project-library.js';
 
 test('Show project folder requires a fresh connected Home link and never sends a path or starts a DAW', async () => {
@@ -1289,8 +1290,44 @@ test('declining the first review leaves neither a root nor a scan', async () => 
     };
   };
   panel.confirm = async () => false;
+  // The inert review advanced the Home revision, so declining must re-read it.
+  panel.refresh = async () => {
+    calls.push('refresh');
+    panel.state = { revision: 2 };
+  };
+  const messages = [];
+  panel.status = message => messages.push(message);
   await panel.addFolder(null);
-  assert.deepEqual(calls, ['/roots/pick', '/roots/review']);
+  assert.match(messages.at(-1), /not connected\. Nothing was granted or read/);
+  assert.deepEqual(calls, ['/roots/pick', '/roots/review', 'refresh']);
+  assert.equal(panel.state.revision, 2, 'the next attempt starts from the advanced revision');
+});
+
+test('a folder this Home already approved goes to its scan review, never a duplicate root grant', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: { is_station: true } });
+  panel.state = { revision: 3 };
+  panel.offerID = 'resolved-offer';
+  panel.run = async (_, __, fn) => fn();
+  const calls = [];
+  panel.post = async (path, body) => {
+    calls.push([path, body]);
+    if (path === '/roots/pick-offer')
+      return { selection_token: 'scoped-token', existing_root_id: 'root-1' };
+    throw new Error(`unexpected ${path}: an approved folder must not be granted again`);
+  };
+  panel.refresh = async () => {
+    calls.push(['refresh']);
+    panel.state = { revision: 3, initialized: true };
+  };
+  panel.status = () => {};
+  panel.scanRootFlow = async (rootID, trigger) => calls.push(['scan', rootID, trigger]);
+  await panel.addFolder('the-button');
+  assert.deepEqual(
+    calls.map(([path]) => path),
+    ['/roots/pick-offer', 'refresh', 'scan']
+  );
+  assert.deepEqual(calls.at(-1), ['scan', 'root-1', 'the-button']);
+  assert.equal(panel.offerID, '', 'the spent offer is not carried into the next add');
 });
 
 test('root paging never merges a page from a different library revision', async () => {
@@ -1733,6 +1770,288 @@ test('scan digest renders as inert text and shows the shelf even with no suggest
     assert.equal(elements.get('projectLibraryProposals').hidden, false);
     assert.equal(line.hidden, true);
     assert.equal(elements.get('projectLibraryProposalRows').children.length, 1);
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+function continuationPanel(response, { search = '' } = {}) {
+  const requests = [];
+  const originalLocation = globalThis.location;
+  globalThis.location = { search };
+  const panel = new ProjectLibraryPanel({
+    workspaceId: 'home 1',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (response instanceof Error) throw response;
+      return response;
+    }
+  });
+  return { panel, requests, restore: () => (globalThis.location = originalLocation) };
+}
+
+const ok = body => ({ ok: true, json: async () => body });
+
+test('a Home reopened without its address restores the one ready collection, sending no path', async () => {
+  const { panel, requests, restore } = continuationPanel(
+    ok({
+      continuations: [
+        { offer_id: 'offer-new', folder: 'Albums', state: 'ready' },
+        { offer_id: 'offer-old', folder: 'Older', state: 'needs_pick', reason: 'expired' }
+      ]
+    })
+  );
+  try {
+    await panel.restoreCollectionContinuation();
+    assert.equal(panel.offerID, 'offer-new');
+    assert.equal(panel.continuations.length, 2, 'the explanation for the other one is kept');
+    assert.deepEqual(requests, [
+      {
+        url: '/api/personal-assistant/folder-digest/continuations?home_id=home%201',
+        options: { headers: { Accept: 'application/json' } }
+      }
+    ]);
+    assert.equal(requests[0].options.method, undefined, 'a read, never a POST');
+    assert.equal(requests[0].options.body, undefined);
+  } finally {
+    restore();
+  }
+});
+
+test('an address that already names the collection wins and asks the server nothing', async () => {
+  const { panel, requests, restore } = continuationPanel(ok({ continuations: [] }), {
+    search: '?folder_offer_id=from-address'
+  });
+  try {
+    await panel.restoreCollectionContinuation();
+    assert.equal(panel.offerID, 'from-address');
+    assert.deepEqual(requests, []);
+  } finally {
+    restore();
+  }
+});
+
+test('two ready collections are ambiguous, so none is chosen for the user', async () => {
+  const { panel, restore } = continuationPanel(
+    ok({
+      continuations: [
+        { offer_id: 'a', folder: 'Albums', state: 'ready' },
+        { offer_id: 'b', folder: 'Sketches', state: 'ready' }
+      ]
+    })
+  );
+  try {
+    await panel.restoreCollectionContinuation();
+    assert.equal(panel.offerID, '');
+    assert.equal(panel.continuations.length, 2);
+  } finally {
+    restore();
+  }
+});
+
+test('a collection that needs a new pick is remembered but never adopted as usable', async () => {
+  const { panel, restore } = continuationPanel(
+    ok({
+      continuations: [{ offer_id: 'gone', folder: 'Albums', state: 'needs_pick', reason: 'lost' }]
+    })
+  );
+  try {
+    await panel.restoreCollectionContinuation();
+    assert.equal(panel.offerID, '');
+    assert.deepEqual(panel.continuations, [
+      { offer_id: 'gone', folder: 'Albums', state: 'needs_pick', reason: 'lost' }
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test('an unavailable or malformed continuation answer leaves the library exactly as before', async () => {
+  for (const response of [
+    { ok: false, json: async () => ({ error: 'no' }) },
+    ok({}),
+    ok({ continuations: 'nope' }),
+    ok({
+      continuations: [
+        null,
+        { state: 'ready' },
+        { offer_id: '', state: 'ready' },
+        { offer_id: 'x'.repeat(161), state: 'ready' },
+        { offer_id: 42, state: 'ready' }
+      ]
+    }),
+    new Error('offline')
+  ]) {
+    const { panel, restore } = continuationPanel(response);
+    try {
+      await panel.restoreCollectionContinuation();
+      assert.equal(panel.offerID, '');
+      assert.deepEqual(panel.continuations, []);
+    } finally {
+      restore();
+    }
+  }
+});
+
+test('each way a folder choice can be unusable gets its own honest message', () => {
+  const kept = /Your Home is ready and anything already connected is kept/;
+  const expired = selectionRecovery({ continuation: { reason: 'expired' } });
+  assert.equal(expired.repick, true);
+  assert.match(expired.message, /30 minutes/);
+  assert.match(expired.message, kept);
+
+  const lost = selectionRecovery({ continuation: { reason: 'lost' } });
+  assert.match(lost.message, /restarted/);
+  assert.doesNotMatch(lost.message, /30 minutes|moved, replaced/);
+
+  const changed = selectionRecovery({ continuation: { reason: 'changed' } });
+  assert.match(changed.message, /changed after you chose it/);
+  assert.doesNotMatch(changed.message, /restarted|30 minutes/);
+
+  const unknown = selectionRecovery({});
+  assert.equal(unknown.repick, true);
+  assert.match(unknown.message, /no longer has the folder you chose/);
+  assert.equal(new Set([expired, lost, changed, unknown].map(item => item.message)).size, 4);
+  for (const item of [expired, lost, changed, unknown]) {
+    assert.match(item.message, /Choose the folder again/);
+    assert.doesNotMatch(item.message, /\/(Users|home|var)\//, 'no path is ever shown');
+  }
+});
+
+test('problems a new pick cannot fix never offer one', () => {
+  for (const [reason, pattern] of [
+    ['picker_unavailable', /native folder picker is unavailable/],
+    ['provider_unavailable', /package is unavailable/],
+    ['home_unavailable', /Home could not be found/]
+  ]) {
+    const recovery = selectionRecovery({ reason, continuation: { reason: 'expired' } });
+    assert.equal(recovery.repick, false, reason);
+    assert.match(recovery.message, pattern);
+    assert.doesNotMatch(recovery.message, /Choose the folder again to continue/);
+  }
+  // A library reason wins over a stale continuation: re-picking would not help.
+  assert.equal(
+    selectionRecovery({ reason: 'provider_unavailable', continuation: { reason: 'lost' } }).repick,
+    false
+  );
+});
+
+function addFolderPanel({ pickOffer, continuations = [], confirmAnswer = true }) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: { is_station: true } });
+  panel.state = { revision: 1 };
+  panel.offerID = 'the-offer';
+  panel.run = async (_, __, fn) => fn();
+  const log = { calls: [], statuses: [], confirms: [] };
+  panel.status = message => log.statuses.push(message);
+  panel.confirm = async (title, lines) => {
+    log.confirms.push({ title, lines });
+    return confirmAnswer;
+  };
+  panel.refresh = async () => log.calls.push('refresh');
+  panel.fetchImpl = async () => ({ ok: true, json: async () => ({ continuations }) });
+  panel.post = async (path, body) => {
+    log.calls.push(path);
+    if (path === '/roots/pick-offer') return pickOffer(body);
+    if (path === '/roots/pick') return { selection_token: 'fresh' };
+    if (path === '/roots/review')
+      return { token: 'review', root_path: '/trusted', scope: 'metadata' };
+    return { root_id: 'root' };
+  };
+  return { panel, log };
+}
+
+const failure = (status, reason = '') => Object.assign(new Error('nope'), { status, reason });
+
+test('a lost offer asks the server why and only then offers one new pick', async () => {
+  for (const [why, pattern] of [
+    ['expired', /30 minutes/],
+    ['lost', /restarted/],
+    ['changed', /changed after you chose it/]
+  ]) {
+    const { panel, log } = addFolderPanel({
+      pickOffer: () => {
+        throw failure(409);
+      },
+      continuations: [
+        { offer_id: 'the-offer', folder: 'Albums', state: 'needs_pick', reason: why }
+      ],
+      confirmAnswer: false
+    });
+    await panel.addFolder(null);
+    assert.equal(log.confirms.length, 1, why);
+    assert.match(log.confirms[0].lines[0], pattern, why);
+    assert.deepEqual(log.calls, ['/roots/pick-offer'], `${why}: declining opens no picker`);
+    assert.equal(panel.offerID, 'the-offer', 'the offer is kept for a later retry');
+  }
+});
+
+test('accepting the recovery opens exactly one fresh pick and keeps the Home', async () => {
+  const { panel, log } = addFolderPanel({
+    pickOffer: () => {
+      throw failure(409);
+    },
+    continuations: [{ offer_id: 'the-offer', state: 'needs_pick', reason: 'lost' }],
+    confirmAnswer: true
+  });
+  panel.confirm = async title => {
+    log.confirms.push({ title });
+    return title === 'Choose the folder again?';
+  };
+  await panel.addFolder(null);
+  assert.deepEqual(log.calls.slice(0, 3), ['/roots/pick-offer', '/roots/pick', '/roots/review']);
+  assert.equal(log.calls.filter(path => path === '/roots/pick').length, 1);
+});
+
+test('package, Home, or picker problems explain themselves and never open a picker', async () => {
+  for (const reason of ['provider_unavailable', 'home_unavailable', 'picker_unavailable']) {
+    const { panel, log } = addFolderPanel({
+      pickOffer: () => {
+        throw failure(409, reason);
+      }
+    });
+    await panel.addFolder(null);
+    assert.deepEqual(log.confirms, [], `${reason}: no "choose again" prompt`);
+    assert.deepEqual(log.calls, ['/roots/pick-offer'], `${reason}: no picker`);
+    assert.equal(log.statuses.length, 1, reason);
+  }
+});
+
+test('dismissing the native chooser is a quiet cancellation that reads and grants nothing', async () => {
+  const { panel, log } = addFolderPanel({ pickOffer: () => ({}) });
+  panel.offerID = '';
+  panel.post = async path => {
+    log.calls.push(path);
+    return { cancelled: true };
+  };
+  await panel.addFolder(null);
+  assert.deepEqual(log.calls, ['/roots/pick']);
+  assert.match(log.statuses.at(-1), /No folder was chosen\. Nothing was connected or read/);
+  assert.deepEqual(log.confirms, []);
+});
+
+test('a stale review re-reads the library so the next attempt is not refused again', async () => {
+  // run() touches the panel element; give it a page with nothing on it.
+  const original = globalThis.document;
+  globalThis.document = { getElementById: () => null };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const log = { calls: [], statuses: [] };
+    panel.status = message => log.statuses.push(message);
+    panel.refresh = async () => log.calls.push('refresh');
+    await panel.run(null, 'Working…', async () => {
+      throw failure(409, 'stale_review');
+    });
+    assert.deepEqual(log.calls, ['refresh']);
+    assert.match(log.statuses.at(-1), /changed while you were reviewing, so nothing was granted/);
+
+    const other = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const otherCalls = [];
+    other.status = () => {};
+    other.refresh = async () => otherCalls.push('refresh');
+    await other.run(null, 'Working…', async () => {
+      throw failure(500, '');
+    });
+    assert.deepEqual(otherCalls, [], 'only a stale review refreshes');
   } finally {
     globalThis.document = original;
   }

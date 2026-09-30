@@ -106,11 +106,11 @@ func (r *Roots) writable(scope Scope) (Document, error) {
 	}
 	home, err := r.library.workspaces.Get(scope.HomeID)
 	if err != nil {
-		return Document{}, ErrUnavailable
+		return Document{}, unavailable(ReasonHomeUnavailable)
 	}
 	state, err := r.library.home(scope, home)
 	if err != nil || !state.PluginAvailable || !r.library.providerWritable(scope, home) {
-		return Document{}, ErrUnavailable
+		return Document{}, unavailable(ReasonProviderUnavailable)
 	}
 	return doc, nil
 }
@@ -122,15 +122,15 @@ func (r *Roots) Pick(ctx context.Context, scope Scope) (string, error) {
 		return "", err
 	}
 	if r.picker == nil || !r.picker.Available() || r.selections == nil {
-		return "", ErrUnavailable
+		return "", unavailable(ReasonPickerUnavailable)
 	}
 	path, chosen, err := r.picker.Choose(ctx, "Choose one project folder to catalog")
 	if err != nil {
 		logger.Warn("Project library folder chooser failed", logger.Fields{"home_id": scope.HomeID, "error": err.Error()})
-		return "", ErrUnavailable
+		return "", unavailable(ReasonPickerUnavailable)
 	}
 	if !chosen {
-		return "", ErrUnavailable
+		return "", ErrPickCanceled
 	}
 	// A native chooser may end a folder path with a separator. Cleaning only
 	// normalizes the spelling of the user's exact selection; symlinks are
@@ -187,6 +187,52 @@ func (r *Roots) PickFromPortfolio(ctx context.Context, scope Scope, offerID stri
 	return r.selections.IssueFor(path, selectionScope(scope))
 }
 
+// ApprovedRootFor reports the ID of the active root that already covers the
+// folder a scoped picker token names, using exactly the rule Commit refuses a
+// duplicate by (same path or same directory identity, not revoked, not
+// inactive). It lets a guided flow offer that root's scan review up front rather
+// than walking the user through a root review whose commit is certain to be
+// refused. It is a pure read: it grants nothing, and it reveals only a root ID
+// for a folder the caller already holds a token for.
+func (r *Roots) ApprovedRootFor(scope Scope, pickToken string) (string, bool) {
+	if r == nil || r.selections == nil || pickToken == "" {
+		return "", false
+	}
+	gate := rootAccessGate(scope)
+	gate.RLock()
+	defer gate.RUnlock()
+	doc, err := r.writable(scope)
+	if err != nil {
+		return "", false
+	}
+	path, err := r.selections.ResolveFor(pickToken, selectionScope(scope))
+	if err != nil {
+		return "", false
+	}
+	path, identity, err := r.pickedRoot(path)
+	if err != nil {
+		return "", false
+	}
+	home, err := r.library.workspaces.Get(scope.HomeID)
+	if err != nil {
+		return "", false
+	}
+	state, err := r.library.home(scope, home)
+	if err != nil {
+		return "", false
+	}
+	inactive := map[string]bool{}
+	for _, id := range state.ProjectLibraryInactiveRoots {
+		inactive[id] = true
+	}
+	for _, root := range doc.Roots {
+		if root.RevokedAt == nil && !inactive[root.ID] && (root.Path == path || root.FileIdentity == identity) {
+			return root.ID, true
+		}
+	}
+	return "", false
+}
+
 func rootDigest(scope Scope, action, path, identity string, revision int64) string {
 	input := []string{selectionScope(scope), action, path, identity, stringInt(revision)}
 	h := sha256.New()
@@ -202,11 +248,11 @@ func stringInt(value int64) string { return strconv.FormatInt(value, 10) }
 func (r *Roots) currentProviderRevision(scope Scope) (int64, error) {
 	home, err := r.library.workspaces.Get(scope.HomeID)
 	if err != nil {
-		return 0, ErrUnavailable
+		return 0, unavailable(ReasonHomeUnavailable)
 	}
 	state, err := r.library.home(scope, home)
 	if err != nil || !state.PluginAvailable || !r.library.providerWritable(scope, home) {
-		return 0, ErrUnavailable
+		return 0, unavailable(ReasonProviderUnavailable)
 	}
 	return state.StateRevision, nil
 }

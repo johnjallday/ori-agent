@@ -1318,6 +1318,76 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     );
     expect(createHash('sha256').update(readFileSync(alternate)).digest('hex')).toBe(alternateHash);
   }
+
+  // music-setup-onboarding, group 1. A Home reopened WITHOUT its original
+  // address (a new tab, a bookmark) still knows which collection it was created
+  // from, and a folder this Home already approved goes to its scan review rather
+  // than a second folder pick or a refused duplicate grant. Evidence label: this
+  // offer came from the documents chip, so it is fake/chip-chooser evidence, NOT
+  // the native macOS dialog.
+  const continuations = await json(
+    await request.get(
+      `/api/personal-assistant/folder-digest/continuations?home_id=${encodeURIComponent(homeID)}`
+    )
+  );
+  expect(continuations.continuations).toMatchObject([{ offer_id: offerID, state: 'ready' }]);
+  expect(JSON.stringify(continuations)).not.toContain(documents);
+  const homeRoute = new URL(page.url()).pathname;
+  const reopenBare = async () => {
+    const bare = await page.context().newPage();
+    const libraryPosts: string[] = [];
+    bare.on('request', apiRequest => {
+      const pathname = new URL(apiRequest.url()).pathname;
+      if (apiRequest.method() === 'POST' && pathname.startsWith(`${base}/roots/`)) {
+        libraryPosts.push(pathname.slice(base.length));
+      }
+    });
+    await bare.goto(homeRoute);
+    expect(new URL(bare.url()).search).toBe('');
+    await expect(bare.locator('#projectLibraryPanel')).toBeVisible();
+    return { bare, shelf: bare.locator('#projectLibraryPanel'), libraryPosts };
+  };
+  const activeRoots = async () => (await json(await request.get(`${base}/roots`))).total_roots;
+
+  // 1. This spec revoked the root earlier, so the restored collection needs a
+  //    fresh, separately confirmed grant: reviewed from the server's own record,
+  //    with no second native pick.
+  const rootsBeforeRegrant = await activeRoots();
+  const first = await reopenBare();
+  await first.shelf.locator('#projectLibraryAdd').click();
+  const regrant = first.bare.getByRole('dialog', { name: 'Connect this discovery folder?' });
+  await expect(regrant).toBeVisible();
+  await expect(regrant).toContainText(documents);
+  expect(await activeRoots()).toBe(rootsBeforeRegrant); // reviewing grants nothing
+  await shot(first.bare, '38-bare-home-reopen-regrant-review');
+  await regrant.getByRole('button', { name: 'Connect folder' }).click();
+  const laterScan = first.bare.getByRole('dialog', { name: 'Scan the folder now?' });
+  await expect(laterScan).toBeVisible();
+  await first.bare.keyboard.press('Escape'); // decline the scan; the grant is kept
+  expect(first.libraryPosts).toEqual(['/roots/pick-offer', '/roots/review', '/roots/commit']);
+  expect(await activeRoots()).toBe(rootsBeforeRegrant + 1);
+  await first.bare.close();
+
+  // 2. Now the folder is approved. A Home reopened bare finds the same collection
+  //    and goes straight to that root's scan review: never a fresh native pick, a
+  //    second root review, or a duplicate grant that would be refused.
+  const second = await reopenBare();
+  await second.shelf.locator('#projectLibraryAdd').click();
+  const rescan = second.bare.getByRole('dialog', { name: 'Scan this discovery folder once?' });
+  await expect(rescan).toBeVisible();
+  await expect(rescan).toContainText(documents);
+  await expect(second.shelf.locator('#projectLibraryStatus')).toContainText('already connected');
+  await shot(second.bare, '39-bare-home-reopen-already-connected');
+  await second.bare.keyboard.press('Escape');
+  await expect(rescan).toBeHidden();
+  await expect(second.shelf.locator('#projectLibraryStatus')).toContainText('Scan canceled');
+  expect(second.libraryPosts).toEqual([
+    '/roots/pick-offer',
+    expect.stringMatching(/^\/roots\/[^/]+\/scans\/review$/)
+  ]);
+  expect(await activeRoots()).toBe(rootsBeforeRegrant + 1);
+  await second.bare.close();
+
   expect(songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))).toEqual(
     before
   );

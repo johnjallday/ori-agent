@@ -119,6 +119,11 @@ type FolderPortfolioEvidence struct {
 	Shape       string `json:"shape"`
 	Projects    int    `json:"projects"`
 	ProviderKey string `json:"provider_key"`
+	// ExistingHome marks a collection offered to a Home that already exists:
+	// the answer adds this collection to that Home's library instead of creating
+	// another Home. It records only that the Home existed at scan time; the Home
+	// itself is re-read from canonical state when the offer is resolved.
+	ExistingHome bool `json:"existing_home,omitempty"`
 }
 
 // FolderOffer is one question about one folder and its answer.

@@ -29,6 +29,8 @@ type FolderDigestService interface {
 	ResolvePortfolio(ctx context.Context, userID, offerID string, input personalassistant.FolderResolveInput) (personalassistant.FolderOfferView, error)
 	PortfolioProvider(ctx context.Context, userID, offerID string) (string, error)
 	ProjectSelectionPath(ctx context.Context, userID, offerID string) (string, error)
+	PortfolioContinuations(ctx context.Context, userID, homeID string) ([]personalassistant.FolderContinuation, error)
+	ResolveExistingHome(ctx context.Context, userID, offerID, requestID string) (personalassistant.FolderOfferView, error)
 }
 
 // FolderProjectSelectionIssuer mints the existing project-connection picker's
@@ -304,6 +306,80 @@ func (h *Handler) FolderProjectSelection(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	orihttp.Success(w, map[string]any{"selection_token": token, "folder": filepath.Base(path)})
+}
+
+// GetFolderContinuations answers "which collection did I choose for this Home?"
+// on a Home reopened without its original query string. It is a pure read that
+// accepts one Home ID and nothing else, returns opaque offer IDs and folder
+// names (never a path), and grants no scan, creator, or staffing permission.
+func (h *Handler) GetFolderContinuations(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	query := r.URL.Query()
+	for key := range query {
+		if key != "home_id" {
+			orihttp.BadRequest(w, "Only a Home id is accepted")
+			return
+		}
+	}
+	homeID := strings.TrimSpace(query.Get("home_id"))
+	if homeID == "" || len(homeID) > 128 {
+		orihttp.BadRequest(w, "A Home id is required")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	continuations, err := h.folderDigest.PortfolioContinuations(r.Context(), userID, homeID)
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"continuations": continuations})
+}
+
+// ResolveFolderExistingHome records the owner's existing Home as the outcome of
+// a confirmed "add this collection to my Home" offer. The body carries only a
+// request id: the Home is re-read on the server, never named by the browser.
+func (h *Handler) ResolveFolderExistingHome(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	offerID := strings.TrimSpace(r.PathValue("offerID"))
+	if offerID == "" {
+		orihttp.BadRequest(w, "Offer id is required")
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if !decodeFolderDigestBody(w, r, &req, "request_id") {
+		return
+	}
+	if strings.TrimSpace(req.RequestID) == "" {
+		orihttp.BadRequest(w, "A request id is required")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	offer, err := h.folderDigest.ResolveExistingHome(r.Context(), userID, offerID, req.RequestID)
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"offer": offer})
 }
 
 type folderHomeProviderRequest struct {

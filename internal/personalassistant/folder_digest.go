@@ -274,6 +274,10 @@ type FolderDigestDeps struct {
 	// HomeExists is an owner-scoped canonical station read. Unknown/unreadable
 	// state fails closed rather than promising a duplicate Home.
 	HomeExists func(ctx context.Context, userID, providerKey string) (exists bool, err error)
+	// ExistingHome returns the owner's existing Home for a reviewed provider
+	// (workspace ID and route) from canonical state. Nil or an error means the
+	// collection falls back to the plain folder suggestion, never a guess.
+	ExistingHome func(ctx context.Context, userID, providerKey string) (FolderCreateResult, error)
 	// LegacyDeclined reads the pre-folder app-card answer once per domain.
 	LegacyDeclined func(ctx context.Context, userID, domain string) (bool, error)
 	// BlueprintAvailable reports whether a blueprint id is installed, so the
@@ -785,7 +789,8 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	}
 	offer := buildFolderOffer(verdict, result, chip, now, s.deps.NewID())
 	// A whole collection is one Home question, not the first of seven
-	// per-project questions. An existing or unreadable Home suppresses it.
+	// per-project questions. An unreadable Home suppresses it. An existing Home
+	// turns it into "add this collection to your Home", never a second Home.
 	if pickedFile == "" && verdict.Portfolio != nil {
 		row, found := folderdigest.CapabilityForShape(verdict.Portfolio.Shape)
 		if found && row.Offer != nil && row.Offer.HomeProviderKey != "" && s.deps.HomeExists != nil {
@@ -793,9 +798,14 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 			if homeErr == nil {
 				offer = buildPortfolioOffer(offer, verdict, row.Offer.HomeProviderKey)
 				if exists {
-					// Home already serves this shape: leave one plain folder
-					// suggestion, never a Home or per-project capability offer.
-					offer.Portfolio = nil
+					// The Home can be re-read canonically: offer to add to it. If it
+					// cannot, leave one plain folder suggestion, never a Home or
+					// per-project capability offer.
+					if s.existingHomeReadable(ctx, userID, row.Offer.HomeProviderKey) {
+						offer.Portfolio.ExistingHome = true
+					} else {
+						offer.Portfolio = nil
+					}
 				}
 			}
 		}
@@ -1312,7 +1322,10 @@ func (s *FolderDigestService) ResolvePortfolio(ctx context.Context, userID, offe
 		}
 		return s.view(ctx, *offer, binding.Paused), nil
 	}
-	if offer.Status != FolderOfferAwaitingOutcome || offer.Portfolio == nil || offer.CapabilitySuppressed || offer.DecidedAt == nil {
+	// An add-to-my-Home offer resolves only through ResolveExistingHome, which
+	// re-reads the Home itself; a browser-supplied Home ID never applies to it.
+	if offer.Status != FolderOfferAwaitingOutcome || offer.Portfolio == nil || offer.Portfolio.ExistingHome ||
+		offer.CapabilitySuppressed || offer.DecidedAt == nil {
 		return FolderOfferView{}, ErrFolderOfferDecided
 	}
 	verified, err := s.deps.HomeJourney.VerifiedHome(ctx, userID, input.HomeID, offer.Portfolio.ProviderKey, *offer.DecidedAt)
@@ -1341,6 +1354,72 @@ func (s *FolderDigestService) ResolvePortfolio(ctx context.Context, userID, offe
 	return s.view(ctx, resolved, binding.Paused), nil
 }
 
+// existingHomeReadable reports whether the owner's existing Home can be read
+// from canonical state right now. It decides only whether to offer "add to your
+// Home"; ResolveExistingHome re-reads the Home when the user confirms.
+func (s *FolderDigestService) existingHomeReadable(ctx context.Context, userID, providerKey string) bool {
+	if s.deps.ExistingHome == nil {
+		return false
+	}
+	home, err := s.deps.ExistingHome(ctx, userID, providerKey)
+	return err == nil && home.WorkspaceID != "" && strings.HasPrefix(home.Route, "/workspaces/")
+}
+
+// ResolveExistingHome records the owner's already-existing Home as the outcome
+// of a confirmed "add this collection to my Home" offer. The browser supplies no
+// Home ID: the Home is re-read from canonical state, so a guessed or foreign ID
+// has nothing to attach to. Like ResolvePortfolio it grants no root, scan, or
+// project link; the library's own reviews still own those.
+func (s *FolderDigestService) ResolveExistingHome(ctx context.Context, userID, offerID, requestID string) (FolderOfferView, error) {
+	if s == nil || s.store == nil || s.deps.ExistingHome == nil || strings.TrimSpace(requestID) == "" || len(requestID) > folderRequestIDMax {
+		return FolderOfferView{}, ErrFolderOutcomeUnavailable
+	}
+	binding, err := s.store.Binding(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	offer := doc.Offer(offerID)
+	if offer == nil {
+		return FolderOfferView{}, ErrFolderOfferNotFound
+	}
+	if receipt := doc.Receipt(requestID); receipt != nil {
+		if receipt.OfferID != offerID || receipt.Action != "existing_home" {
+			return FolderOfferView{}, ErrFolderOfferDecided
+		}
+		return s.view(ctx, *offer, binding.Paused), nil
+	}
+	if offer.Status != FolderOfferAwaitingOutcome || offer.Portfolio == nil || !offer.Portfolio.ExistingHome ||
+		offer.CapabilitySuppressed || offer.DecidedAt == nil {
+		return FolderOfferView{}, ErrFolderOfferDecided
+	}
+	home, err := s.deps.ExistingHome(ctx, userID, offer.Portfolio.ProviderKey)
+	if err != nil || home.WorkspaceID == "" || !strings.HasPrefix(home.Route, "/workspaces/") {
+		return FolderOfferView{}, ErrFolderWorkspaceRefused
+	}
+	now := s.now()
+	var resolved FolderOffer
+	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
+		item := d.Offer(offerID)
+		if item == nil || item.Status != FolderOfferAwaitingOutcome || item.Portfolio == nil || !item.Portfolio.ExistingHome || item.CapabilitySuppressed {
+			return ErrFolderOfferDecided
+		}
+		item.Status, item.ResolvedAt = FolderOfferResolved, &now
+		item.Outcome = &FolderOutcome{Kind: FolderChoiceHome, WorkspaceID: home.WorkspaceID, Route: home.Route, Existing: true}
+		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: requestID, OfferID: offerID, Action: "existing_home", At: now})
+		pruneFolderDigest(d)
+		resolved = *item
+		return nil
+	})
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	return s.view(ctx, resolved, binding.Paused), nil
+}
+
 const portfolioRootHandoffTTL = 30 * time.Minute
 
 // PortfolioRoot permits a fresh, separate library-root review after a
@@ -1364,23 +1443,34 @@ func (s *FolderDigestService) PortfolioRoot(ctx context.Context, userID, offerID
 		offer.Outcome.WorkspaceID != homeID || !offer.Subject.IsRoot {
 		return "", "", ErrFolderWorkspaceRefused
 	}
+	canonical, identity, loss := s.portfolioSource(*offer)
+	if loss != "" {
+		return "", "", ErrFolderPathLost
+	}
+	return canonical, identity, nil
+}
+
+// portfolioSource decides whether a resolved collection offer's server-held
+// folder is still the one the user chose, and if not, why. PortfolioRoot and the
+// read-only continuation projection share it so they cannot disagree.
+func (s *FolderDigestService) portfolioSource(offer FolderOffer) (root, identity string, loss FolderContinuationReason) {
 	if offer.ResolvedAt == nil || s.now().Before(*offer.ResolvedAt) ||
 		s.now().Sub(*offer.ResolvedAt) > portfolioRootHandoffTTL {
-		return "", "", ErrFolderPathLost
+		return "", "", FolderContinuationExpired
 	}
-	root, ok := s.rootPath(*offer)
+	held, ok := s.rootPath(offer)
 	if !ok {
-		return "", "", ErrFolderPathLost
+		return "", "", FolderContinuationLost
 	}
-	canonical, err := s.deps.ValidateRoot(root)
-	if err != nil || canonical != root || FolderKey(canonical) != offer.FolderKey || offer.RootIdentity == "" {
-		return "", "", ErrFolderPathLost
+	canonical, err := s.deps.ValidateRoot(held)
+	if err != nil || canonical != held || FolderKey(canonical) != offer.FolderKey || offer.RootIdentity == "" {
+		return "", "", FolderContinuationChanged
 	}
-	identity, err := portfolioDirectoryIdentity(canonical)
+	identity, err = portfolioDirectoryIdentity(canonical)
 	if err != nil || identity != offer.RootIdentity {
-		return "", "", ErrFolderPathLost
+		return "", "", FolderContinuationChanged
 	}
-	return canonical, offer.RootIdentity, nil
+	return canonical, offer.RootIdentity, ""
 }
 
 func portfolioDirectoryIdentity(path string) (string, error) {
@@ -1740,6 +1830,13 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 				Evidence: offer.Reason, Question: "Set up one Music Production Home for these projects?",
 				AcceptLabel: "Yes, set up Music Production Home", DeclineLabel: row.Offer.OfferCopy.DeclineLabel,
 				SetupSource: "portfolio", SetupQuestID: "home_" + row.Offer.HomeProviderKey,
+			}
+			if offer.Portfolio.ExistingHome {
+				// You already have this Home: the question is about the library, not
+				// about creating or installing anything.
+				v.Capability.Integration = "Nothing is installed or created. You will review connecting this folder to your Home's library next; no scan or project connection starts automatically."
+				v.Capability.Question = "Add this collection to your Music Production Home?"
+				v.Capability.AcceptLabel = "Yes, add to my Home"
 			}
 		}
 	} else if offer.CapabilitySuppressed {

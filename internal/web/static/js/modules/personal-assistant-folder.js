@@ -441,7 +441,9 @@ export function folderOutcomeNote(offer) {
       return `I will not ask about ${subject} again.`;
     case 'resolved':
       if (offer?.outcome?.kind === 'home') {
-        return 'Music Production Home is ready. Your project folders were not moved or linked.';
+        return offer.outcome.existing
+          ? 'Your Music Production Home has this collection waiting in its library. Nothing was moved, linked, or scanned.'
+          : 'Music Production Home is ready. Your project folders were not moved or linked.';
       }
       if (offer?.outcome?.kind === 'tidy') {
         return (
@@ -813,6 +815,10 @@ async function startCapabilityJourney() {
         return;
       }
     }
+    if (state.offer.portfolio?.existing_home) {
+      await startExistingHomeCollection(state.offer);
+      return;
+    }
     if (state.offer.portfolio) {
       await startPortfolioSetup(state.offer);
       return;
@@ -849,6 +855,24 @@ export function portfolioProviderAction(provider = {}) {
   return provider.installed
     ? 'enable the installed provider'
     : 'install and enable the reviewed provider';
+}
+
+// The owner already has this Home, so nothing is installed or created. The
+// server re-reads that Home itself (the browser names none) and records it as the
+// outcome; landing in its library is navigation, and the library asks for its own
+// initialize, root, and scan reviews before anything is granted or scanned.
+async function startExistingHomeCollection(offer) {
+  const result = await postOffer(offer.id, 'existing-home', {});
+  if (!result.ok) {
+    if (result.payload?.needs_pick) showOfferFailure(result.payload);
+    else
+      showError(
+        'Your Music Production Home could not be read right now, so nothing was added. Open the Home and use Add folder there.'
+      );
+    return;
+  }
+  render();
+  continuePortfolioToLibrary(result.payload?.offer);
 }
 
 async function startPortfolioSetup(offer) {
@@ -919,7 +943,10 @@ async function startPortfolioSetup(offer) {
           'The Home was built, but its folder offer is still open. Continue setup to reconcile it.'
         );
       render();
-      continuePortfolioToLibrary(result.payload?.offer);
+      // Returned, not navigated: the creator still staffs and navigates after
+      // this callback and would overwrite a navigation started here. It honours
+      // the URL only when nothing needs its own landing notice.
+      return portfolioLibraryURL(result.payload?.offer) || undefined;
     }
   });
   const context = manager.workspaceCreatorContext;
@@ -940,16 +967,13 @@ export function portfolioLibraryURL(offer) {
   return `${route.replace(/\/$/, '')}/assistant?folder_offer_id=${encodeURIComponent(offer.id)}#projectLibraryPanel`;
 }
 
+// Landing in the Home's library is not a consequence: the library opens on the
+// carried collection and still asks for its own initialize, root, and scan
+// reviews, so a separate "continue?" dialog only delays it. Cancelling here
+// would leave a Home the user just created and no obvious way back to the folder.
 function continuePortfolioToLibrary(offer) {
   const url = portfolioLibraryURL(offer);
-  if (
-    url &&
-    window.confirm(
-      'The Home is ready. Continue to Project Library to review this folder? No scan or project connection starts automatically.'
-    )
-  ) {
-    window.location.assign(url);
-  }
+  if (url) window.location.assign(url);
 }
 
 // startManualTidy is the tidy's Adjust…: the ordinary File Janitor creator,

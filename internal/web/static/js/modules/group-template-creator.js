@@ -1233,6 +1233,25 @@
     }
   }
 
+  // A launcher's requested landing, accepted only as a path under /workspaces/
+  // on this origin. The URL parser resolves dot segments (including encoded
+  // ones), so a request that climbs out of /workspaces/ is refused rather than
+  // trusted textually. Returns the normalized path or '' when unacceptable.
+  const LANDING_BASE = 'http://ori.invalid';
+  function workspaceLanding(value) {
+    if (typeof value !== 'string' || !value.startsWith('/workspaces/') || /[\\\s]/.test(value)) {
+      return '';
+    }
+    let parsed;
+    try {
+      parsed = new URL(value, LANDING_BASE);
+    } catch (_) {
+      return '';
+    }
+    if (parsed.origin !== LANDING_BASE || !parsed.pathname.startsWith('/workspaces/')) return '';
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  }
+
   function landingURL(slug, roleId) {
     const path = `/workspaces/${encodeURIComponent(slug)}`;
     return roleId ? `${path}?role=${encodeURIComponent(roleId)}` : path;
@@ -1264,6 +1283,7 @@
       };
     }
     const pending = state.pending;
+    let landingOverride = '';
     const createBtn = document.getElementById('createFolderBtn');
     manager.isCreatingFolder = true;
     context.submitting = true;
@@ -1319,13 +1339,18 @@
         !context.selection
       ) {
         try {
-          await context.onCreated({
+          const followUp = await context.onCreated({
             folder: { id: result.home_workspace_id, name: result.home_name, kind: 'group' },
             groupId: result.home_workspace_id,
             placed: [],
             failed: [],
             uncertain: []
           });
+          // A launcher may ask to land somewhere on this origin other than the
+          // group page (e.g. its project library). It cannot navigate itself:
+          // this method still staffs roles and then navigates, and would
+          // overwrite it.
+          landingOverride = workspaceLanding(followUp);
         } catch (callbackError) {
           console.warn(
             'Group was created but its launcher follow-up could not complete:',
@@ -1346,6 +1371,13 @@
       if (modalElement) bootstrap.Modal.getInstance(modalElement)?.hide();
       manager.resetAddWorkspaceModalForm?.();
       const slug = String(folder?.folder_slug || '').trim();
+      // Honour a launcher's landing only when nothing needs the group page's
+      // notice: a role that failed to staff must still be shown where it can be
+      // fixed.
+      if (landingOverride && notice.tone === 'success') {
+        window.location.href = landingOverride;
+        return true;
+      }
       if (slug) {
         // The group page is where its roles are managed, so the user lands
         // there instead of reading about it in a toast; the page shows the

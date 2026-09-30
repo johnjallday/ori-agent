@@ -38,6 +38,9 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		HomeExists: func(_ context.Context, userID, providerKey string) (bool, error) {
 			return reviewedHomeExists(b, userID, providerKey)
 		},
+		ExistingHome: func(ctx context.Context, userID, providerKey string) (personalassistant.FolderCreateResult, error) {
+			return reviewedExistingHome(ctx, b, userID, providerKey)
+		},
 		LegacyDeclined: func(ctx context.Context, userID, domain string) (bool, error) {
 			if b.personalAssistantStore == nil || domain != "music_production" {
 				return false, nil

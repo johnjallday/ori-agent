@@ -60,6 +60,7 @@ function environment({ fetch } = {}) {
     window,
     document,
     TextEncoder,
+    URL,
     crypto: {
       randomUUID: (() => {
         let n = 0;
@@ -820,6 +821,76 @@ test('an already-filled 409 counts as staffed; a failed fill still lands on the 
     'a failed role never stops the remaining fills'
   );
   assert.equal(failing.window.location.href, '/workspaces/lab?role=coordinator');
+});
+
+const LIBRARY_LANDING = '/workspaces/lab/assistant?folder_offer_id=offer-1#projectLibraryPanel';
+
+test('a launcher can land the created Home elsewhere under /workspaces/, after staffing finishes', async () => {
+  const env = environment({ fetch: staffingFetch() });
+  const creator = staffingCreator(env.api);
+  const order = [];
+  creator.workspaceCreatorContext.onCreated = async () => {
+    order.push('onCreated');
+    return LIBRARY_LANDING;
+  };
+  assert.equal(await confirmStaffing(env.api, env.element, creator), true);
+  assert.equal(env.window.location.href, LIBRARY_LANDING);
+  assert.equal(
+    env.calls.filter(call => call.options.method === 'PUT').length,
+    1,
+    'the roles are still staffed before the navigation, exactly once'
+  );
+  assert.equal(
+    env.window.sessionStorage.getItem('ori:group-template-landing'),
+    null,
+    'a clean landing elsewhere leaves no stale notice for the group page'
+  );
+  assert.deepEqual(order, ['onCreated']);
+});
+
+test('a launcher landing is ignored when a role failed to staff, so the group page can show it', async () => {
+  const env = environment({
+    fetch: staffingFetch({
+      roles: {
+        coordinator: { status: 409, body: { message: 'That role could not be filled.' } }
+      }
+    })
+  });
+  const creator = staffingCreator(env.api);
+  creator.workspaceCreatorContext.onCreated = async () => LIBRARY_LANDING;
+  assert.equal(await confirmStaffing(env.api, env.element, creator), true);
+  assert.equal(env.window.location.href, '/workspaces/lab?role=coordinator');
+  assert.equal(
+    JSON.parse(env.window.sessionStorage.getItem('ori:group-template-landing')).tone,
+    'warning'
+  );
+});
+
+test('a launcher landing outside /workspaces/ on this origin is never followed', async () => {
+  for (const hostile of [
+    'https://evil.example/workspaces/lab',
+    '//evil.example/workspaces/lab',
+    '/workspaces/../settings',
+    '/workspaces/%2e%2e/settings',
+    '/workspaces/%2E%2E/settings',
+    '/workspaces\\evil',
+    '/workspaces/lab evil',
+    'javascript:alert(1)',
+    '/settings',
+    '/workspaces',
+    42,
+    { href: LIBRARY_LANDING }
+  ]) {
+    const env = environment({ fetch: staffingFetch() });
+    const creator = staffingCreator(env.api);
+    creator.workspaceCreatorContext.onCreated = async () => hostile;
+    assert.equal(await confirmStaffing(env.api, env.element, creator), true);
+    assert.equal(
+      env.window.location.href,
+      '/workspaces/lab',
+      `${JSON.stringify(hostile)} must fall back to the group page`
+    );
+  }
 });
 
 test('landing words name the staffed, failed, and unstaffed roles', () => {
