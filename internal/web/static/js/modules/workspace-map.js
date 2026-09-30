@@ -789,28 +789,36 @@
     if (scopeGroupId) return { show: false };
     if (!status || status.valid) return { show: false };
     var repair = !!status.workspace_id;
+    var resumable = !!(personalAssistant && personalAssistant.state === 'provisioning_hq');
     var onboardingState = String(status.hq_onboarding_state || 'unseen');
     var view = {
       show: true,
       repair: repair,
+      resumable: resumable,
       onboardingState: onboardingState,
-      statusLabel: repair ? 'Needs repair' : 'Not created',
-      title: repair ? 'Personal HQ needs repair' : 'Personal HQ has not been created',
-      detail: repair
-        ? 'The workspace previously designated as your Personal HQ is no longer available. Build a replacement or choose another workspace.'
-        : 'Create a home base for your daily brief, follow-ups, and a clear place to resume work.',
-      showSkip: !repair && onboardingState !== 'skipped',
+      statusLabel: resumable ? 'Setup paused' : repair ? 'Needs repair' : 'Not created',
+      title: resumable
+        ? 'Personal HQ setup is paused'
+        : repair
+          ? 'Personal HQ needs repair'
+          : 'Personal HQ has not been created',
+      detail: resumable
+        ? 'Resume to continue the Personal HQ setup with the settings you already confirmed.'
+        : repair
+          ? 'The workspace previously designated as your Personal HQ is no longer available. Build a replacement or choose another workspace.'
+          : 'Create a home base for your daily brief, follow-ups, and a clear place to resume work.',
+      showSkip: !resumable && !repair && onboardingState !== 'skipped',
       // Import remains available in every ordinary state. It is withdrawn only
       // during the guided stage below, where importing a workspace would
       // silently rebind an existing one as the hired assistant's HQ.
-      showImport: true,
+      showImport: !resumable,
       assistantName: ''
     };
 
     // A hired assistant with no home base yet. The site names its subject and
     // offers only the safe build path. Every other state — repair, import,
     // legacy, skipped outside this stage — keeps its existing copy exactly.
-    if (!repair && personalAssistantNeedsHQ()) {
+    if (!resumable && !repair && personalAssistantNeedsHQ()) {
       var who = String((personalAssistant && personalAssistant.displayName) || '').trim();
       view.guided = true;
       view.assistantName = who;
@@ -3611,7 +3619,11 @@
   }
 
   function hqOverviewHTML(view) {
-    var primaryLabel = view.repair ? 'Build replacement HQ' : 'Build My HQ';
+    var primaryLabel = view.resumable
+      ? 'Resume setup'
+      : view.repair
+        ? 'Build replacement HQ'
+        : 'Build My HQ';
     return (
       '<div class="ws-map-ov-hero ws-map-hq-site-hero">' +
       '<span class="ws-map-ov-ic ws-map-hq-site-icon">HQ</span>' +
@@ -3638,13 +3650,15 @@
       (view.showImport === false
         ? ''
         : '<button type="button" class="ws-map-hq-action ws-map-hq-action-secondary" data-hq-action="import">Import HQ</button>') +
-      (view.repair
-        ? '<button type="button" class="ws-map-hq-action ws-map-hq-action-quiet" data-hq-action="clear">Clear broken HQ link</button>'
-        : view.showSkip
-          ? '<button type="button" class="ws-map-hq-action ws-map-hq-action-quiet" data-hq-action="skip">' +
-            (view.guided ? 'Do this later' : 'Not now') +
-            '</button>'
-          : '') +
+      (view.resumable
+        ? ''
+        : view.repair
+          ? '<button type="button" class="ws-map-hq-action ws-map-hq-action-quiet" data-hq-action="clear">Clear broken HQ link</button>'
+          : view.showSkip
+            ? '<button type="button" class="ws-map-hq-action ws-map-hq-action-quiet" data-hq-action="skip">' +
+              (view.guided ? 'Do this later' : 'Not now') +
+              '</button>'
+            : '') +
       '</div>'
     );
   }
@@ -4684,11 +4698,19 @@
   function hqMenuItems(view) {
     var site = view || {};
     var items = [
-      { label: site.repair ? 'Build replacement HQ' : 'Build My HQ', action: 'hq-build' },
-      { label: 'Import HQ', action: 'hq-import' }
+      {
+        label: site.resumable
+          ? 'Resume setup'
+          : site.repair
+            ? 'Build replacement HQ'
+            : 'Build My HQ',
+        action: 'hq-build'
+      }
     ];
-    if (site.repair) items.push({ label: 'Clear broken HQ link', action: 'hq-clear' });
-    else if (site.showSkip) items.push({ label: 'Not now', action: 'hq-skip' });
+    if (!site.resumable) items.push({ label: 'Import HQ', action: 'hq-import' });
+    if (site.repair && !site.resumable)
+      items.push({ label: 'Clear broken HQ link', action: 'hq-clear' });
+    else if (site.showSkip && !site.resumable) items.push({ label: 'Not now', action: 'hq-skip' });
     return items;
   }
 
