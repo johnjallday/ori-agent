@@ -52,9 +52,12 @@ export const FILTER = Object.freeze({
 // sort priority (lower sorts earlier — FR24), and default primary/secondary
 // actions. `retry`/`rerun`/`cancel` availability is layered on at resolve time
 // from the task's own data (see resolveTaskPresentation).
+// className preserves the task pages' CSS buckets; it is not a semantic state.
+// In particular, Timed Out and Failed share styling but keep distinct labels.
 const STATE_META = Object.freeze({
   [PRESENTATION_STATE.NEEDS_INPUT]: {
     label: 'Needs Input',
+    className: 'blocked',
     tone: 'attention',
     counts: [FILTER.ACTIONABLE, FILTER.ACTIVE, FILTER.NEEDS_ATTENTION],
     sortPriority: 0,
@@ -62,6 +65,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.BLOCKED]: {
     label: 'Blocked',
+    className: 'blocked',
     tone: 'attention',
     counts: [FILTER.ACTIONABLE, FILTER.ACTIVE, FILTER.NEEDS_ATTENTION],
     sortPriority: 1,
@@ -69,6 +73,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.NEEDS_ASSIGNMENT]: {
     label: 'Needs Assignment',
+    className: 'pending',
     tone: 'attention',
     counts: [FILTER.ACTIONABLE, FILTER.NEEDS_ATTENTION],
     sortPriority: 2,
@@ -76,6 +81,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.RUNNING]: {
     label: 'Running',
+    className: 'in_progress',
     tone: 'active',
     counts: [FILTER.ACTIONABLE, FILTER.ACTIVE],
     sortPriority: 3,
@@ -83,6 +89,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.FAILED]: {
     label: 'Failed',
+    className: 'failed',
     tone: 'danger',
     counts: [FILTER.ACTIONABLE, FILTER.NEEDS_ATTENTION],
     sortPriority: 4,
@@ -90,6 +97,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.TIMED_OUT]: {
     label: 'Timed Out',
+    className: 'failed',
     tone: 'danger',
     counts: [FILTER.ACTIONABLE, FILTER.NEEDS_ATTENTION],
     sortPriority: 4,
@@ -97,6 +105,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.READY]: {
     label: 'Ready',
+    className: 'pending',
     tone: 'info',
     counts: [FILTER.ACTIONABLE, FILTER.ACTIVE],
     sortPriority: 5,
@@ -104,6 +113,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.COMPLETED]: {
     label: 'Completed',
+    className: 'completed',
     tone: 'success',
     counts: [FILTER.COMPLETED],
     sortPriority: 6,
@@ -111,6 +121,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.CANCELLED]: {
     label: 'Cancelled',
+    className: 'cancelled',
     tone: 'neutral',
     counts: [],
     sortPriority: 7,
@@ -118,6 +129,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.SKIPPED]: {
     label: 'Skipped',
+    className: 'cancelled',
     tone: 'neutral',
     counts: [],
     sortPriority: 7,
@@ -125,6 +137,7 @@ const STATE_META = Object.freeze({
   },
   [PRESENTATION_STATE.UNKNOWN]: {
     label: 'Unknown',
+    className: 'unknown',
     tone: 'neutral',
     counts: [],
     sortPriority: 8,
@@ -300,7 +313,7 @@ export function resolveTaskState(task, opts) {
  *   hasRunnableAssignee, hasAnswerableInput, retrySupported (booleans),
  *   cancelSupported (default true), rerunSupported (default true).
  * @returns {{
- *   state: string, label: string, tone: string, rawState: string,
+ *   state: string, label: string, className: string, tone: string, rawState: string,
  *   isUnknown: boolean, countCategories: string[], sortPriority: number,
  *   primaryAction: {id:string,label:string}|null,
  *   secondaryActions: Array<{id:string,label:string,confirm?:boolean}>,
@@ -324,6 +337,7 @@ export function resolveTaskPresentation(task, opts) {
     return {
       state,
       label: meta.label,
+      className: meta.className,
       tone: meta.tone,
       rawState,
       isUnknown: state === PRESENTATION_STATE.UNKNOWN,
@@ -356,6 +370,7 @@ export function resolveTaskPresentation(task, opts) {
   return {
     state,
     label: meta.label,
+    className: meta.className,
     tone: meta.tone,
     rawState,
     isUnknown: state === PRESENTATION_STATE.UNKNOWN,
@@ -366,6 +381,68 @@ export function resolveTaskPresentation(task, opts) {
     repair: null,
     assignee: taskAssignee(task),
     latestActivityAt: taskLatestActivityAt(task)
+  };
+}
+
+// Raw labels belong to execution steps and run history, which do not carry an
+// assignee or human-loop context. Task badges must use the full resolver below
+// instead of treating a raw status as the task's complete presentation.
+const RAW_STATUS_LABELS = Object.freeze({
+  pending: 'Pending',
+  assigned: 'Assigned',
+  in_progress: 'In Progress',
+  waiting_for_choice: 'Waiting for Choice',
+  completed: 'Completed',
+  success: 'Completed',
+  done: 'Completed',
+  failed: 'Failed',
+  error: 'Failed',
+  blocked: 'Blocked',
+  cancelled: 'Cancelled',
+  skipped: 'Skipped',
+  timeout: 'Timed Out'
+});
+
+export function getStatusClass(status) {
+  return STATE_META[resolveTaskState({ status })].className;
+}
+
+export function getDisplayStatus(status) {
+  const normalized = lc(status);
+  if (Object.hasOwn(RAW_STATUS_LABELS, normalized)) return RAW_STATUS_LABELS[normalized];
+  return resolveTaskState({ status }) === PRESENTATION_STATE.UNKNOWN ? 'Unknown' : 'Pending';
+}
+
+// A step-through checkpoint uses the existing Next Step control, not the
+// guidance form. An actual human-loop request must still take precedence.
+export function isTaskAwaitingNextStep(task) {
+  const humanLoop = taskHumanLoopState(task);
+  return (
+    lc(task?.execution_mode) === 'step_through' &&
+    lc(task?.status) === 'in_progress' &&
+    task?.context?.execution_step_waiting === true &&
+    humanLoop !== 'blocked' &&
+    humanLoop !== 'waiting_for_choice'
+  );
+}
+
+/** Adapt the canonical presentation to the task pages' existing badge/form API. */
+export function resolveTaskStatusPresentation(task) {
+  const presentation = resolveTaskPresentation(task);
+  const stepPaused = isTaskAwaitingNextStep(task);
+  const isBlocked =
+    !stepPaused &&
+    (presentation.state === PRESENTATION_STATE.BLOCKED ||
+      presentation.state === PRESENTATION_STATE.NEEDS_INPUT);
+  return {
+    className: presentation.className,
+    label: presentation.label,
+    isBlocked,
+    reason: stepPaused
+      ? 'This task is paused between internal execution steps.'
+      : isBlocked
+        ? String(task?.context?.human_loop?.reason || '').trim()
+        : ''
   };
 }
 
@@ -436,6 +513,10 @@ export const TaskPresentation = {
   FILTER,
   resolveTaskState,
   resolveTaskPresentation,
+  resolveTaskStatusPresentation,
+  getStatusClass,
+  getDisplayStatus,
+  isTaskAwaitingNextStep,
   taskMatchesFilter,
   resolveTaskCounts,
   sortTasksForDrawer,

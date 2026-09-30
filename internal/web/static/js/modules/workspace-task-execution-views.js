@@ -14,12 +14,11 @@
 import {
   _formatRelativeDate,
   formatDateTime,
-  getDisplayStatus,
-  getStatusClass,
   getTaskEventData,
   summarizeText,
   stringifyTraceValue
 } from './workspace-task.js';
+import { getDisplayStatus, getStatusClass } from './task-presentation.js';
 
 // Trace pagination page size, exported so the WorkspaceTaskPage constructor
 // can seed _traceVisibleCount with it. The static getter on the class
@@ -54,7 +53,7 @@ export const taskExecutionViewsMethods = {
               <span class="workspace-task-breakdown-index">${index + 1}</span>
               <span class="workspace-task-breakdown-label">${this.escapeHtml(title)}</span>
             </span>
-            <span class="workspace-task-step-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(statusClass))}</span>
+            <span class="workspace-task-step-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(statusKey))}</span>
           </summary>
           <div class="workspace-task-breakdown-body">${detail ? this.escapeHtml(detail) : 'No additional detail.'}</div>
         </details>
