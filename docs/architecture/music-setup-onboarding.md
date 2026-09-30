@@ -283,7 +283,10 @@ workspace read. A child that has chosen a mode gets a "Set up the project team"
 link that requests its team form by role (opened once, only for an empty,
 writable role); a child that has not (the library does not select a mode) is
 linked to its page, which opens its own mode wizard first — File-only is the
-starting option — and the team follows. Workspace pages are routed by folder slug:
+starting option — and the wizard's end returns to the page, whose "Fill the
+primary role" banner opens the role's own form (nothing auto-opens it; the form
+names the role and "this workspace only" and creates nothing until submitted).
+Workspace pages are routed by folder slug:
 `/workspaces/<id>` is a 404, and every library link to a child used the id until
 this was fixed, so no link is offered when the slug cannot be resolved.
 
@@ -403,3 +406,25 @@ Findings behind this table are recorded in
 Fake-picker/chip and headless-browser results are labelled as such; the real
 native chooser, model, and live-DAW behaviour are recorded separately and remain
 NOT RUN until exercised.
+
+### What the journey spec proves (and does not)
+
+`tests/music-setup-onboarding.spec.ts`, run by
+`scripts/music-home-demo.sh test --suite onboarding --provider reviewed`, drives
+the whole path in a disposable HOME on **published** releases: chip-chosen
+collection → setup-first Home → root and scan reviews → per-song blockers (a
+format with no reviewed integration is offered none) → leave the reviewed REAPER
+install without confirming (nothing installed) → confirm install, then enable (two
+separate reviews; installed is not enabled) → "Back to your song" → exact file
+choice → one connected child → the child's mode wizard → the role's own form. It
+hashes every source project file before and after and counts workspaces.
+
+Not proven by it: the native macOS folder dialog (chip only), a REAPER launch or
+live control, any model call (no credentials are part of the fixture), the
+paired local-candidate install (the guidance suite in both install orders covers
+that, separately), and screen-reader behaviour. The `portfolio` (local
+candidate) suite's refusal assertion for a same-name local provider expects the
+text "Home provider is unavailable" but the server answers "The workspace could
+not be linked to the folder right now" on that path; the handler and provider
+preview code are untouched by this branch, so treat it as pre-existing until
+shown otherwise.

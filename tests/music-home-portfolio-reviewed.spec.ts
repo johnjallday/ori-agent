@@ -1471,79 +1471,84 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   // 1. This spec revoked the root earlier, so the restored collection needs a
   //    fresh, separately confirmed grant: reviewed from the server's own record,
   //    with no second native pick.
+  //    Only the paired run disconnects the folder; an unpaired run still has it
+  //    approved, so the re-grant and unfinished-scan checks below do not apply.
   const rootsBeforeRegrant = await activeRoots();
-  const first = await reopenBare();
-  await first.shelf.locator('#projectLibraryAdd').click();
-  const regrant = first.bare.getByRole('dialog', { name: 'Connect this discovery folder?' });
-  await expect(regrant).toBeVisible();
-  await expect(regrant).toContainText(documents);
-  expect(await activeRoots()).toBe(rootsBeforeRegrant); // reviewing grants nothing
-  await shot(first.bare, '38-bare-home-reopen-regrant-review');
-  await regrant.getByRole('button', { name: 'Connect folder' }).click();
-  const laterScan = first.bare.getByRole('dialog', { name: 'Scan this discovery folder once?' });
-  await expect(laterScan).toBeVisible();
-  await first.bare.keyboard.press('Escape'); // decline the scan; the grant is kept
-  await expect(laterScan).toBeHidden();
-  expect(first.libraryPosts).toEqual([
-    '/roots/pick-offer',
-    '/roots/review',
-    '/roots/commit',
-    expect.stringMatching(/^\/roots\/[^/]+\/scans\/review$/)
-  ]);
-  expect(await activeRoots()).toBe(rootsBeforeRegrant + 1);
-  // Declining left a connected, unscanned folder: the setup card offers the scan.
-  await expect(first.bare.locator('#projectSetupNextTitle')).toContainText('Scan Documents once');
-  await shot(first.bare, '38b-setup-card-scan-after-declined-review');
-  await first.bare.close();
+  const revokedEarlier = Boolean(reaperSource);
+  if (revokedEarlier) {
+    const first = await reopenBare();
+    await first.shelf.locator('#projectLibraryAdd').click();
+    const regrant = first.bare.getByRole('dialog', { name: 'Connect this discovery folder?' });
+    await expect(regrant).toBeVisible();
+    await expect(regrant).toContainText(documents);
+    expect(await activeRoots()).toBe(rootsBeforeRegrant); // reviewing grants nothing
+    await shot(first.bare, '38-bare-home-reopen-regrant-review');
+    await regrant.getByRole('button', { name: 'Connect folder' }).click();
+    const laterScan = first.bare.getByRole('dialog', { name: 'Scan this discovery folder once?' });
+    await expect(laterScan).toBeVisible();
+    await first.bare.keyboard.press('Escape'); // decline the scan; the grant is kept
+    await expect(laterScan).toBeHidden();
+    expect(first.libraryPosts).toEqual([
+      '/roots/pick-offer',
+      '/roots/review',
+      '/roots/commit',
+      expect.stringMatching(/^\/roots\/[^/]+\/scans\/review$/)
+    ]);
+    expect(await activeRoots()).toBe(rootsBeforeRegrant + 1);
+    // Declining left a connected, unscanned folder: the setup card offers the scan.
+    await expect(first.bare.locator('#projectSetupNextTitle')).toContainText('Scan Documents once');
+    await shot(first.bare, '38b-setup-card-scan-after-declined-review');
+    await first.bare.close();
 
-  // The same unfinished step on a phone: reachable, in the first screen, no
-  // sideways scrolling, and the hash arrival still lands on it.
-  const phone = await page.context().newPage();
-  await phone.setViewportSize({ width: 390, height: 844 });
-  await phone.goto(`${homeRoute}#projectLibraryPanel`);
-  const phoneCard = phone.locator('#projectSetupNext');
-  await expect(phoneCard).toBeVisible();
-  await expect(phoneCard.locator('#projectSetupNextTitle')).toContainText('Scan Documents once');
-  await expect(phoneCard.locator('#projectSetupNextTitle')).toBeFocused();
-  await expect(phoneCard).toBeInViewport();
-  await expect(phoneCard.locator('#projectSetupNextAction')).toBeVisible();
-  expect(
-    await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
-  ).toBe(true);
-  // Partial visibility is not enough on a phone. Once the arrival scroll has
-  // settled, the whole step must be usable: its heading below the fixed
-  // navigation and its button clear of the floating help and assistant widgets
-  // that sit in the bottom corner.
-  const settled = () =>
-    phone.evaluate(() => {
-      const nav = document.querySelector('nav.navbar') as HTMLElement | null;
-      const title = document.querySelector('#projectSetupNextTitle') as HTMLElement;
-      const button = document.querySelector('#projectSetupNextAction') as HTMLElement;
-      return {
-        navBottom: nav ? nav.getBoundingClientRect().bottom : 0,
-        titleTop: title.getBoundingClientRect().top,
-        buttonBottom: button.getBoundingClientRect().bottom,
-        viewport: window.innerHeight
-      };
-    });
-  await expect
-    .poll(async () => {
-      const box = await settled();
-      return box.titleTop >= box.navBottom && box.buttonBottom <= box.viewport - 96;
-    })
-    .toBe(true);
-  await shot(phone, '38c-setup-card-390px');
-  // Keyboard only: Tab reaches the step's button, Enter opens its review, Escape
-  // cancels it and returns focus to the button. Reviewing scans nothing.
-  await phone.keyboard.press('Tab');
-  await expect(phoneCard.locator('#projectSetupNextAction')).toBeFocused();
-  await phone.keyboard.press('Enter');
-  const phoneScan = phone.getByRole('dialog', { name: 'Scan this discovery folder once?' });
-  await expect(phoneScan).toBeVisible();
-  await phone.keyboard.press('Escape');
-  await expect(phoneScan).toBeHidden();
-  await expect(phoneCard.locator('#projectSetupNextAction')).toBeFocused();
-  await phone.close();
+    // The same unfinished step on a phone: reachable, in the first screen, no
+    // sideways scrolling, and the hash arrival still lands on it.
+    const phone = await page.context().newPage();
+    await phone.setViewportSize({ width: 390, height: 844 });
+    await phone.goto(`${homeRoute}#projectLibraryPanel`);
+    const phoneCard = phone.locator('#projectSetupNext');
+    await expect(phoneCard).toBeVisible();
+    await expect(phoneCard.locator('#projectSetupNextTitle')).toContainText('Scan Documents once');
+    await expect(phoneCard.locator('#projectSetupNextTitle')).toBeFocused();
+    await expect(phoneCard).toBeInViewport();
+    await expect(phoneCard.locator('#projectSetupNextAction')).toBeVisible();
+    expect(
+      await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+    ).toBe(true);
+    // Partial visibility is not enough on a phone. Once the arrival scroll has
+    // settled, the whole step must be usable: its heading below the fixed
+    // navigation and its button clear of the floating help and assistant widgets
+    // that sit in the bottom corner.
+    const settled = () =>
+      phone.evaluate(() => {
+        const nav = document.querySelector('nav.navbar') as HTMLElement | null;
+        const title = document.querySelector('#projectSetupNextTitle') as HTMLElement;
+        const button = document.querySelector('#projectSetupNextAction') as HTMLElement;
+        return {
+          navBottom: nav ? nav.getBoundingClientRect().bottom : 0,
+          titleTop: title.getBoundingClientRect().top,
+          buttonBottom: button.getBoundingClientRect().bottom,
+          viewport: window.innerHeight
+        };
+      });
+    await expect
+      .poll(async () => {
+        const box = await settled();
+        return box.titleTop >= box.navBottom && box.buttonBottom <= box.viewport - 96;
+      })
+      .toBe(true);
+    await shot(phone, '38c-setup-card-390px');
+    // Keyboard only: Tab reaches the step's button, Enter opens its review, Escape
+    // cancels it and returns focus to the button. Reviewing scans nothing.
+    await phone.keyboard.press('Tab');
+    await expect(phoneCard.locator('#projectSetupNextAction')).toBeFocused();
+    await phone.keyboard.press('Enter');
+    const phoneScan = phone.getByRole('dialog', { name: 'Scan this discovery folder once?' });
+    await expect(phoneScan).toBeVisible();
+    await phone.keyboard.press('Escape');
+    await expect(phoneScan).toBeHidden();
+    await expect(phoneCard.locator('#projectSetupNextAction')).toBeFocused();
+    await phone.close();
+  }
 
   // 2. Now the folder is approved. A Home reopened bare finds the same collection
   //    and goes straight to that root's scan review: never a fresh native pick, a
@@ -1562,7 +1567,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     '/roots/pick-offer',
     expect.stringMatching(/^\/roots\/[^/]+\/scans\/review$/)
   ]);
-  expect(await activeRoots()).toBe(rootsBeforeRegrant + 1);
+  expect(await activeRoots()).toBe(rootsBeforeRegrant + (revokedEarlier ? 1 : 0));
   await second.bare.close();
 
   expect(songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))).toEqual(
