@@ -634,8 +634,10 @@ func (b *ServerBuilder) initializeHandlers() {
 		pluginsDir := filepath.Join(config.DefaultDataDir(), "plugins")
 		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, pluginsDir)
 		b.pluginHandler.UpdateChecker().SetAdmissionGate(b.resetWork)
+		b.homeUpgradeSlot = &homeUpgradeSlot{}
+		upgrades := b.homeUpgradeSlot
 		b.pluginHandler.Manager().SetReplacementGuard(func(current plugin.InstalledPlugin, nextVersion, nextFingerprint string) error {
-			return refuseUnreviewedHomeReplacement(b.workspaceStore, current, nextVersion, nextFingerprint)
+			return refuseUnreviewedHomeReplacement(b.workspaceStore, current, nextVersion, nextFingerprint, upgrades.allows)
 		})
 		b.wirePluginSkills()
 		// The Workspace Directory's plugin list (Plugins.json) records every

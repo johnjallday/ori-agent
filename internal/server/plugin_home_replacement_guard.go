@@ -8,12 +8,17 @@ import (
 )
 
 // An installed content change cannot silently move an existing independent
-// Home (or its child snapshots) onto a new package's role guidance. Until a
-// reviewed, recoverable rebind exists, refuse the replacement BEFORE changing
-// any artifact, surface or plugin registry entry. This also covers a local
-// Install over an existing installed name, not only the Plugins Update route.
-func refuseUnreviewedHomeReplacement(store workspace.Store, current plugin.InstalledPlugin, nextVersion, nextFingerprint string) error {
+// Home (or its child snapshots) onto a new package's role guidance. The
+// replacement is refused BEFORE changing any artifact, surface or plugin
+// registry entry, unless it is exactly the one a claimed, owner-reviewed Home
+// package upgrade is performing (reviewed, recoverable rebind:
+// independent-program-homes.md §6.1). This also covers a local Install over an
+// existing installed name, not only the Plugins Update route.
+func refuseUnreviewedHomeReplacement(store workspace.Store, current plugin.InstalledPlugin, nextVersion, nextFingerprint string, reviewedUpgrade func(plugin.InstalledPlugin, string, string) bool) error {
 	if current.WorkspaceSurfaces == nil || len(current.WorkspaceSurfaces.AssistantProgramHomes) == 0 {
+		return nil
+	}
+	if reviewedUpgrade != nil && reviewedUpgrade(current, nextVersion, nextFingerprint) {
 		return nil
 	}
 	if store == nil {

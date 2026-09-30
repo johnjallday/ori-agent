@@ -43,6 +43,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
+	"github.com/johnjallday/ori-agent/internal/homeupgrade"
 	"github.com/johnjallday/ori-agent/internal/integrationrelease"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
@@ -205,6 +206,11 @@ type ServerBuilder struct {
 	// mailboxLinker attaches a connected account to a workspace. It is built in
 	// Phase 18 and consumed by the Email Ops setup quest in Phase 22.6.
 	mailboxLinker *mailboxLinkerService
+	// homeUpgradeSlot lets the plugin replacement guard (Phase 17) consult the
+	// Home package upgrade service built in Phase 22.6.
+	homeUpgradeSlot *homeUpgradeSlot
+	// homeUpgrades reviews, commits and recovers Home package upgrades.
+	homeUpgrades *homeupgrade.Service
 	// gmailSink is the connection's credential sink, stashed so the credential
 	// lifecycle can be attached once the workspace store exists (Phase 18).
 	gmailSink                *gmailCredentialSink

@@ -208,6 +208,31 @@ func (u HomeProviderUpgrade) RebindProject(child *Workspace, homeID string, home
 	return true, nil
 }
 
+// CheckHome classifies a Home without changing it: pending (true) means
+// RebindHome would move it, false with no error means it already moved.
+func (u HomeProviderUpgrade) CheckHome(home *Workspace) (bool, error) {
+	if home == nil {
+		return false, ErrInvalidHomeProviderUpgrade
+	}
+	scratch := &Workspace{}
+	scratch.SetAssistantProgramState(home.GetAssistantProgramState())
+	return u.RebindHome(scratch)
+}
+
+// CheckProject classifies a linked project without changing it, like
+// CheckHome.
+func (u HomeProviderUpgrade) CheckProject(child *Workspace, homeID string, homeDeclaration *AssistantProgramDeclaration) (bool, error) {
+	if child == nil {
+		return false, ErrInvalidHomeProviderUpgrade
+	}
+	scratch := &Workspace{}
+	scratch.SetAssistantProjectLink(child.GetAssistantProjectLink())
+	if provenance := child.GetTemplateProvenance(); provenance != nil {
+		scratch.SetTemplateProvenance(provenance)
+	}
+	return u.RebindProject(scratch, homeID, homeDeclaration)
+}
+
 func sameDeclaration(a, b *AssistantProgramDeclaration) bool {
 	left, errLeft := json.Marshal(a)
 	right, errRight := json.Marshal(b)
