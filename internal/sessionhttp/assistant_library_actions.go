@@ -134,14 +134,43 @@ func (h *Handler) libraryRootExists(w http.ResponseWriter, scope projectlibrary.
 
 func respondLibraryActionError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, projectlibrary.ErrConflict), errors.Is(err, projectlibrary.ErrNotInitialized):
+	case errors.Is(err, projectlibrary.ErrConflict):
+		// The Home moved on while a review was open. The reason lets the browser
+		// re-read the current revision instead of retrying the stale one.
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "Project library changed; review again", "reason": "stale_review",
+		})
+	case errors.Is(err, projectlibrary.ErrNotInitialized):
 		_ = orihttp.RespondConflict(w, "Project library changed; review again")
 	case errors.Is(err, projectlibrary.ErrUnavailable):
+		// A reason lets the browser say what happened and whether choosing a
+		// folder again could help; without one this stays the general message.
+		if reason := projectlibrary.ReasonOf(err); reason != "" {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error": libraryUnavailableMessage(reason), "reason": string(reason),
+			})
+			return
+		}
 		_ = orihttp.RespondConflict(w, "Project library or native picker is unavailable")
 	case errors.Is(err, projectlibrary.ErrLimit):
 		_ = orihttp.RespondBadRequest(w, "Project library limit exceeded")
 	default:
 		_ = orihttp.RespondInternalError(w, "Project library cannot be updated")
+	}
+}
+
+// libraryUnavailableMessage names a cause a person can act on. None of these is
+// a lost folder selection, and choosing a folder again fixes none of them.
+func libraryUnavailableMessage(reason projectlibrary.UnavailableReason) string {
+	switch reason {
+	case projectlibrary.ReasonPickerUnavailable:
+		return "The native folder picker is unavailable here"
+	case projectlibrary.ReasonHomeUnavailable:
+		return "That Home could not be found"
+	case projectlibrary.ReasonProviderUnavailable:
+		return "This Home's package is unavailable, so its library is read-only"
+	default:
+		return "Project library or native picker is unavailable"
 	}
 }
 
@@ -195,6 +224,11 @@ func (h *Handler) PickAssistantLibraryRoot(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	token, err := h.assistantLibraryRoots.Pick(r.Context(), scope)
+	if errors.Is(err, projectlibrary.ErrPickCanceled) {
+		// Dismissing the chooser is an answer, not a failure: nothing changed.
+		_ = orihttp.RespondSuccess(w, map[string]any{"cancelled": true})
+		return
+	}
 	if err != nil {
 		respondLibraryActionError(w, err)
 		return
@@ -225,7 +259,13 @@ func (h *Handler) PickAssistantLibraryOfferRoot(w http.ResponseWriter, r *http.R
 		respondLibraryActionError(w, err)
 		return
 	}
-	_ = orihttp.RespondSuccess(w, map[string]string{"selection_token": token})
+	answer := map[string]string{"selection_token": token}
+	// A folder this Home already approved needs its scan review, not a second
+	// root review whose commit would be refused as a duplicate.
+	if rootID, ok := h.assistantLibraryRoots.ApprovedRootFor(scope, token); ok {
+		answer["existing_root_id"] = rootID
+	}
+	_ = orihttp.RespondSuccess(w, answer)
 }
 
 type libraryRootReviewRequest struct {

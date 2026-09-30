@@ -333,6 +333,62 @@ test('a mixed-DAW portfolio names its evidence and a one-time revival acknowledg
   assert.equal(view.reason, '7 audio project folders');
 });
 
+test('a collection offered to an existing Home asks to add it, not to set up another Home', () => {
+  const offer = {
+    id: 'collection',
+    status: 'pending',
+    verdict: 'project',
+    folder: 'Albums',
+    subject: { name: 'Albums', shape: 'audio', is_root: true },
+    portfolio: {
+      shape: 'audio',
+      projects: 5,
+      provider_key: 'music_project_management',
+      existing_home: true
+    },
+    reason: '5 audio project folders',
+    capability: {
+      recognized: '5 music projects',
+      workspace: 'Music Production Home',
+      question: 'Add this collection to your Music Production Home?',
+      integration: 'Nothing is installed or created.',
+      accept_label: 'Yes, add to my Home',
+      decline_label: 'No thanks'
+    }
+  };
+  const view = folderOfferView(offer);
+  assert.match(view.question, /Add this collection to your Music Production Home/);
+  assert.doesNotMatch(view.question, /Set up one/);
+  assert.equal(view.actions[0].journey, true);
+  assert.equal(view.actions[0].label, 'Yes, add to my Home');
+});
+
+test('a resolved existing-Home outcome says nothing was created, moved, linked, or scanned', () => {
+  const added = folderOutcomeNote({
+    status: 'resolved',
+    folder: 'Albums',
+    outcome: { kind: 'home', existing: true, workspace_id: 'home', route: '/workspaces/home' }
+  });
+  assert.match(added, /waiting in its library/);
+  assert.match(added, /Nothing was moved, linked, or scanned/);
+  assert.doesNotMatch(added, /is ready\./, 'no new Home was made, so it must not say one is ready');
+
+  const created = folderOutcomeNote({
+    status: 'resolved',
+    folder: 'Albums',
+    outcome: { kind: 'home', workspace_id: 'home', route: '/workspaces/home' }
+  });
+  assert.match(created, /Music Production Home is ready/);
+});
+
+test('adding a collection to an existing Home names no Home and sends no path', () => {
+  const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  // The server re-reads the Home; the only body is the request id postOffer adds.
+  assert.match(source, /postOffer\(offer\.id, 'existing-home', \{\}\)/);
+  assert.doesNotMatch(source, /existing-home[^)]*home_id/);
+  assert.match(source, /if \(state\.offer\.portfolio\?\.existing_home\)/);
+});
+
 test('a reviewed file project uses the same card and never the blank creator', () => {
   const offer = {
     id: 'offer-1',

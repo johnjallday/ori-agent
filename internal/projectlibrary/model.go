@@ -35,7 +35,44 @@ var (
 	ErrConflict       = errors.New("project library changed; review again")
 	ErrLimit          = errors.New("project library storage limit reached")
 	ErrMirrorDiverged = errors.New("project library Home mirrors disagree; repair before writing")
+	// ErrPickCanceled means the user dismissed the native chooser. It is an
+	// answer, not a failure: nothing was chosen and nothing changed.
+	ErrPickCanceled = errors.New("project library folder choice was canceled")
 )
+
+// UnavailableReason says why a folder or root action could not proceed, so the
+// browser can give a cause that a new pick can or cannot fix instead of one
+// catch-all. It never carries a path.
+type UnavailableReason string
+
+const (
+	// ReasonPickerUnavailable: this host cannot open a native folder chooser.
+	ReasonPickerUnavailable UnavailableReason = "picker_unavailable"
+	// ReasonHomeUnavailable: the Home could not be found (for example removed
+	// while a chooser was open). Choosing a folder again cannot fix it.
+	ReasonHomeUnavailable UnavailableReason = "home_unavailable"
+	// ReasonProviderUnavailable: the Home's installed package is missing,
+	// replaced, or not writable, so the library is read-only.
+	ReasonProviderUnavailable UnavailableReason = "provider_unavailable"
+)
+
+// unavailableWith is ErrUnavailable with a reason: errors.Is(err, ErrUnavailable)
+// stays true, so existing callers and tests keep treating it the same way.
+type unavailableWith struct{ reason UnavailableReason }
+
+func (e unavailableWith) Error() string        { return ErrUnavailable.Error() }
+func (e unavailableWith) Is(target error) bool { return target == ErrUnavailable }
+
+func unavailable(reason UnavailableReason) error { return unavailableWith{reason: reason} }
+
+// ReasonOf returns why err is an unavailability, or "" when it carries no reason.
+func ReasonOf(err error) UnavailableReason {
+	var typed unavailableWith
+	if errors.As(err, &typed) {
+		return typed.reason
+	}
+	return ""
+}
 
 // Scope is supplied by a host-authenticated caller, never from request JSON.
 type Scope struct {

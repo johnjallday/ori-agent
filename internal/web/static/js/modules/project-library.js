@@ -1,3 +1,6 @@
+import { clearLibraryReturn, readLibraryReturn, writeLibraryReturn } from './library-return.js';
+import { setupQuestURL } from './setup-quest-links.js';
+
 function label(value) {
   return String(value == null || value === '' ? 'Unknown' : value).replaceAll('_', ' ');
 }
@@ -19,6 +22,187 @@ async function payload(response) {
   } catch (_) {
     return {};
   }
+}
+
+// What to tell the user when the folder they chose for this Home cannot be used
+// to continue, and whether choosing it again could help. `reason` is the
+// library's own answer (picker/Home/package unavailable); `continuation` is the
+// server's account of the carried collection (expired, lost after a restart, or
+// changed). Every message says the Home is ready and that nothing was connected,
+// because no committed result is ever lost by a lost selection, and none of these
+// is a reason to distrust a completed grant after an ordinary reload.
+export function selectionRecovery({ reason = '', continuation = null } = {}) {
+  switch (reason) {
+    case 'picker_unavailable':
+      return {
+        repick: false,
+        message:
+          'The native folder picker is unavailable on this computer, so a folder cannot be chosen here. Your Home is unchanged. Use Ori desktop to add a folder.'
+      };
+    case 'provider_unavailable':
+      return {
+        repick: false,
+        message:
+          "This Home's package is unavailable, so its library is read-only. Choosing a folder again will not help; re-enable or reinstall the package, then reopen this Home. Nothing was changed."
+      };
+    case 'home_unavailable':
+      return {
+        repick: false,
+        message: 'That Home could not be found, so nothing was connected. Reopen it from Home.'
+      };
+    default:
+  }
+  const kept = 'Your Home is ready and anything already connected is kept.';
+  switch (continuation?.reason) {
+    case 'expired':
+      return {
+        repick: true,
+        message: `The folder you chose was held for 30 minutes and that time has passed. ${kept} Choose the folder again to continue.`
+      };
+    case 'lost':
+      return {
+        repick: true,
+        message: `Ori was restarted, which clears a folder choice that has not been connected yet. ${kept} Choose the folder again to continue.`
+      };
+    case 'changed':
+      return {
+        repick: true,
+        message: `The folder at that location changed after you chose it (it was moved, replaced, or is gone). ${kept} Choose the folder again to continue.`
+      };
+    default:
+      return {
+        repick: true,
+        message: `Ori no longer has the folder you chose earlier. ${kept} Choose the folder again to continue.`
+      };
+  }
+}
+
+// A short, honest label for where one saved song stands, from the library's own
+// eligibility state. It describes the last scan and the integrations installed
+// now, never a live check of a project application, and it never promises an
+// install: a format no reviewed integration supports is simply a catalog record
+// (notes and session planning still work).
+const ACTIVATION_STATE_LABELS = {
+  review_available: 'Ready to review',
+  file_choice_required: 'Needs a file choice',
+  connected: 'Connected to a project workspace',
+  link_needs_review: 'Saved link needs review',
+  revoked_source: 'Discovery consent ended',
+  unavailable: 'Not found at the last scan',
+  unsupported_format: 'Catalog record only',
+  project_provider_unavailable: 'Needs a project integration',
+  home_provider_unavailable: 'Home package unavailable',
+  provider_ambiguous: 'Integration needs review',
+  folder_owned: 'Folder already used by another workspace'
+};
+
+export function activationStateLabel(state) {
+  // Own properties only: a state like "__proto__" or "toString" must not resolve
+  // to something inherited from Object.prototype.
+  return typeof state === 'string' && Object.hasOwn(ACTIVATION_STATE_LABELS, state)
+    ? ACTIVATION_STATE_LABELS[state]
+    : 'Setup status unknown';
+}
+
+// Where "Set up the project team" goes for a connected project: its own page,
+// asking for the setup form of the first empty role the project's roster offers
+// (primary, then required, then any). The roster is the project's own canonical
+// read, so a role that is filled, read-only, or unknown is never requested; with
+// nothing to fill (or no roster) it is just the project page. The role only
+// selects which form opens: the page's own reviewed staffing does the rest.
+export function projectTeamURL(route, rosterResponse) {
+  const base = String(route || '');
+  if (!/^\/workspaces\/[^/?#]+$/.test(base)) return '';
+  const rows = Array.isArray(rosterResponse?.roles?.roles) ? rosterResponse.roles.roles : [];
+  const empty = rows.filter(
+    row =>
+      row &&
+      row.state === 'empty' &&
+      !row.read_only &&
+      typeof row.role_id === 'string' &&
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(row.role_id)
+  );
+  const pick = empty.find(row => row.primary) || empty.find(row => row.required) || empty[0];
+  return pick ? `${base}?role=${encodeURIComponent(pick.role_id)}` : base;
+}
+
+const folderName = path =>
+  String(path || '')
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop() || 'this folder';
+
+// The one next step for an unfinished Home library, read from the library's own
+// state and never inferred from files. It only names what to review next; every
+// action still opens that step's own review and confirmation. An established
+// Home (a connected folder with a finished scan) returns stage "ready" and shows
+// nothing, so the shelf stays the place to browse and search.
+//   collection: display name of the collection carried from intake, if known.
+export function setupNextStep({ state = null, collection = '', carried = false } = {}) {
+  if (!state) return { stage: 'unknown' };
+  if (state.provider_read_only !== false) {
+    return {
+      stage: 'read_only',
+      title: 'This Home’s package is unavailable',
+      body: 'The library is read-only until the Home’s package is available again. Nothing was changed, and your saved notes and links are kept.',
+      action: null
+    };
+  }
+  const named = collection || '';
+  if (state.initialized !== true && carried && named) {
+    // The person already chose this collection, so starting the library is part of
+    // setting it up. The button says so; the exact folder is then shown for its own
+    // review, and a scan is reviewed after that.
+    return {
+      stage: 'not_initialized',
+      title: `Set up the library for ${named}`,
+      body: `${named} is waiting. This starts the Home’s library (it copies saved notes and exact project links), then shows you the exact folder to review. Nothing is read or scanned until you confirm the folder, and then the scan.`,
+      action: { id: 'initialize', label: `Start library and review ${named}` }
+    };
+  }
+  if (state.initialized !== true) {
+    return {
+      stage: 'not_initialized',
+      title: named ? `Set up the library for ${named}` : 'Start this Home’s project library',
+      body: `${named ? `${named} is waiting. ` : ''}Starting the library copies this Home’s saved notes and exact project links into it. It opens no folders and scans nothing; you review each next step separately.`,
+      action: { id: 'initialize', label: 'Review library setup' }
+    };
+  }
+  const roots = Array.isArray(state.roots) ? state.roots : [];
+  const active = roots.filter(root => !root.revoked_at && !root.needs_review);
+  if (!active.length) {
+    const canPick = carried || state.picker_available !== false;
+    return {
+      stage: 'no_root',
+      title: named ? `Connect ${named} to this Home` : 'Connect a folder to discover projects',
+      body: canPick
+        ? 'Connecting lets Ori read folder names and project markers only. Nothing is scanned until you review a scan.'
+        : 'The native folder picker is unavailable here. Use Ori desktop to add a folder; your saved projects stay usable meanwhile.',
+      action: canPick ? { id: 'add_folder', label: 'Review folder connection' } : null
+    };
+  }
+  const unscanned = active.find(root => !root.last_scan);
+  if (unscanned) {
+    return {
+      stage: 'not_scanned',
+      title: `Scan ${folderName(unscanned.path)} once`,
+      body: 'The folder is connected but has not been scanned. A scan reads folder names and project markers only, never project files.',
+      action: { id: 'scan', label: 'Review scan', rootId: unscanned.id }
+    };
+  }
+  const finished = active.some(
+    root => root.last_scan.status === 'complete' || root.last_scan.status === 'partial'
+  );
+  if (!finished) {
+    const failed = active[0];
+    return {
+      stage: 'scan_incomplete',
+      title: 'The last scan did not finish',
+      body: 'Anything already found is kept. Review a fresh scan when you are ready; nothing was changed.',
+      action: { id: 'scan', label: 'Review scan again', rootId: failed.id }
+    };
+  }
+  return { stage: 'ready' };
 }
 
 export function libraryQuery({
@@ -77,10 +261,19 @@ export function libraryDigestText(digest, roots = []) {
   const projects = count(digest.projects);
   const parts = [`${projects} ${projects === 1 ? 'project' : 'projects'}`];
   if (count(digest.new) > 0) parts.push(`${count(digest.new)} new`);
+  // Each song is in one bucket: already connected, can be set up, or an
+  // unsupported format. A file choice is part of "can be set up", not another
+  // bucket, so the parts never add up to more than the projects found.
+  if (count(digest.connected) > 0) parts.push(`${count(digest.connected)} already connected`);
   if (digest.setup_note) {
     parts.push(DIGEST_SETUP_NOTES[digest.setup_note] || 'project setup is unavailable');
   } else {
-    parts.push(`${count(digest.activatable)} can be set up`);
+    const choices = count(digest.needs_file_choice);
+    parts.push(
+      `${count(digest.activatable)} can be set up${
+        choices > 0 ? ` (${choices} ${choices === 1 ? 'needs' : 'need'} a file choice)` : ''
+      }`
+    );
     if (count(digest.unsupported_format) > 0)
       parts.push(`${count(digest.unsupported_format)} unsupported format`);
   }
@@ -220,6 +413,39 @@ export class ProjectLibraryPanel {
     const fromOffer =
       new URLSearchParams(globalThis.location?.search || '').get('folder_offer_id') || '';
     this.offerID = fromOffer.length <= 160 ? fromOffer : '';
+    // Collections chosen for this Home that the server reported, newest first.
+    this.continuations = [];
+  }
+
+  // A Home reopened without its query string (new tab, bookmark, an address
+  // that was rewritten) still knows which collection it was created from. The
+  // server names it only by an opaque offer ID and only while it can still vouch
+  // for the folder. Adopting that ID grants nothing: pick-offer, the root review
+  // and the commit each re-verify the Home, provider and folder. More than one
+  // ready collection is ambiguous, so none is chosen for the user.
+  async restoreCollectionContinuation({ adopt = true } = {}) {
+    if (!this.workspaceId) return;
+    try {
+      const response = await this.fetchImpl(
+        `/api/personal-assistant/folder-digest/continuations?home_id=${encodeURIComponent(this.workspaceId)}`,
+        { headers: { Accept: 'application/json' } }
+      );
+      if (!response.ok) return;
+      const result = await payload(response);
+      this.continuations = (Array.isArray(result.continuations) ? result.continuations : []).filter(
+        item =>
+          item &&
+          typeof item.offer_id === 'string' &&
+          item.offer_id !== '' &&
+          item.offer_id.length <= 160
+      );
+      const ready = this.continuations.filter(item => item.state === 'ready');
+      // An address that already names a collection wins; the read still tells us
+      // its folder name for the setup card.
+      if (adopt && !this.offerID && ready.length === 1) this.offerID = ready[0].offer_id;
+    } catch (_) {
+      // Purely advisory: without it the user chooses the folder as before.
+    }
   }
 
   get panel() {
@@ -247,6 +473,7 @@ export class ProjectLibraryPanel {
           : result.error?.message || result.message || `Library request failed (${response.status})`
       );
       error.status = response.status;
+      error.reason = typeof result.reason === 'string' ? result.reason : '';
       throw error;
     }
     return result;
@@ -295,11 +522,26 @@ export class ProjectLibraryPanel {
       await work();
     } catch (error) {
       this.status(error.message || 'The library could not be updated. Nothing was confirmed.');
+      if (error.reason === 'stale_review') {
+        // The Home moved on while a review was open (even an inert review
+        // advances its revision). Re-read it so the next review uses the current
+        // one instead of conflicting again; nothing was granted.
+        await this.refresh();
+        this.status(
+          'The library changed while you were reviewing, so nothing was granted. It has been refreshed; review again.'
+        );
+      }
     } finally {
       this.busy = false;
       this.renderQueueControls();
       this.panel?.setAttribute('aria-busy', 'false');
-      if (trigger?.isConnected) {
+      if (trigger?.id === 'projectSetupNextAction' && trigger.closest?.('[hidden]')) {
+        // The step finished and its card hid itself: keep keyboard focus on the
+        // shelf rather than on a control that is no longer there.
+        const heading = document.getElementById('projectLibraryTitle');
+        heading?.setAttribute('tabindex', '-1');
+        heading?.focus();
+      } else if (trigger?.isConnected) {
         trigger.disabled =
           (trigger.id === 'projectLibraryAdd' &&
             (!this.state?.initialized ||
@@ -338,6 +580,12 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibraryMore')
       ?.addEventListener('click', () => void this.search(true));
+    document
+      .getElementById('projectLibrarySelectAll')
+      ?.addEventListener('click', () => this.toggleSelectAll());
+    document.getElementById('projectLibraryConnectAll')?.addEventListener('click', event => {
+      void this.connectSelected(event.currentTarget);
+    });
     document.getElementById('projectLibraryQueueStart')?.addEventListener('click', event => {
       void this.startQueue(event.currentTarget);
     });
@@ -350,7 +598,48 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibraryMoreRoots')
       ?.addEventListener('click', event => void this.moreRoots(event.currentTarget));
+    document
+      .getElementById('projectSetupNextAction')
+      ?.addEventListener('click', event => void this.runSetupNext(event.currentTarget));
+    await this.restoreCollectionContinuation();
     await this.refresh();
+    await this.resumeFromIntegration();
+  }
+
+  // Shows the one next step of an unfinished library above the roster and
+  // progression, so a fresh Home opens on what to do rather than on a level
+  // meter. Pure navigation: the button only starts that step's own review.
+  renderSetupNext() {
+    const section = document.getElementById('projectSetupNext');
+    if (!section) return;
+    const collection =
+      this.continuations.find(item => item.offer_id === this.offerID)?.folder || '';
+    const step = setupNextStep({ state: this.state, collection, carried: Boolean(this.offerID) });
+    this.setupStep = step;
+    const visible = step.stage !== 'ready' && step.stage !== 'unknown';
+    section.hidden = !visible;
+    document.getElementById('assistantProgramPage')?.classList.toggle('is-setup-first', visible);
+    if (!visible) return;
+    document.getElementById('projectSetupNextTitle').textContent = step.title;
+    document.getElementById('projectSetupNextBody').textContent = step.body;
+    const action = document.getElementById('projectSetupNextAction');
+    if (action) {
+      action.hidden = !step.action;
+      action.textContent = step.action?.label || '';
+      action.disabled = this.busy;
+    }
+  }
+
+  async runSetupNext(trigger) {
+    const action = this.setupStep?.action;
+    if (!action || this.busy) return;
+    if (action.id === 'initialize')
+      return this.initialize(trigger, { announced: /^Start library and /.test(action.label) });
+    if (action.id === 'add_folder') return this.addFolder(trigger);
+    if (action.id === 'scan') {
+      const root = (this.state?.roots || []).find(item => item.id === action.rootId);
+      if (root) return this.scanRoot(root, trigger);
+    }
   }
 
   async refresh() {
@@ -369,10 +658,14 @@ export class ProjectLibraryPanel {
             ? 'The Home provider is unavailable. Saved library setup needs its exact installed package.'
             : 'No library yet. Review the saved project links before choosing a folder.'
         );
+        // Arriving on an uninitialized Home used to skip both of these.
+        this.renderSetupNext();
+        this.focusArrival();
         return;
       }
       this.renderFormats();
       this.renderRoots();
+      this.renderSetupNext();
       await this.restoreQueue();
       this.renderQueueControls();
       await this.renderResume();
@@ -384,28 +677,55 @@ export class ProjectLibraryPanel {
           'The native folder picker is unavailable here. You can still review approved folders for another scan; use Ori desktop to add a folder.'
         );
     } catch (error) {
-      this.state = null;
-      this.status(
-        error.message || 'Could not load the Home library. Retry by reopening this Home.'
-      );
-      document.getElementById('projectLibraryAdd').hidden = true;
-      document.getElementById('projectLibrarySetup').hidden = true;
-      document.getElementById('projectLibraryContent').hidden = true;
+      if (this.state?.initialized === true) {
+        // A library that was already on screen stays there. A failed re-read
+        // means the current check is unavailable, not that saved projects
+        // vanished, and hiding them would say otherwise. Nothing was changed.
+        this.status(
+          'Ori could not re-check this library just now, so this is what was last saved. Nothing was changed; reopen this Home to check again.'
+        );
+        this.renderSetupNext();
+      } else {
+        this.state = null;
+        this.status(
+          error.message || 'Could not load the Home library. Retry by reopening this Home.'
+        );
+        document.getElementById('projectLibraryAdd').hidden = true;
+        document.getElementById('projectLibrarySetup').hidden = true;
+        document.getElementById('projectLibraryContent').hidden = true;
+        this.renderSetupNext(); // no state: the card hides rather than guessing
+      }
     }
     this.focusArrival();
   }
 
-  // Arriving from a map badge or an Action Center card lands on the
-  // suggestions heading once the shelf has rendered, instead of wherever the
-  // browser's early hash scroll left the page. Only the first render counts.
+  // Arriving from a map badge, an Action Center card, or a new Home lands on the
+  // relevant heading once the page has rendered, instead of wherever the
+  // browser's early hash scroll left it (the library sits below four panels and
+  // is un-hidden late). Suggestions arrivals land on the suggestions heading; a
+  // #projectLibraryPanel arrival lands on the unfinished-setup card when there is
+  // one, else the shelf heading. Only the first render counts, so later
+  // refreshes never take the user's focus back.
   focusArrival() {
-    if (this.arrivalHandled || globalThis.location?.hash !== '#projectLibraryProposals') return;
+    if (this.arrivalHandled) return;
+    const hash = globalThis.location?.hash;
+    let heading = null;
+    if (hash === '#projectLibraryProposals') {
+      const section = document.getElementById('projectLibraryProposals');
+      heading =
+        section && !section.hidden
+          ? document.getElementById('projectLibraryProposalsTitle')
+          : document.getElementById('projectLibraryTitle');
+    } else if (hash === '#projectLibraryPanel') {
+      const next = document.getElementById('projectSetupNext');
+      heading =
+        next && !next.hidden
+          ? document.getElementById('projectSetupNextTitle')
+          : document.getElementById('projectLibraryTitle');
+    } else {
+      return;
+    }
     this.arrivalHandled = true;
-    const section = document.getElementById('projectLibraryProposals');
-    const heading =
-      section && !section.hidden
-        ? document.getElementById('projectLibraryProposalsTitle')
-        : document.getElementById('projectLibraryTitle');
     if (!heading) return;
     heading.setAttribute('tabindex', '-1');
     heading.scrollIntoView?.({ block: 'start' });
@@ -837,7 +1157,14 @@ export class ProjectLibraryPanel {
                 await this.renderResume();
                 return;
               }
-              globalThis.location.assign(`/workspaces/${encodeURIComponent(current.workspace_id)}`);
+              const route = await this.workspaceRoute(current.workspace_id);
+              if (!route) {
+                this.status(
+                  'That workspace page could not be found right now. Nothing was changed.'
+                );
+                return;
+              }
+              globalThis.location.assign(route);
             })
         );
         item.append(workspace);
@@ -1064,6 +1391,167 @@ export class ProjectLibraryPanel {
     }
   }
 
+  // Rows a person can pick: catalog-only songs on the pages loaded so far.
+  selectableRows() {
+    return this.readOnly ? [] : this.rows.filter(row => row.connection === 'catalog_only');
+  }
+
+  toggleSelectAll() {
+    const pickable = this.selectableRows();
+    if (this.queue || !pickable.length) return;
+    if (pickable.every(row => this.selectedProjects.has(row.id))) {
+      for (const row of pickable) this.selectedProjects.delete(row.id);
+    } else {
+      let left = 0;
+      for (const row of pickable) {
+        if (this.selectedProjects.has(row.id)) continue;
+        if (this.selectedProjects.size >= QUEUE_LIMIT) left++;
+        else this.selectedProjects.add(row.id);
+      }
+      if (left)
+        this.status(`Selected ${QUEUE_LIMIT}, the most one queue takes; ${left} were left out.`);
+      else if (this.cursor)
+        this.status('Selected every song shown. Load more to include the rest.');
+    }
+    this.renderRows();
+    this.renderQueueControls();
+  }
+
+  // Connect every selected song that needs no further choice, after ONE review
+  // that lists each song with its exact file. The library binds a server review
+  // to the document revision, so the reviews cannot all be taken up front: each
+  // song is still reviewed and committed on its own with its own token and key,
+  // and only when the server's review names the file the person confirmed. A song
+  // that needs a file choice or an integration is left alone and named. The first
+  // failure stops the rest; songs already connected stay connected.
+  async connectSelected(trigger) {
+    if (this.queue || this.readOnly || this.busy || this.selectedProjects.size < 2) return;
+    await this.run(trigger, 'Checking the selected songs…', async () => {
+      const ready = [];
+      const left = [];
+      let integration = null;
+      for (const id of [...this.selectedProjects]) {
+        const path = `/projects/${encodeURIComponent(id)}`;
+        const detail = await this.request(path);
+        if (detail.row.connection === 'connected') {
+          this.selectedProjects.delete(id);
+          continue;
+        }
+        const eligibility = await this.request(`${path}/activation`);
+        const files = eligibility.project_files || [];
+        if (eligibility.state === 'review_available' && files.length === 1) {
+          ready.push({
+            id,
+            path,
+            name: detail.row.name,
+            file: files[0],
+            roles: eligibility.project_role_labels || []
+          });
+        } else {
+          const offered =
+            eligibility.state === 'project_provider_unavailable' && eligibility.integration_offer;
+          if (offered && !integration) integration = { detail, offer: offered };
+          left.push(
+            `${detail.row.name}: ${
+              eligibility.state === 'file_choice_required'
+                ? 'choose its project file'
+                : offered
+                  ? `needs the ${offered.display_name || 'project'} integration`
+                  : eligibility.reason || 'project setup needs its own review'
+            }`
+          );
+        }
+      }
+      if (!ready.length) {
+        this.renderRows();
+        if (integration) {
+          // Nothing can be connected yet because the integration is missing: say so
+          // where it is seen and offer its review, rather than a line of small text.
+          const name = integration.offer.display_name || 'project';
+          if (
+            await this.confirm(
+              `Install the ${name} integration first?`,
+              [
+                `None of the ${left.length} selected songs can be connected yet:`,
+                ...left,
+                'Nothing is installed until you confirm it in the integration review. Afterwards you return to a song here and can select all again.'
+              ],
+              `Review the ${name} integration`,
+              trigger
+            )
+          ) {
+            this.startIntegrationReview(integration.detail, integration.offer);
+            return;
+          }
+        }
+        this.status(
+          left.length
+            ? `Nothing to connect together. ${left.join('; ')}.`
+            : 'The selected songs are already connected.'
+        );
+        return;
+      }
+      const roles = [...new Set(ready.flatMap(item => item.roles))];
+      const lines = [
+        `Connect ${ready.length} songs, each as its own project workspace:`,
+        ...ready.map(item => `${item.name} — ${item.file}`),
+        `Installed project roles: ${roles.join(', ') || 'none declared'}`,
+        'Each starts File-only. Source files stay where they are and are never changed. Project-role staffing and live access need separate reviews.'
+      ];
+      if (left.length) lines.push(`Not included (each needs its own review): ${left.join('; ')}`);
+      if (!(await this.confirm(`Connect ${ready.length} songs?`, lines, 'Connect all', trigger))) {
+        this.status('Nothing was connected.');
+        return;
+      }
+      const done = [];
+      let failure = '';
+      for (const item of ready) {
+        try {
+          const detail = await this.request(item.path);
+          if (detail.row.connection !== 'connected') {
+            const eligibility = await this.request(`${item.path}/activation`);
+            const files = eligibility.project_files || [];
+            if (
+              eligibility.state !== 'review_available' ||
+              files.length !== 1 ||
+              files[0] !== item.file
+            ) {
+              throw new Error('it changed after you confirmed, so it was not connected');
+            }
+            const review = await this.post(`${item.path}/activation/review`, {
+              workspace_name: detail.row.name.slice(0, 128),
+              project_file: item.file,
+              if_revision: detail.revision
+            });
+            if (review.project_file !== item.file) {
+              throw new Error('its reviewed file differs from the one you confirmed');
+            }
+            await this.post(`${item.path}/activation/commit`, {
+              review_token: review.token,
+              idempotency_key: operationKey('batch-activation'),
+              confirm: true
+            });
+          }
+          done.push(item.name);
+          this.selectedProjects.delete(item.id);
+        } catch (error) {
+          failure = `${item.name}: ${error.message || 'could not be connected'}`;
+          break;
+        }
+      }
+      await this.refresh();
+      this.status(
+        [
+          `Connected ${done.length} of ${ready.length}.`,
+          failure ? `Stopped at ${failure}. Songs not reached were left alone.` : '',
+          left.length ? `${left.length} need their own review.` : ''
+        ]
+          .filter(Boolean)
+          .join(' ')
+      );
+    });
+  }
+
   renderQueueControls() {
     const message = document.getElementById('projectLibraryQueueStatus');
     const start = document.getElementById('projectLibraryQueueStart');
@@ -1077,9 +1565,22 @@ export class ProjectLibraryPanel {
         : pending
           ? `${pending.index} of ${pending.ids.length} handled · ${pending.skipped?.length || 0} skipped · order and skips saved on this Home. Each remaining song needs its own review; already connected songs stay connected.`
           : this.selectedProjects.size
-            ? `${this.selectedProjects.size} selected · no project will be created until each one is confirmed.`
+            ? `${this.selectedProjects.size} selected · nothing is connected until you review and confirm.`
             : 'Choose at least two catalog-only projects to review one at a time.';
     start.disabled = this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
+    const selectAll = document.getElementById('projectLibrarySelectAll');
+    const connectAll = document.getElementById('projectLibraryConnectAll');
+    if (selectAll) {
+      const pickable = this.selectableRows();
+      const everyPicked =
+        pickable.length > 0 && pickable.every(row => this.selectedProjects.has(row.id));
+      selectAll.textContent = everyPicked ? 'Clear selection' : `Select all (${pickable.length})`;
+      selectAll.disabled = this.busy || this.readOnly || !!pending || pickable.length === 0;
+    }
+    if (connectAll) {
+      connectAll.disabled =
+        this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
+    }
     resume.hidden = discard.hidden = !pending;
     resume.disabled = this.busy || this.readOnly || pending?.status === 'expired';
     discard.disabled = this.busy;
@@ -1234,7 +1735,10 @@ export class ProjectLibraryPanel {
     }
   }
 
-  queueChoice(name, position, count, trigger, reason = '') {
+  // `offer` is the host's reviewed-integration offer for a song that cannot be
+  // set up yet. Choosing it pauses the queue at this same song (no progress, no
+  // creator, no review token); it resumes from here with a fresh review.
+  queueChoice(name, position, count, trigger, reason = '', offer = null) {
     return new Promise(resolve => {
       const dialog = node('dialog', 'assistant-program-hire-dialog project-library-dialog');
       const form = node('form');
@@ -1262,6 +1766,19 @@ export class ProjectLibraryPanel {
         choice = 'review';
       });
       actions.append(pause, skip);
+      if (reason && offer?.quest_id && offer?.display_name) {
+        const integration = node(
+          'button',
+          'modern-btn modern-btn-primary',
+          `Review the ${offer.display_name} integration`
+        );
+        integration.type = 'button';
+        integration.addEventListener('click', () => {
+          choice = 'integration';
+          dialog.close();
+        });
+        actions.append(integration);
+      }
       if (!reason) actions.append(proceed);
       form.append(
         heading,
@@ -1269,7 +1786,7 @@ export class ProjectLibraryPanel {
           'p',
           '',
           reason
-            ? `${reason} Project setup is unavailable. Skip this song or pause the saved Home queue; neither action creates a project.`
+            ? `${reason} Project setup is unavailable. Skip this song or pause the saved Home queue; neither action creates a project.${offer ? ' You can also review the integration; the queue stays paused on this song until you resume it.' : ''}`
             : 'This song needs its own authoritative-file choice and final confirmation. Skipping creates nothing; pausing keeps the saved Home queue.'
         ),
         actions
@@ -1355,10 +1872,19 @@ export class ProjectLibraryPanel {
               this.queue.index + 1,
               this.queue.ids.length,
               trigger,
-              canReview ? '' : eligibility.reason || 'Project setup needs a fresh review.'
+              canReview ? '' : eligibility.reason || 'Project setup needs a fresh review.',
+              canReview ? null : eligibility.integration_offer || null
             );
             if (action === 'pause') {
               this.status('Review queue paused; no other song was connected.');
+              return;
+            }
+            if (action === 'integration' && eligibility.integration_offer) {
+              // The queue stays exactly here: same song, no progress, no creator.
+              this.status(
+                'Review queue paused on this song while you review the integration. Resume it afterwards for a fresh check.'
+              );
+              this.startIntegrationReview(detail, eligibility.integration_offer);
               return;
             }
             if (action === 'skip') {
@@ -1485,10 +2011,14 @@ export class ProjectLibraryPanel {
     });
   }
 
-  async initialize(trigger) {
+  // announced: the setup card's button already said it starts the library (for a
+  // collection the person chose), and the folder's own review follows, so this
+  // step needs no dialog of its own. Any other entry still asks first.
+  async initialize(trigger, { announced = false } = {}) {
     await this.run(trigger, 'Preparing your saved project links for review…', async () => {
       const review = await this.post('/initialize/review');
       if (
+        !announced &&
         !(await this.confirm(
           'Start a Home project library?',
           [
@@ -1511,19 +2041,39 @@ export class ProjectLibraryPanel {
       await this.addFolder(trigger, this.offerID);
   }
 
+  // The carried collection has been used: forget it and drop it from the address
+  // so a reload does not offer it again.
+  consumeOffer(offerID) {
+    this.offerID = '';
+    if (offerID && globalThis.history?.replaceState && globalThis.location?.href) {
+      const url = new URL(globalThis.location.href);
+      url.searchParams.delete('folder_offer_id');
+      globalThis.history.replaceState(globalThis.history.state, '', url);
+    }
+  }
+
   async addFolder(trigger, offerID = this.offerID) {
     await this.run(trigger, 'Preparing the folder selection…', async () => {
       let picked;
       if (offerID) {
         try {
           picked = await this.post('/roots/pick-offer', { offer_id: offerID });
-        } catch (_) {
+        } catch (error) {
+          // Ask the server why, rather than telling every failure "expired or
+          // changed". Package/Home/picker problems are not fixed by a new pick.
+          await this.restoreCollectionContinuation({ adopt: false });
+          const recovery = selectionRecovery({
+            reason: error.reason,
+            continuation: this.continuations.find(item => item.offer_id === offerID) || null
+          });
+          if (!recovery.repick) {
+            this.status(recovery.message);
+            return;
+          }
           if (
             !(await this.confirm(
               'Choose the folder again?',
-              [
-                'The original selection expired or changed. Your Home remains ready, but a new native selection is required.'
-              ],
+              [recovery.message],
               'Open folder picker',
               trigger
             ))
@@ -1532,6 +2082,20 @@ export class ProjectLibraryPanel {
         }
       }
       if (!picked) picked = await this.post('/roots/pick');
+      if (picked.cancelled) {
+        this.status('No folder was chosen. Nothing was connected or read.');
+        return;
+      }
+      if (picked.existing_root_id) {
+        // This Home already approved the folder. A second root review would end
+        // in a refused duplicate after the user confirmed it, so continue at that
+        // root's own scan review. The offer is spent: nothing else to grant.
+        this.consumeOffer(offerID);
+        await this.refresh();
+        this.status('This folder is already connected to your Home. Review a fresh scan of it.');
+        await this.scanRootFlow(picked.existing_root_id, trigger);
+        return;
+      }
       const review = await this.post('/roots/review', {
         selection_token: picked.selection_token,
         if_revision: this.state.revision
@@ -1547,31 +2111,26 @@ export class ProjectLibraryPanel {
           'Connect folder',
           trigger
         ))
-      )
+      ) {
+        // The inert review still advanced the Home document revision; without a
+        // refresh the next attempt would send a stale one and be refused.
+        await this.refresh();
+        this.status('Folder not connected. Nothing was granted or read.');
         return;
+      }
       const receipt = await this.post('/roots/commit', {
         review_token: review.token,
         idempotency_key: operationKey('root'),
         confirm: true
       });
-      this.offerID = '';
-      if (offerID && globalThis.history?.replaceState && globalThis.location?.href) {
-        const url = new URL(globalThis.location.href);
-        url.searchParams.delete('folder_offer_id');
-        globalThis.history.replaceState(globalThis.history.state, '', url);
-      }
+      this.consumeOffer(offerID);
       await this.refresh();
-      if (
-        await this.confirm(
-          'Scan the folder now?',
-          [
-            'One bounded scan will inspect folder names and project markers only. Source files will not be opened or changed.'
-          ],
-          'Review scan',
-          trigger
-        )
-      )
-        await this.scanRootFlow(receipt.root_id, trigger);
+      // The next review follows the refreshed revision of the grant just made.
+      // The scan review is itself the disclosure and confirmation (folder,
+      // bounds, cancel), so a separate "scan now?" question only added a stop.
+      // Cancelling it keeps the connected root; the setup card then offers the
+      // scan again without another folder pick.
+      await this.scanRootFlow(receipt.root_id, trigger);
     });
   }
 
@@ -1651,6 +2210,9 @@ export class ProjectLibraryPanel {
   }
 
   async scanRootFlow(rootID, trigger, scopeID = '') {
+    const recordedScan = () =>
+      (this.state?.roots || []).find(item => item.id === rootID)?.last_scan || null;
+    const priorScanID = recordedScan()?.id || '';
     const review = await this.post(`/roots/${encodeURIComponent(rootID)}/scans/review`, {
       if_revision: this.state.revision,
       ...(scopeID ? { scope_id: scopeID } : {})
@@ -1675,12 +2237,37 @@ export class ProjectLibraryPanel {
       this.status('Scan canceled. The folder was not read.');
       return;
     }
-    const receipt = await this.post(`/roots/${encodeURIComponent(rootID)}/scans/commit`, {
-      review_token: review.token,
-      idempotency_key: operationKey('scan'),
-      confirm: true,
-      ...(scopeID ? { scope_id: scopeID } : {})
-    });
+    const idempotencyKey = operationKey('scan');
+    const commit = () =>
+      this.post(`/roots/${encodeURIComponent(rootID)}/scans/commit`, {
+        review_token: review.token,
+        idempotency_key: idempotencyKey,
+        confirm: true,
+        ...(scopeID ? { scope_id: scopeID } : {})
+      });
+    let receipt;
+    try {
+      receipt = await commit();
+    } catch (error) {
+      // A definite refusal (4xx) is final. No answer at all (a dropped
+      // connection) or a server error is uncertain: the scan may have been
+      // recorded. The same review and key are a replay on the server, which
+      // returns the scan it already recorded and never scans twice.
+      if (!(error.status === undefined || error.status >= 500)) throw error;
+      try {
+        receipt = await commit();
+      } catch (again) {
+        await this.refresh();
+        const seen = recordedScan();
+        if (seen && seen.id !== priorScanID) {
+          this.status(
+            `The reply was lost, but this scan was recorded: ${label(seen.status)} · ${seen.entries_seen} names checked. It was not repeated.`
+          );
+          return;
+        }
+        throw again;
+      }
+    }
     await this.refresh();
     this.status(
       `${label(receipt.status)} scan · ${receipt.entries_seen} entries seen · ${receipt.skipped_links + receipt.skipped_other} skipped${receipt.partial_reason ? ` · ${receipt.partial_reason}` : ''}.`
@@ -1715,6 +2302,57 @@ export class ProjectLibraryPanel {
       });
       await this.refresh();
     });
+  }
+
+  // Sends the person to the host's reviewed install quest for this song's
+  // integration, remembering only where to come back to. The quest ID comes from
+  // the server's offer (validated again by the quest link builder), never from
+  // the row; the hint is navigation only and grants nothing.
+  startIntegrationReview(detail, offer) {
+    let target;
+    try {
+      target = setupQuestURL({ source: 'host', id: offer.quest_id });
+    } catch (_) {
+      this.status('That integration review is unavailable right now. Nothing was changed.');
+      return;
+    }
+    const remembered = writeLibraryReturn({
+      homeID: this.workspaceId,
+      entryID: detail.row.id,
+      questID: offer.quest_id,
+      path: globalThis.location?.pathname || ''
+    });
+    if (!remembered) {
+      this.status(
+        'Ori could not remember where to bring you back to. Open the integration from the Plugins page instead; nothing was changed.'
+      );
+      return;
+    }
+    globalThis.location.assign(target);
+  }
+
+  // Back from the integration review (or the Plugins page): reopen the same song
+  // so it shows its fresh eligibility. The hint names the Home and an opaque
+  // song ID and is checked against this exact Home; the song, its source and
+  // its eligibility are re-read from the server like any other click. Nothing is
+  // created, no folder grant is restored, and no application is launched.
+  async resumeFromIntegration() {
+    const hint = readLibraryReturn();
+    if (!hint || hint.home_id !== this.workspaceId) return;
+    clearLibraryReturn(); // one return per hint; a reload never repeats it
+    try {
+      await this.request(`/projects/${encodeURIComponent(hint.entry_id)}`);
+    } catch (error) {
+      this.status(
+        error.status === 404
+          ? 'The song you were checking is no longer in this library. Nothing was changed.'
+          : 'Ori could not re-check that song just now. Open it from the shelf to check again.'
+      );
+      return;
+    }
+    await this.details(hint.entry_id, null);
+    // After details(): its own progress message would otherwise replace this one.
+    this.status('Back on your song. Its integration status was checked again.');
   }
 
   async details(entryID, trigger) {
@@ -1765,11 +2403,39 @@ export class ProjectLibraryPanel {
           : null;
       const next = node('p', '', `Next action: ${detail.fields.next_action || 'Not set'}`);
       const setup = node('section', 'project-library-setup-preview');
-      setup.append(node('h3', '', 'Project setup'), node('p', '', activation.reason));
+      setup.append(
+        node('h3', '', 'Project setup'),
+        node('p', 'project-library-state', activationStateLabel(activation.state)),
+        node('p', '', activation.reason),
+        node(
+          'p',
+          'project-library-note',
+          'Based on the last scan and the integrations installed now. No project application was opened or checked.'
+        )
+      );
       if (activation.state === 'project_provider_unavailable') {
+        // The host offers a reviewed integration only when it is the honest
+        // remedy for this song's observed format on this computer. Formats no
+        // reviewed integration supports get no install offer, only notes and
+        // session planning below.
+        const offer = activation.integration_offer;
+        const remedies = node('div', 'project-library-remedies');
+        if (offer?.quest_id && offer?.display_name && !this.readOnly) {
+          const review = node(
+            'button',
+            'modern-btn modern-btn-primary',
+            `Review the ${offer.display_name} integration`
+          );
+          review.type = 'button';
+          review.title =
+            'Opens the reviewed install. Nothing is installed or connected until you confirm it there; you return to this song afterwards.';
+          review.addEventListener('click', () => this.startIntegrationReview(detail, offer));
+          remedies.append(review);
+        }
         const plugins = node('a', '', 'Review integrations on the Plugins page');
         plugins.href = '/plugins';
-        setup.append(plugins);
+        remedies.append(plugins);
+        setup.append(remedies);
       }
       if (activation.project_role_labels?.length)
         setup.append(
@@ -1867,9 +2533,13 @@ export class ProjectLibraryPanel {
         detail.row.connection === 'connected' &&
         activation.workspace_id
       ) {
-        const open = node('a', 'modern-btn modern-btn-secondary', 'Open connected workspace');
-        open.href = `/workspaces/${encodeURIComponent(activation.workspace_id)}`;
-        actions.append(open);
+        // Routed by slug; with no resolvable page there is no link to offer.
+        const route = await this.workspaceRoute(activation.workspace_id);
+        if (route) {
+          const open = node('a', 'modern-btn modern-btn-secondary', 'Open connected workspace');
+          open.href = route;
+          actions.append(open);
+        }
         if (!this.readOnly) {
           const showFolder = node(
             'button',
@@ -2145,6 +2815,52 @@ export class ProjectLibraryPanel {
     });
   }
 
+  // A workspace page is routed by its folder slug, never its ID: /workspaces/<id>
+  // is a 404. Resolve the slug from the canonical workspace read. Returns '' when
+  // it cannot be resolved, so a caller shows no link rather than a dead one.
+  async workspaceRoute(workspaceID) {
+    return (await this.workspacePage(workspaceID)).route;
+  }
+
+  // One read of the canonical workspace gives both facts a link to it needs: its
+  // page route and whether it has chosen how it works (its workspace mode). A
+  // project that has not chosen a mode opens its own mode wizard first, so its
+  // team form must not be requested on top of that.
+  async workspacePage(workspaceID) {
+    const none = { route: '', modeChosen: false };
+    if (!workspaceID) return none;
+    try {
+      const response = await this.fetchImpl(`/api/workspaces/${encodeURIComponent(workspaceID)}`, {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) return none;
+      const workspace = await payload(response);
+      const slug = String(workspace?.folder_slug || '').trim();
+      return {
+        route: slug ? `/workspaces/${encodeURIComponent(slug)}` : '',
+        modeChosen: String(workspace?.runtime_state?.selected_mode_id || '').trim() !== ''
+      };
+    } catch (_) {
+      return none;
+    }
+  }
+
+  // The connected project's own roster, read from the canonical project route
+  // (not the library's), turned into the link that opens its team setup form.
+  // Best effort: any failure just means the plain project link, never an error
+  // after a project was already connected.
+  async projectTeamLink(workspaceID, route) {
+    try {
+      const response = await this.fetchImpl(
+        `/api/workspaces/${encodeURIComponent(workspaceID)}/roles`,
+        { headers: { Accept: 'application/json' } }
+      );
+      return projectTeamURL(route, response.ok ? await payload(response) : null);
+    } catch (_) {
+      return projectTeamURL(route, null);
+    }
+  }
+
   async saveActivation(detail, input, trigger) {
     await this.run(trigger, 'Preparing one project for review…', async () => {
       const path = `/projects/${encodeURIComponent(detail.row.id)}/activation`;
@@ -2178,19 +2894,45 @@ export class ProjectLibraryPanel {
       const heading = node('h2', '', `${review.workspace_name} is connected`);
       heading.id = operationKey('connected-project');
       dialog.setAttribute('aria-labelledby', heading.id);
-      const open = node('a', 'modern-btn modern-btn-primary', 'Open project workspace');
-      open.href = `/workspaces/${encodeURIComponent(result.workspace_id)}`;
+      // The project's team is the next step and its own review. Point straight at
+      // its setup form when the project's roster has an empty role to fill.
+      const page = await this.workspacePage(result.workspace_id);
+      const route = page.route;
+      // The team form is requested directly only once the project has chosen how
+      // it works. Until then its page opens the mode wizard first (File-only is
+      // the starting option), and the team is set up right after.
+      const teamURL =
+        route && page.modeChosen ? await this.projectTeamLink(result.workspace_id, route) : '';
+      const hasTeamStep = teamURL.includes('?role=');
       const close = node('button', 'modern-btn modern-btn-secondary', 'Stay in library');
       close.type = 'button';
       close.addEventListener('click', () => dialog.close());
       const actions = node('div', 'assistant-program-dialog-actions');
-      actions.append(close, open);
+      actions.append(close);
+      // Routed by slug (an ID path is a 404). With no resolvable page there is no
+      // link to offer, and the project stays reachable from the library shelf.
+      if (route) {
+        const open = node(
+          'a',
+          `modern-btn ${hasTeamStep ? 'modern-btn-secondary' : 'modern-btn-primary'}`,
+          'Open project workspace'
+        );
+        open.href = route;
+        actions.append(open);
+      }
+      if (hasTeamStep) {
+        const team = node('a', 'modern-btn modern-btn-primary', 'Set up the project team');
+        team.href = teamURL;
+        actions.append(team);
+      }
       form.append(
         heading,
         node(
           'p',
           '',
-          'The saved folder is referenced, not copied or launched. No project role was staffed and no live access was granted; review those separately in the project workspace.'
+          hasTeamStep
+            ? 'The saved folder is referenced, not copied or launched. No project role was staffed and no live access was granted; the project’s team is set up in its own review next.'
+            : 'The saved folder is referenced, not copied or launched. No project role was staffed and no live access was granted. Open the project to choose how it works (File-only is the starting option); its team is set up in its own review right after.'
         ),
         actions
       );

@@ -37,7 +37,10 @@ Options:
   --suite NAME      Browser test suite: home (default), portfolio (local refusal),
                     portfolio-reviewed (published release; test only),
                     manager-notifications (scan digest, badge and Manager
-                    suggestions on the published release; test only), or
+                    suggestions on the published release; test only),
+                    onboarding (the guided collection -> catalog -> reviewed
+                    REAPER install -> song -> staffing journey on published
+                    releases; test only, no --reaper-source), or
                     package-upgrade (reviewed Home package upgrade from --source
                     to --upgrade-source; test only).
   --provider MODE   local (default) or reviewed (the two reviewed suites only).
@@ -149,11 +152,11 @@ done
 
 [[ -n "$plugin_source" ]] || fail "--source or ORI_MUSIC_PLUGIN_SOURCE is required"
 reviewed_suite=0
-if [[ "$test_suite" == "portfolio-reviewed" || "$test_suite" == "manager-notifications" ]]; then
+if [[ "$test_suite" == "portfolio-reviewed" || "$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" ]]; then
 	reviewed_suite=1
 fi
-if [[ -n "$reaper_source" ]] && { [[ "$mode" != "test" || "$provider_mode" != "reviewed" ]] || ((reviewed_suite == 0)); }; then
-	fail "--reaper-source needs test --suite portfolio-reviewed|manager-notifications --provider reviewed"
+if [[ -n "$reaper_source" ]] && { [[ "$mode" != "test" || "$provider_mode" != "reviewed" ]] || ((reviewed_suite == 0)) || [[ "$test_suite" == "onboarding" ]]; }; then
+	fail "--reaper-source needs test --suite portfolio-reviewed|manager-notifications --provider reviewed (the onboarding suite installs REAPER through the reviewed quest and takes no export)"
 fi
 [[ "$port" =~ ^[0-9]+$ ]] || fail "port must be numeric"
 ((port >= 1 && port <= 65535)) || fail "port must be between 1 and 65535"
@@ -163,8 +166,8 @@ if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
 fi
 [[ "$test_suite" == "home" || "$test_suite" == "portfolio" || "$test_suite" == "portfolio-reviewed" ||
-	"$test_suite" == "manager-notifications" || "$test_suite" == "package-upgrade" ]] || \
-	fail "--suite needs home, portfolio, portfolio-reviewed, manager-notifications or package-upgrade"
+	"$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" || "$test_suite" == "package-upgrade" ]] || \
+	fail "--suite needs home, portfolio, portfolio-reviewed, manager-notifications, onboarding or package-upgrade"
 if { [[ "$test_suite" == "package-upgrade" ]] && [[ -z "$upgrade_source" ]]; } ||
 	{ [[ "$test_suite" != "package-upgrade" ]] && [[ -n "$upgrade_source" ]]; }; then
 	fail "--suite package-upgrade and --upgrade-source go together"
@@ -175,7 +178,7 @@ if [[ "$mode" != "test" && "$test_suite" != "home" ]]; then
 fi
 if { ((reviewed_suite == 1)) && [[ "$provider_mode" != "reviewed" ]]; } ||
 	{ [[ "$provider_mode" == "reviewed" ]] && { [[ "$mode" != "test" ]] || ((reviewed_suite == 0)); }; }; then
-	fail "portfolio-reviewed and manager-notifications require test --provider reviewed; other suites require local"
+	fail "portfolio-reviewed, manager-notifications and onboarding require test --provider reviewed; other suites require local"
 fi
 if [[ "$mode" != "serve" && "$open_browser" -eq 1 ]]; then
 	fail "--open is only valid with the serve command"
@@ -414,6 +417,8 @@ if [[ "$mode" == "test" ]]; then
 		playwright_file="tests/music-home-portfolio-reviewed.spec.ts"
 	elif [[ "$test_suite" == "manager-notifications" ]]; then
 		playwright_file="tests/music-home-manager-notifications.spec.ts"
+	elif [[ "$test_suite" == "onboarding" ]]; then
+		playwright_file="tests/music-setup-onboarding.spec.ts"
 	elif [[ "$test_suite" == "package-upgrade" ]]; then
 		playwright_file="tests/music-home-package-upgrade.spec.ts"
 	fi

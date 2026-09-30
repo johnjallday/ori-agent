@@ -1039,6 +1039,44 @@ test('Group creator navigation exposes Details, Roster, then Review while Worksp
   assert.deepEqual(JSON.parse(JSON.stringify(manager.creatorWizardSteps())), [2]);
 });
 
+test('a connection-only creator has no Team step, gate, or agent choice; ordinary creators keep theirs', () => {
+  const manager = loadSessionManager();
+  const steps = () => JSON.parse(JSON.stringify(manager.creatorWizardSteps()));
+
+  // A setup quest's project step only connects the project: nothing it commits
+  // can staff a role, so the wizard must not ask for an agent it cannot honor.
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace', connectionOnly: true };
+  assert.equal(manager.usesTeamRosterCreator(), false);
+  // The blueprint is preselected by the quest, so it is neither a step to show
+  // nor one to count: Details and Review number "1 of 2" and "2 of 2".
+  assert.deepEqual(steps(), [2, 4]);
+  manager.wizardStep = 2;
+  assert.equal(manager.nextWizardStep(), 4, 'Details goes straight to Review');
+  manager.wizardStep = 4;
+  assert.equal(manager.previousWizardStep(), 2);
+  assert.equal(manager.isFinalWizardStep(), true);
+
+  // The Review card says exactly what is and is not committed.
+  const card = manager.renderWorkspaceReceiptTeam(null);
+  assert.match(card, /Project team/);
+  assert.match(card, /Set up in the next step/);
+  assert.match(card, /No agent or profile is created or attached now/);
+  assert.doesNotMatch(card, /data-wizard-edit-step/, 'no Edit team action to a step that is gone');
+
+  // Every other workspace creator is unchanged.
+  for (const context of [
+    { mode: 'ordinary', kind: 'workspace' },
+    { mode: 'ordinary', kind: 'workspace', connectionOnly: false },
+    { mode: 'ordinary', kind: 'workspace', stayAfterCreate: true }
+  ]) {
+    manager.workspaceCreatorContext = context;
+    assert.equal(manager.usesTeamRosterCreator(), true, JSON.stringify(context));
+    assert.deepEqual(steps(), [1, 2, 3, 4], JSON.stringify(context));
+  }
+  manager.workspaceCreatorContext = { mode: 'ordinary', kind: 'workspace' };
+  assert.doesNotMatch(manager.renderWorkspaceReceiptTeam(null), /Set up in the next step/);
+});
+
 test('an ordinary Group starts on its Blueprint step; a managed blueprint skips the roster', () => {
   let blueprintStep = true;
   let managed = false;

@@ -114,6 +114,11 @@
       // stayAfterCreate keeps the current page after a Workspace is created, so
       // a caller such as a setup quest can continue instead of navigating away.
       stayAfterCreate: Boolean(options.stayAfterCreate),
+      // connectionOnly is a creator whose commit only connects a project (a setup
+      // quest's project step). It has no Team step: the project's roles are
+      // staffed in their own reviewed step, so the wizard neither asks for an
+      // agent choice it cannot honor nor creates a profile as a side effect.
+      connectionOnly: Boolean(options.connectionOnly),
       // stageBlueprintRoles proposes the blueprint's whole team once in the draft.
       stageBlueprintRoles: Boolean(options.stageBlueprintRoles),
       blueprintRolesStaged: false,

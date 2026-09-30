@@ -145,7 +145,7 @@ func (s *Store) readSnapshotOnce(scope Scope) (Document, *workspace.AssistantPro
 	}
 	home, err := s.workspaces.Get(scope.HomeID)
 	if err != nil {
-		return Document{}, nil, ErrUnavailable
+		return Document{}, nil, unavailable(ReasonHomeUnavailable)
 	}
 	state, err := s.home(scope, home)
 	if err != nil {

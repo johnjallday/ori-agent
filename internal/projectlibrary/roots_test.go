@@ -42,6 +42,145 @@ func TestRoots_ReadDirectoryDiscardsRowsWhenProviderChangesDuringRead(t *testing
 	}
 }
 
+func TestRoots_ApprovedRootForNamesOnlyAnActiveRootCoveringTheSameFolder(t *testing.T) {
+	r, scope, _, tree, root := connectedMusicRoot(t)
+	picker := r.picker.(*testRootPicker)
+	ctx := context.Background()
+
+	same, err := r.Pick(ctx, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := r.ApprovedRootFor(scope, same); !ok || id != root.ID {
+		t.Fatalf("an already-approved folder was not recognised: %q %v", id, ok)
+	}
+	// Recognising it is a read: no review, root, or revision appears.
+	before, err := r.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.ApprovedRootFor(scope, same); !ok {
+		t.Fatal("a second read changed the answer")
+	}
+	if after, err := r.library.Read(scope); err != nil || after.Revision != before.Revision || len(after.Reviews) != len(before.Reviews) {
+		t.Fatalf("ApprovedRootFor wrote to the library: %+v %v", after, err)
+	}
+
+	// A token no Home issued, another Home's scope, or nothing at all: no answer.
+	for name, token := range map[string]string{"empty": "", "unknown": "not-a-token"} {
+		if id, ok := r.ApprovedRootFor(scope, token); ok || id != "" {
+			t.Fatalf("%s token named root %q", name, id)
+		}
+	}
+	foreign := scope
+	foreign.HomeID = "some-other-home"
+	if id, ok := r.ApprovedRootFor(foreign, same); ok || id != "" {
+		t.Fatalf("another Home's scope learned root %q", id)
+	}
+
+	// A different folder is not covered.
+	other := filepath.Join(t.TempDir(), "Another Collection")
+	if err := os.Mkdir(other, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	picker.path, _ = filepath.EvalSymlinks(other)
+	different, err := r.Pick(ctx, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := r.ApprovedRootFor(scope, different); ok || id != "" {
+		t.Fatalf("an unrelated folder matched root %q", id)
+	}
+
+	// Once the root is revoked it no longer covers its folder, so the ordinary
+	// review-and-commit path applies again.
+	picker.path, _ = filepath.EvalSymlinks(tree.root)
+	doc, err := r.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoke, err := r.ReviewRevoke(scope, root.ID, doc.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.CommitRevoke(scope, root.ID, revoke.Token, "revoke-approved"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := r.Pick(ctx, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := r.ApprovedRootFor(scope, again); ok || id != "" {
+		t.Fatalf("a revoked root still covers its folder: %q", id)
+	}
+}
+
+type unavailableRootPicker struct{}
+
+func (unavailableRootPicker) Available() bool { return false }
+func (unavailableRootPicker) Choose(context.Context, string) (string, bool, error) {
+	return "", false, errors.New("no dialog on this host")
+}
+
+func TestRoots_PickSaysWhyItCannotProceed(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("dismissing the chooser is a cancellation, not an unavailability", func(t *testing.T) {
+		r, scope, _, picker := rootTestService(t)
+		picker.chosen = false
+		token, err := r.Pick(ctx, scope)
+		if token != "" || !errors.Is(err, ErrPickCanceled) {
+			t.Fatalf("cancel = %q %v", token, err)
+		}
+		if errors.Is(err, ErrUnavailable) || ReasonOf(err) != "" {
+			t.Fatalf("a cancel must not read as a failure: %v", err)
+		}
+		if doc, err := r.library.Read(scope); err != nil || len(doc.Roots) != 0 || len(doc.Reviews) != 0 {
+			t.Fatalf("cancel changed the library: %+v %v", doc, err)
+		}
+	})
+
+	t.Run("a host with no chooser", func(t *testing.T) {
+		r, scope, _, _ := rootTestService(t)
+		r.picker = unavailableRootPicker{}
+		_, err := r.Pick(ctx, scope)
+		if !errors.Is(err, ErrUnavailable) || ReasonOf(err) != ReasonPickerUnavailable {
+			t.Fatalf("no chooser = %v (reason %q)", err, ReasonOf(err))
+		}
+	})
+
+	t.Run("the Home's package became unavailable", func(t *testing.T) {
+		r, scope, file, _ := rootTestService(t)
+		if err := file.Update(scope.HomeID, func(home *workspace.Workspace) error {
+			state := home.GetAssistantProgramState()
+			state.PluginAvailable = false
+			home.SetAssistantProgramState(state)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := r.Pick(ctx, scope)
+		if !errors.Is(err, ErrUnavailable) || ReasonOf(err) != ReasonProviderUnavailable {
+			t.Fatalf("provider loss = %v (reason %q)", err, ReasonOf(err))
+		}
+	})
+
+	t.Run("the Home no longer exists", func(t *testing.T) {
+		r, scope, _, _ := rootTestService(t)
+		scope.HomeID = "removed-home"
+		_, err := r.Pick(ctx, scope)
+		if !errors.Is(err, ErrUnavailable) || ReasonOf(err) != ReasonHomeUnavailable {
+			t.Fatalf("missing Home = %v (reason %q)", err, ReasonOf(err))
+		}
+	})
+
+	t.Run("an unrelated error carries no reason", func(t *testing.T) {
+		if ReasonOf(nil) != "" || ReasonOf(ErrConflict) != "" || ReasonOf(ErrUnavailable) != "" {
+			t.Fatal("reasons must only come from the typed unavailability")
+		}
+	})
+}
+
 type testRootPicker struct {
 	path   string
 	chosen bool
@@ -107,6 +246,35 @@ func TestRoots_PortfolioHandoffRejectsReplacementBetweenOfferAndPickerToken(t *t
 	})
 	if token, err := r.PickFromPortfolio(context.Background(), scope, "resolved-offer", resolver); token != "" || !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("a replacement directory got an offer-scoped selection: %q %v", token, err)
+	}
+}
+
+func TestRoots_PortfolioHandoffRefusesMalformedOrUnknownOffersWithoutAskingTheResolver(t *testing.T) {
+	r, scope, _, _ := rootTestService(t)
+	calls := 0
+	resolver := portfolioTestResolver(func(context.Context, string, string, string) (string, string, error) {
+		calls++
+		return "", "", errors.New("no such offer")
+	})
+	for name, offer := range map[string]string{
+		"blank":     "",
+		"oversized": string(make([]byte, 161)),
+	} {
+		if token, err := r.PickFromPortfolio(context.Background(), scope, offer, resolver); token != "" || !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("%s offer ID issued a selection: %q %v", name, token, err)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("a malformed offer ID reached the resolver %d times", calls)
+	}
+	// A well-formed ID the owner does not have is refused with no token, and the
+	// refusal names nothing about why (foreign and unknown look the same).
+	token, err := r.PickFromPortfolio(context.Background(), scope, "someone-elses-offer", resolver)
+	if token != "" || !errors.Is(err, ErrUnavailable) || calls != 1 {
+		t.Fatalf("unknown offer: token=%q err=%v resolver calls=%d", token, err, calls)
+	}
+	if doc, err := r.library.Read(scope); err != nil || len(doc.Roots) != 0 || len(doc.Reviews) != 0 {
+		t.Fatalf("a refused hand-off changed the library: %+v %v", doc, err)
 	}
 }
 

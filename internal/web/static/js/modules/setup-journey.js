@@ -26,8 +26,18 @@ import {
   setupQuestOpenDetail,
   userTemplateSetupQuestAPIRoot
 } from './setup-quest-links.js';
+import { libraryReturnURL, readLibraryReturn } from './library-return.js';
 
 export const PLUGINS_PAGE_URL = '/plugins';
+
+// Where "Back to your song" goes, or '' when this quest was not opened from one.
+// The person got here from a saved song's "review the integration"; its hint
+// names that one install quest and the Home page to return to. A hint for any
+// other quest is ignored, so a stale one can never redirect an unrelated setup.
+// Returning is navigation only: the Home re-reads the song and its eligibility.
+export function libraryReturnTarget(questID, hint = readLibraryReturn()) {
+  return hint && questID && hint.quest_id === questID ? libraryReturnURL(hint) : '';
+}
 
 // integrationHandoffNavigation turns an install quest's summary offer into the
 // one browser request it makes. The target is the server-resolved handoff on
@@ -1208,6 +1218,41 @@ async function launchGroupBuilder() {
   }
 }
 
+// The workspace creator here only connects the project and stays on the page.
+// Once it has finished closing, bring this journey back at its next unfinished
+// step (workspace mode, then staffing) instead of leaving the person inside a
+// child whose staffing is unfinished with the setup run closed behind them. A
+// journey that another setup took over in the meantime is left alone.
+function reopenJourneyAfterCreator(runID) {
+  const creator = document.getElementById('addFolderModal');
+  if (!creator || !state.modal) return;
+  creator.addEventListener(
+    'hidden.bs.modal',
+    () => {
+      if (state.journey?.run_id !== runID) return;
+      // Land on the project's team step when it is unfinished (the same view the
+      // launch card's "Manage Team and Extras" opens), not on the completed
+      // connection step: the person came to finish setup, and the connection
+      // alone staffs nothing. Staffing stays its own review and confirmation.
+      const staffing = (state.journey?.steps || []).find(
+        item => item.kind === 'assistant_program_staffing'
+      );
+      if (staffing && staffing.status !== 'complete') {
+        state.managementView = true;
+        state.selectedStepID = staffing.id;
+      } else {
+        state.selectedStepID = state.journey?.current_step_id || '';
+      }
+      render();
+      state.modal.show();
+      ui()?.root.addEventListener('shown.bs.modal', () => ui()?.stepTitle?.focus(), {
+        once: true
+      });
+    },
+    { once: true }
+  );
+}
+
 async function launchWorkspaceCreator() {
   if (state.launchingWorkspace || state.commitLocked || state.journey?.busy) return;
   state.launchingWorkspace = true;
@@ -1221,6 +1266,7 @@ async function launchWorkspaceCreator() {
           if (state.journey?.run_id === journeyToOpen.run_id) {
             state.journey = journey;
             state.launchStage = '';
+            reopenJourneyAfterCreator(journey.run_id);
           }
           // Settle the exact confirmed folder offer before the creator's
           // ordinary success navigation leaves Today. Failure keeps the card
@@ -1286,17 +1332,26 @@ function renderActions(step) {
     return;
   }
   if (step?.kind === 'project_connect' && state.draft) return;
+  let returnOffered = false;
   (step?.actions || []).forEach(action => {
+    const back =
+      action.id === 'continue_integration_setup' || action.id === 'open_plugins'
+        ? libraryReturnTarget(String(state.journey?.journey?.id || ''))
+        : '';
+    // Both actions lead back to the same song; one button says so once.
+    if (back && returnOffered) return;
+    if (back) returnOffered = true;
     const button = makeText(
       'button',
       'setup-journey__action',
-      setupJourneyActionLabel(step, action)
+      back ? 'Back to your song' : setupJourneyActionLabel(step, action)
     );
     button.type = 'button';
     button.dataset.effect = action.effect || '';
     button.dataset.action = action.id || '';
-    // Continuing into the plugin's quest is the install summary's next step.
-    if (action.id === 'continue_integration_setup') button.dataset.primary = 'true';
+    // Continuing into the plugin's quest is the install summary's next step;
+    // coming from a saved song, the next step is returning to it instead.
+    if (action.id === 'continue_integration_setup' || back) button.dataset.primary = 'true';
     button.addEventListener('click', () => handleAction(action, button));
     container.appendChild(button);
   });
@@ -2092,6 +2147,14 @@ async function navigateAction(actionID) {
       return;
     case 'open_plugins':
     case 'continue_integration_setup': {
+      // From a saved song: return to it. This never opens the plugin's own
+      // project creator, which is unrelated to that song and would be a second
+      // way to create a workspace for it.
+      const back = libraryReturnTarget(String(state.journey?.journey?.id || ''));
+      if (back) {
+        window.location.assign(back);
+        return;
+      }
       const summary = (state.journey?.steps || []).find(step => step.kind === 'summary');
       const navigation = integrationHandoffNavigation(summary, actionID);
       if (!navigation) {

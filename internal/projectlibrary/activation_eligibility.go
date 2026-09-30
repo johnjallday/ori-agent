@@ -29,6 +29,11 @@ type ActivationEligibility struct {
 	ProjectRoleLabels []string `json:"project_role_labels,omitempty"`
 	BlueprintID       string   `json:"blueprint_id,omitempty"`
 	WorkspaceID       string   `json:"workspace_id,omitempty"`
+	// ObservedFormat is the catalog format of the first available observation,
+	// set only with project_provider_unavailable. It is one of discovery's own
+	// format identifiers, never a path, and lets the host decide whether a
+	// reviewed integration could apply. It grants nothing.
+	ObservedFormat string `json:"observed_format,omitempty"`
 }
 
 type ActivationInspector struct {
@@ -136,6 +141,7 @@ func (a *ActivationInspector) Eligibility(ctx context.Context, scope Scope, entr
 		for _, observed := range entry.Observations {
 			if observed.Availability == "available" || observed.Availability == "ambiguous" {
 				result.Reason += " Last observed catalog format: " + observed.Format + ". This does not imply that any integration supports it."
+				result.ObservedFormat = observed.Format
 				break
 			}
 		}

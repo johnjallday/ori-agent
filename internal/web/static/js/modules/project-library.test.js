@@ -2,11 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ProjectLibraryPanel,
+  activationStateLabel,
+  projectTeamURL,
   libraryDigestText,
   libraryQuery,
   libraryRunText,
   proposalSourceLabel,
-  readActivationQueue
+  readActivationQueue,
+  selectionRecovery,
+  setupNextStep
 } from './project-library.js';
 
 test('Show project folder requires a fresh connected Home link and never sends a path or starts a DAW', async () => {
@@ -1221,7 +1225,7 @@ test('out-of-order search responses and double-clicked More cannot mix or duplic
   }
 });
 
-test('folder selection and consent never scan after a canceled second review', async () => {
+test('a granted folder goes straight to the scan review, which still needs its own confirmation', async () => {
   const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: { is_station: true } });
   panel.state = { revision: 1 };
   const calls = [];
@@ -1237,12 +1241,15 @@ test('folder selection and consent never scan after a canceled second review', a
   panel.refresh = async () => {
     panel.state.revision = 3;
   };
-  panel.scanRootFlow = async () => calls.push(['/scan', null]);
+  panel.scanRootFlow = async rootID => calls.push(['/scan', rootID]);
   await panel.addFolder(null);
+  // No separate "scan now?" stop: the grant is followed by the scan review of the
+  // root just granted (its own disclosure and cancel), never by a scan itself.
   assert.deepEqual(
     calls.map(([path]) => path),
-    ['/roots/pick', '/roots/review', '/roots/commit']
+    ['/roots/pick', '/roots/review', '/roots/commit', '/scan']
   );
+  assert.equal(calls[3][1], 'root-1');
   assert.equal(calls[2][1].confirm, true);
   assert.equal(calls[1][1].selection_token, 'picker');
   assert.equal(Object.hasOwn(calls[1][1], 'path'), false);
@@ -1265,10 +1272,11 @@ test('resolved portfolio source uses the offer ID, not a browser path or another
   panel.refresh = async () => {
     panel.state = { revision: 3, initialized: true };
   };
+  panel.scanRootFlow = async rootID => calls.push(['/scan', rootID]);
   await panel.addFolder(null);
   assert.deepEqual(
     calls.map(([path]) => path),
-    ['/roots/pick-offer', '/roots/review', '/roots/commit']
+    ['/roots/pick-offer', '/roots/review', '/roots/commit', '/scan']
   );
   assert.deepEqual(calls[0][1], { offer_id: 'resolved-offer' });
   assert.equal(panel.offerID, '');
@@ -1289,8 +1297,44 @@ test('declining the first review leaves neither a root nor a scan', async () => 
     };
   };
   panel.confirm = async () => false;
+  // The inert review advanced the Home revision, so declining must re-read it.
+  panel.refresh = async () => {
+    calls.push('refresh');
+    panel.state = { revision: 2 };
+  };
+  const messages = [];
+  panel.status = message => messages.push(message);
   await panel.addFolder(null);
-  assert.deepEqual(calls, ['/roots/pick', '/roots/review']);
+  assert.match(messages.at(-1), /not connected\. Nothing was granted or read/);
+  assert.deepEqual(calls, ['/roots/pick', '/roots/review', 'refresh']);
+  assert.equal(panel.state.revision, 2, 'the next attempt starts from the advanced revision');
+});
+
+test('a folder this Home already approved goes to its scan review, never a duplicate root grant', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: { is_station: true } });
+  panel.state = { revision: 3 };
+  panel.offerID = 'resolved-offer';
+  panel.run = async (_, __, fn) => fn();
+  const calls = [];
+  panel.post = async (path, body) => {
+    calls.push([path, body]);
+    if (path === '/roots/pick-offer')
+      return { selection_token: 'scoped-token', existing_root_id: 'root-1' };
+    throw new Error(`unexpected ${path}: an approved folder must not be granted again`);
+  };
+  panel.refresh = async () => {
+    calls.push(['refresh']);
+    panel.state = { revision: 3, initialized: true };
+  };
+  panel.status = () => {};
+  panel.scanRootFlow = async (rootID, trigger) => calls.push(['scan', rootID, trigger]);
+  await panel.addFolder('the-button');
+  assert.deepEqual(
+    calls.map(([path]) => path),
+    ['/roots/pick-offer', 'refresh', 'scan']
+  );
+  assert.deepEqual(calls.at(-1), ['scan', 'root-1', 'the-button']);
+  assert.equal(panel.offerID, '', 'the spent offer is not carried into the next add');
 });
 
 test('root paging never merges a page from a different library revision', async () => {
@@ -1482,6 +1526,38 @@ test('scan digest line names the folder, not its path, and lists only nonzero ex
   assert.match(gone, /5 can be set up, 1 unsupported format, 2 no longer found\.$/);
 });
 
+test('scan digest line separates connected songs and file choices from what can be set up', () => {
+  const roots = [{ id: 'root-1', path: '/Users/owner/Albums' }];
+  const text = libraryDigestText(
+    { ...DIGEST, projects: 5, new: 5, connected: 1, activatable: 3, needs_file_choice: 1 },
+    roots
+  );
+  assert.match(
+    text,
+    /5 projects, 5 new, 1 already connected, 3 can be set up \(1 needs a file choice\)/
+  );
+  const several = libraryDigestText(
+    { ...DIGEST, projects: 6, activatable: 4, needs_file_choice: 2, connected: 0 },
+    roots
+  );
+  assert.match(several, /4 can be set up \(2 need a file choice\)/);
+  assert.equal(several.includes('already connected'), false, 'zero is not mentioned');
+  // A digest stored before these fields existed reads exactly as it always did.
+  assert.equal(libraryDigestText(DIGEST, roots).includes('file choice'), false);
+  // Forged or negative values are ignored rather than shown.
+  const forged = libraryDigestText({ ...DIGEST, connected: -3, needs_file_choice: 'many' }, roots);
+  assert.equal(forged.includes('already connected') || forged.includes('file choice'), false);
+  // Connected songs are still reported when setup evidence is missing.
+  const noEvidence = libraryDigestText(
+    { ...DIGEST, connected: 2, setup_note: 'project_provider_unavailable' },
+    roots
+  );
+  assert.match(
+    noEvidence,
+    /2 already connected, project setup needs a compatible installed integration/
+  );
+});
+
 test('scan digest line handles zero, partial, unknown-root and setup-unavailable digests', () => {
   assert.equal(libraryDigestText(null, []), '');
   assert.equal(libraryDigestText({ projects: 3 }, []), '', 'a digest without a scan is not shown');
@@ -1648,7 +1724,30 @@ test('arriving with the shelf hash focuses the suggestions heading once, after i
     new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
     assert.deepEqual(calls, ['library:tabindex=-1', 'library:scroll', 'library:focus:true']);
     calls.length = 0;
+
+    // A new Home arrives on #projectLibraryPanel: the unfinished-setup card when
+    // there is one, else the shelf heading.
+    elements.projectSetupNext = { hidden: false };
+    elements.projectSetupNextTitle = heading('setup');
     globalThis.location = { hash: '#projectLibraryPanel' };
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, ['setup:tabindex=-1', 'setup:scroll', 'setup:focus:true']);
+    calls.length = 0;
+    elements.projectSetupNext.hidden = true; // established Home: nothing to finish
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, ['library:tabindex=-1', 'library:scroll', 'library:focus:true']);
+    calls.length = 0;
+
+    // Only the first render counts: a later refresh never takes focus back.
+    const once = new ProjectLibraryPanel({ workspaceId: 'home' });
+    once.focusArrival();
+    calls.length = 0;
+    once.focusArrival();
+    assert.deepEqual(calls, []);
+
+    globalThis.location = { hash: '#somewhereElse' };
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    globalThis.location = { hash: '' };
     new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
     assert.deepEqual(calls, [], 'other arrivals keep the page’s normal focus');
   } finally {
@@ -1735,5 +1834,1276 @@ test('scan digest renders as inert text and shows the shelf even with no suggest
     assert.equal(elements.get('projectLibraryProposalRows').children.length, 1);
   } finally {
     globalThis.document = original;
+  }
+});
+
+function continuationPanel(response, { search = '' } = {}) {
+  const requests = [];
+  const originalLocation = globalThis.location;
+  globalThis.location = { search };
+  const panel = new ProjectLibraryPanel({
+    workspaceId: 'home 1',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (response instanceof Error) throw response;
+      return response;
+    }
+  });
+  return { panel, requests, restore: () => (globalThis.location = originalLocation) };
+}
+
+const ok = body => ({ ok: true, json: async () => body });
+
+test('a Home reopened without its address restores the one ready collection, sending no path', async () => {
+  const { panel, requests, restore } = continuationPanel(
+    ok({
+      continuations: [
+        { offer_id: 'offer-new', folder: 'Albums', state: 'ready' },
+        { offer_id: 'offer-old', folder: 'Older', state: 'needs_pick', reason: 'expired' }
+      ]
+    })
+  );
+  try {
+    await panel.restoreCollectionContinuation();
+    assert.equal(panel.offerID, 'offer-new');
+    assert.equal(panel.continuations.length, 2, 'the explanation for the other one is kept');
+    assert.deepEqual(requests, [
+      {
+        url: '/api/personal-assistant/folder-digest/continuations?home_id=home%201',
+        options: { headers: { Accept: 'application/json' } }
+      }
+    ]);
+    assert.equal(requests[0].options.method, undefined, 'a read, never a POST');
+    assert.equal(requests[0].options.body, undefined);
+  } finally {
+    restore();
+  }
+});
+
+test('an address that already names the collection wins, and the read only supplies its folder name', async () => {
+  const { panel, requests, restore } = continuationPanel(
+    ok({
+      continuations: [
+        { offer_id: 'from-address', folder: 'Albums', state: 'ready' },
+        { offer_id: 'another', folder: 'Sketches', state: 'ready' }
+      ]
+    }),
+    { search: '?folder_offer_id=from-address' }
+  );
+  try {
+    await panel.restoreCollectionContinuation();
+    assert.equal(panel.offerID, 'from-address', 'the address is never overridden');
+    assert.equal(requests.length, 1, 'one read-only GET, no body');
+    assert.equal(requests[0].options.method, undefined);
+    assert.equal(
+      panel.continuations.find(item => item.offer_id === panel.offerID).folder,
+      'Albums',
+      'so the setup card can name the collection that was carried'
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('two ready collections are ambiguous, so none is chosen for the user', async () => {
+  const { panel, restore } = continuationPanel(
+    ok({
+      continuations: [
+        { offer_id: 'a', folder: 'Albums', state: 'ready' },
+        { offer_id: 'b', folder: 'Sketches', state: 'ready' }
+      ]
+    })
+  );
+  try {
+    await panel.restoreCollectionContinuation();
+    assert.equal(panel.offerID, '');
+    assert.equal(panel.continuations.length, 2);
+  } finally {
+    restore();
+  }
+});
+
+test('a collection that needs a new pick is remembered but never adopted as usable', async () => {
+  const { panel, restore } = continuationPanel(
+    ok({
+      continuations: [{ offer_id: 'gone', folder: 'Albums', state: 'needs_pick', reason: 'lost' }]
+    })
+  );
+  try {
+    await panel.restoreCollectionContinuation();
+    assert.equal(panel.offerID, '');
+    assert.deepEqual(panel.continuations, [
+      { offer_id: 'gone', folder: 'Albums', state: 'needs_pick', reason: 'lost' }
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test('an unavailable or malformed continuation answer leaves the library exactly as before', async () => {
+  for (const response of [
+    { ok: false, json: async () => ({ error: 'no' }) },
+    ok({}),
+    ok({ continuations: 'nope' }),
+    ok({
+      continuations: [
+        null,
+        { state: 'ready' },
+        { offer_id: '', state: 'ready' },
+        { offer_id: 'x'.repeat(161), state: 'ready' },
+        { offer_id: 42, state: 'ready' }
+      ]
+    }),
+    new Error('offline')
+  ]) {
+    const { panel, restore } = continuationPanel(response);
+    try {
+      await panel.restoreCollectionContinuation();
+      assert.equal(panel.offerID, '');
+      assert.deepEqual(panel.continuations, []);
+    } finally {
+      restore();
+    }
+  }
+});
+
+test('each way a folder choice can be unusable gets its own honest message', () => {
+  const kept = /Your Home is ready and anything already connected is kept/;
+  const expired = selectionRecovery({ continuation: { reason: 'expired' } });
+  assert.equal(expired.repick, true);
+  assert.match(expired.message, /30 minutes/);
+  assert.match(expired.message, kept);
+
+  const lost = selectionRecovery({ continuation: { reason: 'lost' } });
+  assert.match(lost.message, /restarted/);
+  assert.doesNotMatch(lost.message, /30 minutes|moved, replaced/);
+
+  const changed = selectionRecovery({ continuation: { reason: 'changed' } });
+  assert.match(changed.message, /changed after you chose it/);
+  assert.doesNotMatch(changed.message, /restarted|30 minutes/);
+
+  const unknown = selectionRecovery({});
+  assert.equal(unknown.repick, true);
+  assert.match(unknown.message, /no longer has the folder you chose/);
+  assert.equal(new Set([expired, lost, changed, unknown].map(item => item.message)).size, 4);
+  for (const item of [expired, lost, changed, unknown]) {
+    assert.match(item.message, /Choose the folder again/);
+    assert.doesNotMatch(item.message, /\/(Users|home|var)\//, 'no path is ever shown');
+  }
+});
+
+test('problems a new pick cannot fix never offer one', () => {
+  for (const [reason, pattern] of [
+    ['picker_unavailable', /native folder picker is unavailable/],
+    ['provider_unavailable', /package is unavailable/],
+    ['home_unavailable', /Home could not be found/]
+  ]) {
+    const recovery = selectionRecovery({ reason, continuation: { reason: 'expired' } });
+    assert.equal(recovery.repick, false, reason);
+    assert.match(recovery.message, pattern);
+    assert.doesNotMatch(recovery.message, /Choose the folder again to continue/);
+  }
+  // A library reason wins over a stale continuation: re-picking would not help.
+  assert.equal(
+    selectionRecovery({ reason: 'provider_unavailable', continuation: { reason: 'lost' } }).repick,
+    false
+  );
+});
+
+function addFolderPanel({ pickOffer, continuations = [], confirmAnswer = true }) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: { is_station: true } });
+  panel.state = { revision: 1 };
+  panel.offerID = 'the-offer';
+  panel.run = async (_, __, fn) => fn();
+  const log = { calls: [], statuses: [], confirms: [] };
+  panel.status = message => log.statuses.push(message);
+  panel.confirm = async (title, lines) => {
+    log.confirms.push({ title, lines });
+    return confirmAnswer;
+  };
+  panel.refresh = async () => log.calls.push('refresh');
+  panel.fetchImpl = async () => ({ ok: true, json: async () => ({ continuations }) });
+  panel.post = async (path, body) => {
+    log.calls.push(path);
+    if (path === '/roots/pick-offer') return pickOffer(body);
+    if (path === '/roots/pick') return { selection_token: 'fresh' };
+    if (path === '/roots/review')
+      return { token: 'review', root_path: '/trusted', scope: 'metadata' };
+    return { root_id: 'root' };
+  };
+  return { panel, log };
+}
+
+const failure = (status, reason = '') => Object.assign(new Error('nope'), { status, reason });
+
+test('a lost offer asks the server why and only then offers one new pick', async () => {
+  for (const [why, pattern] of [
+    ['expired', /30 minutes/],
+    ['lost', /restarted/],
+    ['changed', /changed after you chose it/]
+  ]) {
+    const { panel, log } = addFolderPanel({
+      pickOffer: () => {
+        throw failure(409);
+      },
+      continuations: [
+        { offer_id: 'the-offer', folder: 'Albums', state: 'needs_pick', reason: why }
+      ],
+      confirmAnswer: false
+    });
+    await panel.addFolder(null);
+    assert.equal(log.confirms.length, 1, why);
+    assert.match(log.confirms[0].lines[0], pattern, why);
+    assert.deepEqual(log.calls, ['/roots/pick-offer'], `${why}: declining opens no picker`);
+    assert.equal(panel.offerID, 'the-offer', 'the offer is kept for a later retry');
+  }
+});
+
+test('accepting the recovery opens exactly one fresh pick and keeps the Home', async () => {
+  const { panel, log } = addFolderPanel({
+    pickOffer: () => {
+      throw failure(409);
+    },
+    continuations: [{ offer_id: 'the-offer', state: 'needs_pick', reason: 'lost' }],
+    confirmAnswer: true
+  });
+  panel.confirm = async title => {
+    log.confirms.push({ title });
+    return title === 'Choose the folder again?';
+  };
+  await panel.addFolder(null);
+  assert.deepEqual(log.calls.slice(0, 3), ['/roots/pick-offer', '/roots/pick', '/roots/review']);
+  assert.equal(log.calls.filter(path => path === '/roots/pick').length, 1);
+});
+
+test('package, Home, or picker problems explain themselves and never open a picker', async () => {
+  for (const reason of ['provider_unavailable', 'home_unavailable', 'picker_unavailable']) {
+    const { panel, log } = addFolderPanel({
+      pickOffer: () => {
+        throw failure(409, reason);
+      }
+    });
+    await panel.addFolder(null);
+    assert.deepEqual(log.confirms, [], `${reason}: no "choose again" prompt`);
+    assert.deepEqual(log.calls, ['/roots/pick-offer'], `${reason}: no picker`);
+    assert.equal(log.statuses.length, 1, reason);
+  }
+});
+
+test('dismissing the native chooser is a quiet cancellation that reads and grants nothing', async () => {
+  const { panel, log } = addFolderPanel({ pickOffer: () => ({}) });
+  panel.offerID = '';
+  panel.post = async path => {
+    log.calls.push(path);
+    return { cancelled: true };
+  };
+  await panel.addFolder(null);
+  assert.deepEqual(log.calls, ['/roots/pick']);
+  assert.match(log.statuses.at(-1), /No folder was chosen\. Nothing was connected or read/);
+  assert.deepEqual(log.confirms, []);
+});
+
+test('a stale review re-reads the library so the next attempt is not refused again', async () => {
+  // run() touches the panel element; give it a page with nothing on it.
+  const original = globalThis.document;
+  globalThis.document = { getElementById: () => null };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const log = { calls: [], statuses: [] };
+    panel.status = message => log.statuses.push(message);
+    panel.refresh = async () => log.calls.push('refresh');
+    await panel.run(null, 'Working…', async () => {
+      throw failure(409, 'stale_review');
+    });
+    assert.deepEqual(log.calls, ['refresh']);
+    assert.match(log.statuses.at(-1), /changed while you were reviewing, so nothing was granted/);
+
+    const other = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const otherCalls = [];
+    other.status = () => {};
+    other.refresh = async () => otherCalls.push('refresh');
+    await other.run(null, 'Working…', async () => {
+      throw failure(500, '');
+    });
+    assert.deepEqual(otherCalls, [], 'only a stale review refreshes');
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+const libState = (extra = {}) => ({
+  provider_read_only: false,
+  initialized: true,
+  picker_available: true,
+  roots: [],
+  ...extra
+});
+const scannedRoot = (id, status = 'complete') => ({
+  id,
+  path: `/sandbox/${id}`,
+  last_scan: { status, entries_seen: 3, skipped_entries: 0 }
+});
+
+test('the next step follows the library’s own state, one action at a time', () => {
+  assert.equal(setupNextStep({}).stage, 'unknown', 'no state, no guess');
+  assert.equal(setupNextStep({ state: null }).stage, 'unknown');
+
+  const readOnly = setupNextStep({ state: libState({ provider_read_only: true }) });
+  assert.equal(readOnly.stage, 'read_only');
+  assert.equal(readOnly.action, null, 'nothing to do until the package is back');
+  assert.match(readOnly.body, /kept/);
+
+  const fresh = setupNextStep({ state: { provider_read_only: false, initialized: false } });
+  assert.equal(fresh.stage, 'not_initialized');
+  assert.deepEqual(fresh.action, { id: 'initialize', label: 'Review library setup' });
+  assert.match(fresh.body, /opens no folders and scans nothing/);
+  assert.match(fresh.body, /saved notes and exact project links/);
+
+  const carried = setupNextStep({
+    state: { provider_read_only: false, initialized: false },
+    collection: 'Albums'
+  });
+  assert.match(carried.title, /Albums/);
+  assert.match(carried.body, /^Albums is waiting\./);
+  assert.equal(carried.action.label, 'Review library setup', 'not carried: the ordinary review');
+
+  // A carried collection is an explicit request to set it up: one button starts the
+  // library and then shows the exact folder, instead of a stop of its own.
+  const carriedStart = setupNextStep({
+    state: { provider_read_only: false, initialized: false },
+    collection: 'Albums',
+    carried: true
+  });
+  assert.equal(carriedStart.stage, 'not_initialized');
+  assert.deepEqual(carriedStart.action, {
+    id: 'initialize',
+    label: 'Start library and review Albums'
+  });
+  assert.match(carriedStart.body, /exact folder to review/);
+  assert.match(carriedStart.body, /Nothing is read or scanned until you confirm/);
+
+  const noRoot = setupNextStep({ state: libState(), collection: 'Albums', carried: true });
+  assert.equal(noRoot.stage, 'no_root');
+  assert.match(noRoot.title, /Connect Albums to this Home/);
+  assert.equal(noRoot.action.id, 'add_folder');
+
+  const revokedOnly = setupNextStep({
+    state: libState({
+      roots: [
+        { id: 'a', path: '/x/a', revoked_at: '2026-09-30T00:00:00Z' },
+        { id: 'b', path: '/x/b', needs_review: true }
+      ]
+    })
+  });
+  assert.equal(revokedOnly.stage, 'no_root', 'a disconnected root is not a usable one');
+
+  const unscanned = setupNextStep({
+    state: libState({ roots: [{ id: 'r1', path: '/Users/me/Music/Albums' }] })
+  });
+  assert.equal(unscanned.stage, 'not_scanned');
+  assert.equal(unscanned.title, 'Scan Albums once');
+  assert.deepEqual(unscanned.action, { id: 'scan', label: 'Review scan', rootId: 'r1' });
+  assert.doesNotMatch(unscanned.title + unscanned.body, /\/Users\/me/, 'only the folder name');
+
+  const failed = setupNextStep({ state: libState({ roots: [scannedRoot('r1', 'failed')] }) });
+  assert.equal(failed.stage, 'scan_incomplete');
+  assert.equal(failed.action.rootId, 'r1');
+  assert.match(failed.body, /kept/);
+
+  for (const finished of ['complete', 'partial']) {
+    assert.equal(
+      setupNextStep({ state: libState({ roots: [scannedRoot('r1', finished)] }) }).stage,
+      'ready',
+      `${finished}: an established Home shows no setup card`
+    );
+  }
+  assert.equal(
+    setupNextStep({ state: libState({ roots: [scannedRoot('r1', 'failed'), scannedRoot('r2')] }) })
+      .stage,
+    'ready',
+    'one finished scan is enough'
+  );
+});
+
+test('with no picker and no carried collection the card explains instead of offering a dead button', () => {
+  const step = setupNextStep({ state: libState({ picker_available: false }) });
+  assert.equal(step.stage, 'no_root');
+  assert.equal(step.action, null);
+  assert.match(step.body, /picker is unavailable/);
+  // A carried collection needs no picker: the server holds the folder.
+  assert.equal(
+    setupNextStep({ state: libState({ picker_available: false }), carried: true }).action.id,
+    'add_folder'
+  );
+});
+
+function setupCardPage() {
+  const elements = new Map();
+  const make = id => {
+    const classes = new Set();
+    const node = {
+      id,
+      hidden: true,
+      disabled: false,
+      textContent: '',
+      classList: {
+        toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)),
+        has: name => classes.has(name)
+      }
+    };
+    elements.set(id, node);
+    return node;
+  };
+  for (const id of [
+    'projectSetupNext',
+    'projectSetupNextTitle',
+    'projectSetupNextBody',
+    'projectSetupNextAction',
+    'assistantProgramPage'
+  ]) {
+    make(id);
+  }
+  return { elements, document: { getElementById: id => elements.get(id) || null } };
+}
+
+test('the setup card shows the next step as plain text and compacts the hero only while it is shown', () => {
+  const original = globalThis.document;
+  const page = setupCardPage();
+  globalThis.document = page.document;
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.offerID = 'offer-1';
+    panel.continuations = [{ offer_id: 'offer-1', folder: '<b>Albums</b>', state: 'ready' }];
+    panel.state = { provider_read_only: false, initialized: false };
+    panel.renderSetupNext();
+    const card = page.elements.get('projectSetupNext');
+    assert.equal(card.hidden, false);
+    assert.equal(page.elements.get('assistantProgramPage').classList.has('is-setup-first'), true);
+    assert.match(page.elements.get('projectSetupNextTitle').textContent, /<b>Albums<\/b>/);
+    assert.equal(
+      'innerHTML' in page.elements.get('projectSetupNextTitle'),
+      false,
+      'a folder name is text, never markup'
+    );
+    const action = page.elements.get('projectSetupNextAction');
+    assert.equal(action.hidden, false);
+    assert.equal(action.textContent, 'Start library and review <b>Albums</b>');
+
+    // The folder is scanned: an established Home shows nothing and the hero relaxes.
+    panel.state = libState({ roots: [scannedRoot('r1')] });
+    panel.renderSetupNext();
+    assert.equal(card.hidden, true);
+    assert.equal(page.elements.get('assistantProgramPage').classList.has('is-setup-first'), false);
+
+    // A failed read hides it rather than guessing.
+    panel.state = { provider_read_only: false, initialized: false };
+    panel.renderSetupNext();
+    assert.equal(card.hidden, false);
+    panel.state = null;
+    panel.renderSetupNext();
+    assert.equal(card.hidden, true);
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+test('the setup card button starts exactly the step it names', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  const started = [];
+  panel.initialize = async trigger => started.push(['initialize', trigger]);
+  panel.addFolder = async trigger => started.push(['add_folder', trigger]);
+  panel.scanRoot = async (root, trigger) => started.push(['scan', root.id, trigger]);
+  panel.state = { roots: [{ id: 'r1' }, { id: 'r2' }] };
+
+  panel.setupStep = { action: { id: 'initialize' } };
+  await panel.runSetupNext('button');
+  panel.setupStep = { action: { id: 'add_folder' } };
+  await panel.runSetupNext('button');
+  panel.setupStep = { action: { id: 'scan', rootId: 'r2' } };
+  await panel.runSetupNext('button');
+  assert.deepEqual(started, [
+    ['initialize', 'button'],
+    ['add_folder', 'button'],
+    ['scan', 'r2', 'button']
+  ]);
+
+  // Nothing to do, a vanished root, or a step already running starts nothing.
+  started.length = 0;
+  panel.setupStep = { action: null };
+  await panel.runSetupNext('button');
+  panel.setupStep = { action: { id: 'scan', rootId: 'gone' } };
+  await panel.runSetupNext('button');
+  panel.setupStep = { action: { id: 'initialize' } };
+  panel.busy = true;
+  await panel.runSetupNext('button');
+  assert.deepEqual(started, []);
+});
+
+test('an uninitialized Home still renders its setup card and lands the arrival', async () => {
+  const original = globalThis.document;
+  const originalLocation = globalThis.location;
+  const page = setupCardPage();
+  const focus = [];
+  for (const id of ['projectLibrarySetup', 'projectLibraryContent', 'projectLibraryAdd']) {
+    page.elements.set(id, { id, hidden: false, disabled: false });
+  }
+  page.elements.set('projectLibraryInitialize', {
+    id: 'projectLibraryInitialize',
+    disabled: false
+  });
+  Object.assign(page.elements.get('projectSetupNextTitle'), {
+    setAttribute: () => {},
+    scrollIntoView: () => focus.push('scroll'),
+    focus: () => focus.push('focus')
+  });
+  globalThis.document = page.document;
+  globalThis.location = { hash: '#projectLibraryPanel', search: '' };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.status = () => {};
+    panel.request = async () => ({ initialized: false, provider_read_only: false });
+    await panel.refresh();
+    assert.equal(page.elements.get('projectSetupNext').hidden, false);
+    assert.equal(page.elements.get('projectSetupNextAction').textContent, 'Review library setup');
+    assert.deepEqual(focus, ['scroll', 'focus'], 'arrival is not skipped before initialization');
+    await panel.refresh(); // a later refresh never moves focus again
+    assert.deepEqual(focus, ['scroll', 'focus']);
+  } finally {
+    globalThis.document = original;
+    globalThis.location = originalLocation;
+  }
+});
+
+function refreshFailurePage() {
+  const page = setupCardPage();
+  for (const id of ['projectLibrarySetup', 'projectLibraryContent', 'projectLibraryAdd']) {
+    page.elements.set(id, { id, hidden: false, disabled: false });
+  }
+  return page;
+}
+
+test('a failed re-read keeps a populated library on screen and says the check is unavailable', async () => {
+  const original = globalThis.document;
+  const page = refreshFailurePage();
+  globalThis.document = page.document;
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const messages = [];
+    panel.status = message => messages.push(message);
+    const saved = libState({ roots: [scannedRoot('r1')], revision: 4 });
+    panel.state = saved;
+    panel.request = async () => {
+      throw new Error('offline');
+    };
+    await panel.refresh();
+    assert.equal(panel.state, saved, 'the last saved state is kept, not cleared');
+    assert.equal(
+      page.elements.get('projectLibraryContent').hidden,
+      false,
+      'saved projects stay visible'
+    );
+    assert.equal(page.elements.get('projectLibraryAdd').hidden, false);
+    assert.match(messages.at(-1), /could not re-check this library just now/);
+    assert.match(messages.at(-1), /last saved/);
+    assert.match(messages.at(-1), /Nothing was changed/);
+    assert.doesNotMatch(messages.at(-1), /offline/, 'no raw error text');
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+test('a first load that fails still hides the library rather than inventing one', async () => {
+  const original = globalThis.document;
+  const page = refreshFailurePage();
+  globalThis.document = page.document;
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const messages = [];
+    panel.status = message => messages.push(message);
+    panel.request = async () => {
+      throw new Error('The Home is unavailable');
+    };
+    await panel.refresh();
+    assert.equal(panel.state, null);
+    assert.equal(page.elements.get('projectLibraryContent').hidden, true);
+    assert.equal(page.elements.get('projectLibraryAdd').hidden, true);
+    assert.equal(messages.at(-1), 'The Home is unavailable');
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+function scanFlowPanel({ commits }) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { revision: 5, roots: [{ id: 'root-1', path: '/x/Albums' }] };
+  const log = { posts: [], statuses: [], keys: [] };
+  panel.status = message => log.statuses.push(message);
+  panel.confirm = async () => true;
+  panel.refresh = async () => log.posts.push('refresh');
+  panel.post = async (path, body) => {
+    log.posts.push(path);
+    if (path.endsWith('/scans/review')) {
+      return { token: 'review-1', root_path: '/x/Albums', scope: 'names only', max_entries: 5000 };
+    }
+    log.keys.push(body.idempotency_key);
+    const next = commits.shift();
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  return { panel, log };
+}
+
+const receipt = { status: 'complete', entries_seen: 4, skipped_links: 0, skipped_other: 0 };
+const noAnswer = () => Object.assign(new TypeError('Failed to fetch'), {});
+const serverError = () => Object.assign(new Error('boom'), { status: 502 });
+
+test('a lost scan reply is replayed once with the same key, so the folder is never scanned twice', async () => {
+  const { panel, log } = scanFlowPanel({ commits: [noAnswer(), receipt] });
+  await panel.scanRootFlow('root-1', null);
+  assert.equal(log.keys.length, 2);
+  assert.equal(log.keys[0], log.keys[1], 'the same idempotency key is the replay');
+  assert.equal(log.posts.filter(path => path.endsWith('/scans/review')).length, 1, 'no new review');
+  assert.match(log.statuses.at(-1), /complete scan · 4 entries seen/);
+
+  const again = scanFlowPanel({ commits: [serverError(), receipt] });
+  await again.panel.scanRootFlow('root-1', null);
+  assert.equal(again.log.keys[0], again.log.keys[1]);
+});
+
+test('a scan that was recorded despite two lost replies is reported, not repeated', async () => {
+  const { panel, log } = scanFlowPanel({ commits: [noAnswer(), noAnswer()] });
+  panel.refresh = async () => {
+    log.posts.push('refresh');
+    panel.state.roots = [
+      {
+        id: 'root-1',
+        path: '/x/Albums',
+        last_scan: { id: 'scan-new', status: 'complete', entries_seen: 4 }
+      }
+    ];
+  };
+  await panel.scanRootFlow('root-1', null);
+  assert.equal(log.keys.length, 2, 'exactly one replay, never a third attempt');
+  assert.match(log.statuses.at(-1), /reply was lost, but this scan was recorded/);
+  assert.match(log.statuses.at(-1), /complete · 4 names checked\. It was not repeated/);
+});
+
+test('an uncertain scan with nothing recorded is an error, and a refusal is never retried', async () => {
+  const unrecorded = scanFlowPanel({ commits: [noAnswer(), noAnswer()] });
+  await assert.rejects(unrecorded.panel.scanRootFlow('root-1', null), /Failed to fetch/);
+  assert.equal(unrecorded.log.keys.length, 2);
+
+  // The same scan id as before the review means nothing new was recorded.
+  const unchanged = scanFlowPanel({ commits: [serverError(), serverError()] });
+  unchanged.panel.state.roots[0].last_scan = {
+    id: 'scan-old',
+    status: 'complete',
+    entries_seen: 1
+  };
+  unchanged.panel.refresh = async () => {};
+  await assert.rejects(unchanged.panel.scanRootFlow('root-1', null), /boom/);
+
+  const refused = scanFlowPanel({
+    commits: [Object.assign(new Error('changed'), { status: 409 })]
+  });
+  await assert.rejects(refused.panel.scanRootFlow('root-1', null), /changed/);
+  assert.equal(refused.log.keys.length, 1, 'a definite refusal is final');
+});
+
+function integrationPage({ pathname = '/workspaces/music-home/assistant' } = {}) {
+  const map = new Map();
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+  const originalLocation = globalThis.location;
+  const navigations = [];
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    configurable: true,
+    value: {
+      getItem: key => (map.has(key) ? map.get(key) : null),
+      setItem: (key, value) => map.set(key, String(value)),
+      removeItem: key => map.delete(key)
+    }
+  });
+  globalThis.location = { pathname, search: '', hash: '', assign: url => navigations.push(url) };
+  return {
+    map,
+    navigations,
+    restore() {
+      if (originalStorage) Object.defineProperty(globalThis, 'sessionStorage', originalStorage);
+      else delete globalThis.sessionStorage;
+      globalThis.location = originalLocation;
+    }
+  };
+}
+
+const songDetail = { row: { id: 'entry-9', name: 'Album 5' } };
+const reaperOffer = {
+  key: 'ori_reaper',
+  quest_id: 'install_ori_reaper',
+  display_name: 'REAPER'
+};
+
+test('reviewing an integration remembers only where to return and opens the reviewed install', () => {
+  const page = integrationPage();
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+    panel.status = () => {};
+    panel.startIntegrationReview(songDetail, reaperOffer);
+    assert.deepEqual(page.navigations, ['/?setup=quest&source=host&quest=install_ori_reaper']);
+    const stored = JSON.parse(page.map.get('ori:library-return'));
+    assert.equal(stored.home_id, 'home-1');
+    assert.equal(stored.entry_id, 'entry-9');
+    assert.equal(stored.quest_id, 'install_ori_reaper');
+    assert.equal(stored.return_path, '/workspaces/music-home/assistant');
+    assert.deepEqual(Object.keys(stored).sort(), [
+      'created_at',
+      'entry_id',
+      'home_id',
+      'quest_id',
+      'return_path'
+    ]);
+  } finally {
+    page.restore();
+  }
+});
+
+test('a bad quest or a page that is not a Home starts nothing and says so', () => {
+  for (const [offer, pathname] of [
+    [{ ...reaperOffer, quest_id: '../install' }, '/workspaces/music-home/assistant'],
+    [{ ...reaperOffer, quest_id: 'Install_Ori' }, '/workspaces/music-home/assistant'],
+    [reaperOffer, '/settings'],
+    [reaperOffer, '/workspaces/music-home/assistant/extra']
+  ]) {
+    const page = integrationPage({ pathname });
+    try {
+      const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+      const messages = [];
+      panel.status = message => messages.push(message);
+      panel.startIntegrationReview(songDetail, offer);
+      assert.deepEqual(page.navigations, [], `${offer.quest_id} at ${pathname}`);
+      assert.equal(page.map.size, 0, 'nothing is remembered for a refused start');
+      assert.match(messages.at(-1), /nothing was changed/i);
+    } finally {
+      page.restore();
+    }
+  }
+});
+
+function returningPanel({ request } = {}) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+  const log = { requests: [], details: [], statuses: [] };
+  panel.status = message => log.statuses.push(message);
+  panel.request = async path => {
+    log.requests.push(path);
+    if (request) return request(path);
+    return {};
+  };
+  panel.details = async (entryID, trigger) => log.details.push([entryID, trigger]);
+  return { panel, log };
+}
+
+function rememberReturn(page, patch = {}) {
+  page.map.set(
+    'ori:library-return',
+    JSON.stringify({
+      home_id: 'home-1',
+      entry_id: 'entry-9',
+      quest_id: 'install_ori_reaper',
+      return_path: '/workspaces/music-home/assistant',
+      created_at: Date.now(),
+      ...patch
+    })
+  );
+}
+
+function queuePanel({ eligibility, queueChoice }) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+  panel.state = { provider_read_only: false };
+  panel.queue = {
+    home_id: 'home-1',
+    ids: ['song-a', 'song-b'],
+    index: 0,
+    created_at: Date.now(),
+    pending: null
+  };
+  const log = { posts: [], statuses: [], choices: [], progressed: 0 };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.saveQueue = () => true;
+  panel.restoreQueue = async () => {};
+  panel.renderQueueControls = () => {};
+  panel.status = message => log.statuses.push(message);
+  panel.post = async path => {
+    log.posts.push(path);
+    throw new Error('no review, creator, or queue write is allowed here');
+  };
+  panel.progressQueue = async () => {
+    log.progressed++;
+  };
+  panel.request = async path =>
+    path.endsWith('/activation')
+      ? eligibility
+      : { row: { id: 'song-a', name: 'Album 5', connection: 'catalog_only' } };
+  panel.queueChoice = async (name, position, count, trigger, reason, offer) => {
+    log.choices.push({ name, position, count, reason, offer });
+    return queueChoice;
+  };
+  return { panel, log };
+}
+
+test('a queued song that needs an integration pauses in place while its review opens', async () => {
+  const page = integrationPage();
+  try {
+    const { panel, log } = queuePanel({
+      eligibility: {
+        state: 'project_provider_unavailable',
+        reason: 'A compatible installed project integration is required.',
+        integration_offer: reaperOffer
+      },
+      queueChoice: 'integration'
+    });
+    await panel.continueQueue();
+    assert.equal(log.choices.length, 1);
+    assert.deepEqual(log.choices[0].offer, reaperOffer, 'the dialog is told what it may offer');
+    assert.equal(panel.queue.index, 0, 'the queue stays on the same song');
+    assert.equal(log.progressed, 0, 'nothing was handled, skipped, or connected');
+    assert.deepEqual(log.posts, [], 'no review, creator, or queue request was made');
+    assert.equal(panel.queue.pending, null, 'no review token is held across the detour');
+    assert.deepEqual(page.navigations, ['/?setup=quest&source=host&quest=install_ori_reaper']);
+    assert.equal(JSON.parse(page.map.get('ori:library-return')).entry_id, 'song-a');
+    assert.match(log.statuses.at(-1), /paused on this song/);
+  } finally {
+    page.restore();
+  }
+});
+
+// A Home with several catalog-only songs, for select-all and connect-all. Each
+// song's detail, eligibility and review are served from `songs`.
+function batchPanel(songs, { confirmed = true, reviewFile = null } = {}) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+  panel.state = { provider_read_only: false };
+  panel.rows = songs.map(song => ({ id: song.id, name: song.name, connection: 'catalog_only' }));
+  const log = { posts: [], statuses: [], confirms: [], refreshes: 0 };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.renderRows = () => {};
+  panel.renderQueueControls = () => {};
+  panel.status = message => log.statuses.push(message);
+  panel.refresh = async () => {
+    log.refreshes++;
+  };
+  panel.confirm = async (title, lines, action) => {
+    log.confirms.push({ title, lines, action });
+    return confirmed;
+  };
+  const byID = id => songs.find(song => song.id === id);
+  panel.request = async path => {
+    const id = decodeURIComponent(path.split('/')[2]);
+    const song = byID(id);
+    if (path.endsWith('/activation')) return song.eligibility;
+    return { row: { id, name: song.name, connection: 'catalog_only' }, revision: 7 };
+  };
+  panel.post = async (path, body) => {
+    log.posts.push({ path, body });
+    if (path.endsWith('/activation/review')) {
+      const id = decodeURIComponent(path.split('/')[2]);
+      return { token: `token-${id}`, project_file: reviewFile || body.project_file };
+    }
+    return {};
+  };
+  return { panel, log };
+}
+
+const readySong = (id, name, file = 'Song.rpp') => ({
+  id,
+  name,
+  eligibility: {
+    state: 'review_available',
+    project_files: [file],
+    project_role_labels: ['REAPER Assistant']
+  }
+});
+
+test('select all picks every selectable song shown and clears them on the next press', () => {
+  const { panel } = batchPanel([readySong('a', 'Album-1'), readySong('b', 'Album-2')]);
+  panel.rows.push({ id: 'c', name: 'Album-3', connection: 'connected' });
+  panel.toggleSelectAll();
+  assert.deepEqual(
+    [...panel.selectedProjects].sort(),
+    ['a', 'b'],
+    'connected songs are not picked'
+  );
+  panel.toggleSelectAll();
+  assert.equal(panel.selectedProjects.size, 0);
+});
+
+test('connect all confirms once with every exact file, then reviews and commits each song on its own', async () => {
+  const songs = [readySong('a', 'Album-1'), readySong('b', 'Album-2', 'Take.rpp')];
+  const { panel, log } = batchPanel(songs);
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.equal(log.confirms.length, 1, 'one review for the whole selection');
+  assert.match(log.confirms[0].lines.join('\n'), /Album-1 — Song\.rpp/);
+  assert.match(log.confirms[0].lines.join('\n'), /Album-2 — Take\.rpp/);
+  assert.deepEqual(
+    log.posts.map(post => post.path.split('/').slice(-2).join('/')),
+    ['activation/review', 'activation/commit', 'activation/review', 'activation/commit']
+  );
+  const commits = log.posts.filter(post => post.path.endsWith('/commit'));
+  assert.notEqual(commits[0].body.idempotency_key, commits[1].body.idempotency_key);
+  assert.deepEqual(
+    commits.map(post => post.body.review_token),
+    ['token-a', 'token-b'],
+    'each commit uses its own song’s review'
+  );
+  assert.equal(panel.selectedProjects.size, 0);
+  assert.match(log.statuses.at(-1), /Connected 2 of 2/);
+});
+
+test('connect all leaves a song that needs a choice or an integration alone and names it', async () => {
+  const songs = [
+    readySong('a', 'Album-1'),
+    readySong('b', 'Album-2'),
+    {
+      id: 'c',
+      name: 'Album-5',
+      eligibility: { state: 'file_choice_required', project_files: ['A.rpp', 'B.rpp'] }
+    },
+    {
+      id: 'd',
+      name: 'Logic Sketch',
+      eligibility: { state: 'unsupported_format', reason: 'Catalog record only.' }
+    }
+  ];
+  const { panel, log } = batchPanel(songs);
+  panel.selectedProjects = new Set(['a', 'b', 'c', 'd']);
+  await panel.connectSelected();
+  const text = log.confirms[0].lines.join('\n');
+  assert.match(text, /Album-5: choose its project file/);
+  assert.match(text, /Logic Sketch: Catalog record only\./);
+  assert.equal(log.posts.filter(post => post.path.endsWith('/commit')).length, 2);
+  assert.ok(!log.posts.some(post => post.path.includes('/c/') || post.path.includes('/d/')));
+  assert.match(log.statuses.at(-1), /2 need their own review/);
+});
+
+test('connect all with the integration missing says so in a dialog and offers its review', async () => {
+  const missing = (id, name) => ({
+    id,
+    name,
+    eligibility: {
+      state: 'project_provider_unavailable',
+      reason: 'A compatible installed project integration is required.',
+      integration_offer: reaperOffer
+    }
+  });
+  const { panel, log } = batchPanel([missing('a', 'Album-1'), missing('b', 'Album-2')]);
+  const started = [];
+  panel.startIntegrationReview = (detail, offer) => started.push({ detail, offer });
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.equal(log.confirms.length, 1, 'a dialog, not only a line of small text');
+  assert.match(log.confirms[0].title, /Install the REAPER integration first\?/);
+  assert.match(log.confirms[0].lines.join('\n'), /Album-1: needs the REAPER integration/);
+  assert.equal(log.confirms[0].action, 'Review the REAPER integration');
+  assert.deepEqual(log.posts, [], 'nothing was reviewed or created');
+  assert.equal(started.length, 1);
+  assert.deepEqual(started[0].offer, reaperOffer);
+});
+
+test('declining the one review connects nothing and reviews nothing', async () => {
+  const { panel, log } = batchPanel([readySong('a', 'Album-1'), readySong('b', 'Album-2')], {
+    confirmed: false
+  });
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.deepEqual(log.posts, [], 'no server review was taken before the person agreed');
+  assert.equal(log.statuses.at(-1), 'Nothing was connected.');
+});
+
+test('connect all stops when a song’s review names a different file than the one confirmed', async () => {
+  const { panel, log } = batchPanel([readySong('a', 'Album-1'), readySong('b', 'Album-2')], {
+    reviewFile: 'Other.rpp'
+  });
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.equal(log.posts.filter(post => post.path.endsWith('/commit')).length, 0);
+  assert.match(log.statuses.at(-1), /Connected 0 of 2\. Stopped at Album-1/);
+  assert.ok(panel.selectedProjects.has('a') && panel.selectedProjects.has('b'));
+});
+
+test('the queue offers an integration only for a song that cannot be set up yet', async () => {
+  const page = integrationPage();
+  try {
+    const eligible = queuePanel({
+      eligibility: {
+        state: 'review_available',
+        reason: '',
+        integration_offer: reaperOffer // a stray offer is ignored for a ready song
+      },
+      queueChoice: 'pause'
+    });
+    await eligible.panel.continueQueue();
+    assert.equal(eligible.log.choices[0].offer, null);
+    assert.equal(eligible.log.choices[0].reason, '');
+
+    const noOffer = queuePanel({
+      eligibility: { state: 'unsupported_format', reason: 'Catalog record only.' },
+      queueChoice: 'pause'
+    });
+    await noOffer.panel.continueQueue();
+    assert.equal(noOffer.log.choices[0].offer, null, 'Logic or Ableton get no install promise');
+    assert.deepEqual(page.navigations, [], 'neither choice started an integration review');
+  } finally {
+    page.restore();
+  }
+});
+
+const rosterOf = rows => ({ roles: { roles: rows, filled_count: 0, total_count: rows.length } });
+
+test('the project team link asks for the first empty role, never a filled, read-only, or odd one', () => {
+  const route = '/workspaces/existing-song';
+  const song = { role_id: 'reaper-assistant', state: 'empty', required: true, primary: true };
+  assert.equal(projectTeamURL(route, rosterOf([song])), `${route}?role=reaper-assistant`);
+  // Primary wins over required, and required over the rest.
+  const other = { role_id: 'mixer', state: 'empty', required: true };
+  const optional = { role_id: 'extras', state: 'empty' };
+  assert.match(projectTeamURL(route, rosterOf([optional, other, song])), /role=reaper-assistant$/);
+  assert.match(projectTeamURL(route, rosterOf([optional, other])), /role=mixer$/);
+  assert.match(projectTeamURL(route, rosterOf([optional])), /role=extras$/);
+  // Nothing to fill, or nothing safe to ask for: just the project page.
+  for (const rows of [
+    [{ ...song, state: 'filled' }],
+    [{ ...song, read_only: true }],
+    [{ ...song, needs_clear: true, state: 'needs_clear' }],
+    [{ ...song, role_id: '../x' }],
+    [{ ...song, role_id: 'a b' }],
+    [{ ...song, role_id: 'x'.repeat(129) }],
+    [{ ...song, role_id: 7 }],
+    [null, undefined, 'x'],
+    []
+  ]) {
+    assert.equal(projectTeamURL(route, rosterOf(rows)), route, JSON.stringify(rows));
+  }
+  for (const response of [null, undefined, {}, { roles: null }, { roles: { roles: 'no' } }]) {
+    assert.equal(projectTeamURL(route, response), route);
+  }
+});
+
+test('the team link only ever extends a workspace page route, never another address', () => {
+  const roster = rosterOf([
+    { role_id: 'reaper-assistant', state: 'empty', required: true, primary: true }
+  ]);
+  for (const route of [
+    '',
+    undefined,
+    null,
+    '/workspaces/',
+    '/workspaces/a/b',
+    '/workspaces/a?x=1',
+    '/workspaces/a#x',
+    '//evil.example/workspaces/a',
+    'https://evil.example/workspaces/a',
+    '/settings',
+    'javascript:alert(1)'
+  ]) {
+    assert.equal(projectTeamURL(route, roster), '', String(route));
+  }
+});
+
+function routePanel(handlers) {
+  const calls = [];
+  const panel = new ProjectLibraryPanel({
+    workspaceId: 'home',
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      const handler = handlers[url];
+      if (!handler) throw new Error(`unexpected ${url}`);
+      return handler();
+    }
+  });
+  return { panel, calls };
+}
+
+test('a workspace page is reached by its slug, because an ID path is a 404', async () => {
+  const { panel, calls } = routePanel({
+    '/api/workspaces/9a28bf04-7260-4909-8522-2d62f46217b2': () => ({
+      ok: true,
+      json: async () => ({ id: '9a28bf04-7260-4909-8522-2d62f46217b2', folder_slug: 'album three' })
+    })
+  });
+  const route = await panel.workspaceRoute('9a28bf04-7260-4909-8522-2d62f46217b2');
+  assert.equal(route, '/workspaces/album%20three');
+  assert.doesNotMatch(route, /9a28bf04/, 'the workspace ID is never used as the page address');
+  assert.equal(calls[0].options.method, undefined, 'a read');
+});
+
+test('a project page reports whether it has chosen how it works, from the one canonical read', async () => {
+  const read = body => ({ ok: true, json: async () => body });
+  for (const [workspace, expected] of [
+    [{ folder_slug: 'song', runtime_state: { selected_mode_id: 'file_only' } }, true],
+    [{ folder_slug: 'song', runtime_state: { selected_mode_id: '  ' } }, false],
+    [{ folder_slug: 'song', runtime_state: {} }, false],
+    [{ folder_slug: 'song' }, false]
+  ]) {
+    const { panel, calls } = routePanel({ '/api/workspaces/w-1': () => read(workspace) });
+    assert.deepEqual(await panel.workspacePage('w-1'), {
+      route: '/workspaces/song',
+      modeChosen: expected
+    });
+    assert.equal(calls.length, 1, 'route and mode come from a single read');
+  }
+  // Nothing readable means no route and no claim about the mode.
+  const { panel } = routePanel({
+    '/api/workspaces/w-1': () => ({ ok: false, json: async () => ({}) })
+  });
+  assert.deepEqual(await panel.workspacePage('w-1'), { route: '', modeChosen: false });
+});
+
+test('with no resolvable page there is no route, so no dead link is ever shown', async () => {
+  for (const handler of [
+    () => ({ ok: true, json: async () => ({ id: 'x' }) }),
+    () => ({ ok: true, json: async () => ({ folder_slug: '   ' }) }),
+    () => ({ ok: false, json: async () => ({ folder_slug: 'nope' }) }),
+    () => ({ ok: true, json: async () => null }),
+    () => {
+      throw new Error('offline');
+    }
+  ]) {
+    const { panel } = routePanel({ '/api/workspaces/w-1': handler });
+    assert.equal(await panel.workspaceRoute('w-1'), '');
+  }
+  assert.equal(await new ProjectLibraryPanel({ workspaceId: 'h' }).workspaceRoute(''), '');
+});
+
+test('the connected dialog reads the project’s own roster and never fails the connect over it', async () => {
+  const roster = () => ({
+    ok: true,
+    json: async () =>
+      rosterOf([{ role_id: 'reaper-assistant', state: 'empty', required: true, primary: true }])
+  });
+  const { panel, calls } = routePanel({ '/api/workspaces/child-9/roles': roster });
+  assert.equal(
+    await panel.projectTeamLink('child-9', '/workspaces/existing-song'),
+    '/workspaces/existing-song?role=reaper-assistant'
+  );
+  assert.deepEqual(calls, [
+    { url: '/api/workspaces/child-9/roles', options: { headers: { Accept: 'application/json' } } }
+  ]);
+  assert.equal(calls[0].options.method, undefined, 'a read, never a write');
+
+  const refused = routePanel({
+    '/api/workspaces/child-9/roles': () => ({ ok: false, json: async () => ({}) })
+  });
+  assert.equal(
+    await refused.panel.projectTeamLink('child-9', '/workspaces/existing-song'),
+    '/workspaces/existing-song'
+  );
+  const offline = routePanel({
+    '/api/workspaces/child-9/roles': () => {
+      throw new Error('offline');
+    }
+  });
+  assert.equal(
+    await offline.panel.projectTeamLink('child-9', '/workspaces/existing-song'),
+    '/workspaces/existing-song'
+  );
+});
+
+test('every eligibility state has its own plain label, and none promises an install or a live check', () => {
+  const states = {
+    review_available: 'Ready to review',
+    file_choice_required: 'Needs a file choice',
+    connected: 'Connected to a project workspace',
+    link_needs_review: 'Saved link needs review',
+    revoked_source: 'Discovery consent ended',
+    unavailable: 'Not found at the last scan',
+    unsupported_format: 'Catalog record only',
+    project_provider_unavailable: 'Needs a project integration',
+    home_provider_unavailable: 'Home package unavailable',
+    provider_ambiguous: 'Integration needs review',
+    folder_owned: 'Folder already used by another workspace'
+  };
+  for (const [state, expected] of Object.entries(states)) {
+    assert.equal(activationStateLabel(state), expected, state);
+  }
+  assert.equal(new Set(Object.values(states)).size, Object.keys(states).length, 'each is distinct');
+  for (const state of ['', 'made_up', undefined, null, '__proto__', 'toString']) {
+    assert.equal(activationStateLabel(state), 'Setup status unknown', String(state));
+  }
+  for (const text of Object.values(states)) {
+    assert.doesNotMatch(text, /install (it|now)|REAPER|live|ready to (record|play)/i);
+  }
+});
+
+test('coming back reopens the same song once, after re-reading it from the server', async () => {
+  const page = integrationPage();
+  try {
+    rememberReturn(page);
+    const { panel, log } = returningPanel();
+    await panel.resumeFromIntegration();
+    assert.deepEqual(log.requests, ['/projects/entry-9'], 'the song is re-read, not trusted');
+    assert.deepEqual(log.details, [['entry-9', null]]);
+    assert.match(log.statuses.at(-1), /Its integration status was checked again/);
+    assert.equal(page.map.size, 0, 'the hint is spent');
+    await panel.resumeFromIntegration();
+    assert.equal(log.details.length, 1, 'a reload or second call never repeats the return');
+  } finally {
+    page.restore();
+  }
+});
+
+test('a hint for another Home, or a tampered or expired one, returns nowhere', async () => {
+  const page = integrationPage();
+  try {
+    rememberReturn(page, { home_id: 'some-other-home' });
+    const other = returningPanel();
+    await other.panel.resumeFromIntegration();
+    assert.deepEqual(other.log.details, []);
+    assert.deepEqual(other.log.requests, []);
+    assert.equal(page.map.size, 1, 'another Home’s hint is left for that Home');
+
+    for (const patch of [
+      { return_path: 'https://evil.example/' },
+      { quest_id: '../x' },
+      { entry_id: 'e'.repeat(161) },
+      { created_at: Date.now() - 2 * 3600 * 1000 }
+    ]) {
+      rememberReturn(page, patch);
+      const { panel, log } = returningPanel();
+      await panel.resumeFromIntegration();
+      assert.deepEqual(log.details, [], JSON.stringify(patch));
+      assert.deepEqual(log.requests, [], 'nothing is asked of the server for a bad hint');
+    }
+  } finally {
+    page.restore();
+  }
+});
+
+test('a song that is gone, or a re-check that fails, says so and creates nothing', async () => {
+  const page = integrationPage();
+  try {
+    rememberReturn(page);
+    const gone = returningPanel({
+      request: async () => {
+        throw Object.assign(new Error('missing'), { status: 404 });
+      }
+    });
+    await gone.panel.resumeFromIntegration();
+    assert.deepEqual(gone.log.details, []);
+    assert.match(gone.log.statuses.at(-1), /no longer in this library\. Nothing was changed/);
+    assert.equal(page.map.size, 0);
+
+    rememberReturn(page);
+    const down = returningPanel({
+      request: async () => {
+        throw Object.assign(new Error('boom'), { status: 503 });
+      }
+    });
+    await down.panel.resumeFromIntegration();
+    assert.deepEqual(down.log.details, []);
+    assert.match(down.log.statuses.at(-1), /could not re-check that song/);
+    // Nothing on the return path issues a review, activation, or creator call.
+    for (const path of [...gone.log.requests, ...down.log.requests]) {
+      assert.match(path, /^\/projects\/[^/]+$/);
+    }
+  } finally {
+    page.restore();
   }
 });

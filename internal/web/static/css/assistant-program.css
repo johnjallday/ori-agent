@@ -283,6 +283,76 @@
     sans-serif;
 }
 
+/* The next step of an unfinished project library. A fresh Home opens on this
+   rather than on a level meter; it disappears once a scan has finished. */
+.assistant-program-setup-next {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin: 1rem 0;
+  padding: 1.1rem 1.25rem;
+  color: var(--assistant-ink);
+  background: var(--assistant-panel);
+  border: 1px solid var(--assistant-line);
+  border-left: 4px solid var(--assistant-amber);
+  border-radius: 3px 12px 12px 3px;
+  scroll-margin-top: 96px;
+}
+.assistant-program-setup-next[hidden] {
+  display: none;
+}
+.assistant-program-setup-next-copy {
+  min-width: 0;
+}
+.assistant-program-setup-next h2 {
+  margin: 0.25rem 0 0.35rem;
+  font-size: 1.25rem;
+  scroll-margin-top: 96px;
+  overflow-wrap: anywhere;
+}
+.assistant-program-setup-next p {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--assistant-muted);
+  line-height: 1.5;
+}
+.assistant-program-setup-next button {
+  flex: none;
+}
+@media (max-width: 700px) {
+  .assistant-program-setup-next {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .assistant-program-setup-next button {
+    width: 100%;
+  }
+}
+
+/* While setup is unfinished the hero keeps the name, stage and level but gives
+   the page back to the next step. Relationship progress is unchanged. */
+.assistant-program-page.is-setup-first .assistant-program-hero {
+  min-height: 0;
+  align-items: center;
+  gap: 1rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+.assistant-program-page.is-setup-first .assistant-program-hero h1 {
+  max-width: none;
+  margin: 0.25rem 0 0.4rem;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+.assistant-program-page.is-setup-first .assistant-program-hero p {
+  margin-bottom: 0.8rem;
+}
+.assistant-program-page.is-setup-first .assistant-program-meter {
+  width: 84px;
+}
+.assistant-program-page.is-setup-first .assistant-program-meter-copy strong {
+  font-size: 1.5rem;
+}
+
 .assistant-program-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
@@ -823,6 +893,30 @@
 .project-library-status {
   min-height: 1.5rem;
   margin: 0.8rem 0;
+}
+/* Where one saved song stands; the label is text, so it never relies on color. */
+.project-library-state {
+  display: inline-block;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.25rem 0.65rem;
+  color: var(--assistant-ink);
+  font: 600 0.8rem/1.3 var(--font-mono, "JetBrains Mono", monospace);
+  letter-spacing: 0.04em;
+  border: 1px solid var(--assistant-line);
+  border-left: 3px solid var(--assistant-amber);
+  border-radius: 3px;
+  background: var(--assistant-panel);
+}
+.project-library-note {
+  color: var(--assistant-muted);
+  font-size: 0.85rem;
+}
+.project-library-remedies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
 }
 .project-library-empty {
   border-left: 3px solid var(--assistant-amber);

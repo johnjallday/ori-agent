@@ -16,6 +16,25 @@ func TestProjectFormatOptions_AreBoundedUniqueAndDrawnFromDiscovery(t *testing.T
 	}
 }
 
+func TestIntegrationKeyForProjectFormat_OnlyAFormatAReviewedIntegrationSupports(t *testing.T) {
+	if key, ok := IntegrationKeyForProjectFormat("reaper"); !ok || key != "ori_reaper" {
+		t.Fatalf("reaper => %q %v, want ori_reaper", key, ok)
+	}
+	// Formats discovery recognizes but no reviewed integration supports must
+	// never map to one: nothing is offered as their cure.
+	for _, format := range []string{"logic", "ableton", "", "REAPER", "reaper ", "../reaper", "unknown"} {
+		if key, ok := IntegrationKeyForProjectFormat(format); ok || key != "" {
+			t.Fatalf("%q mapped to integration %q", format, key)
+		}
+	}
+	// Every mapped format is one discovery itself can produce.
+	for _, option := range ProjectFormatOptions() {
+		if key, ok := IntegrationKeyForProjectFormat(option.ID); ok && (key == "" || !KnownProjectFormat(option.ID)) {
+			t.Fatalf("inconsistent mapping for %q: %q", option.ID, key)
+		}
+	}
+}
+
 func TestMatchMarker_TableRows(t *testing.T) {
 	cases := []struct {
 		name  string

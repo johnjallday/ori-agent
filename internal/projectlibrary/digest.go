@@ -27,6 +27,14 @@ type LibraryDigest struct {
 	Unavailable       int       `json:"unavailable"`
 	UnsupportedFormat int       `json:"unsupported_format"`
 	Activatable       int       `json:"activatable"`
+	// Connected counts songs found by this scan that already have an exact
+	// project link; they are neither "can be set up" nor "unsupported". A digest
+	// stored before this field existed reads as zero, which stays valid.
+	Connected int `json:"connected,omitempty"`
+	// NeedsFileChoice is the part of Activatable whose folder holds several
+	// candidate project files, so setup requires an explicit file choice. It is
+	// never a guess about which file is authoritative.
+	NeedsFileChoice int `json:"needs_file_choice,omitempty"`
 	// SetupNote explains why Activatable and UnsupportedFormat are zero
 	// without implying the entries are unusable.
 	SetupNote string `json:"setup_note,omitempty"`
@@ -46,12 +54,13 @@ func (d LibraryDigest) valid(scans []Scan) bool {
 		d.ScannedAt.IsZero() || (d.Coverage != "complete" && d.Coverage != "partial") {
 		return false
 	}
-	for _, count := range []int{d.Projects, d.New, d.Updated, d.Unavailable, d.UnsupportedFormat, d.Activatable} {
+	for _, count := range []int{d.Projects, d.New, d.Updated, d.Unavailable, d.UnsupportedFormat, d.Activatable, d.Connected, d.NeedsFileChoice} {
 		if count < 0 || count > maxEntries {
 			return false
 		}
 	}
-	if d.New > d.Projects || d.Updated > d.Projects || d.Activatable+d.UnsupportedFormat > d.Projects {
+	if d.New > d.Projects || d.Updated > d.Projects || d.Connected+d.Activatable+d.UnsupportedFormat > d.Projects ||
+		d.NeedsFileChoice > d.Activatable {
 		return false
 	}
 	switch d.SetupNote {
@@ -148,12 +157,19 @@ func buildLibraryDigest(before, after []Entry, scan Scan, finishedAt time.Time, 
 		case previous == nil || observationChanged(*previous, *current):
 			digest.Updated++
 		}
-		if entry.Link != nil || evidence.note != "" ||
+		if entry.Link != nil {
+			digest.Connected++
+			continue
+		}
+		if evidence.note != "" ||
 			(current.Availability != "available" && current.Availability != "ambiguous") {
 			continue
 		}
 		if evidence.supports(current.Alternates) {
 			digest.Activatable++
+			if current.Availability == "ambiguous" {
+				digest.NeedsFileChoice++
+			}
 		} else {
 			digest.UnsupportedFormat++
 		}

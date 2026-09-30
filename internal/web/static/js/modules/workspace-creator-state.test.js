@@ -19,6 +19,16 @@ const {
   lockedRenameRefusal
 } = creatorState();
 
+test('only a caller that asks for it gets a connection-only creator', () => {
+  assert.equal(createCreatorContext({ connectionOnly: true }).connectionOnly, true);
+  for (const options of [{}, { connectionOnly: false }, { stayAfterCreate: true }, undefined]) {
+    assert.equal(createCreatorContext(options).connectionOnly, false, JSON.stringify(options));
+  }
+  // It stays what it was across a kind switch, like the other caller options.
+  const context = createCreatorContext({ connectionOnly: true, stayAfterCreate: true });
+  assert.equal(switchCreatorKind(context, 'group').context.connectionOnly, true);
+});
+
 test('a team lock names agents to keep and survives a kind switch; ordinary creators have none', () => {
   const reason = 'Mail access is granted to the agent named Inbox.';
   const locked = createCreatorContext({

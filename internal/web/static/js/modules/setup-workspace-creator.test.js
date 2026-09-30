@@ -60,3 +60,20 @@ test('None setup placement is explicitly standalone without a Home', () => {
   assert.equal(placement.groupComposition, 'standalone');
   assert.deepEqual(placement.availableCompositions, ['standalone']);
 });
+
+// The open path is DOM-heavy and is exercised by the paired browser suite; these
+// guard the two facts the rest of the journey depends on.
+test('the journey creator only connects, stays on the page, and counts the steps it shows', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('./setup-workspace-creator.js', import.meta.url), 'utf8');
+  assert.match(
+    source,
+    /showAddWorkspaceModal\(\{[^}]*connectionOnly: true[^}]*stayAfterCreate: true[^}]*\}\)/s
+  );
+  // Step numbers belong to the wizard chrome, which counts only the steps it
+  // shows; a hard-coded count here would be wrong the moment a step is removed.
+  assert.doesNotMatch(source, /of 3`/);
+  assert.doesNotMatch(source, /Step \$\{/);
+  // The wizard's team choice is never forwarded: only the reviewed run action is posted.
+  assert.doesNotMatch(source, /role_staffing|team_intent|assistant_hire/);
+});

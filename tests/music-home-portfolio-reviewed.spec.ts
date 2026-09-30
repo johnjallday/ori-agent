@@ -129,23 +129,34 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   const shelf = page.locator('#projectLibraryPanel');
   await expect(shelf).toBeVisible();
   await expect(shelf.locator('#projectLibraryStatus')).toContainText('No library yet');
+  // A fresh Home lands on its unfinished setup, not on the progression header:
+  // the card names the carried collection, is in the first viewport, holds focus
+  // (arrival after async render, even before the library exists), and compacts
+  // the hero while it is shown.
+  const setupCard = page.locator('#projectSetupNext');
+  await expect(setupCard).toBeVisible();
+  await expect(setupCard.locator('#projectSetupNextTitle')).toContainText('Documents');
+  await expect(setupCard.locator('#projectSetupNextTitle')).toBeFocused();
+  await expect(setupCard).toBeInViewport();
+  await expect(setupCard.locator('#projectSetupNextAction')).toHaveText(
+    'Start library and review Documents'
+  );
+  await expect(page.locator('#assistantProgramPage')).toHaveClass(/is-setup-first/);
+  await shot(page, '19a-fresh-home-setup-first');
   expect((await json(await request.get(`${base}/roots`))).initialized).toBe(false);
   await shot(page, '19-reviewed-home-before-library-consent');
-  await shelf.locator('#projectLibraryInitialize').click();
-  await page
-    .getByRole('dialog', { name: 'Start a Home project library?' })
-    .getByRole('button', { name: 'Start library' })
-    .click();
+  // The card's button announced that it starts the library for this collection,
+  // so the exact folder's own review follows directly.
+  await setupCard.locator('#projectSetupNextAction').click();
   const grant = page.getByRole('dialog', { name: 'Connect this discovery folder?' });
   await expect(grant).toContainText(documents);
   expect((await json(await request.get(`${base}/roots`))).total_roots).toBe(0);
   await shot(page, '20-reviewed-portfolio-root-grant');
   await grant.getByRole('button', { name: 'Connect folder' }).click();
-  const scanPrompt = page.getByRole('dialog', { name: 'Scan the folder now?' });
-  await expect(scanPrompt).toBeVisible();
-  expect((await json(await request.get(`${base}/roots`))).total_roots).toBe(1);
-  await scanPrompt.getByRole('button', { name: 'Review scan' }).click();
+  // The grant goes straight to the scan review; no separate "scan now?" stop.
   const scan = page.getByRole('dialog', { name: 'Scan this discovery folder once?' });
+  await expect(scan).toBeVisible();
+  expect((await json(await request.get(`${base}/roots`))).total_roots).toBe(1);
   await expect(scan).toContainText(documents);
   await shot(page, '21-reviewed-portfolio-scan-review');
   await scan.getByRole('button', { name: 'Scan metadata' }).click();
@@ -213,6 +224,58 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   );
   await expect(setup.getByRole('button', { name: /Work on this project/i })).toHaveCount(0);
   await shot(page, '22b-reviewed-portfolio-inert-project-setup');
+
+  // music-setup-onboarding, group 3. A song whose format a reviewed integration
+  // supports is labelled plainly and, where this computer can complete it, can
+  // review that integration and come back to the same song. Chip/fake chooser
+  // evidence; the install itself is NOT confirmed here.
+  await expect(setup).toContainText('Needs a project integration');
+  const offerSupported = process.platform === 'darwin' && process.arch === 'arm64';
+  const album3Entry = projects.rows.find((row: { name: string }) => row.name === 'Album-3')?.id;
+  const album3Activation = await json(
+    await request.get(`${base}/projects/${album3Entry}/activation`)
+  );
+  expect(album3Activation.observed_format).toBe('reaper');
+  expect(album3Activation.integration_offer ?? null).toEqual(
+    offerSupported
+      ? { key: 'ori_reaper', quest_id: 'install_ori_reaper', display_name: 'REAPER' }
+      : null
+  );
+  const reviewIntegration = setup.getByRole('button', { name: 'Review the REAPER integration' });
+  await expect(reviewIntegration).toHaveCount(offerSupported ? 1 : 0);
+  if (offerSupported) {
+    const pluginsBefore = (await json(await request.get('/api/plugins'))).plugins.map(
+      (row: { name: string; enabled: boolean }) => `${row.name}:${row.enabled}`
+    );
+    const workspacesBefore = (await json(await request.get('/api/workspaces'))).folders.length;
+    const homePath = new URL(page.url()).pathname;
+    await reviewIntegration.click();
+    await page.waitForURL(/\/\?setup=quest&source=host&quest=install_ori_reaper/);
+    await expect(page.locator('#specialistSetupJourneyModal')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('#specialistSetupJourneyModal')).toContainText('REAPER');
+    await shot(page, '22b1-reviewed-integration-install-quest');
+    // Nothing was confirmed: no install, no enable, no workspace.
+    expect(
+      (await json(await request.get('/api/plugins'))).plugins.map(
+        (row: { name: string; enabled: boolean }) => `${row.name}:${row.enabled}`
+      )
+    ).toEqual(pluginsBefore);
+    // Leave without confirming (or come back after finishing) and return.
+    await page.goto(homePath);
+    await expect(page.getByRole('dialog', { name: 'Album-3' })).toBeVisible({ timeout: 30_000 });
+    await expect(setup).toContainText('Needs a project integration');
+    await expect(shelf.locator('#projectLibraryStatus')).toContainText('Back on your song');
+    await shot(page, '22b2-back-on-the-same-song');
+    expect(await page.evaluate(() => sessionStorage.getItem('ori:library-return'))).toBeNull();
+    expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+      workspacesBefore
+    );
+    expect(
+      (await json(await request.get('/api/plugins'))).plugins.map(
+        (row: { name: string; enabled: boolean }) => `${row.name}:${row.enabled}`
+      )
+    ).toEqual(pluginsBefore);
+  }
   await setup.getByRole('button', { name: 'Plan a session' }).click();
   const planner = page.getByRole('dialog', { name: 'Plan a studio session' });
   await planner.getByRole('textbox', { name: 'Session goal' }).fill('Listen to the rough mix');
@@ -442,11 +505,25 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(committedResponse.ok(), await committedResponse.text()).toBeTruthy();
     const committed = await committedResponse.json();
     const connected = page.getByRole('dialog', { name: 'Album-3 is connected' });
+    // A workspace page is routed by its folder slug. /workspaces/<id> is a 404,
+    // which the library's links used to point at; the links must use the slug.
+    const childSlug = String(
+      (await json(await request.get(`/api/workspaces/${committed.workspace_id}`))).folder_slug
+    );
+    expect(childSlug).not.toBe('');
+    expect(childSlug).not.toBe(committed.workspace_id);
+    const childRoute = `/workspaces/${encodeURIComponent(childSlug)}`;
     await expect(connected.getByRole('link', { name: 'Open project workspace' })).toHaveAttribute(
       'href',
-      `/workspaces/${committed.workspace_id}`
+      childRoute
     );
     await shot(page, '25-reviewed-single-song-connected');
+    // music-setup-onboarding, group 4. A library-created child has not chosen how
+    // it works yet, so its own page opens the mode wizard first (File-only is the
+    // starting option) and its team comes right after. The dialog says so and does
+    // not request the team form on top of that wizard.
+    await expect(connected).toContainText('choose how it works');
+    await expect(connected.getByRole('link', { name: 'Set up the project team' })).toHaveCount(0);
     await connected.getByRole('button', { name: 'Stay in library' }).click();
     const workspacesAfter = (await json(await request.get('/api/workspaces'))).folders;
     expect(workspacesAfter).toHaveLength(workspacesBefore.length + 1);
@@ -460,6 +537,44 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(
       songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))
     ).toEqual(before);
+
+    // The child's own roster lists its project role, unfilled (not the Home's).
+    const childRolesURL = `/api/workspaces/${committed.workspace_id}/roles`;
+    const rosterBefore = (await json(await request.get(childRolesURL))).roles;
+    expect(rosterBefore.roles.map((role: { role_id: string }) => role.role_id)).toEqual([
+      'reaper-assistant'
+    ]);
+    expect(rosterBefore.filled_count).toBe(0);
+    const homeRosterBefore = (
+      await json(await request.get(`/api/workspaces/${homeID}/assistant-program`))
+    ).roster;
+    // Opening the child by its real route shows the project, not a 404, and
+    // starts with its own mode wizard. Looking at it creates and staffs nothing.
+    const childPage = await page.context().newPage();
+    try {
+      await childPage.goto(childRoute);
+      await expect(childPage.getByRole('heading', { name: 'Set up Reaper Song' })).toBeVisible({
+        timeout: 30_000
+      });
+      await expect(childPage.locator('body')).not.toContainText('404 page not found');
+      await shot(childPage, '25a-library-child-mode-first');
+    } finally {
+      await childPage.close();
+    }
+    expect(
+      (
+        (await json(await request.get(`/api/workspaces/${committed.workspace_id}`)))
+          .agent_instances || []
+      ).length
+    ).toBe(0);
+    expect((await json(await request.get(childRolesURL))).roles.filled_count).toBe(0);
+    expect(
+      (await json(await request.get(`/api/workspaces/${homeID}/assistant-program`))).roster
+    ).toEqual(homeRosterBefore);
+    expect(
+      songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex')),
+      'opening the project never touched a project file'
+    ).toEqual(before);
     await page.reload();
     const afterRestartView = await json(await request.get(`${base}/projects`));
     await shelf
@@ -469,14 +584,18 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     const linkedDetail = page.getByRole('dialog', { name: 'Album-3' });
     await expect(
       linkedDetail.getByRole('link', { name: 'Open connected workspace' })
-    ).toHaveAttribute('href', `/workspaces/${committed.workspace_id}`);
+    ).toHaveAttribute('href', childRoute);
     await linkedDetail.getByRole('button', { name: 'Close' }).click();
     const returnToHome = page.url();
     await shelf
       .locator('#projectLibraryResume')
       .getByRole('button', { name: 'Open Album-3 workspace' })
       .click();
-    await page.waitForURL(new RegExp(`/workspaces/${committed.workspace_id}$`));
+    await page.waitForURL(new RegExp(`${childRoute.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+    // The address matching is not enough: an unroutable path also matches it.
+    // The page itself must be the project, not a 404.
+    await expect(page.locator('body')).not.toContainText('404 page not found');
+    await expect(page.locator('body')).toContainText('Album-3');
     await page.goto(returnToHome);
     await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
     expect(
@@ -1318,6 +1437,139 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     );
     expect(createHash('sha256').update(readFileSync(alternate)).digest('hex')).toBe(alternateHash);
   }
+
+  // music-setup-onboarding, group 1. A Home reopened WITHOUT its original
+  // address (a new tab, a bookmark) still knows which collection it was created
+  // from, and a folder this Home already approved goes to its scan review rather
+  // than a second folder pick or a refused duplicate grant. Evidence label: this
+  // offer came from the documents chip, so it is fake/chip-chooser evidence, NOT
+  // the native macOS dialog.
+  const continuations = await json(
+    await request.get(
+      `/api/personal-assistant/folder-digest/continuations?home_id=${encodeURIComponent(homeID)}`
+    )
+  );
+  expect(continuations.continuations).toMatchObject([{ offer_id: offerID, state: 'ready' }]);
+  expect(JSON.stringify(continuations)).not.toContain(documents);
+  const homeRoute = new URL(page.url()).pathname;
+  const reopenBare = async () => {
+    const bare = await page.context().newPage();
+    const libraryPosts: string[] = [];
+    bare.on('request', apiRequest => {
+      const pathname = new URL(apiRequest.url()).pathname;
+      if (apiRequest.method() === 'POST' && pathname.startsWith(`${base}/roots/`)) {
+        libraryPosts.push(pathname.slice(base.length));
+      }
+    });
+    await bare.goto(homeRoute);
+    expect(new URL(bare.url()).search).toBe('');
+    await expect(bare.locator('#projectLibraryPanel')).toBeVisible();
+    return { bare, shelf: bare.locator('#projectLibraryPanel'), libraryPosts };
+  };
+  const activeRoots = async () => (await json(await request.get(`${base}/roots`))).total_roots;
+
+  // 1. This spec revoked the root earlier, so the restored collection needs a
+  //    fresh, separately confirmed grant: reviewed from the server's own record,
+  //    with no second native pick.
+  //    Only the paired run disconnects the folder; an unpaired run still has it
+  //    approved, so the re-grant and unfinished-scan checks below do not apply.
+  const rootsBeforeRegrant = await activeRoots();
+  const revokedEarlier = Boolean(reaperSource);
+  if (revokedEarlier) {
+    const first = await reopenBare();
+    await first.shelf.locator('#projectLibraryAdd').click();
+    const regrant = first.bare.getByRole('dialog', { name: 'Connect this discovery folder?' });
+    await expect(regrant).toBeVisible();
+    await expect(regrant).toContainText(documents);
+    expect(await activeRoots()).toBe(rootsBeforeRegrant); // reviewing grants nothing
+    await shot(first.bare, '38-bare-home-reopen-regrant-review');
+    await regrant.getByRole('button', { name: 'Connect folder' }).click();
+    const laterScan = first.bare.getByRole('dialog', { name: 'Scan this discovery folder once?' });
+    await expect(laterScan).toBeVisible();
+    await first.bare.keyboard.press('Escape'); // decline the scan; the grant is kept
+    await expect(laterScan).toBeHidden();
+    expect(first.libraryPosts).toEqual([
+      '/roots/pick-offer',
+      '/roots/review',
+      '/roots/commit',
+      expect.stringMatching(/^\/roots\/[^/]+\/scans\/review$/)
+    ]);
+    expect(await activeRoots()).toBe(rootsBeforeRegrant + 1);
+    // Declining left a connected, unscanned folder: the setup card offers the scan.
+    await expect(first.bare.locator('#projectSetupNextTitle')).toContainText('Scan Documents once');
+    await shot(first.bare, '38b-setup-card-scan-after-declined-review');
+    await first.bare.close();
+
+    // The same unfinished step on a phone: reachable, in the first screen, no
+    // sideways scrolling, and the hash arrival still lands on it.
+    const phone = await page.context().newPage();
+    await phone.setViewportSize({ width: 390, height: 844 });
+    await phone.goto(`${homeRoute}#projectLibraryPanel`);
+    const phoneCard = phone.locator('#projectSetupNext');
+    await expect(phoneCard).toBeVisible();
+    await expect(phoneCard.locator('#projectSetupNextTitle')).toContainText('Scan Documents once');
+    await expect(phoneCard.locator('#projectSetupNextTitle')).toBeFocused();
+    await expect(phoneCard).toBeInViewport();
+    await expect(phoneCard.locator('#projectSetupNextAction')).toBeVisible();
+    expect(
+      await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+    ).toBe(true);
+    // Partial visibility is not enough on a phone. Once the arrival scroll has
+    // settled, the whole step must be usable: its heading below the fixed
+    // navigation and its button clear of the floating help and assistant widgets
+    // that sit in the bottom corner.
+    const settled = () =>
+      phone.evaluate(() => {
+        const nav = document.querySelector('nav.navbar') as HTMLElement | null;
+        const title = document.querySelector('#projectSetupNextTitle') as HTMLElement;
+        const button = document.querySelector('#projectSetupNextAction') as HTMLElement;
+        return {
+          navBottom: nav ? nav.getBoundingClientRect().bottom : 0,
+          titleTop: title.getBoundingClientRect().top,
+          buttonBottom: button.getBoundingClientRect().bottom,
+          viewport: window.innerHeight
+        };
+      });
+    await expect
+      .poll(async () => {
+        const box = await settled();
+        return box.titleTop >= box.navBottom && box.buttonBottom <= box.viewport - 96;
+      })
+      .toBe(true);
+    await shot(phone, '38c-setup-card-390px');
+    // Keyboard only: Tab reaches the step's button, Enter opens its review, Escape
+    // cancels it and returns focus to the button. Reviewing scans nothing.
+    await phone.keyboard.press('Tab');
+    await expect(phoneCard.locator('#projectSetupNextAction')).toBeFocused();
+    await phone.keyboard.press('Enter');
+    const phoneScan = phone.getByRole('dialog', { name: 'Scan this discovery folder once?' });
+    await expect(phoneScan).toBeVisible();
+    await phone.keyboard.press('Escape');
+    await expect(phoneScan).toBeHidden();
+    await expect(phoneCard.locator('#projectSetupNextAction')).toBeFocused();
+    await phone.close();
+  }
+
+  // 2. Now the folder is approved. A Home reopened bare finds the same collection
+  //    and goes straight to that root's scan review: never a fresh native pick, a
+  //    second root review, or a duplicate grant that would be refused.
+  const second = await reopenBare();
+  await second.shelf.locator('#projectLibraryAdd').click();
+  const rescan = second.bare.getByRole('dialog', { name: 'Scan this discovery folder once?' });
+  await expect(rescan).toBeVisible();
+  await expect(rescan).toContainText(documents);
+  await expect(second.shelf.locator('#projectLibraryStatus')).toContainText('already connected');
+  await shot(second.bare, '39-bare-home-reopen-already-connected');
+  await second.bare.keyboard.press('Escape');
+  await expect(rescan).toBeHidden();
+  await expect(second.shelf.locator('#projectLibraryStatus')).toContainText('Scan canceled');
+  expect(second.libraryPosts).toEqual([
+    '/roots/pick-offer',
+    expect.stringMatching(/^\/roots\/[^/]+\/scans\/review$/)
+  ]);
+  expect(await activeRoots()).toBe(rootsBeforeRegrant + (revokedEarlier ? 1 : 0));
+  await second.bare.close();
+
   expect(songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))).toEqual(
     before
   );

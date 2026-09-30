@@ -94,6 +94,44 @@ func reviewedHomeExists(b *ServerBuilder, userID, providerKey string) (bool, err
 	return true, nil
 }
 
+// reviewedExistingHome returns the owner's existing Home for a reviewed provider
+// (its workspace ID and route) from the owner-scoped station and the workspace
+// row. Unlike VerifiedHome it proves no creation time and resolves no release,
+// so it is safe to call on a page load; the library still re-verifies the Home
+// and provider before any consequence. Missing, ambiguous, foreign, or
+// unreadable state fails closed so the offer falls back to a plain suggestion.
+func reviewedExistingHome(ctx context.Context, b *ServerBuilder, userID, providerKey string) (personalassistant.FolderCreateResult, error) {
+	refused := personalassistant.ErrFolderWorkspaceRefused
+	if b == nil || b.workspaceFileStore == nil || b.sessionStore == nil || userID == "" {
+		return personalassistant.FolderCreateResult{}, refused
+	}
+	var owner *reviewedintegration.HomeProvider
+	for _, entry := range reviewedintegration.HomeProviders() {
+		if entry.Key == providerKey {
+			copy := entry
+			owner = &copy
+			break
+		}
+	}
+	if owner == nil {
+		return personalassistant.FolderCreateResult{}, refused
+	}
+	programs := workspace.NewAssistantProgramStore(b.workspaceFileStore)
+	station, err := programs.FindStation(workspace.AssistantProgramKey{OwnerUserID: userID, PluginID: owner.PluginID, ProgramID: owner.ProgramID})
+	if err != nil || station == nil || station.OwnerUserID != userID || station.ID == "" {
+		return personalassistant.FolderCreateResult{}, refused
+	}
+	state := station.GetAssistantProgramState()
+	if state == nil || state.HomeProvider == nil || state.HomeProvider.PluginID != owner.PluginID || state.HomeProvider.ProgramID != owner.ProgramID {
+		return personalassistant.FolderCreateResult{}, refused
+	}
+	row, err := b.sessionStore.GetWorkspace(ctx, station.ID)
+	if err != nil || row == nil || row.OwnerUserID != userID || !row.IsGroup() || strings.TrimSpace(row.FolderSlug) == "" {
+		return personalassistant.FolderCreateResult{}, refused
+	}
+	return personalassistant.FolderCreateResult{WorkspaceID: station.ID, Route: "/workspaces/" + row.FolderSlug}, nil
+}
+
 // reviewedProjectQuest selects one installed plugin quest that matches the
 // host-reviewed integration and blueprint. Ambiguous declarations fail closed.
 func reviewedProjectQuest(ctx context.Context, b *ServerBuilder, integrationKey, blueprintID string) (pluginID, questID string, ok bool) {

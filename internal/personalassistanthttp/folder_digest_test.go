@@ -22,6 +22,11 @@ type fakeFolderDigest struct {
 	paused    bool
 	cancel    bool
 	prompted  int
+	// continuationHomes records every Home ID that reached the service.
+	continuationHomes []string
+	// existingHomeCalls records "offer/request" for every existing-Home resolve
+	// that reached the service.
+	existingHomeCalls []string
 }
 
 func (f *fakeFolderDigest) Current(context.Context, string) (personalassistant.FolderDigestView, error) {
@@ -108,6 +113,28 @@ func (f *fakeFolderDigest) ResolveJourney(_ context.Context, _ string, offerID s
 	return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferResolved}, nil
 }
 
+func (f *fakeFolderDigest) PortfolioContinuations(_ context.Context, _ string, homeID string) ([]personalassistant.FolderContinuation, error) {
+	f.continuationHomes = append(f.continuationHomes, homeID)
+	if homeID != "verified-home" {
+		return []personalassistant.FolderContinuation{}, nil
+	}
+	return []personalassistant.FolderContinuation{{
+		OfferID: "offer-9", Folder: "Albums", State: personalassistant.FolderContinuationNeedsPick,
+		Reason: personalassistant.FolderContinuationLost,
+	}}, nil
+}
+
+func (f *fakeFolderDigest) ResolveExistingHome(_ context.Context, _ string, offerID, requestID string) (personalassistant.FolderOfferView, error) {
+	f.existingHomeCalls = append(f.existingHomeCalls, offerID+"/"+requestID)
+	if offerID != "existing-offer" {
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderWorkspaceRefused
+	}
+	return personalassistant.FolderOfferView{
+		ID: offerID, Status: personalassistant.FolderOfferResolved,
+		Outcome: &personalassistant.FolderOutcome{Kind: personalassistant.FolderChoiceHome, WorkspaceID: "home-1", Route: "/workspaces/music-home", Existing: true},
+	}, nil
+}
+
 func newFolderDigestHandler(fake *fakeFolderDigest) *Handler {
 	h := NewHandler(nil, userprofile.LocalUserProvider{})
 	h.SetFolderDigest(fake)
@@ -135,6 +162,138 @@ func TestFolderDigestPrompted_RejectsPayloadAndMarksOnce(t *testing.T) {
 	}
 	if fake.prompted != 2 {
 		t.Fatalf("prompt receipt calls = %d, want 2", fake.prompted)
+	}
+}
+
+func TestFolderContinuations_ReadOnlyOpaqueAndStrict(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	const route = "/api/personal-assistant/folder-digest/continuations"
+	get := func(target string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.GetFolderContinuations(w, httptest.NewRequest(http.MethodGet, target, nil))
+		return w
+	}
+
+	ok := get(route + "?home_id=verified-home")
+	if ok.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", ok.Code, ok.Body.String())
+	}
+	var body struct {
+		Continuations []map[string]any `json:"continuations"`
+	}
+	if err := json.Unmarshal(ok.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode %s: %v", ok.Body.String(), err)
+	}
+	if len(body.Continuations) != 1 {
+		t.Fatalf("body = %s", ok.Body.String())
+	}
+	got := body.Continuations[0]
+	if got["offer_id"] != "offer-9" || got["state"] != "needs_pick" || got["reason"] != "lost" || got["folder"] != "Albums" {
+		t.Fatalf("continuation = %v", got)
+	}
+	for key := range got {
+		if strings.Contains(strings.ToLower(key), "path") {
+			t.Fatalf("continuation exposes %q: %v", key, got)
+		}
+	}
+
+	// A Home the owner has no offer for is an empty list, not an error, so a
+	// foreign or guessed Home ID reveals nothing.
+	if w := get(route + "?home_id=someone-elses-home"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"continuations":[]`) {
+		t.Fatalf("foreign Home: %d %s", w.Code, w.Body.String())
+	}
+
+	before := len(fake.continuationHomes)
+	for _, target := range []string{
+		route,
+		route + "?home_id=",
+		route + "?home_id=%20%20",
+		route + "?home_id=verified-home&path=/Users/me/Music",
+		route + "?home_id=verified-home&folder=Albums",
+		route + "?path=/Users/me/Music",
+		route + "?home_id=" + strings.Repeat("x", 200),
+	} {
+		w := get(target)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s => %d, want 400", target, w.Code)
+		}
+		if strings.Contains(w.Body.String(), "/Users/me") {
+			t.Fatalf("%s echoed the path: %s", target, w.Body.String())
+		}
+	}
+	if len(fake.continuationHomes) != before {
+		t.Fatalf("a refused request reached the service: %v", fake.continuationHomes[before:])
+	}
+
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+		w := httptest.NewRecorder()
+		h.GetFolderContinuations(w, httptest.NewRequest(method, route+"?home_id=verified-home", strings.NewReader("{}")))
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("%s => %d, want 405", method, w.Code)
+		}
+	}
+}
+
+func TestFolderExistingHome_TakesOnlyARequestIDAndNeverAHomeOrPath(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	post := func(offerID, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/"+offerID+"/existing-home", strings.NewReader(body))
+		r.SetPathValue("offerID", offerID)
+		w := httptest.NewRecorder()
+		h.ResolveFolderExistingHome(w, r)
+		return w
+	}
+
+	ok := post("existing-offer", `{"request_id":"req-1"}`)
+	if ok.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", ok.Code, ok.Body.String())
+	}
+	var body struct {
+		Offer personalassistant.FolderOfferView `json:"offer"`
+	}
+	if err := json.Unmarshal(ok.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Offer.Outcome == nil || !body.Offer.Outcome.Existing || body.Offer.Outcome.WorkspaceID != "home-1" {
+		t.Fatalf("outcome = %+v", body.Offer.Outcome)
+	}
+	if got := fake.existingHomeCalls; len(got) != 1 || got[0] != "existing-offer/req-1" {
+		t.Fatalf("service saw %v", got)
+	}
+
+	// A browser cannot name the Home, a workspace, a run, or a path.
+	for _, refused := range []string{
+		`{"request_id":"req-2","home_id":"home-1"}`,
+		`{"request_id":"req-2","workspace_id":"home-1"}`,
+		`{"request_id":"req-2","path":"/Users/me/Music"}`,
+		`{"request_id":"req-2","folder":"Albums"}`,
+		`{"home_id":"home-1"}`,
+		`{}`,
+		`{"request_id":"   "}`,
+		`not json`,
+	} {
+		w := post("existing-offer", refused)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s => %d, want 400 (%s)", refused, w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "/Users/me") {
+			t.Fatalf("%s echoed the path: %s", refused, w.Body.String())
+		}
+	}
+	if len(fake.existingHomeCalls) != 1 {
+		t.Fatalf("a refused body reached the service: %v", fake.existingHomeCalls)
+	}
+
+	// The service's refusal for a wrong/foreign offer is a conflict, not a 200.
+	if w := post("someone-elses", `{"request_id":"req-3"}`); w.Code != http.StatusConflict {
+		t.Fatalf("foreign offer => %d, want 409", w.Code)
+	}
+	w := httptest.NewRecorder()
+	h.ResolveFolderExistingHome(w, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET => %d, want 405", w.Code)
 	}
 }
 

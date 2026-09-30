@@ -4269,7 +4269,11 @@ const sessionManager = {
     // Both kinds start at their first visible step: Blueprint for a Workspace
     // and an ordinary Group, Details for selected-member or guided groups.
     // Import flips to its fixed Details-only layout below.
-    this.wizardStep = this.isGroupCreator() ? this.creatorWizardSteps()[0] : 1;
+    // A connection-only creator has no blueprint step to open on either.
+    this.wizardStep =
+      this.isGroupCreator() || this.workspaceCreatorContext?.connectionOnly
+        ? this.creatorWizardSteps()[0]
+        : 1;
     const modalElement = document.getElementById('addFolderModal');
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
@@ -8458,6 +8462,18 @@ const sessionManager = {
   // Names the primary and accounts for the specialists — the two facts that
   // decide whether this is the team the user meant. Never the roster editor.
   renderWorkspaceReceiptTeam(view) {
+    if (this.workspaceCreatorContext?.connectionOnly) {
+      // Say exactly what this step does and does not do, so a person is never
+      // left believing a team was chosen here.
+      return `
+        <div class="workspace-review-card" data-connection-only-team>
+          <div class="workspace-review-card-main">
+            <span class="workspace-review-card-label">Project team</span>
+            <strong>Set up in the next step</strong>
+            <span class="workspace-review-card-note">This step only connects the project. No agent or profile is created or attached now; the project's role is staffed in its own review afterwards.</span>
+          </div>
+        </div>`;
+    }
     const roster = view ? view.roster : [];
     const specialists = roster.filter(entry => entry.designation === 'specialist');
     const primary = roster.find(entry => entry.designation === 'primary');
@@ -9119,6 +9135,10 @@ const sessionManager = {
   },
 
   usesTeamRosterCreator() {
+    // A connection-only creator (a setup quest's project step) has no Team step:
+    // nothing it commits can staff a role, so it must not gate on, collect, or
+    // send an agent choice. Every Team gate below reads this one switch.
+    if (this.workspaceCreatorContext?.connectionOnly) return false;
     return this.isWorkspaceCreator() || this.usesGroupRosterCreator();
   },
 
@@ -9148,6 +9168,9 @@ const sessionManager = {
     const managedSteps = window.GroupTemplateCreator?.wizardSteps?.(this);
     if (managedSteps) return managedSteps;
     if (this.usesGroupRosterCreator()) return [...blueprint, 2, 3, 4];
+    // The setup quest preselects the blueprint, so its blueprint step is never
+    // shown; counting it would number Review "3 of 3" when only two steps exist.
+    if (this.workspaceCreatorContext?.connectionOnly) return [2, 4];
     return this.isGroupCreator() ? [...blueprint, 2, 4] : [1, 2, 3, 4];
   },
 
@@ -9334,7 +9357,9 @@ const sessionManager = {
         ? 'Setup reviews this exact group before anything is created. Nothing else is created here.'
         : kind === 'group'
           ? 'Check the group name, destination, and reviewed roster. Agents are created only after you confirm.'
-          : 'Check the workspace, its team, and anything it will ask for after creation.';
+          : this.workspaceCreatorContext?.connectionOnly
+            ? 'Check the project being connected. Only the project is connected here; its team is set up in the next step.'
+            : 'Check the workspace, its team, and anything it will ask for after creation.';
     }
     if (groupNotice) {
       groupNotice.hidden = !ordinaryGroup;
@@ -14213,6 +14238,7 @@ const sessionManager = {
           // Without the state helper a lock cannot be enforced, so none is kept.
           teamLock: null,
           stayAfterCreate: Boolean(contextOptions.stayAfterCreate),
+          connectionOnly: Boolean(contextOptions.connectionOnly),
           stageBlueprintRoles: false,
           blueprintRolesStaged: false,
           drafts: { workspace: {}, group: {} },

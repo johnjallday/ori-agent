@@ -74,8 +74,27 @@ func workspaceEntryIsPersonalAssistant(current *workspace.Workspace) bool {
 // agents all list under "Also in this workspace", which is the correct answer
 // rather than an error.
 func (h *Handler) declaredWorkspaceRoles(current *workspace.Workspace) ([]workspaceroles.Role, map[string]string, string) {
-	if station, _, err := h.assistantProgramStation(current.ID); err == nil && station != nil {
+	if station, linkedChild, err := h.assistantProgramStation(current.ID); err == nil && station != nil {
 		state := station.GetAssistantProgramState()
+		// A project linked to a Home staffs its OWN project roles, never the
+		// Home's: the Home's roles belong to the Home page and a linked child may
+		// not fill them. The station's declaration lists the Home roles, so read
+		// the roles this exact link snapshotted (as the assistant summary does).
+		if linkedChild != nil {
+			if link := linkedChild.GetAssistantProjectLink(); link != nil && len(link.ProjectRoles) > 0 {
+				projectRoles := make([]workspace.AssistantProgramRoleSpec, 0, len(link.ProjectRoles))
+				for _, role := range link.ProjectRoles {
+					if role.Scope == workspace.AssistantRoleScopeProject {
+						projectRoles = append(projectRoles, role)
+					}
+				}
+				bindings := make(map[string]string, len(link.ProjectBindings.Bindings))
+				for _, binding := range link.ProjectBindings.Bindings {
+					bindings[binding.RoleID] = binding.AgentName
+				}
+				return workspaceroles.FromAssistantProgram(&workspace.AssistantProgramDeclaration{Roles: projectRoles}), bindings, station.ID
+			}
+		}
 		if state != nil && state.Declaration != nil {
 			bindings := make(map[string]string, len(state.HomeBindings.Bindings))
 			for _, binding := range state.HomeBindings.Bindings {

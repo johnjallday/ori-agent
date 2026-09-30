@@ -86,6 +86,11 @@ func TestDigest_CompletedScanPublishesOncePerScanWithPersistedCounts(t *testing.
 		digest.SetupNote != "" || digest.New+digest.Updated > digest.Projects || digest.New < 1 {
 		t.Fatalf("digest counts: %+v", digest)
 	}
+	// The Alternates folder holds two candidate .rpp files: it can be set up, but
+	// only after an explicit file choice, and nothing is connected yet.
+	if digest.NeedsFileChoice != 1 || digest.Connected != 0 {
+		t.Fatalf("file-choice / connected counts: %+v", digest)
+	}
 	published := events.all()
 	if len(published) != 1 {
 		t.Fatalf("want one scan-completed event, got %d", len(published))
@@ -263,6 +268,38 @@ func TestDigest_MissingSetupEvidenceCountsProjectsOnly(t *testing.T) {
 	})
 }
 
+// Each song found by a scan lands in exactly one bucket, so the counts never
+// double-count a connected song as also "can be set up", and a file choice is a
+// subset of "can be set up" rather than another bucket.
+func TestDigest_BucketsAreDisjointAndFileChoiceIsASubsetOfSetup(t *testing.T) {
+	const scanID = "scan-1"
+	observed := func(availability, alternate string) []Observation {
+		return []Observation{{RootID: "root", ScanID: scanID, Availability: availability, Alternates: []string{alternate}}}
+	}
+	entries := []Entry{
+		{ID: "connected", Link: &ExactLink{}, Observations: observed("available", "Song.rpp")},
+		{ID: "ready", Observations: observed("available", "Song.rpp")},
+		{ID: "choose-a-file", Observations: observed("ambiguous", "Song.rpp")},
+		{ID: "logic", Observations: observed("available", "Song.logicx")},
+		{ID: "gone", Observations: observed("unavailable", "Song.rpp")},
+	}
+	evidence := setupEvidence{extensions: []string{".rpp"}}
+	digest := buildLibraryDigest(nil, entries, Scan{ID: scanID, RootID: "root"}, time.Now(), "complete", evidence)
+	if digest.Projects != 5 || digest.Connected != 1 || digest.Activatable != 2 ||
+		digest.NeedsFileChoice != 1 || digest.UnsupportedFormat != 1 {
+		t.Fatalf("buckets: %+v", digest)
+	}
+	if digest.Connected+digest.Activatable+digest.UnsupportedFormat > digest.Projects || digest.NeedsFileChoice > digest.Activatable {
+		t.Fatalf("a song was counted twice: %+v", digest)
+	}
+	// Without host evidence nothing is claimed about setup, but a linked song is
+	// still a fact the library holds.
+	unchecked := buildLibraryDigest(nil, entries, Scan{ID: scanID, RootID: "root"}, time.Now(), "complete", setupEvidence{note: setupNoteUnchecked})
+	if unchecked.Activatable != 0 || unchecked.UnsupportedFormat != 0 || unchecked.NeedsFileChoice != 0 || unchecked.Connected != 1 {
+		t.Fatalf("no evidence: %+v", unchecked)
+	}
+}
+
 func TestDigest_DocumentRejectsForgedDigests(t *testing.T) {
 	r, scope, _, _, root := connectedMusicRoot(t)
 	scanRoot(t, r, scope, root.ID, "forgery-baseline")
@@ -281,6 +318,12 @@ func TestDigest_DocumentRejectsForgedDigests(t *testing.T) {
 		"missing scan time":   func(d *LibraryDigest) { d.ScannedAt = time.Time{} },
 		"overcounted setup":   func(d *LibraryDigest) { d.SetupNote, d.Activatable, d.UnsupportedFormat = "", d.Projects, 1 },
 		"failed scan claimed": func(d *LibraryDigest) { d.Coverage = "failed" },
+		"overcounted connected": func(d *LibraryDigest) {
+			d.SetupNote, d.Connected, d.Activatable, d.UnsupportedFormat = "", d.Projects, 0, 1
+		},
+		"more file choices than setups": func(d *LibraryDigest) { d.NeedsFileChoice = d.Activatable + 1 },
+		"negative connected":            func(d *LibraryDigest) { d.Connected = -1 },
+		"negative file choice":          func(d *LibraryDigest) { d.NeedsFileChoice = -1 },
 	} {
 		forged := doc
 		copied := *doc.Digest
