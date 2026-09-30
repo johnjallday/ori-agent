@@ -306,14 +306,18 @@ test('a confirmed folder offer connects one existing file without staffing or Ho
     'existing_project'
   );
   await creator.locator('#folderNameInput').fill('Existing Documents Song');
+  // This step only connects the project, so there is no Team step and no agent
+  // to choose: nothing this commit does could staff a role. Details goes straight
+  // to Review, which says exactly what is and is not committed.
   await creator.locator('#wizardNextBtn').click();
-  const projectRole = creator.locator('.ws-role-row[data-role-id="reaper-assistant"]');
-  await expect(projectRole).toContainText('REAPER Assistant');
-  await projectRole.getByRole('button', { name: 'Create an agent for REAPER Assistant' }).click();
-  await page.locator('[data-agent-create-field="name"]').fill('Existing Song Assistant');
-  await page.locator('#createAgentBtn').click();
-  await expect(page.locator('#addAgentModal')).toBeHidden();
-  await creator.locator('#wizardNextBtn').click();
+  await expect(creator.locator('#wizardStep3')).toBeHidden();
+  await expect(creator.locator('.ws-role-row:visible')).toHaveCount(0);
+  // Only the two steps that exist are shown and counted (not "3 of 3").
+  await expect(creator.locator('#wizardStepper .workspace-create-step:visible')).toHaveCount(2);
+  await expect(creator.locator('[data-wizard-step-label="4"]')).toHaveText('Step 2 of 2');
+  await expect(creator.locator('[data-connection-only-team]')).toContainText(
+    'No agent or profile is created or attached now'
+  );
   await expect(creator.locator('#workspaceJourneyReview')).toContainText(
     'Project file: Existing Song.rpp'
   );
@@ -334,7 +338,25 @@ test('a confirmed folder offer connects one existing file without staffing or Ho
   expect(existingID).toBeTruthy();
   expect(journey).toMatchObject({ run_kind: 'root', journey: { source: 'plugin' } });
   expect(journey.run_id).toBeTruthy();
-  await page.waitForURL(/\/workspaces\/existing-documents-song(?:\/|\?|$)/);
+  // The connection stays in the journey: the person is not sent into a child
+  // whose staffing is unfinished. The setup comes back at its next step.
+  const afterConnect = page.locator('#specialistSetupJourneyModal');
+  await expect(afterConnect).toBeVisible({ timeout: 30_000 });
+  expect(new URL(page.url()).pathname).toBe('/');
+  // ...and lands on the project's team step, not on the finished connection: a
+  // connection alone staffs nothing, and staffing is its own reviewed step.
+  await expect(afterConnect).toContainText('Team and extras');
+  await expect(afterConnect.locator('[data-action="review_project_staffing"]')).toBeVisible();
+  await screenshot(page, 'guidance-existing-file-journey-after-connect');
+  // Staffing can begin right here, without recovering through Today: the form
+  // opens on the project that was just connected. Leaving it creates nothing.
+  await afterConnect.locator('[data-action="review_project_staffing"]').click();
+  await expect(
+    afterConnect.locator('.setup-journey__form').getByLabel('Profile name')
+  ).toBeVisible();
+  await screenshot(page, 'guidance-existing-file-staffing-form-after-connect');
+  await afterConnect.locator('button:visible', { hasText: 'Do this later' }).click();
+  await expect(afterConnect).toBeHidden();
   const existing = workspaceFile(existingID).data;
   expect(existing.shared_data.project_entry).toMatchObject({
     kind: 'directory_reference',
@@ -343,6 +365,35 @@ test('a confirmed folder offer connects one existing file without staffing or Ho
   expect(existing.directory_references).toEqual(
     expect.arrayContaining([expect.objectContaining({ path: realpathSync(documents) })])
   );
+  // The connected child's own roster names its project-local role, unfilled, and
+  // not the Home's role: this is what a person staffing the child directly sees.
+  const childRoster = (await json(await request.get(`/api/workspaces/${existingID}/roles`))).roles;
+  expect(childRoster.roles.map((role: { role_id: string }) => role.role_id)).toEqual([
+    'reaper-assistant'
+  ]);
+  expect(childRoster.filled_count).toBe(0);
+  expect(childRoster.total_count).toBe(1);
+  // A child that has already chosen File-only can be sent straight to its team
+  // form by role: the real page (routed by slug, never by id) opens that form
+  // once, with no mode wizard on top of it, and closing it creates nothing.
+  const childSlug = String(
+    (await json(await request.get(`/api/workspaces/${existingID}`))).folder_slug
+  );
+  const teamPage = await page.context().newPage();
+  try {
+    await teamPage.goto(`/workspaces/${encodeURIComponent(childSlug)}?role=reaper-assistant`);
+    const roleForm = teamPage.locator('#addAgentModal');
+    await expect(roleForm).toBeVisible({ timeout: 30_000 });
+    await expect(teamPage.locator('body')).not.toContainText('404 page not found');
+    await expect(teamPage.getByRole('heading', { name: 'Set up Reaper Song' })).toHaveCount(0);
+    expect(new URL(teamPage.url()).search, 'the role request is consumed once').toBe('');
+    await screenshot(teamPage, 'guidance-existing-file-team-form-by-role');
+    await roleForm.getByRole('button', { name: 'Close' }).click();
+    await expect(roleForm).toBeHidden();
+  } finally {
+    await teamPage.close();
+  }
+  expect(workspaceFile(existingID).data.agent_instances || []).toEqual([]);
   expect(existing.assistant_project_link.station_workspace_id).toBe(saved.homeID);
   expect(
     existing.assistant_project_link.project_roles.map((role: { id: string }) => role.id)
@@ -529,8 +580,8 @@ test('only a distinct reviewed child staffing action fills the existing-file pro
     status: 'resolved',
     outcome: { workspace_id: saved.existingID, home_route: homeRoute }
   });
-  // The normal creator navigated straight to the child. Use the persisted
-  // outcome's Home link, not a browser-guessed slug or a discovery grant.
+  // Use the persisted outcome's Home link, not a browser-guessed slug or a
+  // discovery grant.
   await page.goto('/?panel=today&folder=show');
   const followUp = page.locator('#personalAssistantFolderOffer');
   await expect(followUp).toContainText("Here's what I set up:");

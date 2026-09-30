@@ -505,11 +505,25 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(committedResponse.ok(), await committedResponse.text()).toBeTruthy();
     const committed = await committedResponse.json();
     const connected = page.getByRole('dialog', { name: 'Album-3 is connected' });
+    // A workspace page is routed by its folder slug. /workspaces/<id> is a 404,
+    // which the library's links used to point at; the links must use the slug.
+    const childSlug = String(
+      (await json(await request.get(`/api/workspaces/${committed.workspace_id}`))).folder_slug
+    );
+    expect(childSlug).not.toBe('');
+    expect(childSlug).not.toBe(committed.workspace_id);
+    const childRoute = `/workspaces/${encodeURIComponent(childSlug)}`;
     await expect(connected.getByRole('link', { name: 'Open project workspace' })).toHaveAttribute(
       'href',
-      `/workspaces/${committed.workspace_id}`
+      childRoute
     );
     await shot(page, '25-reviewed-single-song-connected');
+    // music-setup-onboarding, group 4. A library-created child has not chosen how
+    // it works yet, so its own page opens the mode wizard first (File-only is the
+    // starting option) and its team comes right after. The dialog says so and does
+    // not request the team form on top of that wizard.
+    await expect(connected).toContainText('choose how it works');
+    await expect(connected.getByRole('link', { name: 'Set up the project team' })).toHaveCount(0);
     await connected.getByRole('button', { name: 'Stay in library' }).click();
     const workspacesAfter = (await json(await request.get('/api/workspaces'))).folders;
     expect(workspacesAfter).toHaveLength(workspacesBefore.length + 1);
@@ -523,6 +537,44 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(
       songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))
     ).toEqual(before);
+
+    // The child's own roster lists its project role, unfilled (not the Home's).
+    const childRolesURL = `/api/workspaces/${committed.workspace_id}/roles`;
+    const rosterBefore = (await json(await request.get(childRolesURL))).roles;
+    expect(rosterBefore.roles.map((role: { role_id: string }) => role.role_id)).toEqual([
+      'reaper-assistant'
+    ]);
+    expect(rosterBefore.filled_count).toBe(0);
+    const homeRosterBefore = (
+      await json(await request.get(`/api/workspaces/${homeID}/assistant-program`))
+    ).roster;
+    // Opening the child by its real route shows the project, not a 404, and
+    // starts with its own mode wizard. Looking at it creates and staffs nothing.
+    const childPage = await page.context().newPage();
+    try {
+      await childPage.goto(childRoute);
+      await expect(childPage.getByRole('heading', { name: 'Set up Reaper Song' })).toBeVisible({
+        timeout: 30_000
+      });
+      await expect(childPage.locator('body')).not.toContainText('404 page not found');
+      await shot(childPage, '25a-library-child-mode-first');
+    } finally {
+      await childPage.close();
+    }
+    expect(
+      (
+        (await json(await request.get(`/api/workspaces/${committed.workspace_id}`)))
+          .agent_instances || []
+      ).length
+    ).toBe(0);
+    expect((await json(await request.get(childRolesURL))).roles.filled_count).toBe(0);
+    expect(
+      (await json(await request.get(`/api/workspaces/${homeID}/assistant-program`))).roster
+    ).toEqual(homeRosterBefore);
+    expect(
+      songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex')),
+      'opening the project never touched a project file'
+    ).toEqual(before);
     await page.reload();
     const afterRestartView = await json(await request.get(`${base}/projects`));
     await shelf
@@ -532,14 +584,18 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     const linkedDetail = page.getByRole('dialog', { name: 'Album-3' });
     await expect(
       linkedDetail.getByRole('link', { name: 'Open connected workspace' })
-    ).toHaveAttribute('href', `/workspaces/${committed.workspace_id}`);
+    ).toHaveAttribute('href', childRoute);
     await linkedDetail.getByRole('button', { name: 'Close' }).click();
     const returnToHome = page.url();
     await shelf
       .locator('#projectLibraryResume')
       .getByRole('button', { name: 'Open Album-3 workspace' })
       .click();
-    await page.waitForURL(new RegExp(`/workspaces/${committed.workspace_id}$`));
+    await page.waitForURL(new RegExp(`${childRoute.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+    // The address matching is not enough: an unroutable path also matches it.
+    // The page itself must be the project, not a 404.
+    await expect(page.locator('body')).not.toContainText('404 page not found');
+    await expect(page.locator('body')).toContainText('Album-3');
     await page.goto(returnToHome);
     await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
     expect(

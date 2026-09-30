@@ -250,6 +250,43 @@ only when the root's recorded last scan differs from the one before the review.
 - **Recovery:** resumed from receipts after reload/restart. Storage loss cannot
   recover unconfirmed permission, recreate a child, or duplicate a profile.
 
+**Implemented (S6/S7).** *Connection-only creator.* The setup quest's workspace
+creator opens with `connectionOnly` and `stayAfterCreate`. `connectionOnly` makes
+`usesTeamRosterCreator()` false, which is the one switch every Team gate reads, so
+the wizard has no Team step, collects no agent choice, and sends none (the journey
+commit never staffed a role anyway: the Team choice was a pure gate whose result
+`SetupWorkspaceCreator.submit` dropped). Its steps are `[2, 4]` (Details, Review;
+the quest preselects the blueprint), numbered by the wizard's own chrome, and the
+Review step states that nothing is created for the team now. Ordinary blueprint
+creation, reviewed team seeding and standalone flows read the same switch as
+false and are unchanged (the paired suite's ordinary-creator test is the guard).
+`stayAfterCreate` keeps the person on the page: the journey reopens once the
+creator has closed, on the project's **team step** (the view "Manage Team and
+Extras" opens), so a connection is followed directly by the staffing review, never
+by a detour through the child and Today. Staffing remains its own review and
+confirmation; nothing about the connection stages it.
+
+*The child's roster.* `GET /api/workspaces/{child}/roles` used to list the
+**Home's** roles for a linked child (the station declaration) and none of its own.
+It now lists the child's snapshotted project roles (project scope only) and only
+its own bindings, matching the assistant summary; the Home page, a joint station
+and a link with no snapshot are unchanged. This is the canonical roster the child
+page's team form (`PUT /api/workspaces/{child}/roles/{role}`, no quest run needed)
+reads.
+
+*Library-created children (no persistence, no migration).* The library's
+activation `runID` is a random id used only for the deterministic child scope, so
+it is not a setup-quest binding, and this feature adds none: nothing is fabricated
+into a run from a browser child id, no creator is replayed, no resolver is widened.
+The connected dialog resolves the child's real page and mode from one canonical
+workspace read. A child that has chosen a mode gets a "Set up the project team"
+link that requests its team form by role (opened once, only for an empty,
+writable role); a child that has not (the library does not select a mode) is
+linked to its page, which opens its own mode wizard first — File-only is the
+starting option — and the team follows. Workspace pages are routed by folder slug:
+`/workspaces/<id>` is a 404, and every library link to a child used the id until
+this was fixed, so no link is offered when the slug cannot be resolved.
+
 ### S8. Integration missing or disabled for a selected song
 
 - **Owner:** the reviewed integration registry (`reviewedintegration`) and the host

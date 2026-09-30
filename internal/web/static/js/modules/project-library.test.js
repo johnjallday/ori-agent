@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ProjectLibraryPanel,
   activationStateLabel,
+  projectTeamURL,
   libraryDigestText,
   libraryQuery,
   libraryRunText,
@@ -2683,6 +2684,157 @@ test('the queue offers an integration only for a song that cannot be set up yet'
   } finally {
     page.restore();
   }
+});
+
+const rosterOf = rows => ({ roles: { roles: rows, filled_count: 0, total_count: rows.length } });
+
+test('the project team link asks for the first empty role, never a filled, read-only, or odd one', () => {
+  const route = '/workspaces/existing-song';
+  const song = { role_id: 'reaper-assistant', state: 'empty', required: true, primary: true };
+  assert.equal(projectTeamURL(route, rosterOf([song])), `${route}?role=reaper-assistant`);
+  // Primary wins over required, and required over the rest.
+  const other = { role_id: 'mixer', state: 'empty', required: true };
+  const optional = { role_id: 'extras', state: 'empty' };
+  assert.match(projectTeamURL(route, rosterOf([optional, other, song])), /role=reaper-assistant$/);
+  assert.match(projectTeamURL(route, rosterOf([optional, other])), /role=mixer$/);
+  assert.match(projectTeamURL(route, rosterOf([optional])), /role=extras$/);
+  // Nothing to fill, or nothing safe to ask for: just the project page.
+  for (const rows of [
+    [{ ...song, state: 'filled' }],
+    [{ ...song, read_only: true }],
+    [{ ...song, needs_clear: true, state: 'needs_clear' }],
+    [{ ...song, role_id: '../x' }],
+    [{ ...song, role_id: 'a b' }],
+    [{ ...song, role_id: 'x'.repeat(129) }],
+    [{ ...song, role_id: 7 }],
+    [null, undefined, 'x'],
+    []
+  ]) {
+    assert.equal(projectTeamURL(route, rosterOf(rows)), route, JSON.stringify(rows));
+  }
+  for (const response of [null, undefined, {}, { roles: null }, { roles: { roles: 'no' } }]) {
+    assert.equal(projectTeamURL(route, response), route);
+  }
+});
+
+test('the team link only ever extends a workspace page route, never another address', () => {
+  const roster = rosterOf([
+    { role_id: 'reaper-assistant', state: 'empty', required: true, primary: true }
+  ]);
+  for (const route of [
+    '',
+    undefined,
+    null,
+    '/workspaces/',
+    '/workspaces/a/b',
+    '/workspaces/a?x=1',
+    '/workspaces/a#x',
+    '//evil.example/workspaces/a',
+    'https://evil.example/workspaces/a',
+    '/settings',
+    'javascript:alert(1)'
+  ]) {
+    assert.equal(projectTeamURL(route, roster), '', String(route));
+  }
+});
+
+function routePanel(handlers) {
+  const calls = [];
+  const panel = new ProjectLibraryPanel({
+    workspaceId: 'home',
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      const handler = handlers[url];
+      if (!handler) throw new Error(`unexpected ${url}`);
+      return handler();
+    }
+  });
+  return { panel, calls };
+}
+
+test('a workspace page is reached by its slug, because an ID path is a 404', async () => {
+  const { panel, calls } = routePanel({
+    '/api/workspaces/9a28bf04-7260-4909-8522-2d62f46217b2': () => ({
+      ok: true,
+      json: async () => ({ id: '9a28bf04-7260-4909-8522-2d62f46217b2', folder_slug: 'album three' })
+    })
+  });
+  const route = await panel.workspaceRoute('9a28bf04-7260-4909-8522-2d62f46217b2');
+  assert.equal(route, '/workspaces/album%20three');
+  assert.doesNotMatch(route, /9a28bf04/, 'the workspace ID is never used as the page address');
+  assert.equal(calls[0].options.method, undefined, 'a read');
+});
+
+test('a project page reports whether it has chosen how it works, from the one canonical read', async () => {
+  const read = body => ({ ok: true, json: async () => body });
+  for (const [workspace, expected] of [
+    [{ folder_slug: 'song', runtime_state: { selected_mode_id: 'file_only' } }, true],
+    [{ folder_slug: 'song', runtime_state: { selected_mode_id: '  ' } }, false],
+    [{ folder_slug: 'song', runtime_state: {} }, false],
+    [{ folder_slug: 'song' }, false]
+  ]) {
+    const { panel, calls } = routePanel({ '/api/workspaces/w-1': () => read(workspace) });
+    assert.deepEqual(await panel.workspacePage('w-1'), {
+      route: '/workspaces/song',
+      modeChosen: expected
+    });
+    assert.equal(calls.length, 1, 'route and mode come from a single read');
+  }
+  // Nothing readable means no route and no claim about the mode.
+  const { panel } = routePanel({
+    '/api/workspaces/w-1': () => ({ ok: false, json: async () => ({}) })
+  });
+  assert.deepEqual(await panel.workspacePage('w-1'), { route: '', modeChosen: false });
+});
+
+test('with no resolvable page there is no route, so no dead link is ever shown', async () => {
+  for (const handler of [
+    () => ({ ok: true, json: async () => ({ id: 'x' }) }),
+    () => ({ ok: true, json: async () => ({ folder_slug: '   ' }) }),
+    () => ({ ok: false, json: async () => ({ folder_slug: 'nope' }) }),
+    () => ({ ok: true, json: async () => null }),
+    () => {
+      throw new Error('offline');
+    }
+  ]) {
+    const { panel } = routePanel({ '/api/workspaces/w-1': handler });
+    assert.equal(await panel.workspaceRoute('w-1'), '');
+  }
+  assert.equal(await new ProjectLibraryPanel({ workspaceId: 'h' }).workspaceRoute(''), '');
+});
+
+test('the connected dialog reads the project’s own roster and never fails the connect over it', async () => {
+  const roster = () => ({
+    ok: true,
+    json: async () =>
+      rosterOf([{ role_id: 'reaper-assistant', state: 'empty', required: true, primary: true }])
+  });
+  const { panel, calls } = routePanel({ '/api/workspaces/child-9/roles': roster });
+  assert.equal(
+    await panel.projectTeamLink('child-9', '/workspaces/existing-song'),
+    '/workspaces/existing-song?role=reaper-assistant'
+  );
+  assert.deepEqual(calls, [
+    { url: '/api/workspaces/child-9/roles', options: { headers: { Accept: 'application/json' } } }
+  ]);
+  assert.equal(calls[0].options.method, undefined, 'a read, never a write');
+
+  const refused = routePanel({
+    '/api/workspaces/child-9/roles': () => ({ ok: false, json: async () => ({}) })
+  });
+  assert.equal(
+    await refused.panel.projectTeamLink('child-9', '/workspaces/existing-song'),
+    '/workspaces/existing-song'
+  );
+  const offline = routePanel({
+    '/api/workspaces/child-9/roles': () => {
+      throw new Error('offline');
+    }
+  });
+  assert.equal(
+    await offline.panel.projectTeamLink('child-9', '/workspaces/existing-song'),
+    '/workspaces/existing-song'
+  );
 });
 
 test('every eligibility state has its own plain label, and none promises an install or a live check', () => {

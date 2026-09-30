@@ -441,7 +441,6 @@ export async function openSetupWorkspaceCreator(journey, onCreated, { folderOffe
   const modal = el('addFolderModal');
   modal.dataset.setupWorkspaceLaunch = 'true';
   const hidden = [];
-  const labels = [];
   const openToggle = el('projectTemplateOpenAfterCreateToggle');
   const onOpenChange = event => {
     if (active === state && event.isTrusted) state.openTouched = true;
@@ -480,9 +479,6 @@ export async function openSetupWorkspaceCreator(journey, onCreated, { folderOffe
       active = null;
     }
     openToggle?.removeEventListener('change', onOpenChange);
-    labels.forEach(([node, value]) => {
-      node.textContent = value;
-    });
     hidden.forEach(([node, wasHidden]) => {
       node.hidden = wasHidden;
     });
@@ -491,18 +487,21 @@ export async function openSetupWorkspaceCreator(journey, onCreated, { folderOffe
     el('workspaceJourneyReview')?.remove();
   };
   modal.addEventListener('hidden.bs.modal', onHidden);
-  manager.showAddWorkspaceModal({ blueprint: state.templateID, entryPoint: 'specialist_setup' });
+  // This step only connects a project. Its roles are staffed in their own
+  // reviewed step, so the wizard has no Team step (nothing it commits could staff
+  // a role) and stays on the journey afterwards instead of navigating into the
+  // new child while staffing is unfinished.
+  manager.showAddWorkspaceModal({
+    blueprint: state.templateID,
+    entryPoint: 'specialist_setup',
+    connectionOnly: true,
+    stayAfterCreate: true
+  });
   mountProjectChoice(state);
   if (draft) el('folderNameInput').value = draft.name;
-  for (let step = 2; step <= 4; step++) {
-    const eyebrow = el(`wizardStep${step}`).querySelector('.workspace-wizard-eyebrow');
-    const number = modal.querySelector(
-      `.workspace-create-step[data-step="${step}"] .workspace-create-step-num`
-    );
-    labels.push([eyebrow, eyebrow.textContent], [number, number.textContent]);
-    eyebrow.textContent = `Step ${step - 1} of 3`;
-    number.textContent = String(step - 1);
-  }
+  // Step numbers come from the wizard itself, which counts only the steps it
+  // shows (Details, Review). A hard-coded "of 3" here would be wrong the moment
+  // a step is removed, and it was overwritten on every step change anyway.
   hide(el('folderAdvancedDisclosure'));
   hide(el('folderDescriptionInput')?.closest('.workspace-setup-card'));
   hide(el('wizardEditBlueprintBtn'));

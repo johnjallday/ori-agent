@@ -1218,6 +1218,41 @@ async function launchGroupBuilder() {
   }
 }
 
+// The workspace creator here only connects the project and stays on the page.
+// Once it has finished closing, bring this journey back at its next unfinished
+// step (workspace mode, then staffing) instead of leaving the person inside a
+// child whose staffing is unfinished with the setup run closed behind them. A
+// journey that another setup took over in the meantime is left alone.
+function reopenJourneyAfterCreator(runID) {
+  const creator = document.getElementById('addFolderModal');
+  if (!creator || !state.modal) return;
+  creator.addEventListener(
+    'hidden.bs.modal',
+    () => {
+      if (state.journey?.run_id !== runID) return;
+      // Land on the project's team step when it is unfinished (the same view the
+      // launch card's "Manage Team and Extras" opens), not on the completed
+      // connection step: the person came to finish setup, and the connection
+      // alone staffs nothing. Staffing stays its own review and confirmation.
+      const staffing = (state.journey?.steps || []).find(
+        item => item.kind === 'assistant_program_staffing'
+      );
+      if (staffing && staffing.status !== 'complete') {
+        state.managementView = true;
+        state.selectedStepID = staffing.id;
+      } else {
+        state.selectedStepID = state.journey?.current_step_id || '';
+      }
+      render();
+      state.modal.show();
+      ui()?.root.addEventListener('shown.bs.modal', () => ui()?.stepTitle?.focus(), {
+        once: true
+      });
+    },
+    { once: true }
+  );
+}
+
 async function launchWorkspaceCreator() {
   if (state.launchingWorkspace || state.commitLocked || state.journey?.busy) return;
   state.launchingWorkspace = true;
@@ -1231,6 +1266,7 @@ async function launchWorkspaceCreator() {
           if (state.journey?.run_id === journeyToOpen.run_id) {
             state.journey = journey;
             state.launchStage = '';
+            reopenJourneyAfterCreator(journey.run_id);
           }
           // Settle the exact confirmed folder offer before the creator's
           // ordinary success navigation leaves Today. Failure keeps the card

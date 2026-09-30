@@ -104,6 +104,28 @@ export function activationStateLabel(state) {
     : 'Setup status unknown';
 }
 
+// Where "Set up the project team" goes for a connected project: its own page,
+// asking for the setup form of the first empty role the project's roster offers
+// (primary, then required, then any). The roster is the project's own canonical
+// read, so a role that is filled, read-only, or unknown is never requested; with
+// nothing to fill (or no roster) it is just the project page. The role only
+// selects which form opens: the page's own reviewed staffing does the rest.
+export function projectTeamURL(route, rosterResponse) {
+  const base = String(route || '');
+  if (!/^\/workspaces\/[^/?#]+$/.test(base)) return '';
+  const rows = Array.isArray(rosterResponse?.roles?.roles) ? rosterResponse.roles.roles : [];
+  const empty = rows.filter(
+    row =>
+      row &&
+      row.state === 'empty' &&
+      !row.read_only &&
+      typeof row.role_id === 'string' &&
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(row.role_id)
+  );
+  const pick = empty.find(row => row.primary) || empty.find(row => row.required) || empty[0];
+  return pick ? `${base}?role=${encodeURIComponent(pick.role_id)}` : base;
+}
+
 const folderName = path =>
   String(path || '')
     .split(/[\\/]/)
@@ -1117,7 +1139,14 @@ export class ProjectLibraryPanel {
                 await this.renderResume();
                 return;
               }
-              globalThis.location.assign(`/workspaces/${encodeURIComponent(current.workspace_id)}`);
+              const route = await this.workspaceRoute(current.workspace_id);
+              if (!route) {
+                this.status(
+                  'That workspace page could not be found right now. Nothing was changed.'
+                );
+                return;
+              }
+              globalThis.location.assign(route);
             })
         );
         item.append(workspace);
@@ -2308,9 +2337,13 @@ export class ProjectLibraryPanel {
         detail.row.connection === 'connected' &&
         activation.workspace_id
       ) {
-        const open = node('a', 'modern-btn modern-btn-secondary', 'Open connected workspace');
-        open.href = `/workspaces/${encodeURIComponent(activation.workspace_id)}`;
-        actions.append(open);
+        // Routed by slug; with no resolvable page there is no link to offer.
+        const route = await this.workspaceRoute(activation.workspace_id);
+        if (route) {
+          const open = node('a', 'modern-btn modern-btn-secondary', 'Open connected workspace');
+          open.href = route;
+          actions.append(open);
+        }
         if (!this.readOnly) {
           const showFolder = node(
             'button',
@@ -2586,6 +2619,52 @@ export class ProjectLibraryPanel {
     });
   }
 
+  // A workspace page is routed by its folder slug, never its ID: /workspaces/<id>
+  // is a 404. Resolve the slug from the canonical workspace read. Returns '' when
+  // it cannot be resolved, so a caller shows no link rather than a dead one.
+  async workspaceRoute(workspaceID) {
+    return (await this.workspacePage(workspaceID)).route;
+  }
+
+  // One read of the canonical workspace gives both facts a link to it needs: its
+  // page route and whether it has chosen how it works (its workspace mode). A
+  // project that has not chosen a mode opens its own mode wizard first, so its
+  // team form must not be requested on top of that.
+  async workspacePage(workspaceID) {
+    const none = { route: '', modeChosen: false };
+    if (!workspaceID) return none;
+    try {
+      const response = await this.fetchImpl(`/api/workspaces/${encodeURIComponent(workspaceID)}`, {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) return none;
+      const workspace = await payload(response);
+      const slug = String(workspace?.folder_slug || '').trim();
+      return {
+        route: slug ? `/workspaces/${encodeURIComponent(slug)}` : '',
+        modeChosen: String(workspace?.runtime_state?.selected_mode_id || '').trim() !== ''
+      };
+    } catch (_) {
+      return none;
+    }
+  }
+
+  // The connected project's own roster, read from the canonical project route
+  // (not the library's), turned into the link that opens its team setup form.
+  // Best effort: any failure just means the plain project link, never an error
+  // after a project was already connected.
+  async projectTeamLink(workspaceID, route) {
+    try {
+      const response = await this.fetchImpl(
+        `/api/workspaces/${encodeURIComponent(workspaceID)}/roles`,
+        { headers: { Accept: 'application/json' } }
+      );
+      return projectTeamURL(route, response.ok ? await payload(response) : null);
+    } catch (_) {
+      return projectTeamURL(route, null);
+    }
+  }
+
   async saveActivation(detail, input, trigger) {
     await this.run(trigger, 'Preparing one project for review…', async () => {
       const path = `/projects/${encodeURIComponent(detail.row.id)}/activation`;
@@ -2619,19 +2698,45 @@ export class ProjectLibraryPanel {
       const heading = node('h2', '', `${review.workspace_name} is connected`);
       heading.id = operationKey('connected-project');
       dialog.setAttribute('aria-labelledby', heading.id);
-      const open = node('a', 'modern-btn modern-btn-primary', 'Open project workspace');
-      open.href = `/workspaces/${encodeURIComponent(result.workspace_id)}`;
+      // The project's team is the next step and its own review. Point straight at
+      // its setup form when the project's roster has an empty role to fill.
+      const page = await this.workspacePage(result.workspace_id);
+      const route = page.route;
+      // The team form is requested directly only once the project has chosen how
+      // it works. Until then its page opens the mode wizard first (File-only is
+      // the starting option), and the team is set up right after.
+      const teamURL =
+        route && page.modeChosen ? await this.projectTeamLink(result.workspace_id, route) : '';
+      const hasTeamStep = teamURL.includes('?role=');
       const close = node('button', 'modern-btn modern-btn-secondary', 'Stay in library');
       close.type = 'button';
       close.addEventListener('click', () => dialog.close());
       const actions = node('div', 'assistant-program-dialog-actions');
-      actions.append(close, open);
+      actions.append(close);
+      // Routed by slug (an ID path is a 404). With no resolvable page there is no
+      // link to offer, and the project stays reachable from the library shelf.
+      if (route) {
+        const open = node(
+          'a',
+          `modern-btn ${hasTeamStep ? 'modern-btn-secondary' : 'modern-btn-primary'}`,
+          'Open project workspace'
+        );
+        open.href = route;
+        actions.append(open);
+      }
+      if (hasTeamStep) {
+        const team = node('a', 'modern-btn modern-btn-primary', 'Set up the project team');
+        team.href = teamURL;
+        actions.append(team);
+      }
       form.append(
         heading,
         node(
           'p',
           '',
-          'The saved folder is referenced, not copied or launched. No project role was staffed and no live access was granted; review those separately in the project workspace.'
+          hasTeamStep
+            ? 'The saved folder is referenced, not copied or launched. No project role was staffed and no live access was granted; the project’s team is set up in its own review next.'
+            : 'The saved folder is referenced, not copied or launched. No project role was staffed and no live access was granted. Open the project to choose how it works (File-only is the starting option); its team is set up in its own review right after.'
         ),
         actions
       );
