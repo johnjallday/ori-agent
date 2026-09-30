@@ -1332,11 +1332,15 @@ function renderActions(step) {
     return;
   }
   if (step?.kind === 'project_connect' && state.draft) return;
+  let returnOffered = false;
   (step?.actions || []).forEach(action => {
     const back =
       action.id === 'continue_integration_setup' || action.id === 'open_plugins'
         ? libraryReturnTarget(String(state.journey?.journey?.id || ''))
         : '';
+    // Both actions lead back to the same song; one button says so once.
+    if (back && returnOffered) return;
+    if (back) returnOffered = true;
     const button = makeText(
       'button',
       'setup-journey__action',
