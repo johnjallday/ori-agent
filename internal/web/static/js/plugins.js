@@ -24,12 +24,12 @@
   // notify surfaces feedback via the shared Toast module when present, falling
   // back to alert() for errors so failures are never swallowed. Success/info
   // messages stay silent if Toast is unavailable (no nagging alerts).
-  function notify(message, type) {
+  function notify(message, type, options) {
     type = type || 'info';
     if (window.Toast && typeof window.Toast[type] === 'function') {
-      window.Toast[type](message);
+      window.Toast[type](message, options || {});
     } else if (window.Toast && typeof window.Toast.show === 'function') {
-      window.Toast.show(message, type);
+      window.Toast.show(message, type, options || {});
     } else if (type === 'error' || type === 'warning') {
       alert(message);
     }
@@ -584,6 +584,21 @@
     }
   };
 
+  // homeUpgradeToastOptions offers the Home page named by a home_upgrade_required
+  // refusal. Only a same-origin workspace route is followed.
+  function homeUpgradeToastOptions(details) {
+    const path = String((details && details.home_path) || '');
+    const name = String((details && details.home_name) || '');
+    const title = name ? 'Upgrade from ' + name : 'Upgrade from the Home';
+    if (!/^\/workspaces\/[^/?#]+\/assistant(\?upgrade=review)?$/.test(path)) return { title };
+    // The action label stays short: the toast never shrinks its button.
+    return {
+      title,
+      duration: 15000,
+      action: { label: 'Open Home', onClick: () => window.location.assign(path) }
+    };
+  }
+
   // pluginUpdate updates from the plugin's recorded source, or, with
   // options.fromList, switches it to the version the Workspace Directory's
   // plugin list names. A switch always shows the review first: the list is
@@ -602,6 +617,12 @@
       if (result.ok) return result.data;
       if (result.status === 409 && result.data && result.data.code === 'reviewed_release_current') {
         notify(result.error, 'info');
+        return null;
+      }
+      // A Home uses this plugin: its upgrade is reviewed on that Home's page,
+      // where its linked projects and staffed agents move with it.
+      if (result.status === 409 && result.data && result.data.code === 'home_upgrade_required') {
+        notify(result.error, 'info', homeUpgradeToastOptions(result.data.details));
         return null;
       }
       throw new Error(result.error);

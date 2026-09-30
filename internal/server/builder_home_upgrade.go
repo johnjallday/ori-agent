@@ -89,6 +89,9 @@ func (b *ServerBuilder) initializeHomePackageUpgrades() {
 	if b.homeUpgradeSlot != nil {
 		b.homeUpgradeSlot.service.Store(service)
 	}
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetHomePackageUpgrades(service, b.pluginHandler.UpdateChecker().Snapshot)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := service.Recover(ctx); err != nil {

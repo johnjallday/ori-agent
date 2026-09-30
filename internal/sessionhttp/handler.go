@@ -14,6 +14,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -48,6 +49,8 @@ type Handler struct {
 	assistantModelValidator       func(provider, model string) error
 	assistantHomeRemoved          func(workspaceID string) error
 	assistantReviewedStaffer      func(context.Context, string, string, string, string) error
+	homePackageUpgrades           HomePackageUpgrades
+	pluginUpdateSnapshot          func() plugin.UpdateSnapshot
 	// assistantRoleStaffer commits exactly the roles the user filled on an
 	// assistant-program blueprint. Separate from assistantReviewedStaffer,
 	// which staffs every required role: under the vacancy model a role the user

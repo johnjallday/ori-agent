@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -36,9 +37,11 @@ func TestHomeReplacementGuard_ExistingHomeNeedsReviewBeforeNewGuidanceCanReplace
 		{"version change", "0.1.1", owner.ComponentFingerprint},
 		{"changed guidance under same version", "0.1.0", strings.Repeat("c", 64)},
 	} {
-		if err := refuseUnreviewedHomeReplacement(store, current, tc.version, tc.fingerprint, nil); err == nil ||
-			!strings.Contains(err.Error(), "reviewed Home/child upgrade") {
-			t.Errorf("%s stranded Home without clear refusal: %v", tc.name, err)
+		err := refuseUnreviewedHomeReplacement(store, current, tc.version, tc.fingerprint, nil)
+		var refusal *plugin.HomeUpgradeRequiredError
+		if err == nil || !errors.Is(err, plugin.ErrHomeUpgradeRequired) || !errors.As(err, &refusal) ||
+			refusal.HomeName != "Existing Home" || strings.Contains(err.Error()+refusal.HomePath, station.ID) {
+			t.Errorf("%s stranded Home without a typed refusal naming it (and no workspace ID): %v %+v", tc.name, err, refusal)
 		}
 	}
 	if err := refuseUnreviewedHomeReplacement(nil, current, "0.1.1", strings.Repeat("b", 64), nil); err == nil {

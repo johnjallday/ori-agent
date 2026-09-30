@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,6 +91,7 @@ type assistantProgramSummary struct {
 	Portfolio                []workspace.AssistantPortfolioProjectProjection `json:"portfolio,omitempty"`
 	RoleProfiles             []assistantProgramRoleProfile                   `json:"role_profiles,omitempty"`
 	Projects                 []assistantProgramProject                       `json:"projects,omitempty"`
+	ProviderUpgrade          *providerUpgradeView                            `json:"provider_upgrade,omitempty"`
 }
 
 type assistantProgramRoleProfile struct {
@@ -320,6 +322,11 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 		}
 	}
 	summary.PromotionPending = state.PromotionReceipt != nil && state.PromotionReceipt.AcknowledgedAt == nil
+	if project == nil && state.HomeProvider != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		summary.ProviderUpgrade = h.providerUpgradeSummary(ctx, station.OwnerUserID, station)
+		cancel()
+	}
 	projects, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).LinkedProjects(station.ID)
 	if err != nil {
 		return assistantProgramSummary{}, err

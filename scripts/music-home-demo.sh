@@ -25,6 +25,9 @@ Options:
   --source DIR      Clean Music Project Management candidate worktree.
   --reaper-source DIR  Optional clean REAPER candidate, exported and built only in the
                        disposable sandbox for the paired portfolio-reviewed test.
+  --upgrade-source DIR Clean newer Music candidate for the package-upgrade suite. It
+                       is exported beside the installed one and swapped in by the
+                       browser test; it is never installed directly.
   --port PORT       Server port (default: 8931).
   --sandbox DIR     Use and preserve this sandbox instead of a temporary one.
   --keep            Preserve the generated temporary sandbox after exit.
@@ -32,9 +35,11 @@ Options:
                     restart this sandbox's server once when the browser requests
                     it (never user state).
   --suite NAME      Browser test suite: home (default), portfolio (local refusal),
-                    portfolio-reviewed (published release; test only), or
+                    portfolio-reviewed (published release; test only),
                     manager-notifications (scan digest, badge and Manager
-                    suggestions on the published release; test only).
+                    suggestions on the published release; test only), or
+                    package-upgrade (reviewed Home package upgrade from --source
+                    to --upgrade-source; test only).
   --provider MODE   local (default) or reviewed (the two reviewed suites only).
   --open            Open the manual demo in the default browser (macOS).
   -h, --help        Show this help.
@@ -67,6 +72,7 @@ esac
 
 plugin_source="${ORI_MUSIC_PLUGIN_SOURCE:-}"
 reaper_source=""
+upgrade_source=""
 port="${ORI_MUSIC_HOME_DEMO_PORT:-8931}"
 sandbox=""
 keep_sandbox="${ORI_KEEP_MUSIC_SANDBOX:-0}"
@@ -86,6 +92,11 @@ while [[ $# -gt 0 ]]; do
 	--reaper-source)
 		[[ $# -ge 2 ]] || fail "--reaper-source needs a directory"
 		reaper_source="$2"
+		shift 2
+		;;
+	--upgrade-source)
+		[[ $# -ge 2 ]] || fail "--upgrade-source needs a directory"
+		upgrade_source="$2"
 		shift 2
 		;;
 	--port)
@@ -152,8 +163,12 @@ if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
 fi
 [[ "$test_suite" == "home" || "$test_suite" == "portfolio" || "$test_suite" == "portfolio-reviewed" ||
-	"$test_suite" == "manager-notifications" ]] || \
-	fail "--suite needs home, portfolio, portfolio-reviewed or manager-notifications"
+	"$test_suite" == "manager-notifications" || "$test_suite" == "package-upgrade" ]] || \
+	fail "--suite needs home, portfolio, portfolio-reviewed, manager-notifications or package-upgrade"
+if { [[ "$test_suite" == "package-upgrade" ]] && [[ -z "$upgrade_source" ]]; } ||
+	{ [[ "$test_suite" != "package-upgrade" ]] && [[ -n "$upgrade_source" ]]; }; then
+	fail "--suite package-upgrade and --upgrade-source go together"
+fi
 [[ "$provider_mode" == "local" || "$provider_mode" == "reviewed" ]] || fail "--provider needs local or reviewed"
 if [[ "$mode" != "test" && "$test_suite" != "home" ]]; then
 	fail "--suite is only valid with the test command"
@@ -184,6 +199,14 @@ git -C "$plugin_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
 
 candidate_revision="$(git -C "$plugin_root" rev-parse HEAD)"
 candidate_tree="$(git -C "$plugin_root" rev-parse HEAD^{tree})"
+upgrade_root=""
+upgrade_revision=""
+if [[ -n "$upgrade_source" ]]; then
+	upgrade_root="$(CDPATH= cd -- "$upgrade_source" 2>/dev/null && pwd)" || fail "upgrade source is unavailable"
+	[[ -z "$(git -C "$upgrade_root" status --porcelain --untracked-files=all)" ]] || fail "upgrade source must be clean"
+	upgrade_revision="$(git -C "$upgrade_root" rev-parse HEAD)"
+	[[ "$upgrade_revision" != "$candidate_revision" ]] || fail "upgrade source is the same commit as --source"
+fi
 reaper_root=""
 reaper_revision=""
 reaper_tree=""
@@ -255,6 +278,25 @@ PY
 printf '%s\n' "$candidate_revision" >"$sandbox/evidence/candidate-revision.txt"
 printf '%s\n' "$candidate_tree" >"$sandbox/evidence/candidate-tree.txt"
 printf '%s\n' "$archive_sha256" >"$sandbox/evidence/candidate-archive-sha256.txt"
+
+upgrade_export=""
+upgrade_version=""
+if [[ -n "$upgrade_root" ]]; then
+	# Never installed: the browser test swaps it into the installed export's
+	# folder, the way a developer replaces a local package with a newer one.
+	upgrade_export="$sandbox/evidence/upgrade-candidate"
+	mkdir -p "$upgrade_export"
+	git -C "$upgrade_root" archive --format=tar "$upgrade_revision" | tar -xf - -C "$upgrade_export"
+	"$upgrade_export/scripts/validate-package.py" "$upgrade_export" >"$sandbox/evidence/upgrade-validation.txt"
+	upgrade_version="$(python3 - "$upgrade_export/.ori-plugin/plugin.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding='utf-8') as handle:
+    print(json.load(handle)['version'])
+PY
+)"
+	printf '%s\n' "$upgrade_revision" >"$sandbox/evidence/upgrade-revision.txt"
+fi
 
 bundled_reaper=""
 if [[ -n "$reaper_root" ]]; then
@@ -372,6 +414,8 @@ if [[ "$mode" == "test" ]]; then
 		playwright_file="tests/music-home-portfolio-reviewed.spec.ts"
 	elif [[ "$test_suite" == "manager-notifications" ]]; then
 		playwright_file="tests/music-home-manager-notifications.spec.ts"
+	elif [[ "$test_suite" == "package-upgrade" ]]; then
+		playwright_file="tests/music-home-package-upgrade.spec.ts"
 	fi
 	run_music_acceptance() {
 		env PLAYWRIGHT_BASE_URL="$base_url" \
@@ -385,6 +429,8 @@ if [[ "$mode" == "test" ]]; then
 			ORI_MUSIC_PLUGIN_VERSION="$candidate_version" \
 			ORI_MUSIC_PLUGIN_TREE="$candidate_tree" \
 			ORI_MUSIC_PLUGIN_ARCHIVE_SHA256="$archive_sha256" \
+			ORI_MUSIC_UPGRADE_PATH="$upgrade_export" \
+			ORI_MUSIC_UPGRADE_VERSION="$upgrade_version" \
 			ORI_MUSIC_HOME_EVIDENCE_DIR="$sandbox/evidence/screenshots" \
 			npx playwright test "$playwright_file" \
 			--project=chromium --workers=1 ${playwright_args[@]+"${playwright_args[@]}"}

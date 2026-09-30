@@ -13,6 +13,82 @@ export function assistantProviderUnavailableMessage(program = {}, declaration = 
   );
 }
 
+// providerUpgradeAgentLine says what the reviewed Home package upgrade does to
+// one staffed agent: a prompt is replaced only while it still equals the old
+// role prompt, so an edited profile or Home copy keeps the owner's text.
+export function providerUpgradeAgentLine(agent = {}) {
+  if (agent.profile === 'keep' || agent.home_copy === 'keep') return 'keeps your edited prompt';
+  if (agent.profile === 'replace' || agent.home_copy === 'replace') return 'gets the new guidance';
+  return 'has no saved profile; nothing to update';
+}
+
+// providerUpgradeCard describes the Home page's package upgrade card: a newer
+// release to review, an operation that needs attention, or the result of the
+// upgrade just committed on this page.
+export function providerUpgradeCard(upgrade, result = null) {
+  if (result && result.status === 'succeeded') {
+    const agents = Array.isArray(result.agents) ? result.agents : [];
+    const kept = agents.filter(
+      agent => providerUpgradeAgentLine(agent) === 'keeps your edited prompt'
+    );
+    const updated = agents.filter(
+      agent => providerUpgradeAgentLine(agent) === 'gets the new guidance'
+    );
+    const parts = [];
+    if (updated.length) {
+      parts.push(
+        `${updated.length} staffed ${updated.length === 1 ? 'agent got' : 'agents got'} the new guidance`
+      );
+    }
+    if (kept.length) {
+      parts.push(`${kept.length} kept ${kept.length === 1 ? 'its' : 'their'} edited prompt`);
+    }
+    return {
+      hidden: false,
+      state: 'succeeded',
+      title: `Upgraded to ${text(result.to_version)}`,
+      text: `${parts.length ? parts.join('; ') + '. ' : ''}Approved library folders stay approved.`,
+      reviewable: false
+    };
+  }
+  const operation = upgrade?.operation;
+  if (operation?.status === 'reconcile_required') {
+    return {
+      hidden: false,
+      state: 'reconcile_required',
+      title: 'Package upgrade needs attention',
+      text: `The upgrade to ${text(operation.to_version)} stopped partway (operation ${text(operation.id)}). ${text(operation.reason)} Nothing is chosen automatically.`.trim(),
+      reviewable: false
+    };
+  }
+  if (operation?.status === 'claimed' || operation?.status === 'replaced') {
+    return {
+      hidden: false,
+      state: 'running',
+      title: 'Package upgrade in progress',
+      text: `Moving this Home to ${text(operation.to_version)}. Reload in a moment.`,
+      reviewable: false
+    };
+  }
+  if (upgrade?.available) {
+    return {
+      hidden: false,
+      state: 'available',
+      title: `${text(upgrade.plugin_id)} ${text(upgrade.available_version)} is available`,
+      text: `This Home uses ${text(upgrade.installed_version)}. Review what changes before upgrading; the Plugins page cannot update it while this Home uses it.`,
+      reviewable: true
+    };
+  }
+  return { hidden: true, state: '', title: '', text: '', reviewable: false };
+}
+
+// requestedUpgradeReview reports whether the page was opened to review the
+// Home's package upgrade (the Plugins page sends the owner here with
+// ?upgrade=review when it refuses to replace a package this Home uses).
+export function requestedUpgradeReview(search = '') {
+  return new URLSearchParams(String(search || '')).get('upgrade') === 'review';
+}
+
 function text(value) {
   return String(value == null ? '' : value);
 }
@@ -99,6 +175,12 @@ export class AssistantProgramPage {
       .getElementById('assistantProgramMigration')
       ?.addEventListener('click', event => void this.openMigrationReview(event.currentTarget));
     document
+      .getElementById('assistantProgramUpgradeReview')
+      ?.addEventListener(
+        'click',
+        event => void this.openProviderUpgradeReview(event.currentTarget)
+      );
+    document
       .getElementById('assistantProgramReflect')
       ?.addEventListener('click', () => void this.reflect());
     document
@@ -115,6 +197,21 @@ export class AssistantProgramPage {
       ?.addEventListener('change', () => this.renderHireModels());
     await this.loadProviderCatalog();
     await this.load();
+    this.openRequestedUpgradeReview();
+  }
+
+  openRequestedUpgradeReview() {
+    const location = globalThis.location;
+    if (!requestedUpgradeReview(location?.search) || !this.program?.provider_upgrade) return;
+    const params = new URLSearchParams(location.search);
+    params.delete('upgrade');
+    const query = params.toString();
+    globalThis.history?.replaceState?.(
+      null,
+      '',
+      `${location.pathname}${query ? `?${query}` : ''}${location.hash || ''}`
+    );
+    void this.openProviderUpgradeReview(document.getElementById('assistantProgramUpgradeReview'));
   }
 
   async request(path = '', options = {}) {
@@ -128,7 +225,12 @@ export class AssistantProgramPage {
     });
     const payload = await responseJSON(response);
     if (!response.ok) {
-      throw new Error(text(payload.error || `Request failed (${response.status})`));
+      const error = new Error(
+        text(payload.error || payload.message || `Request failed (${response.status})`)
+      );
+      error.code = text(payload.code);
+      error.details = payload.details || null;
+      throw error;
     }
     return payload;
   }
@@ -287,6 +389,7 @@ export class AssistantProgramPage {
       'assistantProgramDisabledText',
       assistantProviderUnavailableMessage(program, declaration)
     );
+    this.renderProviderUpgrade(program.is_station ? program.provider_upgrade : null);
 
     const scopedProgram = Number(declaration.schema_version || 1) >= 2;
     const rosterScope = program.roster_scope || (program.is_station ? 'home' : 'project');
@@ -522,6 +625,169 @@ export class AssistantProgramPage {
       progress.textContent = error.message || 'The roster migration impact could not be reviewed.';
       cancel.focus();
     }
+  }
+
+  renderProviderUpgrade(upgrade) {
+    const section = document.getElementById('assistantProgramUpgrade');
+    if (!section) return;
+    const card = providerUpgradeCard(upgrade, this.providerUpgradeResult);
+    section.hidden = card.hidden;
+    section.dataset.state = card.state;
+    setText('assistantProgramUpgradeTitle', card.title);
+    setText('assistantProgramUpgradeText', card.text);
+    const review = document.getElementById('assistantProgramUpgradeReview');
+    if (review) review.hidden = !card.reviewable;
+  }
+
+  providerUpgradeSections(review) {
+    const container = document.createElement('div');
+    const section = (title, ...children) => {
+      const wrapper = document.createElement('section');
+      wrapper.className = 'assistant-program-upgrade-section';
+      const heading = document.createElement('h3');
+      heading.textContent = title;
+      wrapper.append(heading, ...children);
+      container.append(wrapper);
+    };
+    const list = lines => {
+      const items = document.createElement('ul');
+      items.className = 'assistant-program-impact-list';
+      lines.forEach(line => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        items.append(item);
+      });
+      return items;
+    };
+
+    const roles = Array.isArray(review.roles) ? review.roles : [];
+    if (roles.length) {
+      section(
+        'Guidance changes',
+        ...roles.map(role => {
+          const details = document.createElement('details');
+          details.open = roles.length === 1;
+          const summary = document.createElement('summary');
+          summary.textContent = text(role.label || role.role_id);
+          const diff = document.createElement('div');
+          diff.className = 'assistant-program-upgrade-diff';
+          for (const [label, value] of [
+            ['Current', role.old],
+            ['New', role.new]
+          ]) {
+            const column = document.createElement('div');
+            const caption = document.createElement('strong');
+            caption.textContent = label;
+            const body = document.createElement('pre');
+            body.textContent = text(value);
+            column.append(caption, body);
+            diff.append(column);
+          }
+          details.append(summary, diff);
+          return details;
+        })
+      );
+    } else {
+      const note = document.createElement('p');
+      note.textContent = 'Role prompts are unchanged; only packaged skill text changes.';
+      section('Guidance changes', note);
+    }
+
+    const homes = (Array.isArray(review.homes) ? review.homes : []).map(home => {
+      const projects = Array.isArray(home.projects) ? home.projects : [];
+      return projects.length
+        ? `${text(home.name)}: ${projects.length} linked ${projects.length === 1 ? 'project' : 'projects'} (${projects.join(', ')})`
+        : `${text(home.name)}: no linked projects`;
+    });
+    if (Number(review.trashed_homes || 0) > 0) {
+      homes.push(`${review.trashed_homes} in the Trash keep the old release.`);
+    }
+    section('Homes and projects', list(homes));
+
+    const agents = (Array.isArray(review.homes) ? review.homes : []).flatMap(home =>
+      (Array.isArray(home.agents) ? home.agents : []).map(
+        agent =>
+          `${text(agent.agent_name)} (${text(agent.role_label)}): ${providerUpgradeAgentLine(agent)}`
+      )
+    );
+    section(
+      'Staffed agents',
+      list(agents.length ? agents : ['No staffed agent uses a changed role.'])
+    );
+
+    const stays = [
+      'Approved project library folders stay approved.',
+      'Pending library reviews and scans are cancelled; start them again afterwards.'
+    ];
+    const skills = Array.isArray(review.skills) ? review.skills : [];
+    if (skills.length) stays.push(`Skills in the new release: ${skills.join(', ')}.`);
+    (Array.isArray(review.warnings) ? review.warnings : []).forEach(warning =>
+      stays.push(text(warning))
+    );
+    section('What stays the same', list(stays));
+    return container;
+  }
+
+  async openProviderUpgradeReview(trigger) {
+    const { dialog, close } = this.newActionDialog('Review package upgrade', trigger);
+    const heading = document.createElement('h2');
+    heading.textContent = 'Review the Home upgrade';
+    const progress = document.createElement('p');
+    progress.setAttribute('role', 'status');
+    progress.setAttribute('aria-live', 'polite');
+    progress.textContent = 'Inspecting the new release…';
+    const error = document.createElement('p');
+    error.className = 'assistant-program-action-error';
+    error.setAttribute('role', 'alert');
+    const controls = document.createElement('div');
+    controls.className = 'assistant-program-action-buttons';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'modern-btn modern-btn-secondary';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    controls.append(cancel);
+    dialog.append(heading, progress, error, controls);
+    let review;
+    try {
+      review = await this.request('/provider-upgrade/review', { method: 'POST', body: '{}' });
+    } catch (requestError) {
+      progress.textContent = requestError.message || 'The upgrade could not be reviewed.';
+      cancel.focus();
+      return;
+    }
+    heading.textContent = `Upgrade ${text(review.plugin_id)} to ${text(review.to_version)}?`;
+    progress.textContent = `This Home and its linked projects move from ${text(review.from_version)} to ${text(review.to_version)}. Only Home guidance changes.`;
+    dialog.insertBefore(this.providerUpgradeSections(review), error);
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'modern-btn modern-btn-primary';
+    confirm.textContent = 'Upgrade Home';
+    confirm.addEventListener('click', async () => {
+      confirm.disabled = true;
+      cancel.disabled = true;
+      error.textContent = '';
+      progress.textContent = `Installing ${text(review.to_version)} and moving this Home…`;
+      try {
+        const operation = await this.request('/provider-upgrade/commit', {
+          method: 'POST',
+          body: JSON.stringify({ token: review.token })
+        });
+        this.providerUpgradeResult = operation;
+        close();
+        this.announceAction(`Upgraded to ${text(operation.to_version)}.`);
+        await this.load();
+      } catch (commitError) {
+        progress.textContent = '';
+        error.textContent = commitError.details?.id
+          ? `${commitError.message} Operation ${text(commitError.details.id)}.`
+          : commitError.message || 'The upgrade was not applied.';
+        cancel.disabled = false;
+        cancel.focus();
+      }
+    });
+    controls.append(confirm);
+    confirm.focus();
   }
 
   async openHomeRemovalReview(trigger) {
