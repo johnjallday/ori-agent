@@ -6403,7 +6403,8 @@ async function mountedForDrop({
   reparentFails = false,
   layoutFails = false,
   sourceName = 'Alpha',
-  movingName = 'M1'
+  movingName = 'M1',
+  extraPositions = {}
 } = {}) {
   const calls = [];
   let hierarchyChanges = 0;
@@ -6442,7 +6443,7 @@ async function mountedForDrop({
         schema_version: 1,
         revision: 1,
         snap_to_grid: false,
-        positions: { m1: { x: 300, y: 300 }, solo: { x: 2000, y: 2000 } },
+        positions: { m1: { x: 300, y: 300 }, solo: { x: 2000, y: 2000 }, ...extraPositions },
         groups: {
           // Deliberately not the default accent: the confirmation has to wear
           // the colour of the district it is asking about (#346 FR-129).
@@ -6519,6 +6520,34 @@ test('dropping a workspace inside a district moves it into that group (#346 FR-6
   const layoutCall = calls.find(c => c.url.includes('workspace-map') && c.method === 'PATCH');
   assert.ok(layoutCall);
   assert.equal(JSON.stringify(layoutCall.body).includes('parent'), false);
+});
+
+test('an empty group whose anchor is saved still accepts a dropped workspace', async () => {
+  // Every explicit move pins each district's frame corner as a saved position.
+  // That corner is not a building: it must not read as "Occupied" and veto the
+  // join when the workspace is dragged over the group.
+  const { harness, calls, doc } = await mountedForDrop({
+    extraPositions: { g2: { x: 1000, y: 300 } }
+  });
+  const tile = harness.tile('solo');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  // Lands at (1050,350): inside Beta's frame and within one footprint of its corner.
+  tile.fire('pointermove', tilePointer(-950, -1650));
+
+  assert.equal(tile.classList.contains('is-blocked'), false, 'a group corner is not a building');
+  assert.equal(harness.district('g2').classList.contains('is-drop-target'), true);
+  assert.match(
+    harness.control('[data-map-build-text]').textContent,
+    /move this workspace into Beta/
+  );
+
+  tile.fire('pointerup', tilePointer(-950, -1650));
+  await flushDeep();
+  doc.fire('pointerdown', { target: harness.confirm.button('join') });
+  await flushDeep();
+
+  assert.equal(membershipCalls(calls, 'solo').length, 1);
+  assert.deepEqual({ ...membershipCalls(calls, 'solo')[0].body }, { parent_id: 'g2' });
 });
 
 test('a grouped workspace still joins another expanded district with its exact target id (#374)', async () => {

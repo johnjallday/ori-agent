@@ -1121,6 +1121,27 @@
   border-width: 2px;
   border-color: rgb(var(--ws-district-accent));
   background: rgba(var(--ws-district-accent), 0.16);
+  /* The tint alone is easy to miss on a one-cell empty group, so the frame also
+     glows and says what releasing does, in place, beside the pointer. */
+  box-shadow:
+    0 0 0 4px rgba(var(--ws-district-accent), 0.22),
+    0 0 24px rgba(var(--ws-district-accent), 0.35);
+}
+.ws-map-district.is-drop-target::after {
+  content: "Drop to add here";
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(var(--ws-district-accent));
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
 }
 /* A leave confirmation identifies the source with a doubled boundary, not the
    filled destination treatment above. The panel also names it in words. */
