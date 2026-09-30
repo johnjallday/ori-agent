@@ -150,10 +150,42 @@ guess in the browser.
   uncertain scan reply is reconciled from the exact scan receipt before offering a
   fresh scan.
 
+**Guided presentation (implemented).** The Home page carries one *setup card*
+directly under the hero, computed by `setupNextStep` from the library's own
+state: not initialized → "Review library setup"; initialized with no usable root
+→ "Review folder connection" (names the carried collection when known); a
+connected root with no scan → "Scan <folder> once"; only unfinished scans →
+"Review scan again"; provider read-only → an explanation with no action. A root
+with a finished (complete or partial) scan is an established Home and shows no
+card. The card only names the next step; its button opens that step's own review,
+so no consequence is merged or pre-confirmed. While it shows, the hero compacts
+(name, stage and level remain). A `#projectLibraryPanel` arrival focuses the card
+(else the shelf heading) once, including on an uninitialized Home, and never again
+on later refreshes. The sequence after a root grant goes straight to the scan
+review of that root — the separate "Scan the folder now?" question is removed
+because the scan review is itself the disclosure and cancel point; cancelling it
+keeps the root and the card offers the scan again with no new folder pick. Each
+next review is requested only after `refresh()` has read the previous step's
+committed revision.
+
+**Resilience (implemented).** A failed re-read keeps a previously loaded library on
+screen and says the current check is unavailable; a first-load failure still hides
+it. An uncertain scan commit (no answer, or a 5xx) is replayed once with the same
+review token and idempotency key, which the server treats as a replay and never as
+a second scan; if that also fails the browser re-reads the Home and reports a scan
+only when the root's recorded last scan differs from the one before the review.
+
 ### S4. Scan complete or partial
 
 - **Owner:** saved scan session + digest counts (`digest.go`, `query.go`).
 - **Target:** the scan's own coverage record.
+- **Implemented counts:** the persisted scan digest carries `projects`, `new`,
+  `connected` (songs already holding an exact project link), `activatable` (can be
+  set up), `needs_file_choice` (the part of `activatable` whose folder holds several
+  candidate files), `unsupported_format`, `unavailable`, and `coverage`. Each song
+  is in exactly one of connected / can be set up / unsupported, and a file choice
+  is a subset of "can be set up", so the parts never exceed the projects found;
+  digests stored before these fields read them as zero and stay valid.
 - **Next action:** browse/search rows, select a song. Counts distinguish *found
   catalog records*, *verified connected workspaces*, *needs file choice / other
   blockers*, *unsupported formats*, and *coverage* (complete vs partial). A pending

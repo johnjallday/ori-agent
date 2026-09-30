@@ -7,7 +7,8 @@ import {
   libraryRunText,
   proposalSourceLabel,
   readActivationQueue,
-  selectionRecovery
+  selectionRecovery,
+  setupNextStep
 } from './project-library.js';
 
 test('Show project folder requires a fresh connected Home link and never sends a path or starts a DAW', async () => {
@@ -1222,7 +1223,7 @@ test('out-of-order search responses and double-clicked More cannot mix or duplic
   }
 });
 
-test('folder selection and consent never scan after a canceled second review', async () => {
+test('a granted folder goes straight to the scan review, which still needs its own confirmation', async () => {
   const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: { is_station: true } });
   panel.state = { revision: 1 };
   const calls = [];
@@ -1238,12 +1239,15 @@ test('folder selection and consent never scan after a canceled second review', a
   panel.refresh = async () => {
     panel.state.revision = 3;
   };
-  panel.scanRootFlow = async () => calls.push(['/scan', null]);
+  panel.scanRootFlow = async rootID => calls.push(['/scan', rootID]);
   await panel.addFolder(null);
+  // No separate "scan now?" stop: the grant is followed by the scan review of the
+  // root just granted (its own disclosure and cancel), never by a scan itself.
   assert.deepEqual(
     calls.map(([path]) => path),
-    ['/roots/pick', '/roots/review', '/roots/commit']
+    ['/roots/pick', '/roots/review', '/roots/commit', '/scan']
   );
+  assert.equal(calls[3][1], 'root-1');
   assert.equal(calls[2][1].confirm, true);
   assert.equal(calls[1][1].selection_token, 'picker');
   assert.equal(Object.hasOwn(calls[1][1], 'path'), false);
@@ -1266,10 +1270,11 @@ test('resolved portfolio source uses the offer ID, not a browser path or another
   panel.refresh = async () => {
     panel.state = { revision: 3, initialized: true };
   };
+  panel.scanRootFlow = async rootID => calls.push(['/scan', rootID]);
   await panel.addFolder(null);
   assert.deepEqual(
     calls.map(([path]) => path),
-    ['/roots/pick-offer', '/roots/review', '/roots/commit']
+    ['/roots/pick-offer', '/roots/review', '/roots/commit', '/scan']
   );
   assert.deepEqual(calls[0][1], { offer_id: 'resolved-offer' });
   assert.equal(panel.offerID, '');
@@ -1519,6 +1524,38 @@ test('scan digest line names the folder, not its path, and lists only nonzero ex
   assert.match(gone, /5 can be set up, 1 unsupported format, 2 no longer found\.$/);
 });
 
+test('scan digest line separates connected songs and file choices from what can be set up', () => {
+  const roots = [{ id: 'root-1', path: '/Users/owner/Albums' }];
+  const text = libraryDigestText(
+    { ...DIGEST, projects: 5, new: 5, connected: 1, activatable: 3, needs_file_choice: 1 },
+    roots
+  );
+  assert.match(
+    text,
+    /5 projects, 5 new, 1 already connected, 3 can be set up \(1 needs a file choice\)/
+  );
+  const several = libraryDigestText(
+    { ...DIGEST, projects: 6, activatable: 4, needs_file_choice: 2, connected: 0 },
+    roots
+  );
+  assert.match(several, /4 can be set up \(2 need a file choice\)/);
+  assert.equal(several.includes('already connected'), false, 'zero is not mentioned');
+  // A digest stored before these fields existed reads exactly as it always did.
+  assert.equal(libraryDigestText(DIGEST, roots).includes('file choice'), false);
+  // Forged or negative values are ignored rather than shown.
+  const forged = libraryDigestText({ ...DIGEST, connected: -3, needs_file_choice: 'many' }, roots);
+  assert.equal(forged.includes('already connected') || forged.includes('file choice'), false);
+  // Connected songs are still reported when setup evidence is missing.
+  const noEvidence = libraryDigestText(
+    { ...DIGEST, connected: 2, setup_note: 'project_provider_unavailable' },
+    roots
+  );
+  assert.match(
+    noEvidence,
+    /2 already connected, project setup needs a compatible installed integration/
+  );
+});
+
 test('scan digest line handles zero, partial, unknown-root and setup-unavailable digests', () => {
   assert.equal(libraryDigestText(null, []), '');
   assert.equal(libraryDigestText({ projects: 3 }, []), '', 'a digest without a scan is not shown');
@@ -1685,7 +1722,30 @@ test('arriving with the shelf hash focuses the suggestions heading once, after i
     new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
     assert.deepEqual(calls, ['library:tabindex=-1', 'library:scroll', 'library:focus:true']);
     calls.length = 0;
+
+    // A new Home arrives on #projectLibraryPanel: the unfinished-setup card when
+    // there is one, else the shelf heading.
+    elements.projectSetupNext = { hidden: false };
+    elements.projectSetupNextTitle = heading('setup');
     globalThis.location = { hash: '#projectLibraryPanel' };
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, ['setup:tabindex=-1', 'setup:scroll', 'setup:focus:true']);
+    calls.length = 0;
+    elements.projectSetupNext.hidden = true; // established Home: nothing to finish
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, ['library:tabindex=-1', 'library:scroll', 'library:focus:true']);
+    calls.length = 0;
+
+    // Only the first render counts: a later refresh never takes focus back.
+    const once = new ProjectLibraryPanel({ workspaceId: 'home' });
+    once.focusArrival();
+    calls.length = 0;
+    once.focusArrival();
+    assert.deepEqual(calls, []);
+
+    globalThis.location = { hash: '#somewhereElse' };
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    globalThis.location = { hash: '' };
     new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
     assert.deepEqual(calls, [], 'other arrivals keep the page’s normal focus');
   } finally {
@@ -1818,14 +1878,26 @@ test('a Home reopened without its address restores the one ready collection, sen
   }
 });
 
-test('an address that already names the collection wins and asks the server nothing', async () => {
-  const { panel, requests, restore } = continuationPanel(ok({ continuations: [] }), {
-    search: '?folder_offer_id=from-address'
-  });
+test('an address that already names the collection wins, and the read only supplies its folder name', async () => {
+  const { panel, requests, restore } = continuationPanel(
+    ok({
+      continuations: [
+        { offer_id: 'from-address', folder: 'Albums', state: 'ready' },
+        { offer_id: 'another', folder: 'Sketches', state: 'ready' }
+      ]
+    }),
+    { search: '?folder_offer_id=from-address' }
+  );
   try {
     await panel.restoreCollectionContinuation();
-    assert.equal(panel.offerID, 'from-address');
-    assert.deepEqual(requests, []);
+    assert.equal(panel.offerID, 'from-address', 'the address is never overridden');
+    assert.equal(requests.length, 1, 'one read-only GET, no body');
+    assert.equal(requests[0].options.method, undefined);
+    assert.equal(
+      panel.continuations.find(item => item.offer_id === panel.offerID).folder,
+      'Albums',
+      'so the setup card can name the collection that was carried'
+    );
   } finally {
     restore();
   }
@@ -2055,4 +2127,367 @@ test('a stale review re-reads the library so the next attempt is not refused aga
   } finally {
     globalThis.document = original;
   }
+});
+
+const libState = (extra = {}) => ({
+  provider_read_only: false,
+  initialized: true,
+  picker_available: true,
+  roots: [],
+  ...extra
+});
+const scannedRoot = (id, status = 'complete') => ({
+  id,
+  path: `/sandbox/${id}`,
+  last_scan: { status, entries_seen: 3, skipped_entries: 0 }
+});
+
+test('the next step follows the library’s own state, one action at a time', () => {
+  assert.equal(setupNextStep({}).stage, 'unknown', 'no state, no guess');
+  assert.equal(setupNextStep({ state: null }).stage, 'unknown');
+
+  const readOnly = setupNextStep({ state: libState({ provider_read_only: true }) });
+  assert.equal(readOnly.stage, 'read_only');
+  assert.equal(readOnly.action, null, 'nothing to do until the package is back');
+  assert.match(readOnly.body, /kept/);
+
+  const fresh = setupNextStep({ state: { provider_read_only: false, initialized: false } });
+  assert.equal(fresh.stage, 'not_initialized');
+  assert.deepEqual(fresh.action, { id: 'initialize', label: 'Review library setup' });
+  assert.match(fresh.body, /opens no folders and scans nothing/);
+  assert.match(fresh.body, /saved notes and exact project links/);
+
+  const carried = setupNextStep({
+    state: { provider_read_only: false, initialized: false },
+    collection: 'Albums'
+  });
+  assert.match(carried.title, /Albums/);
+  assert.match(carried.body, /^Albums is waiting\./);
+
+  const noRoot = setupNextStep({ state: libState(), collection: 'Albums', carried: true });
+  assert.equal(noRoot.stage, 'no_root');
+  assert.match(noRoot.title, /Connect Albums to this Home/);
+  assert.equal(noRoot.action.id, 'add_folder');
+
+  const revokedOnly = setupNextStep({
+    state: libState({
+      roots: [
+        { id: 'a', path: '/x/a', revoked_at: '2026-09-30T00:00:00Z' },
+        { id: 'b', path: '/x/b', needs_review: true }
+      ]
+    })
+  });
+  assert.equal(revokedOnly.stage, 'no_root', 'a disconnected root is not a usable one');
+
+  const unscanned = setupNextStep({
+    state: libState({ roots: [{ id: 'r1', path: '/Users/me/Music/Albums' }] })
+  });
+  assert.equal(unscanned.stage, 'not_scanned');
+  assert.equal(unscanned.title, 'Scan Albums once');
+  assert.deepEqual(unscanned.action, { id: 'scan', label: 'Review scan', rootId: 'r1' });
+  assert.doesNotMatch(unscanned.title + unscanned.body, /\/Users\/me/, 'only the folder name');
+
+  const failed = setupNextStep({ state: libState({ roots: [scannedRoot('r1', 'failed')] }) });
+  assert.equal(failed.stage, 'scan_incomplete');
+  assert.equal(failed.action.rootId, 'r1');
+  assert.match(failed.body, /kept/);
+
+  for (const finished of ['complete', 'partial']) {
+    assert.equal(
+      setupNextStep({ state: libState({ roots: [scannedRoot('r1', finished)] }) }).stage,
+      'ready',
+      `${finished}: an established Home shows no setup card`
+    );
+  }
+  assert.equal(
+    setupNextStep({ state: libState({ roots: [scannedRoot('r1', 'failed'), scannedRoot('r2')] }) })
+      .stage,
+    'ready',
+    'one finished scan is enough'
+  );
+});
+
+test('with no picker and no carried collection the card explains instead of offering a dead button', () => {
+  const step = setupNextStep({ state: libState({ picker_available: false }) });
+  assert.equal(step.stage, 'no_root');
+  assert.equal(step.action, null);
+  assert.match(step.body, /picker is unavailable/);
+  // A carried collection needs no picker: the server holds the folder.
+  assert.equal(
+    setupNextStep({ state: libState({ picker_available: false }), carried: true }).action.id,
+    'add_folder'
+  );
+});
+
+function setupCardPage() {
+  const elements = new Map();
+  const make = id => {
+    const classes = new Set();
+    const node = {
+      id,
+      hidden: true,
+      disabled: false,
+      textContent: '',
+      classList: {
+        toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)),
+        has: name => classes.has(name)
+      }
+    };
+    elements.set(id, node);
+    return node;
+  };
+  for (const id of [
+    'projectSetupNext',
+    'projectSetupNextTitle',
+    'projectSetupNextBody',
+    'projectSetupNextAction',
+    'assistantProgramPage'
+  ]) {
+    make(id);
+  }
+  return { elements, document: { getElementById: id => elements.get(id) || null } };
+}
+
+test('the setup card shows the next step as plain text and compacts the hero only while it is shown', () => {
+  const original = globalThis.document;
+  const page = setupCardPage();
+  globalThis.document = page.document;
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.offerID = 'offer-1';
+    panel.continuations = [{ offer_id: 'offer-1', folder: '<b>Albums</b>', state: 'ready' }];
+    panel.state = { provider_read_only: false, initialized: false };
+    panel.renderSetupNext();
+    const card = page.elements.get('projectSetupNext');
+    assert.equal(card.hidden, false);
+    assert.equal(page.elements.get('assistantProgramPage').classList.has('is-setup-first'), true);
+    assert.match(page.elements.get('projectSetupNextTitle').textContent, /<b>Albums<\/b>/);
+    assert.equal(
+      'innerHTML' in page.elements.get('projectSetupNextTitle'),
+      false,
+      'a folder name is text, never markup'
+    );
+    const action = page.elements.get('projectSetupNextAction');
+    assert.equal(action.hidden, false);
+    assert.equal(action.textContent, 'Review library setup');
+
+    // The folder is scanned: an established Home shows nothing and the hero relaxes.
+    panel.state = libState({ roots: [scannedRoot('r1')] });
+    panel.renderSetupNext();
+    assert.equal(card.hidden, true);
+    assert.equal(page.elements.get('assistantProgramPage').classList.has('is-setup-first'), false);
+
+    // A failed read hides it rather than guessing.
+    panel.state = { provider_read_only: false, initialized: false };
+    panel.renderSetupNext();
+    assert.equal(card.hidden, false);
+    panel.state = null;
+    panel.renderSetupNext();
+    assert.equal(card.hidden, true);
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+test('the setup card button starts exactly the step it names', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  const started = [];
+  panel.initialize = async trigger => started.push(['initialize', trigger]);
+  panel.addFolder = async trigger => started.push(['add_folder', trigger]);
+  panel.scanRoot = async (root, trigger) => started.push(['scan', root.id, trigger]);
+  panel.state = { roots: [{ id: 'r1' }, { id: 'r2' }] };
+
+  panel.setupStep = { action: { id: 'initialize' } };
+  await panel.runSetupNext('button');
+  panel.setupStep = { action: { id: 'add_folder' } };
+  await panel.runSetupNext('button');
+  panel.setupStep = { action: { id: 'scan', rootId: 'r2' } };
+  await panel.runSetupNext('button');
+  assert.deepEqual(started, [
+    ['initialize', 'button'],
+    ['add_folder', 'button'],
+    ['scan', 'r2', 'button']
+  ]);
+
+  // Nothing to do, a vanished root, or a step already running starts nothing.
+  started.length = 0;
+  panel.setupStep = { action: null };
+  await panel.runSetupNext('button');
+  panel.setupStep = { action: { id: 'scan', rootId: 'gone' } };
+  await panel.runSetupNext('button');
+  panel.setupStep = { action: { id: 'initialize' } };
+  panel.busy = true;
+  await panel.runSetupNext('button');
+  assert.deepEqual(started, []);
+});
+
+test('an uninitialized Home still renders its setup card and lands the arrival', async () => {
+  const original = globalThis.document;
+  const originalLocation = globalThis.location;
+  const page = setupCardPage();
+  const focus = [];
+  for (const id of ['projectLibrarySetup', 'projectLibraryContent', 'projectLibraryAdd']) {
+    page.elements.set(id, { id, hidden: false, disabled: false });
+  }
+  page.elements.set('projectLibraryInitialize', {
+    id: 'projectLibraryInitialize',
+    disabled: false
+  });
+  Object.assign(page.elements.get('projectSetupNextTitle'), {
+    setAttribute: () => {},
+    scrollIntoView: () => focus.push('scroll'),
+    focus: () => focus.push('focus')
+  });
+  globalThis.document = page.document;
+  globalThis.location = { hash: '#projectLibraryPanel', search: '' };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.status = () => {};
+    panel.request = async () => ({ initialized: false, provider_read_only: false });
+    await panel.refresh();
+    assert.equal(page.elements.get('projectSetupNext').hidden, false);
+    assert.equal(page.elements.get('projectSetupNextAction').textContent, 'Review library setup');
+    assert.deepEqual(focus, ['scroll', 'focus'], 'arrival is not skipped before initialization');
+    await panel.refresh(); // a later refresh never moves focus again
+    assert.deepEqual(focus, ['scroll', 'focus']);
+  } finally {
+    globalThis.document = original;
+    globalThis.location = originalLocation;
+  }
+});
+
+function refreshFailurePage() {
+  const page = setupCardPage();
+  for (const id of ['projectLibrarySetup', 'projectLibraryContent', 'projectLibraryAdd']) {
+    page.elements.set(id, { id, hidden: false, disabled: false });
+  }
+  return page;
+}
+
+test('a failed re-read keeps a populated library on screen and says the check is unavailable', async () => {
+  const original = globalThis.document;
+  const page = refreshFailurePage();
+  globalThis.document = page.document;
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const messages = [];
+    panel.status = message => messages.push(message);
+    const saved = libState({ roots: [scannedRoot('r1')], revision: 4 });
+    panel.state = saved;
+    panel.request = async () => {
+      throw new Error('offline');
+    };
+    await panel.refresh();
+    assert.equal(panel.state, saved, 'the last saved state is kept, not cleared');
+    assert.equal(
+      page.elements.get('projectLibraryContent').hidden,
+      false,
+      'saved projects stay visible'
+    );
+    assert.equal(page.elements.get('projectLibraryAdd').hidden, false);
+    assert.match(messages.at(-1), /could not re-check this library just now/);
+    assert.match(messages.at(-1), /last saved/);
+    assert.match(messages.at(-1), /Nothing was changed/);
+    assert.doesNotMatch(messages.at(-1), /offline/, 'no raw error text');
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+test('a first load that fails still hides the library rather than inventing one', async () => {
+  const original = globalThis.document;
+  const page = refreshFailurePage();
+  globalThis.document = page.document;
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const messages = [];
+    panel.status = message => messages.push(message);
+    panel.request = async () => {
+      throw new Error('The Home is unavailable');
+    };
+    await panel.refresh();
+    assert.equal(panel.state, null);
+    assert.equal(page.elements.get('projectLibraryContent').hidden, true);
+    assert.equal(page.elements.get('projectLibraryAdd').hidden, true);
+    assert.equal(messages.at(-1), 'The Home is unavailable');
+  } finally {
+    globalThis.document = original;
+  }
+});
+
+function scanFlowPanel({ commits }) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { revision: 5, roots: [{ id: 'root-1', path: '/x/Albums' }] };
+  const log = { posts: [], statuses: [], keys: [] };
+  panel.status = message => log.statuses.push(message);
+  panel.confirm = async () => true;
+  panel.refresh = async () => log.posts.push('refresh');
+  panel.post = async (path, body) => {
+    log.posts.push(path);
+    if (path.endsWith('/scans/review')) {
+      return { token: 'review-1', root_path: '/x/Albums', scope: 'names only', max_entries: 5000 };
+    }
+    log.keys.push(body.idempotency_key);
+    const next = commits.shift();
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  return { panel, log };
+}
+
+const receipt = { status: 'complete', entries_seen: 4, skipped_links: 0, skipped_other: 0 };
+const noAnswer = () => Object.assign(new TypeError('Failed to fetch'), {});
+const serverError = () => Object.assign(new Error('boom'), { status: 502 });
+
+test('a lost scan reply is replayed once with the same key, so the folder is never scanned twice', async () => {
+  const { panel, log } = scanFlowPanel({ commits: [noAnswer(), receipt] });
+  await panel.scanRootFlow('root-1', null);
+  assert.equal(log.keys.length, 2);
+  assert.equal(log.keys[0], log.keys[1], 'the same idempotency key is the replay');
+  assert.equal(log.posts.filter(path => path.endsWith('/scans/review')).length, 1, 'no new review');
+  assert.match(log.statuses.at(-1), /complete scan · 4 entries seen/);
+
+  const again = scanFlowPanel({ commits: [serverError(), receipt] });
+  await again.panel.scanRootFlow('root-1', null);
+  assert.equal(again.log.keys[0], again.log.keys[1]);
+});
+
+test('a scan that was recorded despite two lost replies is reported, not repeated', async () => {
+  const { panel, log } = scanFlowPanel({ commits: [noAnswer(), noAnswer()] });
+  panel.refresh = async () => {
+    log.posts.push('refresh');
+    panel.state.roots = [
+      {
+        id: 'root-1',
+        path: '/x/Albums',
+        last_scan: { id: 'scan-new', status: 'complete', entries_seen: 4 }
+      }
+    ];
+  };
+  await panel.scanRootFlow('root-1', null);
+  assert.equal(log.keys.length, 2, 'exactly one replay, never a third attempt');
+  assert.match(log.statuses.at(-1), /reply was lost, but this scan was recorded/);
+  assert.match(log.statuses.at(-1), /complete · 4 names checked\. It was not repeated/);
+});
+
+test('an uncertain scan with nothing recorded is an error, and a refusal is never retried', async () => {
+  const unrecorded = scanFlowPanel({ commits: [noAnswer(), noAnswer()] });
+  await assert.rejects(unrecorded.panel.scanRootFlow('root-1', null), /Failed to fetch/);
+  assert.equal(unrecorded.log.keys.length, 2);
+
+  // The same scan id as before the review means nothing new was recorded.
+  const unchanged = scanFlowPanel({ commits: [serverError(), serverError()] });
+  unchanged.panel.state.roots[0].last_scan = {
+    id: 'scan-old',
+    status: 'complete',
+    entries_seen: 1
+  };
+  unchanged.panel.refresh = async () => {};
+  await assert.rejects(unchanged.panel.scanRootFlow('root-1', null), /boom/);
+
+  const refused = scanFlowPanel({
+    commits: [Object.assign(new Error('changed'), { status: 409 })]
+  });
+  await assert.rejects(refused.panel.scanRootFlow('root-1', null), /changed/);
+  assert.equal(refused.log.keys.length, 1, 'a definite refusal is final');
 });

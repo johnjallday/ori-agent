@@ -74,6 +74,74 @@ export function selectionRecovery({ reason = '', continuation = null } = {}) {
   }
 }
 
+const folderName = path =>
+  String(path || '')
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop() || 'this folder';
+
+// The one next step for an unfinished Home library, read from the library's own
+// state and never inferred from files. It only names what to review next; every
+// action still opens that step's own review and confirmation. An established
+// Home (a connected folder with a finished scan) returns stage "ready" and shows
+// nothing, so the shelf stays the place to browse and search.
+//   collection: display name of the collection carried from intake, if known.
+export function setupNextStep({ state = null, collection = '', carried = false } = {}) {
+  if (!state) return { stage: 'unknown' };
+  if (state.provider_read_only !== false) {
+    return {
+      stage: 'read_only',
+      title: 'This Home’s package is unavailable',
+      body: 'The library is read-only until the Home’s package is available again. Nothing was changed, and your saved notes and links are kept.',
+      action: null
+    };
+  }
+  const named = collection || '';
+  if (state.initialized !== true) {
+    return {
+      stage: 'not_initialized',
+      title: named ? `Set up the library for ${named}` : 'Start this Home’s project library',
+      body: `${named ? `${named} is waiting. ` : ''}Starting the library copies this Home’s saved notes and exact project links into it. It opens no folders and scans nothing; you review each next step separately.`,
+      action: { id: 'initialize', label: 'Review library setup' }
+    };
+  }
+  const roots = Array.isArray(state.roots) ? state.roots : [];
+  const active = roots.filter(root => !root.revoked_at && !root.needs_review);
+  if (!active.length) {
+    const canPick = carried || state.picker_available !== false;
+    return {
+      stage: 'no_root',
+      title: named ? `Connect ${named} to this Home` : 'Connect a folder to discover projects',
+      body: canPick
+        ? 'Connecting lets Ori read folder names and project markers only. Nothing is scanned until you review a scan.'
+        : 'The native folder picker is unavailable here. Use Ori desktop to add a folder; your saved projects stay usable meanwhile.',
+      action: canPick ? { id: 'add_folder', label: 'Review folder connection' } : null
+    };
+  }
+  const unscanned = active.find(root => !root.last_scan);
+  if (unscanned) {
+    return {
+      stage: 'not_scanned',
+      title: `Scan ${folderName(unscanned.path)} once`,
+      body: 'The folder is connected but has not been scanned. A scan reads folder names and project markers only, never project files.',
+      action: { id: 'scan', label: 'Review scan', rootId: unscanned.id }
+    };
+  }
+  const finished = active.some(
+    root => root.last_scan.status === 'complete' || root.last_scan.status === 'partial'
+  );
+  if (!finished) {
+    const failed = active[0];
+    return {
+      stage: 'scan_incomplete',
+      title: 'The last scan did not finish',
+      body: 'Anything already found is kept. Review a fresh scan when you are ready; nothing was changed.',
+      action: { id: 'scan', label: 'Review scan again', rootId: failed.id }
+    };
+  }
+  return { stage: 'ready' };
+}
+
 export function libraryQuery({
   text = '',
   stage = '',
@@ -130,10 +198,19 @@ export function libraryDigestText(digest, roots = []) {
   const projects = count(digest.projects);
   const parts = [`${projects} ${projects === 1 ? 'project' : 'projects'}`];
   if (count(digest.new) > 0) parts.push(`${count(digest.new)} new`);
+  // Each song is in one bucket: already connected, can be set up, or an
+  // unsupported format. A file choice is part of "can be set up", not another
+  // bucket, so the parts never add up to more than the projects found.
+  if (count(digest.connected) > 0) parts.push(`${count(digest.connected)} already connected`);
   if (digest.setup_note) {
     parts.push(DIGEST_SETUP_NOTES[digest.setup_note] || 'project setup is unavailable');
   } else {
-    parts.push(`${count(digest.activatable)} can be set up`);
+    const choices = count(digest.needs_file_choice);
+    parts.push(
+      `${count(digest.activatable)} can be set up${
+        choices > 0 ? ` (${choices} ${choices === 1 ? 'needs' : 'need'} a file choice)` : ''
+      }`
+    );
     if (count(digest.unsupported_format) > 0)
       parts.push(`${count(digest.unsupported_format)} unsupported format`);
   }
@@ -283,8 +360,8 @@ export class ProjectLibraryPanel {
   // for the folder. Adopting that ID grants nothing: pick-offer, the root review
   // and the commit each re-verify the Home, provider and folder. More than one
   // ready collection is ambiguous, so none is chosen for the user.
-  async restoreCollectionContinuation({ force = false, adopt = true } = {}) {
-    if ((this.offerID && !force) || !this.workspaceId) return;
+  async restoreCollectionContinuation({ adopt = true } = {}) {
+    if (!this.workspaceId) return;
     try {
       const response = await this.fetchImpl(
         `/api/personal-assistant/folder-digest/continuations?home_id=${encodeURIComponent(this.workspaceId)}`,
@@ -300,7 +377,9 @@ export class ProjectLibraryPanel {
           item.offer_id.length <= 160
       );
       const ready = this.continuations.filter(item => item.state === 'ready');
-      if (adopt && ready.length === 1) this.offerID = ready[0].offer_id;
+      // An address that already names a collection wins; the read still tells us
+      // its folder name for the setup card.
+      if (adopt && !this.offerID && ready.length === 1) this.offerID = ready[0].offer_id;
     } catch (_) {
       // Purely advisory: without it the user chooses the folder as before.
     }
@@ -393,7 +472,13 @@ export class ProjectLibraryPanel {
       this.busy = false;
       this.renderQueueControls();
       this.panel?.setAttribute('aria-busy', 'false');
-      if (trigger?.isConnected) {
+      if (trigger?.id === 'projectSetupNextAction' && trigger.closest?.('[hidden]')) {
+        // The step finished and its card hid itself: keep keyboard focus on the
+        // shelf rather than on a control that is no longer there.
+        const heading = document.getElementById('projectLibraryTitle');
+        heading?.setAttribute('tabindex', '-1');
+        heading?.focus();
+      } else if (trigger?.isConnected) {
         trigger.disabled =
           (trigger.id === 'projectLibraryAdd' &&
             (!this.state?.initialized ||
@@ -444,8 +529,46 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibraryMoreRoots')
       ?.addEventListener('click', event => void this.moreRoots(event.currentTarget));
+    document
+      .getElementById('projectSetupNextAction')
+      ?.addEventListener('click', event => void this.runSetupNext(event.currentTarget));
     await this.restoreCollectionContinuation();
     await this.refresh();
+  }
+
+  // Shows the one next step of an unfinished library above the roster and
+  // progression, so a fresh Home opens on what to do rather than on a level
+  // meter. Pure navigation: the button only starts that step's own review.
+  renderSetupNext() {
+    const section = document.getElementById('projectSetupNext');
+    if (!section) return;
+    const collection =
+      this.continuations.find(item => item.offer_id === this.offerID)?.folder || '';
+    const step = setupNextStep({ state: this.state, collection, carried: Boolean(this.offerID) });
+    this.setupStep = step;
+    const visible = step.stage !== 'ready' && step.stage !== 'unknown';
+    section.hidden = !visible;
+    document.getElementById('assistantProgramPage')?.classList.toggle('is-setup-first', visible);
+    if (!visible) return;
+    document.getElementById('projectSetupNextTitle').textContent = step.title;
+    document.getElementById('projectSetupNextBody').textContent = step.body;
+    const action = document.getElementById('projectSetupNextAction');
+    if (action) {
+      action.hidden = !step.action;
+      action.textContent = step.action?.label || '';
+      action.disabled = this.busy;
+    }
+  }
+
+  async runSetupNext(trigger) {
+    const action = this.setupStep?.action;
+    if (!action || this.busy) return;
+    if (action.id === 'initialize') return this.initialize(trigger);
+    if (action.id === 'add_folder') return this.addFolder(trigger);
+    if (action.id === 'scan') {
+      const root = (this.state?.roots || []).find(item => item.id === action.rootId);
+      if (root) return this.scanRoot(root, trigger);
+    }
   }
 
   async refresh() {
@@ -464,10 +587,14 @@ export class ProjectLibraryPanel {
             ? 'The Home provider is unavailable. Saved library setup needs its exact installed package.'
             : 'No library yet. Review the saved project links before choosing a folder.'
         );
+        // Arriving on an uninitialized Home used to skip both of these.
+        this.renderSetupNext();
+        this.focusArrival();
         return;
       }
       this.renderFormats();
       this.renderRoots();
+      this.renderSetupNext();
       await this.restoreQueue();
       this.renderQueueControls();
       await this.renderResume();
@@ -479,28 +606,55 @@ export class ProjectLibraryPanel {
           'The native folder picker is unavailable here. You can still review approved folders for another scan; use Ori desktop to add a folder.'
         );
     } catch (error) {
-      this.state = null;
-      this.status(
-        error.message || 'Could not load the Home library. Retry by reopening this Home.'
-      );
-      document.getElementById('projectLibraryAdd').hidden = true;
-      document.getElementById('projectLibrarySetup').hidden = true;
-      document.getElementById('projectLibraryContent').hidden = true;
+      if (this.state?.initialized === true) {
+        // A library that was already on screen stays there. A failed re-read
+        // means the current check is unavailable, not that saved projects
+        // vanished, and hiding them would say otherwise. Nothing was changed.
+        this.status(
+          'Ori could not re-check this library just now, so this is what was last saved. Nothing was changed; reopen this Home to check again.'
+        );
+        this.renderSetupNext();
+      } else {
+        this.state = null;
+        this.status(
+          error.message || 'Could not load the Home library. Retry by reopening this Home.'
+        );
+        document.getElementById('projectLibraryAdd').hidden = true;
+        document.getElementById('projectLibrarySetup').hidden = true;
+        document.getElementById('projectLibraryContent').hidden = true;
+        this.renderSetupNext(); // no state: the card hides rather than guessing
+      }
     }
     this.focusArrival();
   }
 
-  // Arriving from a map badge or an Action Center card lands on the
-  // suggestions heading once the shelf has rendered, instead of wherever the
-  // browser's early hash scroll left the page. Only the first render counts.
+  // Arriving from a map badge, an Action Center card, or a new Home lands on the
+  // relevant heading once the page has rendered, instead of wherever the
+  // browser's early hash scroll left it (the library sits below four panels and
+  // is un-hidden late). Suggestions arrivals land on the suggestions heading; a
+  // #projectLibraryPanel arrival lands on the unfinished-setup card when there is
+  // one, else the shelf heading. Only the first render counts, so later
+  // refreshes never take the user's focus back.
   focusArrival() {
-    if (this.arrivalHandled || globalThis.location?.hash !== '#projectLibraryProposals') return;
+    if (this.arrivalHandled) return;
+    const hash = globalThis.location?.hash;
+    let heading = null;
+    if (hash === '#projectLibraryProposals') {
+      const section = document.getElementById('projectLibraryProposals');
+      heading =
+        section && !section.hidden
+          ? document.getElementById('projectLibraryProposalsTitle')
+          : document.getElementById('projectLibraryTitle');
+    } else if (hash === '#projectLibraryPanel') {
+      const next = document.getElementById('projectSetupNext');
+      heading =
+        next && !next.hidden
+          ? document.getElementById('projectSetupNextTitle')
+          : document.getElementById('projectLibraryTitle');
+    } else {
+      return;
+    }
     this.arrivalHandled = true;
-    const section = document.getElementById('projectLibraryProposals');
-    const heading =
-      section && !section.hidden
-        ? document.getElementById('projectLibraryProposalsTitle')
-        : document.getElementById('projectLibraryTitle');
     if (!heading) return;
     heading.setAttribute('tabindex', '-1');
     heading.scrollIntoView?.({ block: 'start' });
@@ -1626,7 +1780,7 @@ export class ProjectLibraryPanel {
         } catch (error) {
           // Ask the server why, rather than telling every failure "expired or
           // changed". Package/Home/picker problems are not fixed by a new pick.
-          await this.restoreCollectionContinuation({ force: true, adopt: false });
+          await this.restoreCollectionContinuation({ adopt: false });
           const recovery = selectionRecovery({
             reason: error.reason,
             continuation: this.continuations.find(item => item.offer_id === offerID) || null
@@ -1690,17 +1844,12 @@ export class ProjectLibraryPanel {
       });
       this.consumeOffer(offerID);
       await this.refresh();
-      if (
-        await this.confirm(
-          'Scan the folder now?',
-          [
-            'One bounded scan will inspect folder names and project markers only. Source files will not be opened or changed.'
-          ],
-          'Review scan',
-          trigger
-        )
-      )
-        await this.scanRootFlow(receipt.root_id, trigger);
+      // The next review follows the refreshed revision of the grant just made.
+      // The scan review is itself the disclosure and confirmation (folder,
+      // bounds, cancel), so a separate "scan now?" question only added a stop.
+      // Cancelling it keeps the connected root; the setup card then offers the
+      // scan again without another folder pick.
+      await this.scanRootFlow(receipt.root_id, trigger);
     });
   }
 
@@ -1780,6 +1929,9 @@ export class ProjectLibraryPanel {
   }
 
   async scanRootFlow(rootID, trigger, scopeID = '') {
+    const recordedScan = () =>
+      (this.state?.roots || []).find(item => item.id === rootID)?.last_scan || null;
+    const priorScanID = recordedScan()?.id || '';
     const review = await this.post(`/roots/${encodeURIComponent(rootID)}/scans/review`, {
       if_revision: this.state.revision,
       ...(scopeID ? { scope_id: scopeID } : {})
@@ -1804,12 +1956,37 @@ export class ProjectLibraryPanel {
       this.status('Scan canceled. The folder was not read.');
       return;
     }
-    const receipt = await this.post(`/roots/${encodeURIComponent(rootID)}/scans/commit`, {
-      review_token: review.token,
-      idempotency_key: operationKey('scan'),
-      confirm: true,
-      ...(scopeID ? { scope_id: scopeID } : {})
-    });
+    const idempotencyKey = operationKey('scan');
+    const commit = () =>
+      this.post(`/roots/${encodeURIComponent(rootID)}/scans/commit`, {
+        review_token: review.token,
+        idempotency_key: idempotencyKey,
+        confirm: true,
+        ...(scopeID ? { scope_id: scopeID } : {})
+      });
+    let receipt;
+    try {
+      receipt = await commit();
+    } catch (error) {
+      // A definite refusal (4xx) is final. No answer at all (a dropped
+      // connection) or a server error is uncertain: the scan may have been
+      // recorded. The same review and key are a replay on the server, which
+      // returns the scan it already recorded and never scans twice.
+      if (!(error.status === undefined || error.status >= 500)) throw error;
+      try {
+        receipt = await commit();
+      } catch (again) {
+        await this.refresh();
+        const seen = recordedScan();
+        if (seen && seen.id !== priorScanID) {
+          this.status(
+            `The reply was lost, but this scan was recorded: ${label(seen.status)} · ${seen.entries_seen} names checked. It was not repeated.`
+          );
+          return;
+        }
+        throw again;
+      }
+    }
     await this.refresh();
     this.status(
       `${label(receipt.status)} scan · ${receipt.entries_seen} entries seen · ${receipt.skipped_links + receipt.skipped_other} skipped${receipt.partial_reason ? ` · ${receipt.partial_reason}` : ''}.`

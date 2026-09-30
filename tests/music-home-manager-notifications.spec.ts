@@ -172,10 +172,7 @@ test('a completed scan leaves a model-free digest on the Home suggestions shelf'
     .getByRole('dialog', { name: 'Connect this discovery folder?' })
     .getByRole('button', { name: 'Connect folder' })
     .click();
-  await page
-    .getByRole('dialog', { name: 'Scan the folder now?' })
-    .getByRole('button', { name: 'Review scan' })
-    .click();
+  // The grant goes straight to the scan review (no separate "scan now?" stop).
   // Reviewing the scan is not a completed scan: still no digest.
   expect((await json(await request.get(`${base}/summary`))).digest).toBeNull();
   await page
