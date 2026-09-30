@@ -131,11 +131,12 @@ test('collection → guided catalog → reviewed REAPER install → exact song �
   await expect(setupCard.locator('#projectSetupNextTitle')).toContainText('Documents');
   await expect(setupCard.locator('#projectSetupNextTitle')).toBeFocused();
   await shot(page, 'onb-01-fresh-home-setup-first');
+  // The person already chose this collection, so one button starts the library
+  // and goes straight to the exact folder's own review (no separate "start?" stop).
+  await expect(setupCard.locator('#projectSetupNextAction')).toHaveText(
+    'Start library and review Documents'
+  );
   await setupCard.locator('#projectSetupNextAction').click();
-  await page
-    .getByRole('dialog', { name: 'Start a Home project library?' })
-    .getByRole('button', { name: 'Start library' })
-    .click();
   const grant = page.getByRole('dialog', { name: 'Connect this discovery folder?' });
   await expect(grant).toContainText(documents);
   await shot(page, 'onb-02-root-review');

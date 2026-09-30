@@ -2165,6 +2165,22 @@ test('the next step follows the library’s own state, one action at a time', ()
   });
   assert.match(carried.title, /Albums/);
   assert.match(carried.body, /^Albums is waiting\./);
+  assert.equal(carried.action.label, 'Review library setup', 'not carried: the ordinary review');
+
+  // A carried collection is an explicit request to set it up: one button starts the
+  // library and then shows the exact folder, instead of a stop of its own.
+  const carriedStart = setupNextStep({
+    state: { provider_read_only: false, initialized: false },
+    collection: 'Albums',
+    carried: true
+  });
+  assert.equal(carriedStart.stage, 'not_initialized');
+  assert.deepEqual(carriedStart.action, {
+    id: 'initialize',
+    label: 'Start library and review Albums'
+  });
+  assert.match(carriedStart.body, /exact folder to review/);
+  assert.match(carriedStart.body, /Nothing is read or scanned until you confirm/);
 
   const noRoot = setupNextStep({ state: libState(), collection: 'Albums', carried: true });
   assert.equal(noRoot.stage, 'no_root');
@@ -2271,7 +2287,7 @@ test('the setup card shows the next step as plain text and compacts the hero onl
     );
     const action = page.elements.get('projectSetupNextAction');
     assert.equal(action.hidden, false);
-    assert.equal(action.textContent, 'Review library setup');
+    assert.equal(action.textContent, 'Start library and review <b>Albums</b>');
 
     // The folder is scanned: an established Home shows nothing and the hero relaxes.
     panel.state = libState({ roots: [scannedRoot('r1')] });

@@ -138,16 +138,16 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await expect(setupCard.locator('#projectSetupNextTitle')).toContainText('Documents');
   await expect(setupCard.locator('#projectSetupNextTitle')).toBeFocused();
   await expect(setupCard).toBeInViewport();
-  await expect(setupCard.locator('#projectSetupNextAction')).toHaveText('Review library setup');
+  await expect(setupCard.locator('#projectSetupNextAction')).toHaveText(
+    'Start library and review Documents'
+  );
   await expect(page.locator('#assistantProgramPage')).toHaveClass(/is-setup-first/);
   await shot(page, '19a-fresh-home-setup-first');
   expect((await json(await request.get(`${base}/roots`))).initialized).toBe(false);
   await shot(page, '19-reviewed-home-before-library-consent');
-  await shelf.locator('#projectLibraryInitialize').click();
-  await page
-    .getByRole('dialog', { name: 'Start a Home project library?' })
-    .getByRole('button', { name: 'Start library' })
-    .click();
+  // The card's button announced that it starts the library for this collection,
+  // so the exact folder's own review follows directly.
+  await setupCard.locator('#projectSetupNextAction').click();
   const grant = page.getByRole('dialog', { name: 'Connect this discovery folder?' });
   await expect(grant).toContainText(documents);
   expect((await json(await request.get(`${base}/roots`))).total_roots).toBe(0);

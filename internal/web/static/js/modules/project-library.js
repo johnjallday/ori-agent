@@ -149,6 +149,17 @@ export function setupNextStep({ state = null, collection = '', carried = false }
     };
   }
   const named = collection || '';
+  if (state.initialized !== true && carried && named) {
+    // The person already chose this collection, so starting the library is part of
+    // setting it up. The button says so; the exact folder is then shown for its own
+    // review, and a scan is reviewed after that.
+    return {
+      stage: 'not_initialized',
+      title: `Set up the library for ${named}`,
+      body: `${named} is waiting. This starts the Home’s library (it copies saved notes and exact project links), then shows you the exact folder to review. Nothing is read or scanned until you confirm the folder, and then the scan.`,
+      action: { id: 'initialize', label: `Start library and review ${named}` }
+    };
+  }
   if (state.initialized !== true) {
     return {
       stage: 'not_initialized',
@@ -616,7 +627,8 @@ export class ProjectLibraryPanel {
   async runSetupNext(trigger) {
     const action = this.setupStep?.action;
     if (!action || this.busy) return;
-    if (action.id === 'initialize') return this.initialize(trigger);
+    if (action.id === 'initialize')
+      return this.initialize(trigger, { announced: /^Start library and /.test(action.label) });
     if (action.id === 'add_folder') return this.addFolder(trigger);
     if (action.id === 'scan') {
       const root = (this.state?.roots || []).find(item => item.id === action.rootId);
@@ -1819,10 +1831,14 @@ export class ProjectLibraryPanel {
     });
   }
 
-  async initialize(trigger) {
+  // announced: the setup card's button already said it starts the library (for a
+  // collection the person chose), and the folder's own review follows, so this
+  // step needs no dialog of its own. Any other entry still asks first.
+  async initialize(trigger, { announced = false } = {}) {
     await this.run(trigger, 'Preparing your saved project links for review…', async () => {
       const review = await this.post('/initialize/review');
       if (
+        !announced &&
         !(await this.confirm(
           'Start a Home project library?',
           [
