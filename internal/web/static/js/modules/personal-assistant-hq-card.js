@@ -19,7 +19,7 @@ export function hqCardView(relationship, rootState, plan = {}) {
   const visible = ['needs_hq', 'provisioning_hq'].includes(state) || receipt;
   const root = hqWorkspaceRootView(rootState);
   const paused = state === 'provisioning_hq';
-  const building = paused && plan.busy;
+  const building = paused && !!plan.busy;
   const collapsed = plan.collapsed === true && !receipt;
   return {
     visible,

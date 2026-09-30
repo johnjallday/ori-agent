@@ -52,7 +52,7 @@ test('hqBuildTarget keeps every other state on the unchanged legacy endpoint', (
   assert.equal(hqBuildTarget(undefined).paf, false);
 });
 
-test('hqBuildAssistantCopy names the relationship and states the confirmation boundary', () => {
+test('hqBuildAssistantCopy names new setup and explains a confirmed setup resume', () => {
   const copy = hqBuildAssistantCopy(hqBuildTarget({ state: 'needs_hq', display_name: 'Atlas' }));
   assert.equal(copy.show, true);
   assert.match(copy.title, /Build Atlas’s Personal HQ/);
@@ -63,7 +63,8 @@ test('hqBuildAssistantCopy names the relationship and states the confirmation bo
   const resuming = hqBuildAssistantCopy(
     hqBuildTarget({ state: 'provisioning_hq', display_name: 'Atlas' })
   );
-  assert.equal(resuming.submitLabel, 'Finish building HQ');
+  assert.match(resuming.intro, /settings you already confirmed/);
+  assert.equal(resuming.submitLabel, 'Resume setup');
 });
 
 test('hqBuildAssistantCopy falls back to a neutral subject and hides on legacy', () => {
@@ -74,7 +75,7 @@ test('hqBuildAssistantCopy falls back to a neutral subject and hides on legacy',
   assert.equal(hqBuildAssistantCopy(null).show, false);
 });
 
-test('hqBuildRequestPayload adds only a request id and version on the PAF path', () => {
+test('hqBuildRequestPayload adds a request id for new setup and sends only resume mode for recovery', () => {
   const form = {
     name: 'Command Post',
     timezone: 'America/New_York',
@@ -103,6 +104,13 @@ test('hqBuildRequestPayload adds only a request id and version on the PAF path',
   ]) {
     assert.equal(key in paf, false, `payload carried ${key}`);
   }
+
+  const resume = hqBuildRequestPayload(
+    hqBuildTarget({ state: 'provisioning_hq', display_name: 'Atlas', state_version: 6 }),
+    form,
+    'ignored-client-request'
+  );
+  assert.deepEqual(resume, { mode: 'resume' });
 
   // The legacy body is byte-for-byte the form, with nothing added.
   const legacy = hqBuildRequestPayload(hqBuildTarget({ state: 'active' }), form, 'hq-request-1');
