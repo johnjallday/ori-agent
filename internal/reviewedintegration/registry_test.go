@@ -23,17 +23,17 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 	}
 	// The floor moves only when a release needs a new host feature, blueprint
 	// minimum, program schema or protocol. A change here is a review decision.
-	if entry.MinimumVersion != "0.8.0" || entry.MinimumBlueprintVersion != 9 ||
+	if entry.MinimumVersion != "0.9.0" || entry.MinimumBlueprintVersion != 10 ||
 		entry.ExpectedProgramSchema != 1 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
 		t.Fatalf("reviewed floor versions drifted: %#v", entry)
 	}
-	if entry.FallbackCommit != "3e3234bfae3465f909fe2aa5189f685a41c7a2ed" {
+	if entry.FallbackCommit != "0a597684f3b181735c961bfb44ed5c2b80994814" {
 		t.Fatalf("reviewed fallback commit drifted: %q", entry.FallbackCommit)
 	}
 	if !entry.ReleaseReady || entry.FallbackSource() != entry.SourceRepository+"#sha="+entry.FallbackCommit {
 		t.Fatalf("published release missing immutable fallback source: ready=%v source=%q", entry.ReleaseReady, entry.FallbackSource())
 	}
-	// The floor must require exactly what the v0.8.0 manifest declares: a
+	// The floor must require exactly what the v0.9.0 manifest declares: a
 	// narrower list would accept a plugin this host cannot honor, a wider one
 	// would refuse the published release.
 	expectedFeatures := []string{

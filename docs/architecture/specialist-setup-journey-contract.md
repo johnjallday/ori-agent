@@ -913,6 +913,11 @@ The REAPER v2 declaration has:
 | `mix_engineer`           | `project` |      yes |      no |
 | `songwriter`             | `project` |      yes |      no |
 
+REAPER 0.9.0 (blueprint v10, the reviewed floor since 2026-09-30) replaces the
+three project rows with one: `reaper-assistant` (REAPER Assistant), project
+scope, required and primary. A child created from an earlier release keeps its
+recorded roles.
+
 Role templates remain reusable immutable declaration data. A role **binding**
 is not reusable. Provider/model/name choices are reviewed per binding. Omitted
 provider/model fields use existing default-resolution semantics and remain
@@ -1027,7 +1032,8 @@ Current managed-learning separation remains authoritative:
 
 Project Producer delegation continues through the existing same-workspace
 coordinator roster, so only that child's Mix Engineer and Songwriter appear as
-targets. Home's coordinator roster contains Home members only. Personal HQ has
+targets. A 0.9.0 child has only its REAPER Assistant, so it has no delegation
+target. Home's coordinator roster contains Home members only. Personal HQ has
 neither roster and cannot use setup as cross-workspace delegation.
 
 ### 5.6 Legacy roster preservation and explicit migration

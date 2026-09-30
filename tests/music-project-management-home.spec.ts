@@ -22,6 +22,27 @@ const HOME_NAME = `Music Production Home ${RUN}`;
 const MANAGER_NAME = 'Portfolio Manager';
 const SONG_BLUEPRINT = 'plugin:reaper-plugin:reaper-song';
 
+// Versions and the project team come from the staged candidates, so this
+// acceptance follows each package's release instead of copied literals.
+function candidateManifest(root: string): Record<string, any> {
+  if (!root) return {};
+  return JSON.parse(readFileSync(path.join(root, '.ori-plugin', 'plugin.json'), 'utf8'));
+}
+const MUSIC_VERSION = String(candidateManifest(MUSIC_PATH).version || '');
+const REAPER_MANIFEST = candidateManifest(REAPER_PATH);
+const REAPER_VERSION = String(REAPER_MANIFEST.version || '');
+const SONG_ENTRY: Record<string, any> =
+  (REAPER_MANIFEST.blueprints || []).find((entry: { id: string }) => entry.id === 'reaper-song') ||
+  {};
+const SONG_BLUEPRINT_VERSION = Number(SONG_ENTRY.version || 0);
+const SONG_TEMPLATE: Record<string, any> = SONG_ENTRY.manifest
+  ? JSON.parse(readFileSync(path.join(REAPER_PATH, SONG_ENTRY.manifest), 'utf8'))
+  : {};
+const PROJECT_ROLES: Array<{ id: string; label: string }> = (
+  SONG_TEMPLATE.assistant_project?.roles || []
+).map((role: { id: string; label: string }) => ({ id: role.id, label: role.label }));
+const PROJECT_ROLE_IDS = PROJECT_ROLES.map(role => role.id);
+
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(120_000);
 test.skip(!ENABLED, 'requires scripts/reaper-demo.sh with isolated exact candidates');
@@ -200,15 +221,12 @@ async function chooseTemplateAndDetails(
 
 async function createGroupedSong(page: Page, request: APIRequestContext, index: number) {
   const songName = `${index === 0 ? 'First' : 'Second'} Split Song ${RUN}`;
-  const team = ['Producer', 'Mix Engineer', 'Songwriter'].map(label => [
-    label,
-    `${songName} ${label}`
-  ]);
+  const team = PROJECT_ROLES.map(role => [role.label, `${songName} ${role.label}`]);
   const creator = await chooseTemplateAndDetails(page, SONG_BLUEPRINT, songName, `${118 + index}`);
   const destination = creator.locator('#workspaceGroupDestinationCard');
   await expect(destination).toContainText(HOME_NAME);
   await expect(destination).toContainText('Existing verified group');
-  await expect(destination).toContainText('Plugin: music-project-management 0.1.0');
+  await expect(destination).toContainText(`Plugin: music-project-management ${MUSIC_VERSION}`);
   if (index === 0) await evidence(page, '03-grouped-song-destination');
 
   await creator.locator('#wizardNextBtn').click();
@@ -268,18 +286,16 @@ async function createGroupedSong(page: Page, request: APIRequestContext, index: 
     project_provider_available: true,
     roster_scope: 'project'
   });
-  expect(assistant.roster.map((binding: { role_id: string }) => binding.role_id).sort()).toEqual([
-    'engineer',
-    'producer',
-    'songwriter'
-  ]);
+  expect(assistant.roster.map((binding: { role_id: string }) => binding.role_id).sort()).toEqual(
+    [...PROJECT_ROLE_IDS].sort()
+  );
 
   const persisted = persistedWorkspace(project.id);
   expect(persisted.data.assistant_project_link).toMatchObject({
     station_workspace_id: homeID,
     home_provider: {
       plugin_id: 'music-project-management',
-      plugin_version: '0.1.0',
+      plugin_version: MUSIC_VERSION,
       program_id: 'music-producer-assistant',
       home_schema_version: 1,
       home_version: 1,
@@ -287,9 +303,9 @@ async function createGroupedSong(page: Page, request: APIRequestContext, index: 
     },
     project_provider: {
       plugin_id: 'reaper-plugin',
-      plugin_version: '0.8.0',
+      plugin_version: REAPER_VERSION,
       blueprint_id: 'reaper-song',
-      blueprint_version: 9,
+      blueprint_version: SONG_BLUEPRINT_VERSION,
       project_team_id: 'reaper-song-team',
       project_team_schema_version: 1,
       project_team_version: 1,
@@ -298,7 +314,7 @@ async function createGroupedSong(page: Page, request: APIRequestContext, index: 
   });
   expect(
     persisted.data.assistant_project_link.project_roles.map((role: { id: string }) => role.id)
-  ).toEqual(['producer', 'engineer', 'songwriter']);
+  ).toEqual(PROJECT_ROLE_IDS);
   expect(persisted.data.shared_data.blueprint_inputs.values.tempo).toBe(`${118 + index}`);
   for (const evidence of [
     persisted.data.assistant_project_link.home_provider.declaration_digest,
@@ -328,7 +344,7 @@ test('installation order preserves consequence-free provider boundaries', async 
     expect(firstPlugins).toHaveLength(1);
     expect(firstPlugins[0]).toMatchObject({
       name: 'music-project-management',
-      version: '0.1.0',
+      version: MUSIC_VERSION,
       enabled: true
     });
     expect(firstPlugins[0].source).toBe(MUSIC_PATH);
@@ -343,7 +359,7 @@ test('installation order preserves consequence-free provider boundaries', async 
     expect(firstPlugins).toHaveLength(1);
     expect(firstPlugins[0]).toMatchObject({
       name: 'reaper-plugin',
-      version: '0.8.0',
+      version: REAPER_VERSION,
       enabled: true
     });
     expect(firstPlugins[0].source).toBe(REAPER_PATH);
@@ -375,7 +391,7 @@ test('installation order preserves consequence-free provider boundaries', async 
     expect(finalPlugins).toHaveLength(1);
     expect(finalPlugins[0]).toMatchObject({
       name: 'reaper-plugin',
-      version: '0.8.0',
+      version: REAPER_VERSION,
       enabled: true
     });
     expect(MUSIC_PATH).toBe('');
@@ -471,7 +487,7 @@ test('Set up REAPER builds the split Home through its own routes, once', async (
     },
     home_provider: {
       plugin_id: 'music-project-management',
-      plugin_version: '0.1.0',
+      plugin_version: MUSIC_VERSION,
       program_id: 'music-producer-assistant',
       home_schema_version: 1,
       home_version: 1,
@@ -537,7 +553,7 @@ test('two REAPER projects share one independently staffed Home and one manager',
   const music = creator.locator('.workspace-group-template-option', {
     hasText: 'Music Production Home'
   });
-  await expect(music).toContainText('Plugin: music-project-management 0.1.0');
+  await expect(music).toContainText(`Plugin: music-project-management ${MUSIC_VERSION}`);
   await music.locator('input').check();
   await creator.getByRole('button', { name: 'Continue →' }).click();
   await creator.locator('#folderNameInput').fill(HOME_NAME);
@@ -570,7 +586,7 @@ test('two REAPER projects share one independently staffed Home and one manager',
     },
     home_provider: {
       plugin_id: 'music-project-management',
-      plugin_version: '0.1.0',
+      plugin_version: MUSIC_VERSION,
       program_id: 'music-producer-assistant',
       home_schema_version: 1,
       home_version: 1,
@@ -579,7 +595,7 @@ test('two REAPER projects share one independently staffed Home and one manager',
     group_template: {
       program_home_owner: {
         plugin_id: 'music-project-management',
-        plugin_version: '0.1.0',
+        plugin_version: MUSIC_VERSION,
         program_id: 'music-producer-assistant'
       }
     }
@@ -917,18 +933,18 @@ test('restart preserves exact candidate identities, links, roles, and files', as
       station_workspace_id: home!.id,
       home_provider: {
         plugin_id: 'music-project-management',
-        plugin_version: '0.1.0',
+        plugin_version: MUSIC_VERSION,
         program_id: 'music-producer-assistant'
       },
       project_provider: {
         plugin_id: 'reaper-plugin',
-        plugin_version: '0.8.0',
+        plugin_version: REAPER_VERSION,
         blueprint_id: 'reaper-song',
-        blueprint_version: 9,
+        blueprint_version: SONG_BLUEPRINT_VERSION,
         project_team_id: 'reaper-song-team'
       }
     });
-    expect(persisted.data.agent_instances).toHaveLength(3);
+    expect(persisted.data.agent_instances).toHaveLength(PROJECT_ROLES.length);
     expect(readFileSync(persistedProjectFile(persisted.file, persisted.data), 'utf8')).toMatch(
       /TEMPO (118|119) 4 4/
     );
@@ -991,10 +1007,7 @@ test('REAPER alone creates only an explicit Home-free standalone variant', async
   );
   await creator.locator('#wizardNextBtn').click();
   await expect(creator.locator('#wizardStep3')).toBeVisible();
-  const team = ['Producer', 'Mix Engineer', 'Songwriter'].map(label => [
-    label,
-    `${projectName} ${label}`
-  ]);
+  const team = PROJECT_ROLES.map(role => [role.label, `${projectName} ${role.label}`]);
   for (const [label, name] of team) await createProjectRoleAgent(page, label, name);
   await creator.locator('#wizardNextBtn').click();
   await expect(creator.locator('#workspaceReviewSummary')).toContainText(
@@ -1050,9 +1063,9 @@ test('REAPER alone creates only an explicit Home-free standalone variant', async
     selected_composition: 'standalone',
     project_provider: {
       plugin_id: 'reaper-plugin',
-      plugin_version: '0.8.0',
+      plugin_version: REAPER_VERSION,
       blueprint_id: 'reaper-song',
-      blueprint_version: 9,
+      blueprint_version: SONG_BLUEPRINT_VERSION,
       project_team_id: 'reaper-song-team'
     }
   });
@@ -1061,7 +1074,7 @@ test('REAPER alone creates only an explicit Home-free standalone variant', async
     persisted.data.template_provenance.group_requirement.standalone_roles.map(
       (role: { role_id: string }) => role.role_id
     )
-  ).toEqual(['producer', 'engineer', 'songwriter']);
+  ).toEqual(PROJECT_ROLE_IDS);
   expect(readFileSync(persistedProjectFile(persisted.file, persisted.data), 'utf8')).toContain(
     'TEMPO 127 4 4'
   );
