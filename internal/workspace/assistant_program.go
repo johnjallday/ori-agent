@@ -317,9 +317,12 @@ type AssistantProgramState struct {
 	// GroupTemplate is inert creation provenance written only in the first
 	// Save of a Home created through a reviewed Group Template selection.
 	GroupTemplate *AssistantGroupTemplateProvenance `json:"group_template,omitempty"`
-	// HomeProvider is immutable fresh-setup provenance for an independently
-	// contributed Home. Combined legacy/current declarations leave it nil.
-	HomeProvider *AssistantProgramHomeOwner `json:"home_provider,omitempty"`
+	// HomeProvider is fresh-setup provenance for an independently contributed
+	// Home. Combined legacy/current declarations leave it nil. Only an
+	// owner-reviewed package upgrade (HomeProviderUpgrade) ever rewrites it,
+	// and each such rewrite appends a ProviderUpgrades receipt.
+	HomeProvider     *AssistantProgramHomeOwner            `json:"home_provider,omitempty"`
+	ProviderUpgrades []AssistantHomeProviderUpgradeReceipt `json:"provider_upgrades,omitempty"`
 	// Hired through Roster are schema-v1 shared-roster compatibility fields.
 	// Schema-v2 staffing writes scoped binding sets and never projects this
 	// legacy roster into newly linked children.
@@ -364,6 +367,7 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 		owner := source.HomeProvider.Clone()
 		clone.HomeProvider = &owner
 	}
+	clone.ProviderUpgrades = append([]AssistantHomeProviderUpgradeReceipt(nil), source.ProviderUpgrades...)
 	clone.Roster = append([]AssistantRoleBinding(nil), source.Roster...)
 	clone.CompletionReceipts = append([]AssistantCompletionReceipt(nil), source.CompletionReceipts...)
 	if source.StageEnteredAt != nil {

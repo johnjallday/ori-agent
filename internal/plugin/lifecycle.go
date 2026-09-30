@@ -369,6 +369,7 @@ func (m *Manager) Uninstall(name string) error {
 
 type updatePreviewResolution struct {
 	sourceVersion     string
+	fingerprint       string
 	trustReport       TrustReport
 	componentsChanged bool
 }
@@ -416,7 +417,9 @@ func (m *Manager) CheckUpdate(name string) (UpdateAvailability, error) {
 }
 
 // UpdatePreview re-resolves an installed plugin from its source and returns the
-// trust report plus whether the set of registered components changed.
+// trust report plus whether the set of registered components changed. A
+// replacement the guard would refuse is refused here too, before the owner is
+// asked to trust it.
 func (m *Manager) UpdatePreview(name string) (TrustReport, bool, error) {
 	m.operationMu.Lock()
 	defer m.operationMu.Unlock()
@@ -429,6 +432,9 @@ func (m *Manager) UpdatePreview(name string) (TrustReport, bool, error) {
 	}
 	preview, err := m.resolveUpdatePreview(existing)
 	if err != nil {
+		return TrustReport{}, false, err
+	}
+	if err := m.guardReplacement(existing.Name, preview.sourceVersion, preview.fingerprint); err != nil {
 		return TrustReport{}, false, err
 	}
 	return preview.trustReport, preview.componentsChanged, nil
@@ -455,6 +461,9 @@ func (m *Manager) PreviewReplacement(name, source string, prefer SourceFormat) (
 	if candidate.Name != existing.Name {
 		return TrustReport{}, false, fmt.Errorf("plugin: reviewed replacement identity mismatch")
 	}
+	if err := m.guardReplacement(existing.Name, candidate.Version, trustedComponentFingerprint(candidate)); err != nil {
+		return TrustReport{}, false, err
+	}
 	return report, componentsChanged(existing, candidate), nil
 }
 
@@ -472,6 +481,7 @@ func (m *Manager) resolveUpdatePreview(existing InstalledPlugin) (updatePreviewR
 	}
 	return updatePreviewResolution{
 		sourceVersion:     d.Version,
+		fingerprint:       trustedComponentFingerprint(d),
 		trustReport:       BuildTrustReport(d),
 		componentsChanged: componentsChanged(existing, d),
 	}, nil

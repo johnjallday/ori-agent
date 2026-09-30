@@ -2,18 +2,25 @@ package server
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // An installed content change cannot silently move an existing independent
-// Home (or its child snapshots) onto a new package's role guidance. Until a
-// reviewed, recoverable rebind exists, refuse the replacement BEFORE changing
-// any artifact, surface or plugin registry entry. This also covers a local
-// Install over an existing installed name, not only the Plugins Update route.
-func refuseUnreviewedHomeReplacement(store workspace.Store, current plugin.InstalledPlugin, nextVersion, nextFingerprint string) error {
+// Home (or its child snapshots) onto a new package's role guidance. The
+// replacement is refused BEFORE changing any artifact, surface or plugin
+// registry entry, unless it is exactly the one a claimed, owner-reviewed Home
+// package upgrade is performing (reviewed, recoverable rebind:
+// independent-program-homes.md §6.1). This also covers a local Install over an
+// existing installed name, not only the Plugins Update route.
+func refuseUnreviewedHomeReplacement(store workspace.Store, current plugin.InstalledPlugin, nextVersion, nextFingerprint string, reviewedUpgrade func(plugin.InstalledPlugin, string, string) bool) error {
 	if current.WorkspaceSurfaces == nil || len(current.WorkspaceSurfaces.AssistantProgramHomes) == 0 {
+		return nil
+	}
+	if reviewedUpgrade != nil && reviewedUpgrade(current, nextVersion, nextFingerprint) {
 		return nil
 	}
 	if store == nil {
@@ -40,7 +47,13 @@ func refuseUnreviewedHomeReplacement(store workspace.Store, current plugin.Insta
 			continue
 		}
 		if owner.PluginVersion != nextVersion || owner.ComponentFingerprint != nextFingerprint {
-			return fmt.Errorf("plugin replacement would strand existing Home %s; reviewed Home/child upgrade is required first", candidate.ID)
+			refusal := &plugin.HomeUpgradeRequiredError{HomeName: candidate.Name}
+			if slug := strings.TrimSpace(candidate.FolderSlug); slug != "" && candidate.Status != workspace.StatusTrashed && candidate.Status != workspace.StatusMissing {
+				// The Home page opens the upgrade review, which inspects the
+				// release itself rather than waiting for the daily update check.
+				refusal.HomePath = "/workspaces/" + url.PathEscape(slug) + "/assistant?upgrade=review"
+			}
+			return refusal
 		}
 	}
 	return nil

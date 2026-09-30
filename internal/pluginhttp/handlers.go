@@ -37,6 +37,10 @@ type ReviewedReplacement func(ctx context.Context, installed plugin.InstalledPlu
 // ReviewedReleaseCurrentCode is the stable error code of a refused update.
 const ReviewedReleaseCurrentCode = "reviewed_release_current"
 
+// HomeUpgradeRequiredCode refuses replacing a package existing Homes are
+// pinned to; the owner upgrades it from the Home page instead.
+const HomeUpgradeRequiredCode = "home_upgrade_required"
+
 // Handler serves plugin operations and owns the plugin Manager wired to Ori's
 // live MCP config/registry.
 type Handler struct {
@@ -85,7 +89,35 @@ func skillNameTakenMessage(err error) string {
 	return strings.ToUpper(detail[:1]) + detail[1:] + "."
 }
 
+// respondHomeUpgradeRequired answers the replacement guard's refusal with a
+// stable code and, when known, the Home page where the owner reviews the
+// upgrade. It reports whether err was that refusal.
+func respondHomeUpgradeRequired(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, plugin.ErrHomeUpgradeRequired) {
+		return false
+	}
+	details := map[string]string{}
+	var refusal *plugin.HomeUpgradeRequiredError
+	if errors.As(err, &refusal) {
+		if refusal.HomeName != "" {
+			details["home_name"] = refusal.HomeName
+		}
+		if refusal.HomePath != "" {
+			details["home_path"] = refusal.HomePath
+		}
+	}
+	if writeErr := orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError(HomeUpgradeRequiredCode,
+		"A Home uses this plugin. Upgrade it from that Home, so its linked projects and staffed agents move with it.",
+	).WithDetails(details)); writeErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
+	}
+	return true
+}
+
 func respondPluginMutationError(w http.ResponseWriter, err error) {
+	if respondHomeUpgradeRequired(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, plugin.ErrSkillNameTaken):
 		orihttp.Conflict(w, skillNameTakenMessage(err))
@@ -385,6 +417,9 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 			report, changed, err = h.mgr.PreviewReplacement(name, source, format)
 		} else {
 			report, changed, err = h.mgr.UpdatePreview(name)
+		}
+		if respondHomeUpgradeRequired(w, err) {
+			return
 		}
 		if err != nil {
 			orihttp.BadRequest(w, err.Error())

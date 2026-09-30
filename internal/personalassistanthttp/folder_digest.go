@@ -11,6 +11,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 )
 
 // FolderDigestService is the "show me a folder" boundary. Every folder it
@@ -45,12 +46,16 @@ func (h *Handler) SetFolderProjectSelections(issuer FolderProjectSelectionIssuer
 // FolderHomeProviderPreview discloses a host-reviewed Home provider release
 // before an install; no source URL or plugin identity comes from the browser.
 type FolderHomeProviderPreview struct {
-	Ready      bool   `json:"ready"`
-	Installed  bool   `json:"installed"`
-	PluginID   string `json:"plugin_id"`
-	Version    string `json:"version,omitempty"`
-	Source     string `json:"source,omitempty"`
-	Disclosure any    `json:"disclosure,omitempty"`
+	Ready     bool   `json:"ready"`
+	Installed bool   `json:"installed"`
+	PluginID  string `json:"plugin_id"`
+	Version   string `json:"version,omitempty"`
+	// Update means an older reviewed release is installed; confirming updates
+	// it to Version. InstalledVersion is that older release.
+	Update           bool   `json:"update,omitempty"`
+	InstalledVersion string `json:"installed_version,omitempty"`
+	Source           string `json:"source,omitempty"`
+	Disclosure       any    `json:"disclosure,omitempty"`
 }
 
 type FolderHomeProviderSetup interface {
@@ -338,6 +343,15 @@ func (h *Handler) SetupFolderHomeProvider(w http.ResponseWriter, r *http.Request
 		preview, err = h.folderHomeProvider.Install(r.Context(), key, strings.TrimSpace(req.ReviewedVersion))
 	} else {
 		preview, err = h.folderHomeProvider.Preview(r.Context(), key)
+	}
+	var homeUpgrade *plugin.HomeUpgradeRequiredError
+	if errors.As(err, &homeUpgrade) {
+		// A Home is pinned to the installed release: it is upgraded from that
+		// Home's page, which moves its projects and agents with it.
+		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("home_upgrade_required",
+			"Your Home uses the installed release. Upgrade it from that Home first, then continue here.",
+		).WithDetails(map[string]string{"home_name": homeUpgrade.HomeName, "home_path": homeUpgrade.HomePath}))
+		return
 	}
 	if err != nil {
 		writeFolderDigestError(w, err)

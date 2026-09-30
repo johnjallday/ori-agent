@@ -11,8 +11,23 @@ import {
   folderOutcomeNote,
   folderReceiptView,
   folderProjectModalOptions,
-  portfolioLibraryURL
+  portfolioLibraryURL,
+  portfolioProviderAction
 } from './personal-assistant-folder.js';
+
+test('an older installed reviewed Home provider is offered as an update', () => {
+  assert.equal(
+    portfolioProviderAction({
+      installed: true,
+      update: true,
+      installed_version: '0.1.0',
+      version: '0.1.1'
+    }),
+    'update the installed provider from 0.1.0 to 0.1.1'
+  );
+  assert.equal(portfolioProviderAction({ installed: true }), 'enable the installed provider');
+  assert.equal(portfolioProviderAction({}), 'install and enable the reviewed provider');
+});
 
 const headlineText = view => view.headline.map(part => part.text).join('');
 const strongText = view => view.headline.filter(part => part.strong).map(part => part.text);

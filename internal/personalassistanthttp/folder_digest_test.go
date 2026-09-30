@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
@@ -295,6 +296,27 @@ func TestFolderHomeProvider_RequiresReviewedVersionAndOneExplicitConfirm(t *test
 		if res.Code != tc.code || fake.installed != tc.installed {
 			t.Errorf("body %s: status %d installs %d want %d %d: %s", tc.body, res.Code, fake.installed, tc.code, tc.installed, res.Body.String())
 		}
+	}
+}
+
+type pinnedFolderHomeSetup struct{ fakeFolderHomeSetup }
+
+func (f *pinnedFolderHomeSetup) Install(context.Context, string, string) (FolderHomeProviderPreview, error) {
+	return FolderHomeProviderPreview{}, &plugin.HomeUpgradeRequiredError{HomeName: "Music Production Home", HomePath: "/workspaces/music-home/assistant?upgrade=review"}
+}
+
+// Updating an older installed release that a Home still pins is refused with
+// the same code and Home link the Plugins page uses.
+func TestFolderHomeProvider_SendsAHomePinnedUpdateToTheHomeUpgrade(t *testing.T) {
+	h := newFolderDigestHandler(&fakeFolderDigest{})
+	h.SetFolderHomeProvider(&pinnedFolderHomeSetup{})
+	req := httptest.NewRequest(http.MethodPost, "/home-provider", strings.NewReader(`{"confirm":true,"reviewed_version":"0.1.1"}`))
+	req.SetPathValue("offerID", "offer-1")
+	res := httptest.NewRecorder()
+	h.SetupFolderHomeProvider(res, req)
+	if res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), `"code":"home_upgrade_required"`) ||
+		!strings.Contains(res.Body.String(), `"home_path":"/workspaces/music-home/assistant?upgrade=review"`) {
+		t.Fatalf("pinned update = %d %s", res.Code, res.Body.String())
 	}
 }
 

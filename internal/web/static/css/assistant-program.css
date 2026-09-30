@@ -106,6 +106,62 @@
   border-radius: 3px;
 }
 
+.assistant-program-upgrade {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  color: var(--assistant-ink);
+  background: rgba(217, 130, 25, 0.12);
+  border: 1px solid rgba(154, 79, 11, 0.35);
+  border-radius: 3px;
+}
+.assistant-program-upgrade[data-state="reconcile_required"] {
+  color: #6d2c21;
+  background: rgba(163, 59, 44, 0.1);
+  border-color: rgba(163, 59, 44, 0.32);
+}
+.assistant-program-upgrade-copy {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.assistant-program-upgrade-section {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+.assistant-program-upgrade-section h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.assistant-program-upgrade-diff {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.6rem;
+}
+.assistant-program-upgrade-diff pre {
+  margin: 0.25rem 0 0;
+  padding: 0.55rem 0.65rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+  background: var(--assistant-panel);
+  border: 1px solid var(--assistant-line);
+  border-radius: 3px;
+}
+@media (max-width: 700px) {
+  .assistant-program-upgrade {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .assistant-program-upgrade-diff {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .assistant-program-hero {
   position: relative;
   display: grid;
