@@ -23,11 +23,15 @@ import (
 
 // initializeConfiguration loads the configuration manager and default settings.
 func (b *ServerBuilder) initializeConfiguration() error {
-	configMgr, err := createConfigManager("settings.json")
-	if err != nil {
-		return err
+	configMgr := b.configManager
+	if configMgr == nil {
+		var err error
+		configMgr, err = createConfigManager("settings.json")
+		if err != nil {
+			return err
+		}
+		b.configManager = configMgr
 	}
-	b.configManager = configMgr
 	b.privateServicesClient = privateservices.NewEnvClient()
 
 	// Materialize the project templates library (starter templates are only
@@ -56,6 +60,9 @@ func (b *ServerBuilder) initializeClientFactory() {
 
 // initializeLLMFactory creates the LLM factory and registers all providers.
 func (b *ServerBuilder) initializeLLMFactory() error {
+	if b.llmFactory != nil {
+		return nil
+	}
 	factory := createLLMFactory()
 	if err := registerLLMProviders(factory, b.configManager); err != nil {
 		return err
@@ -72,10 +79,13 @@ func (b *ServerBuilder) initializeGateway() {
 
 // initializeStorage creates the agent store and sets the path.
 func (b *ServerBuilder) initializeStorage() error {
-	defaultConf := loadDefaultSettings()
-
+	// Sidecar services need this path even when the agent store is supplied.
 	agentStorePath := resolveAgentStorePath()
 	b.agentStorePath = agentStorePath
+	if b.st != nil {
+		return nil
+	}
+	defaultConf := loadDefaultSettings()
 
 	st, err := createAgentStore(agentStorePath, defaultConf, b.configManager, b.resetPolicy.SuppressAgentRehydration)
 	if err != nil {

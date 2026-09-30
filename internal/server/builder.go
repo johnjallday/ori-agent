@@ -778,7 +778,8 @@ func (b *ServerBuilder) createDomainFacades() {
 	}
 }
 
-// WithLLMFactory injects a custom LLM factory (for testing).
+// WithLLMFactory supplies the factory used by Build without registering default
+// providers into it. Passing nil restores default initialization.
 func (b *ServerBuilder) WithLLMFactory(f *llm.Factory) *ServerBuilder {
 	b.llmFactory = f
 	if b.server.Core == nil {
@@ -788,7 +789,8 @@ func (b *ServerBuilder) WithLLMFactory(f *llm.Factory) *ServerBuilder {
 	return b
 }
 
-// WithConfigManager injects a custom config manager (for testing).
+// WithConfigManager supplies an already configured manager; Build does not load
+// the default settings file over it. Passing nil restores default initialization.
 func (b *ServerBuilder) WithConfigManager(c *config.Manager) *ServerBuilder {
 	b.configManager = c
 	if b.server.Core == nil {
@@ -798,7 +800,8 @@ func (b *ServerBuilder) WithConfigManager(c *config.Manager) *ServerBuilder {
 	return b
 }
 
-// WithStore injects a custom store (for testing).
+// WithStore supplies the agent store used by Build instead of opening and seeding
+// the default store. Passing nil restores default initialization.
 func (b *ServerBuilder) WithStore(s store.Store) *ServerBuilder {
 	b.st = s
 	if b.server.Storage == nil {
@@ -808,7 +811,9 @@ func (b *ServerBuilder) WithStore(s store.Store) *ServerBuilder {
 	return b
 }
 
-// WithWorkspaceStore injects a custom workspace store (for testing).
+// WithWorkspaceStore supplies the composed workspace store used by Build without
+// adding production decorators. Folder-backed features use its FileStore
+// capability when available. Passing nil restores default initialization.
 func (b *ServerBuilder) WithWorkspaceStore(ws workspace.Store) *ServerBuilder {
 	b.workspaceStore = ws
 	if b.server.Storage == nil {
