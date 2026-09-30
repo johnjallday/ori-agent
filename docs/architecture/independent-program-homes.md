@@ -435,7 +435,78 @@ Old combined declarations and records keep their recorded project-provider key.
 A new independent declaration with the same program ID or display name does not
 match them. No startup, list, install, enable, catalog refresh, Group Template
 read, project review, retry, reinstall, or lifecycle action rewrites that
-ownership. Migration/reset is outside this feature.
+ownership. The only exception is the owner-reviewed package upgrade in 6.1.
+
+### 6.1 Reviewed Home package upgrade (guidance-only)
+
+Contract written before implementation (2026-09-30). It supersedes the earlier
+"invalidate old root grants" rule in `project-library.md` for this case: the
+owner decided that approved library folders stay approved.
+
+**Scope.** One owner operation moves every Home pinned to an installed Home
+provider package, and every project linked to those Homes, from the installed
+release to one exact newer release of the same package. It applies only when
+the newer release changes guidance: Home role `system_prompt` text and packaged
+skill text. Everything else in the Home declaration (ID, schema and version,
+roles and their IDs, labels, scope, required/primary flags, capability, skill
+names, stages, reflection, allowed project attachments) must be byte-identical,
+and the release must still contribute nothing but that Home. Anything else is a
+different Home and is refused.
+
+**Review** (reads only, installs nothing). It resolves the same target the
+Plugins page would install — the reviewed release's pinned source, or a local
+install's recorded source — and inspects it without installing to learn its
+version, trusted component fingerprint and Home declaration. It lists every
+affected Home, each Home's linked projects, each Home role whose prompt changes,
+and for each bound agent whether its prompt will be replaced (it still equals the
+old role prompt exactly) or kept (the owner edited it). It states that approved
+library folders stay approved and that pending library reviews and scans are
+cancelled. It refuses when any affected Home belongs to another owner, any Home
+or linked project is not pinned exactly to the installed evidence, the mirrors
+disagree, a project role repair is claimed or needs reconciliation, or another
+upgrade is active. The review token lasts ten minutes and binds a digest of the
+whole plan.
+
+**Commit** (separate owner confirmation):
+1. *Claim.* One SQLite transaction re-derives the plan, requires the same digest,
+   consumes the review and records a `claimed` operation (one active operation
+   per package).
+2. *Replace.* The existing plugin replacement path installs the target. The
+   replacement guard allows exactly this replacement — installed evidence equal
+   to the operation's "from", next version and fingerprint equal to its target —
+   while the operation is `claimed`; every other replacement stays refused. The
+   installed record read back afterwards must match the target; its evidence
+   (including the new content generation) is recorded and the operation becomes
+   `replaced`.
+3. *Rebind.* Each Home, then each linked project, gets one fenced write. A record
+   pinned to the old evidence is rewritten; one already pinned to the new
+   evidence is left as is; anything else makes the operation
+   `reconcile_required`. A Home gets the new `HomeProvider` (version,
+   generation, fingerprint, declaration digest) and the new declaration, its
+   `StateRevision` advances, and it records an upgrade receipt. Its Group
+   Template record is creation history and is not rewritten. A linked project
+   gets the new `HomeProvider` on its link and on its Group Requirement
+   snapshot, and the new declaration copy in its template provenance. The
+   snapshot's creation-time digests are left as they were: they record what was
+   reviewed at creation, and replaying an old creation receipt after an upgrade
+   is refused.
+4. *Agents.* For each Home role whose prompt changed, the bound agent's
+   workspace snapshot and global profile get the new prompt only while they
+   still equal the old prompt; otherwise they are kept and the operation says so.
+5. The operation becomes `succeeded`.
+
+**Recovery.** At startup and whenever the upgrade is read, a `claimed`
+operation whose installed package still matches "from" becomes `cancelled`
+(nothing changed; review again); one whose installed package matches the target
+continues from step 3; anything else becomes `reconcile_required`. A `replaced`
+operation reruns steps 3–5, which are idempotent. `reconcile_required` is shown
+to the owner with the operation ID and leaves the affected Homes read-only;
+nothing chooses a side automatically. Between steps 2 and 3 the Homes are
+briefly read-only; a crash extends that until the next start.
+
+**Not covered.** A Home in the Trash keeps its old pin and stays read-only if
+restored. Moving back to an older release is not offered. An install whose
+Homes belong to more than one owner is refused.
 
 ## 7. Cross-provider seam map
 
