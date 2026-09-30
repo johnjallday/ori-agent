@@ -34,6 +34,10 @@ type HQSetupService interface {
 	Setup(ctx context.Context, userID string, request personalassistant.HQSetupRequest) (*personalassistant.HQSetupResult, error)
 }
 
+type hqSetupResumer interface {
+	Resume(ctx context.Context, userID string) (*personalassistant.HQSetupResult, error)
+}
+
 // HireService is the sole consequential hire boundary used by this package.
 type HireService interface {
 	Hire(ctx context.Context, userID string, request personalassistant.HireRequest) (*personalassistant.HireResult, error)
@@ -423,6 +427,7 @@ func writeRecoveryError(w http.ResponseWriter, status int, code, message string)
 // instance field. Those come from the server's own relationship record, so a
 // client cannot aim this operation at records it does not own.
 type hqSetupRequest struct {
+	Mode      string `json:"mode,omitempty"`
 	RequestID string `json:"request_id"`
 	IfVersion int64  `json:"if_version"`
 
@@ -465,26 +470,60 @@ func (h *Handler) SetupHQ(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.hqSetup.Setup(r.Context(), userID, personalassistant.HQSetupRequest{
-		RequestID: body.RequestID, IfVersion: body.IfVersion,
-		HQName: body.Name, Timezone: body.Timezone,
-		ScheduleDays: body.ScheduleDays, ScheduleTime: body.ScheduleTime,
-		Scope: body.Scope, SelectedIDs: body.SelectedWorkspaceIDs,
-		IncludeFuture: body.IncludeFutureWorkspaces, NotifyOnReady: body.NotifyOnReady,
-	})
+	var result *personalassistant.HQSetupResult
+	var err error
+	resumeMode := body.Mode == "resume"
+	if resumeMode {
+		resumer, ok := h.hqSetup.(hqSetupResumer)
+		if !ok {
+			orihttp.ServiceUnavailable(w, "Personal HQ recovery is temporarily unavailable.")
+			return
+		}
+		result, err = resumer.Resume(r.Context(), userID)
+	} else if body.Mode != "" {
+		writeHQSetupError(w, http.StatusBadRequest, "invalid_hq_setup_request",
+			"The Personal HQ recovery request is invalid.", false, nil)
+		return
+	} else {
+		result, err = h.hqSetup.Setup(r.Context(), userID, personalassistant.HQSetupRequest{
+			RequestID: body.RequestID, IfVersion: body.IfVersion,
+			HQName: body.Name, Timezone: body.Timezone,
+			ScheduleDays: body.ScheduleDays, ScheduleTime: body.ScheduleTime,
+			Scope: body.Scope, SelectedIDs: body.SelectedWorkspaceIDs,
+			IncludeFuture: body.IncludeFutureWorkspaces, NotifyOnReady: body.NotifyOnReady,
+		})
+	}
 	if err != nil {
+		var partial *personalassistant.PartialHQSetupError
+		if errors.As(err, &partial) && (errors.Is(err, personalassistant.ErrConflict) || errors.Is(err, personalassistant.ErrRepairNeeded) || errors.Is(err, personalhq.ErrAssistantNameConflict)) {
+			writeHQSetupError(w, http.StatusConflict, "hq_setup_resume_blocked",
+				"Your saved Personal HQ setup cannot continue safely. Existing workspace data was left unchanged. Contact your Ori administrator before starting another HQ build.", false, nil)
+			return
+		}
 		switch {
 		case errors.Is(err, personalassistant.ErrValidation):
 			writeHQSetupError(w, http.StatusBadRequest, "invalid_hq_setup_request",
 				"Check the Personal HQ name and the daily rhythm.", false, nil)
+		case resumeMode && errors.Is(err, personalassistant.ErrNotFound):
+			writeHQSetupError(w, http.StatusConflict, "hq_setup_resume_blocked",
+				"There is no saved Personal HQ setup to resume. Existing workspace data was left unchanged. Contact your Ori administrator before starting another HQ build.", false, nil)
 		case errors.Is(err, personalassistant.ErrConflict), errors.Is(err, personalhq.ErrAssistantNameConflict):
+			if resumeMode {
+				writeHQSetupError(w, http.StatusConflict, "hq_setup_resume_blocked",
+					"This confirmed setup is no longer available to resume. Existing workspace data was left unchanged. Contact your Ori administrator before starting another HQ build.", false, nil)
+				return
+			}
 			writeHQSetupError(w, http.StatusConflict, "hq_setup_conflict",
 				"This request conflicts with your current Personal HQ setup. Refresh and try again.", false, nil)
 		case errors.Is(err, personalassistant.ErrRepairNeeded):
-			writeHQSetupError(w, http.StatusConflict, "hq_setup_repair_needed",
-				"Your Personal HQ setup needs repair before it can continue.", false, nil)
+			if resumeMode {
+				writeHQSetupError(w, http.StatusConflict, "hq_setup_resume_blocked",
+					"Your saved Personal HQ setup cannot be resumed safely. Existing workspace data was left unchanged. Contact your Ori administrator before starting another HQ build.", false, nil)
+			} else {
+				writeHQSetupError(w, http.StatusConflict, "hq_setup_repair_needed",
+					"Your Personal HQ setup needs repair before it can continue.", false, nil)
+			}
 		default:
-			var partial *personalassistant.PartialHQSetupError
 			if errors.As(err, &partial) {
 				// Durable partial: some canonical records exist. Retrying the SAME
 				// request finishes it, so this must never read as "start over".

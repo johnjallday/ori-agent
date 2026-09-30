@@ -190,6 +190,32 @@ func (c *HQSetupCoordinator) Setup(ctx context.Context, userID string, request H
 	}, nil
 }
 
+// Resume continues only the durable, previously confirmed HQ setup for this
+// user. The browser supplies no request identity or setup fields.
+func (c *HQSetupCoordinator) Resume(ctx context.Context, userID string) (*HQSetupResult, error) {
+	if c == nil || c.store == nil {
+		return nil, errors.New("personal assistant: hq setup coordinator is not configured")
+	}
+	state, err := c.store.GetState(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if state.Status != StatusProvisioningHQ || state.HQPayloadJSON == "" {
+		return nil, fmt.Errorf("%w: no resumable personal hq setup", ErrConflict)
+	}
+	stored, err := decodeStoredHQRequest(state)
+	if err != nil {
+		return nil, ErrRepairNeeded
+	}
+	return c.Setup(ctx, userID, HQSetupRequest{
+		RequestID: stored.RequestID, IfVersion: state.StateVersion,
+		HQName: stored.HQName, Timezone: stored.Timezone,
+		ScheduleDays: stored.ScheduleDays, ScheduleTime: stored.ScheduleTime,
+		Scope: stored.Scope, SelectedIDs: stored.SelectedIDs,
+		IncludeFuture: stored.IncludeFuture, NotifyOnReady: stored.NotifyOnReady,
+	})
+}
+
 /*
 claim validates that this relationship may build HQ, then records the operation
 before anything is created.

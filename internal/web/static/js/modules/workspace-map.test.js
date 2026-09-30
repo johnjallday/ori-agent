@@ -1805,10 +1805,20 @@ test('an already-deferred guided site keeps Build but drops Do this later', () =
   assert.doesNotMatch(html, /data-hq-action="skip"/);
 });
 
-test('a resumable HQ setup is treated as the same guided stage', () => {
+test('a resumable HQ setup offers resume without replacement or clear actions', () => {
   const map = loadOriWorkspaceMap();
   map.setPersonalAssistant({ state: 'provisioning_hq', display_name: 'Atlas' });
-  assert.equal(map.hqSiteView({ valid: false, hq_onboarding_state: 'unseen' }).guided, true);
+  const view = map.hqSiteView({
+    valid: false,
+    workspace_id: 'trashed-hq',
+    hq_onboarding_state: 'unseen'
+  });
+  assert.equal(view.resumable, true);
+  assert.equal(view.statusLabel, 'Setup paused');
+  assert.match(view.detail, /settings you already confirmed/);
+  const html = map.hqOverviewHTML(view);
+  assert.match(html, /Resume setup/);
+  assert.doesNotMatch(html, /Build replacement HQ|Clear broken HQ link|data-hq-action="import"/);
 });
 
 test('the reserved site keeps its existing copy outside the guided stage', () => {
