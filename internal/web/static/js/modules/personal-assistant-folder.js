@@ -839,6 +839,18 @@ async function startCapabilityJourney() {
   }
 }
 
+// portfolioProviderAction names what confirming the portfolio card does to the
+// reviewed Home provider. An older installed reviewed release is updated; the
+// server refuses that while a Home still uses it.
+export function portfolioProviderAction(provider = {}) {
+  if (provider.installed && provider.update) {
+    return `update the installed provider from ${provider.installed_version || 'its release'} to ${provider.version || 'the reviewed release'}`;
+  }
+  return provider.installed
+    ? 'enable the installed provider'
+    : 'install and enable the reviewed provider';
+}
+
 async function startPortfolioSetup(offer) {
   const url = `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(offer.id)}/home-provider`;
   const post = async data => {
@@ -848,16 +860,16 @@ async function startPortfolioSetup(offer) {
       body: JSON.stringify(data)
     });
     const body = await readJSON(response);
-    if (!response.ok) throw new Error(body?.error || 'The Home provider is unavailable.');
+    if (!response.ok) {
+      throw new Error(body?.error || body?.message || 'The Home provider is unavailable.');
+    }
     return body.home_provider;
   };
   let provider = await post({});
   if (!provider?.plugin_id) throw new Error('The reviewed Home provider is unavailable.');
   if (!provider.ready) {
     const disclosure = provider.disclosure || {};
-    const action = provider.installed
-      ? 'enable the installed provider'
-      : 'install and enable the reviewed provider';
+    const action = portfolioProviderAction(provider);
     const parts = [
       `Set up Music Production Home: ${action}?`,
       `Plugin: ${provider.plugin_id} ${provider.version || ''}`,

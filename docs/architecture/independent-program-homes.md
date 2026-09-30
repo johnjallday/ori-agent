@@ -439,9 +439,10 @@ ownership. The only exception is the owner-reviewed package upgrade in 6.1.
 
 ### 6.1 Reviewed Home package upgrade (guidance-only)
 
-Contract written before implementation (2026-09-30). It supersedes the earlier
-"invalidate old root grants" rule in `project-library.md` for this case: the
-owner decided that approved library folders stay approved.
+Implemented in `internal/homeupgrade` (2026-09-30; routes in
+`docs/api/API_REFERENCE.md`, "Home Package Upgrade API"). It supersedes the
+earlier "invalidate old root grants" rule in `project-library.md` for this case:
+the owner decided that approved library folders stay approved.
 
 **Scope.** One owner operation moves every Home pinned to an installed Home
 provider package, and every project linked to those Homes, from the installed
@@ -499,14 +500,33 @@ whole plan.
 operation whose installed package still matches "from" becomes `cancelled`
 (nothing changed; review again); one whose installed package matches the target
 continues from step 3; anything else becomes `reconcile_required`. A `replaced`
-operation reruns steps 3–5, which are idempotent. `reconcile_required` is shown
-to the owner with the operation ID and leaves the affected Homes read-only;
-nothing chooses a side automatically. Between steps 2 and 3 the Homes are
-briefly read-only; a crash extends that until the next start.
+operation reruns steps 3–5, which are idempotent; a failed store or agent write
+leaves it `replaced` for the next recovery. An operation a Commit in this process
+is still driving is never recovered underneath it. `reconcile_required` is shown
+to the owner with the operation ID and keeps holding the package's slot, so no
+other upgrade or replacement of that package runs; records it did not move stay
+read-only because they no longer match the installed release. Nothing chooses a
+side automatically. Between steps 2 and 3 the Homes are briefly read-only; a
+crash extends that until the next start.
 
-**Not covered.** A Home in the Trash keeps its old pin and stays read-only if
-restored. Moving back to an older release is not offered. An install whose
-Homes belong to more than one owner is refused.
+**Revisions.** A moved Home's `StateRevision` advances, which cancels pending
+library reviews and running scans bound to it. A linked project's link
+`StateRevision` does not: approved library folders bind the exact link revision
+and stay approved.
+
+**Surfaces.** The Home page shows an upgrade card when the Plugins page's cached
+update check reports a newer release, and a review dialog with each changed
+role's current and new prompt, the affected Homes and projects, and each staffed
+agent's replace/keep outcome. The Plugins page's Update (preview and confirm)
+and a same-name install refuse a pinned package with `409
+home_upgrade_required`, naming the Home and linking to its page with
+`?upgrade=review`, which opens the review directly. "Show me a folder" offers an
+older reviewed release it finds installed as an update to the newest reviewed
+release when no live Home pins it, and returns the same refusal when one does.
+
+**Not covered.** A Home or linked project in the Trash keeps its old pin and
+stays read-only if restored. Moving back to an older release is not offered. An
+install whose Homes belong to more than one owner is refused.
 
 ## 7. Cross-provider seam map
 

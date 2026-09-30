@@ -1498,6 +1498,83 @@ One derived card per Home the current owner holds whose digest has `activatable 
 
 A completed or partial scan publishes one in-process `library.scan_completed` event (`home_id`, `scan_id`, `root_id`, `coverage` and the digest counts only); failed, cancelled, interrupted and replayed scans publish nothing. The optional `library_manager_token_budget` in `settings.json` lowers the token cap of the Manager's review turn below the default and maximum of 20,000.
 
+## Home Package Upgrade API
+
+Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Only guidance may change: Home role prompts and packaged skill text. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
+
+| Code | Meaning |
+| --- | --- |
+| `home_upgrade_current` | Nothing newer to install (moving back to an older release is not offered). |
+| `home_upgrade_no_homes` | No live Home uses the package; update it from the Plugins page. |
+| `home_upgrade_not_guidance_only` | The release changes more than role prompts and skill text. |
+| `home_upgrade_other_owner` | A Home using the package belongs to another owner. |
+| `home_upgrade_pin_mismatch` | A Home or linked project is not pinned to exactly the installed release. |
+| `home_upgrade_mirrors_disagree` | A Home's or linked project's saved copies disagree. |
+| `home_upgrade_repair_active` | A project role repair under one of the Homes is claimed or unreconciled. |
+| `home_upgrade_active` | Another upgrade of the package is in progress or needs reconciliation. |
+| `home_upgrade_review_stale` | The review expired (10 minutes), was used, or the plan changed since. |
+| `home_upgrade_cancelled` | The new release could not be installed; nothing changed. |
+| `home_upgrade_reconcile_required` | The upgrade stopped with records it cannot account for; `details` is the operation. |
+| `home_upgrade_unavailable` | The upgrade could not be completed; nothing was changed (`503` when there is no operation). |
+
+### Get Upgrade Status
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/assistant-program/provider-upgrade`
+
+```json
+{
+  "plugin_id": "music-project-management",
+  "installed_version": "0.1.0",
+  "available_version": "0.1.1",
+  "available": true,
+  "operation": { "id": "…", "status": "reconcile_required", "from_version": "0.1.0", "to_version": "0.1.1", "reason": "…", "updated_at": "…" }
+}
+```
+
+`installed_version` is the Home's pin. `available` comes from the Plugins page's cached update check and never reads a source. `operation` appears only while an operation holds the package (`claimed`, `replaced`, `reconcile_required`); reading this route first settles an operation a crash interrupted. The Home's `GET …/assistant-program` summary carries the same object as `provider_upgrade`.
+
+### Review an Upgrade
+
+**Endpoint:** `POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/review`
+
+Body `{}` (strict JSON). Inspects the target without installing it and records a ten-minute review bound to a digest of the whole plan.
+
+```json
+{
+  "token": "…", "expires_at": "…",
+  "plugin_id": "music-project-management", "from_version": "0.1.0", "to_version": "0.1.1",
+  "roles": [ { "role_id": "portfolio_manager", "label": "Music Portfolio Manager", "old": "…", "new": "…" } ],
+  "homes": [ {
+    "name": "Music Production Home", "projects": ["Album 1"],
+    "agents": [ { "role_id": "portfolio_manager", "role_label": "Music Portfolio Manager", "agent_name": "Portfolio Manager", "profile": "replace", "home_copy": "replace" } ]
+  } ],
+  "trashed_homes": 0,
+  "skills": ["music-project-management"]
+}
+```
+
+`profile` and `home_copy` are `replace` (the agent's prompt still equals the old role prompt), `keep` (the owner edited it) or `missing`. Homes in the Trash keep the old release. Approved library folders stay approved; pending library reviews and scans are cancelled.
+
+### Commit an Upgrade
+
+**Endpoint:** `POST /api/workspaces/{workspaceID}/assistant-program/provider-upgrade/commit`
+
+```json
+{ "token": "…" }
+```
+
+Re-derives the plan and requires the reviewed digest, then installs exactly the reviewed release (the replacement guard allows only this claimed replacement), moves each Home and linked project, and replaces unedited agent prompts. Returns the finished operation:
+
+```json
+{ "id": "…", "status": "succeeded", "from_version": "0.1.0", "to_version": "0.1.1",
+  "agents": [ { "home_id": "…", "role_id": "portfolio_manager", "agent_name": "Portfolio Manager", "profile": "replace", "home_copy": "replace" } ],
+  "updated_at": "…" }
+```
+
+### Plugins Page Refusal
+
+`POST /api/plugins/{name}/update` (preview and confirm) and a same-name install refuse to replace a package a live Home is pinned to with `409 {"code":"home_upgrade_required","details":{"home_name":"…","home_path":"/workspaces/{slug}/assistant?upgrade=review"}}` before any trust dialog. The Home page opened at `home_path` starts the review above. The folder digest's `POST …/offers/{offerID}/home-provider` answers the same way when an older reviewed release it would update is still pinned by a Home; with no such Home, its preview reports `"update": true` and `installed_version`, and confirming updates to the newest reviewed release.
+
 ## Workspace Memory API
 
 Each workspace keeps a curated `MEMORY.md` of durable operational knowledge (facts, decisions, dead ends, watch-state) at the root of its folder. The file on disk is canonical — there is no database copy. Memory is injected into every mission run and workspace chat (capped at ~2,000 tokens) and can be written by agents via the `memory_write` / `memory_forget` tools under every autonomy policy, including Watch.
