@@ -3285,6 +3285,11 @@ import {
       state.hqStatusState = 'error';
     }
     refreshCaptureAvailability();
+    // The Map keeps its own copy of this status and draws the reserved HQ site
+    // from it. Builds that finish outside personal-hq-onboarding.js (the
+    // assistant's HQ card) only fire ori:personal-hq-changed, so without this
+    // the "HQ site" outline outlives the build until a manual reload.
+    if (state.hqStatusState === 'ready') window.OriWorkspaceMap?.setHQStatus?.(state.hqStatus);
     // This request races the workspace load, so on a brand-new profile the area
     // has usually already settled on `empty` by the time the status lands. The
     // arriving blueprint site is drawable content, so re-decide — otherwise the
