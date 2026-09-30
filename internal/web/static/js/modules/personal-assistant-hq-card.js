@@ -18,23 +18,27 @@ export function hqCardView(relationship, rootState, plan = {}) {
   const receipt = Array.isArray(plan.receipt) && plan.receipt.length > 0;
   const visible = ['needs_hq', 'provisioning_hq'].includes(state) || receipt;
   const root = hqWorkspaceRootView(rootState);
-  const building = state === 'provisioning_hq' && !plan.failed;
+  const paused = state === 'provisioning_hq';
+  const building = paused && plan.busy;
   const collapsed = plan.collapsed === true && !receipt;
   return {
     visible,
     receipt,
     collapsed,
+    paused,
     building,
     name: String(relationship?.display_name || '').trim() || 'Your assistant',
     root,
-    canBuild: visible && !receipt && !collapsed && !building && root.confirmed,
+    canBuild: visible && !receipt && !collapsed && !building && (paused || root.confirmed),
     status: building
-      ? 'Building…'
-      : !root.confirmed && !collapsed && !receipt
-        ? root.status
-        : plan.failed
-          ? 'The build did not finish. Retry the same request.'
-          : ''
+      ? 'Resuming setup…'
+      : paused
+        ? 'Your confirmed setup is paused. Resume to continue with the settings you already confirmed.'
+        : !root.confirmed && !collapsed && !receipt
+          ? root.status
+          : plan.failed
+            ? 'The build did not finish. Retry the same request.'
+            : ''
   };
 }
 
@@ -111,18 +115,27 @@ function render() {
     : view.collapsed
       ? 'Build My HQ'
       : `${view.name} is hired. Let me set up my Personal HQ, where I prepare your Daily Brief and track follow-ups.`;
-  el('Plan').hidden = view.collapsed || view.receipt;
+  el('Plan').hidden = view.collapsed || view.receipt || view.paused;
   el('Receipt').hidden = !view.receipt;
   if (view.receipt) renderReceipt(plan.receipt);
   el('Name').value = plan.name;
   el('Time').value = plan.time;
   el('Root').value = view.root.path;
   el('RootStatus').textContent = view.root.status;
-  el('Build').textContent = view.building ? 'Building…' : view.collapsed ? 'Build My HQ' : 'Build';
+  el('Build').textContent = view.building
+    ? 'Resuming…'
+    : view.paused
+      ? 'Resume setup'
+      : view.collapsed
+        ? 'Build My HQ'
+        : 'Build';
   el('Build').disabled = state.busy || (!view.collapsed && !view.canBuild);
   el('Build').hidden = view.receipt;
   el('Adjust').hidden = view.collapsed || view.receipt;
   el('NotNow').hidden = view.collapsed || view.receipt;
+  el('Change').hidden = view.paused;
+  el('Adjust').hidden = view.paused;
+  el('NotNow').hidden = view.paused;
   el('Change').disabled = state.busy || view.building;
   el('Adjust').disabled = state.busy || view.building;
   el('NotNow').disabled = state.busy || view.building;
@@ -186,7 +199,26 @@ async function build() {
     render();
     return;
   }
-  if (state.busy || !hqCardView(state.relationship, state.root, plan).canBuild) return;
+  const view = hqCardView(state.relationship, state.root, plan);
+  if (state.busy || !view.canBuild) return;
+  if (view.paused) {
+    state.busy = true;
+    plan.busy = true;
+    error('');
+    render();
+    try {
+      const relationship = await window.PersonalHQOnboarding?.resumeHQSetup?.();
+      if (!relationship) throw new Error('Could not resume Personal HQ setup. Try again.');
+      await load(relationship);
+    } catch (cause) {
+      error(cause?.message || 'Could not resume Personal HQ setup. Try again.');
+    } finally {
+      state.busy = false;
+      plan.busy = false;
+      render();
+    }
+    return;
+  }
   plan.name = el('Name').value.trim() || 'My HQ';
   plan.time = el('Time').value || '08:00';
   state.busy = true;

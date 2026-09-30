@@ -248,8 +248,10 @@ export function hqBuildAssistantCopy(target) {
   return {
     show: true,
     title: `Build ${who}’s Personal HQ`,
-    intro: `This workspace becomes ${who}’s Personal HQ — where your daily brief is prepared and your follow-ups are tracked. Nothing is created until you confirm.`,
-    submitLabel: target.resuming ? 'Finish building HQ' : 'Build My HQ'
+    intro: target.resuming
+      ? `Your confirmed setup for ${who} is paused. Resume to continue with the settings you already confirmed.`
+      : `This workspace becomes ${who}’s Personal HQ — where your daily brief is prepared and your follow-ups are tracked. Nothing is created until you confirm.`,
+    submitLabel: target.resuming ? 'Resume setup' : 'Build My HQ'
   };
 }
 
@@ -259,6 +261,7 @@ export function hqBuildAssistantCopy(target) {
 export function hqBuildRequestPayload(target, form, requestID) {
   const body = { ...form };
   if (!target?.paf) return body;
+  if (target.resuming) return { mode: 'resume' };
   return { ...body, request_id: String(requestID || '').trim(), if_version: target.stateVersion };
 }
 
@@ -516,6 +519,18 @@ export function followUpView(f) {
     });
   }
 
+  async function resumeHQSetup() {
+    const target = await refreshBuildTarget();
+    if (!target.paf || !target.resuming)
+      throw new Error('There is no paused Personal HQ setup to resume.');
+    const result = await postJSON(target.endpoint, { mode: 'resume' });
+    const relationship = result && result.personal_assistant;
+    if (relationship?.state === 'active') clearHQRequestID(window.localStorage);
+    emitHQQuestSignal('setup-succeeded');
+    await completePAFHQTransition(relationship);
+    return relationship;
+  }
+
   // ---- Build My HQ modal ----
 
   function bootstrapModal(id) {
@@ -657,9 +672,10 @@ export function followUpView(f) {
     // whatever the page happened to know earlier.
     tasks.push(refreshBuildTarget());
     await Promise.all(tasks);
-    applyBuildAssistantCopy();
     const errorBox = document.getElementById('hqBuildError');
     if (errorBox) errorBox.hidden = true;
+    applyBuildAssistantCopy();
+    buildModalStartedForPAF = !!buildTarget.paf;
     const modal = requireModal('hqBuildModal');
     if (modal) modal.show();
     // Observational: Ori's HQ walkthrough uses this to advance to its final
@@ -670,6 +686,7 @@ export function followUpView(f) {
   // The submit target for the form that is currently open. Refreshed at open and
   // again at submit, because the relationship can change under a form left open.
   let buildTarget = hqBuildTarget(null);
+  let buildModalStartedForPAF = false;
 
   async function refreshBuildTarget() {
     try {
@@ -677,15 +694,15 @@ export function followUpView(f) {
         headers: { Accept: 'application/json' }
       });
       if (!res.ok) {
-        buildTarget = hqBuildTarget(null);
+        buildTarget = { ...hqBuildTarget(null), unavailable: true };
         return buildTarget;
       }
       const data = await res.json();
       buildTarget = hqBuildTarget(data && data.personal_assistant);
     } catch (_) {
-      // An unreadable relationship falls back to the legacy consequence, which
-      // creates a workspace without claiming to attach an assistant to it.
-      buildTarget = hqBuildTarget(null);
+      // Do not turn an unreadable relationship into a legacy create: that
+      // could make a second HQ while a saved setup is still in progress.
+      buildTarget = { ...hqBuildTarget(null), unavailable: true };
     }
     return buildTarget;
   }
@@ -695,6 +712,21 @@ export function followUpView(f) {
     const title = document.getElementById('hqBuildModalTitle');
     const intro = document.getElementById('hqBuildAssistantIntro');
     const submit = document.getElementById('hqBuildSubmitBtn');
+    const resumable = !!buildTarget.resuming;
+    const root = document.getElementById('hqBuildWorkspaceRoot')?.closest('.hq-build-root');
+    const name = document.getElementById('hqBuildName')?.closest('.mb-3');
+    const timezone = document.getElementById('hqBuildTimezone')?.closest('.mb-3');
+    const advanced = document.getElementById('hqBuildAdvancedToggle');
+    const errorBox = document.getElementById('hqBuildError');
+    if (root) root.hidden = resumable;
+    if (name) name.hidden = resumable;
+    if (timezone) timezone.hidden = resumable;
+    if (advanced) advanced.hidden = resumable;
+    if (submit) submit.disabled = !!buildTarget.unavailable;
+    if (errorBox && buildTarget.unavailable) {
+      errorBox.textContent = 'Could not verify the assistant setup. Close this window and retry.';
+      errorBox.hidden = false;
+    }
     if (intro) {
       // textContent, not innerHTML: the assistant's name is user-controlled.
       intro.textContent = copy.show ? copy.intro : '';
@@ -772,12 +804,20 @@ export function followUpView(f) {
       submitBtn.disabled = true;
       if (errorBox) errorBox.hidden = true;
       try {
-        const workspaceRootSaved = await saveBuildWorkspaceRoot();
-        if (!workspaceRootSaved) return;
-
         // Re-read the relationship at submit time: a form left open while the
         // relationship changed must not post to the wrong consequence.
         const target = await refreshBuildTarget();
+        if (target.unavailable)
+          throw new Error('Could not verify the assistant setup. Retry before continuing.');
+        if (buildModalStartedForPAF && !target.paf)
+          throw new Error(
+            'This Personal HQ setup has changed. Close and reopen this form to refresh its next step.'
+          );
+        if (target.resuming) applyBuildAssistantCopy();
+        if (!target.resuming) {
+          const workspaceRootSaved = await saveBuildWorkspaceRoot();
+          if (!workspaceRootSaved) return;
+        }
         const requestID = target.paf ? hqRequestID(window.localStorage) : '';
         const result = await postJSON(
           target.endpoint,
@@ -809,7 +849,7 @@ export function followUpView(f) {
           errorBox.hidden = false;
         }
       } finally {
-        submitBtn.disabled = false;
+        submitBtn.disabled = !!buildTarget.unavailable;
       }
     });
   }
@@ -1442,7 +1482,7 @@ export function followUpView(f) {
 
   // The Today card opens this same form for Adjust…, rather than maintaining a
   // second modal or a second submission controller.
-  window.PersonalHQOnboarding = { openBuildModal, refreshHQStatus };
+  window.PersonalHQOnboarding = { openBuildModal, refreshHQStatus, resumeHQSetup };
 
   function init() {
     wireMapActions();
