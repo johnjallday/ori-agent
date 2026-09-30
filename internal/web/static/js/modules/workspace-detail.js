@@ -24,6 +24,14 @@ import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { bankHarvest, taskResultDeepLink, taskScheduleDeepLink } from './economy-harvest.js';
 import { openParcelByRef } from './parcel-open.js';
 import { taskCreateBody } from './quick-task.js';
+import {
+  getStatusClass,
+  getDisplayStatus,
+  isTaskAwaitingNextStep as taskAwaitingNextStep,
+  PRESENTATION_STATE,
+  resolveTaskState,
+  resolveTaskStatusPresentation
+} from './task-presentation.js';
 
 /**
  * Format a date for display
@@ -44,44 +52,6 @@ function formatDate(dateString) {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString();
-}
-
-/**
- * Get status badge class
- * @param {string} status - Task status
- * @returns {string} CSS class
- */
-function getStatusClass(status) {
-  const statusMap = {
-    pending: 'pending',
-    in_progress: 'in_progress',
-    completed: 'completed',
-    failed: 'failed',
-    blocked: 'blocked',
-    waiting_for_choice: 'blocked',
-    cancelled: 'pending',
-    timeout: 'failed'
-  };
-  return statusMap[status] || 'pending';
-}
-
-/**
- * Get display status text
- * @param {string} status - Task status
- * @returns {string} Display text
- */
-function getDisplayStatus(status) {
-  const statusMap = {
-    pending: 'Pending',
-    in_progress: 'In Progress',
-    completed: 'Completed',
-    failed: 'Failed',
-    blocked: 'Blocked',
-    waiting_for_choice: 'Waiting for Choice',
-    cancelled: 'Cancelled',
-    timeout: 'Timed Out'
-  };
-  return statusMap[status] || status;
 }
 
 function buildWorkspaceSlugConflictMessage(conflict) {
@@ -7329,49 +7299,11 @@ export class WorkspaceDetailPage {
   }
 
   isTaskAwaitingNextStep(task) {
-    return (
-      this.getTaskExecutionMode(task) === 'step_through' &&
-      task?.status === 'in_progress' &&
-      task?.context?.execution_step_waiting === true
-    );
+    return taskAwaitingNextStep(task);
   }
 
   getTaskStatusPresentation(task) {
-    if (this.isTaskAwaitingNextStep(task)) {
-      return {
-        className: 'assigned',
-        label: 'Next Step Ready',
-        isBlocked: false,
-        reason: 'This task is paused between internal execution steps.'
-      };
-    }
-
-    const humanLoop = this.getTaskHumanLoop(task);
-    const humanLoopState = String(humanLoop?.state || '').toLowerCase();
-    if (
-      humanLoop &&
-      (humanLoopState === 'blocked' ||
-        humanLoopState === 'waiting_for_choice' ||
-        task?.status === 'waiting_for_choice')
-    ) {
-      const reason = String(humanLoop.reason || '').trim();
-      return {
-        className: 'blocked',
-        label:
-          task?.status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice'
-            ? 'Waiting for Choice'
-            : 'Needs Input',
-        isBlocked: true,
-        reason
-      };
-    }
-
-    return {
-      className: getStatusClass(task?.status),
-      label: getDisplayStatus(task?.status),
-      isBlocked: false,
-      reason: ''
-    };
+    return resolveTaskStatusPresentation(task);
   }
 
   getDisplayResult(task, subtasks = []) {
@@ -7481,7 +7413,7 @@ export class WorkspaceDetailPage {
     }
 
     const taskName = task.description || task.name || task.id || 'Task Result';
-    const statusText = getDisplayStatus(task.status);
+    const statusText = this.getTaskStatusPresentation(task).label;
     const timestamp = formatDate(task.completed_at || task.updated_at || task.created_at);
     const answeredBy = resultData.answeredBy || 'Unknown agent';
     const metaParts = [`Answered by ${answeredBy}`, `${statusText}`, timestamp];
@@ -10603,7 +10535,7 @@ export class WorkspaceDetailPage {
     const response = String(
       payload.agent_response || payloadHumanLoop.agent_response || humanLoop.agent_response || ''
     ).trim();
-    const statusText = getDisplayStatus(task.status);
+    const statusText = this.getTaskStatusPresentation(task).label;
     const timestamp = formatDate(task.updated_at || task.created_at);
     const selectedFieldValues = this.normalizeAssistFieldValues(
       payload.field_values || payloadHumanLoop.field_values || humanLoop.field_values
@@ -12839,29 +12771,25 @@ export class WorkspaceDetailPage {
   }
 
   getTaskExecutionState(task) {
-    if (!task || typeof task !== 'object') return 'pending';
-    const status = String(task.status || '')
-      .trim()
-      .toLowerCase();
-    const humanLoopState = String(task?.context?.human_loop?.state || '')
-      .trim()
-      .toLowerCase();
-    if (
-      humanLoopState === 'blocked' ||
-      humanLoopState === 'waiting_for_choice' ||
-      status === 'waiting_for_choice'
-    )
+    const state = resolveTaskState(task);
+    if (state === PRESENTATION_STATE.BLOCKED) return 'blocked';
+    if (state === PRESENTATION_STATE.NEEDS_INPUT && !this.isTaskAwaitingNextStep(task)) {
       return 'waiting_for_choice';
-    return status || 'pending';
+    }
+    return (
+      String(task?.status || '')
+        .trim()
+        .toLowerCase() || 'pending'
+    );
   }
 
-  setExecutionModalStatus(status) {
+  setExecutionModalStatus(taskOrStatus) {
     if (!this.elements.taskExecutionStatus) return;
-    const safeStatus = String(status || 'pending')
-      .trim()
-      .toLowerCase();
-    this.elements.taskExecutionStatus.className = `workspace-detail-task-status ${getStatusClass(safeStatus)}`;
-    this.elements.taskExecutionStatus.textContent = getDisplayStatus(safeStatus);
+    const task =
+      taskOrStatus && typeof taskOrStatus === 'object' ? taskOrStatus : { status: taskOrStatus };
+    const presentation = this.getTaskStatusPresentation(task);
+    this.elements.taskExecutionStatus.className = `workspace-detail-task-status ${presentation.className}`;
+    this.elements.taskExecutionStatus.textContent = presentation.label;
   }
 
   clearExecutionLog() {
@@ -13004,7 +12932,7 @@ export class WorkspaceDetailPage {
     }
     this.setTaskModalHeaderId(this.elements.taskExecutionId, task.id);
     this.updateTaskExecutionMeta(task);
-    this.setExecutionModalStatus(this.getTaskExecutionState(task));
+    this.setExecutionModalStatus(task);
     this.refreshExecutionBreakdown(task);
     this.updateTaskExecutionControls(task);
     this.setExecutionViewResultEnabled(false);
@@ -13041,14 +12969,14 @@ export class WorkspaceDetailPage {
 
         const state = this.getTaskExecutionState(task);
         this.updateTaskExecutionMeta(task);
-        this.setExecutionModalStatus(state);
+        this.setExecutionModalStatus(task);
         await this.refreshExecutionBreakdown(task);
         this.updateTaskExecutionControls(task);
 
         if (state !== this.executionLastStatus) {
           this.executionLastStatus = state;
           this.appendExecutionLog(
-            `Status changed to ${getDisplayStatus(state)}.`,
+            `Status changed to ${this.getTaskStatusPresentation(task).label}.`,
             state === 'failed'
               ? 'error'
               : state === 'blocked'
@@ -13134,10 +13062,13 @@ export class WorkspaceDetailPage {
         );
         break;
       case 'task.progress': {
-        this.setExecutionModalStatus('in_progress');
         const progress = payload?.progress || {};
         const currentStep = String(progress?.current_step || '').trim();
         const waiting = payload?.waiting_for_next_step === true;
+        this.setExecutionModalStatus({
+          status: 'in_progress',
+          context: { execution_step_waiting: waiting }
+        });
         if (currentStep) {
           this.appendExecutionLog(
             currentStep,
@@ -13164,7 +13095,10 @@ export class WorkspaceDetailPage {
         break;
       }
       case 'task.blocked':
-        this.setExecutionModalStatus('blocked');
+        this.setExecutionModalStatus({
+          status: payload?.status || 'blocked',
+          context: { human_loop: payload?.human_loop }
+        });
         this.appendExecutionLog(
           payload?.reason || 'Execution paused and requires your input.',
           'warning',
@@ -13895,7 +13829,7 @@ export class WorkspaceDetailPage {
             ${dueMarkup}
           </div>
           <div class="workspace-detail-board-card-meta workspace-detail-board-card-meta-secondary">
-            <span>${getDisplayStatus(task.status)}</span>
+            <span>${this.escapeHtml(this.getTaskStatusPresentation(task).label)}</span>
             ${scheduleIndicator}
             ${referenceIndicator}
           </div>

@@ -10,9 +10,16 @@ import {
 import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
 import { taskResultActionsMethods } from './workspace-task-result-actions.js';
 import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
-import { resolveTaskState, PRESENTATION_STATE } from './task-presentation.js';
+import {
+  getStatusClass,
+  getDisplayStatus,
+  resolveTaskStatusPresentation
+} from './task-presentation.js';
 import { fetchRelatedPlan, renderRelatedPlan } from './workspace-related-plan.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
+
+// Keep the raw-status helpers available to existing callers.
+export { getStatusClass, getDisplayStatus };
 
 const escapeTaskHtml =
   window.escapeHtml ||
@@ -52,47 +59,6 @@ export function formatDateTime(dateString) {
     dateStyle: 'medium',
     timeStyle: 'short'
   });
-}
-
-export function getStatusClass(status) {
-  const normalized = String(status || '')
-    .trim()
-    .toLowerCase();
-  if (normalized === 'completed' || normalized === 'success') return 'completed';
-  if (normalized === 'in_progress') return 'in_progress';
-  if (normalized === 'blocked' || normalized === 'waiting_for_choice') return 'blocked';
-  if (normalized === 'cancelled') return 'cancelled';
-  if (normalized === 'skipped') return 'cancelled';
-  if (normalized === 'failed' || normalized === 'error' || normalized === 'timeout')
-    return 'failed';
-  return 'pending';
-}
-
-const KNOWN_STATUS_LABELS = {
-  pending: 'Pending',
-  assigned: 'Assigned',
-  in_progress: 'In Progress',
-  waiting_for_choice: 'Waiting for Choice',
-  completed: 'Completed',
-  success: 'Completed',
-  failed: 'Failed',
-  error: 'Failed',
-  blocked: 'Blocked',
-  cancelled: 'Cancelled',
-  skipped: 'Skipped',
-  timeout: 'Timed Out'
-};
-
-export function getDisplayStatus(status) {
-  const normalized = String(status || '')
-    .trim()
-    .toLowerCase();
-  if (KNOWN_STATUS_LABELS[normalized]) return KNOWN_STATUS_LABELS[normalized];
-  // Shared resolver (FR110) decides only the fallback: a genuinely
-  // unrecognized status is labeled "Unknown", never silently "Pending" (FR38)
-  // — every status this file already knows about is covered above, so this
-  // only changes behavior for a status no caller has ever seen before.
-  return resolveTaskState({ status }) === PRESENTATION_STATE.UNKNOWN ? 'Unknown' : 'Pending';
 }
 
 export function summarizeText(value, maxLength = 220) {
@@ -2341,31 +2307,7 @@ export class WorkspaceTaskPage {
   }
 
   getTaskStatusPresentation(task = this.task) {
-    const humanLoop = this.getTaskHumanLoop(task);
-    const status = String(task?.status || '')
-      .trim()
-      .toLowerCase();
-    const humanLoopState = String(humanLoop?.state || '')
-      .trim()
-      .toLowerCase();
-    const waiting = status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice';
-    const blocked =
-      status === 'blocked' ||
-      waiting ||
-      humanLoopState === 'blocked' ||
-      Boolean(humanLoop?.reason) ||
-      Boolean(humanLoop?.question);
-
-    return {
-      isBlocked: blocked,
-      label: waiting
-        ? 'Waiting for Choice'
-        : blocked
-          ? 'Needs Input'
-          : getDisplayStatus(task?.status),
-      className: blocked ? 'blocked' : getStatusClass(task?.status),
-      reason: String(humanLoop?.reason || '').trim()
-    };
+    return resolveTaskStatusPresentation(task);
   }
 
   normalizeAssistFieldValues(value) {
@@ -3728,7 +3670,8 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-related-links">
           ${group.tasks
             .map(task => {
-              const statusClass = getStatusClass(task?.status);
+              const presentation = this.getTaskStatusPresentation(task);
+              const statusClass = presentation.className;
               const assignee = String(task?.to || 'Unassigned').trim() || 'Unassigned';
               return `
             <a href="${this.getTaskHref(task.id)}" class="workspace-task-related-link" data-status="${this.escapeHtml(statusClass)}">
@@ -3736,7 +3679,7 @@ export class WorkspaceTaskPage {
                 <span class="workspace-task-related-link-dot" data-state="${this.escapeHtml(statusClass)}" aria-hidden="true"></span>
                 <span>${this.escapeHtml(this.getTaskDisplayLabel(task))}</span>
               </span>
-              <span class="workspace-task-related-link-meta">${this.escapeHtml(getDisplayStatus(task.status))} · ${this.escapeHtml(assignee)}</span>
+              <span class="workspace-task-related-link-meta">${this.escapeHtml(presentation.label)} · ${this.escapeHtml(assignee)}</span>
             </a>
           `;
             })
@@ -3771,8 +3714,7 @@ export class WorkspaceTaskPage {
     const sideX = 60;
     const r = 11;
 
-    const colorForStatus = status => {
-      const cls = getStatusClass(status);
+    const colorForStatusClass = cls => {
       switch (cls) {
         case 'completed':
           return '#157347';
@@ -3790,7 +3732,8 @@ export class WorkspaceTaskPage {
     };
 
     const nodeMarkup = (task, x, y, opts = {}) => {
-      const fill = colorForStatus(task?.status);
+      const presentation = this.getTaskStatusPresentation(task);
+      const fill = colorForStatusClass(presentation.className);
       const id = String(task?.id || '').replace(/"/g, '&quot;');
       const labelRaw = this.getTaskDisplayLabel(task);
       const label = labelRaw.length > 22 ? labelRaw.slice(0, 21) + '…' : labelRaw;
@@ -3799,7 +3742,7 @@ export class WorkspaceTaskPage {
       const cls = isCurrent
         ? 'workspace-task-relgraph-node workspace-task-relgraph-node--current'
         : 'workspace-task-relgraph-node';
-      const titleAttr = `${this.escapeHtml(labelRaw)} · ${this.escapeHtml(getDisplayStatus(task?.status))}`;
+      const titleAttr = `${this.escapeHtml(labelRaw)} · ${this.escapeHtml(presentation.label)}`;
       const wrapStart = isCurrent ? '<g' : `<a href="${this.getTaskHref(id)}"`;
       const wrapEnd = isCurrent ? '</g>' : '</a>';
       return `
@@ -8150,7 +8093,7 @@ export class WorkspaceTaskPage {
   buildResultNoteContent(resultText, title) {
     const taskTitle = this.getTaskDisplayLabel();
     const sourceHref = this.getTaskHref(this.taskId);
-    const status = getDisplayStatus(this.task?.status);
+    const status = this.getTaskStatusPresentation().label;
     const savedAt = formatDateTime(new Date().toISOString());
     const completedAt = formatDateTime(this.task?.completed_at);
     const agent = String(this.task?.to || '').trim();
