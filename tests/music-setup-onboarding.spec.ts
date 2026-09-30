@@ -152,6 +152,21 @@ test('collection → guided catalog → reviewed REAPER install → exact song �
   expect((await json(await request.get(`${base}/roots`))).total_roots).toBe(1);
   await shot(page, 'onb-03-catalog-after-scan');
 
+  // Nothing can be connected together before the integration exists. Say so in a
+  // dialog (not only a line of small text) and offer its review; declining changes
+  // nothing.
+  await shelf.locator('#projectLibrarySelectAll').click();
+  await shelf.locator('#projectLibraryConnectAll').click();
+  const needIntegration = page.getByRole('dialog', {
+    name: 'Install the REAPER integration first?'
+  });
+  await expect(needIntegration).toBeVisible({ timeout: 60_000 });
+  await expect(needIntegration).toContainText('Album-1: needs the REAPER integration');
+  await shot(page, 'onb-03b-connect-all-needs-integration');
+  await needIntegration.getByRole('button', { name: 'Cancel' }).click();
+  await shelf.locator('#projectLibrarySelectAll').click(); // Clear selection
+  await expect(shelf.locator('#projectLibrarySelectAll')).toHaveText('Select all (6)');
+
   // ── Honest blockers, per song ────────────────────────────────────────────
   const rows = (await json(await request.get(`${base}/projects`))).rows as {
     id: string;

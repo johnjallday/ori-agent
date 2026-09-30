@@ -2783,6 +2783,30 @@ test('connect all leaves a song that needs a choice or an integration alone and 
   assert.match(log.statuses.at(-1), /2 need their own review/);
 });
 
+test('connect all with the integration missing says so in a dialog and offers its review', async () => {
+  const missing = (id, name) => ({
+    id,
+    name,
+    eligibility: {
+      state: 'project_provider_unavailable',
+      reason: 'A compatible installed project integration is required.',
+      integration_offer: reaperOffer
+    }
+  });
+  const { panel, log } = batchPanel([missing('a', 'Album-1'), missing('b', 'Album-2')]);
+  const started = [];
+  panel.startIntegrationReview = (detail, offer) => started.push({ detail, offer });
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.equal(log.confirms.length, 1, 'a dialog, not only a line of small text');
+  assert.match(log.confirms[0].title, /Install the REAPER integration first\?/);
+  assert.match(log.confirms[0].lines.join('\n'), /Album-1: needs the REAPER integration/);
+  assert.equal(log.confirms[0].action, 'Review the REAPER integration');
+  assert.deepEqual(log.posts, [], 'nothing was reviewed or created');
+  assert.equal(started.length, 1);
+  assert.deepEqual(started[0].offer, reaperOffer);
+});
+
 test('declining the one review connects nothing and reviews nothing', async () => {
   const { panel, log } = batchPanel([readySong('a', 'Album-1'), readySong('b', 'Album-2')], {
     confirmed: false

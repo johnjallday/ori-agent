@@ -1429,6 +1429,7 @@ export class ProjectLibraryPanel {
     await this.run(trigger, 'Checking the selected songs…', async () => {
       const ready = [];
       const left = [];
+      let integration = null;
       for (const id of [...this.selectedProjects]) {
         const path = `/projects/${encodeURIComponent(id)}`;
         const detail = await this.request(path);
@@ -1447,17 +1448,42 @@ export class ProjectLibraryPanel {
             roles: eligibility.project_role_labels || []
           });
         } else {
+          const offered =
+            eligibility.state === 'project_provider_unavailable' && eligibility.integration_offer;
+          if (offered && !integration) integration = { detail, offer: offered };
           left.push(
             `${detail.row.name}: ${
               eligibility.state === 'file_choice_required'
                 ? 'choose its project file'
-                : eligibility.reason || 'project setup needs its own review'
+                : offered
+                  ? `needs the ${offered.display_name || 'project'} integration`
+                  : eligibility.reason || 'project setup needs its own review'
             }`
           );
         }
       }
       if (!ready.length) {
         this.renderRows();
+        if (integration) {
+          // Nothing can be connected yet because the integration is missing: say so
+          // where it is seen and offer its review, rather than a line of small text.
+          const name = integration.offer.display_name || 'project';
+          if (
+            await this.confirm(
+              `Install the ${name} integration first?`,
+              [
+                `None of the ${left.length} selected songs can be connected yet:`,
+                ...left,
+                'Nothing is installed until you confirm it in the integration review. Afterwards you return to a song here and can select all again.'
+              ],
+              `Review the ${name} integration`,
+              trigger
+            )
+          ) {
+            this.startIntegrationReview(integration.detail, integration.offer);
+            return;
+          }
+        }
         this.status(
           left.length
             ? `Nothing to connect together. ${left.join('; ')}.`
