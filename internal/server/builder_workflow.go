@@ -253,30 +253,36 @@ func (b *ServerBuilder) workspaceStartupMaintenanceApproved() bool {
 }
 
 func (b *ServerBuilder) initializeWorkspaceStore() error {
-	var ws workspace.Store
+	ws := b.workspaceStore
+	injected := ws != nil
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
-	// Use the session store adapter if available (preferred for unified workspace data)
-	if b.sessionStore != nil {
-		adapter := session.NewWorkspaceStoreAdapter(b.sessionStore)
-		ws = adapter
-		if verbose {
-			logger.Info("Workspace store initialized using session store adapter (SQLite)", logger.Fields{})
-		}
-	} else {
-		// Fall back to file-based store if session store is not available
-		workspaceDir := resolveWorkspaceDir()
-		fileStore, err := createWorkspaceStore(workspaceDir)
-		if err != nil {
-			return err
-		}
-		ws = fileStore
-		if verbose {
-			logger.Info("Workspace store initialized using file store (fallback)", logger.Fields{"dir": workspaceDir})
+	// Compose production storage only when the caller has not supplied it.
+	if !injected {
+		// Use the session store adapter if available (preferred for unified workspace data)
+		if b.sessionStore != nil {
+			adapter := session.NewWorkspaceStoreAdapter(b.sessionStore)
+			ws = adapter
+			if verbose {
+				logger.Info("Workspace store initialized using session store adapter (SQLite)", logger.Fields{})
+			}
+		} else {
+			// Fall back to file-based store if session store is not available
+			workspaceDir := resolveWorkspaceDir()
+			fileStore, err := createWorkspaceStore(workspaceDir)
+			if err != nil {
+				return err
+			}
+			ws = fileStore
+			if verbose {
+				logger.Info("Workspace store initialized using file store (fallback)", logger.Fields{"dir": workspaceDir})
+			}
 		}
 	}
 
-	// Always create the folder-based FileStore alongside the primary store.
+	// Production storage includes a folder-based FileStore alongside the primary.
+	// An injected store owns its composition: reuse its folder capability, if
+	// present, rather than opening an unrelated root or adding decorators.
 	// The FileStore manages workspace folders on disk (workspace.json, files/, notes/, etc.)
 	//
 	// Priority for workspace root:
@@ -288,7 +294,14 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	agentRehydrationApproved := !b.resetPolicy.SuppressAgentRehydration
 	var fileStore *workspace.FileStore
 	var err error
-	if b.sessionStore != nil && b.sessionStore.DB() != nil {
+	if injected {
+		switch supplied := ws.(type) {
+		case *workspace.FileStore:
+			fileStore = supplied
+		case interface{ FileStore() *workspace.FileStore }:
+			fileStore = supplied.FileStore()
+		}
+	} else if b.sessionStore != nil && b.sessionStore.DB() != nil {
 		// Continuity: a copied folder carrying a checkpoint (or one retained
 		// across an app-record reset) stays out of the folder store until a
 		// reviewed import registers it, and imported work runs only once the
@@ -303,11 +316,11 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 			return fmt.Errorf("workspace slug integrity check failed: %w", err)
 		}
 		logger.Warn("Failed to create folder-based workspace store", logger.Fields{"error": err})
-	} else {
+	} else if fileStore != nil {
 		// When SQLite is the primary store, wrap with SyncStore so every
 		// Save() also writes workspace.json to disk. This keeps MCP configs,
 		// skills, schedules, tasks, and all other workspace data portable.
-		if b.sessionStore != nil {
+		if !injected && b.sessionStore != nil {
 			ws = workspace.NewSyncStore(ws, fileStore)
 			if verbose {
 				logger.Info("Workspace SyncStore enabled (SQLite → disk write-through)", logger.Fields{"dir": workspaceDir})
@@ -451,7 +464,9 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 				composite.SetWorkspaceAgentSource(workspace.NewTrustedWorkspaceAgentSource(source, allowlist))
 			}
 		}
-		ws = workspace.NewAgentSnapshotStore(ws, b.st)
+		if !injected {
+			ws = workspace.NewAgentSnapshotStore(ws, b.st)
+		}
 	}
 
 	b.workspaceStore = ws
