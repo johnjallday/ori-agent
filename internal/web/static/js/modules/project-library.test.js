@@ -2675,6 +2675,135 @@ test('a queued song that needs an integration pauses in place while its review o
   }
 });
 
+// A Home with several catalog-only songs, for select-all and connect-all. Each
+// song's detail, eligibility and review are served from `songs`.
+function batchPanel(songs, { confirmed = true, reviewFile = null } = {}) {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home-1' });
+  panel.state = { provider_read_only: false };
+  panel.rows = songs.map(song => ({ id: song.id, name: song.name, connection: 'catalog_only' }));
+  const log = { posts: [], statuses: [], confirms: [], refreshes: 0 };
+  panel.run = async (_trigger, _message, work) => work();
+  panel.renderRows = () => {};
+  panel.renderQueueControls = () => {};
+  panel.status = message => log.statuses.push(message);
+  panel.refresh = async () => {
+    log.refreshes++;
+  };
+  panel.confirm = async (title, lines, action) => {
+    log.confirms.push({ title, lines, action });
+    return confirmed;
+  };
+  const byID = id => songs.find(song => song.id === id);
+  panel.request = async path => {
+    const id = decodeURIComponent(path.split('/')[2]);
+    const song = byID(id);
+    if (path.endsWith('/activation')) return song.eligibility;
+    return { row: { id, name: song.name, connection: 'catalog_only' }, revision: 7 };
+  };
+  panel.post = async (path, body) => {
+    log.posts.push({ path, body });
+    if (path.endsWith('/activation/review')) {
+      const id = decodeURIComponent(path.split('/')[2]);
+      return { token: `token-${id}`, project_file: reviewFile || body.project_file };
+    }
+    return {};
+  };
+  return { panel, log };
+}
+
+const readySong = (id, name, file = 'Song.rpp') => ({
+  id,
+  name,
+  eligibility: {
+    state: 'review_available',
+    project_files: [file],
+    project_role_labels: ['REAPER Assistant']
+  }
+});
+
+test('select all picks every selectable song shown and clears them on the next press', () => {
+  const { panel } = batchPanel([readySong('a', 'Album-1'), readySong('b', 'Album-2')]);
+  panel.rows.push({ id: 'c', name: 'Album-3', connection: 'connected' });
+  panel.toggleSelectAll();
+  assert.deepEqual(
+    [...panel.selectedProjects].sort(),
+    ['a', 'b'],
+    'connected songs are not picked'
+  );
+  panel.toggleSelectAll();
+  assert.equal(panel.selectedProjects.size, 0);
+});
+
+test('connect all confirms once with every exact file, then reviews and commits each song on its own', async () => {
+  const songs = [readySong('a', 'Album-1'), readySong('b', 'Album-2', 'Take.rpp')];
+  const { panel, log } = batchPanel(songs);
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.equal(log.confirms.length, 1, 'one review for the whole selection');
+  assert.match(log.confirms[0].lines.join('\n'), /Album-1 — Song\.rpp/);
+  assert.match(log.confirms[0].lines.join('\n'), /Album-2 — Take\.rpp/);
+  assert.deepEqual(
+    log.posts.map(post => post.path.split('/').slice(-2).join('/')),
+    ['activation/review', 'activation/commit', 'activation/review', 'activation/commit']
+  );
+  const commits = log.posts.filter(post => post.path.endsWith('/commit'));
+  assert.notEqual(commits[0].body.idempotency_key, commits[1].body.idempotency_key);
+  assert.deepEqual(
+    commits.map(post => post.body.review_token),
+    ['token-a', 'token-b'],
+    'each commit uses its own song’s review'
+  );
+  assert.equal(panel.selectedProjects.size, 0);
+  assert.match(log.statuses.at(-1), /Connected 2 of 2/);
+});
+
+test('connect all leaves a song that needs a choice or an integration alone and names it', async () => {
+  const songs = [
+    readySong('a', 'Album-1'),
+    readySong('b', 'Album-2'),
+    {
+      id: 'c',
+      name: 'Album-5',
+      eligibility: { state: 'file_choice_required', project_files: ['A.rpp', 'B.rpp'] }
+    },
+    {
+      id: 'd',
+      name: 'Logic Sketch',
+      eligibility: { state: 'unsupported_format', reason: 'Catalog record only.' }
+    }
+  ];
+  const { panel, log } = batchPanel(songs);
+  panel.selectedProjects = new Set(['a', 'b', 'c', 'd']);
+  await panel.connectSelected();
+  const text = log.confirms[0].lines.join('\n');
+  assert.match(text, /Album-5: choose its project file/);
+  assert.match(text, /Logic Sketch: Catalog record only\./);
+  assert.equal(log.posts.filter(post => post.path.endsWith('/commit')).length, 2);
+  assert.ok(!log.posts.some(post => post.path.includes('/c/') || post.path.includes('/d/')));
+  assert.match(log.statuses.at(-1), /2 need their own review/);
+});
+
+test('declining the one review connects nothing and reviews nothing', async () => {
+  const { panel, log } = batchPanel([readySong('a', 'Album-1'), readySong('b', 'Album-2')], {
+    confirmed: false
+  });
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.deepEqual(log.posts, [], 'no server review was taken before the person agreed');
+  assert.equal(log.statuses.at(-1), 'Nothing was connected.');
+});
+
+test('connect all stops when a song’s review names a different file than the one confirmed', async () => {
+  const { panel, log } = batchPanel([readySong('a', 'Album-1'), readySong('b', 'Album-2')], {
+    reviewFile: 'Other.rpp'
+  });
+  panel.selectedProjects = new Set(['a', 'b']);
+  await panel.connectSelected();
+  assert.equal(log.posts.filter(post => post.path.endsWith('/commit')).length, 0);
+  assert.match(log.statuses.at(-1), /Connected 0 of 2\. Stopped at Album-1/);
+  assert.ok(panel.selectedProjects.has('a') && panel.selectedProjects.has('b'));
+});
+
 test('the queue offers an integration only for a song that cannot be set up yet', async () => {
   const page = integrationPage();
   try {

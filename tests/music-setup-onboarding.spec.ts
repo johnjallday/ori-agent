@@ -335,5 +335,52 @@ test('collection → guided catalog → reviewed REAPER install → exact song �
     workspacesBefore + 1
   );
   await shot(page, 'onb-15-home-after-journey');
+
+  // ── Select all, then connect every song that needs no further choice ─────
+  // The REAPER integration is now installed and Album-1..4 each have one project
+  // file. Logic Sketch has no reviewed integration, so it stays out and is named.
+  await expect(finalShelf.locator('#projectLibraryQueueStart')).toBeDisabled();
+  const selectAll = finalShelf.locator('#projectLibrarySelectAll');
+  await expect(selectAll).toHaveText('Select all (5)');
+  await selectAll.click();
+  await expect(selectAll).toHaveText('Clear selection');
+  await expect(finalShelf.locator('#projectLibraryQueueStatus')).toContainText('5 selected');
+  await shot(page, 'onb-16-select-all');
+  const connectAll = finalShelf.locator('#projectLibraryConnectAll');
+  await expect(connectAll).toBeEnabled();
+  await connectAll.click();
+  const batch = page.getByRole('dialog', { name: 'Connect 4 songs?' });
+  await expect(batch).toBeVisible({ timeout: 60_000 });
+  for (const name of ['Album-1', 'Album-2', 'Album-3', 'Album-4']) {
+    await expect(batch).toContainText(`${name} — Song.rpp`);
+  }
+  await expect(batch).toContainText('Logic Sketch');
+  await expect(batch).toContainText('Not included');
+  // Nothing is reviewed on the server, let alone created, before the agreement.
+  expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+    workspacesBefore + 1
+  );
+  await shot(page, 'onb-17-connect-all-review');
+  await batch.getByRole('button', { name: 'Cancel' }).click();
+  expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+    workspacesBefore + 1
+  );
+  await connectAll.click();
+  await page
+    .getByRole('dialog', { name: 'Connect 4 songs?' })
+    .getByRole('button', { name: 'Connect all' })
+    .click();
+  await expect(finalShelf.locator('#projectLibraryStatus')).toContainText('Connected 4 of 4', {
+    timeout: 120_000
+  });
+  const connectedNow = (await json(await request.get(`${base}/projects`))).rows
+    .filter((row: { connection: string }) => row.connection === 'connected')
+    .map((row: { name: string }) => row.name)
+    .sort();
+  expect(connectedNow).toEqual(['Album-1', 'Album-2', 'Album-3', 'Album-4', 'Album-5']);
+  expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(
+    workspacesBefore + 5 // each song is its own workspace, nothing else
+  );
+  await shot(page, 'onb-18-connected-all');
   expect(sources.map(sha)).toEqual(before);
 });

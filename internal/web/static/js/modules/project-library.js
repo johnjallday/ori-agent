@@ -580,6 +580,12 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibraryMore')
       ?.addEventListener('click', () => void this.search(true));
+    document
+      .getElementById('projectLibrarySelectAll')
+      ?.addEventListener('click', () => this.toggleSelectAll());
+    document.getElementById('projectLibraryConnectAll')?.addEventListener('click', event => {
+      void this.connectSelected(event.currentTarget);
+    });
     document.getElementById('projectLibraryQueueStart')?.addEventListener('click', event => {
       void this.startQueue(event.currentTarget);
     });
@@ -1385,6 +1391,141 @@ export class ProjectLibraryPanel {
     }
   }
 
+  // Rows a person can pick: catalog-only songs on the pages loaded so far.
+  selectableRows() {
+    return this.readOnly ? [] : this.rows.filter(row => row.connection === 'catalog_only');
+  }
+
+  toggleSelectAll() {
+    const pickable = this.selectableRows();
+    if (this.queue || !pickable.length) return;
+    if (pickable.every(row => this.selectedProjects.has(row.id))) {
+      for (const row of pickable) this.selectedProjects.delete(row.id);
+    } else {
+      let left = 0;
+      for (const row of pickable) {
+        if (this.selectedProjects.has(row.id)) continue;
+        if (this.selectedProjects.size >= QUEUE_LIMIT) left++;
+        else this.selectedProjects.add(row.id);
+      }
+      if (left)
+        this.status(`Selected ${QUEUE_LIMIT}, the most one queue takes; ${left} were left out.`);
+      else if (this.cursor)
+        this.status('Selected every song shown. Load more to include the rest.');
+    }
+    this.renderRows();
+    this.renderQueueControls();
+  }
+
+  // Connect every selected song that needs no further choice, after ONE review
+  // that lists each song with its exact file. The library binds a server review
+  // to the document revision, so the reviews cannot all be taken up front: each
+  // song is still reviewed and committed on its own with its own token and key,
+  // and only when the server's review names the file the person confirmed. A song
+  // that needs a file choice or an integration is left alone and named. The first
+  // failure stops the rest; songs already connected stay connected.
+  async connectSelected(trigger) {
+    if (this.queue || this.readOnly || this.busy || this.selectedProjects.size < 2) return;
+    await this.run(trigger, 'Checking the selected songs…', async () => {
+      const ready = [];
+      const left = [];
+      for (const id of [...this.selectedProjects]) {
+        const path = `/projects/${encodeURIComponent(id)}`;
+        const detail = await this.request(path);
+        if (detail.row.connection === 'connected') {
+          this.selectedProjects.delete(id);
+          continue;
+        }
+        const eligibility = await this.request(`${path}/activation`);
+        const files = eligibility.project_files || [];
+        if (eligibility.state === 'review_available' && files.length === 1) {
+          ready.push({
+            id,
+            path,
+            name: detail.row.name,
+            file: files[0],
+            roles: eligibility.project_role_labels || []
+          });
+        } else {
+          left.push(
+            `${detail.row.name}: ${
+              eligibility.state === 'file_choice_required'
+                ? 'choose its project file'
+                : eligibility.reason || 'project setup needs its own review'
+            }`
+          );
+        }
+      }
+      if (!ready.length) {
+        this.renderRows();
+        this.status(
+          left.length
+            ? `Nothing to connect together. ${left.join('; ')}.`
+            : 'The selected songs are already connected.'
+        );
+        return;
+      }
+      const roles = [...new Set(ready.flatMap(item => item.roles))];
+      const lines = [
+        `Connect ${ready.length} songs, each as its own project workspace:`,
+        ...ready.map(item => `${item.name} — ${item.file}`),
+        `Installed project roles: ${roles.join(', ') || 'none declared'}`,
+        'Each starts File-only. Source files stay where they are and are never changed. Project-role staffing and live access need separate reviews.'
+      ];
+      if (left.length) lines.push(`Not included (each needs its own review): ${left.join('; ')}`);
+      if (!(await this.confirm(`Connect ${ready.length} songs?`, lines, 'Connect all', trigger))) {
+        this.status('Nothing was connected.');
+        return;
+      }
+      const done = [];
+      let failure = '';
+      for (const item of ready) {
+        try {
+          const detail = await this.request(item.path);
+          if (detail.row.connection !== 'connected') {
+            const eligibility = await this.request(`${item.path}/activation`);
+            const files = eligibility.project_files || [];
+            if (
+              eligibility.state !== 'review_available' ||
+              files.length !== 1 ||
+              files[0] !== item.file
+            ) {
+              throw new Error('it changed after you confirmed, so it was not connected');
+            }
+            const review = await this.post(`${item.path}/activation/review`, {
+              workspace_name: detail.row.name.slice(0, 128),
+              project_file: item.file,
+              if_revision: detail.revision
+            });
+            if (review.project_file !== item.file) {
+              throw new Error('its reviewed file differs from the one you confirmed');
+            }
+            await this.post(`${item.path}/activation/commit`, {
+              review_token: review.token,
+              idempotency_key: operationKey('batch-activation'),
+              confirm: true
+            });
+          }
+          done.push(item.name);
+          this.selectedProjects.delete(item.id);
+        } catch (error) {
+          failure = `${item.name}: ${error.message || 'could not be connected'}`;
+          break;
+        }
+      }
+      await this.refresh();
+      this.status(
+        [
+          `Connected ${done.length} of ${ready.length}.`,
+          failure ? `Stopped at ${failure}. Songs not reached were left alone.` : '',
+          left.length ? `${left.length} need their own review.` : ''
+        ]
+          .filter(Boolean)
+          .join(' ')
+      );
+    });
+  }
+
   renderQueueControls() {
     const message = document.getElementById('projectLibraryQueueStatus');
     const start = document.getElementById('projectLibraryQueueStart');
@@ -1398,9 +1539,22 @@ export class ProjectLibraryPanel {
         : pending
           ? `${pending.index} of ${pending.ids.length} handled · ${pending.skipped?.length || 0} skipped · order and skips saved on this Home. Each remaining song needs its own review; already connected songs stay connected.`
           : this.selectedProjects.size
-            ? `${this.selectedProjects.size} selected · no project will be created until each one is confirmed.`
+            ? `${this.selectedProjects.size} selected · nothing is connected until you review and confirm.`
             : 'Choose at least two catalog-only projects to review one at a time.';
     start.disabled = this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
+    const selectAll = document.getElementById('projectLibrarySelectAll');
+    const connectAll = document.getElementById('projectLibraryConnectAll');
+    if (selectAll) {
+      const pickable = this.selectableRows();
+      const everyPicked =
+        pickable.length > 0 && pickable.every(row => this.selectedProjects.has(row.id));
+      selectAll.textContent = everyPicked ? 'Clear selection' : `Select all (${pickable.length})`;
+      selectAll.disabled = this.busy || this.readOnly || !!pending || pickable.length === 0;
+    }
+    if (connectAll) {
+      connectAll.disabled =
+        this.busy || this.readOnly || !!pending || this.selectedProjects.size < 2;
+    }
     resume.hidden = discard.hidden = !pending;
     resume.disabled = this.busy || this.readOnly || pending?.status === 'expired';
     discard.disabled = this.busy;
