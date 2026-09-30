@@ -26,6 +26,15 @@ func newWorkflowTestHandler(t *testing.T) (*TaskHandler, *workspace.Workspace) {
 	return handler, ws
 }
 
+func reloadWorkflowTestWorkspace(t *testing.T, handler *TaskHandler, id string) *workspace.Workspace {
+	t.Helper()
+	ws, err := handler.workspaceStore.Get(id)
+	if err != nil {
+		t.Fatalf("reload workspace: %v", err)
+	}
+	return ws
+}
+
 func postJSON(t *testing.T, handler *TaskHandler, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	buf, err := json.Marshal(body)
@@ -89,7 +98,8 @@ func TestWorkflowCreate_AtomicHappyPath(t *testing.T) {
 		t.Fatalf("expected step-2 to reference step-1 as input, got %v", resp.Subtasks[1].InputTaskIDs)
 	}
 
-	// Inspect the workspace state directly to confirm the batch persisted.
+	// Reload persisted state rather than inspecting the original save input.
+	ws = reloadWorkflowTestWorkspace(t, handler, ws.ID)
 	if got := len(ws.Tasks); got != 3 {
 		t.Fatalf("expected 3 tasks in workspace, got %d", got)
 	}
@@ -133,6 +143,7 @@ func TestWorkflowCreate_PersistsOutputContractOnStorageStep(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
+	ws = reloadWorkflowTestWorkspace(t, handler, ws.ID)
 	storageStep, err := ws.GetTask("append")
 	if err != nil {
 		t.Fatalf("get storage step: %v", err)
@@ -202,6 +213,7 @@ func TestWorkflowCreate_RollsBackOnGraphCycle(t *testing.T) {
 	if !hasCycle {
 		t.Fatalf("expected a dependency_cycle issue, got %+v", resp.Issues)
 	}
+	ws = reloadWorkflowTestWorkspace(t, handler, ws.ID)
 	if got := len(ws.Tasks); got != 0 {
 		t.Fatalf("expected workspace to remain empty after rollback, got %d tasks", got)
 	}
@@ -271,6 +283,9 @@ func TestWorkflowCreate_AttachToExistingParent(t *testing.T) {
 	if err := ws.AddTask(workspace.Task{ID: "existing-parent", Description: "Existing parent"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	if err := handler.workspaceStore.Save(ws); err != nil {
+		t.Fatalf("persist seed: %v", err)
+	}
 
 	rec := postJSON(t, handler, map[string]any{
 		"workspace_id":        ws.ID,
@@ -294,6 +309,7 @@ func TestWorkflowCreate_AttachToExistingParent(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
+	ws = reloadWorkflowTestWorkspace(t, handler, ws.ID)
 	if got := len(ws.Tasks); got != 3 {
 		t.Fatalf("expected 1 existing + 2 attached = 3 tasks, got %d", got)
 	}
@@ -354,6 +370,9 @@ func TestWorkflowCreate_StructuredIssueOnSingleTaskEndpoint(t *testing.T) {
 	handler, ws := newWorkflowTestHandler(t)
 	if err := ws.AddTask(workspace.Task{ID: "anchor", Description: "anchor"}); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	if err := handler.workspaceStore.Save(ws); err != nil {
+		t.Fatalf("persist seed: %v", err)
 	}
 
 	body, _ := json.Marshal(map[string]any{

@@ -1524,6 +1524,9 @@ func TestAppendCSVContractReviewSmoke_CreateInvalidApprove(t *testing.T) {
 	storedTask.CurrentRunID = "run-review-smoke"
 	workspace.RecordTaskExecution(storedTask, "success", invalidResult, time.Now(), time.Second)
 	if err := savedWS.UpdateTask(*storedTask); err != nil {
+		t.Fatalf("update invalid execution: %v", err)
+	}
+	if err := store.Save(savedWS); err != nil {
 		t.Fatalf("persist invalid execution: %v", err)
 	}
 

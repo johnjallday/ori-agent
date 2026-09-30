@@ -291,8 +291,9 @@ type Workspace struct {
 	// absent), so a cleared Goal — a real, empty-valued envelope — is never
 	// resurrected. See SyncStore.Save.
 	//
-	// Never persisted and never cloned: it describes how one value was loaded,
-	// and a copy decoded from disk always carries its own Goal directly.
+	// Never persisted: a copy decoded from disk carries its own Goal directly.
+	// In-memory store snapshots retain this read-provenance marker so copying
+	// a deliberately cleared Goal does not turn it back into absent data.
 	missionLoaded bool
 }
 
