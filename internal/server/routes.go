@@ -797,6 +797,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/activate", s.Handlers.Session.ActivateAssistantProgram)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/hire", s.Handlers.Session.HireAssistantProgram)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/roots", s.Handlers.Session.ListAssistantLibraryRoots)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/summary", s.Handlers.Session.GetAssistantLibrarySummary)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/initialize/review", s.Handlers.Session.ReviewAssistantLibraryInitialize)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/initialize/commit", s.Handlers.Session.CommitAssistantLibraryInitialize)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/roots/pick", s.Handlers.Session.PickAssistantLibraryRoot)
@@ -818,6 +819,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/proposals", s.Handlers.Session.ListAssistantLibraryProposals)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/proposals/{proposalID}/review", s.Handlers.Session.ReviewAssistantLibraryProposal)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/proposals/{proposalID}/commit", s.Handlers.Session.CommitAssistantLibraryProposal)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/proposals/{proposalID}/dismiss", s.Handlers.Session.DismissAssistantLibraryProposal)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects", s.Handlers.Session.SearchAssistantLibrary)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}", s.Handlers.Session.GetAssistantLibraryProject)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/forget/review", s.Handlers.Session.ReviewAssistantLibraryForget)
@@ -1595,6 +1597,7 @@ func registerActionCenterRoutes(mux *http.ServeMux, s *Server) {
 	// Action Center — cross-workspace triage of mission opportunities.
 	if s.Handlers.ActionCenter != nil {
 		mux.HandleFunc("GET /api/action-center/opportunities", s.Handlers.ActionCenter.List)
+		mux.HandleFunc("GET /api/action-center/library", s.Handlers.ActionCenter.ListLibrary)
 		mux.HandleFunc("GET /api/action-center/opportunities/{workspaceID}/{opportunityID}", s.Handlers.ActionCenter.Get)
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/dismiss", s.Handlers.ActionCenter.Dismiss)
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/snooze", s.Handlers.ActionCenter.Snooze)

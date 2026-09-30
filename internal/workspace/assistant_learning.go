@@ -125,7 +125,24 @@ type AssistantLearningDocument struct {
 	Tombstones    []AssistantLearningTombstone       `json:"tombstones,omitempty"`
 	Suggestions   []AssistantSuggestion              `json:"suggestions,omitempty"`
 	Runs          []AssistantReflectionRunDiagnostic `json:"runs,omitempty"`
+	// ProposalFeedback counts the owner's answers to the Home Manager's
+	// library suggestions. It is a reviewed-only signal: it is shown to the
+	// owner and never rendered into a prompt, toolbox or learning candidate.
+	ProposalFeedback    []AssistantProposalFeedback `json:"proposal_feedback,omitempty"`
+	FeedbackProposalIDs []string                    `json:"feedback_proposal_ids,omitempty"`
 }
+
+// AssistantProposalFeedback is one suggestion kind's accept and dismiss counts.
+type AssistantProposalFeedback struct {
+	Kind      string    `json:"kind"`
+	Accepted  int       `json:"accepted"`
+	Dismissed int       `json:"dismissed"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// maxFeedbackProposalIDs bounds the dedupe memory that keeps a retried
+// answer from being counted twice.
+const maxFeedbackProposalIDs = 256
 
 func cloneEvidence(values []AssistantEvidenceReference) []AssistantEvidenceReference {
 	return append([]AssistantEvidenceReference(nil), values...)
@@ -154,7 +171,46 @@ func CloneAssistantLearningDocument(source AssistantLearningDocument) AssistantL
 		clone.Suggestions[i].Evidence = cloneEvidence(source.Suggestions[i].Evidence)
 	}
 	clone.Runs = append([]AssistantReflectionRunDiagnostic(nil), source.Runs...)
+	clone.ProposalFeedback = append([]AssistantProposalFeedback(nil), source.ProposalFeedback...)
+	clone.FeedbackProposalIDs = append([]string(nil), source.FeedbackProposalIDs...)
 	return clone
+}
+
+// RecordProposalFeedback counts one owner answer ("accepted" or "dismissed")
+// to one Manager suggestion. A suggestion is counted at most once, so a
+// retried request is harmless. It changes nothing but these counters.
+func (store *AssistantLearningStore) RecordProposalFeedback(workspaceID, proposalID, kind, outcome string) (AssistantLearningDocument, error) {
+	proposalID, kind = strings.TrimSpace(proposalID), strings.TrimSpace(kind)
+	if proposalID == "" || len(proposalID) > 160 || kind == "" || len(kind) > 64 ||
+		(outcome != "accepted" && outcome != "dismissed") {
+		return AssistantLearningDocument{}, errors.New("invalid suggestion feedback")
+	}
+	return store.Update(workspaceID, -1, func(document *AssistantLearningDocument) error {
+		for _, counted := range document.FeedbackProposalIDs {
+			if counted == proposalID {
+				return nil
+			}
+		}
+		index := -1
+		for i := range document.ProposalFeedback {
+			if document.ProposalFeedback[i].Kind == kind {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			document.ProposalFeedback = append(document.ProposalFeedback, AssistantProposalFeedback{Kind: kind})
+			index = len(document.ProposalFeedback) - 1
+		}
+		if outcome == "accepted" {
+			document.ProposalFeedback[index].Accepted++
+		} else {
+			document.ProposalFeedback[index].Dismissed++
+		}
+		document.ProposalFeedback[index].UpdatedAt = time.Now().UTC()
+		document.FeedbackProposalIDs = append(document.FeedbackProposalIDs, proposalID)
+		return nil
+	})
 }
 
 var assistantLearningMu sync.Mutex
@@ -231,6 +287,13 @@ func normalizeLearningDocument(document *AssistantLearningDocument) {
 	sort.Slice(document.Suggestions, func(i, j int) bool { return document.Suggestions[i].ID < document.Suggestions[j].ID })
 	if len(document.Runs) > 100 {
 		document.Runs = append([]AssistantReflectionRunDiagnostic(nil), document.Runs[len(document.Runs)-100:]...)
+	}
+	sort.Slice(document.ProposalFeedback, func(i, j int) bool {
+		return document.ProposalFeedback[i].Kind < document.ProposalFeedback[j].Kind
+	})
+	if len(document.FeedbackProposalIDs) > maxFeedbackProposalIDs {
+		document.FeedbackProposalIDs = append([]string(nil),
+			document.FeedbackProposalIDs[len(document.FeedbackProposalIDs)-maxFeedbackProposalIDs:]...)
 	}
 }
 

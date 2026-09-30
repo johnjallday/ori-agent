@@ -158,6 +158,23 @@ func TestHomeLibraryTools_OnlyVerifiedLocalManagerCanReadAndMustRecheckAtCall(t 
 	if err != nil || len(current.Proposals) != 1 || current.Entries[0].Fields.NextAction != "" {
 		t.Fatalf("model suggestion directly changed a Home note: %+v %v", current, err)
 	}
+	if current.Proposals[0].Source != "" || current.Proposals[0].ScanID != "" {
+		t.Fatalf("a chat suggestion claimed scan-review provenance: %+v", current.Proposals[0])
+	}
+	// The scan-review runner's provider carries a run context into the store:
+	// outside an active turn for that scan, it cannot file a suggestion.
+	runProvider := NewWorkspaceToolProvider(nil, file, home.ID)
+	runProvider.SetExecutingAgent("Manager")
+	runProvider.SetExecutingInstanceID("manager-instance")
+	runProvider.SetProjectLibraryEvidence(func(_ projectlibrary.Scope, _ *workspace.Workspace) bool { return true })
+	runProvider.SetManagerRun(projectlibrary.ManagerRunContext{ScanID: "no-active-scan", Model: "test-model"})
+	if out, err := findLibraryTool(runProvider.Tools(), "home_library_propose_root_review").Call(context.Background(),
+		`{"reason":"outside a turn","request_key":"run-marked-root"}`); err == nil {
+		t.Fatalf("a run-marked provider filed a suggestion outside an active turn: %s", out)
+	}
+	if after, err := library.Read(scope); err != nil || len(after.Proposals) != 1 {
+		t.Fatalf("run-marked refusal saved something: %+v %v", after.Proposals, err)
+	}
 	if _, err := propose.Call(context.Background(), `{"entry_id":"`+child.ID+`","fields_revision":0,"next_action":"Unsafe","request_key":"foreign"}`); err == nil {
 		t.Fatal("child workspace ID obtained a Home proposal")
 	}

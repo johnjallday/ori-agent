@@ -67,6 +67,7 @@ type Settings struct {
 	SystemReasoningEffort string `json:"system_reasoning_effort,omitempty"` // Optional reasoning effort for system tasks (currently used by Codex: low, medium, high, xhigh)
 
 	NativeMCPExecTimeoutSeconds int `json:"native_mcp_exec_timeout_seconds,omitempty"` // Optional timeout (seconds) for native-MCP CLI task runs; 0 uses the built-in default (300s)
+	LibraryManagerTokenBudget   int `json:"library_manager_token_budget,omitempty"`    // Optional token cap for one Manager scan-review turn; 0 or anything above the built-in default (20,000) uses the default
 
 	// Multi-agent orchestration defaults
 	MultiAgentMode      string  `json:"multi_agent_mode,omitempty"`      // auto, force, off
@@ -1398,6 +1399,15 @@ func (m *Manager) GetNativeMCPExecTimeoutSeconds() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.settings.NativeMCPExecTimeoutSeconds
+}
+
+// GetLibraryManagerTokenBudget returns the configured token cap for one
+// Manager scan-review turn. Zero means "use the built-in default"; the
+// library runner never lets it exceed that default.
+func (m *Manager) GetLibraryManagerTokenBudget() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.LibraryManagerTokenBudget
 }
 
 // GetMultiAgentDefaults returns the default multi-agent mode and threshold.

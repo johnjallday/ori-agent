@@ -1182,3 +1182,66 @@ textarea.form-control:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* =============================================================================
+   ACTION CENTER — HOME LIBRARY CARDS (library-manager-notifications FR 13)
+   Navigation-only cards derived from a Home's scan digest and ready Manager
+   suggestions. Theme variables carry light and dark; no motion.
+   ============================================================================= */
+
+.action-center-library {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--primary-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.action-center-library-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.action-center-library-intro {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.action-center-library-cards {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.action-center-library-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-primary);
+}
+
+.action-center-library-copy {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.action-center-library-counts {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.action-center-library-open {
+  flex: none;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}

@@ -19,6 +19,29 @@ type Store struct {
 	workspaces       workspace.Store
 	now              func() time.Time
 	providerEvidence func(Scope, *workspace.Workspace) bool
+	installed        InstalledPluginSource
+	events           EventPublisher
+}
+
+// EventPublisher is the host's workspace event bus. A published event is a
+// notification only; every subscriber must reauthorize its own work.
+type EventPublisher interface {
+	Publish(workspace.Event)
+}
+
+// WithEventBus lets a completed scan announce its digest after the fenced
+// Home write succeeds. Call this before publishing the Store.
+func (s *Store) WithEventBus(events EventPublisher) *Store {
+	s.events = events
+	return s
+}
+
+// WithInstalledPlugins supplies the host's live plugin list so a scan's
+// digest can count entries a compatible installed blueprint could set up.
+// The count is guidance; a setup review repeats every check.
+func (s *Store) WithInstalledPlugins(installed InstalledPluginSource) *Store {
+	s.installed = installed
+	return s
 }
 
 func NewStore(workspaces workspace.Store) *Store {
@@ -89,10 +112,34 @@ func (s *Store) Read(scope Scope) (Document, error) {
 	return doc, err
 }
 
+// mirrorReadAttempts bounds how long a read waits out an in-flight write. A
+// fenced Home write replaces the folder mirror and then the primary, so a
+// read that lands between the two sees them disagree for a few milliseconds
+// (for example the scan-review receipt written right after a scan). A split
+// that outlasts the retries still fails closed as ErrMirrorDiverged.
+const mirrorReadAttempts = 5
+
 // readSnapshot returns metadata and its Home authority from the same read.
 // Query consumers must not combine an older document with newer link/member
-// state fetched independently after a concurrent Home mutation.
+// state fetched independently after a concurrent Home mutation. Never call it
+// inside a Home update callback: it may sleep between attempts.
 func (s *Store) readSnapshot(scope Scope) (Document, *workspace.AssistantProgramState, error) {
+	var err error
+	for attempt := 1; attempt <= mirrorReadAttempts; attempt++ {
+		var doc Document
+		var state *workspace.AssistantProgramState
+		doc, state, err = s.readSnapshotOnce(scope)
+		if !errors.Is(err, ErrMirrorDiverged) {
+			return doc, state, err
+		}
+		if attempt < mirrorReadAttempts {
+			time.Sleep(time.Duration(attempt) * 15 * time.Millisecond)
+		}
+	}
+	return Document{}, nil, err
+}
+
+func (s *Store) readSnapshotOnce(scope Scope) (Document, *workspace.AssistantProgramState, error) {
 	if s == nil || s.workspaces == nil || !scope.valid() {
 		return Document{}, nil, ErrUnavailable
 	}
@@ -177,9 +224,13 @@ func (s *Store) mutateWithHomePolicy(scope Scope, expected int64, op operation, 
 		}
 		// Revoking an existing grant is a reductive owner action. It must
 		// remain possible when the installed provider has disappeared.
+		// A scan-review receipt may record a skip or an interruption after
+		// provider loss; starting a turn still requires evidence (its policy).
 		if ((op.action != "review_revoke_root" && op.action != "revoke_root" && op.action != "scan_finish" &&
 			op.action != "review_forget_entry" && op.action != "forget_entry" &&
-			op.action != "discard_activation_queue") &&
+			op.action != "discard_activation_queue" && op.action != "proposal_run_claim" &&
+			op.action != "proposal_run_finish" && op.action != "proposal_run_sweep" &&
+			op.action != "dismiss_proposal") &&
 			!s.providerWritable(scope, home)) || (policy != nil && !policy(state, home)) {
 			return ErrUnavailable
 		}
@@ -237,7 +288,8 @@ func (s *Store) mutateWithHomePolicy(scope Scope, expected int64, op operation, 
 		// Preserve the actionable error from the callback; never turn failed
 		// saves into success or claim an operation was recorded.
 		if errors.Is(err, ErrUnavailable) || errors.Is(err, ErrNotInitialized) || errors.Is(err, ErrCorrupt) ||
-			errors.Is(err, ErrConflict) || errors.Is(err, ErrLimit) || errors.Is(err, ErrMirrorDiverged) {
+			errors.Is(err, ErrConflict) || errors.Is(err, ErrLimit) || errors.Is(err, ErrMirrorDiverged) ||
+			errors.Is(err, ErrDuplicateProposal) || errors.Is(err, ErrRecentlyDismissed) || errors.Is(err, errNoRunChange) {
 			return OperationReceipt{}, false, err
 		}
 		// The shared workspace fence refused the Home write because another

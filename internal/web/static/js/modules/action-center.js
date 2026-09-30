@@ -154,6 +154,65 @@
     list.innerHTML = items.map(rowHTML).join('');
   }
 
+  // --- Home library cards (library-manager-notifications FR 13) ---
+  // Derived per request from each Home's scan digest and ready suggestions.
+  // A card only links to the Home's suggestions shelf; there is nothing to
+  // dismiss or resolve here, and it disappears once nothing is ready.
+  const LIBRARY_SHELF_ROUTE = /^\/workspaces\/[^/?#\s]+\/assistant#projectLibraryProposals$/;
+
+  function libraryCount(value) {
+    return Number.isInteger(value) && value > 0 ? value : 0;
+  }
+
+  function libraryCardHTML(card) {
+    if (!card || typeof card !== 'object') return '';
+    const route = typeof card.route === 'string' ? card.route : '';
+    if (!LIBRARY_SHELF_ROUTE.test(route)) return '';
+    const fresh = libraryCount(card.new);
+    const ready = libraryCount(card.activatable);
+    const review = libraryCount(card.ready_proposals);
+    if (!ready && !review) return '';
+    const parts = [];
+    if (fresh) parts.push(`${fresh} new`);
+    if (ready) parts.push(`${ready} ready to set up`);
+    if (review) parts.push(`${review} ${review === 1 ? 'suggestion' : 'suggestions'} to review`);
+    const name = String(card.home_name || '').trim() || 'Home';
+    const scanned = card.scanned_at ? ` · scanned ${fmtTime(card.scanned_at)}` : '';
+    const partial = card.coverage === 'partial' ? ' · partial scan' : '';
+    return `
+      <article class="action-center-library-card" data-home-id="${escapeHtml(card.home_id)}">
+        <div class="action-center-library-copy">
+          <strong>${escapeHtml(name)}</strong>
+          <span class="action-center-library-counts">${escapeHtml(parts.join(' · ') + scanned + partial)}</span>
+        </div>
+        <a class="modern-btn modern-btn-secondary action-center-library-open" href="${escapeHtml(route)}" aria-label="${escapeHtml(`Open ${name} suggestions shelf`)}">Open shelf</a>
+      </article>
+    `;
+  }
+
+  function renderLibrary(cards) {
+    const section = $('#action-center-library');
+    const container = $('#action-center-library-cards');
+    if (!section || !container) return;
+    const visible = (Array.isArray(cards) ? cards : []).filter(
+      card => !workspaceFilter || (card && card.home_id === workspaceFilter)
+    );
+    const html = visible.map(libraryCardHTML).filter(Boolean);
+    container.innerHTML = html.join('');
+    section.hidden = html.length === 0;
+  }
+
+  async function fetchLibrary() {
+    try {
+      const resp = await fetch('/api/action-center/library');
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return Array.isArray(data.items) ? data.items : [];
+    } catch (_) {
+      return []; // Library cards are optional; findings still load.
+    }
+  }
+
   function renderFilterBanner(items) {
     const el = $('#action-center-filter-banner');
     if (!el) return;
@@ -213,6 +272,7 @@
   }
 
   async function reload() {
+    void fetchLibrary().then(renderLibrary);
     try {
       setStatus('Loading...');
       const data = await fetchList();
@@ -399,7 +459,9 @@
     assistantSourceHTML,
     handleAddToBacklog,
     escapeHtml,
-    fmtTime
+    fmtTime,
+    libraryCardHTML,
+    renderLibrary
   };
 
   if (document.readyState === 'loading') {

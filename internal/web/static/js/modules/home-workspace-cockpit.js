@@ -1,6 +1,7 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
+import { createLibraryBadgeLoader, libraryShelfRoute } from './home-library-badges.js';
 import { workspacePageURL } from './workspace-routes.js';
 import {
   normalizeKind,
@@ -1797,6 +1798,10 @@ import {
     // distinguishable — the first hides the HUD, the second shows two zeros
     // (city-economy FR34).
     economy: null,
+    // Project-library badges keyed by Home id (library-manager-notifications
+    // FR 11). Empty until the summaries answer; a Map drawn without them is
+    // correct, just briefly plainer.
+    libraryBadges: {},
     onboardingGate: {
       state: ONBOARDING_GATE_LOADING,
       allowWorkspaceHydration: false,
@@ -1926,6 +1931,9 @@ import {
       // Farm badges and harvest piles (city-economy FR35). A projection, not
       // the whole economy: the Map draws buildings, it does not hold balances.
       economy: economyMapSnapshot(state.economy),
+      // Navigation-only badges for program Homes whose library has something
+      // ready to review. The click is handled below, never by the Map.
+      libraryBadges: state.libraryBadges,
       // Cockpit contract (see workspace-map.js): select-only pointer semantics,
       // no internal topbar/overview chrome, and no invented default selection.
       selectOnly: true,
@@ -3545,6 +3553,30 @@ import {
     mountMap();
   }
 
+  /**
+   * Re-read the program Homes' library summaries and redraw their badges.
+   *
+   * Event-driven only (refresh, tab visible again, back/forward return); the
+   * loader reuses its answer inside thirty seconds unless forced. The Map is
+   * re-mounted only when a badge actually changed, which keeps camera and
+   * selection exactly as the economy re-mount does.
+   */
+  const libraryBadgeLoader = createLibraryBadgeLoader();
+  let libraryBadgesLoaded = false;
+  async function refreshLibraryBadges({ force = false } = {}) {
+    if (!canHydrateWorkspaceData()) return;
+    let next;
+    try {
+      next = await libraryBadgeLoader.load(state.flattened, { force });
+    } catch (err) {
+      console.warn('home-workspace-cockpit: library badges unavailable', err);
+      return;
+    }
+    if (JSON.stringify(next) === JSON.stringify(state.libraryBadges)) return;
+    state.libraryBadges = next;
+    mountMap();
+  }
+
   async function refresh() {
     if (!canHydrateWorkspaceData()) return null;
     if (state.inFlight) return state.inFlight;
@@ -3592,6 +3624,13 @@ import {
       renderEconomyHUD();
       mountMap();
     });
+    // Library badges need the Home ids, so they follow the workspace list.
+    const cycle = state.inFlight;
+    void cycle
+      .then(() => refreshLibraryBadges({ force: !libraryBadgesLoaded }))
+      .then(() => {
+        libraryBadgesLoaded = true;
+      });
     return state.inFlight;
   }
 
@@ -3704,6 +3743,16 @@ import {
     void refreshEconomyAndRender();
   });
 
+  // Library badges re-read when the owner comes back to Home, never on a
+  // timer: a tab made visible again (reused inside thirty seconds), or a
+  // back/forward return from a shelf where a suggestion may have been handled.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshLibraryBadges();
+  });
+  window.addEventListener('pageshow', event => {
+    if (event.persisted) void refreshLibraryBadges({ force: true });
+  });
+
   // District tags may be reconciled after the Map's initial shell binding when
   // persisted layout arrives. Keep one Home-owned delegated seam on the stable
   // Map host so those replacement tags still route through select-and-open;
@@ -3733,6 +3782,17 @@ import {
       },
       true
     );
+    // A Home's library badge only navigates to its suggestions shelf. It is a
+    // sibling of the district tag, so it never selects or opens the group.
+    els.map.addEventListener('click', event => {
+      const badge = event.target?.closest?.('[data-library-badge]');
+      if (!badge) return;
+      const route = libraryShelfRoute(badge.getAttribute('data-library-route'));
+      if (!route) return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.location.assign(route);
+    });
     els.map.addEventListener('click', event => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
       const target = event.target?.closest?.('.ws-map-district-tag[data-ws-id]');

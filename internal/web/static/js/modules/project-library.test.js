@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ProjectLibraryPanel, libraryQuery, readActivationQueue } from './project-library.js';
+import {
+  ProjectLibraryPanel,
+  libraryDigestText,
+  libraryQuery,
+  libraryRunText,
+  proposalSourceLabel,
+  readActivationQueue
+} from './project-library.js';
 
 test('Show project folder requires a fresh connected Home link and never sends a path or starts a DAW', async () => {
   const requests = [];
@@ -360,6 +367,7 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     const destinations = [];
     panel.details = id => destinations.push(id);
     panel.request = async path => {
+      if (path === '/summary') return { initialized: true, digest: null, ready_proposals: 5 };
       assert.equal(path, '/proposals');
       return {
         total: 6,
@@ -469,13 +477,17 @@ test('Manager suggestions render as inert text and stale rows have no confirmati
     assert.match(recap.children[1].textContent, /<script>untrusted recap<\/script>/);
     assert.match(recap.children[1].textContent, /not evidence that work happened/);
     assert.equal(recap.children[4].textContent, 'Edit Album-4 suggested recap');
+    assert.equal(ready.children[5].textContent, 'Dismiss <svg onload=alert(1)> suggestion');
+    assert.equal(stale.children.filter(child => child.tag === 'button').length, 0);
     panel.state.provider_read_only = true;
     await panel.renderProposals();
-    assert.equal(
-      elements
-        .get('projectLibraryProposalRows')
-        .children[0].children.filter(child => child.tag === 'button').length,
-      0
+    // A read-only Home offers no review, but dismissing only removes.
+    const readOnlyButtons = elements
+      .get('projectLibraryProposalRows')
+      .children[0].children.filter(child => child.tag === 'button');
+    assert.deepEqual(
+      readOnlyButtons.map(button => button.textContent),
+      ['Dismiss <svg onload=alert(1)> suggestion']
     );
   } finally {
     globalThis.document = original;
@@ -1438,4 +1450,290 @@ test('manual edit review cannot commit without a second user confirmation', asyn
     null
   );
   assert.deepEqual(calls, ['/projects/entry-1/fields/review']);
+});
+
+const DIGEST = {
+  scan_id: 'scan-1',
+  root_id: 'root-1',
+  scanned_at: '2026-09-29T12:00:00Z',
+  coverage: 'complete',
+  projects: 6,
+  new: 6,
+  updated: 0,
+  unavailable: 0,
+  unsupported_format: 1,
+  activatable: 5
+};
+
+test('scan digest line names the folder, not its path, and lists only nonzero extras', () => {
+  const roots = [{ id: 'root-1', path: '/Users/owner/Music Projects' }];
+  const text = libraryDigestText(DIGEST, roots);
+  assert.match(
+    text,
+    /^Scanned Music Projects on .*2026: 6 projects, 6 new, 5 can be set up, 1 unsupported format\.$/
+  );
+  assert.equal(text.includes('/Users/owner'), false);
+  const quiet = libraryDigestText(
+    { ...DIGEST, projects: 1, new: 0, unsupported_format: 0, activatable: 1 },
+    roots
+  );
+  assert.match(quiet, /: 1 project, 1 can be set up\.$/);
+  const gone = libraryDigestText({ ...DIGEST, new: 0, unavailable: 2 }, roots);
+  assert.match(gone, /5 can be set up, 1 unsupported format, 2 no longer found\.$/);
+});
+
+test('scan digest line handles zero, partial, unknown-root and setup-unavailable digests', () => {
+  assert.equal(libraryDigestText(null, []), '');
+  assert.equal(libraryDigestText({ projects: 3 }, []), '', 'a digest without a scan is not shown');
+  const empty = libraryDigestText(
+    { ...DIGEST, projects: 0, new: 0, activatable: 0, unsupported_format: 0 },
+    []
+  );
+  assert.match(empty, /^Scanned an approved folder on .*: 0 projects, 0 can be set up\.$/);
+  const partial = libraryDigestText({ ...DIGEST, coverage: 'partial' }, []);
+  assert.match(partial, /Partial scan: folders it did not reach were left unchanged\.$/);
+  const noIntegration = libraryDigestText(
+    {
+      ...DIGEST,
+      activatable: 0,
+      unsupported_format: 0,
+      setup_note: 'project_provider_unavailable'
+    },
+    []
+  );
+  assert.match(
+    noIntegration,
+    /6 projects, 6 new, project setup needs a compatible installed integration\./
+  );
+  assert.equal(noIntegration.includes('can be set up'), false);
+  const forged = libraryDigestText(
+    { ...DIGEST, projects: -4, new: '9', activatable: 1.5, scanned_at: 'not a date' },
+    []
+  );
+  assert.match(forged, /on an unknown date: 0 projects, 0 can be set up, 1 unsupported format\./);
+});
+
+test('the Manager review line names skips, results and stop reasons without claiming any change', () => {
+  assert.equal(libraryRunText(null), '');
+  assert.equal(
+    libraryRunText({ status: 'skipped', reason: 'no_model' }),
+    'Manager review skipped: the Manager has no tool-capable model configured.'
+  );
+  assert.equal(
+    libraryRunText({ status: 'skipped', reason: 'interrupted' }),
+    'Manager review skipped: Ori stopped during the review.'
+  );
+  assert.equal(
+    libraryRunText({ status: 'skipped', reason: '<img src=x>' }),
+    'Manager review skipped: it could not run.',
+    'an unknown reason is never echoed'
+  );
+  assert.equal(
+    libraryRunText({
+      status: 'finished',
+      proposals: 3,
+      model: 'claude-x',
+      reason: 'proposal_limit'
+    }),
+    'The Manager (claude-x) reviewed this scan and left 3 suggestions for your review. It stopped at the three-suggestion limit.'
+  );
+  assert.equal(
+    libraryRunText({ status: 'finished', proposals: 0, reason: '' }),
+    'The Manager reviewed this scan and had no suggestions.'
+  );
+  assert.match(libraryRunText({ status: 'started' }), /in progress/);
+  assert.equal(
+    proposalSourceLabel({ source: 'manager_model', model: 'claude-x' }),
+    'From the scan review · claude-x'
+  );
+  assert.equal(proposalSourceLabel({}), 'From a Manager chat');
+  assert.equal(proposalSourceLabel({ source: 'forged' }), 'From a Manager chat');
+});
+
+test('dismissal needs its own confirmation and a retry reuses the same key', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.run = async (_trigger, _message, work) => work();
+  const messages = [];
+  panel.status = message => messages.push(message);
+  let refreshes = 0;
+  panel.refresh = async () => {
+    refreshes++;
+  };
+  const posts = [];
+  let failNext = true;
+  panel.post = async (path, body) => {
+    posts.push({ path, body });
+    if (failNext) {
+      failNext = false;
+      throw new Error('network dropped the reply');
+    }
+    return { replay: posts.length > 1 };
+  };
+  const row = {
+    name: 'Song <b>',
+    status: 'ready',
+    proposal: { id: 'p 1', next_action: '<script>x</script>' }
+  };
+  let answer = false;
+  const titles = [];
+  panel.confirm = async (title, lines) => {
+    titles.push(title);
+    assert.ok(
+      lines.some(line => line.includes('No notes, sessions, folders or workspaces change'))
+    );
+    return answer;
+  };
+  await panel.dismissProposal(row, null);
+  assert.deepEqual(posts, [], 'cancelling sends nothing');
+  assert.equal(messages.at(-1), 'Nothing was dismissed.');
+  answer = true;
+  await assert.rejects(panel.dismissProposal(row, null), /network dropped/);
+  await panel.dismissProposal(row, null);
+  assert.equal(posts.length, 2);
+  assert.equal(posts[0].path, '/proposals/p%201/dismiss');
+  assert.deepEqual(Object.keys(posts[0].body).sort(), ['confirm', 'idempotency_key']);
+  assert.equal(posts[0].body.confirm, true);
+  assert.equal(
+    posts[1].body.idempotency_key,
+    posts[0].body.idempotency_key,
+    'a retried dismissal replays the same answer'
+  );
+  assert.equal(refreshes, 1);
+  assert.equal(titles[0], 'Dismiss the suggestion for Song <b>?');
+  assert.equal(panel.pendingDismissals.size, 0);
+});
+
+test('feedback line totals the owner’s answers and hides when there are none', async () => {
+  const { libraryFeedbackText } = await import('./project-library.js');
+  assert.equal(libraryFeedbackText(null), '');
+  assert.equal(libraryFeedbackText([{ kind: 'next_action', accepted: 0, dismissed: 0 }]), '');
+  assert.equal(
+    libraryFeedbackText([
+      { kind: 'next_action', accepted: 2, dismissed: 1 },
+      { kind: 'project_review', accepted: 0, dismissed: 3 },
+      { kind: 'forged', accepted: -5, dismissed: '9' }
+    ]),
+    'Your answers to Manager suggestions so far: 2 accepted, 4 dismissed.'
+  );
+});
+
+test('arriving with the shelf hash focuses the suggestions heading once, after it renders', () => {
+  const originalDocument = globalThis.document;
+  const originalLocation = globalThis.location;
+  const calls = [];
+  const heading = id => ({
+    setAttribute: (name, value) => calls.push(`${id}:${name}=${value}`),
+    scrollIntoView: () => calls.push(`${id}:scroll`),
+    focus: options => calls.push(`${id}:focus:${options?.preventScroll}`)
+  });
+  const section = { hidden: false };
+  const elements = {
+    projectLibraryProposals: section,
+    projectLibraryProposalsTitle: heading('suggestions'),
+    projectLibraryTitle: heading('library')
+  };
+  globalThis.document = { getElementById: id => elements[id] || null };
+  try {
+    globalThis.location = { hash: '#projectLibraryProposals' };
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.focusArrival();
+    panel.focusArrival(); // a later refresh never steals focus again
+    assert.deepEqual(calls, [
+      'suggestions:tabindex=-1',
+      'suggestions:scroll',
+      'suggestions:focus:true'
+    ]);
+    calls.length = 0;
+    section.hidden = true; // nothing to review: land on the library heading
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, ['library:tabindex=-1', 'library:scroll', 'library:focus:true']);
+    calls.length = 0;
+    globalThis.location = { hash: '#projectLibraryPanel' };
+    new ProjectLibraryPanel({ workspaceId: 'home' }).focusArrival();
+    assert.deepEqual(calls, [], 'other arrivals keep the page’s normal focus');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.location = originalLocation;
+  }
+});
+
+test('scan digest renders as inert text and shows the shelf even with no suggestions', async () => {
+  const original = globalThis.document;
+  const elements = new Map();
+  const makeNode = tag => ({
+    tag,
+    children: [],
+    hidden: true,
+    textContent: '',
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener() {}
+  });
+  for (const [id, tag] of [
+    ['projectLibraryProposals', 'section'],
+    ['projectLibraryProposalRows', 'div'],
+    ['projectLibraryDigest', 'p']
+  ])
+    elements.set(id, makeNode(tag));
+  globalThis.document = {
+    createElement: tag => {
+      const element = makeNode(tag);
+      element.hidden = false;
+      return element;
+    },
+    getElementById: id => elements.get(id) || null
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      provider_read_only: false,
+      roots: [{ id: 'root-1', path: '/Music/<img src=x onerror=alert(1)>' }]
+    };
+    const requests = [];
+    panel.request = async path => {
+      requests.push(path);
+      if (path === '/summary') return { initialized: true, digest: DIGEST, ready_proposals: 0 };
+      return { total: 0, rows: [] };
+    };
+    await panel.renderProposals();
+    const line = elements.get('projectLibraryDigest');
+    assert.equal(line.hidden, false);
+    assert.match(line.textContent, /^Scanned <img src=x onerror=alert\(1\)> on /);
+    assert.equal('innerHTML' in line, false, 'the digest is assigned as text, never markup');
+    assert.equal(elements.get('projectLibraryProposals').hidden, false);
+    const [empty] = elements.get('projectLibraryProposalRows').children;
+    assert.equal(empty.textContent, 'No Manager suggestions to review for this scan.');
+    assert.deepEqual(requests, ['/summary', '/proposals'], 'rendering never starts a scan');
+
+    // No digest and no suggestions: the shelf stays hidden.
+    panel.request = async path => (path === '/summary' ? { digest: null } : { total: 0 });
+    await panel.renderProposals();
+    assert.equal(elements.get('projectLibraryProposals').hidden, true);
+    assert.equal(line.hidden, true);
+
+    // An unavailable summary never hides real suggestions or invents a digest.
+    panel.request = async path => {
+      if (path === '/summary') throw new Error('unavailable');
+      return {
+        total: 1,
+        rows: [
+          {
+            name: 'Song',
+            status: 'ready',
+            proposal: { id: 'p', next_action: 'Mix', reason: '', agent_name: 'Manager' }
+          }
+        ]
+      };
+    };
+    await panel.renderProposals();
+    assert.equal(elements.get('projectLibraryProposals').hidden, false);
+    assert.equal(line.hidden, true);
+    assert.equal(elements.get('projectLibraryProposalRows').children.length, 1);
+  } finally {
+    globalThis.document = original;
+  }
 });

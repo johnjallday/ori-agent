@@ -939,6 +939,25 @@
   margin: 0 0 1rem;
   font-family: "Chakra Petch", sans-serif;
 }
+.project-library-digest {
+  margin: -0.5rem 0 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.project-library-run {
+  margin: -0.6rem 0 1rem;
+  color: var(--assistant-muted);
+  overflow-wrap: anywhere;
+}
+.project-library-resume-card button + .project-library-dismiss {
+  margin-left: 0.5rem;
+}
+/* Arriving from a map badge or an Action Center card scrolls a shelf heading
+   to the top; keep it clear of the fixed navbar (as settings.css does). */
+.project-library-panel h2,
+.project-library-resume h3 {
+  scroll-margin-top: 96px;
+}
 .project-library-resume-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));

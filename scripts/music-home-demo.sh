@@ -28,11 +28,14 @@ Options:
   --port PORT       Server port (default: 8931).
   --sandbox DIR     Use and preserve this sandbox instead of a temporary one.
   --keep            Preserve the generated temporary sandbox after exit.
-  --restart-check   In the paired reviewed test only, restart this sandbox's
-                    server once when the browser requests it (never user state).
+  --restart-check   In a reviewed test only (portfolio-reviewed needs --reaper-source),
+                    restart this sandbox's server once when the browser requests
+                    it (never user state).
   --suite NAME      Browser test suite: home (default), portfolio (local refusal),
-                    or portfolio-reviewed (published release; test only).
-  --provider MODE   local (default) or reviewed (portfolio-reviewed only).
+                    portfolio-reviewed (published release; test only), or
+                    manager-notifications (scan digest, badge and Manager
+                    suggestions on the published release; test only).
+  --provider MODE   local (default) or reviewed (the two reviewed suites only).
   --open            Open the manual demo in the default browser (macOS).
   -h, --help        Show this help.
 
@@ -134,8 +137,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$plugin_source" ]] || fail "--source or ORI_MUSIC_PLUGIN_SOURCE is required"
-if [[ -n "$reaper_source" && ( "$mode" != "test" || "$test_suite" != "portfolio-reviewed" || "$provider_mode" != "reviewed" ) ]]; then
-	fail "--reaper-source needs test --suite portfolio-reviewed --provider reviewed"
+reviewed_suite=0
+if [[ "$test_suite" == "portfolio-reviewed" || "$test_suite" == "manager-notifications" ]]; then
+	reviewed_suite=1
+fi
+if [[ -n "$reaper_source" ]] && { [[ "$mode" != "test" || "$provider_mode" != "reviewed" ]] || ((reviewed_suite == 0)); }; then
+	fail "--reaper-source needs test --suite portfolio-reviewed|manager-notifications --provider reviewed"
 fi
 [[ "$port" =~ ^[0-9]+$ ]] || fail "port must be numeric"
 ((port >= 1 && port <= 65535)) || fail "port must be between 1 and 65535"
@@ -144,21 +151,23 @@ fi
 if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
 fi
-[[ "$test_suite" == "home" || "$test_suite" == "portfolio" || "$test_suite" == "portfolio-reviewed" ]] || \
-	fail "--suite needs home, portfolio or portfolio-reviewed"
+[[ "$test_suite" == "home" || "$test_suite" == "portfolio" || "$test_suite" == "portfolio-reviewed" ||
+	"$test_suite" == "manager-notifications" ]] || \
+	fail "--suite needs home, portfolio, portfolio-reviewed or manager-notifications"
 [[ "$provider_mode" == "local" || "$provider_mode" == "reviewed" ]] || fail "--provider needs local or reviewed"
 if [[ "$mode" != "test" && "$test_suite" != "home" ]]; then
 	fail "--suite is only valid with the test command"
 fi
-if [[ "$test_suite" == "portfolio-reviewed" && "$provider_mode" != "reviewed" ]] || \
-	[[ "$provider_mode" == "reviewed" && ( "$mode" != "test" || "$test_suite" != "portfolio-reviewed" ) ]]; then
-	fail "portfolio-reviewed requires test --provider reviewed; other suites require local"
+if { ((reviewed_suite == 1)) && [[ "$provider_mode" != "reviewed" ]]; } ||
+	{ [[ "$provider_mode" == "reviewed" ]] && { [[ "$mode" != "test" ]] || ((reviewed_suite == 0)); }; }; then
+	fail "portfolio-reviewed and manager-notifications require test --provider reviewed; other suites require local"
 fi
 if [[ "$mode" != "serve" && "$open_browser" -eq 1 ]]; then
 	fail "--open is only valid with the serve command"
 fi
-if ((restart_check == 1)) && [[ "$mode" != "test" || "$test_suite" != "portfolio-reviewed" || "$provider_mode" != "reviewed" || -z "$reaper_source" ]]; then
-	fail "--restart-check requires test --suite portfolio-reviewed --provider reviewed --reaper-source"
+if ((restart_check == 1)) && { [[ "$mode" != "test" || "$provider_mode" != "reviewed" ]] || ((reviewed_suite == 0)) ||
+	[[ "$test_suite" == "portfolio-reviewed" && -z "$reaper_source" ]]; }; then
+	fail "--restart-check requires test --provider reviewed with --suite manager-notifications, or --suite portfolio-reviewed with --reaper-source"
 fi
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -361,6 +370,8 @@ if [[ "$mode" == "test" ]]; then
 		playwright_file="tests/music-home-portfolio.spec.ts"
 	elif [[ "$test_suite" == "portfolio-reviewed" ]]; then
 		playwright_file="tests/music-home-portfolio-reviewed.spec.ts"
+	elif [[ "$test_suite" == "manager-notifications" ]]; then
+		playwright_file="tests/music-home-manager-notifications.spec.ts"
 	fi
 	run_music_acceptance() {
 		env PLAYWRIGHT_BASE_URL="$base_url" \

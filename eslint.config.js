@@ -157,6 +157,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-hq-email-setup.js',
       'internal/web/static/js/modules/home-calendar-ops-portal.js',
       'internal/web/static/js/modules/home-daily-brief.js',
+      'internal/web/static/js/modules/home-library-badges.js',
       'internal/web/static/js/modules/home-plugin-updates.js',
       'internal/web/static/js/modules/home-workspace-cockpit.js',
       'internal/web/static/js/modules/home-workspace-tree.js',

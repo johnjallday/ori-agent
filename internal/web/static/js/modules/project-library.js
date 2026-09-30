@@ -51,6 +51,106 @@ export function libraryQuery({
   return query.toString();
 }
 
+const DIGEST_SETUP_NOTES = {
+  setup_check_unavailable: 'project setup was not checked',
+  home_provider_unavailable: 'project setup needs the Home’s installed package',
+  project_provider_unavailable: 'project setup needs a compatible installed integration',
+  provider_ambiguous: 'more than one installed integration needs review before setup'
+};
+
+// libraryDigestText renders the Home's model-free scan digest. The digest
+// carries only IDs and counts; the folder name comes from the owner-only roots
+// list the shelf already loaded, reduced to its last path segment.
+export function libraryDigestText(digest, roots = []) {
+  if (!digest || typeof digest !== 'object' || !digest.scan_id) return '';
+  const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
+  const root = (Array.isArray(roots) ? roots : []).find(item => item?.id === digest.root_id);
+  const name =
+    String(root?.path || '')
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .pop() || 'an approved folder';
+  const scanned = new Date(digest.scanned_at);
+  const when = Number.isNaN(scanned.getTime())
+    ? 'an unknown date'
+    : scanned.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  const projects = count(digest.projects);
+  const parts = [`${projects} ${projects === 1 ? 'project' : 'projects'}`];
+  if (count(digest.new) > 0) parts.push(`${count(digest.new)} new`);
+  if (digest.setup_note) {
+    parts.push(DIGEST_SETUP_NOTES[digest.setup_note] || 'project setup is unavailable');
+  } else {
+    parts.push(`${count(digest.activatable)} can be set up`);
+    if (count(digest.unsupported_format) > 0)
+      parts.push(`${count(digest.unsupported_format)} unsupported format`);
+  }
+  if (count(digest.unavailable) > 0) parts.push(`${count(digest.unavailable)} no longer found`);
+  let text = `Scanned ${name} on ${when}: ${parts.join(', ')}.`;
+  if (digest.coverage === 'partial')
+    text += ' Partial scan: folders it did not reach were left unchanged.';
+  return text;
+}
+
+const RUN_SKIP_REASONS = {
+  no_manager: 'no Manager is bound to this Home',
+  no_model: 'the Manager has no tool-capable model configured',
+  provider_unavailable: 'the Home provider is unavailable',
+  unavailable: 'the Manager’s library tools are unavailable',
+  superseded: 'a newer scan replaced this one',
+  model_error: 'the model call failed',
+  time_limit: 'the review ran out of time',
+  interrupted: 'Ori stopped during the review'
+};
+
+const RUN_STOP_REASONS = {
+  proposal_limit: 'It stopped at the three-suggestion limit.',
+  time_limit: 'It stopped at the one-minute limit.',
+  token_limit: 'It stopped at the token budget.',
+  step_limit: 'It stopped at the step limit.',
+  model_error: 'The model call failed after saving these.'
+};
+
+// libraryRunText describes the Manager's bounded review of the digest's scan.
+// It never implies a suggestion was applied.
+export function libraryRunText(run) {
+  if (!run || typeof run !== 'object') return '';
+  const count = Number.isInteger(run.proposals) && run.proposals > 0 ? run.proposals : 0;
+  if (run.status === 'started') return 'Manager review of this scan is in progress…';
+  if (run.status === 'skipped')
+    return `Manager review skipped: ${RUN_SKIP_REASONS[run.reason] || 'it could not run'}.`;
+  if (run.status !== 'finished') return '';
+  const model = String(run.model || '').trim();
+  const who = model ? `The Manager (${model})` : 'The Manager';
+  const found = count
+    ? `left ${count} ${count === 1 ? 'suggestion' : 'suggestions'} for your review`
+    : 'had no suggestions';
+  const stop = RUN_STOP_REASONS[run.reason] ? ` ${RUN_STOP_REASONS[run.reason]}` : '';
+  return `${who} reviewed this scan and ${found}.${stop}`;
+}
+
+// libraryFeedbackText totals the owner's answers across suggestion kinds.
+// It is shown to the owner only; nothing tunes itself from it.
+export function libraryFeedbackText(feedback) {
+  const count = value => (Number.isInteger(value) && value > 0 ? value : 0);
+  let accepted = 0;
+  let dismissed = 0;
+  for (const row of Array.isArray(feedback) ? feedback : []) {
+    accepted += count(row?.accepted);
+    dismissed += count(row?.dismissed);
+  }
+  if (!accepted && !dismissed) return '';
+  return `Your answers to Manager suggestions so far: ${accepted} accepted, ${dismissed} dismissed.`;
+}
+
+// A suggestion's origin: the bounded scan review, or a Manager chat.
+export function proposalSourceLabel(proposal) {
+  if (proposal?.source === 'manager_model') {
+    const model = String(proposal.model || '').trim();
+    return model ? `From the scan review · ${model}` : 'From the scan review';
+  }
+  return 'From a Manager chat';
+}
+
 // Only queue navigation (opaque entry IDs and a user-confirmed retry) lives in
 // this browser tab. Every item still requires a fresh server review and a
 // distinct user confirmation; storage never grants folder/creator authority.
@@ -292,6 +392,24 @@ export class ProjectLibraryPanel {
       document.getElementById('projectLibrarySetup').hidden = true;
       document.getElementById('projectLibraryContent').hidden = true;
     }
+    this.focusArrival();
+  }
+
+  // Arriving from a map badge or an Action Center card lands on the
+  // suggestions heading once the shelf has rendered, instead of wherever the
+  // browser's early hash scroll left the page. Only the first render counts.
+  focusArrival() {
+    if (this.arrivalHandled || globalThis.location?.hash !== '#projectLibraryProposals') return;
+    this.arrivalHandled = true;
+    const section = document.getElementById('projectLibraryProposals');
+    const heading =
+      section && !section.hidden
+        ? document.getElementById('projectLibraryProposalsTitle')
+        : document.getElementById('projectLibraryTitle');
+    if (!heading) return;
+    heading.setAttribute('tabindex', '-1');
+    heading.scrollIntoView?.({ block: 'start' });
+    heading.focus?.({ preventScroll: true });
   }
 
   async renderPendingLinks() {
@@ -374,13 +492,44 @@ export class ProjectLibraryPanel {
     if (!section || !container) return;
     container.replaceChildren();
     section.hidden = true;
-    let page;
+    // The digest is a model-free summary of the last completed scan. It is
+    // shown even when the Manager has made no suggestions.
+    let summary = null;
+    try {
+      summary = await this.request('/summary');
+    } catch (_) {
+      summary = null;
+    }
+    const digestText = libraryDigestText(summary?.digest, this.state?.roots);
+    const digestLine = document.getElementById('projectLibraryDigest');
+    if (digestLine) {
+      digestLine.textContent = digestText;
+      digestLine.hidden = !digestText;
+    }
+    const runText = digestText ? libraryRunText(summary?.proposal_run) : '';
+    const runLine = document.getElementById('projectLibraryRun');
+    if (runLine) {
+      runLine.textContent = runText;
+      runLine.hidden = !runText;
+    }
+    const feedbackText = libraryFeedbackText(summary?.feedback);
+    const feedbackLine = document.getElementById('projectLibraryFeedback');
+    if (feedbackLine) {
+      feedbackLine.textContent = feedbackText;
+      feedbackLine.hidden = !feedbackText;
+    }
+    let page = null;
     try {
       page = await this.request('/proposals');
     } catch (_) {
-      return; // An unavailable provider/binding never creates a review action.
+      page = null; // An unavailable provider/binding never creates a review action.
     }
-    if (!page.total) return;
+    if (!page?.total) {
+      if (!digestText) return;
+      section.hidden = false;
+      container.append(node('p', '', 'No Manager suggestions to review for this scan.'));
+      return;
+    }
     section.hidden = false;
     for (const row of page.rows || []) {
       const proposal = row.proposal;
@@ -414,7 +563,13 @@ export class ProjectLibraryPanel {
         node(
           'small',
           '',
-          `Suggested by ${proposal.agent_name} · ${row.status === 'ready' ? 'Ready for your separate review' : `Not actionable (${row.status})`}`
+          `Suggested by ${proposal.agent_name} · ${proposalSourceLabel(proposal)} · ${
+            row.status === 'ready'
+              ? 'Ready for your separate review'
+              : row.status === 'dismissed'
+                ? 'Dismissed by you'
+                : `Not actionable (${row.status})`
+          }`
         )
       );
       if (row.status === 'ready' && !this.readOnly) {
@@ -445,6 +600,18 @@ export class ProjectLibraryPanel {
         );
         card.append(button);
       }
+      // Dismissing only removes, so it stays available when the Manager or
+      // the Home provider has gone away (the row then reads "unavailable").
+      if (row.status === 'ready' || row.status === 'unavailable') {
+        const dismiss = node(
+          'button',
+          'modern-btn modern-btn-secondary project-library-dismiss',
+          `Dismiss ${row.name} suggestion`
+        );
+        dismiss.type = 'button';
+        dismiss.addEventListener('click', () => void this.dismissProposal(row, dismiss));
+        card.append(dismiss);
+      }
       container.append(card);
     }
     if (page.total > (page.rows || []).length)
@@ -455,6 +622,38 @@ export class ProjectLibraryPanel {
           `Showing the latest ${(page.rows || []).length} of ${page.total} saved suggestions.`
         )
       );
+  }
+
+  // A dismissal is its own owner answer. The idempotency key survives a lost
+  // reply, so retrying the same dismissal replays instead of failing.
+  async dismissProposal(row, trigger) {
+    await this.run(trigger, 'Checking this suggestion…', async () => {
+      const proposal = row.proposal;
+      const confirmed = await this.confirm(
+        `Dismiss the suggestion for ${row.name}?`,
+        [
+          'Only this suggestion is marked dismissed. No notes, sessions, folders or workspaces change.',
+          'The Manager’s scan reviews will not suggest the same kind of step for this project again for seven days.'
+        ],
+        'Dismiss suggestion',
+        trigger
+      );
+      if (!confirmed) {
+        this.status('Nothing was dismissed.');
+        return;
+      }
+      this.pendingDismissals ||= new Map();
+      const key = this.pendingDismissals.get(proposal.id) || operationKey('dismiss');
+      this.pendingDismissals.set(proposal.id, key);
+      await this.post(`/proposals/${encodeURIComponent(proposal.id)}/dismiss`, {
+        confirm: true,
+        idempotency_key: key
+      });
+      this.pendingDismissals.delete(proposal.id);
+      // Refresh first: it resets the status line, and this message must stay.
+      await this.refresh();
+      this.status(`Dismissed the suggestion for ${row.name}. Nothing else changed.`);
+    });
   }
 
   async editRecapProposal(row, trigger) {

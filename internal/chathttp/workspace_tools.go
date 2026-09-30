@@ -44,6 +44,8 @@ type WorkspaceToolProvider struct {
 	// a global agent fallback with the same name cannot substitute for it.
 	executingInstanceID    string
 	projectLibraryEvidence func(projectlibrary.Scope, *workspace.Workspace) bool
+	// managerRun is set only by the host's scan-review runner.
+	managerRun projectlibrary.ManagerRunContext
 
 	// Optional dependencies for management tools (Phase 2)
 	agentStore    store.Store

@@ -173,6 +173,64 @@ test('handleAddToBacklog re-enables the button and shows an error status on fail
   );
 });
 
+const LIBRARY_CARD = {
+  home_id: 'home-1',
+  home_name: 'Music <Home>',
+  route: '/workspaces/music-home/assistant#projectLibraryProposals',
+  projects: 6,
+  new: 6,
+  activatable: 5,
+  ready_proposals: 1,
+  coverage: 'complete'
+};
+
+test('a Home library card only links to that Home’s suggestions shelf', () => {
+  const { api } = loadActionCenter();
+  const html = api.libraryCardHTML(LIBRARY_CARD);
+  assert.match(html, /<strong>Music &lt;Home&gt;<\/strong>/);
+  assert.match(html, /6 new · 5 ready to set up · 1 suggestion to review/);
+  assert.match(
+    html,
+    /<a class="modern-btn modern-btn-secondary action-center-library-open" href="\/workspaces\/music-home\/assistant#projectLibraryProposals" aria-label="Open Music &lt;Home&gt; suggestions shelf">Open shelf<\/a>/
+  );
+  assert.doesNotMatch(html, /data-action=/, 'no dismiss, snooze or resolve on a derived card');
+  assert.match(api.libraryCardHTML({ ...LIBRARY_CARD, coverage: 'partial' }), /partial scan/);
+  for (const route of [
+    'https://evil.example/workspaces/x/assistant#projectLibraryProposals',
+    '/workspaces/x/assistant',
+    'javascript:alert(1)'
+  ])
+    assert.equal(api.libraryCardHTML({ ...LIBRARY_CARD, route }), '', route);
+  assert.equal(
+    api.libraryCardHTML({ ...LIBRARY_CARD, activatable: 0, ready_proposals: 0 }),
+    '',
+    'nothing ready: no card'
+  );
+});
+
+test('renderLibrary shows the section only with a card and respects the workspace filter', () => {
+  const section = makeEl({ hidden: true });
+  const container = makeEl();
+  const elements = {
+    '#action-center-library': section,
+    '#action-center-library-cards': container
+  };
+  const { api } = loadActionCenter({ elements });
+  api.renderLibrary([
+    LIBRARY_CARD,
+    { ...LIBRARY_CARD, home_id: 'home-2', activatable: 0, ready_proposals: 0 }
+  ]);
+  assert.equal(section.hidden, false);
+  assert.equal((container.innerHTML.match(/<article /g) || []).length, 1);
+  api.renderLibrary([]);
+  assert.equal(section.hidden, true);
+  assert.equal(container.innerHTML, '');
+
+  const filtered = loadActionCenter({ elements, search: '?workspace=home-2' });
+  filtered.api.renderLibrary([LIBRARY_CARD]);
+  assert.equal(section.hidden, true, 'a workspace-scoped view hides other Homes');
+});
+
 test('handleAddToBacklog posts to the add-to-backlog endpoint, not resolve/dismiss', async () => {
   const calls = [];
   const { api } = loadActionCenter({

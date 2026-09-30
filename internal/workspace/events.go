@@ -122,10 +122,80 @@ const (
 	EventDynamicAgentApproved  EventType = "dynamic_agent.approved"
 	EventDynamicAgentDenied    EventType = "dynamic_agent.denied"
 
+	// Project library events. The payload is path-free by contract; see
+	// LibraryScanCompleted.
+	EventLibraryScanCompleted EventType = "library.scan_completed"
+
 	// System events
 	EventError   EventType = "error"
 	EventWarning EventType = "warning"
 )
+
+// LibraryScanCompleted is the whole payload of EventLibraryScanCompleted.
+// It is a notification, never authority: a subscriber must re-read the Home
+// and reauthorize before doing anything. It holds opaque IDs and counts
+// only, never a folder path, file name or project title.
+type LibraryScanCompleted struct {
+	HomeID            string `json:"home_id"`
+	ScanID            string `json:"scan_id"`
+	RootID            string `json:"root_id"`
+	Coverage          string `json:"coverage"` // "complete" or "partial"
+	Projects          int    `json:"projects"`
+	New               int    `json:"new"`
+	Updated           int    `json:"updated"`
+	Unavailable       int    `json:"unavailable"`
+	UnsupportedFormat int    `json:"unsupported_format"`
+	Activatable       int    `json:"activatable"`
+}
+
+// Event wraps the payload for the bus. Data carries the same keys as the
+// struct's JSON so history and the event API show exactly these fields.
+func (p LibraryScanCompleted) Event(source string) Event {
+	return Event{Type: EventLibraryScanCompleted, WorkspaceID: p.HomeID, Source: source,
+		Data: map[string]any{
+			"home_id": p.HomeID, "scan_id": p.ScanID, "root_id": p.RootID, "coverage": p.Coverage,
+			"projects": p.Projects, "new": p.New, "updated": p.Updated, "unavailable": p.Unavailable,
+			"unsupported_format": p.UnsupportedFormat, "activatable": p.Activatable,
+		},
+		Metadata: map[string]string{}}
+}
+
+// LibraryScanCompletedFromEvent accepts only a well-formed in-process
+// library event. Anything else is ignored rather than guessed at.
+func LibraryScanCompletedFromEvent(event Event) (LibraryScanCompleted, bool) {
+	if event.Type != EventLibraryScanCompleted || event.Data == nil {
+		return LibraryScanCompleted{}, false
+	}
+	text := func(key string) (string, bool) {
+		value, ok := event.Data[key].(string)
+		return value, ok && value != "" && len(value) <= 160
+	}
+	count := func(key string) (int, bool) {
+		value, ok := event.Data[key].(int)
+		return value, ok && value >= 0
+	}
+	var p LibraryScanCompleted
+	var ok [10]bool
+	p.HomeID, ok[0] = text("home_id")
+	p.ScanID, ok[1] = text("scan_id")
+	p.RootID, ok[2] = text("root_id")
+	p.Coverage, ok[3] = text("coverage")
+	p.Projects, ok[4] = count("projects")
+	p.New, ok[5] = count("new")
+	p.Updated, ok[6] = count("updated")
+	p.Unavailable, ok[7] = count("unavailable")
+	p.UnsupportedFormat, ok[8] = count("unsupported_format")
+	p.Activatable, ok[9] = count("activatable")
+	for _, valid := range ok {
+		if !valid {
+			return LibraryScanCompleted{}, false
+		}
+	}
+	if p.HomeID != event.WorkspaceID || (p.Coverage != "complete" && p.Coverage != "partial") {
+		return LibraryScanCompleted{}, false
+	}
+	return p, true
+}
 
 // Event represents a workspace event
 type Event struct {
