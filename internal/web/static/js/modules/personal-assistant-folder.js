@@ -209,6 +209,14 @@ const SETUP_STOP_COPY = {
   failed: 'A step did not finish.'
 };
 
+// A collection's run stops in the same ways; only what is already true differs.
+const PORTFOLIO_STOP_COPY = {
+  needs_model:
+    'What finished is kept. The Home needs a model before its agents can be added; nothing was listed yet.',
+  needs_pick: subject =>
+    `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to list it.`
+};
+
 const CONTINUE_SETUP = {
   id: 'resume',
   label: 'Continue setup',
@@ -257,7 +265,7 @@ function stoppedActions(reason, setup) {
 // setup: the plan lines with a state each, one status line, and — only when
 // stopped — one plain sentence saying what finished and what is needed. A raw
 // stop reason code is never shown.
-export function setupRunView(setup, subject) {
+export function setupRunView(setup, subject, { portfolio = false } = {}) {
   const lines = setupLinesView(setup?.lines);
   const status = String(setup?.status || 'running');
   if (status !== 'stopped') {
@@ -273,7 +281,8 @@ export function setupRunView(setup, subject) {
   const reason = String(setup?.stop_reason || 'failed');
   const finished = lines.filter(line => line.state === 'done').length;
   const progress = lines.length ? `${finished} of ${lines.length} steps finished. ` : '';
-  let sentence = SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
+  let sentence =
+    (portfolio && PORTFOLIO_STOP_COPY[reason]) || SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
   if (typeof sentence === 'function') sentence = sentence(subject);
   return {
     status,
@@ -296,7 +305,7 @@ export function setupModalView(offer) {
   if (!offer.setup && !receipt.visible) return { visible: false };
   const folder = String(offer.folder || '').trim() || 'this project';
   const subject = String(offer.subject?.name || '').trim() || folder;
-  const run = setupRunView(offer.setup, subject);
+  const run = setupRunView(offer.setup, subject, { portfolio: Boolean(offer.portfolio) });
   const total = run.lines.length;
   const finished = run.lines.filter(line => line.state === 'done').length;
   if (receipt.visible) {
@@ -343,7 +352,9 @@ function capabilityConfirmView(offer, base, subject) {
   const capability = offer.capability;
   const portfolio = offer.portfolio;
   // A collection rides the same one-consent plan and run as a single project.
-  const run = offer.setup ? setupRunView(offer.setup, subject) : null;
+  const run = offer.setup
+    ? setupRunView(offer.setup, subject, { portfolio: Boolean(portfolio) })
+    : null;
   const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
   const continuing = base.status === 'awaiting_outcome';

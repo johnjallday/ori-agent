@@ -411,7 +411,9 @@ func (h *Handler) ListAssistantLibraryRoots(w http.ResponseWriter, r *http.Reque
 			}
 			return 0
 		}(), "provider_read_only": !h.assistantLibraryProviderEvidence(scope, station),
-		"picker_available": h.assistantLibraryRoots.PickerAvailable()})
+		"picker_available": h.assistantLibraryRoots.PickerAvailable(),
+		// The shared-assistant switch rides this read: no extra fetch on load.
+		"sharing": h.librarySharing(scope, station)})
 }
 
 // ListAssistantLibraryScanScopes is a read-only, revision-bound page of

@@ -833,6 +833,10 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// One click: the reviewed activation, the Home's shared assistant under its
 		// standing consent, and the first task. Owner-only; never an agent tool.
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/open", s.Handlers.Session.OpenAssistantLibraryProject)
+		// The Home's switch for its shared assistant (off / on / renew after a
+		// plugin update) and the way back when the assistant was deleted.
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing", s.Handlers.Session.SetAssistantLibrarySharing)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing/assistant", s.Handlers.Session.ReAddAssistantLibrarySharing)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/resume", s.Handlers.Session.GetAssistantStudioResume)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/handoff-receipts", s.Handlers.Session.ListAssistantStudioHandoffReceipts)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/sessions", s.Handlers.Session.ListAssistantStudioSessions)

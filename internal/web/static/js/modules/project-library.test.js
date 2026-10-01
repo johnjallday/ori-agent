@@ -9,6 +9,7 @@ import {
   libraryOpenChoices,
   libraryOpenRoute,
   libraryOpenedMessage,
+  librarySharingView,
   libraryQuery,
   libraryRunText,
   proposalSourceLabel,
@@ -3222,4 +3223,94 @@ test('Open posts one request ID per song, keeps it for a retry, and goes to the 
   } finally {
     globalThis.location = previous;
   }
+});
+
+test('the shared-assistant switch says where the Home stands and offers the one fix', () => {
+  const base = { role_label: 'REAPER Assistant', team_digest: 'd1' };
+  assert.equal(librarySharingView({ ...base, state: 'unavailable' }).visible, false);
+  assert.equal(librarySharingView({ ...base, state: 'on' }, true).visible, false);
+  assert.equal(librarySharingView(null).visible, false);
+  const on = librarySharingView({ ...base, state: 'on', agent_name: 'REAPER Assistant' });
+  assert.equal(on.checked, true);
+  assert.equal(on.switchLabel, 'Add my REAPER Assistant to songs I open');
+  assert.match(on.note, /joins each song you open\. File-only/);
+  assert.equal(on.action, null);
+  assert.match(
+    librarySharingView({ ...base, state: 'on' }).note,
+    /added to the first song you open, then joins each one/
+  );
+  const off = librarySharingView({ ...base, state: 'off', agent_name: 'REAPER Assistant' });
+  assert.equal(off.checked, false);
+  assert.match(off.note, /get no agent/);
+  // A Home built before sharing existed opts in with the same switch.
+  const none = librarySharingView({ ...base, state: 'none' });
+  assert.equal(none.checked, false);
+  assert.match(none.note, /Turn this on/);
+  const stale = librarySharingView({ ...base, state: 'stale', agent_name: 'REAPER Assistant' });
+  assert.equal(stale.switchDisabled, true);
+  assert.deepEqual(stale.action, { id: 'review', label: 'Review the updated assistant' });
+  const missing = librarySharingView({
+    ...base,
+    state: 'on',
+    agent_name: 'REAPER Assistant',
+    assistant_missing: true
+  });
+  assert.deepEqual(missing.action, { id: 'readd', label: 'Add the assistant again' });
+  assert.match(missing.note, /is gone/);
+});
+
+test('the switch sends the team it showed, and a stale review asks before renewing', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.run = async (_trigger, _message, work) => work();
+  panel.renderSharing = () => {};
+  const statuses = [];
+  panel.status = message => statuses.push(message);
+  const posts = [];
+  let reply = { sharing: { state: 'off', role_label: 'REAPER Assistant', team_digest: 'd1' } };
+  panel.post = async (path, body) => {
+    posts.push({ path, body });
+    return reply;
+  };
+  panel.state = {
+    provider_read_only: false,
+    sharing: { state: 'on', role_label: 'REAPER Assistant', team_digest: 'd1' }
+  };
+  await panel.setSharing({ checked: false });
+  assert.equal(posts[0].path, '/sharing');
+  assert.equal(posts[0].body.enabled, false);
+  assert.equal(posts[0].body.team_digest, undefined);
+  assert.match(posts[0].body.request_id, /^sharing-/);
+  assert.equal(panel.state.sharing.state, 'off');
+  reply = { sharing: { state: 'on', role_label: 'REAPER Assistant', team_digest: 'd1' } };
+  await panel.setSharing({ checked: true });
+  assert.deepEqual(
+    { enabled: posts[1].body.enabled, team_digest: posts[1].body.team_digest },
+    { enabled: true, team_digest: 'd1' }
+  );
+  // Review the updated assistant: cancelled sends nothing, confirmed renews.
+  panel.state.sharing = { state: 'stale', role_label: 'REAPER Assistant', team_digest: 'd2' };
+  const asked = [];
+  panel.confirm = async (title, lines) => {
+    asked.push({ title, lines });
+    return asked.length > 1;
+  };
+  const trigger = { dataset: { sharingAction: 'review' } };
+  await panel.runSharingAction(trigger);
+  assert.equal(posts.length, 2);
+  assert.match(asked[0].lines.join(' '), /keeps its own model, instructions and tools/);
+  await panel.runSharingAction(trigger);
+  assert.deepEqual(
+    { path: posts[2].path, enabled: posts[2].body.enabled, digest: posts[2].body.team_digest },
+    { path: '/sharing', enabled: true, digest: 'd2' }
+  );
+  // Add the assistant again.
+  panel.state.sharing = {
+    state: 'on',
+    role_label: 'REAPER Assistant',
+    agent_name: 'REAPER Assistant',
+    assistant_missing: true
+  };
+  await panel.runSharingAction({ dataset: { sharingAction: 'readd' } });
+  assert.equal(posts[3].path, '/sharing/assistant');
+  assert.match(statuses.at(-1), /next song you open gets a new REAPER Assistant/);
 });

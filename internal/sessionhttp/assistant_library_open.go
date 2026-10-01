@@ -151,6 +151,16 @@ func (h *Handler) OpenAssistantLibraryProject(w http.ResponseWriter, r *http.Req
 		// missing and go there. No second workspace is ever made.
 		result.WorkspaceID = eligible.WorkspaceID
 	case "review_available", "file_choice_required":
+		// D6: a plugin update changed the assistant the user agreed to. They are
+		// asked once, on the Home (before any file question); until then no song
+		// is opened half-staffed.
+		if h.projectStaffing != nil && h.librarySharing(scope, home).State == sharingStale {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error":  "Your assistant changed in a plugin update. Review the updated assistant on this Home, then open the song.",
+				"reason": "consent_stale",
+			})
+			return
+		}
 		if eligible.State == "file_choice_required" && request.SelectedFile == "" {
 			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 				"error": "Choose which project file to open", "reason": "needs_choice",
@@ -279,11 +289,7 @@ func (h *Handler) createNeedsModel(scope projectlibrary.Scope, home *workspace.W
 	if !consent.Active() {
 		return false
 	}
-	read := h.installedProjectTeam
-	if h.projectTeamOverride != nil {
-		read = h.projectTeamOverride
-	}
-	team, ok := read(scope, home)
+	team, ok := h.projectTeamFor(scope, home)
 	if !ok || !consent.Covers(team.PluginID, team.BlueprintID) || consent.TeamDigest != team.Digest {
 		return false // nothing would be created: the open adds no agent
 	}

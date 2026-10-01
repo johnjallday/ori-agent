@@ -390,16 +390,13 @@ func TestOpenLibrarySong_NeedsAModelBeforeMakingAHalfStaffedSong(t *testing.T) {
 	if code, payload := f.open(t, openHomeID, "three", `{"request_id":"r3"}`); code != http.StatusOK || payload["staffing"] != "joined" {
 		t.Fatalf("bind without a system model = %d %v", code, payload)
 	}
-	// A stale team creates nothing, so it is not held back for a model.
+	// D6: a plugin update changed the team: Open stops, asks on the Home, and
+	// makes nothing.
 	team.Digest = strings.Repeat("c", 64)
 	f.opener.rows["four"] = projectlibrary.ActivationEligibility{State: "review_available", ProjectFiles: []string{"Song 004.rpp"}}
-	if _, err := f.staffs.Consents().Grant(openHomeID, agentworkspace.ProjectStaffingConsentGrant{
-		Source: agentworkspace.ProjectStaffingConsentHomeSwitch, PluginID: "reaper-plugin", BlueprintID: "reaper-song",
-		TeamDigest: strings.Repeat("d", 64), RoleIDs: []string{"reaper-assistant"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if code, _ := f.open(t, openHomeID, "four", `{"request_id":"r4"}`); code != http.StatusOK {
-		t.Fatalf("stale team = %d", code)
+	before := len(f.opener.activations)
+	code, payload = f.open(t, openHomeID, "four", `{"request_id":"r4"}`)
+	if code != http.StatusConflict || payload["reason"] != "consent_stale" || len(f.opener.activations) != before {
+		t.Fatalf("stale team = %d %v", code, payload)
 	}
 }

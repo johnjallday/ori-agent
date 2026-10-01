@@ -426,6 +426,30 @@ func (c *ProjectStaffingConsents) RecordAgent(homeID, pluginID, blueprintID, tea
 	return err
 }
 
+// ForgetAgent clears a role's recorded agent when that exact agent is gone (the
+// caller checked), so the next project opened creates a fresh one and records
+// it. A different recorded name is never touched.
+func (c *ProjectStaffingConsents) ForgetAgent(homeID, pluginID, blueprintID, roleID, agentName string) (*ProjectStaffingConsent, error) {
+	return c.update(homeID, func(current *ProjectStaffingConsent) (*ProjectStaffingConsent, bool, error) {
+		if current == nil || !current.Covers(pluginID, blueprintID) {
+			return current, false, ErrProjectStaffingConsentInvalid
+		}
+		next := current.Clone()
+		for i := range next.Roles {
+			role := &next.Roles[i]
+			if role.RoleID != roleID {
+				continue
+			}
+			if role.AgentName != agentName || agentName == "" {
+				return current, false, ErrProjectStaffingConsentInvalid
+			}
+			role.AgentName, role.PendingName = "", ""
+			return next, true, nil
+		}
+		return current, false, ErrProjectStaffingConsentInvalid
+	})
+}
+
 // Revoke switches the consent off (D7). Songs opened afterwards get no agent; the
 // record and its agent stay, so switching it back on reuses the same agent.
 func (c *ProjectStaffingConsents) Revoke(homeID string) (*ProjectStaffingConsent, error) {

@@ -347,6 +347,45 @@ export function proposalSourceLabel(proposal) {
 // Only queue navigation (opaque entry IDs and a user-confirmed retry) lives in
 // this browser tab. Every item still requires a fresh server review and a
 // distinct user confirmation; storage never grants folder/creator authority.
+// librarySharingView words the Home's shared-assistant switch from the
+// library read's `sharing`. Hidden when no installed blueprint opens this Home's
+// songs, or the Home is read-only.
+export function librarySharingView(sharing, readOnly = false) {
+  const state = String(sharing?.state || '');
+  if (readOnly || !state || state === 'unavailable') return { visible: false };
+  const role = String(sharing.role_label || 'assistant').trim();
+  const agent = String(sharing.agent_name || '').trim();
+  const view = {
+    visible: true,
+    checked: state === 'on' || state === 'stale',
+    switchDisabled: state === 'stale',
+    switchLabel: `Add my ${role} to songs I open`,
+    note: '',
+    action: null
+  };
+  switch (state) {
+    case 'on':
+      view.note = agent
+        ? `${agent} joins each song you open. File-only: it works with the project files.`
+        : `Your ${role} is added to the first song you open, then joins each one.`;
+      break;
+    case 'off':
+      view.note = `Songs you open get no agent. Turn this on to add your ${role} to them.`;
+      break;
+    case 'stale':
+      view.note = `A plugin update changed your ${role}. Review it to keep adding it to the songs you open.`;
+      view.action = { id: 'review', label: 'Review the updated assistant' };
+      break;
+    default:
+      view.note = `Turn this on and your ${role} joins each song you open.`;
+  }
+  if (sharing.assistant_missing && state === 'on') {
+    view.note = `${agent || `Your ${role}`} is gone, so songs you open get no agent. The next one can get a new ${role}.`;
+    view.action = { id: 'readd', label: 'Add the assistant again' };
+  }
+  return view;
+}
+
 // libraryOpenAction is the row's one-click Open, or null when the row cannot be
 // opened here (read-only Home, unsupported format, source unavailable): such a
 // row keeps its Details, which explain why.
@@ -652,9 +691,118 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectSetupNextAction')
       ?.addEventListener('click', event => void this.runSetupNext(event.currentTarget));
+    document
+      .getElementById('projectLibrarySharingSwitch')
+      ?.addEventListener('change', event => void this.setSharing(event.currentTarget));
+    document
+      .getElementById('projectLibrarySharingAction')
+      ?.addEventListener('click', event => void this.runSharingAction(event.currentTarget));
     await this.restoreCollectionContinuation();
     await this.refresh();
     await this.resumeFromIntegration();
+  }
+
+  // The Home's switch for its shared assistant, and the one action that fixes
+  // it when it cannot apply. It rides the library read: no extra fetch.
+  renderSharing() {
+    const section = document.getElementById('projectLibrarySharing');
+    if (!section) return;
+    const view = librarySharingView(this.state?.sharing, this.readOnly);
+    section.hidden = !view.visible;
+    if (!view.visible) return;
+    const toggle = document.getElementById('projectLibrarySharingSwitch');
+    if (toggle) {
+      toggle.checked = view.checked;
+      toggle.disabled = this.busy || view.switchDisabled;
+    }
+    const labelElement = document.getElementById('projectLibrarySharingLabel');
+    if (labelElement) labelElement.textContent = view.switchLabel;
+    const note = document.getElementById('projectLibrarySharingNote');
+    if (note) note.textContent = view.note;
+    const action = document.getElementById('projectLibrarySharingAction');
+    if (action) {
+      action.hidden = !view.action;
+      action.textContent = view.action?.label || '';
+      action.dataset.sharingAction = view.action?.id || '';
+      action.disabled = this.busy;
+    }
+  }
+
+  async postSharing(path, body) {
+    const result = await this.post(path, {
+      request_id: `sharing-${globalThis.crypto.randomUUID()}`,
+      ...body
+    });
+    if (this.state && result?.sharing) this.state.sharing = result.sharing;
+    return result;
+  }
+
+  async setSharing(toggle) {
+    const sharing = this.state?.sharing;
+    if (!sharing || this.busy) return;
+    const enabled = Boolean(toggle?.checked);
+    await this.run(
+      toggle,
+      enabled ? 'Turning the shared assistant on…' : 'Turning the shared assistant off…',
+      async () => {
+        try {
+          await this.postSharing(
+            '/sharing',
+            enabled ? { enabled, team_digest: sharing.team_digest } : { enabled }
+          );
+          this.status(
+            enabled
+              ? `Your ${sharing.role_label || 'assistant'} joins each song you open.`
+              : 'Songs you open from now on get no agent. Songs already open keep theirs.'
+          );
+        } catch (error) {
+          if (error.payload?.sharing && this.state) this.state.sharing = error.payload.sharing;
+          throw error;
+        } finally {
+          this.renderSharing();
+        }
+      }
+    );
+  }
+
+  async runSharingAction(trigger) {
+    const sharing = this.state?.sharing;
+    const id = trigger?.dataset?.sharingAction || '';
+    if (!sharing || this.busy || !id) return;
+    if (id === 'review') {
+      const role = sharing.role_label || 'assistant';
+      const accepted = await this.confirm(
+        'Review the updated assistant',
+        [
+          `A plugin update changed what your ${role} is for this Home's songs.`,
+          `${sharing.agent_name || `Your ${role}`} keeps its own model, instructions and tools.`,
+          'It joins the songs you open from now on. Songs already open are unchanged.',
+          'File-only: nothing here starts live control of the project app.'
+        ],
+        'Keep adding it',
+        trigger
+      );
+      if (!accepted) return;
+      await this.run(trigger, 'Saving your answer…', async () => {
+        try {
+          await this.postSharing('/sharing', { enabled: true, team_digest: sharing.team_digest });
+          this.status(`Your ${role} joins the songs you open again.`);
+        } finally {
+          this.renderSharing();
+        }
+      });
+      return;
+    }
+    if (id === 'readd') {
+      await this.run(trigger, 'Getting a new assistant ready…', async () => {
+        try {
+          await this.postSharing('/sharing/assistant', {});
+          this.status(`The next song you open gets a new ${sharing.role_label || 'assistant'}.`);
+        } finally {
+          this.renderSharing();
+        }
+      });
+    }
   }
 
   // Shows the one next step of an unfinished library above the roster and
@@ -716,6 +864,7 @@ export class ProjectLibraryPanel {
       }
       this.renderFormats();
       this.renderRoots();
+      this.renderSharing();
       this.renderSetupNext();
       await this.restoreQueue();
       this.renderQueueControls();

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -235,12 +236,29 @@ func (s *Service) Settle(projectID string) error {
 	return nil
 }
 
+// AgentExists says whether the user has an agent of that name.
+func (s *Service) AgentExists(name string) bool { return s != nil && s.agentExists(name) }
+
+// agentOrigins is the agent store's own answer to where a name comes from.
+type agentOrigins interface {
+	AgentOrigin(name string) (store.AgentOrigin, bool)
+}
+
+// agentExists is true only for an agent in the user's own roster. A song keeps
+// its own copy of the agents it had, and the store lists such a workspace-only
+// copy by name; that copy is not the shared assistant and is never bound (D3).
 func (s *Service) agentExists(name string) bool {
 	if s.agents == nil {
 		return false
 	}
-	_, found := s.agents.GetAgent(name)
-	return found
+	if _, found := s.agents.GetAgent(name); !found {
+		return false
+	}
+	if origins, ok := s.agents.(agentOrigins); ok {
+		origin, found := origins.AgentOrigin(name)
+		return found && origin.Source != store.SourceWorkspace
+	}
+	return true
 }
 
 // nameTaken is the create's own collision rule: any agent the user has, or any

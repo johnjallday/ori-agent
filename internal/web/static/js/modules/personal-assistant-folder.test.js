@@ -765,6 +765,26 @@ test('every stop reason says in one plain sentence what finished and what is nee
   }
 });
 
+test('a stopped collection says what is true for a collection', () => {
+  const view = folderOfferView({
+    ...stoppedOffer('needs_model'),
+    subject: { name: 'Songs' },
+    portfolio: { projects: 30 }
+  });
+  assert.match(view.question, /The Home needs a model before its agents can be added/);
+  assert.doesNotMatch(view.question, /workspace and folder are set up/);
+  assert.deepEqual(
+    view.actions.map(action => action.id),
+    ['model', 'retry', 'resume']
+  );
+  const modal = setupModalView({
+    ...stoppedOffer('needs_model'),
+    subject: { name: 'Songs' },
+    portfolio: { projects: 30 }
+  });
+  assert.match(modal.status, /The Home needs a model/);
+});
+
 test('a stopped setup offers the action that fixes its stop', () => {
   const ids = reason =>
     folderOfferView(stoppedOffer(reason, { entry_candidates: ['A.rpp', 'B.rpp'] })).actions.map(

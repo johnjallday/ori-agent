@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -146,6 +147,50 @@ func TestFillRegrantsAfterTheSwitchWasTurnedOff(t *testing.T) {
 	}
 	if consent, _ := service.Consents().Read("home"); !consent.Active() {
 		t.Fatalf("not switched back on: %+v", consent)
+	}
+}
+
+// originAgents is an agent store that knows where each name comes from.
+type originAgents struct {
+	fakeAgents
+	workspaceOnly map[string]bool
+}
+
+func (o originAgents) AgentOrigin(name string) (store.AgentOrigin, bool) {
+	if o.workspaceOnly[name] {
+		return store.AgentOrigin{Source: store.SourceWorkspace, WorkspaceID: "song-a"}, true
+	}
+	if o.fakeAgents[name] {
+		return store.AgentOrigin{Source: store.SourceRoster}, true
+	}
+	return store.AgentOrigin{}, false
+}
+
+// D3 after a delete: a song's own leftover copy of the assistant is not the
+// assistant, so the consent stops (assistant_missing) instead of binding it.
+func TestFillNeverBindsASongsLeftoverCopy(t *testing.T) {
+	st, _, _ := fixture(t)
+	agents := originAgents{fakeAgents: fakeAgents{}, workspaceOnly: map[string]bool{}}
+	service := New(st, agents)
+	grant := &Grant{Source: "folder_offer"}
+	if fills, err := service.Fill("song-a", []string{"reaper-assistant"}, grant); err != nil || fills[0].Name != "REAPER Assistant" {
+		t.Fatalf("first fill = %+v %v", fills, err)
+	}
+	agents.fakeAgents["REAPER Assistant"] = true
+	bindInSong(t, st, "song-a", "REAPER Assistant", "created")
+	if err := service.Settle("song-a"); err != nil {
+		t.Fatal(err)
+	}
+	if fills, err := service.Fill("song-b", []string{"reaper-assistant"}, nil); err != nil || fills[0].Mode != ModeBind {
+		t.Fatalf("while it is in the roster = %+v %v", fills, err)
+	}
+	// Deleted from the roster; only a song's own copy is left under the name.
+	agents.workspaceOnly["REAPER Assistant"] = true
+	if service.AgentExists("REAPER Assistant") {
+		t.Fatal("a workspace-only copy counted as the assistant")
+	}
+	if _, err := service.Fill("song-b", []string{"reaper-assistant"}, nil); !errors.Is(err, ErrAssistantMissing) {
+		t.Fatalf("after the delete = %v", err)
 	}
 }
 
