@@ -85,7 +85,7 @@ func ResolveWorkspaceScope(src WorkspaceSource, cfg Config, userID string) Works
 			candidates = append(candidates, candidate{id: trimmed, name: trimmed})
 		}
 	} else {
-		listed, err := src.ListActive()
+		listed, err := workspace.ListActiveSummaries(src)
 		if err != nil {
 			result.Complete = false
 			gaps.add("workspace list is unavailable")
@@ -93,9 +93,6 @@ func ResolveWorkspaceScope(src WorkspaceSource, cfg Config, userID string) Works
 			return result
 		}
 		for _, lean := range listed {
-			if lean == nil {
-				continue
-			}
 			id := strings.TrimSpace(lean.ID)
 			if id == "" || id != lean.ID {
 				// All-scope malformed identities are exclusions, not selected
