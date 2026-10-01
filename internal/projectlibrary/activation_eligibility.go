@@ -224,6 +224,36 @@ func (a *ActivationInspector) Eligibility(ctx context.Context, scope Scope, entr
 	return result, nil
 }
 
+// ProjectTeam is the one installed project blueprint this Home can open its
+// projects with, and the project roles it requires. Digest is the team
+// fingerprint every project opened with it is pinned to.
+type ProjectTeam struct {
+	PluginID    string
+	BlueprintID string
+	Digest      string
+	Roles       []workspace.AssistantProgramRoleSpec
+}
+
+// CompatibleProjectTeam reads, from the host's installed plugins only, the
+// project blueprint the Home's projects would be opened with. It reports false
+// when none or more than one is installed.
+func CompatibleProjectTeam(installed []plugin.InstalledPlugin, homeOwner *workspace.AssistantProgramHomeOwner, scope Scope) (ProjectTeam, bool) {
+	blueprint, project, ambiguous := compatibleProjectBlueprint(installed, homeOwner, scope)
+	if ambiguous || blueprint == nil || project == nil || blueprint.Template.PluginOwner == nil {
+		return ProjectTeam{}, false
+	}
+	team := ProjectTeam{
+		PluginID: blueprint.Template.PluginOwner.PluginID, BlueprintID: blueprint.ID,
+		Digest: projecttemplates.AssistantProjectDigest(project),
+	}
+	for _, role := range project.ProgramRoles() {
+		if role.Required {
+			team.Roles = append(team.Roles, role)
+		}
+	}
+	return team, len(team.Roles) > 0
+}
+
 // compatibleProjectBlueprint is shared by the inert read and the reviewed
 // creator boundary. Only the host's live enabled provider declarations count;
 // a browser-supplied blueprint ID can never select or weaken this roster.

@@ -20,6 +20,11 @@ const (
 	FolderPlanMode        = "mode"
 	FolderPlanAgents      = "agents"
 	FolderPlanTask        = "task"
+	// A portfolio's plan: the library lists the projects, a project gets its
+	// workspace when it is opened, and the shared assistant joins it then.
+	FolderPlanLibrary   = "library"
+	FolderPlanSongs     = "songs"
+	FolderPlanAssistant = "assistant"
 )
 
 // States of one plan line while a run is in progress.
@@ -89,6 +94,15 @@ type FolderSetupIntent struct {
 	Placement    string `json:"placement,omitempty"`
 	CreatesHome  bool   `json:"creates_home,omitempty"`
 	HomeTemplate string `json:"home_template,omitempty"`
+	// A portfolio plan: Portfolio marks it; StaffsHome promised to add the Home's
+	// required roles; GrantsConsent promised the standing consent for the
+	// projects' shared assistant (the plan's assistant line).
+	Portfolio     bool `json:"portfolio,omitempty"`
+	StaffsHome    bool `json:"staffs_home,omitempty"`
+	GrantsConsent bool `json:"grants_consent,omitempty"`
+	// SharedProjects says some of the collection's projects can be opened with
+	// the shared assistant; a collection of other formats is listed only.
+	SharedProjects bool `json:"shared_projects,omitempty"`
 }
 
 // FolderSetupPlan is everything one press of Set up will do. The browser sends
@@ -139,6 +153,10 @@ type FolderSetupUpdate struct {
 	RunID           string
 	EntryName       string
 	EntryCandidates []string
+	// HomeID is the Home a portfolio run built or joined; Receipt is what it
+	// read back from canonical state when it finished.
+	HomeID  string
+	Receipt []FolderReceiptRow
 	// keepLines makes the service keep the stored lines and change only the
 	// status; the service uses it to record a stop it decided on itself.
 	keepLines bool
@@ -223,6 +241,16 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 			return fmt.Errorf("%w: setup entry", errFolderDigestInvalid)
 		}
 	}
+	if len(run.HomeID) > 200 || strings.ContainsAny(run.HomeID, "/\\\x00\r\n") || len(run.Receipt) > folderSetupMaxLines {
+		return fmt.Errorf("%w: setup home", errFolderDigestInvalid)
+	}
+	for _, row := range run.Receipt {
+		if row.Kind == "" || len(row.Kind) > 40 || len(row.Name) > folderSetupMaxText || len(row.Detail) > folderSetupMaxText ||
+			len(row.Route) > 512 || (row.Route != "" && !strings.HasPrefix(row.Route, "/workspaces/")) ||
+			strings.ContainsAny(row.Name+row.Detail, "\x00\r\n") || looksLikeFilesystemPath(row.Name) || looksLikeFilesystemPath(row.Detail) {
+			return fmt.Errorf("%w: setup receipt", errFolderDigestInvalid)
+		}
+	}
 	return nil
 }
 
@@ -251,4 +279,8 @@ type FolderSetupRun struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 	// Intent is what the confirmed plan promised, kept for a resume.
 	Intent FolderSetupIntent `json:"intent,omitempty"`
+	// HomeID and Receipt are a portfolio run's Home and what it read back from
+	// canonical state when it finished; the offer resolves to that Home.
+	HomeID  string             `json:"home_id,omitempty"`
+	Receipt []FolderReceiptRow `json:"receipt,omitempty"`
 }

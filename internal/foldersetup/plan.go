@@ -1,6 +1,7 @@
 package foldersetup
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -107,6 +108,126 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 	plan := personalassistant.NewFolderSetupPlan(lines)
 	plan.Intent = intent
 	return plan
+}
+
+// PortfolioFacts are what a collection's plan is built from, read by the host
+// from canonical state.
+type PortfolioFacts struct {
+	// FolderName is the collection folder's name; Projects how many project
+	// folders the scan saw in it, and CollectionNoun what to call them.
+	FolderName     string
+	Projects       int
+	CollectionNoun string
+	// HomeName names the Home; HomeExists says it is already there and
+	// HomeTemplate is the exact template a new Home is created from.
+	HomeName     string
+	HomeExists   bool
+	HomeTemplate string
+	// HomeStaffed says the Home's required roles are already filled.
+	HomeStaffed bool
+	Provider    Plugin
+	// Integration is the reviewed integration some projects need; nil when no
+	// project in the collection is one it can set up (IntegrationProjects == 0).
+	Integration         *Plugin
+	IntegrationProjects int
+	AppName             string
+	// ProjectLabel is the project blueprint's name for one project.
+	ProjectLabel string
+	// AssistantName is the shared assistant's role label when the installed
+	// blueprint declares it; empty before the integration is installed.
+	AssistantName string
+	// Sharing is the Home's consent for the shared assistant: "" (none), "on" or
+	// "off" (switched off on the Home).
+	Sharing string
+}
+
+// Sharing states of an existing Home's consent.
+const (
+	SharingOn  = "on"
+	SharingOff = "off"
+)
+
+// BuildPortfolioPlan lists every consequence of Set up on a collection of
+// projects, in the order the card shows them, and the intent a run is held to.
+// Listing creates no project workspace (D4); a project gets one when it is opened.
+func BuildPortfolioPlan(facts PortfolioFacts) personalassistant.FolderSetupPlan {
+	intent := personalassistant.FolderSetupIntent{Portfolio: true, Placement: "grouped", HomeTemplate: facts.HomeTemplate}
+	provider := pluginLine(personalassistant.FolderPlanProvider, "plugin", facts.Provider)
+	if provider.Detail == "Nothing is installed." || provider.Detail == "" {
+		provider.Detail = "It provides the Home these projects are listed in."
+	}
+	lines := []personalassistant.FolderPlanLine{provider}
+	intent.Provider, intent.ProviderPlugin, intent.ProviderVersion = facts.Provider.State, facts.Provider.PluginID, facts.Provider.Version
+	shared := facts.Integration != nil && facts.IntegrationProjects > 0
+	intent.SharedProjects = shared
+	if shared {
+		line := pluginLine(personalassistant.FolderPlanIntegration, "integration", *facts.Integration)
+		line.Detail = strings.TrimSpace(line.Detail + " " + countPhrase(facts.IntegrationProjects, facts.ProjectLabel) + " can use it.")
+		lines = append(lines, line)
+		intent.Integration, intent.IntegrationPlugin, intent.IntegrationVersion =
+			facts.Integration.State, facts.Integration.PluginID, facts.Integration.Version
+	}
+	if !facts.HomeExists {
+		intent.CreatesHome = true
+		lines = append(lines, personalassistant.FolderPlanLine{
+			Kind: personalassistant.FolderPlanHome, Name: "Creates your " + facts.HomeName,
+			Detail: "Your later projects of this kind join it.",
+		})
+	}
+	if !facts.HomeExists || !facts.HomeStaffed {
+		intent.StaffsHome = true
+		lines = append(lines, personalassistant.FolderPlanLine{
+			Kind: personalassistant.FolderPlanAgents, Name: "Adds the agents the Home requires",
+			Detail: "They keep track of the whole collection.",
+		})
+	}
+	noun := strings.TrimSpace(facts.CollectionNoun)
+	if noun == "" {
+		noun = "projects"
+	}
+	lines = append(lines, personalassistant.FolderPlanLine{
+		Kind:   personalassistant.FolderPlanLibrary,
+		Name:   fmt.Sprintf("Lists the %d %s in %s", facts.Projects, noun, facts.FolderName),
+		Detail: "Names and project files only. Nothing is opened, moved or copied.",
+	})
+	if shared {
+		one := strings.TrimSpace(facts.ProjectLabel)
+		lines = append(lines, personalassistant.FolderPlanLine{
+			Kind: personalassistant.FolderPlanSongs, Name: "A " + one + " gets its workspace the first time you open it",
+			Detail: "Listing them makes no workspace.",
+		})
+		if facts.Sharing != SharingOn {
+			intent.GrantsConsent = true
+			assistant := "Your project assistant"
+			if name := strings.TrimSpace(facts.AssistantName); name != "" {
+				assistant = "Your " + name
+			}
+			detail := "File-only: Ori does not control " + facts.AppName + ". You can turn this off on the Home."
+			if facts.Sharing == SharingOff {
+				detail = "This turns it back on. File-only: Ori does not control " + facts.AppName + "."
+			}
+			lines = append(lines, personalassistant.FolderPlanLine{
+				Kind: personalassistant.FolderPlanAssistant, Name: assistant + " joins each " + one + " you open",
+				Detail: detail,
+			})
+		}
+	} else {
+		lines = append(lines, personalassistant.FolderPlanLine{
+			Kind: personalassistant.FolderPlanSongs, Name: "No workspace or agent is made for these projects",
+			Detail: "They are listed in the Home only.",
+		})
+	}
+	plan := personalassistant.NewFolderSetupPlan(lines)
+	plan.Intent = intent
+	return plan
+}
+
+// countPhrase is "1 Studio song" or "200 Studio songs" for a blueprint label.
+func countPhrase(n int, label string) string {
+	if n == 1 {
+		return "1 " + strings.TrimSpace(label)
+	}
+	return fmt.Sprintf("%d %s", n, pluralLabel(label))
 }
 
 // pluginLine words one plugin's line; noun is "integration" for the project

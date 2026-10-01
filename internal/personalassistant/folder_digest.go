@@ -856,6 +856,8 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 			exists, homeErr := s.deps.HomeExists(ctx, userID, row.Offer.HomeProviderKey)
 			if homeErr == nil {
 				offer = buildPortfolioOffer(offer, verdict, row.Offer.HomeProviderKey)
+				offer.Portfolio.IntegrationKey, offer.Portfolio.IntegrationProjects =
+					folderdigest.IntegrationProjects(result, verdict.Portfolio.Shape, now)
 				if exists {
 					// The Home can be re-read canonically: offer to add to it. If it
 					// cannot, leave one plain folder suggestion, never a Home or
@@ -1401,7 +1403,8 @@ func (s *FolderDigestService) ResolvePortfolio(ctx context.Context, userID, offe
 			return ErrFolderOfferDecided
 		}
 		item.Status, item.ResolvedAt = FolderOfferResolved, &now
-		item.Outcome = &FolderOutcome{Kind: FolderChoiceHome, WorkspaceID: verified.WorkspaceID, Route: verified.Route}
+		item.Outcome = &FolderOutcome{Kind: FolderChoiceHome, WorkspaceID: verified.WorkspaceID, Route: verified.Route,
+			Receipt: finishedSetupReceipt(item)}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: offerID, Action: "portfolio", At: now})
 		pruneFolderDigest(d)
 		resolved = *item
@@ -1469,7 +1472,8 @@ func (s *FolderDigestService) ResolveExistingHome(ctx context.Context, userID, o
 			return ErrFolderOfferDecided
 		}
 		item.Status, item.ResolvedAt = FolderOfferResolved, &now
-		item.Outcome = &FolderOutcome{Kind: FolderChoiceHome, WorkspaceID: home.WorkspaceID, Route: home.Route, Existing: true}
+		item.Outcome = &FolderOutcome{Kind: FolderChoiceHome, WorkspaceID: home.WorkspaceID, Route: home.Route, Existing: true,
+			Receipt: finishedSetupReceipt(item)}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: requestID, OfferID: offerID, Action: "existing_home", At: now})
 		pruneFolderDigest(d)
 		resolved = *item
@@ -1479,6 +1483,15 @@ func (s *FolderDigestService) ResolveExistingHome(ctx context.Context, userID, o
 		return FolderOfferView{}, err
 	}
 	return s.view(ctx, resolved, binding.Paused), nil
+}
+
+// finishedSetupReceipt is the receipt a finished one-card collection run read
+// back from canonical state; a step-by-step resolve carries none.
+func finishedSetupReceipt(offer *FolderOffer) []FolderReceiptRow {
+	if offer == nil || offer.Setup == nil || offer.Setup.Status != FolderSetupDone {
+		return nil
+	}
+	return append([]FolderReceiptRow(nil), offer.Setup.Receipt...)
 }
 
 const portfolioRootHandoffTTL = 30 * time.Minute
@@ -1511,6 +1524,35 @@ func (s *FolderDigestService) PortfolioRoot(ctx context.Context, userID, offerID
 	return canonical, identity, nil
 }
 
+// PortfolioSetupRoot is PortfolioRoot for a one-card collection run still in
+// progress: the offer is not resolved yet (it resolves last), so the proof is
+// instead that the user pressed Set up on it, its run is the one recording this
+// Home, and the server-held folder is still the one the scan saw. The browser
+// never names the folder.
+func (s *FolderDigestService) PortfolioSetupRoot(ctx context.Context, userID, offerID, homeID string) (string, string, error) {
+	if s == nil || s.store == nil || userID == "" || offerID == "" || homeID == "" {
+		return "", "", ErrFolderOutcomeUnavailable
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return "", "", err
+	}
+	offer := doc.Offer(offerID)
+	if offer == nil {
+		return "", "", ErrFolderOfferNotFound
+	}
+	if offer.Status != FolderOfferAwaitingOutcome || offer.Portfolio == nil || offer.DecidedAt == nil || offer.CapabilitySuppressed ||
+		offer.Setup == nil || offer.Setup.Status != FolderSetupRunning || offer.Setup.HomeID != homeID || !offer.Subject.IsRoot ||
+		!s.isRunning(offerID) {
+		return "", "", ErrFolderWorkspaceRefused
+	}
+	canonical, identity, loss := s.heldPortfolioFolder(*offer)
+	if loss != "" {
+		return "", "", ErrFolderPathLost
+	}
+	return canonical, identity, nil
+}
+
 // portfolioSource decides whether a resolved collection offer's server-held
 // folder is still the one the user chose, and if not, why. PortfolioRoot and the
 // read-only continuation projection share it so they cannot disagree.
@@ -1519,6 +1561,12 @@ func (s *FolderDigestService) portfolioSource(offer FolderOffer) (root, identity
 		s.now().Sub(*offer.ResolvedAt) > portfolioRootHandoffTTL {
 		return "", "", FolderContinuationExpired
 	}
+	return s.heldPortfolioFolder(offer)
+}
+
+// heldPortfolioFolder is the server-held collection folder when it is still the
+// exact directory the scan saw (canonical path and directory identity).
+func (s *FolderDigestService) heldPortfolioFolder(offer FolderOffer) (root, identity string, loss FolderContinuationReason) {
 	held, ok := s.rootPath(offer)
 	if !ok {
 		return "", "", FolderContinuationLost

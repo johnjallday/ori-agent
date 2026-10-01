@@ -289,7 +289,7 @@ export function setupRunView(setup, subject) {
 // step count, a percentage, and the lines. Pure data; the DOM is drawn below.
 // It is not visible for an offer with no one-card run.
 export function setupModalView(offer) {
-  if (!offer || offer.portfolio) return { visible: false };
+  if (!offer) return { visible: false };
   const receipt = folderReceiptView(offer);
   // A settled offer no longer carries its run, only its receipt; the pop-up that
   // watched the run still ends on it. Without either there is nothing to show.
@@ -304,8 +304,10 @@ export function setupModalView(offer) {
       visible: true,
       phase: 'done',
       eyebrow: 'All set',
-      title: `${subject} is ready`,
-      status: 'Here is what I set up. The first task starts when you open the workspace.',
+      title: receipt.home ? `${receipt.homeName} is ready` : `${subject} is ready`,
+      status: receipt.home
+        ? 'Here is what I set up. Open a project from the library when you want to work on it.'
+        : 'Here is what I set up. The first task starts when you open the workspace.',
       count: total ? `${total} of ${total} steps finished` : '',
       percent: 100,
       lines: run.lines.map(line => ({ ...line, state: line.state ? 'done' : '' })),
@@ -340,8 +342,9 @@ export function setupModalView(offer) {
 function capabilityConfirmView(offer, base, subject) {
   const capability = offer.capability;
   const portfolio = offer.portfolio;
-  const run = !portfolio && offer.setup ? setupRunView(offer.setup, subject) : null;
-  const planLines = !portfolio && !run ? setupLinesView(offer.plan?.lines) : [];
+  // A collection rides the same one-consent plan and run as a single project.
+  const run = offer.setup ? setupRunView(offer.setup, subject) : null;
+  const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
   const continuing = base.status === 'awaiting_outcome';
   const decline = {
@@ -440,7 +443,12 @@ export function folderOfferView(offer, options = {}) {
     needsPick: offer.needs_pick === true
   };
   const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
-  if (status === 'awaiting_outcome' && offer?.capability && !offer.portfolio && !view.setup) {
+  if (
+    status === 'awaiting_outcome' &&
+    offer?.capability &&
+    (!offer.portfolio || view.plan) &&
+    !view.setup
+  ) {
     if (view.plan) {
       view.question =
         'Project setup has not finished. Set up does what is left in one go, or continue step by step. Here is what is left:';
@@ -453,7 +461,7 @@ export function folderOfferView(offer, options = {}) {
   }
   if (
     status === 'resolved' &&
-    offer?.outcome?.kind === 'project' &&
+    (offer?.outcome?.kind === 'project' || offer?.outcome?.kind === 'home') &&
     folderReceiptView(offer).visible
   ) {
     view.question = "Here's what I set up:";
@@ -590,6 +598,8 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirm 
 // A receipt is read only from the resolved server outcome; the workspace name
 // and route are never reconstructed from the folder name or blueprint plan.
 export function folderReceiptView(offer) {
+  if (offer?.status === 'resolved' && offer?.outcome?.kind === 'home')
+    return homeReceiptView(offer);
   if (offer?.status !== 'resolved' || offer?.outcome?.kind !== 'project') return { visible: false };
   const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
   const workspace = rows.find(row => row.kind === 'workspace');
@@ -620,6 +630,32 @@ export function folderReceiptView(offer) {
     route,
     homeRoute: verifiedHomeRoute,
     openLabel: `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`
+  };
+}
+
+// homeReceiptView is a one-card collection setup's receipt: the Home, the
+// agents it added, the listing and the shared assistant. Open lands on the
+// Home's library (no folder handoff: the run already connected and listed it).
+// A collection resolved step by step carries no rows and shows the old note.
+function homeReceiptView(offer) {
+  const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
+  const home = rows.find(row => row?.kind === 'home');
+  const route = String(home?.route || '').trim();
+  if (!home || !/^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/.test(route))
+    return { visible: false };
+  const homeName = String(home.name || '').trim() || 'your Home';
+  return {
+    visible: true,
+    home: true,
+    homeName,
+    rows: rows.map(row => ({
+      kind: String(row.kind || ''),
+      name: String(row.name || ''),
+      detail: String(row.detail || '')
+    })),
+    route,
+    homeRoute: '',
+    openLabel: `Open ${homeName}`
   };
 }
 
@@ -749,7 +785,10 @@ const RECEIPT_LABELS = {
   folder: ['Folder', '▤'],
   blueprint: ['Blueprint', '✦'],
   agent: ['Agent', '●'],
-  task: ['First task', '✓']
+  task: ['First task', '✓'],
+  home: ['Home', '⌂'],
+  library: ['Library', '☰'],
+  assistant: ['Shared assistant', '●']
 };
 
 // renderReceiptRows draws the receipt's rows (what Set up made) into a list.

@@ -93,13 +93,60 @@ test('a settled offer has dropped its run but the pop-up still ends on the recei
   assert.equal(view.openLabel, 'Open Session');
 });
 
-test('the run pop-up is not shown without a one-card run or for a portfolio', () => {
+test('the run pop-up is not shown without a one-card run', () => {
   assert.equal(setupModalView(null).visible, false);
   assert.equal(setupModalView({ status: 'pending', plan: { lines: [] } }).visible, false);
-  assert.equal(
-    setupModalView({ portfolio: { projects: 3 }, setup: { status: 'running', lines: [] } }).visible,
-    false
-  );
+  assert.equal(setupModalView({ portfolio: { projects: 3 } }).visible, false);
+});
+
+test('a collection run shows in the pop-up and ends on its Home receipt', () => {
+  const running = setupModalView({
+    status: 'awaiting_outcome',
+    subject: { name: 'Songs' },
+    portfolio: { projects: 200 },
+    setup: { status: 'running', lines: runLines(['done', 'working', 'waiting']) }
+  });
+  assert.equal(running.visible, true);
+  assert.equal(running.phase, 'running');
+  assert.equal(running.title, 'Setting up Songs');
+  const done = setupModalView({
+    status: 'resolved',
+    subject: { name: 'Songs' },
+    portfolio: { projects: 200 },
+    outcome: {
+      kind: 'home',
+      route: '/workspaces/music-home',
+      receipt: [
+        {
+          kind: 'home',
+          name: 'Music Production Home',
+          detail: 'created',
+          route: '/workspaces/music-home/assistant#projectLibraryPanel'
+        },
+        { kind: 'library', name: 'Listed 200 music projects in Songs' }
+      ]
+    }
+  });
+  assert.equal(done.phase, 'done');
+  assert.equal(done.title, 'Music Production Home is ready');
+  assert.match(done.status, /Open a project from the library/);
+  // Open lands on the library, with no folder handoff to start again.
+  assert.equal(done.route, '/workspaces/music-home/assistant#projectLibraryPanel');
+  assert.equal(done.openLabel, 'Open Music Production Home');
+  assert.equal(done.receiptRows.length, 2);
+});
+
+test('a collection resolved step by step has no receipt and keeps its note', () => {
+  const offer = {
+    status: 'resolved',
+    subject: { name: 'Songs' },
+    portfolio: { projects: 6 },
+    outcome: { kind: 'home', route: '/workspaces/music-home' }
+  };
+  assert.equal(folderReceiptView(offer).visible, false);
+  // A Home row must link to that Home's library, nowhere else.
+  offer.outcome.receipt = [{ kind: 'home', name: 'Home', route: '/agents' }];
+  assert.equal(folderReceiptView(offer).visible, false);
 });
 
 test('an older installed reviewed Home provider is offered as an update', () => {
@@ -582,18 +629,62 @@ test('a planned project card lists every consequence and offers Set up and Adjus
   assert.equal(view.setup, null);
 });
 
-test('a card without a plan, and a portfolio card, keep the step-by-step journey', () => {
+test('a card without a plan keeps the step-by-step journey, a collection card included', () => {
   const noPlan = folderOfferView({ ...oneCardOffer, plan: undefined });
   assert.equal(noPlan.actions[0].journey, true);
   assert.ok(!noPlan.actions[0].oneCard);
   assert.equal(noPlan.plan, null);
-  const portfolio = folderOfferView({
+  const unplanned = folderOfferView({
     ...oneCardOffer,
     portfolio: { projects: 6 },
-    plan: oneCardOffer.plan
+    plan: undefined
   });
-  assert.equal(portfolio.actions[0].journey, true);
-  assert.equal(portfolio.plan, null);
+  assert.equal(unplanned.actions[0].journey, true);
+  assert.equal(unplanned.plan, null);
+});
+
+const portfolioPlan = {
+  digest: 'p1',
+  lines: [
+    {
+      kind: 'provider',
+      name: 'Installs and enables the reviewed Music Project Management plugin 0.1.1'
+    },
+    { kind: 'integration', name: 'Installs and enables the reviewed REAPER integration 0.9.0' },
+    { kind: 'home', name: 'Creates your Music Production Home' },
+    { kind: 'agents', name: 'Adds the agents the Home requires' },
+    { kind: 'library', name: 'Lists the 200 music projects in Songs' },
+    { kind: 'songs', name: 'A REAPER song gets its workspace the first time you open it' },
+    { kind: 'assistant', name: 'Your project assistant joins each REAPER song you open' }
+  ]
+};
+
+test('a planned collection card is the one consent: Set up, Adjust…, No thanks, Later', () => {
+  const view = folderOfferView({
+    ...oneCardOffer,
+    subject: { name: 'Songs' },
+    portfolio: { projects: 200 },
+    capability: {
+      ...oneCardOffer.capability,
+      question: 'Set up one Music Production Home for these projects?'
+    },
+    plan: portfolioPlan
+  });
+  assert.deepEqual(
+    view.actions.map(action => action.id),
+    ['setup', 'adjust', 'no', 'later']
+  );
+  assert.equal(view.actions[0].label, 'Set up');
+  assert.equal(view.actions[0].oneCard, true);
+  // Adjust… is today's step-by-step portfolio path.
+  assert.equal(view.actions[1].journey, true);
+  assert.equal(view.plan.digest, 'p1');
+  assert.deepEqual(
+    view.plan.lines.map(line => line.kind),
+    ['provider', 'integration', 'home', 'agents', 'library', 'songs', 'assistant']
+  );
+  assert.match(view.question, /everything Set up will do/);
+  assert.deepEqual(view.headline.map(part => part.text).join(''), 'Songs has 200 music projects.');
 });
 
 test('a running one-card setup shows each line with its state and no actions', () => {

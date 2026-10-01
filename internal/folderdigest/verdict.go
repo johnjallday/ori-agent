@@ -234,6 +234,28 @@ func portfolioFromScan(r Result, now time.Time) *PortfolioSignal {
 	return best
 }
 
+// IntegrationProjects counts the collection's project folders of one shape that
+// a reviewed integration can set up (its marker or dominant extension is one the
+// capability's integration declares), and names that integration. A collection
+// of only other formats returns "" and 0: its projects are listed, never staffed.
+func IntegrationProjects(r Result, shape Shape, now time.Time) (string, int) {
+	key, count := "", 0
+	for _, candidate := range r.Subfolders() {
+		if !projectSignal(candidate, now) || ShapeFor(candidate) != shape {
+			continue
+		}
+		markerName := ""
+		if candidate.Marker != nil {
+			markerName = candidate.Marker.Name
+		}
+		if row, ok := ProjectCapabilityFor(shape, markerName, candidate.DominantExtension); ok && row.Offer.IntegrationKey != "" {
+			key = row.Offer.IntegrationKey
+			count++
+		}
+	}
+	return key, count
+}
+
 // ShapeBlueprint is one row of the shape → blueprint table in tables.go.
 type ShapeBlueprint struct {
 	Shape       Shape

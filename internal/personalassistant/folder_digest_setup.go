@@ -19,10 +19,11 @@ var ErrFolderPlanChanged = errors.New("personal assistant: the setup plan change
 // folderSetupTimeout bounds one run, which may include a plugin download.
 const folderSetupTimeout = 20 * time.Minute
 
-// eligibleForOneCard is true for the single recognized project a one-card setup
-// covers: not a portfolio, not suppressed, and with a reviewed capability row.
+// eligibleForOneCard is true for what a one-card setup covers: a single
+// recognized project with a reviewed capability row, or a whole collection of
+// projects (a portfolio) — never one whose capability was suppressed.
 func eligibleForOneCard(offer FolderOffer) bool {
-	return offer.Portfolio == nil && !offer.CapabilitySuppressed && isProjectCapabilityOffer(offer)
+	return !offer.CapabilitySuppressed && isProjectCapabilityOffer(offer)
 }
 
 // attachSetupRun shows the stored run. A run recorded as running with no live
@@ -302,6 +303,22 @@ func (s *FolderDigestService) settleSetup(ctx context.Context, userID, offerID s
 	if offer == nil || offer.Setup == nil || offer.Setup.Status != FolderSetupDone || offer.Status != FolderOfferAwaitingOutcome {
 		return
 	}
+	if offer.Portfolio != nil {
+		// A collection resolves to its Home through the same proofs the
+		// step-by-step path uses: a Home the reviewed template made after Set up
+		// was pressed, or the owner's existing Home re-read from canonical state.
+		requestID := "setup-" + offerID + "-home"
+		if offer.Portfolio.ExistingHome {
+			_, err = s.ResolveExistingHome(ctx, userID, offerID, requestID)
+		} else {
+			_, err = s.ResolvePortfolio(ctx, userID, offerID, FolderResolveInput{HomeID: offer.Setup.HomeID, RequestID: requestID})
+		}
+		if err != nil {
+			logger.Warn("One-card collection setup finished but could not be verified", logger.Fields{"offer_id": offerID, "error": err.Error()})
+			_ = s.recordSetup(ctx, userID, offerID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
+		}
+		return
+	}
 	_, err = s.ResolveJourney(ctx, userID, offerID, FolderJourneyInput{
 		RunID: offer.Setup.RunID, RequestID: "setup-" + offerID + "-" + offer.Setup.RunID,
 	})
@@ -330,6 +347,12 @@ func (s *FolderDigestService) recordSetup(ctx context.Context, userID, offerID s
 		}
 		if u.EntryName != "" {
 			run.EntryName = u.EntryName
+		}
+		if u.HomeID != "" {
+			run.HomeID = u.HomeID
+		}
+		if len(u.Receipt) > 0 {
+			run.Receipt = append([]FolderReceiptRow(nil), u.Receipt...)
 		}
 		run.EntryCandidates = append([]string(nil), u.EntryCandidates...)
 		return nil

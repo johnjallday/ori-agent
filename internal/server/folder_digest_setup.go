@@ -230,6 +230,9 @@ func (h *folderSetupHost) forget(userID string, entry reviewedintegration.Entry)
 // Plan lists every consequence of Set up for the offer, in the order the card
 // shows them. Every string is plain text and names no path.
 func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.FolderSetupRequest) (personalassistant.FolderSetupPlan, error) {
+	if req.Offer.Portfolio != nil {
+		return h.portfolioPlan(ctx, req)
+	}
 	target, err := h.target(req.Offer)
 	if err != nil {
 		return personalassistant.FolderSetupPlan{}, err
@@ -245,6 +248,9 @@ func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.Folder
 // quest to the end or to the first stop. Progress is reported through req.Update;
 // only an unexpected error is returned.
 func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderSetupRequest) error {
+	if req.Offer.Portfolio != nil {
+		return h.portfolioRun(ctx, req)
+	}
 	target, err := h.target(req.Offer)
 	if err != nil {
 		return err
