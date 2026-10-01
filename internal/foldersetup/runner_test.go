@@ -379,6 +379,30 @@ func TestRunAQuestionLeavesItsLineWaitingNotFailed(t *testing.T) {
 		lineStates(progress.last())[personalassistant.FolderPlanAgents] != personalassistant.FolderLineWaiting {
 		t.Fatalf("needs_model: %+v %v", result, lineStates(progress.last()))
 	}
+	// What finished before the stop stays finished, and nothing was created.
+	finished := lineStates(progress.last())
+	for _, kind := range []string{personalassistant.FolderPlanIntegration, personalassistant.FolderPlanWorkspace, personalassistant.FolderPlanFolder, personalassistant.FolderPlanMode} {
+		if finished[kind] != personalassistant.FolderLineDone {
+			t.Errorf("%s = %s after a model stop, want done", kind, finished[kind])
+		}
+	}
+	for _, call := range noModel.calls {
+		if call == "add_project_staffing" || call == "add_home_staffing" {
+			t.Fatalf("an agent was made without a model: %v", noModel.calls)
+		}
+	}
+	// Once a model exists, trying again finishes the rest and repeats nothing.
+	noModel.modelsReady = true
+	before := len(noModel.calls)
+	result, _ = runWith(t, noModel, fakeSelections{})
+	if result.Status != personalassistant.FolderSetupDone {
+		t.Fatalf("after setting a model: %+v", result)
+	}
+	for _, call := range noModel.calls[before:] {
+		if call == "connect_existing_project" || call == "select_file_only_mode" {
+			t.Fatalf("a finished step was repeated: %v", noModel.calls[before:])
+		}
+	}
 }
 
 func TestRunStopReasons(t *testing.T) {

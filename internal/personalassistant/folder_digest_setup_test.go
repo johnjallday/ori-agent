@@ -233,6 +233,59 @@ func TestFolderSetup_ARunLostToARestartIsReportedInterruptedAndResumes(t *testin
 	close(f.setup.hold)
 }
 
+// A folder chosen in the native dialog is held in memory only. After a restart,
+// choosing the same folder again returns the same offer and its run, which then
+// resumes; nothing is created twice.
+func TestFolderSetup_PickingTheSameFolderAgainResumesTheSameRun(t *testing.T) {
+	f := newOneCardFixture(t)
+	ctx := context.Background()
+	f.setup.finish = func() FolderSetupUpdate {
+		return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopNeedsModel, RunID: "new-run"}
+	}
+	// The card was made by the dialog, not a chip, so its path is memory only.
+	picked, err := f.service.scanSelectedRoot(ctx, "local", f.folder, "", "")
+	if err != nil || picked.Plan == nil {
+		t.Fatalf("picked offer = %+v, %v", picked, err)
+	}
+	if _, err := f.service.StartSetup(ctx, "local", picked.ID, FolderSetupInput{RequestID: "r1", PlanDigest: picked.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the run to stop", func() bool {
+		stored, _ := f.store.Read(ctx, "local")
+		o := stored.Offer(picked.ID)
+		return o != nil && o.Setup != nil && o.Setup.Status == FolderSetupStopped && !f.service.isRunning(picked.ID)
+	})
+
+	restarted := f.newService()
+	restarted.deps.Setup = f.setup
+	restarted.deps.Journey = &fakeJourneyVerifier{folder: f.folder}
+	current, err := restarted.Current(ctx, "local")
+	if err != nil || current.Offer == nil || !current.Offer.NeedsPick || current.Offer.Setup == nil {
+		t.Fatalf("after a restart the card must ask for the folder: %+v, %v", current.Offer, err)
+	}
+	digest := current.Offer.Setup.PlanDigest
+	if _, err := restarted.StartSetup(ctx, "local", picked.ID, FolderSetupInput{RequestID: "r2", PlanDigest: digest}); !errors.Is(err, ErrFolderPathLost) {
+		t.Fatalf("a lost path must not be guessed: %v", err)
+	}
+	again, err := restarted.scanSelectedRoot(ctx, "local", f.folder, "", "")
+	if err != nil || again.ID != picked.ID || again.Setup == nil || again.NeedsPick {
+		t.Fatalf("picking the same folder must resume the same offer: %+v, %v", again, err)
+	}
+	f.setup.finish = nil
+	runsBefore := f.setup.runCount()
+	if _, err := restarted.StartSetup(ctx, "local", picked.ID, FolderSetupInput{RequestID: "r3", PlanDigest: digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the resumed run to resolve", func() bool {
+		stored, _ := f.store.Read(ctx, "local")
+		o := stored.Offer(picked.ID)
+		return o != nil && o.Status == FolderOfferResolved
+	})
+	if f.setup.runCount() != runsBefore+1 {
+		t.Fatalf("runs = %d, want %d", f.setup.runCount(), runsBefore+1)
+	}
+}
+
 func TestFolderSetup_AStoppedRunResumesOnItsConfirmedPlan(t *testing.T) {
 	f := newOneCardFixture(t)
 	f.setup.finish = func() FolderSetupUpdate {
