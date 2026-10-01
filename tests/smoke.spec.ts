@@ -537,16 +537,14 @@ test.describe('Home First Run', () => {
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.getByText('No workspaces yet.', { exact: true })).toHaveCount(0);
-    const emptyActions = page.locator('.cockpit-empty-map-actions');
-    await expect(emptyActions.getByRole('button', { name: 'New Workspace' })).toBeVisible();
-    await expect(emptyActions.getByRole('button', { name: 'Import Folder' })).toBeVisible();
+    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
     await expect(page.locator('#sidebar')).toHaveCount(1);
     await expect(page.locator('#sidebarToggle')).toBeVisible();
 
     await page.goto('/workspaces');
     await expect(page.locator('#addFolderModal')).toBeHidden();
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
-    await expect(page.locator('.cockpit-empty-map-actions')).toBeVisible();
+    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
   });
 
   test('keeps the Map-first launcher interaction contract on Home', async ({ page }) => {

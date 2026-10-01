@@ -1942,9 +1942,6 @@ import {
       // Explicit Home-only contract. The shared Map keeps its legacy empty
       // prompt unless its cockpit host opts into a real buildingless canvas.
       emptyPresentation: state.flattened.length === 0 ? 'canvas' : 'legacy',
-      // The add-a-workspace invitation, decided here from authoritative state
-      // (mapInvitationView) so the Map never infers emptiness for itself.
-      invitation: currentInvitation(),
       onSelect: id =>
         selectItem(id, {
           fromMap: true,
