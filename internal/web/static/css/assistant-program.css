@@ -894,6 +894,20 @@
   min-height: 1.5rem;
   margin: 0.8rem 0;
 }
+/* A row's one-click Open sits before its Details; the file chips wrap below. */
+.project-library-row-actions {
+  white-space: nowrap;
+}
+.project-library-row-actions > .modern-btn + .modern-btn {
+  margin-left: 0.4rem;
+}
+.project-library-open-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  white-space: normal;
+}
 /* Where one saved song stands; the label is text, so it never relies on color. */
 .project-library-state {
   display: inline-block;

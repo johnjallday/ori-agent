@@ -347,6 +347,56 @@ export function proposalSourceLabel(proposal) {
 // Only queue navigation (opaque entry IDs and a user-confirmed retry) lives in
 // this browser tab. Every item still requires a fresh server review and a
 // distinct user confirmation; storage never grants folder/creator authority.
+// libraryOpenAction is the row's one-click Open, or null when the row cannot be
+// opened here (read-only Home, unsupported format, source unavailable): such a
+// row keeps its Details, which explain why.
+export function libraryOpenAction(row, readOnly) {
+  if (readOnly || !row?.can_open) return null;
+  const name = String(row.name || 'this project');
+  return {
+    label: 'Open',
+    ariaLabel:
+      row.connection === 'connected'
+        ? `Open ${name}`
+        : `Open ${name}: makes its workspace and adds your assistant`
+  };
+}
+
+// A route the open action may navigate to: one workspace, nothing else.
+export function libraryOpenRoute(result) {
+  const route = String(result?.route || '');
+  return /^\/workspaces\/[a-z0-9][a-z0-9-]*$/.test(route) ? route : '';
+}
+
+// What the status line says after a song opened, before the page moves on.
+export function libraryOpenedMessage(name, result) {
+  const song = String(name || 'The project');
+  const agent = String(result?.agent_name || '').trim();
+  switch (result?.staffing) {
+    case 'added':
+      return `${song} is ready. ${agent || 'Your assistant'} was added and joins each song you open.`;
+    case 'joined':
+      return `${song} is ready. ${agent || 'Your assistant'} joined it.`;
+    case 'off':
+      return `${song} is ready. Adding your assistant is switched off, so no agent was added.`;
+    case 'consent_stale':
+      return `${song} is ready. Your assistant changed in a plugin update; review it on this Home to add it.`;
+    case 'assistant_missing':
+      return `${song} is ready. Your shared assistant is gone, so no agent was added.`;
+    default:
+      return result?.created ? `${song} is ready.` : `Opening ${song}.`;
+  }
+}
+
+// The project files to choose between when a song folder holds several.
+export function libraryOpenChoices(error) {
+  if (error?.reason !== 'needs_choice') return [];
+  const files = error?.payload?.project_files;
+  return (Array.isArray(files) ? files : [])
+    .map(name => String(name || '').trim())
+    .filter(name => name && !name.includes('/') && !name.includes('\\'));
+}
+
 const QUEUE_LIMIT = 100;
 export function readActivationQueue(homeID, storage = globalThis.sessionStorage, now = Date.now()) {
   try {
@@ -474,6 +524,7 @@ export class ProjectLibraryPanel {
       );
       error.status = response.status;
       error.reason = typeof result.reason === 'string' ? result.reason : '';
+      error.payload = result;
       throw error;
     }
     return result;
@@ -1380,7 +1431,16 @@ export class ProjectLibraryPanel {
             : 'Not scanned'
         )
       );
-      const action = node('td');
+      const action = node('td', 'project-library-row-actions');
+      const open = libraryOpenAction(row, this.readOnly);
+      if (open) {
+        const openButton = node('button', 'modern-btn modern-btn-primary', open.label);
+        openButton.type = 'button';
+        openButton.dataset.libraryOpen = row.id;
+        openButton.setAttribute('aria-label', open.ariaLabel);
+        openButton.addEventListener('click', () => void this.openRow(row, openButton, action));
+        action.append(openButton);
+      }
       const button = node('button', 'modern-btn modern-btn-secondary', 'Details');
       button.type = 'button';
       button.setAttribute('aria-label', `Review ${row.name}`);
@@ -1389,6 +1449,66 @@ export class ProjectLibraryPanel {
       tr.append(pick, name, stage, connection, observed, action);
       tbody.append(tr);
     }
+  }
+
+  // Open one song in one click: its workspace is made (or the one it has is
+  // used), the Home's shared assistant joins it, and the page goes there. The
+  // server repeats every check; a folder with several project files comes back
+  // as chips, and the same request ID makes a retry finish what is missing.
+  async openRow(row, trigger, cell, selectedFile = '') {
+    if (this.busy || this.readOnly || !row?.id) return;
+    this.openRequests = this.openRequests || new Map();
+    const requestID = this.openRequests.get(row.id) || `open-${globalThis.crypto.randomUUID()}`;
+    this.openRequests.set(row.id, requestID);
+    const body = { request_id: requestID };
+    if (selectedFile) body.selected_file = selectedFile;
+    const label = trigger?.textContent || 'Open';
+    this.busy = true;
+    cell?.setAttribute('aria-busy', 'true');
+    if (trigger) {
+      trigger.disabled = true;
+      trigger.textContent = 'Opening…';
+    }
+    this.status(`Opening ${row.name}… making its workspace and adding your assistant.`);
+    try {
+      const result = await this.post(`/projects/${encodeURIComponent(row.id)}/open`, body);
+      this.openRequests.delete(row.id);
+      this.status(libraryOpenedMessage(row.name, result));
+      const route = libraryOpenRoute(result);
+      if (route) globalThis.location.assign(route);
+    } catch (error) {
+      const choices = libraryOpenChoices(error);
+      if (choices.length && cell) {
+        this.renderOpenChoices(row, cell, choices);
+        this.status(`${row.name} has more than one project file. Choose the one to open.`);
+      } else {
+        this.status(error.message || `${row.name} could not be opened. Nothing was changed.`);
+      }
+    } finally {
+      this.busy = false;
+      cell?.setAttribute('aria-busy', 'false');
+      if (trigger?.isConnected) {
+        trigger.disabled = false;
+        trigger.textContent = label;
+      }
+    }
+  }
+
+  // The file chips for a song folder with several project files.
+  renderOpenChoices(row, cell, choices) {
+    cell.querySelector('.project-library-open-choice')?.remove();
+    const group = node('div', 'project-library-open-choice');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', `Project file to open for ${row.name}`);
+    for (const name of choices) {
+      const chip = node('button', 'modern-btn modern-btn-secondary', name);
+      chip.type = 'button';
+      chip.dataset.libraryOpenFile = name;
+      chip.addEventListener('click', () => void this.openRow(row, chip, cell, name));
+      group.append(chip);
+    }
+    cell.append(group);
+    group.querySelector('button')?.focus();
   }
 
   // Rows a person can pick: catalog-only songs on the pages loaded so far.

@@ -13,9 +13,16 @@ import (
 // ID and a project-file name seen during an authorized metadata scan: the
 // resolver derives the exact folder from the current Home grant each time.
 func (h *Handler) assistantLibraryActivator() *projectlibrary.ActivationService {
+	service, _ := h.assistantLibraryActivatorWithInspector()
+	return service
+}
+
+// assistantLibraryActivatorWithInspector also returns the read-only inspector
+// the service reviews with, for a caller that must read eligibility first.
+func (h *Handler) assistantLibraryActivatorWithInspector() (*projectlibrary.ActivationService, *projectlibrary.ActivationInspector) {
 	if h == nil || h.workspaceTaskStore == nil || h.workspaceStore == nil || h.assistantLibraryRoots == nil ||
 		h.installedPluginLister == nil || h.groupRequirements == nil {
-		return nil
+		return nil, nil
 	}
 	owners := libraryFolderOwners{Store: h.workspaceTaskStore, folders: h.workspaceStore}
 	inspector := projectlibrary.NewActivationInspector(h.assistantLibraryStore(), h.assistantLibraryRoots,
@@ -25,7 +32,7 @@ func (h *Handler) assistantLibraryActivator() *projectlibrary.ActivationService 
 		creator.SetGroupRequirementService(h.groupRequirements)
 		creator.SetCreatedWorkspaceRecorder(h.allowlistLocallyCreatedWorkspace)
 		return creator
-	})
+	}), inspector
 }
 
 type assistantActivationReviewRequest struct {

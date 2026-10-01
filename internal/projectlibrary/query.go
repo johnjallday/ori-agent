@@ -48,6 +48,10 @@ type SearchRow struct {
 	ActivitySource string    `json:"activity_source,omitempty"`
 	LastScannedAt  time.Time `json:"last_scanned_at,omitempty"`
 	NeedsChoice    bool      `json:"needs_choice,omitempty"`
+	// CanOpen says the owner can open the row in one click: it is connected, or
+	// it is catalog-only with an available source in a format the installed
+	// project blueprint opens. The open action repeats every check.
+	CanOpen bool `json:"can_open,omitempty"`
 }
 
 type SearchPage struct {

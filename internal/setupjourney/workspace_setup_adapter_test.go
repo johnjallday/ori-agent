@@ -111,6 +111,38 @@ func TestWorkspaceSetupAdapterSelectsOnlyFileModeWithoutLiveSideEffects(t *testi
 	}
 }
 
+// An opened library song records File-only exactly as the journey does, never
+// touches live control, and never overwrites a mode the user already chose.
+func TestSelectFileOnlyModeRecordsFileOnlyAndNeverOverwrites(t *testing.T) {
+	adapter, store, live := workspaceSetupFixture(t)
+	ctx := context.Background()
+	if err := SelectFileOnlyMode(ctx, adapter.wizard, store.workspace.ID); err != nil {
+		t.Fatal(err)
+	}
+	state := store.workspace.GetRuntimeState()
+	if state == nil || state.SelectedModeID != fileOnlyModeID || len(state.Grants) != 0 || live.evaluations != 0 {
+		t.Fatalf("File-only state = %+v, live evaluations = %d", state, live.evaluations)
+	}
+	// Twice is once.
+	if err := SelectFileOnlyMode(ctx, adapter.wizard, store.workspace.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A mode the user picked stays.
+	chosen, chosenStore, _ := workspaceSetupFixture(t)
+	if _, err := chosen.wizard.Confirm(ctx, chosenStore.workspace.ID, "mode", setupwizard.StepAction{Type: setupwizard.ActionConfirm, Option: "assisted"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SelectFileOnlyMode(ctx, chosen.wizard, chosenStore.workspace.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := chosenStore.workspace.GetRuntimeState(); got == nil || got.SelectedModeID != "assisted" {
+		t.Fatalf("the user's own mode was overwritten: %+v", got)
+	}
+	if err := SelectFileOnlyMode(ctx, nil, "x"); err == nil {
+		t.Fatal("no wizard must be an error")
+	}
+}
+
 func TestWorkspaceSetupAdapterReadsCanonicallyReadyPermissionBearingMode(t *testing.T) {
 	adapter, store, live := workspaceSetupFixture(t)
 	live.durable = runtimecapability.DurableConfigured

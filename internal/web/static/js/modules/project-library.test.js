@@ -5,6 +5,10 @@ import {
   activationStateLabel,
   projectTeamURL,
   libraryDigestText,
+  libraryOpenAction,
+  libraryOpenChoices,
+  libraryOpenRoute,
+  libraryOpenedMessage,
   libraryQuery,
   libraryRunText,
   proposalSourceLabel,
@@ -3105,5 +3109,117 @@ test('a song that is gone, or a re-check that fails, says so and creates nothing
     }
   } finally {
     page.restore();
+  }
+});
+
+test('a row offers Open only when the server says it can be opened', () => {
+  const song = { id: 's1', name: 'Song 002', connection: 'catalog_only', can_open: true };
+  assert.equal(libraryOpenAction(song, false).label, 'Open');
+  assert.match(libraryOpenAction(song, false).ariaLabel, /Song 002: makes its workspace/);
+  assert.equal(
+    libraryOpenAction({ ...song, connection: 'connected' }, false).ariaLabel,
+    'Open Song 002'
+  );
+  // Read-only Home, unsupported format or a lost source: Details explain it.
+  assert.equal(libraryOpenAction(song, true), null);
+  assert.equal(libraryOpenAction({ ...song, can_open: false }, false), null);
+  assert.equal(libraryOpenAction(null, false), null);
+});
+
+test('the open action goes only to one workspace', () => {
+  assert.equal(libraryOpenRoute({ route: '/workspaces/song-002' }), '/workspaces/song-002');
+  for (const route of [
+    '',
+    '/agents',
+    'https://example.com/workspaces/x',
+    '/workspaces/a/b',
+    '//x'
+  ]) {
+    assert.equal(libraryOpenRoute({ route }), '', route);
+  }
+});
+
+test('the status line says how the assistant came to the song', () => {
+  const name = 'Song 002';
+  const agent = { agent_name: 'REAPER Assistant' };
+  assert.match(
+    libraryOpenedMessage(name, { ...agent, staffing: 'added' }),
+    /was added and joins each song/
+  );
+  assert.match(
+    libraryOpenedMessage(name, { ...agent, staffing: 'joined' }),
+    /REAPER Assistant joined it/
+  );
+  assert.match(libraryOpenedMessage(name, { staffing: 'off' }), /switched off, so no agent/);
+  assert.match(libraryOpenedMessage(name, { staffing: 'consent_stale' }), /review it on this Home/);
+  assert.match(libraryOpenedMessage(name, { staffing: 'assistant_missing' }), /gone, so no agent/);
+  assert.equal(
+    libraryOpenedMessage(name, { staffing: 'none', created: true }),
+    'Song 002 is ready.'
+  );
+  for (const staffing of ['added', 'joined', 'off', 'consent_stale', 'assistant_missing']) {
+    assert.doesNotMatch(libraryOpenedMessage(name, { staffing }), /_/, staffing);
+  }
+});
+
+test('several project files come back as chips of bare file names', () => {
+  const error = Object.assign(new Error('Choose'), {
+    reason: 'needs_choice',
+    payload: { project_files: ['Song 001.rpp', 'Song 001 alt.rpp', '../x.rpp', 'a/b.rpp', ''] }
+  });
+  assert.deepEqual(libraryOpenChoices(error), ['Song 001.rpp', 'Song 001 alt.rpp']);
+  assert.deepEqual(libraryOpenChoices({ reason: 'stale_review', payload: error.payload }), []);
+  assert.deepEqual(libraryOpenChoices(null), []);
+});
+
+test('Open posts one request ID per song, keeps it for a retry, and goes to the song', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { provider_read_only: false };
+  const statuses = [];
+  panel.status = message => statuses.push(message);
+  const posts = [];
+  let answer = 'needs_choice';
+  panel.post = async (path, body) => {
+    posts.push({ path, body });
+    if (answer === 'needs_choice') {
+      throw Object.assign(new Error('Choose which project file to open'), {
+        reason: 'needs_choice',
+        payload: { project_files: ['A.rpp', 'B.rpp'] }
+      });
+    }
+    if (answer === 'conflict') throw Object.assign(new Error('Busy'), { reason: 'stale_review' });
+    return { route: '/workspaces/song-001', staffing: 'joined', agent_name: 'REAPER Assistant' };
+  };
+  const assigned = [];
+  const previous = globalThis.location;
+  globalThis.location = { search: '', assign: url => assigned.push(url) };
+  try {
+    const row = { id: 'song 1', name: 'Song 001' };
+    const button = { disabled: false, textContent: 'Open', isConnected: true };
+    await panel.openRow(row, button);
+    assert.equal(posts[0].path, '/projects/song%201/open');
+    assert.match(posts[0].body.request_id, /^open-/);
+    assert.equal(posts[0].body.selected_file, undefined);
+    assert.equal(assigned.length, 0, 'a question never navigates');
+    assert.equal(button.disabled, false);
+    assert.equal(button.textContent, 'Open');
+    answer = 'conflict';
+    await panel.openRow(row, button);
+    answer = 'ok';
+    await panel.openRow(row, button, undefined, 'B.rpp');
+    // The same song keeps its request ID until it opens, so a retry replays.
+    assert.equal(new Set(posts.map(post => post.body.request_id)).size, 1);
+    assert.equal(posts.at(-1).body.selected_file, 'B.rpp');
+    assert.deepEqual(assigned, ['/workspaces/song-001']);
+    assert.match(statuses.at(-1), /REAPER Assistant joined it/);
+    // A read-only Home or a busy panel sends nothing.
+    panel.state = { provider_read_only: true };
+    await panel.openRow(row, button);
+    panel.state = { provider_read_only: false };
+    panel.busy = true;
+    await panel.openRow(row, button);
+    assert.equal(posts.length, 3);
+  } finally {
+    globalThis.location = previous;
   }
 });

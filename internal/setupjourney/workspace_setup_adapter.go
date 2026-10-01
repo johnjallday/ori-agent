@@ -38,6 +38,40 @@ func NewWorkspaceSetupAdapter(wizard *setupwizard.Service, readiness ProjectFile
 	return &WorkspaceSetupAdapter{wizard: wizard, readiness: readiness}
 }
 
+// SelectFileOnlyMode records File-only on a workspace's Setup Wizard: the same
+// consequence select_file_only_mode commits in the journey, for a workspace a
+// reviewed library open just made. It grants nothing (no live control), and a
+// workspace whose mode is already chosen is left as it is.
+func SelectFileOnlyMode(ctx context.Context, wizard *setupwizard.Service, workspaceID string) error {
+	if wizard == nil || strings.TrimSpace(workspaceID) == "" {
+		return errors.New("workspace setup owner is unavailable")
+	}
+	status, err := wizard.Status(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if !status.Applicable {
+		return nil // No Setup Wizard: nothing to choose.
+	}
+	for _, step := range status.Steps {
+		if step.Kind == workspace.SetupStepKindRuntimeMode && strings.TrimSpace(step.SelectedOption) != "" {
+			return nil // Already chosen, possibly by the user: never overwritten.
+		}
+	}
+	_, stepID, ok := fileOnlyProjection(status)
+	if !ok {
+		return errors.New("the workspace offers no File-only mode")
+	}
+	status, err = wizard.Confirm(ctx, workspaceID, stepID, setupwizard.StepAction{Type: setupwizard.ActionConfirm, Option: fileOnlyModeID})
+	if err != nil {
+		return err
+	}
+	if projection, _, ok := fileOnlyProjection(status); !ok || projection.ModeID != fileOnlyModeID {
+		return errors.New("workspace setup mode was not observed")
+	}
+	return nil
+}
+
 func (a *WorkspaceSetupAdapter) InputDigest(action ActionID, raw json.RawMessage) (string, error) {
 	if action != ActionReviewFileOnlyMode && action != ActionSelectFileOnlyMode {
 		return "", errors.New("workspace setup action is unavailable")

@@ -232,6 +232,8 @@ type ProjectTeam struct {
 	BlueprintID string
 	Digest      string
 	Roles       []workspace.AssistantProgramRoleSpec
+	// EntryExtensions are the project files the blueprint opens (".ext").
+	EntryExtensions []string
 }
 
 // CompatibleProjectTeam reads, from the host's installed plugins only, the
@@ -245,6 +247,9 @@ func CompatibleProjectTeam(installed []plugin.InstalledPlugin, homeOwner *worksp
 	team := ProjectTeam{
 		PluginID: blueprint.Template.PluginOwner.PluginID, BlueprintID: blueprint.ID,
 		Digest: projecttemplates.AssistantProjectDigest(project),
+	}
+	if connection := blueprint.Template.ProjectConnection; connection != nil && connection.AttachExisting != nil {
+		team.EntryExtensions = append([]string(nil), connection.AttachExisting.EntryExtensions...)
 	}
 	for _, role := range project.ProgramRoles() {
 		if role.Required {
