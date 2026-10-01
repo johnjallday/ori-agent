@@ -863,8 +863,8 @@ That behavior cannot be stretched into the new topology:
 
 | Existing layer                 | Current identity/behavior                                                                                        | Required scoped behavior                                                                                                                                                                          |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Global Agent definition        | `store.Store`, keyed by case-sensitive display name; prompt/model/provider are reusable definition data.         | A staffing operation creates a fresh profile for each role binding unless its own interrupted-operation receipt proves ownership. A same-named existing profile is a collision, not silent reuse. |
-| Workspace-local Agent snapshot | Stored by `(workspace ID, agent name)` and preferred by task runtime resolution.                                 | Each staffed Home/child receives its own snapshot from the trusted role template and selected provider/model. User edits remain in that workspace and are never copied to a later child.          |
+| Global Agent definition        | `store.Store`, keyed by case-sensitive display name; prompt/model/provider are reusable definition data.         | A staffing operation creates a fresh profile for each role binding unless its own interrupted-operation receipt proves ownership. A same-named existing profile is a collision, not silent reuse. Exception: a Home's standing staffing consent (below) creates one profile per split project role, records its name, and later binds that exact profile into each project opened in the Home. |
+| Workspace-local Agent snapshot | Stored by `(workspace ID, agent name)` and preferred by task runtime resolution.                                 | Each staffed Home/child receives its own snapshot from the trusted role template and selected provider/model. User edits remain in that workspace and are never copied to a later child. A model/prompt edit to a consent's shared profile is carried into the snapshots the consent tracks, except one changed in its own project. |
 | `AgentInstance`                | Workspace attachment with UUID but the current station flow copies one instance into all projects.               | A new UUID is minted per `(owning workspace, scoped role ID)`. Instance, node, toolbox/MCP/skill grants, task history, memory, and runtime state are never copied across Home/siblings.           |
 | Assistant role binding         | One station `role_id -> instance/name` roster.                                                                   | Home bindings live in Home state; project bindings live on the exact child link. Stable role/scope/instance IDs, not the mutable name, establish attribution.                                     |
 | Entry/coordinator              | One station primary is projected into every project.                                                             | Home primary is Music Portfolio Manager. Every child has its own Producer primary.                                                                                                                |
@@ -879,6 +879,32 @@ before profile creation. A collision, unavailable agent store, stale roster
 revision, invalid provider/model, or partial provisioning is a bounded failure
 for that one Home or child only. It never reuses another user's/customized
 profile merely because the display name matches.
+
+#### Standing staffing consent (hire once, assign many)
+
+A Home may hold one `ProjectStaffingConsent` (on `AssistantProgramState`,
+`project_staffing_consent`): the user's one-time agreement, given by pressing
+Set up on a folder card or turning on the Home's library switch, that a split
+project blueprint's required project roles are filled on every project opened
+in that Home by one shared profile per role. It is scoped to the Home, the
+plugin + blueprint, and the blueprint's project-team digest
+(`AssistantProjectDigest`, as pinned on each child's `ProjectProvider`).
+
+- The first project that needs the role **creates** the profile under the role's
+  label (the next free name on a collision, never adopting a same-named
+  profile); the name is reserved before the create and recorded only after the
+  create is seen bound in that project. Every later project **binds** that
+  recorded profile through the same `StaffRoleOnWorkspace` / reviewed staffing
+  seams, so every existing check still runs.
+- A changed team digest stops (`consent_stale`) until the user re-confirms once,
+  on the Home. A recorded profile that is gone stops (`assistant_missing`); a
+  workspace-only leftover copy under that name never counts as the profile.
+  Switched off, a project still opens (File-only) with no agent.
+- The consent records each project's snapshot digest as Ori wrote it, so a
+  model/prompt edit to the shared profile is carried into every tracked snapshot
+  still as written; a snapshot changed in its project keeps the change.
+- A project already staffed with its own profile is never restaffed, and the
+  consent never selects a live mode or grants live control.
 
 ### 5.2 Assistant Program declaration v2
 

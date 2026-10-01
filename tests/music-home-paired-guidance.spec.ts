@@ -294,8 +294,11 @@ test('a confirmed folder offer connects one existing file without staffing or Ho
   await page.goto('/?panel=today&folder=show');
   const offerCard = page.locator('#personalAssistantFolderOffer');
   await expect(offerCard).toContainText('Documents looks like a REAPER project');
-  // The card shows the whole plan behind one Set up; Adjust… is today's step-by-step journey.
-  await offerCard.getByRole('button', { name: 'Adjust…' }).click();
+  // With a reviewed provider the card shows the whole plan behind one Set up and
+  // Adjust… is today's step-by-step journey. These local candidates are not the
+  // reviewed release, so there is no one-click plan and the card's own accept
+  // opens that same journey.
+  await offerCard.getByRole('button', { name: /^(Adjust…|Yes, help with my music)$/ }).click();
   const quest = page.locator('#specialistSetupJourneyModal');
   await expect(quest).toBeVisible();
   await expect(quest).toContainText('Create New Workspace');

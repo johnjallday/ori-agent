@@ -42,6 +42,16 @@ The journey can either:
 
 An existing external project stays where it is. Ori does not move it or write Ori metadata into that external folder.
 
+### One card for a song or a whole portfolio
+
+Feeding a folder to the assistant (**Show me a folder**) is the shortest path. When the reviewed releases can be resolved, the card lists every consequence and **Set up** runs it on the server; **Adjust…** opens the step-by-step quests above instead.
+
+- **A REAPER song** (a folder with one `.rpp`): installs what is missing, builds or joins the Music Production Home, makes the song's workspace in File-only mode, adds its REAPER Assistant and queues a first read-only task for when you open it.
+- **A portfolio** (a folder of song folders, for example 200 of them): installs both plugins, builds the Home and its Portfolio Manager, starts the Home's library, connects the folder and lists every song — names and project files only. Listing makes **no** song workspace.
+- **Opening a song** from the Home's library (**Open** on its row) makes that song's workspace, records File-only mode, adds the REAPER Assistant and starts its first task. A song folder with two `.rpp` files asks which one first.
+- **One REAPER Assistant per Home.** Pressing Set up is a standing consent: the first song creates "REAPER Assistant" (or the next free name, never someone else's agent of that name) and every later song gets that same agent. The roster shows it once, with its songs. A change to its model or prompt on the Agents page reaches every song it works on, except a song where you changed that song's own copy. The Home's library panel has a switch, "Add my REAPER Assistant to songs I open": off, songs still open (File-only) with no agent. After a plugin update changes the project team, the Home asks once — **Review the updated assistant** — before more songs get it. A song that already has its own agent keeps it.
+- None of this opens REAPER or turns on live control: Ori-assisted mode stays its own review inside each song.
+
 ## File-only and Ori-assisted modes
 
 **File-only** is a complete supported mode. It uses the exact project files you approved and ordinary task confirmations. It does not configure or test Web Remote, stage a runner, grant live-control scopes, or require REAPER to be open.

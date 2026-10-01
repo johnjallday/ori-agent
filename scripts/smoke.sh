@@ -19,6 +19,10 @@
 # fresh sandbox with the reviewed REAPER blueprint; blueprint-details prints
 # what a create stored. Slice B (attach an existing project) adds
 # reaper-demo-folders, pick-folder, folder-checksum, and attach-details.
+# Portfolio hire-once (tasks/tasks-portfolio-hire-once.md) adds showfolder
+# seed-song, seed-portfolio and portfolio-run (a whole collection through the
+# one card), and baseline-export (an origin/dev baseline for the music and
+# REAPER harness suites without a worktree).
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
@@ -3277,6 +3281,30 @@ smoke_library_notifications() {
   [[ "$status" == PASS ]]
 }
 
+# smoke_baseline_export exports <rev> (default origin/dev) into a new <dir> as a
+# throwaway Git repo with this worktree's node_modules linked. The harness
+# suites refuse to run outside a Git toplevel (music-home-demo.sh,
+# reaper-demo.sh), so this is how they get a dev baseline without creating a
+# worktree:
+#   ./scripts/smoke.sh baseline-export "$TMPDIR/dev-baseline"
+#   cd "$TMPDIR/dev-baseline" && GOWORK=off ./scripts/reaper-demo.sh test ...
+smoke_baseline_export() {
+  local dir="${2:-}" rev="${3:-origin/dev}" top short
+  [[ -n "$dir" ]] || fail "usage: $0 baseline-export <new-dir> [rev]"
+  [[ ! -e "$dir" ]] || fail "refusing: $dir already exists"
+  top="$(git rev-parse --show-toplevel)" || fail "not in a git checkout"
+  short="$(git -C "$top" rev-parse --short --verify --quiet "$rev^{commit}")" || fail "unknown revision: $rev"
+  mkdir -p "$dir"
+  git -C "$top" archive "$rev" | tar -x -C "$dir"
+  if [[ -d "$top/node_modules" ]]; then
+    ln -s "$top/node_modules" "$dir/node_modules"
+  fi
+  git -C "$dir" init -q
+  git -C "$dir" add -A
+  git -C "$dir" -c user.email=baseline@local -c user.name=baseline commit -qm "baseline $rev $short"
+  echo "ok   exported $rev ($short) to $dir"
+}
+
 # agent_state_digest fingerprints every runtime state file under a sandbox.
 agent_state_digest() {
   local dir="$1/agent_state"
@@ -3292,6 +3320,7 @@ serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 serve-split) serve_split "${2:-8931}" "${3:-split}" ;;
 seed-import) smoke_seed_import "$@" ;;
 gosec-new) smoke_gosec_new "$@" ;;
+baseline-export) smoke_baseline_export "$@" ;;
 agent-files) smoke_agent_files "$@" ;;
 agent-chat) smoke_agent_chat "$@" ;;
 seed-legacy-agents) smoke_seed_legacy_agents "$@" ;;
@@ -3350,6 +3379,7 @@ library-notifications) smoke_library_notifications "$@" ;;
   echo "  $0 serve-split [port] [sandbox-name]     # skills: isolated server with HOME and the data dir apart" >&2
   echo "  $0 seed-import <sandbox-dir>             # skills: fill the split sandbox's ~/.agents/skills for the import panel" >&2
   echo "  $0 gosec-new [base]                      # gosec findings on lines this branch added (base: origin/dev)" >&2
+  echo "  $0 baseline-export <new-dir> [rev]       # <rev> (origin/dev) as a throwaway Git repo, for harness baselines" >&2
   echo "  $0 agent-files <sandbox> <agent>         # agents in the root: mtime + sha of definition and state files" >&2
   echo "  $0 agent-chat <base-url> <agent> [text]  # agents in the root: send one chat turn to an agent" >&2
   echo "  $0 seed-legacy-agents <sandbox>          # agents in the root: pre-upgrade install (agents in the data dir)" >&2

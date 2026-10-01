@@ -207,6 +207,8 @@ test('Try again after a model is set finishes the run on the same card, then Ope
   const rows = (await receipt.allInnerTexts()).join('\n');
   expect(rows).toMatch(/Workspace/);
   expect(rows).toMatch(/Agent/);
+  // The song's agent is the Home's one shared assistant, not "<label> · <song>".
+  expect(rows).toMatch(/REAPER Assistant[^\n·]*added/);
   expect(rows).toMatch(/First task/);
   expect(rows).toMatch(/Starts when you open it/);
 
@@ -267,6 +269,15 @@ test('keyboard only: Set up runs from the focused button and the card announces 
   await page.keyboard.press('Enter');
   const receipt = card.locator('#personalAssistantFolderReceipt li');
   await expect(receipt.first()).toBeVisible({ timeout: 180_000 });
+  // A later song in the same Home joins the assistant the first one added.
+  expect((await receipt.allInnerTexts()).join('\n')).toMatch(/REAPER Assistant[^\n·]*joined/);
+  const agents = await ok(await request.get('/api/agents/dashboard/list'));
+  const names = (Array.isArray(agents) ? agents : agents.agents || []).map(
+    (agent: { name: string }) => agent.name
+  );
+  expect(names.filter((name: string) => name.startsWith('REAPER Assistant'))).toEqual([
+    'REAPER Assistant'
+  ]);
   // The pop-up's Open link is reachable and activatable without a mouse.
   const open = page.locator('#folderSetupRunModal').getByRole('link', { name: /^Open / });
   await open.focus();

@@ -25,6 +25,23 @@ path. An existing Home suppresses the collection offer. Neither path installs
 a native music application, nor does a folder scan create a workspace. Existing
 accepted specialist relationships and their setup reporting remain readable.
 
+**One card, one consent (portfolio-hire-once).** When the reviewed releases can
+be resolved, both cards carry a server-built plan (every consequence, in order)
+and **Set up** runs it on the server; **Adjust…** keeps the step-by-step path
+above. A single song runs `internal/foldersetup/runner.go` (integration quest →
+Home → project → File-only → staffing → first task). A collection runs
+`internal/foldersetup/portfolio.go`, one reviewed step per pass, each compared
+with the plan before it commits: Home provider → integration (only when some
+folders are projects it opens) → the Home from its reviewed Group Template →
+the Home's required agents (`needs_model` first, so nothing is hired without a
+model) → library start → folder connect → one metadata scan → the Home's
+standing staffing consent. Both record that consent, so the song's project role
+is filled by the Home's one shared assistant (created once, bound afterwards).
+Listing makes no song workspace; a song gets one when it is opened from the
+library. Stop reasons (`needs_model`, `install_failed`, `plan_changed`,
+`consent_stale`, `assistant_missing`, `interrupted`) leave what finished in
+place, and **Continue setup** / **Try again** resume from canonical state.
+
 What shipped, in one place:
 
 | Area | Where |
