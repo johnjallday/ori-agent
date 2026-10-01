@@ -294,7 +294,8 @@ test('a confirmed folder offer connects one existing file without staffing or Ho
   await page.goto('/?panel=today&folder=show');
   const offerCard = page.locator('#personalAssistantFolderOffer');
   await expect(offerCard).toContainText('Documents looks like a REAPER project');
-  await offerCard.locator('[data-folder-action="setup"]').click();
+  // The card shows the whole plan behind one Set up; Adjust… is today's step-by-step journey.
+  await offerCard.getByRole('button', { name: 'Adjust…' }).click();
   const quest = page.locator('#specialistSetupJourneyModal');
   await expect(quest).toBeVisible();
   await expect(quest).toContainText('Create New Workspace');

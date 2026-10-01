@@ -1427,6 +1427,18 @@ No body (any request data is `400`). Same as a scan with `{ "picker": true }`.
 
 After the Create Workspace modal (opened pre-filled, sent with `entry_point: "folder_digest"` and `folder_offer_id`) reports the workspace it made. The server links the offer's folder as the workspace's primary project directory, superseding a blueprint scaffold inside the workspace, seeds one first task naming the read-only tools below, and returns the `resolved` offer. `409` when the workspace was not created for this offer or already has an outside linked folder; `409` with `"needs_pick": true` when the server no longer holds the picked folder (pick it again); `503` when the folder store is unavailable.
 
+### Set Up a Recognized Project (one card)
+
+**Endpoint:** `POST /api/personal-assistant/folder-digest/offers/{offerID}/setup`
+
+```json
+{ "request_id": "…", "plan_digest": "<64 hex>", "entry_name": "optional picked project file" }
+```
+
+A pending project offer whose shape needs a reviewed integration carries `plan` (`lines`: label, detail, `state`, and a `digest`) and `setup` (the run: `status`, `stop_reason`, `lines`). The digest of the plan is the user's consent: it covers every line except its state. The server runs the plan itself (plugin installs, Home, workspace, folder link, File-only mode, agents, first task) and answers `200` with the offer (the run continues on the server; poll the offer). Allowed fields are exactly the three above; there is no path field, and the intent behind the plan is pinned on the server. `409` with `"plan_changed": true` and the fresh offer when the plan moved since the card was drawn; `409` while another run holds the offer; `404` unknown offer. A run that cannot finish stops with a `stop_reason` (for example `needs_model`, `needs_pick`, `install_failed`) and keeps what it finished; sending the same digest again continues from there. A finished run makes the offer `resolved` with a receipt (`outcome.workspace_id`, `outcome.route`). The first read-only task starts when the workspace is first opened (`POST /api/workspaces/{id}/folder-first-task/start`, once).
+
+`GET /api/personal-assistant/folder-digest?offer_id=<id>` returns that offer as `offer` (a running or finished one included) instead of the current one, which is how the card follows its own run when another offer is waiting.
+
 ### Read-only tools over linked directories
 
 Chat and task runs in a workspace with a linked directory get two tools:

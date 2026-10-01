@@ -235,7 +235,18 @@ func (d *FolderDigestDocument) Awaiting() *FolderOffer {
 	var latest *FolderOffer
 	for i := range d.Offers {
 		o := &d.Offers[i]
-		if o.Status == FolderOfferAwaitingOutcome && (latest == nil || o.CreatedAt.After(latest.CreatedAt)) {
+		if o.Status != FolderOfferAwaitingOutcome {
+			continue
+		}
+		// An offer whose one-card setup is running is the one the user is
+		// watching, so it wins over a newer offer that is only waiting.
+		running := o.Setup != nil && o.Setup.Status == FolderSetupRunning
+		latestRunning := latest != nil && latest.Setup != nil && latest.Setup.Status == FolderSetupRunning
+		switch {
+		case latest == nil, running && !latestRunning:
+			latest = o
+		case latestRunning && !running:
+		case o.CreatedAt.After(latest.CreatedAt):
 			latest = o
 		}
 	}

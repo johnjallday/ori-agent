@@ -19,6 +19,7 @@ import (
 // dialog. No handler here accepts a filesystem path (FR48).
 type FolderDigestService interface {
 	Current(ctx context.Context, userID string) (personalassistant.FolderDigestView, error)
+	CurrentOffer(ctx context.Context, userID, offerID string) (personalassistant.FolderDigestView, error)
 	MarkFirstPromptShown(ctx context.Context, userID string) (personalassistant.FolderDigestView, error)
 	ScanChip(ctx context.Context, userID, chip string) (personalassistant.FolderOfferView, error)
 	ScanPicked(ctx context.Context, userID string) (*personalassistant.FolderOfferView, error)
@@ -83,7 +84,10 @@ func (h *Handler) SetFolderDigest(service FolderDigestService) {
 // largest legitimate body is a decision with a request id.
 const maxFolderDigestBodyBytes = 4 * 1024
 
-// GetFolderDigest returns the pending offer and the chooser's chips.
+// GetFolderDigest returns the pending offer and the chooser's chips. With
+// ?offer_id= it returns that one offer instead, whatever its status: the card
+// polls a running setup this way so a finished run shows its own receipt. The
+// query accepts an offer identifier and nothing else, never a path.
 func (h *Handler) GetFolderDigest(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
@@ -96,7 +100,13 @@ func (h *Handler) GetFolderDigest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := h.folderDigest.Current(r.Context(), userID)
+	var view personalassistant.FolderDigestView
+	var err error
+	if offerID := strings.TrimSpace(r.URL.Query().Get("offer_id")); offerID != "" {
+		view, err = h.folderDigest.CurrentOffer(r.Context(), userID, offerID)
+	} else {
+		view, err = h.folderDigest.Current(r.Context(), userID)
+	}
 	if err != nil {
 		writeFolderDigestError(w, err)
 		return

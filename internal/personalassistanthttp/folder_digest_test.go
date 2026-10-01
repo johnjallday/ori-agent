@@ -29,6 +29,8 @@ type fakeFolderDigest struct {
 	existingHomeCalls []string
 	// setups records every one-card setup click that reached the service.
 	setups []personalassistant.FolderSetupInput
+	// namedOffers records every offer id a GET asked for by name.
+	namedOffers []string
 }
 
 func (f *fakeFolderDigest) Current(context.Context, string) (personalassistant.FolderDigestView, error) {
@@ -36,6 +38,16 @@ func (f *fakeFolderDigest) Current(context.Context, string) (personalassistant.F
 		Chips:      []personalassistant.FolderChip{{ID: "downloads", Label: "Downloads"}},
 		PickerNote: "Pick a folder from the list for now.",
 		Paused:     f.paused,
+	}, nil
+}
+
+func (f *fakeFolderDigest) CurrentOffer(_ context.Context, _ string, offerID string) (personalassistant.FolderDigestView, error) {
+	f.namedOffers = append(f.namedOffers, offerID)
+	if offerID != "offer-1" {
+		return personalassistant.FolderDigestView{}, personalassistant.ErrFolderOfferNotFound
+	}
+	return personalassistant.FolderDigestView{
+		Offer: &personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferResolved},
 	}, nil
 }
 
@@ -150,6 +162,31 @@ func (f *fakeFolderDigest) StartSetup(_ context.Context, _ string, offerID strin
 		ID: offerID, Status: personalassistant.FolderOfferAwaitingOutcome,
 		Setup: &personalassistant.FolderSetupView{Status: personalassistant.FolderSetupRunning},
 	}, nil
+}
+
+func TestGetFolderDigest_CanReadOneNamedOfferAndNothingElse(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	get := func(target string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.GetFolderDigest(w, httptest.NewRequest(http.MethodGet, target, nil))
+		return w
+	}
+	const route = "/api/personal-assistant/folder-digest"
+	if w := get(route); w.Code != http.StatusOK || len(fake.namedOffers) != 0 {
+		t.Fatalf("the plain read must stay the plain read: %d %v", w.Code, fake.namedOffers)
+	}
+	named := get(route + "?offer_id=offer-1")
+	if named.Code != http.StatusOK || len(fake.namedOffers) != 1 || !strings.Contains(named.Body.String(), `"resolved"`) {
+		t.Fatalf("named read = %d %s", named.Code, named.Body.String())
+	}
+	if w := get(route + "?offer_id=missing"); w.Code != http.StatusNotFound {
+		t.Fatalf("an unknown offer = %d", w.Code)
+	}
+	// A path in the query is not an offer id and is never read as one.
+	if w := get(route + "?path=/etc"); w.Code != http.StatusOK || len(fake.namedOffers) != 2 {
+		t.Fatalf("an unrelated query must be ignored: %d %v", w.Code, fake.namedOffers)
+	}
 }
 
 func TestFolderSetup_AcceptsOnlyTheDigestAndAnEntryNameAndNeverAPath(t *testing.T) {

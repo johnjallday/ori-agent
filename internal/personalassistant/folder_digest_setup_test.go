@@ -395,6 +395,69 @@ func TestFolderSetup_NoFirstTaskIsSeededForARunTheVerifierRefuses(t *testing.T) 
 	}
 }
 
+// Another offer can be left awaiting (an abandoned Adjust…). It must not hide a
+// run the user is watching, and it must not swallow the receipt when that run
+// finishes: the card polls its own offer by name.
+func TestFolderSetup_AnotherWaitingOfferNeitherHidesARunNorItsReceipt(t *testing.T) {
+	f := newOneCardFixture(t)
+	ctx := context.Background()
+	f.setup.hold = make(chan struct{})
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the run to start", func() bool { return f.setup.runCount() == 1 })
+
+	// A newer offer that is merely waiting, from the step-by-step path.
+	other := filepath.Join(f.home, "Other")
+	if err := os.MkdirAll(other, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "Other.rpp"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := f.service.scanRoot(ctx, "local", other, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Decide(ctx, "local", waiting.ID, FolderDecisionInput{Decision: FolderDecisionYes, RequestID: "yes-other"}); err != nil {
+		t.Fatal(err)
+	}
+	// Make it unambiguously the newer one without touching the fixture's clock,
+	// which the running goroutine reads.
+	if _, err := f.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
+		d.Offer(waiting.ID).CreatedAt = d.Offer(f.offer.ID).CreatedAt.Add(time.Hour)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	current, err := f.service.Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.ID != f.offer.ID {
+		t.Fatalf("the offer being run must be the current one: %+v, %v", current.Offer, err)
+	}
+
+	close(f.setup.hold)
+	waitFor(t, "the run to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
+
+	// Now the waiting offer is "current", but the card's own offer still reads as
+	// resolved, with its outcome, when asked for by name.
+	current, err = f.service.Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.ID != waiting.ID {
+		t.Fatalf("current after the run = %+v, %v", current.Offer, err)
+	}
+	named, err := f.service.CurrentOffer(ctx, "local", f.offer.ID)
+	if err != nil || named.Offer == nil || named.Offer.ID != f.offer.ID ||
+		named.Offer.Status != FolderOfferResolved || named.Offer.Outcome == nil || named.Offer.Outcome.WorkspaceID != "quest-project" {
+		t.Fatalf("the finished run's own receipt = %+v, %v", named.Offer, err)
+	}
+	if _, err := f.service.CurrentOffer(ctx, "local", "no-such-offer"); !errors.Is(err, ErrFolderOfferNotFound) {
+		t.Fatalf("an unknown offer: %v", err)
+	}
+	if _, err := f.service.CurrentOffer(ctx, "local", "  "); !errors.Is(err, ErrValidation) {
+		t.Fatalf("a blank offer id: %v", err)
+	}
+}
+
 func TestFolderSetup_AFolderWithSeveralProjectFilesAsksWhichOne(t *testing.T) {
 	f := newOneCardFixture(t)
 	ctx := context.Background()

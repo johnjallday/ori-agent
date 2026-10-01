@@ -1055,8 +1055,14 @@ function syncSetupPolling() {
 }
 
 async function pollSetup() {
+  const id = state.offer?.id;
+  if (!id) return;
   try {
-    const response = await fetch(DIGEST_ENDPOINT, { headers: { Accept: 'application/json' } });
+    // The card's own offer, by name: another waiting offer may be the "current"
+    // one, and a finished run must still show its own receipt.
+    const response = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(id)}`, {
+      headers: { Accept: 'application/json' }
+    });
     if (!response.ok) return;
     const payload = await readJSON(response);
     // Once the run settles the read returns the resolved offer, which ends the poll.

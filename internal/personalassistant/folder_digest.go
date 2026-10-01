@@ -561,6 +561,21 @@ func (s *FolderDigestService) now() time.Time { return s.deps.Now() }
 // chips. A confirmed journey survives page/server restarts; only when neither
 // exists do we resurface a due "later" or the next queued candidate.
 func (s *FolderDigestService) Current(ctx context.Context, userID string) (FolderDigestView, error) {
+	return s.current(ctx, userID, "")
+}
+
+// CurrentOffer is Current for one named offer, whatever its status. The card
+// polls it while its setup runs: another offer may be the "current" one, and a
+// run that finishes must still show its own receipt.
+func (s *FolderDigestService) CurrentOffer(ctx context.Context, userID, offerID string) (FolderDigestView, error) {
+	offerID = strings.TrimSpace(offerID)
+	if offerID == "" || len(offerID) > folderRequestIDMax {
+		return FolderDigestView{}, fmt.Errorf("%w: offer id", ErrValidation)
+	}
+	return s.current(ctx, userID, offerID)
+}
+
+func (s *FolderDigestService) current(ctx context.Context, userID, offerID string) (FolderDigestView, error) {
 	if s == nil || s.store == nil {
 		return FolderDigestView{}, ErrRepairNeeded
 	}
@@ -571,6 +586,16 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 	doc, err := s.store.Read(ctx, userID)
 	if err != nil {
 		return FolderDigestView{}, err
+	}
+	if offerID != "" {
+		named := doc.Offer(offerID)
+		if named == nil {
+			return FolderDigestView{}, ErrFolderOfferNotFound
+		}
+		view := s.chooserView(binding)
+		offer := s.viewFor(ctx, userID, *named, binding.Paused)
+		view.Offer = &offer
+		return view, nil
 	}
 	pending := doc.Pending()
 	if pending == nil {
@@ -585,9 +610,20 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 	if pending == nil {
 		pending = recentProjectHomeNavigation(doc, s.now())
 	}
-	view := FolderDigestView{Chips: s.availableChips(), Paused: binding.Paused}
+	view := s.chooserView(binding)
 	view.PromptFirstFolder = !binding.Paused && doc.FirstPromptShownAt == nil &&
 		s.deps.MissionUnresolved != nil && s.deps.MissionUnresolved("pa-show-folder")
+	if pending != nil {
+		offer := s.viewFor(ctx, userID, *pending, binding.Paused)
+		view.Offer = &offer
+	}
+	return view, nil
+}
+
+// chooserView is the part of the digest view that does not depend on an offer:
+// the chooser's chips and what the picker can do.
+func (s *FolderDigestService) chooserView(binding KnowledgeBinding) FolderDigestView {
+	view := FolderDigestView{Chips: s.availableChips(), Paused: binding.Paused}
 	reason := ""
 	if s.deps.Picker != nil {
 		view.PickerAvailable = s.deps.Picker.Available()
@@ -596,11 +632,7 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 		reason = s.deps.Picker.UnavailableReason()
 	}
 	view.PickerNote = folderChooserNote(len(view.Chips), view.PickerAvailable, reason)
-	if pending != nil {
-		offer := s.viewFor(ctx, userID, *pending, binding.Paused)
-		view.Offer = &offer
-	}
-	return view, nil
+	return view
 }
 
 // The normal project creator navigates to the child as soon as it succeeds.

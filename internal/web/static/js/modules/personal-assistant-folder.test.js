@@ -1017,6 +1017,8 @@ test('Set up sends only the plan digest and a chosen file name, and polls only w
   // Polling starts from a click or an already-running read, never on its own.
   assert.match(source, /state\.offer\?\.setup\?\.status === 'running'/);
   assert.match(source, /SETUP_POLL_MS = 1500/);
+  // It polls its own offer by name, so another waiting offer cannot hide the receipt.
+  assert.match(source, /\$\{DIGEST_ENDPOINT\}\?offer_id=\$\{encodeURIComponent\(id\)\}/);
   assert.doesNotMatch(source, /folder_card_stub/);
 });
 
