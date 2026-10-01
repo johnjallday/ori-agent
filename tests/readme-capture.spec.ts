@@ -668,6 +668,15 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { started: false });
       return;
     }
+    // A workspace page also asks once whether a folder card left a first task to
+    // start. These fictional workspaces came from no folder card.
+    if (
+      url.pathname ===
+      `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/folder-first-task/start`
+    ) {
+      await json(route, { started: false, reason: 'no_first_task' });
+      return;
+    }
     // Blueprint Setup Wizard: setup-wizard.js and workspace-map.js both read a
     // workspace's setup state on load, for every workspace regardless of
     // blueprint. These fictional workspaces come from no blueprint, so the

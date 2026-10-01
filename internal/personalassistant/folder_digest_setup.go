@@ -257,16 +257,17 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	if !s.claimRun(offerID) {
 		return s.viewFor(ctx, userID, started, binding.Paused), nil
 	}
-	go s.runSetup(userID, started, path, plan, entryName)
+	// The run outlives the request: keep its values, drop its cancellation.
+	go s.runSetup(context.WithoutCancel(ctx), userID, started, path, plan, entryName)
 	return s.viewFor(ctx, userID, started, binding.Paused), nil
 }
 
 // runSetup drives one run on a context that outlives the request, then lets the
 // existing journey verification settle the offer. A run that cannot be proved
 // to have made a workspace for this exact folder never resolves the offer.
-func (s *FolderDigestService) runSetup(userID string, offer FolderOffer, path string, plan FolderSetupPlan, entryName string) {
+func (s *FolderDigestService) runSetup(parent context.Context, userID string, offer FolderOffer, path string, plan FolderSetupPlan, entryName string) {
 	defer s.releaseRun(offer.ID)
-	ctx, cancel := context.WithTimeout(context.Background(), folderSetupTimeout)
+	ctx, cancel := context.WithTimeout(parent, folderSetupTimeout)
 	defer cancel()
 	update := func(ctx context.Context, u FolderSetupUpdate) error { return s.recordSetup(ctx, userID, offer.ID, u) }
 	err := s.deps.Setup.Run(ctx, FolderSetupRequest{
