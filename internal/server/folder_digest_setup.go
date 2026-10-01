@@ -165,6 +165,15 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 				return foldersetup.PlanFacts{}, err
 			}
 			facts.Provider = &provider
+			// A blueprint whose Home comes from a reviewed provider joins that
+			// Home. The run re-checks this against the journey's own group policy
+			// and stops if they disagree, so the assumption cannot cost the user.
+			exists, err := reviewedHomeExists(h.builder, req.UserID, target.provider.Key)
+			if err != nil {
+				return foldersetup.PlanFacts{}, errSetupUnavailable
+			}
+			facts.Grouped, facts.HomeExists = true, exists
+			facts.HomeTemplate = "plugin:" + target.entry.PluginID + ":" + target.entry.ExpectedBlueprintID
 		}
 		cached = cachedPlanFacts{at: time.Now(), facts: facts}
 		h.mu.Lock()
@@ -241,9 +250,13 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 	if target.provider != nil && req.Plan.Intent.Provider != "" {
 		runner.Providers = homeProviderInstaller{setup: folderHomeProviderSetup{builder: b}, key: target.provider.Key}
 	}
-	result, err := runner.Run(ctx, foldersetup.Config{
+	config := foldersetup.Config{
 		Plan: req.Plan, WorkspaceName: strings.TrimSpace(req.Offer.Subject.Name), EntryName: req.EntryName,
-	})
+	}
+	if req.Offer.Setup != nil {
+		config.RunID = req.Offer.Setup.RunID
+	}
+	result, err := runner.Run(ctx, config)
 	if result.Cause != nil {
 		// The card says only what is needed; the cause belongs in the log.
 		logger.Warn("One-card folder setup stopped", logger.Fields{
@@ -265,6 +278,10 @@ func (j scopedJourney) Read(ctx context.Context, runID string) (*setupjourney.Jo
 
 func (j scopedJourney) Mutate(ctx context.Context, runID string, action setupjourney.ActionID, request setupjourney.ActionMutation) (*setupjourney.ActionResult, error) {
 	return j.service.Mutate(ctx, j.userID, runID, action, request)
+}
+
+func (j scopedJourney) Child(ctx context.Context, rootRevision int64, key string) (*setupjourney.JourneyProjection, error) {
+	return j.service.CreateOrResumeChild(ctx, j.userID, setupjourney.PresentationMutation{IfRevision: rootRevision, IdempotencyKey: key})
 }
 
 // homeProviderInstaller installs the reviewed Home provider through the same

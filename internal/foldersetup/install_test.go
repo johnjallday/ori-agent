@@ -20,11 +20,16 @@ type fakeInstall struct {
 	shownVersion string
 	pluginID     string
 	commitErr    error
+	unresolved   bool
 	calls        *[]string
 }
 
 func newFakeInstall(log *[]string) *fakeInstall {
 	return &fakeInstall{revision: 1, shownVersion: "0.9.0", pluginID: "reaper-plugin", calls: log}
+}
+
+func (f *fakeInstall) Child(context.Context, int64, string) (*setupjourney.JourneyProjection, error) {
+	return nil, errors.New("the install quest has no child runs")
 }
 
 func (f *fakeInstall) Read(context.Context, string) (*setupjourney.JourneyProjection, error) {
@@ -37,7 +42,11 @@ func (f *fakeInstall) Read(context.Context, string) (*setupjourney.JourneyProjec
 	default:
 		step.Actions = []setupjourney.ActionDefinition{{ID: setupjourney.ActionReviewInstall}}
 	}
-	return &setupjourney.JourneyProjection{RunID: "install-run", StateRevision: f.revision, Steps: []setupjourney.StepProjection{step}}, nil
+	return &setupjourney.JourneyProjection{
+		RunID: "install-run", StateRevision: f.revision, Steps: []setupjourney.StepProjection{step},
+		// A commit that failed leaves the quest unresolved, as the real journey does.
+		Busy: f.unresolved, ReconciliationRequired: f.unresolved,
+	}, nil
 }
 
 func (f *fakeInstall) Mutate(_ context.Context, _ string, action setupjourney.ActionID, _ setupjourney.ActionMutation) (*setupjourney.ActionResult, error) {
@@ -50,6 +59,7 @@ func (f *fakeInstall) Mutate(_ context.Context, _ string, action setupjourney.Ac
 		return &setupjourney.ActionResult{Review: &setupjourney.ReviewProjection{Token: "t", CommitAction: setupjourney.ActionEnable, Integration: disclosure}}, nil
 	}
 	if f.commitErr != nil {
+		f.unresolved = true
 		return nil, f.commitErr
 	}
 	if action == setupjourney.ActionInstall {
@@ -247,6 +257,39 @@ func TestRunStopsOnAFailedDownloadAndRunsNothingAfterIt(t *testing.T) {
 	}
 	if got := lineStates(progress.last())[personalassistant.FolderPlanIntegration]; got != personalassistant.FolderLineFailed {
 		t.Fatalf("the failing line = %s, want failed", got)
+	}
+}
+
+// A failed install leaves the install quest unresolved, and the journey will not
+// commit again until the plugin is seen installed. The run says so instead of
+// pressing on, and a retry continues once the plugin is installed another way.
+func TestRunAfterAFailedInstallWaitsForThePluginInsteadOfCommittingAgain(t *testing.T) {
+	h := newInstallHarness()
+	h.install.commitErr = errors.New("download failed")
+	h.provider.ready = true
+	cfg := installConfig(personalassistant.FolderInstallInstall, personalassistant.FolderInstallReady)
+	if result, _ := h.run(t, cfg); result.StopReason != personalassistant.FolderStopInstallFailed {
+		t.Fatalf("first attempt = %+v", result)
+	}
+
+	// Try again with the plugin still missing: no second install is attempted.
+	before := len(h.log)
+	result, _ := h.run(t, cfg)
+	if result.StopReason != personalassistant.FolderStopInstallFailed || result.Cause == nil {
+		t.Fatalf("retry = %+v", result)
+	}
+	for _, call := range h.log[before:] {
+		if call == "install:review_install" || call == "install:install" {
+			t.Fatalf("committed again over an unresolved install: %v", h.log[before:])
+		}
+	}
+
+	// The user installs it from Plugins; the step now reads complete, and Try
+	// again carries on from there.
+	h.install.installed, h.install.enabled = true, true
+	result, _ = h.run(t, cfg)
+	if result.Status != personalassistant.FolderSetupDone {
+		t.Fatalf("retry after the plugin was installed = %+v cause=%v", result, result.Cause)
 	}
 }
 

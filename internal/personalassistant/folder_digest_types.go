@@ -156,6 +156,9 @@ type FolderOffer struct {
 	Decision             string         `json:"decision,omitempty"`
 	Choice               string         `json:"choice,omitempty"`
 	Outcome              *FolderOutcome `json:"outcome,omitempty"`
+	// EntryName is the base name of the file the user picked, when the offer came
+	// from a picked file rather than a folder. Never a path.
+	EntryName string `json:"entry_name,omitempty"`
 	// Setup is the one-card setup run, kept so the card survives a reload.
 	Setup      *FolderSetupRun `json:"setup,omitempty"`
 	RequestID  string          `json:"request_id,omitempty"`
@@ -341,6 +344,11 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		}
 		if offer.Setup != nil {
 			if err := validateFolderSetupRun(*offer.Setup); err != nil {
+				return err
+			}
+		}
+		if offer.EntryName != "" {
+			if err := validateFolderName(offer.EntryName); err != nil {
 				return err
 			}
 		}

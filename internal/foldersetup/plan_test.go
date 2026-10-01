@@ -91,6 +91,49 @@ func TestBuildPlanListsTheHomeProviderOnlyWhenThereIsOne(t *testing.T) {
 	}
 }
 
+func TestBuildPlanNamesThePlacementAndTheHomeItCreates(t *testing.T) {
+	standalone := BuildPlan(baseFacts())
+	if line(standalone, personalassistant.FolderPlanHome).Kind != "" || standalone.Intent.Placement != "standalone" || standalone.Intent.CreatesHome {
+		t.Fatalf("standalone plan = %+v", standalone)
+	}
+	if got := line(standalone, personalassistant.FolderPlanWorkspace).Name; got != "Creates a REAPER Song workspace named My Song" {
+		t.Fatalf("standalone workspace line = %q", got)
+	}
+
+	facts := baseFacts()
+	facts.Grouped, facts.HomeTemplate = true, "plugin:x:y"
+	creating := BuildPlan(facts)
+	if got := line(creating, personalassistant.FolderPlanHome).Name; got != "Creates the Home this workspace belongs to" {
+		t.Fatalf("home line = %q", got)
+	}
+	if got := line(creating, personalassistant.FolderPlanWorkspace).Name; got != "Creates a REAPER Song workspace named My Song in that Home" {
+		t.Fatalf("workspace line = %q", got)
+	}
+	if creating.Intent.Placement != "grouped" || !creating.Intent.CreatesHome || creating.Intent.HomeTemplate != "plugin:x:y" {
+		t.Fatalf("intent = %+v", creating.Intent)
+	}
+	// The Home line comes before the workspace that goes in it.
+	kinds := make([]string, 0, len(creating.Lines))
+	for _, l := range creating.Lines {
+		kinds = append(kinds, l.Kind)
+	}
+	if strings.Join(kinds, ",") != "integration,home,workspace,folder,mode,agents,task" {
+		t.Fatalf("order = %v", kinds)
+	}
+
+	facts.HomeExists = true
+	existing := BuildPlan(facts)
+	if line(existing, personalassistant.FolderPlanHome).Kind != "" || existing.Intent.CreatesHome || existing.Intent.Placement != "grouped" {
+		t.Fatalf("existing-Home plan = %+v", existing)
+	}
+	if got := line(existing, personalassistant.FolderPlanWorkspace).Name; got != "Creates a REAPER Song workspace named My Song in your Home" {
+		t.Fatalf("existing-Home workspace line = %q", got)
+	}
+	if creating.Digest == existing.Digest || creating.Digest == standalone.Digest {
+		t.Fatal("creating a Home, joining one and standing alone must be different consents")
+	}
+}
+
 func TestBuildPlanSaysWhenTheAppItselfIsNotInstalled(t *testing.T) {
 	facts := baseFacts()
 	facts.AppInstalled = false

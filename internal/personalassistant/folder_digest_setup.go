@@ -143,6 +143,18 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	if s.isRunning(offerID) {
 		return s.viewFor(ctx, userID, *offer, binding.Paused), nil
 	}
+	// A project file the user chooses must be one the server offered. The journey
+	// checks the name against the folder again; this keeps a made-up name from
+	// ever reaching it.
+	if input.EntryName != "" && offer.Setup != nil && len(offer.Setup.EntryCandidates) > 0 {
+		offered := false
+		for _, candidate := range offer.Setup.EntryCandidates {
+			offered = offered || candidate == input.EntryName
+		}
+		if !offered {
+			return FolderOfferView{}, fmt.Errorf("%w: project file", ErrValidation)
+		}
+	}
 	// The project's own folder: the scan root, or the subfolder the offer is about.
 	path, err := s.subjectPathOf(*offer)
 	if err != nil {
@@ -190,8 +202,13 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 				Name: item.Subject.Name, Verdict: item.Verdict, Decision: FolderDecisionYes, Choice: FolderChoiceProject, At: now,
 			})
 		}
+		// A chosen file wins; then the one an earlier run was given; then the file
+		// the user picked when they showed the folder.
 		if entryName == "" && item.Setup != nil {
 			entryName = item.Setup.EntryName
+		}
+		if entryName == "" {
+			entryName = item.EntryName
 		}
 		lines := append([]FolderPlanLine(nil), plan.Lines...)
 		for i := range lines {

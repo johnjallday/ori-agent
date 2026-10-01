@@ -47,6 +47,9 @@ const maxPasses = 16
 type Journey interface {
 	Read(ctx context.Context, runID string) (*setupjourney.JourneyProjection, error)
 	Mutate(ctx context.Context, runID string, action setupjourney.ActionID, request setupjourney.ActionMutation) (*setupjourney.ActionResult, error)
+	// Child starts (or resumes) the run for a further project, once the root run
+	// already holds one. It is given the root's revision and a fresh key.
+	Child(ctx context.Context, rootRevision int64, key string) (*setupjourney.JourneyProjection, error)
 }
 
 // Selections mints the project-picker token for the offer's remembered folder
@@ -71,6 +74,9 @@ type Config struct {
 	WorkspaceName string
 	// EntryName names the project file when the user or the scan chose one.
 	EntryName string
+	// RunID is the plugin quest run an earlier attempt of this setup used, so a
+	// resume reads that run (root or child) and never starts another.
+	RunID string
 }
 
 // Result is how a run ended. Cause is the underlying error behind a stop the
@@ -163,7 +169,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config) (Result, error) {
 	if r == nil || (r.Journey == nil && r.OpenProject == nil) || r.Selections == nil || r.Progress == nil {
 		return Result{}, errors.New("foldersetup: runner is not wired")
 	}
-	state := &run{Runner: r, cfg: cfg, entryName: cfg.EntryName}
+	state := &run{Runner: r, cfg: cfg, entryName: cfg.EntryName, runID: cfg.RunID}
 	state.lines = append([]personalassistant.FolderPlanLine(nil), cfg.Plan.Lines...)
 	for i := range state.lines {
 		state.lines[i].State = personalassistant.FolderLineWaiting
@@ -191,10 +197,17 @@ func (r *Runner) Run(ctx context.Context, cfg Config) (Result, error) {
 
 func (s *run) finish(ctx context.Context, status, reason string, candidates []string, cause error) (Result, error) {
 	if status == personalassistant.FolderSetupStopped {
-		// The line that was in progress is the one that did not finish.
+		// The line that was in progress is the one that did not finish. When the
+		// run stopped to ask the user for something (a file, the folder, a model)
+		// nothing failed: that line simply waits for the answer.
+		next := personalassistant.FolderLineFailed
+		switch reason {
+		case personalassistant.FolderStopNeedsChoice, personalassistant.FolderStopNeedsPick, personalassistant.FolderStopNeedsModel:
+			next = personalassistant.FolderLineWaiting
+		}
 		for i := range s.lines {
 			if s.lines[i].State == personalassistant.FolderLineWorking {
-				s.lines[i].State = personalassistant.FolderLineFailed
+				s.lines[i].State = next
 			}
 		}
 	}
@@ -237,6 +250,23 @@ func (s *run) drive(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if s.runID == "" && journey.RunKind == setupjourney.RunKindRoot && journey.Receipts.ProjectWorkspaceID != "" {
+			// The root run already holds a project (an earlier folder): this one
+			// is a further project, which is its own child run.
+			child, childErr := s.journey.Child(ctx, journey.StateRevision, s.key())
+			if childErr != nil || child == nil || child.RunID == "" {
+				cause := "no child run"
+				if childErr != nil {
+					cause = childErr.Error()
+				}
+				return failed("could not start a run for another project: " + cause)
+			}
+			s.runID = child.RunID
+			if err := s.record(ctx, personalassistant.FolderSetupRunning, "", nil); err != nil {
+				return err
+			}
+			continue
+		}
 		if journey.RunID != "" {
 			s.runID = journey.RunID
 		}
@@ -254,7 +284,15 @@ func (s *run) drive(ctx context.Context) error {
 		if step == nil {
 			return &stop{reason: personalassistant.FolderStopFailed}
 		}
-		s.setKinds(stepLines[step.Kind], personalassistant.FolderLineWorking)
+		working := stepLines[step.Kind]
+		if step.Kind == specialist.SetupStepProjectConnect {
+			// The Home is made first; only then is the workspace connected.
+			working = []string{personalassistant.FolderPlanWorkspace, personalassistant.FolderPlanFolder}
+			if needsHome(step) {
+				working = []string{personalassistant.FolderPlanHome}
+			}
+		}
+		s.setKinds(working, personalassistant.FolderLineWorking)
 		if err := s.record(ctx, personalassistant.FolderSetupRunning, "", nil); err != nil {
 			return err
 		}
@@ -339,6 +377,13 @@ func (s *run) installIntegration(ctx context.Context, intent personalassistant.F
 		if step.Status == setupjourney.StepComplete {
 			s.setKind(personalassistant.FolderPlanIntegration, personalassistant.FolderLineDone)
 			return nil
+		}
+		if journey.Busy || journey.ReconciliationRequired {
+			// An earlier install attempt did not finish and the journey will not
+			// run another commit until the plugin is seen installed (it never
+			// re-executes a mutation). Installing it from Plugins settles it, and
+			// a retry then finds the step complete.
+			return &stop{reason: personalassistant.FolderStopInstallFailed, detail: "an earlier install attempt is unresolved"}
 		}
 		var action setupjourney.ActionID
 		for _, candidate := range []setupjourney.ActionID{setupjourney.ActionReviewInstall, setupjourney.ActionReviewEnable, setupjourney.ActionReviewUpdate} {
@@ -479,11 +524,50 @@ func placement(prep *projectconnection.HomePreparation) (string, error) {
 	return "", &stop{reason: personalassistant.FolderStopFailed}
 }
 
+// needsHome is true while the blueprint requires a Home that does not exist yet.
+func needsHome(step *setupjourney.StepProjection) bool {
+	prep := step.Preparation
+	return prep != nil && prep.GroupPolicy == string(projecttemplates.GroupPolicyRequired) && !prep.Exists
+}
+
+// createHome creates the Home the blueprint requires, exactly as the plan
+// promised: the Home's template must be the expected one, and the plan must have
+// said a Home would be created.
+func (s *run) createHome(ctx context.Context, journey *setupjourney.JourneyProjection, step *setupjourney.StepProjection) error {
+	prep := step.Preparation
+	if !s.cfg.Plan.Intent.CreatesHome {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the blueprint now needs a Home the plan did not promise"}
+	}
+	if !has(step, setupjourney.ActionReviewCreateGroup) {
+		return failed("the project step does not offer to create the required Home")
+	}
+	input, err := json.Marshal(struct {
+		Name string `json:"name"`
+	}{Name: prep.Name})
+	if err != nil {
+		return err
+	}
+	review, err := s.review(ctx, journey, setupjourney.ActionReviewCreateGroup, input)
+	if err != nil {
+		return err
+	}
+	shown := review.Group
+	expected := s.cfg.Plan.Intent.HomeTemplate
+	if shown == nil || review.CommitAction != setupjourney.ActionCreateGroup || shown.Exists || shown.Name != prep.Name ||
+		shown.TemplateID != prep.TemplateID || (expected != "" && shown.TemplateID != expected) {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home review differs from the plan"}
+	}
+	if err := s.commit(ctx, journey, review, input); err != nil {
+		return err
+	}
+	s.setKind(personalassistant.FolderPlanHome, personalassistant.FolderLineDone)
+	return nil
+}
+
 func (s *run) connectProject(ctx context.Context, journey *setupjourney.JourneyProjection, step *setupjourney.StepProjection) error {
 	prep := step.Preparation
-	if has(step, setupjourney.ActionReviewCreateGroup) && prep != nil && prep.GroupPolicy == string(projecttemplates.GroupPolicyRequired) && !prep.Exists {
-		// Creating a required Home is driven in a later group.
-		return failed("the blueprint requires a Home that does not exist yet")
+	if needsHome(step) {
+		return s.createHome(ctx, journey, step)
 	}
 	if !has(step, setupjourney.ActionReviewExistingProject) {
 		return failed("the project step does not offer an existing-project review")
@@ -491,6 +575,9 @@ func (s *run) connectProject(ctx context.Context, journey *setupjourney.JourneyP
 	composition, err := placement(prep)
 	if err != nil {
 		return err
+	}
+	if planned := s.cfg.Plan.Intent.Placement; planned != "" && composition != planned {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the workspace would be placed " + composition + ", the plan said " + planned}
 	}
 	token, folder, err := s.Selections.Select(ctx)
 	if err != nil {

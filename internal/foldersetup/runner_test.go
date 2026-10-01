@@ -33,6 +33,20 @@ type fakeJourney struct {
 	staffingScope   workspace.AssistantRoleScope
 	staffingBound   bool
 	staffingOutRole string
+
+	// rootHasProject makes the root run hold another folder's project already, so
+	// a further project must be its own child run.
+	rootHasProject bool
+	childErr       error
+	childStarted   bool
+
+	// A required Home, and what its review discloses.
+	homeRequired    bool
+	homeExists      bool
+	homeStaffed     bool
+	homeTemplate    string // the template the journey itself reports
+	homeShownTmpl   string // the template the Home review discloses; "" = homeTemplate
+	recommendedBoth bool   // a "recommended" Home with both compositions available
 }
 
 func newFake() *fakeJourney {
@@ -47,8 +61,31 @@ var order = []specialist.SetupStepKind{
 	specialist.SetupStepProjectConnect, specialist.SetupStepWorkspaceSetup, specialist.SetupStepAssistantProgramStaffing,
 }
 
-func (f *fakeJourney) Read(context.Context, string) (*setupjourney.JourneyProjection, error) {
+// Child starts the run for a further project, as CreateOrResumeChild does.
+func (f *fakeJourney) Child(_ context.Context, rootRevision int64, _ string) (*setupjourney.JourneyProjection, error) {
+	f.calls = append(f.calls, "child")
+	if f.childErr != nil {
+		return nil, f.childErr
+	}
+	if rootRevision != f.revision {
+		return nil, errors.New("stale root revision")
+	}
+	f.childStarted = true
+	return &setupjourney.JourneyProjection{RunID: "child-1", RunKind: setupjourney.RunKindChild, StateRevision: f.revision}, nil
+}
+
+func (f *fakeJourney) Read(_ context.Context, runID string) (*setupjourney.JourneyProjection, error) {
+	if runID == "" && f.rootHasProject {
+		// The root run already holds another folder's project.
+		return &setupjourney.JourneyProjection{
+			RunID: "root-1", RunKind: setupjourney.RunKindRoot, StateRevision: f.revision,
+			Lifecycle: setupjourney.LifecycleReady, Receipts: setupjourney.ResourceProjection{ProjectWorkspaceID: "earlier-project"},
+		}, nil
+	}
 	projection := &setupjourney.JourneyProjection{RunID: "run-1", StateRevision: f.revision, Busy: f.busy}
+	if runID == "child-1" {
+		projection.RunID, projection.RunKind = "child-1", setupjourney.RunKindChild
+	}
 	ready := true
 	for _, kind := range order {
 		step := setupjourney.StepProjection{ID: string(kind), Kind: kind, Status: setupjourney.StepPending}
@@ -62,6 +99,21 @@ func (f *fakeJourney) Read(context.Context, string) (*setupjourney.JourneyProjec
 				step.Preparation = &projectconnection.HomePreparation{
 					GroupPolicy: "none", AvailableCompositions: []string{"standalone"},
 				}
+				switch {
+				case f.homeRequired:
+					step.Preparation = &projectconnection.HomePreparation{
+						Name: "Music Home", TemplateID: f.homeTemplate, GroupPolicy: "required",
+						AvailableCompositions: []string{"grouped"}, Exists: f.homeExists,
+					}
+					if !f.homeExists {
+						step.Actions = []setupjourney.ActionDefinition{{ID: setupjourney.ActionReviewCreateGroup}}
+					}
+				case f.recommendedBoth:
+					step.Preparation = &projectconnection.HomePreparation{
+						Name: "Music Home", TemplateID: f.homeTemplate, GroupPolicy: "recommended",
+						AvailableCompositions: []string{"grouped", "standalone"}, Exists: f.homeExists,
+					}
+				}
 			case specialist.SetupStepWorkspaceSetup:
 				step.Actions = []setupjourney.ActionDefinition{{ID: setupjourney.ActionReviewFileOnlyMode}}
 			case specialist.SetupStepAssistantProgramStaffing:
@@ -70,6 +122,13 @@ func (f *fakeJourney) Read(context.Context, string) (*setupjourney.JourneyProjec
 					Scope: workspace.AssistantRoleScopeProject, WorkspaceLabel: "My Song",
 					Roles: []setupjourney.StaffingRoleProjection{{RoleID: "producer", Label: "Producer", Required: true}},
 				}}}
+				if f.homeRequired && !f.homeStaffed {
+					step.Actions = append([]setupjourney.ActionDefinition{{ID: setupjourney.ActionReviewHomeStaffing}}, step.Actions...)
+					step.Staffing.Scopes = append([]setupjourney.StaffingScopeProjection{{
+						Scope: workspace.AssistantRoleScopeHome, WorkspaceLabel: "Music Home",
+						Roles: []setupjourney.StaffingRoleProjection{{RoleID: "portfolio_manager", Label: "Portfolio Manager", Required: true}},
+					}}, step.Staffing.Scopes...)
+				}
 			}
 		}
 		projection.Steps = append(projection.Steps, step)
@@ -85,19 +144,40 @@ func (f *fakeJourney) Read(context.Context, string) (*setupjourney.JourneyProjec
 func (f *fakeJourney) Mutate(_ context.Context, _ string, action setupjourney.ActionID, request setupjourney.ActionMutation) (*setupjourney.ActionResult, error) {
 	f.calls = append(f.calls, string(action))
 	switch action {
+	case setupjourney.ActionReviewCreateGroup:
+		template := f.homeShownTmpl
+		if template == "" {
+			template = f.homeTemplate
+		}
+		return &setupjourney.ActionResult{Review: &setupjourney.ReviewProjection{
+			Token: "t-home", CommitAction: setupjourney.ActionCreateGroup,
+			Group: &projectconnection.HomePreparation{Name: "Music Home", TemplateID: template, GroupPolicy: "required", AvailableCompositions: []string{"grouped"}},
+		}}, nil
 	case setupjourney.ActionReviewExistingProject:
+		composition, state := "standalone", "ready_standalone"
+		if f.homeRequired || (f.recommendedBoth && f.homeExists) {
+			composition, state = "grouped", "ready_grouped"
+		}
 		return &setupjourney.ActionResult{Review: &setupjourney.ReviewProjection{
 			Token: "t-project", CommitAction: setupjourney.ActionConnectExistingProject,
 			ProjectConnection: &projectconnection.Projection{
 				ModeID: projecttemplates.ProjectConnectionExistingProject, WorkspaceName: "My Song",
 				SelectedFolder: f.shownFolder, EntryName: f.shownEntry, EntryCandidates: f.candidates,
-				GroupComposition: "standalone",
+				GroupComposition: composition, GroupRequirementState: state,
 			},
 		}}, nil
 	case setupjourney.ActionReviewFileOnlyMode:
 		return &setupjourney.ActionResult{Review: &setupjourney.ReviewProjection{
 			Token: "t-mode", CommitAction: setupjourney.ActionSelectFileOnlyMode,
 			WorkspaceSetup: &setupjourney.WorkspaceSetupProjection{ModeID: f.modeID},
+		}}, nil
+	case setupjourney.ActionReviewHomeStaffing:
+		return &setupjourney.ActionResult{Review: &setupjourney.ReviewProjection{
+			Token: "t-home-staff", CommitAction: setupjourney.ActionAddHomeStaffing,
+			Staffing: &setupjourney.StaffingProjection{Scopes: []setupjourney.StaffingScopeProjection{{
+				Scope: workspace.AssistantRoleScopeHome, ModelsReady: f.modelsReady,
+				Roles: []setupjourney.StaffingRoleProjection{{RoleID: "portfolio_manager", Label: "Portfolio Manager", Required: true, ProfileName: "Portfolio Manager"}},
+			}}},
 		}}, nil
 	case setupjourney.ActionReviewProjectStaffing:
 		role := setupjourney.StaffingRoleProjection{RoleID: "producer", Label: "Producer", Required: true,
@@ -114,6 +194,16 @@ func (f *fakeJourney) Mutate(_ context.Context, _ string, action setupjourney.Ac
 	}
 	if err := f.commitErr[action]; err != nil {
 		return nil, err
+	}
+	if action == setupjourney.ActionCreateGroup {
+		f.homeExists = true
+		f.revision++
+		return &setupjourney.ActionResult{}, nil
+	}
+	if action == setupjourney.ActionAddHomeStaffing {
+		f.homeStaffed = true
+		f.revision++
+		return &setupjourney.ActionResult{}, nil
 	}
 	kind := map[setupjourney.ActionID]specialist.SetupStepKind{
 		setupjourney.ActionConnectExistingProject: specialist.SetupStepProjectConnect,
@@ -265,6 +355,29 @@ func TestRunCommitErrorStopsAndKeepsEarlierLinesDone(t *testing.T) {
 	}
 	if states[personalassistant.FolderPlanAgents] != personalassistant.FolderLineWaiting {
 		t.Fatalf("a later line ran: %v", states)
+	}
+}
+
+// A stop to ask the user is not a failure: the line waits, it is not marked failed.
+func TestRunAQuestionLeavesItsLineWaitingNotFailed(t *testing.T) {
+	asking := newFake()
+	asking.shownEntry, asking.candidates = "", []string{"A.rpp", "B.rpp"}
+	result, progress := runWith(t, asking, fakeSelections{})
+	if result.StopReason != personalassistant.FolderStopNeedsChoice {
+		t.Fatalf("result = %+v", result)
+	}
+	states := lineStates(progress.last())
+	if states[personalassistant.FolderPlanWorkspace] != personalassistant.FolderLineWaiting ||
+		states[personalassistant.FolderPlanFolder] != personalassistant.FolderLineWaiting {
+		t.Fatalf("a question must not read as a failure: %v", states)
+	}
+	noModel := newFake()
+	noModel.done[specialist.SetupStepProjectConnect], noModel.done[specialist.SetupStepWorkspaceSetup] = true, true
+	noModel.modelsReady = false
+	result, progress = runWith(t, noModel, fakeSelections{})
+	if result.StopReason != personalassistant.FolderStopNeedsModel ||
+		lineStates(progress.last())[personalassistant.FolderPlanAgents] != personalassistant.FolderLineWaiting {
+		t.Fatalf("needs_model: %+v %v", result, lineStates(progress.last()))
 	}
 }
 

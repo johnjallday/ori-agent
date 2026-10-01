@@ -18,8 +18,15 @@ type fakeFolderSetup struct {
 	lines   []FolderPlanLine
 	planErr error
 	runs    int
+	entries []string
 	hold    chan struct{}
 	finish  func() FolderSetupUpdate
+}
+
+func (f *fakeFolderSetup) entryNames() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.entries...)
 }
 
 func (f *fakeFolderSetup) Plan(context.Context, FolderSetupRequest) (FolderSetupPlan, error) {
@@ -43,6 +50,7 @@ func (f *fakeFolderSetup) runCount() int {
 func (f *fakeFolderSetup) Run(ctx context.Context, req FolderSetupRequest) error {
 	f.mu.Lock()
 	f.runs++
+	f.entries = append(f.entries, req.EntryName)
 	hold, finish := f.hold, f.finish
 	f.mu.Unlock()
 	lines := append([]FolderPlanLine(nil), req.Plan.Lines...)
@@ -254,6 +262,70 @@ func TestFolderSetup_AStoppedRunResumesOnItsConfirmedPlan(t *testing.T) {
 	waitFor(t, "the resumed run to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
 	if f.setup.runCount() != 2 {
 		t.Fatalf("runs = %d", f.setup.runCount())
+	}
+}
+
+func TestFolderSetup_AFolderWithSeveralProjectFilesAsksWhichOne(t *testing.T) {
+	f := newOneCardFixture(t)
+	ctx := context.Background()
+	f.setup.finish = func() FolderSetupUpdate {
+		return FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopNeedsChoice, RunID: "new-run",
+			EntryCandidates: []string{"A.rpp", "B.rpp"}}
+	}
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the run to ask", func() bool {
+		s := f.stored(t).Setup
+		return s != nil && s.StopReason == FolderStopNeedsChoice && !f.service.isRunning(f.offer.ID)
+	})
+	view, err := f.service.Current(ctx, "local")
+	if err != nil || view.Offer == nil || view.Offer.Setup == nil || len(view.Offer.Setup.EntryCandidates) != 2 {
+		t.Fatalf("the card must carry the file names: %+v, %v", view.Offer, err)
+	}
+	digest := f.stored(t).Setup.PlanDigest
+	// A name the server did not offer never reaches the run, however it is spelt.
+	for _, name := range []string{"C.rpp", "../A.rpp", "dir/A.rpp"} {
+		if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "bad-" + name, PlanDigest: digest, EntryName: name}); !errors.Is(err, ErrValidation) {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+	if f.setup.runCount() != 1 {
+		t.Fatalf("a refused name started a run (runs = %d)", f.setup.runCount())
+	}
+	f.setup.finish = nil
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "ok", PlanDigest: digest, EntryName: "B.rpp"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the offer to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
+	if names := f.setup.entryNames(); len(names) != 2 || names[1] != "B.rpp" {
+		t.Fatalf("the chosen file did not reach the run: %v", names)
+	}
+}
+
+func TestFolderSetup_APickedFileIsTheProjectFileWithoutAsking(t *testing.T) {
+	f := newFolderDigestFixture(t)
+	folder := filepath.Join(f.home, "Desktop")
+	if err := os.WriteFile(filepath.Join(folder, "Song.rpp"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setup := &fakeFolderSetup{lines: oneCardLines()}
+	f.service.deps.Setup = setup
+	f.service.deps.Journey = &fakeJourneyVerifier{folder: folder}
+	offer, err := f.service.scanSelectedRoot(context.Background(), "local", folder, "", "Song.rpp")
+	if err != nil || offer.Plan == nil {
+		t.Fatalf("offer = %+v, %v", offer, err)
+	}
+	stored, err := f.store.Read(context.Background(), "local")
+	if err != nil || stored.Offer(offer.ID) == nil || stored.Offer(offer.ID).EntryName != "Song.rpp" {
+		t.Fatalf("the picked file's base name must be kept: %+v, %v", stored.Offer(offer.ID), err)
+	}
+	if _, err := f.service.StartSetup(context.Background(), "local", offer.ID, FolderSetupInput{RequestID: "r1", PlanDigest: offer.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the run to start", func() bool { return len(setup.entryNames()) == 1 })
+	if got := setup.entryNames()[0]; got != "Song.rpp" {
+		t.Fatalf("entry = %q, want the picked file", got)
 	}
 }
 

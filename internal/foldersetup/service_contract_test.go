@@ -31,11 +31,22 @@ const (
 // owners is the synthetic state behind the journey's three steps.
 type owners struct {
 	project, mode, staffed bool
+	// The child run of a further project has its own owners, as in the real
+	// journey where project, mode and team belong to each project.
+	childProject, childMode, childStaffed bool
 	// shownFolder lets a test make the project review disclose another folder.
 	shownFolder string
 	commits     []string
 	requests    []projectconnection.Request
 	staffInput  []json.RawMessage
+}
+
+// flags selects the project, mode and team state of the run being driven.
+func (o *owners) flags(kind setupjourney.RunKind) (project, mode, staffed *bool) {
+	if kind == setupjourney.RunKindChild {
+		return &o.childProject, &o.childMode, &o.childStaffed
+	}
+	return &o.project, &o.mode, &o.staffed
 }
 
 type contractCatalog struct{ declaration specialist.SetupJourney }
@@ -135,23 +146,31 @@ func (a stepAdapter) PrepareCommit(_ context.Context, _ setupjourney.ReadScope, 
 	return a.material(action, input), nil
 }
 
-func (a stepAdapter) Commit(_ context.Context, _ setupjourney.ReadScope, action setupjourney.ActionID, input json.RawMessage, _ setupjourney.ActionReviewMaterial) (setupjourney.CanonicalResult, error) {
+func (a stepAdapter) Commit(_ context.Context, scope setupjourney.ReadScope, action setupjourney.ActionID, input json.RawMessage, _ setupjourney.ActionReviewMaterial) (setupjourney.CanonicalResult, error) {
 	o := a.owners
+	project, mode, staffed := o.flags(scope.RunKind)
 	o.commits = append(o.commits, string(action))
 	switch a.kind {
 	case specialist.SetupStepProjectConnect:
 		var request projectconnection.Request
 		_ = json.Unmarshal(input, &request)
 		o.requests = append(o.requests, request)
-		o.project = true
-		return setupjourney.CanonicalResult{ProjectWorkspaceID: "proj-1"}, nil
+		*project = true
+		return setupjourney.CanonicalResult{ProjectWorkspaceID: projectID(scope.RunKind)}, nil
 	case specialist.SetupStepWorkspaceSetup:
-		o.mode = true
+		*mode = true
 	case specialist.SetupStepAssistantProgramStaffing:
 		o.staffInput = append(o.staffInput, input)
-		o.staffed = true
+		*staffed = true
 	}
 	return setupjourney.CanonicalResult{}, nil
+}
+
+func projectID(kind setupjourney.RunKind) string {
+	if kind == setupjourney.RunKindChild {
+		return "proj-2"
+	}
+	return "proj-1"
 }
 
 func (a stepAdapter) ConsequenceObserved(_ setupjourney.ActionID, read setupjourney.CanonicalStepRead) bool {
@@ -159,12 +178,12 @@ func (a stepAdapter) ConsequenceObserved(_ setupjourney.ActionID, read setupjour
 }
 
 func (a stepAdapter) Read(_ context.Context, scope setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
-	o := a.owners
+	project, mode, staffed := a.owners.flags(scope.RunKind)
 	switch a.kind {
 	case specialist.SetupStepProjectConnect:
-		if o.project {
+		if *project {
 			return setupjourney.CanonicalStepRead{Complete: true, AvailableActions: []setupjourney.ActionID{setupjourney.ActionOpenProject},
-				Result: setupjourney.CanonicalResult{ProjectWorkspaceID: "proj-1"}}, nil
+				Result: setupjourney.CanonicalResult{ProjectWorkspaceID: projectID(scope.RunKind)}}, nil
 		}
 		return setupjourney.CanonicalStepRead{
 			AvailableActions: []setupjourney.ActionID{setupjourney.ActionReviewExistingProject},
@@ -174,19 +193,19 @@ func (a stepAdapter) Read(_ context.Context, scope setupjourney.ReadScope) (setu
 			},
 		}, nil
 	case specialist.SetupStepWorkspaceSetup:
-		if o.mode {
+		if *mode {
 			return setupjourney.CanonicalStepRead{Complete: true, AvailableActions: []setupjourney.ActionID{setupjourney.ActionOpenProject},
 				WorkspaceSetup: &setupjourney.WorkspaceSetupProjection{ModeID: fileOnlyModeID, ModeLabel: "File-only", FilesConnected: true}}, nil
 		}
 		return setupjourney.CanonicalStepRead{AvailableActions: []setupjourney.ActionID{setupjourney.ActionReviewFileOnlyMode}}, nil
 	case specialist.SetupStepAssistantProgramStaffing:
-		role := setupjourney.StaffingRoleProjection{RoleID: "producer", Label: "Producer", Required: true, Configured: o.staffed}
+		role := setupjourney.StaffingRoleProjection{RoleID: "producer", Label: "Producer", Required: true, Configured: *staffed}
 		projection := &setupjourney.StaffingProjection{Scopes: []setupjourney.StaffingScopeProjection{
 			{Scope: workspace.AssistantRoleScopeHome, WorkspaceID: "home-1", WorkspaceLabel: "Home", RequiredComplete: true},
-			{Scope: workspace.AssistantRoleScopeProject, WorkspaceID: "proj-1", WorkspaceLabel: "My Song",
-				RequiredComplete: o.staffed, Roles: []setupjourney.StaffingRoleProjection{role}},
+			{Scope: workspace.AssistantRoleScopeProject, WorkspaceID: projectID(scope.RunKind), WorkspaceLabel: "My Song",
+				RequiredComplete: *staffed, Roles: []setupjourney.StaffingRoleProjection{role}},
 		}}
-		if o.staffed {
+		if *staffed {
 			return setupjourney.CanonicalStepRead{Complete: true, Staffing: projection,
 				AvailableActions: []setupjourney.ActionID{setupjourney.ActionOpenHomeStaffing, setupjourney.ActionOpenProjectStaffing}}, nil
 		}
@@ -223,8 +242,14 @@ func contractService(t *testing.T, o *owners) *setupjourney.Service {
 	} {
 		readers[kind] = stepAdapter{owners: o, kind: kind}
 	}
-	readers[specialist.SetupStepSummary] = setupjourney.CanonicalReaderFunc(func(context.Context, setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
-		return setupjourney.CanonicalStepRead{AvailableActions: []setupjourney.ActionID{setupjourney.ActionReviewSetup}}, nil
+	readers[specialist.SetupStepSummary] = setupjourney.CanonicalReaderFunc(func(_ context.Context, scope setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
+		// A finished root offers to connect another project, which is what lets a
+		// further folder have its own child run.
+		actions := []setupjourney.ActionID{setupjourney.ActionReviewSetup}
+		if scope.RunKind == setupjourney.RunKindRoot {
+			actions = append(actions, setupjourney.ActionConnectAnotherProject)
+		}
+		return setupjourney.CanonicalStepRead{AvailableActions: actions}, nil
 	})
 	registry, err := setupjourney.NewReaderRegistry(readers)
 	if err != nil {
@@ -264,6 +289,10 @@ type contractJourney struct{ service *setupjourney.Service }
 
 func (j contractJourney) Read(ctx context.Context, runID string) (*setupjourney.JourneyProjection, error) {
 	return j.service.Read(ctx, contractUser, runID)
+}
+
+func (j contractJourney) Child(ctx context.Context, rootRevision int64, key string) (*setupjourney.JourneyProjection, error) {
+	return j.service.CreateOrResumeChild(ctx, contractUser, setupjourney.PresentationMutation{IfRevision: rootRevision, IdempotencyKey: key})
 }
 
 func (j contractJourney) Mutate(ctx context.Context, runID string, action setupjourney.ActionID, request setupjourney.ActionMutation) (*setupjourney.ActionResult, error) {
@@ -321,16 +350,51 @@ func TestRealJourneyIsDrivenToReadyThroughReviewAndCommit(t *testing.T) {
 	}
 }
 
-func TestRealJourneyRerunRepeatsNothing(t *testing.T) {
+func TestRealJourneyResumeOfAFinishedRunRepeatsNothing(t *testing.T) {
 	o := &owners{}
 	service := contractService(t, o)
-	if result, _ := contractRun(t, service); result.Status != personalassistant.FolderSetupDone {
-		t.Fatalf("first run = %+v", result)
+	first, _ := contractRun(t, service)
+	if first.Status != personalassistant.FolderSetupDone {
+		t.Fatalf("first run = %+v", first)
 	}
 	before := len(o.commits)
-	result, _ := contractRun(t, service)
-	if result.Status != personalassistant.FolderSetupDone || len(o.commits) != before {
-		t.Fatalf("rerun = %+v, commits %d -> %d", result, before, len(o.commits))
+	cfg := testConfig()
+	cfg.RunID = first.RunID // what a resume carries
+	runner := &Runner{Journey: contractJourney{service}, Selections: fakeSelections{}, Progress: &recorder{}}
+	result, err := runner.Run(context.Background(), cfg)
+	if err != nil || result.Status != personalassistant.FolderSetupDone || len(o.commits) != before {
+		t.Fatalf("resume = %+v, %v, commits %d -> %d", result, err, before, len(o.commits))
+	}
+}
+
+func TestRealJourneyConnectsAFurtherProjectOnItsOwnChildRun(t *testing.T) {
+	o := &owners{}
+	service := contractService(t, o)
+	first, _ := contractRun(t, service)
+	if first.Status != personalassistant.FolderSetupDone {
+		t.Fatalf("first project = %+v cause=%v", first, first.Cause)
+	}
+	// The first project stays done; the second folder's child run starts empty.
+	o.commits = nil
+	second, _ := contractRun(t, service)
+	if second.Status != personalassistant.FolderSetupDone || second.RunID == "" || second.RunID == first.RunID {
+		t.Fatalf("second project = %+v cause=%v (first run %q)", second, second.Cause, first.RunID)
+	}
+	if len(o.commits) != 3 {
+		t.Fatalf("commits = %v", o.commits)
+	}
+	child, err := service.Read(context.Background(), contractUser, second.RunID)
+	if err != nil || child.RunKind != setupjourney.RunKindChild || child.Lifecycle != setupjourney.LifecycleReady {
+		t.Fatalf("child journey = %+v, %v", child, err)
+	}
+	// The same run id is what a resume would read, and it repeats nothing.
+	progress := &recorder{}
+	runner := &Runner{Journey: contractJourney{service}, Selections: fakeSelections{}, Progress: progress}
+	cfg := testConfig()
+	cfg.RunID = second.RunID
+	before := len(o.commits)
+	if result, err := runner.Run(context.Background(), cfg); err != nil || result.Status != personalassistant.FolderSetupDone || len(o.commits) != before {
+		t.Fatalf("resume = %+v, %v, commits %d -> %d", result, err, before, len(o.commits))
 	}
 }
 

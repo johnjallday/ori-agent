@@ -831,6 +831,8 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	if fileShape != "" && offer.Status == FolderOfferPending {
 		offer.Subject.Shape = string(fileShape)
 		offer.Subject.DominantExtension = strings.ToLower(filepath.Ext(pickedFile))
+		// The picked file names the project file; only its base name is kept.
+		offer.EntryName = filepath.Base(pickedFile)
 	}
 	domain, evidence := folderOfferDomainClass(offer)
 	legacyDeclined := false

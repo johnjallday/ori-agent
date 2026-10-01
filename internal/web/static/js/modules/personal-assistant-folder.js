@@ -199,7 +199,8 @@ const SETUP_STOP_COPY = {
     `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to carry on.`,
   needs_choice: subject => `${subject} has more than one project file. Choose the one to set up.`,
   needs_model: 'The workspace and folder are set up. The agent needs a model before it can start.',
-  install_failed: 'The integration could not be installed or enabled, so nothing after it ran.',
+  install_failed:
+    'The integration could not be installed or enabled, so nothing after it ran. If you install it from Plugins, Try again continues from there.',
   interrupted: 'Setup was interrupted before it finished.',
   failed: 'A step did not finish.'
 };

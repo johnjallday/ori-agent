@@ -77,6 +77,12 @@ type FolderSetupIntent struct {
 	Provider           string `json:"provider,omitempty"`
 	ProviderPlugin     string `json:"provider_plugin,omitempty"`
 	ProviderVersion    string `json:"provider_version,omitempty"`
+	// Placement is "grouped" (inside a Home) or "standalone"; CreatesHome says
+	// the plan promised to create that Home first. HomeTemplate is the exact
+	// template the Home is created from.
+	Placement    string `json:"placement,omitempty"`
+	CreatesHome  bool   `json:"creates_home,omitempty"`
+	HomeTemplate string `json:"home_template,omitempty"`
 }
 
 // FolderSetupPlan is everything one press of Set up will do. The browser sends
@@ -201,8 +207,8 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 	}
 	intent := run.Intent
 	for _, text := range []string{intent.Integration, intent.IntegrationPlugin, intent.IntegrationVersion,
-		intent.Provider, intent.ProviderPlugin, intent.ProviderVersion} {
-		if len(text) > 80 || strings.ContainsAny(text, "/\\\x00\r\n") {
+		intent.Provider, intent.ProviderPlugin, intent.ProviderVersion, intent.Placement, intent.HomeTemplate} {
+		if len(text) > 160 || strings.ContainsAny(text, "/\\\x00\r\n") {
 			return fmt.Errorf("%w: setup intent", errFolderDigestInvalid)
 		}
 	}

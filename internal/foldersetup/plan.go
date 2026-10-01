@@ -35,6 +35,13 @@ type PlanFacts struct {
 	// Provider is the plugin that supplies the Home a split blueprint needs; nil
 	// when the blueprint has none.
 	Provider *Plugin
+	// Grouped says the workspace joins a Home (a blueprint that requires one, or
+	// the user already has one); HomeExists says that Home is already there, so
+	// nothing is created for it. HomeTemplate is the exact template a new Home is
+	// created from.
+	Grouped      bool
+	HomeExists   bool
+	HomeTemplate string
 }
 
 // BuildPlan lists every consequence of one press of Set up, in the order the card
@@ -53,6 +60,22 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		lines = append(lines, line)
 		intent.Provider, intent.ProviderPlugin, intent.ProviderVersion = facts.Provider.State, facts.Provider.PluginID, facts.Provider.Version
 	}
+	workspaceName := "Creates a " + facts.BlueprintLabel + " workspace named " + facts.WorkspaceName
+	intent.Placement = "standalone"
+	if facts.Grouped {
+		intent.Placement = "grouped"
+		intent.HomeTemplate = facts.HomeTemplate
+		if facts.HomeExists {
+			workspaceName += " in your Home"
+		} else {
+			intent.CreatesHome = true
+			lines = append(lines, personalassistant.FolderPlanLine{
+				Kind: personalassistant.FolderPlanHome, Name: "Creates the Home this workspace belongs to",
+				Detail: "Your later projects of this kind join it.",
+			})
+			workspaceName += " in that Home"
+		}
+	}
 	mode := personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanMode, Name: "Uses File-only mode"}
 	if facts.AppInstalled {
 		mode.Detail = "Ori does not control " + facts.AppName + "."
@@ -62,7 +85,7 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		mode.Detail = facts.AppName + " itself is not installed here; File-only mode works without it."
 	}
 	lines = append(lines,
-		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanWorkspace, Name: "Creates a " + facts.BlueprintLabel + " workspace named " + facts.WorkspaceName},
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanWorkspace, Name: workspaceName},
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Links " + facts.WorkspaceName + " where it is", Detail: "Nothing is moved or copied."},
 		mode,
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanAgents, Name: "Adds the agents this blueprint requires"},
