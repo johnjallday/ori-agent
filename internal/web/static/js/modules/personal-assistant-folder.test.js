@@ -12,8 +12,95 @@ import {
   folderReceiptView,
   folderProjectModalOptions,
   portfolioLibraryURL,
-  portfolioProviderAction
+  portfolioProviderAction,
+  setupModalView
 } from './personal-assistant-folder.js';
+
+const runLines = states =>
+  states.map((state, index) => ({ kind: 'other', name: `Step ${index + 1}`, detail: '', state }));
+
+test('the run pop-up says the assistant is working and counts finished steps', () => {
+  const view = setupModalView({
+    status: 'awaiting_outcome',
+    subject: { name: 'Session' },
+    capability: { recognized: 'REAPER', workspace: 'song workspace' },
+    setup: {
+      status: 'running',
+      lines: runLines(['done', 'done', 'working', 'waiting'])
+    }
+  });
+  assert.equal(view.visible, true);
+  assert.equal(view.phase, 'running');
+  assert.equal(view.eyebrow, 'Your assistant is working');
+  assert.equal(view.title, 'Setting up Session');
+  assert.equal(view.count, '2 of 4 steps finished');
+  assert.equal(view.percent, 50);
+  assert.equal(view.status, 'Working on: Step 3');
+  assert.deepEqual(view.actions, []);
+});
+
+test('a stopped run keeps its progress and offers the way forward in the pop-up', () => {
+  const view = setupModalView({
+    status: 'awaiting_outcome',
+    subject: { name: 'Session' },
+    setup: {
+      status: 'stopped',
+      stop_reason: 'needs_model',
+      lines: runLines(['done', 'waiting'])
+    }
+  });
+  assert.equal(view.phase, 'stopped');
+  assert.equal(view.title, 'Session needs you');
+  assert.equal(view.percent, 50);
+  assert.match(view.status, /needs a model/);
+  assert.doesNotMatch(JSON.stringify(view), /needs_model/);
+  assert.deepEqual(
+    view.actions.map(action => action.label),
+    ['Set up a model', 'Try again', 'Continue setup']
+  );
+});
+
+test('a finished run shows the receipt and the Open link in the pop-up', () => {
+  const view = setupModalView({
+    status: 'resolved',
+    subject: { name: 'Session' },
+    setup: { status: 'done', lines: runLines(['done', 'done']) },
+    outcome: {
+      kind: 'project',
+      route: '/workspaces/session',
+      receipt: [{ kind: 'workspace', name: 'Session' }]
+    }
+  });
+  assert.equal(view.phase, 'done');
+  assert.equal(view.percent, 100);
+  assert.equal(view.route, '/workspaces/session');
+  assert.equal(view.openLabel, 'Open Session');
+  assert.equal(view.receiptRows.length, 1);
+});
+
+test('a settled offer has dropped its run but the pop-up still ends on the receipt', () => {
+  const view = setupModalView({
+    status: 'resolved',
+    subject: { name: 'Session' },
+    outcome: {
+      kind: 'project',
+      route: '/workspaces/session',
+      receipt: [{ kind: 'workspace', name: 'Session' }]
+    }
+  });
+  assert.equal(view.visible, true);
+  assert.equal(view.phase, 'done');
+  assert.equal(view.openLabel, 'Open Session');
+});
+
+test('the run pop-up is not shown without a one-card run or for a portfolio', () => {
+  assert.equal(setupModalView(null).visible, false);
+  assert.equal(setupModalView({ status: 'pending', plan: { lines: [] } }).visible, false);
+  assert.equal(
+    setupModalView({ portfolio: { projects: 3 }, setup: { status: 'running', lines: [] } }).visible,
+    false
+  );
+});
 
 test('an older installed reviewed Home provider is offered as an update', () => {
   assert.equal(

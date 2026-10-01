@@ -153,10 +153,25 @@ test('Set up without a model stops with one plain sentence and a way forward', a
 
   const card = await openCard(page);
   await card.getByRole('button', { name: 'Set up', exact: true }).click();
+  // Set up opens a pop-up that watches the run: no click per step, and it says
+  // the assistant is working.
+  const runModal = page.locator('#folderSetupRunModal');
+  await expect(runModal).toBeVisible();
+  await expect(runModal.locator('#folderSetupRunEyebrow')).toContainText(/working|paused/i);
+  await expect(runModal.locator('#folderSetupRunBar')).toHaveAttribute('aria-valuenow', /\d+/);
+  const stopped = runModal.locator('#folderSetupRunStatus');
+  await expect(stopped).toContainText('needs a model', { timeout: 120_000 });
+  await expect(runModal.locator('#folderSetupRunCount')).toContainText(/\d+ of \d+ steps finished/);
+  await expect(runModal).not.toContainText(/needs_model|plan_changed|install_failed/);
+  for (const name of ['Set up a model', 'Try again', 'Continue setup']) {
+    await expect(runModal.getByRole('button', { name })).toBeVisible();
+  }
+  // Closing it does not stop anything: the card says the same on its own.
+  await runModal.getByRole('button', { name: /^Close/ }).click();
+  await expect(runModal).toBeHidden();
   const sentence = card.locator('#personalAssistantFolderOfferQuestion');
-  await expect(sentence).toContainText('needs a model', { timeout: 120_000 });
+  await expect(sentence).toContainText('needs a model');
   await expect(sentence).toContainText(/\d+ of \d+ steps finished/);
-  // No raw reason code ever reaches the screen.
   await expect(card).not.toContainText(/needs_model|plan_changed|install_failed/);
   for (const name of ['Set up a model', 'Try again', 'Continue setup']) {
     await expect(card.getByRole('button', { name })).toBeVisible();
@@ -193,7 +208,12 @@ test('Try again after a model is set finishes the run on the same card, then Ope
       startCalls.push(JSON.stringify(await response.json().catch(() => ({}))));
     }
   });
-  const open = card.getByRole('link', { name: /^Open / });
+  // The pop-up that watched the run ends on the same receipt and Open link.
+  const runModal = page.locator('#folderSetupRunModal');
+  await expect(runModal).toBeVisible();
+  await expect(runModal.locator('#folderSetupRunEyebrow')).toHaveText('All set');
+  await expect(runModal.locator('#folderSetupRunBar')).toHaveAttribute('aria-valuenow', '100');
+  const open = runModal.getByRole('link', { name: /^Open / });
   await expect(open).toBeVisible();
   const href = await open.getAttribute('href');
   expect(href).toMatch(/^\/workspaces\/[a-z0-9-]+$/);
@@ -231,8 +251,8 @@ test('keyboard only: Set up runs from the focused button and the card announces 
   await page.keyboard.press('Enter');
   const receipt = card.locator('#personalAssistantFolderReceipt li');
   await expect(receipt.first()).toBeVisible({ timeout: 180_000 });
-  // The Open link is reachable and activatable without a mouse.
-  const open = card.getByRole('link', { name: /^Open / });
+  // The pop-up's Open link is reachable and activatable without a mouse.
+  const open = page.locator('#folderSetupRunModal').getByRole('link', { name: /^Open / });
   await open.focus();
   await expect(open).toBeFocused();
 });

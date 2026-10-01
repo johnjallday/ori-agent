@@ -278,6 +278,55 @@ export function setupRunView(setup, subject) {
   };
 }
 
+// setupModalView is the run pop-up: the same run the card shows, framed so the
+// user can see the assistant is working — a phase (running, stopped, done), a
+// step count, a percentage, and the lines. Pure data; the DOM is drawn below.
+// It is not visible for an offer with no one-card run.
+export function setupModalView(offer) {
+  if (!offer || offer.portfolio) return { visible: false };
+  const receipt = folderReceiptView(offer);
+  // A settled offer no longer carries its run, only its receipt; the pop-up that
+  // watched the run still ends on it. Without either there is nothing to show.
+  if (!offer.setup && !receipt.visible) return { visible: false };
+  const folder = String(offer.folder || '').trim() || 'this project';
+  const subject = String(offer.subject?.name || '').trim() || folder;
+  const run = setupRunView(offer.setup, subject);
+  const total = run.lines.length;
+  const finished = run.lines.filter(line => line.state === 'done').length;
+  if (receipt.visible) {
+    return {
+      visible: true,
+      phase: 'done',
+      eyebrow: 'All set',
+      title: `${subject} is ready`,
+      status: 'Here is what I set up. The first task starts when you open the workspace.',
+      count: total ? `${total} of ${total} steps finished` : '',
+      percent: 100,
+      lines: run.lines.map(line => ({ ...line, state: line.state ? 'done' : '' })),
+      receiptRows: receipt.rows,
+      route: receipt.route,
+      openLabel: receipt.openLabel,
+      actions: []
+    };
+  }
+  const stopped = run.status === 'stopped';
+  return {
+    visible: true,
+    phase: stopped ? 'stopped' : 'running',
+    eyebrow: stopped ? 'Setup paused' : 'Your assistant is working',
+    title: stopped ? `${subject} needs you` : `Setting up ${subject}`,
+    // The count line already says how many steps finished.
+    status: stopped ? run.question.replace(/^\d+ of \d+ steps finished\. /, '') : run.statusLine,
+    count: total ? `${finished} of ${total} steps finished` : '',
+    percent: total ? Math.round((finished / total) * 100) : 0,
+    lines: run.lines,
+    receiptRows: [],
+    route: '',
+    openLabel: '',
+    actions: run.actions
+  };
+}
+
 // A reviewed capability rides the same result card. With a plan from the server
 // the card is the one consent: Set up runs the whole setup on the server and
 // Adjust… opens the step-by-step journey. Without one it opens the existing
@@ -677,6 +726,35 @@ export function renderSetupLines(list, lines, doc = document) {
   });
 }
 
+const RECEIPT_LABELS = {
+  workspace: ['Workspace', '◈'],
+  folder: ['Folder', '▤'],
+  blueprint: ['Blueprint', '✦'],
+  agent: ['Agent', '●'],
+  task: ['First task', '✓']
+};
+
+// renderReceiptRows draws the receipt's rows (what Set up made) into a list.
+// Shared by the card and the run pop-up so both say the same thing.
+function renderReceiptRows(list, rows, doc = document) {
+  if (!list) return;
+  list.replaceChildren();
+  rows.forEach(row => {
+    const li = doc.createElement('li');
+    const [label, glyph] = RECEIPT_LABELS[row.kind] || ['Set up', '•'];
+    li.dataset.kind = RECEIPT_LABELS[row.kind] ? row.kind : 'other';
+    const icon = doc.createElement('span');
+    icon.className = 'pa-folder__receipt-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = glyph;
+    li.append(
+      icon,
+      doc.createTextNode(`${label} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`)
+    );
+    list.append(li);
+  });
+}
+
 function elements() {
   const root = document.getElementById('personalAssistantFolder');
   if (!root) return null;
@@ -719,6 +797,102 @@ function showStatus(message) {
 function showError(message) {
   const els = elements();
   setText(els?.error, message);
+  runModal.error = String(message || '');
+  renderRunModal();
+}
+
+// The run pop-up: opened by pressing Set up (or Try again), it follows the same
+// offer the card does. Closing it never stops the run; the card keeps showing
+// progress. `wanted` is true only while the user has it open, so a page that
+// loads onto a run in progress does not pop a dialog over what they were doing.
+const runModal = { wanted: false, bound: false, error: '' };
+
+function runModalElements() {
+  const root = document.getElementById('folderSetupRunModal');
+  if (!root) return null;
+  return {
+    root,
+    eyebrow: document.getElementById('folderSetupRunEyebrow'),
+    title: document.getElementById('folderSetupRunTitle'),
+    bar: document.getElementById('folderSetupRunBar'),
+    fill: document.getElementById('folderSetupRunFill'),
+    count: document.getElementById('folderSetupRunCount'),
+    status: document.getElementById('folderSetupRunStatus'),
+    steps: document.getElementById('folderSetupRunSteps'),
+    receipt: document.getElementById('folderSetupRunReceipt'),
+    error: document.getElementById('folderSetupRunError'),
+    actions: document.getElementById('folderSetupRunActions')
+  };
+}
+
+function openRunModal() {
+  const els = runModalElements();
+  const Modal = globalThis.bootstrap?.Modal;
+  if (!els || !Modal) return;
+  runModal.wanted = true;
+  runModal.error = '';
+  if (!runModal.bound) {
+    els.root.addEventListener('hidden.bs.modal', () => {
+      runModal.wanted = false;
+    });
+    runModal.bound = true;
+  }
+  renderRunModal();
+  Modal.getOrCreateInstance(els.root).show();
+}
+
+function closeRunModal() {
+  runModal.wanted = false;
+  const root = document.getElementById('folderSetupRunModal');
+  if (root) globalThis.bootstrap?.Modal?.getInstance(root)?.hide();
+}
+
+function renderRunModal() {
+  if (!runModal.wanted) return;
+  const els = runModalElements();
+  if (!els) return;
+  const view = setupModalView(state.offer);
+  if (!view.visible) {
+    closeRunModal();
+    return;
+  }
+  els.root.dataset.phase = view.phase;
+  setText(els.eyebrow, view.eyebrow, false);
+  setText(els.title, view.title, false);
+  setText(els.count, view.count);
+  setText(els.status, view.status, false);
+  els.bar.setAttribute('aria-valuenow', String(view.percent));
+  els.fill.style.width = `${view.percent}%`;
+  const done = view.phase === 'done';
+  renderSetupLines(els.steps, view.lines);
+  els.steps.hidden = done || !view.lines.length;
+  renderReceiptRows(els.receipt, view.receiptRows);
+  els.receipt.hidden = !done || !view.receiptRows.length;
+  els.error.textContent = runModal.error;
+  els.error.hidden = !runModal.error;
+  els.actions.replaceChildren();
+  if (done && view.route) {
+    const open = document.createElement('a');
+    open.className = 'btn btn-primary';
+    open.href = view.route;
+    open.textContent = view.openLabel;
+    els.actions.append(open);
+  }
+  view.actions.forEach(action => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = action.style === 'primary' ? 'btn btn-primary' : 'btn btn-outline-secondary';
+    button.dataset.folderRunAction = action.id;
+    button.textContent = action.label;
+    button.disabled = state.busy;
+    button.addEventListener('click', () => {
+      // Retrying keeps the pop-up; anything that opens another dialog or page
+      // closes it first.
+      if (!action.oneCard) closeRunModal();
+      runAction(action);
+    });
+    els.actions.append(button);
+  });
 }
 
 function requestId() {
@@ -846,30 +1020,8 @@ function renderOffer() {
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
   if (els.receipt) {
-    els.receipt.replaceChildren();
     els.receipt.hidden = !receipt.visible;
-    if (receipt.visible)
-      receipt.rows.forEach(row => {
-        const li = document.createElement('li');
-        const labels = {
-          workspace: ['Workspace', '◈'],
-          folder: ['Folder', '▤'],
-          blueprint: ['Blueprint', '✦'],
-          agent: ['Agent', '●'],
-          task: ['First task', '✓']
-        };
-        const [label, glyph] = labels[row.kind] || ['Set up', '•'];
-        li.dataset.kind = labels[row.kind] ? row.kind : 'other';
-        const icon = document.createElement('span');
-        icon.className = 'pa-folder__receipt-icon';
-        icon.setAttribute('aria-hidden', 'true');
-        icon.textContent = glyph;
-        li.append(
-          icon,
-          document.createTextNode(`${label} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`)
-        );
-        els.receipt.append(li);
-      });
+    renderReceiptRows(els.receipt, receipt.visible ? receipt.rows : []);
   }
   if (els.plan) {
     const lines = view.setup?.lines || view.plan?.lines || [];
@@ -949,6 +1101,7 @@ function render() {
   renderChooser();
   renderOffer();
   renderScene();
+  renderRunModal();
   syncSetupPolling();
 }
 
@@ -1024,7 +1177,11 @@ async function startOneCardSetup(action) {
     const body = { plan_digest: digest };
     if (action?.entry) body.entry_name = action.entry;
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
-    if (ok) return;
+    if (ok) {
+      // Show the run in a pop-up so it is plain that the assistant is working.
+      openRunModal();
+      return;
+    }
     if (payload?.plan_changed && payload.offer) {
       // The card on screen was stale: show what Set up would do now.
       state.offer = payload.offer;

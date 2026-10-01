@@ -1292,6 +1292,38 @@
   </div>
 </div>
 
+<!-- One-card folder setup: watches the server's run. Pressing Set up on the folder
+     card opens it; it never asks for a click per step, and closing it does not
+     stop the run (the card keeps showing progress). Content comes from the card
+     module's setupModalView. -->
+<div class="modal fade folder-run" id="folderSetupRunModal" tabindex="-1"
+     aria-labelledby="folderSetupRunTitle" aria-hidden="true" role="dialog" aria-modal="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content folder-run__frame">
+      <header class="folder-run__header">
+        <span class="folder-run__pulse" id="folderSetupRunPulse" aria-hidden="true"></span>
+        <div class="folder-run__heading">
+          <p class="folder-run__eyebrow" id="folderSetupRunEyebrow">Your assistant is working</p>
+          <h2 class="folder-run__title" id="folderSetupRunTitle">Setting up</h2>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close. Setup keeps running."></button>
+      </header>
+      <div class="modal-body folder-run__body">
+        <div class="folder-run__meter">
+          <div class="folder-run__bar" id="folderSetupRunBar" role="progressbar" aria-label="Setup progress"
+               aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="folderSetupRunFill"></span></div>
+          <p class="folder-run__count" id="folderSetupRunCount"></p>
+        </div>
+        <p class="folder-run__status" id="folderSetupRunStatus" role="status" aria-live="polite"></p>
+        <ul class="folder-run__steps" id="folderSetupRunSteps" aria-label="Setup steps"></ul>
+        <ul class="folder-run__steps folder-run__receipt" id="folderSetupRunReceipt" aria-label="What was set up" hidden></ul>
+        <p class="folder-run__error" id="folderSetupRunError" role="alert" hidden></p>
+      </div>
+      <footer class="modal-footer folder-run__footer" id="folderSetupRunActions"></footer>
+    </div>
+  </div>
+</div>
+
 <!-- Generic specialist setup journey. Domain copy, order, status, and actions
      come from the server; this shell owns only fixed review interactions. -->
 <div class="modal fade setup-journey" id="specialistSetupJourneyModal" tabindex="-1"
