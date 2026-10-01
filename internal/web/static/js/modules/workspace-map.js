@@ -3663,30 +3663,6 @@
     );
   }
 
-  // Home's add-a-workspace invitation (home-workspace-map-ui-refresh 3.2). The
-  // host decides WHEN from authoritative state — an empty list, or a list whose
-  // only workspace is the valid Personal HQ — and this draws the same two
-  // create entry points the empty map always had, under one small heading. It
-  // is a card in the corner, not a sheet: only its buttons take the pointer.
-  function cockpitEmptyActionsHTML(variant) {
-    var detail =
-      variant === 'hq-only'
-        ? '<p class="cockpit-empty-map-detail">Your Personal HQ is set up. Add one for a project, a class, or a routine.</p>'
-        : '';
-    return (
-      '<div class="cockpit-empty-map-actions" role="group" aria-labelledby="cockpitMapInviteTitle" data-map-invitation="' +
-      escapeHtml(variant || 'empty') +
-      '">' +
-      '<p class="cockpit-empty-map-title" id="cockpitMapInviteTitle">Add a workspace to your map</p>' +
-      detail +
-      '<div class="cockpit-empty-map-buttons">' +
-      '<button type="button" class="modern-btn modern-btn-primary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">New Workspace</button>' +
-      '<button type="button" class="modern-btn modern-btn-secondary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="true" data-workspace-entry-point="home_cockpit_import">Import Folder</button>' +
-      '</div>' +
-      '</div>'
-    );
-  }
-
   function shellHTML(stats, workspaces, selectedId, viewport, options) {
     var site = hqSiteView(hqStatus);
     var authoritativeEmpty =
@@ -3698,14 +3674,6 @@
       (Array.isArray(workspaces) && workspaces.length > 0) || site.show || authoritativeEmpty
         ? canvasHTML(workspaces, selectedId, { viewport: viewport }).html
         : emptyCanvasHTML();
-    // A host that decides the invitation itself (Home) says so with a string,
-    // '' meaning none; a host that does not keeps the authoritative-empty rule.
-    var invitation =
-      options && typeof options.invitation === 'string'
-        ? options.invitation
-        : authoritativeEmpty
-          ? 'empty'
-          : '';
     // Cockpit mode: the workspace-area header and on-demand context modal
     // already own the title, the stat readout, New Workspace, and the selected
     // workspace's overview (PRD FR15, FR17, FR29, FR62-FR69). Rendering the
@@ -3716,7 +3684,6 @@
         '<section class="ws-map-theatre">' +
         '<div class="ws-map-compass">N<b>▲</b></div>' +
         canvas +
-        (invitation ? cockpitEmptyActionsHTML(invitation) : '') +
         '</section>' +
         '</div>' +
         selBarHTML() +
@@ -3852,30 +3819,6 @@
       document.getElementById('cockpitCreateWorkspaceBtn') ||
       document.getElementById('launcherCreateWorkspaceBtn');
     if (create && typeof create.click === 'function') create.click();
-  }
-
-  function bindCockpitEmptyActions(container) {
-    var buttons = container.querySelectorAll('.cockpit-empty-map-actions button');
-    buttons.forEach(function (button) {
-      button.addEventListener('click', function () {
-        var modal = document.getElementById('addFolderModal');
-        if (!modal) return;
-        var entryPoint = button.getAttribute('data-workspace-entry-point');
-        modal.addEventListener(
-          'hidden.bs.modal',
-          function restoreEmptyActionFocus() {
-            // A late HQ response may remount the Map while the modal is open.
-            // Resolve the current button by its stable contract rather than
-            // focusing a detached trigger from the previous canvas.
-            var current = container.querySelector(
-              '.cockpit-empty-map-actions [data-workspace-entry-point="' + entryPoint + '"]'
-            );
-            if (current && current.focus) current.focus();
-          },
-          { once: true }
-        );
-      });
-    });
   }
 
   function bindCreate(container) {
@@ -10830,7 +10773,6 @@
     );
     settleRenderedBuildings(container, onScreen);
     bindCreate(container);
-    bindCockpitEmptyActions(container);
     bindTiles(container, workspaces, state);
     bindContextMenu(container, workspaces, state);
     bindHQSite(container, state);

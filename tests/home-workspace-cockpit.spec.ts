@@ -1440,82 +1440,21 @@ test.describe('Sparse map invitation and compact assistant', () => {
     await skipOnboarding(page);
   });
 
-  test('an authoritative empty map invites with a heading and the two existing entry points', async ({
-    page
-  }) => {
+  test('an empty map and an HQ-only map draw no add-a-workspace card', async ({ page }) => {
     await routeTree(page, () => []);
     await routeHQ(page, { valid: false, hq_onboarding_state: 'unseen' });
     await page.goto('/');
-    const invite = page.locator('.cockpit-empty-map-actions');
-    await expect(invite).toHaveAttribute('data-map-invitation', 'empty');
-    // Named by its own visible heading.
-    await expect(page.getByRole('group', { name: 'Add a workspace to your map' })).toBeVisible();
-    await expect(invite.getByRole('button', { name: 'New Workspace' })).toHaveCount(1);
-    await expect(invite.getByRole('button', { name: 'Import Folder' })).toHaveCount(1);
-  });
+    await expect(page.locator('#cockpitMap')).toBeVisible();
+    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
 
-  test('an HQ-only map invites once its late HQ status validates, and stops when a workspace arrives', async ({
-    page
-  }) => {
-    let folders: unknown[] = [HQ];
-    await routeTree(page, () => folders);
-    await routeHQ(page, { valid: true, workspace_id: 'hq-1' }, 400);
-    await page.goto('/');
-    await expect(page.locator(`.ws-map-tile[data-ws-id="${HQ.id}"]`)).toBeVisible();
-
-    // The list lands first; the invitation waits for the status that proves
-    // this lone workspace is the designated HQ.
-    const invite = page.locator('.cockpit-empty-map-actions');
-    await expect(invite).toHaveAttribute('data-map-invitation', 'hq-only');
-    await expect(invite).toContainText('Your Personal HQ is set up.');
-
-    // A filter dims tiles; it never makes a map look empty or change the voice.
-    await page.locator('[data-cockpit-signal="running"]').click();
-    await expect(invite).toHaveAttribute('data-map-invitation', 'hq-only');
-    await page.locator('[data-cockpit-signal="running"]').click();
-
-    folders = [HQ, OTHER];
-    await page.evaluate(() => window.dispatchEvent(new Event('ori:workspaces-changed')));
-    await expect(page.locator(`.ws-map-tile[data-ws-id="${OTHER.id}"]`)).toBeVisible();
-    await expect(invite).toHaveCount(0);
-  });
-
-  test('on a phone, the HQ-only invitation gets room and never covers the HQ', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.unroute('**/api/workspaces?tree=true');
     await routeTree(page, () => [HQ]);
+    await page.unroute('**/api/personal-hq/status');
     await routeHQ(page, { valid: true, workspace_id: 'hq-1' });
-    // A first visit: no saved camera, so the map frames the HQ itself (a
-    // shared sandbox would otherwise restore wherever it last looked).
-    await page.route('**/api/workspace-map/layout', route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          layout: { schema_version: 1, revision: 1, snap_to_grid: true, positions: {} }
-        })
-      })
-    );
-    await page.goto('/');
-    const invite = page.locator('.cockpit-empty-map-actions');
-    await expect(invite).toHaveAttribute('data-map-invitation', 'hq-only');
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-invitation', 'hq-only');
-    const map = (await page.locator('#cockpitMap').boundingBox())!;
-    expect(
-      map.height,
-      'the first-run map gets the empty map’s extra height'
-    ).toBeGreaterThanOrEqual(519);
-    await page.waitForTimeout(300);
-    const [card, hq] = await Promise.all([
-      invite.boundingBox(),
-      page.locator(`.ws-map-tile[data-ws-id="${HQ.id}"]`).boundingBox()
-    ]);
-    const overlap =
-      card!.x < hq!.x + hq!.width &&
-      hq!.x < card!.x + card!.width &&
-      card!.y < hq!.y + hq!.height &&
-      hq!.y < card!.y + card!.height;
-    expect(overlap, 'the card leaves the HQ building visible').toBe(false);
+    await page.reload();
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${HQ.id}"]`)).toBeVisible();
+    await page.waitForTimeout(400);
+    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
   });
 
   test('a lone workspace that is not the HQ, or a failed load, never invites', async ({ page }) => {
