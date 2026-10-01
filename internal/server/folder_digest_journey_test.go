@@ -88,6 +88,24 @@ func TestFreshJourneyProjectRefusesHistoricalAndUnfinishedRuns(t *testing.T) {
 	if !freshJourneyProject(projection, "new-run", accepted) {
 		t.Fatal("ready plugin quest was not accepted")
 	}
+	// A further project is a child run. It reports no source of its own and is
+	// accepted only with a root, still ready, fresh and holding a project.
+	child := *projection
+	child.RunKind, child.RootRunID, child.Journey.Source = setupjourney.RunKindChild, "root-run", ""
+	if !freshJourneyProject(&child, "new-run", accepted) {
+		t.Fatal("a finished child run of the plugin quest was not accepted")
+	}
+	for name, mutate := range map[string]func(*setupjourney.JourneyProjection){
+		"child without a root":    func(p *setupjourney.JourneyProjection) { p.RootRunID = "" },
+		"root run without source": func(p *setupjourney.JourneyProjection) { p.RunKind = setupjourney.RunKindRoot },
+		"child of a host quest":   func(p *setupjourney.JourneyProjection) { p.Journey.Source = setupjourney.QuestSourceHost },
+	} {
+		copy := child
+		mutate(&copy)
+		if freshJourneyProject(&copy, "new-run", accepted) {
+			t.Errorf("%s accepted as new project", name)
+		}
+	}
 	before := accepted.Add(-time.Minute)
 	for name, mutate := range map[string]func(*setupjourney.JourneyProjection){
 		"old ready run": func(p *setupjourney.JourneyProjection) { p.FirstCompletedAt = &before },

@@ -156,11 +156,16 @@ type FolderOffer struct {
 	Decision             string         `json:"decision,omitempty"`
 	Choice               string         `json:"choice,omitempty"`
 	Outcome              *FolderOutcome `json:"outcome,omitempty"`
-	RequestID            string         `json:"request_id,omitempty"`
-	CreatedAt            time.Time      `json:"created_at"`
-	DecidedAt            *time.Time     `json:"decided_at,omitempty"`
-	LaterUntil           *time.Time     `json:"later_until,omitempty"`
-	ResolvedAt           *time.Time     `json:"resolved_at,omitempty"`
+	// EntryName is the base name of the file the user picked, when the offer came
+	// from a picked file rather than a folder. Never a path.
+	EntryName string `json:"entry_name,omitempty"`
+	// Setup is the one-card setup run, kept so the card survives a reload.
+	Setup      *FolderSetupRun `json:"setup,omitempty"`
+	RequestID  string          `json:"request_id,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	DecidedAt  *time.Time      `json:"decided_at,omitempty"`
+	LaterUntil *time.Time      `json:"later_until,omitempty"`
+	ResolvedAt *time.Time      `json:"resolved_at,omitempty"`
 }
 
 // FolderDecision is the durable record of one answer (FR23).
@@ -230,7 +235,18 @@ func (d *FolderDigestDocument) Awaiting() *FolderOffer {
 	var latest *FolderOffer
 	for i := range d.Offers {
 		o := &d.Offers[i]
-		if o.Status == FolderOfferAwaitingOutcome && (latest == nil || o.CreatedAt.After(latest.CreatedAt)) {
+		if o.Status != FolderOfferAwaitingOutcome {
+			continue
+		}
+		// An offer whose one-card setup is running is the one the user is
+		// watching, so it wins over a newer offer that is only waiting.
+		running := o.Setup != nil && o.Setup.Status == FolderSetupRunning
+		latestRunning := latest != nil && latest.Setup != nil && latest.Setup.Status == FolderSetupRunning
+		switch {
+		case latest == nil, running && !latestRunning:
+			latest = o
+		case latestRunning && !running:
+		case o.CreatedAt.After(latest.CreatedAt):
 			latest = o
 		}
 	}
@@ -335,6 +351,16 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 					(row.Route != "" && (!strings.HasPrefix(row.Route, "/") || strings.HasPrefix(row.Route, "//"))) {
 					return fmt.Errorf("%w: receipt row", errFolderDigestInvalid)
 				}
+			}
+		}
+		if offer.Setup != nil {
+			if err := validateFolderSetupRun(*offer.Setup); err != nil {
+				return err
+			}
+		}
+		if offer.EntryName != "" {
+			if err := validateFolderName(offer.EntryName); err != nil {
+				return err
 			}
 		}
 		if offer.Portfolio != nil {

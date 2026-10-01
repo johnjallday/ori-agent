@@ -1189,3 +1189,33 @@ Never touched: `internal/sessionhttp/*_test.go` (CI timeout cliff),
 `internal/plugin/schema/setup-quest-v1.schema.json`,
 `internal/specialist/compatibility/reaper-setup.json`, the REAPER journey
 renderers in `setup-journey.js`, and `internal/reviewedintegration`.
+
+## 8. The one-card runner (`internal/foldersetup`)
+
+A recognized project folder shows its whole plan on one card; one **Set up**
+click runs it on the server instead of walking the browser through the journey.
+**Adjust…** still opens the step-by-step journey, unchanged.
+
+- **Consent is a digest.** `FolderSetupPlan.Digest` is the SHA-256 of the plan
+  lines with `State` excluded. `POST …/offers/{id}/setup` must send the digest
+  the card showed; a different one is `409 plan_changed` with the fresh offer.
+  The `FolderSetupIntent` behind the plan is pinned on the server and never
+  sent to the browser; no path crosses the wire.
+- **The runner drives the existing service.** `foldersetup.Runner` only calls
+  `setupjourney.Service` review-then-commit (`IfRevision`, review token, fresh
+  idempotency key) and `CreateOrResumeChild` for the plugin quest. It does not
+  change `Mutate` or any adapter. A `reconcile_required` operation stops the
+  run; nothing is committed over it.
+- **Placement.** Grouped when the blueprint requires a Home or one exists,
+  otherwise standalone.
+- **Stops.** The run ends on a `stop_reason` shown as one plain sentence on the
+  card (never the raw code), for example `needs_model`, `needs_pick`,
+  `install_failed`. Finished lines stay `done`; unfinished ones are `waiting`
+  (a `needs_*` stop) or `failed`. Sending the same digest again resumes.
+- **Receipt and first task.** `ResolveJourney` verifies the outcome
+  (`folderJourneyVerifier.VerifiedProject`), stores the receipt, and seeds one
+  read-only first task. It starts once, when the workspace is first opened
+  (`handleFolderFirstTaskStart`, consumed marker
+  `folder_first_task_autostart_consumed_at`; a failed start keeps it).
+- **Portfolio and existing-Home cards are unchanged.** They keep their own
+  Set up button and journey.

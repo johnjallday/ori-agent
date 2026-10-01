@@ -455,3 +455,285 @@
     transition: none;
   }
 }
+
+/* The workspace banner shown while the agent works on its first task. */
+.first-task-banner {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--cozy-line, #cdbf9f);
+  border-left: 4px solid var(--cozy-moss, #4a6b4a);
+  border-radius: 10px;
+  background: var(--cozy-paper-raised, #fdfaf2);
+  color: var(--cozy-ink, #2b2417);
+}
+
+.first-task-banner[hidden] {
+  display: none;
+}
+
+.first-task-banner[data-phase="needs-you"] {
+  border-left-color: var(--cozy-amber-strong, #a8741a);
+}
+
+.first-task-banner[data-phase="failed"] {
+  border-left-color: var(--cozy-clay, #b0502f);
+}
+
+.first-task-banner__text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 0.1rem;
+  overflow-wrap: anywhere;
+}
+
+.first-task-banner__text span {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.88rem;
+}
+
+.first-task-banner__pulse {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 3px solid var(--cozy-moss, #4a6b4a);
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--cozy-moss, #4a6b4a) 45%, transparent);
+  animation: folder-run-pulse 1.6s ease-out infinite;
+}
+
+.first-task-banner:not([data-phase="working"]) .first-task-banner__pulse {
+  background: currentcolor;
+  border-color: transparent;
+  opacity: 0.55;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .first-task-banner__pulse {
+    animation: none;
+  }
+}
+
+/* One-card folder setup: a pop-up that watches the server's run. It states that
+   the assistant is working (pulse, step count, bar) and never asks for a click
+   per step. State is a glyph plus a hidden word, never colour alone. */
+.folder-run {
+  --run-ink: var(--cozy-ink, #2b2417);
+  --run-dim: var(--cozy-ink-dim, #5d5442);
+  --run-line: var(--cozy-line, #cdbf9f);
+  --run-paper: var(--cozy-paper-raised, #fdfaf2);
+  --run-moss: var(--cozy-moss, #4a6b4a);
+  --run-amber: var(--cozy-amber-strong, #a8741a);
+  --run-clay: var(--cozy-clay, #b0502f);
+}
+
+/* Solid paper, not the global glass modal (components.css sets that with
+   !important): the steps must stay legible. */
+.folder-run .folder-run__frame {
+  border: 1px solid var(--run-line) !important;
+  border-radius: 14px;
+  background: var(--run-paper) !important;
+  color: var(--run-ink);
+  backdrop-filter: none !important;
+}
+
+.folder-run .btn-primary {
+  border-color: var(--run-moss);
+  background: var(--run-moss);
+  color: #fff;
+}
+
+.folder-run__header {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  padding: 1.1rem 1.25rem 0.5rem;
+}
+
+.folder-run__heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-run__eyebrow {
+  margin: 0;
+  color: var(--run-moss);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.folder-run__title {
+  margin: 0.1rem 0 0;
+  font-size: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+.folder-run__pulse {
+  flex: none;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 3px solid var(--run-moss);
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--run-moss) 45%, transparent);
+  animation: folder-run-pulse 1.6s ease-out infinite;
+}
+
+.folder-run[data-phase="done"] .folder-run__pulse {
+  background: var(--run-moss);
+  animation: none;
+}
+
+.folder-run[data-phase="stopped"] .folder-run__pulse {
+  border-color: var(--run-amber);
+  animation: none;
+}
+
+@keyframes folder-run-pulse {
+  70% {
+    box-shadow: 0 0 0 0.7rem transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.folder-run__body {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.5rem 1.25rem 0.75rem;
+}
+
+.folder-run__bar {
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--run-line) 55%, transparent);
+}
+
+.folder-run__bar span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--run-moss);
+  transition: width 0.4s ease;
+}
+
+.folder-run[data-phase="stopped"] .folder-run__bar span {
+  background: var(--run-amber);
+}
+
+.folder-run__count,
+.folder-run__status {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.folder-run__count {
+  margin-top: 0.35rem;
+  color: var(--run-dim);
+  font-size: 0.8rem;
+}
+
+.folder-run__status {
+  font-size: 0.95rem;
+}
+
+.folder-run__steps {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-run__steps[hidden],
+.folder-run__error[hidden] {
+  display: none;
+}
+
+.folder-run__steps li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--run-line);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.folder-run__steps .pa-folder__plan-icon,
+.folder-run__steps .pa-folder__receipt-icon {
+  flex: none;
+  width: 1.2em;
+  color: var(--run-dim);
+  font-weight: 750;
+  text-align: center;
+}
+
+.folder-run__steps small {
+  display: block;
+  color: var(--run-dim);
+  font-size: 0.78rem;
+}
+
+.folder-run__steps li[data-state="working"] {
+  border-color: var(--run-amber);
+  background: color-mix(in srgb, var(--run-amber) 8%, transparent);
+  font-weight: 600;
+}
+
+.folder-run__steps li[data-state="working"] .pa-folder__plan-icon {
+  color: var(--run-amber);
+  animation: folder-run-blink 1.2s ease-in-out infinite;
+}
+
+.folder-run__steps li[data-state="done"] .pa-folder__plan-icon {
+  color: var(--run-moss);
+}
+
+.folder-run__steps li[data-state="failed"] {
+  border-color: var(--run-clay);
+}
+
+.folder-run__steps li[data-state="failed"] .pa-folder__plan-icon {
+  color: var(--run-clay);
+}
+
+@keyframes folder-run-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.folder-run__error {
+  margin: 0;
+  color: var(--run-clay);
+}
+
+.folder-run__footer {
+  gap: 0.5rem;
+  border-top: 1px solid var(--run-line);
+}
+
+.folder-run__footer:empty {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folder-run__pulse,
+  .folder-run__steps li[data-state="working"] .pa-folder__plan-icon {
+    animation: none;
+  }
+  .folder-run__bar span {
+    transition: none;
+  }
+}

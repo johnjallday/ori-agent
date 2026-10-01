@@ -6,6 +6,8 @@
 // the Home assistant panel. It never sends a filesystem location — chips are
 // identifiers the server resolves, and the native picker runs server-side.
 
+import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
+
 const DIGEST_ENDPOINT = '/api/personal-assistant/folder-digest';
 
 export const FOLDER_CHIP_ICON = '\u{1F4C1}';
@@ -174,47 +176,232 @@ function projectConfirmView(offer, base, subject, remember, { back = false } = {
   return { ...base, headline, question, actions, confirming: back };
 }
 
-// A reviewed capability rides the same result card and opens the existing
+// The states of one plan line while the server runs the setup.
+const SETUP_LINE_STATES = ['waiting', 'working', 'done', 'failed'];
+
+// setupLinesView normalizes the server's plan or run lines for rendering. Every
+// field is text; an unknown state is shown as a neutral row, never trusted.
+export function setupLinesView(lines) {
+  return (Array.isArray(lines) ? lines : [])
+    .filter(line => line && typeof line === 'object' && String(line.name || '').trim())
+    .map(line => ({
+      kind: String(line.kind || '').trim(),
+      name: String(line.name).trim(),
+      detail: String(line.detail || '').trim(),
+      state: SETUP_LINE_STATES.includes(line.state) ? line.state : ''
+    }));
+}
+
+const SETUP_STOP_COPY = {
+  plan_changed:
+    'What Set up would do now differs from the plan you approved, so I stopped before going further.',
+  needs_pick: subject =>
+    `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to carry on.`,
+  needs_choice: subject => `${subject} has more than one project file. Choose the one to set up.`,
+  needs_model: 'The workspace and folder are set up. The agent needs a model before it can start.',
+  install_failed:
+    'The integration could not be installed or enabled, so nothing after it ran. If you install it from Plugins, Try again continues from there.',
+  interrupted: 'Setup was interrupted before it finished.',
+  failed: 'A step did not finish.'
+};
+
+const CONTINUE_SETUP = {
+  id: 'resume',
+  label: 'Continue setup',
+  style: 'outline',
+  journey: true
+};
+
+function stoppedActions(reason, setup) {
+  const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
+  switch (reason) {
+    case 'plan_changed':
+      return [{ ...CONTINUE_SETUP, style: 'primary' }];
+    case 'needs_pick':
+      return [
+        { id: 'repick', label: 'Pick it again', style: 'primary', repick: true },
+        CONTINUE_SETUP
+      ];
+    case 'needs_choice':
+      return [
+        ...(Array.isArray(setup.entry_candidates) ? setup.entry_candidates : [])
+          .map(name => String(name || '').trim())
+          .filter(Boolean)
+          .map((name, index) => ({
+            id: `choose-${index}`,
+            label: name,
+            style: 'outline',
+            oneCard: true,
+            entry: name
+          })),
+        CONTINUE_SETUP
+      ];
+    case 'needs_model':
+      return [
+        { id: 'model', label: 'Set up a model', style: 'primary', href: MODEL_SETTINGS_URL },
+        { ...retry, style: 'outline' },
+        CONTINUE_SETUP
+      ];
+    default:
+      return [retry, CONTINUE_SETUP];
+  }
+}
+
+// setupRunView is the card while the server runs (or has stopped) a one-card
+// setup: the plan lines with a state each, one status line, and — only when
+// stopped — one plain sentence saying what finished and what is needed. A raw
+// stop reason code is never shown.
+export function setupRunView(setup, subject) {
+  const lines = setupLinesView(setup?.lines);
+  const status = String(setup?.status || 'running');
+  if (status !== 'stopped') {
+    const working = lines.find(line => line.state === 'working');
+    return {
+      status: status === 'done' ? 'running' : status,
+      lines,
+      statusLine: working ? `Working on: ${working.name}` : 'Starting…',
+      question: `Setting up ${subject}…`,
+      actions: []
+    };
+  }
+  const reason = String(setup?.stop_reason || 'failed');
+  const finished = lines.filter(line => line.state === 'done').length;
+  const progress = lines.length ? `${finished} of ${lines.length} steps finished. ` : '';
+  let sentence = SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
+  if (typeof sentence === 'function') sentence = sentence(subject);
+  return {
+    status,
+    lines,
+    statusLine: '',
+    question: `${progress}${sentence}`,
+    actions: stoppedActions(reason, setup || {})
+  };
+}
+
+// setupModalView is the run pop-up: the same run the card shows, framed so the
+// user can see the assistant is working — a phase (running, stopped, done), a
+// step count, a percentage, and the lines. Pure data; the DOM is drawn below.
+// It is not visible for an offer with no one-card run.
+export function setupModalView(offer) {
+  if (!offer || offer.portfolio) return { visible: false };
+  const receipt = folderReceiptView(offer);
+  // A settled offer no longer carries its run, only its receipt; the pop-up that
+  // watched the run still ends on it. Without either there is nothing to show.
+  if (!offer.setup && !receipt.visible) return { visible: false };
+  const folder = String(offer.folder || '').trim() || 'this project';
+  const subject = String(offer.subject?.name || '').trim() || folder;
+  const run = setupRunView(offer.setup, subject);
+  const total = run.lines.length;
+  const finished = run.lines.filter(line => line.state === 'done').length;
+  if (receipt.visible) {
+    return {
+      visible: true,
+      phase: 'done',
+      eyebrow: 'All set',
+      title: `${subject} is ready`,
+      status: 'Here is what I set up. The first task starts when you open the workspace.',
+      count: total ? `${total} of ${total} steps finished` : '',
+      percent: 100,
+      lines: run.lines.map(line => ({ ...line, state: line.state ? 'done' : '' })),
+      receiptRows: receipt.rows,
+      route: receipt.route,
+      openLabel: receipt.openLabel,
+      actions: []
+    };
+  }
+  const stopped = run.status === 'stopped';
+  return {
+    visible: true,
+    phase: stopped ? 'stopped' : 'running',
+    eyebrow: stopped ? 'Setup paused' : 'Your assistant is working',
+    title: stopped ? `${subject} needs you` : `Setting up ${subject}`,
+    // The count line already says how many steps finished.
+    status: stopped ? run.question.replace(/^\d+ of \d+ steps finished\. /, '') : run.statusLine,
+    count: total ? `${finished} of ${total} steps finished` : '',
+    percent: total ? Math.round((finished / total) * 100) : 0,
+    lines: run.lines,
+    receiptRows: [],
+    route: '',
+    openLabel: '',
+    actions: run.actions
+  };
+}
+
+// A reviewed capability rides the same result card. With a plan from the server
+// the card is the one consent: Set up runs the whole setup on the server and
+// Adjust… opens the step-by-step journey. Without one it opens the existing
 // install → project-setup journey. It never uses the blank-workspace creator.
 function capabilityConfirmView(offer, base, subject) {
   const capability = offer.capability;
-  const continuing = base.status === 'awaiting_outcome';
-  const actions = continuing
-    ? [{ id: 'resume', label: 'Continue setup', style: 'primary', journey: true }]
-    : base.decided
-      ? []
-      : [
-          {
-            id: 'setup',
-            label: String(capability.accept_label || 'Set up'),
-            style: 'primary',
-            journey: true
-          },
-          {
-            id: 'no',
-            label: String(capability.decline_label || 'No thanks'),
-            style: 'outline',
-            decision: 'no'
-          },
-          { id: 'later', label: 'Later', style: 'link', decision: 'later' }
-        ];
   const portfolio = offer.portfolio;
+  const run = !portfolio && offer.setup ? setupRunView(offer.setup, subject) : null;
+  const planLines = !portfolio && !run ? setupLinesView(offer.plan?.lines) : [];
+  const hasPlan = planLines.length > 0;
+  const continuing = base.status === 'awaiting_outcome';
+  const decline = {
+    id: 'no',
+    label: String(capability.decline_label || 'No thanks'),
+    style: 'outline',
+    decision: 'no'
+  };
+  const later = { id: 'later', label: 'Later', style: 'link', decision: 'later' };
+  let actions;
+  if (run) actions = run.actions;
+  else if (continuing && hasPlan)
+    // Adjust… was pressed earlier: the one-click plan stays, beside the journey.
+    actions = [
+      { id: 'setup', label: 'Set up', style: 'primary', oneCard: true },
+      { id: 'resume', label: 'Continue setup', style: 'outline', journey: true }
+    ];
+  else if (continuing)
+    actions = [{ id: 'resume', label: 'Continue setup', style: 'primary', journey: true }];
+  else if (base.decided) actions = [];
+  else if (hasPlan)
+    actions = [
+      {
+        id: 'setup',
+        // The plan above says what happens, so the button is the plain verb.
+        label: 'Set up',
+        style: 'primary',
+        oneCard: true
+      },
+      { id: 'adjust', label: 'Adjust…', style: 'outline', journey: true },
+      decline,
+      later
+    ];
+  else
+    actions = [
+      {
+        id: 'setup',
+        label: String(capability.accept_label || 'Set up'),
+        style: 'primary',
+        journey: true
+      },
+      decline,
+      later
+    ];
   const headline = portfolio
     ? segments([{ text: subject }, ` has ${portfolio.projects} music projects.`])
     : segments([{ text: subject }, ` looks like a ${capability.recognized} project.`]);
-  const question = portfolio
+  let question = portfolio
     ? String(capability.question || `Set up a ${capability.workspace}?`)
     : `Set up ${subject} as a ${capability.workspace}?`;
+  if (hasPlan) question += ' Here is everything Set up will do:';
+  if (run) question = run.question;
+  else if (capability.revived)
+    question = `You said no before, but this is a whole collection now. ${question}`;
   return {
     ...base,
     headline,
-    question: capability.revived
-      ? `You said no before, but this is a whole collection now. ${question}`
-      : question,
-    capabilityDetail: String(capability.integration || ''),
-    reason: String(capability.evidence || base.reason),
+    question,
+    // The plan lists every consequence, so the pre-setup install promise would
+    // only repeat it; a run shows its own progress instead.
+    capabilityDetail: hasPlan || run ? '' : String(capability.integration || ''),
+    reason: run ? '' : String(capability.evidence || base.reason),
     actions,
-    resume: continuing
+    resume: continuing,
+    plan: hasPlan ? { lines: planLines, digest: String(offer.plan?.digest || '') } : null,
+    setup: run
   };
 }
 
@@ -247,10 +434,16 @@ export function folderOfferView(offer, options = {}) {
     needsPick: offer.needs_pick === true
   };
   const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
-  if (status === 'awaiting_outcome' && offer?.capability && !offer.portfolio) {
-    view.question = 'Project setup has not finished. Continue to review its current steps.';
-    view.capabilityDetail =
-      'Opening setup checks its current steps; it does not by itself create another workspace or enable live project control.';
+  if (status === 'awaiting_outcome' && offer?.capability && !offer.portfolio && !view.setup) {
+    if (view.plan) {
+      view.question =
+        'Project setup has not finished. Set up does what is left in one go, or continue step by step. Here is what is left:';
+      view.capabilityDetail = '';
+    } else {
+      view.question = 'Project setup has not finished. Continue to review its current steps.';
+      view.capabilityDetail =
+        'Opening setup checks its current steps; it does not by itself create another workspace or enable live project control.';
+    }
   }
   if (
     status === 'resolved' &&
@@ -505,6 +698,75 @@ function announceOffer() {
   );
 }
 
+const SETUP_LINE_GLYPHS = {
+  waiting: ['○', 'Waiting'],
+  working: ['◔', 'In progress'],
+  done: ['✓', 'Done'],
+  failed: ['!', 'Did not finish']
+};
+
+// renderSetupLines draws a plan or a run's lines into a list. The state is a
+// glyph and a visually hidden word, never colour alone. Used by the Home panel
+// card and the mission card, so both show the same lines.
+export function renderSetupLines(list, lines, doc = document) {
+  if (!list) return;
+  list.replaceChildren();
+  lines.forEach(line => {
+    const item = doc.createElement('li');
+    item.dataset.kind = line.kind || 'other';
+    if (line.state) item.dataset.state = line.state;
+    const icon = doc.createElement('span');
+    icon.className = 'pa-folder__plan-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = line.state ? SETUP_LINE_GLYPHS[line.state][0] : '•';
+    const body = doc.createElement('span');
+    body.className = 'pa-folder__plan-text';
+    body.append(line.name);
+    if (line.detail) {
+      const detail = doc.createElement('small');
+      detail.textContent = line.detail;
+      body.append(detail);
+    }
+    if (line.state) {
+      const word = doc.createElement('span');
+      word.className = 'visually-hidden';
+      word.textContent = ` — ${SETUP_LINE_GLYPHS[line.state][1]}`;
+      body.append(word);
+    }
+    item.append(icon, body);
+    list.append(item);
+  });
+}
+
+const RECEIPT_LABELS = {
+  workspace: ['Workspace', '◈'],
+  folder: ['Folder', '▤'],
+  blueprint: ['Blueprint', '✦'],
+  agent: ['Agent', '●'],
+  task: ['First task', '✓']
+};
+
+// renderReceiptRows draws the receipt's rows (what Set up made) into a list.
+// Shared by the card and the run pop-up so both say the same thing.
+function renderReceiptRows(list, rows, doc = document) {
+  if (!list) return;
+  list.replaceChildren();
+  rows.forEach(row => {
+    const li = doc.createElement('li');
+    const [label, glyph] = RECEIPT_LABELS[row.kind] || ['Set up', '•'];
+    li.dataset.kind = RECEIPT_LABELS[row.kind] ? row.kind : 'other';
+    const icon = doc.createElement('span');
+    icon.className = 'pa-folder__receipt-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = glyph;
+    li.append(
+      icon,
+      doc.createTextNode(`${label} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`)
+    );
+    list.append(li);
+  });
+}
+
 function elements() {
   const root = document.getElementById('personalAssistantFolder');
   if (!root) return null;
@@ -526,6 +788,7 @@ function elements() {
     capability: document.getElementById('personalAssistantFolderOfferCapability'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
     receipt: document.getElementById('personalAssistantFolderReceipt'),
+    plan: document.getElementById('personalAssistantFolderPlan'),
     actions: document.getElementById('personalAssistantFolderOfferActions'),
     offerNote: document.getElementById('personalAssistantFolderOfferNote'),
     error: document.getElementById('personalAssistantFolderOfferError')
@@ -546,6 +809,102 @@ function showStatus(message) {
 function showError(message) {
   const els = elements();
   setText(els?.error, message);
+  runModal.error = String(message || '');
+  renderRunModal();
+}
+
+// The run pop-up: opened by pressing Set up (or Try again), it follows the same
+// offer the card does. Closing it never stops the run; the card keeps showing
+// progress. `wanted` is true only while the user has it open, so a page that
+// loads onto a run in progress does not pop a dialog over what they were doing.
+const runModal = { wanted: false, bound: false, error: '' };
+
+function runModalElements() {
+  const root = document.getElementById('folderSetupRunModal');
+  if (!root) return null;
+  return {
+    root,
+    eyebrow: document.getElementById('folderSetupRunEyebrow'),
+    title: document.getElementById('folderSetupRunTitle'),
+    bar: document.getElementById('folderSetupRunBar'),
+    fill: document.getElementById('folderSetupRunFill'),
+    count: document.getElementById('folderSetupRunCount'),
+    status: document.getElementById('folderSetupRunStatus'),
+    steps: document.getElementById('folderSetupRunSteps'),
+    receipt: document.getElementById('folderSetupRunReceipt'),
+    error: document.getElementById('folderSetupRunError'),
+    actions: document.getElementById('folderSetupRunActions')
+  };
+}
+
+function openRunModal() {
+  const els = runModalElements();
+  const Modal = globalThis.bootstrap?.Modal;
+  if (!els || !Modal) return;
+  runModal.wanted = true;
+  runModal.error = '';
+  if (!runModal.bound) {
+    els.root.addEventListener('hidden.bs.modal', () => {
+      runModal.wanted = false;
+    });
+    runModal.bound = true;
+  }
+  renderRunModal();
+  Modal.getOrCreateInstance(els.root).show();
+}
+
+function closeRunModal() {
+  runModal.wanted = false;
+  const root = document.getElementById('folderSetupRunModal');
+  if (root) globalThis.bootstrap?.Modal?.getInstance(root)?.hide();
+}
+
+function renderRunModal() {
+  if (!runModal.wanted) return;
+  const els = runModalElements();
+  if (!els) return;
+  const view = setupModalView(state.offer);
+  if (!view.visible) {
+    closeRunModal();
+    return;
+  }
+  els.root.dataset.phase = view.phase;
+  setText(els.eyebrow, view.eyebrow, false);
+  setText(els.title, view.title, false);
+  setText(els.count, view.count);
+  setText(els.status, view.status, false);
+  els.bar.setAttribute('aria-valuenow', String(view.percent));
+  els.fill.style.width = `${view.percent}%`;
+  const done = view.phase === 'done';
+  renderSetupLines(els.steps, view.lines);
+  els.steps.hidden = done || !view.lines.length;
+  renderReceiptRows(els.receipt, view.receiptRows);
+  els.receipt.hidden = !done || !view.receiptRows.length;
+  els.error.textContent = runModal.error;
+  els.error.hidden = !runModal.error;
+  els.actions.replaceChildren();
+  if (done && view.route) {
+    const open = document.createElement('a');
+    open.className = 'btn btn-primary';
+    open.href = view.route;
+    open.textContent = view.openLabel;
+    els.actions.append(open);
+  }
+  view.actions.forEach(action => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = action.style === 'primary' ? 'btn btn-primary' : 'btn btn-outline-secondary';
+    button.dataset.folderRunAction = action.id;
+    button.textContent = action.label;
+    button.disabled = state.busy;
+    button.addEventListener('click', () => {
+      // Retrying keeps the pop-up; anything that opens another dialog or page
+      // closes it first.
+      if (!action.oneCard) closeRunModal();
+      runAction(action);
+    });
+    els.actions.append(button);
+  });
 }
 
 function requestId() {
@@ -673,34 +1032,22 @@ function renderOffer() {
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
   if (els.receipt) {
-    els.receipt.replaceChildren();
     els.receipt.hidden = !receipt.visible;
-    if (receipt.visible)
-      receipt.rows.forEach(row => {
-        const li = document.createElement('li');
-        const labels = {
-          workspace: ['Workspace', '◈'],
-          folder: ['Folder', '▤'],
-          blueprint: ['Blueprint', '✦'],
-          agent: ['Agent', '●'],
-          task: ['First task', '✓']
-        };
-        const [label, glyph] = labels[row.kind] || ['Set up', '•'];
-        li.dataset.kind = labels[row.kind] ? row.kind : 'other';
-        const icon = document.createElement('span');
-        icon.className = 'pa-folder__receipt-icon';
-        icon.setAttribute('aria-hidden', 'true');
-        icon.textContent = glyph;
-        li.append(
-          icon,
-          document.createTextNode(`${label} · ${row.name}${row.detail ? ` (${row.detail})` : ''}`)
-        );
-        els.receipt.append(li);
-      });
+    renderReceiptRows(els.receipt, receipt.visible ? receipt.rows : []);
+  }
+  if (els.plan) {
+    const lines = view.setup?.lines || view.plan?.lines || [];
+    renderSetupLines(els.plan, lines);
+    els.plan.hidden = !lines.length;
+    els.plan.dataset.mode = view.setup ? view.setup.status : 'plan';
   }
   if (els.actions) {
     els.actions.replaceChildren();
-    els.actions.hidden = view.decided && !receipt.route && !receipt.homeRoute && !view.resume;
+    els.actions.hidden =
+      view.decided &&
+      !receipt.route &&
+      !receipt.homeRoute &&
+      (!view.resume || !(view.actions || []).length);
     if (receipt.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
@@ -734,8 +1081,15 @@ function renderOffer() {
     }
   }
   if (els.offerNote) {
+    // A one-card run says what it is doing; a stopped one already said what it
+    // needs in the question, so the outcome note would only repeat it.
     const note =
-      state.progress || (view.decided && !receipt.visible ? folderOutcomeNote(state.offer) : '');
+      state.progress ||
+      (view.setup
+        ? view.setup.statusLine
+        : view.decided && !receipt.visible
+          ? folderOutcomeNote(state.offer)
+          : '');
     els.offerNote.replaceChildren();
     els.offerNote.hidden = !note;
     if (note) {
@@ -759,6 +1113,8 @@ function render() {
   renderChooser();
   renderOffer();
   renderScene();
+  renderRunModal();
+  syncSetupPolling();
 }
 
 // runAction carries out one of the offer's actions, wherever its button was
@@ -780,6 +1136,14 @@ function runAction(action) {
     announceOffer();
     return;
   }
+  if (action.href) {
+    window.location.assign(action.href);
+    return;
+  }
+  if (action.oneCard) {
+    startOneCardSetup(action);
+    return;
+  }
   if (action.journey) {
     void startCapabilityJourney();
     return;
@@ -793,6 +1157,90 @@ function runAction(action) {
     return;
   }
   decide(action);
+}
+
+const SETUP_POLL_MS = 1500;
+let setupPollTimer = null;
+
+// startOneCardSetup is the click on Set up, Try again, or a project-file chip.
+// It sends only the digest of the plan the card showed (and a chosen project
+// file name); the server recomputes the plan, holds the folder itself, and
+// runs the setup in the background while the card polls for progress.
+async function startOneCardSetup(action) {
+  const offer = state.offer;
+  if (!offer?.id || state.busy) return;
+  if (offer.needs_pick) {
+    showOfferFailure({
+      needs_pick: true,
+      error: 'Ori no longer has that folder open. Pick it again.'
+    });
+    render();
+    return;
+  }
+  const digest = String(offer.plan?.digest || offer.setup?.plan_digest || '');
+  if (!digest) {
+    showError('This setup has no plan to confirm. Choose Adjust… to set it up step by step.');
+    return;
+  }
+  state.busy = true;
+  showError('');
+  render();
+  try {
+    const body = { plan_digest: digest };
+    if (action?.entry) body.entry_name = action.entry;
+    const { ok, payload } = await postOffer(offer.id, 'setup', body);
+    if (ok) {
+      // Show the run in a pop-up so it is plain that the assistant is working.
+      openRunModal();
+      return;
+    }
+    if (payload?.plan_changed && payload.offer) {
+      // The card on screen was stale: show what Set up would do now.
+      state.offer = payload.offer;
+      announceOffer();
+      showError(String(payload.error || 'What Set up does has changed. Review the new plan.'));
+      return;
+    }
+    showOfferFailure(payload);
+  } catch (_) {
+    showError('Set up could not be started. Try again.');
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+// syncSetupPolling polls the existing digest read while a run is going, and
+// only then. A page that loads onto a running setup resumes it the same way;
+// nothing polls otherwise, so an idle page makes no extra request.
+function syncSetupPolling() {
+  const running = state.offer?.setup?.status === 'running';
+  if (running && !setupPollTimer) {
+    setupPollTimer = setInterval(() => void pollSetup(), SETUP_POLL_MS);
+  } else if (!running && setupPollTimer) {
+    clearInterval(setupPollTimer);
+    setupPollTimer = null;
+  }
+}
+
+async function pollSetup() {
+  const id = state.offer?.id;
+  if (!id) return;
+  try {
+    // The card's own offer, by name: another waiting offer may be the "current"
+    // one, and a finished run must still show its own receipt.
+    const response = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(id)}`, {
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) return;
+    const payload = await readJSON(response);
+    // Once the run settles the read returns the resolved offer, which ends the poll.
+    state.offer = payload?.folder_digest?.offer || state.offer;
+    announceOffer();
+    render();
+  } catch (_) {
+    // The next tick tries again.
+  }
 }
 
 // A card confirmation records intent before opening the reviewed install

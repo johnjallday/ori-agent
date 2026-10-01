@@ -253,6 +253,21 @@ type FolderHomeVerifier interface {
 	VerifiedHome(ctx context.Context, userID, homeID, providerKey string, acceptedAfter time.Time) (FolderCreateResult, error)
 }
 
+// FolderFirstTaskRequest asks the host to give a workspace the setup created the
+// first read-only task for the shape of the folder it was made for.
+type FolderFirstTaskRequest struct {
+	UserID      string
+	WorkspaceID string
+	Shape       folderdigest.Shape
+}
+
+// FolderFirstTaskSeeder adds that task, once: a replay finds the task already
+// there and adds none. It returns the receipt row that describes the task as it
+// now stands, including whether it will start by itself on the first open.
+type FolderFirstTaskSeeder interface {
+	SeedFirstTask(ctx context.Context, req FolderFirstTaskRequest) (FolderReceiptRow, error)
+}
+
 // FolderDigestDeps are the seams the service is built over. Zero values
 // take production defaults except ValidateRoot, which the server supplies
 // from File Janitor's root rules.
@@ -293,6 +308,13 @@ type FolderDigestDeps struct {
 	// Journey verifies the plugin's created project before resolving a card.
 	Journey     FolderJourneyVerifier
 	HomeJourney FolderHomeVerifier
+	// Setup plans and runs a recognized project's one-card setup. Nil keeps the
+	// step-by-step journey as the only path.
+	Setup FolderSetupRunner
+	// FirstTask seeds the first task on a workspace the setup journey created, so
+	// a project connected through the journey (the card's Set up or Adjust…) ends
+	// with the same first task a generic project gets. Nil seeds none.
+	FirstTask FolderFirstTaskSeeder
 	// OnResolved runs after a project outcome completes: the dossier
 	// producer learns from the offer and reports whether the fact was saved
 	// (FR35–FR39). Best-effort; its answer is recorded on the outcome.
@@ -396,6 +418,7 @@ type FolderDigestService struct {
 	mu       sync.Mutex
 	paths    map[string]string // offer id → canonical root; memory only (FR27)
 	scanning map[string]bool   // user id → a scan is in flight
+	running  map[string]bool   // offer id → a one-card setup is running in this process
 }
 
 // NewFolderDigestService builds the service.
@@ -421,7 +444,7 @@ func NewFolderDigestService(store *FolderDigestStore, deps FolderDigestDeps) *Fo
 	}
 	return &FolderDigestService{
 		store: store, deps: deps,
-		paths: map[string]string{}, scanning: map[string]bool{},
+		paths: map[string]string{}, scanning: map[string]bool{}, running: map[string]bool{},
 	}
 }
 
@@ -475,6 +498,10 @@ type FolderOfferView struct {
 	// Capability is derived from the host table and the saved digest evidence;
 	// it is never accepted as a client-supplied action or plugin declaration.
 	Capability *FolderCapabilityView `json:"capability,omitempty"`
+	// Plan is everything Set up will do, present on a pending single-project
+	// capability offer. Setup is the run once Set up was pressed.
+	Plan  *FolderSetupPlan `json:"plan,omitempty"`
+	Setup *FolderSetupView `json:"setup,omitempty"`
 }
 
 // FolderCapabilityView is the optional explanation on the existing digest
@@ -534,6 +561,21 @@ func (s *FolderDigestService) now() time.Time { return s.deps.Now() }
 // chips. A confirmed journey survives page/server restarts; only when neither
 // exists do we resurface a due "later" or the next queued candidate.
 func (s *FolderDigestService) Current(ctx context.Context, userID string) (FolderDigestView, error) {
+	return s.current(ctx, userID, "")
+}
+
+// CurrentOffer is Current for one named offer, whatever its status. The card
+// polls it while its setup runs: another offer may be the "current" one, and a
+// run that finishes must still show its own receipt.
+func (s *FolderDigestService) CurrentOffer(ctx context.Context, userID, offerID string) (FolderDigestView, error) {
+	offerID = strings.TrimSpace(offerID)
+	if offerID == "" || len(offerID) > folderRequestIDMax {
+		return FolderDigestView{}, fmt.Errorf("%w: offer id", ErrValidation)
+	}
+	return s.current(ctx, userID, offerID)
+}
+
+func (s *FolderDigestService) current(ctx context.Context, userID, offerID string) (FolderDigestView, error) {
 	if s == nil || s.store == nil {
 		return FolderDigestView{}, ErrRepairNeeded
 	}
@@ -544,6 +586,16 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 	doc, err := s.store.Read(ctx, userID)
 	if err != nil {
 		return FolderDigestView{}, err
+	}
+	if offerID != "" {
+		named := doc.Offer(offerID)
+		if named == nil {
+			return FolderDigestView{}, ErrFolderOfferNotFound
+		}
+		view := s.chooserView(binding)
+		offer := s.viewFor(ctx, userID, *named, binding.Paused)
+		view.Offer = &offer
+		return view, nil
 	}
 	pending := doc.Pending()
 	if pending == nil {
@@ -558,9 +610,20 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 	if pending == nil {
 		pending = recentProjectHomeNavigation(doc, s.now())
 	}
-	view := FolderDigestView{Chips: s.availableChips(), Paused: binding.Paused}
+	view := s.chooserView(binding)
 	view.PromptFirstFolder = !binding.Paused && doc.FirstPromptShownAt == nil &&
 		s.deps.MissionUnresolved != nil && s.deps.MissionUnresolved("pa-show-folder")
+	if pending != nil {
+		offer := s.viewFor(ctx, userID, *pending, binding.Paused)
+		view.Offer = &offer
+	}
+	return view, nil
+}
+
+// chooserView is the part of the digest view that does not depend on an offer:
+// the chooser's chips and what the picker can do.
+func (s *FolderDigestService) chooserView(binding KnowledgeBinding) FolderDigestView {
+	view := FolderDigestView{Chips: s.availableChips(), Paused: binding.Paused}
 	reason := ""
 	if s.deps.Picker != nil {
 		view.PickerAvailable = s.deps.Picker.Available()
@@ -569,11 +632,7 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 		reason = s.deps.Picker.UnavailableReason()
 	}
 	view.PickerNote = folderChooserNote(len(view.Chips), view.PickerAvailable, reason)
-	if pending != nil {
-		offer := s.view(ctx, *pending, binding.Paused)
-		view.Offer = &offer
-	}
-	return view, nil
+	return view
 }
 
 // The normal project creator navigates to the child as soon as it succeeds.
@@ -739,7 +798,7 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		for _, prior := range doc.Offers {
 			if prior.FolderKey == FolderKey(root) && prior.Status == FolderOfferAwaitingOutcome {
 				s.rememberPath(prior.ID, root)
-				view := s.view(ctx, prior, binding.Paused)
+				view := s.viewFor(ctx, userID, prior, binding.Paused)
 				return view, nil
 			}
 		}
@@ -823,6 +882,8 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	if fileShape != "" && offer.Status == FolderOfferPending {
 		offer.Subject.Shape = string(fileShape)
 		offer.Subject.DominantExtension = strings.ToLower(filepath.Ext(pickedFile))
+		// The picked file names the project file; only its base name is kept.
+		offer.EntryName = filepath.Base(pickedFile)
 	}
 	domain, evidence := folderOfferDomainClass(offer)
 	legacyDeclined := false
@@ -862,7 +923,7 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	if stored == nil {
 		stored = &offer
 	}
-	return s.view(ctx, *stored, binding.Paused), nil
+	return s.viewFor(ctx, userID, *stored, binding.Paused), nil
 }
 
 // fileVerdict makes a recognized picked file's parent the project instead
@@ -1050,7 +1111,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	if err == nil && resolvedNow {
 		result = s.afterOutcome(ctx, userID, result)
 	}
-	return s.view(ctx, result, binding.Paused), nil
+	return s.viewFor(ctx, userID, result, binding.Paused), nil
 }
 
 // runCreate has the host set the project workspace up for the offer's
@@ -1565,6 +1626,11 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 	if err != nil || verified.WorkspaceID == "" || !strings.HasPrefix(verified.Route, "/workspaces/") {
 		return FolderOfferView{}, ErrFolderWorkspaceRefused
 	}
+	// The project is proved to be this folder's. Only now does it get its first
+	// task, and the receipt shows the task as it actually stands. Best effort: a
+	// project without its first task is still set up, and the receipt then simply
+	// has no task row.
+	verified.Receipt = s.withFirstTask(ctx, userID, offer.Subject.Shape, verified)
 	now := s.now()
 	var resolved FolderOffer
 	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
@@ -1575,7 +1641,8 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 		item.Status = FolderOfferResolved
 		item.ResolvedAt = &now
 		item.Outcome = &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: verified.WorkspaceID, Route: verified.Route,
-			HomeRoute: verified.HomeRoute, Blueprint: row.Blueprint.BlueprintID}
+			HomeRoute: verified.HomeRoute, Blueprint: row.Blueprint.BlueprintID,
+			Receipt: append([]FolderReceiptRow(nil), verified.Receipt...)}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: offerID, Action: "journey", At: now})
 		pruneFolderDigest(d)
 		resolved = *item
@@ -1883,6 +1950,15 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 			}
 		}
 	}
+	s.attachSetupRun(offer, &v)
+	return v
+}
+
+// viewFor is view for a caller that knows the user: it also attaches the plan a
+// pending project offer's Set up would carry out, which can depend on the user.
+func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer FolderOffer, paused bool) FolderOfferView {
+	v := s.view(ctx, offer, paused)
+	s.attachSetupPlan(ctx, userID, offer, &v)
 	return v
 }
 

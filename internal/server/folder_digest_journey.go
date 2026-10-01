@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
@@ -166,41 +167,57 @@ func reviewedProjectQuest(ctx context.Context, b *ServerBuilder, integrationKey,
 type folderJourneyVerifier struct{ builder *ServerBuilder }
 
 func (v folderJourneyVerifier) VerifiedProject(ctx context.Context, userID, runID, folderPath, blueprintID, integrationKey string, acceptedAfter time.Time) (personalassistant.FolderCreateResult, error) {
-	refused := personalassistant.ErrFolderWorkspaceRefused
+	// Every refusal is the same answer to the caller; the log says which check
+	// refused, with no path or identity in it.
+	refuse := func(why string) (personalassistant.FolderCreateResult, error) {
+		logger.Info("A setup run could not be verified for its folder", logger.Fields{"reason": why})
+		return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderWorkspaceRefused
+	}
 	b := v.builder
 	if b == nil || b.setupJourneyService == nil || b.workspaceFileStore == nil || b.sessionStore == nil || runID == "" {
-		return personalassistant.FolderCreateResult{}, refused
+		return refuse("not wired")
 	}
 	entry, ok := reviewedintegration.Get(integrationKey)
 	if !ok || entry.ExpectedBlueprintID != blueprintID {
-		return personalassistant.FolderCreateResult{}, refused
+		return refuse("unreviewed integration")
 	}
 	_, questID, found := reviewedProjectQuest(ctx, b, integrationKey, blueprintID)
 	if !found {
-		return personalassistant.FolderCreateResult{}, refused
+		return refuse("no single plugin quest")
 	}
 	scoped, err := b.setupJourneyService.ForQuest(ctx, userID, entry.PluginID, questID)
 	if err != nil {
-		return personalassistant.FolderCreateResult{}, refused
+		return refuse("quest unavailable")
 	}
 	journey, err := scoped.Read(ctx, userID, runID)
-	if err != nil || !freshJourneyProject(journey, runID, acceptedAfter) {
-		return personalassistant.FolderCreateResult{}, refused
+	if err != nil {
+		return refuse("run unreadable")
+	}
+	if !freshJourneyProject(journey, runID, acceptedAfter) {
+		return refuse("run is not a fresh, finished project run")
 	}
 	id := journey.Receipts.ProjectWorkspaceID
 	project, err := b.workspaceFileStore.Get(id)
 	if err != nil || project == nil || project.OwnerUserID != userID {
-		return personalassistant.FolderCreateResult{}, refused
+		return refuse("project workspace unreadable or foreign")
 	}
 	if !journeyProjectMatchesFolder(project, userID, entry.PluginID, blueprintID, folderPath) {
-		return personalassistant.FolderCreateResult{}, refused
+		return refuse("project is not this folder's")
 	}
 	row, err := b.sessionStore.GetWorkspace(ctx, id)
 	if err != nil || row == nil || row.OwnerUserID != userID || row.IsGroup() || strings.TrimSpace(row.FolderSlug) == "" {
-		return personalassistant.FolderCreateResult{}, refused
+		return refuse("project row unreadable")
 	}
-	return personalassistant.FolderCreateResult{WorkspaceID: id, Route: "/workspaces/" + row.FolderSlug,
-		HomeRoute: v.verifiedProjectHomeRoute(ctx, userID, project)}, nil
+	result := personalassistant.FolderCreateResult{WorkspaceID: id, Route: "/workspaces/" + row.FolderSlug,
+		HomeRoute: v.verifiedProjectHomeRoute(ctx, userID, project)}
+	// The receipt is what the card shows once the setup is proved. It is a
+	// best-effort read: without it the card falls back to its plain outcome note.
+	if b.sessionHandler != nil {
+		if rows, receiptErr := b.sessionHandler.FolderOfferWorkspaceReceipt(id, true); receiptErr == nil {
+			result.Receipt = rows
+		}
+	}
+	return result, nil
 }
 
 // An offer cannot infer a Home from its name or selected folder. Only a
@@ -248,9 +265,21 @@ func (v folderJourneyVerifier) verifiedProjectHomeRoute(ctx context.Context, own
 	return "/workspaces/" + row.FolderSlug + "/assistant#projectLibraryPanel"
 }
 
+// A plugin quest's root run reports its source. A child run (a further project)
+// carries none by design: it holds no relationship identity of its own and is
+// authorized through its root. The caller reads it through the plugin quest's
+// scoped service, which refuses any run whose root is not that quest's, so a
+// child with a root is that quest's.
+func journeySourceIsPlugin(journey *setupjourney.JourneyProjection) bool {
+	if journey.Journey.Source == setupjourney.QuestSourcePlugin {
+		return true
+	}
+	return journey.RunKind == setupjourney.RunKindChild && journey.Journey.Source == "" && journey.RootRunID != ""
+}
+
 func freshJourneyProject(journey *setupjourney.JourneyProjection, runID string, acceptedAfter time.Time) bool {
 	return journey != nil && journey.RunID == runID &&
-		journey.Journey.Source == setupjourney.QuestSourcePlugin &&
+		journeySourceIsPlugin(journey) &&
 		journey.Lifecycle == setupjourney.LifecycleReady &&
 		journey.FirstCompletedAt != nil && !journey.FirstCompletedAt.Before(acceptedAfter) &&
 		journey.Receipts.ProjectWorkspaceID != ""

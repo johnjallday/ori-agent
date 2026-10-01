@@ -1706,3 +1706,104 @@ test('a settings render leaves a collapsed configuration card collapsed', () => 
   assert.equal(page.elements.configContent.hidden, true);
   assert.equal(page.elements.configPanel.classList.contains('is-collapsed'), true);
 });
+
+// The folder's first task starts on the first open. The page asks the server and
+// does only what it is told: it opens no dialog and starts nothing itself.
+function firstTaskPage(response) {
+  const calls = { fetch: [], loadTasks: 0, monitor: [], toast: [], banner: [], resumed: 0 };
+  const page = {
+    workspaceId: 'ws 1',
+    tasks: [{ id: 't-1', to: 'Atlas' }],
+    loadTasks: async () => {
+      calls.loadTasks++;
+    },
+    startExecutionMonitor: id => calls.monitor.push(id),
+    updateFirstTaskBanner: task => calls.banner.push(task?.id),
+    resumeFirstTaskBanner: () => {
+      calls.resumed++;
+    }
+  };
+  global.fetch = async (url, init) => {
+    calls.fetch.push({ url, method: init?.method });
+    if (response instanceof Error) throw response;
+    return { ok: response.ok !== false, json: async () => response.body };
+  };
+  global.window.Toast = { info: message => calls.toast.push(message) };
+  return { page, calls };
+}
+
+test('the folder first task start posts to its own endpoint and follows the task', async () => {
+  const { page, calls } = firstTaskPage({ body: { started: true, task_id: 't-1' } });
+  await WorkspaceDetailPage.prototype.maybeStartFolderFirstTask.call(page);
+
+  assert.deepEqual(calls.fetch, [
+    { url: '/api/workspaces/ws%201/folder-first-task/start', method: 'POST' }
+  ]);
+  assert.equal(calls.loadTasks, 1);
+  assert.deepEqual(calls.monitor, ['t-1']);
+  assert.equal(calls.toast.length, 1);
+  // The banner says the agent is working, and follows this task to its end.
+  assert.equal(page.firstTaskBannerId, 't-1');
+  assert.deepEqual(calls.banner, ['t-1']);
+});
+
+test('a first task that is still running keeps its banner after a reload', () => {
+  const calls = { banner: [], monitor: [] };
+  const task = {
+    id: 't-9',
+    context: {
+      template_id: 'folder-digest',
+      template_starter_task: true,
+      folder_first_task_autostart_consumed_at: '2026-10-01T00:00:00Z'
+    }
+  };
+  const page = (state, tasks = [task]) => ({
+    tasks,
+    getTaskExecutionState: () => state,
+    updateFirstTaskBanner: item => calls.banner.push(item.id),
+    startExecutionMonitor: id => calls.monitor.push(id)
+  });
+  const running = page('in_progress');
+  WorkspaceDetailPage.prototype.resumeFirstTaskBanner.call(running);
+  assert.equal(running.firstTaskBannerId, 't-9');
+  assert.deepEqual(calls.banner, ['t-9']);
+  assert.deepEqual(calls.monitor, ['t-9']);
+
+  // A finished one is not announced again, and an ordinary task is never a banner.
+  const done = page('completed');
+  WorkspaceDetailPage.prototype.resumeFirstTaskBanner.call(done);
+  const ordinary = page('in_progress', [{ id: 't-1', context: {} }]);
+  WorkspaceDetailPage.prototype.resumeFirstTaskBanner.call(ordinary);
+  assert.equal(done.firstTaskBannerId, undefined);
+  assert.equal(ordinary.firstTaskBannerId, undefined);
+  assert.deepEqual(calls.banner, ['t-9']);
+});
+
+test('the folder first task start does nothing when the server did not start it', async () => {
+  for (const body of [
+    { started: false, reason: 'already_consumed' },
+    { started: false, reason: 'setup_wizard_opening' },
+    { started: false, reason: 'unassigned' },
+    { started: true }
+  ]) {
+    const { page, calls } = firstTaskPage({ body });
+    await WorkspaceDetailPage.prototype.maybeStartFolderFirstTask.call(page);
+    assert.equal(calls.loadTasks, 0, JSON.stringify(body));
+    assert.deepEqual(calls.monitor, [], JSON.stringify(body));
+    assert.deepEqual(calls.toast, [], JSON.stringify(body));
+  }
+});
+
+test('the folder first task start swallows a failed request', async () => {
+  for (const response of [new Error('offline'), { ok: false, body: {} }]) {
+    const { page, calls } = firstTaskPage(response);
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await WorkspaceDetailPage.prototype.maybeStartFolderFirstTask.call(page);
+    } finally {
+      console.warn = warn;
+    }
+    assert.deepEqual(calls.monitor, []);
+  }
+});

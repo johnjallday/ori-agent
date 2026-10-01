@@ -33,6 +33,9 @@
           <span id="workspaceGroupRequirementStatusSummary"></span>
           <span id="workspaceGroupRequirementStatusActions" class="workspace-group-requirement-status__actions"></span>
         </section>
+        <!-- First-task banner: shown while the agent works on the read-only task a
+             folder card seeded; workspace-first-task-banner.js fills and hides it. -->
+        <section id="workspaceFirstTaskBanner" class="first-task-banner" role="status" aria-live="polite" hidden></section>
         <!-- Email Ops connect CTA: populated by personal-hq-email-setup.js on the
              Email Ops workspace when no account is linked yet — one-click setup on
              the workspace surface. Additive; hidden when connected or elsewhere. -->
