@@ -12,9 +12,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/specialist"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // errSetupUnavailable keeps a card on the step-by-step journey when the
@@ -173,6 +175,9 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 				return foldersetup.PlanFacts{}, errSetupUnavailable
 			}
 			facts.Grouped, facts.HomeExists = true, exists
+			if exists {
+				facts.SharingOff = reviewedHomeSharingOff(h.builder, req.UserID, target.provider.Key)
+			}
 			facts.HomeTemplate = "plugin:" + target.entry.PluginID + ":" + target.entry.ExpectedBlueprintID
 		}
 		cached = cachedPlanFacts{at: time.Now(), facts: facts}
@@ -190,6 +195,29 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 		return foldersetup.PlanFacts{}, errSetupUnavailable
 	}
 	return facts, nil
+}
+
+// reviewedHomeSharingOff says the owner's Home for a reviewed provider has a
+// shared-assistant consent that was switched off. Anything unreadable is false:
+// the plan then simply does not mention the switch.
+func reviewedHomeSharingOff(b *ServerBuilder, userID, providerKey string) bool {
+	if b == nil || b.workspaceFileStore == nil {
+		return false
+	}
+	for _, entry := range reviewedintegration.HomeProviders() {
+		if entry.Key != providerKey {
+			continue
+		}
+		station, err := workspace.NewAssistantProgramStore(b.workspaceFileStore).FindStation(workspace.AssistantProgramKey{
+			OwnerUserID: userID, PluginID: entry.PluginID, ProgramID: entry.ProgramID,
+		})
+		if err != nil || station == nil {
+			return false
+		}
+		consent := station.GetAssistantProgramState().GetProjectStaffingConsent()
+		return consent != nil && consent.Validate() == nil && consent.RevokedAt != nil
+	}
+	return false
 }
 
 // forget drops cached facts, so the next plan reflects what a run just changed.
@@ -250,6 +278,13 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 	if target.provider != nil && req.Plan.Intent.Provider != "" {
 		runner.Providers = homeProviderInstaller{setup: folderHomeProviderSetup{builder: b}, key: target.provider.Key}
 	}
+	if b.projectStaffing != nil {
+		// Set up on the card is the standing consent (D1, D9): the song's Home
+		// records it and the song gets the Home's one shared assistant.
+		runner.Shared = sharedStaffing{service: b.projectStaffing, grant: &projectstaffing.Grant{
+			Source: workspace.ProjectStaffingConsentFolderOffer, OfferID: req.Offer.ID,
+		}}
+	}
 	config := foldersetup.Config{
 		Plan: req.Plan, WorkspaceName: strings.TrimSpace(req.Offer.Subject.Name), EntryName: req.EntryName,
 	}
@@ -264,6 +299,21 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 		})
 	}
 	return err
+}
+
+// sharedStaffing adapts the project staffing service to the runner. grant is
+// the consent the run records on a Home that has none (nil records nothing).
+type sharedStaffing struct {
+	service *projectstaffing.Service
+	grant   *projectstaffing.Grant
+}
+
+func (s sharedStaffing) Fill(_ context.Context, projectWorkspaceID string, roleIDs []string) ([]projectstaffing.Fill, error) {
+	return s.service.Fill(projectWorkspaceID, roleIDs, s.grant)
+}
+
+func (s sharedStaffing) Settle(_ context.Context, projectWorkspaceID string) error {
+	return s.service.Settle(projectWorkspaceID)
 }
 
 // scopedJourney binds one user to a quest-scoped journey service.

@@ -215,9 +215,27 @@ func (a stepAdapter) Read(_ context.Context, scope setupjourney.ReadScope) (setu
 	return setupjourney.CanonicalStepRead{}, nil
 }
 
+// contractStep is a step owner the real Service can both read and drive.
+type contractStep interface {
+	setupjourney.CanonicalReader
+	setupjourney.JourneyActionAdapter
+}
+
 // contractService builds a real Service, scoped to the plugin's quest.
 func contractService(t *testing.T, o *owners) *setupjourney.Service {
 	t.Helper()
+	return contractServiceWith(t, o, nil)
+}
+
+// contractServiceWith replaces the synthetic owner of some steps with a real one.
+func contractServiceWith(t *testing.T, o *owners, steps map[specialist.SetupStepKind]contractStep) *setupjourney.Service {
+	t.Helper()
+	stepFor := func(kind specialist.SetupStepKind) contractStep {
+		if step, ok := steps[kind]; ok {
+			return step
+		}
+		return stepAdapter{owners: o, kind: kind}
+	}
 	entry, ok := reviewedintegration.Get("ori_reaper")
 	if !ok {
 		t.Fatal("reviewed REAPER integration is not registered")
@@ -240,7 +258,7 @@ func contractService(t *testing.T, o *owners) *setupjourney.Service {
 	for _, kind := range []specialist.SetupStepKind{
 		specialist.SetupStepProjectConnect, specialist.SetupStepWorkspaceSetup, specialist.SetupStepAssistantProgramStaffing,
 	} {
-		readers[kind] = stepAdapter{owners: o, kind: kind}
+		readers[kind] = stepFor(kind)
 	}
 	readers[specialist.SetupStepSummary] = setupjourney.CanonicalReaderFunc(func(_ context.Context, scope setupjourney.ReadScope) (setupjourney.CanonicalStepRead, error) {
 		// A finished root offers to connect another project, which is what lets a
@@ -262,7 +280,7 @@ func contractService(t *testing.T, o *owners) *setupjourney.Service {
 	for _, kind := range []specialist.SetupStepKind{
 		specialist.SetupStepProjectConnect, specialist.SetupStepWorkspaceSetup, specialist.SetupStepAssistantProgramStaffing,
 	} {
-		if err := service.SetActionAdapter(kind, stepAdapter{owners: o, kind: kind}); err != nil {
+		if err := service.SetActionAdapter(kind, stepFor(kind)); err != nil {
 			t.Fatal(err)
 		}
 	}

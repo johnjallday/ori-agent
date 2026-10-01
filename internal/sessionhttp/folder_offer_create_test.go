@@ -77,7 +77,11 @@ func TestFolderOfferWorkspaceReceipt_ReadsActualCreatedRecordsAndReuse(t *testin
 		t.Fatal(err)
 	}
 	ws.SetTemplateProvenance(&agentworkspace.TemplateProvenance{TemplateID: "writing-project", TemplateName: "Writing project"})
-	ws.AgentInstances = []agentworkspace.AgentInstance{{Name: "Editor", Role: "Lead"}, {Name: "Researcher", Role: "Sources"}}
+	ws.AgentInstances = []agentworkspace.AgentInstance{
+		{Name: "Editor", Role: "Lead", RoleSource: agentworkspace.RoleSourceCreated},
+		// The Home's shared assistant joins; it was not made for this project.
+		{Name: "REAPER Assistant", Role: "REAPER Assistant", RoleSource: agentworkspace.RoleSourceAssigned},
+	}
 	if err := handler.workspaceStore.Save(ws); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +95,8 @@ func TestFolderOfferWorkspaceReceipt_ReadsActualCreatedRecordsAndReuse(t *testin
 	}
 	if strings.Join(kinds, ",") != "workspace,folder,blueprint,agent,agent,task" ||
 		withRoles[0].Detail != "already set up" || withRoles[2].Name != "Writing project" ||
-		withRoles[3].Name != "Editor" || withRoles[3].Detail != "Lead" {
+		withRoles[3].Name != "Editor" || withRoles[3].Detail != "Lead, added" ||
+		withRoles[4].Name != "REAPER Assistant" || withRoles[4].Detail != "joined" {
 		t.Fatalf("blueprint/reuse receipt = %+v", withRoles)
 	}
 }

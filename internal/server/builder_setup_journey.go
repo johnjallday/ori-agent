@@ -17,6 +17,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pathselection"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
+	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/samplelibrary"
@@ -197,6 +198,8 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			})
 		}
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
+		b.assistantStaffing = staffingAdapter
+		b.projectStaffing = projectstaffing.New(b.workspaceStore, b.st)
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetAssistantReviewedStaffer(staffingAdapter.StaffFromReviewedWorkspaceSetup)
 			// Keep final project batches separate from one exact live workspace-role

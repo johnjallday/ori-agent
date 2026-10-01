@@ -46,6 +46,12 @@ const (
 	FolderStopInstallFailed = "install_failed"
 	FolderStopInterrupted   = "interrupted"
 	FolderStopFailed        = "failed"
+	// FolderStopConsentStale: the Home's shared assistant was agreed to for an
+	// older version of the blueprint's team; the user is asked again on the Home.
+	FolderStopConsentStale = "consent_stale"
+	// FolderStopAssistantMissing: the shared assistant the Home's consent created
+	// was deleted or renamed.
+	FolderStopAssistantMissing = "assistant_missing"
 )
 
 // FolderPlanLine is one consequence the user consents to. Name and Detail are

@@ -1607,6 +1607,27 @@ for rel, body in entries:
 print(f"ok   seeded {kind} capability fixture in {home}")
 PY
     ;;
+  seed-song)
+    # One named REAPER song folder inside a chip (<chip>/<name>/<name>.rpp plus
+    # takes), so several songs can be fed through the card one after another.
+    local home="${4:-}" chip="${5:-}" name="${6:-}"
+    [[ -n "$home" && -d "$home" && "$home" == *"/ori-demo."* && -n "$chip" && -n "$name" ]] ||
+      fail "usage: $0 showfolder <base-url> seed-song <ori-demo-sandbox> <Desktop|Documents|Downloads> <song-name>"
+    case "$chip" in Desktop|Documents|Downloads) ;; *) fail "unknown chip: $chip" ;; esac
+    [[ "$name" != */* && "$name" != .* ]] || fail "the song name must be a plain folder name"
+    python3 - "$home" "$chip" "$name" <<'PY'
+import os, sys
+home, chip, name = sys.argv[1:]
+entries = [(f"{chip}/{name}/{name}.rpp", b"<REAPER_PROJECT>\n")]
+entries += [(f"{chip}/{name}/Media/take-{i}.wav", b"RIFF") for i in range(3)]
+for rel, body in entries:
+    target = os.path.join(home, rel)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "xb") as output:  # never overwrite, even in a sandbox
+        output.write(body)
+print(f"ok   seeded song {name} in {chip}")
+PY
+    ;;
   seed-corpus)
     # Desktop as a corpus: a bibliography plus two small real PDFs (one page
     # of text each, with a valid cross-reference table), for the corpus

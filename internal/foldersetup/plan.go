@@ -42,6 +42,9 @@ type PlanFacts struct {
 	Grouped      bool
 	HomeExists   bool
 	HomeTemplate string
+	// SharingOff says the existing Home's shared assistant was switched off;
+	// Set up switches it back on, so the plan says so.
+	SharingOff bool
 }
 
 // BuildPlan lists every consequence of one press of Set up, in the order the card
@@ -84,11 +87,21 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		// promises a live connection.
 		mode.Detail = facts.AppName + " itself is not installed here; File-only mode works without it."
 	}
+	agents := personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanAgents, Name: "Adds the agents this blueprint requires"}
+	if facts.Grouped {
+		// D9: in a Home the project assistant is hired once and shared, and this
+		// Set up is the consent that covers the later projects too.
+		later := "the later " + pluralLabel(facts.BlueprintLabel) + " you open in this Home"
+		agents.Detail = "Its assistant is shared: the same one joins " + later + "."
+		if facts.SharingOff {
+			agents.Detail = "Its assistant is shared, and this turns adding it to " + later + " back on."
+		}
+	}
 	lines = append(lines,
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanWorkspace, Name: workspaceName},
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Links " + facts.WorkspaceName + " where it is", Detail: "Nothing is moved or copied."},
 		mode,
-		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanAgents, Name: "Adds the agents this blueprint requires"},
+		agents,
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanTask, Name: "Queues a first read-only task for when you open it"},
 	)
 	plan := personalassistant.NewFolderSetupPlan(lines)
@@ -119,6 +132,19 @@ func pluginLine(kind, noun string, p Plugin) personalassistant.FolderPlanLine {
 		line.Detail = "Nothing is installed."
 	}
 	return line
+}
+
+// pluralLabel names more than one of a blueprint's projects ("Studio songs").
+func pluralLabel(label string) string {
+	label = strings.TrimSpace(label)
+	switch {
+	case label == "":
+		return "projects"
+	case strings.HasSuffix(label, "s"):
+		return label
+	default:
+		return label + "s"
+	}
 }
 
 func reviewedSource(source string) string {

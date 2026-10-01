@@ -655,6 +655,8 @@ test('every stop reason says in one plain sentence what finished and what is nee
     'needs_model',
     'install_failed',
     'interrupted',
+    'consent_stale',
+    'assistant_missing',
     'failed',
     'something_unknown'
   ]) {
@@ -683,6 +685,9 @@ test('a stopped setup offers the action that fixes its stop', () => {
   assert.deepEqual(ids('needs_model'), ['model', 'retry', 'resume']);
   assert.deepEqual(ids('needs_choice'), ['choose-0', 'choose-1', 'resume']);
   assert.deepEqual(ids('plan_changed'), ['resume']);
+  // The shared assistant cannot be added on its own: the user chooses in the journey.
+  assert.deepEqual(ids('consent_stale'), ['resume']);
+  assert.deepEqual(ids('assistant_missing'), ['resume']);
   const model = folderOfferView(stoppedOffer('needs_model')).actions[0];
   assert.equal(model.href, '/settings#system-model');
   const choice = folderOfferView(stoppedOffer('needs_choice', { entry_candidates: ['A.rpp'] }))

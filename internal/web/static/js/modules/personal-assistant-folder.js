@@ -202,6 +202,10 @@ const SETUP_STOP_COPY = {
   install_failed:
     'The integration could not be installed or enabled, so nothing after it ran. If you install it from Plugins, Try again continues from there.',
   interrupted: 'Setup was interrupted before it finished.',
+  consent_stale:
+    'The workspace and folder are set up. Your shared assistant was approved for an older version of this blueprint, so I did not add it. Continue setup to choose the agent yourself.',
+  assistant_missing:
+    'The workspace and folder are set up. The shared assistant this Home used is gone, so I did not add one on my own. Continue setup to choose the agent yourself.',
   failed: 'A step did not finish.'
 };
 
@@ -216,6 +220,8 @@ function stoppedActions(reason, setup) {
   const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
   switch (reason) {
     case 'plan_changed':
+    case 'consent_stale':
+    case 'assistant_missing':
       return [{ ...CONTINUE_SETUP, style: 'primary' }];
     case 'needs_pick':
       return [

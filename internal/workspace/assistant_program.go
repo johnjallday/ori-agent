@@ -311,9 +311,13 @@ type AssistantProgramState struct {
 	ProjectLibraryInitReviews []AssistantProjectLibraryInitReview `json:"project_library_init_reviews,omitempty"`
 	// Removed/restored Homes keep their catalog history, but these former
 	// root IDs can never silently regain filesystem authority on restore.
-	ProjectLibraryInactiveRoots []string                `json:"project_library_inactive_roots,omitempty"`
-	Topology                    AssistantTopologyState  `json:"topology,omitempty"`
-	Migration                   AssistantMigrationState `json:"migration,omitempty"`
+	ProjectLibraryInactiveRoots []string `json:"project_library_inactive_roots,omitempty"`
+	// ProjectStaffingConsent is the user's standing agreement that a project
+	// role is filled, on every project opened in this Home, by the one agent the
+	// consent created. Written only through ProjectStaffingConsents.
+	ProjectStaffingConsent *ProjectStaffingConsent `json:"project_staffing_consent,omitempty"`
+	Topology               AssistantTopologyState  `json:"topology,omitempty"`
+	Migration              AssistantMigrationState `json:"migration,omitempty"`
 	// GroupTemplate is inert creation provenance written only in the first
 	// Save of a Home created through a reviewed Group Template selection.
 	GroupTemplate *AssistantGroupTemplateProvenance `json:"group_template,omitempty"`
@@ -354,6 +358,7 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 	clone.ProjectLibrary = append(json.RawMessage(nil), source.ProjectLibrary...)
 	clone.ProjectLibraryInitReviews = append([]AssistantProjectLibraryInitReview(nil), source.ProjectLibraryInitReviews...)
 	clone.ProjectLibraryInactiveRoots = append([]string(nil), source.ProjectLibraryInactiveRoots...)
+	clone.ProjectStaffingConsent = source.ProjectStaffingConsent.Clone()
 	for i := range clone.ProjectLibraryInitReviews {
 		if source.ProjectLibraryInitReviews[i].ConsumedAt != nil {
 			value := *source.ProjectLibraryInitReviews[i].ConsumedAt

@@ -134,6 +134,31 @@ func TestBuildPlanNamesThePlacementAndTheHomeItCreates(t *testing.T) {
 	}
 }
 
+// D9: in a Home, Set up also agrees that the project's assistant is shared with
+// the later projects; standing alone there is nothing to share it with.
+func TestBuildPlanSaysTheAssistantIsSharedInAHome(t *testing.T) {
+	standalone := line(BuildPlan(baseFacts()), personalassistant.FolderPlanAgents)
+	if standalone.Name != "Adds the agents this blueprint requires" || standalone.Detail != "" {
+		t.Fatalf("standalone agents line = %+v", standalone)
+	}
+	facts := baseFacts()
+	facts.Grouped, facts.HomeExists = true, true
+	shared := BuildPlan(facts)
+	got := line(shared, personalassistant.FolderPlanAgents)
+	if got.Name != "Adds the agents this blueprint requires" ||
+		got.Detail != "Its assistant is shared: the same one joins the later REAPER Songs you open in this Home." {
+		t.Fatalf("shared agents line = %+v", got)
+	}
+	facts.SharingOff = true
+	off := BuildPlan(facts)
+	if got := line(off, personalassistant.FolderPlanAgents).Detail; got != "Its assistant is shared, and this turns adding it to the later REAPER Songs you open in this Home back on." {
+		t.Fatalf("switched-off agents line = %q", got)
+	}
+	if off.Digest == shared.Digest || shared.Digest == BuildPlan(baseFacts()).Digest {
+		t.Fatal("sharing, switching sharing back on and standing alone must be different consents")
+	}
+}
+
 func TestBuildPlanSaysWhenTheAppItselfIsNotInstalled(t *testing.T) {
 	facts := baseFacts()
 	facts.AppInstalled = false
