@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +59,7 @@ func resetPluginPaths(dataDir string) plugin.ResetPaths {
 	return plugin.DefaultResetPaths(dataDir)
 }
 
-func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(context.Context) []settingsreset.Blocker) {
+func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(context.Context) settingsreset.FreshInspection) {
 	var targets []settingsreset.FreshTarget
 	add := func(category settingsreset.CategoryID, kind, path, reason string) {
 		if strings.TrimSpace(path) == "" {
@@ -116,41 +117,85 @@ func (b *ServerBuilder) resetFreshOwners() ([]settingsreset.FreshTarget, func(co
 	claudeRoot, codexHome := cliMCP.PersistenceRoots()
 	add(settingsreset.CategoryRuntimeCache, "cli_mcp_configs", claudeRoot, "Remove generated installation-owned CLI MCP JSON; external CLI authentication and user configuration remain.")
 
-	checkFresh := func(ctx context.Context) []settingsreset.Blocker {
-		var blockers []settingsreset.Blocker
+	checkFresh := func(ctx context.Context) settingsreset.FreshInspection {
+		var found settingsreset.FreshInspection
 		if err := ctx.Err(); err != nil {
-			return []settingsreset.Blocker{{Code: "fresh_inspection_cancelled", Message: "Start Fresh owner inspection did not finish.", Recovery: "Review Start Fresh again when the installation is idle."}}
+			found.Blockers = []settingsreset.Blocker{{Code: "fresh_inspection_cancelled", Message: "Start Fresh owner inspection did not finish.", Recovery: "Review Start Fresh again when the installation is idle."}}
+			return found
 		}
-		legacyUsage := filepath.Join(os.Getenv("HOME"), ".ori-agent", "usage_data", "usage_records.json")
-		if active := filepath.Join(config.DefaultDataDir(), "usage_data", "usage_records.json"); legacyUsage != active {
-			// #nosec G703 -- this is a read-only metadata check of the one explicit
-			// legacy HOME location; reset never opens its contents or removes it.
-			if _, err := os.Lstat(legacyUsage); err == nil {
-				blockers = append(blockers, settingsreset.Blocker{Code: "legacy_usage_ownership_ambiguous", Category: settingsreset.CategoryActivity, Message: "A legacy shared-HOME usage file cannot be attributed exclusively to this installation.", Recovery: "Archive or remove that legacy file manually after confirming no other Ori installation uses it, then review Start Fresh again."})
-			} else if !os.IsNotExist(err) {
-				blockers = append(blockers, settingsreset.Blocker{Code: "legacy_usage_unavailable", Category: settingsreset.CategoryActivity, Message: "The legacy shared-HOME usage location cannot be inspected safely.", Recovery: "Restore access to that location and review Start Fresh again."})
-			}
-		}
-		if entries, err := os.ReadDir(codexHome); err == nil {
-			for _, entry := range entries {
-				if strings.HasPrefix(entry.Name(), "ori-ws-") && strings.HasSuffix(entry.Name(), ".config.toml") {
-					blockers = append(blockers, settingsreset.Blocker{Code: "external_cli_profile_present", Category: settingsreset.CategoryRuntimeCache, Message: "Generated Ori workspace profiles remain in external CODEX_HOME.", Recovery: "Remove only reviewed ori-ws-*.config.toml profiles manually; preserve auth.json, config.toml and all other external CLI files."})
-					break
-				}
-			}
-		} else if !os.IsNotExist(err) {
-			blockers = append(blockers, settingsreset.Blocker{Code: "external_cli_home_unavailable", Category: settingsreset.CategoryRuntimeCache, Message: "External CODEX_HOME cannot be inspected safely.", Recovery: "Restore access to CODEX_HOME and review Start Fresh again; external authentication will not be removed."})
-		}
+		found.Kept = append(found.Kept, keptLegacyUsage(os.Getenv("HOME"), config.DefaultDataDir())...)
+		found.Kept = append(found.Kept, keptCodexProfiles(codexHome)...)
 		if b.resetWakeStore != nil {
 			if candidates, err := b.resetWakeStore.Candidates(time.Now()); err != nil {
-				blockers = append(blockers, settingsreset.Blocker{Code: "wake_state_unavailable", Category: settingsreset.CategoryRuntimeCache, Message: "Shared wake state cannot be inspected safely.", Recovery: "Resolve the wake coordinator file and stop other Ori/Herdr wake writers before Start Fresh."})
+				found.Blockers = append(found.Blockers, settingsreset.Blocker{Code: "wake_state_unavailable", Category: settingsreset.CategoryRuntimeCache, Message: "Shared wake state cannot be inspected safely.", Recovery: "Resolve the wake coordinator file and stop other Ori/Herdr wake writers before Start Fresh."})
 			} else if len(candidates) != 0 {
-				blockers = append(blockers, settingsreset.Blocker{Code: "wake_candidates_active", Category: settingsreset.CategoryRuntimeCache, Message: "One or more shared wake requests are still active.", Recovery: "Cancel scheduled Ori work and any Herdr wake-enabled run, then review Start Fresh again. Other sources will not be cancelled automatically."})
+				found.Blockers = append(found.Blockers, settingsreset.Blocker{Code: "wake_candidates_active", Category: settingsreset.CategoryRuntimeCache, Message: "One or more shared wake requests are still active.", Recovery: "Cancel scheduled Ori work and any Herdr wake-enabled run, then review Start Fresh again. Other sources will not be cancelled automatically."})
 			}
 		}
-		return blockers
+		return found
 	}
 	return targets, checkFresh
+}
+
+// keptLegacyUsage discloses the usage file Ori kept in $HOME/.ori-agent before
+// v0.0.111 moved usage into the data dir. No current build reads or writes it,
+// and any installation sharing the HOME may have written to it, so Start Fresh
+// leaves it and names it rather than refusing to run. Where the data dir is
+// that same folder the file is the live one and is removed as usage_records.
+func keptLegacyUsage(home, dataDir string) []settingsreset.FreshKept {
+	legacyUsage := filepath.Join(home, ".ori-agent", "usage_data", "usage_records.json")
+	if legacyUsage == filepath.Join(dataDir, "usage_data", "usage_records.json") {
+		return nil
+	}
+	// #nosec G703 -- this is a read-only metadata check of the one explicit
+	// legacy HOME location; reset never opens its contents or removes it.
+	_, err := os.Lstat(legacyUsage)
+	reason := "Usage records from Ori versions before v0.0.111, which kept them in your home folder. This version never reads them, and other Ori installations may have written to the same file, so Start Fresh leaves its usage_data folder as it is. Delete that folder yourself if you want those records gone."
+	switch {
+	case os.IsNotExist(err):
+		return nil
+	case err != nil:
+		reason = "Could not be checked for usage records from Ori versions before v0.0.111. Start Fresh does not touch this location either way."
+	}
+	return []settingsreset.FreshKept{{Category: settingsreset.CategoryActivity, Location: settingsreset.Location{DisplayPath: legacyUsage, Reason: reason}}}
+}
+
+// keptCodexProfiles discloses the ori-ws-*.config.toml profiles Ori writes into
+// CODEX_HOME for workspace MCP servers. They are named by workspace, so another
+// installation sharing CODEX_HOME (a wt demo server, say) may own them, and
+// Codex runs rewrite a profile before passing it, so a leftover never takes
+// effect. Start Fresh leaves them and names them rather than refusing to run.
+func keptCodexProfiles(codexHome string) []settingsreset.FreshKept {
+	if strings.TrimSpace(codexHome) == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(codexHome)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return []settingsreset.FreshKept{{Category: settingsreset.CategoryRuntimeCache, Location: settingsreset.Location{
+			DisplayPath: codexHome,
+			Reason:      "Could not be checked for the Codex profiles Ori writes for workspace MCP servers (ori-ws-*.config.toml). Start Fresh does not touch this folder either way.",
+		}}}
+	}
+	profiles := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "ori-ws-") && strings.HasSuffix(entry.Name(), ".config.toml") {
+			profiles++
+		}
+	}
+	if profiles == 0 {
+		return nil
+	}
+	count := "1 Codex profile"
+	if profiles != 1 {
+		count = fmt.Sprintf("%d Codex profiles", profiles)
+	}
+	return []settingsreset.FreshKept{{Category: settingsreset.CategoryRuntimeCache, Location: settingsreset.Location{
+		DisplayPath: filepath.Join(codexHome, "ori-ws-*.config.toml"),
+		Reason:      count + " Ori wrote for workspace MCP servers. Start Fresh leaves them: another Ori installation sharing this Codex folder may use them, and Ori rewrites a workspace's profile before any Codex run uses it, so a leftover one never takes effect. Delete them yourself if you want them gone; keep auth.json, config.toml and every other file there.",
+	}}}
 }
 
 func (b *ServerBuilder) initializeResetCoordinator() {

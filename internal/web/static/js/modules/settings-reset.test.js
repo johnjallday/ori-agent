@@ -124,6 +124,8 @@ function harness({
       'confirmResetBtn',
       'resetConfirmError',
       'resetItemsList',
+      'resetBlockers',
+      'resetBlockerList',
       'resetConfirmModal',
       'resetConfirmTitleText',
       'resetConfirmWarning',
@@ -149,6 +151,7 @@ function harness({
     ].map(id => [id, element()])
   );
   elements.resetAgentsFolderConfirm.hidden = true;
+  elements.resetBlockers.hidden = true;
   elements.confirmResetBtn.disabled = true;
   elements.openReplaySetupBtn.hidden = true;
   elements.openGettingStartedBtn.hidden = true;
@@ -268,6 +271,10 @@ function harness({
     previewText() {
       const text = node => [node.textContent, ...node.children.map(text)].join(' ');
       return text(elements.resetItemsList);
+    },
+    blockerText() {
+      const text = node => [node.textContent, ...node.children.map(text)].join(' ');
+      return text(elements.resetBlockerList);
     }
   };
 }
@@ -340,11 +347,40 @@ test('preview blockers stay literal and prevent destructive submission', async (
   assert.equal(h.elements.confirmResetBtn.disabled, true);
   await h.elements.confirmResetBtn.emit('click');
   assert.equal(h.calls.filter(call => call.url === '/api/reset').length, 0);
-  assert.match(h.previewText(), /<b>Host unavailable<\/b>/);
+  assert.match(h.blockerText(), /<b>Host unavailable<\/b> Fully relaunch\./);
   assert.equal(
-    h.elements.resetItemsList.children.some(node => node.innerHTML),
+    h.elements.resetBlockerList.children.some(node => node.innerHTML),
     false
   );
+});
+
+test('blockers are listed beside the locked confirm box, not buried in the scope list', async () => {
+  const blocked = {
+    ...preview,
+    blockers: [
+      {
+        code: 'wake_candidates_active',
+        message: 'One or more shared wake requests are still active.',
+        recovery: 'Cancel scheduled Ori work.'
+      }
+    ]
+  };
+  const h = harness({ previewResult: blocked });
+  await h.review();
+  assert.equal(h.elements.resetBlockers.hidden, false);
+  assert.equal(h.elements.resetBlockerList.children.length, 1);
+  assert.equal(h.previewText().includes('wake requests'), false);
+  assert.equal(h.elements.resetConfirmInput.disabled, true);
+  assert.match(h.elements.resetConfirmInput.placeholder, /locked/i);
+  assert.match(h.elements.resetConfirmError.textContent, /problems listed above/);
+
+  // A clean review afterwards hides the panel and unlocks the box again.
+  const clean = harness();
+  await clean.review();
+  assert.equal(clean.elements.resetBlockers.hidden, true);
+  assert.equal(clean.elements.resetBlockerList.children.length, 0);
+  assert.equal(clean.elements.resetConfirmInput.disabled, false);
+  assert.equal(clean.elements.resetConfirmInput.placeholder, 'Type RESET to confirm');
 });
 
 test('restart-required remains pending, visible, and never substitutes a timed reload', async () => {
@@ -812,8 +848,8 @@ test('unsafe plugin ownership blocks confirmation with the server message', asyn
   assert.equal(h.elements.confirmResetBtn.disabled, true);
   await h.elements.confirmResetBtn.emit('click');
   assert.equal(h.calls.filter(call => call.url === '/api/reset').length, 0);
-  assert.match(h.previewText(), /claim the same personal skill directory/);
-  assert.match(h.previewText(), /Uninstall one of them manually/);
+  assert.match(h.blockerText(), /claim the same personal skill directory/);
+  assert.match(h.blockerText(), /Uninstall one of them manually/);
 });
 
 test('a partial plugin failure names the unresolved plugin and keeps the recovery identity', async () => {

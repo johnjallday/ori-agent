@@ -141,6 +141,60 @@ func TestStartFreshIsOneServerRecognizedIntentNotASelectionShortcut(t *testing.T
 	}
 }
 
+// A leftover CheckFresh cannot attribute to this installation is listed under
+// its category's Keep entries. It neither blocks Start Fresh nor binds the
+// reviewed scope, since nothing removes it; a CheckFresh blocker still blocks.
+func TestStartFreshDisclosesKeptLeftoversWithoutBlocking(t *testing.T) {
+	f, owners, planner := previewFixture(t)
+	root := f.Paths().DataDir
+	mustPreview(t, owners.Config.SetTemplatesRoot(filepath.Join(root, "templates")))
+	mustPreview(t, owners.Config.Save())
+	t.Setenv("ORI_TEMPLATES_DIR", filepath.Join(root, "templates"))
+	t.Setenv("WORKFLOW_TEMPLATES_DIR", filepath.Join(root, "workflow_templates"))
+	owners.FreshTargets = fixtureFreshTargets(root)
+	usage := Location{DisplayPath: "/home/legacy/usage_records.json", Reason: "legacy usage"}
+	profiles := Location{DisplayPath: "/home/.codex/ori-ws-*.config.toml", Reason: "codex profiles"}
+	inspection := FreshInspection{Kept: []FreshKept{{CategoryActivity, usage}, {CategoryRuntimeCache, profiles}}}
+	owners.CheckFresh = func(context.Context) FreshInspection { return inspection }
+
+	preview, err := planner.Create(t.Context(), IntentStartFresh, nil)
+	mustPreview(t, err)
+	if len(preview.Blockers) != 0 {
+		t.Fatalf("kept leftovers blocked Start Fresh: %+v", preview.Blockers)
+	}
+	kept := func(preview Preview, id CategoryID) []Location {
+		for _, category := range preview.Categories {
+			if category.ID == id {
+				return category.Retained
+			}
+		}
+		return nil
+	}
+	for id, want := range map[CategoryID]Location{CategoryActivity: usage, CategoryRuntimeCache: profiles} {
+		if !slices.Contains(kept(preview, id), want) {
+			t.Fatalf("%s Keep = %+v, want %+v", id, kept(preview, id), want)
+		}
+	}
+	if slices.Contains(kept(preview, CategoryTemplates), usage) || slices.Contains(kept(preview, CategoryTemplates), profiles) {
+		t.Fatal("a leftover was disclosed under the wrong category")
+	}
+
+	// A new leftover between review and confirmation changes no removal.
+	inspection.Kept = append(inspection.Kept, FreshKept{CategoryRuntimeCache, Location{DisplayPath: "/elsewhere", Reason: "new"}})
+	validated, err := planner.Validate(t.Context(), preview.ID)
+	mustPreview(t, err)
+	if !slices.Contains(kept(validated, CategoryRuntimeCache), Location{DisplayPath: "/elsewhere", Reason: "new"}) {
+		t.Fatalf("validated preview lost the current disclosure: %+v", kept(validated, CategoryRuntimeCache))
+	}
+
+	inspection.Blockers = []Blocker{{Code: "wake_candidates_active", Category: CategoryRuntimeCache, Message: "m", Recovery: "r"}}
+	blocked, err := planner.Create(t.Context(), IntentStartFresh, nil)
+	mustPreview(t, err)
+	if !hasBlocker(blocked, "wake_candidates_active") {
+		t.Fatalf("CheckFresh blocker dropped: %+v", blocked.Blockers)
+	}
+}
+
 func TestStartFreshBlocksExternalTemplateRootsInsteadOfBroadeningDeletion(t *testing.T) {
 	f, owners, planner := previewFixture(t)
 	owners.FreshTargets = fixtureFreshTargets(f.Paths().DataDir)

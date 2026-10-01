@@ -49,6 +49,20 @@ type FreshTarget struct {
 	Count    *int64
 }
 
+// FreshInspection is what CheckFresh found outside the installation. Blockers
+// stop Start Fresh. Kept names a leftover Start Fresh leaves in place, because
+// it cannot be attributed to this installation and nothing here reads it, so
+// the preview discloses it under its category instead of refusing the reset.
+type FreshInspection struct {
+	Blockers []Blocker
+	Kept     []FreshKept
+}
+
+type FreshKept struct {
+	Category CategoryID
+	Location Location
+}
+
 type Owners struct {
 	DataDir    string
 	Config     *config.Manager
@@ -65,7 +79,7 @@ type Owners struct {
 	PluginPaths    plugin.ResetPaths
 	FreshTargets   []FreshTarget
 	FreshBlockers  []Blocker
-	CheckFresh     func(context.Context) []Blocker
+	CheckFresh     func(context.Context) FreshInspection
 	CheckLifecycle func(context.Context) []Blocker
 }
 
@@ -251,14 +265,17 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 			block(item.Code, item.Category, item.Message, item.Recovery)
 		}
 	}
+	var freshKept []FreshKept
 	if intent == IntentStartFresh {
 		for _, item := range owners.FreshBlockers {
 			block(item.Code, item.Category, item.Message, item.Recovery)
 		}
 		if owners.CheckFresh != nil {
-			for _, item := range owners.CheckFresh(ctx) {
+			inspection := owners.CheckFresh(ctx)
+			for _, item := range inspection.Blockers {
 				block(item.Code, item.Category, item.Message, item.Recovery)
 			}
+			freshKept = inspection.Kept
 		}
 	}
 	root, err := resolvePath(owners.DataDir)
@@ -396,6 +413,13 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 			}
 			if len(view.AgentsFolder.AlsoRemoved) > 0 {
 				view.AgentsFolder.Notice = AgentsFolderFreshNotice
+			}
+		}
+		// Kept leftovers are disclosure only: nothing removes them, so they are
+		// not bound into the scope digest below.
+		for _, kept := range freshKept {
+			if kept.Category == id {
+				category.Retained = append(category.Retained, kept.Location)
 			}
 		}
 		view.Categories = append(view.Categories, category)
