@@ -21,10 +21,11 @@ import (
 
 // Store manages workspace persistence and retrieval
 type Store interface {
-	// Save persists a workspace to storage
+	// Save persists workspace data without retaining mutable caller references.
 	Save(ws *Workspace) error
 
-	// Get retrieves a workspace by ID
+	// Get returns an independent workspace snapshot. Mutations require Save or
+	// Update to become persisted state.
 	Get(id string) (*Workspace, error)
 
 	// List returns all workspace IDs
@@ -65,6 +66,7 @@ type Store interface {
 	// instead of Get+mutate+Save to avoid the lost-update race where two
 	// goroutines clone, mutate disjoint fields, and overwrite each other.
 	//
+	// Returning an error from fn must not commit its workspace mutations.
 	// Implementations should typically delegate to CanonicalUpdate.
 	Update(wsID string, fn func(*Workspace) error) error
 }
@@ -2689,20 +2691,21 @@ func (s *InMemoryStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *ag
 	return nil
 }
 
-// Save stores a workspace in memory.
-//
-// Note: unlike FileStore, InMemoryStore stores the caller's *Workspace pointer
-// directly rather than a clone. Several existing tests rely on inserting
-// workspaces with Go-typed map values (e.g. []string in Scope) that would
-// otherwise be flattened to []interface{} by the JSON-based clone helper.
-// Tests that need clone semantics should use FileStore.
-func (s *InMemoryStore) Save(ws *Workspace) error {
+// Save stores an independent snapshot, preserving Go-typed fixture values.
+func (s *InMemoryStore) Save(source *Workspace) error {
+	ws, err := cloneInMemoryWorkspace(source)
+	if err != nil {
+		return err
+	}
+	if ws.FolderSlug == "" && strings.TrimSpace(ws.Name) != "" {
+		ws.FolderSlug = Slugify(ws.Name)
+		source.mu.Lock()
+		source.FolderSlug = ws.FolderSlug
+		source.mu.Unlock()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if ws.FolderSlug == "" && strings.TrimSpace(ws.Name) != "" {
-		ws.FolderSlug = Slugify(ws.Name)
-	}
 	if workspaceReservesSlug(ws) && ws.FolderSlug != "" {
 		key := strings.ToLower(ws.FolderSlug)
 		if owner, exists := s.slugToID[key]; exists && owner != ws.ID {
@@ -2727,7 +2730,7 @@ func (s *InMemoryStore) Save(ws *Workspace) error {
 	return nil
 }
 
-// Get retrieves a workspace by ID.
+// Get returns an independent workspace snapshot by ID.
 func (s *InMemoryStore) Get(id string) (*Workspace, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2737,7 +2740,7 @@ func (s *InMemoryStore) Get(id string) (*Workspace, error) {
 		return nil, fmt.Errorf("workspace %s not found", id)
 	}
 
-	return ws, nil
+	return cloneInMemoryWorkspace(ws)
 }
 
 // ResolveSlug returns the current workspace for a canonical slug without ID
@@ -2756,7 +2759,7 @@ func (s *InMemoryStore) ResolveSlug(slug string) (*Workspace, error) {
 	if !ok {
 		return nil, ErrWorkspaceSlugNotFound
 	}
-	return ws, nil
+	return cloneInMemoryWorkspace(ws)
 }
 
 // List returns all workspace IDs
@@ -2885,7 +2888,11 @@ func (s *InMemoryStore) ListActive() ([]*Workspace, error) {
 	var active []*Workspace
 	for _, ws := range s.workspaces {
 		if ws.GetStatus() == StatusActive {
-			active = append(active, ws)
+			clone, err := cloneInMemoryWorkspace(ws)
+			if err != nil {
+				return nil, err
+			}
+			active = append(active, clone)
 		}
 	}
 

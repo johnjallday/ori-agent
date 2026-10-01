@@ -784,9 +784,12 @@ func TestTodayService_RefusesForeignBriefInvalidSlugAndReplacedHQ(t *testing.T) 
 		t.Fatalf("foreign brief not isolated: %+v err=%v", got, err)
 	}
 
-	// InMemoryStore intentionally retains the saved pointer, letting this test
-	// simulate corrupt persisted presentation data without bypassing the store.
+	// Seed corrupt persisted presentation data explicitly; changing a read or
+	// previously saved input must not alter the store by itself.
 	ws.FolderSlug = "../foreign"
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
 	got, err = service.Get(context.Background(), "local")
 	if err != nil || got.State != "partial" || got.Links.PersonalHQ != "" {
 		t.Fatalf("invalid slug became a route: %+v err=%v", got, err)

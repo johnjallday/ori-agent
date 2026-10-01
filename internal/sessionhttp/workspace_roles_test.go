@@ -96,6 +96,9 @@ func TestDeclaredWorkspaceRoles_AChildUsesOnlyItsOwnBindings(t *testing.T) {
 		{RoleID: "song-assistant", AgentName: "Song Helper"},
 	}}
 	stored.SetAssistantProjectLink(link)
+	if err := handler.workspaceTaskStore.Save(stored); err != nil {
+		t.Fatal(err)
+	}
 	_, bindings, _ := handler.declaredWorkspaceRoles(stored)
 	if !reflect.DeepEqual(bindings, map[string]string{"song-assistant": "Song Helper"}) {
 		t.Fatalf("bindings = %v, want only this child's own", bindings)
