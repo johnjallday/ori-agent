@@ -64,7 +64,7 @@ func (h *Handler) handleGeminiChat(w http.ResponseWriter, r *http.Request, ag *r
 	}
 
 	text := getResponseText(resp.Content)
-	_ = h.persistAgent(agentName, ag.Agent)
+	_ = h.persistAgent(agentName, ag)
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{

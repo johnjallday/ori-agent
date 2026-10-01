@@ -124,6 +124,11 @@ type FolderPortfolioEvidence struct {
 	// another Home. It records only that the Home existed at scan time; the Home
 	// itself is re-read from canonical state when the offer is resolved.
 	ExistingHome bool `json:"existing_home,omitempty"`
+	// IntegrationKey names the reviewed integration that can set up some of the
+	// collection's projects, and IntegrationProjects counts those project folders
+	// (the rest are listed only). Zero means no integration and no assistant.
+	IntegrationKey      string `json:"integration_key,omitempty"`
+	IntegrationProjects int    `json:"integration_projects,omitempty"`
 }
 
 // FolderOffer is one question about one folder and its answer.
@@ -346,7 +351,7 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 				return fmt.Errorf("%w: receipt rows", errFolderDigestInvalid)
 			}
 			for _, row := range offer.Outcome.Receipt {
-				if !strings.Contains("|workspace|folder|blueprint|agent|task|schedule|directory|", "|"+row.Kind+"|") ||
+				if !strings.Contains("|workspace|folder|blueprint|agent|task|schedule|directory|home|library|assistant|", "|"+row.Kind+"|") ||
 					row.Kind == "" || len(row.Name) > 512 || len(row.Detail) > 512 || len(row.Route) > 1024 ||
 					(row.Route != "" && (!strings.HasPrefix(row.Route, "/") || strings.HasPrefix(row.Route, "//"))) {
 					return fmt.Errorf("%w: receipt row", errFolderDigestInvalid)
@@ -367,7 +372,10 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			row, ok := folderdigest.CapabilityForShape(folderdigest.Shape(offer.Portfolio.Shape))
 			if !ok || row.Offer == nil || row.Offer.HomeProviderKey != offer.Portfolio.ProviderKey ||
 				offer.Portfolio.Projects < folderdigest.PortfolioMinProjects || offer.Portfolio.Projects > 5000 ||
-				offer.Subject.Kind != FolderChoiceProject || !offer.Subject.IsRoot || offer.Subject.Shape != offer.Portfolio.Shape {
+				offer.Subject.Kind != FolderChoiceProject || !offer.Subject.IsRoot || offer.Subject.Shape != offer.Portfolio.Shape ||
+				offer.Portfolio.IntegrationProjects < 0 || offer.Portfolio.IntegrationProjects > offer.Portfolio.Projects ||
+				(offer.Portfolio.IntegrationProjects > 0) != (offer.Portfolio.IntegrationKey != "") ||
+				(offer.Portfolio.IntegrationKey != "" && offer.Portfolio.IntegrationKey != row.Offer.IntegrationKey) {
 				return fmt.Errorf("%w: portfolio", errFolderDigestInvalid)
 			}
 		}

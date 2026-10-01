@@ -33,7 +33,7 @@ func TestPersistAgent_DoesNotPersistRuntimeMCPServerNames(t *testing.T) {
 	st := newPreflightStore("Ori", &agent.Agent{})
 	h := NewHandler(st, nil)
 
-	runtimeAgent := &agent.Agent{}
+	runtimeAgent := &resolvedChatAgent{Agent: &agent.Agent{}}
 
 	if err := h.persistAgent("Ori", runtimeAgent); err != nil {
 		t.Fatalf("persistAgent returned error: %v", err)
@@ -42,6 +42,28 @@ func TestPersistAgent_DoesNotPersistRuntimeMCPServerNames(t *testing.T) {
 	persisted, ok := st.GetAgent("Ori")
 	if !ok || persisted == nil {
 		t.Fatalf("expected persisted agent")
+	}
+}
+
+// A workspace's own copy never becomes the user's agent: one agent can work in
+// many workspaces, and a prompt changed in one of them must stay there.
+func TestPersistAgent_NeverWritesAWorkspaceCopyBack(t *testing.T) {
+	st := newPreflightStore("Studio Assistant", &agent.Agent{Settings: types.Settings{SystemPrompt: "shared"}})
+	h := NewHandler(st, nil)
+	h.SetRuntimeResolver(&stubChatRuntimeResolver{resolved: &workspace.ResolvedAgentRuntime{
+		Agent:             &agent.Agent{Settings: types.Settings{SystemPrompt: "only in this song"}},
+		FromWorkspaceCopy: true,
+	}})
+
+	resolved, err := h.resolveEffectiveAgent("Studio Assistant", normalizedChatRouteContext{WorkspaceID: "song-b"})
+	if err != nil || !resolved.WorkspaceCopy {
+		t.Fatalf("resolved = %+v, %v", resolved, err)
+	}
+	if err := h.persistAgent("Studio Assistant", resolved); err != nil {
+		t.Fatal(err)
+	}
+	if persisted, _ := st.GetAgent("Studio Assistant"); persisted.Settings.SystemPrompt != "shared" {
+		t.Fatalf("the song's copy was written back: %q", persisted.Settings.SystemPrompt)
 	}
 }
 

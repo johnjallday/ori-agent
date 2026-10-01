@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -410,7 +411,9 @@ func (h *Handler) ListAssistantLibraryRoots(w http.ResponseWriter, r *http.Reque
 			}
 			return 0
 		}(), "provider_read_only": !h.assistantLibraryProviderEvidence(scope, station),
-		"picker_available": h.assistantLibraryRoots.PickerAvailable()})
+		"picker_available": h.assistantLibraryRoots.PickerAvailable(),
+		// The shared-assistant switch rides this read: no extra fetch on load.
+		"sharing": h.librarySharing(scope, station)})
 }
 
 // ListAssistantLibraryScanScopes is a read-only, revision-bound page of
@@ -509,7 +512,40 @@ func (h *Handler) SearchAssistantLibrary(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	page.ProviderReadOnly = !h.assistantLibraryProviderEvidence(scope, station)
+	if !page.ProviderReadOnly {
+		h.markOpenableRows(scope, station, page.Rows)
+	}
 	_ = orihttp.RespondSuccess(w, page)
+}
+
+// markOpenableRows sets CanOpen from one read of the installed project
+// blueprint: a connected row opens its workspace, a catalog-only row with an
+// available source in a format the blueprint opens gets one. Nothing is read
+// from disk; the open action itself repeats every check.
+func (h *Handler) markOpenableRows(scope projectlibrary.Scope, station *workspace.Workspace, rows []projectlibrary.SearchRow) {
+	team, ok := h.installedProjectTeam(scope, station)
+	opens := map[string]bool{}
+	if ok {
+		for _, marker := range folderdigest.Markers {
+			if marker.ProjectFormat == "" || marker.Kind != folderdigest.MarkerGlob {
+				continue
+			}
+			for _, ext := range team.EntryExtensions {
+				if strings.EqualFold(filepath.Ext(marker.Name), ext) {
+					opens[marker.ProjectFormat] = true
+				}
+			}
+		}
+	}
+	for i := range rows {
+		row := &rows[i]
+		switch row.Connection {
+		case "connected":
+			row.CanOpen = true
+		case "catalog_only":
+			row.CanOpen = opens[row.Format] && (row.Availability == "available" || row.Availability == "ambiguous")
+		}
+	}
 }
 
 func (h *Handler) GetAssistantLibraryProject(w http.ResponseWriter, r *http.Request) {

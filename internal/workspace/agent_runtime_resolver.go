@@ -53,10 +53,14 @@ type SkillResolver interface {
 
 // ResolvedAgentRuntime is the effective runtime configuration for an agent executing inside a workspace.
 type ResolvedAgentRuntime struct {
-	Agent           *agent.Agent
-	AgentInstance   *AgentInstance
-	MCPServers      []string
-	EffectiveSkills []ResolvedSkill
+	Agent         *agent.Agent
+	AgentInstance *AgentInstance
+	// FromWorkspaceCopy is true when Agent is the workspace's own copy, not the
+	// user's agent of that name. Nothing learned while running it may be written
+	// back to the user's agent: the copy can differ from it.
+	FromWorkspaceCopy bool
+	MCPServers        []string
+	EffectiveSkills   []ResolvedSkill
 	// MCPToolAllowlist maps a materialized runtime server name (see
 	// RuntimeMCPServerName) to the tool names its binding permits. A missing
 	// key means the server carries no restriction (legacy all-tools
@@ -127,6 +131,7 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 	}
 
 	var baseAgent *agent.Agent
+	fromCopy := false
 	if strings.TrimSpace(workspaceID) != "" && r.workspaceStore != nil {
 		if local, ok, err := r.workspaceStore.GetWorkspaceAgent(workspaceID, agentName); err != nil {
 			logger.Warn("workspace-local agent lookup failed; falling back to global agent store", logger.Fields{
@@ -135,7 +140,7 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 				"error":        err.Error(),
 			})
 		} else if ok && local != nil {
-			baseAgent = local
+			baseAgent, fromCopy = local, true
 		}
 	}
 	if baseAgent == nil {
@@ -155,8 +160,9 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 
 	clonedAgent := cloneRuntimeAgent(baseAgent)
 	resolved := &ResolvedAgentRuntime{
-		Agent:      clonedAgent,
-		MCPServers: nil,
+		Agent:             clonedAgent,
+		FromWorkspaceCopy: fromCopy,
+		MCPServers:        nil,
 	}
 
 	if strings.TrimSpace(workspaceID) == "" || r.workspaceStore == nil || r.mcpRegistry == nil || r.mcpConfigManager == nil {

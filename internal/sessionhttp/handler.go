@@ -17,6 +17,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
+	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -61,6 +62,16 @@ type Handler struct {
 	// route derives Home/project authority from its target, while final project
 	// creation may commit several already-reviewed project roles together.
 	assistantWorkspaceRoleStaffer func(context.Context, string, []RoleStaffingFill) error
+	// projectStaffing decides how an opened library song's roles share the
+	// Home's assistant; staffingModelReady says a new agent would have a model.
+	projectStaffing    *projectstaffing.Service
+	staffingModelReady func() bool
+	// selectFileOnly records File-only on an opened song's Setup Wizard.
+	selectFileOnly func(context.Context, string) error
+	// libraryOpenerOverride and projectTeamOverride replace the library's
+	// reviewed creator and the installed-blueprint read in tests.
+	libraryOpenerOverride libraryOpener
+	projectTeamOverride   func(projectlibrary.Scope, *workspace.Workspace) (projectlibrary.ProjectTeam, bool)
 	// assistantRoleUnstaffer clears one role. Clearing unbinds; it never
 	// deletes an agent definition.
 	assistantRoleUnstaffer assistantRoleUnstaffer
@@ -289,6 +300,20 @@ func (h *Handler) SetAssistantRoleStaffer(staff func(context.Context, string, []
 // callback used by PUT /api/workspaces/{workspaceID}/roles/{roleID}.
 func (h *Handler) SetAssistantWorkspaceRoleStaffer(staff func(context.Context, string, []RoleStaffingFill) error) {
 	h.assistantWorkspaceRoleStaffer = staff
+}
+
+// SetSharedProjectStaffing supplies the Home's standing-consent decisions used
+// when a listed song is opened, and the model check that keeps a create from
+// making an agent with nothing to run on.
+func (h *Handler) SetSharedProjectStaffing(service *projectstaffing.Service, modelReady func() bool) {
+	h.projectStaffing = service
+	h.staffingModelReady = modelReady
+}
+
+// SetOpenedSongFileOnly supplies the File-only selection an opened song gets,
+// so opening it asks no mode question (D5: it never grants live control).
+func (h *Handler) SetOpenedSongFileOnly(selectFileOnly func(context.Context, string) error) {
+	h.selectFileOnly = selectFileOnly
 }
 
 func (h *Handler) SetAssistantHomeRemoved(finalize func(workspaceID string) error) {

@@ -29,6 +29,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
+	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
 	"github.com/johnjallday/ori-agent/internal/specialist"
@@ -107,6 +108,17 @@ type Provider interface {
 	Install(ctx context.Context, reviewedVersion string) error
 }
 
+// SharedStaffing fills a project's roles with the one assistant the Home's
+// standing consent names (hire once, assign many). The card's Set up is that
+// consent: Fill records it on the Home when there is none. Errors are the
+// projectstaffing sentinels; ErrNotShared keeps the per-project naming.
+type SharedStaffing interface {
+	// Fill says how each role is filled (create with a reserved name, or bind).
+	Fill(ctx context.Context, projectWorkspaceID string, roleIDs []string) ([]projectstaffing.Fill, error)
+	// Settle records the assistant a create made, once the project shows it.
+	Settle(ctx context.Context, projectWorkspaceID string) error
+}
+
 // Runner is the resumable run loop. It holds no state between calls: every pass
 // re-reads the journey and performs only the steps that are still incomplete.
 type Runner struct {
@@ -122,6 +134,9 @@ type Runner struct {
 	Providers  Provider
 	Selections Selections
 	Progress   Progress
+	// Shared fills project roles with the Home's shared assistant. Nil keeps
+	// one agent per project ("<role> · <project>").
+	Shared SharedStaffing
 	// NewKey returns a fresh idempotency key; nil uses random bytes.
 	NewKey func() string
 }
@@ -162,6 +177,8 @@ type run struct {
 	journey   Journey
 	runID     string
 	entryName string
+	// settled is true once the shared assistant a create made is recorded.
+	settled bool
 }
 
 // Run drives the journey to the end or to the first thing that needs the user.
@@ -202,7 +219,8 @@ func (s *run) finish(ctx context.Context, status, reason string, candidates []st
 		// nothing failed: that line simply waits for the answer.
 		next := personalassistant.FolderLineFailed
 		switch reason {
-		case personalassistant.FolderStopNeedsChoice, personalassistant.FolderStopNeedsPick, personalassistant.FolderStopNeedsModel:
+		case personalassistant.FolderStopNeedsChoice, personalassistant.FolderStopNeedsPick, personalassistant.FolderStopNeedsModel,
+			personalassistant.FolderStopConsentStale, personalassistant.FolderStopAssistantMissing:
 			next = personalassistant.FolderLineWaiting
 		}
 		for i := range s.lines {
@@ -277,6 +295,9 @@ func (s *run) drive(ctx context.Context) error {
 			return &stop{reason: personalassistant.FolderStopInstallFailed}
 		}
 		s.markFinished(journey)
+		if err := s.settle(ctx, journey); err != nil {
+			return err
+		}
 		if journey.Lifecycle == setupjourney.LifecycleReady {
 			return nil
 		}
@@ -639,6 +660,9 @@ func (s *run) selectFileOnly(ctx context.Context, journey *setupjourney.JourneyP
 type staffedRole struct {
 	RoleID string `json:"role_id"`
 	Name   string `json:"name"`
+	// Mode is "bind" to attach the Home's shared assistant; omitted means create,
+	// so a create sends exactly the input it always did.
+	Mode string `json:"mode,omitempty"`
 }
 
 func (s *run) staff(ctx context.Context, journey *setupjourney.JourneyProjection, step *setupjourney.StepProjection) error {
@@ -657,6 +681,15 @@ func (s *run) staff(ctx context.Context, journey *setupjourney.JourneyProjection
 		}
 		if !has(step, review) {
 			return &stop{reason: personalassistant.FolderStopFailed}
+		}
+		if scope == workspace.AssistantRoleScopeProject && s.Shared != nil {
+			shared, err := s.sharedRoles(ctx, journey, step.Staffing, roles)
+			if err != nil {
+				return err
+			}
+			if shared != nil {
+				roles = shared
+			}
 		}
 		input, err := json.Marshal(struct {
 			Roles []staffedRole `json:"roles"`
@@ -679,6 +712,83 @@ func (s *run) staff(ctx context.Context, journey *setupjourney.JourneyProjection
 		return s.commit(ctx, journey, reviewed, input)
 	}
 	return &stop{reason: personalassistant.FolderStopFailed}
+}
+
+// sharedRoles fills the project's missing roles with the Home's shared
+// assistant. It returns nil (and no error) when the project's roles are not
+// shared, so the run keeps one agent per project.
+func (s *run) sharedRoles(ctx context.Context, journey *setupjourney.JourneyProjection, staffing *setupjourney.StaffingProjection, roles []staffedRole) ([]staffedRole, error) {
+	projectID := projectWorkspaceID(journey, staffing)
+	if projectID == "" {
+		return nil, failed("the staffing step names no project")
+	}
+	roleIDs := make([]string, 0, len(roles))
+	for _, role := range roles {
+		roleIDs = append(roleIDs, role.RoleID)
+	}
+	fills, err := s.Shared.Fill(ctx, projectID, roleIDs)
+	switch {
+	case errors.Is(err, projectstaffing.ErrNotShared):
+		return nil, nil
+	case errors.Is(err, projectstaffing.ErrConsentStale):
+		return nil, &stop{reason: personalassistant.FolderStopConsentStale}
+	case errors.Is(err, projectstaffing.ErrAssistantMissing):
+		return nil, &stop{reason: personalassistant.FolderStopAssistantMissing}
+	case err != nil:
+		return nil, failed("could not decide the shared assistant: " + err.Error())
+	}
+	byRole := make(map[string]projectstaffing.Fill, len(fills))
+	for _, fill := range fills {
+		byRole[fill.RoleID] = fill
+	}
+	shared := make([]staffedRole, 0, len(roles))
+	for _, role := range roles {
+		fill, found := byRole[role.RoleID]
+		if !found || strings.TrimSpace(fill.Name) == "" {
+			return nil, failed("the shared assistant left a role unfilled")
+		}
+		mode := ""
+		if fill.Mode == projectstaffing.ModeBind {
+			mode = setupjourney.StaffingModeBind
+		}
+		shared = append(shared, staffedRole{RoleID: role.RoleID, Name: fill.Name, Mode: mode})
+	}
+	return shared, nil
+}
+
+// settle records the shared assistant a create made, once the journey shows the
+// project's team complete. It runs at most once per run and is safe to repeat.
+func (s *run) settle(ctx context.Context, journey *setupjourney.JourneyProjection) error {
+	if s.Shared == nil || s.settled {
+		return nil
+	}
+	for i := range journey.Steps {
+		step := &journey.Steps[i]
+		if step.Kind != specialist.SetupStepAssistantProgramStaffing || step.Status != setupjourney.StepComplete {
+			continue
+		}
+		projectID := projectWorkspaceID(journey, step.Staffing)
+		if projectID == "" {
+			return nil
+		}
+		if err := s.Shared.Settle(ctx, projectID); err != nil {
+			return failed("could not record the shared assistant: " + err.Error())
+		}
+		s.settled = true
+	}
+	return nil
+}
+
+// projectWorkspaceID is the project the staffing step works on.
+func projectWorkspaceID(journey *setupjourney.JourneyProjection, staffing *setupjourney.StaffingProjection) string {
+	if staffing != nil {
+		for _, target := range staffing.Scopes {
+			if target.Scope == workspace.AssistantRoleScopeProject && strings.TrimSpace(target.WorkspaceID) != "" {
+				return target.WorkspaceID
+			}
+		}
+	}
+	return strings.TrimSpace(journey.Receipts.ProjectWorkspaceID)
 }
 
 // missingRoles are the required, unconfigured roles of one scope, named the way
@@ -711,11 +821,13 @@ func truncate(value string, limit int) string {
 }
 
 // staffingMatches holds the review to the plan: only the requested required
-// roles, created (never bound to an existing agent), in the requested scope.
+// roles, in the requested scope, each with the requested agent, and each
+// created or bound exactly as requested. A bind is only ever the Home's shared
+// assistant, which the consent itself created (D3).
 func staffingMatches(shown *setupjourney.StaffingProjection, scope workspace.AssistantRoleScope, want []staffedRole) bool {
-	wanted := map[string]string{}
+	wanted := map[string]staffedRole{}
 	for _, role := range want {
-		wanted[role.RoleID] = role.Name
+		wanted[role.RoleID] = role
 	}
 	seen := 0
 	for _, target := range shown.Scopes {
@@ -723,8 +835,9 @@ func staffingMatches(shown *setupjourney.StaffingProjection, scope workspace.Ass
 			return false
 		}
 		for _, role := range target.Roles {
-			name, ok := wanted[role.RoleID]
-			if !ok || !role.Required || role.Bound || role.ProfileName != name {
+			requested, ok := wanted[role.RoleID]
+			binds := requested.Mode == setupjourney.StaffingModeBind
+			if !ok || !role.Required || role.Bound != binds || role.ProfileName != requested.Name {
 				return false
 			}
 			seen++

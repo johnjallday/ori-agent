@@ -38,6 +38,9 @@ type DashboardHandler struct {
 	// constant, not per-agent data, which is why it belongs on the list response
 	// rather than in each row (agents-page-ux FR-75).
 	xpPerLevel func() int64
+	// copySteps names the workspace copies kept in step with an agent, which
+	// are not customisations of it (see carried_edits.go).
+	copySteps CopyStepReader
 }
 
 // XPPerLevelReporter is the one thing the dashboard needs from the evolution
@@ -154,6 +157,10 @@ type AgentDetailResponse struct {
 	CodexSync any `json:"codex_sync,omitempty"`
 	// Origin: see AgentListItem.Origin.
 	Origin *store.AgentOrigin `json:"origin,omitempty"`
+	// WorkspaceCount and Workspaces are the workspaces the agent works in, so
+	// the page can say so before a delete the server would refuse.
+	WorkspaceCount int                      `json:"workspace_count"`
+	Workspaces     []workspace.WorkspaceRef `json:"workspaces"`
 }
 
 // originFor returns an agent's origin for a response, or nil when the store
@@ -428,10 +435,16 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),
 		Version:         agentConfigVersion(ag),
 		Appearance:      appearanceForAgent(ag),
-		Origin:          originFor(h.State, agentName),
+		Origin:          h.withoutCopiesInStep(agentName, originFor(h.State, agentName)),
 	}
 	memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
-	response.PresentationRole = h.support.classify(r.Context(), agentName, memberships[strings.ToLower(agentName)].Workspaces)
+	membership := memberships[strings.ToLower(agentName)]
+	response.PresentationRole = h.support.classify(r.Context(), agentName, membership.Workspaces)
+	response.WorkspaceCount = membership.Count
+	response.Workspaces = membership.Workspaces
+	if response.Workspaces == nil {
+		response.Workspaces = []workspace.WorkspaceRef{}
+	}
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")

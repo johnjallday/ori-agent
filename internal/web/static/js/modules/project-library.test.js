@@ -5,6 +5,11 @@ import {
   activationStateLabel,
   projectTeamURL,
   libraryDigestText,
+  libraryOpenAction,
+  libraryOpenChoices,
+  libraryOpenRoute,
+  libraryOpenedMessage,
+  librarySharingView,
   libraryQuery,
   libraryRunText,
   proposalSourceLabel,
@@ -3106,4 +3111,206 @@ test('a song that is gone, or a re-check that fails, says so and creates nothing
   } finally {
     page.restore();
   }
+});
+
+test('a row offers Open only when the server says it can be opened', () => {
+  const song = { id: 's1', name: 'Song 002', connection: 'catalog_only', can_open: true };
+  assert.equal(libraryOpenAction(song, false).label, 'Open');
+  assert.match(libraryOpenAction(song, false).ariaLabel, /Song 002: makes its workspace/);
+  assert.equal(
+    libraryOpenAction({ ...song, connection: 'connected' }, false).ariaLabel,
+    'Open Song 002'
+  );
+  // Read-only Home, unsupported format or a lost source: Details explain it.
+  assert.equal(libraryOpenAction(song, true), null);
+  assert.equal(libraryOpenAction({ ...song, can_open: false }, false), null);
+  assert.equal(libraryOpenAction(null, false), null);
+});
+
+test('the open action goes only to one workspace', () => {
+  assert.equal(libraryOpenRoute({ route: '/workspaces/song-002' }), '/workspaces/song-002');
+  for (const route of [
+    '',
+    '/agents',
+    'https://example.com/workspaces/x',
+    '/workspaces/a/b',
+    '//x'
+  ]) {
+    assert.equal(libraryOpenRoute({ route }), '', route);
+  }
+});
+
+test('the status line says how the assistant came to the song', () => {
+  const name = 'Song 002';
+  const agent = { agent_name: 'REAPER Assistant' };
+  assert.match(
+    libraryOpenedMessage(name, { ...agent, staffing: 'added' }),
+    /was added and joins each song/
+  );
+  assert.match(
+    libraryOpenedMessage(name, { ...agent, staffing: 'joined' }),
+    /REAPER Assistant joined it/
+  );
+  assert.match(libraryOpenedMessage(name, { staffing: 'off' }), /switched off, so no agent/);
+  assert.match(libraryOpenedMessage(name, { staffing: 'consent_stale' }), /review it on this Home/);
+  assert.match(libraryOpenedMessage(name, { staffing: 'assistant_missing' }), /gone, so no agent/);
+  assert.equal(
+    libraryOpenedMessage(name, { staffing: 'none', created: true }),
+    'Song 002 is ready.'
+  );
+  for (const staffing of ['added', 'joined', 'off', 'consent_stale', 'assistant_missing']) {
+    assert.doesNotMatch(libraryOpenedMessage(name, { staffing }), /_/, staffing);
+  }
+});
+
+test('several project files come back as chips of bare file names', () => {
+  const error = Object.assign(new Error('Choose'), {
+    reason: 'needs_choice',
+    payload: { project_files: ['Song 001.rpp', 'Song 001 alt.rpp', '../x.rpp', 'a/b.rpp', ''] }
+  });
+  assert.deepEqual(libraryOpenChoices(error), ['Song 001.rpp', 'Song 001 alt.rpp']);
+  assert.deepEqual(libraryOpenChoices({ reason: 'stale_review', payload: error.payload }), []);
+  assert.deepEqual(libraryOpenChoices(null), []);
+});
+
+test('Open posts one request ID per song, keeps it for a retry, and goes to the song', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.state = { provider_read_only: false };
+  const statuses = [];
+  panel.status = message => statuses.push(message);
+  const posts = [];
+  let answer = 'needs_choice';
+  panel.post = async (path, body) => {
+    posts.push({ path, body });
+    if (answer === 'needs_choice') {
+      throw Object.assign(new Error('Choose which project file to open'), {
+        reason: 'needs_choice',
+        payload: { project_files: ['A.rpp', 'B.rpp'] }
+      });
+    }
+    if (answer === 'conflict') throw Object.assign(new Error('Busy'), { reason: 'stale_review' });
+    return { route: '/workspaces/song-001', staffing: 'joined', agent_name: 'REAPER Assistant' };
+  };
+  const assigned = [];
+  const previous = globalThis.location;
+  globalThis.location = { search: '', assign: url => assigned.push(url) };
+  try {
+    const row = { id: 'song 1', name: 'Song 001' };
+    const button = { disabled: false, textContent: 'Open', isConnected: true };
+    await panel.openRow(row, button);
+    assert.equal(posts[0].path, '/projects/song%201/open');
+    assert.match(posts[0].body.request_id, /^open-/);
+    assert.equal(posts[0].body.selected_file, undefined);
+    assert.equal(assigned.length, 0, 'a question never navigates');
+    assert.equal(button.disabled, false);
+    assert.equal(button.textContent, 'Open');
+    answer = 'conflict';
+    await panel.openRow(row, button);
+    answer = 'ok';
+    await panel.openRow(row, button, undefined, 'B.rpp');
+    // The same song keeps its request ID until it opens, so a retry replays.
+    assert.equal(new Set(posts.map(post => post.body.request_id)).size, 1);
+    assert.equal(posts.at(-1).body.selected_file, 'B.rpp');
+    assert.deepEqual(assigned, ['/workspaces/song-001']);
+    assert.match(statuses.at(-1), /REAPER Assistant joined it/);
+    // A read-only Home or a busy panel sends nothing.
+    panel.state = { provider_read_only: true };
+    await panel.openRow(row, button);
+    panel.state = { provider_read_only: false };
+    panel.busy = true;
+    await panel.openRow(row, button);
+    assert.equal(posts.length, 3);
+  } finally {
+    globalThis.location = previous;
+  }
+});
+
+test('the shared-assistant switch says where the Home stands and offers the one fix', () => {
+  const base = { role_label: 'REAPER Assistant', team_digest: 'd1' };
+  assert.equal(librarySharingView({ ...base, state: 'unavailable' }).visible, false);
+  assert.equal(librarySharingView({ ...base, state: 'on' }, true).visible, false);
+  assert.equal(librarySharingView(null).visible, false);
+  const on = librarySharingView({ ...base, state: 'on', agent_name: 'REAPER Assistant' });
+  assert.equal(on.checked, true);
+  assert.equal(on.switchLabel, 'Add my REAPER Assistant to songs I open');
+  assert.match(on.note, /joins each song you open\. File-only/);
+  assert.equal(on.action, null);
+  assert.match(
+    librarySharingView({ ...base, state: 'on' }).note,
+    /added to the first song you open, then joins each one/
+  );
+  const off = librarySharingView({ ...base, state: 'off', agent_name: 'REAPER Assistant' });
+  assert.equal(off.checked, false);
+  assert.match(off.note, /get no agent/);
+  // A Home built before sharing existed opts in with the same switch.
+  const none = librarySharingView({ ...base, state: 'none' });
+  assert.equal(none.checked, false);
+  assert.match(none.note, /Turn this on/);
+  const stale = librarySharingView({ ...base, state: 'stale', agent_name: 'REAPER Assistant' });
+  assert.equal(stale.switchDisabled, true);
+  assert.deepEqual(stale.action, { id: 'review', label: 'Review the updated assistant' });
+  const missing = librarySharingView({
+    ...base,
+    state: 'on',
+    agent_name: 'REAPER Assistant',
+    assistant_missing: true
+  });
+  assert.deepEqual(missing.action, { id: 'readd', label: 'Add the assistant again' });
+  assert.match(missing.note, /is gone/);
+});
+
+test('the switch sends the team it showed, and a stale review asks before renewing', async () => {
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.run = async (_trigger, _message, work) => work();
+  panel.renderSharing = () => {};
+  const statuses = [];
+  panel.status = message => statuses.push(message);
+  const posts = [];
+  let reply = { sharing: { state: 'off', role_label: 'REAPER Assistant', team_digest: 'd1' } };
+  panel.post = async (path, body) => {
+    posts.push({ path, body });
+    return reply;
+  };
+  panel.state = {
+    provider_read_only: false,
+    sharing: { state: 'on', role_label: 'REAPER Assistant', team_digest: 'd1' }
+  };
+  await panel.setSharing({ checked: false });
+  assert.equal(posts[0].path, '/sharing');
+  assert.equal(posts[0].body.enabled, false);
+  assert.equal(posts[0].body.team_digest, undefined);
+  assert.match(posts[0].body.request_id, /^sharing-/);
+  assert.equal(panel.state.sharing.state, 'off');
+  reply = { sharing: { state: 'on', role_label: 'REAPER Assistant', team_digest: 'd1' } };
+  await panel.setSharing({ checked: true });
+  assert.deepEqual(
+    { enabled: posts[1].body.enabled, team_digest: posts[1].body.team_digest },
+    { enabled: true, team_digest: 'd1' }
+  );
+  // Review the updated assistant: cancelled sends nothing, confirmed renews.
+  panel.state.sharing = { state: 'stale', role_label: 'REAPER Assistant', team_digest: 'd2' };
+  const asked = [];
+  panel.confirm = async (title, lines) => {
+    asked.push({ title, lines });
+    return asked.length > 1;
+  };
+  const trigger = { dataset: { sharingAction: 'review' } };
+  await panel.runSharingAction(trigger);
+  assert.equal(posts.length, 2);
+  assert.match(asked[0].lines.join(' '), /keeps its own model, instructions and tools/);
+  await panel.runSharingAction(trigger);
+  assert.deepEqual(
+    { path: posts[2].path, enabled: posts[2].body.enabled, digest: posts[2].body.team_digest },
+    { path: '/sharing', enabled: true, digest: 'd2' }
+  );
+  // Add the assistant again.
+  panel.state.sharing = {
+    state: 'on',
+    role_label: 'REAPER Assistant',
+    agent_name: 'REAPER Assistant',
+    assistant_missing: true
+  };
+  await panel.runSharingAction({ dataset: { sharingAction: 'readd' } });
+  assert.equal(posts[3].path, '/sharing/assistant');
+  assert.match(statuses.at(-1), /next song you open gets a new REAPER Assistant/);
 });

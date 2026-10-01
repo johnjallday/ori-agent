@@ -73,6 +73,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
+	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
@@ -367,9 +368,13 @@ type ServerBuilder struct {
 	setupJourneyStore        *setupjourney.SQLiteStore
 	// integrationReleases resolves the latest reviewed integration release for
 	// both the guided setup and the Plugins page update check.
-	integrationReleases  *integrationrelease.Resolver
-	setupJourneyService  *setupjourney.Service
-	setupJourneyHandler  *setupjourneyhttp.Handler
+	integrationReleases *integrationrelease.Resolver
+	setupJourneyService *setupjourney.Service
+	setupJourneyHandler *setupjourneyhttp.Handler
+	// assistantStaffing is the one staffing seam (review → commit) and
+	// projectStaffing decides how a project's roles share the Home's assistant.
+	assistantStaffing    *setupjourney.AssistantStaffingAdapter
+	projectStaffing      *projectstaffing.Service
 	sampleLibraryService *samplelibrary.Service
 	sampleLibraryHandler *samplelibraryhttp.Handler
 
@@ -665,6 +670,9 @@ func (b *ServerBuilder) createDomainFacades() {
 	// dropped the agent's saved tile.
 	b.server.Storage.AgentMapPositions = b.agentMapStore
 	b.server.Storage.PersonalAssistantKnowledge = b.personalAssistantKnowledge
+	if b.projectStaffing != nil {
+		b.server.Storage.AgentEditCarrier = carriedEdits{service: b.projectStaffing}
+	}
 
 	// Workflow System Facade
 	b.server.Workflow = NewWorkflowSystemFacade(

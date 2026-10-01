@@ -202,7 +202,19 @@ const SETUP_STOP_COPY = {
   install_failed:
     'The integration could not be installed or enabled, so nothing after it ran. If you install it from Plugins, Try again continues from there.',
   interrupted: 'Setup was interrupted before it finished.',
+  consent_stale:
+    'The workspace and folder are set up. Your shared assistant was approved for an older version of this blueprint, so I did not add it. Continue setup to choose the agent yourself.',
+  assistant_missing:
+    'The workspace and folder are set up. The shared assistant this Home used is gone, so I did not add one on my own. Continue setup to choose the agent yourself.',
   failed: 'A step did not finish.'
+};
+
+// A collection's run stops in the same ways; only what is already true differs.
+const PORTFOLIO_STOP_COPY = {
+  needs_model:
+    'What finished is kept. The Home needs a model before its agents can be added; nothing was listed yet.',
+  needs_pick: subject =>
+    `Ori no longer has ${subject} open (the server was restarted). Pick the folder again to list it.`
 };
 
 const CONTINUE_SETUP = {
@@ -216,6 +228,8 @@ function stoppedActions(reason, setup) {
   const retry = { id: 'retry', label: 'Try again', style: 'primary', oneCard: true, retry: true };
   switch (reason) {
     case 'plan_changed':
+    case 'consent_stale':
+    case 'assistant_missing':
       return [{ ...CONTINUE_SETUP, style: 'primary' }];
     case 'needs_pick':
       return [
@@ -251,7 +265,7 @@ function stoppedActions(reason, setup) {
 // setup: the plan lines with a state each, one status line, and — only when
 // stopped — one plain sentence saying what finished and what is needed. A raw
 // stop reason code is never shown.
-export function setupRunView(setup, subject) {
+export function setupRunView(setup, subject, { portfolio = false } = {}) {
   const lines = setupLinesView(setup?.lines);
   const status = String(setup?.status || 'running');
   if (status !== 'stopped') {
@@ -267,7 +281,8 @@ export function setupRunView(setup, subject) {
   const reason = String(setup?.stop_reason || 'failed');
   const finished = lines.filter(line => line.state === 'done').length;
   const progress = lines.length ? `${finished} of ${lines.length} steps finished. ` : '';
-  let sentence = SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
+  let sentence =
+    (portfolio && PORTFOLIO_STOP_COPY[reason]) || SETUP_STOP_COPY[reason] || SETUP_STOP_COPY.failed;
   if (typeof sentence === 'function') sentence = sentence(subject);
   return {
     status,
@@ -283,14 +298,14 @@ export function setupRunView(setup, subject) {
 // step count, a percentage, and the lines. Pure data; the DOM is drawn below.
 // It is not visible for an offer with no one-card run.
 export function setupModalView(offer) {
-  if (!offer || offer.portfolio) return { visible: false };
+  if (!offer) return { visible: false };
   const receipt = folderReceiptView(offer);
   // A settled offer no longer carries its run, only its receipt; the pop-up that
   // watched the run still ends on it. Without either there is nothing to show.
   if (!offer.setup && !receipt.visible) return { visible: false };
   const folder = String(offer.folder || '').trim() || 'this project';
   const subject = String(offer.subject?.name || '').trim() || folder;
-  const run = setupRunView(offer.setup, subject);
+  const run = setupRunView(offer.setup, subject, { portfolio: Boolean(offer.portfolio) });
   const total = run.lines.length;
   const finished = run.lines.filter(line => line.state === 'done').length;
   if (receipt.visible) {
@@ -298,8 +313,10 @@ export function setupModalView(offer) {
       visible: true,
       phase: 'done',
       eyebrow: 'All set',
-      title: `${subject} is ready`,
-      status: 'Here is what I set up. The first task starts when you open the workspace.',
+      title: receipt.home ? `${receipt.homeName} is ready` : `${subject} is ready`,
+      status: receipt.home
+        ? 'Here is what I set up. Open a project from the library when you want to work on it.'
+        : 'Here is what I set up. The first task starts when you open the workspace.',
       count: total ? `${total} of ${total} steps finished` : '',
       percent: 100,
       lines: run.lines.map(line => ({ ...line, state: line.state ? 'done' : '' })),
@@ -334,8 +351,11 @@ export function setupModalView(offer) {
 function capabilityConfirmView(offer, base, subject) {
   const capability = offer.capability;
   const portfolio = offer.portfolio;
-  const run = !portfolio && offer.setup ? setupRunView(offer.setup, subject) : null;
-  const planLines = !portfolio && !run ? setupLinesView(offer.plan?.lines) : [];
+  // A collection rides the same one-consent plan and run as a single project.
+  const run = offer.setup
+    ? setupRunView(offer.setup, subject, { portfolio: Boolean(portfolio) })
+    : null;
+  const planLines = !run ? setupLinesView(offer.plan?.lines) : [];
   const hasPlan = planLines.length > 0;
   const continuing = base.status === 'awaiting_outcome';
   const decline = {
@@ -434,7 +454,12 @@ export function folderOfferView(offer, options = {}) {
     needsPick: offer.needs_pick === true
   };
   const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
-  if (status === 'awaiting_outcome' && offer?.capability && !offer.portfolio && !view.setup) {
+  if (
+    status === 'awaiting_outcome' &&
+    offer?.capability &&
+    (!offer.portfolio || view.plan) &&
+    !view.setup
+  ) {
     if (view.plan) {
       view.question =
         'Project setup has not finished. Set up does what is left in one go, or continue step by step. Here is what is left:';
@@ -447,7 +472,7 @@ export function folderOfferView(offer, options = {}) {
   }
   if (
     status === 'resolved' &&
-    offer?.outcome?.kind === 'project' &&
+    (offer?.outcome?.kind === 'project' || offer?.outcome?.kind === 'home') &&
     folderReceiptView(offer).visible
   ) {
     view.question = "Here's what I set up:";
@@ -584,6 +609,8 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirm 
 // A receipt is read only from the resolved server outcome; the workspace name
 // and route are never reconstructed from the folder name or blueprint plan.
 export function folderReceiptView(offer) {
+  if (offer?.status === 'resolved' && offer?.outcome?.kind === 'home')
+    return homeReceiptView(offer);
   if (offer?.status !== 'resolved' || offer?.outcome?.kind !== 'project') return { visible: false };
   const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
   const workspace = rows.find(row => row.kind === 'workspace');
@@ -614,6 +641,32 @@ export function folderReceiptView(offer) {
     route,
     homeRoute: verifiedHomeRoute,
     openLabel: `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`
+  };
+}
+
+// homeReceiptView is a one-card collection setup's receipt: the Home, the
+// agents it added, the listing and the shared assistant. Open lands on the
+// Home's library (no folder handoff: the run already connected and listed it).
+// A collection resolved step by step carries no rows and shows the old note.
+function homeReceiptView(offer) {
+  const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
+  const home = rows.find(row => row?.kind === 'home');
+  const route = String(home?.route || '').trim();
+  if (!home || !/^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/.test(route))
+    return { visible: false };
+  const homeName = String(home.name || '').trim() || 'your Home';
+  return {
+    visible: true,
+    home: true,
+    homeName,
+    rows: rows.map(row => ({
+      kind: String(row.kind || ''),
+      name: String(row.name || ''),
+      detail: String(row.detail || '')
+    })),
+    route,
+    homeRoute: '',
+    openLabel: `Open ${homeName}`
   };
 }
 
@@ -743,7 +796,10 @@ const RECEIPT_LABELS = {
   folder: ['Folder', '▤'],
   blueprint: ['Blueprint', '✦'],
   agent: ['Agent', '●'],
-  task: ['First task', '✓']
+  task: ['First task', '✓'],
+  home: ['Home', '⌂'],
+  library: ['Library', '☰'],
+  assistant: ['Shared assistant', '●']
 };
 
 // renderReceiptRows draws the receipt's rows (what Set up made) into a list.

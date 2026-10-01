@@ -66,7 +66,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *r
 	text := getResponseText(resp.Content)
 
 	logger.Debug("Claude chat response completed", logger.Fields{"duration": time.Since(start)})
-	_ = h.persistAgent(agentName, ag.Agent)
+	_ = h.persistAgent(agentName, ag)
 
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)

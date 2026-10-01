@@ -410,7 +410,7 @@ func (h *Handler) tryHandleUtilityDirect(
 		responseText := disallowedUtilityToolMessage(decision.ToolName)
 		ag.Messages = append(ag.Messages, openai.UserMessage(query))
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-		_ = h.persistAgent(agentName, ag.Agent)
+		_ = h.persistAgent(agentName, ag)
 
 		h.storeMessageInSession(baseCtx, sessionID, "user", query)
 		h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
@@ -448,7 +448,7 @@ func (h *Handler) tryHandleUtilityDirect(
 			responseText := "I couldn't find an available browser tool for this agent. Attach/configure Playwright (or another browser MCP) and try again."
 			ag.Messages = append(ag.Messages, openai.UserMessage(query))
 			ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-			_ = h.persistAgent(agentName, ag.Agent)
+			_ = h.persistAgent(agentName, ag)
 
 			h.storeMessageInSession(baseCtx, sessionID, "user", query)
 			h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
@@ -547,7 +547,7 @@ func (h *Handler) tryHandleUtilityDirect(
 
 	ag.Messages = append(ag.Messages, openai.UserMessage(query))
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-	_ = h.persistAgent(agentName, ag.Agent)
+	_ = h.persistAgent(agentName, ag)
 
 	h.storeMessageInSession(baseCtx, sessionID, "user", query)
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)
@@ -1374,7 +1374,7 @@ func (h *Handler) handleDirectToolCommand(w http.ResponseWriter, r *http.Request
 	// Add to conversation history for context
 	ag.Messages = append(ag.Messages, openai.UserMessage(q))
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(result.Result))
-	_ = h.persistAgent(current, ag.Agent)
+	_ = h.persistAgent(current, ag)
 
 	// Return formatted response
 	response := formatDirectToolResponse(result)
@@ -1394,7 +1394,7 @@ func (h *Handler) maybeHandleWorkspacePlanningForm(w http.ResponseWriter, base c
 
 		ag.Messages = append(ag.Messages, openai.UserMessage(originalQuery))
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-		_ = h.persistAgent(current, ag.Agent)
+		_ = h.persistAgent(current, ag)
 
 		h.storeMessageInSession(base, sessionID, "user", originalQuery)
 		h.storeMessageInSession(base, sessionID, "assistant", responseText)

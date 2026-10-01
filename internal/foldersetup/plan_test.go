@@ -134,6 +134,151 @@ func TestBuildPlanNamesThePlacementAndTheHomeItCreates(t *testing.T) {
 	}
 }
 
+// D9: in a Home, Set up also agrees that the project's assistant is shared with
+// the later projects; standing alone there is nothing to share it with.
+func TestBuildPlanSaysTheAssistantIsSharedInAHome(t *testing.T) {
+	standalone := line(BuildPlan(baseFacts()), personalassistant.FolderPlanAgents)
+	if standalone.Name != "Adds the agents this blueprint requires" || standalone.Detail != "" {
+		t.Fatalf("standalone agents line = %+v", standalone)
+	}
+	facts := baseFacts()
+	facts.Grouped, facts.HomeExists = true, true
+	shared := BuildPlan(facts)
+	got := line(shared, personalassistant.FolderPlanAgents)
+	if got.Name != "Adds the agents this blueprint requires" ||
+		got.Detail != "Its assistant is shared: the same one joins the later REAPER Songs you open in this Home." {
+		t.Fatalf("shared agents line = %+v", got)
+	}
+	facts.SharingOff = true
+	off := BuildPlan(facts)
+	if got := line(off, personalassistant.FolderPlanAgents).Detail; got != "Its assistant is shared, and this turns adding it to the later REAPER Songs you open in this Home back on." {
+		t.Fatalf("switched-off agents line = %q", got)
+	}
+	if off.Digest == shared.Digest || shared.Digest == BuildPlan(baseFacts()).Digest {
+		t.Fatal("sharing, switching sharing back on and standing alone must be different consents")
+	}
+}
+
+func portfolioFacts() PortfolioFacts {
+	return PortfolioFacts{
+		FolderName: "Songs", Projects: 200, CollectionNoun: "music projects", HomeName: "Music Production Home",
+		HomeTemplate: "plugin-home:mpm:music-producer-assistant",
+		Provider: Plugin{Name: "Music Project Management", PluginID: "mpm", State: personalassistant.FolderInstallInstall,
+			Version: "0.1.1", Source: "johnjallday/music-project-management"},
+		Integration: &Plugin{Name: "REAPER", PluginID: "reaper-plugin", State: personalassistant.FolderInstallInstall,
+			Version: "0.9.0", Source: "johnjallday/reaper-plugin"},
+		IntegrationProjects: 200, AppName: "REAPER", ProjectLabel: "REAPER song",
+	}
+}
+
+func kindsOf(plan personalassistant.FolderSetupPlan) string {
+	kinds := make([]string, 0, len(plan.Lines))
+	for _, l := range plan.Lines {
+		kinds = append(kinds, l.Kind)
+	}
+	return strings.Join(kinds, ",")
+}
+
+func TestBuildPortfolioPlanListsTheWholeCollectionSetup(t *testing.T) {
+	plan := BuildPortfolioPlan(portfolioFacts())
+	if got := kindsOf(plan); got != "provider,integration,home,agents,library,songs,assistant" {
+		t.Fatalf("order = %s", got)
+	}
+	want := map[string]string{
+		personalassistant.FolderPlanProvider:    "Installs and enables the reviewed Music Project Management plugin 0.1.1",
+		personalassistant.FolderPlanIntegration: "Installs and enables the reviewed REAPER integration 0.9.0",
+		personalassistant.FolderPlanHome:        "Creates your Music Production Home",
+		personalassistant.FolderPlanAgents:      "Adds the agents the Home requires",
+		personalassistant.FolderPlanLibrary:     "Lists the 200 music projects in Songs",
+		personalassistant.FolderPlanSongs:       "A REAPER song gets its workspace the first time you open it",
+		personalassistant.FolderPlanAssistant:   "Your project assistant joins each REAPER song you open",
+	}
+	for kind, name := range want {
+		if got := line(plan, kind).Name; got != name {
+			t.Errorf("%s = %q, want %q", kind, got, name)
+		}
+	}
+	if d := line(plan, personalassistant.FolderPlanIntegration).Detail; !strings.Contains(d, "200 REAPER songs can use it.") {
+		t.Errorf("integration detail = %q", d)
+	}
+	if d := line(plan, personalassistant.FolderPlanAssistant).Detail; !strings.Contains(d, "File-only: Ori does not control REAPER.") {
+		t.Errorf("assistant detail = %q", d)
+	}
+	if d := line(plan, personalassistant.FolderPlanLibrary).Detail; !strings.Contains(d, "Nothing is opened, moved or copied") {
+		t.Errorf("library detail = %q", d)
+	}
+	intent := plan.Intent
+	if !intent.Portfolio || !intent.CreatesHome || !intent.StaffsHome || !intent.GrantsConsent || !intent.SharedProjects ||
+		intent.HomeTemplate != "plugin-home:mpm:music-producer-assistant" || intent.Integration != personalassistant.FolderInstallInstall ||
+		intent.Provider != personalassistant.FolderInstallInstall {
+		t.Fatalf("intent = %+v", intent)
+	}
+	// No line names a path or promises live control.
+	for _, l := range plan.Lines {
+		text := l.Name + " " + l.Detail
+		if looksLikePath := strings.Contains(text, " /") || strings.HasPrefix(text, "/"); looksLikePath {
+			t.Fatalf("a line names a path: %+v", l)
+		}
+		if strings.Contains(strings.ToLower(text), "live") {
+			t.Fatalf("a line promises live control: %+v", l)
+		}
+	}
+}
+
+func TestBuildPortfolioPlanNamesTheAssistantOnceItIsKnown(t *testing.T) {
+	facts := portfolioFacts()
+	facts.AssistantName = "REAPER Assistant"
+	if got := line(BuildPortfolioPlan(facts), personalassistant.FolderPlanAssistant).Name; got != "Your REAPER Assistant joins each REAPER song you open" {
+		t.Fatalf("assistant line = %q", got)
+	}
+}
+
+func TestBuildPortfolioPlanForAnExistingHome(t *testing.T) {
+	facts := portfolioFacts()
+	facts.HomeExists, facts.HomeStaffed, facts.Sharing = true, true, SharingOn
+	facts.Provider.State, facts.Integration.State = personalassistant.FolderInstallReady, personalassistant.FolderInstallReady
+	plan := BuildPortfolioPlan(facts)
+	if got := kindsOf(plan); got != "provider,integration,library,songs" {
+		t.Fatalf("existing staffed Home with sharing on = %s", got)
+	}
+	if plan.Intent.CreatesHome || plan.Intent.StaffsHome || plan.Intent.GrantsConsent || !plan.Intent.SharedProjects {
+		t.Fatalf("intent = %+v", plan.Intent)
+	}
+	// 2.8: a Home with no consent yet gets the assistant line and the consent.
+	facts.Sharing = ""
+	if plan := BuildPortfolioPlan(facts); !plan.Intent.GrantsConsent || line(plan, personalassistant.FolderPlanAssistant).Kind == "" {
+		t.Fatalf("no consent yet = %+v", plan.Intent)
+	}
+	// Switched off on the Home: the line says this turns it back on.
+	facts.Sharing = SharingOff
+	if d := line(BuildPortfolioPlan(facts), personalassistant.FolderPlanAssistant).Detail; !strings.HasPrefix(d, "This turns it back on.") {
+		t.Fatalf("switched-off detail = %q", d)
+	}
+	// An unstaffed existing Home gets its agents, never a second Home.
+	facts.HomeStaffed = false
+	if got := kindsOf(BuildPortfolioPlan(facts)); !strings.Contains(got, "agents") || strings.Contains(got, "home") {
+		t.Fatalf("unstaffed existing Home = %s", got)
+	}
+}
+
+func TestBuildPortfolioPlanWithoutSharedProjectsOnlyLists(t *testing.T) {
+	facts := portfolioFacts()
+	facts.Integration, facts.IntegrationProjects = nil, 0
+	plan := BuildPortfolioPlan(facts)
+	if got := kindsOf(plan); got != "provider,home,agents,library,songs" {
+		t.Fatalf("order = %s", got)
+	}
+	if got := line(plan, personalassistant.FolderPlanSongs).Name; got != "No workspace or agent is made for these projects" {
+		t.Fatalf("songs line = %q", got)
+	}
+	if plan.Intent.GrantsConsent || plan.Intent.SharedProjects || plan.Intent.Integration != "" {
+		t.Fatalf("intent = %+v", plan.Intent)
+	}
+	if plan.Digest == BuildPortfolioPlan(portfolioFacts()).Digest {
+		t.Fatal("listing only and sharing an assistant must be different consents")
+	}
+}
+
 func TestBuildPlanSaysWhenTheAppItselfIsNotInstalled(t *testing.T) {
 	facts := baseFacts()
 	facts.AppInstalled = false

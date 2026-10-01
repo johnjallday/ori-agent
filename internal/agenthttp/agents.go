@@ -117,6 +117,9 @@ type Handler struct {
 	support       personalAssistantSupportClassifier
 	// desktopOpener opens an agent's folder in Finder ("Show in Finder").
 	desktopOpener platform.DesktopOpener
+	// editCarrier carries a model or prompt edit into the workspace copies Ori
+	// keeps in step with the agent (see carried_edits.go).
+	editCarrier EditCarrier
 }
 
 func New(state store.Store) *Handler {
@@ -753,6 +756,14 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A model or prompt edit reaches the workspaces whose copy Ori keeps in step
+	// with this agent; a rename never gets here for an agent in a workspace.
+	var carried *CarriedEdit
+	if newName == agentName && (req.Model != nil || req.LLMProvider != nil || req.ReasoningEffort != nil ||
+		req.Temperature != nil || req.MaxTokens != nil || req.SystemPrompt != nil) {
+		carried = h.carryEdit(agentName)
+	}
+
 	logger.Info("Agent metadata updated", logger.Fields{"agent": newName})
 
 	// Log activity
@@ -803,12 +814,16 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// The complete canonical appearance comes back on every update, so an editor
 	// can adopt the confirmed state — including the server-assigned catalog
 	// version — instead of trusting its own staged copy (FR-41/FR-59).
-	orihttp.Success(w, map[string]any{
+	response := map[string]any{
 		"success":    true,
 		"name":       newName,
 		"message":    "Agent updated successfully",
 		"appearance": appearanceForAgent(agent),
-	})
+	}
+	if carried != nil {
+		response["carried"] = carried
+	}
+	orihttp.Success(w, response)
 }
 
 // handleDelete serves DELETE /api/agents?name=...: removes the agent and

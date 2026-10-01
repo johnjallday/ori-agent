@@ -19,6 +19,10 @@
 # fresh sandbox with the reviewed REAPER blueprint; blueprint-details prints
 # what a create stored. Slice B (attach an existing project) adds
 # reaper-demo-folders, pick-folder, folder-checksum, and attach-details.
+# Portfolio hire-once (tasks/tasks-portfolio-hire-once.md) adds showfolder
+# seed-song, seed-portfolio and portfolio-run (a whole collection through the
+# one card), and baseline-export (an origin/dev baseline for the music and
+# REAPER harness suites without a worktree).
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
@@ -1607,6 +1611,86 @@ for rel, body in entries:
 print(f"ok   seeded {kind} capability fixture in {home}")
 PY
     ;;
+  seed-song)
+    # One named REAPER song folder inside a chip (<chip>/<name>/<name>.rpp plus
+    # takes), so several songs can be fed through the card one after another.
+    local home="${4:-}" chip="${5:-}" name="${6:-}"
+    [[ -n "$home" && -d "$home" && "$home" == *"/ori-demo."* && -n "$chip" && -n "$name" ]] ||
+      fail "usage: $0 showfolder <base-url> seed-song <ori-demo-sandbox> <Desktop|Documents|Downloads> <song-name>"
+    case "$chip" in Desktop|Documents|Downloads) ;; *) fail "unknown chip: $chip" ;; esac
+    [[ "$name" != */* && "$name" != .* ]] || fail "the song name must be a plain folder name"
+    python3 - "$home" "$chip" "$name" <<'PY'
+import os, sys
+home, chip, name = sys.argv[1:]
+entries = [(f"{chip}/{name}/{name}.rpp", b"<REAPER_PROJECT>\n")]
+entries += [(f"{chip}/{name}/Media/take-{i}.wav", b"RIFF") for i in range(3)]
+for rel, body in entries:
+    target = os.path.join(home, rel)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "xb") as output:  # never overwrite, even in a sandbox
+        output.write(body)
+print(f"ok   seeded song {name} in {chip}")
+PY
+    ;;
+  seed-portfolio)
+    # A music portfolio: <count> song folders directly in one chip, each with its
+    # project file, a backup, a bounce and a Media/ folder of takes. <format> is
+    # rpp (default), als, or mixed (every third song is an Ableton set).
+    # <two-files> songs (default 0) get a second project file, so opening them
+    # asks which file. Never overwrites, even in a sandbox.
+    local home="${4:-}" count="${5:-}" chip="${6:-Desktop}" format="${7:-rpp}" two="${8:-0}"
+    [[ -n "$home" && -d "$home" && "$home" == *"/ori-demo."* && "$count" =~ ^[0-9]+$ && "$two" =~ ^[0-9]+$ ]] ||
+      fail "usage: $0 showfolder <base-url> seed-portfolio <ori-demo-sandbox> <count> [Desktop|Documents|Downloads] [rpp|als|mixed] [two-files]"
+    case "$chip" in Desktop|Documents|Downloads) ;; *) fail "unknown chip: $chip" ;; esac
+    case "$format" in rpp|als|mixed) ;; *) fail "unknown format: $format" ;; esac
+    python3 - "$home" "$count" "$chip" "$format" "$two" <<'PY'
+import os, sys
+home, count, chip, fmt, two = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5])
+def put(rel, body):
+    target = os.path.join(home, rel)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "xb") as output:  # never overwrite, even in a sandbox
+        output.write(body)
+for i in range(1, count + 1):
+    name = f"Song {i:03d}"
+    ext = ".als" if fmt == "als" or (fmt == "mixed" and i % 3 == 0) else ".rpp"
+    body = b"<REAPER_PROJECT>\n" if ext == ".rpp" else b"ableton\n"
+    put(f"{chip}/{name}/{name}{ext}", body)
+    if i <= two:
+        put(f"{chip}/{name}/{name} alt{ext}", body)
+    put(f"{chip}/{name}/{name}{ext}-bak", body)
+    put(f"{chip}/{name}/{name} bounce.wav", b"RIFF")
+    for take in range(3):
+        put(f"{chip}/{name}/Media/take-{take}.wav", b"RIFF")
+print(f"ok   seeded {count} {fmt} song folders in {chip} ({two} with two project files)")
+PY
+    ;;
+  portfolio-run)
+    # A whole collection end to end: seed <count> song folders in <chip>, scan
+    # the chip, print the plan the card shows, press Set up (the one-card stage)
+    # and print the receipt rows the run read back.
+    local home="${4:-}" count="${5:-}" chip="${6:-Desktop}" format="${7:-rpp}" two="${8:-0}" offer
+    "$0" showfolder "$BASE_URL" seed-portfolio "$home" "$count" "$chip" "$format" "$two" || return 1
+    offer=$(curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/scan" -H 'Content-Type: application/json' \
+      -d "{\"chip\":\"$(printf '%s' "$chip" | tr '[:upper:]' '[:lower:]')\"}" | python3 -c '
+import json, sys
+o = json.load(sys.stdin).get("offer") or {}
+print(o.get("id", ""))
+print("plan for", (o.get("subject") or {}).get("name"), json.dumps(o.get("portfolio")), file=sys.stderr)
+for l in (o.get("plan") or {}).get("lines") or []:
+    print("  - [%s] %s — %s" % (l["kind"], l["name"], l.get("detail", "")), file=sys.stderr)')
+    [[ -n "$offer" ]] || fail "the scan made no offer"
+    "$0" showfolder "$BASE_URL" one-card "$offer" | python3 -c '
+import json, sys
+for line in sys.stdin:
+    if line.startswith("outcome:"):
+        outcome = json.loads(line[len("outcome: "):])
+        for r in outcome.get("receipt") or []:
+            print("  receipt: %s | %s | %s" % (r["kind"], r["name"], r.get("detail", "")))
+    elif line.startswith(("started:", "status:")):
+        last = line.strip()
+print("  last:", last if "last" in dir() else "")'
+    ;;
   seed-corpus)
     # Desktop as a corpus: a bibliography plus two small real PDFs (one page
     # of text each, with a valid cross-reference table), for the corpus
@@ -1717,7 +1801,7 @@ PY
     # Pass a project file name as the second argument to answer "which file".
     local offer="${4:-}" entry="${5:-}" digest body
     [[ -n "$offer" ]] || fail "usage: $0 showfolder <base-url> one-card <offer-id> [project-file-name]"
-    digest=$(curl -s "$BASE_URL/api/personal-assistant/folder-digest" | python3 -c 'import json,sys; o=(json.load(sys.stdin).get("folder_digest") or {}).get("offer") or {}; print((o.get("plan") or {}).get("digest") or (o.get("setup") or {}).get("plan_digest") or "")')
+    digest=$(curl -s "$BASE_URL/api/personal-assistant/folder-digest?offer_id=$offer" | python3 -c 'import json,sys; o=(json.load(sys.stdin).get("folder_digest") or {}).get("offer") or {}; print((o.get("plan") or {}).get("digest") or (o.get("setup") or {}).get("plan_digest") or "")')
     [[ -n "$digest" ]] || fail "the current offer has no plan (is the integration installed, and is this a recognized project?)"
     body="{\"plan_digest\":\"$digest\",\"request_id\":\"smoke-$(date +%s%N)\""
     [[ -n "$entry" ]] && body="$body,\"entry_name\":\"$entry\""
@@ -1726,7 +1810,7 @@ PY
       | python3 -c 'import json,sys; p=json.load(sys.stdin); o=p.get("offer") or {}; print("started:", o.get("status"), (o.get("setup") or {}).get("status"), p.get("error",""))'
     for _ in $(seq 1 120); do
       sleep 1
-      curl -s "$BASE_URL/api/personal-assistant/folder-digest" | python3 -c '
+      curl -s "$BASE_URL/api/personal-assistant/folder-digest?offer_id=$offer" | python3 -c '
 import json, sys
 o = (json.load(sys.stdin).get("folder_digest") or {}).get("offer") or {}
 s = o.get("setup") or {}
@@ -1774,7 +1858,7 @@ sys.exit(3 if s.get("status") == "running" else 0)
   today)
     curl -sf "$BASE_URL/api/personal-assistant/today" | python3 -c 'import json,sys; t=json.load(sys.stdin)["today"]; print("Today:", t.get("state")); [print(k + ":", ", ".join(i.get("title", "") for i in (t.get(k) or {}).get("items", [])) or "(empty)") for k in ("working_on", "needs_you", "done")]; print("Could not read:", ", ".join(t.get("unavailable_sources") or []) or "none")'
     ;;
-  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|hqcard|hq|today|scan <chip>|decide <offer> <decision> [choice]|one-card <offer> [project-file]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
+  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|seed-song <sandbox> <chip> <name>|seed-portfolio <sandbox> <count> [chip] [rpp|als|mixed] [two-files]|hqcard|hq|today|scan <chip>|decide <offer> <decision> [choice]|one-card <offer> [project-file]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
   esac
 }
 
@@ -3197,6 +3281,30 @@ smoke_library_notifications() {
   [[ "$status" == PASS ]]
 }
 
+# smoke_baseline_export exports <rev> (default origin/dev) into a new <dir> as a
+# throwaway Git repo with this worktree's node_modules linked. The harness
+# suites refuse to run outside a Git toplevel (music-home-demo.sh,
+# reaper-demo.sh), so this is how they get a dev baseline without creating a
+# worktree:
+#   ./scripts/smoke.sh baseline-export "$TMPDIR/dev-baseline"
+#   cd "$TMPDIR/dev-baseline" && GOWORK=off ./scripts/reaper-demo.sh test ...
+smoke_baseline_export() {
+  local dir="${2:-}" rev="${3:-origin/dev}" top short
+  [[ -n "$dir" ]] || fail "usage: $0 baseline-export <new-dir> [rev]"
+  [[ ! -e "$dir" ]] || fail "refusing: $dir already exists"
+  top="$(git rev-parse --show-toplevel)" || fail "not in a git checkout"
+  short="$(git -C "$top" rev-parse --short --verify --quiet "$rev^{commit}")" || fail "unknown revision: $rev"
+  mkdir -p "$dir"
+  git -C "$top" archive "$rev" | tar -x -C "$dir"
+  if [[ -d "$top/node_modules" ]]; then
+    ln -s "$top/node_modules" "$dir/node_modules"
+  fi
+  git -C "$dir" init -q
+  git -C "$dir" add -A
+  git -C "$dir" -c user.email=baseline@local -c user.name=baseline commit -qm "baseline $rev $short"
+  echo "ok   exported $rev ($short) to $dir"
+}
+
 # agent_state_digest fingerprints every runtime state file under a sandbox.
 agent_state_digest() {
   local dir="$1/agent_state"
@@ -3212,6 +3320,7 @@ serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 serve-split) serve_split "${2:-8931}" "${3:-split}" ;;
 seed-import) smoke_seed_import "$@" ;;
 gosec-new) smoke_gosec_new "$@" ;;
+baseline-export) smoke_baseline_export "$@" ;;
 agent-files) smoke_agent_files "$@" ;;
 agent-chat) smoke_agent_chat "$@" ;;
 seed-legacy-agents) smoke_seed_legacy_agents "$@" ;;
@@ -3270,6 +3379,7 @@ library-notifications) smoke_library_notifications "$@" ;;
   echo "  $0 serve-split [port] [sandbox-name]     # skills: isolated server with HOME and the data dir apart" >&2
   echo "  $0 seed-import <sandbox-dir>             # skills: fill the split sandbox's ~/.agents/skills for the import panel" >&2
   echo "  $0 gosec-new [base]                      # gosec findings on lines this branch added (base: origin/dev)" >&2
+  echo "  $0 baseline-export <new-dir> [rev]       # <rev> (origin/dev) as a throwaway Git repo, for harness baselines" >&2
   echo "  $0 agent-files <sandbox> <agent>         # agents in the root: mtime + sha of definition and state files" >&2
   echo "  $0 agent-chat <base-url> <agent> [text]  # agents in the root: send one chat turn to an agent" >&2
   echo "  $0 seed-legacy-agents <sandbox>          # agents in the root: pre-upgrade install (agents in the data dir)" >&2

@@ -166,7 +166,7 @@ func (h *Handler) handleOpenAIChat(
 	}
 
 	logger.Debug("Chat response completed", logger.Fields{"duration": time.Since(start), "response": text})
-	_ = h.persistAgent(agentName, ag.Agent)
+	_ = h.persistAgent(agentName, ag)
 
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
@@ -292,7 +292,7 @@ func (h *Handler) handleOpenAIToolCalls(
 	}
 
 	logger.Debug("Chat with tool completed", logger.Fields{"duration": time.Since(start)})
-	_ = h.persistAgent(agentName, ag.Agent)
+	_ = h.persistAgent(agentName, ag)
 
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)

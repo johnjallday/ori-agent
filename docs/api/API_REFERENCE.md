@@ -24,6 +24,7 @@ http://localhost:8765/api
 - [Workspace Groups](#workspace-groups)
 - [Workspace Build Sessions API](#workspace-build-sessions-api)
 - [Personal Assistant Folder Digest API](#personal-assistant-folder-digest-api)
+- [Home Library: Open a Song and the Shared Assistant](#home-library-open-a-song-and-the-shared-assistant)
 - [Scheduler Nodes API](#scheduler-nodes-api)
 - [Workspace Map Activity API](#workspace-map-activity-api)
 - [Custom Workflows API](#custom-workflows-api)
@@ -1441,6 +1442,8 @@ An offer the user sent to the step-by-step journey (**Adjust…**, so `awaiting_
 
 `GET /api/personal-assistant/folder-digest?offer_id=<id>` returns that offer as `offer` (a running or finished one included) instead of the current one, which is how the card follows its own run when another offer is waiting.
 
+The same action sets up a **collection** offer (`portfolio`) when its reviewed Home provider resolves: the plan lists the provider, the integration (only when some folders are projects it opens), the Home, its agents, the library listing and the shared assistant, and the run builds the Home, staffs its required roles, starts its library, connects the folder, scans it once and records the Home's standing staffing consent. It lists the projects and makes **no** project workspace. The finished offer's `outcome.receipt` rows (`home`, `library`, `assistant`) name what was made; the `library` row says "Listed N … so far" after a partial scan. A single-song run records the same consent on its Home, so its project role is filled by the Home's one shared assistant: created by the first song (receipt detail `added`), bound by later ones (`joined`).
+
 ### Read-only tools over linked directories
 
 Chat and task runs in a workspace with a linked directory get two tools:
@@ -1511,6 +1514,40 @@ One derived card per Home the current owner holds whose digest has `activatable 
 ### Event and Setting
 
 A completed or partial scan publishes one in-process `library.scan_completed` event (`home_id`, `scan_id`, `root_id`, `coverage` and the digest counts only); failed, cancelled, interrupted and replayed scans publish nothing. The optional `library_manager_token_budget` in `settings.json` lowers the token cap of the Manager's review turn below the default and maximum of 20,000.
+
+## Home Library: Open a Song and the Shared Assistant
+
+Every route is for the authenticated owner of that exact Home (`404` otherwise) and takes a strict JSON body: unknown fields are `400`, and any `path` or `folder` field is refused (the browser never names a folder).
+
+### Open a Listed Project
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/library/projects/{entryID}/open`
+
+```json
+{ "request_id": "open-7f3a", "selected_file": "Song 001 alt.rpp" }
+```
+
+Makes the project's workspace (or uses the one it already has), records File-only mode, fills its required project roles under the Home's standing staffing consent and seeds its first task. `selected_file` is only for a folder with several project files. Answers `200` with `{ entry_id, workspace_id, route, created, staffing, agent_name, first_task }`, where `staffing` is `added` (the shared assistant was created), `joined` (bound), `already` (the role was filled), `off` (switched off: no agent), `none` (no consent), `not_shared`, `consent_stale` or `assistant_missing`. The same `request_id` finishes a half-done open instead of making a second workspace. `409 needs_choice` with `project_files` when the folder has several project files; `409 consent_stale` (before anything is made) when the installed blueprint's team changed since the consent; `409 needs_model` before the workspace is made when the assistant would be created and no model is set. Search rows carry `can_open` for the rows this can open.
+
+### The Staffing Switch
+
+`GET /api/workspaces/{homeID}/assistant-program/library/roots` includes `sharing`: `{ state: none | on | off | stale | unavailable, role_label, agent_name, assistant_missing, team_digest }`.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/library/sharing`
+
+```json
+{ "request_id": "switch-1", "enabled": false, "team_digest": "…" }
+```
+
+`enabled: false` switches the consent off (it keeps its assistant; opening a song then adds no agent). `enabled: true` records a fresh consent (`source: home_switch`) and must echo the `team_digest` the switch showed (`409 sharing_changed` otherwise); this is also how a Home made before the consent existed opts in, and how a changed team is re-confirmed once.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/library/sharing/assistant`
+
+`{ "request_id": "…" }` — after the shared assistant was deleted, clears it from the consent so the next song opened creates a new one (the next free name) and records it.
+
+### Edits to the Shared Assistant
+
+`PATCH /api/agents/{name}` that changes the model, provider, reasoning effort, temperature, max tokens or system prompt is carried into every project copy the consent tracks for that agent, except a copy changed in its own project. The response then includes `carried: { updated: [{id, name}], customised: [{id, name}] }`. `GET /api/agents/{name}/detail` adds `workspace_count` and `workspaces`, and leaves copies that are still in step out of `origin.customised_in`. A chat answered by a workspace's own copy never writes that copy back to the user's agent.
 
 ## Home Package Upgrade API
 

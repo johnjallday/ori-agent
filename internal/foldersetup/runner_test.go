@@ -2,6 +2,7 @@ package foldersetup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -33,6 +34,9 @@ type fakeJourney struct {
 	staffingScope   workspace.AssistantRoleScope
 	staffingBound   bool
 	staffingOutRole string
+	// shownProfile makes the staffing review disclose another agent's name.
+	shownProfile  string
+	staffRequests []staffedRole
 
 	// rootHasProject makes the root run hold another folder's project already, so
 	// a further project must be its own child run.
@@ -83,6 +87,9 @@ func (f *fakeJourney) Read(_ context.Context, runID string) (*setupjourney.Journ
 		}, nil
 	}
 	projection := &setupjourney.JourneyProjection{RunID: "run-1", StateRevision: f.revision, Busy: f.busy}
+	if f.done[specialist.SetupStepProjectConnect] {
+		projection.Receipts.ProjectWorkspaceID = "song-1"
+	}
 	if runID == "child-1" {
 		projection.RunID, projection.RunKind = "child-1", setupjourney.RunKindChild
 	}
@@ -119,7 +126,7 @@ func (f *fakeJourney) Read(_ context.Context, runID string) (*setupjourney.Journ
 			case specialist.SetupStepAssistantProgramStaffing:
 				step.Actions = []setupjourney.ActionDefinition{{ID: setupjourney.ActionReviewProjectStaffing}}
 				step.Staffing = &setupjourney.StaffingProjection{Scopes: []setupjourney.StaffingScopeProjection{{
-					Scope: workspace.AssistantRoleScopeProject, WorkspaceLabel: "My Song",
+					Scope: workspace.AssistantRoleScopeProject, WorkspaceID: "song-1", WorkspaceLabel: "My Song",
 					Roles: []setupjourney.StaffingRoleProjection{{RoleID: "producer", Label: "Producer", Required: true}},
 				}}}
 				if f.homeRequired && !f.homeStaffed {
@@ -180,8 +187,21 @@ func (f *fakeJourney) Mutate(_ context.Context, _ string, action setupjourney.Ac
 			}}},
 		}}, nil
 	case setupjourney.ActionReviewProjectStaffing:
+		// The review discloses the agent and mode requested, as the real one does.
+		var requested struct {
+			Roles []staffedRole `json:"roles"`
+		}
+		_ = json.Unmarshal(request.Input, &requested)
+		f.staffRequests = append(f.staffRequests, requested.Roles...)
 		role := setupjourney.StaffingRoleProjection{RoleID: "producer", Label: "Producer", Required: true,
 			ProfileName: "Producer · My Song", Bound: f.staffingBound}
+		if len(requested.Roles) == 1 {
+			role.ProfileName = requested.Roles[0].Name
+			role.Bound = f.staffingBound || requested.Roles[0].Mode == setupjourney.StaffingModeBind
+		}
+		if f.shownProfile != "" {
+			role.ProfileName = f.shownProfile
+		}
 		if f.staffingOutRole != "" {
 			role.RoleID = f.staffingOutRole
 		}

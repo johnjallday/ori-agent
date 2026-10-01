@@ -112,7 +112,7 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 		for _, instance := range ws.AgentInstances {
 			if strings.TrimSpace(instance.Name) != "" {
 				rows = append(rows, personalassistant.FolderReceiptRow{
-					Kind: "agent", Name: instance.Name, Detail: instance.Role,
+					Kind: "agent", Name: instance.Name, Detail: agentReceiptDetail(instance),
 				})
 			}
 		}
@@ -130,6 +130,21 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 		}
 	}
 	return rows, nil
+}
+
+// agentReceiptDetail says how an agent came to be in the workspace: "joined"
+// for an agent the user already had (the Home's shared assistant), "added" for
+// one this setup created. The role is named only when the name does not say it.
+func agentReceiptDetail(instance workspace.AgentInstance) string {
+	verb := "added"
+	if instance.RoleSource == workspace.RoleSourceAssigned {
+		verb = "joined"
+	}
+	role := strings.TrimSpace(instance.Role)
+	if role == "" || strings.EqualFold(role, strings.TrimSpace(instance.Name)) {
+		return verb
+	}
+	return role + ", " + verb
 }
 
 // createFailureMessage pulls the user-facing error out of a refused create,

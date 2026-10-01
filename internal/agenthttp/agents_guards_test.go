@@ -101,6 +101,76 @@ func TestSharedEditSingleWorkspaceNoConfirmation(t *testing.T) {
 	}
 }
 
+type recordingCarrier struct {
+	calls  []string
+	result CarriedEdit
+}
+
+func (c *recordingCarrier) CarryEdit(agentName string) (CarriedEdit, error) {
+	c.calls = append(c.calls, agentName)
+	return c.result, nil
+}
+
+// D10: a saved model or prompt edit is carried to the copies Ori keeps in step,
+// and the response says where it went. Other edits carry nothing.
+func TestSharedEditIsCarriedToTheTrackedCopies(t *testing.T) {
+	h := guardTestHandler(t, []string{"Shared"}, map[string][]string{"ws-a": {"Shared"}, "ws-b": {"Shared"}})
+	carrier := &recordingCarrier{result: CarriedEdit{
+		Updated:    []workspace.WorkspaceRef{{ID: "ws-a", Name: "Song A"}},
+		Customised: []workspace.WorkspaceRef{{ID: "ws-b", Name: "Song B"}},
+	}}
+	h.SetEditCarrier(carrier)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/agents/Shared", strings.NewReader(`{"model":"terra","confirm_shared_edit":true}`))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || len(carrier.calls) != 1 || carrier.calls[0] != "Shared" {
+		t.Fatalf("model edit: %d %s calls=%v", rr.Code, rr.Body.String(), carrier.calls)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `"carried":{"updated":[{"id":"ws-a"`) || !strings.Contains(body, `"customised":[{"id":"ws-b"`) {
+		t.Fatalf("response does not say where the edit went: %s", body)
+	}
+
+	// A favourite or a description is not part of what is carried.
+	req = httptest.NewRequest(http.MethodPatch, "/api/agents/Shared", strings.NewReader(`{"favorite":true}`))
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || len(carrier.calls) != 1 || strings.Contains(rr.Body.String(), "carried") {
+		t.Fatalf("favourite edit carried: %d %s calls=%v", rr.Code, rr.Body.String(), carrier.calls)
+	}
+	// A refused edit carries nothing.
+	req = httptest.NewRequest(http.MethodPatch, "/api/agents/Shared", strings.NewReader(`{"system_prompt":"new"}`))
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict || len(carrier.calls) != 1 {
+		t.Fatalf("unconfirmed edit carried: %d calls=%v", rr.Code, carrier.calls)
+	}
+}
+
+type stepReader map[string]bool
+
+func (s stepReader) InStep(string) map[string]bool { return s }
+
+// A copy Ori keeps in step is not listed as a customisation; any other copy is.
+func TestDetailOriginDropsCopiesKeptInStep(t *testing.T) {
+	h := NewDashboardHandler(nil)
+	origin := &store.AgentOrigin{Source: store.SourceRoster, CustomisedIn: []store.WorkspaceRef{
+		{ID: "song-a", Name: "Song A"}, {ID: "song-b", Name: "Song B"}, {ID: "studio", Name: "Studio"},
+	}}
+	if got := h.withoutCopiesInStep("Shared", origin); len(got.CustomisedIn) != 3 {
+		t.Fatalf("unwired = %+v", got)
+	}
+	h.SetCopyStepReader(stepReader{"song-a": true})
+	got := h.withoutCopiesInStep("Shared", origin)
+	if len(got.CustomisedIn) != 2 || got.CustomisedIn[0].ID != "song-b" || got.CustomisedIn[1].ID != "studio" {
+		t.Fatalf("filtered = %+v", got.CustomisedIn)
+	}
+	if len(origin.CustomisedIn) != 3 {
+		t.Fatal("the filter changed the store's origin")
+	}
+}
+
 // TestRenameAttachedDefinitionBlocked verifies renaming an attached definition
 // is rejected (PRD FR10).
 func TestRenameAttachedDefinitionBlocked(t *testing.T) {

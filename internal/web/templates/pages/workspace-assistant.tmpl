@@ -137,6 +137,17 @@
                 <button id="projectLibraryInitialize" class="modern-btn modern-btn-secondary" type="button">Review library setup</button>
               </div>
               <div id="projectLibraryContent" hidden>
+                <section id="projectLibrarySharing" class="project-library-sharing" aria-labelledby="projectLibrarySharingTitle" hidden>
+                  <div class="project-library-sharing-head">
+                    <h3 id="projectLibrarySharingTitle">Shared assistant</h3>
+                    <div class="form-check form-switch project-library-sharing-switch">
+                      <input id="projectLibrarySharingSwitch" class="form-check-input" type="checkbox" role="switch" aria-describedby="projectLibrarySharingNote">
+                      <label id="projectLibrarySharingLabel" class="form-check-label" for="projectLibrarySharingSwitch">Add my assistant to songs I open</label>
+                    </div>
+                  </div>
+                  <p id="projectLibrarySharingNote" class="project-library-sharing-note"></p>
+                  <button id="projectLibrarySharingAction" class="modern-btn modern-btn-primary" type="button" hidden></button>
+                </section>
                 <section id="projectLibraryResume" class="project-library-resume" aria-labelledby="projectLibraryResumeTitle" hidden>
                   <h3 id="projectLibraryResumeTitle">Pick up where you left off</h3>
                   <div id="projectLibraryResumeCards" class="project-library-resume-cards"></div>

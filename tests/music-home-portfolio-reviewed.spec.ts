@@ -88,7 +88,10 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     disclosures.push(dialog.message());
     await dialog.accept(); // Only inside the disposable HOME; the test asserts consequences below.
   });
-  await offerCard.locator('[data-folder-action="setup"]').click();
+  // Set up is the one-card run for the whole collection (portfolio-hire-once.spec.ts);
+  // this suite walks the step-by-step path behind Adjust…, which reviews the
+  // provider release, then opens the Home creator.
+  await offerCard.locator('[data-folder-action="adjust"]').click();
   const creator = page.locator('#addFolderModal');
   await expect(creator).toBeVisible({ timeout: 90_000 });
   expect(disclosures.join('\n')).toContain(

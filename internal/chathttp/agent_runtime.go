@@ -52,6 +52,9 @@ type resolvedChatAgent struct {
 	// binding is confined to; a missing key means no repository constraint.
 	// See workspace.ResolvedAgentRuntime.MCPRepoScope.
 	MCPRepoScope map[string]string
+	// WorkspaceCopy is true when the agent is the workspace's own copy; see
+	// workspace.ResolvedAgentRuntime.FromWorkspaceCopy.
+	WorkspaceCopy bool
 }
 
 // SetRuntimeResolver configures workspace-aware agent runtime resolution for chat requests.
@@ -91,6 +94,7 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 			MCPServers:       append([]string{}, resolved.MCPServers...),
 			MCPToolAllowlist: resolved.MCPToolAllowlist,
 			MCPRepoScope:     resolved.MCPRepoScope,
+			WorkspaceCopy:    resolved.FromWorkspaceCopy,
 		}
 		if len(resolved.EffectiveSkills) > 0 {
 			result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)
@@ -238,12 +242,16 @@ func (h *Handler) rehydrateSessionHistory(ctx context.Context, sessionID string,
 	})
 }
 
-func (h *Handler) persistAgent(agentName string, ag *agent.Agent) error {
-	if h == nil || h.store == nil || ag == nil || strings.TrimSpace(agentName) == "" {
+// persistAgent saves the chat's agent back to the user's agent of that name. A
+// workspace's own copy is never saved there: it can differ from the user's
+// agent (a prompt changed in that workspace), and one agent can work in many
+// workspaces, so writing it back would make one workspace's copy everyone's.
+func (h *Handler) persistAgent(agentName string, ag *resolvedChatAgent) error {
+	if h == nil || h.store == nil || ag == nil || ag.Agent == nil || ag.WorkspaceCopy || strings.TrimSpace(agentName) == "" {
 		return nil
 	}
 
-	return h.store.SetAgent(agentName, cloneAgentForChat(ag))
+	return h.store.SetAgent(agentName, cloneAgentForChat(ag.Agent))
 }
 
 func cloneAgentForChat(src *agent.Agent) *agent.Agent {
