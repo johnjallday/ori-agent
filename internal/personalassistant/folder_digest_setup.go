@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -52,12 +53,22 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	if s.deps.Setup == nil || offer.Status != FolderOfferPending || !eligibleForOneCard(offer) {
 		return
 	}
-	plan, err := s.deps.Setup.Plan(ctx, FolderSetupRequest{UserID: userID, Offer: offer})
+	plan, err := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, offer))
 	if err != nil || len(plan.Lines) == 0 {
 		return
 	}
-	plan = NewFolderSetupPlan(plan.Lines)
+	plan = plan.Stamped()
 	v.Plan = &plan
+}
+
+// setupRequest is what the host needs to plan an offer's setup.
+func (s *FolderDigestService) setupRequest(ctx context.Context, userID string, offer FolderOffer) FolderSetupRequest {
+	req := FolderSetupRequest{UserID: userID, Offer: offer}
+	if row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension); ok &&
+		row.Offer != nil && s.deps.AppInstalled != nil {
+		req.AppInstalled = s.deps.AppInstalled(ctx, row.Offer.IntegrationName)
+	}
+	return req
 }
 
 func (s *FolderDigestService) isRunning(offerID string) bool {
@@ -143,11 +154,11 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	// legitimately shrinks as steps finish, against the plan it was confirmed on.
 	var plan FolderSetupPlan
 	if offer.Status == FolderOfferPending {
-		fresh, planErr := s.deps.Setup.Plan(ctx, FolderSetupRequest{UserID: userID, Offer: *offer})
+		fresh, planErr := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, *offer))
 		if planErr != nil {
 			return FolderOfferView{}, planErr
 		}
-		plan = NewFolderSetupPlan(fresh.Lines)
+		plan = fresh.Stamped()
 		if plan.Digest != input.PlanDigest {
 			return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderPlanChanged
 		}
@@ -155,7 +166,10 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		if offer.Setup.PlanDigest != input.PlanDigest {
 			return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderPlanChanged
 		}
-		plan = FolderSetupPlan{Lines: append([]FolderPlanLine(nil), offer.Setup.Lines...), Digest: offer.Setup.PlanDigest}
+		plan = FolderSetupPlan{
+			Lines: append([]FolderPlanLine(nil), offer.Setup.Lines...), Digest: offer.Setup.PlanDigest,
+			Intent: offer.Setup.Intent,
+		}
 	}
 
 	now := s.now()
@@ -191,7 +205,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		}
 		item.Setup = &FolderSetupRun{
 			PlanDigest: plan.Digest, Lines: lines, Status: FolderSetupRunning, EntryName: entryName,
-			RunID: runID, StartedAt: now, UpdatedAt: now,
+			RunID: runID, StartedAt: now, UpdatedAt: now, Intent: plan.Intent,
 		}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: item.ID, Action: "setup", At: now})
 		pruneFolderDigest(d)

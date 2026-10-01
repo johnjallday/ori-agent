@@ -85,10 +85,35 @@ type Result struct {
 // ErrNeedsPick means the folder's path is gone (the server restarted).
 var ErrNeedsPick = errors.New("foldersetup: the folder must be picked again")
 
+// ProviderPreview is where a supporting plugin (the Home provider) stands.
+type ProviderPreview struct {
+	// Ready means it is installed at the reviewed release and enabled.
+	Ready    bool
+	PluginID string
+	// Version is the reviewed release an Install would put in place.
+	Version string
+}
+
+// Provider installs the reviewed plugin that supplies a split blueprint's Home.
+// Install takes the version Preview disclosed and refuses any other.
+type Provider interface {
+	Preview(ctx context.Context) (ProviderPreview, error)
+	Install(ctx context.Context, reviewedVersion string) error
+}
+
 // Runner is the resumable run loop. It holds no state between calls: every pass
 // re-reads the journey and performs only the steps that are still incomplete.
 type Runner struct {
-	Journey    Journey
+	// Journey is the plugin quest's journey: the project, the mode and the team.
+	Journey Journey
+	// OpenProject, when set, resolves that journey after the install steps have
+	// run: the plugin's quest exists only once the plugin does.
+	OpenProject func(ctx context.Context) (Journey, error)
+	// Install is the host's install quest for the reviewed integration. Nil
+	// means the integration is taken to be ready already.
+	Install Journey
+	// Providers installs the Home provider the plan promised. Nil means none.
+	Providers  Provider
 	Selections Selections
 	Progress   Progress
 	// NewKey returns a fresh idempotency key; nil uses random bytes.
@@ -125,15 +150,17 @@ var stepLines = map[specialist.SetupStepKind][]string{
 
 type run struct {
 	*Runner
-	cfg       Config
-	lines     []personalassistant.FolderPlanLine
+	cfg   Config
+	lines []personalassistant.FolderPlanLine
+	// journey is the plugin quest being driven; runID is its run.
+	journey   Journey
 	runID     string
 	entryName string
 }
 
 // Run drives the journey to the end or to the first thing that needs the user.
 func (r *Runner) Run(ctx context.Context, cfg Config) (Result, error) {
-	if r == nil || r.Journey == nil || r.Selections == nil || r.Progress == nil {
+	if r == nil || (r.Journey == nil && r.OpenProject == nil) || r.Selections == nil || r.Progress == nil {
 		return Result{}, errors.New("foldersetup: runner is not wired")
 	}
 	state := &run{Runner: r, cfg: cfg, entryName: cfg.EntryName}
@@ -199,14 +226,14 @@ func (s *run) setKinds(kinds []string, state string) {
 }
 
 func (s *run) drive(ctx context.Context) error {
-	// The integration line is settled before the project steps exist; group 2
-	// drives its install and enable here. Until then it must already be ready.
-	s.setKind(personalassistant.FolderPlanIntegration, personalassistant.FolderLineDone)
 	if err := s.record(ctx, personalassistant.FolderSetupRunning, "", nil); err != nil {
 		return err
 	}
+	if err := s.prepare(ctx); err != nil {
+		return err
+	}
 	for pass := 0; pass < maxPasses; pass++ {
-		journey, err := s.Journey.Read(ctx, s.runID)
+		journey, err := s.journey.Read(ctx, s.runID)
 		if err != nil {
 			return err
 		}
@@ -236,6 +263,155 @@ func (s *run) drive(ctx context.Context) error {
 		}
 	}
 	return &stop{reason: personalassistant.FolderStopFailed}
+}
+
+// prepare brings the plugins the plan promised into place, then opens the plugin
+// quest, which exists only once the plugin does. Each is held to the confirmed
+// intent: a release other than the one the user saw stops the run.
+func (s *run) prepare(ctx context.Context) error {
+	intent := s.cfg.Plan.Intent
+	if s.Install != nil && intent.Integration != "" {
+		if err := s.installIntegration(ctx, intent); err != nil {
+			return err
+		}
+	} else {
+		s.setKind(personalassistant.FolderPlanIntegration, personalassistant.FolderLineDone)
+	}
+	if s.Providers != nil && intent.Provider != "" {
+		if err := s.installProvider(ctx, intent); err != nil {
+			return err
+		}
+	} else {
+		s.setKind(personalassistant.FolderPlanProvider, personalassistant.FolderLineDone)
+	}
+	s.journey = s.Journey
+	if s.OpenProject != nil {
+		opened, err := s.OpenProject(ctx)
+		if err != nil || opened == nil {
+			// An install that succeeded but left no single plugin quest is not a
+			// setup the runner can finish.
+			return failed("the plugin quest is unavailable after the install")
+		}
+		s.journey = opened
+	}
+	return s.record(ctx, personalassistant.FolderSetupRunning, "", nil)
+}
+
+// installActions are the reviews a state of the integration may need, in order.
+func installActions(state string) []setupjourney.ActionID {
+	switch state {
+	case personalassistant.FolderInstallInstall:
+		return []setupjourney.ActionID{setupjourney.ActionReviewInstall, setupjourney.ActionReviewEnable}
+	case personalassistant.FolderInstallEnable:
+		return []setupjourney.ActionID{setupjourney.ActionReviewEnable}
+	case personalassistant.FolderInstallUpdate:
+		return []setupjourney.ActionID{setupjourney.ActionReviewUpdate, setupjourney.ActionReviewEnable}
+	}
+	return nil
+}
+
+// installIntegration drives the host's install quest through the reviews the
+// plan promised, one review then commit at a time.
+func (s *run) installIntegration(ctx context.Context, intent personalassistant.FolderSetupIntent) error {
+	s.setKind(personalassistant.FolderPlanIntegration, personalassistant.FolderLineWorking)
+	if err := s.record(ctx, personalassistant.FolderSetupRunning, "", nil); err != nil {
+		return err
+	}
+	allowed := installActions(intent.Integration)
+	runID := ""
+	for pass := 0; pass < 6; pass++ {
+		journey, err := s.Install.Read(ctx, runID)
+		if err != nil {
+			return &stop{reason: personalassistant.FolderStopInstallFailed, detail: err.Error()}
+		}
+		if journey.RunID != "" {
+			runID = journey.RunID
+		}
+		var step *setupjourney.StepProjection
+		for i := range journey.Steps {
+			if journey.Steps[i].Kind == specialist.SetupStepIntegrationInstall {
+				step = &journey.Steps[i]
+			}
+		}
+		if step == nil {
+			return &stop{reason: personalassistant.FolderStopInstallFailed, detail: "the install quest has no install step"}
+		}
+		if step.Status == setupjourney.StepComplete {
+			s.setKind(personalassistant.FolderPlanIntegration, personalassistant.FolderLineDone)
+			return nil
+		}
+		var action setupjourney.ActionID
+		for _, candidate := range []setupjourney.ActionID{setupjourney.ActionReviewInstall, setupjourney.ActionReviewEnable, setupjourney.ActionReviewUpdate} {
+			if has(step, candidate) {
+				action = candidate
+				break
+			}
+		}
+		if action == "" {
+			return &stop{reason: personalassistant.FolderStopInstallFailed, detail: "the install quest offers no action (" + string(step.ReasonCode) + ")"}
+		}
+		if !containsAction(allowed, action) {
+			// The plan said this would not be needed (or would be a different step).
+			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the install quest now needs " + string(action)}
+		}
+		review, err := s.reviewOn(ctx, s.Install, runID, journey.StateRevision, action, nil)
+		if err != nil {
+			return &stop{reason: personalassistant.FolderStopInstallFailed, detail: err.Error()}
+		}
+		shown := review.Integration
+		if shown == nil || shown.PluginID != intent.IntegrationPlugin || !integrationVersionMatches(shown, action, intent.IntegrationVersion) {
+			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the integration review differs from the plan"}
+		}
+		if err := s.commitOn(ctx, s.Install, runID, journey.StateRevision, review, nil); err != nil {
+			return &stop{reason: personalassistant.FolderStopInstallFailed, detail: err.Error()}
+		}
+	}
+	return &stop{reason: personalassistant.FolderStopInstallFailed, detail: "the integration did not become ready"}
+}
+
+// integrationVersionMatches holds a review to the release the plan named: the
+// release an install or update would put in place, or the one an enable turns on.
+func integrationVersionMatches(shown *setupjourney.IntegrationProjection, action setupjourney.ActionID, planned string) bool {
+	if action == setupjourney.ActionReviewEnable {
+		return shown.InstalledVersion == planned
+	}
+	return shown.ExpectedVersion == planned
+}
+
+func containsAction(list []setupjourney.ActionID, action setupjourney.ActionID) bool {
+	for _, candidate := range list {
+		if candidate == action {
+			return true
+		}
+	}
+	return false
+}
+
+// installProvider brings the Home provider to the reviewed release the plan named.
+func (s *run) installProvider(ctx context.Context, intent personalassistant.FolderSetupIntent) error {
+	s.setKind(personalassistant.FolderPlanProvider, personalassistant.FolderLineWorking)
+	if err := s.record(ctx, personalassistant.FolderSetupRunning, "", nil); err != nil {
+		return err
+	}
+	preview, err := s.Providers.Preview(ctx)
+	if err != nil {
+		return &stop{reason: personalassistant.FolderStopInstallFailed, detail: err.Error()}
+	}
+	if preview.Ready {
+		s.setKind(personalassistant.FolderPlanProvider, personalassistant.FolderLineDone)
+		return nil
+	}
+	if intent.Provider == personalassistant.FolderInstallReady || preview.PluginID != intent.ProviderPlugin || preview.Version != intent.ProviderVersion {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home provider differs from the plan"}
+	}
+	if err := s.Providers.Install(ctx, preview.Version); err != nil {
+		return &stop{reason: personalassistant.FolderStopInstallFailed, detail: err.Error()}
+	}
+	if verified, err := s.Providers.Preview(ctx); err != nil || !verified.Ready {
+		return &stop{reason: personalassistant.FolderStopInstallFailed, detail: "the Home provider was not ready after the install"}
+	}
+	s.setKind(personalassistant.FolderPlanProvider, personalassistant.FolderLineDone)
+	return nil
 }
 
 // markFinished turns the lines of every complete step to done.
@@ -470,10 +646,19 @@ func staffingMatches(shown *setupjourney.StaffingProjection, scope workspace.Ass
 	return seen == len(wanted)
 }
 
-// review runs a review action at the projection's revision.
+// review runs a review action on the plugin quest at the projection's revision.
 func (s *run) review(ctx context.Context, journey *setupjourney.JourneyProjection, action setupjourney.ActionID, input json.RawMessage) (*setupjourney.ReviewProjection, error) {
-	result, err := s.Journey.Mutate(ctx, s.runID, action, setupjourney.ActionMutation{
-		IfRevision: journey.StateRevision, IdempotencyKey: s.key(), Input: input,
+	return s.reviewOn(ctx, s.journey, s.runID, journey.StateRevision, action, input)
+}
+
+// commit confirms a review it has already checked, with the same input.
+func (s *run) commit(ctx context.Context, journey *setupjourney.JourneyProjection, review *setupjourney.ReviewProjection, input json.RawMessage) error {
+	return s.commitOn(ctx, s.journey, s.runID, journey.StateRevision, review, input)
+}
+
+func (s *run) reviewOn(ctx context.Context, j Journey, runID string, revision int64, action setupjourney.ActionID, input json.RawMessage) (*setupjourney.ReviewProjection, error) {
+	result, err := j.Mutate(ctx, runID, action, setupjourney.ActionMutation{
+		IfRevision: revision, IdempotencyKey: s.key(), Input: input,
 	})
 	if err != nil {
 		return nil, err
@@ -484,10 +669,9 @@ func (s *run) review(ctx context.Context, journey *setupjourney.JourneyProjectio
 	return result.Review, nil
 }
 
-// commit confirms a review it has already checked, with the same input.
-func (s *run) commit(ctx context.Context, journey *setupjourney.JourneyProjection, review *setupjourney.ReviewProjection, input json.RawMessage) error {
-	_, err := s.Journey.Mutate(ctx, s.runID, review.CommitAction, setupjourney.ActionMutation{
-		IfRevision: journey.StateRevision, IdempotencyKey: s.key(), ReviewToken: review.Token, Input: input,
+func (s *run) commitOn(ctx context.Context, j Journey, runID string, revision int64, review *setupjourney.ReviewProjection, input json.RawMessage) error {
+	_, err := j.Mutate(ctx, runID, review.CommitAction, setupjourney.ActionMutation{
+		IfRevision: revision, IdempotencyKey: s.key(), ReviewToken: review.Token, Input: input,
 	})
 	return err
 }

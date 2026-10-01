@@ -15,7 +15,7 @@ func TestFolderSetupHostFallsBackToTheJourneyWhenItCannotPlan(t *testing.T) {
 		Subject: personalassistant.FolderCandidateRecord{Name: "Song", Shape: "audio", MarkerName: "*.rpp"},
 	}
 	// No journey service at all: the card must keep the step-by-step path.
-	host := folderSetupHost{builder: &ServerBuilder{}}
+	host := &folderSetupHost{builder: &ServerBuilder{}}
 	if _, err := host.Plan(t.Context(), personalassistant.FolderSetupRequest{UserID: "local", Offer: offer}); !errors.Is(err, errSetupUnavailable) {
 		t.Fatalf("plan without a journey service = %v", err)
 	}
@@ -23,7 +23,7 @@ func TestFolderSetupHostFallsBackToTheJourneyWhenItCannotPlan(t *testing.T) {
 		t.Fatalf("run without a journey service = %v", err)
 	}
 	// A subject that is not a recognized project is never planned.
-	other := folderSetupHost{builder: &ServerBuilder{}}
+	other := &folderSetupHost{builder: &ServerBuilder{}}
 	if _, err := other.Plan(t.Context(), personalassistant.FolderSetupRequest{Offer: personalassistant.FolderOffer{}}); !errors.Is(err, errSetupUnavailable) {
 		t.Fatalf("plan of an unrecognized subject = %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 // Line kinds of a folder setup plan, in the order the card shows them.
 const (
 	FolderPlanIntegration = "integration"
+	FolderPlanProvider    = "provider"
 	FolderPlanHome        = "home"
 	FolderPlanWorkspace   = "workspace"
 	FolderPlanFolder      = "folder"
@@ -57,12 +58,35 @@ type FolderPlanLine struct {
 	State  string `json:"state,omitempty"`
 }
 
+// Where an installable plugin stands, as the plan promised it.
+const (
+	FolderInstallReady   = "ready"
+	FolderInstallInstall = "install"
+	FolderInstallEnable  = "enable"
+	FolderInstallUpdate  = "update"
+)
+
+// FolderSetupIntent is what the confirmed plan promised about the two plugins a
+// setup may install, in a form the run can check. A resumed run is held to this,
+// not to a recomputed plan: the plan shrinks as steps finish, the promise does not.
+// It never leaves the server.
+type FolderSetupIntent struct {
+	Integration        string `json:"integration,omitempty"`
+	IntegrationPlugin  string `json:"integration_plugin,omitempty"`
+	IntegrationVersion string `json:"integration_version,omitempty"`
+	Provider           string `json:"provider,omitempty"`
+	ProviderPlugin     string `json:"provider_plugin,omitempty"`
+	ProviderVersion    string `json:"provider_version,omitempty"`
+}
+
 // FolderSetupPlan is everything one press of Set up will do. The browser sends
 // Digest back with the click and the server recomputes the plan: a mismatch
 // means the card on screen is stale and the click is refused.
 type FolderSetupPlan struct {
 	Lines  []FolderPlanLine `json:"lines"`
 	Digest string           `json:"digest"`
+	// Intent is the machine-readable promise behind the lines; server only.
+	Intent FolderSetupIntent `json:"-"`
 }
 
 // FolderPlanDigest is the SHA-256 of the lines' canonical JSON with State
@@ -86,6 +110,15 @@ func NewFolderSetupPlan(lines []FolderPlanLine) FolderSetupPlan {
 	return FolderSetupPlan{Lines: copied, Digest: FolderPlanDigest(copied)}
 }
 
+// Stamped returns the plan with its digest recomputed from its lines and its
+// lines copied, keeping the intent. A host's plan is never trusted to carry a
+// digest it computed itself.
+func (p FolderSetupPlan) Stamped() FolderSetupPlan {
+	stamped := NewFolderSetupPlan(p.Lines)
+	stamped.Intent = p.Intent
+	return stamped
+}
+
 // FolderSetupUpdate is one snapshot of a run, written onto the offer.
 type FolderSetupUpdate struct {
 	Lines           []FolderPlanLine
@@ -103,10 +136,13 @@ type FolderSetupUpdate struct {
 // folder's canonical path from the offer the server holds; it is set only for
 // Run and never reaches the browser.
 type FolderSetupRequest struct {
-	UserID    string
-	Offer     FolderOffer
-	Path      string
-	EntryName string
+	UserID string
+	Offer  FolderOffer
+	// AppInstalled says whether the application itself is on this computer, which
+	// the plan states honestly; setup never depends on it.
+	AppInstalled bool
+	Path         string
+	EntryName    string
 	// Plan is the confirmed plan a Run is held to.
 	Plan FolderSetupPlan
 	// Update records the run's progress on the offer.
@@ -159,8 +195,15 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 	}
 	for _, line := range run.Lines {
 		if line.Kind == "" || len(line.Name) > folderSetupMaxText || len(line.Detail) > folderSetupMaxText ||
-			strings.ContainsAny(line.Name+line.Detail, "/\\\x00\r\n") {
+			strings.ContainsAny(line.Name+line.Detail, "\x00\r\n") || looksLikeFilesystemPath(line.Name) || looksLikeFilesystemPath(line.Detail) {
 			return fmt.Errorf("%w: setup line", errFolderDigestInvalid)
+		}
+	}
+	intent := run.Intent
+	for _, text := range []string{intent.Integration, intent.IntegrationPlugin, intent.IntegrationVersion,
+		intent.Provider, intent.ProviderPlugin, intent.ProviderVersion} {
+		if len(text) > 80 || strings.ContainsAny(text, "/\\\x00\r\n") {
+			return fmt.Errorf("%w: setup intent", errFolderDigestInvalid)
 		}
 	}
 	for _, name := range append([]string{run.EntryName}, run.EntryCandidates...) {
@@ -169,6 +212,14 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 		}
 	}
 	return nil
+}
+
+// looksLikeFilesystemPath is true for text that names a place on disk: a leading
+// slash or tilde, a backslash, or a slash-led word anywhere. A reviewed source
+// label such as "owner/repo" is not one.
+func looksLikeFilesystemPath(text string) bool {
+	return strings.HasPrefix(text, "/") || strings.HasPrefix(text, "~") ||
+		strings.Contains(text, "\\") || strings.Contains(text, " /") || strings.Contains(text, " ~/")
 }
 
 // FolderSetupRun is the persisted state of one offer's one-card setup. It is
@@ -186,4 +237,6 @@ type FolderSetupRun struct {
 	RunID           string    `json:"run_id,omitempty"`
 	StartedAt       time.Time `json:"started_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	// Intent is what the confirmed plan promised, kept for a resume.
+	Intent FolderSetupIntent `json:"intent,omitempty"`
 }

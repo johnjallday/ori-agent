@@ -294,8 +294,17 @@ func TestFolderSetup_RunStateStaysBoundedAndPathFree(t *testing.T) {
 			t.Errorf("case %d accepted: %+v", i, run)
 		}
 	}
+	for _, text := range []string{"Links ~/Songs", `Links C:\Songs`, "/Users/me/Songs"} {
+		if err := validateFolderSetupRun(FolderSetupRun{Status: FolderSetupRunning, Lines: []FolderPlanLine{{Kind: "folder", Name: text}}}); err == nil {
+			t.Errorf("a path-like line %q was accepted", text)
+		}
+	}
 	good := FolderSetupRun{Status: FolderSetupStopped, EntryCandidates: []string{"A.rpp"},
-		Lines: []FolderPlanLine{{Kind: "workspace", Name: "Creates a workspace named My Song"}}}
+		Lines: []FolderPlanLine{
+			{Kind: "workspace", Name: "Creates a workspace named My Song"},
+			// A reviewed source label is "owner/repo", not a path.
+			{Kind: "integration", Name: "Installs and enables the reviewed REAPER integration 0.9.0", Detail: "From johnjallday/reaper-plugin, checked before it is enabled."},
+		}}
 	if err := validateFolderSetupRun(good); err != nil {
 		t.Fatal(err)
 	}
