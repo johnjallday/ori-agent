@@ -117,6 +117,10 @@
   const confirmButton = byId('confirmResetBtn');
   const error = byId('resetConfirmError');
   const items = byId('resetItemsList');
+  // Blockers render beside the confirm box they lock, not at the end of the
+  // reviewed scope, where a long Start Fresh list buries them.
+  const blockerPanel = byId('resetBlockers');
+  const blockerList = byId('resetBlockerList');
   const modalElement = byId('resetConfirmModal');
   const modalTitle = byId('resetConfirmTitleText');
   const modalWarning = byId('resetConfirmWarning');
@@ -253,11 +257,23 @@
         rows.push(`Keep: ${location.display_path} — ${location.reason}`);
       }
     }
-    for (const blocker of preview.blockers || []) {
-      rows.push(`Blocked: ${blocker.message} ${blocker.recovery || ''}`.trim());
-    }
     if (preview.restart?.instructions) rows.push(`Afterward: ${preview.restart.instructions}`);
     return rows;
+  }
+
+  function renderBlockers(blockers) {
+    blockerList?.replaceChildren();
+    for (const blocker of blockers) {
+      const li = document.createElement('li');
+      li.textContent = `${blocker.message} ${blocker.recovery || ''}`.trim();
+      blockerList?.appendChild(li);
+    }
+    if (blockerPanel) blockerPanel.hidden = blockers.length === 0;
+    if (input) {
+      input.placeholder = blockers.length
+        ? 'Locked until the problems above are fixed'
+        : 'Type RESET to confirm';
+    }
   }
 
   function renderPreview(preview) {
@@ -267,6 +283,7 @@
       li.textContent = row;
       items?.appendChild(li);
     }
+    renderBlockers(preview.blockers || []);
     if (modalTitle) {
       modalTitle.textContent =
         preview.intent === 'start_fresh' ? 'Confirm Start Fresh' : 'Confirm reviewed data reset';
@@ -303,7 +320,7 @@
     }
     if (preview.blockers?.length) {
       showError(
-        'Reset is blocked. Resolve every blocker and review again; no data has been deleted.'
+        'Reset is blocked by the problems listed above. Fix them, then review again; no data has been deleted.'
       );
     } else {
       showError('');

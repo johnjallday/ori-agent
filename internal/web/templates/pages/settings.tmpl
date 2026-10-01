@@ -1943,6 +1943,13 @@
               </label>
             </div>
           </div>
+          <!-- Anything that locks the confirm box is listed right above it, so a
+               blocked review says why instead of just greying out the box. -->
+          <div id="resetBlockers" class="alert alert-danger mb-3" role="alert" hidden>
+            <p class="mb-1"><strong>Fix these before you can reset</strong></p>
+            <ul id="resetBlockerList" class="mb-2" style="overflow-wrap: anywhere;"></ul>
+            <p class="mb-0">Then cancel and review again. Nothing has been deleted.</p>
+          </div>
           <label for="resetConfirmInput" id="resetConfirmInstructions" class="mb-2" style="color: var(--text-secondary);">
             To confirm, type <strong>RESET</strong> in the box below:
           </label>
