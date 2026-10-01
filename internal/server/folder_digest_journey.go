@@ -199,8 +199,16 @@ func (v folderJourneyVerifier) VerifiedProject(ctx context.Context, userID, runI
 	if err != nil || row == nil || row.OwnerUserID != userID || row.IsGroup() || strings.TrimSpace(row.FolderSlug) == "" {
 		return personalassistant.FolderCreateResult{}, refused
 	}
-	return personalassistant.FolderCreateResult{WorkspaceID: id, Route: "/workspaces/" + row.FolderSlug,
-		HomeRoute: v.verifiedProjectHomeRoute(ctx, userID, project)}, nil
+	result := personalassistant.FolderCreateResult{WorkspaceID: id, Route: "/workspaces/" + row.FolderSlug,
+		HomeRoute: v.verifiedProjectHomeRoute(ctx, userID, project)}
+	// The receipt is what the card shows once the setup is proved. It is a
+	// best-effort read: without it the card falls back to its plain outcome note.
+	if b.sessionHandler != nil {
+		if rows, receiptErr := b.sessionHandler.FolderOfferWorkspaceReceipt(id, true); receiptErr == nil {
+			result.Receipt = rows
+		}
+	}
+	return result, nil
 }
 
 // An offer cannot infer a Home from its name or selected folder. Only a

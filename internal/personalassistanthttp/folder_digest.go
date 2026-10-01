@@ -31,6 +31,7 @@ type FolderDigestService interface {
 	ProjectSelectionPath(ctx context.Context, userID, offerID string) (string, error)
 	PortfolioContinuations(ctx context.Context, userID, homeID string) ([]personalassistant.FolderContinuation, error)
 	ResolveExistingHome(ctx context.Context, userID, offerID, requestID string) (personalassistant.FolderOfferView, error)
+	StartSetup(ctx context.Context, userID, offerID string, input personalassistant.FolderSetupInput) (personalassistant.FolderOfferView, error)
 }
 
 // FolderProjectSelectionIssuer mints the existing project-connection picker's
@@ -269,6 +270,54 @@ func (h *Handler) DecideFolderDigest(w http.ResponseWriter, r *http.Request) {
 	offer, err := h.folderDigest.Decide(r.Context(), userID, offerID, personalassistant.FolderDecisionInput{
 		Decision: req.Decision, Choice: req.Choice, RequestID: req.RequestID, Create: req.Create,
 	})
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"offer": offer})
+}
+
+type folderSetupRequest struct {
+	RequestID  string `json:"request_id"`
+	PlanDigest string `json:"plan_digest"`
+	EntryName  string `json:"entry_name"`
+}
+
+// SetupFolderDigest is the click on Set up. The body carries the digest of the
+// plan the card showed, a request id, and optionally the project file chosen
+// from the names the server offered; the folder itself is never accepted. A
+// digest that no longer matches is a 409 carrying the fresh offer.
+func (h *Handler) SetupFolderDigest(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	offerID := strings.TrimSpace(r.PathValue("offerID"))
+	if offerID == "" {
+		orihttp.BadRequest(w, "Offer id is required")
+		return
+	}
+	var req folderSetupRequest
+	if !decodeFolderDigestBody(w, r, &req, "request_id", "plan_digest", "entry_name") {
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	offer, err := h.folderDigest.StartSetup(r.Context(), userID, offerID, personalassistant.FolderSetupInput{
+		RequestID: req.RequestID, PlanDigest: req.PlanDigest, EntryName: req.EntryName,
+	})
+	if errors.Is(err, personalassistant.ErrFolderPlanChanged) {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error":        "What Set up would do has changed. Review the new plan",
+			"plan_changed": true, "offer": offer,
+		})
+		return
+	}
 	if err != nil {
 		writeFolderDigestError(w, err)
 		return

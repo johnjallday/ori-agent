@@ -96,6 +96,52 @@ func TestFolderOfferWorkspaceReceipt_ReadsActualCreatedRecordsAndReuse(t *testin
 	}
 }
 
+// A project the setup journey connected is linked through its project entry,
+// not a primary directory. Its receipt still says the folder is linked, by name
+// and never by path.
+func TestFolderOfferWorkspaceReceipt_NamesAFolderLinkedThroughTheProjectEntry(t *testing.T) {
+	handler, _, cleanup := capabilityTemplateEnv(t)
+	defer cleanup()
+	id, err := handler.CreateFolderOfferWorkspace(context.Background(), FolderOfferWorkspaceRequest{Name: "My Song", OfferID: "offer-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := handler.workspaceStore.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(t.TempDir(), "My Song")
+	if err := os.Mkdir(folder, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	dirID, err := projecttemplates.AttachLinkedDirectory(ws, "My Song", folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(ws.SharedData, projecttemplates.PrimaryDirectoryIDKey)
+	if err := agentworkspace.SetProjectEntryLocator(ws.SharedData, agentworkspace.ProjectEntryLocator{
+		SchemaVersion: 1, Kind: agentworkspace.ProjectEntryDirectoryReference,
+		DirectoryReferenceID: dirID, RelativePath: "My Song.rpp",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.workspaceStore.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := handler.FolderOfferWorkspaceReceipt(id, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) < 2 || rows[1].Kind != "folder" || rows[1].Name != "My Song" || rows[1].Detail != "linked where it is" {
+		t.Fatalf("receipt = %+v", rows)
+	}
+	for _, row := range rows {
+		if strings.Contains(row.Name+row.Detail, folder) {
+			t.Fatalf("a receipt row leaked the folder path: %+v", row)
+		}
+	}
+}
+
 func TestCreateFolderOfferWorkspace_UsesTheOrdinaryPipeline(t *testing.T) {
 	handler, libDir, cleanup := capabilityTemplateEnv(t)
 	defer cleanup()

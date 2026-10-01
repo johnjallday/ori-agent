@@ -1710,6 +1710,36 @@ PY
       -d "{\"decision\":\"yes\",\"choice\":\"project\",\"create\":true,\"request_id\":\"smoke-$(date +%s%N)\"}" \
       | python3 -c 'import json,sys; p=json.load(sys.stdin); o=p.get("offer") or {}; print("set up:", o.get("status"), (o.get("subject") or {}).get("name"), json.dumps(o.get("outcome")), p.get("error",""))'
     ;;
+  one-card)
+    # A recognized project's one-card setup: post Set up with the plan digest the
+    # card is showing (read from the current offer), then poll the digest read
+    # until the run leaves "running" and print the lines and the outcome.
+    # Pass a project file name as the second argument to answer "which file".
+    local offer="${4:-}" entry="${5:-}" digest body
+    [[ -n "$offer" ]] || fail "usage: $0 showfolder <base-url> one-card <offer-id> [project-file-name]"
+    digest=$(curl -s "$BASE_URL/api/personal-assistant/folder-digest" | python3 -c 'import json,sys; o=(json.load(sys.stdin).get("folder_digest") or {}).get("offer") or {}; print((o.get("plan") or {}).get("digest") or (o.get("setup") or {}).get("plan_digest") or "")')
+    [[ -n "$digest" ]] || fail "the current offer has no plan (is the integration installed, and is this a recognized project?)"
+    body="{\"plan_digest\":\"$digest\",\"request_id\":\"smoke-$(date +%s%N)\""
+    [[ -n "$entry" ]] && body="$body,\"entry_name\":\"$entry\""
+    curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/offers/$offer/setup" \
+      -H 'Content-Type: application/json' -d "$body}" \
+      | python3 -c 'import json,sys; p=json.load(sys.stdin); o=p.get("offer") or {}; print("started:", o.get("status"), (o.get("setup") or {}).get("status"), p.get("error",""))'
+    for _ in $(seq 1 120); do
+      sleep 1
+      curl -s "$BASE_URL/api/personal-assistant/folder-digest" | python3 -c '
+import json, sys
+o = (json.load(sys.stdin).get("folder_digest") or {}).get("offer") or {}
+s = o.get("setup") or {}
+print("status:", o.get("status"), "run:", s.get("status", "-"), "stop:", s.get("stop_reason", "-"))
+for l in s.get("lines") or []:
+    print("  [%s] %s" % (l.get("state", "-"), l.get("name")))
+if o.get("status") == "resolved":
+    print("outcome:", json.dumps(o.get("outcome")))
+    sys.exit(0)
+sys.exit(3 if s.get("status") == "running" else 0)
+' && break
+    done
+    ;;
   project)
     # The project outcome end to end through the API, as the Create Workspace
     # modal (the card's Adjust…) does it: yes on the offer, create the
@@ -1744,7 +1774,7 @@ PY
   today)
     curl -sf "$BASE_URL/api/personal-assistant/today" | python3 -c 'import json,sys; t=json.load(sys.stdin)["today"]; print("Today:", t.get("state")); [print(k + ":", ", ".join(i.get("title", "") for i in (t.get(k) or {}).get("items", [])) or "(empty)") for k in ("working_on", "needs_you", "done")]; print("Could not read:", ", ".join(t.get("unavailable_sources") or []) or "none")'
     ;;
-  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|hqcard|hq|today|scan <chip>|decide <offer> <decision> [choice]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
+  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|hqcard|hq|today|scan <chip>|decide <offer> <decision> [choice]|one-card <offer> [project-file]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
   esac
 }
 

@@ -27,6 +27,8 @@ type fakeFolderDigest struct {
 	// existingHomeCalls records "offer/request" for every existing-Home resolve
 	// that reached the service.
 	existingHomeCalls []string
+	// setups records every one-card setup click that reached the service.
+	setups []personalassistant.FolderSetupInput
 }
 
 func (f *fakeFolderDigest) Current(context.Context, string) (personalassistant.FolderDigestView, error) {
@@ -133,6 +135,78 @@ func (f *fakeFolderDigest) ResolveExistingHome(_ context.Context, _ string, offe
 		ID: offerID, Status: personalassistant.FolderOfferResolved,
 		Outcome: &personalassistant.FolderOutcome{Kind: personalassistant.FolderChoiceHome, WorkspaceID: "home-1", Route: "/workspaces/music-home", Existing: true},
 	}, nil
+}
+
+func (f *fakeFolderDigest) StartSetup(_ context.Context, _ string, offerID string, input personalassistant.FolderSetupInput) (personalassistant.FolderOfferView, error) {
+	f.setups = append(f.setups, input)
+	stale := personalassistant.NewFolderSetupPlan([]personalassistant.FolderPlanLine{{Kind: "workspace", Name: "Creates a workspace"}})
+	switch {
+	case input.PlanDigest != "current":
+		return personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferPending, Plan: &stale}, personalassistant.ErrFolderPlanChanged
+	case input.EntryName == "lost":
+		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderPathLost
+	}
+	return personalassistant.FolderOfferView{
+		ID: offerID, Status: personalassistant.FolderOfferAwaitingOutcome,
+		Setup: &personalassistant.FolderSetupView{Status: personalassistant.FolderSetupRunning},
+	}, nil
+}
+
+func TestFolderSetup_AcceptsOnlyTheDigestAndAnEntryNameAndNeverAPath(t *testing.T) {
+	fake := &fakeFolderDigest{}
+	h := newFolderDigestHandler(fake)
+	post := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/folder-digest/offers/offer-1/setup", strings.NewReader(body))
+		r.SetPathValue("offerID", "offer-1")
+		w := httptest.NewRecorder()
+		h.SetupFolderDigest(w, r)
+		return w
+	}
+	for _, body := range []string{
+		`{"request_id":"r","plan_digest":"current","path":"/private"}`,
+		`{"request_id":"r","plan_digest":"current","folder":"/private"}`,
+		`{"request_id":"r","plan_digest":"current","folder_path":"/private"}`,
+		`{"request_id":"r","plan_digest":"current","selection_token":"x"}`,
+		`not json`,
+	} {
+		if w := post(body); w.Code != http.StatusBadRequest {
+			t.Errorf("%s => %d, want 400", body, w.Code)
+		}
+	}
+	if len(fake.setups) != 0 {
+		t.Fatalf("a refused body reached the service: %+v", fake.setups)
+	}
+	w := post(`{"request_id":"r1","plan_digest":"current","entry_name":"My Song.rpp"}`)
+	if w.Code != http.StatusOK || len(fake.setups) != 1 || fake.setups[0].EntryName != "My Song.rpp" ||
+		fake.setups[0].PlanDigest != "current" || fake.setups[0].RequestID != "r1" {
+		t.Fatalf("status=%d setups=%+v body=%s", w.Code, fake.setups, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"running"`) {
+		t.Fatalf("the run state must reach the card: %s", w.Body.String())
+	}
+	// A stale plan is a 409 carrying the fresh offer, so the card can re-render.
+	stale := post(`{"request_id":"r2","plan_digest":"old"}`)
+	var body struct {
+		PlanChanged bool                              `json:"plan_changed"`
+		Offer       personalassistant.FolderOfferView `json:"offer"`
+	}
+	if stale.Code != http.StatusConflict || json.Unmarshal(stale.Body.Bytes(), &body) != nil || !body.PlanChanged ||
+		body.Offer.Plan == nil || len(body.Offer.Plan.Lines) != 1 {
+		t.Fatalf("stale plan => %d %s", stale.Code, stale.Body.String())
+	}
+	// A folder the server no longer holds asks to be picked again.
+	if lost := post(`{"request_id":"r3","plan_digest":"current","entry_name":"lost"}`); lost.Code != http.StatusConflict ||
+		!strings.Contains(lost.Body.String(), `"needs_pick":true`) {
+		t.Fatalf("lost path => %d %s", lost.Code, lost.Body.String())
+	}
+	// Only POST.
+	r := httptest.NewRequest(http.MethodGet, "/x", nil)
+	r.SetPathValue("offerID", "offer-1")
+	gw := httptest.NewRecorder()
+	h.SetupFolderDigest(gw, r)
+	if gw.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET => %d", gw.Code)
+	}
 }
 
 func newFolderDigestHandler(fake *fakeFolderDigest) *Handler {

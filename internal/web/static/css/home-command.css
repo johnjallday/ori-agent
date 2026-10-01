@@ -392,6 +392,84 @@ body.home-command-page .home-command-bridge * {
   }
 }
 
+/* The one-card setup's plan: one row per consequence, with a state glyph that
+   is also said in words for assistive tech (never colour alone). */
+.pa-folder__plan {
+  display: grid;
+  gap: 6px;
+  margin: 0.5rem 0 0.75rem;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.pa-folder__plan[hidden] {
+  display: none;
+}
+
+.pa-folder__plan li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border: 1px solid var(--hc-line);
+  border-radius: 7px;
+  background: var(--hc-panel);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.pa-folder__plan-icon {
+  flex: none;
+  width: 1.1em;
+  color: var(--hc-ink-faint);
+  font-weight: 750;
+  text-align: center;
+}
+
+.pa-folder__plan-text {
+  min-width: 0;
+}
+
+.pa-folder__plan-text small {
+  display: block;
+  color: var(--hc-ink-dim);
+  font-size: 11px;
+}
+
+.pa-folder__plan li[data-state="working"] {
+  border-color: var(--hc-line-bright);
+}
+
+.pa-folder__plan li[data-state="working"] .pa-folder__plan-icon {
+  color: var(--hc-amber);
+  animation: pa-folder-plan-working 1.2s ease-in-out infinite;
+}
+
+.pa-folder__plan li[data-state="done"] .pa-folder__plan-icon {
+  color: var(--hc-signal);
+}
+
+.pa-folder__plan li[data-state="failed"] {
+  border-color: var(--hc-alert);
+}
+
+.pa-folder__plan li[data-state="failed"] .pa-folder__plan-icon {
+  color: var(--hc-alert);
+}
+
+@keyframes pa-folder-plan-working {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pa-folder__plan li[data-state="working"] .pa-folder__plan-icon {
+    animation: none;
+  }
+}
+
 .pa-hq-card #personalAssistantHQPlan {
   display: grid;
   gap: 0.45rem;

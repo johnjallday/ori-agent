@@ -156,11 +156,13 @@ type FolderOffer struct {
 	Decision             string         `json:"decision,omitempty"`
 	Choice               string         `json:"choice,omitempty"`
 	Outcome              *FolderOutcome `json:"outcome,omitempty"`
-	RequestID            string         `json:"request_id,omitempty"`
-	CreatedAt            time.Time      `json:"created_at"`
-	DecidedAt            *time.Time     `json:"decided_at,omitempty"`
-	LaterUntil           *time.Time     `json:"later_until,omitempty"`
-	ResolvedAt           *time.Time     `json:"resolved_at,omitempty"`
+	// Setup is the one-card setup run, kept so the card survives a reload.
+	Setup      *FolderSetupRun `json:"setup,omitempty"`
+	RequestID  string          `json:"request_id,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	DecidedAt  *time.Time      `json:"decided_at,omitempty"`
+	LaterUntil *time.Time      `json:"later_until,omitempty"`
+	ResolvedAt *time.Time      `json:"resolved_at,omitempty"`
 }
 
 // FolderDecision is the durable record of one answer (FR23).
@@ -335,6 +337,11 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 					(row.Route != "" && (!strings.HasPrefix(row.Route, "/") || strings.HasPrefix(row.Route, "//"))) {
 					return fmt.Errorf("%w: receipt row", errFolderDigestInvalid)
 				}
+			}
+		}
+		if offer.Setup != nil {
+			if err := validateFolderSetupRun(*offer.Setup); err != nil {
+				return err
 			}
 		}
 		if offer.Portfolio != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // FolderOfferWorkspaceRequest is the workspace the assistant sets up for a
@@ -91,6 +92,16 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 		if ref, err := ws.GetDirectoryReference(primary); err == nil && ref != nil {
 			rows = append(rows, personalassistant.FolderReceiptRow{
 				Kind: "folder", Name: ref.Name, Detail: "linked as primary",
+			})
+		}
+	} else if locator, err := workspace.GetProjectEntryLocator(ws.SharedData); err == nil && locator != nil &&
+		locator.Kind == workspace.ProjectEntryDirectoryReference {
+		// A project the setup journey connected is linked through its project
+		// entry rather than a primary directory. The row names the folder, never
+		// its path.
+		if ref, err := ws.GetDirectoryReference(locator.DirectoryReferenceID); err == nil && ref != nil && strings.TrimSpace(ref.Name) != "" {
+			rows = append(rows, personalassistant.FolderReceiptRow{
+				Kind: "folder", Name: ref.Name, Detail: "linked where it is",
 			})
 		}
 	}

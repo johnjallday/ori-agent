@@ -30,7 +30,8 @@ import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.
 import {
   FOLDER_QUEST_ACTION_URL,
   folderOfferView,
-  folderOutcomeNote
+  folderOutcomeNote,
+  renderSetupLines
 } from './personal-assistant-folder.js';
 
 export function currentTier(status) {
@@ -155,9 +156,13 @@ export function firstMissionOfferView(view, offer, confirm = '') {
   }
   const offerView = folderOfferView(offer, { confirm });
   if (!offerView.visible) return { visible: false };
+  // A one-card setup run keeps its question (progress or what stopped it) and,
+  // when stopped, its actions, even though the offer is already decided.
+  const inRun = Boolean(offerView.setup);
   return {
     ...offerView,
-    actions: offerView.decided ? [] : offerView.actions || [],
+    inRun,
+    actions: offerView.decided && !inRun ? [] : offerView.actions || [],
     note: offerView.decided ? folderOutcomeNote(offer) : ''
   };
 }
@@ -525,7 +530,19 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
       });
     }
     const question = el('first-mission-offer-question');
-    if (question) question.textContent = offer.decided ? offer.note : offer.question;
+    if (question)
+      question.textContent = offer.decided && !offer.inRun ? offer.note : offer.question;
+    const planLines = offer.setup?.lines || offer.plan?.lines || [];
+    const plan = el('first-mission-offer-plan');
+    if (plan) {
+      renderSetupLines(plan, planLines);
+      plan.hidden = !planLines.length;
+    }
+    const status = el('first-mission-offer-status');
+    if (status) {
+      status.textContent = offer.setup?.statusLine || '';
+      status.hidden = !status.textContent;
+    }
     const reason = el('first-mission-offer-reason');
     if (reason) {
       reason.textContent = offer.reason;

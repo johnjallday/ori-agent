@@ -103,6 +103,7 @@ DELETE /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-0000
 DELETE /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/home-provider => not-found
 DELETE /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/project-selection => not-found
 DELETE /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/resolve => not-found
+DELETE /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/setup => not-found
 DELETE /api/personal-assistant/folder-digest/picker               => not-found
 DELETE /api/personal-assistant/folder-digest/scan                 => not-found
 DELETE /api/personal-assistant/setup-journey                      => not-found
@@ -505,6 +506,7 @@ GET    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-0000
 GET    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/home-provider => not-found
 GET    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/project-selection => not-found
 GET    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/resolve => not-found
+GET    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/setup => not-found
 GET    /api/personal-assistant/folder-digest/picker               => not-found
 GET    /api/personal-assistant/folder-digest/scan                 => not-found
 GET    /api/personal-assistant/setup-journey                      => handled
@@ -907,6 +909,7 @@ PATCH  /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-0000
 PATCH  /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/home-provider => not-found
 PATCH  /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/project-selection => not-found
 PATCH  /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/resolve => not-found
+PATCH  /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/setup => not-found
 PATCH  /api/personal-assistant/folder-digest/picker               => not-found
 PATCH  /api/personal-assistant/folder-digest/scan                 => not-found
 PATCH  /api/personal-assistant/setup-journey                      => not-found
@@ -1309,6 +1312,7 @@ POST   /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-0000
 POST   /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/home-provider => handled
 POST   /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/project-selection => handled
 POST   /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/resolve => handled
+POST   /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/setup => handled
 POST   /api/personal-assistant/folder-digest/picker               => handled
 POST   /api/personal-assistant/folder-digest/scan                 => handled
 POST   /api/personal-assistant/setup-journey                      => not-found
@@ -1711,6 +1715,7 @@ PUT    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-0000
 PUT    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/home-provider => not-found
 PUT    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/project-selection => not-found
 PUT    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/resolve => not-found
+PUT    /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/setup => not-found
 PUT    /api/personal-assistant/folder-digest/picker               => not-found
 PUT    /api/personal-assistant/folder-digest/scan                 => not-found
 PUT    /api/personal-assistant/setup-journey                      => not-found

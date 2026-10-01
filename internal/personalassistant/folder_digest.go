@@ -293,6 +293,9 @@ type FolderDigestDeps struct {
 	// Journey verifies the plugin's created project before resolving a card.
 	Journey     FolderJourneyVerifier
 	HomeJourney FolderHomeVerifier
+	// Setup plans and runs a recognized project's one-card setup. Nil keeps the
+	// step-by-step journey as the only path.
+	Setup FolderSetupRunner
 	// OnResolved runs after a project outcome completes: the dossier
 	// producer learns from the offer and reports whether the fact was saved
 	// (FR35–FR39). Best-effort; its answer is recorded on the outcome.
@@ -396,6 +399,7 @@ type FolderDigestService struct {
 	mu       sync.Mutex
 	paths    map[string]string // offer id → canonical root; memory only (FR27)
 	scanning map[string]bool   // user id → a scan is in flight
+	running  map[string]bool   // offer id → a one-card setup is running in this process
 }
 
 // NewFolderDigestService builds the service.
@@ -421,7 +425,7 @@ func NewFolderDigestService(store *FolderDigestStore, deps FolderDigestDeps) *Fo
 	}
 	return &FolderDigestService{
 		store: store, deps: deps,
-		paths: map[string]string{}, scanning: map[string]bool{},
+		paths: map[string]string{}, scanning: map[string]bool{}, running: map[string]bool{},
 	}
 }
 
@@ -475,6 +479,10 @@ type FolderOfferView struct {
 	// Capability is derived from the host table and the saved digest evidence;
 	// it is never accepted as a client-supplied action or plugin declaration.
 	Capability *FolderCapabilityView `json:"capability,omitempty"`
+	// Plan is everything Set up will do, present on a pending single-project
+	// capability offer. Setup is the run once Set up was pressed.
+	Plan  *FolderSetupPlan `json:"plan,omitempty"`
+	Setup *FolderSetupView `json:"setup,omitempty"`
 }
 
 // FolderCapabilityView is the optional explanation on the existing digest
@@ -570,7 +578,7 @@ func (s *FolderDigestService) Current(ctx context.Context, userID string) (Folde
 	}
 	view.PickerNote = folderChooserNote(len(view.Chips), view.PickerAvailable, reason)
 	if pending != nil {
-		offer := s.view(ctx, *pending, binding.Paused)
+		offer := s.viewFor(ctx, userID, *pending, binding.Paused)
 		view.Offer = &offer
 	}
 	return view, nil
@@ -739,7 +747,7 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 		for _, prior := range doc.Offers {
 			if prior.FolderKey == FolderKey(root) && prior.Status == FolderOfferAwaitingOutcome {
 				s.rememberPath(prior.ID, root)
-				view := s.view(ctx, prior, binding.Paused)
+				view := s.viewFor(ctx, userID, prior, binding.Paused)
 				return view, nil
 			}
 		}
@@ -862,7 +870,7 @@ func (s *FolderDigestService) scanSelectedRoot(ctx context.Context, userID, raw,
 	if stored == nil {
 		stored = &offer
 	}
-	return s.view(ctx, *stored, binding.Paused), nil
+	return s.viewFor(ctx, userID, *stored, binding.Paused), nil
 }
 
 // fileVerdict makes a recognized picked file's parent the project instead
@@ -1050,7 +1058,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	if err == nil && resolvedNow {
 		result = s.afterOutcome(ctx, userID, result)
 	}
-	return s.view(ctx, result, binding.Paused), nil
+	return s.viewFor(ctx, userID, result, binding.Paused), nil
 }
 
 // runCreate has the host set the project workspace up for the offer's
@@ -1575,7 +1583,8 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 		item.Status = FolderOfferResolved
 		item.ResolvedAt = &now
 		item.Outcome = &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: verified.WorkspaceID, Route: verified.Route,
-			HomeRoute: verified.HomeRoute, Blueprint: row.Blueprint.BlueprintID}
+			HomeRoute: verified.HomeRoute, Blueprint: row.Blueprint.BlueprintID,
+			Receipt: append([]FolderReceiptRow(nil), verified.Receipt...)}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: offerID, Action: "journey", At: now})
 		pruneFolderDigest(d)
 		resolved = *item
@@ -1883,6 +1892,15 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 			}
 		}
 	}
+	s.attachSetupRun(offer, &v)
+	return v
+}
+
+// viewFor is view for a caller that knows the user: it also attaches the plan a
+// pending project offer's Set up would carry out, which can depend on the user.
+func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer FolderOffer, paused bool) FolderOfferView {
+	v := s.view(ctx, offer, paused)
+	s.attachSetupPlan(ctx, userID, offer, &v)
 	return v
 }
 
