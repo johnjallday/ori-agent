@@ -208,7 +208,9 @@ func (s *Service) grantFor(song Song, grant Grant) workspace.ProjectStaffingCons
 
 // Settle records, from the song's own staffing, the agent the consent's create
 // made: a role bound to an agent this song created, whose name is the one the
-// consent reserved. Nothing else is ever recorded (D3). It is safe to repeat.
+// consent reserved. Nothing else is ever recorded (D3). It then records the
+// song's copy of the consent's agent, so a later edit can reach it (D10). It is
+// safe to repeat.
 func (s *Service) Settle(projectID string) error {
 	song, err := s.Song(projectID)
 	if err != nil {
@@ -233,7 +235,7 @@ func (s *Service) Settle(projectID string) error {
 			return err
 		}
 	}
-	return nil
+	return s.trackCopies(song)
 }
 
 // AgentExists says whether the user has an agent of that name.

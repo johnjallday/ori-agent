@@ -56,6 +56,56 @@ test('an entry without an origin is one of the user agents with nothing to say',
   }
 });
 
+test('a saved edit says which workspace copies it reached and which kept their own', () => {
+  const origin = load();
+  const ref = (id, name) => ({ id, name });
+  assert.equal(
+    origin.carriedEditLabel({
+      updated: [ref('a', 'Song 1'), ref('c', 'Song 3')],
+      customised: [ref('b', 'Song 2')]
+    }),
+    'Also updated in 2 workspaces. Song 2 keeps its own changes.'
+  );
+  assert.equal(
+    origin.carriedEditLabel({ updated: [ref('a', 'Song 1')], customised: [] }),
+    'Also updated in 1 workspace.'
+  );
+  assert.equal(
+    origin.carriedEditLabel({ updated: [], customised: [ref('b', 'Song 2'), ref('d', '')] }),
+    'Song 2, d keep their own changes.'
+  );
+  for (const nothing of [undefined, null, {}, { updated: [], customised: [] }, 'x']) {
+    assert.equal(origin.carriedEditLabel(nothing), '');
+  }
+});
+
+test('a delete of an agent that works in workspaces is refused up front with the count', () => {
+  const origin = load();
+  const songs = n =>
+    Array.from({ length: n }, (_, i) => ({ id: `s${i + 1}`, name: `Song ${i + 1}` }));
+  assert.equal(
+    origin.attachedDeleteMessage({
+      name: 'Studio Assistant',
+      workspace_count: 12,
+      workspaces: songs(12)
+    }),
+    '“Studio Assistant” works in 12 workspaces (Song 1, Song 2, Song 3 and 9 more). ' +
+      'Remove it from those workspaces before deleting it.'
+  );
+  assert.equal(
+    origin.attachedDeleteMessage({ name: 'Solo', workspace_count: 1, workspaces: songs(1) }),
+    '“Solo” works in 1 workspace (Song 1). Remove it from that workspace before deleting it.'
+  );
+  // The count alone, when the list was not included.
+  assert.equal(
+    origin.attachedDeleteMessage({ name: 'Solo', workspace_count: 2 }),
+    '“Solo” works in 2 workspaces. Remove it from those workspaces before deleting it.'
+  );
+  for (const free of [{ name: 'Idle', workspace_count: 0 }, { name: 'Idle' }, null]) {
+    assert.equal(origin.attachedDeleteMessage(free), '');
+  }
+});
+
 test('a workspace entry without a name falls back to its ID', () => {
   const origin = load();
   assert.equal(

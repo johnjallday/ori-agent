@@ -41,6 +41,14 @@ func provider(d string) *workspace.AssistantProjectProviderOwner {
 func fixture(t *testing.T) (workspace.Store, *Service, fakeAgents) {
 	t.Helper()
 	store := workspace.NewInMemoryStore()
+	seedHome(t, store)
+	agents := fakeAgents{}
+	return store, New(store, agents), agents
+}
+
+// seedHome saves a Home and two songs linked to it.
+func seedHome(t *testing.T, store workspace.Store) {
+	t.Helper()
 	home := &workspace.Workspace{ID: "home", Name: "Home", Status: workspace.StatusActive, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	home.SetAssistantProgramState(&workspace.AssistantProgramState{SchemaVersion: workspace.AssistantProgramStateSchemaVersion})
 	if err := store.Save(home); err != nil {
@@ -56,8 +64,6 @@ func fixture(t *testing.T) (workspace.Store, *Service, fakeAgents) {
 			t.Fatal(err)
 		}
 	}
-	agents := fakeAgents{}
-	return store, New(store, agents), agents
 }
 
 // bindInSong records a role filled in a song, as the staffing adapter would.

@@ -753,6 +753,13 @@ func TestResolveAgentForWorkspace_LocalSnapshotPreferredOverGlobal(t *testing.T)
 	if resolved.Agent.Settings.Model != "local-model" {
 		t.Fatalf("expected local snapshot to win, got %q", resolved.Agent.Settings.Model)
 	}
+	if !resolved.FromWorkspaceCopy {
+		t.Fatal("the workspace's own copy was not reported as one")
+	}
+	other, err := resolver.ResolveAgentForWorkspace("Manager", "", "")
+	if err != nil || other.FromWorkspaceCopy {
+		t.Fatalf("the user's agent was reported as a workspace copy: %+v %v", other, err)
+	}
 }
 
 func TestResolveEffectiveSkills_AgentOverridesWorkspace(t *testing.T) {

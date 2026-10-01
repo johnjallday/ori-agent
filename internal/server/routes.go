@@ -164,6 +164,9 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if s.Storage.AgentMapPositions != nil {
 		agentHandler.SetMapPositionStore(s.Storage.AgentMapPositions)
 	}
+	if s.Storage.AgentEditCarrier != nil {
+		agentHandler.SetEditCarrier(s.Storage.AgentEditCarrier)
+	}
 	if s.Handlers.ExternalAgents != nil {
 		agentHandler.SetClaudeSyncProvider(s.Handlers.ExternalAgents.ClaudeSyncData)
 		agentHandler.SetCodexSyncProvider(s.Handlers.ExternalAgents.CodexSyncData)
@@ -196,6 +199,9 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.ExternalAgents != nil {
 		dashboardHandler.SetClaudeSyncProvider(s.Handlers.ExternalAgents.ClaudeSyncData)
 		dashboardHandler.SetCodexSyncProvider(s.Handlers.ExternalAgents.CodexSyncData)
+	}
+	if steps, ok := s.Storage.AgentEditCarrier.(agenthttp.CopyStepReader); ok {
+		dashboardHandler.SetCopyStepReader(steps)
 	}
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)

@@ -45,6 +45,23 @@ func TestProjectStaffingConsentValidate(t *testing.T) {
 			return c
 		}(),
 		"revoked before": revokedEarly,
+		"copies with no agent": func() *ProjectStaffingConsent {
+			c := testConsent()
+			c.Roles[0].Copies = []ProjectStaffingCopy{{WorkspaceID: "song", Digest: consentDigest}}
+			return c
+		}(),
+		"copy digest": func() *ProjectStaffingConsent {
+			c := testConsent()
+			c.Roles[0].AgentName = "REAPER Assistant"
+			c.Roles[0].Copies = []ProjectStaffingCopy{{WorkspaceID: "song", Digest: "abc"}}
+			return c
+		}(),
+		"duplicate copy": func() *ProjectStaffingConsent {
+			c := testConsent()
+			c.Roles[0].AgentName = "REAPER Assistant"
+			c.Roles[0].Copies = []ProjectStaffingCopy{{WorkspaceID: "song", Digest: consentDigest}, {WorkspaceID: "song", Digest: consentDigest}}
+			return c
+		}(),
 	}
 	for name, consent := range cases {
 		if err := consent.Validate(); !errors.Is(err, ErrProjectStaffingConsentInvalid) {
@@ -243,6 +260,69 @@ func TestProjectStaffingConsentsGrantRecordRevoke(t *testing.T) {
 	}
 }
 
+// D10: the consent remembers each project's copy as Ori wrote it. The first
+// record of a project is kept; only the agent's own role records copies; a
+// forgotten agent forgets its copies; a re-grant keeps them with the agent.
+func TestProjectStaffingConsentsTrackCopies(t *testing.T) {
+	store := NewInMemoryStore()
+	homeID := consentHome(t, store)
+	consents := NewProjectStaffingConsents(store)
+	if _, err := consents.Grant(homeID, reaperGrant()); err != nil {
+		t.Fatal(err)
+	}
+	written, edited := strings.Repeat("1", 64), strings.Repeat("2", 64)
+	// No agent recorded yet: nothing to track.
+	if err := consents.TrackCopy(homeID, "reaper-assistant", "REAPER Assistant", "song-a", written); err != nil {
+		t.Fatal(err)
+	}
+	if read, _ := consents.Read(homeID); len(read.Roles[0].Copies) != 0 {
+		t.Fatalf("tracked a copy of an agent the consent did not record: %+v", read.Roles[0])
+	}
+	if err := consents.ReserveAgent(homeID, "ori-reaper", "reaper-song", consentDigest, "reaper-assistant", "REAPER Assistant"); err != nil {
+		t.Fatal(err)
+	}
+	if err := consents.RecordAgent(homeID, "ori-reaper", "reaper-song", consentDigest, "reaper-assistant", "REAPER Assistant"); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range []struct{ agent, song, digest string }{
+		{"REAPER Assistant", "song-a", written},
+		{"REAPER Assistant", "song-a", edited}, // the first record stays
+		{"REAPER Assistant", "song-b", written},
+		{"Someone Else", "song-c", written}, // not the consent's agent
+	} {
+		if err := consents.TrackCopy(homeID, "reaper-assistant", call.agent, call.song, call.digest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read, _ := consents.Read(homeID)
+	if got := read.Roles[0].Copies; len(got) != 2 || got[0].Digest != written || got[1].WorkspaceID != "song-b" {
+		t.Fatalf("copies = %+v", got)
+	}
+	// A carry records new digests for tracked songs only, and drops a song that
+	// lost the agent.
+	if err := consents.SetCopyDigests(homeID, "reaper-assistant", "REAPER Assistant",
+		map[string]string{"song-a": edited, "song-x": edited}, []string{"song-b"}); err != nil {
+		t.Fatal(err)
+	}
+	read, _ = consents.Read(homeID)
+	if got := read.Roles[0].Copies; len(got) != 1 || got[0] != (ProjectStaffingCopy{WorkspaceID: "song-a", Digest: edited}) {
+		t.Fatalf("after the carry = %+v", got)
+	}
+	// Switched off and on again, the agent keeps its songs.
+	if _, err := consents.Revoke(homeID); err != nil {
+		t.Fatal(err)
+	}
+	switched := reaperGrant()
+	switched.Source = ProjectStaffingConsentHomeSwitch
+	if fresh, err := consents.Grant(homeID, switched); err != nil || len(fresh.Roles[0].Copies) != 1 {
+		t.Fatalf("re-grant = %+v %v", fresh, err)
+	}
+	// The agent is gone: its copies go with it.
+	if forgotten, err := consents.ForgetAgent(homeID, "ori-reaper", "reaper-song", "reaper-assistant", "REAPER Assistant"); err != nil || len(forgotten.Roles[0].Copies) != 0 {
+		t.Fatalf("forget = %+v %v", forgotten, err)
+	}
+}
+
 func TestProjectStaffingConsentsRefuseAProjectAndBadGrants(t *testing.T) {
 	store := NewInMemoryStore()
 	homeID := consentHome(t, store)
@@ -269,11 +349,13 @@ func TestProjectStaffingConsentCloneIsDeep(t *testing.T) {
 	consent := testConsent()
 	at := consent.GrantedAt.Add(time.Minute)
 	consent.RevokedAt = &at
+	consent.Roles[0].Copies = []ProjectStaffingCopy{{WorkspaceID: "song", Digest: consentDigest}}
 	state := &AssistantProgramState{ProjectStaffingConsent: consent}
 	clone := CloneAssistantProgramState(state)
 	clone.ProjectStaffingConsent.Roles[0].AgentName = "changed"
+	clone.ProjectStaffingConsent.Roles[0].Copies[0].Digest = "changed"
 	*clone.ProjectStaffingConsent.RevokedAt = at.Add(time.Hour)
-	if consent.Roles[0].AgentName != "" || !consent.RevokedAt.Equal(at) {
+	if consent.Roles[0].AgentName != "" || !consent.RevokedAt.Equal(at) || consent.Roles[0].Copies[0].Digest != consentDigest {
 		t.Fatalf("clone aliased the consent: %+v", consent)
 	}
 }

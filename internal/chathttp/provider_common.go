@@ -301,7 +301,7 @@ func (h *Handler) runProviderToolLoop(w http.ResponseWriter, ctx, baseCtx contex
 		"provider": run.ProviderLabel,
 		"duration": time.Since(start),
 	})
-	_ = h.persistAgent(run.AgentName, ag.Agent)
+	_ = h.persistAgent(run.AgentName, ag)
 	h.storeMessageInSession(baseCtx, run.SessionID, "assistant", finalText)
 
 	writeJSONResponse(w, attachPlannerDecision(attachActionReceipts(attachRouteMetadata(map[string]any{

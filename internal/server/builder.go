@@ -670,6 +670,9 @@ func (b *ServerBuilder) createDomainFacades() {
 	// dropped the agent's saved tile.
 	b.server.Storage.AgentMapPositions = b.agentMapStore
 	b.server.Storage.PersonalAssistantKnowledge = b.personalAssistantKnowledge
+	if b.projectStaffing != nil {
+		b.server.Storage.AgentEditCarrier = carriedEdits{service: b.projectStaffing}
+	}
 
 	// Workflow System Facade
 	b.server.Workflow = NewWorkflowSystemFacade(

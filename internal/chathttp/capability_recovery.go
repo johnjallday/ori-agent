@@ -87,7 +87,7 @@ func (h *Handler) maybeHandleCapabilityRecovery(
 
 	ag.Messages = append(ag.Messages, openai.UserMessage(userMessage))
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-	if err := h.persistAgent(agentName, ag.Agent); err != nil {
+	if err := h.persistAgent(agentName, ag); err != nil {
 		logger.Warn("Failed to persist agent after capability recovery", logger.Fields{"agent": agentName, "error": err})
 	}
 

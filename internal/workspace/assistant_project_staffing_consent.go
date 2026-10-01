@@ -51,7 +51,22 @@ type ProjectStaffingConsentRole struct {
 	PendingName string `json:"pending_name,omitempty"`
 	Provider    string `json:"provider,omitempty"`
 	Model       string `json:"model,omitempty"`
+	// Copies are the projects holding their own copy of AgentName, each with the
+	// digest of that copy as Ori last wrote it. An edit to the agent is carried
+	// to a copy only while the copy still has that digest: a copy the user
+	// changed in its project keeps the change (D10).
+	Copies []ProjectStaffingCopy `json:"copies,omitempty"`
 }
+
+// ProjectStaffingCopy is one project's own copy of a consent's agent.
+type ProjectStaffingCopy struct {
+	WorkspaceID string `json:"workspace_id"`
+	Digest      string `json:"digest"`
+}
+
+// ProjectStaffingMaxCopies bounds the copies one role records. A project past
+// it is simply not tracked, so an edit does not reach it.
+const ProjectStaffingMaxCopies = 5000
 
 // Clone returns a deep copy.
 func (c *ProjectStaffingConsent) Clone() *ProjectStaffingConsent {
@@ -60,6 +75,9 @@ func (c *ProjectStaffingConsent) Clone() *ProjectStaffingConsent {
 	}
 	clone := *c
 	clone.Roles = append([]ProjectStaffingConsentRole(nil), c.Roles...)
+	for i := range clone.Roles {
+		clone.Roles[i].Copies = append([]ProjectStaffingCopy(nil), c.Roles[i].Copies...)
+	}
 	if c.RevokedAt != nil {
 		value := *c.RevokedAt
 		clone.RevokedAt = &value
@@ -99,6 +117,19 @@ func (c *ProjectStaffingConsent) Validate() error {
 			return invalid("duplicate role")
 		}
 		seen[role.RoleID] = struct{}{}
+		if len(role.Copies) > ProjectStaffingMaxCopies || (len(role.Copies) > 0 && role.AgentName == "") {
+			return invalid("copies")
+		}
+		projects := make(map[string]struct{}, len(role.Copies))
+		for _, entry := range role.Copies {
+			if !consentText(entry.WorkspaceID, 160, false) || !lowerHex(entry.Digest, 64) {
+				return invalid("copy")
+			}
+			if _, duplicate := projects[entry.WorkspaceID]; duplicate {
+				return invalid("duplicate copy")
+			}
+			projects[entry.WorkspaceID] = struct{}{}
+		}
 	}
 	if c.RevokedAt != nil && c.RevokedAt.Before(c.GrantedAt) {
 		return invalid("revoked_at")
@@ -443,11 +474,77 @@ func (c *ProjectStaffingConsents) ForgetAgent(homeID, pluginID, blueprintID, rol
 			if role.AgentName != agentName || agentName == "" {
 				return current, false, ErrProjectStaffingConsentInvalid
 			}
-			role.AgentName, role.PendingName = "", ""
+			role.AgentName, role.PendingName, role.Copies = "", "", nil
 			return next, true, nil
 		}
 		return current, false, ErrProjectStaffingConsentInvalid
 	})
+}
+
+// TrackCopy records a project's own copy of a role's recorded agent, with the
+// digest of that copy as Ori wrote it. A project already tracked keeps its
+// record: a later read of the copy could be the user's own edit. Nothing is
+// written when agentName is not the role's agent, or the limit is reached.
+func (c *ProjectStaffingConsents) TrackCopy(homeID, roleID, agentName, workspaceID, digest string) error {
+	_, err := c.update(homeID, func(current *ProjectStaffingConsent) (*ProjectStaffingConsent, bool, error) {
+		if current == nil || agentName == "" {
+			return current, false, nil
+		}
+		next := current.Clone()
+		for i := range next.Roles {
+			role := &next.Roles[i]
+			if role.RoleID != roleID || role.AgentName != agentName || len(role.Copies) >= ProjectStaffingMaxCopies {
+				continue
+			}
+			for _, entry := range role.Copies {
+				if entry.WorkspaceID == workspaceID {
+					return current, false, nil
+				}
+			}
+			role.Copies = append(role.Copies, ProjectStaffingCopy{WorkspaceID: workspaceID, Digest: digest})
+			return next, true, nil
+		}
+		return current, false, nil
+	})
+	return err
+}
+
+// SetCopyDigests records what carrying an edit did to a role's copies: each
+// tracked project in digests now has that digest, and each in drop is no
+// longer tracked (it no longer has the agent). Projects not tracked are never
+// added here, and nothing is written when agentName is no longer the role's.
+func (c *ProjectStaffingConsents) SetCopyDigests(homeID, roleID, agentName string, digests map[string]string, drop []string) error {
+	_, err := c.update(homeID, func(current *ProjectStaffingConsent) (*ProjectStaffingConsent, bool, error) {
+		if current == nil || agentName == "" {
+			return current, false, nil
+		}
+		dropped := make(map[string]bool, len(drop))
+		for _, id := range drop {
+			dropped[id] = true
+		}
+		next := current.Clone()
+		changed := false
+		for i := range next.Roles {
+			role := &next.Roles[i]
+			if role.RoleID != roleID || role.AgentName != agentName {
+				continue
+			}
+			kept := role.Copies[:0]
+			for _, entry := range role.Copies {
+				if dropped[entry.WorkspaceID] {
+					changed = true
+					continue
+				}
+				if digest, found := digests[entry.WorkspaceID]; found && digest != entry.Digest {
+					entry.Digest, changed = digest, true
+				}
+				kept = append(kept, entry)
+			}
+			role.Copies = kept
+		}
+		return next, changed, nil
+	})
+	return err
 }
 
 // Revoke switches the consent off (D7). Songs opened afterwards get no agent; the

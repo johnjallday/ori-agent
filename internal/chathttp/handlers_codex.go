@@ -53,7 +53,7 @@ func (h *Handler) handleCodexChat(w http.ResponseWriter, r *http.Request, ag *re
 	text := getResponseText(resp.Content)
 
 	logger.Debug("Codex chat response completed", logger.Fields{"duration": time.Since(start)})
-	_ = h.persistAgent(agentName, ag.Agent)
+	_ = h.persistAgent(agentName, ag)
 
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 	h.trackUsageCommon("codex", ag.Settings.Model, agentName, resp.Usage, ag.Agent, userMessage)

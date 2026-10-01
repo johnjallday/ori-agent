@@ -162,7 +162,7 @@ func (h *Handler) finishWorkspaceNoteFallbackResponse(
 	}
 
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(responseText))
-	if err := h.persistAgent(agentName, ag.Agent); err != nil {
+	if err := h.persistAgent(agentName, ag); err != nil {
 		logger.Warn("Failed to persist agent after note fallback", logger.Fields{"agent": agentName, "error": err})
 	}
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", responseText)

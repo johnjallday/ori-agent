@@ -56,12 +56,76 @@
     return names.length ? 'Customised in: ' + names.join(', ') : '';
   }
 
+  // Where a saved model or prompt edit went, from the update response's
+  // `carried` { updated: [{id, name}], customised: [{id, name}] }: the
+  // workspaces whose copy Ori keeps in step got it; one changed there kept its
+  // own. '' when the edit reached no workspace copy.
+  function carriedEditLabel(carried) {
+    if (!carried || typeof carried !== 'object') return '';
+    var refNames = function (refs) {
+      return (Array.isArray(refs) ? refs : [])
+        .map(function (ref) {
+          return String((ref && (ref.name || ref.id)) || '').trim();
+        })
+        .filter(Boolean);
+    };
+    var updated = refNames(carried.updated).length;
+    var kept = refNames(carried.customised);
+    var parts = [];
+    if (updated) {
+      parts.push('Also updated in ' + updated + ' workspace' + (updated === 1 ? '' : 's') + '.');
+    }
+    if (kept.length) {
+      parts.push(
+        kept.join(', ') + (kept.length === 1 ? ' keeps its' : ' keep their') + ' own changes.'
+      );
+    }
+    return parts.join(' ');
+  }
+
+  // What a delete of an agent that works in workspaces would hit, said before
+  // anything is sent (the server refuses that delete): '“Studio Assistant” works
+  // in 12 workspaces (Song 1, Song 2, Song 3 and 9 more). Remove it from those
+  // workspaces before deleting it.' '' when it works in none.
+  function attachedDeleteMessage(agent) {
+    var count = Number((agent && agent.workspace_count) || 0);
+    if (!count) return '';
+    var shown = (agent && Array.isArray(agent.workspaces) ? agent.workspaces : [])
+      .map(function (ref) {
+        return String((ref && (ref.name || ref.id)) || '').trim();
+      })
+      .filter(Boolean)
+      .slice(0, 3);
+    var list = '';
+    if (shown.length) {
+      list =
+        ' (' +
+        shown.join(', ') +
+        (count > shown.length ? ' and ' + (count - shown.length) + ' more' : '') +
+        ')';
+    }
+    return (
+      '“' +
+      String((agent && agent.name) || 'This agent') +
+      '” works in ' +
+      count +
+      ' workspace' +
+      (count === 1 ? '' : 's') +
+      list +
+      '. Remove it from ' +
+      (count === 1 ? 'that workspace' : 'those workspaces') +
+      ' before deleting it.'
+    );
+  }
+
   var api = {
     isWorkspaceOwned: isWorkspaceOwned,
     workspaceName: workspaceName,
     workspaceMarker: workspaceMarker,
     customisedIn: customisedIn,
-    customisedInLabel: customisedInLabel
+    customisedInLabel: customisedInLabel,
+    carriedEditLabel: carriedEditLabel,
+    attachedDeleteMessage: attachedDeleteMessage
   };
 
   if (typeof window !== 'undefined') {

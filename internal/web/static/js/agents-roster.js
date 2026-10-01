@@ -1863,8 +1863,22 @@
         })
         .join('');
       if (vm.workspaces.length > 2) {
+        // The overflow names what it hides (up to ten), so an agent shared by
+        // many songs can be read off its card; the Workspaces tab lists them all.
+        var hidden = vm.workspaces.slice(2);
+        var named = hidden
+          .slice(0, 10)
+          .map(function (w) {
+            return w.name;
+          })
+          .join(', ');
+        var rest = hidden.length > 10 ? ' and ' + (hidden.length - 10) + ' more' : '';
         pills +=
-          '<span class="agent-card__pill is-more">+' + (vm.workspaces.length - 2) + '</span>';
+          '<span class="agent-card__pill is-more" title="Also in ' +
+          esc(named + rest) +
+          '">+' +
+          hidden.length +
+          '</span>';
       }
     }
     return '<span class="agent-card__pills">' + pills + '</span>';
@@ -3261,6 +3275,15 @@
   function onDeleteClick() {
     var name = state.selected;
     if (!name) return;
+    // The server refuses to delete an agent that works in workspaces; say so,
+    // with the count, instead of confirming a delete that cannot happen.
+    var attached = window.AgentOrigin
+      ? window.AgentOrigin.attachedDeleteMessage(state.byName[name])
+      : '';
+    if (attached) {
+      window.alert(attached);
+      return;
+    }
     if (
       !window.confirm(
         'Delete “' + name + '”? This permanently removes the agent and cannot be undone.'

@@ -106,6 +106,10 @@ type StorageSystemFacade struct {
 	// or a rename. It is the store rather than the service: the agent handler
 	// has no business reading a layout, only maintaining one (FR-57, FR-58).
 	AgentMapPositions *agentmap.SQLiteStore
+	// AgentEditCarrier carries an edit of a shared agent into the project
+	// copies a Home's standing consent tracks (D10). Nil when the setup journey
+	// did not wire.
+	AgentEditCarrier agenthttp.EditCarrier
 }
 
 // WorkflowSystemFacade manages workspace orchestration dependencies

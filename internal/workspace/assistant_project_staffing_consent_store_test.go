@@ -52,12 +52,27 @@ func TestProjectStaffingConsentSurvivesBothMirrorsAndARestart(t *testing.T) {
 	if err := consents.RecordAgent(home.ID, "ori-reaper", "reaper-song", digest, "reaper-assistant", "REAPER Assistant"); err != nil {
 		t.Fatal(err)
 	}
+	// The copies an edit is carried to (D10) live in the same record.
+	written, carried := strings.Repeat("1", 64), strings.Repeat("2", 64)
+	for _, song := range []string{"song-a", "song-b"} {
+		if err := consents.TrackCopy(home.ID, "reaper-assistant", "REAPER Assistant", song, written); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := consents.SetCopyDigests(home.ID, "reaper-assistant", "REAPER Assistant", map[string]string{"song-b": carried}, nil); err != nil {
+		t.Fatal(err)
+	}
 	check := func(name string, store workspace.Store) {
 		t.Helper()
 		got, err := workspace.NewProjectStaffingConsents(store).Read(home.ID)
 		if err != nil || got == nil || !got.Active() || got.TeamDigest != digest || got.OfferID != "offer-1" ||
 			len(got.Roles) != 1 || got.Roles[0].AgentName != "REAPER Assistant" {
 			t.Fatalf("%s lost the consent: %+v %v", name, got, err)
+		}
+		copies := got.Roles[0].Copies
+		if len(copies) != 2 || copies[0] != (workspace.ProjectStaffingCopy{WorkspaceID: "song-a", Digest: written}) ||
+			copies[1] != (workspace.ProjectStaffingCopy{WorkspaceID: "song-b", Digest: carried}) {
+			t.Fatalf("%s lost the copies: %+v", name, copies)
 		}
 	}
 	check("primary", primary)
@@ -89,7 +104,7 @@ func TestProjectStaffingConsentSurvivesBothMirrorsAndARestart(t *testing.T) {
 	}
 	for name, store := range map[string]workspace.Store{"primary": restarted, "folder": refolded} {
 		got, err := workspace.NewProjectStaffingConsents(store).Read(home.ID)
-		if err != nil || got == nil || got.RevokedAt == nil || got.Roles[0].AgentName != "REAPER Assistant" {
+		if err != nil || got == nil || got.RevokedAt == nil || got.Roles[0].AgentName != "REAPER Assistant" || len(got.Roles[0].Copies) != 2 {
 			t.Fatalf("%s after revoke: %+v %v", name, got, err)
 		}
 	}

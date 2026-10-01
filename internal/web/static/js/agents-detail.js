@@ -1248,6 +1248,17 @@ async function saveAgentPatch(name, payload) {
   return { response, cancelled: false, reloaded: false };
 }
 
+// "Also updated in 2 workspaces. Song B keeps its own changes." — where a saved
+// model or prompt edit went among the workspace copies Ori keeps in step with
+// this agent, or '' when it reached none.
+async function carriedEditNote(response) {
+  const data = await response
+    .clone()
+    .json()
+    .catch(() => ({}));
+  return window.AgentOrigin ? window.AgentOrigin.carriedEditLabel(data && data.carried) : '';
+}
+
 function setProfileSavingState(isSaving) {
   const saveButton = document.getElementById('profileSaveBtn');
   if (!saveButton) return;
@@ -1416,9 +1427,11 @@ async function saveConfigChanges() {
       throw new Error(await readResponseError(response, 'Failed to save changes'));
     }
 
+    const carried = await carriedEditNote(response);
     await refreshAgentDetails();
     setConfigStatus('Configuration updated successfully.', 'success');
     setConfigEditMode(false);
+    if (carried) showToast(carried, 'success');
   } catch (error) {
     console.error('Failed to save configuration:', error);
     setConfigStatus(error.message || 'Failed to save configuration', 'error');
@@ -1524,9 +1537,11 @@ async function savePromptChanges() {
       throw new Error(await readResponseError(response, 'Failed to save system prompt'));
     }
 
+    const carried = await carriedEditNote(response);
     await refreshAgentDetails();
     setPromptStatus('System prompt updated successfully.', 'success');
     setPromptEditMode(false);
+    if (carried) showToast(carried, 'success');
   } catch (error) {
     console.error('Failed to save system prompt:', error);
     setPromptStatus(error.message || 'Failed to save system prompt', 'error');
@@ -2458,6 +2473,13 @@ function chatWithAgent() {
 }
 
 async function confirmDelete() {
+  // The server refuses to delete an agent that works in workspaces; say so,
+  // with the count, instead of confirming a delete that cannot happen.
+  const attached = window.AgentOrigin ? window.AgentOrigin.attachedDeleteMessage(currentAgent) : '';
+  if (attached) {
+    alert(attached);
+    return;
+  }
   if (
     !confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)
   ) {
