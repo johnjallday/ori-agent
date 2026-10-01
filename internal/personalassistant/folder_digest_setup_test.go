@@ -189,6 +189,36 @@ func TestFolderSetup_ClickRecordsTheYesRunsAndResolves(t *testing.T) {
 	}
 }
 
+func TestFolderSetup_AdjustThenSetUpStillRunsTheOneClickPlan(t *testing.T) {
+	f := newOneCardFixture(t)
+	ctx := context.Background()
+	// Adjust… sends the offer to the step-by-step journey: a yes with no run.
+	view, err := f.service.Decide(ctx, "local", f.offer.ID, FolderDecisionInput{
+		Decision: FolderDecisionYes, Choice: FolderChoiceProject, RequestID: "adjust"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Status != FolderOfferAwaitingOutcome {
+		t.Fatalf("status = %s", view.Status)
+	}
+	// The resumed card keeps the one-click plan beside Continue setup.
+	current, err := f.service.Current(ctx, "local")
+	if err != nil || current.Offer == nil || current.Offer.Plan == nil || current.Offer.Setup != nil {
+		t.Fatalf("an adjusted offer must still carry its plan: %+v, %v", current.Offer, err)
+	}
+	// A stale digest is refused with the fresh plan, as on a pending offer.
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "stale", PlanDigest: "0000"}); !errors.Is(err, ErrFolderPlanChanged) {
+		t.Fatalf("stale digest: %v", err)
+	}
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "go", PlanDigest: current.Offer.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the offer to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
+	if f.setup.runCount() != 1 {
+		t.Fatalf("runs = %d", f.setup.runCount())
+	}
+}
+
 func TestFolderSetup_TwoClicksStartOneRun(t *testing.T) {
 	f := newOneCardFixture(t)
 	f.setup.hold = make(chan struct{})

@@ -140,6 +140,17 @@ test('Adjust… opens today’s step-by-step journey instead of running the plan
   // shows no run in progress.
   expect(await pluginNames()).toEqual(before);
   await expect(page.locator('#personalAssistantFolderPlan[data-mode="running"]')).toHaveCount(0);
+
+  // Leaving the journey does not lose the one-click plan: the resumed card offers
+  // Set up beside Continue setup.
+  await page.locator('#specialistSetupJourneyClose').click();
+  await expect(modal).toBeHidden();
+  await page.reload();
+  const resumed = await openCard(page);
+  await expect(resumed).toContainText('Project setup has not finished');
+  await expect(resumed.getByRole('button', { name: 'Set up', exact: true })).toBeVisible();
+  await expect(resumed.getByRole('button', { name: 'Continue setup' })).toBeVisible();
+  await expect(resumed.locator('#personalAssistantFolderPlan li').first()).toBeVisible();
 });
 
 test('Set up without a model stops with one plain sentence and a way forward', async ({
@@ -222,8 +233,13 @@ test('Try again after a model is set finishes the run on the same card, then Ope
   await expect
     .poll(() => startCalls.some(call => call.includes('"started":true')), { timeout: 60_000 })
     .toBe(true);
-  // The task runs in the background: no dialog covers the page.
+  // The task runs in the background: no dialog covers the page, and a banner says
+  // the agent is working on it (then where it ended up).
   await expect(page.locator('.modal.show')).toHaveCount(0);
+  const banner = page.locator('#workspaceFirstTaskBanner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText(/first task/);
+  await expect(banner.getByRole('link', { name: /the task$/ })).toBeVisible();
   // A reload never starts it a second time.
   const before = startCalls.length;
   await page.reload();

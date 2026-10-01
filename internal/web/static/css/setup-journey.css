@@ -456,6 +456,68 @@
   }
 }
 
+/* The workspace banner shown while the agent works on its first task. */
+.first-task-banner {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--cozy-line, #cdbf9f);
+  border-left: 4px solid var(--cozy-moss, #4a6b4a);
+  border-radius: 10px;
+  background: var(--cozy-paper-raised, #fdfaf2);
+  color: var(--cozy-ink, #2b2417);
+}
+
+.first-task-banner[hidden] {
+  display: none;
+}
+
+.first-task-banner[data-phase="needs-you"] {
+  border-left-color: var(--cozy-amber-strong, #a8741a);
+}
+
+.first-task-banner[data-phase="failed"] {
+  border-left-color: var(--cozy-clay, #b0502f);
+}
+
+.first-task-banner__text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 0.1rem;
+  overflow-wrap: anywhere;
+}
+
+.first-task-banner__text span {
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.88rem;
+}
+
+.first-task-banner__pulse {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 3px solid var(--cozy-moss, #4a6b4a);
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--cozy-moss, #4a6b4a) 45%, transparent);
+  animation: folder-run-pulse 1.6s ease-out infinite;
+}
+
+.first-task-banner:not([data-phase="working"]) .first-task-banner__pulse {
+  background: currentcolor;
+  border-color: transparent;
+  opacity: 0.55;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .first-task-banner__pulse {
+    animation: none;
+  }
+}
+
 /* One-card folder setup: a pop-up that watches the server's run. It states that
    the assistant is working (pulse, step count, bar) and never asks for a click
    per step. State is a glyph plus a hidden word, never colour alone. */

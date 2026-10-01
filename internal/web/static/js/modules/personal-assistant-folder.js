@@ -347,6 +347,12 @@ function capabilityConfirmView(offer, base, subject) {
   const later = { id: 'later', label: 'Later', style: 'link', decision: 'later' };
   let actions;
   if (run) actions = run.actions;
+  else if (continuing && hasPlan)
+    // Adjust… was pressed earlier: the one-click plan stays, beside the journey.
+    actions = [
+      { id: 'setup', label: 'Set up', style: 'primary', oneCard: true },
+      { id: 'resume', label: 'Continue setup', style: 'outline', journey: true }
+    ];
   else if (continuing)
     actions = [{ id: 'resume', label: 'Continue setup', style: 'primary', journey: true }];
   else if (base.decided) actions = [];
@@ -429,9 +435,15 @@ export function folderOfferView(offer, options = {}) {
   };
   const view = verdictView(offer, base, { verdict, folder, subject, remember, confirm });
   if (status === 'awaiting_outcome' && offer?.capability && !offer.portfolio && !view.setup) {
-    view.question = 'Project setup has not finished. Continue to review its current steps.';
-    view.capabilityDetail =
-      'Opening setup checks its current steps; it does not by itself create another workspace or enable live project control.';
+    if (view.plan) {
+      view.question =
+        'Project setup has not finished. Set up does what is left in one go, or continue step by step. Here is what is left:';
+      view.capabilityDetail = '';
+    } else {
+      view.question = 'Project setup has not finished. Continue to review its current steps.';
+      view.capabilityDetail =
+        'Opening setup checks its current steps; it does not by itself create another workspace or enable live project control.';
+    }
   }
   if (
     status === 'resolved' &&

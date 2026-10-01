@@ -514,6 +514,30 @@ test('a reviewed file project uses the same card and never the blank creator', (
   assert.equal(waiting.actions[0].journey, true);
 });
 
+test('after Adjust… the card keeps Set up beside Continue setup when a plan exists', () => {
+  const view = folderOfferView({
+    id: 'offer-2',
+    verdict: 'project',
+    status: 'awaiting_outcome',
+    folder: 'Documents',
+    subject: { name: 'Session' },
+    capability: {
+      recognized: 'REAPER',
+      workspace: 'REAPER song workspace',
+      setup_source: 'plugin'
+    },
+    plan: { digest: 'a'.repeat(64), lines: [{ name: 'Creates a workspace' }] }
+  });
+  assert.deepEqual(
+    view.actions.map(action => action.id),
+    ['setup', 'resume']
+  );
+  assert.equal(view.actions[0].oneCard, true);
+  assert.equal(view.actions[1].journey, true);
+  assert.match(view.question, /Set up does what is left in one go/);
+  assert.equal(view.plan.lines.length, 1);
+});
+
 const oneCardOffer = {
   id: 'offer-1',
   verdict: 'project',

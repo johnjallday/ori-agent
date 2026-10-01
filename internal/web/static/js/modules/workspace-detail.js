@@ -16,6 +16,7 @@ import {
   guidanceLines,
   policySummary
 } from './workspace-planning-policy.js';
+import { firstTaskBannerView, renderFirstTaskBanner } from './workspace-first-task-banner.js';
 import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
@@ -5820,15 +5821,70 @@ export class WorkspaceDetailPage {
       );
       if (!response.ok) return;
       const result = await response.json().catch(() => ({}));
-      if (!result?.started || !result?.task_id) return;
+      if (!result?.started || !result?.task_id) {
+        // Not started now: a reload while it still runs keeps the banner.
+        this.resumeFirstTaskBanner();
+        return;
+      }
       await this.loadTasks();
       if (window.Toast) {
         window.Toast.info('Your first task started: a read-only look at the folder.');
       }
+      this.firstTaskBannerId = result.task_id;
+      this.updateFirstTaskBanner(this.tasks.find(item => item.id === result.task_id));
       this.startExecutionMonitor(result.task_id);
     } catch (error) {
       console.warn('Folder first task start check failed:', error);
     }
+  }
+
+  /**
+   * Show the first-task banner for a folder's first task that was already started
+   * and is still going (a reload, or coming back to the workspace). A finished one
+   * is not announced again; it is only followed to its end in the session that
+   * saw it start.
+   */
+  resumeFirstTaskBanner() {
+    const task = (this.tasks || []).find(
+      item =>
+        item?.context?.template_id === 'folder-digest' &&
+        item.context.template_starter_task === true &&
+        item.context.folder_first_task_autostart_consumed_at
+    );
+    if (!task) return;
+    const state = this.getTaskExecutionState(task);
+    if (!['pending', 'in_progress', 'running', 'blocked', 'waiting_for_choice'].includes(state)) {
+      return;
+    }
+    this.firstTaskBannerId = task.id;
+    this.updateFirstTaskBanner(task);
+    if (state === 'in_progress' || state === 'running') this.startExecutionMonitor(task.id);
+  }
+
+  async refreshFirstTaskBanner() {
+    const taskId = this.firstTaskBannerId;
+    if (!taskId) return;
+    try {
+      const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+      if (!response.ok) return;
+      this.updateFirstTaskBanner(await response.json());
+    } catch (error) {
+      console.warn('First task banner refresh failed:', error);
+    }
+  }
+
+  updateFirstTaskBanner(task) {
+    if (!task || task.id !== this.firstTaskBannerId) return;
+    const mount = document.getElementById('workspaceFirstTaskBanner');
+    renderFirstTaskBanner(
+      mount,
+      firstTaskBannerView({
+        state: this.getTaskExecutionState(task),
+        agentName: task.to,
+        taskTitle: task.title,
+        href: this.buildTaskHref(task.id)
+      })
+    );
   }
 
   async maybePromptForMissingEntryAgent() {
@@ -13004,6 +13060,7 @@ export class WorkspaceDetailPage {
         if (!task || task.id !== taskId) return;
 
         const state = this.getTaskExecutionState(task);
+        this.updateFirstTaskBanner(task);
         this.updateTaskExecutionMeta(task);
         this.setExecutionModalStatus(task);
         await this.refreshExecutionBreakdown(task);
@@ -13087,6 +13144,13 @@ export class WorkspaceDetailPage {
     if (!this.currentExecutionTaskId || !event) return;
     const { taskId, payload } = this.extractRealtimeTaskPayload(event);
     if (!taskId || taskId !== this.currentExecutionTaskId) return;
+    if (
+      taskId === this.firstTaskBannerId &&
+      ['task.completed', 'task.failed', 'task.blocked'].includes(event.type)
+    ) {
+      // These stop the poll, so the banner reads the task's final state itself.
+      void this.refreshFirstTaskBanner();
+    }
 
     switch (event.type) {
       case 'task.started':

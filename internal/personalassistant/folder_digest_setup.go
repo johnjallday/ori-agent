@@ -47,10 +47,19 @@ func (s *FolderDigestService) attachSetupRun(offer FolderOffer, v *FolderOfferVi
 	v.Setup = view
 }
 
-// attachSetupPlan reads the plan for a pending offer. A host that cannot plan
-// leaves the card on the step-by-step journey rather than showing a guess.
+// planPending reports whether an offer's setup is still to be planned: a pending
+// offer, or one the user sent to the step-by-step journey (Adjust…) that has no
+// one-card run yet, so the one-click plan stays available beside Continue setup.
+func planPending(offer FolderOffer) bool {
+	return offer.Status == FolderOfferPending ||
+		(offer.Status == FolderOfferAwaitingOutcome && offer.Choice == FolderChoiceProject && offer.Setup == nil)
+}
+
+// attachSetupPlan reads the plan for an offer that has none running. A host that
+// cannot plan leaves the card on the step-by-step journey rather than showing a
+// guess.
 func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string, offer FolderOffer, v *FolderOfferView) {
-	if s.deps.Setup == nil || offer.Status != FolderOfferPending || !eligibleForOneCard(offer) {
+	if s.deps.Setup == nil || !planPending(offer) || !eligibleForOneCard(offer) {
 		return
 	}
 	plan, err := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, offer))
@@ -157,7 +166,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		return FolderOfferView{}, ErrFolderOutcomeUnavailable
 	}
 	switch {
-	case offer.Status == FolderOfferPending:
+	case planPending(*offer):
 	case offer.Status == FolderOfferAwaitingOutcome && offer.Choice == FolderChoiceProject && offer.Setup != nil:
 	default:
 		return FolderOfferView{}, ErrFolderOfferDecided
@@ -183,11 +192,12 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		return FolderOfferView{}, err
 	}
 
-	// The click consents to the plan on screen. A pending offer is checked
-	// against the plan the server would produce now; a resumed run, whose plan
-	// legitimately shrinks as steps finish, against the plan it was confirmed on.
+	// The click consents to the plan on screen. An offer with no run yet is
+	// checked against the plan the server would produce now; a resumed run, whose
+	// plan legitimately shrinks as steps finish, against the plan it was
+	// confirmed on.
 	var plan FolderSetupPlan
-	if offer.Status == FolderOfferPending {
+	if offer.Setup == nil {
 		fresh, planErr := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, *offer))
 		if planErr != nil {
 			return FolderOfferView{}, planErr

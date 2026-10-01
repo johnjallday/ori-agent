@@ -1437,6 +1437,8 @@ After the Create Workspace modal (opened pre-filled, sent with `entry_point: "fo
 
 A pending project offer whose shape needs a reviewed integration carries `plan` (`lines`: label, detail, `state`, and a `digest`) and `setup` (the run: `status`, `stop_reason`, `lines`). The digest of the plan is the user's consent: it covers every line except its state. The server runs the plan itself (plugin installs, Home, workspace, folder link, File-only mode, agents, first task) and answers `200` with the offer (the run continues on the server; poll the offer). Allowed fields are exactly the three above; there is no path field, and the intent behind the plan is pinned on the server. `409` with `"plan_changed": true` and the fresh offer when the plan moved since the card was drawn; `409` while another run holds the offer; `404` unknown offer. A run that cannot finish stops with a `stop_reason` (for example `needs_model`, `needs_pick`, `install_failed`) and keeps what it finished; sending the same digest again continues from there. A finished run makes the offer `resolved` with a receipt (`outcome.workspace_id`, `outcome.route`). The first read-only task starts when the workspace is first opened (`POST /api/workspaces/{id}/folder-first-task/start`, once).
 
+An offer the user sent to the step-by-step journey (**Adjust…**, so `awaiting_outcome` with no run yet) still carries `plan`, and the setup action accepts it the same way, so the one-click path is not lost.
+
 `GET /api/personal-assistant/folder-digest?offer_id=<id>` returns that offer as `offer` (a running or finished one included) instead of the current one, which is how the card follows its own run when another offer is waiting.
 
 ### Read-only tools over linked directories
