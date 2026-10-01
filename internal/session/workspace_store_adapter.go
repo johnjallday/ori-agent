@@ -196,7 +196,9 @@ func (a *WorkspaceStoreAdapter) Delete(id string) error {
 	return a.store.DeleteWorkspace(ctx, id)
 }
 
-// ListActive returns all active workspaces.
+// ListActive returns metadata-only projections for compatibility. New listing
+// consumers should use ListActiveSummaries; mutate through Update, not these
+// partial Workspace values.
 func (a *WorkspaceStoreAdapter) ListActive() ([]*workspace.Workspace, error) {
 	ctx := context.Background()
 
@@ -212,6 +214,28 @@ func (a *WorkspaceStoreAdapter) ListActive() ([]*workspace.Workspace, error) {
 		}
 	}
 	return active, nil
+}
+
+// ListActiveSummaries returns metadata without constructing a writable
+// Workspace or decoding its orchestration and capability state.
+func (a *WorkspaceStoreAdapter) ListActiveSummaries() ([]workspace.WorkspaceSummary, error) {
+	listed, err := a.store.ListWorkspaces(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]workspace.WorkspaceSummary, 0, len(listed))
+	for _, ws := range listed {
+		if ws.Status != WorkspaceStatusActive && ws.Status != "" {
+			continue
+		}
+		summaries = append(summaries, workspace.WorkspaceSummary{
+			ID: ws.ID, Name: ws.Name, Kind: string(NormalizeWorkspaceKind(string(ws.Kind))),
+			Description: ws.Description, FolderSlug: ws.FolderSlug,
+			OwnerUserID: normalizeOwnerUserID(ws.OwnerUserID), ParentID: ws.ParentID, OrderIndex: ws.OrderIndex,
+			Status: workspace.StatusActive, Version: ws.Version, CreatedAt: ws.CreatedAt, UpdatedAt: ws.UpdatedAt,
+		})
+	}
+	return summaries, nil
 }
 
 // ListActiveForScheduling returns active workspaces for the task scheduler with

@@ -34,7 +34,10 @@ type Store interface {
 	// Delete removes a workspace from storage
 	Delete(id string) error
 
-	// ListActive returns all active workspaces
+	// ListActive is a compatibility listing: some stores return metadata-only
+	// projections, not complete writable records. Prefer SummaryLister for new
+	// consumers. Hydrate IDs with Get for payload decisions and use Update for
+	// mutations; saving a listing may erase omitted state.
 	ListActive() ([]*Workspace, error)
 
 	// GetFilesPath returns the path for storing files for a workspace

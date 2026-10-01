@@ -192,9 +192,10 @@ func (s Snapshot) AllRefs() map[string]SourceRef {
 	return out
 }
 
-// WorkspaceSource is the narrow workspace-listing contract the snapshot
-// builder needs. workspace.Store (the folder-backed store already wired in
-// production) satisfies it.
+// WorkspaceSource is the compatibility contract the snapshot builder needs.
+// ResolveWorkspaceScope prefers workspace.SummaryLister when available and
+// otherwise projects ListActive into summaries; both paths hydrate IDs through
+// Get. Keeping this interface lets existing custom sources migrate gradually.
 type WorkspaceSource interface {
 	Get(id string) (*workspace.Workspace, error)
 	ListActive() ([]*workspace.Workspace, error)
