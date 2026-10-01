@@ -157,6 +157,11 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				h.handleTemplateSetupStart(w, r, id)
 				return
 			}
+		case "folder-first-task":
+			if len(parts) == 3 && parts[2] == "start" {
+				h.handleFolderFirstTaskStart(w, r, id)
+				return
+			}
 		case "group-requirement":
 			if len(parts) == 3 && parts[2] == "delete/review" {
 				h.ReviewRequiredGroupRequirementDeletion(w, r, id)

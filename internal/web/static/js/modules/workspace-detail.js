@@ -353,8 +353,16 @@ export class WorkspaceDetailPage {
     if (!restoredBlockedTask && !setupOwned && !this.checkAutoOpenCreateAgent()) {
       await this.maybePromptForMissingEntryAgent();
     }
+    let startedSetupTask = false;
     if (!restoredBlockedTask && !setupOwned) {
-      await this.maybeStartTemplateSetup();
+      startedSetupTask = await this.maybeStartTemplateSetup();
+    }
+    // A blueprint's own setup task goes first; the folder's first task never
+    // starts alongside it. It is not held back by a Setup Wizard merely existing
+    // (a workspace the setup journey made has one): the server waits for the
+    // wizard to be finished.
+    if (!restoredBlockedTask && !startedSetupTask) {
+      await this.maybeStartFolderFirstTask();
     }
   }
 
@@ -5780,9 +5788,9 @@ export class WorkspaceDetailPage {
         `/api/workspaces/${encodeURIComponent(this.workspaceId)}/template-setup/start`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
       );
-      if (!response.ok) return;
+      if (!response.ok) return false;
       const result = await response.json().catch(() => ({}));
-      if (!result?.started || !result?.task_id) return;
+      if (!result?.started || !result?.task_id) return false;
       await this.loadTasks();
       if (window.Toast) {
         window.Toast.info('Setup task started — the workspace agent is getting things ready.');
@@ -5790,8 +5798,36 @@ export class WorkspaceDetailPage {
       // Land where the setup conversation surfaces: the same execution monitor
       // a manual Start opens (agent questions arrive via the blocked-task flow).
       this.startExecutionMonitor(result.task_id);
+      return true;
     } catch (error) {
       console.warn('Template setup auto-start check failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * First-open start for the read-only first task a shown folder's workspace was
+   * given. The server starts it once (its own consumed marker), only when the task
+   * has an agent and no setup dialog is still open, so this is safe on every open.
+   * It never opens a dialog: the task runs in the background and the monitor
+   * follows it.
+   */
+  async maybeStartFolderFirstTask() {
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/folder-first-task/start`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+      );
+      if (!response.ok) return;
+      const result = await response.json().catch(() => ({}));
+      if (!result?.started || !result?.task_id) return;
+      await this.loadTasks();
+      if (window.Toast) {
+        window.Toast.info('Your first task started: a read-only look at the folder.');
+      }
+      this.startExecutionMonitor(result.task_id);
+    } catch (error) {
+      console.warn('Folder first task start check failed:', error);
     }
   }
 

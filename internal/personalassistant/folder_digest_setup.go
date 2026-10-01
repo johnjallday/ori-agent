@@ -71,6 +71,28 @@ func (s *FolderDigestService) setupRequest(ctx context.Context, userID string, o
 	return req
 }
 
+// withFirstTask returns the receipt of a verified project with its first task
+// seeded and described. Every other row is kept as the host reported it.
+func (s *FolderDigestService) withFirstTask(ctx context.Context, userID, shape string, verified FolderCreateResult) []FolderReceiptRow {
+	if s.deps.FirstTask == nil {
+		return verified.Receipt
+	}
+	task, err := s.deps.FirstTask.SeedFirstTask(ctx, FolderFirstTaskRequest{
+		UserID: userID, WorkspaceID: verified.WorkspaceID, Shape: folderdigest.Shape(shape),
+	})
+	rows := make([]FolderReceiptRow, 0, len(verified.Receipt)+1)
+	for _, row := range verified.Receipt {
+		if row.Kind != "task" { // the seeder's row replaces any earlier one
+			rows = append(rows, row)
+		}
+	}
+	if err != nil {
+		logger.Warn("The setup's first task could not be added", logger.Fields{"workspace_id": verified.WorkspaceID, "error": err.Error()})
+		return rows
+	}
+	return append(rows, task)
+}
+
 func (s *FolderDigestService) isRunning(offerID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

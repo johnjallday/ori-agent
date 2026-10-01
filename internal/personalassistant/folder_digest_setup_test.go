@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
 // fakeFolderSetup stands in for the host's runner. Run reports "running", waits
@@ -315,6 +317,81 @@ func TestFolderSetup_AStoppedRunResumesOnItsConfirmedPlan(t *testing.T) {
 	waitFor(t, "the resumed run to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
 	if f.setup.runCount() != 2 {
 		t.Fatalf("runs = %d", f.setup.runCount())
+	}
+}
+
+type fakeFirstTaskSeeder struct {
+	mu    sync.Mutex
+	calls []FolderFirstTaskRequest
+	err   error
+}
+
+func (f *fakeFirstTaskSeeder) SeedFirstTask(_ context.Context, req FolderFirstTaskRequest) (FolderReceiptRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, req)
+	if f.err != nil {
+		return FolderReceiptRow{}, f.err
+	}
+	return FolderReceiptRow{Kind: "task", Name: "Summarize the session", Detail: "Starts when you open it"}, nil
+}
+
+func (f *fakeFirstTaskSeeder) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func TestFolderSetup_AVerifiedProjectGetsItsFirstTaskOnTheReceipt(t *testing.T) {
+	f := newOneCardFixture(t)
+	seeder := &fakeFirstTaskSeeder{}
+	f.service.deps.FirstTask = seeder
+	ctx := context.Background()
+	if _, err := f.service.StartSetup(ctx, "local", f.offer.ID, FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the offer to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
+	stored := f.stored(t)
+	rows := stored.Outcome.Receipt
+	if len(rows) != 1 || rows[0].Kind != "task" || rows[0].Detail != "Starts when you open it" {
+		t.Fatalf("receipt = %+v", rows)
+	}
+	if seeder.callCount() != 1 || seeder.calls[0].WorkspaceID != "quest-project" || seeder.calls[0].UserID != "local" {
+		t.Fatalf("seeder calls = %+v", seeder.calls)
+	}
+	if seeder.calls[0].Shape != folderdigest.Shape(stored.Subject.Shape) {
+		t.Fatalf("the task must be the shape of the folder shown: %+v", seeder.calls[0])
+	}
+}
+
+func TestFolderSetup_AFirstTaskThatCannotBeAddedDoesNotFailTheSetup(t *testing.T) {
+	f := newOneCardFixture(t)
+	f.service.deps.FirstTask = &fakeFirstTaskSeeder{err: errors.New("tasks are unavailable")}
+	if _, err := f.service.StartSetup(context.Background(), "local", f.offer.ID, FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the offer to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
+	for _, row := range f.stored(t).Outcome.Receipt {
+		if row.Kind == "task" {
+			t.Fatalf("a task row appeared for a task that was not added: %+v", row)
+		}
+	}
+}
+
+func TestFolderSetup_NoFirstTaskIsSeededForARunTheVerifierRefuses(t *testing.T) {
+	f := newOneCardFixture(t)
+	seeder := &fakeFirstTaskSeeder{}
+	f.service.deps.FirstTask = seeder
+	f.service.deps.Journey = &fakeJourneyVerifier{folder: "/somewhere/else"} // refuses this folder
+	if _, err := f.service.StartSetup(context.Background(), "local", f.offer.ID, FolderSetupInput{RequestID: "r1", PlanDigest: f.offer.Plan.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the run to be refused", func() bool {
+		s := f.stored(t).Setup
+		return s != nil && s.Status == FolderSetupStopped && !f.service.isRunning(f.offer.ID)
+	})
+	if seeder.callCount() != 0 || f.stored(t).Status != FolderOfferAwaitingOutcome {
+		t.Fatalf("seeded for a run that was never proved: calls=%d status=%s", seeder.callCount(), f.stored(t).Status)
 	}
 }
 

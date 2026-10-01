@@ -253,6 +253,21 @@ type FolderHomeVerifier interface {
 	VerifiedHome(ctx context.Context, userID, homeID, providerKey string, acceptedAfter time.Time) (FolderCreateResult, error)
 }
 
+// FolderFirstTaskRequest asks the host to give a workspace the setup created the
+// first read-only task for the shape of the folder it was made for.
+type FolderFirstTaskRequest struct {
+	UserID      string
+	WorkspaceID string
+	Shape       folderdigest.Shape
+}
+
+// FolderFirstTaskSeeder adds that task, once: a replay finds the task already
+// there and adds none. It returns the receipt row that describes the task as it
+// now stands, including whether it will start by itself on the first open.
+type FolderFirstTaskSeeder interface {
+	SeedFirstTask(ctx context.Context, req FolderFirstTaskRequest) (FolderReceiptRow, error)
+}
+
 // FolderDigestDeps are the seams the service is built over. Zero values
 // take production defaults except ValidateRoot, which the server supplies
 // from File Janitor's root rules.
@@ -296,6 +311,10 @@ type FolderDigestDeps struct {
 	// Setup plans and runs a recognized project's one-card setup. Nil keeps the
 	// step-by-step journey as the only path.
 	Setup FolderSetupRunner
+	// FirstTask seeds the first task on a workspace the setup journey created, so
+	// a project connected through the journey (the card's Set up or Adjust…) ends
+	// with the same first task a generic project gets. Nil seeds none.
+	FirstTask FolderFirstTaskSeeder
 	// OnResolved runs after a project outcome completes: the dossier
 	// producer learns from the offer and reports whether the fact was saved
 	// (FR35–FR39). Best-effort; its answer is recorded on the outcome.
@@ -1575,6 +1594,11 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 	if err != nil || verified.WorkspaceID == "" || !strings.HasPrefix(verified.Route, "/workspaces/") {
 		return FolderOfferView{}, ErrFolderWorkspaceRefused
 	}
+	// The project is proved to be this folder's. Only now does it get its first
+	// task, and the receipt shows the task as it actually stands. Best effort: a
+	// project without its first task is still set up, and the receipt then simply
+	// has no task row.
+	verified.Receipt = s.withFirstTask(ctx, userID, offer.Subject.Shape, verified)
 	now := s.now()
 	var resolved FolderOffer
 	_, err = s.store.Mutate(ctx, userID, func(d *FolderDigestDocument) error {
