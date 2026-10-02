@@ -1637,27 +1637,39 @@ PY
     # project file, a backup, a bounce and a Media/ folder of takes. <format> is
     # rpp (default), als, or mixed (every third song is an Ableton set).
     # <two-files> songs (default 0) get a second project file, so opening them
-    # asks which file. Never overwrites, even in a sandbox.
+    # asks which file. Each song's project file carries its own saved time:
+    # Song 001 today, Song 002 yesterday, then further back to over a year, so
+    # "Last saved" order and labels are visible. Never overwrites, even in a
+    # sandbox.
     local home="${4:-}" count="${5:-}" chip="${6:-Desktop}" format="${7:-rpp}" two="${8:-0}"
     [[ -n "$home" && -d "$home" && "$home" == *"/ori-demo."* && "$count" =~ ^[0-9]+$ && "$two" =~ ^[0-9]+$ ]] ||
       fail "usage: $0 showfolder <base-url> seed-portfolio <ori-demo-sandbox> <count> [Desktop|Documents|Downloads] [rpp|als|mixed] [two-files]"
     case "$chip" in Desktop|Documents|Downloads) ;; *) fail "unknown chip: $chip" ;; esac
     case "$format" in rpp|als|mixed) ;; *) fail "unknown format: $format" ;; esac
     python3 - "$home" "$count" "$chip" "$format" "$two" <<'PY'
-import os, sys
+import datetime, os, sys, time
 home, count, chip, fmt, two = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5])
-def put(rel, body):
+DAYS_AGO = [0, 1, 2, 4, 7, 12, 20, 35, 70, 150, 300, 420]
+def saved_at(i):
+    days = DAYS_AGO[i - 1] if i <= len(DAYS_AGO) else DAYS_AGO[-1] + 45 * (i - len(DAYS_AGO))
+    if days == 0:
+        return time.time() - 60
+    day = datetime.date.today() - datetime.timedelta(days=days)
+    return datetime.datetime.combine(day, datetime.time(12)).timestamp()  # local noon
+def put(rel, body, saved=None):
     target = os.path.join(home, rel)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     with open(target, "xb") as output:  # never overwrite, even in a sandbox
         output.write(body)
+    if saved is not None:
+        os.utime(target, (saved, saved))
 for i in range(1, count + 1):
     name = f"Song {i:03d}"
     ext = ".als" if fmt == "als" or (fmt == "mixed" and i % 3 == 0) else ".rpp"
     body = b"<REAPER_PROJECT>\n" if ext == ".rpp" else b"ableton\n"
-    put(f"{chip}/{name}/{name}{ext}", body)
+    put(f"{chip}/{name}/{name}{ext}", body, saved_at(i))
     if i <= two:
-        put(f"{chip}/{name}/{name} alt{ext}", body)
+        put(f"{chip}/{name}/{name} alt{ext}", body, saved_at(i) - 3600)
     put(f"{chip}/{name}/{name}{ext}-bak", body)
     put(f"{chip}/{name}/{name} bounce.wav", b"RIFF")
     for take in range(3):

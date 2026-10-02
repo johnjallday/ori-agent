@@ -74,7 +74,7 @@ func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root
 			FileIdentity: candidate.FileIdentity, Format: candidate.Format,
 			Alternates: append([]string(nil), candidate.Alternates...),
 			ScanID:     scan.ID, ScannedAt: observed.StartedAt, LastCheckedAt: observed.StartedAt,
-			Availability: "available"}
+			FileModifiedAt: candidate.FileModifiedAt.UTC(), Availability: "available"}
 		if candidate.Ambiguous {
 			observation.Availability = "ambiguous"
 		}

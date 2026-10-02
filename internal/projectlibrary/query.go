@@ -47,7 +47,11 @@ type SearchRow struct {
 	ActivityAt     time.Time `json:"sourced_activity_at,omitempty"`
 	ActivitySource string    `json:"activity_source,omitempty"`
 	LastScannedAt  time.Time `json:"last_scanned_at,omitempty"`
-	NeedsChoice    bool      `json:"needs_choice,omitempty"`
+	// LastSavedAt is the newest project-file save time among the sources
+	// that are usable now (available or ambiguous, on an active root). A save
+	// time is not evidence that anyone worked on the song. Nil: no date.
+	LastSavedAt *time.Time `json:"last_saved_at,omitempty"`
+	NeedsChoice bool       `json:"needs_choice,omitempty"`
 	// CanOpen says the owner can open the row in one click: it is connected, or
 	// it is catalog-only with an available source in a format the installed
 	// project blueprint opens. The open action repeats every check.
@@ -217,7 +221,7 @@ func (q *Search) normalize(doc Document) error {
 		return ErrConflict
 	}
 	switch q.Sort {
-	case "name", "status", "priority", "next_action", "sourced_activity", "scanned_at":
+	case "name", "status", "priority", "next_action", "sourced_activity", "scanned_at", "last_saved":
 	default:
 		return ErrConflict
 	}
@@ -416,6 +420,12 @@ func (s *Store) projectSearchRowInRoot(scope Scope, entry Entry, roots map[strin
 		if observed.ScannedAt.After(row.LastScannedAt) {
 			row.LastScannedAt = observed.ScannedAt
 		}
+		if root.RevokedAt == nil && !inactive[root.ID] &&
+			(observed.Availability == "available" || observed.Availability == "ambiguous") &&
+			!observed.FileModifiedAt.IsZero() && (row.LastSavedAt == nil || observed.FileModifiedAt.After(*row.LastSavedAt)) {
+			saved := observed.FileModifiedAt.UTC()
+			row.LastSavedAt = &saved
+		}
 		if (root.RevokedAt != nil || inactive[root.ID]) && row.Availability == "not_scanned" {
 			row.Availability = "revoked_source"
 		} else if root.RevokedAt == nil && !inactive[root.ID] {
@@ -510,6 +520,13 @@ func searchKey(row SearchRow, sortField string) string {
 		return row.ActivityAt.UTC().Format(searchTimestampLayout)
 	case "scanned_at":
 		return row.LastScannedAt.UTC().Format(searchTimestampLayout)
+	case "last_saved":
+		// An undated row's empty key sorts before every date, so it comes
+		// last in the descending "most recently saved" order.
+		if row.LastSavedAt == nil {
+			return ""
+		}
+		return row.LastSavedAt.UTC().Format(searchTimestampLayout)
 	default:
 		return strings.ToLower(row.Name)
 	}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -63,12 +64,15 @@ func openPinnedDirectory(root Root, relative, expectedIdentity string) (int, err
 
 // DirectoryRow carries only names and metadata, never project/audio bytes.
 // IsLink is explicit so discovery can report skipped symlinks, not follow them.
+// ModifiedAt comes from the same no-follow stat as Size and Identity: it says
+// when the entry was last saved on disk, never that anyone worked on it.
 type DirectoryRow struct {
 	Name       string
 	IsDir      bool
 	IsLink     bool
 	Size       int64
 	Identity   string
+	ModifiedAt time.Time
 	Unreadable bool
 }
 
@@ -152,7 +156,8 @@ func readPinnedDirectory(ctx context.Context, root Root, relative, expectedIdent
 			continue
 		}
 		rows = append(rows, DirectoryRow{Name: name, IsDir: st.Mode&unix.S_IFMT == unix.S_IFDIR,
-			IsLink: st.Mode&unix.S_IFMT == unix.S_IFLNK, Size: st.Size, Identity: unixIdentity(&st)})
+			IsLink: st.Mode&unix.S_IFMT == unix.S_IFLNK, Size: st.Size, Identity: unixIdentity(&st),
+			ModifiedAt: time.Unix(st.Mtim.Unix()).UTC()})
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, false, err

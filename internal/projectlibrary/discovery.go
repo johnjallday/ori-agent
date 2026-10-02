@@ -13,12 +13,15 @@ import (
 
 // Candidate is one observed folder, not one project per authoritative file.
 // Alternatives are basename-only evidence. Nothing here activates a project.
+// FileModifiedAt is the newest save time among the Alternates, taken from the
+// listing's own stat; it is never read from inside a project file.
 type Candidate struct {
-	RelativeFolder string   `json:"relative_folder"`
-	FileIdentity   string   `json:"file_identity"`
-	Format         string   `json:"format"`
-	Alternates     []string `json:"alternates,omitempty"`
-	Ambiguous      bool     `json:"ambiguous"`
+	RelativeFolder string    `json:"relative_folder"`
+	FileIdentity   string    `json:"file_identity"`
+	Format         string    `json:"format"`
+	Alternates     []string  `json:"alternates,omitempty"`
+	Ambiguous      bool      `json:"ambiguous"`
+	FileModifiedAt time.Time `json:"file_modified_at,omitempty"`
 }
 
 // ObservedScope is inert server-known directory evidence for a separately
@@ -181,6 +184,7 @@ func (r *Roots) discoverAt(ctx context.Context, scope Scope, root Root, relative
 
 func recognizedProject(relative, identity string, rows []DirectoryRow) (Candidate, bool) {
 	groups := map[string][]string{}
+	newest := map[string]time.Time{}
 	for _, row := range rows {
 		if row.IsLink || row.Unreadable || strings.HasPrefix(row.Name, ".") || strings.HasSuffix(row.Name, ".icloud") {
 			continue
@@ -188,15 +192,20 @@ func recognizedProject(relative, identity string, rows []DirectoryRow) (Candidat
 		marker, ok := folderdigest.MatchMarker(row.Name, row.IsDir)
 		if ok && marker.ProjectFormat != "" {
 			groups[marker.ProjectFormat] = append(groups[marker.ProjectFormat], row.Name)
+			if row.ModifiedAt.After(newest[marker.ProjectFormat]) {
+				newest[marker.ProjectFormat] = row.ModifiedAt
+			}
 		}
 	}
 	candidate := Candidate{RelativeFolder: relative, FileIdentity: identity}
 	// Marker table order is the host's deterministic choice of a primary
 	// format. Alternatives and mixed formats remain explicit ambiguity, not
-	// implicit permission to connect through a particular plugin.
+	// implicit permission to connect through a particular plugin. Only the
+	// primary format's files date the song.
 	for _, marker := range folderdigest.Markers {
 		if choices := groups[marker.ProjectFormat]; len(choices) > 0 {
 			candidate.Format, candidate.Alternates = marker.ProjectFormat, choices
+			candidate.FileModifiedAt = newest[marker.ProjectFormat].UTC()
 			break
 		}
 	}

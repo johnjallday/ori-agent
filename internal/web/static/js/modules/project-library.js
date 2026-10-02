@@ -1,5 +1,24 @@
 import { clearLibraryReturn, readLibraryReturn, writeLibraryReturn } from './library-return.js';
+import {
+  lastSavedLabel,
+  libraryOpenAction,
+  libraryOpenChoices,
+  libraryOpenRoute,
+  libraryOpenedMessage,
+  libraryRequestError,
+  readLibraryPayload as payload
+} from './library-open.js';
 import { setupQuestURL } from './setup-quest-links.js';
+
+// The open helpers moved to library-open.js so the setup pop-up can share them
+// without loading this module on every page; existing importers keep working.
+export {
+  lastSavedLabel,
+  libraryOpenAction,
+  libraryOpenChoices,
+  libraryOpenRoute,
+  libraryOpenedMessage
+} from './library-open.js';
 
 function label(value) {
   return String(value == null || value === '' ? 'Unknown' : value).replaceAll('_', ' ');
@@ -14,14 +33,6 @@ function node(tag, className, value) {
   if (className) element.className = className;
   if (value != null) element.textContent = String(value);
   return element;
-}
-
-async function payload(response) {
-  try {
-    return await response.json();
-  } catch (_) {
-    return {};
-  }
 }
 
 // What to tell the user when the folder they chose for this Home cannot be used
@@ -386,56 +397,6 @@ export function librarySharingView(sharing, readOnly = false) {
   return view;
 }
 
-// libraryOpenAction is the row's one-click Open, or null when the row cannot be
-// opened here (read-only Home, unsupported format, source unavailable): such a
-// row keeps its Details, which explain why.
-export function libraryOpenAction(row, readOnly) {
-  if (readOnly || !row?.can_open) return null;
-  const name = String(row.name || 'this project');
-  return {
-    label: 'Open',
-    ariaLabel:
-      row.connection === 'connected'
-        ? `Open ${name}`
-        : `Open ${name}: makes its workspace and adds your assistant`
-  };
-}
-
-// A route the open action may navigate to: one workspace, nothing else.
-export function libraryOpenRoute(result) {
-  const route = String(result?.route || '');
-  return /^\/workspaces\/[a-z0-9][a-z0-9-]*$/.test(route) ? route : '';
-}
-
-// What the status line says after a song opened, before the page moves on.
-export function libraryOpenedMessage(name, result) {
-  const song = String(name || 'The project');
-  const agent = String(result?.agent_name || '').trim();
-  switch (result?.staffing) {
-    case 'added':
-      return `${song} is ready. ${agent || 'Your assistant'} was added and joins each song you open.`;
-    case 'joined':
-      return `${song} is ready. ${agent || 'Your assistant'} joined it.`;
-    case 'off':
-      return `${song} is ready. Adding your assistant is switched off, so no agent was added.`;
-    case 'consent_stale':
-      return `${song} is ready. Your assistant changed in a plugin update; review it on this Home to add it.`;
-    case 'assistant_missing':
-      return `${song} is ready. Your shared assistant is gone, so no agent was added.`;
-    default:
-      return result?.created ? `${song} is ready.` : `Opening ${song}.`;
-  }
-}
-
-// The project files to choose between when a song folder holds several.
-export function libraryOpenChoices(error) {
-  if (error?.reason !== 'needs_choice') return [];
-  const files = error?.payload?.project_files;
-  return (Array.isArray(files) ? files : [])
-    .map(name => String(name || '').trim())
-    .filter(name => name && !name.includes('/') && !name.includes('\\'));
-}
-
 const QUEUE_LIMIT = 100;
 export function readActivationQueue(homeID, storage = globalThis.sessionStorage, now = Date.now()) {
   try {
@@ -555,17 +516,7 @@ export class ProjectLibraryPanel {
       ...options
     });
     const result = await payload(response);
-    if (!response.ok) {
-      const error = new Error(
-        typeof result.error === 'string'
-          ? result.error
-          : result.error?.message || result.message || `Library request failed (${response.status})`
-      );
-      error.status = response.status;
-      error.reason = typeof result.reason === 'string' ? result.reason : '';
-      error.payload = result;
-      throw error;
-    }
+    if (!response.ok) throw libraryRequestError(response, result);
     return result;
   }
   post(path, body = {}) {
@@ -666,6 +617,11 @@ export class ProjectLibraryPanel {
     document.getElementById('projectLibrarySearchForm')?.addEventListener('submit', event => {
       event.preventDefault();
       void this.search(false);
+    });
+    // "Last saved" means newest first; the direction stays the person's to change.
+    document.getElementById('projectLibrarySort')?.addEventListener('change', event => {
+      const direction = document.getElementById('projectLibraryDirection');
+      if (event.currentTarget.value === 'last_saved' && direction) direction.value = 'desc';
     });
     document
       .getElementById('projectLibraryMore')
@@ -1566,6 +1522,8 @@ export class ProjectLibraryPanel {
         node('strong', '', row.name),
         node('small', '', row.next_action || 'No next action saved')
       );
+      const saved = lastSavedLabel(row.last_saved_at);
+      if (saved) name.append(node('small', 'project-library-saved', saved));
       const stage = node('td');
       stage.append(node('span', '', label(row.stage)), node('small', '', label(row.status)));
       const connection = node('td', '', label(row.connection));
