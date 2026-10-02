@@ -719,6 +719,94 @@
   color: var(--run-clay);
 }
 
+/* A Home run's last screen: the songs saved most recently, each with Open. */
+.folder-run__songs {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-run__songs[hidden],
+.folder-run__more[hidden] {
+  display: none;
+}
+
+.folder-run__song {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--run-line);
+  border-radius: 8px;
+}
+
+.folder-run__song-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.folder-run__song-text strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.folder-run__song-text small {
+  color: var(--run-dim);
+  font-size: 0.78rem;
+}
+
+.folder-run .folder-run__song-open {
+  flex: none;
+  min-width: 5.5rem;
+  border: 1px solid var(--run-moss);
+  background: transparent;
+  color: var(--run-moss);
+  font-weight: 600;
+}
+
+.folder-run .folder-run__song-open:hover,
+.folder-run .folder-run__song-open:focus-visible {
+  border-color: var(--run-moss);
+  background: var(--run-moss);
+  color: var(--run-paper);
+}
+
+.folder-run .folder-run__song-open:disabled {
+  border-color: var(--run-line);
+  color: var(--run-dim);
+}
+
+.folder-run__choices {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.folder-run__choices .btn {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.folder-run__more {
+  color: var(--run-dim);
+  font-size: 0.88rem;
+}
+
+.folder-run__more > summary {
+  cursor: pointer;
+}
+
+.folder-run__more[open] > summary {
+  margin-bottom: 0.4rem;
+}
+
 .folder-run__footer {
   gap: 0.5rem;
   border-top: 1px solid var(--run-line);

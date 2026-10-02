@@ -136,6 +136,151 @@ test('a collection run shows in the pop-up and ends on its Home receipt', () => 
   assert.equal(done.receiptRows.length, 2);
 });
 
+const homeRunOffer = (outcome = {}) => ({
+  id: 'offer-1',
+  status: 'resolved',
+  subject: { name: 'Documents' },
+  portfolio: { projects: 12 },
+  setup: { status: 'done', lines: runLines(['done', 'done', 'done']) },
+  outcome: {
+    kind: 'home',
+    workspace_id: 'home-1',
+    route: '/workspaces/music-home',
+    receipt: [
+      {
+        kind: 'home',
+        name: 'Music Production Home',
+        detail: 'created',
+        route: '/workspaces/music-home/assistant#projectLibraryPanel'
+      },
+      { kind: 'library', name: 'Listed 12 music projects in Documents' }
+    ],
+    ...outcome
+  }
+});
+
+// Local calendar times, so the labels hold in any time zone the tests run in.
+const today = new Date(2026, 9, 2, 15, 0);
+const savedDaysAgo = days =>
+  new Date(today.getFullYear(), today.getMonth(), today.getDate() - days, 11).toISOString();
+const songRows = count =>
+  Array.from({ length: count }, (_, index) => ({
+    id: `entry-${index + 1}`,
+    name: `Song ${String(index + 1).padStart(3, '0')}`,
+    connection: 'catalog_only',
+    can_open: true,
+    last_saved_at: savedDaysAgo(index)
+  }));
+
+test('the Home receipt names the Home by the workspace ID in the outcome', () => {
+  assert.equal(folderReceiptView(homeRunOffer()).homeID, 'home-1');
+  // Never parsed out of a route.
+  assert.equal(folderReceiptView(homeRunOffer({ workspace_id: undefined })).homeID, '');
+});
+
+test('a finished Home run ends on the six songs saved most recently', () => {
+  const rows = [
+    { id: 'gone', name: 'Unsupported', can_open: false, last_saved_at: savedDaysAgo(0) },
+    { id: 'undated', name: 'Undated', can_open: true },
+    ...songRows(8)
+  ];
+  const view = setupModalView(homeRunOffer(), { songs: rows, total: 12, now: today });
+  assert.equal(view.visible, true);
+  assert.equal(view.phase, 'done');
+  assert.equal(view.eyebrow, 'All set');
+  assert.equal(view.title, 'Pick a song to start with');
+  assert.equal(
+    view.status,
+    'Music Production Home is ready with 12 songs. These are the ones you saved most recently.'
+  );
+  assert.deepEqual(
+    view.songs.map(song => [song.name, song.saved]),
+    [
+      ['Song 001', 'Saved today'],
+      ['Song 002', 'Saved yesterday'],
+      ['Song 003', 'Saved 2 days ago'],
+      ['Song 004', 'Saved 3 days ago'],
+      ['Song 005', 'Saved 4 days ago'],
+      ['Song 006', 'Saved 5 days ago']
+    ]
+  );
+  assert.equal(view.songs[0].id, 'entry-1');
+  assert.equal(
+    view.songs[0].ariaLabel,
+    'Open Song 001: makes its workspace and adds your assistant'
+  );
+  // What was set up is still there (drawn folded), and the link browses the library.
+  assert.equal(view.receiptRows.length, 2);
+  assert.equal(view.route, '/workspaces/music-home/assistant#projectLibraryPanel');
+  assert.equal(view.openLabel, 'Browse all 12 songs');
+  assert.doesNotMatch(JSON.stringify(view), /last_saved_at|0001-01-01/);
+});
+
+test('with no song to open, the done screen is the one it always was', () => {
+  const offer = homeRunOffer();
+  const before = setupModalView(offer);
+  assert.equal(before.title, 'Music Production Home is ready');
+  assert.equal(before.openLabel, 'Open Music Production Home');
+  assert.equal(before.songs, undefined);
+  for (const [name, options] of [
+    ['the list was never read (or the read failed)', {}],
+    ['the Home has no songs', { songs: [], total: 0 }],
+    [
+      'no song can be opened here',
+      { songs: songRows(3).map(row => ({ ...row, can_open: false })), total: 3 }
+    ],
+    [
+      'no song has a save time',
+      {
+        songs: songRows(3).map(row => ({ ...row, last_saved_at: '0001-01-01T00:00:00Z' })),
+        total: 3
+      }
+    ]
+  ]) {
+    assert.deepEqual(setupModalView(offer, { ...options, now: today }), before, name);
+  }
+});
+
+test('songs are only for a finished Home run', () => {
+  const songs = songRows(3);
+  // A single song set up through the card ends on its own workspace.
+  const project = setupModalView(
+    {
+      status: 'resolved',
+      subject: { name: 'Session' },
+      setup: { status: 'done', lines: runLines(['done']) },
+      outcome: {
+        kind: 'project',
+        route: '/workspaces/session',
+        receipt: [{ kind: 'workspace', name: 'Session' }]
+      }
+    },
+    { songs, total: 3 }
+  );
+  assert.equal(project.title, 'Session is ready');
+  assert.equal(project.songs, undefined);
+  // A Home run still going (or stopped) shows its steps, never a list.
+  for (const status of ['running', 'stopped']) {
+    const run = setupModalView(
+      {
+        status: 'awaiting_outcome',
+        subject: { name: 'Documents' },
+        portfolio: { projects: 3 },
+        setup: { status, stop_reason: 'failed', lines: runLines(['done', 'waiting']) }
+      },
+      { songs, total: 3 }
+    );
+    assert.equal(run.phase, status);
+    assert.equal(run.songs, undefined);
+  }
+});
+
+test('one song is counted as one song', () => {
+  const view = setupModalView(homeRunOffer(), { songs: songRows(1), total: 1, now: today });
+  assert.match(view.status, /is ready with 1 song\./);
+  assert.equal(view.openLabel, 'Browse all 1 song');
+});
+
 test('a collection resolved step by step has no receipt and keeps its note', () => {
   const offer = {
     status: 'resolved',

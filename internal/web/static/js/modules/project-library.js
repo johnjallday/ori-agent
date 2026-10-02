@@ -1,5 +1,26 @@
 import { clearLibraryReturn, readLibraryReturn, writeLibraryReturn } from './library-return.js';
+import {
+  lastSavedLabel,
+  libraryOpenAction,
+  libraryOpenChoices,
+  libraryOpenRoute,
+  libraryOpenedMessage,
+  libraryRequestError,
+  readLibraryPayload as payload,
+  RECENT_SONGS_QUERY,
+  recentSongs
+} from './library-open.js';
 import { setupQuestURL } from './setup-quest-links.js';
+
+// The open helpers moved to library-open.js so the setup pop-up can share them
+// without loading this module on every page; existing importers keep working.
+export {
+  lastSavedLabel,
+  libraryOpenAction,
+  libraryOpenChoices,
+  libraryOpenRoute,
+  libraryOpenedMessage
+} from './library-open.js';
 
 function label(value) {
   return String(value == null || value === '' ? 'Unknown' : value).replaceAll('_', ' ');
@@ -14,14 +35,6 @@ function node(tag, className, value) {
   if (className) element.className = className;
   if (value != null) element.textContent = String(value);
   return element;
-}
-
-async function payload(response) {
-  try {
-    return await response.json();
-  } catch (_) {
-    return {};
-  }
 }
 
 // What to tell the user when the folder they chose for this Home cannot be used
@@ -386,56 +399,6 @@ export function librarySharingView(sharing, readOnly = false) {
   return view;
 }
 
-// libraryOpenAction is the row's one-click Open, or null when the row cannot be
-// opened here (read-only Home, unsupported format, source unavailable): such a
-// row keeps its Details, which explain why.
-export function libraryOpenAction(row, readOnly) {
-  if (readOnly || !row?.can_open) return null;
-  const name = String(row.name || 'this project');
-  return {
-    label: 'Open',
-    ariaLabel:
-      row.connection === 'connected'
-        ? `Open ${name}`
-        : `Open ${name}: makes its workspace and adds your assistant`
-  };
-}
-
-// A route the open action may navigate to: one workspace, nothing else.
-export function libraryOpenRoute(result) {
-  const route = String(result?.route || '');
-  return /^\/workspaces\/[a-z0-9][a-z0-9-]*$/.test(route) ? route : '';
-}
-
-// What the status line says after a song opened, before the page moves on.
-export function libraryOpenedMessage(name, result) {
-  const song = String(name || 'The project');
-  const agent = String(result?.agent_name || '').trim();
-  switch (result?.staffing) {
-    case 'added':
-      return `${song} is ready. ${agent || 'Your assistant'} was added and joins each song you open.`;
-    case 'joined':
-      return `${song} is ready. ${agent || 'Your assistant'} joined it.`;
-    case 'off':
-      return `${song} is ready. Adding your assistant is switched off, so no agent was added.`;
-    case 'consent_stale':
-      return `${song} is ready. Your assistant changed in a plugin update; review it on this Home to add it.`;
-    case 'assistant_missing':
-      return `${song} is ready. Your shared assistant is gone, so no agent was added.`;
-    default:
-      return result?.created ? `${song} is ready.` : `Opening ${song}.`;
-  }
-}
-
-// The project files to choose between when a song folder holds several.
-export function libraryOpenChoices(error) {
-  if (error?.reason !== 'needs_choice') return [];
-  const files = error?.payload?.project_files;
-  return (Array.isArray(files) ? files : [])
-    .map(name => String(name || '').trim())
-    .filter(name => name && !name.includes('/') && !name.includes('\\'));
-}
-
 const QUEUE_LIMIT = 100;
 export function readActivationQueue(homeID, storage = globalThis.sessionStorage, now = Date.now()) {
   try {
@@ -481,6 +444,26 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
   } catch (_) {
     return null;
   }
+}
+
+// recentlySavedView is the "Recently saved" section from one last_saved page:
+// up to six songs with a save time, each with Open where the Home can open it.
+// A read-only Home still shows its songs, without Open. No dated song: hidden.
+export function recentlySavedView(page, now = new Date()) {
+  const readOnly = page?.provider_read_only !== false;
+  const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(Boolean);
+  const picks = readOnly
+    ? rows.filter(row => lastSavedLabel(row.last_saved_at, now)).slice(0, 6)
+    : recentSongs(rows);
+  return {
+    visible: picks.length > 0,
+    cards: picks.map(row => ({
+      row,
+      name: String(row.name || '').trim() || 'This song',
+      saved: lastSavedLabel(row.last_saved_at, now),
+      open: libraryOpenAction(row, readOnly)
+    }))
+  };
 }
 
 // This panel belongs to the exact Home. No browser path, child workspace ID,
@@ -555,17 +538,7 @@ export class ProjectLibraryPanel {
       ...options
     });
     const result = await payload(response);
-    if (!response.ok) {
-      const error = new Error(
-        typeof result.error === 'string'
-          ? result.error
-          : result.error?.message || result.message || `Library request failed (${response.status})`
-      );
-      error.status = response.status;
-      error.reason = typeof result.reason === 'string' ? result.reason : '';
-      error.payload = result;
-      throw error;
-    }
+    if (!response.ok) throw libraryRequestError(response, result);
     return result;
   }
   post(path, body = {}) {
@@ -666,6 +639,11 @@ export class ProjectLibraryPanel {
     document.getElementById('projectLibrarySearchForm')?.addEventListener('submit', event => {
       event.preventDefault();
       void this.search(false);
+    });
+    // "Last saved" means newest first; the direction stays the person's to change.
+    document.getElementById('projectLibrarySort')?.addEventListener('change', event => {
+      const direction = document.getElementById('projectLibraryDirection');
+      if (event.currentTarget.value === 'last_saved' && direction) direction.value = 'desc';
     });
     document
       .getElementById('projectLibraryMore')
@@ -868,6 +846,7 @@ export class ProjectLibraryPanel {
       this.renderSetupNext();
       await this.restoreQueue();
       this.renderQueueControls();
+      await this.renderRecent();
       await this.renderResume();
       await this.renderPendingLinks();
       await this.renderProposals();
@@ -1294,6 +1273,39 @@ export class ProjectLibraryPanel {
     );
   }
 
+  // "Recently saved": the songs whose project files were saved last, from the
+  // same last_saved query the setup pop-up uses. Open is the table's own
+  // openRow, so file chips and status messages match. It is a shortcut: when
+  // the read fails the section stays hidden and the table below still works.
+  async renderRecent() {
+    const section = document.getElementById('projectLibraryRecent');
+    const container = document.getElementById('projectLibraryRecentCards');
+    if (!section || !container) return;
+    let view;
+    try {
+      view = recentlySavedView(await this.request(`/projects?${RECENT_SONGS_QUERY}`));
+    } catch (_) {
+      view = { visible: false, cards: [] };
+    }
+    container.replaceChildren();
+    section.hidden = !view.visible;
+    for (const card of view.cards) {
+      const item = node('article', 'project-library-resume-card project-library-recent-card');
+      const text = node('div', 'project-library-recent-text');
+      text.append(node('h4', '', card.name), node('small', '', card.saved));
+      item.append(text);
+      if (card.open) {
+        const open = node('button', 'modern-btn modern-btn-primary', card.open.label);
+        open.type = 'button';
+        open.dataset.libraryOpen = card.row.id;
+        open.setAttribute('aria-label', card.open.ariaLabel);
+        open.addEventListener('click', () => void this.openRow(card.row, open, item));
+        item.append(open);
+      }
+      container.append(item);
+    }
+  }
+
   async renderResume() {
     const section = document.getElementById('projectLibraryResume');
     const container = document.getElementById('projectLibraryResumeCards');
@@ -1566,6 +1578,8 @@ export class ProjectLibraryPanel {
         node('strong', '', row.name),
         node('small', '', row.next_action || 'No next action saved')
       );
+      const saved = lastSavedLabel(row.last_saved_at);
+      if (saved) name.append(node('small', 'project-library-saved', saved));
       const stage = node('td');
       stage.append(node('span', '', label(row.stage)), node('small', '', label(row.status)));
       const connection = node('td', '', label(row.connection));
@@ -1625,6 +1639,7 @@ export class ProjectLibraryPanel {
       this.status(libraryOpenedMessage(row.name, result));
       const route = libraryOpenRoute(result);
       if (route) globalThis.location.assign(route);
+      else void this.renderRecent(); // Staying here: the song is connected now.
     } catch (error) {
       const choices = libraryOpenChoices(error);
       if (choices.length && cell) {

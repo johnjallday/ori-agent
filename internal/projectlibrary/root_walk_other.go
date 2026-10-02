@@ -2,7 +2,10 @@
 
 package projectlibrary
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type DirectoryRow struct {
 	Name       string
@@ -10,6 +13,7 @@ type DirectoryRow struct {
 	IsLink     bool
 	Size       int64
 	Identity   string
+	ModifiedAt time.Time
 	Unreadable bool
 }
 

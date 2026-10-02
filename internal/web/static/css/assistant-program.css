@@ -1174,6 +1174,30 @@
   margin-bottom: 0.75rem;
   color: var(--assistant-muted);
 }
+/* Recently saved: compact song cards, the name and save time beside Open. */
+.project-library-recent-cards {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}
+.project-library-recent-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.project-library-recent-text {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+.project-library-recent-card h4 {
+  margin: 0 0 0.2rem;
+}
+.project-library-recent-card small {
+  margin-bottom: 0;
+}
+.project-library-recent-card .project-library-open-choice {
+  flex-basis: 100%;
+}
 .project-library-session-history {
   margin: 1.5rem 0;
   padding-top: 1.1rem;

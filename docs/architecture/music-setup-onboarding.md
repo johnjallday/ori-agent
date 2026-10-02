@@ -195,6 +195,33 @@ only when the root's recorded last scan differs from the one before the review.
   and labels the current check unavailable; it never claims saved data vanished.
 - **Recovery:** saved sessions, paging, filters, and last-observed labels persist.
 
+### S4a. End of a one-card collection setup: "Pick a song to start with"
+
+- **Owner:** the resolved folder offer (`outcome.kind = home`, `outcome.workspace_id`
+  names the Home) and the library's `last_saved` search (`project-library.md`,
+  "Last saved and recent songs").
+- **Target:** the run pop-up (`#folderSetupRunModal`) that the user opened by
+  pressing **Set up** and kept open until the run finished.
+- **What it shows:** the first time the open pop-up reaches done on a Home receipt,
+  it reads `projects?sort=last_saved&direction=desc&page_size=25` once and keeps up
+  to six songs that can be opened and have a save time: "Pick a song to start
+  with", "{Home} is ready with N songs. These are the ones you saved most
+  recently.", each song with "Saved …" and **Open** (the library's one-click open,
+  request ID reused on a retry). What was set up folds under a closed "What I set
+  up"; the footer link reads "Browse all N songs" and lands on the library. An
+  existing-Home collection (S2b) run ends the same way, over the whole library.
+- **Open:** "Opening {song}…", every Open disabled, then the song's workspace. A
+  folder with several project files answers `needs_choice`: its file names come
+  back as chips under that song and focus moves to the first. Any other failure
+  shows the server's message in the pop-up's error line and the buttons come back.
+- **Fallbacks (today's done screen, unchanged):** the read fails, no song is both
+  openable and dated (for example an all-Ableton collection), or the receipt is a
+  single project rather than a Home. Never an empty list or a list error.
+- **Once:** nothing is stored. A pop-up closed while the run is going never reads
+  the list; one closed on the last screen does not come back on reload. The card's
+  own receipt and Home link are unchanged. The Home library keeps the same list
+  at its top as "Recently saved" for every later visit.
+
 ### S5. Catalog-only (unsupported format, or no compatible provider)
 
 - **Owner:** the catalog entry (`projectlibrary` query) and the provider-eligibility

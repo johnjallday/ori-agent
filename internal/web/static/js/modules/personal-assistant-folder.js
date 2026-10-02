@@ -6,6 +6,15 @@
 // the Home assistant panel. It never sends a filesystem location — chips are
 // identifiers the server resolves, and the native picker runs server-side.
 
+import {
+  lastSavedLabel,
+  libraryOpenAction,
+  libraryOpenChoices,
+  libraryOpenRoute,
+  openLibrarySong,
+  RECENT_SONGS_QUERY,
+  recentSongs
+} from './library-open.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 
 const DIGEST_ENDPOINT = '/api/personal-assistant/folder-digest';
@@ -297,7 +306,12 @@ export function setupRunView(setup, subject, { portfolio = false } = {}) {
 // user can see the assistant is working — a phase (running, stopped, done), a
 // step count, a percentage, and the lines. Pure data; the DOM is drawn below.
 // It is not visible for an offer with no one-card run.
-export function setupModalView(offer) {
+//
+// A Home run that finished ends on the songs saved most recently (`songs`, the
+// library's rows sorted by last_saved, and `total`, the library's song count):
+// each with an Open, the receipt folded under "What I set up". With no such
+// song the done screen is exactly the receipt and the Home link.
+export function setupModalView(offer, { songs = [], total = 0, now = new Date() } = {}) {
   if (!offer) return { visible: false };
   const receipt = folderReceiptView(offer);
   // A settled offer no longer carries its run, only its receipt; the pop-up that
@@ -306,10 +320,10 @@ export function setupModalView(offer) {
   const folder = String(offer.folder || '').trim() || 'this project';
   const subject = String(offer.subject?.name || '').trim() || folder;
   const run = setupRunView(offer.setup, subject, { portfolio: Boolean(offer.portfolio) });
-  const total = run.lines.length;
+  const steps = run.lines.length;
   const finished = run.lines.filter(line => line.state === 'done').length;
   if (receipt.visible) {
-    return {
+    const done = {
       visible: true,
       phase: 'done',
       eyebrow: 'All set',
@@ -317,13 +331,31 @@ export function setupModalView(offer) {
       status: receipt.home
         ? 'Here is what I set up. Open a project from the library when you want to work on it.'
         : 'Here is what I set up. The first task starts when you open the workspace.',
-      count: total ? `${total} of ${total} steps finished` : '',
+      count: steps ? `${steps} of ${steps} steps finished` : '',
       percent: 100,
       lines: run.lines.map(line => ({ ...line, state: line.state ? 'done' : '' })),
       receiptRows: receipt.rows,
       route: receipt.route,
       openLabel: receipt.openLabel,
       actions: []
+    };
+    const picks = receipt.home ? recentSongs(songs) : [];
+    if (!picks.length) return done;
+    const library = plural(Math.max(Number(total) || 0, picks.length), 'song');
+    return {
+      ...done,
+      title: 'Pick a song to start with',
+      status: `${receipt.homeName} is ready with ${library}. These are the ones you saved most recently.`,
+      songs: picks.map(row => {
+        const name = String(row.name || '').trim() || 'This song';
+        return {
+          id: String(row.id),
+          name,
+          saved: lastSavedLabel(row.last_saved_at, now),
+          ariaLabel: libraryOpenAction({ ...row, name }, false).ariaLabel
+        };
+      }),
+      openLabel: `Browse all ${library}`
     };
   }
   const stopped = run.status === 'stopped';
@@ -334,8 +366,8 @@ export function setupModalView(offer) {
     title: stopped ? `${subject} needs you` : `Setting up ${subject}`,
     // The count line already says how many steps finished.
     status: stopped ? run.question.replace(/^\d+ of \d+ steps finished\. /, '') : run.statusLine,
-    count: total ? `${finished} of ${total} steps finished` : '',
-    percent: total ? Math.round((finished / total) * 100) : 0,
+    count: steps ? `${finished} of ${steps} steps finished` : '',
+    percent: steps ? Math.round((finished / steps) * 100) : 0,
     lines: run.lines,
     receiptRows: [],
     route: '',
@@ -655,10 +687,13 @@ function homeReceiptView(offer) {
   if (!home || !/^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#projectLibraryPanel$/.test(route))
     return { visible: false };
   const homeName = String(home.name || '').trim() || 'your Home';
+  // The Home's workspace ID, read from the server's outcome, never from the route.
+  const homeID = String(offer?.outcome?.workspace_id || '').trim();
   return {
     visible: true,
     home: true,
     homeName,
+    homeID: homeID.length <= 160 ? homeID : '',
     rows: rows.map(row => ({
       kind: String(row.kind || ''),
       name: String(row.name || ''),
@@ -875,6 +910,52 @@ function showError(message) {
 // loads onto a run in progress does not pop a dialog over what they were doing.
 const runModal = { wanted: false, bound: false, error: '' };
 
+// The last screen of a Home run: the songs saved most recently, read once when
+// the open pop-up first reaches done, for the offer it watched. Nothing here
+// is stored; a pop-up closed before done, or a page loaded later, never asks.
+const runSongs = {
+  offerID: '',
+  homeID: '',
+  status: '', // '' | 'loading' | 'ready' | 'failed'
+  rows: [],
+  total: 0,
+  opening: '', // the song being opened; every Open waits for it
+  message: '', // what the status line says while opening or choosing a file
+  choices: null, // { id, files } when a song folder holds several project files
+  requests: new Map(), // song → request ID, reused when the same song is retried
+  drawn: '' // the list the DOM was last drawn from
+};
+
+async function loadRecentSongs(offerID, homeID) {
+  Object.assign(runSongs, {
+    offerID,
+    homeID,
+    status: 'loading',
+    rows: [],
+    total: 0,
+    opening: '',
+    message: '',
+    choices: null,
+    requests: new Map()
+  });
+  try {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(homeID)}/assistant-program/library/projects?${RECENT_SONGS_QUERY}`,
+      { headers: { Accept: 'application/json' } }
+    );
+    const page = response.ok ? await readJSON(response) : null;
+    if (runSongs.offerID !== offerID) return;
+    if (!page || !Array.isArray(page.rows)) throw new Error('no library page');
+    runSongs.rows = recentSongs(page.rows);
+    runSongs.total = Number(page.total) || 0;
+    runSongs.status = 'ready';
+  } catch (_) {
+    // The list is a shortcut; without it the done screen is the one it always was.
+    if (runSongs.offerID === offerID) runSongs.status = 'failed';
+  }
+  renderRunModal();
+}
+
 function runModalElements() {
   const root = document.getElementById('folderSetupRunModal');
   if (!root) return null;
@@ -887,10 +968,129 @@ function runModalElements() {
     count: document.getElementById('folderSetupRunCount'),
     status: document.getElementById('folderSetupRunStatus'),
     steps: document.getElementById('folderSetupRunSteps'),
+    songs: document.getElementById('folderSetupRunSongs'),
+    more: document.getElementById('folderSetupRunMore'),
     receipt: document.getElementById('folderSetupRunReceipt'),
     error: document.getElementById('folderSetupRunError'),
     actions: document.getElementById('folderSetupRunActions')
   };
+}
+
+// openRecentSong is the pop-up's Open: the library's one-click open, then the
+// song's workspace. A folder with several project files comes back as file
+// chips under the song; any other failure is the server's own message, and
+// the buttons come back so another song can be tried.
+async function openRecentSong(song, selectedFile = '') {
+  if (runSongs.opening || !runSongs.homeID || state.busy) return;
+  const requestID = runSongs.requests.get(song.id) || `open-${requestId()}`;
+  runSongs.requests.set(song.id, requestID);
+  runSongs.opening = song.id;
+  runSongs.message = `Opening ${song.name}…`;
+  runModal.error = '';
+  renderRunModal();
+  try {
+    const result = await openLibrarySong(runSongs.homeID, song.id, { requestID, selectedFile });
+    runSongs.requests.delete(song.id);
+    const route = libraryOpenRoute(result);
+    if (route) {
+      window.location.assign(route); // Stay "Opening…" while the page changes.
+      return;
+    }
+    runSongs.choices = null;
+    runSongs.message = '';
+    runModal.error = `${song.name} is ready. Browse all songs to open it.`;
+  } catch (error) {
+    const files = libraryOpenChoices(error);
+    if (files.length) {
+      runSongs.choices = { id: song.id, files };
+      runSongs.message = `${song.name} has more than one project file. Choose the one to open.`;
+    } else {
+      runSongs.message = '';
+      runModal.error = error?.message || `${song.name} could not be opened. Nothing was changed.`;
+    }
+  }
+  runSongs.opening = '';
+  renderRunModal();
+  if (runSongs.choices?.id === song.id) {
+    document.querySelector(`#folderSetupRunSongs [data-folder-run-choice] button`)?.focus();
+  }
+}
+
+function songRow(song) {
+  const item = document.createElement('li');
+  item.className = 'folder-run__song';
+  item.dataset.songId = song.id;
+  const text = document.createElement('span');
+  text.className = 'folder-run__song-text';
+  const name = document.createElement('strong');
+  name.textContent = song.name;
+  text.append(name);
+  if (song.saved) {
+    const saved = document.createElement('small');
+    saved.textContent = song.saved;
+    text.append(saved);
+  }
+  const open = document.createElement('button');
+  open.type = 'button';
+  // Not .btn-outline-primary: components.css makes that a white glass button.
+  open.className = 'btn btn-sm folder-run__song-open';
+  open.dataset.folderRunOpen = song.id;
+  open.setAttribute('aria-label', song.ariaLabel);
+  open.addEventListener('click', () => void openRecentSong(song));
+  item.append(text, open);
+  return item;
+}
+
+function fileChoices(song, files) {
+  const group = document.createElement('div');
+  group.className = 'folder-run__choices';
+  group.dataset.folderRunChoice = song.id;
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', `Project file to open for ${song.name}`);
+  files.forEach(file => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'btn btn-sm btn-outline-secondary';
+    chip.textContent = file;
+    chip.addEventListener('click', () => void openRecentSong(song, file));
+    group.append(chip);
+  });
+  return group;
+}
+
+// renderRunSongs draws the song list once per list and keeps each row's state
+// (Opening…, disabled, file chips) in step on every render, so a re-render
+// never takes focus away from the button the user is on.
+function renderRunSongs(els, view) {
+  if (!els.songs || !els.more || !els.receipt) return;
+  const songs = view.songs || [];
+  els.songs.hidden = !songs.length;
+  // The songs lead; what was set up folds under "What I set up".
+  if (songs.length && els.receipt.parentElement !== els.more) els.more.append(els.receipt);
+  if (!songs.length && els.receipt.parentElement === els.more) els.more.before(els.receipt);
+  els.more.hidden = !songs.length || !view.receiptRows.length;
+  const drawn = JSON.stringify(songs);
+  if (drawn !== runSongs.drawn) {
+    runSongs.drawn = drawn;
+    els.songs.replaceChildren(...songs.map(songRow));
+  }
+  songs.forEach(song => {
+    const item = els.songs.querySelector(`[data-song-id="${CSS.escape(song.id)}"]`);
+    if (!item) return;
+    const open = item.querySelector('[data-folder-run-open]');
+    open.disabled = Boolean(runSongs.opening) || state.busy;
+    open.textContent = runSongs.opening === song.id ? 'Opening…' : 'Open';
+    const chosen = runSongs.choices?.id === song.id ? runSongs.choices.files : null;
+    let group = item.querySelector('[data-folder-run-choice]');
+    if (!chosen) group?.remove();
+    else if (!group) {
+      group = fileChoices(song, chosen);
+      item.append(group);
+    }
+    group?.querySelectorAll('button').forEach(chip => {
+      chip.disabled = Boolean(runSongs.opening);
+    });
+  });
 }
 
 function openRunModal() {
@@ -919,29 +1119,41 @@ function renderRunModal() {
   if (!runModal.wanted) return;
   const els = runModalElements();
   if (!els) return;
-  const view = setupModalView(state.offer);
+  const offerID = String(state.offer?.id || '');
+  const listed = runSongs.offerID === offerID && runSongs.status === 'ready';
+  const view = setupModalView(
+    state.offer,
+    listed ? { songs: runSongs.rows, total: runSongs.total } : {}
+  );
   if (!view.visible) {
     closeRunModal();
     return;
+  }
+  const done = view.phase === 'done';
+  // The first time the open pop-up reaches done on a Home, ask the library once.
+  const receipt = done ? folderReceiptView(state.offer) : null;
+  if (receipt?.home && receipt.homeID && offerID && runSongs.offerID !== offerID) {
+    void loadRecentSongs(offerID, receipt.homeID);
   }
   els.root.dataset.phase = view.phase;
   setText(els.eyebrow, view.eyebrow, false);
   setText(els.title, view.title, false);
   setText(els.count, view.count);
-  setText(els.status, view.status, false);
+  setText(els.status, (view.songs?.length && runSongs.message) || view.status, false);
   els.bar.setAttribute('aria-valuenow', String(view.percent));
   els.fill.style.width = `${view.percent}%`;
-  const done = view.phase === 'done';
   renderSetupLines(els.steps, view.lines);
   els.steps.hidden = done || !view.lines.length;
   renderReceiptRows(els.receipt, view.receiptRows);
   els.receipt.hidden = !done || !view.receiptRows.length;
+  renderRunSongs(els, view);
   els.error.textContent = runModal.error;
   els.error.hidden = !runModal.error;
   els.actions.replaceChildren();
   if (done && view.route) {
     const open = document.createElement('a');
-    open.className = 'btn btn-primary';
+    // Beside the songs' Open buttons, browsing the library is the quieter way on.
+    open.className = view.songs?.length ? 'btn btn-outline-secondary' : 'btn btn-primary';
     open.href = view.route;
     open.textContent = view.openLabel;
     els.actions.append(open);

@@ -14,6 +14,7 @@ import {
   libraryRunText,
   proposalSourceLabel,
   readActivationQueue,
+  recentlySavedView,
   selectionRecovery,
   setupNextStep
 } from './project-library.js';
@@ -3313,4 +3314,75 @@ test('the switch sends the team it showed, and a stale review asks before renewi
   await panel.runSharingAction({ dataset: { sharingAction: 'readd' } });
   assert.equal(posts[3].path, '/sharing/assistant');
   assert.match(statuses.at(-1), /next song you open gets a new REAPER Assistant/);
+});
+
+const recentNow = new Date(2026, 9, 2, 15, 0);
+const savedAgo = days =>
+  new Date(
+    recentNow.getFullYear(),
+    recentNow.getMonth(),
+    recentNow.getDate() - days,
+    11
+  ).toISOString();
+const recentRows = count =>
+  Array.from({ length: count }, (_, index) => ({
+    id: `song-${index + 1}`,
+    name: `Song ${index + 1}`,
+    connection: 'catalog_only',
+    can_open: true,
+    last_saved_at: savedAgo(index)
+  }));
+
+test('Recently saved shows at most six songs that can be opened, each with Open', () => {
+  const rows = [
+    { id: 'ableton', name: 'Arrangement', can_open: false, last_saved_at: savedAgo(0) },
+    { id: 'undated', name: 'Undated', can_open: true },
+    ...recentRows(8)
+  ];
+  const view = recentlySavedView({ provider_read_only: false, rows }, recentNow);
+  assert.equal(view.visible, true);
+  assert.equal(view.cards.length, 6);
+  assert.deepEqual(view.cards.map(card => [card.name, card.saved]).slice(0, 3), [
+    ['Song 1', 'Saved today'],
+    ['Song 2', 'Saved yesterday'],
+    ['Song 3', 'Saved 2 days ago']
+  ]);
+  assert.equal(view.cards[0].open.label, 'Open');
+  assert.match(view.cards[0].open.ariaLabel, /^Open Song 1: makes its workspace/);
+  assert.equal(view.cards[0].row.id, 'song-1');
+});
+
+test('a read-only Home still lists its recent songs, without Open', () => {
+  // The server marks no row openable while the Home provider is unavailable.
+  const rows = recentRows(3).map(row => ({ ...row, can_open: false }));
+  for (const flag of [true, undefined]) {
+    const view = recentlySavedView({ provider_read_only: flag, rows }, recentNow);
+    assert.equal(view.visible, true);
+    assert.deepEqual(
+      view.cards.map(card => [card.name, card.open]),
+      [
+        ['Song 1', null],
+        ['Song 2', null],
+        ['Song 3', null]
+      ]
+    );
+  }
+  const many = recentlySavedView({ provider_read_only: true, rows: recentRows(9) }, recentNow);
+  assert.equal(many.cards.length, 6);
+});
+
+test('Recently saved is hidden when no song has a save time', () => {
+  for (const page of [
+    null,
+    { provider_read_only: false, rows: [] },
+    { provider_read_only: false, rows: [{ id: 'a', name: 'A', can_open: true }] },
+    {
+      provider_read_only: true,
+      rows: [{ id: 'a', name: 'A', last_saved_at: '0001-01-01T00:00:00Z' }]
+    }
+  ]) {
+    const view = recentlySavedView(page, recentNow);
+    assert.equal(view.visible, false);
+    assert.deepEqual(view.cards, []);
+  }
 });

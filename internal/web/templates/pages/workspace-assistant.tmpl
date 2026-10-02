@@ -137,6 +137,10 @@
                 <button id="projectLibraryInitialize" class="modern-btn modern-btn-secondary" type="button">Review library setup</button>
               </div>
               <div id="projectLibraryContent" hidden>
+                <section id="projectLibraryRecent" class="project-library-resume project-library-recent" aria-labelledby="projectLibraryRecentTitle" hidden>
+                  <h3 id="projectLibraryRecentTitle">Recently saved</h3>
+                  <div id="projectLibraryRecentCards" class="project-library-resume-cards project-library-recent-cards"></div>
+                </section>
                 <section id="projectLibrarySharing" class="project-library-sharing" aria-labelledby="projectLibrarySharingTitle" hidden>
                   <div class="project-library-sharing-head">
                     <h3 id="projectLibrarySharingTitle">Shared assistant</h3>
@@ -178,7 +182,7 @@
                     <select id="projectLibraryConnection" class="form-select" aria-label="Project connection"><option value="">All connections</option><option value="catalog_only">Catalog only</option><option value="connected">Connected</option><option value="needs_review">Needs review</option></select>
                     <select id="projectLibraryAvailability" class="form-select" aria-label="Last observed availability"><option value="">Any availability</option><option value="available">Available at last scan</option><option value="ambiguous">Needs file choice</option><option value="unavailable">Unavailable at last scan</option><option value="revoked_source">Discovery consent ended</option><option value="not_scanned">Not scanned</option></select>
                     <select id="projectLibraryPriority" class="form-select" aria-label="Saved priority"><option value="">Any priority</option><option value="0">Priority 0</option><option value="1">Priority 1</option><option value="2">Priority 2</option><option value="3">Priority 3</option><option value="4">Priority 4</option><option value="5">Priority 5</option></select>
-                    <select id="projectLibrarySort" class="form-select" aria-label="Sort projects"><option value="name">Name</option><option value="status">Status</option><option value="priority">Priority</option><option value="next_action">Next action</option><option value="sourced_activity">Sourced activity</option><option value="scanned_at">Last scan</option></select>
+                    <select id="projectLibrarySort" class="form-select" aria-label="Sort projects"><option value="name">Name</option><option value="last_saved">Last saved</option><option value="status">Status</option><option value="priority">Priority</option><option value="next_action">Next action</option><option value="sourced_activity">Sourced activity</option><option value="scanned_at">Last scan</option></select>
                     <select id="projectLibraryDirection" class="form-select" aria-label="Sort direction"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
                     <button class="modern-btn modern-btn-secondary" type="submit">Find</button>
                   </div>

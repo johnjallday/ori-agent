@@ -228,7 +228,10 @@ test('keyboard only: Try again lists the 200 songs and opens on the library', as
   expect(await songWorkspaces(request)).toEqual([]);
   expect(await agentNames(request)).not.toContain(ASSISTANT);
 
-  const open = runModal.getByRole('link', { name: /^Open / });
+  // The pop-up ends on the songs saved most recently (recent-songs-after-setup
+  // covers that list); the whole library is the link beside them.
+  await expect(runModal.locator('#folderSetupRunTitle')).toHaveText('Pick a song to start with');
+  const open = runModal.getByRole('link', { name: `Browse all ${SONGS} songs` });
   await open.focus();
   await expect(open).toBeFocused();
   await page.keyboard.press('Enter');

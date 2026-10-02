@@ -22,7 +22,9 @@
 # Portfolio hire-once (tasks/tasks-portfolio-hire-once.md) adds showfolder
 # seed-song, seed-portfolio and portfolio-run (a whole collection through the
 # one card), and baseline-export (an origin/dev baseline for the music and
-# REAPER harness suites without a worktree).
+# REAPER harness suites without a worktree). Recent songs after setup
+# (tasks/tasks-recent-songs-after-setup.md) gives seed-portfolio staggered
+# save times and adds showfolder model (the system model setup needs).
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
@@ -1637,27 +1639,39 @@ PY
     # project file, a backup, a bounce and a Media/ folder of takes. <format> is
     # rpp (default), als, or mixed (every third song is an Ableton set).
     # <two-files> songs (default 0) get a second project file, so opening them
-    # asks which file. Never overwrites, even in a sandbox.
+    # asks which file. Each song's project file carries its own saved time:
+    # Song 001 today, Song 002 yesterday, then further back to over a year, so
+    # "Last saved" order and labels are visible. Never overwrites, even in a
+    # sandbox.
     local home="${4:-}" count="${5:-}" chip="${6:-Desktop}" format="${7:-rpp}" two="${8:-0}"
     [[ -n "$home" && -d "$home" && "$home" == *"/ori-demo."* && "$count" =~ ^[0-9]+$ && "$two" =~ ^[0-9]+$ ]] ||
       fail "usage: $0 showfolder <base-url> seed-portfolio <ori-demo-sandbox> <count> [Desktop|Documents|Downloads] [rpp|als|mixed] [two-files]"
     case "$chip" in Desktop|Documents|Downloads) ;; *) fail "unknown chip: $chip" ;; esac
     case "$format" in rpp|als|mixed) ;; *) fail "unknown format: $format" ;; esac
     python3 - "$home" "$count" "$chip" "$format" "$two" <<'PY'
-import os, sys
+import datetime, os, sys, time
 home, count, chip, fmt, two = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5])
-def put(rel, body):
+DAYS_AGO = [0, 1, 2, 4, 7, 12, 20, 35, 70, 150, 300, 420]
+def saved_at(i):
+    days = DAYS_AGO[i - 1] if i <= len(DAYS_AGO) else DAYS_AGO[-1] + 45 * (i - len(DAYS_AGO))
+    if days == 0:
+        return time.time() - 60
+    day = datetime.date.today() - datetime.timedelta(days=days)
+    return datetime.datetime.combine(day, datetime.time(12)).timestamp()  # local noon
+def put(rel, body, saved=None):
     target = os.path.join(home, rel)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     with open(target, "xb") as output:  # never overwrite, even in a sandbox
         output.write(body)
+    if saved is not None:
+        os.utime(target, (saved, saved))
 for i in range(1, count + 1):
     name = f"Song {i:03d}"
     ext = ".als" if fmt == "als" or (fmt == "mixed" and i % 3 == 0) else ".rpp"
     body = b"<REAPER_PROJECT>\n" if ext == ".rpp" else b"ableton\n"
-    put(f"{chip}/{name}/{name}{ext}", body)
+    put(f"{chip}/{name}/{name}{ext}", body, saved_at(i))
     if i <= two:
-        put(f"{chip}/{name}/{name} alt{ext}", body)
+        put(f"{chip}/{name}/{name} alt{ext}", body, saved_at(i) - 3600)
     put(f"{chip}/{name}/{name}{ext}-bak", body)
     put(f"{chip}/{name}/{name} bounce.wav", b"RIFF")
     for take in range(3):
@@ -1755,6 +1769,14 @@ PY
       -d "{\"request_id\":\"showfolder-hq\",\"if_version\":$version,\"name\":\"My HQ\",\"timezone\":\"UTC\"}"
     printf 'personal_assistant.state = %s\n' \
       "$(curl -s "$BASE_URL/api/personal-assistant" | json_field 'personal_assistant.state')"
+    ;;
+  model)
+    # The system model a one-card setup needs before it can add agents. The
+    # default is the Codex model the live-model specs use (wt demo passes your
+    # Codex login through). Run it after hq.
+    local provider="${4:-codex}" model="${5:-gpt-5.6-luna}"
+    curl -s -o /dev/null -w "%{http_code} system model $provider/$model\n" -X POST "$BASE_URL/api/settings/system-model" \
+      -H 'Content-Type: application/json' -d "{\"provider\":\"$provider\",\"model\":\"$model\"}"
     ;;
   scan)
     local chip="${4:-downloads}"
@@ -1858,7 +1880,7 @@ sys.exit(3 if s.get("status") == "running" else 0)
   today)
     curl -sf "$BASE_URL/api/personal-assistant/today" | python3 -c 'import json,sys; t=json.load(sys.stdin)["today"]; print("Today:", t.get("state")); [print(k + ":", ", ".join(i.get("title", "") for i in (t.get(k) or {}).get("items", [])) or "(empty)") for k in ("working_on", "needs_you", "done")]; print("Could not read:", ", ".join(t.get("unavailable_sources") or []) or "none")'
     ;;
-  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|seed-song <sandbox> <chip> <name>|seed-portfolio <sandbox> <count> [chip] [rpp|als|mixed] [two-files]|hqcard|hq|today|scan <chip>|decide <offer> <decision> [choice]|one-card <offer> [project-file]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
+  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|seed-song <sandbox> <chip> <name>|seed-portfolio <sandbox> <count> [chip] [rpp|als|mixed] [two-files]|hqcard|hq|model [provider] [model]|today|scan <chip>|decide <offer> <decision> [choice]|one-card <offer> [project-file]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
   esac
 }
 
