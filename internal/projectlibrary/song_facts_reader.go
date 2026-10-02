@@ -94,8 +94,10 @@ func ReadSongFacts(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongF
 	scanner := bufio.NewScanner(counted)
 	scanner.Buffer(make([]byte, 0, min(64<<10, limits.MaxLineBytes)), limits.MaxLineBytes)
 
-	var stack [maxSongFactsDepth]byte
-	depth, started, closed := 0, false, false
+	// The open blocks, innermost last. Its capacity is fixed: a push past it is
+	// refused, so it never grows with the file.
+	stack := make([]byte, 0, maxSongFactsDepth)
+	started, closed := false, false
 	var facts SongFacts
 	var tempoSeen bool
 	var tempoMin, tempoMax float64
@@ -124,49 +126,46 @@ func ReadSongFacts(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongF
 			if !bytes.HasPrefix(line, root) || (len(line) > len(root) && line[len(root)] != ' ' && line[len(root)] != '\t') {
 				return SongFacts{}, unreadableFacts("not a project of this format")
 			}
-			started, depth, stack[0] = true, 1, blockRoot
+			started, stack = true, append(stack, blockRoot)
 			continue
 		}
-		if closed {
+		if closed || len(stack) == 0 {
 			return SongFacts{}, unreadableFacts("content after the project")
 		}
+		current := stack[len(stack)-1]
 		if line[0] == '<' {
-			if depth >= maxSongFactsDepth {
+			if len(stack) >= maxSongFactsDepth {
 				return SongFacts{}, unreadableFacts("nested too deep")
 			}
-			parent := stack[depth-1]
 			kind := blockOther
 			switch name := blockName(line); {
-			case parent == blockRoot && string(name) == grammar.Track:
+			case current == blockRoot && string(name) == grammar.Track:
 				kind = blockTrack
 				if tracks < maxSongTrackCount {
 					tracks++
 				} else {
 					tracksOverflow = true
 				}
-			case parent == blockTrack && string(name) == grammar.Item:
+			case current == blockTrack && string(name) == grammar.Item:
 				kind = blockItem
 				itemHasStart, itemHasLength = false, false
-			case parent == blockRoot && string(name) == grammar.TempoChanges:
+			case current == blockRoot && string(name) == grammar.TempoChanges:
 				kind = blockTempoChanges
 			}
-			stack[depth] = kind
-			depth++
+			stack = append(stack, kind)
 			continue
 		}
 		if len(line) == 1 && line[0] == '>' {
-			depth--
-			if stack[depth] == blockItem && itemHasStart && itemHasLength {
+			if current == blockItem && itemHasStart && itemHasLength {
 				if end := itemStart + itemLength; end > facts.LengthSeconds {
 					facts.LengthSeconds = end
 				}
 			}
-			if depth == 0 {
-				closed = true
-			}
+			stack = stack[:len(stack)-1]
+			closed = len(stack) == 0
 			continue
 		}
-		switch stack[depth-1] {
+		switch current {
 		case blockRoot:
 			if value, ok := field(line, grammar.Tempo, 1); ok && facts.TempoBPM == 0 {
 				if bpm, ok := songNumber(value); ok && bpm >= minSongTempo && bpm <= maxSongTempo {
