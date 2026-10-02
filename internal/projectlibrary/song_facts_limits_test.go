@@ -17,7 +17,7 @@ import (
 
 // connectedRootAt connects a library root at dir (its folders already written)
 // on a fresh Home that agreed to song details.
-func connectedRootAt(t *testing.T, dir string, consent bool) (*Roots, Scope, *workspace.FileStore, Root) {
+func connectedRootAt(t *testing.T, dir string) (*Roots, Scope, *workspace.FileStore, Root) {
 	t.Helper()
 	r, scope, file, picker := rootTestService(t)
 	picker.path, _ = filepath.EvalSymlinks(dir)
@@ -37,9 +37,7 @@ func connectedRootAt(t *testing.T, dir string, consent bool) (*Roots, Scope, *wo
 	if err != nil {
 		t.Fatal(err)
 	}
-	if consent {
-		grantSongDetails(t, file, scope)
-	}
+	grantSongDetails(t, file, scope)
 	return r, scope, file, root
 }
 
@@ -72,7 +70,7 @@ func TestSongFacts_UnreadableFilesGiveNoFactsAndNoError(t *testing.T) {
 		t.Fatal(err)
 	}
 	setSaved(t, huge, saved)
-	r, scope, _, root := connectedRootAt(t, dir, true)
+	r, scope, _, root := connectedRootAt(t, dir)
 	opens := &openCounter{}
 	r.factsOpened = opens.hook
 	if scan := scanRoot(t, r, scope, root.ID, "unreadable"); scan.Status != "complete" {
@@ -146,7 +144,7 @@ func TestSongFacts_FilesThatMoveUnderThePassAreReadNextScan(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "Songs")
 			saved := time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC)
 			path := writeSong(t, dir, "Song", "Song.rpp", []byte(rppProject("92", nil, [][][2]string{{{"0", "60"}}})), saved)
-			r, scope, _, root := connectedRootAt(t, dir, true)
+			r, scope, _, root := connectedRootAt(t, dir)
 			changed := false
 			opens := &openCounter{before: func(string, string) {
 				if !changed {
@@ -184,7 +182,7 @@ func TestSongFacts_SymlinksAndBackupsAreNeverOpened(t *testing.T) {
 	if err := os.Symlink(real, filepath.Join(dir, "Song", "Link.rpp")); err != nil {
 		t.Fatal(err)
 	}
-	r, scope, _, root := connectedRootAt(t, dir, true)
+	r, scope, _, root := connectedRootAt(t, dir)
 	opens := &openCounter{}
 	r.factsOpened = opens.hook
 	scanRoot(t, r, scope, root.ID, "links")
@@ -203,7 +201,7 @@ func TestSongFacts_BudgetStopsThePassAndTheNextScanReadsTheRest(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		writeSong(t, dir, fmt.Sprintf("Song %d", i), "Song.rpp", content, base.Add(time.Duration(i)*time.Hour))
 	}
-	r, scope, _, root := connectedRootAt(t, dir, true)
+	r, scope, _, root := connectedRootAt(t, dir)
 	r.factsBudget = songFactsBudget{Duration: time.Minute, Bytes: int64(2 * len(content))}
 	opens := &openCounter{}
 	r.factsOpened = opens.hook
@@ -230,7 +228,7 @@ func TestSongFacts_BudgetStopsThePassAndTheNextScanReadsTheRest(t *testing.T) {
 // about size bytes.
 func sizedProject(i, size int) []byte {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("<REAPER_PROJECT 0.1 \"7.27/macOS-arm64\" 1727800000\n  TEMPO %d 4 4\n", 80+i%90))
+	fmt.Fprintf(&b, "<REAPER_PROJECT 0.1 \"7.27/macOS-arm64\" 1727800000\n  TEMPO %d 4 4\n", 80+i%90)
 	for track := 0; b.Len() < size; track++ {
 		b.WriteString("  <TRACK\n    <FXCHAIN\n      <VST \"VST: ReaComp\" reacomp.vst 0 \"\" 1\n")
 		for line := 0; line < 40; line++ {
@@ -251,7 +249,7 @@ func TestSongFacts_TwoHundredSongsFitTheBudget(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		writeSong(t, dir, fmt.Sprintf("Song %03d", i), "Song.rpp", sizedProject(i, 256<<10), base.Add(time.Duration(i)*time.Minute))
 	}
-	r, scope, _, root := connectedRootAt(t, dir, true)
+	r, scope, _, root := connectedRootAt(t, dir)
 	doc, err := r.library.Read(scope)
 	if err != nil {
 		t.Fatal(err)
@@ -316,7 +314,7 @@ func TestSongFacts_AnAbletonCollectionGetsNoFactsButABrief(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		writeSong(t, dir, fmt.Sprintf("Set %d", i), "Set.als", []byte("ableton"), base.Add(time.Duration(i)*time.Hour))
 	}
-	r, scope, file, root := connectedRootAt(t, dir, true)
+	r, scope, file, root := connectedRootAt(t, dir)
 	opens := &openCounter{}
 	r.factsOpened = opens.hook
 	scan := scanRoot(t, r, scope, root.ID, "ableton")

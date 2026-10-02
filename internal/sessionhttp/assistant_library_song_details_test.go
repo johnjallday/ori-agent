@@ -17,7 +17,7 @@ import (
 
 // songDetailsHome is an initialized, writable Home library: its installed Home
 // provider matches the Home's fingerprint exactly.
-func songDetailsHome(t *testing.T) (*Handler, *workspace.InMemoryStore, *workspace.Workspace, plugin.InstalledPlugin) {
+func songDetailsHome(t *testing.T) (*Handler, *workspace.InMemoryStore, *workspace.Workspace) {
 	t.Helper()
 	handler, store, station, _ := assistantPortfolioHTTPFixture(t)
 	handler.currentUserID = func(context.Context) (string, error) { return station.OwnerUserID, nil }
@@ -68,7 +68,7 @@ func songDetailsHome(t *testing.T) (*Handler, *workspace.InMemoryStore, *workspa
 	if _, _, err := library.CommitInitialize(scope, review.Token, "song-details-init"); err != nil {
 		t.Fatal(err)
 	}
-	return handler, store, station, installed
+	return handler, store, station
 }
 
 func postSongDetails(t *testing.T, handler *Handler, homeID, body string) (int, map[string]any) {
@@ -109,7 +109,7 @@ func rootsSongDetails(t *testing.T, handler *Handler, homeID string) string {
 }
 
 func TestLibrarySongDetails_AHomeWithoutConsentHasNoSwitch(t *testing.T) {
-	handler, _, station, _ := songDetailsHome(t)
+	handler, _, station := songDetailsHome(t)
 	if state := rootsSongDetails(t, handler, station.ID); state != workspace.SongDetailsNone {
 		t.Fatalf("roots song_details = %q, want none", state)
 	}
@@ -126,7 +126,7 @@ func TestLibrarySongDetails_AHomeWithoutConsentHasNoSwitch(t *testing.T) {
 }
 
 func TestLibrarySongDetails_TheSwitchTurnsOffAndOnAgain(t *testing.T) {
-	handler, store, station, _ := songDetailsHome(t)
+	handler, store, station := songDetailsHome(t)
 	if err := workspace.NewSongDetailsConsents(store).Grant(station.ID, "offer-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestLibrarySongDetails_TheSwitchTurnsOffAndOnAgain(t *testing.T) {
 }
 
 func TestLibrarySongDetails_ARefusedOrForeignRequestChangesNothing(t *testing.T) {
-	handler, store, station, _ := songDetailsHome(t)
+	handler, store, station := songDetailsHome(t)
 	if err := workspace.NewSongDetailsConsents(store).Grant(station.ID, "offer-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestLibrarySongDetails_ARefusedOrForeignRequestChangesNothing(t *testing.T)
 }
 
 func TestLibrarySongDetails_AReadOnlyHomeTurnsOffButNotOn(t *testing.T) {
-	handler, store, station, _ := songDetailsHome(t)
+	handler, store, station := songDetailsHome(t)
 	if err := workspace.NewSongDetailsConsents(store).Grant(station.ID, "offer-1"); err != nil {
 		t.Fatal(err)
 	}

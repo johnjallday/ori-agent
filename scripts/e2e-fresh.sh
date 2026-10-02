@@ -9,6 +9,11 @@
 # --rev REV serves a build of another commit (for example origin/dev) instead
 # of the working tree, so the same specs give the baseline to compare with.
 #
+# --sandbox-env NAME hands each spec its own sandbox path as NAME, for specs
+# that seed folders into the sandbox (ORI_SONG_FACTS_SANDBOX,
+# ORI_RECENT_SONGS_SANDBOX, …). An exported CODEX_HOME reaches the server, so
+# the Codex provider works there as in `wt demo`.
+#
 # Many specs change durable state a later spec would trip over (a hire cannot
 # be undone, onboarding is completed once), so comparing a branch with its
 # baseline means one clean sandbox per spec. By hand that is start a server in
@@ -33,12 +38,17 @@ set -euo pipefail
 port=8947
 tail_lines=40
 rev=""
+sandbox_env=""
 specs=()
 pw_args=()
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--port)
 		port="${2:-}"
+		shift 2
+		;;
+	--sandbox-env)
+		sandbox_env="${2:-}"
 		shift 2
 		;;
 	--rev)
@@ -66,7 +76,11 @@ done
 	exit 2
 }
 [[ ${#specs[@]} -gt 0 ]] || {
-	echo "usage: $0 [--port PORT] [--tail N] [--rev REV] spec [spec ...] [-- playwright args]" >&2
+	echo "usage: $0 [--port PORT] [--tail N] [--rev REV] [--sandbox-env NAME] spec [spec ...] [-- playwright args]" >&2
+	exit 2
+}
+[[ -z "$sandbox_env" || "$sandbox_env" =~ ^[A-Z][A-Z0-9_]*$ ]] || {
+	echo "--sandbox-env expects an upper-case variable name, got '$sandbox_env'" >&2
 	exit 2
 }
 
@@ -131,8 +145,10 @@ for spec in "${specs[@]}"; do
 
 	log="$sandbox/playwright.log"
 	status=0
+	env_args=()
+	[[ -z "$sandbox_env" ]] || env_args=(--env "$sandbox_env=$sandbox")
 	# The ${a[@]+...} form: bash 3.2 calls an empty array unbound under set -u.
-	./scripts/e2e.sh --port "$port" --wait 180 --tail 0 "$spec" -- ${pw_args[@]+"${pw_args[@]}"} \
+	./scripts/e2e.sh --port "$port" --wait 180 --tail 0 ${env_args[@]+"${env_args[@]}"} "$spec" -- ${pw_args[@]+"${pw_args[@]}"} \
 		>"$log" 2>&1 || status=$?
 	if [[ "$tail_lines" != "0" ]]; then
 		tail -n "$tail_lines" "$log"

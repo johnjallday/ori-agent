@@ -221,6 +221,34 @@ only when the root's recorded last scan differs from the one before the review.
   the list; one closed on the last screen does not come back on reload. The card's
   own receipt and Home link are unchanged. The Home library keeps the same list
   at its top as "Recently saved" for every later visit.
+- **Song facts:** on a Home that reads song details (S4b) each song's line is
+  "Saved 3 days ago · 14 tracks · 92 BPM · 3:41"; a song without facts (another
+  format, an unreadable file) shows "Saved …" only.
+
+### S4b. Song details: the card's line and the switch
+
+- **Owner:** `AssistantProgramState.song_details_consent` and the library's fact
+  pass (`project-library.md`, "Song facts and the collection brief").
+- **The card:** the one-card collection plan's library line reads "Reads each
+  REAPER project's tempo, length and track count. Nothing is moved, copied or
+  changed." when Set up creates the Home, or when the existing Home's switch is
+  on; otherwise (an existing Home without the consent, or switched off) it keeps
+  "Names and project files only. Nothing is opened, moved or copied." Set up on a
+  card that creates the Home records the consent before listing, so the setup's
+  own scan reads the facts; it never adds the consent to an existing Home, and
+  **Adjust…** (step by step) never grants it. No new step or checkbox. The setup
+  receipt's library row says what was read.
+- **The switch:** the library panel's "Read song details when scanning" (only on
+  a Home that consented; disabled on a read-only Home) with its note "Ori reads
+  each REAPER project's tempo, length and track count. Nothing is changed." Off
+  clears every stored fact and the collection brief at once ("Song details
+  cleared. Scans no longer read project files."); on starts no scan, and facts
+  return with the next one. Off, the Home behaves like a Home without the consent,
+  including the Manager's post-scan turn.
+- **The brief:** after each completed scan of a Home whose switch is on, the
+  Manager's turn writes one short description of the whole collection, shown at
+  the top of "From your {Manager}" with where it came from, or one line on why
+  there is none (for example no model).
 
 ### S5. Catalog-only (unsupported format, or no compatible provider)
 

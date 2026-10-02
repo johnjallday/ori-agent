@@ -3505,6 +3505,15 @@ test('a Home that reads song details says why it has no brief', () => {
     libraryBriefView({}, { mode: 'brief', status: 'skipped', reason: 'no_model' }).note,
     'No brief: set up a model so your Manager can describe your collection.'
   );
+  // Switched off since the turn: the brief went with the facts; the switch says why.
+  assert.equal(
+    note({ status: 'finished' }),
+    'No brief for this scan: your Portfolio Manager did not write one.'
+  );
+  assert.equal(
+    libraryBriefView(page, { mode: 'brief', status: 'finished' }, { state: 'off' }).note,
+    ''
+  );
 });
 
 test('the brief renders as text above the digest, and replaces the empty suggestions line', async () => {
@@ -3658,8 +3667,8 @@ test('switching song details off clears the facts lines and says so', async () =
       posts.push({ path, body });
       return { song_details: { state: body.enabled ? 'on' : 'off', app_name: 'REAPER' } };
     };
-    panel.renderRecent = async () => refreshed++;
-    panel.search = async () => refreshed++;
+    // The whole library is re-read: facts, the brief and the moved revision.
+    panel.refresh = async () => refreshed++;
     panel.renderSongDetails();
     const toggle = elements.projectLibrarySongDetailsSwitch;
     assert.equal(elements.projectLibrarySongDetails.hidden, false);
@@ -3672,7 +3681,7 @@ test('switching song details off clears the facts lines and says so', async () =
     assert.equal(posts[0].body.enabled, false);
     assert.match(posts[0].body.request_id, /^song-details-/);
     assert.equal(panel.state.song_details.state, 'off');
-    assert.equal(refreshed, 2, 'the facts lines are re-read');
+    assert.equal(refreshed, 1, 'the library is re-read');
     assert.equal(
       elements.projectLibraryStatus.textContent,
       'Song details cleared. Scans no longer read project files.'
@@ -3692,7 +3701,7 @@ test('switching song details off clears the facts lines and says so', async () =
     assert.equal(panel.state.song_details.state, 'off');
     assert.equal(toggle.checked, false);
     assert.match(elements.projectLibraryStatus.textContent, /read-only right now/);
-    assert.equal(refreshed, 2);
+    assert.equal(refreshed, 1, 'a refusal re-reads nothing');
   } finally {
     globalThis.document = previousDocument;
   }

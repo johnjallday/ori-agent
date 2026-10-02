@@ -372,8 +372,9 @@ function briefMissingText(run, manager) {
 // libraryBriefView is the head of the Home's Manager section (D8): its title
 // names the Manager's role on every Home; on a Home that reads song details it
 // shows the Manager's collection brief with where it came from, or one line on
-// why there is none. The brief is model text: it is only ever shown as text.
-export function libraryBriefView(page, run) {
+// why there is none. With the switch off there is no brief and nothing to
+// explain (the switch says so). The brief is model text: only ever text.
+export function libraryBriefView(page, run, songDetails = { state: 'on' }) {
   const label = String(page?.manager_label || '').trim();
   const manager = `your ${label || 'Manager'}`;
   const view = { title: `From ${manager}`, brief: null, note: '' };
@@ -390,7 +391,7 @@ export function libraryBriefView(page, run) {
       text,
       provenance: `Written by ${by} after the scan${when}${model ? ` · ${model}` : ''}`
     };
-  } else if (run?.mode === 'brief') {
+  } else if (run?.mode === 'brief' && songDetails?.state === 'on') {
     view.note = briefMissingText(run, manager);
   }
   return view;
@@ -866,8 +867,10 @@ export class ProjectLibraryPanel {
       }
     );
     if (!changed) return;
-    await this.renderRecent();
-    await this.search(false);
+    // Off cleared the facts and the brief written from them, and moved the
+    // library's revision on: re-read the whole library so the lists, the
+    // Manager section and the next review all start from the current one.
+    await this.refresh();
     this.status(songDetailsStatus(enabled));
   }
 
@@ -1179,7 +1182,7 @@ export class ProjectLibraryPanel {
     }
     const run = summary?.proposal_run;
     const briefMode = run?.mode === 'brief';
-    const head = libraryBriefView(page, digestText ? run : null);
+    const head = libraryBriefView(page, digestText ? run : null, this.state?.song_details);
     const title = document.getElementById('projectLibraryProposalsTitle');
     if (title) title.textContent = head.title;
     const briefBox = document.getElementById('projectLibraryBrief');

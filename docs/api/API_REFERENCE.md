@@ -1545,6 +1545,22 @@ Makes the project's workspace (or uses the one it already has), records File-onl
 
 `{ "request_id": "…" }` — after the shared assistant was deleted, clears it from the consent so the next song opened creates a new one (the next free name) and records it.
 
+### Song Details (tempo, length, track count)
+
+`GET /api/workspaces/{homeID}/assistant-program/library/roots` also includes `song_details`: `{ state: none | on | off, app_name }`. `none` means the Home never agreed (it was made before this, or step by step) and has no switch. Search rows (`GET …/library/projects`) and detail sources carry `facts: { tempo_bpm, tempo_varies, length_seconds, track_count }` when known and the switch is on; unknown parts are left out.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/library/song-details`
+
+```json
+{ "request_id": "song-details-1", "enabled": false }
+```
+
+`enabled: false` stops later scans from reading project files and clears every stored fact and the collection brief in the same Home write. `enabled: true` turns it back on (no scan starts; facts return with the next one). Answers `200` with `{ song_details: { state, app_name } }`; setting the current state is a no-op. `409 song_details_not_granted` when the Home has no consent record; `409 provider_unavailable` for `enabled: true` on a read-only Home (off still works). A scan review on a Home whose switch is on discloses the read: `reads_song_facts: true` and a `scope` that names the three facts.
+
+### The Manager's Collection Brief
+
+`GET /api/workspaces/{homeID}/assistant-program/library/proposals` also returns `manager_label` (the Home's Manager role label) and, on a Home whose switch is on, `brief: { scan_id, text, agent_name, model, created_at }` when the Manager's post-scan turn wrote one for the latest scan. The brief is plain text (at most three sentences and 500 characters, no paths or links), never a suggestion: it adds nothing to `ready_proposals`. `GET …/library/summary`'s `proposal_run` carries `mode: "brief"` for such a turn.
+
 ### Edits to the Shared Assistant
 
 `PATCH /api/agents/{name}` that changes the model, provider, reasoning effort, temperature, max tokens or system prompt is carried into every project copy the consent tracks for that agent, except a copy changed in its own project. The response then includes `carried: { updated: [{id, name}], customised: [{id, name}] }`. `GET /api/agents/{name}/detail` adds `workspace_count` and `workspaces`, and leaves copies that are still in step out of `origin.customised_in`. A chat answered by a workspace's own copy never writes that copy back to the user's agent.
