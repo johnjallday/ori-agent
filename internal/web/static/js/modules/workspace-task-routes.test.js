@@ -6,6 +6,11 @@ const { WorkspaceTaskPage } = await import('./workspace-task.js');
 
 test('workspace task keeps UUID APIs separate from slug page links', async () => {
   const page = new WorkspaceTaskPage('workspace-uuid', 'task-1', 'marketing-site');
+  page.setState = () => {};
+  page.setAlert = () => {};
+  page.render = () => {};
+  page.seedLiveActivityFromHistory = () => {};
+  page.loadRelatedPlan = async () => {};
   const previousFetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async url => {
@@ -14,12 +19,19 @@ test('workspace task keeps UUID APIs separate from slug page links', async () =>
   };
 
   try {
-    await page.fetchWorkspace();
+    await page.loadData();
   } finally {
     globalThis.fetch = previousFetch;
   }
 
-  assert.deepEqual(requests, ['/api/workspaces/workspace-uuid']);
+  assert.deepEqual(requests, [
+    '/api/workspaces/workspace-uuid',
+    '/api/orchestration/tasks?id=task-1',
+    '/api/agents',
+    '/api/orchestration/events?workspace_id=workspace-uuid&task_id=task-1&limit=200',
+    '/api/workspaces/workspace-uuid/output-dir'
+  ]);
+  assert.equal(page.workspace?.id, 'workspace-uuid');
   assert.equal(page.getTaskHref('task/2'), '/workspaces/marketing-site/task/task%2F2');
   assert.equal(page.getRunHref('run/2'), '/workspaces/marketing-site/runs/run%2F2');
 });

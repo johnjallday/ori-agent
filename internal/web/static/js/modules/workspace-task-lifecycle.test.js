@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createTaskPageDataLoader } from './workspace-task-data-loader.js';
 
 globalThis.window = {};
 globalThis.document = { getElementById: () => null };
@@ -17,7 +18,9 @@ function deferred() {
 }
 
 async function flush() {
-  for (let index = 0; index < 12; index++) await Promise.resolve();
+  // Drain the transport/JSON/loader microtasks without counting implementation
+  // layers; deliberately unresolved responses remain pending.
+  await new Promise(resolve => setImmediate(resolve));
 }
 
 function snapshot(label) {
@@ -34,27 +37,33 @@ function snapshot(label) {
 }
 
 function makePage(t, snapshots = []) {
-  const page = new WorkspaceTaskPage('ws', 'task', 'workspace-slug');
   let current;
   let index = 0;
   const view = { renders: 0, states: [], alerts: [], errors: [] };
-  page.fetchWorkspace = options => {
-    current = snapshots[index++];
-    assert.ok(current, 'unexpected data request');
-    current.signal = options?.signal;
-    return Promise.resolve(current.workspace);
-  };
-  page.fetchTask = () => Promise.resolve(current.task);
-  page.fetchAgents = () => Promise.resolve(current.agents);
-  page.fetchTaskEvents = () => Promise.resolve(current.events);
-  page.fetchWorkspaceOutputDir = () => Promise.resolve(current.outputDir);
-  page.fetchWorkspaceRunsForTask = task => {
-    const source = snapshots.find(
-      item =>
-        item.label === task?.current_run_id || item.task?.current_run_id === task?.current_run_id
-    );
-    return Promise.resolve(source?.runs || []);
-  };
+  const response = body => ({ ok: true, status: 200, json: async () => body });
+  const loader = createTaskPageDataLoader(async (url, options) => {
+    if (url === '/api/workspaces/ws') {
+      current = snapshots[index++];
+      assert.ok(current, 'unexpected data request');
+      current.signal = options?.signal;
+      return response(current.workspace);
+    }
+    if (url === '/api/orchestration/tasks?id=task') return response(current.task);
+    if (url === '/api/agents') return response({ agents: current.agents });
+    if (url.startsWith('/api/orchestration/events?')) return response({ events: current.events });
+    if (url === '/api/workspaces/ws/output-dir') return response({ output_dir: current.outputDir });
+    if (url.startsWith('/api/workspaces/ws/runs/')) {
+      const runId = decodeURIComponent(url.split('/').at(-1));
+      const source = snapshots.find(
+        item => item.label === runId || item.task?.current_run_id === runId
+      );
+      return response(((await source?.runs) || []).find(run => run.id === runId) || null);
+    }
+    // Plan tests exercise the real lookup through their mocked transport.
+    assert.ok(url.startsWith('/api/workspaces/ws/plan-for-task/'), `unexpected request: ${url}`);
+    return fetch(url, options);
+  });
+  const page = new WorkspaceTaskPage('ws', 'task', 'workspace-slug', loader);
   page.loadRelatedPlan = async () => {};
   page.render = () => view.renders++;
   page.setState = state => view.states.push(state);
@@ -68,6 +77,93 @@ function makePage(t, snapshots = []) {
   t.mock.method(console, 'error', (...args) => view.errors.push(args));
   return { page, view };
 }
+
+function loadedSnapshot(label) {
+  const source = snapshot(label);
+  return {
+    workspace: source.workspace,
+    task: source.task,
+    tasks: source.workspace.tasks,
+    workspaceOutputDir: source.outputDir,
+    availableAgents: source.agents,
+    taskEvents: source.events,
+    workspaceRuns: source.runs,
+    currentRun: source.runs[0]
+  };
+}
+
+for (const [olderMethod, newerMethod] of [
+  ['loadData', 'loadData'],
+  ['loadData', 'refreshAfterStepChange'],
+  ['refreshAfterStepChange', 'loadData'],
+  ['refreshAfterStepChange', 'refreshAfterStepChange']
+]) {
+  test(`controller retains ownership when ${newerMethod} supersedes a cancellation-ignoring ${olderMethod} loader`, async t => {
+    const pending = deferred();
+    const { page, view } = makePage(t);
+    const inputs = [];
+    const read = input => {
+      inputs.push(input);
+      return inputs.length === 1 ? pending.promise : Promise.resolve(loadedSnapshot('new'));
+    };
+    page.dataLoader = { loadSnapshot: read, refreshSnapshot: read };
+    const oldRead = page[olderMethod]();
+    await page[newerMethod]();
+    assert.equal(inputs[0].signal.aborted, true);
+    assert.equal(inputs[1].signal.aborted, false);
+    assert.equal(inputs[0].workspaceId, 'ws');
+    assert.equal(inputs[0].taskId, 'task');
+    assert.ok(!('controller' in inputs[0]), 'the loader receives a signal, not request ownership');
+    pending.resolve(loadedSnapshot('old'));
+    await oldRead;
+    assert.equal(page.task.description, 'new');
+    assert.equal(page.currentRun.id, 'new');
+    assert.equal(view.renders, 1);
+    assert.equal(view.states.at(-1), 'content');
+  });
+}
+
+for (const method of ['loadData', 'refreshAfterStepChange']) {
+  test(`controller discards a cancellation-ignoring ${method} loader snapshot after teardown`, async t => {
+    const pending = deferred();
+    const { page, view } = makePage(t);
+    page.dataLoader = {
+      loadSnapshot: () => pending.promise,
+      refreshSnapshot: () => pending.promise
+    };
+    const read = page[method]();
+    page.destroy();
+    const states = view.states.length;
+    pending.resolve(loadedSnapshot('late'));
+    await read;
+    assert.equal(page.task, null);
+    assert.equal(view.renders, 0);
+    assert.equal(view.states.length, states);
+  });
+}
+
+test('controller refresh passes only cached data and preserves auxiliary page metadata', async t => {
+  const { page, view } = makePage(t);
+  const cached = loadedSnapshot('cached');
+  Object.assign(page, cached);
+  page.dataLoader = {
+    refreshSnapshot: async input => {
+      assert.deepEqual(input.previousSnapshot, {
+        workspace: cached.workspace,
+        tasks: cached.tasks,
+        task: cached.task
+      });
+      assert.ok(!('elements' in input));
+      return loadedSnapshot('new');
+    }
+  };
+  await page.refreshAfterStepChange();
+  assert.equal(page.task.description, 'new');
+  assert.equal(page.workspaceOutputDir, 'cached');
+  assert.deepEqual(page.availableAgents, cached.availableAgents);
+  assert.deepEqual(page.taskEvents, cached.taskEvents);
+  assert.equal(view.renders, 1);
+});
 
 function fakeTimers(t) {
   const timers = new Map();
@@ -444,33 +540,27 @@ test('a superseding refresh replaces its aborted plan lookup', async t => {
   assert.ok(container.innerHTML.includes('New plan'));
 });
 
-test('data fetch helpers propagate cancellation to every request and run lookup', async t => {
-  const { page } = makePage(t);
+test('data loader propagates cancellation to every request and run lookup', async t => {
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     calls.push({ url: String(url), signal: options?.signal });
-    return { ok: true, json: async () => ({ id: 'run', agents: [], events: [] }) };
+    return {
+      ok: true,
+      json: async () => ({
+        id: 'run',
+        current_run_id: 'run',
+        execution_history: [{ run_id: 'previous' }],
+        agents: [],
+        events: []
+      })
+    };
   });
   const controller = new AbortController();
-  const options = { signal: controller.signal };
-  for (const method of [
-    'fetchWorkspace',
-    'fetchTask',
-    'fetchAgents',
-    'fetchTaskEvents',
-    'fetchWorkspaceOutputDir'
-  ]) {
-    await WorkspaceTaskPage.prototype[method].call(page, options);
-  }
-  page.fetchCurrentRun = WorkspaceTaskPage.prototype.fetchCurrentRun;
-  await WorkspaceTaskPage.prototype.fetchWorkspaceRunsForTask.call(
-    page,
-    {
-      current_run_id: 'run',
-      execution_history: [{ run_id: 'previous' }]
-    },
-    options
-  );
+  await createTaskPageDataLoader().loadSnapshot({
+    workspaceId: 'ws',
+    taskId: 'task',
+    signal: controller.signal
+  });
   assert.equal(calls.length, 7);
   assert.ok(calls.every(call => call.signal === controller.signal));
 });
