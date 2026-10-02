@@ -203,7 +203,7 @@ func (th *TaskHandler) persistStructuredTaskState(ws *workspace.Workspace, task 
 	if err := ws.UpdateTask(*task); err != nil {
 		return fmt.Errorf("failed to update task: %w", err)
 	}
-	if err := th.workspaceStore.Save(ws); err != nil {
+	if err := th.persistTasks(ws.ID, *task); err != nil {
 		return fmt.Errorf("failed to save workspace: %w", err)
 	}
 	return nil
