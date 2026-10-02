@@ -924,6 +924,19 @@
 .project-library-sharing .modern-btn {
   margin-top: 0.6rem;
 }
+/* The global 44px touch target (common.css) would turn a switch into a circle on
+   a phone: the switch keeps its shape and its label becomes the target. */
+@media (max-width: 768px) {
+  .project-library-sharing-switch .form-check-input {
+    min-height: 0;
+    min-width: 0;
+  }
+  .project-library-sharing-switch .form-check-label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
 /* A row's one-click Open sits before its Details; the file chips wrap below. */
 .project-library-row-actions {
   white-space: nowrap;

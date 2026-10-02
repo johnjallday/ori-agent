@@ -57,7 +57,50 @@ const [width, height] = (args.find(arg => /^\d+x\d+$/.test(arg)) || '1440x900')
 const scheme = args.includes('dark') ? 'dark' : 'light';
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width, height }, colorScheme: scheme });
+await page.addInitScript(theme => window.localStorage.setItem('ori-theme', theme), scheme);
 const problems = [];
+
+// The Home library at path, its rows loaded.
+async function openLibrary(path) {
+  await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#projectLibraryRows tr').first().waitFor({ timeout: 60_000 });
+  await page.waitForTimeout(1200);
+}
+
+// Prints "Recently saved", the switch, and every row's muted line.
+async function printLibrary() {
+  const lines = selector =>
+    page
+      .locator(selector)
+      .evaluateAll(items =>
+        items.map(
+          item =>
+            `${item.querySelector('h4, strong')?.textContent} — ${item.querySelector('small.project-library-saved, h4 + small')?.textContent || ''}`
+        )
+      );
+  console.log('Recently saved:');
+  (await lines('#projectLibraryRecentCards article')).forEach(row => console.log(`  ${row}`));
+  const songDetails = page.locator('#projectLibrarySongDetails');
+  if (await songDetails.isVisible()) {
+    const on = await page.locator('#projectLibrarySongDetailsSwitch').isChecked();
+    console.log(
+      `Switch: ${on ? 'on' : 'off'} — ${await page.locator('#projectLibrarySongDetailsNote').textContent()}`
+    );
+  } else {
+    console.log('Switch: not shown');
+  }
+  console.log('Library rows:');
+  (await lines('#projectLibraryRows tr')).forEach(row => console.log(`  ${row}`));
+}
+
+async function panelShot(name) {
+  const file = shot(`${name}-${scheme}-${width}`);
+  await page.locator('#projectLibraryPanel').screenshot({ path: file });
+  console.log(`saved ${file}`);
+}
+
+const named = (value, fallback) =>
+  value && !/^(light|dark|on|off|\d+x\d+)$/.test(value) ? value : fallback;
 page.on(
   'console',
   message => message.type() === 'error' && problems.push(`console: ${message.text()}`)
@@ -103,33 +146,38 @@ try {
     const browse = await modal.getByRole('link', { name: /^Browse all/ }).getAttribute('href');
     console.log(`library ${browse}; saved ${shot(`setup-${chip}`)}`);
   } else if (step === 'library') {
-    const path = args[0];
-    const name = args[1] && !/^(light|dark|\d+x\d+)$/.test(args[1]) ? args[1] : 'library';
-    await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' });
-    await page.locator('#projectLibraryRows tr').first().waitFor({ timeout: 60_000 });
-    await page.waitForTimeout(1200);
-    const recent = await page
-      .locator('#projectLibraryRecentCards article')
-      .evaluateAll(items =>
-        items.map(
-          item =>
-            `${item.querySelector('h4')?.textContent} — ${item.querySelector('small')?.textContent}`
-        )
-      );
-    console.log('Recently saved:');
-    recent.forEach(row => console.log(`  ${row}`));
-    const rows = await page
-      .locator('#projectLibraryRows tr')
-      .evaluateAll(items =>
-        items.map(
-          item =>
-            `${item.querySelector('strong')?.textContent} — ${item.querySelector('.project-library-saved')?.textContent || ''}`
-        )
-      );
-    console.log('Library rows:');
-    rows.forEach(row => console.log(`  ${row}`));
-    await page.screenshot({ path: shot(`${name}-${scheme}-${width}`), fullPage: true });
-    console.log(`saved ${shot(`${name}-${scheme}-${width}`)}`);
+    await openLibrary(args[0]);
+    await printLibrary();
+    await panelShot(named(args[1], 'library'));
+  } else if (step === 'switch') {
+    // switch <path> on|off [name]: set the song-details switch and wait for its status.
+    const want = args.includes('on');
+    await openLibrary(args[0]);
+    const toggle = page.locator('#projectLibrarySongDetailsSwitch');
+    if ((await toggle.isChecked()) !== want) {
+      await toggle.click();
+      await page
+        .locator('#projectLibraryStatus', {
+          hasText: want ? 'Song details are on' : 'Song details cleared'
+        })
+        .waitFor({ timeout: 30_000 });
+    }
+    console.log(`Status: ${await page.locator('#projectLibraryStatus').textContent()}`);
+    await printLibrary();
+    await panelShot(named(args[2], want ? 'switch-on' : 'switch-off'));
+  } else if (step === 'rescan') {
+    // rescan <path> [name]: review and commit one scan of the first folder.
+    await openLibrary(args[0]);
+    await page
+      .locator('#projectLibraryRoots article.project-library-root')
+      .first()
+      .getByRole('button', { name: 'Review scan' })
+      .click();
+    await page.getByRole('button', { name: 'Scan metadata' }).click();
+    await page.waitForTimeout(4000);
+    await openLibrary(args[0]);
+    await printLibrary();
+    await panelShot(named(args[1], 'rescan'));
   } else {
     throw new Error(`unknown step ${step}`);
   }

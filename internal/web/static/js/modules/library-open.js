@@ -170,12 +170,15 @@ export function songFactsLabel(facts) {
   return parts.join(' · ');
 }
 
-// savedWithFacts is a song's one muted line: "Saved 3 days ago · 14 tracks ·
-// 92 BPM · 3:41", or either half alone.
-export function savedWithFacts(row, now = new Date()) {
-  return [lastSavedLabel(row?.last_saved_at, now), songFactsLabel(row?.facts)]
-    .filter(Boolean)
+// songLineText is a song's one muted line, "Saved … · 14 tracks · 92 BPM ·
+// 3:41", with each fact kept on one line (non-breaking spaces inside a fact),
+// so a narrow card wraps only between facts.
+export function songLineText(saved, facts) {
+  const unbroken = String(facts || '')
+    .split(' · ')
+    .map(part => part.replaceAll(' ', ' '))
     .join(' · ');
+  return [saved, unbroken].filter(Boolean).join(' · ');
 }
 
 // recentSongs keeps the rows a person can open in one click and that have a

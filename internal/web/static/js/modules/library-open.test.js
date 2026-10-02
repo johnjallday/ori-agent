@@ -5,8 +5,8 @@ import {
   openLibrarySong,
   RECENT_SONGS_QUERY,
   recentSongs,
-  savedWithFacts,
-  songFactsLabel
+  songFactsLabel,
+  songLineText
 } from './library-open.js';
 import * as library from './project-library.js';
 
@@ -165,16 +165,14 @@ test('song facts read as tracks, tempo and length, leaving out what is unknown',
   }
 });
 
-test('a song line joins its save time and its facts', () => {
-  const facts = { track_count: 14, tempo_bpm: 92, length_seconds: 221 };
+test('a song line keeps each fact whole and wraps only between facts', () => {
   assert.equal(
-    savedWithFacts({ last_saved_at: ago(3), facts }, now),
-    'Saved 3 days ago · 14 tracks · 92 BPM · 3:41'
+    songLineText('Saved 3 days ago', '14 tracks · 92 BPM, varies · 3:41'),
+    'Saved 3 days ago · 14 tracks · 92 BPM, varies · 3:41'
   );
-  assert.equal(savedWithFacts({ last_saved_at: ago(3) }, now), 'Saved 3 days ago');
-  assert.equal(savedWithFacts({ facts }, now), '14 tracks · 92 BPM · 3:41');
-  assert.equal(savedWithFacts({}, now), '');
-  assert.equal(savedWithFacts(null, now), '');
+  assert.equal(songLineText('Saved today', ''), 'Saved today', 'no facts: the save time unchanged');
+  assert.equal(songLineText('', '1 track'), '1 track');
+  assert.equal(songLineText('', ''), '');
 });
 
 test('the Home library still exports the open helpers it always had', () => {

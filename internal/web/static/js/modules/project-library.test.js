@@ -16,7 +16,11 @@ import {
   readActivationQueue,
   recentlySavedView,
   selectionRecovery,
-  setupNextStep
+  setupNextStep,
+  LIBRARY_INTRO,
+  libraryIntroText,
+  songDetailsStatus,
+  songDetailsSwitchView
 } from './project-library.js';
 
 test('Show project folder requires a fresh connected Home link and never sends a path or starts a DAW', async () => {
@@ -3352,6 +3356,21 @@ test('Recently saved shows at most six songs that can be opened, each with Open'
   assert.equal(view.cards[0].row.id, 'song-1');
 });
 
+test('Recently saved cards carry each song facts line; a song without facts shows only Saved', () => {
+  const rows = recentRows(3);
+  rows[0].facts = { track_count: 6, tempo_bpm: 128.5, length_seconds: 3725 };
+  rows[2].facts = {};
+  const view = recentlySavedView({ provider_read_only: false, rows }, recentNow);
+  assert.deepEqual(
+    view.cards.map(card => [card.name, card.saved, card.facts]),
+    [
+      ['Song 1', 'Saved today', '6 tracks · 128.5 BPM · 1:02:05'],
+      ['Song 2', 'Saved yesterday', ''],
+      ['Song 3', 'Saved 2 days ago', '']
+    ]
+  );
+});
+
 test('a read-only Home still lists its recent songs, without Open', () => {
   // The server marks no row openable while the Home provider is unavailable.
   const rows = recentRows(3).map(row => ({ ...row, can_open: false }));
@@ -3409,7 +3428,11 @@ test('each library row shows its save time and song facts on one line', () => {
     const lines = tbody.children.map(tr =>
       tr.children[1].children.find(child => child.className === 'project-library-saved')
     );
-    assert.match(lines[0].textContent, /^Saved .+ · 14 tracks · 92 BPM, varies · 3:41$/);
+    assert.match(
+      lines[0].textContent.replaceAll(' ', ' '),
+      /^Saved .+ · 14 tracks · 92 BPM, varies · 3:41$/
+    );
+    assert.match(lines[0].textContent, /14 tracks · 92 BPM, varies/);
     assert.equal(lines[0].dataset.songFacts, '14 tracks · 92 BPM, varies · 3:41');
     assert.match(lines[1].textContent, /^Saved [^·]+$/, 'no facts: only "Saved …"');
     assert.equal(lines[1].dataset.songFacts, undefined);
@@ -3418,6 +3441,124 @@ test('each library row shows its save time and song facts on one line', () => {
       tbody.children.map(tr => tr.children[1].children.map(c => c.textContent).join(' ')).join(' '),
       /\b(progress|complete|ready|unknown)\b/i
     );
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('the song-details switch shows only on a Home that agreed at setup', () => {
+  for (const songDetails of [undefined, null, {}, { state: 'none' }, { state: 'surprise' }]) {
+    assert.deepEqual(songDetailsSwitchView(songDetails), { visible: false });
+  }
+  assert.deepEqual(songDetailsSwitchView({ state: 'on', app_name: 'REAPER' }), {
+    visible: true,
+    checked: true,
+    disabled: false,
+    note: "Ori reads each REAPER project's tempo, length and track count. Nothing is changed."
+  });
+  const off = songDetailsSwitchView({ state: 'off', app_name: 'REAPER' });
+  assert.equal(off.checked, false);
+  assert.match(off.note, /^Scans read no project files\./);
+  assert.equal(songDetailsSwitchView({ state: 'on' }, true).disabled, true, 'read-only: disabled');
+  assert.equal(
+    songDetailsSwitchView({ state: 'on' }).note,
+    "Ori reads each project's tempo, length and track count. Nothing is changed."
+  );
+  assert.equal(
+    songDetailsStatus(false),
+    'Song details cleared. Scans no longer read project files.'
+  );
+  assert.match(songDetailsStatus(true), /next scan reads them; nothing is scanned now/);
+});
+
+test('the library intro says what a scan reads', () => {
+  assert.equal(libraryIntroText(undefined), LIBRARY_INTRO);
+  assert.equal(libraryIntroText({ state: 'off' }), LIBRARY_INTRO);
+  assert.match(LIBRARY_INTRO, /without opening project files/);
+  const on = libraryIntroText({ state: 'on', app_name: 'REAPER' });
+  assert.match(on, /each REAPER project's tempo, length and track count/);
+  assert.doesNotMatch(on, /without opening project files/);
+});
+
+test('switching song details off clears the facts lines and says so', async () => {
+  const previousDocument = globalThis.document;
+  const elements = {};
+  const makeElement = tag => ({
+    tag,
+    children: [],
+    textContent: '',
+    className: '',
+    hidden: false,
+    checked: false,
+    disabled: false,
+    dataset: {},
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener() {},
+    setAttribute() {}
+  });
+  for (const id of [
+    'projectLibraryIntro',
+    'projectLibrarySongDetails',
+    'projectLibrarySongDetailsSwitch',
+    'projectLibrarySongDetailsNote',
+    'projectLibraryStatus'
+  ]) {
+    elements[id] = makeElement('x');
+  }
+  globalThis.document = { createElement: makeElement, getElementById: id => elements[id] || null };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      initialized: true,
+      provider_read_only: false,
+      song_details: { state: 'on', app_name: 'REAPER' }
+    };
+    const posts = [];
+    let refreshed = 0;
+    panel.post = async (path, body) => {
+      posts.push({ path, body });
+      return { song_details: { state: body.enabled ? 'on' : 'off', app_name: 'REAPER' } };
+    };
+    panel.renderRecent = async () => refreshed++;
+    panel.search = async () => refreshed++;
+    panel.renderSongDetails();
+    const toggle = elements.projectLibrarySongDetailsSwitch;
+    assert.equal(elements.projectLibrarySongDetails.hidden, false);
+    assert.equal(toggle.checked, true);
+    assert.match(elements.projectLibraryIntro.textContent, /tempo, length and track count/);
+
+    toggle.checked = false;
+    await panel.setSongDetails(toggle);
+    assert.equal(posts[0].path, '/song-details');
+    assert.equal(posts[0].body.enabled, false);
+    assert.match(posts[0].body.request_id, /^song-details-/);
+    assert.equal(panel.state.song_details.state, 'off');
+    assert.equal(refreshed, 2, 'the facts lines are re-read');
+    assert.equal(
+      elements.projectLibraryStatus.textContent,
+      'Song details cleared. Scans no longer read project files.'
+    );
+    assert.equal(elements.projectLibraryIntro.textContent, LIBRARY_INTRO);
+
+    // A refusal keeps the server's state and its message.
+    panel.post = async () => {
+      const error = new Error(
+        'This Home is read-only right now, so song details cannot be turned on.'
+      );
+      error.payload = { song_details: { state: 'off' } };
+      throw error;
+    };
+    toggle.checked = true;
+    await panel.setSongDetails(toggle);
+    assert.equal(panel.state.song_details.state, 'off');
+    assert.equal(toggle.checked, false);
+    assert.match(elements.projectLibraryStatus.textContent, /read-only right now/);
+    assert.equal(refreshed, 2);
   } finally {
     globalThis.document = previousDocument;
   }

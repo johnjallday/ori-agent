@@ -9,8 +9,8 @@ import {
   readLibraryPayload as payload,
   RECENT_SONGS_QUERY,
   recentSongs,
-  savedWithFacts,
-  songFactsLabel
+  songFactsLabel,
+  songLineText
 } from './library-open.js';
 import { setupQuestURL } from './setup-quest-links.js';
 
@@ -22,7 +22,6 @@ export {
   libraryOpenChoices,
   libraryOpenRoute,
   libraryOpenedMessage,
-  savedWithFacts,
   songFactsLabel
 } from './library-open.js';
 
@@ -403,6 +402,46 @@ export function librarySharingView(sharing, readOnly = false) {
   return view;
 }
 
+// The library's intro: what reading this Home's folders does. A Home whose
+// song-details switch is on also reads three numbers from each project file.
+export const LIBRARY_INTRO =
+  'Discover project names and formats without opening project files, launching a project application or creating workspaces. Each scan is a separate choice; planning a session saves notes only.';
+
+function songProjects(songDetails) {
+  const app = String(songDetails?.app_name || '').trim();
+  return app ? `each ${app} project's` : "each project's";
+}
+
+export function libraryIntroText(songDetails) {
+  if (songDetails?.state !== 'on') return LIBRARY_INTRO;
+  return `Discover project names and formats, and ${songProjects(songDetails)} tempo, length and track count, without launching a project application, creating workspaces or changing any file. Each scan is a separate choice; planning a session saves notes only.`;
+}
+
+// songDetailsSwitchView words the Home's "Read song details when scanning"
+// switch from the library read's `song_details`. Only a Home that agreed on its
+// setup card has it (state on or off); a read-only Home shows it disabled.
+export function songDetailsSwitchView(songDetails, readOnly = false) {
+  const state = String(songDetails?.state || '');
+  if (state !== 'on' && state !== 'off') return { visible: false };
+  const read = songProjects(songDetails);
+  return {
+    visible: true,
+    checked: state === 'on',
+    disabled: Boolean(readOnly),
+    note:
+      state === 'on'
+        ? `Ori reads ${read} tempo, length and track count. Nothing is changed.`
+        : `Scans read no project files. Turn this on to read ${read} tempo, length and track count on the next scan.`
+  };
+}
+
+// What the status line says after the switch changed.
+export function songDetailsStatus(enabled) {
+  return enabled
+    ? 'Song details are on. The next scan reads them; nothing is scanned now.'
+    : 'Song details cleared. Scans no longer read project files.';
+}
+
 const QUEUE_LIMIT = 100;
 export function readActivationQueue(homeID, storage = globalThis.sessionStorage, now = Date.now()) {
   try {
@@ -451,8 +490,9 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
 }
 
 // recentlySavedView is the "Recently saved" section from one last_saved page:
-// up to six songs with a save time, each with Open where the Home can open it.
-// A read-only Home still shows its songs, without Open. No dated song: hidden.
+// up to six songs with a save time, each with Open where the Home can open it,
+// and its song facts when they are known. A read-only Home still shows its
+// songs, without Open. No dated song: hidden.
 export function recentlySavedView(page, now = new Date()) {
   const readOnly = page?.provider_read_only !== false;
   const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(Boolean);
@@ -465,9 +505,18 @@ export function recentlySavedView(page, now = new Date()) {
       row,
       name: String(row.name || '').trim() || 'This song',
       saved: lastSavedLabel(row.last_saved_at, now),
+      facts: songFactsLabel(row.facts),
       open: libraryOpenAction(row, readOnly)
     }))
   };
+}
+
+// savedLine is one song's muted line, "Saved … · 14 tracks · 92 BPM · 3:41",
+// with the facts half on data-song-facts for tests and styling.
+function savedLine(className, saved, facts) {
+  const line = node('small', className, songLineText(saved, facts));
+  if (facts) line.dataset.songFacts = facts;
+  return line;
 }
 
 // This panel belongs to the exact Home. No browser path, child workspace ID,
@@ -679,6 +728,9 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibrarySharingAction')
       ?.addEventListener('click', event => void this.runSharingAction(event.currentTarget));
+    document
+      .getElementById('projectLibrarySongDetailsSwitch')
+      ?.addEventListener('change', event => void this.setSongDetails(event.currentTarget));
     await this.restoreCollectionContinuation();
     await this.refresh();
     await this.resumeFromIntegration();
@@ -708,6 +760,56 @@ export class ProjectLibraryPanel {
       action.dataset.sharingAction = view.action?.id || '';
       action.disabled = this.busy;
     }
+  }
+
+  // The Home's song-details switch and the intro that says what a scan reads.
+  // Both ride the library read.
+  renderSongDetails() {
+    const intro = document.getElementById('projectLibraryIntro');
+    if (intro) intro.textContent = libraryIntroText(this.state?.song_details);
+    const section = document.getElementById('projectLibrarySongDetails');
+    if (!section) return;
+    const view = songDetailsSwitchView(this.state?.song_details, this.readOnly);
+    section.hidden = !view.visible;
+    if (!view.visible) return;
+    const toggle = document.getElementById('projectLibrarySongDetailsSwitch');
+    if (toggle) {
+      toggle.checked = view.checked;
+      toggle.disabled = this.busy || view.disabled;
+    }
+    const note = document.getElementById('projectLibrarySongDetailsNote');
+    if (note) note.textContent = view.note;
+  }
+
+  // Off clears every stored song fact on the server, so the facts lines go
+  // with it; on starts no scan, so there is nothing to show until the next one.
+  async setSongDetails(toggle) {
+    if (!this.state?.song_details || this.busy || this.readOnly) return;
+    const enabled = Boolean(toggle?.checked);
+    let changed = false;
+    await this.run(
+      toggle,
+      enabled ? 'Turning song details on…' : 'Turning song details off…',
+      async () => {
+        try {
+          const result = await this.post('/song-details', {
+            request_id: `song-details-${globalThis.crypto.randomUUID()}`,
+            enabled
+          });
+          if (result?.song_details) this.state.song_details = result.song_details;
+          changed = true;
+        } catch (error) {
+          if (error.payload?.song_details) this.state.song_details = error.payload.song_details;
+          throw error;
+        } finally {
+          this.renderSongDetails();
+        }
+      }
+    );
+    if (!changed) return;
+    await this.renderRecent();
+    await this.search(false);
+    this.status(songDetailsStatus(enabled));
   }
 
   async postSharing(path, body) {
@@ -847,6 +949,7 @@ export class ProjectLibraryPanel {
       this.renderFormats();
       this.renderRoots();
       this.renderSharing();
+      this.renderSongDetails();
       this.renderSetupNext();
       await this.restoreQueue();
       this.renderQueueControls();
@@ -1296,7 +1399,7 @@ export class ProjectLibraryPanel {
     for (const card of view.cards) {
       const item = node('article', 'project-library-resume-card project-library-recent-card');
       const text = node('div', 'project-library-recent-text');
-      text.append(node('h4', '', card.name), node('small', '', card.saved));
+      text.append(node('h4', '', card.name), savedLine('', card.saved, card.facts));
       item.append(text);
       if (card.open) {
         const open = node('button', 'modern-btn modern-btn-primary', card.open.label);
@@ -1582,13 +1685,9 @@ export class ProjectLibraryPanel {
         node('strong', '', row.name),
         node('small', '', row.next_action || 'No next action saved')
       );
-      const saved = savedWithFacts(row);
-      if (saved) {
-        const line = node('small', 'project-library-saved', saved);
-        const facts = songFactsLabel(row.facts);
-        if (facts) line.dataset.songFacts = facts;
-        name.append(line);
-      }
+      const saved = lastSavedLabel(row.last_saved_at);
+      const facts = songFactsLabel(row.facts);
+      if (saved || facts) name.append(savedLine('project-library-saved', saved, facts));
       const stage = node('td');
       stage.append(node('span', '', label(row.stage)), node('small', '', label(row.status)));
       const connection = node('td', '', label(row.connection));

@@ -88,6 +88,24 @@ func FactsMarker(format string) (Marker, bool) {
 	return Marker{}, false
 }
 
+// FactsAppName is the application whose project files declare facts, as the
+// tool table names it ("" when none does), so a screen can say whose files a
+// Home reads without naming the application in code.
+func FactsAppName() string {
+	for _, marker := range Markers {
+		if marker.Facts == nil || marker.Kind != MarkerGlob || !strings.HasPrefix(marker.Name, "*.") {
+			continue
+		}
+		extension := strings.ToLower(strings.TrimPrefix(marker.Name, "*"))
+		for _, tool := range Tools {
+			if tool.Match == ToolByExtension && strings.ToLower(tool.Value) == extension && tool.ToolName != "" {
+				return tool.ToolName
+			}
+		}
+	}
+	return ""
+}
+
 // The Markers table itself lives in tables.go, the package's data-only file.
 
 // matches reports whether one directory entry satisfies the marker row.

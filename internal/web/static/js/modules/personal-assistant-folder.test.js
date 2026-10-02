@@ -275,6 +275,22 @@ test('songs are only for a finished Home run', () => {
   }
 });
 
+test('each song on the last screen carries its facts, and a song without facts none', () => {
+  const rows = songRows(3);
+  rows[0].facts = { track_count: 14, tempo_bpm: 92, tempo_varies: true, length_seconds: 221 };
+  rows[1].facts = { track_count: 1 };
+  const view = setupModalView(homeRunOffer(), { songs: rows, total: 3, now: today });
+  assert.deepEqual(
+    view.songs.map(song => [song.name, song.saved, song.facts]),
+    [
+      ['Song 001', 'Saved today', '14 tracks · 92 BPM, varies · 3:41'],
+      ['Song 002', 'Saved yesterday', '1 track'],
+      ['Song 003', 'Saved 2 days ago', '']
+    ]
+  );
+  assert.doesNotMatch(JSON.stringify(view.songs), /tempo_bpm|track_count|unknown|progress/);
+});
+
 test('one song is counted as one song', () => {
   const view = setupModalView(homeRunOffer(), { songs: songRows(1), total: 1, now: today });
   assert.match(view.status, /is ready with 1 song\./);

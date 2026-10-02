@@ -127,6 +127,29 @@ func factsAt(t *testing.T, r *Roots, scope Scope, rootID, relative string) *Obse
 	return observation.Facts
 }
 
+// storedFacts counts the observations whose stored record holds facts, from
+// the Home's decoded library document.
+func storedFacts(t *testing.T, store workspace.Store, scope Scope) int {
+	t.Helper()
+	home, err := store.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := decodeDocument(home.GetAssistantProgramState().ProjectLibrary, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, entry := range doc.Entries {
+		for _, observation := range entry.Observations {
+			if observation.Facts != nil {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 func treeHashes(t *testing.T, tree musicTree) map[string][32]byte {
 	t.Helper()
 	hashes := map[string][32]byte{}
@@ -350,12 +373,8 @@ func TestSongFacts_AHomeWithoutConsentOpensNoFile(t *testing.T) {
 			if len(events.all()) != 2 {
 				t.Fatalf("events = %d, want one per scan", len(events.all()))
 			}
-			home, err := file.Get(scope.HomeID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if stored := home.GetAssistantProgramState().ProjectLibrary; bytes.Contains(stored, []byte(`"facts"`)) {
-				t.Fatal("a Home without consent stored facts")
+			if count := storedFacts(t, file, scope); count != 0 {
+				t.Fatalf("a Home without consent stored %d facts", count)
 			}
 		})
 	}
@@ -549,13 +568,8 @@ func TestStore_ForgedFactsMakeTheDocumentInvalid(t *testing.T) {
 func TestStore_AHomeWithoutFactsStillLoads(t *testing.T) {
 	r, scope, file, _, root := connectedMusicRoot(t)
 	scanRoot(t, r, scope, root.ID, "no-consent")
-	home, err := file.Get(scope.HomeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored := home.GetAssistantProgramState().ProjectLibrary
-	if bytes.Contains(stored, []byte(`"facts"`)) {
-		t.Fatal("a Home without consent wrote facts")
+	if count := storedFacts(t, file, scope); count != 0 {
+		t.Fatalf("a Home without consent wrote %d facts", count)
 	}
 	doc, err := NewStore(file).Read(scope)
 	if err != nil || len(doc.Entries) != 4 {
@@ -683,6 +697,89 @@ func TestQuery_FactsComeFromTheSourceThatDatesTheSong(t *testing.T) {
 	}
 	if detail, err := s.Detail(scope, "two-sources"); err != nil || detail.Row.Facts != nil || detail.Sources[0].Facts != nil {
 		t.Fatalf("switched off, detail shows facts: %+v %v", detail, err)
+	}
+}
+
+func TestSetSongDetails_OffClearsFactsAndOnReadsThemOnTheNextScan(t *testing.T) {
+	r, scope, file, tree, root := connectedMusicRoot(t)
+	factsMusicTree(t, tree)
+	store := r.library
+	for _, enabled := range []bool{true, false} {
+		if _, err := store.SetSongDetails(scope, enabled); !errors.Is(err, ErrSongDetailsNotGranted) {
+			t.Fatalf("a Home without consent, enabled=%v: %v", enabled, err)
+		}
+	}
+	grantSongDetails(t, file, scope)
+	opens := &openCounter{}
+	r.factsOpened = opens.hook
+	scanRoot(t, r, scope, root.ID, "facts")
+	opens.take()
+	before, err := store.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Off: the switch and every stored fact go in one Home write.
+	if state, err := store.SetSongDetails(scope, false); err != nil || state != workspace.SongDetailsOff {
+		t.Fatalf("off: %q %v", state, err)
+	}
+	if count := storedFacts(t, file, scope); count != 0 {
+		t.Fatalf("switching off left %d facts stored", count)
+	}
+	home, err := file.Get(scope.HomeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consent := home.GetAssistantProgramState().GetSongDetailsConsent(); consent.RevokedAt == nil {
+		t.Fatalf("switching off kept the consent on: %+v", consent)
+	}
+	after, err := store.Read(scope)
+	if err != nil || after.Revision != before.Revision+1 || len(after.Entries) != len(before.Entries) {
+		t.Fatalf("off: revision %d→%d, %d entries %v", before.Revision, after.Revision, len(after.Entries), err)
+	}
+	// Off again (a retried request) writes nothing.
+	if state, err := store.SetSongDetails(scope, false); err != nil || state != workspace.SongDetailsOff {
+		t.Fatalf("off again: %q %v", state, err)
+	}
+	if again, _ := store.Read(scope); again.Revision != after.Revision {
+		t.Fatalf("off again moved the revision %d→%d", after.Revision, again.Revision)
+	}
+	// Off means off: the next scan opens nothing.
+	scanRoot(t, r, scope, root.ID, "while-off")
+	if got := opens.take(); len(got) != 0 {
+		t.Fatalf("a scan with the switch off opened %v", got)
+	}
+
+	// On: no scan starts, no facts until the next scan, then they come back.
+	if state, err := store.SetSongDetails(scope, true); err != nil || state != workspace.SongDetailsOn {
+		t.Fatalf("on: %q %v", state, err)
+	}
+	if got := opens.take(); len(got) != 0 || factsAt(t, r, scope, root.ID, "Single") != nil {
+		t.Fatalf("turning on read files (%v) or showed facts", got)
+	}
+	if state, err := store.SetSongDetails(scope, true); err != nil || state != workspace.SongDetailsOn {
+		t.Fatalf("on again: %q %v", state, err)
+	}
+	scanRoot(t, r, scope, root.ID, "back-on")
+	if got := opens.take(); len(got) != 2 || factsAt(t, r, scope, root.ID, "Single") == nil {
+		t.Fatalf("after turning on, the next scan opened %v", got)
+	}
+}
+
+func TestSetSongDetails_AReadOnlyHomeCanTurnOffButNotOn(t *testing.T) {
+	r, scope, file, tree, root := connectedMusicRoot(t)
+	factsMusicTree(t, tree)
+	grantSongDetails(t, file, scope)
+	scanRoot(t, r, scope, root.ID, "facts")
+	readOnly := NewStore(file).WithProviderEvidence(func(Scope, *workspace.Workspace) bool { return false })
+	if state, err := readOnly.SetSongDetails(scope, false); err != nil || state != workspace.SongDetailsOff {
+		t.Fatalf("off on a read-only Home: %q %v", state, err)
+	}
+	if _, err := readOnly.SetSongDetails(scope, true); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("on on a read-only Home: %v", err)
+	}
+	if state, err := readOnly.SongDetailsState(scope); err != nil || state != workspace.SongDetailsOff {
+		t.Fatalf("state: %q %v", state, err)
 	}
 }
 
