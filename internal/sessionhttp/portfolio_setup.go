@@ -285,24 +285,36 @@ func (h *Handler) CommitPortfolioRoot(ownerUserID, homeID, token, key string) (s
 	return root.ID, nil
 }
 
-// ReviewPortfolioScan reviews one listing of the whole root. MetadataOnly is
-// true only for a whole-root scan of names and project markers.
-func (h *Handler) ReviewPortfolioScan(ownerUserID, homeID, rootID string) (token, reviewedRoot string, metadataOnly bool, err error) {
+// PortfolioScanReview is what one listing review of the whole root discloses.
+// MetadataOnly is true only for a whole-root scan of names and project markers,
+// plus, when ReadsSongDetails, each project's tempo, length and track count.
+type PortfolioScanReview struct {
+	Token            string
+	RootID           string
+	MetadataOnly     bool
+	ReadsSongDetails bool
+}
+
+// ReviewPortfolioScan reviews one listing of the whole root.
+func (h *Handler) ReviewPortfolioScan(ownerUserID, homeID, rootID string) (PortfolioScanReview, error) {
 	scope, err := h.portfolioLibraryScope(ownerUserID, homeID)
 	if err != nil || h.assistantLibraryRoots == nil {
-		return "", "", false, ErrPortfolioSetupUnavailable
+		return PortfolioScanReview{}, ErrPortfolioSetupUnavailable
 	}
 	doc, err := h.assistantLibraryStore().Read(scope)
 	if err != nil {
-		return "", "", false, err
+		return PortfolioScanReview{}, err
 	}
 	review, err := h.assistantLibraryRoots.ReviewScan(scope, rootID, doc.Revision)
 	if err != nil {
-		return "", "", false, err
+		return PortfolioScanReview{}, err
 	}
-	metadataOnly = review.IncludesScan && review.ScopeID == "" && review.MaxEntries > 0 &&
-		strings.Contains(review.Scope, "no file contents")
-	return review.Token, review.RootID, metadataOnly, nil
+	scopeText := projectlibrary.ScanScopeNamesOnly
+	if review.ReadsSongFacts {
+		scopeText = projectlibrary.ScanScopeSongDetails
+	}
+	return PortfolioScanReview{Token: review.Token, RootID: review.RootID, ReadsSongDetails: review.ReadsSongFacts,
+		MetadataOnly: review.IncludesScan && review.ScopeID == "" && review.MaxEntries > 0 && review.Scope == scopeText}, nil
 }
 
 // CommitPortfolioScan lists the root and reports how many projects the library

@@ -731,7 +731,7 @@ func (s *Store) managerProposalRows(scope Scope, doc Document, state *workspace.
 			name = "Discovery folders"
 		}
 		if entry := sessionEntry(doc, proposal.EntryID); entry != nil {
-			if projected := s.projectSearchRow(scope, *entry, roots, linked, inactive).Name; projected != "" {
+			if projected := s.projectSearchRow(scope, *entry, roots, linked, inactive, false).Name; projected != "" {
 				name = projected
 			}
 		}

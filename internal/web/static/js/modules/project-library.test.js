@@ -3371,6 +3371,58 @@ test('a read-only Home still lists its recent songs, without Open', () => {
   assert.equal(many.cards.length, 6);
 });
 
+test('each library row shows its save time and song facts on one line', () => {
+  const previousDocument = globalThis.document;
+  const makeElement = tag => ({
+    tag,
+    children: [],
+    textContent: '',
+    className: '',
+    dataset: {},
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener() {},
+    setAttribute() {}
+  });
+  const tbody = makeElement('tbody');
+  globalThis.document = {
+    createElement: makeElement,
+    getElementById: id => (id === 'projectLibraryRows' ? tbody : null)
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' }); // no state: read-only
+    panel.rows = [
+      {
+        id: 'with-facts',
+        name: 'Night Drive',
+        last_saved_at: savedAgo(3),
+        facts: { track_count: 14, tempo_bpm: 92, tempo_varies: true, length_seconds: 221 }
+      },
+      { id: 'saved-only', name: 'Ableton Set', last_saved_at: savedAgo(3) },
+      { id: 'undated', name: 'Undated' }
+    ];
+    panel.renderRows();
+    const lines = tbody.children.map(tr =>
+      tr.children[1].children.find(child => child.className === 'project-library-saved')
+    );
+    assert.match(lines[0].textContent, /^Saved .+ · 14 tracks · 92 BPM, varies · 3:41$/);
+    assert.equal(lines[0].dataset.songFacts, '14 tracks · 92 BPM, varies · 3:41');
+    assert.match(lines[1].textContent, /^Saved [^·]+$/, 'no facts: only "Saved …"');
+    assert.equal(lines[1].dataset.songFacts, undefined);
+    assert.equal(lines[2], undefined, 'no save time and no facts: no line');
+    assert.doesNotMatch(
+      tbody.children.map(tr => tr.children[1].children.map(c => c.textContent).join(' ')).join(' '),
+      /\b(progress|complete|ready|unknown)\b/i
+    );
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 test('Recently saved is hidden when no song has a save time', () => {
   for (const page of [
     null,

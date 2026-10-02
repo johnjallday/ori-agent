@@ -51,6 +51,9 @@ type SearchRow struct {
 	// that are usable now (available or ambiguous, on an active root). A save
 	// time is not evidence that anyone worked on the song. Nil: no date.
 	LastSavedAt *time.Time `json:"last_saved_at,omitempty"`
+	// Facts are the tempo, length and track count read from the same source
+	// that gives LastSavedAt. Nil when unknown, or when the Home's switch is off.
+	Facts       *SongFacts `json:"facts,omitempty"`
 	NeedsChoice bool       `json:"needs_choice,omitempty"`
 	// CanOpen says the owner can open the row in one click: it is connected, or
 	// it is catalog-only with an available source in a format the installed
@@ -97,6 +100,18 @@ type DetailSource struct {
 	Availability    string    `json:"last_observed_availability"`
 	ScannedAt       time.Time `json:"scanned_at"`
 	FileModifiedAt  time.Time `json:"observed_file_modified_at,omitempty"`
+	// Facts are shown for a usable source only.
+	Facts *SongFacts `json:"facts,omitempty"`
+}
+
+// shownFacts is what a projection may show of an observation's facts: nothing
+// when the Home's switch is off or the record holds no facts.
+func shownFacts(observed Observation, factsOn bool) *SongFacts {
+	if !factsOn || observed.Facts == nil || observed.Facts.empty() {
+		return nil
+	}
+	facts := observed.Facts.SongFacts
+	return &facts
 }
 
 func (s *Store) Detail(scope Scope, entryID string) (Detail, error) {
@@ -123,7 +138,8 @@ func (s *Store) Detail(scope Scope, entryID string) (Detail, error) {
 		for _, id := range state.ProjectLibraryInactiveRoots {
 			inactive[id] = true
 		}
-		row := s.projectSearchRow(scope, entry, roots, linked, inactive)
+		factsOn := state.GetSongDetailsConsent().Active()
+		row := s.projectSearchRow(scope, entry, roots, linked, inactive, factsOn)
 		row.applySessionActivity(latestSessionActivity(doc.Sessions)[entry.ID])
 		result := Detail{Row: row,
 			EntryRevision: entry.Revision, Fields: entry.Fields, Revision: doc.Revision, ProviderReadOnly: !state.PluginAvailable}
@@ -137,11 +153,15 @@ func (s *Store) Detail(scope Scope, entryID string) (Detail, error) {
 			if len(alternates) > maxDetailAlternates {
 				alternates = alternates[:maxDetailAlternates]
 			}
-			result.Sources = append(result.Sources, DetailSource{RootID: observed.RootID,
+			source := DetailSource{RootID: observed.RootID,
 				RelativeFolder: observed.RelativeFolder, Format: observed.Format,
 				Alternates: append([]string(nil), alternates...), TotalAlternates: len(observed.Alternates),
 				Availability: availability, ScannedAt: observed.ScannedAt,
-				FileModifiedAt: observed.FileModifiedAt})
+				FileModifiedAt: observed.FileModifiedAt}
+			if availability == "available" || availability == "ambiguous" {
+				source.Facts = shownFacts(observed, factsOn)
+			}
+			result.Sources = append(result.Sources, source)
 		}
 		// Surface currently usable sources before revoked history. The rest
 		// is still represented by TotalSources, not silently declared absent.
@@ -315,12 +335,13 @@ func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
 		inactive[id] = true
 	}
 	sessionActivity := latestSessionActivity(doc.Sessions)
+	factsOn := state.GetSongDetailsConsent().Active()
 	rows := make([]SearchRow, 0, len(doc.Entries))
 	for _, entry := range doc.Entries {
 		// A root filter scopes the displayed source, format, availability and
 		// scan time together. Otherwise a record observed under two roots could
 		// match one root while showing another root's unrelated format.
-		row := s.projectSearchRowInRoot(scope, entry, roots, linked, inactive, query.RootID)
+		row := s.projectSearchRowInRoot(scope, entry, roots, linked, inactive, query.RootID, factsOn)
 		row.applySessionActivity(sessionActivity[entry.ID])
 		if query.matches(row, entry) {
 			rows = append(rows, row)
@@ -375,11 +396,11 @@ func (row *SearchRow) applySessionActivity(at time.Time) {
 	}
 }
 
-func (s *Store) projectSearchRow(scope Scope, entry Entry, roots map[string]Root, linked, inactive map[string]bool) SearchRow {
-	return s.projectSearchRowInRoot(scope, entry, roots, linked, inactive, "")
+func (s *Store) projectSearchRow(scope Scope, entry Entry, roots map[string]Root, linked, inactive map[string]bool, factsOn bool) SearchRow {
+	return s.projectSearchRowInRoot(scope, entry, roots, linked, inactive, "", factsOn)
 }
 
-func (s *Store) projectSearchRowInRoot(scope Scope, entry Entry, roots map[string]Root, linked, inactive map[string]bool, rootID string) SearchRow {
+func (s *Store) projectSearchRowInRoot(scope Scope, entry Entry, roots map[string]Root, linked, inactive map[string]bool, rootID string, factsOn bool) SearchRow {
 	row := SearchRow{ID: entry.ID, Name: entry.Fields.DisplayName,
 		Stage: entry.Fields.Stage, Status: entry.Fields.Status, NextAction: entry.Fields.NextAction,
 		Priority: entry.Fields.Priority, FieldsRevision: entry.Fields.Revision,
@@ -425,6 +446,7 @@ func (s *Store) projectSearchRowInRoot(scope Scope, entry Entry, roots map[strin
 			!observed.FileModifiedAt.IsZero() && (row.LastSavedAt == nil || observed.FileModifiedAt.After(*row.LastSavedAt)) {
 			saved := observed.FileModifiedAt.UTC()
 			row.LastSavedAt = &saved
+			row.Facts = shownFacts(observed, factsOn)
 		}
 		if (root.RevokedAt != nil || inactive[root.ID]) && row.Availability == "not_scanned" {
 			row.Availability = "revoked_source"

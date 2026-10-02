@@ -8,7 +8,9 @@ import {
   libraryRequestError,
   readLibraryPayload as payload,
   RECENT_SONGS_QUERY,
-  recentSongs
+  recentSongs,
+  savedWithFacts,
+  songFactsLabel
 } from './library-open.js';
 import { setupQuestURL } from './setup-quest-links.js';
 
@@ -19,7 +21,9 @@ export {
   libraryOpenAction,
   libraryOpenChoices,
   libraryOpenRoute,
-  libraryOpenedMessage
+  libraryOpenedMessage,
+  savedWithFacts,
+  songFactsLabel
 } from './library-open.js';
 
 function label(value) {
@@ -1578,8 +1582,13 @@ export class ProjectLibraryPanel {
         node('strong', '', row.name),
         node('small', '', row.next_action || 'No next action saved')
       );
-      const saved = lastSavedLabel(row.last_saved_at);
-      if (saved) name.append(node('small', 'project-library-saved', saved));
+      const saved = savedWithFacts(row);
+      if (saved) {
+        const line = node('small', 'project-library-saved', saved);
+        const facts = songFactsLabel(row.facts);
+        if (facts) line.dataset.songFacts = facts;
+        name.append(line);
+      }
       const stage = node('td');
       stage.append(node('span', '', label(row.stage)), node('small', '', label(row.status)));
       const connection = node('td', '', label(row.connection));

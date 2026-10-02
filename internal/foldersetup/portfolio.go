@@ -90,6 +90,9 @@ type LibraryScanReview struct {
 	Token        string
 	RootID       string
 	MetadataOnly bool
+	// ReadsSongDetails says the listing also reads each project's tempo, length
+	// and track count (the Home's song-details consent is on).
+	ReadsSongDetails bool
 }
 
 // ScanOutcome is what a listing found.
@@ -107,6 +110,12 @@ type Library interface {
 	CommitConnect(ctx context.Context, homeID string, review ConnectReview, key string) (string, error)
 	ReviewScan(ctx context.Context, homeID, rootID string) (LibraryScanReview, error)
 	CommitScan(ctx context.Context, homeID, rootID string, review LibraryScanReview, key string) (ScanOutcome, error)
+}
+
+// SongDetails records the Home's song-details consent: each scan may read
+// each project's tempo, length and track count.
+type SongDetails interface {
+	Grant(ctx context.Context, homeID string) error
 }
 
 // Sharing is the Home's standing consent for the projects' shared assistant.
@@ -141,7 +150,9 @@ type PortfolioRunner struct {
 	Staffing HomeStaffing
 	Library  Library
 	Sharing  Sharing
-	Receipts Receipts
+	// SongDetails is required when the plan grants the song-details consent.
+	SongDetails SongDetails
+	Receipts    Receipts
 	// Folder is the collection folder's server-held path.
 	Folder   string
 	Progress Progress
@@ -165,7 +176,7 @@ var ErrPortfolioNotWired = errors.New("foldersetup: the portfolio run is not wir
 // Run drives the collection's setup to the end or to the first stop.
 func (p *PortfolioRunner) Run(ctx context.Context, cfg PortfolioConfig) (Result, error) {
 	if p == nil || p.Homes == nil || p.Staffing == nil || p.Library == nil || p.Receipts == nil || p.Progress == nil ||
-		(cfg.Plan.Intent.GrantsConsent && p.Sharing == nil) {
+		(cfg.Plan.Intent.GrantsConsent && p.Sharing == nil) || (cfg.Plan.Intent.GrantsSongDetails && p.SongDetails == nil) {
 		return Result{}, ErrPortfolioNotWired
 	}
 	state := &run{
@@ -368,9 +379,21 @@ func (s *portfolioRun) staffHome(ctx context.Context) error {
 
 // library turns the Home's library on, connects the collection folder and lists
 // it, each through the library's own review. Folder and scope are compared with
-// the plan: only this folder, names and project files only.
+// the plan: only this folder, names and project files only, plus the three song
+// facts when the plan's library line said so.
 func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 	lib := s.runner.Library
+	// The song-details consent the library line disclosed is recorded on the
+	// Home this run created before anything is listed, so the setup's own scan
+	// reads the facts. A Home the run did not create never gets it.
+	if s.cfg.Plan.Intent.GrantsSongDetails {
+		if !s.cfg.Plan.Intent.CreatesHome {
+			return ScanOutcome{}, &stop{reason: personalassistant.FolderStopPlanChanged, detail: "song details are granted only on a Home the plan creates"}
+		}
+		if err := s.runner.SongDetails.Grant(ctx, s.homeID); err != nil {
+			return ScanOutcome{}, failed("the song-details consent was not recorded: " + err.Error())
+		}
+	}
 	current, err := lib.State(ctx, s.homeID)
 	if err != nil {
 		return ScanOutcome{}, failed("could not read the Home's library: " + err.Error())
@@ -419,6 +442,9 @@ func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 	}
 	if review.Token == "" || review.RootID != rootID || !review.MetadataOnly {
 		return ScanOutcome{}, &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the listing review is not names and project files only"}
+	}
+	if review.ReadsSongDetails && !s.cfg.Plan.Intent.ReadsSongDetails {
+		return ScanOutcome{}, &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the listing review reads song details the plan did not mention"}
 	}
 	listed, err := lib.CommitScan(ctx, s.homeID, rootID, review, s.key())
 	if err != nil {

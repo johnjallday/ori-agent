@@ -73,7 +73,9 @@ var capabilityRows = []CapabilityRow{
 	{
 		Shape: ShapeAudio,
 		Markers: []Marker{
-			{Name: "*.rpp", Kind: MarkerGlob, Shape: ShapeAudio, Label: "REAPER session", ProjectFormat: "reaper"},
+			{Name: "*.rpp", Kind: MarkerGlob, Shape: ShapeAudio, Label: "REAPER session", ProjectFormat: "reaper",
+				Facts: &ProjectFacts{Root: "<REAPER_PROJECT", Tempo: "TEMPO", TempoChanges: "TEMPOENVEX", TempoPoint: "PT",
+					Track: "TRACK", Item: "ITEM", ItemStart: "POSITION", ItemLength: "LENGTH"}},
 			{Name: "*.logicx", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Logic Pro project", ProjectFormat: "logic", ProjectBundle: true},
 			{Name: "*.als", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Ableton Live set", ProjectFormat: "ableton"},
 		},

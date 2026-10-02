@@ -46,6 +46,46 @@ type Marker struct {
 	// ProjectBundle allows a recognized project format to be a directory
 	// marker. Other project-format globs match regular files only.
 	ProjectBundle bool
+	// Facts, when set, says where a project file of this format keeps its
+	// tempo, length and track count. It is inert: generic code interprets it,
+	// and a Home reads facts only with the user's song-details consent.
+	Facts *ProjectFacts
+}
+
+// ProjectFacts describes, as data, where three song facts sit in a
+// block-structured text project file: a block opens with a "<NAME …" line
+// and closes with a ">" line, and an attribute is a "KEY value …" line. The
+// root is the block the file opens with. Every field is a block name or an
+// attribute key; nothing here is a pattern or code.
+type ProjectFacts struct {
+	// Root is the first word of the file's first non-empty line ("<NAME").
+	Root string
+	// Tempo is the root's attribute whose first value is the base tempo.
+	Tempo string
+	// TempoChanges is the block in the root holding tempo points; TempoPoint
+	// is its point attribute, whose second value is a tempo.
+	TempoChanges string
+	TempoPoint   string
+	// Track is a block in the root; each one is one track.
+	Track string
+	// Item is a block in a track; ItemStart + ItemLength is where it ends.
+	Item       string
+	ItemStart  string
+	ItemLength string
+}
+
+// FactsMarker returns the project marker of format that declares facts, so
+// a caller can read and name that format's files without naming it.
+func FactsMarker(format string) (Marker, bool) {
+	if format == "" {
+		return Marker{}, false
+	}
+	for _, marker := range Markers {
+		if marker.ProjectFormat == format && marker.Facts != nil && !marker.ProjectBundle && marker.Kind == MarkerGlob {
+			return marker, true
+		}
+	}
+	return Marker{}, false
 }
 
 // The Markers table itself lives in tables.go, the package's data-only file.

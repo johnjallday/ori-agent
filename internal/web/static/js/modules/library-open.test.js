@@ -4,7 +4,9 @@ import {
   lastSavedLabel,
   openLibrarySong,
   RECENT_SONGS_QUERY,
-  recentSongs
+  recentSongs,
+  savedWithFacts,
+  songFactsLabel
 } from './library-open.js';
 import * as library from './project-library.js';
 
@@ -132,6 +134,47 @@ test('any other failure carries the server message, or a plain one when there is
     openLibrarySong('home', 'entry', { requestID: 'r', fetchImpl: empty.fetchImpl }),
     { message: 'Library request failed (502)', reason: '' }
   );
+});
+
+test('song facts read as tracks, tempo and length, leaving out what is unknown', () => {
+  assert.equal(
+    songFactsLabel({ track_count: 14, tempo_bpm: 92, length_seconds: 221 }),
+    '14 tracks · 92 BPM · 3:41'
+  );
+  assert.equal(songFactsLabel({ track_count: 1 }), '1 track');
+  assert.equal(songFactsLabel({ tempo_bpm: 92, tempo_varies: true }), '92 BPM, varies');
+  assert.equal(songFactsLabel({ tempo_bpm: 128.5 }), '128.5 BPM');
+  assert.equal(songFactsLabel({ length_seconds: 59.6 }), '1:00', 'rounded to the second');
+  assert.equal(songFactsLabel({ length_seconds: 3725.5 }), '1:02:06', 'h:mm:ss from an hour on');
+  assert.equal(songFactsLabel({ length_seconds: 3600 }), '1:00:00');
+  assert.equal(songFactsLabel({ length_seconds: 7 }), '0:07');
+  assert.equal(songFactsLabel({ tempo_bpm: 92, length_seconds: 200 }), '92 BPM · 3:20');
+  for (const none of [
+    undefined,
+    null,
+    {},
+    'facts',
+    { track_count: 0, tempo_bpm: 0, length_seconds: 0 },
+    { track_count: -2, tempo_bpm: Number.NaN, length_seconds: Infinity },
+    { track_count: '14', tempo_bpm: '92' },
+    { track_count: 1.5 },
+    { length_seconds: 0.2 },
+    { tempo_varies: true }
+  ]) {
+    assert.equal(songFactsLabel(none), '', JSON.stringify(none));
+  }
+});
+
+test('a song line joins its save time and its facts', () => {
+  const facts = { track_count: 14, tempo_bpm: 92, length_seconds: 221 };
+  assert.equal(
+    savedWithFacts({ last_saved_at: ago(3), facts }, now),
+    'Saved 3 days ago · 14 tracks · 92 BPM · 3:41'
+  );
+  assert.equal(savedWithFacts({ last_saved_at: ago(3) }, now), 'Saved 3 days ago');
+  assert.equal(savedWithFacts({ facts }, now), '14 tracks · 92 BPM · 3:41');
+  assert.equal(savedWithFacts({}, now), '');
+  assert.equal(savedWithFacts(null, now), '');
 });
 
 test('the Home library still exports the open helpers it always had', () => {
