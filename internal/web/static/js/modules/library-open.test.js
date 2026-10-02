@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lastSavedLabel, openLibrarySong, recentSongs } from './library-open.js';
+import {
+  lastSavedLabel,
+  openLibrarySong,
+  RECENT_SONGS_QUERY,
+  recentSongs
+} from './library-open.js';
 import * as library from './project-library.js';
 
 // Local calendar times, so the buckets hold in any time zone the tests run in.
@@ -37,6 +42,10 @@ test('the saved label is empty for a missing, unreadable or unknown time', () =>
   for (const value of [undefined, null, '', 'not a date', 42, '0001-01-01T00:00:00Z']) {
     assert.equal(lastSavedLabel(value, now), '', String(value));
   }
+});
+
+test('both recent-song lists read one page of the library, newest save first', () => {
+  assert.equal(RECENT_SONGS_QUERY, 'sort=last_saved&direction=desc&page_size=25');
 });
 
 test('recent songs keep openable, dated rows in the order given, six at most', () => {

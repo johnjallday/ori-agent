@@ -15,7 +15,6 @@ import {
   proposalSourceLabel,
   readActivationQueue,
   recentlySavedView,
-  RECENTLY_SAVED_QUERY,
   selectionRecovery,
   setupNextStep
 } from './project-library.js';
@@ -3333,10 +3332,6 @@ const recentRows = count =>
     can_open: true,
     last_saved_at: savedAgo(index)
   }));
-
-test('Recently saved reads the newest saves first, as the setup pop-up does', () => {
-  assert.equal(RECENTLY_SAVED_QUERY, 'sort=last_saved&direction=desc&page_size=25');
-});
 
 test('Recently saved shows at most six songs that can be opened, each with Open', () => {
   const rows = [

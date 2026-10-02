@@ -22,7 +22,9 @@
 # Portfolio hire-once (tasks/tasks-portfolio-hire-once.md) adds showfolder
 # seed-song, seed-portfolio and portfolio-run (a whole collection through the
 # one card), and baseline-export (an origin/dev baseline for the music and
-# REAPER harness suites without a worktree).
+# REAPER harness suites without a worktree). Recent songs after setup
+# (tasks/tasks-recent-songs-after-setup.md) gives seed-portfolio staggered
+# save times and adds showfolder model (the system model setup needs).
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
@@ -1768,6 +1770,14 @@ PY
     printf 'personal_assistant.state = %s\n' \
       "$(curl -s "$BASE_URL/api/personal-assistant" | json_field 'personal_assistant.state')"
     ;;
+  model)
+    # The system model a one-card setup needs before it can add agents. The
+    # default is the Codex model the live-model specs use (wt demo passes your
+    # Codex login through). Run it after hq.
+    local provider="${4:-codex}" model="${5:-gpt-5.6-luna}"
+    curl -s -o /dev/null -w "%{http_code} system model $provider/$model\n" -X POST "$BASE_URL/api/settings/system-model" \
+      -H 'Content-Type: application/json' -d "{\"provider\":\"$provider\",\"model\":\"$model\"}"
+    ;;
   scan)
     local chip="${4:-downloads}"
     curl -s -X POST "$BASE_URL/api/personal-assistant/folder-digest/scan" -H 'Content-Type: application/json' \
@@ -1870,7 +1880,7 @@ sys.exit(3 if s.get("status") == "running" else 0)
   today)
     curl -sf "$BASE_URL/api/personal-assistant/today" | python3 -c 'import json,sys; t=json.load(sys.stdin)["today"]; print("Today:", t.get("state")); [print(k + ":", ", ".join(i.get("title", "") for i in (t.get(k) or {}).get("items", [])) or "(empty)") for k in ("working_on", "needs_you", "done")]; print("Could not read:", ", ".join(t.get("unavailable_sources") or []) or "none")'
     ;;
-  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|seed-song <sandbox> <chip> <name>|seed-portfolio <sandbox> <count> [chip] [rpp|als|mixed] [two-files]|hqcard|hq|today|scan <chip>|decide <offer> <decision> [choice]|one-card <offer> [project-file]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
+  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|seed-song <sandbox> <chip> <name>|seed-portfolio <sandbox> <count> [chip] [rpp|als|mixed] [two-files]|hqcard|hq|model [provider] [model]|today|scan <chip>|decide <offer> <decision> [choice]|one-card <offer> [project-file]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
   esac
 }
 

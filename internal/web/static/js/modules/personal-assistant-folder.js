@@ -12,6 +12,7 @@ import {
   libraryOpenChoices,
   libraryOpenRoute,
   openLibrarySong,
+  RECENT_SONGS_QUERY,
   recentSongs
 } from './library-open.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
@@ -924,8 +925,6 @@ const runSongs = {
   requests: new Map(), // song → request ID, reused when the same song is retried
   drawn: '' // the list the DOM was last drawn from
 };
-
-const RECENT_SONGS_QUERY = 'sort=last_saved&direction=desc&page_size=25';
 
 async function loadRecentSongs(offerID, homeID) {
   Object.assign(runSongs, {

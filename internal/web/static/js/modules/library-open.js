@@ -4,6 +4,10 @@
 // here decides anything: the open endpoint repeats every check, and a save time
 // is only a file time, never evidence that anyone worked on a song.
 
+// The library read behind both recent-song lists (the setup pop-up and the
+// Home's "Recently saved"): newest save first, one page.
+export const RECENT_SONGS_QUERY = 'sort=last_saved&direction=desc&page_size=25';
+
 // The response body, or {} when there is none.
 export async function readLibraryPayload(response) {
   try {

@@ -7,6 +7,7 @@ import {
   libraryOpenedMessage,
   libraryRequestError,
   readLibraryPayload as payload,
+  RECENT_SONGS_QUERY,
   recentSongs
 } from './library-open.js';
 import { setupQuestURL } from './setup-quest-links.js';
@@ -444,9 +445,6 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
     return null;
   }
 }
-
-// The query behind "Recently saved": the library's own rows, newest save first.
-export const RECENTLY_SAVED_QUERY = 'sort=last_saved&direction=desc&page_size=25';
 
 // recentlySavedView is the "Recently saved" section from one last_saved page:
 // up to six songs with a save time, each with Open where the Home can open it.
@@ -1285,7 +1283,7 @@ export class ProjectLibraryPanel {
     if (!section || !container) return;
     let view;
     try {
-      view = recentlySavedView(await this.request(`/projects?${RECENTLY_SAVED_QUERY}`));
+      view = recentlySavedView(await this.request(`/projects?${RECENT_SONGS_QUERY}`));
     } catch (_) {
       view = { visible: false, cards: [] };
     }
