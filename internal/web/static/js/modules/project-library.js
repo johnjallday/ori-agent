@@ -6,7 +6,8 @@ import {
   libraryOpenRoute,
   libraryOpenedMessage,
   libraryRequestError,
-  readLibraryPayload as payload
+  readLibraryPayload as payload,
+  recentSongs
 } from './library-open.js';
 import { setupQuestURL } from './setup-quest-links.js';
 
@@ -444,6 +445,29 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
   }
 }
 
+// The query behind "Recently saved": the library's own rows, newest save first.
+export const RECENTLY_SAVED_QUERY = 'sort=last_saved&direction=desc&page_size=25';
+
+// recentlySavedView is the "Recently saved" section from one last_saved page:
+// up to six songs with a save time, each with Open where the Home can open it.
+// A read-only Home still shows its songs, without Open. No dated song: hidden.
+export function recentlySavedView(page, now = new Date()) {
+  const readOnly = page?.provider_read_only !== false;
+  const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(Boolean);
+  const picks = readOnly
+    ? rows.filter(row => lastSavedLabel(row.last_saved_at, now)).slice(0, 6)
+    : recentSongs(rows);
+  return {
+    visible: picks.length > 0,
+    cards: picks.map(row => ({
+      row,
+      name: String(row.name || '').trim() || 'This song',
+      saved: lastSavedLabel(row.last_saved_at, now),
+      open: libraryOpenAction(row, readOnly)
+    }))
+  };
+}
+
 // This panel belongs to the exact Home. No browser path, child workspace ID,
 // source-file content, or model call is accepted as an authority input.
 export class ProjectLibraryPanel {
@@ -824,6 +848,7 @@ export class ProjectLibraryPanel {
       this.renderSetupNext();
       await this.restoreQueue();
       this.renderQueueControls();
+      await this.renderRecent();
       await this.renderResume();
       await this.renderPendingLinks();
       await this.renderProposals();
@@ -1250,6 +1275,39 @@ export class ProjectLibraryPanel {
     );
   }
 
+  // "Recently saved": the songs whose project files were saved last, from the
+  // same last_saved query the setup pop-up uses. Open is the table's own
+  // openRow, so file chips and status messages match. It is a shortcut: when
+  // the read fails the section stays hidden and the table below still works.
+  async renderRecent() {
+    const section = document.getElementById('projectLibraryRecent');
+    const container = document.getElementById('projectLibraryRecentCards');
+    if (!section || !container) return;
+    let view;
+    try {
+      view = recentlySavedView(await this.request(`/projects?${RECENTLY_SAVED_QUERY}`));
+    } catch (_) {
+      view = { visible: false, cards: [] };
+    }
+    container.replaceChildren();
+    section.hidden = !view.visible;
+    for (const card of view.cards) {
+      const item = node('article', 'project-library-resume-card project-library-recent-card');
+      const text = node('div', 'project-library-recent-text');
+      text.append(node('h4', '', card.name), node('small', '', card.saved));
+      item.append(text);
+      if (card.open) {
+        const open = node('button', 'modern-btn modern-btn-primary', card.open.label);
+        open.type = 'button';
+        open.dataset.libraryOpen = card.row.id;
+        open.setAttribute('aria-label', card.open.ariaLabel);
+        open.addEventListener('click', () => void this.openRow(card.row, open, item));
+        item.append(open);
+      }
+      container.append(item);
+    }
+  }
+
   async renderResume() {
     const section = document.getElementById('projectLibraryResume');
     const container = document.getElementById('projectLibraryResumeCards');
@@ -1583,6 +1641,7 @@ export class ProjectLibraryPanel {
       this.status(libraryOpenedMessage(row.name, result));
       const route = libraryOpenRoute(result);
       if (route) globalThis.location.assign(route);
+      else void this.renderRecent(); // Staying here: the song is connected now.
     } catch (error) {
       const choices = libraryOpenChoices(error);
       if (choices.length && cell) {
