@@ -176,7 +176,7 @@ export function songFactsLabel(facts) {
 export function songLineText(saved, facts) {
   const unbroken = String(facts || '')
     .split(' · ')
-    .map(part => part.replaceAll(' ', ' '))
+    .map(part => part.replaceAll(' ', '\xa0'))
     .join(' · ');
   return [saved, unbroken].filter(Boolean).join(' · ');
 }

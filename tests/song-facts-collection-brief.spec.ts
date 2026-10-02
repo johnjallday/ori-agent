@@ -96,7 +96,7 @@ function hashes(dir = join(sandbox, CHIP), out = new Map<string, string>()) {
   return out;
 }
 
-const plain = (text: string | null) => (text || '').replaceAll(' ', ' ').trim();
+const plain = (text: string | null) => (text || '').replaceAll('\xa0', ' ').trim();
 
 async function openCard(page: Page) {
   await page.goto('/');
@@ -125,7 +125,7 @@ const rowLines = (page: Page) =>
     .evaluateAll(rows =>
       rows.map(row => [
         row.querySelector('strong')?.textContent || '',
-        (row.querySelector('.project-library-saved')?.textContent || '').replaceAll(' ', ' ')
+        (row.querySelector('.project-library-saved')?.textContent || '').replaceAll('\xa0', ' ')
       ])
     );
 
@@ -133,7 +133,7 @@ const cardLines = (page: Page) =>
   page
     .locator('#projectLibraryRecentCards article')
     .evaluateAll(cards =>
-      cards.map(card => (card.querySelector('small')?.textContent || '').replaceAll(' ', ' '))
+      cards.map(card => (card.querySelector('small')?.textContent || '').replaceAll('\xa0', ' '))
     );
 
 // The scan review: one native dialog per confirmation.
@@ -226,7 +226,7 @@ test('the card says what the library reads, and setup ends on songs with their f
     .evaluateAll(items =>
       items.map(item => [
         item.querySelector('strong')?.textContent || '',
-        (item.querySelector('small')?.textContent || '').replaceAll(' ', ' ')
+        (item.querySelector('small')?.textContent || '').replaceAll('\xa0', ' ')
       ])
     );
   expect(songs).toEqual(

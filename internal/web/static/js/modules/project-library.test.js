@@ -3430,10 +3430,10 @@ test('each library row shows its save time and song facts on one line', () => {
       tr.children[1].children.find(child => child.className === 'project-library-saved')
     );
     assert.match(
-      lines[0].textContent.replaceAll(' ', ' '),
+      lines[0].textContent.replaceAll('\xa0', ' '),
       /^Saved .+ · 14 tracks · 92 BPM, varies · 3:41$/
     );
-    assert.match(lines[0].textContent, /14 tracks · 92 BPM, varies/);
+    assert.match(lines[0].textContent, /14\xa0tracks · 92\xa0BPM,\xa0varies/);
     assert.equal(lines[0].dataset.songFacts, '14 tracks · 92 BPM, varies · 3:41');
     assert.match(lines[1].textContent, /^Saved [^·]+$/, 'no facts: only "Saved …"');
     assert.equal(lines[1].dataset.songFacts, undefined);

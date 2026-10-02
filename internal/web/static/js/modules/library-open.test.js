@@ -168,10 +168,10 @@ test('song facts read as tracks, tempo and length, leaving out what is unknown',
 test('a song line keeps each fact whole and wraps only between facts', () => {
   assert.equal(
     songLineText('Saved 3 days ago', '14 tracks · 92 BPM, varies · 3:41'),
-    'Saved 3 days ago · 14 tracks · 92 BPM, varies · 3:41'
+    'Saved 3 days ago · 14\xa0tracks · 92\xa0BPM,\xa0varies · 3:41'
   );
   assert.equal(songLineText('Saved today', ''), 'Saved today', 'no facts: the save time unchanged');
-  assert.equal(songLineText('', '1 track'), '1 track');
+  assert.equal(songLineText('', '1 track'), '1\xa0track');
   assert.equal(songLineText('', ''), '');
 });
 
