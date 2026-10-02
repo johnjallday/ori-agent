@@ -82,12 +82,14 @@ type IMAPProvider struct {
 	// tlsConfig is nil in production, which means the system roots and the
 	// account's own host name. Tests set it to trust a local server.
 	tlsConfig *tls.Config
-	now       func() time.Time
+	// commandTimeout bounds each IMAP command; tests shorten it.
+	commandTimeout time.Duration
+	now            func() time.Time
 }
 
 // NewIMAPProvider constructs the IMAP-backed MailboxProvider.
 func NewIMAPProvider(resolver IMAPCredentialResolver) *IMAPProvider {
-	return &IMAPProvider{resolver: resolver, now: time.Now}
+	return &IMAPProvider{resolver: resolver, commandTimeout: imapCommandTimeout, now: time.Now}
 }
 
 var _ MailboxProvider = (*IMAPProvider)(nil)
@@ -104,17 +106,11 @@ func (p *IMAPProvider) SearchThreads(ctx context.Context, account Account, q Que
 
 	var metas []imapMeta
 	err = p.withSession(ctx, account, func(c *client.Client) error {
-		status, err := c.Select(imapInbox, true)
+		inbox, err := selectIMAPMailbox(c, imapInbox, false)
 		if err != nil {
 			return err
 		}
-		criteria := imap.NewSearchCriteria()
-		criteria.Since = p.now().AddDate(0, 0, -q.LookbackDays)
-		uids, err := c.UidSearch(criteria)
-		if err != nil {
-			return err
-		}
-		metas, err = fetchIMAPMeta(c, newestUIDs(uids, imapScanLimit), imapMailboxRef{name: imapInbox, uidValidity: status.UidValidity}, false)
+		metas, err = scanIMAPMailbox(c, inbox, p.now().AddDate(0, 0, -q.LookbackDays))
 		return err
 	})
 	if err != nil {
@@ -145,33 +141,34 @@ func (p *IMAPProvider) SearchThreads(ctx context.Context, account Account, q Que
 // GetThread returns one conversation with its bounded, sanitized message text.
 // The user's own replies are read from the Sent folder when the server has one,
 // so a thread reads as the exchange it was rather than one side of it.
+//
+// The thread's messages are found the way the list found them: by scanning the
+// newest mail in a bounded window and grouping on this side. The server is
+// never asked to search reply headers. Gmail answers a References search by
+// reading the whole mailbox, which on a real inbox ran past the command time
+// limit; a date search it answers from its index. In a busy inbox, a thread's
+// oldest messages can fall outside the scan, so the thread shows its recent
+// part rather than failing.
 func (p *IMAPProvider) GetThread(ctx context.Context, account Account, threadID string) (Thread, error) {
 	ref, err := parseIMAPThreadID(threadID)
 	if err != nil {
 		return Thread{}, ErrNotFound
 	}
-
 	var metas []imapMeta
 	err = p.withSession(ctx, account, func(c *client.Client) error {
-		status, err := c.Select(imapInbox, true)
+		since := p.now().AddDate(0, 0, -MaxLookbackDays)
+		inbox, err := selectIMAPMailbox(c, imapInbox, false)
 		if err != nil {
 			return err
 		}
-		inbox := imapMailboxRef{name: imapInbox, uidValidity: status.UidValidity}
-		uids, err := threadUIDs(c, ref, inbox)
-		if err != nil {
+		metas, err = threadMessages(c, inbox, ref, threadID, since)
+		if err != nil || len(metas) == 0 || ref.rootID == "" {
+			// Not here, or a message with no Message-ID, which cannot have replies.
 			return err
-		}
-		metas, err = fetchIMAPMeta(c, newestUIDs(uids, imapMaxThreadMessages), inbox, true)
-		if err != nil {
-			return err
-		}
-		if ref.rootID == "" {
-			return nil // a message with no Message-ID cannot have replies
 		}
 		// The Sent folder is a courtesy: a server without one, or one that
 		// refuses it, still yields the inbox side of the thread.
-		if sent := readSentSide(c, ref); len(sent) > 0 {
+		if sent := readSentSide(c, ref, threadID, since); len(sent) > 0 {
 			metas = append(metas, sent...)
 		}
 		return nil
@@ -190,25 +187,66 @@ func (p *IMAPProvider) GetThread(ctx context.Context, account Account, threadID 
 
 // readSentSide returns the thread's messages from the Sent folder, or nil when
 // the folder cannot be found or read.
-func readSentSide(c *client.Client, ref imapThreadRef) []imapMeta {
+func readSentSide(c *client.Client, ref imapThreadRef, threadID string, since time.Time) []imapMeta {
 	name := findSentMailbox(c)
 	if name == "" {
 		return nil
 	}
-	status, err := c.Select(name, true)
+	sent, err := selectIMAPMailbox(c, name, true)
 	if err != nil {
 		return nil
 	}
-	sent := imapMailboxRef{name: name, uidValidity: status.UidValidity, sent: true}
-	uids, err := threadUIDs(c, ref, sent)
-	if err != nil {
-		return nil
-	}
-	metas, err := fetchIMAPMeta(c, newestUIDs(uids, imapMaxThreadMessages), sent, true)
+	metas, err := threadMessages(c, sent, ref, threadID, since)
 	if err != nil {
 		return nil
 	}
 	return metas
+}
+
+// selectIMAPMailbox opens a folder read-only (EXAMINE).
+func selectIMAPMailbox(c *client.Client, name string, sent bool) (imapMailboxRef, error) {
+	status, err := c.Select(name, true)
+	if err != nil {
+		return imapMailboxRef{}, err
+	}
+	return imapMailboxRef{name: name, uidValidity: status.UidValidity, sent: sent}, nil
+}
+
+// scanIMAPMailbox reads the envelope and threading headers of the newest
+// messages that arrived since the given time, in the selected folder.
+func scanIMAPMailbox(c *client.Client, mailbox imapMailboxRef, since time.Time) ([]imapMeta, error) {
+	criteria := imap.NewSearchCriteria()
+	criteria.Since = since
+	uids, err := c.UidSearch(criteria)
+	if err != nil {
+		return nil, err
+	}
+	return fetchIMAPMeta(c, newestUIDs(uids, imapScanLimit), mailbox, false)
+}
+
+// threadMessages finds one thread's messages in the selected folder and reads
+// their text.
+func threadMessages(c *client.Client, mailbox imapMailboxRef, ref imapThreadRef, threadID string, since time.Time) ([]imapMeta, error) {
+	var uids []uint32
+	if ref.rootID == "" {
+		// A message with no Message-ID is its own thread, addressed by UID. A
+		// changed UIDVALIDITY means the UID now names a different message.
+		if mailbox.sent || mailbox.uidValidity != ref.uidValidity {
+			return nil, nil
+		}
+		uids = []uint32{ref.uid}
+	} else {
+		scanned, err := scanIMAPMailbox(c, mailbox, since)
+		if err != nil {
+			return nil, err
+		}
+		for _, meta := range scanned {
+			if meta.threadID() == threadID {
+				uids = append(uids, meta.uid)
+			}
+		}
+	}
+	return fetchIMAPMeta(c, newestUIDs(uids, imapMaxThreadMessages), mailbox, true)
 }
 
 // withSession opens one authenticated IMAP session, runs fn, and closes it. Any
@@ -235,7 +273,7 @@ func (p *IMAPProvider) withSession(ctx context.Context, account Account, fn func
 	if err != nil {
 		return classifyIMAPError(ctx, err)
 	}
-	c.Timeout = imapCommandTimeout
+	c.Timeout = p.commandTimeout
 	// The library logs protocol oddities to stderr by default; they can quote
 	// server responses, so they are dropped rather than written to Ori's log.
 	c.ErrorLog = log.New(io.Discard, "", 0)
@@ -336,28 +374,6 @@ func newIMAPClient(ctx context.Context, conn net.Conn) (*client.Client, error) {
 	}
 	_ = conn.SetDeadline(time.Time{})
 	return c, nil
-}
-
-// threadUIDs finds one thread's messages in the selected mailbox.
-func threadUIDs(c *client.Client, ref imapThreadRef, mailbox imapMailboxRef) ([]uint32, error) {
-	if ref.rootID == "" {
-		// A message with no Message-ID is its own thread, addressed by UID. A
-		// changed UIDVALIDITY means the UID now names a different message.
-		if mailbox.sent || mailbox.uidValidity != ref.uidValidity {
-			return nil, nil
-		}
-		return []uint32{ref.uid}, nil
-	}
-	header := func(field string) *imap.SearchCriteria {
-		criteria := imap.NewSearchCriteria()
-		criteria.Header.Add(field, ref.rootID)
-		return criteria
-	}
-	replies := imap.NewSearchCriteria()
-	replies.Or = [][2]*imap.SearchCriteria{{header("References"), header("In-Reply-To")}}
-	criteria := imap.NewSearchCriteria()
-	criteria.Or = [][2]*imap.SearchCriteria{{header("Message-Id"), replies}}
-	return c.UidSearch(criteria)
 }
 
 // fetchIMAPMeta reads the envelope, flags, and threading headers for uids in the
@@ -525,7 +541,19 @@ func classifyIMAPError(ctx context.Context, err error) error {
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return ErrTimeout
 	}
+	// A command that outlives its time limit surfaces as a closed connection:
+	// the library's reader stops at the deadline. It is worth retrying, which
+	// a provider failure is not.
+	if isIMAPClosedConnection(err) {
+		return ErrTimeout
+	}
 	return ErrProvider
+}
+
+// isIMAPClosedConnection matches the library's "connection closed" errors,
+// which carry no type to test against.
+func isIMAPClosedConnection(err error) bool {
+	return strings.HasPrefix(err.Error(), "imap: connection closed")
 }
 
 // isIMAPConnectionError reports whether a failed command never got an answer,
@@ -536,5 +564,5 @@ func isIMAPConnectionError(err error) bool {
 	if errors.As(err, &netErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
-	return strings.HasPrefix(err.Error(), "imap: connection closed")
+	return isIMAPClosedConnection(err)
 }

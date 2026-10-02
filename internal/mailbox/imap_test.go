@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
+	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/memory"
 	"github.com/emersion/go-imap/server"
 )
@@ -66,10 +67,21 @@ func (b *lockedBuffer) String() string {
 
 func newTestIMAPServer(t *testing.T) *testIMAPServer {
 	t.Helper()
+	return newTestIMAPServerWith(t, nil)
+}
+
+// newTestIMAPServerWith lets a test put a wrapper between the protocol server
+// and the in-memory store, e.g. to make a command slow.
+func newTestIMAPServerWith(t *testing.T, wrap func(backend.Backend) backend.Backend) *testIMAPServer {
+	t.Helper()
 	serverTLS, clientTLS := testTLSConfigs(t)
 
 	be := memory.New()
-	srv := server.New(be)
+	var served backend.Backend = be
+	if wrap != nil {
+		served = wrap(be)
+	}
+	srv := server.New(served)
 	srv.ErrorLog = log.New(io.Discard, "", 0)
 	wire := &lockedBuffer{}
 	srv.Debug = wire
@@ -153,6 +165,22 @@ func (s *testIMAPServer) deliver(folder string, m testMail) {
 	if err := s.mailbox(folder).CreateMessage(m.flags, m.date, bytes.NewBufferString(body)); err != nil {
 		s.t.Fatalf("deliver: %v", err)
 	}
+}
+
+// clientCommands returns the commands the client sent, without their tags.
+// Client lines start with a tag; server lines start with "*" or "+". Lines of
+// message data inside a literal can look like either, so callers match on
+// command names rather than trusting every line.
+func (s *testIMAPServer) clientCommands() []string {
+	var out []string
+	for _, line := range strings.Split(s.wire.String(), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] == "*" || fields[0] == "+" {
+			continue
+		}
+		out = append(out, strings.Join(fields[1:], " "))
+	}
+	return out
 }
 
 func (s *testIMAPServer) provider(password string) *IMAPProvider {
@@ -464,19 +492,13 @@ func TestIMAPReadsNeverModifyTheMailbox(t *testing.T) {
 		t.Fatalf("GetThread: %v", err)
 	}
 
-	wire := s.wire.String()
-	if !strings.Contains(wire, "EXAMINE") {
+	if !strings.Contains(s.wire.String(), "EXAMINE") {
 		t.Fatal("expected folders to be opened with EXAMINE")
 	}
 	forbidden := regexp.MustCompile(`(?i)\b(SELECT|STORE|COPY|MOVE|EXPUNGE|APPEND|DELETE|RENAME|CREATE)\b`)
-	for _, line := range strings.Split(wire, "\n") {
-		// Client commands start with a tag; server lines start with "*" or "+".
-		fields := strings.Fields(line)
-		if len(fields) < 2 || fields[0] == "*" || fields[0] == "+" {
-			continue
-		}
-		command := strings.Join(fields[1:], " ")
-		if forbidden.MatchString(fields[1]) || (strings.EqualFold(fields[1], "UID") && len(fields) > 2 && forbidden.MatchString(fields[2])) {
+	for _, command := range s.clientCommands() {
+		fields := strings.Fields(command)
+		if forbidden.MatchString(fields[0]) || (strings.EqualFold(fields[0], "UID") && len(fields) > 1 && forbidden.MatchString(fields[1])) {
 			t.Fatalf("the reader sent a mailbox-changing command: %q", command)
 		}
 		if strings.Contains(strings.ToUpper(command), "BODY[") {
@@ -489,6 +511,89 @@ func TestIMAPReadsNeverModifyTheMailbox(t *testing.T) {
 				t.Fatal("an inbox message was marked read")
 			}
 		}
+	}
+}
+
+// Opening a conversation must not ask the server to search reply headers.
+// Gmail answers that by reading the whole mailbox: on a real inbox it ran past
+// the command time limit and opening any conversation failed.
+func TestIMAPGetThreadNeverAsksTheServerToSearchHeaders(t *testing.T) {
+	s := newTestIMAPServer(t)
+	now := time.Now()
+	s.deliver(imapInbox, testMail{from: "l@example.com", subject: "Plans", messageID: "l1@example.com", date: now.Add(-2 * time.Hour), body: "plans"})
+	s.deliver(imapInbox, testMail{from: "l@example.com", subject: "Re: Plans", messageID: "l2@example.com", references: "<l1@example.com>", date: now.Add(-time.Hour), body: "more"})
+	s.deliver("Sent", testMail{from: testIMAPOwner, subject: "Re: Plans", messageID: "l3@example.com", references: "<l1@example.com> <l2@example.com>", body: "ok"})
+
+	p := s.provider(testIMAPPassword)
+	page, err := p.SearchThreads(context.Background(), imapTestAccount(), Query{})
+	if err != nil || len(page.Threads) != 1 {
+		t.Fatalf("SearchThreads = %d threads, %v", len(page.Threads), err)
+	}
+	thread, err := p.GetThread(context.Background(), imapTestAccount(), page.Threads[0].ID)
+	if err != nil || len(thread.Messages) != 3 {
+		t.Fatalf("GetThread = %d messages, %v; want both inbox messages and the sent reply", len(thread.Messages), err)
+	}
+	headerSearch := regexp.MustCompile(`(?i)\bSEARCH\b.*\bHEADER\b`)
+	for _, command := range s.clientCommands() {
+		if headerSearch.MatchString(command) {
+			t.Fatalf("the reader asked the server to search headers: %q", command)
+		}
+	}
+}
+
+// stallingBackend makes every search take delay, like a server working through
+// a large mailbox.
+type stallingBackend struct {
+	backend.Backend
+	delay time.Duration
+}
+
+func (b stallingBackend) Login(info *imap.ConnInfo, username, password string) (backend.User, error) {
+	user, err := b.Backend.Login(info, username, password)
+	if err != nil {
+		return nil, err
+	}
+	return stallingUser{User: user, delay: b.delay}, nil
+}
+
+type stallingUser struct {
+	backend.User
+	delay time.Duration
+}
+
+func (u stallingUser) GetMailbox(name string) (backend.Mailbox, error) {
+	mbox, err := u.User.GetMailbox(name)
+	if err != nil {
+		return nil, err
+	}
+	return stallingMailbox{Mailbox: mbox, delay: u.delay}, nil
+}
+
+type stallingMailbox struct {
+	backend.Mailbox
+	delay time.Duration
+}
+
+func (m stallingMailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
+	time.Sleep(m.delay)
+	return m.Mailbox.SearchMessages(uid, criteria)
+}
+
+func TestIMAPStalledCommandIsATimeout(t *testing.T) {
+	s := newTestIMAPServerWith(t, func(be backend.Backend) backend.Backend {
+		return stallingBackend{Backend: be, delay: 2 * time.Second}
+	})
+	s.deliver(imapInbox, testMail{from: "m@example.com", subject: "Slow", messageID: "m1@example.com", body: "slow"})
+
+	p := s.provider(testIMAPPassword)
+	p.commandTimeout = 200 * time.Millisecond
+	started := time.Now()
+	_, err := p.SearchThreads(context.Background(), imapTestAccount(), Query{})
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("err = %v, want ErrTimeout: a stalled command is worth retrying", err)
+	}
+	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
+		t.Fatalf("took %s, want the command time limit to end the read", elapsed)
 	}
 }
 
