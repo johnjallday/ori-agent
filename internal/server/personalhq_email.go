@@ -105,7 +105,7 @@ func (l *mailboxLinkerService) mailboxStatusForWorkspace(ctx context.Context, ws
 		Connected:    true,
 		AccountID:    acc.ID,
 		EmailAddress: acc.EmailAddress,
-		Health:       accountHealth(acc.CredentialsStatus),
+		Health:       accountHealth(acc),
 	}), nil
 }
 
@@ -188,11 +188,11 @@ func (l *mailboxLinkerService) unlinkMailboxFromWorkspace(ctx context.Context, w
 	return personalhqhttp.MailboxStatus{Connected: false}, nil
 }
 
-// accountHealth maps a Vault email secret state to a mailbox health label for the
-// UI: a connected account with a usable token is healthy; one whose tokens are
-// gone reads as disconnected (needs reconnect).
-func accountHealth(state vault.EmailAccountSecretState) string {
-	if state.HasAccessToken || state.HasRefreshToken {
+// accountHealth maps a Vault email account to a mailbox health label for the
+// UI: an account that still holds its credential is healthy; one whose
+// credential is gone reads as disconnected (needs reconnect).
+func accountHealth(acc *vault.EmailAccount) string {
+	if hasMailCredential(acc) {
 		return "healthy"
 	}
 	return "disconnected"

@@ -1376,7 +1376,12 @@ func (b *ServerBuilder) wireMailboxRuntime() {
 		return
 	}
 	gmailProvider := mailbox.NewGmailProvider(mailboxvault.NewResolver(b.vaultStore))
-	cachedProvider := mailbox.NewCachingProvider(gmailProvider)
+	// Reads go to the reader for how each account was connected: the Gmail API
+	// for Google sign-in, IMAP for a password or app password. Sending stays on
+	// the Gmail provider below; a password account cannot send yet.
+	logins := mailboxvault.NewLoginResolver(b.vaultStore)
+	reader := mailbox.NewRoutingProvider(logins, gmailProvider, mailbox.NewIMAPProvider(logins))
+	cachedProvider := mailbox.NewCachingProvider(reader)
 	b.mailboxAccess = newMailboxAccess(b.workspaceStore, b.vaultStore, cachedProvider)
 	// Credential teardown and consolidation invalidate cached reads through this.
 	b.mailboxInvalidator = cachedProvider

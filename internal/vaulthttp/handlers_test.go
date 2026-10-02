@@ -481,6 +481,44 @@ func TestHandlerEmailAccountLifecycle(t *testing.T) {
 	}
 }
 
+func TestHandlerAppPasswordAccountRevealsLoginOnlyToTheServer(t *testing.T) {
+	handler, store, db := newTestHandler(t, vault.NewMemorySecretStore())
+	defer func() { _ = db.Close() }()
+	primaryVault := createHandlerVault(t, store, "Primary Vault")
+
+	createRec := performJSONRequest(t, handler, http.MethodPost, "/api/vault/email-accounts", map[string]any{
+		"vault_id":      primaryVault.ID,
+		"provider":      "imap_smtp",
+		"email_address": "me@fastmail.example",
+		"auth_type":     "app_password",
+		"imap_host":     "imap.fastmail.example",
+		"smtp_host":     "smtp.fastmail.example",
+		"credentials":   map[string]any{"password": "app-password-1234"},
+	})
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from create email account, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	if strings.Contains(createRec.Body.String(), "app-password-1234") {
+		t.Fatalf("expected create response to redact the password, got %s", createRec.Body.String())
+	}
+	var created struct {
+		Account vault.EmailAccount `json:"account"`
+	}
+	decodeJSONBody(t, createRec, &created)
+
+	login, err := store.RevealEmailLoginCredentials(context.Background(), created.Account.ID, vault.AccessContext{})
+	if err != nil {
+		t.Fatalf("RevealEmailLoginCredentials: %v", err)
+	}
+	if login.AuthType != vault.EmailAuthTypeAppPassword || login.Password != "app-password-1234" {
+		t.Fatalf("login = %+v", login)
+	}
+	// Defaults applied on create: the username is the address, and SSL ports.
+	if login.Username != "me@fastmail.example" || login.IMAPHost != "imap.fastmail.example" || login.IMAPPort != 993 || login.SMTPPort != 465 {
+		t.Fatalf("login servers = %+v", login)
+	}
+}
+
 func TestHandlerEmailOAuthProviders(t *testing.T) {
 	handler, _, db := newTestHandler(t, vault.NewMemorySecretStore())
 	defer func() { _ = db.Close() }()

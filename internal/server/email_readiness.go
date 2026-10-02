@@ -86,9 +86,13 @@ func (e *emailReadinessEvaluator) Evaluate(ctx context.Context, workspaceID stri
 		}
 	}
 
-	// 1-4: the connection-level conditions, shared by every workspace.
-	if blocked := e.evaluateConnection(ctx); blocked != nil {
-		return *blocked
+	// 1-4: the connection-level conditions, shared by every workspace. They are
+	// about Google sign-in, so they do not apply to a mailbox connected with a
+	// password: that account never touches Google.
+	if !e.linkedWithPassword(ctx, workspaceID) {
+		if blocked := e.evaluateConnection(ctx); blocked != nil {
+			return *blocked
+		}
 	}
 
 	// 5: does THIS workspace have a mailbox linked?
@@ -131,7 +135,19 @@ func (e *emailReadinessEvaluator) Evaluate(ctx context.Context, workspaceID stri
 			AccountID:   accountID,
 		}
 	}
-	if !acc.CredentialsStatus.HasAccessToken && !acc.CredentialsStatus.HasRefreshToken {
+	if !hasMailCredential(acc) && isPasswordConnected(acc) {
+		// Not a Google repair: sending the user to the Google Account card would
+		// change nothing for this account.
+		return EmailReadiness{
+			Reason:       workspace.BlockedReasonReconnectRequired,
+			Message:      "The linked email account has no saved password. Save its app password again to continue.",
+			Action:       emailActionLinkAccount,
+			ActionLabel:  "Reconnect email",
+			AccountID:    acc.ID,
+			EmailAddress: acc.EmailAddress,
+		}
+	}
+	if !hasMailCredential(acc) {
 		return EmailReadiness{
 			Reason:       workspace.BlockedReasonReconnectRequired,
 			Message:      "The linked email account needs to be reconnected before Ori can read it.",
@@ -144,6 +160,25 @@ func (e *emailReadinessEvaluator) Evaluate(ctx context.Context, workspaceID stri
 	}
 
 	return EmailReadiness{Ready: true, AccountID: acc.ID, EmailAddress: acc.EmailAddress}
+}
+
+// linkedWithPassword reports whether workspaceID's mailbox is an account
+// connected with a password or app password. Anything it cannot read answers
+// false, which keeps the existing Google-first order.
+func (e *emailReadinessEvaluator) linkedWithPassword(ctx context.Context, workspaceID string) bool {
+	if e.accounts == nil {
+		return false
+	}
+	ws, err := e.workspaces.Get(workspaceID)
+	if err != nil || ws == nil {
+		return false
+	}
+	binding, ok := emailBindingFor(ws)
+	if !ok {
+		return false
+	}
+	acc, err := e.accounts.GetEmailAccount(ctx, stringFromConfig(binding.Config, "account_id"))
+	return err == nil && isPasswordConnected(acc)
 }
 
 // evaluateConnection checks the workspace-independent conditions, returning the
