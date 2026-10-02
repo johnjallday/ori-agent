@@ -52,6 +52,12 @@ type ManagerProposalPage struct {
 	Revision int64                `json:"revision"`
 	Rows     []ManagerProposalRow `json:"rows"`
 	Total    int                  `json:"total"`
+	// Brief is the Manager's collection brief for the latest scan, when its
+	// turn wrote one and the Home still reads song details. It is not a
+	// suggestion: it never counts as one and offers no action.
+	Brief *CollectionBrief `json:"brief,omitempty"`
+	// ManagerLabel is the Home's Manager role label ("Portfolio Manager").
+	ManagerLabel string `json:"manager_label,omitempty"`
 }
 
 func proposalDigest(scope Scope, authority ManagerAuthority, entryID, nextAction, reason string, fieldsRev, bindingRev int64) string {
@@ -704,8 +710,28 @@ func (s *Store) ListManagerProposals(scope Scope) (ManagerProposalPage, error) {
 	if err != nil {
 		return ManagerProposalPage{}, err
 	}
-	return ManagerProposalPage{Revision: doc.Revision, Rows: s.managerProposalRows(scope, doc, state),
-		Total: len(doc.Proposals)}, nil
+	page := ManagerProposalPage{Revision: doc.Revision, Rows: s.managerProposalRows(scope, doc, state),
+		Total: len(doc.Proposals), ManagerLabel: managerRoleLabel(state)}
+	if brief := doc.CollectionBrief; brief != nil && doc.Digest != nil && brief.ScanID == doc.Digest.ScanID &&
+		digestRootActive(doc, state, doc.Digest.RootID) && state.GetSongDetailsConsent().Active() {
+		current := *brief
+		page.Brief = &current
+	}
+	return page, nil
+}
+
+// managerRoleLabel is the label of the Home's required primary Home role, the
+// role the scan-review turn runs as.
+func managerRoleLabel(state *workspace.AssistantProgramState) string {
+	if state == nil || state.Declaration == nil {
+		return ""
+	}
+	for _, role := range state.Declaration.Roles {
+		if role.Scope == workspace.AssistantRoleScopeHome && role.Primary && role.Required {
+			return role.Label
+		}
+	}
+	return ""
 }
 
 // managerProposalRows projects the newest 20 proposals from one snapshot.

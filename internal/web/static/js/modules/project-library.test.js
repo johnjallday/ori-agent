@@ -18,6 +18,7 @@ import {
   selectionRecovery,
   setupNextStep,
   LIBRARY_INTRO,
+  libraryBriefView,
   libraryIntroText,
   songDetailsStatus,
   songDetailsSwitchView
@@ -3440,6 +3441,139 @@ test('each library row shows its save time and song facts on one line', () => {
     assert.doesNotMatch(
       tbody.children.map(tr => tr.children[1].children.map(c => c.textContent).join(' ')).join(' '),
       /\b(progress|complete|ready|unknown)\b/i
+    );
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('the Manager section is titled by its role and leads with the brief and its source', () => {
+  const at = new Date(2026, 9, 2, 14, 0).toISOString();
+  const view = libraryBriefView(
+    {
+      manager_label: 'Portfolio Manager',
+      brief: {
+        text: 'Most songs sit between 90 and 99 BPM.',
+        agent_name: 'Portfolio Manager',
+        model: 'gpt-5.6-luna',
+        created_at: at
+      }
+    },
+    { status: 'finished', mode: 'brief' }
+  );
+  assert.deepEqual(view, {
+    title: 'From your Portfolio Manager',
+    brief: {
+      text: 'Most songs sit between 90 and 99 BPM.',
+      provenance: 'Written by Portfolio Manager after the scan on Oct 2 · gpt-5.6-luna'
+    },
+    note: ''
+  });
+  // Every Home with the section gets the role title, brief or not.
+  assert.equal(
+    libraryBriefView({ manager_label: 'Library Lead' }, null).title,
+    'From your Library Lead'
+  );
+  assert.equal(libraryBriefView(null, null).title, 'From your Manager');
+  assert.equal(
+    libraryBriefView({}, { status: 'finished', mode: '' }).note,
+    '',
+    'no brief turn: no note'
+  );
+});
+
+test('a Home that reads song details says why it has no brief', () => {
+  const page = { manager_label: 'Portfolio Manager' };
+  const note = run => libraryBriefView(page, { mode: 'brief', ...run }).note;
+  assert.equal(
+    note({ status: 'skipped', reason: 'no_model' }),
+    'No brief: set up a model so your Portfolio Manager can describe your collection.'
+  );
+  assert.equal(
+    note({ status: 'skipped', reason: 'superseded' }),
+    'No brief for this scan: a newer scan replaced this one.'
+  );
+  assert.equal(
+    note({ status: 'started' }),
+    'Your Portfolio Manager is describing your collection…'
+  );
+  assert.equal(
+    note({ status: 'finished', reason: 'step_limit' }),
+    'No brief for this scan: your Portfolio Manager did not write one. It stopped at the step limit.'
+  );
+  assert.equal(
+    libraryBriefView({}, { mode: 'brief', status: 'skipped', reason: 'no_model' }).note,
+    'No brief: set up a model so your Manager can describe your collection.'
+  );
+});
+
+test('the brief renders as text above the digest, and replaces the empty suggestions line', async () => {
+  const previousDocument = globalThis.document;
+  const elements = new Map();
+  const makeNode = tag => ({
+    tag,
+    children: [],
+    textContent: '',
+    className: '',
+    hidden: false,
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener() {}
+  });
+  for (const id of [
+    'projectLibraryProposals',
+    'projectLibraryProposalRows',
+    'projectLibraryProposalsTitle',
+    'projectLibraryBrief',
+    'projectLibraryDigest',
+    'projectLibraryRun'
+  ])
+    elements.set(id, makeNode('x'));
+  globalThis.document = { createElement: makeNode, getElementById: id => elements.get(id) || null };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = { provider_read_only: false, roots: [{ id: 'root-1', path: '/Music/Songs' }] };
+    const brief = {
+      text: '<img src=x onerror=alert(1)> Four songs sit near 92 BPM.',
+      agent_name: 'Portfolio Manager',
+      model: 'gpt-5.6-luna',
+      created_at: '2026-10-02T12:00:00Z'
+    };
+    panel.request = async path =>
+      path === '/summary'
+        ? { digest: DIGEST, proposal_run: { status: 'finished', mode: 'brief' } }
+        : { total: 0, rows: [], manager_label: 'Portfolio Manager', brief };
+    await panel.renderProposals();
+    assert.equal(
+      elements.get('projectLibraryProposalsTitle').textContent,
+      'From your Portfolio Manager'
+    );
+    const box = elements.get('projectLibraryBrief');
+    assert.equal(box.hidden, false);
+    assert.equal(box.children[0].textContent, brief.text, 'model text is set as text');
+    assert.equal('innerHTML' in box.children[0], false);
+    assert.match(box.children[1].textContent, /^Written by Portfolio Manager after the scan on /);
+    assert.equal(elements.get('projectLibraryRun').hidden, true, 'the brief is its own run line');
+    assert.equal(elements.get('projectLibraryProposals').hidden, false);
+    assert.deepEqual(elements.get('projectLibraryProposalRows').children, []);
+
+    // The same Home with no model: no brief, one line why.
+    panel.request = async path =>
+      path === '/summary'
+        ? {
+            digest: DIGEST,
+            proposal_run: { status: 'skipped', reason: 'no_model', mode: 'brief' }
+          }
+        : { total: 0, rows: [], manager_label: 'Portfolio Manager' };
+    await panel.renderProposals();
+    assert.equal(box.hidden, true);
+    assert.equal(
+      elements.get('projectLibraryRun').textContent,
+      'No brief: set up a model so your Portfolio Manager can describe your collection.'
     );
   } finally {
     globalThis.document = previousDocument;

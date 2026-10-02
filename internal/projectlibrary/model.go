@@ -112,6 +112,9 @@ type Document struct {
 	Proposals     []ManagerProposal        `json:"proposals,omitempty"`
 	Reviews       []ReviewReceipt          `json:"reviews,omitempty"`
 	Operations    []OperationReceipt       `json:"operations,omitempty"`
+	// CollectionBrief is the Manager's description of the library after the
+	// latest scan whose turn wrote one (Homes that read song facts only).
+	CollectionBrief *CollectionBrief `json:"collection_brief,omitempty"`
 }
 
 type Root struct {
@@ -519,6 +522,9 @@ func (d Document) valid(scope Scope) bool {
 		return false
 	}
 	if !proposalRunsValid(d.ProposalRuns, scans) || !dismissalsValid(d.Dismissals) {
+		return false
+	}
+	if d.CollectionBrief != nil && !d.CollectionBrief.valid(scans) {
 		return false
 	}
 	sessions := map[string]bool{}

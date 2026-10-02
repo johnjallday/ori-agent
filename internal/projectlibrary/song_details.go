@@ -32,8 +32,9 @@ func (s *Store) SongDetailsState(scope Scope) (string, error) {
 }
 
 // SetSongDetails turns the Home's song-details switch off or on (D6) in one
-// fenced Home write. Off records revoked_at and clears every stored song fact
-// in that same write, so nothing read under the consent outlives it; the next
+// fenced Home write. Off records revoked_at and clears every stored song fact,
+// and the collection brief written from them, in that same write, so nothing
+// read under the consent outlives it; the next
 // scan opens no file. On clears revoked_at on a Home that consented at setup
 // (ErrSongDetailsNotGranted otherwise) and starts no scan: facts return on the
 // next one. Setting the state it already has changes nothing. Off is reductive
@@ -121,6 +122,11 @@ func (s *Store) clearedFacts(scope Scope, state *workspace.AssistantProgramState
 				cleared++
 			}
 		}
+	}
+	// The collection brief was written from those facts: it goes with them.
+	if doc.CollectionBrief != nil {
+		doc.CollectionBrief = nil
+		cleared++
 	}
 	if cleared == 0 {
 		return state.ProjectLibrary, 0, nil

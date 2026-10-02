@@ -256,6 +256,11 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	if p.libraryReadEnabled() {
 		tools = append(tools, p.librarySearchTool(), p.libraryDetailTool(), p.librarySessionsTool(), p.libraryHandoffReceiptsTool(),
 			p.libraryProposeNextActionTool(), p.libraryProposeProjectReviewTool(), p.libraryProposeSessionGoalTool(), p.libraryProposeRootReviewTool(), p.libraryProposeSessionRecapTool())
+		// The brief tool exists only inside a scan-review turn of a Home that
+		// reads song details; a Manager chat never gets it.
+		if p.managerRun.ScanID != "" && p.managerRun.Brief {
+			tools = append(tools, p.librarySaveBriefTool())
+		}
 	}
 
 	// Coordinator-only: the entry agent can delegate work to specialists.

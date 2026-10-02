@@ -9,6 +9,9 @@
  *       screenshot it, print its song rows and the Home library link
  *   node scripts/demo-song-facts.mjs <baseUrl> <outDir> library <path> [name] [light|dark] [WxH]
  *       open the Home library, screenshot it, print "Recently saved" and the rows
+ *   … switch <path> on|off [name]   set the song-details switch
+ *   … rescan <path> [name]          review and commit one scan of the first folder
+ *   … brief <path> [name]           wait for the Manager's turn, print its brief
  *
  * Prepare the sandbox first: ./scripts/smoke.sh showfolder <url> hq, … model, and
  * … seed-portfolio <sandbox> <count> <chip>. Prints console errors and failed
@@ -60,8 +63,10 @@ const page = await browser.newPage({ viewport: { width, height }, colorScheme: s
 await page.addInitScript(theme => window.localStorage.setItem('ori-theme', theme), scheme);
 const problems = [];
 
-// The Home library at path, its rows loaded.
+// The Home library at path, its rows loaded. A second visit to the same URL
+// with only a #hash would not reload, so leave the page first.
 async function openLibrary(path) {
+  if (page.url() !== 'about:blank') await page.goto('about:blank');
   await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' });
   await page.locator('#projectLibraryRows tr').first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1200);
@@ -178,6 +183,29 @@ try {
     await openLibrary(args[0]);
     await printLibrary();
     await panelShot(named(args[1], 'rescan'));
+  } else if (step === 'brief') {
+    // brief <path> [name]: wait for the Manager's turn on the latest scan to end,
+    // then print and screenshot the Home's Manager section.
+    const deadline = Date.now() + 120_000;
+    for (;;) {
+      await openLibrary(args[0]);
+      const run = await page.locator('#projectLibraryRun').textContent();
+      const brief = await page.locator('#projectLibraryBrief').isVisible();
+      if (brief || (run && !/describing your collection|in progress/.test(run))) break;
+      if (Date.now() > deadline) throw new Error('the Manager turn did not end within two minutes');
+      await page.waitForTimeout(5000);
+    }
+    const section = page.locator('#projectLibraryProposals');
+    console.log(`Title: ${await page.locator('#projectLibraryProposalsTitle').textContent()}`);
+    if (await page.locator('#projectLibraryBrief').isVisible()) {
+      console.log(`Brief: ${await page.locator('.project-library-brief-text').textContent()}`);
+      console.log(`Source: ${await page.locator('.project-library-brief-source').textContent()}`);
+    }
+    const run = page.locator('#projectLibraryRun');
+    if (await run.isVisible()) console.log(`Run: ${await run.textContent()}`);
+    const file = shot(`${named(args[1], 'brief')}-${scheme}-${width}`);
+    await section.screenshot({ path: file });
+    console.log(`saved ${file}`);
   } else {
     throw new Error(`unknown step ${step}`);
   }

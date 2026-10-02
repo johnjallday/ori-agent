@@ -337,6 +337,65 @@ export function libraryRunText(run) {
   return `${who} reviewed this scan and ${found}.${stop}`;
 }
 
+const SHORT_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec'
+];
+
+// Why a Home that reads song details has no brief for its latest scan.
+// `manager` is "your Portfolio Manager" (or "your Manager").
+function briefMissingText(run, manager) {
+  if (run?.status === 'started')
+    return `${manager[0].toUpperCase()}${manager.slice(1)} is describing your collection…`;
+  if (run?.status === 'skipped') {
+    if (run.reason === 'no_model')
+      return `No brief: set up a model so ${manager} can describe your collection.`;
+    return `No brief for this scan: ${RUN_SKIP_REASONS[run.reason] || 'the review could not run'}.`;
+  }
+  if (run?.status === 'finished') {
+    const stop = RUN_STOP_REASONS[run.reason] ? ` ${RUN_STOP_REASONS[run.reason]}` : '';
+    return `No brief for this scan: ${manager} did not write one.${stop}`;
+  }
+  return '';
+}
+
+// libraryBriefView is the head of the Home's Manager section (D8): its title
+// names the Manager's role on every Home; on a Home that reads song details it
+// shows the Manager's collection brief with where it came from, or one line on
+// why there is none. The brief is model text: it is only ever shown as text.
+export function libraryBriefView(page, run) {
+  const label = String(page?.manager_label || '').trim();
+  const manager = `your ${label || 'Manager'}`;
+  const view = { title: `From ${manager}`, brief: null, note: '' };
+  const brief = page?.brief;
+  const text = typeof brief?.text === 'string' ? brief.text.trim() : '';
+  if (text) {
+    const at = new Date(brief.created_at);
+    const when = Number.isNaN(at.getTime())
+      ? ''
+      : ` on ${SHORT_MONTHS[at.getMonth()]} ${at.getDate()}`;
+    const by = String(brief.agent_name || '').trim() || label || 'the Manager';
+    const model = String(brief.model || '').trim();
+    view.brief = {
+      text,
+      provenance: `Written by ${by} after the scan${when}${model ? ` · ${model}` : ''}`
+    };
+  } else if (run?.mode === 'brief') {
+    view.note = briefMissingText(run, manager);
+  }
+  return view;
+}
+
 // libraryFeedbackText totals the owner's answers across suggestion kinds.
 // It is shown to the owner only; nothing tunes itself from it.
 export function libraryFeedbackText(feedback) {
@@ -1112,7 +1171,32 @@ export class ProjectLibraryPanel {
       digestLine.textContent = digestText;
       digestLine.hidden = !digestText;
     }
-    const runText = digestText ? libraryRunText(summary?.proposal_run) : '';
+    let page = null;
+    try {
+      page = await this.request('/proposals');
+    } catch (_) {
+      page = null; // An unavailable provider/binding never creates a review action.
+    }
+    const run = summary?.proposal_run;
+    const briefMode = run?.mode === 'brief';
+    const head = libraryBriefView(page, digestText ? run : null);
+    const title = document.getElementById('projectLibraryProposalsTitle');
+    if (title) title.textContent = head.title;
+    const briefBox = document.getElementById('projectLibraryBrief');
+    if (briefBox) {
+      briefBox.replaceChildren();
+      briefBox.hidden = !head.brief;
+      if (head.brief) {
+        // Model text: set as text, never parsed as HTML.
+        briefBox.append(
+          node('p', 'project-library-brief-text', head.brief.text),
+          node('small', 'project-library-brief-source', head.brief.provenance)
+        );
+      }
+    }
+    // A brief turn's line is the brief's own provenance or why there is none;
+    // a suggestions turn keeps today's run line.
+    const runText = !digestText ? '' : briefMode ? head.note : libraryRunText(run);
     const runLine = document.getElementById('projectLibraryRun');
     if (runLine) {
       runLine.textContent = runText;
@@ -1124,16 +1208,14 @@ export class ProjectLibraryPanel {
       feedbackLine.textContent = feedbackText;
       feedbackLine.hidden = !feedbackText;
     }
-    let page = null;
-    try {
-      page = await this.request('/proposals');
-    } catch (_) {
-      page = null; // An unavailable provider/binding never creates a review action.
-    }
+    // The note on what suggestions are only matters where there are some.
+    const suggestionsNote = document.getElementById('projectLibraryProposalsNote');
+    if (suggestionsNote) suggestionsNote.hidden = briefMode && !page?.total;
     if (!page?.total) {
-      if (!digestText) return;
+      if (!digestText && !head.brief) return;
       section.hidden = false;
-      container.append(node('p', '', 'No Manager suggestions to review for this scan.'));
+      if (!briefMode)
+        container.append(node('p', '', 'No Manager suggestions to review for this scan.'));
       return;
     }
     section.hidden = false;
