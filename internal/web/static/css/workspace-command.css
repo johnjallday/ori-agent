@@ -1256,7 +1256,9 @@
 .ws-cmd-map-zone-head div {
   min-width: 0;
 }
-.ws-cmd-map-zone-head span {
+/* The kicker only: a bare `span` also matched the count badge beside it and
+   knocked it out of its centered inline-grid. */
+.ws-cmd-map-zone-head div span {
   display: block;
   color: var(--ws-faction);
   font-family: var(--ws-font-mono);
@@ -5894,6 +5896,85 @@ button.ws-cmd-rpg-class-card:focus-visible {
   --ws-keeper-deep: rgba(232, 181, 75, 0.38);
   --ws-idle: #4ec5e6;
   --ws-alert: #e87863;
+}
+
+/* Every other Operations Map window (Mission, Tasks, Quest Board, Inventory,
+   Stations) belongs to the light planning surface, like the tool belt that
+   opens it. The base rules paint a near-black shell and translucent black rows,
+   which left light-mode ink unreadable, so give them light surfaces here. The
+   window sits beside .ws-cmd-opmap, not inside it, so it needs the same
+   light-surface status inks. */
+[data-bs-theme="light"] .ws-cmd-map-window-backdrop {
+  background: rgba(31, 33, 40, 0.28);
+}
+[data-bs-theme="light"] .ws-cmd-map-window:not(.ws-cmd-map-window-inspector) {
+  --ws-waiting: #8a5b18;
+  --ws-input: #a8511d;
+  --ws-done: #3d7728;
+
+  background:
+    linear-gradient(rgba(31, 107, 78, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 107, 78, 0.03) 1px, transparent 1px),
+    linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.7),
+    0 24px 60px -28px rgba(31, 33, 40, 0.55);
+}
+[data-bs-theme="light"]
+  .ws-cmd-map-window:not(.ws-cmd-map-window-inspector)
+  .ws-cmd-map-window-head {
+  background: rgba(255, 255, 255, 0.72);
+}
+[data-bs-theme="light"]
+  .ws-cmd-map-window:not(.ws-cmd-map-window-inspector)
+  .ws-cmd-map-window-close {
+  background: #ffffff;
+}
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-zone-head strong,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-quest-frame-head strong,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-inventory-group header strong,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-slot-name {
+  color: var(--ws-ink-heading);
+}
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-quest-frame-head {
+  border-color: rgba(31, 107, 78, 0.22);
+  background:
+    linear-gradient(90deg, rgba(31, 107, 78, 0.09), transparent 58%), rgba(255, 255, 255, 0.72);
+}
+/* background-color only, so each inventory slot keeps its type-colored glow. */
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-task-row,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-station,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-inventory-slot,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-inventory-badge,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-inventory-group {
+  background-color: rgba(255, 255, 255, 0.78);
+}
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-task-row:hover,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-station:hover,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-inventory-slot:hover,
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-inventory-badge.is-active {
+  background-color: rgba(31, 107, 78, 0.07);
+}
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-inventory-slot.is-empty:hover {
+  background-color: rgba(255, 255, 255, 0.78);
+}
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-inventory-slot::before {
+  border-color: rgba(31, 33, 40, 0.06);
+}
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-slot-type {
+  background: rgba(255, 255, 255, 0.9);
+}
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-task-start {
+  border-color: #18573f;
+  background: linear-gradient(180deg, #2d7a5e, #1f6b4e);
+  color: var(--ws-on-accent);
+}
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-task-start i {
+  color: var(--ws-on-accent);
+}
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-task-start:hover {
+  border-color: #124632;
+  background: linear-gradient(180deg, #276d54, #195a41);
 }
 
 [data-bs-theme="light"] .ws-cmd-title h2,
