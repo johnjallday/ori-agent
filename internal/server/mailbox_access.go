@@ -82,9 +82,9 @@ func (a *mailboxAccess) AuthorizedAccount(ctx context.Context, workspaceID, agen
 		return mailbox.Account{}, mailbox.ErrDisconnected
 	}
 	// FR 42: the binding must be HEALTHY, not merely present. An account whose
-	// tokens are gone would otherwise fail deep inside the provider with an error
-	// the agent reads as a transient mail problem.
-	if !acc.CredentialsStatus.HasAccessToken && !acc.CredentialsStatus.HasRefreshToken {
+	// credential is gone would otherwise fail deep inside the provider with an
+	// error the agent reads as a transient mail problem.
+	if !hasMailCredential(acc) {
 		return mailbox.Account{}, mailbox.ErrExpired
 	}
 	return mailbox.Account{
@@ -93,6 +93,25 @@ func (a *mailboxAccess) AuthorizedAccount(ctx context.Context, workspaceID, agen
 		EmailAddress: acc.EmailAddress,
 		Health:       mailbox.HealthHealthy,
 	}, nil
+}
+
+// isPasswordConnected reports whether an account was connected with a password
+// or app password (read over IMAP) rather than with Google sign-in.
+func isPasswordConnected(acc *vault.EmailAccount) bool {
+	return acc != nil && (acc.AuthType == vault.EmailAuthTypePassword || acc.AuthType == vault.EmailAuthTypeAppPassword)
+}
+
+// hasMailCredential reports whether a linked account still holds the secret its
+// reader needs: a password for a password-connected account, a token for one
+// connected with Google sign-in.
+func hasMailCredential(acc *vault.EmailAccount) bool {
+	if acc == nil {
+		return false
+	}
+	if isPasswordConnected(acc) {
+		return acc.CredentialsStatus.HasPassword
+	}
+	return acc.CredentialsStatus.HasAccessToken || acc.CredentialsStatus.HasRefreshToken
 }
 
 // isInboxAgent reports whether agentName is the canonical Personal HQ Inbox

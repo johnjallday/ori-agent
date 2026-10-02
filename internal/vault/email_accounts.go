@@ -401,6 +401,52 @@ func (s *Store) RevealEmailOAuthCredentials(ctx context.Context, id string, acce
 	}, nil
 }
 
+// EmailLoginCredentials is the decrypted login for a mailbox connected with a
+// password or an app password, plus the servers it is used against. Like
+// EmailOAuthCredentials it is returned ONLY to internal server wiring (the
+// mailbox credential resolver) and must never be serialized to an HTTP
+// response, log, or LLM prompt.
+type EmailLoginCredentials struct {
+	Provider     EmailProvider
+	AuthType     EmailAuthType
+	EmailAddress string
+	Username     string
+	Password     string
+	IMAPHost     string
+	IMAPPort     int
+	SMTPHost     string
+	SMTPPort     int
+}
+
+// RevealEmailLoginCredentials decrypts and returns the password login for an
+// email account. It is the password counterpart of RevealEmailOAuthCredentials:
+// the single, explicit reveal path for that secret. For an OAuth account the
+// result carries no password, and the caller treats it as having no login.
+func (s *Store) RevealEmailLoginCredentials(ctx context.Context, id string, access AccessContext) (*EmailLoginCredentials, error) {
+	record, err := s.GetRecord(ctx, id, access)
+	if err != nil {
+		return nil, err
+	}
+	if normalizeRecordType(record.Type) != RecordTypeEmailAccount {
+		return nil, ErrRecordNotFound
+	}
+	payload, err := decodeEmailAccountPayload(record.Payload)
+	if err != nil {
+		return nil, err
+	}
+	return &EmailLoginCredentials{
+		Provider:     NormalizeEmailProvider(payload.Provider),
+		AuthType:     normalizeEmailAuthType(payload.AuthType),
+		EmailAddress: payload.EmailAddress,
+		Username:     payload.Username,
+		Password:     payload.Password,
+		IMAPHost:     payload.IMAPHost,
+		IMAPPort:     payload.IMAPPort,
+		SMTPHost:     payload.SMTPHost,
+		SMTPPort:     payload.SMTPPort,
+	}, nil
+}
+
 func decodeEmailAccountPayload(data json.RawMessage) (emailAccountPayload, error) {
 	var payload emailAccountPayload
 	if len(data) == 0 {
