@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -60,6 +61,55 @@ func openPinnedDirectory(root Root, relative, expectedIdentity string) (int, err
 		return -1, ErrUnavailable
 	}
 	return fd, nil
+}
+
+// openPinnedProjectFile opens one file of a listed folder for the fact pass:
+// the folder through the pinned no-follow walk, the file itself with
+// O_NOFOLLOW (a symlink fails to open) and O_NONBLOCK (a FIFO cannot stall the
+// pass), read only. It must be the regular file the listing saw: same
+// identity, size and save time. The caller holds the root gate.
+func openPinnedProjectFile(root Root, relative, folderIdentity string, want FactsSource) (*os.File, error) {
+	if want.File == "" || want.File == "." || want.File == ".." || filepath.Base(want.File) != want.File ||
+		strings.ContainsAny(want.File, "/\\\x00") {
+		return nil, ErrUnavailable
+	}
+	dir, err := openPinnedDirectory(root, relative, folderIdentity)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = unix.Close(dir) }()
+	fd, err := unix.Openat(dir, want.File, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0) // #nosec G304 G703 -- a base name from the pinned listing, opened read-only relative to the pinned folder descriptor.
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || !pinnedFileMatches(&st, want) {
+		_ = unix.Close(fd)
+		return nil, ErrUnavailable
+	}
+	return os.NewFile(uintptr(fd), want.File), nil
+}
+
+// pinnedFileStillMatches re-checks an open file after reading it: a file
+// re-saved during the read is not the file the listing saw.
+func pinnedFileStillMatches(file *os.File, want FactsSource) bool {
+	conn, err := file.SyscallConn()
+	if err != nil {
+		return false
+	}
+	matches := false
+	if err := conn.Control(func(fd uintptr) {
+		var st unix.Stat_t
+		matches = unix.Fstat(int(fd), &st) == nil && pinnedFileMatches(&st, want)
+	}); err != nil {
+		return false
+	}
+	return matches
+}
+
+func pinnedFileMatches(st *unix.Stat_t, want FactsSource) bool {
+	return st.Mode&unix.S_IFMT == unix.S_IFREG && unixIdentity(st) == want.Identity && st.Size == want.Size &&
+		time.Unix(st.Mtim.Unix()).UTC().Equal(want.ModifiedAt)
 }
 
 // DirectoryRow carries only names and metadata, never project/audio bytes.

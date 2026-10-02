@@ -50,6 +50,10 @@ type Roots struct {
 	guards     filejanitor.RootGuards
 	mu         sync.Mutex
 	pending    map[string]string // review token -> native picker reference (never a path)
+	// factsBudget bounds a scan's fact pass; zero means defaultSongFactsBudget.
+	// factsOpened, when set, sees every project file the pass opens (tests).
+	factsBudget songFactsBudget
+	factsOpened func(relative, file string)
 }
 
 func NewRoots(library *Store, picker FolderPicker, selections *pathselection.Store, guards filejanitor.RootGuards) *Roots {
@@ -563,30 +567,38 @@ func (r *Roots) VerifyConnectedRoot(scope Scope, id string) (Root, error) {
 }
 
 func (r *Roots) verifyConnectedRootNoGate(scope Scope, id string) (Root, error) {
+	root, _, err := r.verifyConnectedRootStateNoGate(scope, id)
+	return root, err
+}
+
+// verifyConnectedRootStateNoGate is verifyConnectedRootNoGate that also returns
+// the Home state the check read, for a caller that needs another grant from
+// the same snapshot (the fact pass's song-details consent).
+func (r *Roots) verifyConnectedRootStateNoGate(scope Scope, id string) (Root, *workspace.AssistantProgramState, error) {
 	if r == nil || r.library == nil {
-		return Root{}, ErrUnavailable
+		return Root{}, nil, ErrUnavailable
 	}
 	doc, state, err := r.library.readSnapshot(scope)
 	if err != nil || !state.PluginAvailable {
-		return Root{}, ErrUnavailable
+		return Root{}, nil, ErrUnavailable
 	}
 	home, err := r.library.workspaces.Get(scope.HomeID)
 	if err != nil || !r.library.providerWritable(scope, home) {
-		return Root{}, ErrUnavailable
+		return Root{}, nil, ErrUnavailable
 	}
 	for _, inactive := range state.ProjectLibraryInactiveRoots {
 		if inactive == id {
-			return Root{}, ErrUnavailable
+			return Root{}, nil, ErrUnavailable
 		}
 	}
 	for _, root := range doc.Roots {
 		if root.ID == id && root.RevokedAt == nil {
 			_, liveID, err := r.pickedRoot(root.Path)
 			if err == nil && liveID == root.FileIdentity {
-				return root, nil
+				return root, state, nil
 			}
-			return Root{}, ErrUnavailable
+			return Root{}, nil, ErrUnavailable
 		}
 	}
-	return Root{}, ErrUnavailable
+	return Root{}, nil, ErrUnavailable
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -111,6 +112,9 @@ type Document struct {
 	Proposals     []ManagerProposal        `json:"proposals,omitempty"`
 	Reviews       []ReviewReceipt          `json:"reviews,omitempty"`
 	Operations    []OperationReceipt       `json:"operations,omitempty"`
+	// CollectionBrief is the Manager's description of the library after the
+	// latest scan whose turn wrote one (Homes that read song facts only).
+	CollectionBrief *CollectionBrief `json:"collection_brief,omitempty"`
 }
 
 type Root struct {
@@ -134,6 +138,49 @@ type Observation struct {
 	LastCheckedAt  time.Time `json:"last_checked_at,omitempty"`
 	FileModifiedAt time.Time `json:"file_modified_at,omitempty"`
 	Availability   string    `json:"availability"`
+	// Facts are the song's tempo, length and track count, read by a consenting
+	// Home's fact pass from the file that dates the song. Nil: not read.
+	Facts *ObservedFacts `json:"facts,omitempty"`
+}
+
+// ObservedFacts are one song's facts and the exact project file they came from.
+// A later scan reads the file again only when that file changed.
+type ObservedFacts struct {
+	SongFacts
+	ReadFrom FactsSource `json:"read_from"`
+}
+
+// FactsSource names a project file by its listing: base name, identity, size
+// and save time. Any difference means the facts are no longer this file's.
+type FactsSource struct {
+	File       string    `json:"file"`
+	Identity   string    `json:"identity"`
+	Size       int64     `json:"size"`
+	ModifiedAt time.Time `json:"modified_at"`
+}
+
+// Facts are valid only for a format whose marker declares them, read from one
+// of the observation's listed files of that format.
+func (f *ObservedFacts) valid(o Observation) bool {
+	source := f.ReadFrom
+	return f.SongFacts.valid() &&
+		source.File != "" && filepath.Base(source.File) == source.File && validText(source.File, 240) &&
+		factsFile(o.Format, source.File) && slices.Contains(o.Alternates, source.File) &&
+		source.Identity != "" && validText(source.Identity, 160) &&
+		source.Size >= 0 && source.Size <= DefaultSongFactsLimits.MaxBytes && !source.ModifiedAt.IsZero()
+}
+
+func (s FactsSource) sameFile(other FactsSource) bool {
+	return s.File == other.File && s.Identity == other.Identity && s.Size == other.Size &&
+		s.ModifiedAt.Equal(other.ModifiedAt)
+}
+
+func (f *ObservedFacts) clone() *ObservedFacts {
+	if f == nil {
+		return nil
+	}
+	copied := *f
+	return &copied
 }
 
 // Milestone preserves the legacy Home's stable milestone ID, due date and
@@ -404,7 +451,7 @@ func (d Document) valid(scope Scope) bool {
 		for _, o := range e.Observations {
 			if !roots[o.RootID] || seenRoots[o.RootID] || !validRelative(o.RelativeFolder) ||
 				o.FileIdentity == "" || !validText(o.FileIdentity, 160) || o.ScanID == "" || o.ScannedAt.IsZero() ||
-				len(o.Alternates) > 64 {
+				len(o.Alternates) > 64 || (o.Facts != nil && !o.Facts.valid(o)) {
 				return false
 			}
 			if !folderdigest.KnownProjectFormat(o.Format) {
@@ -475,6 +522,9 @@ func (d Document) valid(scope Scope) bool {
 		return false
 	}
 	if !proposalRunsValid(d.ProposalRuns, scans) || !dismissalsValid(d.Dismissals) {
+		return false
+	}
+	if d.CollectionBrief != nil && !d.CollectionBrief.valid(scans) {
 		return false
 	}
 	sessions := map[string]bool{}

@@ -103,6 +103,11 @@ type FolderSetupIntent struct {
 	// SharedProjects says some of the collection's projects can be opened with
 	// the shared assistant; a collection of other formats is listed only.
 	SharedProjects bool `json:"shared_projects,omitempty"`
+	// ReadsSongDetails says the plan's library line told the user that each
+	// project's tempo, length and track count are read; GrantsSongDetails
+	// promised to record that consent on the Home the plan creates.
+	ReadsSongDetails  bool `json:"reads_song_details,omitempty"`
+	GrantsSongDetails bool `json:"grants_song_details,omitempty"`
 }
 
 // FolderSetupPlan is everything one press of Set up will do. The browser sends

@@ -124,7 +124,7 @@ func (s *Store) Resume(scope Scope) (ResumeView, error) {
 		if entry == nil || !validText(id, 160) {
 			return ResumeView{}, ErrCorrupt
 		}
-		row := s.projectSearchRow(scope, *entry, nil, linked, nil)
+		row := s.projectSearchRow(scope, *entry, nil, linked, nil, false)
 		name := entry.Fields.DisplayName
 		if name == "" && row.Connection == "connected" {
 			name = row.Name // Exact reciprocal child name, never a path/name adoption.
@@ -169,7 +169,7 @@ func (s *Store) verifiedRecapShareLink(scope Scope, state *workspace.AssistantPr
 	for _, id := range state.LinkedProjectIDs {
 		linked[id] = true
 	}
-	if s.projectSearchRow(scope, *entry, nil, linked, nil).Connection != "connected" {
+	if s.projectSearchRow(scope, *entry, nil, linked, nil, false).Connection != "connected" {
 		return nil, false
 	}
 	pinned := *entry.Link

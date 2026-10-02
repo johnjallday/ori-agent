@@ -16,7 +16,12 @@ import {
   readActivationQueue,
   recentlySavedView,
   selectionRecovery,
-  setupNextStep
+  setupNextStep,
+  LIBRARY_INTRO,
+  libraryBriefView,
+  libraryIntroText,
+  songDetailsStatus,
+  songDetailsSwitchView
 } from './project-library.js';
 
 test('Show project folder requires a fresh connected Home link and never sends a path or starts a DAW', async () => {
@@ -3352,6 +3357,21 @@ test('Recently saved shows at most six songs that can be opened, each with Open'
   assert.equal(view.cards[0].row.id, 'song-1');
 });
 
+test('Recently saved cards carry each song facts line; a song without facts shows only Saved', () => {
+  const rows = recentRows(3);
+  rows[0].facts = { track_count: 6, tempo_bpm: 128.5, length_seconds: 3725 };
+  rows[2].facts = {};
+  const view = recentlySavedView({ provider_read_only: false, rows }, recentNow);
+  assert.deepEqual(
+    view.cards.map(card => [card.name, card.saved, card.facts]),
+    [
+      ['Song 1', 'Saved today', '6 tracks · 128.5 BPM · 1:02:05'],
+      ['Song 2', 'Saved yesterday', ''],
+      ['Song 3', 'Saved 2 days ago', '']
+    ]
+  );
+});
+
 test('a read-only Home still lists its recent songs, without Open', () => {
   // The server marks no row openable while the Home provider is unavailable.
   const rows = recentRows(3).map(row => ({ ...row, can_open: false }));
@@ -3369,6 +3389,322 @@ test('a read-only Home still lists its recent songs, without Open', () => {
   }
   const many = recentlySavedView({ provider_read_only: true, rows: recentRows(9) }, recentNow);
   assert.equal(many.cards.length, 6);
+});
+
+test('each library row shows its save time and song facts on one line', () => {
+  const previousDocument = globalThis.document;
+  const makeElement = tag => ({
+    tag,
+    children: [],
+    textContent: '',
+    className: '',
+    dataset: {},
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener() {},
+    setAttribute() {}
+  });
+  const tbody = makeElement('tbody');
+  globalThis.document = {
+    createElement: makeElement,
+    getElementById: id => (id === 'projectLibraryRows' ? tbody : null)
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' }); // no state: read-only
+    panel.rows = [
+      {
+        id: 'with-facts',
+        name: 'Night Drive',
+        last_saved_at: savedAgo(3),
+        facts: { track_count: 14, tempo_bpm: 92, tempo_varies: true, length_seconds: 221 }
+      },
+      { id: 'saved-only', name: 'Ableton Set', last_saved_at: savedAgo(3) },
+      { id: 'undated', name: 'Undated' }
+    ];
+    panel.renderRows();
+    const lines = tbody.children.map(tr =>
+      tr.children[1].children.find(child => child.className === 'project-library-saved')
+    );
+    assert.match(
+      lines[0].textContent.replaceAll('\xa0', ' '),
+      /^Saved .+ · 14 tracks · 92 BPM, varies · 3:41$/
+    );
+    assert.match(lines[0].textContent, /14\xa0tracks · 92\xa0BPM,\xa0varies/);
+    assert.equal(lines[0].dataset.songFacts, '14 tracks · 92 BPM, varies · 3:41');
+    assert.match(lines[1].textContent, /^Saved [^·]+$/, 'no facts: only "Saved …"');
+    assert.equal(lines[1].dataset.songFacts, undefined);
+    assert.equal(lines[2], undefined, 'no save time and no facts: no line');
+    assert.doesNotMatch(
+      tbody.children.map(tr => tr.children[1].children.map(c => c.textContent).join(' ')).join(' '),
+      /\b(progress|complete|ready|unknown)\b/i
+    );
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('the Manager section is titled by its role and leads with the brief and its source', () => {
+  const at = new Date(2026, 9, 2, 14, 0).toISOString();
+  const view = libraryBriefView(
+    {
+      manager_label: 'Portfolio Manager',
+      brief: {
+        text: 'Most songs sit between 90 and 99 BPM.',
+        agent_name: 'Portfolio Manager',
+        model: 'gpt-5.6-luna',
+        created_at: at
+      }
+    },
+    { status: 'finished', mode: 'brief' }
+  );
+  assert.deepEqual(view, {
+    title: 'From your Portfolio Manager',
+    brief: {
+      text: 'Most songs sit between 90 and 99 BPM.',
+      provenance: 'Written by Portfolio Manager after the scan on Oct 2 · gpt-5.6-luna'
+    },
+    note: ''
+  });
+  // Every Home with the section gets the role title, brief or not.
+  assert.equal(
+    libraryBriefView({ manager_label: 'Library Lead' }, null).title,
+    'From your Library Lead'
+  );
+  assert.equal(libraryBriefView(null, null).title, 'From your Manager');
+  assert.equal(
+    libraryBriefView({}, { status: 'finished', mode: '' }).note,
+    '',
+    'no brief turn: no note'
+  );
+});
+
+test('a Home that reads song details says why it has no brief', () => {
+  const page = { manager_label: 'Portfolio Manager' };
+  const note = run => libraryBriefView(page, { mode: 'brief', ...run }).note;
+  assert.equal(
+    note({ status: 'skipped', reason: 'no_model' }),
+    'No brief: set up a model so your Portfolio Manager can describe your collection.'
+  );
+  assert.equal(
+    note({ status: 'skipped', reason: 'superseded' }),
+    'No brief for this scan: a newer scan replaced this one.'
+  );
+  assert.equal(
+    note({ status: 'started' }),
+    'Your Portfolio Manager is describing your collection…'
+  );
+  assert.equal(
+    note({ status: 'finished', reason: 'step_limit' }),
+    'No brief for this scan: your Portfolio Manager did not write one. It stopped at the step limit.'
+  );
+  assert.equal(
+    libraryBriefView({}, { mode: 'brief', status: 'skipped', reason: 'no_model' }).note,
+    'No brief: set up a model so your Manager can describe your collection.'
+  );
+  // Switched off since the turn: the brief went with the facts; the switch says why.
+  assert.equal(
+    note({ status: 'finished' }),
+    'No brief for this scan: your Portfolio Manager did not write one.'
+  );
+  assert.equal(
+    libraryBriefView(page, { mode: 'brief', status: 'finished' }, { state: 'off' }).note,
+    ''
+  );
+});
+
+test('the brief renders as text above the digest, and replaces the empty suggestions line', async () => {
+  const previousDocument = globalThis.document;
+  const elements = new Map();
+  const makeNode = tag => ({
+    tag,
+    children: [],
+    textContent: '',
+    className: '',
+    hidden: false,
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener() {}
+  });
+  for (const id of [
+    'projectLibraryProposals',
+    'projectLibraryProposalRows',
+    'projectLibraryProposalsTitle',
+    'projectLibraryBrief',
+    'projectLibraryDigest',
+    'projectLibraryRun'
+  ])
+    elements.set(id, makeNode('x'));
+  globalThis.document = { createElement: makeNode, getElementById: id => elements.get(id) || null };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = { provider_read_only: false, roots: [{ id: 'root-1', path: '/Music/Songs' }] };
+    const brief = {
+      text: '<img src=x onerror=alert(1)> Four songs sit near 92 BPM.',
+      agent_name: 'Portfolio Manager',
+      model: 'gpt-5.6-luna',
+      created_at: '2026-10-02T12:00:00Z'
+    };
+    panel.request = async path =>
+      path === '/summary'
+        ? { digest: DIGEST, proposal_run: { status: 'finished', mode: 'brief' } }
+        : { total: 0, rows: [], manager_label: 'Portfolio Manager', brief };
+    await panel.renderProposals();
+    assert.equal(
+      elements.get('projectLibraryProposalsTitle').textContent,
+      'From your Portfolio Manager'
+    );
+    const box = elements.get('projectLibraryBrief');
+    assert.equal(box.hidden, false);
+    assert.equal(box.children[0].textContent, brief.text, 'model text is set as text');
+    assert.equal('innerHTML' in box.children[0], false);
+    assert.match(box.children[1].textContent, /^Written by Portfolio Manager after the scan on /);
+    assert.equal(elements.get('projectLibraryRun').hidden, true, 'the brief is its own run line');
+    assert.equal(elements.get('projectLibraryProposals').hidden, false);
+    assert.deepEqual(elements.get('projectLibraryProposalRows').children, []);
+
+    // The same Home with no model: no brief, one line why.
+    panel.request = async path =>
+      path === '/summary'
+        ? {
+            digest: DIGEST,
+            proposal_run: { status: 'skipped', reason: 'no_model', mode: 'brief' }
+          }
+        : { total: 0, rows: [], manager_label: 'Portfolio Manager' };
+    await panel.renderProposals();
+    assert.equal(box.hidden, true);
+    assert.equal(
+      elements.get('projectLibraryRun').textContent,
+      'No brief: set up a model so your Portfolio Manager can describe your collection.'
+    );
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('the song-details switch shows only on a Home that agreed at setup', () => {
+  for (const songDetails of [undefined, null, {}, { state: 'none' }, { state: 'surprise' }]) {
+    assert.deepEqual(songDetailsSwitchView(songDetails), { visible: false });
+  }
+  assert.deepEqual(songDetailsSwitchView({ state: 'on', app_name: 'REAPER' }), {
+    visible: true,
+    checked: true,
+    disabled: false,
+    note: "Ori reads each REAPER project's tempo, length and track count. Nothing is changed."
+  });
+  const off = songDetailsSwitchView({ state: 'off', app_name: 'REAPER' });
+  assert.equal(off.checked, false);
+  assert.match(off.note, /^Scans read no project files\./);
+  assert.equal(songDetailsSwitchView({ state: 'on' }, true).disabled, true, 'read-only: disabled');
+  assert.equal(
+    songDetailsSwitchView({ state: 'on' }).note,
+    "Ori reads each project's tempo, length and track count. Nothing is changed."
+  );
+  assert.equal(
+    songDetailsStatus(false),
+    'Song details cleared. Scans no longer read project files.'
+  );
+  assert.match(songDetailsStatus(true), /next scan reads them; nothing is scanned now/);
+});
+
+test('the library intro says what a scan reads', () => {
+  assert.equal(libraryIntroText(undefined), LIBRARY_INTRO);
+  assert.equal(libraryIntroText({ state: 'off' }), LIBRARY_INTRO);
+  assert.match(LIBRARY_INTRO, /without opening project files/);
+  const on = libraryIntroText({ state: 'on', app_name: 'REAPER' });
+  assert.match(on, /each REAPER project's tempo, length and track count/);
+  assert.doesNotMatch(on, /without opening project files/);
+});
+
+test('switching song details off clears the facts lines and says so', async () => {
+  const previousDocument = globalThis.document;
+  const elements = {};
+  const makeElement = tag => ({
+    tag,
+    children: [],
+    textContent: '',
+    className: '',
+    hidden: false,
+    checked: false,
+    disabled: false,
+    dataset: {},
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren() {
+      this.children = [];
+    },
+    addEventListener() {},
+    setAttribute() {}
+  });
+  for (const id of [
+    'projectLibraryIntro',
+    'projectLibrarySongDetails',
+    'projectLibrarySongDetailsSwitch',
+    'projectLibrarySongDetailsNote',
+    'projectLibraryStatus'
+  ]) {
+    elements[id] = makeElement('x');
+  }
+  globalThis.document = { createElement: makeElement, getElementById: id => elements[id] || null };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      initialized: true,
+      provider_read_only: false,
+      song_details: { state: 'on', app_name: 'REAPER' }
+    };
+    const posts = [];
+    let refreshed = 0;
+    panel.post = async (path, body) => {
+      posts.push({ path, body });
+      return { song_details: { state: body.enabled ? 'on' : 'off', app_name: 'REAPER' } };
+    };
+    // The whole library is re-read: facts, the brief and the moved revision.
+    panel.refresh = async () => refreshed++;
+    panel.renderSongDetails();
+    const toggle = elements.projectLibrarySongDetailsSwitch;
+    assert.equal(elements.projectLibrarySongDetails.hidden, false);
+    assert.equal(toggle.checked, true);
+    assert.match(elements.projectLibraryIntro.textContent, /tempo, length and track count/);
+
+    toggle.checked = false;
+    await panel.setSongDetails(toggle);
+    assert.equal(posts[0].path, '/song-details');
+    assert.equal(posts[0].body.enabled, false);
+    assert.match(posts[0].body.request_id, /^song-details-/);
+    assert.equal(panel.state.song_details.state, 'off');
+    assert.equal(refreshed, 1, 'the library is re-read');
+    assert.equal(
+      elements.projectLibraryStatus.textContent,
+      'Song details cleared. Scans no longer read project files.'
+    );
+    assert.equal(elements.projectLibraryIntro.textContent, LIBRARY_INTRO);
+
+    // A refusal keeps the server's state and its message.
+    panel.post = async () => {
+      const error = new Error(
+        'This Home is read-only right now, so song details cannot be turned on.'
+      );
+      error.payload = { song_details: { state: 'off' } };
+      throw error;
+    };
+    toggle.checked = true;
+    await panel.setSongDetails(toggle);
+    assert.equal(panel.state.song_details.state, 'off');
+    assert.equal(toggle.checked, false);
+    assert.match(elements.projectLibraryStatus.textContent, /read-only right now/);
+    assert.equal(refreshed, 1, 'a refusal re-reads nothing');
+  } finally {
+    globalThis.document = previousDocument;
+  }
 });
 
 test('Recently saved is hidden when no song has a save time', () => {

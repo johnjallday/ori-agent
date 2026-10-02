@@ -843,6 +843,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// plugin update) and the way back when the assistant was deleted.
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing", s.Handlers.Session.SetAssistantLibrarySharing)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing/assistant", s.Handlers.Session.ReAddAssistantLibrarySharing)
+		// The Home's song-details switch: off clears every stored song fact.
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/song-details", s.Handlers.Session.SetAssistantLibrarySongDetails)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/resume", s.Handlers.Session.GetAssistantStudioResume)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/handoff-receipts", s.Handlers.Session.ListAssistantStudioHandoffReceipts)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/library/projects/{entryID}/sessions", s.Handlers.Session.ListAssistantStudioSessions)

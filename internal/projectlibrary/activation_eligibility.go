@@ -76,7 +76,7 @@ func (a *ActivationInspector) Eligibility(ctx context.Context, scope Scope, entr
 		for _, id := range state.LinkedProjectIDs {
 			linked[id] = true
 		}
-		row := a.library.projectSearchRow(scope, *entry, nil, linked, nil)
+		row := a.library.projectSearchRow(scope, *entry, nil, linked, nil, false)
 		if row.Connection != "connected" {
 			result.State, result.Reason = "link_needs_review", "The saved project link needs review; no new workspace will be created."
 			return result, nil

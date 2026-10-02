@@ -19,18 +19,27 @@ import (
 // ScanReview authorizes exactly one bounded, metadata-only root scan. A new
 // explicit review is required even when the same root was scanned before.
 type ScanReview struct {
-	Token               string    `json:"token"`
-	RootID              string    `json:"root_id"`
-	RootPath            string    `json:"root_path"` // Authenticated human review only.
-	Scope               string    `json:"scope"`
-	ScopeID             string    `json:"scope_id,omitempty"`
-	RelativeFolder      string    `json:"relative_folder,omitempty"`
-	MaxEntries          int       `json:"max_entries"`
-	IncludesScan        bool      `json:"includes_scan"`
-	InterruptsPriorScan bool      `json:"interrupts_prior_scan"`
-	ExpiresAt           time.Time `json:"expires_at"`
-	Revision            int64     `json:"revision"`
+	Token               string `json:"token"`
+	RootID              string `json:"root_id"`
+	RootPath            string `json:"root_path"` // Authenticated human review only.
+	Scope               string `json:"scope"`
+	ScopeID             string `json:"scope_id,omitempty"`
+	RelativeFolder      string `json:"relative_folder,omitempty"`
+	MaxEntries          int    `json:"max_entries"`
+	IncludesScan        bool   `json:"includes_scan"`
+	InterruptsPriorScan bool   `json:"interrupts_prior_scan"`
+	// ReadsSongFacts says the Home's song-details switch is on, so the scan also
+	// reads each project's tempo, length and track count.
+	ReadsSongFacts bool      `json:"reads_song_facts,omitempty"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	Revision       int64     `json:"revision"`
 }
+
+// What a scan review says the scan reads.
+const (
+	ScanScopeNamesOnly   = "selected folder and immediate child names/project markers (no file contents)"
+	ScanScopeSongDetails = "selected folder and immediate child names/project markers, and each project's tempo, length and track count (no other file contents)"
+)
 
 func scanDigest(scope Scope, root Root, expected int64, selected *ScanScope) string {
 	action := "scan_root:" + strconv.FormatInt(expected, 10)
@@ -191,11 +200,14 @@ func (r *Roots) reviewScan(scope Scope, rootID, scopeID string, expected int64) 
 	if err != nil {
 		return ScanReview{}, err
 	}
-	return ScanReview{Token: review.Token, RootID: rootID, RootPath: root.Path, ScopeID: scopeID,
-		RelativeFolder: relative,
-		Scope:          "selected folder and immediate child names/project markers (no file contents)",
-		MaxEntries:     scanEntryLimit, IncludesScan: true, InterruptsPriorScan: interrupts,
-		ExpiresAt: review.ExpiresAt, Revision: review.Revision}, nil
+	disclosed := ScanReview{Token: review.Token, RootID: rootID, RootPath: root.Path, ScopeID: scopeID,
+		RelativeFolder: relative, Scope: ScanScopeNamesOnly,
+		MaxEntries: scanEntryLimit, IncludesScan: true, InterruptsPriorScan: interrupts,
+		ExpiresAt: review.ExpiresAt, Revision: review.Revision}
+	if _, state, err := r.library.readSnapshot(scope); err == nil && state.GetSongDetailsConsent().Active() {
+		disclosed.Scope, disclosed.ReadsSongFacts = ScanScopeSongDetails, true
+	}
+	return disclosed, nil
 }
 
 // CommitScan first records running+receipt in one Home update, then scans
@@ -343,11 +355,18 @@ func (r *Roots) commitScan(ctx context.Context, scope Scope, rootID, scopeID, to
 	} else if reason != "" {
 		status = "partial"
 	}
-	finished, finishErr := r.finishScan(scope, scan, observed, status, reason)
+	finished, completed, finishErr := r.recordScanFinish(scope, scan, observed, status, reason)
 	if finishErr != nil {
 		// A failed finalization leaves a durable running/interrupted record;
 		// never claim the client-visible result was persisted.
 		return Scan{}, false, finishErr
+	}
+	if completed != nil {
+		// The listing is saved. A consenting Home now reads song facts, so the
+		// Manager turn the event starts sees this scan's facts. The pass never
+		// changes the listing, and the event is published whatever it did.
+		r.readSongFactsAfterScan(ctx, scope, finished, observed, root)
+		r.library.publishScanCompleted(scope, *completed)
 	}
 	return finished, false, nil
 }
@@ -362,25 +381,37 @@ func currentRootMatches(doc *Document, root Root) bool {
 	return false
 }
 
+// finishScan records a scan's outcome and publishes it when it completed.
 func (r *Roots) finishScan(scope Scope, started Scan, observed Discovery, status, reason string) (Scan, error) {
+	finished, completed, err := r.recordScanFinish(scope, started, observed, status, reason)
+	if err == nil && completed != nil {
+		r.library.publishScanCompleted(scope, *completed)
+	}
+	return finished, err
+}
+
+// recordScanFinish is the fenced write that finishes a scan. It returns the
+// digest to publish when this call recorded a complete or partial scan, and
+// nil for a replay or any other outcome; it publishes nothing itself.
+func (r *Roots) recordScanFinish(scope Scope, started Scan, observed Discovery, status, reason string) (Scan, *LibraryDigest, error) {
 	if status != "complete" && status != "partial" && status != "failed" && status != "cancelled" {
-		return Scan{}, ErrConflict
+		return Scan{}, nil, ErrConflict
 	}
 	if status == "complete" || status == "partial" {
 		if observed.RootID != started.RootID || observed.RootRevision != started.RootRevision ||
 			observed.Scope != started.Scope || observed.EntriesSeen > scanEntryLimit || observed.EntriesSeen < 0 {
-			return Scan{}, ErrCorrupt
+			return Scan{}, nil, ErrCorrupt
 		}
 	}
 	payload, err := json.Marshal(observed)
 	if err != nil {
-		return Scan{}, ErrCorrupt
+		return Scan{}, nil, ErrCorrupt
 	}
 	digest := sha256.Sum256(payload)
 	encodedDigest := hex.EncodeToString(digest[:])
 	doc, err := r.library.Read(scope)
 	if err != nil {
-		return Scan{}, err
+		return Scan{}, nil, err
 	}
 	// The digest's setup count needs the host's installed list. Read it
 	// before taking the Home lock; the blueprint match itself is evaluated
@@ -481,10 +512,10 @@ func (r *Roots) finishScan(scope Scope, started Scan, observed Discovery, status
 			}
 			return scan.ID, nil
 		})
-	if err == nil && !replay && completed != nil {
-		r.library.publishScanCompleted(scope, *completed)
+	if err != nil || replay {
+		return finished, nil, err
 	}
-	return finished, err
+	return finished, completed, nil
 }
 
 func appendKnownScopes(scan *Scan, observed Discovery) (skipped bool) {

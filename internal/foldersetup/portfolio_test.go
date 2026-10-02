@@ -46,6 +46,11 @@ type portfolioWorld struct {
 	sharing  string
 	grantErr error
 
+	// The song-details consent, and whether the listing review reads them.
+	songDetails     bool
+	detailsErr      error
+	reviewReadsSong bool
+
 	receiptFacts *PortfolioReceiptFacts
 }
 
@@ -141,7 +146,8 @@ func (w worldLibrary) CommitConnect(context.Context, string, ConnectReview, stri
 
 func (w worldLibrary) ReviewScan(_ context.Context, _, rootID string) (LibraryScanReview, error) {
 	w.log = append(w.log, "scan:review")
-	return LibraryScanReview{Token: "t-scan", RootID: rootID, MetadataOnly: !w.notMetadata}, nil
+	return LibraryScanReview{Token: "t-scan", RootID: rootID, MetadataOnly: !w.notMetadata,
+		ReadsSongDetails: w.songDetails || w.reviewReadsSong}, nil
 }
 
 func (w worldLibrary) CommitScan(context.Context, string, string, LibraryScanReview, string) (ScanOutcome, error) {
@@ -164,6 +170,18 @@ func (w worldSharing) Grant(context.Context, string) error {
 		return w.grantErr
 	}
 	w.sharing = SharingOn
+	return nil
+}
+
+// SongDetails.
+type worldSongDetails struct{ *portfolioWorld }
+
+func (w worldSongDetails) Grant(context.Context, string) error {
+	w.log = append(w.log, "details:grant")
+	if w.detailsErr != nil {
+		return w.detailsErr
+	}
+	w.songDetails = true
 	return nil
 }
 
@@ -195,7 +213,7 @@ func runPortfolio(t *testing.T, w *portfolioWorld, plan personalassistant.Folder
 	progress := &recorder{}
 	runner := &PortfolioRunner{
 		Homes: w, Staffing: worldStaffing{w}, Library: worldLibrary{w}, Sharing: worldSharing{w}, Receipts: worldReceipts{w},
-		Folder: portfolioFolder, Progress: progress,
+		SongDetails: worldSongDetails{w}, Folder: portfolioFolder, Progress: progress,
 	}
 	cfg := PortfolioConfig{Plan: plan, AcceptedAfter: time.Now().Add(-time.Minute)}
 	if mutate != nil {
@@ -214,7 +232,9 @@ func TestPortfolioRunSetsUpAFreshCollectionInOrder(t *testing.T) {
 	if result.Status != personalassistant.FolderSetupDone {
 		t.Fatalf("result = %+v cause=%v", result, result.Cause)
 	}
-	want := "home:find,home:review,home:commit,staff:Portfolio Manager,library:review,library:on,root:review,root:connect,scan:review,scan:commit,consent:grant"
+	// The song-details consent is recorded before anything is listed, so the
+	// setup's own scan reads the facts its library line disclosed.
+	want := "home:find,home:review,home:commit,staff:Portfolio Manager,details:grant,library:review,library:on,root:review,root:connect,scan:review,scan:commit,consent:grant"
 	if got := strings.Join(w.log, ","); got != want {
 		t.Fatalf("calls =\n %s\nwant\n %s", got, want)
 	}
@@ -368,7 +388,8 @@ func TestPortfolioRunInterruptedRecordsAStop(t *testing.T) {
 	cancel()
 	progress := &recorder{}
 	runner := &PortfolioRunner{Homes: w, Staffing: worldStaffing{w}, Library: worldLibrary{w}, Sharing: worldSharing{w}, Receipts: worldReceipts{w},
-		Folder: portfolioFolder, Progress: progress, Providers: &fakeProvider{pluginID: "music-project-management", version: "0.1.1", calls: &[]string{}}}
+		SongDetails: worldSongDetails{w}, Folder: portfolioFolder, Progress: progress,
+		Providers: &fakeProvider{pluginID: "music-project-management", version: "0.1.1", calls: &[]string{}}}
 	facts := freshFacts()
 	facts.Provider.State = personalassistant.FolderInstallInstall
 	runner.Providers = cancelledProvider{}

@@ -139,6 +139,48 @@ export function lastSavedLabel(isoTime, now = new Date()) {
   return `Saved ${MONTHS[saved.getMonth()]} ${saved.getFullYear()}`;
 }
 
+const positive = value => typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+// songLength is m:ss, or h:mm:ss from an hour on, rounded to the second.
+function songLength(seconds) {
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = String(total % 60).padStart(2, '0');
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${secs}` : `${minutes}:${secs}`;
+}
+
+// songFactsLabel words the three numbers read from a song's project file:
+// "14 tracks · 92 BPM · 3:41", "92 BPM, varies" when the tempo changes. A part
+// that is unknown is left out (never "0" or "unknown"); no facts is ''. These are
+// facts about the file, never a word on how far along the song is.
+export function songFactsLabel(facts) {
+  if (!facts || typeof facts !== 'object') return '';
+  const parts = [];
+  if (positive(facts.track_count) && Number.isInteger(facts.track_count)) {
+    parts.push(plural(facts.track_count, 'track'));
+  }
+  if (positive(facts.tempo_bpm)) {
+    const tempo = `${Math.round(facts.tempo_bpm * 10) / 10} BPM`;
+    parts.push(facts.tempo_varies === true ? `${tempo}, varies` : tempo);
+  }
+  if (positive(facts.length_seconds) && Math.round(facts.length_seconds) > 0) {
+    parts.push(songLength(facts.length_seconds));
+  }
+  return parts.join(' · ');
+}
+
+// songLineText is a song's one muted line, "Saved … · 14 tracks · 92 BPM ·
+// 3:41", with each fact kept on one line (non-breaking spaces inside a fact),
+// so a narrow card wraps only between facts.
+export function songLineText(saved, facts) {
+  const unbroken = String(facts || '')
+    .split(' · ')
+    .map(part => part.replaceAll(' ', '\xa0'))
+    .join(' · ');
+  return [saved, unbroken].filter(Boolean).join(' · ');
+}
+
 // recentSongs keeps the rows a person can open in one click and that have a
 // real save time, in the order given (the server sorts by last_saved), at most
 // `limit` of them.

@@ -316,8 +316,12 @@ type AssistantProgramState struct {
 	// role is filled, on every project opened in this Home, by the one agent the
 	// consent created. Written only through ProjectStaffingConsents.
 	ProjectStaffingConsent *ProjectStaffingConsent `json:"project_staffing_consent,omitempty"`
-	Topology               AssistantTopologyState  `json:"topology,omitempty"`
-	Migration              AssistantMigrationState `json:"migration,omitempty"`
+	// SongDetailsConsent lets each scan read tempo, length and track count from
+	// the Home's project files. Granted only by a folder card that created
+	// the Home; a Home without it never opens a project file.
+	SongDetailsConsent *SongDetailsConsent     `json:"song_details_consent,omitempty"`
+	Topology           AssistantTopologyState  `json:"topology,omitempty"`
+	Migration          AssistantMigrationState `json:"migration,omitempty"`
 	// GroupTemplate is inert creation provenance written only in the first
 	// Save of a Home created through a reviewed Group Template selection.
 	GroupTemplate *AssistantGroupTemplateProvenance `json:"group_template,omitempty"`
@@ -359,6 +363,7 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 	clone.ProjectLibraryInitReviews = append([]AssistantProjectLibraryInitReview(nil), source.ProjectLibraryInitReviews...)
 	clone.ProjectLibraryInactiveRoots = append([]string(nil), source.ProjectLibraryInactiveRoots...)
 	clone.ProjectStaffingConsent = source.ProjectStaffingConsent.Clone()
+	clone.SongDetailsConsent = source.SongDetailsConsent.Clone()
 	for i := range clone.ProjectLibraryInitReviews {
 		if source.ProjectLibraryInitReviews[i].ConsumedAt != nil {
 			value := *source.ProjectLibraryInitReviews[i].ConsumedAt

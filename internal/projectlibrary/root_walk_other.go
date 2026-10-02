@@ -4,6 +4,7 @@ package projectlibrary
 
 import (
 	"context"
+	"os"
 	"time"
 )
 
@@ -18,6 +19,13 @@ type DirectoryRow struct {
 }
 
 func directoryMatches(Root, string, string) bool { return false }
+
+// Without a descriptor-anchored no-follow open, the fact pass opens nothing.
+func openPinnedProjectFile(Root, string, string, FactsSource) (*os.File, error) {
+	return nil, ErrUnavailable
+}
+
+func pinnedFileStillMatches(*os.File, FactsSource) bool { return false }
 
 func readPinnedDirectory(context.Context, Root, string, string, int) ([]DirectoryRow, bool, error) {
 	return nil, false, ErrUnavailable

@@ -83,6 +83,13 @@ func reconcileCandidates(doc *Document, scan Scan, observed Discovery, root Root
 			return err
 		}
 		if entryIndex >= 0 {
+			// Facts stay only while the file that dates the song is the very
+			// file they were read from; otherwise the fact pass reads it again.
+			if prior := doc.Entries[entryIndex].Observations[observationIndex].Facts; prior != nil &&
+				candidate.DatedFile != nil && prior.ReadFrom.sameFile(*candidate.DatedFile) &&
+				factsFile(candidate.Format, candidate.DatedFile.File) {
+				observation.Facts = prior.clone()
+			}
 			doc.Entries[entryIndex].Observations[observationIndex] = observation
 			doc.Entries[entryIndex].Revision++
 			continue

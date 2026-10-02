@@ -13,7 +13,9 @@ import {
   libraryOpenRoute,
   openLibrarySong,
   RECENT_SONGS_QUERY,
-  recentSongs
+  recentSongs,
+  songFactsLabel,
+  songLineText
 } from './library-open.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 
@@ -352,6 +354,7 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
           id: String(row.id),
           name,
           saved: lastSavedLabel(row.last_saved_at, now),
+          facts: songFactsLabel(row.facts),
           ariaLabel: libraryOpenAction({ ...row, name }, false).ariaLabel
         };
       }),
@@ -1025,9 +1028,11 @@ function songRow(song) {
   const name = document.createElement('strong');
   name.textContent = song.name;
   text.append(name);
-  if (song.saved) {
+  if (song.saved || song.facts) {
+    // One muted line: "Saved 3 days ago · 14 tracks · 92 BPM · 3:41".
     const saved = document.createElement('small');
-    saved.textContent = song.saved;
+    saved.textContent = songLineText(song.saved, song.facts);
+    if (song.facts) saved.dataset.songFacts = song.facts;
     text.append(saved);
   }
   const open = document.createElement('button');

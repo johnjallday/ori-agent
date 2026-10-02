@@ -8,7 +8,9 @@ import {
   libraryRequestError,
   readLibraryPayload as payload,
   RECENT_SONGS_QUERY,
-  recentSongs
+  recentSongs,
+  songFactsLabel,
+  songLineText
 } from './library-open.js';
 import { setupQuestURL } from './setup-quest-links.js';
 
@@ -19,7 +21,8 @@ export {
   libraryOpenAction,
   libraryOpenChoices,
   libraryOpenRoute,
-  libraryOpenedMessage
+  libraryOpenedMessage,
+  songFactsLabel
 } from './library-open.js';
 
 function label(value) {
@@ -334,6 +337,66 @@ export function libraryRunText(run) {
   return `${who} reviewed this scan and ${found}.${stop}`;
 }
 
+const SHORT_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec'
+];
+
+// Why a Home that reads song details has no brief for its latest scan.
+// `manager` is "your Portfolio Manager" (or "your Manager").
+function briefMissingText(run, manager) {
+  if (run?.status === 'started')
+    return `${manager[0].toUpperCase()}${manager.slice(1)} is describing your collection…`;
+  if (run?.status === 'skipped') {
+    if (run.reason === 'no_model')
+      return `No brief: set up a model so ${manager} can describe your collection.`;
+    return `No brief for this scan: ${RUN_SKIP_REASONS[run.reason] || 'the review could not run'}.`;
+  }
+  if (run?.status === 'finished') {
+    const stop = RUN_STOP_REASONS[run.reason] ? ` ${RUN_STOP_REASONS[run.reason]}` : '';
+    return `No brief for this scan: ${manager} did not write one.${stop}`;
+  }
+  return '';
+}
+
+// libraryBriefView is the head of the Home's Manager section (D8): its title
+// names the Manager's role on every Home; on a Home that reads song details it
+// shows the Manager's collection brief with where it came from, or one line on
+// why there is none. With the switch off there is no brief and nothing to
+// explain (the switch says so). The brief is model text: only ever text.
+export function libraryBriefView(page, run, songDetails = { state: 'on' }) {
+  const label = String(page?.manager_label || '').trim();
+  const manager = `your ${label || 'Manager'}`;
+  const view = { title: `From ${manager}`, brief: null, note: '' };
+  const brief = page?.brief;
+  const text = typeof brief?.text === 'string' ? brief.text.trim() : '';
+  if (text) {
+    const at = new Date(brief.created_at);
+    const when = Number.isNaN(at.getTime())
+      ? ''
+      : ` on ${SHORT_MONTHS[at.getMonth()]} ${at.getDate()}`;
+    const by = String(brief.agent_name || '').trim() || label || 'the Manager';
+    const model = String(brief.model || '').trim();
+    view.brief = {
+      text,
+      provenance: `Written by ${by} after the scan${when}${model ? ` · ${model}` : ''}`
+    };
+  } else if (run?.mode === 'brief' && songDetails?.state === 'on') {
+    view.note = briefMissingText(run, manager);
+  }
+  return view;
+}
+
 // libraryFeedbackText totals the owner's answers across suggestion kinds.
 // It is shown to the owner only; nothing tunes itself from it.
 export function libraryFeedbackText(feedback) {
@@ -399,6 +462,46 @@ export function librarySharingView(sharing, readOnly = false) {
   return view;
 }
 
+// The library's intro: what reading this Home's folders does. A Home whose
+// song-details switch is on also reads three numbers from each project file.
+export const LIBRARY_INTRO =
+  'Discover project names and formats without opening project files, launching a project application or creating workspaces. Each scan is a separate choice; planning a session saves notes only.';
+
+function songProjects(songDetails) {
+  const app = String(songDetails?.app_name || '').trim();
+  return app ? `each ${app} project's` : "each project's";
+}
+
+export function libraryIntroText(songDetails) {
+  if (songDetails?.state !== 'on') return LIBRARY_INTRO;
+  return `Discover project names and formats, and ${songProjects(songDetails)} tempo, length and track count, without launching a project application, creating workspaces or changing any file. Each scan is a separate choice; planning a session saves notes only.`;
+}
+
+// songDetailsSwitchView words the Home's "Read song details when scanning"
+// switch from the library read's `song_details`. Only a Home that agreed on its
+// setup card has it (state on or off); a read-only Home shows it disabled.
+export function songDetailsSwitchView(songDetails, readOnly = false) {
+  const state = String(songDetails?.state || '');
+  if (state !== 'on' && state !== 'off') return { visible: false };
+  const read = songProjects(songDetails);
+  return {
+    visible: true,
+    checked: state === 'on',
+    disabled: Boolean(readOnly),
+    note:
+      state === 'on'
+        ? `Ori reads ${read} tempo, length and track count. Nothing is changed.`
+        : `Scans read no project files. Turn this on to read ${read} tempo, length and track count on the next scan.`
+  };
+}
+
+// What the status line says after the switch changed.
+export function songDetailsStatus(enabled) {
+  return enabled
+    ? 'Song details are on. The next scan reads them; nothing is scanned now.'
+    : 'Song details cleared. Scans no longer read project files.';
+}
+
 const QUEUE_LIMIT = 100;
 export function readActivationQueue(homeID, storage = globalThis.sessionStorage, now = Date.now()) {
   try {
@@ -447,8 +550,9 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
 }
 
 // recentlySavedView is the "Recently saved" section from one last_saved page:
-// up to six songs with a save time, each with Open where the Home can open it.
-// A read-only Home still shows its songs, without Open. No dated song: hidden.
+// up to six songs with a save time, each with Open where the Home can open it,
+// and its song facts when they are known. A read-only Home still shows its
+// songs, without Open. No dated song: hidden.
 export function recentlySavedView(page, now = new Date()) {
   const readOnly = page?.provider_read_only !== false;
   const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(Boolean);
@@ -461,9 +565,18 @@ export function recentlySavedView(page, now = new Date()) {
       row,
       name: String(row.name || '').trim() || 'This song',
       saved: lastSavedLabel(row.last_saved_at, now),
+      facts: songFactsLabel(row.facts),
       open: libraryOpenAction(row, readOnly)
     }))
   };
+}
+
+// savedLine is one song's muted line, "Saved … · 14 tracks · 92 BPM · 3:41",
+// with the facts half on data-song-facts for tests and styling.
+function savedLine(className, saved, facts) {
+  const line = node('small', className, songLineText(saved, facts));
+  if (facts) line.dataset.songFacts = facts;
+  return line;
 }
 
 // This panel belongs to the exact Home. No browser path, child workspace ID,
@@ -675,6 +788,9 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibrarySharingAction')
       ?.addEventListener('click', event => void this.runSharingAction(event.currentTarget));
+    document
+      .getElementById('projectLibrarySongDetailsSwitch')
+      ?.addEventListener('change', event => void this.setSongDetails(event.currentTarget));
     await this.restoreCollectionContinuation();
     await this.refresh();
     await this.resumeFromIntegration();
@@ -704,6 +820,58 @@ export class ProjectLibraryPanel {
       action.dataset.sharingAction = view.action?.id || '';
       action.disabled = this.busy;
     }
+  }
+
+  // The Home's song-details switch and the intro that says what a scan reads.
+  // Both ride the library read.
+  renderSongDetails() {
+    const intro = document.getElementById('projectLibraryIntro');
+    if (intro) intro.textContent = libraryIntroText(this.state?.song_details);
+    const section = document.getElementById('projectLibrarySongDetails');
+    if (!section) return;
+    const view = songDetailsSwitchView(this.state?.song_details, this.readOnly);
+    section.hidden = !view.visible;
+    if (!view.visible) return;
+    const toggle = document.getElementById('projectLibrarySongDetailsSwitch');
+    if (toggle) {
+      toggle.checked = view.checked;
+      toggle.disabled = this.busy || view.disabled;
+    }
+    const note = document.getElementById('projectLibrarySongDetailsNote');
+    if (note) note.textContent = view.note;
+  }
+
+  // Off clears every stored song fact on the server, so the facts lines go
+  // with it; on starts no scan, so there is nothing to show until the next one.
+  async setSongDetails(toggle) {
+    if (!this.state?.song_details || this.busy || this.readOnly) return;
+    const enabled = Boolean(toggle?.checked);
+    let changed = false;
+    await this.run(
+      toggle,
+      enabled ? 'Turning song details on…' : 'Turning song details off…',
+      async () => {
+        try {
+          const result = await this.post('/song-details', {
+            request_id: `song-details-${globalThis.crypto.randomUUID()}`,
+            enabled
+          });
+          if (result?.song_details) this.state.song_details = result.song_details;
+          changed = true;
+        } catch (error) {
+          if (error.payload?.song_details) this.state.song_details = error.payload.song_details;
+          throw error;
+        } finally {
+          this.renderSongDetails();
+        }
+      }
+    );
+    if (!changed) return;
+    // Off cleared the facts and the brief written from them, and moved the
+    // library's revision on: re-read the whole library so the lists, the
+    // Manager section and the next review all start from the current one.
+    await this.refresh();
+    this.status(songDetailsStatus(enabled));
   }
 
   async postSharing(path, body) {
@@ -843,6 +1011,7 @@ export class ProjectLibraryPanel {
       this.renderFormats();
       this.renderRoots();
       this.renderSharing();
+      this.renderSongDetails();
       this.renderSetupNext();
       await this.restoreQueue();
       this.renderQueueControls();
@@ -1005,7 +1174,32 @@ export class ProjectLibraryPanel {
       digestLine.textContent = digestText;
       digestLine.hidden = !digestText;
     }
-    const runText = digestText ? libraryRunText(summary?.proposal_run) : '';
+    let page = null;
+    try {
+      page = await this.request('/proposals');
+    } catch (_) {
+      page = null; // An unavailable provider/binding never creates a review action.
+    }
+    const run = summary?.proposal_run;
+    const briefMode = run?.mode === 'brief';
+    const head = libraryBriefView(page, digestText ? run : null, this.state?.song_details);
+    const title = document.getElementById('projectLibraryProposalsTitle');
+    if (title) title.textContent = head.title;
+    const briefBox = document.getElementById('projectLibraryBrief');
+    if (briefBox) {
+      briefBox.replaceChildren();
+      briefBox.hidden = !head.brief;
+      if (head.brief) {
+        // Model text: set as text, never parsed as HTML.
+        briefBox.append(
+          node('p', 'project-library-brief-text', head.brief.text),
+          node('small', 'project-library-brief-source', head.brief.provenance)
+        );
+      }
+    }
+    // A brief turn's line is the brief's own provenance or why there is none;
+    // a suggestions turn keeps today's run line.
+    const runText = !digestText ? '' : briefMode ? head.note : libraryRunText(run);
     const runLine = document.getElementById('projectLibraryRun');
     if (runLine) {
       runLine.textContent = runText;
@@ -1017,16 +1211,14 @@ export class ProjectLibraryPanel {
       feedbackLine.textContent = feedbackText;
       feedbackLine.hidden = !feedbackText;
     }
-    let page = null;
-    try {
-      page = await this.request('/proposals');
-    } catch (_) {
-      page = null; // An unavailable provider/binding never creates a review action.
-    }
+    // The note on what suggestions are only matters where there are some.
+    const suggestionsNote = document.getElementById('projectLibraryProposalsNote');
+    if (suggestionsNote) suggestionsNote.hidden = briefMode && !page?.total;
     if (!page?.total) {
-      if (!digestText) return;
+      if (!digestText && !head.brief) return;
       section.hidden = false;
-      container.append(node('p', '', 'No Manager suggestions to review for this scan.'));
+      if (!briefMode)
+        container.append(node('p', '', 'No Manager suggestions to review for this scan.'));
       return;
     }
     section.hidden = false;
@@ -1292,7 +1484,7 @@ export class ProjectLibraryPanel {
     for (const card of view.cards) {
       const item = node('article', 'project-library-resume-card project-library-recent-card');
       const text = node('div', 'project-library-recent-text');
-      text.append(node('h4', '', card.name), node('small', '', card.saved));
+      text.append(node('h4', '', card.name), savedLine('', card.saved, card.facts));
       item.append(text);
       if (card.open) {
         const open = node('button', 'modern-btn modern-btn-primary', card.open.label);
@@ -1579,7 +1771,8 @@ export class ProjectLibraryPanel {
         node('small', '', row.next_action || 'No next action saved')
       );
       const saved = lastSavedLabel(row.last_saved_at);
-      if (saved) name.append(node('small', 'project-library-saved', saved));
+      const facts = songFactsLabel(row.facts);
+      if (saved || facts) name.append(savedLine('project-library-saved', saved, facts));
       const stage = node('td');
       stage.append(node('span', '', label(row.stage)), node('small', '', label(row.status)));
       const connection = node('td', '', label(row.connection));

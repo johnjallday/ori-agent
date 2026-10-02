@@ -139,6 +139,9 @@ type PortfolioFacts struct {
 	// Sharing is the Home's consent for the shared assistant: "" (none), "on" or
 	// "off" (switched off on the Home).
 	Sharing string
+	// SongDetails is the existing Home's song-details consent: "" (none), "on"
+	// or "off". A Home the plan creates gets it; an existing Home never does.
+	SongDetails string
 }
 
 // Sharing states of an existing Home's consent.
@@ -146,6 +149,24 @@ const (
 	SharingOn  = "on"
 	SharingOff = "off"
 )
+
+// SongDetailsOn is an existing Home whose song-details switch is on.
+const SongDetailsOn = "on"
+
+// The library line's detail: today's, and the one a Home that reads song facts
+// shows (libraryDetailSongDetails). Each is part of the plan digest, so a card
+// showing the other is refused as plan_changed.
+const libraryDetailNamesOnly = "Names and project files only. Nothing is opened, moved or copied."
+
+// libraryDetailSongDetails names the application whose project files are read
+// ("Reads each <app> project's tempo, …"), as the card names it elsewhere.
+func libraryDetailSongDetails(appName string) string {
+	project := "project"
+	if app := strings.TrimSpace(appName); app != "" {
+		project = app + " project"
+	}
+	return "Reads each " + project + "'s tempo, length and track count. Nothing is moved, copied or changed."
+}
 
 // BuildPortfolioPlan lists every consequence of Set up on a collection of
 // projects, in the order the card shows them, and the intent a run is held to.
@@ -185,10 +206,18 @@ func BuildPortfolioPlan(facts PortfolioFacts) personalassistant.FolderSetupPlan 
 	if noun == "" {
 		noun = "projects"
 	}
+	// T6: a Home this Set up creates reads song facts (its consent is this
+	// card); an existing Home reads them only when its own switch is on.
+	intent.GrantsSongDetails = !facts.HomeExists
+	intent.ReadsSongDetails = !facts.HomeExists || facts.SongDetails == SongDetailsOn
+	library := libraryDetailNamesOnly
+	if intent.ReadsSongDetails {
+		library = libraryDetailSongDetails(facts.AppName)
+	}
 	lines = append(lines, personalassistant.FolderPlanLine{
 		Kind:   personalassistant.FolderPlanLibrary,
 		Name:   fmt.Sprintf("Lists the %d %s in %s", facts.Projects, noun, facts.FolderName),
-		Detail: "Names and project files only. Nothing is opened, moved or copied.",
+		Detail: library,
 	})
 	if shared {
 		one := strings.TrimSpace(facts.ProjectLabel)

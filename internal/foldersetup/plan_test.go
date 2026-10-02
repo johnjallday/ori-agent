@@ -204,11 +204,12 @@ func TestBuildPortfolioPlanListsTheWholeCollectionSetup(t *testing.T) {
 	if d := line(plan, personalassistant.FolderPlanAssistant).Detail; !strings.Contains(d, "File-only: Ori does not control REAPER.") {
 		t.Errorf("assistant detail = %q", d)
 	}
-	if d := line(plan, personalassistant.FolderPlanLibrary).Detail; !strings.Contains(d, "Nothing is opened, moved or copied") {
+	if d := line(plan, personalassistant.FolderPlanLibrary).Detail; d != "Reads each REAPER project's tempo, length and track count. Nothing is moved, copied or changed." {
 		t.Errorf("library detail = %q", d)
 	}
 	intent := plan.Intent
 	if !intent.Portfolio || !intent.CreatesHome || !intent.StaffsHome || !intent.GrantsConsent || !intent.SharedProjects ||
+		!intent.ReadsSongDetails || !intent.GrantsSongDetails ||
 		intent.HomeTemplate != "plugin-home:mpm:music-producer-assistant" || intent.Integration != personalassistant.FolderInstallInstall ||
 		intent.Provider != personalassistant.FolderInstallInstall {
 		t.Fatalf("intent = %+v", intent)

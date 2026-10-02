@@ -310,6 +310,34 @@ func (p *WorkspaceToolProvider) libraryProposeProjectReviewTool() toolapi.Tool {
 	}
 }
 
+func (p *WorkspaceToolProvider) librarySaveBriefTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{Name: "home_library_save_brief",
+			Description: "Save this scan's one short description of the owner's whole music library, shown on the Home. Describe only what the collection holds, how its songs group (tempo, length, track count) and what was saved lately. Never claim a song is done, finished, ready or good, and never advise. Plain text: at most three sentences and 500 characters, one paragraph, no file names, paths or links. Changes no project, file, note or task. Saving a second, different brief for the same scan is refused.",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{
+				"text": map[string]any{"type": "string", "description": "The brief: plain text, at most three sentences and 500 characters."},
+			}, "required": []string{"text"}}},
+		call: func(_ context.Context, raw string) (string, error) {
+			var input struct {
+				Text string `json:"text"`
+			}
+			if err := decodeLibraryToolArgs(raw, &input); err != nil {
+				return "", err
+			}
+			brief, replay, err := p.libraryStore().SaveCollectionBrief(p.managerAuthority(), input.Text)
+			if err != nil {
+				return "", fmt.Errorf("collection brief not saved: %w", err)
+			}
+			encoded, err := json.Marshal(map[string]any{"scan_id": brief.ScanID, "replay": replay,
+				"effect": "Brief saved on the Home. Nothing else changed."})
+			if err != nil || len(encoded) > 4096 {
+				return "", fmt.Errorf("collection brief result exceeded its limit")
+			}
+			return string(encoded), nil
+		},
+	}
+}
+
 func (p *WorkspaceToolProvider) librarySessionsTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{Name: "home_library_sessions",

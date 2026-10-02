@@ -24,7 +24,10 @@
 # one card), and baseline-export (an origin/dev baseline for the music and
 # REAPER harness suites without a worktree). Recent songs after setup
 # (tasks/tasks-recent-songs-after-setup.md) gives seed-portfolio staggered
-# save times and adds showfolder model (the system model setup needs).
+# save times and adds showfolder model (the system model setup needs). Song
+# facts and a collection brief (tasks/tasks-song-facts-collection-brief.md)
+# makes seed-portfolio write real minimal REAPER projects with varied tempo,
+# track counts and lengths, and adds its [bad] songs.
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
@@ -1641,16 +1644,38 @@ PY
     # <two-files> songs (default 0) get a second project file, so opening them
     # asks which file. Each song's project file carries its own saved time:
     # Song 001 today, Song 002 yesterday, then further back to over a year, so
-    # "Last saved" order and labels are visible. Never overwrites, even in a
-    # sandbox.
-    local home="${4:-}" count="${5:-}" chip="${6:-Desktop}" format="${7:-rpp}" two="${8:-0}"
-    [[ -n "$home" && -d "$home" && "$home" == *"/ori-demo."* && "$count" =~ ^[0-9]+$ && "$two" =~ ^[0-9]+$ ]] ||
-      fail "usage: $0 showfolder <base-url> seed-portfolio <ori-demo-sandbox> <count> [Desktop|Documents|Downloads] [rpp|als|mixed] [two-files]"
+    # "Last saved" order and labels are visible. Each REAPER project is a small
+    # valid project with its own tempo, track count and item lengths (song
+    # facts); Song 003 has tempo changes. [bad] (default 0) makes Song 004 a
+    # malformed file and Song 005 a sparse 40 MiB one, so neither gives facts.
+    # Never overwrites, even in a sandbox.
+    local home="${4:-}" count="${5:-}" chip="${6:-Desktop}" format="${7:-rpp}" two="${8:-0}" bad="${9:-0}"
+    [[ -n "$home" && -d "$home" && "$home" == *"/ori-demo."* && "$count" =~ ^[0-9]+$ && "$two" =~ ^[0-9]+$ && "$bad" =~ ^[01]$ ]] ||
+      fail "usage: $0 showfolder <base-url> seed-portfolio <ori-demo-sandbox> <count> [Desktop|Documents|Downloads] [rpp|als|mixed] [two-files] [bad]"
     case "$chip" in Desktop|Documents|Downloads) ;; *) fail "unknown chip: $chip" ;; esac
     case "$format" in rpp|als|mixed) ;; *) fail "unknown format: $format" ;; esac
-    python3 - "$home" "$count" "$chip" "$format" "$two" <<'PY'
+    python3 - "$home" "$count" "$chip" "$format" "$two" "$bad" <<'PY'
 import datetime, os, sys, time
-home, count, chip, fmt, two = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5])
+home, count, chip, fmt, two, bad = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], int(sys.argv[5]), sys.argv[6] == "1"
+TEMPOS = [92, 120, 96, 140, 88, 128.5, 100, 174, 90, 110]
+def rpp(i):
+    # A minimal project shaped like one REAPER saves: tempo, tracks, items.
+    tempo, tracks = TEMPOS[(i - 1) % len(TEMPOS)], 1 + (i * 5) % 14
+    length = 3725.0 if i == 10 else 95.0 + (i * 37) % 240
+    lines = ['<REAPER_PROJECT 0.1 "7.27/macOS-arm64" 1727800000', "  RIPPLE 0", f"  TEMPO {tempo} 4 4"]
+    if i == 3:
+        lines += ["  <TEMPOENVEX", "    ACT 1 -1", f"    PT 0 {tempo} 1", f"    PT 60 {tempo + 8} 1", "  >"]
+    for t in range(tracks):
+        lines += ["  <TRACK {%08X-0000-4000-8000-%012X}" % (i, t), f'    NAME "Track {t + 1}"']
+        if t == 0:  # the last item of track 1 ends the song
+            lines += ["    <ITEM", "      POSITION 0", f"      LENGTH {length / 2}", "    >",
+                      "    <ITEM", f"      POSITION {length / 2}", f"      LENGTH {length / 2}",
+                      "      <SOURCE WAVE", '        FILE "Media/take-0.wav"', "      >", "    >"]
+        elif t % 3 == 0:
+            lines += ["    <ITEM", f"      POSITION {t}", "      LENGTH 8", "    >"]
+        lines.append("  >")
+    lines.append(">")
+    return ("\n".join(lines) + "\n").encode()
 DAYS_AGO = [0, 1, 2, 4, 7, 12, 20, 35, 70, 150, 300, 420]
 def saved_at(i):
     days = DAYS_AGO[i - 1] if i <= len(DAYS_AGO) else DAYS_AGO[-1] + 45 * (i - len(DAYS_AGO))
@@ -1668,15 +1693,21 @@ def put(rel, body, saved=None):
 for i in range(1, count + 1):
     name = f"Song {i:03d}"
     ext = ".als" if fmt == "als" or (fmt == "mixed" and i % 3 == 0) else ".rpp"
-    body = b"<REAPER_PROJECT>\n" if ext == ".rpp" else b"ableton\n"
+    body = rpp(i) if ext == ".rpp" else b"ableton\n"
+    if bad and ext == ".rpp" and i == 4:
+        body = b"not a REAPER project\n"
     put(f"{chip}/{name}/{name}{ext}", body, saved_at(i))
+    if bad and ext == ".rpp" and i == 5:
+        with open(os.path.join(home, f"{chip}/{name}/{name}{ext}"), "r+b") as output:
+            output.truncate(40 * 1024 * 1024)  # sparse: over the 32 MiB cap, no disk used
+        os.utime(os.path.join(home, f"{chip}/{name}/{name}{ext}"), (saved_at(i), saved_at(i)))
     if i <= two:
         put(f"{chip}/{name}/{name} alt{ext}", body, saved_at(i) - 3600)
     put(f"{chip}/{name}/{name}{ext}-bak", body)
     put(f"{chip}/{name}/{name} bounce.wav", b"RIFF")
     for take in range(3):
         put(f"{chip}/{name}/Media/take-{take}.wav", b"RIFF")
-print(f"ok   seeded {count} {fmt} song folders in {chip} ({two} with two project files)")
+print(f"ok   seeded {count} {fmt} song folders in {chip} ({two} with two project files{', Song 004 malformed and Song 005 oversized' if bad else ''})")
 PY
     ;;
   portfolio-run)
@@ -1880,7 +1911,7 @@ sys.exit(3 if s.get("status") == "running" else 0)
   today)
     curl -sf "$BASE_URL/api/personal-assistant/today" | python3 -c 'import json,sys; t=json.load(sys.stdin)["today"]; print("Today:", t.get("state")); [print(k + ":", ", ".join(i.get("title", "") for i in (t.get(k) or {}).get("items", [])) or "(empty)") for k in ("working_on", "needs_you", "done")]; print("Could not read:", ", ".join(t.get("unavailable_sources") or []) or "none")'
     ;;
-  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|seed-song <sandbox> <chip> <name>|seed-portfolio <sandbox> <count> [chip] [rpp|als|mixed] [two-files]|hqcard|hq|model [provider] [model]|today|scan <chip>|decide <offer> <decision> [choice]|one-card <offer> [project-file]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
+  *) fail "usage: $0 showfolder <base-url> <seed|seed-audio|seed-corpus|seed-capability <sandbox> <project|portfolio|decline|file>|seed-song <sandbox> <chip> <name>|seed-portfolio <sandbox> <count> [chip] [rpp|als|mixed] [two-files] [bad]|hqcard|hq|model [provider] [model]|today|scan <chip>|decide <offer> <decision> [choice]|one-card <offer> [project-file]|project <offer> [name] [template]|resolve <offer> <workspace>|hide|unhide <sandbox> <folder>|current>" ;;
   esac
 }
 

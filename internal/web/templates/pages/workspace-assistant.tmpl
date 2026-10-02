@@ -130,7 +130,7 @@
                 <div><span class="assistant-program-panel-index">05 / PROJECT LIBRARY</span><h2 id="projectLibraryTitle">The project shelf</h2></div>
                 <button id="projectLibraryAdd" class="modern-btn modern-btn-primary" type="button" hidden>Add folder</button>
               </div>
-              <p class="project-library-intro">Discover project names and formats without opening project files, launching a project application or creating workspaces. Each scan is a separate choice; planning a session saves notes only.</p>
+              <p id="projectLibraryIntro" class="project-library-intro">Discover project names and formats without opening project files, launching a project application or creating workspaces. Each scan is a separate choice; planning a session saves notes only.</p>
               <p id="projectLibraryStatus" class="project-library-status" role="status" aria-live="polite" tabindex="-1">Loading saved projects…</p>
               <div id="projectLibrarySetup" class="project-library-empty" hidden>
                 <p>Bring your existing linked projects into one Home library. This copies saved notes and links; it does not open any folders.</p>
@@ -152,6 +152,16 @@
                   <p id="projectLibrarySharingNote" class="project-library-sharing-note"></p>
                   <button id="projectLibrarySharingAction" class="modern-btn modern-btn-primary" type="button" hidden></button>
                 </section>
+                <section id="projectLibrarySongDetails" class="project-library-sharing project-library-song-details" aria-labelledby="projectLibrarySongDetailsTitle" hidden>
+                  <div class="project-library-sharing-head">
+                    <h3 id="projectLibrarySongDetailsTitle">Song details</h3>
+                    <div class="form-check form-switch project-library-sharing-switch">
+                      <input id="projectLibrarySongDetailsSwitch" class="form-check-input" type="checkbox" role="switch" aria-describedby="projectLibrarySongDetailsNote">
+                      <label class="form-check-label" for="projectLibrarySongDetailsSwitch">Read song details when scanning</label>
+                    </div>
+                  </div>
+                  <p id="projectLibrarySongDetailsNote" class="project-library-sharing-note"></p>
+                </section>
                 <section id="projectLibraryResume" class="project-library-resume" aria-labelledby="projectLibraryResumeTitle" hidden>
                   <h3 id="projectLibraryResumeTitle">Pick up where you left off</h3>
                   <div id="projectLibraryResumeCards" class="project-library-resume-cards"></div>
@@ -162,11 +172,12 @@
                   <div id="projectLibraryPendingRows" class="project-library-resume-cards"></div>
                 </section>
                 <section id="projectLibraryProposals" class="project-library-resume" aria-labelledby="projectLibraryProposalsTitle" hidden>
-                  <h3 id="projectLibraryProposalsTitle">Manager suggestions to review</h3>
+                  <h3 id="projectLibraryProposalsTitle">From your Manager</h3>
+                  <div id="projectLibraryBrief" class="project-library-brief" hidden></div>
                   <p id="projectLibraryDigest" class="project-library-digest" hidden></p>
                   <p id="projectLibraryRun" class="project-library-run" hidden></p>
                   <p id="projectLibraryFeedback" class="project-library-run" hidden></p>
-                  <p>Manager suggestions are untrusted drafts or navigation hints. They cannot select folders, save sessions, change notes, or start project work. Review and confirm each change separately as the Home owner.</p>
+                  <p id="projectLibraryProposalsNote">Manager suggestions are untrusted drafts or navigation hints. They cannot select folders, save sessions, change notes, or start project work. Review and confirm each change separately as the Home owner.</p>
                   <div id="projectLibraryProposalRows" class="project-library-resume-cards"></div>
                 </section>
                 <div id="projectLibraryRoots" class="project-library-roots" aria-label="Approved discovery folders"></div>

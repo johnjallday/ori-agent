@@ -172,6 +172,9 @@ func (h *folderSetupHost) portfolioPlan(ctx context.Context, req personalassista
 	if home != nil {
 		facts.HomeExists, facts.HomeName, facts.HomeStaffed = true, home.Name, homeStaffed(home)
 		facts.Sharing = h.sharing(home, target.row.Blueprint.BlueprintID)
+		if home.GetAssistantProgramState().GetSongDetailsConsent().Active() {
+			facts.SongDetails = foldersetup.SongDetailsOn
+		}
 		if team, ok := h.projectTeam(home); ok && len(team.Roles) == 1 {
 			facts.AssistantName = team.Roles[0].Label
 		}
@@ -209,6 +212,9 @@ func (h *folderSetupHost) portfolioRun(ctx context.Context, req personalassistan
 	}
 	if req.Plan.Intent.GrantsConsent {
 		runner.Sharing = portfolioSharing{host: h, offerID: req.Offer.ID, blueprintID: target.row.Blueprint.BlueprintID}
+	}
+	if req.Plan.Intent.GrantsSongDetails {
+		runner.SongDetails = portfolioSongDetails{store: b.workspaceStore, offerID: req.Offer.ID}
 	}
 	config := foldersetup.PortfolioConfig{Plan: req.Plan}
 	if req.Offer.Setup != nil {
@@ -391,8 +397,9 @@ func (l portfolioLibrary) CommitConnect(_ context.Context, homeID string, review
 }
 
 func (l portfolioLibrary) ReviewScan(_ context.Context, homeID, rootID string) (foldersetup.LibraryScanReview, error) {
-	token, reviewed, metadataOnly, err := l.builder.sessionHandler.ReviewPortfolioScan(l.userID, homeID, rootID)
-	return foldersetup.LibraryScanReview{Token: token, RootID: reviewed, MetadataOnly: metadataOnly}, err
+	review, err := l.builder.sessionHandler.ReviewPortfolioScan(l.userID, homeID, rootID)
+	return foldersetup.LibraryScanReview{Token: review.Token, RootID: review.RootID, MetadataOnly: review.MetadataOnly,
+		ReadsSongDetails: review.ReadsSongDetails}, err
 }
 
 func (l portfolioLibrary) CommitScan(ctx context.Context, homeID, rootID string, review foldersetup.LibraryScanReview, key string) (foldersetup.ScanOutcome, error) {
@@ -445,6 +452,20 @@ func (s portfolioSharing) Grant(_ context.Context, homeID string) error {
 	return err
 }
 
+// portfolioSongDetails records the song-details consent on the Home the run
+// created, citing the card's offer.
+type portfolioSongDetails struct {
+	store   workspace.Store
+	offerID string
+}
+
+func (s portfolioSongDetails) Grant(_ context.Context, homeID string) error {
+	if s.store == nil {
+		return errSetupUnavailable
+	}
+	return workspace.NewSongDetailsConsents(s.store).Grant(homeID, s.offerID)
+}
+
 // portfolioReceipts reads back what the run made, from canonical state.
 type portfolioReceipts struct {
 	host         *folderSetupHost
@@ -483,6 +504,13 @@ func (r portfolioReceipts) Receipt(_ context.Context, homeID string, facts folde
 	listed := personalassistant.FolderReceiptRow{
 		Kind: "library", Name: fmt.Sprintf("Listed %d %s in %s", facts.Listed.Listed, noun, r.folder),
 		Detail: "names and project files only",
+	}
+	if home.GetAssistantProgramState().GetSongDetailsConsent().Active() {
+		one := strings.TrimSpace(r.projectLabel)
+		if one == "" {
+			one = "project"
+		}
+		listed.Detail = "names, project files, and each " + one + "'s tempo, length and track count"
 	}
 	if facts.Listed.Partial {
 		// Never claim the whole folder after a partial listing.

@@ -924,6 +924,32 @@
 .project-library-sharing .modern-btn {
   margin-top: 0.6rem;
 }
+/* The Manager's collection brief: one short paragraph, its source muted below. */
+.project-library-brief {
+  margin: 0.4rem 0 0.8rem;
+}
+.project-library-brief-text {
+  margin: 0 0 0.25rem;
+  font-size: 1.02rem;
+  line-height: 1.5;
+}
+.project-library-brief-source {
+  display: block;
+  color: var(--assistant-muted);
+}
+/* The global 44px touch target (common.css) would turn a switch into a circle on
+   a phone: the switch keeps its shape and its label becomes the target. */
+@media (max-width: 768px) {
+  .project-library-sharing-switch .form-check-input {
+    min-height: 0;
+    min-width: 0;
+  }
+  .project-library-sharing-switch .form-check-label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
 /* A row's one-click Open sits before its Details; the file chips wrap below. */
 .project-library-row-actions {
   white-space: nowrap;

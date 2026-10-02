@@ -22,6 +22,10 @@ type Candidate struct {
 	Alternates     []string  `json:"alternates,omitempty"`
 	Ambiguous      bool      `json:"ambiguous"`
 	FileModifiedAt time.Time `json:"file_modified_at,omitempty"`
+	// DatedFile is the primary format's newest project file, the one whose save
+	// time is FileModifiedAt. A consenting Home's fact pass reads this file and
+	// no other. Nil when that newest entry is a bundle, not a file.
+	DatedFile *FactsSource `json:"dated_file,omitempty"`
 }
 
 // ObservedScope is inert server-known directory evidence for a separately
@@ -184,7 +188,7 @@ func (r *Roots) discoverAt(ctx context.Context, scope Scope, root Root, relative
 
 func recognizedProject(relative, identity string, rows []DirectoryRow) (Candidate, bool) {
 	groups := map[string][]string{}
-	newest := map[string]time.Time{}
+	newest := map[string]DirectoryRow{}
 	for _, row := range rows {
 		if row.IsLink || row.Unreadable || strings.HasPrefix(row.Name, ".") || strings.HasSuffix(row.Name, ".icloud") {
 			continue
@@ -192,8 +196,12 @@ func recognizedProject(relative, identity string, rows []DirectoryRow) (Candidat
 		marker, ok := folderdigest.MatchMarker(row.Name, row.IsDir)
 		if ok && marker.ProjectFormat != "" {
 			groups[marker.ProjectFormat] = append(groups[marker.ProjectFormat], row.Name)
-			if row.ModifiedAt.After(newest[marker.ProjectFormat]) {
-				newest[marker.ProjectFormat] = row.ModifiedAt
+			// Equal save times pick the first name, so the dated file is the
+			// same on every listing of an unchanged folder.
+			prior, seen := newest[marker.ProjectFormat]
+			if !seen || row.ModifiedAt.After(prior.ModifiedAt) ||
+				(row.ModifiedAt.Equal(prior.ModifiedAt) && row.Name < prior.Name) {
+				newest[marker.ProjectFormat] = row
 			}
 		}
 	}
@@ -205,7 +213,12 @@ func recognizedProject(relative, identity string, rows []DirectoryRow) (Candidat
 	for _, marker := range folderdigest.Markers {
 		if choices := groups[marker.ProjectFormat]; len(choices) > 0 {
 			candidate.Format, candidate.Alternates = marker.ProjectFormat, choices
-			candidate.FileModifiedAt = newest[marker.ProjectFormat].UTC()
+			dated := newest[marker.ProjectFormat]
+			candidate.FileModifiedAt = dated.ModifiedAt.UTC()
+			if !dated.IsDir && dated.Identity != "" {
+				candidate.DatedFile = &FactsSource{File: dated.Name, Identity: dated.Identity,
+					Size: dated.Size, ModifiedAt: dated.ModifiedAt.UTC()}
+			}
 			break
 		}
 	}
