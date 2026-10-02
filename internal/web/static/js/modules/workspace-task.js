@@ -15,7 +15,8 @@ import {
   getDisplayStatus,
   resolveTaskStatusPresentation
 } from './task-presentation.js';
-import { fetchRelatedPlan, renderRelatedPlan } from './workspace-related-plan.js';
+import { renderRelatedPlan } from './workspace-related-plan.js';
+import { createTaskPageDataLoader } from './workspace-task-data-loader.js';
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 
 // Keep the raw-status helpers available to existing callers.
@@ -841,7 +842,13 @@ function buildResultWorkflowDraft(
 }
 
 export class WorkspaceTaskPage {
-  constructor(workspaceId, taskId, workspaceSlug = workspaceId) {
+  constructor(
+    workspaceId,
+    taskId,
+    workspaceSlug = workspaceId,
+    dataLoader = createTaskPageDataLoader()
+  ) {
+    this.dataLoader = dataLoader;
     this.workspaceId = workspaceId;
     this.workspaceSlug = workspaceSlug;
     this.taskId = taskId;
@@ -1361,42 +1368,27 @@ export class WorkspaceTaskPage {
   async loadData() {
     const request = this.beginDataRequest();
     if (!request) return;
-    const options = { signal: request.controller.signal };
     this.setState('loading');
     this.setAlert('');
 
     try {
-      const [workspace, taskResponse, agents, taskEvents, outputDir] = await Promise.all([
-        this.fetchWorkspace(options),
-        this.fetchTask(options),
-        this.fetchAgents(options).catch(() => []),
-        this.fetchTaskEvents(options).catch(() => []),
-        this.fetchWorkspaceOutputDir(options).catch(() => '')
-      ]);
+      const snapshot = await this.dataLoader.loadSnapshot({
+        workspaceId: request.workspaceId,
+        taskId: request.taskId,
+        signal: request.controller.signal
+      });
       if (!this.isDataRequestCurrent(request)) return;
 
-      let tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : [];
-      const workspaceTask = tasks.find(item => String(item?.id || '') === request.taskId) || null;
-      const task = taskResponse || workspaceTask;
-      const validTask =
-        task && String(task.workspace_id || request.workspaceId) === request.workspaceId;
-      if (validTask && !workspaceTask) tasks = [task];
-      const runs = validTask
-        ? await this.fetchWorkspaceRunsForTask(task, options).catch(() => [])
-        : [];
-      if (!this.isDataRequestCurrent(request)) return;
-
-      // Publish one coherent snapshot, never half of an obsolete load while
-      // its run lookup is still outstanding.
-      this.workspace = workspace || null;
-      this.workspaceOutputDir = outputDir || '';
-      this.tasks = tasks;
-      this.availableAgents = Array.isArray(agents) ? agents : [];
-      this.taskEvents = Array.isArray(taskEvents) ? taskEvents : [];
-      this.task = validTask ? task : null;
-      this.workspaceRuns = runs;
-      this.currentRun = this.findWorkspaceRun(this.task?.current_run_id);
-      if (!validTask) {
+      // Only the controller can publish a snapshot to the live page.
+      this.workspace = snapshot.workspace;
+      this.workspaceOutputDir = snapshot.workspaceOutputDir;
+      this.tasks = snapshot.tasks;
+      this.availableAgents = snapshot.availableAgents;
+      this.taskEvents = snapshot.taskEvents;
+      this.task = snapshot.task;
+      this.workspaceRuns = snapshot.workspaceRuns;
+      this.currentRun = snapshot.currentRun;
+      if (!this.task) {
         this.setState('empty');
         return;
       }
@@ -1413,111 +1405,6 @@ export class WorkspaceTaskPage {
       this.setAlert(error?.message || 'Failed to load this task page.');
       this.setState('empty');
     }
-  }
-
-  async fetchWorkspace(options = {}) {
-    const response = await fetch(
-      `/api/workspaces/${encodeURIComponent(this.workspaceId)}`,
-      options
-    );
-    if (!response.ok) {
-      throw new Error('Failed to load workspace details.');
-    }
-    return response.json();
-  }
-
-  // fetchWorkspaceOutputDir returns the resolved default output directory for
-  // this workspace (<workspace>/outputs), used to show where "Default output
-  // folder" actually writes.
-  async fetchWorkspaceOutputDir(options = {}) {
-    const response = await fetch(
-      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/output-dir`,
-      options
-    );
-    if (!response.ok) return '';
-    const data = await response.json();
-    return String(data?.output_dir || '').trim();
-  }
-
-  async fetchTask(options = {}) {
-    const response = await fetch(
-      `/api/orchestration/tasks?id=${encodeURIComponent(this.taskId)}`,
-      options
-    );
-    if (response.status === 404) return null;
-    if (!response.ok) {
-      throw new Error('Failed to load task details.');
-    }
-    return response.json();
-  }
-
-  async fetchAgents(options = {}) {
-    const response = await fetch('/api/agents', options);
-    if (!response.ok) {
-      throw new Error('Failed to load agent list.');
-    }
-
-    const payload = await response.json();
-    return Array.isArray(payload?.agents) ? payload.agents : [];
-  }
-
-  async fetchTaskEvents(options = {}) {
-    const params = new URLSearchParams({
-      workspace_id: this.workspaceId,
-      task_id: this.taskId,
-      limit: '200'
-    });
-    const response = await fetch(`/api/orchestration/events?${params.toString()}`, options);
-    if (!response.ok) return [];
-
-    const payload = await response.json().catch(() => ({}));
-    return Array.isArray(payload?.events) ? payload.events : [];
-  }
-
-  async fetchCurrentRun(runId, options = {}) {
-    const normalizedRunId = String(runId || '').trim();
-    if (!normalizedRunId) return null;
-
-    const response = await fetch(
-      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(normalizedRunId)}`,
-      options
-    );
-    if (response.status === 404) return null;
-    if (!response.ok) {
-      throw new Error('Failed to load latest workspace run.');
-    }
-    return response.json();
-  }
-
-  async fetchWorkspaceRunsForTask(task = this.task, options = {}) {
-    const runIds = new Set();
-    const currentRunId = String(task?.current_run_id || '').trim();
-    if (currentRunId) runIds.add(currentRunId);
-
-    (Array.isArray(task?.execution_history) ? task.execution_history : []).forEach(entry => {
-      const runId = String(entry?.run_id || '').trim();
-      if (runId) runIds.add(runId);
-    });
-
-    if (!runIds.size) return [];
-
-    const runs = await Promise.all(
-      [...runIds].map(runId => this.fetchCurrentRun(runId, options).catch(() => null))
-    );
-
-    return runs
-      .filter(Boolean)
-      .sort((left, right) => this.workspaceRunTimestamp(right) - this.workspaceRunTimestamp(left));
-  }
-
-  findWorkspaceRun(runId) {
-    const normalizedRunId = String(runId || '').trim();
-    if (!normalizedRunId) return null;
-    return (
-      (Array.isArray(this.workspaceRuns) ? this.workspaceRuns : []).find(
-        run => run?.id === normalizedRunId
-      ) || null
-    );
   }
 
   setupRealtime() {
@@ -2932,9 +2819,11 @@ export class WorkspaceTaskPage {
   // is the ordinary case, not an error worth reporting (FR-148).
   async loadRelatedPlan(request = this._dataRequest) {
     if (!this.isDataRequestCurrent(request)) return;
-    const related = await fetchRelatedPlan(request.workspaceId, 'task', request.taskId, url =>
-      fetch(url, { signal: request.controller.signal })
-    );
+    const related = await this.dataLoader.loadRelatedPlan({
+      workspaceId: request.workspaceId,
+      taskId: request.taskId,
+      signal: request.controller.signal
+    });
     if (!this.isDataRequestCurrent(request)) return;
     renderRelatedPlan(
       document.getElementById('workspace-task-related-plan'),
@@ -3587,12 +3476,6 @@ export class WorkspaceTaskPage {
       .replace(/_/g, ' ');
     if (!normalized) return '';
     return normalized.replace(/\b\w/g, char => char.toUpperCase());
-  }
-
-  workspaceRunTimestamp(run) {
-    const raw = run?.finished_at || run?.started_at || run?.created_at || '';
-    const parsed = new Date(raw).getTime();
-    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   isBlockedDetailsRedundant(detailsValue) {
@@ -4338,23 +4221,19 @@ export class WorkspaceTaskPage {
   async refreshAfterStepChange() {
     const request = this.beginDataRequest();
     if (!request) return;
-    const options = { signal: request.controller.signal };
     try {
-      const [workspace, taskResponse] = await Promise.all([
-        this.fetchWorkspace(options),
-        this.fetchTask(options).catch(() => null)
-      ]);
+      const snapshot = await this.dataLoader.refreshSnapshot({
+        workspaceId: request.workspaceId,
+        taskId: request.taskId,
+        signal: request.controller.signal,
+        previousSnapshot: { workspace: this.workspace, tasks: this.tasks, task: this.task }
+      });
       if (!this.isDataRequestCurrent(request)) return;
-      const tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : this.tasks;
-      const workspaceTask = tasks.find(item => String(item?.id || '') === request.taskId);
-      const task = taskResponse || workspaceTask || this.task;
-      const runs = await this.fetchWorkspaceRunsForTask(task, options).catch(() => []);
-      if (!this.isDataRequestCurrent(request)) return;
-      this.workspace = workspace || this.workspace;
-      this.tasks = tasks;
-      this.task = task;
-      this.workspaceRuns = runs;
-      this.currentRun = this.findWorkspaceRun(this.task?.current_run_id);
+      this.workspace = snapshot.workspace;
+      this.tasks = snapshot.tasks;
+      this.task = snapshot.task;
+      this.workspaceRuns = snapshot.workspaceRuns;
+      this.currentRun = snapshot.currentRun;
       void this.loadRelatedPlan(request);
       this.render();
       // This refresh may have superseded the initial load's loading state.

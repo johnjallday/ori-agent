@@ -192,6 +192,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-first-task-banner.js',
       'internal/web/static/js/modules/workspace-native-mcp.js',
       'internal/web/static/js/modules/workspace-task.js',
+      'internal/web/static/js/modules/workspace-task-data-loader.js',
       'internal/web/static/js/modules/workspace-task-execution-views.js',
       'internal/web/static/js/modules/workspace-task-result-actions.js',
       'internal/web/static/js/modules/workspace-task-skill-draft.js',
