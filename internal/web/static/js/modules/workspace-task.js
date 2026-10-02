@@ -859,6 +859,10 @@ export class WorkspaceTaskPage {
     this.assistReviewMode = false;
     this.workspaceRealtimeUnsubscribe = null;
     this.pendingRefreshTimer = null;
+    this.workflowPollTimer = null;
+    this._workflowPollGeneration = 0;
+    this._dataRequest = null;
+    this._destroyed = false;
     this.titleEditInProgress = false;
     this.detailsEditInProgress = false;
     this.workflowDraftPending = false;
@@ -917,6 +921,7 @@ export class WorkspaceTaskPage {
   }
 
   async init() {
+    if (this._destroyed) return;
     this.cacheElements();
     this.bindEvents();
     await this.loadData();
@@ -932,6 +937,10 @@ export class WorkspaceTaskPage {
   // would resolve into a stale instance, and the debounced refresh timer
   // would call loadData() on a page that no longer exists.
   destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+    this.invalidateDataRequest();
+    this.stopWorkflowPolling();
     if (typeof this.workspaceRealtimeUnsubscribe === 'function') {
       try {
         this.workspaceRealtimeUnsubscribe();
@@ -948,7 +957,7 @@ export class WorkspaceTaskPage {
       }
       this.skillDraftAbortController = null;
     }
-    if (this.pendingRefreshTimer) {
+    if (this.pendingRefreshTimer !== null) {
       window.clearTimeout(this.pendingRefreshTimer);
       this.pendingRefreshTimer = null;
     }
@@ -1314,56 +1323,103 @@ export class WorkspaceTaskPage {
     );
   }
 
+  // Loads and step refreshes share one owner. Abort is best-effort resource
+  // cleanup; ownership checks also reject transports that ignore cancellation.
+  beginDataRequest() {
+    if (this._destroyed) return null;
+    this.invalidateDataRequest();
+    const request = {
+      controller: new AbortController(),
+      workspaceId: this.workspaceId,
+      taskId: this.taskId
+    };
+    this._dataRequest = request;
+    return request;
+  }
+
+  isDataRequestCurrent(request) {
+    return Boolean(
+      request &&
+      !this._destroyed &&
+      this._dataRequest === request &&
+      !request.controller.signal.aborted &&
+      request.workspaceId === this.workspaceId &&
+      request.taskId === this.taskId
+    );
+  }
+
+  invalidateDataRequest() {
+    const request = this._dataRequest;
+    this._dataRequest = null;
+    try {
+      request?.controller.abort();
+    } catch (_err) {
+      // A broken abort polyfill must not prevent invalidating the owner.
+    }
+  }
+
   async loadData() {
+    const request = this.beginDataRequest();
+    if (!request) return;
+    const options = { signal: request.controller.signal };
     this.setState('loading');
     this.setAlert('');
 
     try {
       const [workspace, taskResponse, agents, taskEvents, outputDir] = await Promise.all([
-        this.fetchWorkspace(),
-        this.fetchTask(),
-        this.fetchAgents().catch(() => []),
-        this.fetchTaskEvents().catch(() => []),
-        this.fetchWorkspaceOutputDir().catch(() => '')
+        this.fetchWorkspace(options),
+        this.fetchTask(options),
+        this.fetchAgents(options).catch(() => []),
+        this.fetchTaskEvents(options).catch(() => []),
+        this.fetchWorkspaceOutputDir(options).catch(() => '')
       ]);
+      if (!this.isDataRequestCurrent(request)) return;
 
+      let tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : [];
+      const workspaceTask = tasks.find(item => String(item?.id || '') === request.taskId) || null;
+      const task = taskResponse || workspaceTask;
+      const validTask =
+        task && String(task.workspace_id || request.workspaceId) === request.workspaceId;
+      if (validTask && !workspaceTask) tasks = [task];
+      const runs = validTask
+        ? await this.fetchWorkspaceRunsForTask(task, options).catch(() => [])
+        : [];
+      if (!this.isDataRequestCurrent(request)) return;
+
+      // Publish one coherent snapshot, never half of an obsolete load while
+      // its run lookup is still outstanding.
       this.workspace = workspace || null;
       this.workspaceOutputDir = outputDir || '';
-      this.tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : [];
+      this.tasks = tasks;
       this.availableAgents = Array.isArray(agents) ? agents : [];
       this.taskEvents = Array.isArray(taskEvents) ? taskEvents : [];
-
-      const workspaceTask = this.tasks.find(item => String(item?.id || '') === this.taskId) || null;
-      this.task = taskResponse || workspaceTask;
-
-      if (!this.task || String(this.task.workspace_id || this.workspaceId) !== this.workspaceId) {
+      this.task = validTask ? task : null;
+      this.workspaceRuns = runs;
+      this.currentRun = this.findWorkspaceRun(this.task?.current_run_id);
+      if (!validTask) {
         this.setState('empty');
         return;
       }
 
-      if (!workspaceTask) {
-        this.tasks = this.task ? [this.task] : [];
-      }
-
-      // Where this task came from, when a Plan created it. Not awaited: most
-      // tasks have no plan, and the page should not wait on a lookup that
-      // usually returns nothing.
-      void this.loadRelatedPlan();
-
-      this.workspaceRuns = await this.fetchWorkspaceRunsForTask(this.task).catch(() => []);
-      this.currentRun = this.findWorkspaceRun(this.task?.current_run_id);
+      // Plan provenance remains non-blocking, but belongs to this same read.
+      void this.loadRelatedPlan(request);
       this.seedLiveActivityFromHistory();
       this.render();
       this.setState('content');
     } catch (error) {
+      if (!this.isDataRequestCurrent(request)) return;
+      this.invalidateDataRequest();
       console.error('Failed to load workspace task page:', error);
       this.setAlert(error?.message || 'Failed to load this task page.');
       this.setState('empty');
     }
   }
 
-  async fetchWorkspace() {
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
+  async fetchWorkspace(options = {}) {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}`,
+      options
+    );
     if (!response.ok) {
       throw new Error('Failed to load workspace details.');
     }
@@ -1373,17 +1429,21 @@ export class WorkspaceTaskPage {
   // fetchWorkspaceOutputDir returns the resolved default output directory for
   // this workspace (<workspace>/outputs), used to show where "Default output
   // folder" actually writes.
-  async fetchWorkspaceOutputDir() {
+  async fetchWorkspaceOutputDir(options = {}) {
     const response = await fetch(
-      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/output-dir`
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/output-dir`,
+      options
     );
     if (!response.ok) return '';
     const data = await response.json();
     return String(data?.output_dir || '').trim();
   }
 
-  async fetchTask() {
-    const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(this.taskId)}`);
+  async fetchTask(options = {}) {
+    const response = await fetch(
+      `/api/orchestration/tasks?id=${encodeURIComponent(this.taskId)}`,
+      options
+    );
     if (response.status === 404) return null;
     if (!response.ok) {
       throw new Error('Failed to load task details.');
@@ -1391,8 +1451,8 @@ export class WorkspaceTaskPage {
     return response.json();
   }
 
-  async fetchAgents() {
-    const response = await fetch('/api/agents');
+  async fetchAgents(options = {}) {
+    const response = await fetch('/api/agents', options);
     if (!response.ok) {
       throw new Error('Failed to load agent list.');
     }
@@ -1401,25 +1461,26 @@ export class WorkspaceTaskPage {
     return Array.isArray(payload?.agents) ? payload.agents : [];
   }
 
-  async fetchTaskEvents() {
+  async fetchTaskEvents(options = {}) {
     const params = new URLSearchParams({
       workspace_id: this.workspaceId,
       task_id: this.taskId,
       limit: '200'
     });
-    const response = await fetch(`/api/orchestration/events?${params.toString()}`);
+    const response = await fetch(`/api/orchestration/events?${params.toString()}`, options);
     if (!response.ok) return [];
 
     const payload = await response.json().catch(() => ({}));
     return Array.isArray(payload?.events) ? payload.events : [];
   }
 
-  async fetchCurrentRun(runId) {
+  async fetchCurrentRun(runId, options = {}) {
     const normalizedRunId = String(runId || '').trim();
     if (!normalizedRunId) return null;
 
     const response = await fetch(
-      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(normalizedRunId)}`
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(normalizedRunId)}`,
+      options
     );
     if (response.status === 404) return null;
     if (!response.ok) {
@@ -1428,7 +1489,7 @@ export class WorkspaceTaskPage {
     return response.json();
   }
 
-  async fetchWorkspaceRunsForTask(task = this.task) {
+  async fetchWorkspaceRunsForTask(task = this.task, options = {}) {
     const runIds = new Set();
     const currentRunId = String(task?.current_run_id || '').trim();
     if (currentRunId) runIds.add(currentRunId);
@@ -1441,7 +1502,7 @@ export class WorkspaceTaskPage {
     if (!runIds.size) return [];
 
     const runs = await Promise.all(
-      [...runIds].map(runId => this.fetchCurrentRun(runId).catch(() => null))
+      [...runIds].map(runId => this.fetchCurrentRun(runId, options).catch(() => null))
     );
 
     return runs
@@ -1461,6 +1522,7 @@ export class WorkspaceTaskPage {
 
   setupRealtime() {
     if (
+      this._destroyed ||
       this.workspaceRealtimeUnsubscribe ||
       !window.workspaceRealtime ||
       typeof window.workspaceRealtime.subscribeToWorkspace !== 'function'
@@ -1477,6 +1539,7 @@ export class WorkspaceTaskPage {
   }
 
   handleRealtimeEvent(event) {
+    if (this._destroyed) return;
     const eventType = String(event?.type || '').trim();
     if (!eventType.startsWith('task.') && !eventType.startsWith('delegation.')) {
       return;
@@ -1516,9 +1579,13 @@ export class WorkspaceTaskPage {
     // unset here; significant lifecycle transitions surface on their own
     // through the status pill / hero priority changes.
 
+    // An accepted event is newer than every outstanding snapshot, even
+    // during the debounce window before the next load starts.
+    this.invalidateDataRequest();
     window.clearTimeout(this.pendingRefreshTimer);
     this.pendingRefreshTimer = window.setTimeout(() => {
-      this.loadData();
+      this.pendingRefreshTimer = null;
+      void this.loadData();
     }, 180);
   }
 
@@ -2863,8 +2930,12 @@ export class WorkspaceTaskPage {
   //
   // A failure or a missing link both render nothing: a task created directly
   // is the ordinary case, not an error worth reporting (FR-148).
-  async loadRelatedPlan() {
-    const related = await fetchRelatedPlan(this.workspaceId, 'task', this.taskId);
+  async loadRelatedPlan(request = this._dataRequest) {
+    if (!this.isDataRequestCurrent(request)) return;
+    const related = await fetchRelatedPlan(request.workspaceId, 'task', request.taskId, url =>
+      fetch(url, { signal: request.controller.signal })
+    );
+    if (!this.isDataRequestCurrent(request)) return;
     renderRelatedPlan(
       document.getElementById('workspace-task-related-plan'),
       related,
@@ -4152,10 +4223,7 @@ export class WorkspaceTaskPage {
         const text = await response.text();
         throw new Error(text || 'Failed to stop step');
       }
-      if (this.workflowPollTimer) {
-        clearTimeout(this.workflowPollTimer);
-        this.workflowPollTimer = null;
-      }
+      this.stopWorkflowPolling();
       this.notify('success', 'Step stopped');
       await this.refreshAfterStepChange();
     } catch (error) {
@@ -4223,19 +4291,29 @@ export class WorkspaceTaskPage {
     }
   }
 
-  pollStepCompletion(taskId, maxAttempts = 60, intervalMs = 3000) {
-    const id = String(taskId || '').trim();
-    if (!id) return;
-    if (this.workflowPollTimer) {
+  stopWorkflowPolling() {
+    this._workflowPollGeneration++;
+    if (this.workflowPollTimer !== null) {
       clearTimeout(this.workflowPollTimer);
       this.workflowPollTimer = null;
     }
+  }
+
+  pollStepCompletion(taskId, maxAttempts = 60, intervalMs = 3000) {
+    const id = String(taskId || '').trim();
+    if (!id || this._destroyed) return;
+    this.stopWorkflowPolling();
+    const generation = this._workflowPollGeneration;
+    const isCurrent = () => !this._destroyed && generation === this._workflowPollGeneration;
     let attempts = 0;
     const tick = async () => {
+      if (!isCurrent()) return;
+      this.workflowPollTimer = null;
       attempts++;
       if (attempts > maxAttempts) return;
       try {
         await this.refreshAfterStepChange();
+        if (!isCurrent()) return;
         const target =
           String(this.task?.id || '') === id
             ? this.task
@@ -4247,33 +4325,46 @@ export class WorkspaceTaskPage {
           status === 'cancelled' ||
           status === 'timeout'
         ) {
-          this.workflowPollTimer = null;
           return;
         }
       } catch (_error) {
         // network blip — keep polling
       }
-      this.workflowPollTimer = setTimeout(tick, intervalMs);
+      if (isCurrent()) this.workflowPollTimer = setTimeout(tick, intervalMs);
     };
     this.workflowPollTimer = setTimeout(tick, intervalMs);
   }
 
   async refreshAfterStepChange() {
+    const request = this.beginDataRequest();
+    if (!request) return;
+    const options = { signal: request.controller.signal };
     try {
       const [workspace, taskResponse] = await Promise.all([
-        this.fetchWorkspace(),
-        this.fetchTask().catch(() => null)
+        this.fetchWorkspace(options),
+        this.fetchTask(options).catch(() => null)
       ]);
+      if (!this.isDataRequestCurrent(request)) return;
+      const tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : this.tasks;
+      const workspaceTask = tasks.find(item => String(item?.id || '') === request.taskId);
+      const task = taskResponse || workspaceTask || this.task;
+      const runs = await this.fetchWorkspaceRunsForTask(task, options).catch(() => []);
+      if (!this.isDataRequestCurrent(request)) return;
       this.workspace = workspace || this.workspace;
-      this.tasks = Array.isArray(workspace?.tasks) ? workspace.tasks : this.tasks;
-      if (taskResponse) {
-        this.task = taskResponse;
-      }
-      this.workspaceRuns = await this.fetchWorkspaceRunsForTask(this.task).catch(() => []);
+      this.tasks = tasks;
+      this.task = task;
+      this.workspaceRuns = runs;
       this.currentRun = this.findWorkspaceRun(this.task?.current_run_id);
+      void this.loadRelatedPlan(request);
       this.render();
+      // This refresh may have superseded the initial load's loading state.
+      this.setState(this.task ? 'content' : 'empty');
     } catch (error) {
+      if (!this.isDataRequestCurrent(request)) return;
+      this.invalidateDataRequest();
       console.error('Failed to refresh task data:', error);
+      if (!this.task) this.setAlert(error?.message || 'Failed to load this task page.');
+      this.setState(this.task ? 'content' : 'empty');
     }
   }
 
