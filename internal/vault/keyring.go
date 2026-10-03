@@ -194,6 +194,8 @@ func (k *Keyring) read() (rememberedVault, error) {
 }
 
 func (k *Keyring) write(remembered rememberedVault) error {
+	// #nosec G117 -- this JSON is the secret itself: it is written only to the
+	// installation secret store (the Keychain), never to a response or a log.
 	data, err := json.Marshal(remembered)
 	if err != nil {
 		return err

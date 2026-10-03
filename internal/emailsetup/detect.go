@@ -52,8 +52,9 @@ type Profile struct {
 	NeedsUsername bool   `json:"needs_username,omitempty"`
 	UsernameHint  string `json:"username_hint,omitempty"`
 
-	AppPasswordURL   string `json:"app_password_url,omitempty"`
-	AppPasswordSteps string `json:"app_password_steps,omitempty"`
+	// HelpURL is where the user creates an app password, and HelpSteps how.
+	HelpURL   string `json:"app_password_url,omitempty"`
+	HelpSteps string `json:"app_password_steps,omitempty"`
 	// Warning is a likely problem worth saying before the user goes looking,
 	// e.g. a school account whose admin blocks app passwords.
 	Warning string `json:"warning,omitempty"`
@@ -69,7 +70,7 @@ type MXLookup func(ctx context.Context, domain string) ([]*net.MX, error)
 const mxLookupTimeout = 3 * time.Second
 
 const (
-	googleAppPasswordURL = "https://myaccount.google.com/apppasswords"
+	googleAppPasswordURL = "https://myaccount.google.com/apppasswords" // #nosec G101 -- a public help page URL, not a credential
 	appleAccountURL      = "https://account.apple.com"
 	yahooSecurityURL     = "https://login.yahoo.com/account/security"
 	aolSecurityURL       = "https://login.aol.com/account/security"
@@ -80,8 +81,8 @@ func gmailProfile() Profile {
 	return Profile{
 		Provider: ProviderGmail, Label: "Gmail", Supported: true,
 		IMAPHost: "imap.gmail.com", IMAPPort: 993, SMTPHost: "smtp.gmail.com", SMTPPort: 465,
-		AppPasswordURL:   googleAppPasswordURL,
-		AppPasswordSteps: "Turn on 2-Step Verification first; until it is on, Google says the app password setting isn't available. Then create an app password named Ori and paste it here.",
+		HelpURL:   googleAppPasswordURL,
+		HelpSteps: "Turn on 2-Step Verification first; until it is on, Google says the app password setting isn't available. Then create an app password named Ori and paste it here.",
 	}
 }
 
@@ -96,8 +97,8 @@ func iCloudProfile() Profile {
 	return Profile{
 		Provider: ProviderICloud, Label: "iCloud Mail", Supported: true,
 		IMAPHost: "imap.mail.me.com", IMAPPort: 993, SMTPHost: "smtp.mail.me.com", SMTPPort: 587,
-		AppPasswordURL:   appleAccountURL,
-		AppPasswordSteps: "Sign in, open Sign-In and Security, then App-Specific Passwords, and create one named Ori. Paste it exactly as Apple shows it.",
+		HelpURL:   appleAccountURL,
+		HelpSteps: "Sign in, open Sign-In and Security, then App-Specific Passwords, and create one named Ori. Paste it exactly as Apple shows it.",
 	}
 }
 
@@ -105,8 +106,8 @@ func yahooProfile() Profile {
 	return Profile{
 		Provider: ProviderYahoo, Label: "Yahoo Mail", Supported: true,
 		IMAPHost: "imap.mail.yahoo.com", IMAPPort: 993, SMTPHost: "smtp.mail.yahoo.com", SMTPPort: 465,
-		AppPasswordURL:   yahooSecurityURL,
-		AppPasswordSteps: "Choose Generate app password, name it Ori, and paste it here.",
+		HelpURL:   yahooSecurityURL,
+		HelpSteps: "Choose Generate app password, name it Ori, and paste it here.",
 	}
 }
 
@@ -114,8 +115,8 @@ func aolProfile() Profile {
 	return Profile{
 		Provider: ProviderAOL, Label: "AOL Mail", Supported: true,
 		IMAPHost: "imap.aol.com", IMAPPort: 993, SMTPHost: "smtp.aol.com", SMTPPort: 465,
-		AppPasswordURL:   aolSecurityURL,
-		AppPasswordSteps: "Choose Generate app password, name it Ori, and paste it here.",
+		HelpURL:   aolSecurityURL,
+		HelpSteps: "Choose Generate app password, name it Ori, and paste it here.",
 	}
 }
 
@@ -123,8 +124,8 @@ func fastmailProfile() Profile {
 	return Profile{
 		Provider: ProviderFastmail, Label: "Fastmail", Supported: true,
 		IMAPHost: "imap.fastmail.com", IMAPPort: 993, SMTPHost: "smtp.fastmail.com", SMTPPort: 465,
-		AppPasswordURL:   fastmailSettingsURL,
-		AppPasswordSteps: "Open Privacy & Security, then App passwords, and create one for mail. Fastmail's Basic plan has no mail-app access.",
+		HelpURL:   fastmailSettingsURL,
+		HelpSteps: "Open Privacy & Security, then App passwords, and create one for mail. Fastmail's Basic plan has no mail-app access.",
 	}
 }
 
@@ -202,7 +203,7 @@ func profileFromMX(ctx context.Context, domain string, lookup MXLookup) Profile 
 	return Profile{
 		Provider: ProviderOther, Label: domain, Supported: true, NeedsServer: true,
 		IMAPHost: "imap." + domain, IMAPPort: 993, SMTPHost: "smtp." + domain, SMTPPort: 465,
-		AppPasswordSteps: "Use an app password if your provider offers one, or your mail password. Your provider's help pages list the IMAP server.",
+		HelpSteps: "Use an app password if your provider offers one, or your mail password. Your provider's help pages list the IMAP server.",
 	}
 }
 
