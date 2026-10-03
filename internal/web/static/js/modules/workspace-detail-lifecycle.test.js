@@ -35,8 +35,11 @@ function workspace(label) {
   };
 }
 
-function makePage(t) {
-  const page = new WorkspaceDetailPage('ws', 'workspace-slug', { suppressSetupPrompts: true });
+function makePage(t, options = {}) {
+  const page = new WorkspaceDetailPage('ws', 'workspace-slug', {
+    suppressSetupPrompts: true,
+    ...options
+  });
   const view = { renders: [], errors: [], warnings: [], refreshes: 0 };
   page.workspace = workspace('cached');
   for (const method of [
@@ -75,6 +78,286 @@ function makePage(t) {
   t.mock.method(console, 'warn', (...args) => view.warnings.push(args));
   return { page, view };
 }
+
+const panels = [
+  {
+    method: 'loadTasks',
+    resource: 'tasks',
+    snapshot: label => ({ tasks: [{ id: label }] }),
+    value: page => page.tasks[0]?.id,
+    loading: 'tasksLoading',
+    failed: 'tasksLoadFailed'
+  },
+  {
+    method: 'loadBacklog',
+    resource: 'backlog',
+    snapshot: label => ({ items: [{ id: label }], sync: { label } }),
+    value: page => page.backlogItems[0]?.id,
+    loading: 'backlogLoading',
+    failed: 'backlogLoadFailed'
+  }
+];
+
+for (const panel of panels) {
+  test(`${panel.method} delegates transport to the injected loader with explicit request inputs`, async t => {
+    const calls = [];
+    const snapshot = Object.freeze({
+      ...panel.snapshot('loaded'),
+      workspace: workspace('must not publish'),
+      notes: [{ id: 'must not publish' }]
+    });
+    const dataLoader = {
+      [panel.method]: async request => {
+        calls.push(request);
+        return snapshot;
+      }
+    };
+    const { page, view } = makePage(t, { dataLoader });
+    const cachedWorkspace = page.workspace;
+    page.workspaceId = 'workspace/uuid with spaces';
+    page.backlogIncludeDescendants = true;
+    t.mock.method(globalThis, 'fetch', async () => {
+      assert.fail('the controller must not fetch panel data');
+    });
+    await page[panel.method]();
+    assert.equal(page.dataLoader, dataLoader);
+    assert.equal(panel.value(page), 'loaded');
+    assert.equal(page[panel.loading], false);
+    assert.equal(page[panel.failed], false);
+    assert.equal(calls.length, 1);
+    const signal = page._resourceRequests.get(panel.resource).controller.signal;
+    assert.deepEqual(calls[0], {
+      workspaceId: 'workspace/uuid with spaces',
+      signal,
+      ...(panel.resource === 'backlog' ? { includeDescendants: true } : {})
+    });
+    assert.equal(signal.aborted, false);
+    assert.equal(page.workspace, cachedWorkspace);
+    assert.deepEqual(page.notes, []);
+    assert.equal(view.errors.length, 0);
+    assert.equal(view.refreshes, 1);
+  });
+}
+
+function seedPanel(page, panel, label) {
+  if (panel.resource === 'tasks') page.tasks = panel.snapshot(label).tasks;
+  else {
+    page.backlogItems = panel.snapshot(label).items;
+    page.backlogSync = panel.snapshot(label).sync;
+  }
+}
+
+for (const panel of panels) {
+  for (const outcome of ['response', 'failure']) {
+    test(`${panel.method} rejects a superseded ${outcome} from a cancellation-ignoring loader`, async t => {
+      const pending = deferred();
+      const requests = [];
+      const { page, view } = makePage(t, {
+        dataLoader: {
+          [panel.method]: request => {
+            requests.push(request);
+            return requests.length === 1 ? pending.promise : Promise.resolve(panel.snapshot('new'));
+          }
+        }
+      });
+      const oldRead = page[panel.method]();
+      await page[panel.method]();
+      const renders = view.renders.length;
+      const refreshes = view.refreshes;
+      assert.equal(requests[0].signal.aborted, true);
+      assert.equal(requests[1].signal.aborted, false);
+      if (outcome === 'response') pending.resolve(panel.snapshot('old'));
+      else pending.reject(new Error('obsolete loader failure'));
+      await oldRead;
+      assert.equal(panel.value(page), 'new');
+      if (panel.resource === 'backlog') assert.deepEqual(page.backlogSync, { label: 'new' });
+      assert.equal(page[panel.loading], false);
+      assert.equal(page[panel.failed], false);
+      assert.equal(view.renders.length, renders);
+      assert.equal(view.refreshes, refreshes);
+      assert.equal(view.errors.length, 0);
+    });
+
+    test(`${panel.method} obsolete loader ${outcome} cannot finish a newer loading indicator`, async t => {
+      const first = deferred();
+      const second = deferred();
+      let calls = 0;
+      const { page, view } = makePage(t, {
+        dataLoader: { [panel.method]: () => (++calls === 1 ? first.promise : second.promise) }
+      });
+      seedPanel(page, panel, 'cached');
+      const oldRead = page[panel.method]();
+      const newRead = page[panel.method]();
+      const renders = view.renders.length;
+      if (outcome === 'response') first.resolve(panel.snapshot('old'));
+      else first.reject(new Error('obsolete loader failure'));
+      await oldRead;
+      assert.equal(page[panel.loading], true);
+      assert.equal(page[panel.failed], false);
+      assert.equal(panel.value(page), 'cached');
+      assert.equal(view.renders.length, renders);
+      assert.equal(view.refreshes, 0);
+      assert.equal(view.errors.length, 0);
+      second.resolve(panel.snapshot('new'));
+      await newRead;
+      assert.equal(page[panel.loading], false);
+      assert.equal(panel.value(page), 'new');
+      assert.equal(view.refreshes, 1);
+    });
+  }
+
+  for (const invalidation of ['destroy', 'workspace identity']) {
+    test(`${panel.method} loader publication is fenced by ${invalidation}`, async t => {
+      const pending = deferred();
+      let signal;
+      const { page, view } = makePage(t, {
+        dataLoader: {
+          [panel.method]: request => {
+            signal = request.signal;
+            return pending.promise;
+          }
+        }
+      });
+      seedPanel(page, panel, 'cached');
+      const read = page[panel.method]();
+      if (invalidation === 'destroy') page.destroy();
+      else page.workspaceId = 'another-workspace';
+      const renders = view.renders.length;
+      pending.resolve(panel.snapshot('late'));
+      await read;
+      assert.equal(panel.value(page), 'cached');
+      if (panel.resource === 'backlog') assert.deepEqual(page.backlogSync, { label: 'cached' });
+      assert.equal(view.renders.length, renders);
+      assert.equal(view.refreshes, 0);
+      assert.equal(view.errors.length, 0);
+      if (invalidation === 'destroy') assert.equal(signal.aborted, true);
+    });
+  }
+
+  test(`${panel.method} current loader failures preserve controller-owned fallback and presentation`, async t => {
+    const failure = new Error('current loader failure');
+    const { page, view } = makePage(t, {
+      dataLoader: {
+        [panel.method]: async () => {
+          throw failure;
+        }
+      }
+    });
+    seedPanel(page, panel, 'cached');
+    await page[panel.method]();
+    assert.equal(page[panel.loading], false);
+    assert.equal(page[panel.failed], true);
+    assert.equal(panel.value(page), undefined);
+    if (panel.resource === 'backlog') assert.deepEqual(page.backlogSync, { label: 'cached' });
+    else assert.ok(view.renders.includes('renderTasks'));
+    assert.equal(view.errors.length, 1);
+    assert.equal(view.errors[0][1], failure);
+    assert.equal(view.refreshes, 1);
+  });
+
+  test(`${panel.method} cannot invoke an injected loader after teardown`, async t => {
+    let calls = 0;
+    const { page, view } = makePage(t, {
+      dataLoader: {
+        [panel.method]: async () => {
+          calls++;
+          return panel.snapshot('late');
+        }
+      }
+    });
+    page.destroy();
+    await page[panel.method]();
+    assert.equal(calls, 0);
+    assert.equal(view.refreshes, 0);
+    assert.equal(view.renders.length, 0);
+  });
+}
+
+test('injected task and backlog reads retain independent owners', async t => {
+  const tasks = deferred();
+  const oldBacklog = deferred();
+  const taskRequests = [];
+  const backlogRequests = [];
+  const { page } = makePage(t, {
+    dataLoader: {
+      loadTasks: request => {
+        taskRequests.push(request);
+        return tasks.promise;
+      },
+      loadBacklog: request => {
+        backlogRequests.push(request);
+        return backlogRequests.length === 1
+          ? oldBacklog.promise
+          : Promise.resolve({ items: [{ id: 'new backlog' }], sync: null });
+      }
+    }
+  });
+  const taskRead = page.loadTasks();
+  const backlogRead = page.loadBacklog();
+  await page.loadBacklog();
+  assert.equal(taskRequests[0].signal.aborted, false);
+  assert.equal(backlogRequests[0].signal.aborted, true);
+  assert.equal(backlogRequests[1].signal.aborted, false);
+  assert.equal(page.tasksLoading, true);
+  oldBacklog.resolve({ items: [{ id: 'old backlog' }], sync: { stale: true } });
+  await backlogRead;
+  tasks.resolve({ tasks: [{ id: 'task' }] });
+  await taskRead;
+  assert.deepEqual(page.tasks, [{ id: 'task' }]);
+  assert.deepEqual(page.backlogItems, [{ id: 'new backlog' }]);
+  assert.equal(page.backlogSync, null);
+});
+
+test('a backlog filter change passes the new scope explicitly and suppresses the older scope', async t => {
+  const pending = deferred();
+  const requests = [];
+  const { page } = makePage(t, {
+    dataLoader: {
+      loadBacklog: request => {
+        requests.push(request);
+        return requests.length === 1
+          ? pending.promise
+          : Promise.resolve({ items: [{ id: 'descendant' }], sync: null });
+      }
+    }
+  });
+  const oldRead = page.loadBacklog();
+  page.backlogIncludeDescendants = true;
+  await page.loadBacklog();
+  assert.deepEqual(
+    requests.map(request => request.includeDescendants),
+    [false, true]
+  );
+  pending.resolve({ items: [{ id: 'local only' }], sync: { stale: true } });
+  await oldRead;
+  assert.deepEqual(page.backlogItems, [{ id: 'descendant' }]);
+  assert.equal(page.backlogSync, null);
+});
+
+test('task snapshot publication retains board rendering, accessible counts, and route restoration', async t => {
+  const { page, view } = makePage(t, {
+    dataLoader: { loadTasks: async () => ({ tasks: [{ id: 'first' }, { id: 'second' }] }) }
+  });
+  page.currentView = 'board';
+  page.boardConfig = {};
+  const attributes = {};
+  page.elements.taskCount = { setAttribute: (name, value) => (attributes[name] = value) };
+  await page.loadTasks();
+  assert.equal(page.elements.taskCount.textContent, 2);
+  assert.deepEqual(attributes, { 'aria-busy': 'false', 'aria-label': '2 tasks' });
+  for (const method of [
+    'renderAgentGroups',
+    'renderBoard',
+    'renderTasks',
+    'renderWorkspaceConfigSummary',
+    'renderWorkspaceWorkflowLinks',
+    'restoreTaskAssistPageFromRoute',
+    'refreshHomeAssistantQuickPrompts'
+  ]) {
+    assert.equal(view.renders.filter(render => render === method).length, 1, method);
+  }
+  assert.equal(view.refreshes, 1);
+});
 
 const resources = [
   { method: 'loadWorkspace', body: workspace, value: page => page.workspace?.name },

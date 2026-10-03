@@ -6,6 +6,7 @@
  */
 /* global escapeHtml */
 
+import { createWorkspaceDetailDataLoader } from './workspace-detail-data-loader.js';
 import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explorer.js';
 import { WorkspaceMCPManager } from './workspace-detail-mcp.js';
 import { WorkspaceNativeMCPManager } from './workspace-native-mcp.js';
@@ -178,6 +179,7 @@ export class WorkspaceDetailPage {
     this.workspaceId = workspaceId;
     this.workspaceSlug = String(workspaceSlug || '').trim();
     this.suppressSetupPrompts = options.suppressSetupPrompts === true;
+    this.dataLoader = options.dataLoader ?? createWorkspaceDetailDataLoader();
     this._destroyed = false;
     this._resourceRequests = new Map();
     this._requestSequence = 0;
@@ -3422,15 +3424,12 @@ export class WorkspaceDetailPage {
     this.renderAgentGroups();
 
     try {
-      const response = await fetch(
-        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(request.workspaceId)}`,
-        { signal: request.controller.signal }
-      );
-      if (!response.ok) throw new Error('Failed to load tasks');
-
-      const data = await response.json();
+      const snapshot = await this.dataLoader.loadTasks({
+        workspaceId: request.workspaceId,
+        signal: request.controller.signal
+      });
       if (!this.isResourceRequestCurrent(request)) return;
-      this.tasks = data.tasks || [];
+      this.tasks = snapshot.tasks;
       if (this.currentView === 'board' && this.boardConfig) {
         this.renderBoard();
       }
@@ -3475,16 +3474,14 @@ export class WorkspaceDetailPage {
     this.backlogLoading = true;
     this.backlogLoadFailed = false;
     try {
-      const params = new URLSearchParams({ workspace_id: request.workspaceId });
-      if (this.backlogIncludeDescendants) params.set('include_descendants', 'true');
-      const response = await fetch(`/api/orchestration/backlog?${params.toString()}`, {
-        signal: request.controller.signal
+      const snapshot = await this.dataLoader.loadBacklog({
+        workspaceId: request.workspaceId,
+        signal: request.controller.signal,
+        includeDescendants: this.backlogIncludeDescendants
       });
-      if (!response.ok) throw new Error('Failed to load backlog');
-      const data = await response.json();
       if (!this.isResourceRequestCurrent(request)) return;
-      this.backlogItems = Array.isArray(data.items) ? data.items : [];
-      this.backlogSync = data.sync || null;
+      this.backlogItems = snapshot.items;
+      this.backlogSync = snapshot.sync;
       this.backlogLoadFailed = false;
     } catch (error) {
       if (!this.isResourceRequestCurrent(request)) return;
