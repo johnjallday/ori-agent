@@ -11,6 +11,8 @@ import (
 //
 // Read-only, like WorkspaceLookup: resolving who moves with a district must
 // never be able to change who belongs to it (FR-8).
+// The legacy method keeps custom stores compatible; the resolver prefers the
+// optional workspace.SummaryLister API when available.
 type WorkspaceLister interface {
 	ListActive() ([]*workspace.Workspace, error)
 }
@@ -46,20 +48,20 @@ func (r *StoreDescendantResolver) GroupNodeIDs(_ context.Context, groupID string
 	if err != nil {
 		return nil, err
 	}
-	workspaces, err := r.lister.ListActive()
+	summaries, err := workspace.ListActiveSummaries(r.lister)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workspaces for group %q: %w", groupID, err)
 	}
 
-	childrenByParent := make(map[string][]string, len(workspaces))
-	known := make(map[string]bool, len(workspaces))
-	for _, ws := range workspaces {
-		if ws == nil || ws.ID == "" {
+	childrenByParent := make(map[string][]string, len(summaries))
+	known := make(map[string]bool, len(summaries))
+	for _, summary := range summaries {
+		if summary.ID == "" {
 			continue
 		}
-		known[ws.ID] = true
-		if ws.ParentID != "" {
-			childrenByParent[ws.ParentID] = append(childrenByParent[ws.ParentID], ws.ID)
+		known[summary.ID] = true
+		if summary.ParentID != "" {
+			childrenByParent[summary.ParentID] = append(childrenByParent[summary.ParentID], summary.ID)
 		}
 	}
 	if !known[groupID] {
