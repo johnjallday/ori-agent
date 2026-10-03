@@ -209,6 +209,10 @@ export function extractFileItems(attachments) {
 export class WorkspaceMembersPanel {
   constructor(workspaceId) {
     this.workspaceId = workspaceId;
+    this._destroyed = false;
+    this._readController = new AbortController();
+    this._reloadGeneration = 0;
+    this._syncGeneration = 0;
     this.group = null; // tree node for this workspace (groups only)
     this.tree = [];
     this.els = {};
@@ -219,6 +223,14 @@ export class WorkspaceMembersPanel {
     this.taskLoadFailures = 0;
     this.taskFilters = { status: 'default', member: 'all', dateRange: 'any' };
     this.colorPopoverOpen = false;
+  }
+
+  destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+    this._readController.abort();
+    this.rollupObserver?.disconnect();
+    this.rollupObserver = null;
   }
 
   cacheElements() {
@@ -243,15 +255,24 @@ export class WorkspaceMembersPanel {
    * Called by the page after the workspace loads. Activates the panel and
    * group header identity when the workspace is a group; hides them otherwise.
    */
-  async syncWorkspace(workspace) {
+  async syncWorkspace(workspace, options = {}) {
+    if (this._destroyed) return false;
+    const generation = ++this._syncGeneration;
+    const isCurrent = () =>
+      !this._destroyed &&
+      generation === this._syncGeneration &&
+      (!options.isCurrent || options.isCurrent());
+    if (!isCurrent()) return false;
     this.cacheElements();
     if (!isGroupNode(workspace)) {
+      this._reloadGeneration++;
       this.deactivate();
       return false;
     }
 
     this.bindControlsOnce();
-    await this.reload();
+    await this.reload({ ...options, isCurrent });
+    if (!isCurrent()) return false;
     if (!this.group) {
       // Tree did not confirm the group (e.g. trashed); keep everything hidden.
       this.deactivate();
@@ -263,6 +284,7 @@ export class WorkspaceMembersPanel {
   }
 
   activate() {
+    if (this._destroyed) return;
     this.active = true;
     if (this.els.panel) this.els.panel.hidden = false;
     if (this.els.bento) this.els.bento.classList.add('has-members-panel');
@@ -283,11 +305,21 @@ export class WorkspaceMembersPanel {
 
   // Reload the workspace tree and re-render the member list (+ rollups when
   // they were already loaded).
-  async reload() {
+  async reload(options = {}) {
+    if (this._destroyed) return;
+    const generation = ++this._reloadGeneration;
+    const signal = options.signal || this._readController.signal;
+    const isCurrent = () =>
+      !this._destroyed &&
+      generation === this._reloadGeneration &&
+      !signal.aborted &&
+      (!options.isCurrent || options.isCurrent());
+    if (!isCurrent()) return;
     try {
-      const res = await fetch('/api/workspaces?tree=true');
+      const res = await fetch('/api/workspaces?tree=true', { signal });
       if (!res.ok) throw new Error(`tree fetch failed: ${res.status}`);
       const data = await res.json();
+      if (!isCurrent()) return;
       this.tree = data.workspaces || data.folders || [];
       this.group = findWorkspaceNode(this.tree, this.workspaceId);
       if (!isGroupNode(this.group)) {
@@ -300,6 +332,7 @@ export class WorkspaceMembersPanel {
         void this.loadRollups();
       }
     } catch (err) {
+      if (!isCurrent()) return;
       console.error('Failed to load group members:', err);
       this.showError('Failed to load members.');
     }
@@ -331,13 +364,17 @@ export class WorkspaceMembersPanel {
   // Fire the per-member roll-up requests only when the panel is first
   // expanded (initPanelExpansion flips aria-expanded to "true").
   armLazyRollups() {
-    if (this.rollupObserver || !this.els.panel) return;
+    if (this._destroyed || this.rollupObserver || !this.els.panel) return;
     if (this.els.rollups) {
       this.els.rollups.innerHTML =
         '<div class="group-detail-empty">Expand the panel to load member tasks, notes, and files.</div>';
     }
     this.rollupObserver = new MutationObserver(() => {
-      if (this.els.panel.getAttribute('aria-expanded') === 'true' && !this.rollupsLoaded) {
+      if (
+        !this._destroyed &&
+        this.els.panel.getAttribute('aria-expanded') === 'true' &&
+        !this.rollupsLoaded
+      ) {
         this.rollupsLoaded = true;
         void this.loadRollups();
       }
@@ -349,10 +386,12 @@ export class WorkspaceMembersPanel {
   }
 
   async loadRollups() {
-    if (!this.els.rollups || !this.group) return;
+    if (this._destroyed || !this.els.rollups || !this.group) return;
+    const group = this.group;
     this.els.rollups.innerHTML =
       '<div class="group-detail-empty">Loading member tasks, notes &amp; files…</div>';
     await Promise.all([this.loadTasks(), this.loadNotesFiles()]);
+    if (this._destroyed || this.group !== group) return;
     this.renderRollups();
   }
 
@@ -647,12 +686,15 @@ export class WorkspaceMembersPanel {
   // --- Notes & files roll-up (direct concrete members only) --------------------
 
   async loadNotesFiles() {
-    if (!this.group) return;
-    const members = directMembers(this.group).filter(m => !isGroupNode(m));
+    if (this._destroyed || !this.group) return;
+    const group = this.group;
+    const members = directMembers(group).filter(m => !isGroupNode(m));
 
     const noteResults = await Promise.allSettled(
       members.map(async member => {
-        const res = await fetch(`/api/workspaces/${encodeURIComponent(member.id)}/notes`);
+        const res = await fetch(`/api/workspaces/${encodeURIComponent(member.id)}/notes`, {
+          signal: this._readController.signal
+        });
         if (!res.ok) throw new Error(`notes fetch failed: ${res.status}`);
         const data = await res.json();
         return (data.notes || []).map(note => ({
@@ -664,9 +706,12 @@ export class WorkspaceMembersPanel {
       })
     );
 
+    if (this._destroyed || this.group !== group) return;
     const fileResults = await Promise.allSettled(
       members.map(async member => {
-        const res = await fetch(`/api/workspaces/${encodeURIComponent(member.id)}`);
+        const res = await fetch(`/api/workspaces/${encodeURIComponent(member.id)}`, {
+          signal: this._readController.signal
+        });
         if (!res.ok) throw new Error(`files fetch failed: ${res.status}`);
         const data = await res.json();
         const attachments =
@@ -680,6 +725,7 @@ export class WorkspaceMembersPanel {
       })
     );
 
+    if (this._destroyed || this.group !== group) return;
     const notes = [];
     const files = [];
     let failures = 0;
@@ -737,14 +783,16 @@ export class WorkspaceMembersPanel {
   // --- Tasks roll-up (default open + scheduled; status/created-date/member filters)
 
   async loadTasks() {
-    if (!this.group) return;
+    if (this._destroyed || !this.group) return;
+    const group = this.group;
 
     // Direct concrete workspace members only; sub-group tasks are excluded.
-    const members = directMembers(this.group).filter(m => !isGroupNode(m));
+    const members = directMembers(group).filter(m => !isGroupNode(m));
     const results = await Promise.allSettled(
       members.map(async member => {
         const res = await fetch(
-          `/api/orchestration/tasks?workspace_id=${encodeURIComponent(member.id)}`
+          `/api/orchestration/tasks?workspace_id=${encodeURIComponent(member.id)}`,
+          { signal: this._readController.signal }
         );
         if (!res.ok) throw new Error(`tasks fetch failed: ${res.status}`);
         const data = await res.json();
@@ -757,6 +805,7 @@ export class WorkspaceMembersPanel {
       })
     );
 
+    if (this._destroyed || this.group !== group) return;
     const all = [];
     let failures = 0;
     results.forEach(r => {

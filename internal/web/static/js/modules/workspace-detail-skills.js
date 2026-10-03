@@ -347,6 +347,7 @@ export class WorkspaceSkillsManager {
   }
 
   async loadAvailableSkills(force = false) {
+    if (this.host._destroyed) return [];
     if (!force && Array.isArray(this.availableSkills) && this.availableSkills.length > 0) {
       return this.availableSkills;
     }
@@ -354,14 +355,20 @@ export class WorkspaceSkillsManager {
       return this.availableSkillsPromise;
     }
 
-    this.availableSkillsPromise = (async () => {
-      const response = await fetch('/api/skills?agent=default');
+    const request = this.host.beginResourceRequest?.('skillCatalog');
+    const isCurrent = () =>
+      !this.host._destroyed && (!request || this.host.isResourceRequestCurrent(request));
+    const promise = (async () => {
+      const response = await fetch('/api/skills?agent=default', {
+        signal: request?.controller.signal
+      });
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || 'Failed to load skills');
       }
 
       const data = await response.json();
+      if (!isCurrent()) return [];
       const seen = new Set();
       const skillsList = (Array.isArray(data?.skills) ? data.skills : [])
         .map(skill => ({
@@ -381,11 +388,14 @@ export class WorkspaceSkillsManager {
       this.availableSkills = skillsList;
       return skillsList;
     })();
-
+    this.availableSkillsPromise = promise;
     try {
-      return await this.availableSkillsPromise;
+      return await promise;
+    } catch (error) {
+      if (!isCurrent()) return [];
+      throw error;
     } finally {
-      this.availableSkillsPromise = null;
+      if (this.availableSkillsPromise === promise) this.availableSkillsPromise = null;
     }
   }
 
