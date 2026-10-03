@@ -178,6 +178,15 @@ export class WorkspaceDetailPage {
     this.workspaceId = workspaceId;
     this.workspaceSlug = String(workspaceSlug || '').trim();
     this.suppressSetupPrompts = options.suppressSetupPrompts === true;
+    this._destroyed = false;
+    this._resourceRequests = new Map();
+    this._requestSequence = 0;
+    this._workspaceMetadataRevision = 0;
+    this._pageDisposers = [];
+    this._pageTimeouts = new Set();
+    this.workspaceRealtimeUnsubscribe = null;
+    this.characterCatalogUnsubscribe = null;
+    this._watchingCharacterCatalog = false;
     this.workspace = null;
     this.tasks = [];
     this.sessions = [];
@@ -290,10 +299,128 @@ export class WorkspaceDetailPage {
     this.fileModalManager = new WorkspaceFileModalManager(this);
   }
 
+  // Each projection owns its reads independently: refreshing Tasks must not
+  // cancel Notes or Backlog. Cancellation releases resources; identity checks
+  // also reject transports that ignore abort and obsolete finally blocks.
+  beginResourceRequest(resource, parent = null) {
+    if (this._destroyed || (parent && !this.isResourceRequestCurrent(parent))) return null;
+    this._resourceRequests ||= new Map();
+    this.invalidateResourceRequest(resource);
+    const request = {
+      resource,
+      workspaceId: this.workspaceId,
+      sequence: (this._requestSequence = (this._requestSequence || 0) + 1),
+      controller: new AbortController(),
+      parent
+    };
+    this._resourceRequests.set(resource, request);
+    return request;
+  }
+
+  isResourceRequestCurrent(request) {
+    return Boolean(
+      request &&
+      !this._destroyed &&
+      request.workspaceId === this.workspaceId &&
+      this._resourceRequests?.get(request.resource) === request &&
+      !request.controller.signal.aborted &&
+      (!request.parent || this.isResourceRequestCurrent(request.parent))
+    );
+  }
+
+  invalidateResourceRequest(resource) {
+    const request = this._resourceRequests?.get(resource);
+    this._resourceRequests?.delete(resource);
+    try {
+      request?.controller.abort();
+    } catch (_err) {
+      // Invalidating the owner must work even with a broken abort polyfill.
+    }
+    if (request) {
+      for (const dependent of this._resourceRequests.values()) {
+        if (dependent.parent === request) this.invalidateResourceRequest(dependent.resource);
+      }
+    }
+  }
+
+  publishWorkspaceSnapshot(workspace, request) {
+    // Directories also refresh these fields. A later directory read must not
+    // be rolled back when an earlier full-workspace read eventually finishes.
+    if (workspace && this.workspace && this._workspaceMetadataRevision > request.sequence) {
+      workspace = { ...workspace };
+      for (const key of [
+        'directory_references',
+        'mcp_bindings',
+        'agent_mcp_access',
+        'primary_directory_id',
+        'project_path',
+        'shared_data'
+      ])
+        workspace[key] = this.workspace[key];
+    }
+    this.workspace = workspace;
+    this._workspaceMetadataRevision = Math.max(
+      this._workspaceMetadataRevision || 0,
+      request.sequence
+    );
+  }
+
+  listenToPage(target, type, listener) {
+    if (this._destroyed || !target?.addEventListener) return;
+    const guarded = event => {
+      if (!this._destroyed) listener(event);
+    };
+    target.addEventListener(type, guarded);
+    this._pageDisposers.push(() => target.removeEventListener(type, guarded));
+  }
+
+  schedulePageCallback(callback, delay) {
+    if (this._destroyed) return;
+    const timer = window.setTimeout(() => {
+      this._pageTimeouts.delete(timer);
+      if (!this._destroyed) callback();
+    }, delay);
+    this._pageTimeouts.add(timer);
+  }
+
+  // Release the main page's reads, observers, subscriptions, global listeners,
+  // and polling resources. Mutation requests already submitted are not undone.
+  destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+    for (const resource of this._resourceRequests?.keys() || [])
+      this.invalidateResourceRequest(resource);
+    for (const unsubscribe of [
+      this.workspaceRealtimeUnsubscribe,
+      this.characterCatalogUnsubscribe
+    ]) {
+      try {
+        unsubscribe?.();
+      } catch (_err) {
+        /* Best-effort independent cleanup. */
+      }
+    }
+    this.workspaceRealtimeUnsubscribe = null;
+    this.characterCatalogUnsubscribe = null;
+    this.stopExecutionMonitor();
+    this.stopTaskActivityTick();
+    this.membersPanel?.destroy?.();
+    for (const dispose of this._pageDisposers || []) dispose();
+    this._pageDisposers = [];
+    for (const timer of this._pageTimeouts || []) window.clearTimeout(timer);
+    this._pageTimeouts?.clear();
+    if (this._pageDropOverlay) {
+      this._pageDropOverlay.remove();
+      this._pageDropOverlay = null;
+      delete document.body.dataset.workspaceDetailDropBound;
+    }
+  }
+
   /**
    * Initialize the workspace detail page
    */
   async init() {
+    if (this._destroyed) return;
     // One-shot arrival links (?task=…&result=1, ?task=…&schedule=1) are read
     // from the URL the page was OPENED with. The Command view rewrites the
     // address bar to its own view state while this method is still loading
@@ -310,10 +437,13 @@ export class WorkspaceDetailPage {
     this.setupNotesPanelVaultDrop();
     this.setupPageDragAndDrop();
     await this.loadWorkspace();
+    if (this._destroyed) return;
     this.consumeProjectOpenFailureNotice();
     this.watchCharacterCatalog();
     await this.loadAgentCatalog();
+    if (this._destroyed) return;
     await this.loadWorkspaceAgentSnapshots();
+    if (this._destroyed) return;
     await Promise.all([
       this.loadTasks(),
       this.loadBacklog(),
@@ -323,6 +453,7 @@ export class WorkspaceDetailPage {
       this.loadDirectories(),
       this.loadSchedules()
     ]);
+    if (this._destroyed) return;
     // The harvest popover's two links (FR37, FR42). Both run right after tasks
     // load, because each resolves its task out of the list that was just
     // filled, and before the setup prompts below so a deliberate deep link is
@@ -337,7 +468,7 @@ export class WorkspaceDetailPage {
     this.setupRealtime();
     if (restoredBlockedTask) {
       this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage);
-      window.setTimeout(
+      this.schedulePageCallback(
         () => this.scheduleTaskAssistScrollReset(this.elements.taskAssistPage),
         360
       );
@@ -351,12 +482,15 @@ export class WorkspaceDetailPage {
     // should meet — not a missing-entry-agent prompt landing on top of it, and
     // not an agent task racing the deterministic setup it duplicates.
     const setupOwned = await this.initSharedSetupWizard();
+    if (this._destroyed) return;
     if (!restoredBlockedTask && !setupOwned && !this.checkAutoOpenCreateAgent()) {
       await this.maybePromptForMissingEntryAgent();
+      if (this._destroyed) return;
     }
     let startedSetupTask = false;
     if (!restoredBlockedTask && !setupOwned) {
       startedSetupTask = await this.maybeStartTemplateSetup();
+      if (this._destroyed) return;
     }
     // A blueprint's own setup task goes first; the folder's first task never
     // starts alongside it. It is not held back by a Setup Wizard merely existing
@@ -598,6 +732,7 @@ export class WorkspaceDetailPage {
    * MIME types and are handled by their own panel drop zones.
    */
   setupPageDragAndDrop() {
+    if (this._destroyed) return;
     if (document.body.dataset.workspaceDetailDropBound === 'true') {
       return;
     }
@@ -618,6 +753,7 @@ export class WorkspaceDetailPage {
         <div class="workspace-detail-drop-overlay-subtitle">They'll be saved to this workspace's files</div>
       </div>`;
     document.body.appendChild(overlay);
+    this._pageDropOverlay = overlay;
 
     let dragDepth = 0;
 
@@ -637,14 +773,14 @@ export class WorkspaceDetailPage {
       overlay.classList.remove('is-active');
     };
 
-    document.addEventListener('dragenter', event => {
+    this.listenToPage(document, 'dragenter', event => {
       if (!isFileDrag(event) || modalOpen()) return;
       event.preventDefault();
       dragDepth += 1;
       overlay.classList.add('is-active');
     });
 
-    document.addEventListener('dragover', event => {
+    this.listenToPage(document, 'dragover', event => {
       if (!isFileDrag(event) || modalOpen()) return;
       event.preventDefault();
       if (event.dataTransfer) {
@@ -652,7 +788,7 @@ export class WorkspaceDetailPage {
       }
     });
 
-    document.addEventListener('dragleave', event => {
+    this.listenToPage(document, 'dragleave', event => {
       if (!isFileDrag(event)) return;
       dragDepth -= 1;
       if (dragDepth <= 0) {
@@ -660,7 +796,7 @@ export class WorkspaceDetailPage {
       }
     });
 
-    document.addEventListener('drop', event => {
+    this.listenToPage(document, 'drop', event => {
       if (!isFileDrag(event)) return;
       // Never let the browser navigate to a dropped file.
       event.preventDefault();
@@ -675,7 +811,7 @@ export class WorkspaceDetailPage {
       }
     });
 
-    window.addEventListener('dragend', hideOverlay);
+    this.listenToPage(window, 'dragend', hideOverlay);
   }
 
   /**
@@ -1772,7 +1908,7 @@ export class WorkspaceDetailPage {
     this.elements.taskAssistAgent?.addEventListener('change', () =>
       this.updateAssistSwitchButtonState()
     );
-    window.addEventListener('popstate', () => this.restoreTaskAssistPageFromRoute());
+    this.listenToPage(window, 'popstate', () => this.restoreTaskAssistPageFromRoute());
     this.elements.addAgentSubmitBtn?.addEventListener('click', () =>
       this.addSelectedAgentToWorkspace()
     );
@@ -2258,17 +2394,24 @@ export class WorkspaceDetailPage {
    * Load workspace data
    */
   async loadWorkspace() {
+    const request = this.beginResourceRequest('workspace');
+    if (!request) return;
     try {
       const response = await fetch(
-        `/api/orchestration/workspace?id=${encodeURIComponent(this.workspaceId)}`
+        `/api/orchestration/workspace?id=${encodeURIComponent(request.workspaceId)}`,
+        { signal: request.controller.signal }
       );
       if (!response.ok) throw new Error('Failed to load workspace');
 
-      this.workspace = await response.json();
-      this.workspaceSlug = String(this.workspace?.folder_slug || this.workspaceSlug || '').trim();
+      const workspace = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
       await this.loadAvailableSkills().catch(error => {
-        console.warn('Failed to load skill catalog for workspace detail:', error);
+        if (this.isResourceRequestCurrent(request))
+          console.warn('Failed to load skill catalog for workspace detail:', error);
       });
+      if (!this.isResourceRequestCurrent(request)) return;
+      this.publishWorkspaceSnapshot(workspace, request);
+      this.workspaceSlug = String(this.workspace?.folder_slug || this.workspaceSlug || '').trim();
       this.workspaceSettings = this.normalizeWorkspaceSettings(
         this.workspace?.workspace_settings || this.workspace?.shared_data?.workspace_settings || {}
       );
@@ -2285,7 +2428,7 @@ export class WorkspaceDetailPage {
       // depends on the workspace's folder, which the workspace payload does not
       // describe. It is not awaited: the settings section renders empty for a
       // moment rather than holding the whole page on a filesystem check.
-      void this.loadWorkspacePlanningPolicy();
+      void this.loadWorkspacePlanningPolicy('', request);
       if (
         window.OriAskRouting &&
         typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function'
@@ -2312,7 +2455,8 @@ export class WorkspaceDetailPage {
           label: workspaceName ? (onCanvas ? 'Canvas: ' : 'Workspace: ') + workspaceName : ''
         });
       }
-      await this.renderWorkspaceInfo();
+      await this.renderWorkspaceInfo(request);
+      if (!this.isResourceRequestCurrent(request)) return;
       this.renderGroupRequirementStatus();
       this.syncProjectActionState();
       this.renderWorkspaceMCPBindings();
@@ -2322,10 +2466,15 @@ export class WorkspaceDetailPage {
       this.renderAgentGroups();
       this.refreshHomeAssistantQuickPrompts();
       this.renderWorkspaceHealth();
-      await this.membersPanel.syncWorkspace(this.workspace);
+      await this.membersPanel.syncWorkspace(this.workspace, {
+        signal: request.controller.signal,
+        isCurrent: () => this.isResourceRequestCurrent(request)
+      });
+      if (!this.isResourceRequestCurrent(request)) return;
       // Keep the opt-in Command view in sync once data is loaded/refreshed.
       window.workspaceCommand?.refresh();
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load workspace:', error);
       if (window.Toast) window.Toast.error('Failed to load workspace');
       this.renderWorkspaceHealth();
@@ -2413,8 +2562,9 @@ export class WorkspaceDetailPage {
   /**
    * Render workspace information in header
    */
-  async renderWorkspaceInfo() {
-    if (!this.workspace) return;
+  async renderWorkspaceInfo(parent = null) {
+    if (!this.workspace || this._destroyed || (parent && !this.isResourceRequestCurrent(parent)))
+      return;
 
     if (this.elements.workspaceName) {
       this.elements.workspaceName.textContent = this.workspace.name || 'Unnamed Workspace';
@@ -2453,7 +2603,8 @@ export class WorkspaceDetailPage {
     }
 
     // Load children workspaces from tree API
-    await this.loadChildren();
+    await this.loadChildren(parent);
+    if (this._destroyed || (parent && !this.isResourceRequestCurrent(parent))) return;
     this.renderWorkspaceHealth();
   }
 
@@ -3149,10 +3300,15 @@ export class WorkspaceDetailPage {
   /**
    * Load children workspaces from the tree API
    */
-  async loadChildren() {
+  async loadChildren(parent = null) {
+    const request = this.beginResourceRequest('children', parent);
+    if (!request) return;
     try {
       // Fetch the full workspace tree to find children
-      const response = await fetch('/api/workspaces?tree=true');
+      const response = await fetch('/api/workspaces?tree=true', {
+        signal: request.controller.signal
+      });
+      if (!this.isResourceRequestCurrent(request)) return;
       if (!response.ok) {
         this.children = [];
         this.renderChildren();
@@ -3160,6 +3316,7 @@ export class WorkspaceDetailPage {
       }
 
       const data = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
       const folders = data.folders || [];
 
       // Find this workspace in the tree and get its children
@@ -3176,10 +3333,11 @@ export class WorkspaceDetailPage {
         return null;
       };
 
-      const currentWorkspace = findWorkspace(folders, this.workspaceId);
+      const currentWorkspace = findWorkspace(folders, request.workspaceId);
       this.children = currentWorkspace?.children || [];
       this.renderChildren();
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load children workspaces:', error);
       this.children = [];
       this.renderChildren();
@@ -3257,42 +3415,49 @@ export class WorkspaceDetailPage {
    * Load tasks for the workspace
    */
   async loadTasks() {
+    const request = this.beginResourceRequest('tasks');
+    if (!request) return;
     this.tasksLoading = true;
     this.tasksLoadFailed = false;
     this.renderAgentGroups();
 
     try {
       const response = await fetch(
-        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`
+        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(request.workspaceId)}`,
+        { signal: request.controller.signal }
       );
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
       this.tasks = data.tasks || [];
       if (this.currentView === 'board' && this.boardConfig) {
         this.renderBoard();
       }
       this.tasksLoadFailed = false;
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load tasks:', error);
       this.tasks = [];
       this.tasksLoadFailed = true;
     } finally {
-      this.tasksLoading = false;
-      this.renderTasks();
-      this.renderWorkspaceConfigSummary();
-      this.renderWorkspaceWorkflowLinks();
-      this.restoreTaskAssistPageFromRoute();
+      if (this.isResourceRequestCurrent(request)) {
+        this.tasksLoading = false;
+        this.renderTasks();
+        this.renderWorkspaceConfigSummary();
+        this.renderWorkspaceWorkflowLinks();
+        this.restoreTaskAssistPageFromRoute();
 
-      if (this.elements.taskCount) {
-        this.elements.taskCount.textContent = this.tasks.length;
-        this.elements.taskCount.setAttribute('aria-busy', 'false');
-        this.elements.taskCount.setAttribute('aria-label', `${this.tasks.length} tasks`);
+        if (this.elements.taskCount) {
+          this.elements.taskCount.textContent = this.tasks.length;
+          this.elements.taskCount.setAttribute('aria-busy', 'false');
+          this.elements.taskCount.setAttribute('aria-label', `${this.tasks.length} tasks`);
+        }
+        this.refreshHomeAssistantQuickPrompts();
+        // Keep the opt-in Command view (and its open stat manager) in sync after
+        // task mutations, which reload tasks without a full workspace reload.
+        window.workspaceCommand?.refresh();
       }
-      this.refreshHomeAssistantQuickPrompts();
-      // Keep the opt-in Command view (and its open stat manager) in sync after
-      // task mutations, which reload tasks without a full workspace reload.
-      window.workspaceCommand?.refresh();
     }
   }
 
@@ -3305,24 +3470,32 @@ export class WorkspaceDetailPage {
 
   /** Load this workspace's Backlog items (and, opt-in, its descendants' — FR62). */
   async loadBacklog() {
+    const request = this.beginResourceRequest('backlog');
+    if (!request) return;
     this.backlogLoading = true;
     this.backlogLoadFailed = false;
     try {
-      const params = new URLSearchParams({ workspace_id: this.workspaceId });
+      const params = new URLSearchParams({ workspace_id: request.workspaceId });
       if (this.backlogIncludeDescendants) params.set('include_descendants', 'true');
-      const response = await fetch(`/api/orchestration/backlog?${params.toString()}`);
+      const response = await fetch(`/api/orchestration/backlog?${params.toString()}`, {
+        signal: request.controller.signal
+      });
       if (!response.ok) throw new Error('Failed to load backlog');
       const data = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
       this.backlogItems = Array.isArray(data.items) ? data.items : [];
       this.backlogSync = data.sync || null;
       this.backlogLoadFailed = false;
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load backlog:', error);
       this.backlogItems = [];
       this.backlogLoadFailed = true;
     } finally {
-      this.backlogLoading = false;
-      window.workspaceCommand?.refresh();
+      if (this.isResourceRequestCurrent(request)) {
+        this.backlogLoading = false;
+        window.workspaceCommand?.refresh();
+      }
     }
   }
 
@@ -4048,8 +4221,16 @@ export class WorkspaceDetailPage {
   // otherwise a chosen character would stay invisible here until some unrelated
   // event happened to redraw the roster.
   watchCharacterCatalog() {
-    if (!window.CharacterCatalog || typeof window.CharacterCatalog.onChange !== 'function') return;
-    window.CharacterCatalog.onChange(() => {
+    if (
+      this._destroyed ||
+      this._watchingCharacterCatalog ||
+      !window.CharacterCatalog ||
+      typeof window.CharacterCatalog.onChange !== 'function'
+    )
+      return;
+    this._watchingCharacterCatalog = true;
+    this.characterCatalogUnsubscribe = window.CharacterCatalog.onChange(() => {
+      if (this._destroyed) return;
       this.renderAgentGroups();
       window.workspaceCommand?.refresh();
     });
@@ -5864,17 +6045,23 @@ export class WorkspaceDetailPage {
   async refreshFirstTaskBanner() {
     const taskId = this.firstTaskBannerId;
     if (!taskId) return;
+    const request = this.beginResourceRequest('firstTaskBanner');
+    if (!request) return;
     try {
-      const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+      const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`, {
+        signal: request.controller.signal
+      });
       if (!response.ok) return;
-      this.updateFirstTaskBanner(await response.json());
+      const task = await response.json();
+      if (this.isResourceRequestCurrent(request)) this.updateFirstTaskBanner(task);
     } catch (error) {
-      console.warn('First task banner refresh failed:', error);
+      if (this.isResourceRequestCurrent(request))
+        console.warn('First task banner refresh failed:', error);
     }
   }
 
   updateFirstTaskBanner(task) {
-    if (!task || task.id !== this.firstTaskBannerId) return;
+    if (this._destroyed || !task || task.id !== this.firstTaskBannerId) return;
     const mount = document.getElementById('workspaceFirstTaskBanner');
     renderFirstTaskBanner(
       mount,
@@ -8353,35 +8540,41 @@ export class WorkspaceDetailPage {
     });
   }
 
-  async fetchLatestSubtasksForParent(parentTaskID) {
-    if (!parentTaskID || !this.workspaceId) return [];
+  async fetchLatestSubtasksForParent(parentTaskID, parent = null) {
+    if (!parentTaskID || !this.workspaceId || this._destroyed) return [];
+    const request = parent || this.beginResourceRequest('executionSubtasks');
+    if (!this.isResourceRequestCurrent(request)) return [];
     try {
       const response = await fetch(
-        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`
+        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(request.workspaceId)}`,
+        { signal: request.controller.signal }
       );
       if (!response.ok) return [];
       const payload = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return [];
       const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
       return tasks.filter(task => task?.parent_task_id === parentTaskID);
     } catch (error) {
-      console.error('Failed to fetch latest subtasks for breakdown:', error);
+      if (this.isResourceRequestCurrent(request))
+        console.error('Failed to fetch latest subtasks for breakdown:', error);
       return [];
     }
   }
 
-  async refreshExecutionBreakdown(task) {
+  async refreshExecutionBreakdown(task, parent = null) {
+    const request = this.beginResourceRequest('executionBreakdown', parent);
+    if (!request) return;
     if (!task) {
       this.renderTaskExecutionBreakdown(null);
       return;
     }
 
-    let subtasks = this.getSubtasksForParent(task.id);
+    const subtasks = this.getSubtasksForParent(task.id);
     this.renderTaskExecutionBreakdown(task, subtasks);
-
     if (!subtasks.length) return;
 
-    const latestSubtasks = await this.fetchLatestSubtasksForParent(task.id);
-    if (!latestSubtasks.length) return;
+    const latestSubtasks = await this.fetchLatestSubtasksForParent(task.id, request);
+    if (!this.isResourceRequestCurrent(request) || !latestSubtasks.length) return;
     this.renderTaskExecutionBreakdown(task, latestSubtasks);
   }
 
@@ -11945,15 +12138,19 @@ export class WorkspaceDetailPage {
 
   // loadWorkspacePlanningPolicy fetches the effective policy. A preset argument
   // previews one without saving it (FR-142).
-  async loadWorkspacePlanningPolicy(preset = '') {
+  async loadWorkspacePlanningPolicy(preset = '', parent = null) {
     if (!this.workspaceId) return null;
+    const request = this.beginResourceRequest('planningPolicy', parent);
+    if (!request) return null;
     const query = preset ? `?preset=${encodeURIComponent(preset)}` : '';
     try {
       const response = await fetch(
-        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/planning-policy${query}`
+        `/api/workspaces/${encodeURIComponent(request.workspaceId)}/planning-policy${query}`,
+        { signal: request.controller.signal }
       );
       if (!response.ok) return null;
       const payload = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return null;
       this.workspacePlanningPolicy = payload?.policy || null;
       this.renderWorkspacePlanningPolicy();
       return this.workspacePlanningPolicy;
@@ -12393,6 +12590,8 @@ export class WorkspaceDetailPage {
   }
 
   async loadWorkspaceAgentSnapshots() {
+    const request = this.beginResourceRequest('agentSnapshots');
+    if (!request) return;
     this.workspaceAgentSnapshots = new Set();
     this.workspaceAgentProfiles = new Map();
     const id = this.workspace?.id;
@@ -12402,9 +12601,12 @@ export class WorkspaceDetailPage {
       // every workspace-local agent that has an on-disk snapshot. We derive both
       // the advisory snapshot set and the profile map used by getAgentProfile()
       // from the same response.
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/agents`);
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/agents`, {
+        signal: request.controller.signal
+      });
       if (!response.ok) return;
       const data = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
       const agents = Array.isArray(data?.agents) ? data.agents : [];
       agents.forEach(agent => {
         const name = String(agent?.name || '').trim();
@@ -12428,6 +12630,7 @@ export class WorkspaceDetailPage {
     } catch (_err) {
       // Profile info is advisory; failure just hides the model badge / recovery hint.
     }
+    if (!this.isResourceRequestCurrent(request)) return;
     this.renderAgentGroups();
     window.workspaceCommand?.refresh();
   }
@@ -12442,6 +12645,7 @@ export class WorkspaceDetailPage {
   }
 
   async loadAgentCatalog(force = false) {
+    if (this._destroyed) return this.agentCatalog;
     if (!force && this.agentIndex instanceof Map && this.agentIndex.size > 0) {
       this.agentCatalogLoaded = true;
       this.agentCatalogLoadFailed = false;
@@ -12449,18 +12653,23 @@ export class WorkspaceDetailPage {
       return this.agentCatalog;
     }
 
+    const request = this.beginResourceRequest('agentCatalog');
+    if (!request) return this.agentCatalog;
     const nextCatalog = [];
     const nextIndex = new Map();
     this.agentCatalogLoaded = false;
     this.agentCatalogLoadFailed = false;
     this.renderWorkspaceHealth();
     try {
-      const response = await fetch('/api/agents/dashboard/list');
+      const response = await fetch('/api/agents/dashboard/list', {
+        signal: request.controller.signal
+      });
       if (!response.ok) {
         throw new Error(`Failed to load agent catalog (${response.status})`);
       }
 
       const data = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return this.agentCatalog;
       const agents = Array.isArray(data?.agents) ? data.agents : [];
       agents.forEach(agent => {
         const name = String(agent?.name || '').trim();
@@ -12505,6 +12714,7 @@ export class WorkspaceDetailPage {
         nextIndex.set(this.normalizeAgentName(name), profile);
       });
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return this.agentCatalog;
       console.error('Failed to load agent catalog:', error);
       this.agentCatalogLoadFailed = true;
     }
@@ -13040,30 +13250,41 @@ export class WorkspaceDetailPage {
   }
 
   stopExecutionMonitor() {
-    if (this.executionMonitorTimer) {
+    this.invalidateResourceRequest('executionMonitor');
+    this.invalidateResourceRequest('executionPoll');
+    this.invalidateResourceRequest('executionBreakdown');
+    if (this.executionMonitorTimer != null) {
       clearInterval(this.executionMonitorTimer);
       this.executionMonitorTimer = null;
     }
   }
 
   async startExecutionMonitor(taskId) {
+    if (this._destroyed) return;
     this.stopExecutionMonitor();
     if (!taskId) return;
+    const owner = this.beginResourceRequest('executionMonitor');
+    if (!owner) return;
     this.currentExecutionTaskId = taskId;
 
     const poll = async () => {
+      const request = this.beginResourceRequest('executionPoll', owner);
+      if (!request) return;
       try {
-        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`, {
+          signal: request.controller.signal
+        });
         if (!response.ok) return;
 
         const task = await response.json();
-        if (!task || task.id !== taskId) return;
+        if (!this.isResourceRequestCurrent(request) || !task || task.id !== taskId) return;
 
         const state = this.getTaskExecutionState(task);
         this.updateFirstTaskBanner(task);
         this.updateTaskExecutionMeta(task);
         this.setExecutionModalStatus(task);
-        await this.refreshExecutionBreakdown(task);
+        await this.refreshExecutionBreakdown(task, request);
+        if (!this.isResourceRequestCurrent(request)) return;
         this.updateTaskExecutionControls(task);
 
         if (state !== this.executionLastStatus) {
@@ -13125,12 +13346,13 @@ export class WorkspaceDetailPage {
           await this.loadTasks();
         }
       } catch (error) {
-        console.error('Failed to monitor task execution:', error);
+        if (this.isResourceRequestCurrent(request))
+          console.error('Failed to monitor task execution:', error);
       }
     };
 
     await poll();
-    this.executionMonitorTimer = setInterval(poll, 3000);
+    if (this.isResourceRequestCurrent(owner)) this.executionMonitorTimer = setInterval(poll, 3000);
   }
 
   extractRealtimeTaskPayload(event) {
@@ -13141,9 +13363,15 @@ export class WorkspaceDetailPage {
   }
 
   handleTaskExecutionRealtimeEvent(event) {
-    if (!this.currentExecutionTaskId || !event) return;
+    if (this._destroyed || !this.currentExecutionTaskId || !event) return;
     const { taskId, payload } = this.extractRealtimeTaskPayload(event);
     if (!taskId || taskId !== this.currentExecutionTaskId) return;
+    if (['task.started', 'task.progress', 'task.thinking'].includes(event.type)) {
+      // These events paint newer execution state without stopping the monitor.
+      // Reject any older poll (and its breakdown) before it can roll that back.
+      this.invalidateResourceRequest('executionPoll');
+      this.invalidateResourceRequest('executionBreakdown');
+    }
     if (
       taskId === this.firstTaskBannerId &&
       ['task.completed', 'task.failed', 'task.blocked'].includes(event.type)
@@ -13601,8 +13829,14 @@ export class WorkspaceDetailPage {
    * Load board configuration and render
    */
   async loadBoard() {
+    const request = this.beginResourceRequest('board');
+    if (!request) return;
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/board`);
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(request.workspaceId)}/board`,
+        { signal: request.controller.signal }
+      );
+      if (!this.isResourceRequestCurrent(request)) return;
       if (!response.ok) {
         this.boardConfig = null;
         this.renderBoard();
@@ -13610,10 +13844,13 @@ export class WorkspaceDetailPage {
       }
 
       const data = await response.json();
-      this.boardConfig = data.board || null;
+      if (!this.isResourceRequestCurrent(request)) return;
       await this.ensureAgentOptions();
+      if (!this.isResourceRequestCurrent(request)) return;
+      this.boardConfig = data.board || null;
       this.renderBoard();
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load board:', error);
       this.boardConfig = null;
       this.renderBoard();
@@ -13642,11 +13879,13 @@ export class WorkspaceDetailPage {
   }
 
   async ensureAgentOptions() {
+    if (this._destroyed) return [];
     if (Array.isArray(this.agentOptions) && this.agentOptions.length > 0) {
       return this.agentOptions;
     }
 
     await this.loadAgentCatalog();
+    if (this._destroyed) return [];
     if (Array.isArray(this.agentOptions) && this.agentOptions.length > 0) {
       return this.agentOptions;
     }
@@ -14614,34 +14853,41 @@ export class WorkspaceDetailPage {
    * Load sessions for the workspace
    */
   async loadSessions() {
+    const request = this.beginResourceRequest('sessions');
+    if (!request) return;
     this.sessionsLoading = true;
     this.sessionsLoadFailed = false;
     this.renderSessions();
 
     try {
       const response = await fetch(
-        `/api/sessions?folder_id=${encodeURIComponent(this.workspaceId)}`
+        `/api/sessions?folder_id=${encodeURIComponent(request.workspaceId)}`,
+        { signal: request.controller.signal }
       );
       if (!response.ok) throw new Error('Failed to load sessions');
 
       const data = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
       this.sessions = data.sessions || data || [];
       this.sessionsLoadFailed = false;
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load sessions:', error);
       this.sessions = [];
       this.sessionsLoadFailed = true;
     } finally {
-      this.sessionsLoading = false;
-      this.renderSessions();
+      if (this.isResourceRequestCurrent(request)) {
+        this.sessionsLoading = false;
+        this.renderSessions();
 
-      if (this.elements.sessionCount) {
-        this.elements.sessionCount.textContent = this.sessions.length;
-        this.elements.sessionCount.setAttribute('aria-busy', 'false');
-        this.elements.sessionCount.setAttribute('aria-label', `${this.sessions.length} sessions`);
+        if (this.elements.sessionCount) {
+          this.elements.sessionCount.textContent = this.sessions.length;
+          this.elements.sessionCount.setAttribute('aria-busy', 'false');
+          this.elements.sessionCount.setAttribute('aria-label', `${this.sessions.length} sessions`);
+        }
+        this.refreshHomeAssistantQuickPrompts();
+        window.workspaceCommand?.refresh();
       }
-      this.refreshHomeAssistantQuickPrompts();
-      window.workspaceCommand?.refresh();
     }
   }
 
@@ -14679,6 +14925,8 @@ export class WorkspaceDetailPage {
    * Load files for the workspace
    */
   async loadFiles() {
+    const request = this.beginResourceRequest('files');
+    if (!request) return;
     if (this.elements.filesList) {
       this.elements.filesList.innerHTML =
         '<div class="workspace-detail-loading">Loading files...</div>';
@@ -14688,9 +14936,13 @@ export class WorkspaceDetailPage {
     this.renderWorkspaceHealth();
 
     try {
-      await this.syncWorkspaceFilesFromDisk();
+      await this.syncWorkspaceFilesFromDisk(request);
+      if (!this.isResourceRequestCurrent(request)) return;
 
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(request.workspaceId)}`, {
+        signal: request.controller.signal
+      });
+      if (!this.isResourceRequestCurrent(request)) return;
       if (!response.ok) {
         this.files = [];
         this.filesLoaded = true;
@@ -14703,6 +14955,7 @@ export class WorkspaceDetailPage {
       }
 
       const workspace = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
       // Filter attachments to only include files (not text content)
       this.files = (workspace.attachments || []).filter(
         a => a.file_meta || a.type === 'image' || a.type === 'other'
@@ -14714,6 +14967,7 @@ export class WorkspaceDetailPage {
       this.renderWorkspaceHealth();
       window.workspaceCommand?.refresh();
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load files:', error);
       this.files = [];
       this.filesLoaded = true;
@@ -14725,19 +14979,20 @@ export class WorkspaceDetailPage {
     }
   }
 
-  async syncWorkspaceFilesFromDisk() {
-    if (!this.workspaceId) return;
-
+  async syncWorkspaceFilesFromDisk(parent = null) {
+    if (!this.workspaceId || this._destroyed) return;
+    const request = parent || this.beginResourceRequest('fileSync');
+    if (!this.isResourceRequestCurrent(request)) return;
     try {
       const response = await fetch(
-        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/files/tree`,
-        { cache: 'no-store' }
+        `/api/workspaces/${encodeURIComponent(request.workspaceId)}/files/tree`,
+        { cache: 'no-store', signal: request.controller.signal }
       );
-      if (!response.ok) {
+      if (this.isResourceRequestCurrent(request) && !response.ok)
         console.warn('Workspace file sync failed:', response.status);
-      }
     } catch (error) {
-      console.warn('Workspace file sync failed:', error);
+      if (this.isResourceRequestCurrent(request))
+        console.warn('Workspace file sync failed:', error);
     }
   }
 
@@ -15067,6 +15322,8 @@ export class WorkspaceDetailPage {
    * Load notes for the workspace
    */
   async loadNotes() {
+    const request = this.beginResourceRequest('notes');
+    if (!request) return;
     this.updateCopyNotesButtonState(true);
     if (this.elements.notesList) {
       this.elements.notesList.innerHTML =
@@ -15074,7 +15331,11 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`);
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(request.workspaceId)}/notes`,
+        { signal: request.controller.signal }
+      );
+      if (!this.isResourceRequestCurrent(request)) return;
       if (!response.ok) {
         // Notes endpoint might return workspace notes differently
         this.notes = [];
@@ -15084,16 +15345,18 @@ export class WorkspaceDetailPage {
       }
 
       const data = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
       this.notes = data.notes || (Array.isArray(data) ? data : [data]).filter(Boolean);
       this.renderNotes();
       this.refreshHomeAssistantQuickPrompts();
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load notes:', error);
       this.notes = [];
       this.renderNotes();
       this.refreshHomeAssistantQuickPrompts();
     } finally {
-      window.workspaceCommand?.refresh();
+      if (this.isResourceRequestCurrent(request)) window.workspaceCommand?.refresh();
     }
   }
 
@@ -15208,6 +15471,7 @@ export class WorkspaceDetailPage {
    * and any other context needed for the assistant.
    */
   activateWorkspace() {
+    if (this._destroyed) return;
     fetch(`/api/orchestration/workspace/activate?id=${encodeURIComponent(this.workspaceId)}`, {
       method: 'POST'
     }).catch(err => console.warn('Failed to activate workspace:', err));
@@ -15556,6 +15820,8 @@ export class WorkspaceDetailPage {
    * Load directories for the workspace
    */
   async loadDirectories() {
+    const request = this.beginResourceRequest('directories');
+    if (!request) return;
     if (this.elements.directoriesList) {
       this.elements.directoriesList.innerHTML =
         '<div class="workspace-detail-loading">Loading directories...</div>';
@@ -15565,7 +15831,14 @@ export class WorkspaceDetailPage {
       // Directories may come from:
       // 1) directory_references (workspace imports / folder picker)
       // 2) legacy attachments with type "directory"
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(request.workspaceId)}`, {
+        signal: request.controller.signal
+      });
+      if (!this.isResourceRequestCurrent(request)) return;
+      if (this.workspace && this._workspaceMetadataRevision > request.sequence) {
+        this.publishDirectorySnapshot(this.workspace, request);
+        return;
+      }
       if (!response.ok) {
         this.directories = [];
         this.renderDirectories();
@@ -15574,90 +15847,99 @@ export class WorkspaceDetailPage {
       }
 
       const workspace = await response.json();
-
-      if (workspace && typeof workspace === 'object') {
-        if (!this.workspace || typeof this.workspace !== 'object') {
-          this.workspace = {};
-        }
-        this.workspace.directory_references = Array.isArray(workspace.directory_references)
-          ? workspace.directory_references
-          : [];
-        this.workspace.mcp_bindings = Array.isArray(workspace.mcp_bindings)
-          ? workspace.mcp_bindings
-          : [];
-        this.workspace.agent_mcp_access = Array.isArray(workspace.agent_mcp_access)
-          ? workspace.agent_mcp_access
-          : [];
-        this.workspace.primary_directory_id =
-          typeof workspace.primary_directory_id === 'string' ? workspace.primary_directory_id : '';
-        this.workspace.project_path =
-          typeof workspace.project_path === 'string'
-            ? workspace.project_path
-            : this.workspace.project_path || '';
-        this.workspace.shared_data =
-          workspace.shared_data && typeof workspace.shared_data === 'object'
-            ? workspace.shared_data
-            : this.workspace.shared_data || {};
-      }
-
-      const refs = Array.isArray(workspace.directory_references)
-        ? workspace.directory_references.map(ref => ({
-            id: ref.id,
-            name: ref.name || '',
-            path: ref.path || '',
-            source: 'reference'
-          }))
-        : [];
-
-      const attachmentDirs = Array.isArray(workspace.attachments)
-        ? workspace.attachments
-            .filter(attachment => attachment && attachment.type === 'directory')
-            .map(attachment => ({
-              id: attachment.id,
-              name: attachment.title || attachment.name || '',
-              path: attachment.path || attachment.body || '',
-              source: 'attachment'
-            }))
-        : [];
-
-      // De-duplicate by id first, then by normalized path for mixed legacy/new sources.
-      const seenById = new Set();
-      const seenByPath = new Set();
-      this.directories = [];
-      [...refs, ...attachmentDirs].forEach(dir => {
-        if (!dir || !dir.id) return;
-        if (seenById.has(dir.id)) return;
-
-        const normalizedPath = String(dir.path || '')
-          .trim()
-          .replace(/[\\/]+$/, '')
-          .toLowerCase();
-        if (normalizedPath && seenByPath.has(normalizedPath)) {
-          return;
-        }
-
-        seenById.add(dir.id);
-        if (normalizedPath) {
-          seenByPath.add(normalizedPath);
-        }
-        this.directories.push(dir);
-      });
-
-      this.renderDirectories();
-      this.syncProjectActionState();
-      this.renderWorkspaceMCPBindings();
-      this.renderWorkspaceSkillBindings();
-      this.renderAgentGroups();
-      this.refreshHomeAssistantQuickPrompts();
+      this.publishDirectorySnapshot(workspace, request);
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
+      // The newer full workspace read also supersedes failures of this older
+      // metadata read. Keep that authoritative projection instead of clearing it.
+      if (this.workspace && this._workspaceMetadataRevision > request.sequence) {
+        this.publishDirectorySnapshot(this.workspace, request);
+        return;
+      }
       console.error('Failed to load directories:', error);
       this.directories = [];
       this.renderDirectories();
       this.syncProjectActionState();
       this.refreshHomeAssistantQuickPrompts();
     } finally {
-      window.workspaceCommand?.refresh();
+      if (this.isResourceRequestCurrent(request)) window.workspaceCommand?.refresh();
     }
+  }
+
+  publishDirectorySnapshot(workspace, request) {
+    if (!this.isResourceRequestCurrent(request)) return;
+    // A newer workspace read already supplied fresher directory metadata.
+    // Derive this panel from it rather than rolling shared fields back.
+    if (this.workspace && this._workspaceMetadataRevision > request.sequence)
+      workspace = this.workspace;
+
+    if (workspace && typeof workspace === 'object') {
+      if (!this.workspace || typeof this.workspace !== 'object') this.workspace = {};
+      this.workspace.directory_references = Array.isArray(workspace.directory_references)
+        ? workspace.directory_references
+        : [];
+      this.workspace.mcp_bindings = Array.isArray(workspace.mcp_bindings)
+        ? workspace.mcp_bindings
+        : [];
+      this.workspace.agent_mcp_access = Array.isArray(workspace.agent_mcp_access)
+        ? workspace.agent_mcp_access
+        : [];
+      this.workspace.primary_directory_id =
+        typeof workspace.primary_directory_id === 'string' ? workspace.primary_directory_id : '';
+      this.workspace.project_path =
+        typeof workspace.project_path === 'string'
+          ? workspace.project_path
+          : this.workspace.project_path || '';
+      this.workspace.shared_data =
+        workspace.shared_data && typeof workspace.shared_data === 'object'
+          ? workspace.shared_data
+          : this.workspace.shared_data || {};
+      this._workspaceMetadataRevision = Math.max(
+        this._workspaceMetadataRevision || 0,
+        request.sequence
+      );
+    }
+
+    const refs = Array.isArray(workspace.directory_references)
+      ? workspace.directory_references.map(ref => ({
+          id: ref.id,
+          name: ref.name || '',
+          path: ref.path || '',
+          source: 'reference'
+        }))
+      : [];
+    const attachmentDirs = Array.isArray(workspace.attachments)
+      ? workspace.attachments
+          .filter(attachment => attachment && attachment.type === 'directory')
+          .map(attachment => ({
+            id: attachment.id,
+            name: attachment.title || attachment.name || '',
+            path: attachment.path || attachment.body || '',
+            source: 'attachment'
+          }))
+      : [];
+
+    // De-duplicate by id first, then by normalized path for mixed legacy/new sources.
+    const seenById = new Set();
+    const seenByPath = new Set();
+    this.directories = [];
+    [...refs, ...attachmentDirs].forEach(dir => {
+      if (!dir || !dir.id || seenById.has(dir.id)) return;
+      const normalizedPath = String(dir.path || '')
+        .trim()
+        .replace(/[\\/]+$/, '')
+        .toLowerCase();
+      if (normalizedPath && seenByPath.has(normalizedPath)) return;
+      seenById.add(dir.id);
+      if (normalizedPath) seenByPath.add(normalizedPath);
+      this.directories.push(dir);
+    });
+    this.renderDirectories();
+    this.syncProjectActionState();
+    this.renderWorkspaceMCPBindings();
+    this.renderWorkspaceSkillBindings();
+    this.renderAgentGroups();
+    this.refreshHomeAssistantQuickPrompts();
   }
 
   /**
@@ -16098,6 +16380,8 @@ export class WorkspaceDetailPage {
    * Schedules are tasks that have a schedule field set
    */
   async loadSchedules() {
+    const request = this.beginResourceRequest('schedules');
+    if (!request) return;
     if (this.elements.schedulesList) {
       this.elements.schedulesList.innerHTML =
         '<div class="workspace-detail-loading">Loading schedules...</div>';
@@ -16106,8 +16390,10 @@ export class WorkspaceDetailPage {
     try {
       // Schedules are stored as tasks with schedule field
       const response = await fetch(
-        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`
+        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(request.workspaceId)}`,
+        { signal: request.controller.signal }
       );
+      if (!this.isResourceRequestCurrent(request)) return;
       if (!response.ok) {
         this.schedules = [];
         this.renderSchedules();
@@ -16115,6 +16401,7 @@ export class WorkspaceDetailPage {
       }
 
       const data = await response.json();
+      if (!this.isResourceRequestCurrent(request)) return;
       const allTasks = data.tasks || [];
 
       // Filter tasks that have schedules
@@ -16133,11 +16420,12 @@ export class WorkspaceDetailPage {
 
       this.renderSchedules();
     } catch (error) {
+      if (!this.isResourceRequestCurrent(request)) return;
       console.error('Failed to load schedules:', error);
       this.schedules = [];
       this.renderSchedules();
     } finally {
-      window.workspaceCommand?.refresh();
+      if (this.isResourceRequestCurrent(request)) window.workspaceCommand?.refresh();
     }
   }
 
@@ -16216,12 +16504,17 @@ export class WorkspaceDetailPage {
   setupRealtime() {
     // Use existing realtime system if available
     if (
+      !this._destroyed &&
+      !this.workspaceRealtimeUnsubscribe &&
       window.workspaceRealtime &&
       typeof window.workspaceRealtime.subscribeToWorkspace === 'function'
     ) {
-      window.workspaceRealtime.subscribeToWorkspace(this.workspaceId, event => {
-        this.handleRealtimeEvent(event);
-      });
+      this.workspaceRealtimeUnsubscribe = window.workspaceRealtime.subscribeToWorkspace(
+        this.workspaceId,
+        event => {
+          this.handleRealtimeEvent(event);
+        }
+      );
     }
   }
 
@@ -16229,6 +16522,7 @@ export class WorkspaceDetailPage {
    * Handle real-time events
    */
   handleRealtimeEvent(event) {
+    if (this._destroyed) return;
     this.handleTaskExecutionRealtimeEvent(event);
     // The Operations map shows its units working from this same stream.
     window.workspaceCommand?.handleActivityEvent?.(event);
@@ -16433,9 +16727,9 @@ export class WorkspaceDetailPage {
   }
 
   ensureTaskActivityTick() {
-    if (this._taskActivityTickHandle) return;
+    if (this._destroyed || this._taskActivityTickHandle != null) return;
     this._taskActivityTickHandle = window.setInterval(() => {
-      if (this._taskActivity.size === 0) {
+      if (this._destroyed || this._taskActivity.size === 0) {
         this.stopTaskActivityTick();
         return;
       }
@@ -16446,7 +16740,7 @@ export class WorkspaceDetailPage {
   }
 
   stopTaskActivityTick() {
-    if (this._taskActivityTickHandle) {
+    if (this._taskActivityTickHandle != null) {
       window.clearInterval(this._taskActivityTickHandle);
       this._taskActivityTickHandle = null;
     }
