@@ -1,11 +1,13 @@
 package mailbox
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"errors"
 	"io"
 	"mime/quotedprintable"
+	"net/textproto"
 	"regexp"
 	"sort"
 	"strconv"
@@ -65,14 +67,17 @@ type imapMeta struct {
 	messageID   string
 	// parents are the Message-IDs this message replies to, oldest first: the
 	// References header, then In-Reply-To.
-	parents  []string
-	subject  string
-	from     Participant
-	to       []Participant
-	date     time.Time
-	unread   bool
-	answered bool
-	snippet  string
+	parents       []string
+	subject       string
+	from          Participant
+	to            []Participant
+	cc            []Participant
+	date          time.Time
+	unread        bool
+	answered      bool
+	bulk          bool
+	autoSubmitted bool
+	snippet       string
 }
 
 // rootID is the Message-ID of the message that started this conversation, or ""
@@ -167,9 +172,31 @@ func firstMessageID(value string) string {
 	return ""
 }
 
+// imapHeaderSection fetches the headers the envelope does not carry: the
+// threading header and the list and automation signals. PEEK keeps the
+// message unread.
+func imapHeaderSection() *imap.BodySectionName {
+	fields := append([]string{"References"}, signalHeaders...)
+	return &imap.BodySectionName{
+		BodyPartName: imap.BodyPartName{Specifier: imap.HeaderSpecifier, Fields: fields},
+		Peek:         true,
+	}
+}
+
+// parseIMAPHeaders reads the fetched header block. A block cut at the size
+// limit still yields every header before the cut.
+func parseIMAPHeaders(raw []byte) textproto.MIMEHeader {
+	reader := textproto.NewReader(bufio.NewReader(bytes.NewReader(append(raw, '\r', '\n', '\r', '\n'))))
+	header, _ := reader.ReadMIMEHeader()
+	if header == nil {
+		return textproto.MIMEHeader{}
+	}
+	return header
+}
+
 // imapMetaFromMessage projects one fetched message. Every text field is
 // untrusted and is sanitized here, before anything above this package sees it.
-func imapMetaFromMessage(msg *imap.Message, references *imap.BodySectionName, mailbox imapMailboxRef) imapMeta {
+func imapMetaFromMessage(msg *imap.Message, headers *imap.BodySectionName, mailbox imapMailboxRef) imapMeta {
 	meta := imapMeta{
 		uid:         msg.Uid,
 		uidValidity: mailbox.uidValidity,
@@ -194,21 +221,30 @@ func imapMetaFromMessage(msg *imap.Message, references *imap.BodySectionName, ma
 		if len(env.From) > 0 {
 			meta.from = imapParticipant(env.From[0])
 		}
-		for _, addr := range env.To {
-			if p := imapParticipant(addr); p.Address != "" {
-				meta.to = append(meta.to, p)
-			}
-		}
+		meta.to = imapParticipants(env.To)
+		meta.cc = imapParticipants(env.Cc)
 		if msg.InternalDate.IsZero() {
 			meta.date = env.Date.UTC()
 		}
 	}
-	if literal := msg.GetBody(references); literal != nil {
-		header, _ := io.ReadAll(io.LimitReader(literal, imapMaxHeaderBytes))
-		meta.parents = messageIDs(string(header))
+	if literal := msg.GetBody(headers); literal != nil {
+		raw, _ := io.ReadAll(io.LimitReader(literal, imapMaxHeaderBytes))
+		header := parseIMAPHeaders(raw)
+		meta.parents = messageIDs(header.Get("References"))
+		meta.bulk, meta.autoSubmitted = senderSignals(header.Get)
 	}
 	meta.parents = append(meta.parents, inReplyTo...)
 	return meta
+}
+
+func imapParticipants(addrs []*imap.Address) []Participant {
+	var out []Participant
+	for _, addr := range addrs {
+		if p := imapParticipant(addr); p.Address != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func imapParticipant(addr *imap.Address) Participant {
@@ -280,13 +316,17 @@ func (g imapThreadGroup) thread(account Account) Thread {
 			ThreadID: g.id,
 			From:     m.from,
 			To:       m.to,
+			Cc:       m.cc,
 			Subject:  m.subject,
 			Snippet:  m.snippet,
 			SentAt:   m.date,
 			FromUser: m.sent || (account.EmailAddress != "" && strings.EqualFold(m.from.Address, account.EmailAddress)),
 			// A copy in the Sent folder is the user's own message; its flags say
 			// nothing about what the user still has to read.
-			Unread: m.unread && !m.sent,
+			Unread:        m.unread && !m.sent,
+			Answered:      m.answered,
+			Bulk:          m.bulk,
+			AutoSubmitted: m.autoSubmitted,
 		}
 		out.Messages = append(out.Messages, msg)
 		if out.Subject == "" && msg.Subject != "" {

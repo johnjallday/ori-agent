@@ -29,6 +29,8 @@ func ResetRecordTables() []string {
 		"workspace_map_positions", "workspace_map_group_presentations",
 		"workspace_map_agent_positions", "personal_assistant_state",
 		"personal_assistant_assignment", "personal_hq_followup", "calendar_meeting_prep",
+		// Derived from mail and re-derived on the next read; never retained.
+		"email_triage_state",
 		"daily_brief_config", "daily_brief_revision", "daily_brief_generation_claim",
 		"daily_brief_notification", "workspace_plans", "workspace_plan_versions",
 		"workspace_plan_clarifications", "workspace_plan_approvals", "workspace_plan_task_links",

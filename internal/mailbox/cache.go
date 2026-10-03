@@ -147,6 +147,9 @@ func searchKey(q Query) string {
 	b.WriteByte('|')
 	b.WriteString(strconv.FormatBool(q.WaitingOnUserOnly))
 	b.WriteByte('|')
+	// A page without snippets must never answer a request for them.
+	b.WriteString(strconv.FormatBool(q.WithSnippets))
+	b.WriteByte('|')
 	b.WriteString(q.PageToken)
 	b.WriteByte('|')
 	b.WriteString(strings.Join(q.Labels, ","))

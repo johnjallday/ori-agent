@@ -180,7 +180,7 @@ func headerSafe(v string) string {
 func (g *GmailProvider) threadMetadata(ctx context.Context, svc *gmailapi.Service, account Account, threadID string) (Thread, error) {
 	t, err := svc.Users.Threads.Get("me", threadID).
 		Format("metadata").
-		MetadataHeaders("Subject", "From", "To", "Date").
+		MetadataHeaders(append([]string{"Subject", "From", "To", "Cc", "Date"}, signalHeaders...)...).
 		Context(ctx).Do()
 	if err != nil {
 		return Thread{}, classifyGmailError(err)
@@ -222,8 +222,10 @@ func mapThread(account Account, t *gmailapi.Thread, withBodies bool) Thread {
 
 func mapMessage(account Account, m *gmailapi.Message, withBody bool) Message {
 	msg := Message{ID: m.Id, ThreadID: m.ThreadId, Unread: hasLabel(m.LabelIds, "UNREAD")}
+	headers := map[string]string{}
 	if m.Payload != nil {
 		for _, h := range m.Payload.Headers {
+			headers[strings.ToLower(h.Name)] = h.Value
 			switch strings.ToLower(h.Name) {
 			case "subject":
 				msg.Subject = SanitizeText(h.Value, 500)
@@ -231,8 +233,16 @@ func mapMessage(account Account, m *gmailapi.Message, withBody bool) Message {
 				msg.From = parseParticipant(h.Value)
 			case "to":
 				msg.To = parseParticipants(h.Value)
+			case "cc":
+				msg.Cc = parseParticipants(h.Value)
 			}
 		}
+	}
+	msg.Bulk, msg.AutoSubmitted = senderSignals(func(name string) string { return headers[strings.ToLower(name)] })
+	// Gmail has already sorted promotions, social updates, and forums out of
+	// the primary inbox; that is the same fact as a list header.
+	if hasLabel(m.LabelIds, "CATEGORY_PROMOTIONS") || hasLabel(m.LabelIds, "CATEGORY_SOCIAL") || hasLabel(m.LabelIds, "CATEGORY_FORUMS") {
+		msg.Bulk = true
 	}
 	msg.FromUser = account.EmailAddress != "" &&
 		strings.EqualFold(msg.From.Address, account.EmailAddress)

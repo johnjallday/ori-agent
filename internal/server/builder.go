@@ -32,6 +32,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/economy"
 	"github.com/johnjallday/ori-agent/internal/economyhttp"
 	"github.com/johnjallday/ori-agent/internal/emailsetuphttp"
+	"github.com/johnjallday/ori-agent/internal/emailtriage"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
@@ -208,6 +209,8 @@ type ServerBuilder struct {
 	// mailboxLinker attaches a connected account to a workspace. It is built in
 	// Phase 18 and consumed by the Email Ops setup quest in Phase 22.6.
 	mailboxLinker *mailboxLinkerService
+	// emailTriage sorts a linked inbox into "Needs you", FYI, and ignorable.
+	emailTriage *emailtriage.Service
 	// homeUpgradeSlot lets the plugin replacement guard (Phase 17) consult the
 	// Home package upgrade service built in Phase 22.6.
 	homeUpgradeSlot *homeUpgradeSlot

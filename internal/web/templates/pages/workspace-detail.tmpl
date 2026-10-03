@@ -40,6 +40,10 @@
              Email Ops workspace when no account is linked yet — one-click setup on
              the workspace surface. Additive; hidden when connected or elsewhere. -->
         <div id="workspaceEmailConnectMount" class="workspace-email-connect-mount" hidden></div>
+        <!-- "Needs you": the inbox sorted into what needs the user, what is worth
+             knowing, and what can be ignored. Populated by email-needs-you.js
+             for a workspace with a linked mailbox; hidden everywhere else. -->
+        <section id="workspaceNeedsYouMount" class="needs-you" aria-labelledby="needsYouTitle" hidden></section>
         <!-- Workspace follow-up management panel (Mail spin-off): populated by
              workspace-followups.js for a workspace that owns follow-ups (the
              Email Ops workspace). Additive; hidden when there are none. Placed
@@ -9201,6 +9205,7 @@
   <script type="module" src="/js/modules/personal-hq-email-setup.js"></script>
   <!-- Follow-up management panel for a workspace that owns follow-ups (Email Ops). -->
   <script type="module" src="/js/modules/workspace-followups.js"></script>
+  <script type="module" src="/js/modules/email-needs-you.js"></script>
   <!-- Read-only Daily Brief history of a workspace that is not the HQ here. -->
   <script type="module" src="/js/modules/workspace-daily-briefs.js"></script>
 

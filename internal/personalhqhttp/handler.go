@@ -31,6 +31,7 @@ type Handler struct {
 	upgrade                *personalhq.UpgradeCoordinator
 	mailboxLinker          MailboxLinker
 	workspaceMailboxLinker WorkspaceMailboxLinker
+	needsYou               NeedsYouService
 	replies                ReplyService
 	followups              FollowUpAPI
 	journal                JournalAPI

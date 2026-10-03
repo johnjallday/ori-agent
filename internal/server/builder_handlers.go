@@ -1419,6 +1419,8 @@ func (b *ServerBuilder) wireMailboxRuntime() {
 	linker := newMailboxLinkerService(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider)
 	linker.readiness = readiness
 	b.mailboxLinker = linker
+	// The "Needs you" list reads through the same cache as the agent tools.
+	b.wireNeedsYou(cachedProvider)
 	if b.personalHQHandler != nil && b.personalHQService != nil {
 		b.personalHQHandler.SetMailboxLinker(linker)
 		b.personalHQHandler.SetWorkspaceMailboxLinker(linker)
@@ -1434,7 +1436,9 @@ func (b *ServerBuilder) wireMailboxRuntime() {
 			}
 			return b.workspaceFileStore
 		}
-		b.dailyBriefMailbox = newDailyBriefMailboxSource(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider, emailOpsSource)
+		briefMailbox := newDailyBriefMailboxSource(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider, emailOpsSource)
+		briefMailbox.triage = b.emailTriage
+		b.dailyBriefMailbox = briefMailbox
 	}
 	// Confirm-gated send broker: the ONLY send path. The raw (uncached) Gmail
 	// provider is the sender; sends re-authorize via the send policy and emit

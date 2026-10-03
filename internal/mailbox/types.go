@@ -66,6 +66,7 @@ type Message struct {
 	ThreadID string        `json:"thread_id"`
 	From     Participant   `json:"from"`
 	To       []Participant `json:"to,omitempty"`
+	Cc       []Participant `json:"cc,omitempty"`
 	Subject  string        `json:"subject"`
 	Snippet  string        `json:"snippet"` // bounded + sanitized plain text
 	SentAt   time.Time     `json:"sent_at"`
@@ -73,6 +74,17 @@ type Message struct {
 	// WaitingOnUser without leaking provider flags.
 	FromUser bool `json:"from_user"`
 	Unread   bool `json:"unread"`
+	// Answered is true when the server marks the message replied to (IMAP's
+	// \Answered flag). It is the only sign of a reply that lives in a folder the
+	// list does not read; Gmail threads carry the reply itself instead.
+	Answered bool `json:"answered,omitempty"`
+	// Bulk is true when the message says it was sent to a list: it carries
+	// List-Unsubscribe or List-Id, or Precedence bulk/list/junk. Newsletters and
+	// promotions do; a person writing to the user does not.
+	Bulk bool `json:"bulk,omitempty"`
+	// AutoSubmitted is true when the message says a machine sent it (an
+	// Auto-Submitted header other than "no"): notifications, receipts, alerts.
+	AutoSubmitted bool `json:"auto_submitted,omitempty"`
 }
 
 // Thread is a bounded projection of an email thread. Messages may be empty in a
@@ -102,6 +114,9 @@ type Query struct {
 	PageToken string `json:"page_token,omitempty"`
 	// WaitingOnUserOnly narrows to threads awaiting the user (for the brief).
 	WaitingOnUserOnly bool `json:"waiting_on_user_only,omitempty"`
+	// WithSnippets asks for the bounded, sanitized text of each returned
+	// thread's newest message, which a list projection otherwise may omit.
+	WithSnippets bool `json:"with_snippets,omitempty"`
 }
 
 // Normalized returns a copy with MaxResults/LookbackDays clamped into the

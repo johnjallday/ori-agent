@@ -1282,6 +1282,10 @@ func registerPersonalHQRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/email/status", s.Handlers.PersonalHQ.WorkspaceMailboxStatusHandler)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/email/link", s.Handlers.PersonalHQ.WorkspaceLinkMailbox)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/email/unlink", s.Handlers.PersonalHQ.WorkspaceUnlinkMailbox)
+		// The "Needs you" list for a workspace's linked mailbox.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/email/needs-you", s.Handlers.PersonalHQ.WorkspaceNeedsYou)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/email/needs-you/mark", s.Handlers.PersonalHQ.WorkspaceNeedsYouMark)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/email/needs-you/track", s.Handlers.PersonalHQ.WorkspaceNeedsYouTrack)
 		// Email Ops portal status for the HQ email station (presence + open
 		// follow-up count badge).
 		mux.HandleFunc("GET /api/personal-hq/email-ops", s.Handlers.PersonalHQ.EmailOpsStatusHandler)
