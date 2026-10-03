@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/connections"
 	"github.com/johnjallday/ori-agent/internal/mailbox"
 	"github.com/johnjallday/ori-agent/internal/vault"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -42,18 +43,39 @@ func TestEmailReadiness_PasswordAccountWithoutPasswordIsNotAGoogleRepair(t *test
 	if got.Ready || got.Reason != workspace.BlockedReasonReconnectRequired {
 		t.Fatalf("readiness = %+v, want reconnect required", got)
 	}
-	if got.Action == emailActionReconnect || got.ActionURL == googleAccountCard {
-		t.Fatalf("readiness = %+v, must not send a password account to the Google Account card", got)
+	if got.Action != emailActionSetUpEmail || got.ActionURL != emailSetupURL {
+		t.Fatalf("readiness = %+v, want the setup card, never the Google Account card", got)
 	}
 }
 
-func TestEmailReadiness_UnlinkedWorkspaceKeepsTheGoogleFirstOrder(t *testing.T) {
-	// Nothing is linked, so there is no password account to exempt: the existing
-	// first step is unchanged.
+func TestEmailReadiness_UnlinkedWorkspaceWithoutGoogleOffersTheSetupCard(t *testing.T) {
+	// Nothing is linked and Google sign-in is not set up: the card connects a
+	// mailbox without it, so it is the first step rather than Google.
 	e := newEmailReadinessEvaluator(connectionStore(t, nil), healthyVaults(), unlinkedWorkspace(t), passwordAccount(true))
 
-	if got := e.Evaluate(context.Background(), "ws-1"); got.Action != emailActionConnectGoogle {
-		t.Fatalf("readiness = %+v, want the Google connection step", got)
+	got := e.Evaluate(context.Background(), "ws-1")
+	if got.Action != emailActionSetUpEmail || got.ActionURL != emailSetupURL || got.Reason != workspace.BlockedReasonNotLinkedToWorkspace {
+		t.Fatalf("readiness = %+v, want the setup card", got)
+	}
+}
+
+func TestEmailReadiness_UnlinkedWorkspaceWithGoogleReadyKeepsTheGoogleLink(t *testing.T) {
+	// A healthy Google connection still links in one click, as before.
+	e := newEmailReadinessEvaluator(connectionStore(t, connectedWithGmail(connections.HealthHealthy)), healthyVaults(), unlinkedWorkspace(t), healthyAccount())
+
+	if got := e.Evaluate(context.Background(), "ws-1"); got.Action != emailActionLinkAccount {
+		t.Fatalf("readiness = %+v, want the existing link step", got)
+	}
+}
+
+func TestEmailReadiness_LockedVaultIsNamedFirst(t *testing.T) {
+	// The linked account's vault is locked: the account cannot be read, so its
+	// kind is unknown, and "connect Google" would be the wrong repair.
+	e := newEmailReadinessEvaluator(connectionStore(t, nil), healthyVaults(), linkedWorkspace(t), fakeAccounts{err: vault.ErrVaultLocked})
+
+	got := e.Evaluate(context.Background(), "ws-1")
+	if got.Action != emailActionRepairVault || got.Reason != workspace.BlockedReasonVaultRepairRequired || got.ActionURL != vaultsPage {
+		t.Fatalf("readiness = %+v, want the unlock-vault repair", got)
 	}
 }
 

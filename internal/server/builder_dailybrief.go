@@ -381,12 +381,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		renameCoordinator.WithContinuityAttachments(b.continuityLocal)
 	}
 	b.personalAssistantHandler.SetRenameService(renameCoordinator)
-	capabilities := personalassistant.NewCapabilityService(
-		b.personalAssistantService, b.workspaceStore, personalAssistantEmailCapability{readiness: b.emailReadiness},
-	)
+	emailCapability := personalAssistantEmailCapability{readiness: b.emailReadiness}
 	if b.workspaceFileStore != nil {
-		capabilities.SetEmailOpsWorkspaceLocator(emailOpsWorkspaceLocator{source: b.workspaceFileStore})
+		emailCapability.emailOps = b.workspaceFileStore
 	}
+	capabilities := personalassistant.NewCapabilityService(b.personalAssistantService, b.workspaceStore, emailCapability)
 	b.personalAssistantHandler.SetCapabilityService(capabilities)
 	b.personalAssistantHandler.SetSpecialistOfferService(
 		personalassistant.NewSpecialistOfferService(b.personalAssistantStore),

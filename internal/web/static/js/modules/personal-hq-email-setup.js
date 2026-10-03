@@ -136,10 +136,30 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
     modal.classList.remove('is-open');
   }
 
+  // openEmailSetupCard opens the "Set up email" card (email-setup.js), which
+  // connects a mailbox with an app password and links it to Email Ops. It
+  // reports false when the card is not on this page.
+  function openEmailSetupCard(onDone) {
+    if (window.OriEmailSetup && typeof window.OriEmailSetup.open === 'function') {
+      return window.OriEmailSetup.open({ onDone }) !== false;
+    }
+    return false;
+  }
+
+  function isEmailSetupUrl(url) {
+    try {
+      const parsed = new URL(String(url || ''), window.location.origin);
+      return parsed.pathname === '/' && parsed.searchParams.get('setup') === 'email';
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Re-pointed to the shared Google Account connection (FR 46/53): no separate
   // OAuth popup and no user-supplied Web client. If Gmail is enabled on the
   // global Google connection, reuse it to give this workspace its own account
-  // with no re-authorization; otherwise send the user to set up Google first.
+  // with no re-authorization; otherwise the setup card connects the mailbox
+  // with an app password instead.
   async function connectEmail(target) {
     const active = target || scope;
     if (!active) return;
@@ -153,6 +173,7 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
     const gmail =
       conn && Array.isArray(conn.grants) ? conn.grants.find(g => g.product === 'gmail') : null;
     if (!(conn && conn.subject && gmail && gmail.health === 'healthy')) {
+      if (openEmailSetupCard(() => renderBody())) return;
       toast('Connect Google and enable Gmail in Settings → Google Account first.', 'danger');
       window.open('/settings#google-account', '_blank');
       return;
@@ -234,6 +255,7 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
     action.setAttribute('aria-label', view.actionLabel);
     action.addEventListener('click', async () => {
       if (view.action === 'settings') {
+        if (isEmailSetupUrl(view.actionUrl) && openEmailSetupCard(() => renderBody())) return;
         window.location.href = view.actionUrl || '/settings#google-account';
         return;
       }
@@ -405,17 +427,22 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
       setup.action === 'enable_gmail' ||
       setup.action === 'repair_vault' ||
       setup.action === 'reconnect_gmail';
+    // The setup card connects and links the mailbox itself; the wizard just
+    // re-reads afterwards.
+    const usesSetupCard = setup.action === 'set_up_email';
     const action = document.createElement('button');
     action.type = 'button';
     action.className = 'modern-btn modern-btn-primary modern-btn-sm';
     action.id = 'setupWizardEmailAction';
-    action.textContent = needsSettings
-      ? setup.action_label || 'Open account settings'
-      : status && status.connected
-        ? 'Relink this mailbox'
-        : 'Link a mailbox';
+    action.textContent =
+      needsSettings || usesSetupCard
+        ? setup.action_label || 'Open account settings'
+        : status && status.connected
+          ? 'Relink this mailbox'
+          : 'Link a mailbox';
     action.addEventListener('click', async () => {
-      if (needsSettings) {
+      if (usesSetupCard && openEmailSetupCard(() => ctx.refresh())) return;
+      if (needsSettings || usesSetupCard) {
         ctx.rememberReturn();
         window.location.href = setup.action_url || '/settings#google-account';
         return;

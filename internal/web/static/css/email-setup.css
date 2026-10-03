@@ -1,0 +1,194 @@
+/* The "Set up email" card (email-setup.js). Same paper and ink as the folder
+   setup run modal, so the two one-card setups read as one family. */
+
+.email-setup {
+  --setup-ink: var(--cozy-ink, #2b2417);
+  --setup-dim: var(--cozy-ink-dim, #5d5442);
+  --setup-line: var(--cozy-line, #cdbf9f);
+  --setup-paper: var(--cozy-paper-raised, #fdfaf2);
+  --setup-moss: var(--cozy-moss, #4a6b4a);
+  --setup-amber: var(--cozy-amber-strong, #a8741a);
+  --setup-clay: var(--cozy-clay, #b0502f);
+}
+
+/* Solid paper, not the global glass modal (components.css sets that with
+   !important): instructions and errors must stay legible. */
+.email-setup .email-setup__frame {
+  border: 1px solid var(--setup-line) !important;
+  border-radius: 14px;
+  background: var(--setup-paper) !important;
+  color: var(--setup-ink);
+  backdrop-filter: none !important;
+}
+
+.email-setup .btn-primary {
+  border-color: var(--setup-moss);
+  background: var(--setup-moss);
+  color: #fff;
+}
+
+.email-setup__header {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  padding: 1.1rem 1.25rem 0.25rem;
+}
+
+.email-setup__heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.email-setup__eyebrow {
+  margin: 0;
+  color: var(--setup-moss);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.email-setup__title {
+  margin: 0.1rem 0 0;
+  font-size: 1.25rem;
+}
+
+.email-setup__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 1.25rem 1.25rem;
+}
+
+.email-setup__lead,
+.email-setup__note,
+.email-setup__hint {
+  margin: 0;
+  color: var(--setup-dim);
+}
+
+.email-setup__note,
+.email-setup__hint {
+  font-size: 0.85rem;
+}
+
+.email-setup__field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.email-setup__field label {
+  width: 100%;
+  font-weight: 600;
+}
+
+.email-setup__field .form-control {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.email-setup__field .email-setup__port {
+  flex: 0 0 5rem;
+}
+
+.email-setup__field .form-control[aria-invalid="true"] {
+  border-color: var(--setup-clay);
+}
+
+.email-setup__error {
+  width: 100%;
+  margin: 0;
+  color: var(--setup-clay);
+  font-size: 0.85rem;
+}
+
+.email-setup__status {
+  margin: 0;
+  min-height: 0;
+}
+
+.email-setup__status:empty {
+  display: none;
+}
+
+.email-setup__status.is-error {
+  color: var(--setup-clay);
+}
+
+.email-setup__who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.email-setup__provider {
+  font-weight: 700;
+}
+
+.email-setup__address {
+  color: var(--setup-dim);
+  overflow-wrap: anywhere;
+}
+
+.email-setup__change {
+  padding: 0;
+  color: var(--setup-moss);
+}
+
+.email-setup__warning {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid var(--setup-amber);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--setup-amber) 10%, transparent);
+}
+
+.email-setup__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--setup-line);
+  border-radius: 10px;
+}
+
+.email-setup__steps p {
+  margin: 0;
+}
+
+.email-setup__link {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  align-self: flex-start;
+  color: var(--setup-moss);
+  font-weight: 600;
+}
+
+.email-setup__receipt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.email-setup__receipt li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.email-setup__receipt .bi {
+  color: var(--setup-moss);
+}
+
+.email-setup__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
