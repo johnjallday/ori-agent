@@ -182,6 +182,7 @@ export default defineConfig([
       'internal/web/static/js/modules/studio-dashboard.js',
       'internal/web/static/js/modules/studio.js',
       'internal/web/static/js/modules/workspace-detail.js',
+      'internal/web/static/js/modules/workspace-detail-data-loader.js',
       'internal/web/static/js/modules/workspace-agent-detail.js',
       'internal/web/static/js/modules/workspace-detail-members.js',
       'internal/web/static/js/modules/workspace-detail-directory-explorer.js',
