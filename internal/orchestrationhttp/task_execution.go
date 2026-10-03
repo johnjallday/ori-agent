@@ -164,7 +164,7 @@ func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
 		if err := ws.UpdateTask(*task); err != nil {
 			return fmt.Errorf("failed to set task execution mode: %w", err)
 		}
-		if err := th.workspaceStore.Save(ws); err != nil {
+		if err := th.persistTasks(ws.ID, *task); err != nil {
 			return fmt.Errorf("failed to save workspace: %w", err)
 		}
 	}
@@ -316,7 +316,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			orihttp.InternalError(w, "Failed to reset task for rerun")
 			return
 		}
-		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
+		if err := th.persistTasks(foundWorkspace.ID, *foundTask); err != nil {
 			logger.Error("Failed to save workspace", logger.Fields{"error": err})
 			orihttp.InternalError(w, "Failed to save workspace")
 			return
@@ -343,7 +343,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		orihttp.InternalError(w, "Failed to update task execution settings")
 		return
 	}
-	if err := th.workspaceStore.Save(foundWorkspace); err != nil {
+	if err := th.persistTasks(foundWorkspace.ID, *foundTask); err != nil {
 		logger.Error("Failed to save workspace", logger.Fields{"error": err})
 		orihttp.InternalError(w, "Failed to save workspace")
 		return
@@ -568,7 +568,7 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update task", err)
 		return
 	}
-	if err := th.workspaceStore.Save(ws); err != nil {
+	if err := th.persistTasks(ws.ID, *task); err != nil {
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
@@ -693,7 +693,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 		logger.Error("Failed to update parent task status", logger.Fields{"task_id": parentTaskID, "error": err})
 		return
 	}
-	if err := th.workspaceStore.Save(ws); err != nil {
+	if err := th.persistTasks(ws.ID, *parentTask); err != nil {
 		logger.Error("Failed to save workspace for parent task start", logger.Fields{"workspace_id": workspaceID, "error": err})
 		return
 	}
@@ -835,7 +835,7 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 		logger.Error("Failed to update parent task after sequence", logger.Fields{"task_id": parentTaskID, "error": err})
 		return
 	}
-	if err := th.workspaceStore.Save(ws); err != nil {
+	if err := th.persistTasks(ws.ID, *parentTask); err != nil {
 		logger.Error("Failed to save workspace after task sequence", logger.Fields{"workspace_id": workspaceID, "error": err})
 		return
 	}
@@ -968,7 +968,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	if err := ws.UpdateTask(*task); err != nil {
 		return "", fmt.Errorf("failed to update task status: %w", err)
 	}
-	if err := th.workspaceStore.Save(ws); err != nil {
+	if err := th.persistTasks(ws.ID, *task); err != nil {
 		return "", fmt.Errorf("failed to save workspace: %w", err)
 	}
 
@@ -1065,7 +1065,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		if err := ws.UpdateTask(*task); err != nil {
 			return awaitingErr.Result, fmt.Errorf("failed to update waiting task: %w", err)
 		}
-		if err := th.workspaceStore.Save(ws); err != nil {
+		if err := th.persistTasks(ws.ID, *task); err != nil {
 			return awaitingErr.Result, fmt.Errorf("failed to save waiting task: %w", err)
 		}
 		return awaitingErr.Result, nil
@@ -1136,7 +1136,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	if err := ws.UpdateTask(*task); err != nil {
 		return result, fmt.Errorf("failed to update task: %w", err)
 	}
-	if err := th.workspaceStore.Save(ws); err != nil {
+	if err := th.persistTasks(ws.ID, *task); err != nil {
 		return result, fmt.Errorf("failed to save workspace: %w", err)
 	}
 
@@ -1185,13 +1185,38 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		if len(task.ExecutionTrace) > 0 {
 			if err := ws.UpdateTask(*task); err != nil {
 				logger.Error("Failed to persist task execution trace", logger.Fields{"task_id": task.ID, "error": err})
-			} else if err := th.workspaceStore.Save(ws); err != nil {
+			} else if err := th.persistTasks(ws.ID, *task); err != nil {
 				logger.Error("Failed to save task execution trace", logger.Fields{"task_id": task.ID, "error": err})
 			}
 		}
 	}
 
 	return result, execErr
+}
+
+// persistTasks writes the given tasks, and nothing else, to the workspace on
+// disk: it re-reads the workspace under its lock and replaces only these tasks.
+// Callers keep updating the snapshot they hold too, because the rest of the run
+// reads its tasks from it.
+//
+// It never saves that snapshot. A task run is asynchronous and long-lived: by
+// the time it writes, the workspace on disk may have gained bindings, directory
+// references, a Home library or settings the snapshot never had.
+//   - On an ordinary workspace, writing the whole snapshot back silently erased
+//     them. Downloads Janitor lost its folder grant mid-apply: the first file
+//     moved, and every later one failed with "Ori could not move this file".
+//   - An Assistant Home or a song in it refuses a stale write instead. The run
+//     then failed, and its failure could not be recorded either, so the task
+//     showed In progress forever.
+func (th *TaskHandler) persistTasks(workspaceID string, tasks ...workspace.Task) error {
+	return workspace.CanonicalUpdate(th.workspaceStore, workspaceID, func(fresh *workspace.Workspace) error {
+		for _, task := range tasks {
+			if err := fresh.UpdateTask(task); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.Task, blockedErr *workspace.TaskBlockedError, manual bool, extra map[string]any) error {
@@ -1234,21 +1259,7 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	if err := ws.UpdateTask(*task); err != nil {
 		return fmt.Errorf("failed to update blocked task: %w", err)
 	}
-	// Persist through a re-read under the workspace lock rather than saving the
-	// snapshot this goroutine captured when the task started.
-	//
-	// Task execution is asynchronous and long-lived: by the time a task blocks,
-	// the workspace on disk may have gained bindings, directory references, or
-	// settings the snapshot never had. Writing the whole stale snapshot back
-	// silently erased them. Observed via Downloads Janitor, whose template
-	// seeds starter tasks that auto-start on first open: a task blocking during
-	// an apply wiped the folder grant mid-batch, so the first file moved and
-	// every later one failed with "Ori could not move this file".
-	//
-	// Only the task changed here, so only the task is written.
-	if err := workspace.CanonicalUpdate(th.workspaceStore, ws.ID, func(fresh *workspace.Workspace) error {
-		return fresh.UpdateTask(*task)
-	}); err != nil {
+	if err := th.persistTasks(ws.ID, *task); err != nil {
 		return fmt.Errorf("failed to save blocked task: %w", err)
 	}
 
@@ -1277,9 +1288,7 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 		if !preflightOnly && len(task.ExecutionTrace) > 0 {
 			if err := ws.UpdateTask(*task); err != nil {
 				logger.Error("Failed to persist blocked task execution trace", logger.Fields{"task_id": task.ID, "error": err})
-			} else if err := workspace.CanonicalUpdate(th.workspaceStore, ws.ID, func(fresh *workspace.Workspace) error {
-				return fresh.UpdateTask(*task)
-			}); err != nil {
+			} else if err := th.persistTasks(ws.ID, *task); err != nil {
 				logger.Error("Failed to save blocked task execution trace", logger.Fields{"task_id": task.ID, "error": err})
 			}
 		}
@@ -2265,7 +2274,7 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 			if err := ws.UpdateTask(*inputTask); err != nil {
 				return fmt.Errorf("failed to auto-assign input task: %w", err)
 			}
-			if err := th.workspaceStore.Save(ws); err != nil {
+			if err := th.persistTasks(ws.ID, *inputTask); err != nil {
 				return fmt.Errorf("failed to save workspace after auto-assignment: %w", err)
 			}
 		}
@@ -2284,7 +2293,7 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 		if err := ws.UpdateTask(*inputTask); err != nil {
 			return fmt.Errorf("failed to update input task status: %w", err)
 		}
-		if err := th.workspaceStore.Save(ws); err != nil {
+		if err := th.persistTasks(ws.ID, *inputTask); err != nil {
 			return fmt.Errorf("failed to save workspace: %w", err)
 		}
 
@@ -2321,7 +2330,7 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 		if err := ws.UpdateTask(*inputTask); err != nil {
 			return fmt.Errorf("failed to save input task result: %w", err)
 		}
-		if err := th.workspaceStore.Save(ws); err != nil {
+		if err := th.persistTasks(ws.ID, *inputTask); err != nil {
 			return fmt.Errorf("failed to save workspace after input task: %w", err)
 		}
 

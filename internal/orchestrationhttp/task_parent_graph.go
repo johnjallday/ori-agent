@@ -133,7 +133,7 @@ func sortParentSubtasks(subtasks []workspace.Task) []workspace.Task {
 }
 
 func (th *TaskHandler) prepareParentSubtasksForExecution(ws *workspace.Workspace, subtasks []workspace.Task) error {
-	needsSave := false
+	var reset []workspace.Task
 
 	for _, subtaskInfo := range subtasks {
 		subtask, err := ws.GetTask(subtaskInfo.ID)
@@ -155,11 +155,11 @@ func (th *TaskHandler) prepareParentSubtasksForExecution(ws *workspace.Workspace
 		if err := ws.UpdateTask(*subtask); err != nil {
 			return fmt.Errorf("failed to reset subtask %s: %w", subtask.ID, err)
 		}
-		needsSave = true
+		reset = append(reset, *subtask)
 	}
 
-	if needsSave {
-		if err := th.workspaceStore.Save(ws); err != nil {
+	if len(reset) > 0 {
+		if err := th.persistTasks(ws.ID, reset...); err != nil {
 			return fmt.Errorf("failed to save workspace before subtask execution: %w", err)
 		}
 	}
