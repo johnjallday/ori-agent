@@ -70,8 +70,9 @@ and immediately before publication. It does not cancel jobs already running.
 
 ## Prepare a candidate
 
-The daily **Auto Release** workflow counts squash-merged PR subjects absent from
-the last stable tag. It requires the exact source commit's successful **CI** push
+The daily **Auto Release** workflow counts the PRs landed on `dev` since the last
+stable tag: a squash merge's `(#N)` subject or a merge commit's
+`Merge pull request #N`. The release merge-back is not counted. It requires the exact source commit's successful **CI** push
 run, not merely an unrelated successful check. Fetch/API failures fail closed.
 
 ```bash

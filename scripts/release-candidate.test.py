@@ -129,6 +129,20 @@ class LifecycleTests(GitFixture):
                 with self.assertRaises(rc.Refusal):
                     rc.evaluate(rc.Repository())
 
+    def test_merge_commit_prs_count_but_the_release_merge_back_does_not(self):
+        # "Create a merge commit" leaves no (#N) suffix on dev, and the merged
+        # branch's own subjects are not PRs even when one cites an issue.
+        for number, branch in ((11, "feature/landed"), (12, "release/v1.2.3")):
+            rc.git("checkout", "-qb", branch)
+            self.commit(f"fix: cite an issue (#{number + 100})")
+            rc.git("checkout", "-q", "dev")
+            rc.git("merge", "-q", "--no-ff", "-m", f"Merge pull request #{number} from owner/{branch}", branch)
+        rc.git("push", "--quiet", "origin", "dev")
+        for minimum, ready in (("11", "true"), ("12", "false")):
+            with patch.dict(os.environ, {"RELEASE_MIN_PRS": minimum}):
+                rc.evaluate(rc.Repository())
+                self.assertEqual(self.outputs()["ready"], ready)
+
     def test_dev_keeps_advancing_and_promotion_excludes_new_features(self):
         main_before = rc.Repository().branches["main"]
         sha = self.prepare()
