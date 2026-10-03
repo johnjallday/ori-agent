@@ -31,6 +31,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/economy"
 	"github.com/johnjallday/ori-agent/internal/economyhttp"
+	"github.com/johnjallday/ori-agent/internal/emailsetuphttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
@@ -290,6 +291,11 @@ type ServerBuilder struct {
 	githubHandler      *githubhttp.Handler
 	connStore          *connections.Store
 	consentLog         *connections.ConsentLog
+
+	// emailSetupHandler serves the "Set up email" card; vaultKeyring keeps the
+	// vault Ori unlocks by itself so mail logins survive a restart.
+	emailSetupHandler *emailsetuphttp.Handler
+	vaultKeyring      *vault.Keyring
 
 	// External agents (Claude Code, Codex)
 	externalAgentsCache   *externalagents.Cache
@@ -741,6 +747,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		Evolution:             b.evolutionHandler,
 		Vault:                 b.vaultHandler,
 		Connections:           b.connectionsHandler,
+		EmailSetup:            b.emailSetupHandler,
 		GitHub:                b.githubHandler,
 		ExternalAgents:        b.externalAgentsHandler,
 		Skills:                b.skillsHandler,

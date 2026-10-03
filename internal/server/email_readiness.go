@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/connections"
+	"github.com/johnjallday/ori-agent/internal/vault"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -52,7 +54,13 @@ const (
 	emailActionReconnect     = "reconnect_gmail"
 	emailActionRepairVault   = "repair_vault"
 	emailActionLinkAccount   = "link_account"
+	// emailActionSetUpEmail opens the "Set up email" card, which connects a
+	// mailbox with an app password and links it here.
+	emailActionSetUpEmail = "set_up_email"
 )
+
+// vaultsPage is where a locked vault is unlocked.
+const vaultsPage = "/vaults"
 
 // googleAccountCard is where every connection-level repair happens.
 const googleAccountCard = "/settings#google-account"
@@ -86,11 +94,29 @@ func (e *emailReadinessEvaluator) Evaluate(ctx context.Context, workspaceID stri
 		}
 	}
 
+	// A locked vault hides which kind of account is linked, and every check
+	// below would misreport it, so it is named first.
+	linked, linkedAcc, linkedErr := e.linkedAccount(ctx, workspaceID)
+	if linked && errors.Is(linkedErr, vault.ErrVaultLocked) {
+		return EmailReadiness{
+			Reason:      workspace.BlockedReasonVaultRepairRequired,
+			Message:     "The vault holding your email login is locked. Unlock it so Ori can read your inbox.",
+			Action:      emailActionRepairVault,
+			ActionLabel: "Unlock vault",
+			ActionURL:   vaultsPage,
+		}
+	}
+
 	// 1-4: the connection-level conditions, shared by every workspace. They are
 	// about Google sign-in, so they do not apply to a mailbox connected with a
 	// password: that account never touches Google.
-	if !e.linkedWithPassword(ctx, workspaceID) {
+	if !isPasswordConnected(linkedAcc) {
 		if blocked := e.evaluateConnection(ctx); blocked != nil {
+			if !linked {
+				// Nothing is linked yet, and Google sign-in is not ready either:
+				// the card connects a mailbox without it.
+				return setUpEmailReadiness()
+			}
 			return *blocked
 		}
 	}
@@ -136,13 +162,13 @@ func (e *emailReadinessEvaluator) Evaluate(ctx context.Context, workspaceID stri
 		}
 	}
 	if !hasMailCredential(acc) && isPasswordConnected(acc) {
-		// Not a Google repair: sending the user to the Google Account card would
-		// change nothing for this account.
+		// Not a Google repair: the setup card saves the app password again.
 		return EmailReadiness{
 			Reason:       workspace.BlockedReasonReconnectRequired,
-			Message:      "The linked email account has no saved password. Save its app password again to continue.",
-			Action:       emailActionLinkAccount,
-			ActionLabel:  "Reconnect email",
+			Message:      "The linked email account has no saved password. Set up email again to continue.",
+			Action:       emailActionSetUpEmail,
+			ActionLabel:  "Set up email",
+			ActionURL:    emailSetupURL,
 			AccountID:    acc.ID,
 			EmailAddress: acc.EmailAddress,
 		}
@@ -162,23 +188,38 @@ func (e *emailReadinessEvaluator) Evaluate(ctx context.Context, workspaceID stri
 	return EmailReadiness{Ready: true, AccountID: acc.ID, EmailAddress: acc.EmailAddress}
 }
 
-// linkedWithPassword reports whether workspaceID's mailbox is an account
-// connected with a password or app password. Anything it cannot read answers
-// false, which keeps the existing Google-first order.
-func (e *emailReadinessEvaluator) linkedWithPassword(ctx context.Context, workspaceID string) bool {
-	if e.accounts == nil {
-		return false
-	}
+// linkedAccount reports whether workspaceID has a mailbox binding and, when it
+// does, the account it names. The account is nil when it cannot be read; err
+// says why (vault.ErrVaultLocked for a locked vault).
+func (e *emailReadinessEvaluator) linkedAccount(ctx context.Context, workspaceID string) (bool, *vault.EmailAccount, error) {
 	ws, err := e.workspaces.Get(workspaceID)
 	if err != nil || ws == nil {
-		return false
+		return false, nil, err
 	}
 	binding, ok := emailBindingFor(ws)
 	if !ok {
-		return false
+		return false, nil, nil
+	}
+	if e.accounts == nil {
+		return true, nil, nil
 	}
 	acc, err := e.accounts.GetEmailAccount(ctx, stringFromConfig(binding.Config, "account_id"))
-	return err == nil && isPasswordConnected(acc)
+	if err != nil {
+		return true, nil, err
+	}
+	return true, acc, nil
+}
+
+// setUpEmailReadiness is the first step for a workspace with no mailbox: the
+// "Set up email" card.
+func setUpEmailReadiness() EmailReadiness {
+	return EmailReadiness{
+		Reason:      workspace.BlockedReasonNotLinkedToWorkspace,
+		Message:     "Set up email so this workspace can read your inbox.",
+		Action:      emailActionSetUpEmail,
+		ActionLabel: "Set up email",
+		ActionURL:   emailSetupURL,
+	}
 }
 
 // evaluateConnection checks the workspace-independent conditions, returning the

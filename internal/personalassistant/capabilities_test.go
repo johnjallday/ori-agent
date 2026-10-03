@@ -2,7 +2,6 @@ package personalassistant
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -11,8 +10,6 @@ import (
 )
 
 type capabilityEmail struct{ status EmailCapabilityStatus }
-
-var errUnavailableForTest = errors.New("workspace source unavailable")
 
 func (s capabilityEmail) EmailCapability(context.Context, string) EmailCapabilityStatus {
 	return s.status
@@ -100,45 +97,29 @@ func TestCapabilityService_DistinguishesEmptyRevokedAndPreHire(t *testing.T) {
 	}
 }
 
-type emailOpsLocator struct {
-	exists bool
-	err    error
-	users  []string
-}
-
-func (l *emailOpsLocator) HasEmailOpsWorkspace(userID string) (bool, error) {
-	l.users = append(l.users, userID)
-	return l.exists, l.err
-}
-
-// FR 40: only the "Set up email" state changes, and only when the user has no
-// Email Ops workspace; every other state keeps its own route.
-func TestCapabilityService_EmailSetupRoutesToTheQuestWithoutAnEmailOpsWorkspace(t *testing.T) {
-	const questURL = "/?setup=quest&source=host&quest=email_ops_setup"
+// Setting up email opens the setup card; a state with its own repair keeps the
+// route the readiness owner named.
+func TestCapabilityService_EmailCardRoutes(t *testing.T) {
+	const cardURL = "/?setup=email"
 	service, _, _, _, _ := serviceMatrixFixture(StatusActive)
 	workspaces := workspace.NewInMemoryStore()
 	cases := []struct {
 		name      string
 		status    EmailCapabilityStatus
-		locator   *emailOpsLocator
 		wantRoute string
 		wantLabel string
 	}{
-		{"not configured, no Email Ops", EmailCapabilityStatus{Status: CapabilityNotConfigured, Route: "/settings#google-account"}, &emailOpsLocator{}, questURL, "Set up email"},
-		{"unavailable, no Email Ops", EmailCapabilityStatus{Status: CapabilityUnavailable}, &emailOpsLocator{}, questURL, "Set up email"},
-		{"not configured, Email Ops exists", EmailCapabilityStatus{Status: CapabilityNotConfigured, Route: "/settings#google-account"}, &emailOpsLocator{exists: true}, "/settings#google-account", "Set up email"},
-		{"locator failed", EmailCapabilityStatus{Status: CapabilityNotConfigured, Route: "/settings#google-account"}, &emailOpsLocator{err: errUnavailableForTest}, "/settings#google-account", "Set up email"},
-		{"available stays a review", EmailCapabilityStatus{Status: CapabilityAvailable, Route: "/settings#google-account"}, &emailOpsLocator{}, "/settings#google-account", "Review email connection"},
-		{"revoked stays a repair", EmailCapabilityStatus{Status: CapabilityRevoked, Route: "/settings#google-account"}, &emailOpsLocator{}, "/settings#google-account", "Repair email connection"},
-		{"no locator wired", EmailCapabilityStatus{Status: CapabilityNotConfigured, Route: "/settings#google-account"}, nil, "/settings#google-account", "Set up email"},
+		{"not configured, no repair named", EmailCapabilityStatus{Status: CapabilityNotConfigured}, cardURL, "Set up email"},
+		{"not configured, the card named", EmailCapabilityStatus{Status: CapabilityNotConfigured, Route: cardURL}, cardURL, "Set up email"},
+		{"not configured, a vault to unlock", EmailCapabilityStatus{Status: CapabilityNotConfigured, Route: "/vaults"}, "/vaults", "Set up email"},
+		{"unavailable", EmailCapabilityStatus{Status: CapabilityUnavailable}, cardURL, "Set up email"},
+		{"available stays a review", EmailCapabilityStatus{Status: CapabilityAvailable, Route: "/workspaces/email-ops"}, "/workspaces/email-ops", "Review email connection"},
+		{"revoked stays a repair", EmailCapabilityStatus{Status: CapabilityRevoked, Route: "/settings#google-account"}, "/settings#google-account", "Repair email connection"},
+		{"an unsafe route is ignored", EmailCapabilityStatus{Status: CapabilityNotConfigured, Route: "//evil.example"}, cardURL, "Set up email"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			capabilities := NewCapabilityService(service, workspaces, capabilityEmail{status: test.status})
-			if test.locator != nil {
-				capabilities.SetEmailOpsWorkspaceLocator(test.locator)
-			}
-			projection, err := capabilities.Get(context.Background(), "local")
+			projection, err := NewCapabilityService(service, workspaces, capabilityEmail{status: test.status}).Get(context.Background(), "local")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -146,11 +127,11 @@ func TestCapabilityService_EmailSetupRoutesToTheQuestWithoutAnEmailOpsWorkspace(
 			if email.Key != "email" || email.ActionRoute != test.wantRoute || email.ActionLabel != test.wantLabel || email.Status != test.status.Status {
 				t.Fatalf("email card = %+v, want route %q label %q", email, test.wantRoute, test.wantLabel)
 			}
-			if test.locator != nil && test.status.Status != CapabilityAvailable && test.status.Status != CapabilityRevoked &&
-				(len(test.locator.users) != 1 || test.locator.users[0] != "local") {
-				t.Fatalf("locator asked about %v, want the current user once", test.locator.users)
-			}
 		})
+	}
+	projection, err := NewCapabilityService(service, workspaces, nil).Get(context.Background(), "local")
+	if err != nil || projection.Cards[0].ActionRoute != cardURL {
+		t.Fatalf("with no reader the card = %+v, %v; want the setup card", projection.Cards[0], err)
 	}
 }
 

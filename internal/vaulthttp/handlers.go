@@ -15,6 +15,16 @@ import (
 type Handler struct {
 	store      *vault.Store
 	oauthFlows *emailOAuthFlowStore
+	// onVaultDeleted runs after a vault is deleted, e.g. to drop a password
+	// Ori kept for it. Nil does nothing.
+	onVaultDeleted func(vaultID string)
+}
+
+// SetVaultDeletedHook registers fn to run after a vault is deleted.
+func (h *Handler) SetVaultDeletedHook(fn func(vaultID string)) {
+	if h != nil {
+		h.onVaultDeleted = fn
+	}
 }
 
 func NewHandler(store *vault.Store) *Handler {
@@ -272,6 +282,9 @@ func (h *Handler) handleVault(w http.ResponseWriter, r *http.Request, vaultID st
 		}); err != nil {
 			respondVaultError(w, err)
 			return
+		}
+		if h.onVaultDeleted != nil {
+			h.onVaultDeleted(vaultID)
 		}
 		orihttp.Success(w, map[string]any{
 			"success":     true,

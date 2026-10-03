@@ -325,6 +325,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		// wiring to wireMailboxRuntime, called after the workspace store exists
 		// (Phase 18).
 		b.vaultStore = vaultStore
+		b.wireEmailSetup(vaultStore)
 		logger.Info("Vault system initialized", logger.Fields{})
 	}
 

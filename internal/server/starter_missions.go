@@ -67,7 +67,9 @@ func (b *ServerBuilder) starterMissionContext() progression.MissionContext {
 		mission.FileJanitor = &progression.MissionWorkspace{Slug: slug, WizardReady: ready}
 	}
 
-	mission.EmailQuestURL = hostquests.EmailOpsSetupQuestURL
+	// The email branch opens the one-card setup; the guided quest stays
+	// reachable for anyone who already started it.
+	mission.EmailQuestURL = emailSetupURL
 	// Only the email branch shows "In progress", and only while Mission 03 is
 	// open, so the setup journey is read just for that case.
 	if progression.ChooseConnectSourceBranch(mission.FocusAreas) == progression.BranchEmail &&

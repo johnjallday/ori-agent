@@ -597,6 +597,22 @@ func TestIMAPStalledCommandIsATimeout(t *testing.T) {
 	}
 }
 
+func TestIMAPCheckLogin(t *testing.T) {
+	s := newTestIMAPServer(t)
+	p := s.provider(testIMAPPassword)
+	creds := IMAPCredentials{Host: s.host, Port: s.port, Username: testIMAPUser, Password: testIMAPPassword}
+	if err := p.CheckLogin(context.Background(), creds); err != nil {
+		t.Fatalf("CheckLogin with the right password: %v", err)
+	}
+	creds.Password = "wrong"
+	if err := p.CheckLogin(context.Background(), creds); !errors.Is(err, ErrExpired) {
+		t.Fatalf("CheckLogin with a wrong password = %v, want ErrExpired", err)
+	}
+	if err := p.CheckLogin(context.Background(), IMAPCredentials{Host: s.host, Port: s.port, Username: testIMAPUser}); !errors.Is(err, ErrDisconnected) {
+		t.Fatalf("CheckLogin with no password = %v, want ErrDisconnected", err)
+	}
+}
+
 func TestIMAPWrongPasswordIsExpired(t *testing.T) {
 	s := newTestIMAPServer(t)
 	_, err := s.provider("wrong-password").SearchThreads(context.Background(), imapTestAccount(), Query{})

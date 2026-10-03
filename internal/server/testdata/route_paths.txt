@@ -18,6 +18,8 @@
 /api/device/detect-hardware
 /api/device/wifi/current
 /api/diagnostics/ui-smoke-test
+/api/email-setup/connect
+/api/email-setup/detect
 /api/evolution/assistant
 /api/external-agents
 /api/external-agents/claude

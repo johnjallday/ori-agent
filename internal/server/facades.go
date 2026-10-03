@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/economyhttp"
+	"github.com/johnjallday/ori-agent/internal/emailsetuphttp"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
@@ -177,6 +178,7 @@ type HandlerFacade struct {
 	Evolution        *evolutionhttp.Handler
 	Vault            *vaulthttp.Handler
 	Connections      *connectionshttp.Handler
+	EmailSetup       *emailsetuphttp.Handler
 	GitHub           *githubhttp.Handler
 	ExternalAgents   *externalagentshttp.Handler
 	Skills           *skillshttp.Handler

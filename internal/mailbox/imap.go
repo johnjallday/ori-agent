@@ -260,6 +260,23 @@ func (p *IMAPProvider) withSession(ctx context.Context, account Account, fn func
 	if err != nil {
 		return err // already a typed mailbox error
 	}
+	return p.withCredentials(ctx, creds, fn)
+}
+
+// CheckLogin signs in with creds and opens the inbox read-only, so setup can
+// tell a wrong password from a working one before anything is saved. It
+// answers ErrExpired when the server refuses the login.
+func (p *IMAPProvider) CheckLogin(ctx context.Context, creds IMAPCredentials) error {
+	if p == nil {
+		return ErrDisconnected
+	}
+	return p.withCredentials(ctx, creds, func(c *client.Client) error {
+		_, err := selectIMAPMailbox(c, imapInbox, false)
+		return err
+	})
+}
+
+func (p *IMAPProvider) withCredentials(ctx context.Context, creds IMAPCredentials, fn func(*client.Client) error) error {
 	if strings.TrimSpace(creds.Host) == "" || creds.Username == "" || creds.Password == "" {
 		return ErrDisconnected
 	}
