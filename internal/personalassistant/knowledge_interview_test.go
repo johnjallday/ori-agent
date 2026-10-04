@@ -58,6 +58,56 @@ func TestKnowledgeInterviewRowReceiptsAndExplicitCompletionAreIdempotent(t *test
 	}
 }
 
+func TestKnowledgeInterviewPriorityHintUsesPlainFocusAreaWords(t *testing.T) {
+	const fallback = "Share one priority to keep in mind; nothing is saved until you review it."
+	tests := []struct {
+		name  string
+		areas []FocusArea
+		want  string
+	}{
+		{"plan my day", []FocusArea{FocusPlanMyDay}, "You mentioned planning your day. What, if anything, should I remember?"},
+		{"commitments", []FocusArea{FocusTrackCommitments}, "You mentioned tracking commitments and follow-ups. What, if anything, should I remember?"},
+		{"meetings", []FocusArea{FocusPrepareForMeetings}, "You mentioned preparing for meetings. What, if anything, should I remember?"},
+		{"projects", []FocusArea{FocusKeepProjectsMoving}, "You mentioned keeping projects moving. What, if anything, should I remember?"},
+		{"email", []FocusArea{FocusHelpWithEmail}, "You mentioned help with email. What, if anything, should I remember?"},
+		{"songs", []FocusArea{FocusTrackSongsInProgress}, "You mentioned tracking songs in progress. What, if anything, should I remember?"},
+		{"handoffs", []FocusArea{FocusChaseCollaboratorHandoffs}, "You mentioned chasing collaborator handoffs. What, if anything, should I remember?"},
+		{"release dates", []FocusArea{FocusKeepReleaseDatesVisible}, "You mentioned keeping release dates visible. What, if anything, should I remember?"},
+		{"project files", []FocusArea{FocusOrganizeProjectFiles}, "You mentioned organizing project files. What, if anything, should I remember?"},
+		{"first area wins", []FocusArea{FocusHelpWithEmail, FocusPlanMyDay}, "You mentioned help with email. What, if anything, should I remember?"},
+		{"something else", []FocusArea{FocusSomethingElse}, fallback},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newKnowledgeFixture(t)
+			ctx := context.Background()
+			state, err := f.relationships.GetState(ctx, "local")
+			if err != nil {
+				t.Fatal(err)
+			}
+			state.FocusAreas = tc.areas
+			if _, err := f.relationships.UpdateState(ctx, state, state.StateVersion); err != nil {
+				t.Fatal(err)
+			}
+			s := NewKnowledgeInterviewService(NewKnowledgeStore(f.resolver(), f.folder))
+			questions, err := s.Questions(ctx, "local")
+			if err != nil || len(questions) == 0 {
+				t.Fatalf("questions=%+v %v", questions, err)
+			}
+			if got := questions[0].Hint; got != tc.want {
+				t.Fatalf("hint = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// The state store rejects unknown focus areas, so the fallback for one is
+	// checked on the lookup the hint is built from.
+	for _, area := range []FocusArea{FocusSomethingElse, FocusArea("plan_my_decade"), FocusArea("")} {
+		if phrase, ok := focusAreaPhrases[area]; ok {
+			t.Fatalf("focus area %q has a hint phrase %q; it must use the default hint", area, phrase)
+		}
+	}
+}
+
 func TestKnowledgeInterviewIsReadOnlyUntilOfferedAndDeferSurvivesRestart(t *testing.T) {
 	f := newKnowledgeFixture(t)
 	ctx := context.Background()

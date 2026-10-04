@@ -30,6 +30,21 @@ type KnowledgeInterviewService struct {
 	now      func() time.Time
 }
 
+// focusAreaPhrases turns a stored focus area into words for the question 1
+// hint. FocusSomethingElse and unknown values are absent on purpose: they get
+// the default hint rather than a raw id.
+var focusAreaPhrases = map[FocusArea]string{
+	FocusPlanMyDay:                 "planning your day",
+	FocusTrackCommitments:          "tracking commitments and follow-ups",
+	FocusPrepareForMeetings:        "preparing for meetings",
+	FocusKeepProjectsMoving:        "keeping projects moving",
+	FocusHelpWithEmail:             "help with email",
+	FocusTrackSongsInProgress:      "tracking songs in progress",
+	FocusChaseCollaboratorHandoffs: "chasing collaborator handoffs",
+	FocusKeepReleaseDatesVisible:   "keeping release dates visible",
+	FocusOrganizeProjectFiles:      "organizing project files",
+}
+
 func NewKnowledgeInterviewService(store *KnowledgeStore) *KnowledgeInterviewService {
 	return &KnowledgeInterviewService{store: store, now: time.Now}
 }
@@ -52,9 +67,8 @@ func (s *KnowledgeInterviewService) Questions(ctx context.Context, userID string
 	hint := "Share one priority to keep in mind; nothing is saved until you review it."
 	if state != nil {
 		if len(state.FocusAreas) > 0 {
-			area := strings.TrimSpace(string(state.FocusAreas[0]))
-			if len(area) <= 100 && !sensitive.ContainsSecretLikeText(area) {
-				hint = "You mentioned " + area + ". What, if anything, should I remember?"
+			if phrase, ok := focusAreaPhrases[state.FocusAreas[0]]; ok {
+				hint = "You mentioned " + phrase + ". What, if anything, should I remember?"
 			}
 		} else if mandate := strings.TrimSpace(state.Mandate); mandate != "" && len(mandate) <= 100 && !sensitive.ContainsSecretLikeText(mandate) {
 			hint = "Your working agreement mentions " + mandate + ". Is there a priority to remember?"

@@ -72,14 +72,96 @@
   display: none;
 }
 
-.interview-wizard-review {
-  margin: 0;
-  padding-left: 1.1rem;
+.interview-wizard-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--danger-color, #c62828);
 }
 
-.interview-wizard-review li {
-  margin-bottom: 0.5rem;
+.interview-wizard-error:empty {
+  display: none;
+}
+
+.interview-wizard-counter {
+  display: block;
+  margin-top: 0.25rem;
+  text-align: right;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-options {
+  margin-top: 0.5rem;
+}
+
+.interview-wizard-options[hidden],
+.interview-wizard-radios[hidden] {
+  display: none;
+}
+
+.interview-wizard-radios {
+  margin: 0.75rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.interview-wizard-radios legend {
+  float: none;
+  width: auto;
+  margin: 0 0 0.25rem;
+  padding: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-radio-note {
+  display: block;
+  margin-left: 1.5rem;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-review {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.interview-wizard-review-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border-color);
   overflow-wrap: anywhere;
+}
+
+.interview-wizard-review-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.interview-wizard-review-step {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-review-badge {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-review-head .modern-btn {
+  margin-left: auto;
+}
+
+.interview-wizard-review-where,
+.interview-wizard-review-skipped {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 
 .interview-wizard-footer {

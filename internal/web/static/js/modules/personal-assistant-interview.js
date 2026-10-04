@@ -1,4 +1,6 @@
 import {
+  browserStorage,
+  hasInterviewDraft,
   openInterviewWizard,
   reviewedInterviewRows
 } from './personal-assistant-interview-wizard.js';
@@ -38,6 +40,9 @@ export function mountPersonalAssistantInterview(root = document) {
     try {
       snapshot = await api(INTERVIEW_API);
       build.hidden = true;
+      start.textContent = hasInterviewDraft(browserStorage())
+        ? 'Resume interview'
+        : 'Start interview';
       start.hidden = snapshot.status === 'completed';
       defer.hidden = snapshot.status === 'completed';
       if (snapshot.status === 'completed') {
