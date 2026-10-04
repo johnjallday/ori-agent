@@ -432,7 +432,281 @@ async function stageMapRequests() {
   console.log(`${normalized.length} API request(s) in Map view written to ${file}`);
 }
 
-const stages = { tree: stageTree, 'map-requests': stageMapRequests };
+// Opens Home in Tree view with nothing remembered from an earlier stage.
+async function openTree() {
+  await page.goto(`${baseUrl}/?view=tree`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#cockpitTreeNav [data-tree-row]').first().waitFor();
+  await applyTheme();
+  await settle(600);
+}
+
+async function expand(kind, name) {
+  const item = rowByKind(kind, name);
+  if ((await item.getAttribute('aria-expanded')) !== 'true') {
+    await item.locator('[data-tree-toggle]').click();
+  }
+}
+
+const article = () => page.locator('#cockpitTreePane .cockpit-pane-article');
+const activeTab = () => page.locator('#cockpitTreePane .cockpit-pane-tab.is-active');
+const action = label =>
+  page.locator('#cockpitTreePane .cockpit-pane-actions').getByText(label, { exact: true });
+
+// Group 2: one of each kind in the pane, and how tabs behave.
+async function stagePane() {
+  await openTree();
+  await expand('workspace', 'Studio Notes');
+  await rowByKind('ticket', 'Reply to the mastering').waitFor();
+
+  // --- Ticket (FR33) -------------------------------------------------------
+  await rowByKind('ticket', 'Reply to the mastering').click();
+  await page.locator('.cockpit-pane-lead').waitFor();
+  let text = await article().innerText();
+  check(text.includes('Ticket in Studio Notes'), 'ticket: says "Ticket in Studio Notes"');
+  check(
+    (await page.locator('.cockpit-pane-chip').innerText()) === 'Ready',
+    'ticket: shows its state'
+  );
+  check(text.includes('They asked which mix to master'), 'ticket: shows its description');
+  check(text.includes('#mix'), 'ticket: shows its tags');
+  check(text.includes('Added by you'), 'ticket: shows its source in words');
+  check(
+    /\/workspaces\/studio-notes\?ticket=[0-9a-f-]{36}$/.test(
+      await action('Open in Tickets').getAttribute('href')
+    ),
+    'ticket: "Open in Tickets" links to the workspace page with the ticket open'
+  );
+  await shot('p1-ticket');
+
+  // --- Files (FR34) --------------------------------------------------------
+  await expand('folder', 'briefs');
+  await rowByKind('file', '2026-10-04.md').click();
+  await page.locator('.cockpit-pane-markdown h1').waitFor();
+  text = await article().innerText();
+  check(text.includes('files/briefs/'), 'file: shows its path inside the workspace');
+  check((await page.locator('.cockpit-pane-markdown h2').count()) === 2, 'Markdown file: rendered');
+  const opened = page.waitForResponse(response => response.url().endsWith('/files/open'));
+  await action('Open').click();
+  const openResponse = await opened;
+  check(
+    openResponse.ok() &&
+      /briefs\/.*2026-10-04\.md/.test(openResponse.request().postDataJSON().relative_path),
+    `file: Open posts the file's path (${openResponse.status()})`
+  );
+  const revealed = page.waitForResponse(response => response.url().endsWith('/files/reveal'));
+  await action('Reveal in Finder').click();
+  check((await revealed).ok(), 'file: Reveal in Finder posts too');
+  await shot('p2-markdown-file');
+
+  await rowByKind('file', 'tempo.csv').click();
+  await page.locator('.cockpit-pane-pre').waitFor();
+  check(
+    (await page.locator('.cockpit-pane-pre').innerText()).includes('Night Drive,92'),
+    'text file: shown as plain text'
+  );
+
+  await rowByKind('file', 'cover.png').click();
+  await page.locator('.cockpit-pane-image').waitFor();
+  check(
+    await page
+      .locator('.cockpit-pane-image')
+      .evaluate(image => image.complete && image.naturalWidth > 0),
+    'image: shown inline'
+  );
+  await shot('p3-image');
+
+  await expand('folder', 'stems');
+  await expand('folder', 'takes');
+  await rowByKind('file', 'lead-vocal.wav').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="file"] .cockpit-pane-note').waitFor();
+  check((await article().innerText()).includes('No preview'), 'other file: "No preview"');
+  await shot('p4-no-preview');
+
+  // BACKLOG.md lives in the group's files and carries the sync line.
+  await rowByKind('file', 'BACKLOG.md').click();
+  await page.locator('.cockpit-pane-lead').waitFor();
+  check(
+    (await page.locator('.cockpit-pane-lead').innerText()) ===
+      'Ori keeps this file in step with the backlog.',
+    'BACKLOG.md: says Ori keeps it in step with the backlog'
+  );
+
+  // --- Memory and agent (FR37, FR38) ---------------------------------------
+  await rowByKind('memory', 'Memory').first().click();
+  await page.locator('.cockpit-pane-list li').first().waitFor();
+  check((await page.locator('.cockpit-pane-list li').count()) === 3, 'memory: lists its 3 entries');
+  check(
+    (await action('Open Memory').getAttribute('href')) === '/workspaces/studio-notes#memory',
+    'memory: "Open Memory" goes to the Memory tab'
+  );
+  await shot('p5-memory');
+
+  await rowByKind('agent', 'Scout').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="agent"]').waitFor();
+  text = await article().innerText();
+  check(
+    text.includes('Agent in Studio Notes') && /Role\s+\S+/.test(text) && /Model\s+\S+/.test(text),
+    'agent: shows name, role and model'
+  );
+  check(
+    (await action('Open agent').getAttribute('href')) === '/workspaces/studio-notes/agents/Scout',
+    'agent: "Open agent" links to the agent'
+  );
+  await shot('p6-agent');
+
+  // --- Workspace overview (FR39) -------------------------------------------
+  await rowByKind('workspace', 'Studio Notes').locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  await settle(400);
+  text = await article().innerText();
+  check(
+    /Workspace/.test(await page.locator('.cockpit-pane-sub').innerText()),
+    'overview: says it is a workspace'
+  );
+  check((await page.locator('.cockpit-pane-chip').count()) === 1, 'overview: shows the status');
+  check(
+    (await page.locator('.cockpit-pane-stat').count()) === 3 && /Next run/i.test(text),
+    'overview: agents, open tasks, needs attention, and the next run'
+  );
+  check(text.includes('#music') && text.includes('#home'), 'overview: shows the tags');
+  const links = await page.locator('.cockpit-pane-link').allInnerTexts();
+  check(
+    links.map(entry => entry.split('\n')[0]).join(',') === 'Notes,Backlog,Files,Memory,Agents',
+    `overview: lists the sections with counts (${links.map(entry => entry.replace(/\s+/g, ' ')).join(' | ')})`
+  );
+  for (const label of ['Open workspace', 'Move…', 'Delete']) {
+    check((await action(label).count()) === 1, `overview: has the "${label}" button`);
+  }
+  await shot('p7-workspace-overview');
+
+  // A section link reveals that section in the tree and moves focus to it.
+  await rowByKind('section', 'Backlog').first().locator('[data-tree-toggle]').click();
+  await page.locator('.cockpit-pane-link', { hasText: 'Backlog' }).click();
+  await settle(300);
+  check(
+    await page.evaluate(
+      () =>
+        document.activeElement?.getAttribute('data-tree-kind') === 'section' &&
+        document.activeElement.getAttribute('aria-expanded') === 'true' &&
+        document.activeElement.textContent.includes('Backlog')
+    ),
+    'overview: a section link opens that section in the tree and focuses it'
+  );
+  await page.locator('.cockpit-pane-link', { hasText: 'Memory' }).click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="memory"]').waitFor();
+  check(true, 'overview: the Memory link opens Memory');
+
+  // Move… opens the existing Move dialog.
+  await page.locator('.cockpit-pane-tab-label', { hasText: 'Studio Notes' }).click();
+  await action('Move…').click();
+  await page.locator('[data-tree-move-dialog] [data-tree-move-to]').first().waitFor();
+  check(
+    (await page.locator('[data-tree-move-dialog]').innerText()).includes('Music'),
+    'overview: Move… opens the Move dialog with its destinations'
+  );
+  await page.locator('[data-tree-move-cancel]').click();
+
+  // --- Group overview (FR40) -----------------------------------------------
+  await rowByKind('group', 'Music').locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="group"]').waitFor();
+  await settle(400);
+  text = await article().innerText();
+  check(
+    text.includes('Night Drive') && text.includes('Harbor Lights'),
+    'group overview: lists its workspaces'
+  );
+  check(
+    text.toUpperCase().includes("THE GROUP'S OWN CONTENTS"),
+    'group overview: lists its own sections'
+  );
+  for (const label of ['Open group', 'Move…', 'Delete']) {
+    check((await action(label).count()) === 1, `group overview: has the "${label}" button`);
+  }
+  await shot('p8-group-overview');
+  await page.locator('.cockpit-pane-link', { hasText: 'Night Drive' }).click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  check(
+    (await activeTab().innerText()).includes('Night Drive') &&
+      (await page.locator('.cockpit-pane-sub').innerText()).includes('Workspace in Music'),
+    "group overview: a child's link opens that workspace's overview"
+  );
+
+  // --- Selection stays shared with the Map (FR30) -------------------------
+  const nightId = await rowByKind('workspace', 'Night Drive').getAttribute('data-tree-row');
+  check(
+    (await page.evaluate(() => window.OriHomeCockpit.getState().selectedId)) === nightId &&
+      (await page.locator('#cockpitContextModal.show').count()) === 0,
+    "selection: the workspace is Home's selection, and no context modal opened"
+  );
+
+  // --- Tabs (FR25-FR29) -----------------------------------------------------
+  const tabNames = () => page.locator('.cockpit-pane-tab-label').allInnerTexts();
+  const names = await tabNames();
+  check(new Set(names).size === names.length, `tabs: no item has two tabs (${names.length} open)`);
+  const strip = await page.locator('.cockpit-pane-tabs').evaluate(el => ({
+    scrolls: el.scrollWidth > el.clientWidth,
+    pageScrolls: document.documentElement.scrollWidth > window.innerWidth
+  }));
+  check(
+    strip.scrolls && !strip.pageScrolls,
+    'tabs: more tabs than fit scroll inside the strip, not the page'
+  );
+  await shot('p9-many-tabs');
+
+  // Closing the active (last) tab activates the one to its left; closing a
+  // middle active tab activates the one to its right.
+  const before = await tabNames();
+  await activeTab().locator('[data-pane-close]').click();
+  check(
+    (await activeTab().innerText()).trim() === before[before.length - 2],
+    'tabs: closing the last tab activates the one to its left'
+  );
+  await page.locator('.cockpit-pane-tab-label').nth(1).click();
+  const middle = await tabNames();
+  await activeTab().locator('[data-pane-close]').click();
+  check(
+    (await activeTab().innerText()).trim() === middle[2],
+    'tabs: closing a middle tab activates the one to its right'
+  );
+
+  // The open item's row is highlighted and its ancestors are opened (FR28).
+  await rowByKind('group', 'Music').locator('[data-tree-toggle]').click();
+  await rowByKind('workspace', 'Studio Notes').locator('[data-tree-toggle]').click();
+  const target = (await tabNames()).findIndex(name => name.includes('tempo.csv'));
+  await page.locator('.cockpit-pane-tab-label').nth(target).click();
+  await rowByKind('file', 'tempo.csv').waitFor();
+  check(
+    (await rowByKind('file', 'tempo.csv').getAttribute('aria-selected')) === 'true' &&
+      (await rowByKind('workspace', 'Studio Notes').getAttribute('aria-expanded')) === 'true',
+    'tabs: switching to a tab opens its ancestors and highlights its row'
+  );
+
+  // Closing every tab leaves the empty state.
+  while ((await page.locator('.cockpit-pane-tab').count()) > 0) {
+    await page.locator('.cockpit-pane-tab [data-pane-close]').first().click();
+  }
+  check(
+    (await page.locator('.cockpit-pane-empty').innerText()).includes('Nothing open'),
+    'tabs: with none open the pane says "Nothing open"'
+  );
+
+  // --- Map shows the same selection ---------------------------------------
+  // Select a workspace in the Tree one more time, then switch: the Map must
+  // show that workspace selected, and still no context modal.
+  await rowByKind('workspace', 'Harbor Lights').locator('.cockpit-tree-name').click();
+  const harborId = await rowByKind('workspace', 'Harbor Lights').getAttribute('data-tree-row');
+  await page.locator('#cockpitViewMap').click();
+  await page.locator('#cockpitMap').waitFor({ state: 'visible' });
+  await settle(500);
+  check(
+    (await page.locator(`.ws-map-tile[data-ws-id="${harborId}"].is-selected`).count()) === 1 &&
+      (await page.locator('.ws-map-tile.is-selected').count()) === 1 &&
+      (await page.locator('#cockpitContextModal.show').count()) === 0,
+    'selection: Map shows the workspace that was selected in the Tree'
+  );
+}
+
+const stages = { tree: stageTree, pane: stagePane, 'map-requests': stageMapRequests };
 try {
   if (!stages[stage])
     throw new Error(`unknown stage "${stage}" (have: ${Object.keys(stages).join(', ')})`);

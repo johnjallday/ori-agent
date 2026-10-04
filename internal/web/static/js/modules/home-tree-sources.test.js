@@ -26,15 +26,27 @@ import {
   loadSection,
   loadSections,
   loadNote,
+  loadTicket,
+  loadMemory,
+  loadFilePreview,
+  filePreviewKind,
+  workspaceFileURL,
+  openWorkspaceFile,
+  ticketStateLabel,
+  ticketSourceLabel,
+  FILE_PREVIEW_LIMIT,
   responseErrorMessage
 } from './home-tree-sources.js';
 
-// A fetch stand-in: `routes` maps a URL to a JSON body, to `{ status, body }`
-// for a failure, or to a function for anything else. Every call is recorded.
+// A fetch stand-in: `routes` maps a URL to a JSON body, to a string for a file's
+// raw text, to `{ status, body }` for a failure, or to a function for anything
+// else. Every call is recorded; `impl.requests` also keeps the options.
 function stubFetch(routes) {
   const calls = [];
-  const impl = async url => {
+  const requests = [];
+  const impl = async (url, options) => {
     calls.push(url);
+    requests.push({ url, options });
     const route = routes[url];
     if (route === undefined) {
       return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
@@ -47,11 +59,12 @@ function stubFetch(routes) {
     return {
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(value),
+      text: async () => (typeof value === 'string' ? value : JSON.stringify(value)),
       json: async () => value
     };
   };
   impl.calls = calls;
+  impl.requests = requests;
   return impl;
 }
 
@@ -248,15 +261,35 @@ test('memory has no rows; its entries feed the pane and its count the badge', ()
   const shaped = memoryToRows('ws1', {
     entries: [{ index: 0, type: 'decision', date: '2026-10-01', text: 'Ship on Fridays.' }],
     managed_learnings: [{ id: 'l1', type: 'preference', text: 'Keep replies short.' }],
-    unstructured: ['A loose line.', '   ']
+    unstructured: ['# Workspace Memory', 'A loose line.']
   });
   assert.deepEqual(shaped.rows, []);
-  assert.equal(shaped.count, 3);
-  assert.deepEqual(
-    shaped.entries.map(e => e.text),
-    ['Ship on Fridays.', 'Keep replies short.', 'A loose line.']
-  );
+  // Entries, then approved learnings. The file's other lines — its heading,
+  // loose prose — are not entries, as on the workspace's own Memory tab.
+  assert.equal(shaped.count, 2);
+  assert.deepEqual(shaped.entries, [
+    { text: 'Ship on Fridays.', type: 'decision', date: '2026-10-01' },
+    { text: 'Keep replies short.', type: 'preference', date: '' }
+  ]);
   assert.equal(memoryToRows('ws1', {}).count, 0);
+  // A workspace whose MEMORY.md holds only its heading has no memory yet.
+  assert.equal(memoryToRows('ws1', { entries: [], unstructured: ['# Workspace Memory'] }).count, 0);
+});
+
+test('ticket states use the PRD wording; an unknown state falls back to the server label', () => {
+  assert.equal(ticketStateLabel('in_progress', 'In Progress'), 'In progress');
+  assert.equal(ticketStateLabel('review', ''), 'Review');
+  assert.equal(ticketStateLabel('triage', 'Needs triage'), 'Needs triage');
+  assert.equal(ticketStateLabel('triage', ''), 'triage');
+  assert.equal(ticketStateLabel('', ''), 'Unknown');
+});
+
+test('ticket sources are described in words; an unknown source is shown as it is', () => {
+  assert.equal(ticketSourceLabel('manual'), 'Added by you');
+  assert.equal(ticketSourceLabel('assistant'), 'Suggested by the assistant');
+  assert.equal(ticketSourceLabel('home_quick_capture'), 'Quick capture on Home');
+  assert.equal(ticketSourceLabel('some_new_source'), 'some_new_source');
+  assert.equal(ticketSourceLabel(''), 'Unknown');
 });
 
 test('agents keep the API order and carry role and model', () => {
@@ -513,4 +546,159 @@ test('loadNote returns the whole note for the pane', async () => {
     updatedAt: '2026-10-04T10:00:00Z'
   });
   await assert.rejects(() => loadNote('gone', { fetchImpl }), /HTTP 404/);
+});
+
+test('loadTicket returns what the ticket tab shows', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/tickets/t1': {
+      id: 't1',
+      display_number: '#7',
+      title: 'Reply to the mastering engineer',
+      state: 'in_progress',
+      state_label: 'In Progress',
+      description: '  Which mix to master?  ',
+      tags: ['mix', ''],
+      source: 'home_quick_capture'
+    }
+  });
+  assert.deepEqual(await loadTicket('ws1', 't1', { fetchImpl }), {
+    id: 't1',
+    title: 'Reply to the mastering engineer',
+    number: '#7',
+    state: 'in_progress',
+    stateLabel: 'In progress',
+    finished: false,
+    description: 'Which mix to master?',
+    tags: ['mix'],
+    source: 'home_quick_capture',
+    sourceLabel: 'Quick capture on Home'
+  });
+  await assert.rejects(() => loadTicket('ws1', 'gone', { fetchImpl }), /HTTP 404/);
+});
+
+test('loadMemory returns the entries the Memory tab lists', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/memory': {
+      entries: [{ text: 'Ship on Fridays.', type: 'decision', date: '2026-10-01' }],
+      unstructured: ['# Workspace Memory']
+    }
+  });
+  assert.deepEqual(await loadMemory('ws1', { fetchImpl }), {
+    entries: [{ text: 'Ship on Fridays.', type: 'decision', date: '2026-10-01' }]
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Files (FR34)
+// ---------------------------------------------------------------------------
+
+test('a file is previewed by what its extension says it is', () => {
+  ['BACKLOG.md', 'docs/Plan.MARKDOWN', 'a/b/c.mdx'].forEach(path =>
+    assert.equal(filePreviewKind(path), 'markdown', path)
+  );
+  ['tempo.csv', 'settings.json', 'notes.txt', 'run.log', 'a.yaml', 'main.go'].forEach(path =>
+    assert.equal(filePreviewKind(path), 'text', path)
+  );
+  ['cover.png', 'photo.JPG', 'icon.svg', 'anim.gif'].forEach(path =>
+    assert.equal(filePreviewKind(path), 'image', path)
+  );
+  ['Night Drive.rpp', 'lead-vocal.wav', 'archive.zip', 'README', '.gitignore', ''].forEach(path =>
+    assert.equal(filePreviewKind(path), 'none', path)
+  );
+});
+
+test('a file address encodes each segment, so odd names still resolve', () => {
+  assert.equal(
+    workspaceFileURL('ws1', 'briefs/2026-10-04.md'),
+    '/api/workspaces/ws1/files/briefs/2026-10-04.md'
+  );
+  assert.equal(
+    workspaceFileURL('ws1', 'my stems/take #2?.wav'),
+    '/api/workspaces/ws1/files/my%20stems/take%20%232%3F.wav'
+  );
+});
+
+test('a Markdown or text file is fetched as text for its preview', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/files/briefs/today.md': '# Daily brief\n',
+    '/api/workspaces/ws1/files/tempo.csv': 'song,bpm\nNight Drive,92\n'
+  });
+  assert.deepEqual(await loadFilePreview('ws1', 'briefs/today.md', { fetchImpl }), {
+    kind: 'markdown',
+    url: '/api/workspaces/ws1/files/briefs/today.md',
+    text: '# Daily brief\n',
+    tooLarge: false
+  });
+  const csv = await loadFilePreview('ws1', 'tempo.csv', { size: 24, fetchImpl });
+  assert.equal(csv.kind, 'text');
+  assert.equal(csv.text, 'song,bpm\nNight Drive,92\n');
+});
+
+test('an image or an unknown file is never fetched: there is nothing to read as text', async () => {
+  const fetchImpl = stubFetch({});
+  assert.deepEqual(await loadFilePreview('ws1', 'cover.png', { fetchImpl }), {
+    kind: 'image',
+    url: '/api/workspaces/ws1/files/cover.png',
+    text: '',
+    tooLarge: false
+  });
+  assert.equal((await loadFilePreview('ws1', 'take.wav', { fetchImpl })).kind, 'none');
+  assert.deepEqual(fetchImpl.calls, []);
+});
+
+test('a text file over the preview limit is not fetched', async () => {
+  const fetchImpl = stubFetch({});
+  const preview = await loadFilePreview('ws1', 'huge.log', {
+    size: FILE_PREVIEW_LIMIT + 1,
+    fetchImpl
+  });
+  assert.equal(preview.tooLarge, true);
+  assert.equal(preview.text, '');
+  assert.deepEqual(fetchImpl.calls, []);
+});
+
+test('a text file that turns out larger than its listing said is still not shown', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/files/grew.log': 'x'.repeat(FILE_PREVIEW_LIMIT + 10)
+  });
+  const preview = await loadFilePreview('ws1', 'grew.log', { size: 10, fetchImpl });
+  assert.equal(preview.tooLarge, true);
+  assert.equal(preview.text, '');
+});
+
+test('a file that cannot be read fails with the server reason', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/files/gone.md': { status: 404, body: { message: 'File not found' } }
+  });
+  await assert.rejects(() => loadFilePreview('ws1', 'gone.md', { fetchImpl }), /File not found/);
+});
+
+test('Open and Reveal post the path inside the workspace', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/files/open': { message: 'ok' },
+    '/api/workspaces/ws1/files/reveal': { message: 'ok' }
+  });
+  await openWorkspaceFile('ws1', 'briefs/today.md', { fetchImpl });
+  await openWorkspaceFile('ws1', 'briefs/today.md', { reveal: true, fetchImpl });
+  assert.deepEqual(fetchImpl.calls, [
+    '/api/workspaces/ws1/files/open',
+    '/api/workspaces/ws1/files/reveal'
+  ]);
+  assert.equal(fetchImpl.requests[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(fetchImpl.requests[0].options.body), {
+    relative_path: 'briefs/today.md'
+  });
+});
+
+test('a failed Open reports the server reason', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/files/open': {
+      status: 500,
+      body: { message: 'Failed to open file: desktop opening is unavailable' }
+    }
+  });
+  await assert.rejects(
+    () => openWorkspaceFile('ws1', 'a.md', { fetchImpl }),
+    /desktop opening is unavailable/
+  );
 });

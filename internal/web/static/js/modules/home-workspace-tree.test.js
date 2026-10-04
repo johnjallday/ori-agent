@@ -27,6 +27,7 @@ import {
   treeCanUndo,
   isRowExpanded,
   setRowExpanded,
+  revealTargets,
   rowActivation,
   treeActiveRowId,
   isWorkspaceRowKind
@@ -450,6 +451,69 @@ test('setRowExpanded records only where a row differs from its default', () => {
   setRowExpanded(state, 'section', 'w1/s/notes', true);
   setRowExpanded(state, 'folder', 'w1/d/docs', false);
   assert.equal(state.expandedRows.size + state.collapsedGroups.size, 0);
+});
+
+test('revealTargets lists what must be open for a row to be on screen (FR28)', () => {
+  // A note in DB (g1 > g2 > w3): both groups, the workspace, then Notes.
+  assert.deepEqual(revealTargets('w3/n/n1', flat()), [
+    { kind: 'group', id: 'g1' },
+    { kind: 'group', id: 'g2' },
+    { kind: 'workspace', id: 'w3' },
+    { kind: 'section', id: 'w3/s/notes' }
+  ]);
+  // A file two folders down also needs each folder above it.
+  assert.deepEqual(revealTargets('w4/f/stems/takes/lead.wav', flat()), [
+    { kind: 'workspace', id: 'w4' },
+    { kind: 'section', id: 'w4/s/files' },
+    { kind: 'folder', id: 'w4/d/stems' },
+    { kind: 'folder', id: 'w4/d/stems/takes' }
+  ]);
+  // Memory is not inside a section; a ticket is inside Backlog.
+  assert.deepEqual(revealTargets('w4/m', flat()), [{ kind: 'workspace', id: 'w4' }]);
+  assert.deepEqual(revealTargets('w4/t/t1', flat()).pop(), { kind: 'section', id: 'w4/s/backlog' });
+});
+
+test('revealTargets never expands the row itself, and a group owner is a group', () => {
+  // A workspace or group tab only needs its ancestors open.
+  assert.deepEqual(revealTargets('w3', flat()), [
+    { kind: 'group', id: 'g1' },
+    { kind: 'group', id: 'g2' }
+  ]);
+  assert.deepEqual(revealTargets('w4', flat()), []);
+  // A note that lives in a group: the group is the owner to open.
+  assert.deepEqual(revealTargets('g2/n/n1', flat()), [
+    { kind: 'group', id: 'g1' },
+    { kind: 'group', id: 'g2' },
+    { kind: 'section', id: 'g2/s/notes' }
+  ]);
+  // A section row needs its workspace open, not itself.
+  assert.deepEqual(revealTargets('w4/s/notes', flat()), [{ kind: 'workspace', id: 'w4' }]);
+  assert.deepEqual(revealTargets('', flat()), []);
+  assert.deepEqual(revealTargets('w4/zz/unknown', flat()), []);
+});
+
+test('applying revealTargets makes the row appear among the visible rows', () => {
+  const state = { collapsedGroups: new Set(['g1', 'g2', 'w3/s/notes']), expandedRows: new Set() };
+  const contents = { w3: contentsFor('w3') };
+  const rowsBefore = visibleTreeRows(tree(), state.collapsedGroups, 0, '', {
+    expanded: state.expandedRows,
+    contents
+  });
+  assert.equal(
+    rowsBefore.some(r => r.id === 'w3/n/n1'),
+    false
+  );
+  revealTargets('w3/n/n1', flat()).forEach(target =>
+    setRowExpanded(state, target.kind, target.id, true)
+  );
+  const rowsAfter = visibleTreeRows(tree(), state.collapsedGroups, 0, '', {
+    expanded: state.expandedRows,
+    contents
+  });
+  assert.equal(
+    rowsAfter.some(r => r.id === 'w3/n/n1'),
+    true
+  );
 });
 
 test('rowActivation: names open, sections and folders only toggle (FR22-FR24)', () => {

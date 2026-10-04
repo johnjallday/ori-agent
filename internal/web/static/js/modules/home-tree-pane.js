@@ -17,10 +17,28 @@
 //
 // The pure parts are exported for home-tree-pane.test.js and run without a DOM.
 
-import { escapeHtml, isGroupWorkspace } from './home-workspace-cockpit.js';
-import { sectionInfo, sectionOfKind } from './home-tree-sources.js';
-import { iconHTML } from './home-tree-icons.js';
+import {
+  escapeHtml,
+  formatCount,
+  groupRailView,
+  isGroupWorkspace,
+  workspaceRailView,
+  workspaceSignals
+} from './home-workspace-cockpit.js';
+import {
+  PREVIEW_IMAGE,
+  PREVIEW_MARKDOWN,
+  PREVIEW_TEXT,
+  SECTIONS,
+  SECTION_READY,
+  itemKey,
+  sectionInfo,
+  sectionOfKind
+} from './home-tree-sources.js';
+import { iconHTML, rowIconName } from './home-tree-icons.js';
 import { renderMarkdown } from './note-editor.js';
+import { workspaceNotePath } from './note-routes.js';
+import { workspacePageURL } from './workspace-routes.js';
 
 // ---------------------------------------------------------------------------
 // Tab state (FR25, FR26)
@@ -178,11 +196,14 @@ export const ITEM_FAILED = 'failed';
  * `{ status, value, error }`. A tab with nothing to load (it is described
  * entirely by its row) is ready from the start.
  */
-export function paneView(tab, { flattened = [], item = null } = {}) {
+export function paneView(tab, context = {}) {
+  const { flattened = [], item = null } = context;
   const workspace = findWorkspace(flattened, tab.workspaceId);
   const parent =
     workspace && workspace.parent_id ? findWorkspace(flattened, workspace.parent_id) : null;
   const loaded = item || { status: ITEM_READY, value: null, error: '' };
+  // One shape for every kind of item; each kind fills the parts it has and the
+  // renderer skips the rest.
   const view = {
     key: tab.key,
     kind: tab.kind,
@@ -191,18 +212,270 @@ export function paneView(tab, { flattened = [], item = null } = {}) {
     sub: paneSubline(tab, workspace, parent),
     status: loaded.status,
     error: loaded.error || '',
+    chip: null, // { label, tone }
     tags: [],
-    body: null
+    actions: [], // { label, href } to go somewhere, { label, action } to do something
+    lead: '',
+    notice: '',
+    stats: [], // { value, label }
+    fields: [], // { label, value }
+    body: null, // { type: 'markdown' | 'text' | 'image' | 'none', … }
+    list: null, // { items: [{ text, meta }], empty }
+    linkGroups: [] // { label, links: [{ label, icon, meta, action, target }] }
   };
-
-  if (tab.kind === 'note' && loaded.status === ITEM_READY && loaded.value) {
-    view.title = loaded.value.name || view.title;
-    view.crumbs = [...view.crumbs.slice(0, -1), view.title];
-    view.tags = Array.isArray(loaded.value.tags) ? loaded.value.tags : [];
-    view.body = { type: 'markdown', markdown: String(loaded.value.content ?? '') };
+  const fill = VIEW_FILLERS[tab.kind];
+  if (fill) {
+    fill(view, {
+      tab,
+      workspace,
+      flattened,
+      value: loaded.status === ITEM_READY ? loaded.value : null,
+      context
+    });
   }
   return view;
 }
+
+function slugOf(workspace) {
+  return String((workspace && workspace.folder_slug) || '').trim();
+}
+
+// The last breadcrumb is the item's own name; keep it in step with the title.
+function retitle(view, title) {
+  if (!title) return;
+  view.title = title;
+  view.crumbs = [...view.crumbs.slice(0, -1), title];
+}
+
+const TICKET_TONES = {
+  backlog: 'mute',
+  ready: 'info',
+  in_progress: 'ok',
+  review: 'amber',
+  done: 'mute',
+  cancelled: 'mute'
+};
+
+const STATUS_TONES = {
+  attention: 'warn',
+  running: 'ok',
+  active: 'ok',
+  idle: 'mute',
+  unknown: 'mute'
+};
+
+/**
+ * When a workspace next has scheduled work, in words (FR39).
+ *
+ * `scheduleIndex` is Home's own schedule join (`null` until it has loaded, or
+ * when it failed). Unknown reads "—"; known and empty reads "No schedule".
+ */
+export function nextRunLabel(workspaceId, scheduleIndex, locale) {
+  if (!scheduleIndex) return '—';
+  const times = (scheduleIndex[workspaceId] || [])
+    .map(row => new Date(String((row && (row.next_run || row.next_run_at)) || '')))
+    .filter(at => !Number.isNaN(at.getTime()))
+    .sort((a, b) => a - b);
+  if (times.length === 0) return 'No schedule';
+  return times[0].toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/**
+ * The sections of a workspace or group as overview links, with counts.
+ *
+ * A count that has not loaded reads "—", never "0". A group lists only the
+ * sections that hold something, as its tree does (FR16, FR39, FR40).
+ */
+export function sectionLinks(workspaceId, sections, { hideEmpty = false } = {}) {
+  const links = [];
+  SECTIONS.forEach(info => {
+    const state = (sections && sections[info.id]) || null;
+    const ready = !!state && state.status === SECTION_READY;
+    if (hideEmpty && !(ready && state.count > 0)) return;
+    links.push({
+      label: info.label,
+      icon: rowIconName({ kind: 'section', section: info.id }),
+      meta: formatCount(ready ? state.count : null),
+      // Memory is one item, so its link opens it; the others reveal the
+      // section in the tree.
+      action: info.expandable ? 'reveal-section' : 'open-item',
+      target: info.expandable ? info.id : itemKey(workspaceId, info.id)
+    });
+  });
+  return links;
+}
+
+const VIEW_FILLERS = {
+  // FR32. The body is the note's Markdown; the editor replaces it in place.
+  note(view, { tab, workspace, value }) {
+    const slug = slugOf(workspace);
+    if (slug) {
+      view.actions.push({
+        label: 'Open full note',
+        href: workspaceNotePath(slug, tab.meta.noteId),
+        primary: true
+      });
+    }
+    if (!value) return;
+    retitle(view, value.name);
+    view.tags = Array.isArray(value.tags) ? value.tags : [];
+    view.body = {
+      type: 'markdown',
+      markdown: String(value.content ?? ''),
+      empty: 'This note is empty.'
+    };
+  },
+
+  // FR33, read-only.
+  ticket(view, { tab, workspace, value }) {
+    const slug = slugOf(workspace);
+    if (slug) {
+      view.actions.push({
+        label: 'Open in Tickets',
+        href: workspacePageURL(slug, [], {
+          search: new URLSearchParams({ ticket: tab.meta.ticketId })
+        }),
+        primary: true
+      });
+    }
+    // The row already knows the state, so the chip shows before the ticket loads.
+    const state = value ? value.state : tab.meta.state;
+    const label = value ? value.stateLabel : tab.meta.stateLabel;
+    if (label) view.chip = { label, tone: TICKET_TONES[state] || 'mute' };
+    if (!value) return;
+    retitle(view, value.title);
+    view.tags = value.tags;
+    if (value.description) view.lead = value.description;
+    else view.notice = 'This ticket has no description.';
+    view.fields = [
+      { label: 'Source', value: value.sourceLabel },
+      { label: 'Workspace', value: workspaceName(workspace) }
+    ];
+    if (value.number) view.fields.unshift({ label: 'Number', value: value.number });
+  },
+
+  // FR34, read-only: the path inside the workspace and a preview.
+  file(view, { tab, value }) {
+    const path = String(tab.meta.path || '');
+    view.actions = [
+      { label: 'Open', action: 'file-open', primary: true },
+      { label: 'Reveal in Finder', action: 'file-reveal' }
+    ];
+    view.fields = [{ label: 'Path', value: `files/${path}` }];
+    if (path === 'BACKLOG.md') view.lead = 'Ori keeps this file in step with the backlog.';
+    if (!value) return;
+    if (value.tooLarge) {
+      view.body = { type: 'none', text: 'This file is too large to preview here.' };
+    } else if (value.kind === PREVIEW_MARKDOWN) {
+      view.body = { type: 'markdown', markdown: value.text, empty: 'This file is empty.' };
+    } else if (value.kind === PREVIEW_TEXT) {
+      view.body = { type: 'text', text: value.text, empty: 'This file is empty.' };
+    } else if (value.kind === PREVIEW_IMAGE) {
+      view.body = { type: 'image', src: value.url, alt: tab.label };
+    } else {
+      view.body = { type: 'none', text: 'No preview' };
+    }
+  },
+
+  // FR37, read-only: the entries as a list.
+  memory(view, { workspace, value }) {
+    const slug = slugOf(workspace);
+    if (slug) {
+      view.actions.push({
+        label: 'Open Memory',
+        href: workspacePageURL(slug, [], { hash: 'memory' }),
+        primary: true
+      });
+    }
+    view.lead = isGroupWorkspace(workspace)
+      ? 'What the agents in this group remember.'
+      : 'What the agents in this workspace remember.';
+    if (!value) return;
+    view.list = {
+      items: value.entries.map(entry => ({
+        text: entry.text,
+        meta: [entry.type, entry.date].filter(Boolean).join(' · ')
+      })),
+      empty: 'No memory entries yet.'
+    };
+  },
+
+  // FR38, read-only. Everything it shows came with the tree row.
+  agent(view, { tab, workspace }) {
+    const slug = slugOf(workspace);
+    if (slug) {
+      view.actions.push({
+        label: 'Open agent',
+        href: workspacePageURL(slug, ['agents', tab.meta.name || tab.label]),
+        primary: true
+      });
+    }
+    view.fields = [
+      { label: 'Role', value: tab.meta.role || '—' },
+      { label: 'Model', value: tab.meta.model || '—' }
+    ];
+  },
+
+  // FR39. The facts are the Home rail's own (workspaceRailView), so the two
+  // can never disagree; only the layout is the pane's.
+  workspace(view, { tab, workspace, context }) {
+    if (!workspace) return;
+    const rail = workspaceRailView(workspace);
+    view.chip = { label: rail.status.label, tone: STATUS_TONES[rail.status.status] || 'mute' };
+    view.tags = (context.tagsById && context.tagsById[tab.workspaceId]) || [];
+    if (rail.openHref)
+      view.actions.push({ label: 'Open workspace', href: rail.openHref, primary: true });
+    view.actions.push(
+      { label: 'Move…', action: 'move' },
+      { label: 'Delete', action: 'delete', danger: true }
+    );
+    view.lead = rail.mission;
+    view.stats = [
+      { value: formatCount(rail.status.agents), label: 'Agents' },
+      { value: formatCount(rail.status.openTasks), label: 'Open tasks' },
+      { value: formatCount(rail.status.attention), label: 'Need attention' }
+    ];
+    view.fields = [
+      { label: 'Next run', value: nextRunLabel(tab.workspaceId, context.scheduleIndex) }
+    ];
+    view.linkGroups = [
+      { label: 'In this workspace', links: sectionLinks(tab.workspaceId, context.sections) }
+    ];
+  },
+
+  // FR40. The facts are groupRailView's.
+  group(view, { tab, workspace, flattened, context }) {
+    if (!workspace) return;
+    const rail = groupRailView(workspace, flattened, { view: 'tree' });
+    view.tags = (context.tagsById && context.tagsById[tab.workspaceId]) || [];
+    if (rail.openHref)
+      view.actions.push({ label: 'Open group', href: rail.openHref, primary: true });
+    view.actions.push(
+      { label: 'Move…', action: 'move' },
+      { label: 'Delete', action: 'delete', danger: true }
+    );
+    view.lead = rail.description;
+    view.stats = [
+      { value: formatCount(rail.aggregates.descendantWorkspaces), label: 'Workspaces' },
+      { value: formatCount(rail.aggregates.openTasks.total), label: 'Open tasks' },
+      { value: formatCount(rail.aggregates.attention.total), label: 'Need attention' }
+    ];
+    const children = flattened
+      .filter(ws => ws && ws.parent_id === tab.workspaceId)
+      .map(child => ({
+        label: workspaceName(child),
+        icon: isGroupWorkspace(child) ? 'group' : 'workspace',
+        meta: isGroupWorkspace(child) ? 'Group' : workspaceSignals(child).label,
+        action: 'open-workspace',
+        target: child.id
+      }));
+    view.linkGroups = [
+      { label: 'Workspaces in this group', links: children, empty: 'This group is empty.' }
+    ];
+    const own = sectionLinks(tab.workspaceId, context.sections, { hideEmpty: true });
+    if (own.length) view.linkGroups.push({ label: "The group's own contents", links: own });
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -237,40 +510,158 @@ export function renderEmptyPaneHTML() {
   );
 }
 
-function bodyHTML(view) {
-  if (view.status === ITEM_LOADING) {
-    return '<p class="cockpit-pane-note" role="status">Loading…</p>';
+function actionHTML(action) {
+  const tone = action.primary
+    ? 'modern-btn-primary'
+    : action.danger
+      ? 'modern-btn-danger'
+      : 'modern-btn-secondary';
+  const classes = `modern-btn ${tone} modern-btn-sm`;
+  if (action.href) {
+    return `<a class="${classes}" href="${escapeHtml(action.href)}">${escapeHtml(action.label)}</a>`;
   }
-  if (view.status === ITEM_FAILED) {
-    return (
-      '<div class="cockpit-pane-failed" role="alert">' +
-      `<p>Couldn't load this. ${escapeHtml(view.error)}</p>` +
-      `<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-pane-retry="${escapeHtml(view.key)}">Retry</button>` +
-      '</div>'
-    );
-  }
-  if (view.body && view.body.type === 'markdown') {
-    return view.body.markdown.trim()
-      ? `<div class="cockpit-pane-markdown">${renderMarkdown(view.body.markdown)}</div>`
-      : '<p class="cockpit-pane-note">This note is empty.</p>';
-  }
-  return '';
+  return (
+    `<button type="button" class="${classes}" data-pane-action="${escapeHtml(action.action)}">` +
+    `${escapeHtml(action.label)}</button>`
+  );
 }
 
-/** The pane for one tab: breadcrumb, title, the "what and where" line, body. */
+function previewHTML(body) {
+  if (!body) return '';
+  if (body.type === 'markdown') {
+    return body.markdown.trim()
+      ? `<div class="cockpit-pane-markdown">${renderMarkdown(body.markdown)}</div>`
+      : `<p class="cockpit-pane-note">${escapeHtml(body.empty || 'Nothing here yet.')}</p>`;
+  }
+  if (body.type === 'text') {
+    return body.text
+      ? `<pre class="cockpit-pane-pre">${escapeHtml(body.text)}</pre>`
+      : `<p class="cockpit-pane-note">${escapeHtml(body.empty || 'Nothing here yet.')}</p>`;
+  }
+  if (body.type === 'image') {
+    return (
+      `<img class="cockpit-pane-image" src="${escapeHtml(body.src)}" ` +
+      `alt="${escapeHtml(body.alt || '')}">`
+    );
+  }
+  return `<p class="cockpit-pane-note">${escapeHtml(body.text || 'No preview')}</p>`;
+}
+
+function listHTML(list) {
+  if (!list) return '';
+  if (list.items.length === 0) {
+    return `<p class="cockpit-pane-note">${escapeHtml(list.empty || 'Nothing here yet.')}</p>`;
+  }
+  return (
+    '<ul class="cockpit-pane-list">' +
+    list.items
+      .map(
+        entry =>
+          `<li>${escapeHtml(entry.text)}` +
+          (entry.meta
+            ? ` <span class="cockpit-pane-list-meta">${escapeHtml(entry.meta)}</span>`
+            : '') +
+          '</li>'
+      )
+      .join('') +
+    '</ul>'
+  );
+}
+
+function linkGroupHTML(group) {
+  const links = group.links
+    .map(
+      link =>
+        `<button type="button" class="cockpit-pane-link" data-pane-action="${escapeHtml(link.action)}" ` +
+        `data-pane-target="${escapeHtml(link.target)}">` +
+        iconHTML(link.icon) +
+        `<span class="cockpit-pane-link-label">${escapeHtml(link.label)}</span>` +
+        `<span class="cockpit-pane-link-meta">${escapeHtml(link.meta)}</span>` +
+        '</button>'
+    )
+    .join('');
+  return (
+    '<section class="cockpit-pane-links">' +
+    `<h4 class="cockpit-pane-kicker">${escapeHtml(group.label)}</h4>` +
+    (links
+      ? `<div class="cockpit-pane-link-list">${links}</div>`
+      : `<p class="cockpit-pane-note">${escapeHtml(group.empty || 'Nothing here yet.')}</p>`) +
+    '</section>'
+  );
+}
+
+// Everything under the rule: what was loaded, or why it was not.
+function contentHTML(view) {
+  const parts = [];
+  if (view.lead) parts.push(`<p class="cockpit-pane-lead">${escapeHtml(view.lead)}</p>`);
+  if (view.notice) parts.push(`<p class="cockpit-pane-note">${escapeHtml(view.notice)}</p>`);
+  if (view.stats.length) {
+    parts.push(
+      '<div class="cockpit-pane-stats">' +
+        view.stats
+          .map(
+            stat =>
+              '<div class="cockpit-pane-stat">' +
+              `<span class="cockpit-pane-stat-value">${escapeHtml(stat.value)}</span>` +
+              `<span class="cockpit-pane-kicker">${escapeHtml(stat.label)}</span>` +
+              '</div>'
+          )
+          .join('') +
+        '</div>'
+    );
+  }
+  if (view.fields.length) {
+    parts.push(
+      '<dl class="cockpit-pane-fields">' +
+        view.fields
+          .map(
+            field =>
+              `<div><dt>${escapeHtml(field.label)}</dt><dd>${escapeHtml(field.value)}</dd></div>`
+          )
+          .join('') +
+        '</dl>'
+    );
+  }
+  if (view.status === ITEM_LOADING) {
+    parts.push('<p class="cockpit-pane-note" role="status">Loading…</p>');
+  } else if (view.status === ITEM_FAILED) {
+    parts.push(
+      '<div class="cockpit-pane-failed" role="alert">' +
+        `<p>Couldn't load this. ${escapeHtml(view.error)}</p>` +
+        `<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-pane-retry="${escapeHtml(view.key)}">Retry</button>` +
+        '</div>'
+    );
+  } else {
+    parts.push(previewHTML(view.body), listHTML(view.list));
+  }
+  view.linkGroups.forEach(group => parts.push(linkGroupHTML(group)));
+  return parts.filter(Boolean).join('');
+}
+
+/**
+ * The pane for one tab: breadcrumb, title, the "what and where" line with the
+ * item's state and tags, its buttons, then its contents (FR31-FR40).
+ */
 export function renderPaneHTML(view) {
+  const chip = view.chip
+    ? `<span class="cockpit-pane-chip is-${escapeHtml(view.chip.tone)}">${escapeHtml(view.chip.label)}</span>`
+    : '';
   const tags = (view.tags || [])
     .map(tag => `<span class="cockpit-pane-tag">#${escapeHtml(tag)}</span>`)
     .join('');
-  const body = bodyHTML(view);
+  const actions = view.actions.length
+    ? `<div class="cockpit-pane-actions">${view.actions.map(actionHTML).join('')}</div>`
+    : '';
+  const content = contentHTML(view);
   return (
     `<article class="cockpit-pane-article" data-pane-kind="${escapeHtml(view.kind)}">` +
     `<div class="cockpit-pane-crumbs">${view.crumbs.map(escapeHtml).join(' <span aria-hidden="true">/</span> ')}</div>` +
     '<header class="cockpit-pane-head">' +
     `<h3 class="cockpit-pane-title" data-pane-title tabindex="-1">${escapeHtml(view.title)}</h3>` +
-    `<div class="cockpit-pane-sub"><span>${escapeHtml(view.sub)}</span>${tags}</div>` +
+    `<div class="cockpit-pane-sub"><span>${escapeHtml(view.sub)}</span>${chip}${tags}</div>` +
     '</header>' +
-    (body ? `<div class="cockpit-pane-rule" role="presentation"></div>${body}` : '') +
+    actions +
+    (content ? `<div class="cockpit-pane-rule" role="presentation"></div>${content}` : '') +
     '</article>'
   );
 }
@@ -290,11 +681,15 @@ const bindings = new WeakMap();
  * Draw the tab strip and the active tab's pane into `host`.
  *
  * `state` supplies `treeTabs`, `activeTabKey`, `treeTabItems` (what has been
- * loaded per tab) and `flattened`. Callbacks:
+ * loaded per tab), `flattened`, and what the overviews read: `treeContents`,
+ * `metadata.tagsById` and `scheduleIndex`. Callbacks:
  *
- *   onActivateTab(key)   a tab was chosen
- *   onCloseTab(key)      a tab's close button was pressed
- *   onRetryTab(key)      "Retry" on a tab whose item failed to load
+ *   onActivateTab(key)        a tab was chosen
+ *   onCloseTab(key)           a tab's close button was pressed
+ *   onRetryTab(key)           "Retry" on a tab whose item failed to load
+ *   onAction(action, target)  a button in the pane was pressed: 'move',
+ *                             'delete', 'file-open', 'file-reveal',
+ *                             'reveal-section', 'open-item', 'open-workspace'
  *
  * `focusTitle` moves keyboard focus to the pane's title after drawing, which
  * is what opening an item with Enter must do (FR72).
@@ -317,25 +712,33 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
   }
 
   const stripHTML = renderTabStripHTML(tabs, state.activeTabKey, state.flattened);
+  const contents = (state.treeContents || {})[active ? active.workspaceId : ''];
   const panelHTML = active
     ? renderPaneHTML(
         paneView(active, {
           flattened: state.flattened,
-          item: (state.treeTabItems || {})[active.key] || null
+          item: (state.treeTabItems || {})[active.key] || null,
+          sections: contents ? contents.sections : null,
+          tagsById: (state.metadata && state.metadata.tagsById) || {},
+          scheduleIndex: state.scheduleIndex
         })
       )
     : renderEmptyPaneHTML();
 
   // Redrawing replaces the elements, so focus that sat on one of them has to be
-  // put back on its replacement: the tab that was clicked, or the title that
-  // Enter moved focus to before the item finished loading.
+  // put back on its replacement: the tab that was clicked, the title that
+  // Enter moved focus to before the item finished loading, or the button that
+  // was just pressed.
   const focused = document.activeElement;
   const focusedTabKey =
     focused && strip.contains(focused) ? focused.getAttribute('data-pane-tab') : null;
-  const titleHadFocus =
-    !!focused && panel.contains(focused) && focused.hasAttribute('data-pane-title');
+  const inPanel = !!focused && panel.contains(focused);
+  const titleHadFocus = inPanel && focused.hasAttribute('data-pane-title');
+  const focusedAction = inPanel ? focused.getAttribute('data-pane-action') : null;
+  const focusedTarget = inPanel ? focused.getAttribute('data-pane-target') : null;
 
-  const last = drawn.get(host) || { strip: null, panel: null };
+  const last = drawn.get(host) || { strip: null, panel: null, key: '' };
+  const activeKey = active ? active.key : '';
   if (last.strip !== stripHTML) {
     strip.innerHTML = stripHTML;
     strip.hidden = tabs.length === 0;
@@ -353,11 +756,21 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
   }
   if (last.panel !== panelHTML) {
     panel.innerHTML = panelHTML;
-    panel.scrollTop = 0;
+    // A different item starts at its top; the same item redrawn (its contents
+    // arrived, a count changed) stays where the reader was.
+    if (last.key !== activeKey) panel.scrollTop = 0;
     if (titleHadFocus) focusTitle = true;
+    if (focusedAction) {
+      const again = Array.from(panel.querySelectorAll('[data-pane-action]')).find(
+        el =>
+          el.getAttribute('data-pane-action') === focusedAction &&
+          el.getAttribute('data-pane-target') === focusedTarget
+      );
+      if (again) again.focus({ preventScroll: true });
+    }
   }
   panel.setAttribute('aria-label', active ? `${active.label || 'Open item'}` : 'Nothing open');
-  drawn.set(host, { strip: stripHTML, panel: panelHTML });
+  drawn.set(host, { strip: stripHTML, panel: panelHTML, key: activeKey });
 
   // The listener is bound once per host and always reads the latest callbacks.
   const bound = bindings.has(host);
@@ -380,8 +793,18 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
         return;
       }
       const retry = event.target.closest('[data-pane-retry]');
-      if (retry && typeof handlers.onRetryTab === 'function') {
-        handlers.onRetryTab(retry.getAttribute('data-pane-retry'));
+      if (retry) {
+        if (typeof handlers.onRetryTab === 'function') {
+          handlers.onRetryTab(retry.getAttribute('data-pane-retry'));
+        }
+        return;
+      }
+      const action = event.target.closest('[data-pane-action]');
+      if (action && typeof handlers.onAction === 'function') {
+        handlers.onAction(
+          action.getAttribute('data-pane-action'),
+          action.getAttribute('data-pane-target') || ''
+        );
       }
     });
   }

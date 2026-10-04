@@ -13,10 +13,12 @@ import {
   ITEM_READY,
   activateTab,
   closeTab,
+  nextRunLabel,
   openTab,
   paneCrumbs,
   paneSubline,
   paneView,
+  sectionLinks,
   renderEmptyPaneHTML,
   renderPaneHTML,
   renderTabStripHTML,
@@ -34,11 +36,29 @@ const tab = (key, extra = {}) => ({
 
 // Music (group) > Night Drive; My HQ and Solo at the top level.
 const FLAT = [
-  { id: 'g1', name: 'Music', kind: 'group', parent_id: '' },
-  { id: 'ws1', name: 'Night Drive', parent_id: 'g1' },
-  { id: 'hq', name: 'My HQ', is_personal_hq: true, parent_id: '' },
-  { id: 'solo', name: 'Solo', parent_id: '' },
-  { id: 'g2', name: 'Stems', kind: 'group', parent_id: 'g1' }
+  {
+    id: 'g1',
+    name: 'Music',
+    kind: 'group',
+    parent_id: '',
+    folder_slug: 'music',
+    description: 'Songs in progress.'
+  },
+  {
+    id: 'ws1',
+    name: 'Night Drive',
+    parent_id: 'g1',
+    folder_slug: 'night-drive',
+    description: 'The first single.',
+    agent_count: 2,
+    open_task_count: 3,
+    needs_attention_count: 1,
+    active: false
+  },
+  { id: 'hq', name: 'My HQ', is_personal_hq: true, parent_id: '', folder_slug: 'my-hq' },
+  // Solo reports nothing: no counts, no activity.
+  { id: 'solo', name: 'Solo', parent_id: '', folder_slug: 'solo' },
+  { id: 'g2', name: 'Stems', kind: 'group', parent_id: 'g1', folder_slug: 'stems' }
 ];
 
 // ---------------------------------------------------------------------------
@@ -249,7 +269,12 @@ test('a note that has loaded shows its tags and its content as Markdown', () => 
   assert.equal(view.title, 'Lyrics draft');
   assert.equal(view.sub, 'Note in Night Drive');
   assert.deepEqual(view.tags, ['lyrics']);
-  assert.deepEqual(view.body, { type: 'markdown', markdown: '## Verse 1\n\nWords.' });
+  assert.equal(view.body.type, 'markdown');
+  assert.equal(view.body.markdown, '## Verse 1\n\nWords.');
+  // FR32: "Open full note" goes to the note page.
+  assert.deepEqual(view.actions, [
+    { label: 'Open full note', href: '/workspaces/night-drive/notes/n1', primary: true }
+  ]);
   assert.equal(view.status, ITEM_READY);
 });
 
@@ -377,4 +402,358 @@ test('names and tags are escaped everywhere they are printed', () => {
     );
   assert.doesNotMatch(html, /<img/i);
   assert.match(html, /&lt;img/);
+});
+
+// ---------------------------------------------------------------------------
+// Ticket (FR33)
+// ---------------------------------------------------------------------------
+
+const TICKET_TAB = tab('ws1/t/t1', {
+  kind: 'ticket',
+  label: 'Record backing vocals',
+  meta: { ticketId: 't1', state: 'ready', stateLabel: 'Ready' }
+});
+
+const ready = value => ({ status: ITEM_READY, value, error: '' });
+
+test('a ticket shows its state, description, tags and source, and links to Tickets', () => {
+  const view = paneView(TICKET_TAB, {
+    flattened: FLAT,
+    item: ready({
+      title: 'Record backing vocals',
+      number: '#4',
+      state: 'in_progress',
+      stateLabel: 'In progress',
+      description: 'Double the chorus.',
+      tags: ['vocals'],
+      sourceLabel: 'Added by you'
+    })
+  });
+  assert.equal(view.sub, 'Ticket in Night Drive');
+  assert.deepEqual(view.chip, { label: 'In progress', tone: 'ok' });
+  assert.equal(view.lead, 'Double the chorus.');
+  assert.deepEqual(view.tags, ['vocals']);
+  assert.deepEqual(view.fields, [
+    { label: 'Number', value: '#4' },
+    { label: 'Source', value: 'Added by you' },
+    { label: 'Workspace', value: 'Night Drive' }
+  ]);
+  assert.deepEqual(view.actions, [
+    { label: 'Open in Tickets', href: '/workspaces/night-drive?ticket=t1', primary: true }
+  ]);
+});
+
+test('a ticket shows the state its row knew while the ticket itself is loading', () => {
+  const view = paneView(TICKET_TAB, { flattened: FLAT, item: { status: ITEM_LOADING } });
+  assert.deepEqual(view.chip, { label: 'Ready', tone: 'info' });
+  assert.equal(view.lead, '');
+  assert.deepEqual(view.fields, []);
+});
+
+test('a ticket with no description says so; finished states are muted', () => {
+  const view = paneView(TICKET_TAB, {
+    flattened: FLAT,
+    item: ready({ title: 'Done one', state: 'done', stateLabel: 'Done', description: '', tags: [] })
+  });
+  assert.equal(view.notice, 'This ticket has no description.');
+  assert.equal(view.chip.tone, 'mute');
+  assert.equal(view.title, 'Done one');
+});
+
+// ---------------------------------------------------------------------------
+// File (FR34)
+// ---------------------------------------------------------------------------
+
+const fileTab = path =>
+  tab(`ws1/f/${path}`, { kind: 'file', label: path.split('/').pop(), meta: { path } });
+
+test('a file shows its path inside the workspace and offers Open and Reveal', () => {
+  const view = paneView(fileTab('briefs/today.md'), { flattened: FLAT });
+  assert.equal(view.sub, 'File in Night Drive');
+  assert.deepEqual(view.fields, [{ label: 'Path', value: 'files/briefs/today.md' }]);
+  assert.deepEqual(
+    view.actions.map(action => [action.label, action.action]),
+    [
+      ['Open', 'file-open'],
+      ['Reveal in Finder', 'file-reveal']
+    ]
+  );
+});
+
+test('each kind of file gets its own preview', () => {
+  const preview = (path, value) =>
+    paneView(fileTab(path), { flattened: FLAT, item: ready(value) }).body;
+  assert.deepEqual(preview('a.md', { kind: 'markdown', text: '# Hi' }), {
+    type: 'markdown',
+    markdown: '# Hi',
+    empty: 'This file is empty.'
+  });
+  assert.deepEqual(preview('a.csv', { kind: 'text', text: 'a,b' }), {
+    type: 'text',
+    text: 'a,b',
+    empty: 'This file is empty.'
+  });
+  assert.deepEqual(preview('cover.png', { kind: 'image', url: '/api/x/cover.png' }), {
+    type: 'image',
+    src: '/api/x/cover.png',
+    alt: 'cover.png'
+  });
+  assert.deepEqual(preview('take.wav', { kind: 'none' }), { type: 'none', text: 'No preview' });
+  assert.deepEqual(preview('huge.log', { kind: 'text', tooLarge: true }), {
+    type: 'none',
+    text: 'This file is too large to preview here.'
+  });
+});
+
+test('BACKLOG.md says that Ori keeps it in step with the backlog; other files do not', () => {
+  assert.equal(
+    paneView(fileTab('BACKLOG.md'), { flattened: FLAT }).lead,
+    'Ori keeps this file in step with the backlog.'
+  );
+  assert.equal(paneView(fileTab('docs/BACKLOG.md'), { flattened: FLAT }).lead, '');
+  assert.equal(paneView(fileTab('plan.md'), { flattened: FLAT }).lead, '');
+});
+
+test('a text preview is escaped, a Markdown one rendered, an image shown inline', () => {
+  const html = (path, value) =>
+    renderPaneHTML(paneView(fileTab(path), { flattened: FLAT, item: ready(value) }));
+  const text = html('a.json', { kind: 'text', text: '{"a": "<b>"}' });
+  assert.match(
+    text,
+    /<pre class="cockpit-pane-pre">\{&quot;a&quot;: &quot;&lt;b&gt;&quot;\}<\/pre>/
+  );
+  assert.match(html('a.md', { kind: 'markdown', text: '# Hi' }), /class="cockpit-pane-markdown"/);
+  assert.match(
+    html('cover.png', { kind: 'image', url: '/api/x/cover.png' }),
+    /<img class="cockpit-pane-image" src="\/api\/x\/cover\.png" alt="cover\.png">/
+  );
+  assert.match(html('take.wav', { kind: 'none' }), /No preview/);
+});
+
+// ---------------------------------------------------------------------------
+// Memory and agent (FR37, FR38)
+// ---------------------------------------------------------------------------
+
+test('Memory lists its entries and links to the Memory tab', () => {
+  const view = paneView(tab('ws1/m', { kind: 'memory', label: 'Memory' }), {
+    flattened: FLAT,
+    item: ready({
+      entries: [
+        { text: 'Ship on Fridays.', type: 'decision', date: '2026-10-01' },
+        { text: 'Keep replies short.', type: '', date: '' }
+      ]
+    })
+  });
+  assert.equal(view.title, 'Memory');
+  assert.equal(view.sub, 'Memory for Night Drive');
+  assert.deepEqual(view.list.items, [
+    { text: 'Ship on Fridays.', meta: 'decision · 2026-10-01' },
+    { text: 'Keep replies short.', meta: '' }
+  ]);
+  assert.deepEqual(view.actions, [
+    { label: 'Open Memory', href: '/workspaces/night-drive#memory', primary: true }
+  ]);
+});
+
+test('Memory with no entries says so rather than showing an empty list', () => {
+  const html = renderPaneHTML(
+    paneView(tab('ws1/m', { kind: 'memory' }), { flattened: FLAT, item: ready({ entries: [] }) })
+  );
+  assert.match(html, /No memory entries yet\./);
+  assert.doesNotMatch(html, /<ul class="cockpit-pane-list">/);
+});
+
+test('an agent shows its role and model and links to the agent', () => {
+  const view = paneView(
+    tab('ws1/a/REAPER Assistant', {
+      kind: 'agent',
+      label: 'REAPER Assistant',
+      meta: { name: 'REAPER Assistant', role: 'specialist', model: 'claude-sonnet-5-5' }
+    }),
+    { flattened: FLAT }
+  );
+  assert.equal(view.sub, 'Agent in Night Drive');
+  assert.deepEqual(view.fields, [
+    { label: 'Role', value: 'specialist' },
+    { label: 'Model', value: 'claude-sonnet-5-5' }
+  ]);
+  assert.deepEqual(view.actions, [
+    {
+      label: 'Open agent',
+      href: '/workspaces/night-drive/agents/REAPER%20Assistant',
+      primary: true
+    }
+  ]);
+  // An agent has nothing to load, so it is ready at once.
+  assert.equal(view.status, ITEM_READY);
+});
+
+test('an agent with no role or model on record shows a dash, not a blank', () => {
+  const view = paneView(
+    tab('ws1/a/Bare', { kind: 'agent', label: 'Bare', meta: { name: 'Bare' } }),
+    {
+      flattened: FLAT
+    }
+  );
+  assert.deepEqual(
+    view.fields.map(field => field.value),
+    ['—', '—']
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Workspace and group overviews (FR39, FR40)
+// ---------------------------------------------------------------------------
+
+const SECTIONS_LOADED = {
+  notes: { status: 'ready', count: 2, rows: [] },
+  backlog: { status: 'ready', count: 0, rows: [] },
+  files: { status: 'loading', count: null, rows: [] },
+  memory: { status: 'ready', count: 3, rows: [] },
+  agents: { status: 'failed', count: null, rows: [] }
+};
+
+test('a workspace overview shows status, counts, next run, tags and its buttons', () => {
+  const view = paneView(tab('ws1', { kind: 'workspace' }), {
+    flattened: FLAT,
+    tagsById: { ws1: ['music', 'reaper'] },
+    scheduleIndex: {},
+    sections: SECTIONS_LOADED
+  });
+  assert.deepEqual(view.chip, { label: 'Needs attention', tone: 'warn' });
+  assert.deepEqual(view.tags, ['music', 'reaper']);
+  assert.equal(view.lead, 'The first single.');
+  assert.deepEqual(view.stats, [
+    { value: '2', label: 'Agents' },
+    { value: '3', label: 'Open tasks' },
+    { value: '1', label: 'Need attention' }
+  ]);
+  assert.deepEqual(view.fields, [{ label: 'Next run', value: 'No schedule' }]);
+  assert.deepEqual(view.actions, [
+    { label: 'Open workspace', href: '/workspaces/night-drive', primary: true },
+    { label: 'Move…', action: 'move' },
+    { label: 'Delete', action: 'delete', danger: true }
+  ]);
+});
+
+test('a count the server did not send reads "—", never "0" (FR39)', () => {
+  const view = paneView(tab('solo', { kind: 'workspace', workspaceId: 'solo' }), {
+    flattened: FLAT,
+    scheduleIndex: null
+  });
+  assert.deepEqual(
+    view.stats.map(stat => stat.value),
+    ['—', '—', '—']
+  );
+  assert.equal(view.chip.label, 'Status unavailable');
+  // The schedule has not loaded either: unknown, not "No schedule".
+  assert.deepEqual(view.fields, [{ label: 'Next run', value: '—' }]);
+});
+
+test('a workspace overview lists every section with its count, loaded or not', () => {
+  const view = paneView(tab('ws1', { kind: 'workspace' }), {
+    flattened: FLAT,
+    sections: SECTIONS_LOADED
+  });
+  const [group] = view.linkGroups;
+  assert.equal(group.label, 'In this workspace');
+  assert.deepEqual(
+    group.links.map(link => [link.label, link.meta, link.action, link.target]),
+    [
+      ['Notes', '2', 'reveal-section', 'notes'],
+      ['Backlog', '0', 'reveal-section', 'backlog'],
+      ['Files', '—', 'reveal-section', 'files'],
+      // Memory is one item: its link opens it instead of revealing a section.
+      ['Memory', '3', 'open-item', 'ws1/m'],
+      ['Agents', '—', 'reveal-section', 'agents']
+    ]
+  );
+  // Nothing loaded at all: every count is unknown.
+  assert.deepEqual(
+    sectionLinks('ws1', null).map(link => link.meta),
+    ['—', '—', '—', '—', '—']
+  );
+});
+
+test('nextRunLabel: the earliest run, "No schedule" when none, "—" when unknown', () => {
+  assert.equal(nextRunLabel('ws1', null), '—');
+  assert.equal(nextRunLabel('ws1', {}), 'No schedule');
+  assert.equal(nextRunLabel('ws1', { ws1: [{ next_run: 'not a date' }] }), 'No schedule');
+  const label = nextRunLabel(
+    'ws1',
+    {
+      ws1: [{ next_run: '2026-10-09T08:00:00Z' }, { next_run_at: '2026-10-05T08:00:00Z' }],
+      other: [{ next_run: '2026-10-01T08:00:00Z' }]
+    },
+    'en-US'
+  );
+  assert.match(label, /Oct 5, 2026/);
+});
+
+test('a group overview lists its children, then only its own non-empty sections (FR40)', () => {
+  const view = paneView(tab('g1', { kind: 'group', workspaceId: 'g1' }), {
+    flattened: FLAT,
+    sections: SECTIONS_LOADED
+  });
+  assert.equal(view.sub, 'Group');
+  assert.equal(view.lead, 'Songs in progress.');
+  assert.equal(view.chip, null);
+  const [children, own] = view.linkGroups;
+  assert.equal(children.label, 'Workspaces in this group');
+  assert.deepEqual(
+    children.links.map(link => [link.label, link.meta, link.action, link.target]),
+    [
+      ['Night Drive', 'Needs attention', 'open-workspace', 'ws1'],
+      ['Stems', 'Group', 'open-workspace', 'g2']
+    ]
+  );
+  assert.deepEqual(
+    own.links.map(link => link.label),
+    ['Notes', 'Memory']
+  );
+  assert.deepEqual(view.actions, [
+    { label: 'Open group', href: '/workspaces/music', primary: true },
+    { label: 'Move…', action: 'move' },
+    { label: 'Delete', action: 'delete', danger: true }
+  ]);
+});
+
+test('a group overview totals its workspaces from the same figures the rail uses', () => {
+  const view = paneView(tab('g1', { kind: 'group', workspaceId: 'g1' }), { flattened: FLAT });
+  assert.deepEqual(view.stats, [
+    { value: '1', label: 'Workspaces' },
+    { value: '3', label: 'Open tasks' },
+    { value: '1', label: 'Need attention' }
+  ]);
+  // No sections loaded and none non-empty: only the children are listed.
+  assert.equal(view.linkGroups.length, 1);
+});
+
+test('an empty group says so', () => {
+  const html = renderPaneHTML(
+    paneView(tab('g2', { kind: 'group', workspaceId: 'g2' }), { flattened: FLAT })
+  );
+  assert.match(html, /This group is empty\./);
+  assert.match(html, /Group in Music/);
+});
+
+test('overview buttons are links where they navigate and buttons where they act', () => {
+  const html = renderPaneHTML(
+    paneView(tab('ws1', { kind: 'workspace' }), { flattened: FLAT, sections: SECTIONS_LOADED })
+  );
+  assert.match(
+    html,
+    /<a class="modern-btn modern-btn-primary modern-btn-sm" href="\/workspaces\/night-drive">Open workspace<\/a>/
+  );
+  assert.match(
+    html,
+    /<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-pane-action="move">Move…<\/button>/
+  );
+  assert.match(
+    html,
+    /class="modern-btn modern-btn-danger modern-btn-sm" data-pane-action="delete">Delete</
+  );
+  assert.match(html, /data-pane-action="reveal-section" data-pane-target="notes"/);
+  assert.match(html, /class="cockpit-pane-chip is-warn">Needs attention</);
+  assert.match(html, /class="cockpit-pane-stat-value">3</);
 });

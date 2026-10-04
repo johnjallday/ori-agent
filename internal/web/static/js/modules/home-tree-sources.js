@@ -170,13 +170,35 @@ const TICKET_STATE_LABELS = {
   cancelled: 'Cancelled'
 };
 
-/** The words for a ticket state, preferring the server's own label. */
+/**
+ * The words for a ticket state.
+ *
+ * The six known states use the PRD's wording ("In progress"); a state this
+ * build has never heard of falls back to the server's own label, then to the
+ * raw value, so a new state still shows as something.
+ */
 export function ticketStateLabel(state, serverLabel = '') {
-  return text(serverLabel) || TICKET_STATE_LABELS[text(state)] || text(state) || 'Unknown';
+  return TICKET_STATE_LABELS[text(state)] || text(serverLabel) || text(state) || 'Unknown';
 }
 
 export function isFinishedTicketState(state) {
   return FINISHED_TICKET_STATES.has(text(state));
+}
+
+const TICKET_SOURCE_LABELS = {
+  manual: 'Added by you',
+  assistant: 'Suggested by the assistant',
+  home_quick_capture: 'Quick capture on Home',
+  action_center: 'From the Action Center',
+  backlog_markdown: 'Written in BACKLOG.md',
+  note: 'Created from a note',
+  blueprint_intake: 'Created during workspace setup',
+  migration: 'Carried over from an earlier version'
+};
+
+/** Where a ticket came from, in words; an unknown source is shown as it is. */
+export function ticketSourceLabel(source) {
+  return TICKET_SOURCE_LABELS[text(source)] || text(source) || 'Unknown';
 }
 
 /**
@@ -295,8 +317,10 @@ export function filesToRows(workspaceId, payload) {
  * `GET /api/workspaces/{id}/memory` → no rows, one list for the pane.
  *
  * Memory is a single row in the tree (FR9), so it has no child rows. `entries`
- * is what its tab lists (FR37): the dated entries, then what Ori has learned,
- * then any free text the file holds.
+ * is what its tab lists (FR37): the entries, then the learnings the user has
+ * approved. The payload's `unstructured` lines are left out, as they are on
+ * the workspace's Memory tab ("not injected as entries"): they are whatever
+ * else MEMORY.md holds, such as its "# Workspace Memory" heading.
  */
 export function memoryToRows(workspaceId, payload) {
   const data = payload || {};
@@ -308,10 +332,6 @@ export function memoryToRows(workspaceId, payload) {
   (Array.isArray(data.managed_learnings) ? data.managed_learnings : []).forEach(entry => {
     if (!entry || !text(entry.text)) return;
     entries.push({ text: text(entry.text), type: text(entry.type) || 'learned', date: '' });
-  });
-  (Array.isArray(data.unstructured) ? data.unstructured : []).forEach(line => {
-    if (!text(line)) return;
-    entries.push({ text: text(line), type: '', date: '' });
   });
   return { rows: [], count: entries.length, entries };
 }
@@ -506,6 +526,181 @@ export function loadSections(workspace, { fetchImpl, sections, onSection } = {})
 // ---------------------------------------------------------------------------
 // One item, for the pane
 // ---------------------------------------------------------------------------
+
+async function getJSON(url, fetchImpl) {
+  const response = await resolveFetch(fetchImpl)(url, { headers: { Accept: 'application/json' } });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+  }
+  return response.json();
+}
+
+/** `GET /api/workspaces/{id}/tickets/{ticketId}` → what the ticket tab shows. */
+export async function loadTicket(workspaceId, ticketId, { fetchImpl } = {}) {
+  const ticket = await getJSON(
+    `/api/workspaces/${enc(workspaceId)}/tickets/${enc(ticketId)}`,
+    fetchImpl
+  );
+  return {
+    id: String(ticket.id || ticketId),
+    title: text(ticket.title) || 'Untitled ticket',
+    number: text(ticket.display_number),
+    state: text(ticket.state),
+    stateLabel: ticketStateLabel(ticket.state, ticket.state_label),
+    finished: isFinishedTicketState(ticket.state),
+    description: String(ticket.description ?? '').trim(),
+    tags: Array.isArray(ticket.tags) ? ticket.tags.map(text).filter(Boolean) : [],
+    source: text(ticket.source),
+    sourceLabel: ticketSourceLabel(ticket.source)
+  };
+}
+
+/** `GET /api/workspaces/{id}/memory` → the entries the Memory tab lists. */
+export async function loadMemory(workspaceId, { fetchImpl } = {}) {
+  const shaped = memoryToRows(
+    workspaceId,
+    await getJSON(`/api/workspaces/${enc(workspaceId)}/memory`, fetchImpl)
+  );
+  return { entries: shaped.entries };
+}
+
+// --- Files ---------------------------------------------------------------
+
+const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdx']);
+const IMAGE_EXTENSIONS = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'avif',
+  'bmp',
+  'ico',
+  'svg'
+]);
+const TEXT_EXTENSIONS = new Set([
+  'txt',
+  'text',
+  'log',
+  'csv',
+  'tsv',
+  'json',
+  'jsonl',
+  'yaml',
+  'yml',
+  'toml',
+  'ini',
+  'conf',
+  'cfg',
+  'env',
+  'xml',
+  'html',
+  'htm',
+  'css',
+  'js',
+  'mjs',
+  'ts',
+  'tsx',
+  'jsx',
+  'go',
+  'py',
+  'rb',
+  'rs',
+  'java',
+  'c',
+  'h',
+  'cpp',
+  'sh',
+  'bash',
+  'zsh',
+  'sql',
+  'lua',
+  'tex',
+  'srt',
+  'vtt',
+  'rst'
+]);
+
+/** A text file larger than this is not fetched for preview. */
+export const FILE_PREVIEW_LIMIT = 512 * 1024;
+
+export const PREVIEW_MARKDOWN = 'markdown';
+export const PREVIEW_TEXT = 'text';
+export const PREVIEW_IMAGE = 'image';
+export const PREVIEW_NONE = 'none';
+
+/**
+ * How a file is previewed, decided by its extension (FR34): Markdown is
+ * rendered, other text (CSV and JSON included) is shown as it is, an image is
+ * shown inline, and anything else has no preview.
+ */
+export function filePreviewKind(path) {
+  const name = String(path || '')
+    .split('/')
+    .pop()
+    .toLowerCase();
+  const dot = name.lastIndexOf('.');
+  const extension = dot > 0 ? name.slice(dot + 1) : '';
+  if (MARKDOWN_EXTENSIONS.has(extension)) return PREVIEW_MARKDOWN;
+  if (IMAGE_EXTENSIONS.has(extension)) return PREVIEW_IMAGE;
+  if (TEXT_EXTENSIONS.has(extension)) return PREVIEW_TEXT;
+  return PREVIEW_NONE;
+}
+
+/**
+ * The address a workspace file is served from. Built here rather than taken
+ * from the listing so that a name with a space, `#` or `?` is always encoded.
+ */
+export function workspaceFileURL(workspaceId, path) {
+  const segments = String(path || '')
+    .split('/')
+    .filter(Boolean)
+    .map(enc);
+  return `/api/workspaces/${enc(workspaceId)}/files/${segments.join('/')}`;
+}
+
+/**
+ * What the file tab needs to draw a preview.
+ *
+ * Only Markdown and other text are fetched; an image is shown straight from
+ * its address and anything else has nothing to fetch. `tooLarge` is set
+ * instead of fetching a text file over the preview limit.
+ */
+export async function loadFilePreview(workspaceId, path, { size = null, fetchImpl } = {}) {
+  const kind = filePreviewKind(path);
+  const url = workspaceFileURL(workspaceId, path);
+  const preview = { kind, url, text: '', tooLarge: false };
+  if (kind !== PREVIEW_MARKDOWN && kind !== PREVIEW_TEXT) return preview;
+  if (Number.isFinite(size) && size > FILE_PREVIEW_LIMIT) {
+    return { ...preview, tooLarge: true };
+  }
+  const response = await resolveFetch(fetchImpl)(url);
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+  }
+  const body = await response.text();
+  if (body.length > FILE_PREVIEW_LIMIT) return { ...preview, tooLarge: true };
+  return { ...preview, text: body };
+}
+
+/**
+ * Open a file in its default application, or reveal it in the file manager
+ * (`POST …/files/open`, `POST …/files/reveal`). Both act on the machine the
+ * server runs on, which for Ori is the user's own.
+ */
+export async function openWorkspaceFile(workspaceId, path, { reveal = false, fetchImpl } = {}) {
+  const response = await resolveFetch(fetchImpl)(
+    `/api/workspaces/${enc(workspaceId)}/files/${reveal ? 'reveal' : 'open'}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relative_path: path })
+    }
+  );
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+  }
+}
 
 /** `GET /api/notes/{id}` → the whole note, content included. */
 export async function loadNote(noteId, { fetchImpl } = {}) {

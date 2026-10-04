@@ -1647,11 +1647,27 @@ export function renderWorkspaceAreaStatusHTML(status) {
 // Tree is a peer VIEW owned by this coordinator: it renders and handles local
 // interaction, and hands every mutation back here so shared state, refresh, and
 // modal context stay single-authority (FR117).
-import { mountTree, ancestorIds, isWorkspaceRowKind } from './home-workspace-tree.js';
+import {
+  mountTree,
+  ancestorIds,
+  isWorkspaceRowKind,
+  revealTargets,
+  setRowExpanded
+} from './home-workspace-tree.js';
 // The Tree's contents and its reading pane (tasks/prd-home-file-tree.md). The
 // coordinator fetches a row's contents when the row is expanded and keeps what
 // is open; the Tree and the pane only draw what they are handed.
-import { SECTION_FAILED, loadNote, loadSections, sectionInfo } from './home-tree-sources.js';
+import {
+  SECTION_FAILED,
+  loadFilePreview,
+  loadMemory,
+  loadNote,
+  loadSections,
+  loadTicket,
+  openWorkspaceFile,
+  sectionInfo,
+  sectionKey
+} from './home-tree-sources.js';
 import {
   ITEM_FAILED,
   ITEM_LOADING,
@@ -2066,7 +2082,27 @@ import {
         els.treeNav.querySelector('[data-tree-row]');
       if (target) target.focus();
     }
+    // A row that was asked to be revealed is scrolled into view once it is
+    // actually drawn — which, for a row inside a workspace that has only just
+    // been expanded, is a render or two later, when its section has loaded.
+    if (pendingRevealKey && treeHandle.rows.some(row => row.id === pendingRevealKey)) {
+      const rowEl = Array.from(els.treeNav.querySelectorAll('[data-tree-row]')).find(
+        el => el.getAttribute('data-tree-row') === pendingRevealKey
+      );
+      pendingRevealKey = '';
+      if (rowEl) rowEl.scrollIntoView({ block: 'nearest' });
+    }
     syncTreeContents();
+  }
+
+  let pendingRevealKey = '';
+
+  /** Expand whatever hides a row, and scroll to the row once it is drawn (FR28). */
+  function revealTreeRow(key) {
+    revealTargets(key, state.flattened).forEach(target =>
+      setRowExpanded(state, target.kind, target.id, true)
+    );
+    pendingRevealKey = key;
   }
 
   // ---- Tree contents: fetched when a row is expanded (FR17) ----
@@ -2095,6 +2131,9 @@ import {
     setTimeout(() => {
       treeRenderQueued = false;
       mountTreeView();
+      // An overview lists its sections with their counts, so it follows them.
+      const active = state.treeTabs.find(tab => tab.key === state.activeTabKey);
+      if (active && isWorkspaceRowKind(active.kind)) mountPaneView();
     }, 0);
   }
 
@@ -2136,29 +2175,29 @@ import {
       {
         onActivateTab: key => activateTreeTab(key),
         onCloseTab: key => closeTreeTab(key),
-        onRetryTab: key => void loadTabItem(key, { force: true })
+        onRetryTab: key => void loadTabItem(key, { force: true }),
+        onAction: (action, target) => handlePaneAction(action, target)
       },
       { focusTitle }
     );
   }
 
+  /** Open a tree row in the pane. */
+  function openTreeItem(row, options) {
+    openTreeTab(tabFromRow(row), options);
+  }
+
   /**
-   * Open a tree row in the pane.
+   * Open a tab (or switch to it), highlight its row and bring it into view.
    *
-   * A workspace or group row also becomes Home's shared selection, so switching
+   * A workspace or group tab also becomes Home's shared selection, so switching
    * to Map shows the same item selected. It does not open the context modal:
-   * in Tree view the pane is the detail view (FR30).
+   * in Tree view the pane is the detail view (FR28, FR30).
    */
-  function openTreeItem(row, { keyboard = false } = {}) {
-    const next = openTab(state.treeTabs, state.activeTabKey, tabFromRow(row));
+  function openTreeTab(tab, { keyboard = false } = {}) {
+    const next = openTab(state.treeTabs, state.activeTabKey, tab);
     state.treeTabs = next.tabs;
-    state.activeTabKey = next.activeKey;
-    void loadTabItem(next.activeKey);
-    if (isWorkspaceRowKind(row.kind)) {
-      selectItem(row.id, { openModal: false, invoker: document.activeElement });
-    } else {
-      mountTreeView();
-    }
+    showActiveTreeTab(next.activeKey, { invoker: document.activeElement });
     // Opening with Enter moves focus to the pane's title; a click leaves focus
     // on the row that was clicked (FR72).
     mountPaneView({ focusTitle: keyboard });
@@ -2166,21 +2205,37 @@ import {
 
   function activateTreeTab(key) {
     const next = activateTab(state.treeTabs, state.activeTabKey, key);
-    state.activeTabKey = next.activeKey;
-    void loadTabItem(next.activeKey);
-    const tab = state.treeTabs.find(entry => entry.key === next.activeKey);
-    if (tab && isWorkspaceRowKind(tab.kind)) selectItem(tab.workspaceId, { openModal: false });
-    else mountTreeView();
+    showActiveTreeTab(next.activeKey);
     mountPaneView();
+  }
+
+  // Shared by opening and switching: make `key` the active tab, fetch what it
+  // shows (again, if it was already loaded, so a tab left open does not go
+  // stale), reveal its row, and redraw the tree.
+  function showActiveTreeTab(key, { invoker = null } = {}) {
+    state.activeTabKey = key;
+    const tab = state.treeTabs.find(entry => entry.key === key);
+    if (!tab) {
+      mountTreeView();
+      return;
+    }
+    void loadTabItem(key, { refresh: true });
+    revealTreeRow(key);
+    if (isWorkspaceRowKind(tab.kind)) selectItem(tab.workspaceId, { openModal: false, invoker });
+    else mountTreeView();
   }
 
   function closeTreeTab(key) {
     const next = closeTab(state.treeTabs, state.activeTabKey, key);
+    const activeChanged = next.activeKey !== state.activeTabKey;
     state.treeTabs = next.tabs;
-    state.activeTabKey = next.activeKey;
     delete state.treeTabItems[key];
-    if (next.activeKey) void loadTabItem(next.activeKey);
-    mountTreeView();
+    if (activeChanged && next.activeKey) {
+      showActiveTreeTab(next.activeKey);
+    } else {
+      state.activeTabKey = next.activeKey;
+      mountTreeView();
+    }
     mountPaneView();
     // The button that was pressed is gone. Put focus on the tab that took its
     // place, or back in the tree when nothing is open.
@@ -2190,21 +2245,41 @@ import {
     if (target) target.focus();
   }
 
+  // What each kind of tab fetches beyond its tree row. An agent, a workspace
+  // and a group are described entirely by data Home already holds.
+  const TAB_LOADERS = {
+    note: tab => loadNote(tab.meta.noteId),
+    ticket: tab => loadTicket(tab.workspaceId, tab.meta.ticketId),
+    file: tab => loadFilePreview(tab.workspaceId, tab.meta.path, { size: tab.meta.size }),
+    memory: tab => loadMemory(tab.workspaceId)
+  };
+
   /**
-   * Load what a tab needs beyond its tree row. A note needs its content; kinds
-   * described entirely by their row need nothing and are skipped.
+   * Load what a tab shows.
+   *
+   * The first load shows "Loading…". `refresh` reloads a tab that already has
+   * its item — it keeps showing what it has until the new answer arrives, and
+   * keeps it if the reload fails, so switching tabs never blanks one. `force`
+   * is the Retry button: back to "Loading…", failure reported.
    */
-  async function loadTabItem(key, { force = false } = {}) {
+  async function loadTabItem(key, { force = false, refresh = false } = {}) {
     const tab = state.treeTabs.find(entry => entry.key === key);
-    if (!tab || tab.kind !== 'note') return;
+    const load = tab && TAB_LOADERS[tab.kind];
+    if (!load) return;
     const current = state.treeTabItems[key];
-    if (current && !force && current.status !== ITEM_FAILED) return;
-    state.treeTabItems[key] = { status: ITEM_LOADING, value: null, error: '' };
-    mountPaneView();
+    if (current && current.status === ITEM_LOADING) return;
+    const usable = !!current && current.status === ITEM_READY;
+    if (usable && !force && !refresh) return;
+    const quiet = usable && !force;
+    if (!quiet) {
+      state.treeTabItems[key] = { status: ITEM_LOADING, value: null, error: '' };
+      mountPaneView();
+    }
     try {
-      const value = await loadNote(tab.meta.noteId);
+      const value = await load(tab);
       state.treeTabItems[key] = { status: ITEM_READY, value, error: '' };
     } catch (err) {
+      if (quiet) return;
       const message = err && err.message ? String(err.message) : 'Request failed';
       state.treeTabItems[key] = { status: ITEM_FAILED, value: null, error: message };
       announce(`Couldn't load ${tab.label}.`);
@@ -2212,6 +2287,64 @@ import {
     // The tab may have been closed while its item was on the way.
     if (state.treeTabs.some(entry => entry.key === key)) mountPaneView();
     else delete state.treeTabItems[key];
+  }
+
+  /** A button inside the pane was pressed; `target` is whatever it names. */
+  function handlePaneAction(action, target) {
+    const tab = state.treeTabs.find(entry => entry.key === state.activeTabKey);
+    if (!tab) return;
+    if (action === 'move') {
+      if (treeHandle) treeHandle.openMoveDialog(tab.workspaceId);
+    } else if (action === 'delete') {
+      if (treeHandle) void treeHandle.deleteWorkspace(tab.workspaceId);
+    } else if (action === 'file-open' || action === 'file-reveal') {
+      void openFileFromPane(tab, action === 'file-reveal');
+    } else if (action === 'reveal-section') {
+      revealSectionInTree(tab.workspaceId, target);
+    } else if (action === 'open-item') {
+      // The one item an overview links to directly is Memory.
+      openTreeTab({
+        key: target,
+        kind: 'memory',
+        workspaceId: tab.workspaceId,
+        label: 'Memory',
+        meta: {}
+      });
+    } else if (action === 'open-workspace') {
+      const child = findWorkspace(state.flattened, target);
+      if (!child) return;
+      const kind = isGroupWorkspace(child) ? 'group' : 'workspace';
+      setRowExpanded(state, kind, child.id, true);
+      openTreeTab({
+        key: child.id,
+        kind,
+        workspaceId: child.id,
+        label: String(child.name || ''),
+        meta: {}
+      });
+    }
+  }
+
+  /** Open a section in the tree and put keyboard focus on its row (FR39). */
+  function revealSectionInTree(workspaceId, sectionId) {
+    const key = sectionKey(workspaceId, sectionId);
+    revealTreeRow(key);
+    setRowExpanded(state, 'section', key, true);
+    state.focusId = key;
+    mountTreeView();
+    if (treeHandle) treeHandle.focusRow(key);
+  }
+
+  async function openFileFromPane(tab, reveal) {
+    try {
+      await openWorkspaceFile(tab.workspaceId, tab.meta.path, { reveal });
+      announce(reveal ? `Revealed ${tab.label} in the file manager.` : `Opened ${tab.label}.`);
+    } catch (err) {
+      const reason = err && err.message ? String(err.message) : 'Request failed';
+      const message = `Couldn't ${reveal ? 'reveal' : 'open'} ${tab.label}: ${reason}`;
+      announce(message);
+      if (window.Toast) window.Toast.error(message);
+    }
   }
 
   /**
@@ -3818,6 +3951,8 @@ import {
       renderFilters();
       applyFilterToMap();
       renderToday();
+      // A workspace overview in the Tree pane shows the next scheduled run.
+      mountPaneView();
       if (state.railState === RAIL_SUMMARY) renderRail({ announceChange: false });
     });
     // The economy rides alongside for the same reason (city-economy FR35). The

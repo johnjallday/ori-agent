@@ -38,7 +38,10 @@ import {
   SECTION_LOADING,
   SECTION_READY,
   itemKey,
-  sectionKey
+  parseItemKey,
+  sectionInfo,
+  sectionKey,
+  sectionOfKind
 } from './home-tree-sources.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
 
@@ -83,6 +86,44 @@ export function setRowExpanded(state, kind, id, open) {
   }
   if (open) state.expandedRows.add(id);
   else state.expandedRows.delete(id);
+}
+
+/**
+ * The rows that must be open for a row to be on screen (FR28).
+ *
+ * Given a row key, returns `{ kind, id }` for each ancestor, outermost first:
+ * the groups above its workspace, then — for a row inside a workspace — the
+ * workspace itself, its section, and any folders above a file. Pass each to
+ * `setRowExpanded(state, kind, id, true)`. The row itself is not included:
+ * revealing a workspace does not expand it.
+ */
+export function revealTargets(key, flattened) {
+  const parsed = parseItemKey(key);
+  if (!parsed) return [];
+  const rows = Array.isArray(flattened) ? flattened : [];
+  const targets = ancestorIds(rows, parsed.workspaceId).map(id => ({ kind: 'group', id }));
+  if (parsed.kind === 'workspace') return targets;
+
+  const owner = rows.find(row => row && row.id === parsed.workspaceId);
+  targets.push({
+    kind: owner && isGroupWorkspace(owner) ? 'group' : 'workspace',
+    id: parsed.workspaceId
+  });
+  const sectionId = parsed.kind === 'section' ? parsed.itemId : sectionOfKind(parsed.kind);
+  const info = sectionInfo(sectionId);
+  if (info && info.expandable && parsed.kind !== 'section') {
+    targets.push({ kind: 'section', id: sectionKey(parsed.workspaceId, sectionId) });
+  }
+  if (parsed.kind === 'file' || parsed.kind === 'folder') {
+    const folders = parsed.itemId.split('/').slice(0, -1);
+    folders.forEach((_, index) => {
+      targets.push({
+        kind: 'folder',
+        id: itemKey(parsed.workspaceId, 'folder', folders.slice(0, index + 1).join('/'))
+      });
+    });
+  }
+  return targets;
 }
 
 /** The words a failed section shows, for example "Couldn't load Notes" (FR19). */
