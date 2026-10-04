@@ -264,9 +264,10 @@ test.describe('Home workspace cockpit', () => {
 
   test('routes Map and Tree Group actions through the shared creator', async ({ page }) => {
     await ensureWorkspace(page);
-    await page.request.post('/api/workspaces', {
+    const second = await page.request.post('/api/workspaces', {
       data: { name: `Second groupable workspace ${Date.now()}`, workspace_preset: 'general' }
     });
+    const reviewedMember = (await second.json())?.folder?.id as string;
     await page.goto('/');
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'ready');
 
@@ -295,19 +296,26 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
     await dismissCreator(page);
 
-    await page.locator('[data-tree-check]').first().check();
+    // The Tree picks rows with Cmd/Ctrl-click; the bar that offers "Group
+    // selected" appears only while something is picked.
+    const memberRow = page.locator(`[data-tree-row="${reviewedMember}"]`);
+    await memberRow.locator('.cockpit-tree-name').click({ modifiers: ['ControlOrMeta'] });
+    await expect(memberRow).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('button', { name: 'Group selected', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Group selected', exact: true }).click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
     await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText(
       'keeps that choice fixed'
     );
-    const reviewedMember = await page
-      .locator('[data-tree-check]')
-      .first()
-      .getAttribute('data-tree-check');
     await page.locator('#folderNameInput').fill('Reviewed Tree Group');
     await page.locator('#wizardNextBtn').click();
+    // The creator reviews the group's Manager before it will go on to Review.
+    const creator = page.locator('#addFolderModal');
+    await creator.locator('[data-team-agent-setup]').click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page.locator('#createAgentBtn').click();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    await creator.getByRole('button', { name: 'Review →' }).click();
     await expect(page.locator('#workspaceReviewSummary')).toContainText(
       'top-level workspace will move'
     );
@@ -524,29 +532,30 @@ test.describe('Home workspace cockpit', () => {
     expect(new URL(page.url()).pathname).toBe('/');
   });
 
-  test('Tree context traps focus and restores it to the invoking row on dismiss', async ({
+  test('selecting in Tree opens the pane, never the context modal, and Map shows the same selection', async ({
     page
   }) => {
+    // home-file-tree FR30: in Tree view the pane is the detail view. The
+    // selection is still Home's shared selection, so Map agrees with it.
     const id = await ensureWorkspace(page);
     await page.goto('/?view=tree');
     const row = page.locator(`[data-tree-row="${id}"]`);
-    await row.click();
-    const modal = page.locator('#cockpitContextModal');
-    await expect(modal).toBeVisible();
-    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === true);
-    await expect(page.locator('[data-cockpit-rail-back]')).toBeFocused();
+    await row.locator('.cockpit-tree-name').click();
 
-    for (let i = 0; i < 8; i += 1) await page.keyboard.press('Tab');
-    expect(
-      await page.evaluate(() =>
-        document.getElementById('cockpitContextModal')?.contains(document.activeElement)
-      )
-    ).toBe(true);
+    await expect(page.locator('#cockpitTreePane .cockpit-pane-tab.is-active')).toHaveCount(1);
+    await expect(row).toHaveAttribute('aria-selected', 'true');
+    await expect(row).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+    expect(await page.evaluate(() => window.OriHomeCockpit?.getState?.()?.selectedId)).toBe(id);
+    expect(await page.evaluate(() => window.OriHomeCockpit?.getState?.()?.modalVisible)).toBe(
+      false
+    );
+    expect(new URL(page.url()).pathname).toBe('/');
 
-    await page.keyboard.press('Escape');
-    await expect(modal).toBeHidden();
-    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
-    await expect(row).toBeFocused();
+    await page.locator('[data-cockpit-view="map"]').click();
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${id}"]`)).toHaveClass(/is-selected/);
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
   });
 
   test('Personal HQ uses the shared modal, preserves selection on dismiss, and dispatches actions once', async ({
@@ -780,7 +789,29 @@ test.describe('Home workspace cockpit', () => {
     for (const label of ['Create Workspace', 'Create Group', 'Import Folder', 'Rescan']) {
       await expect(page.locator('#cockpitTree').getByRole('button', { name: label })).toBeVisible();
     }
-    await expect(page.locator('[data-tree-move]').first()).toBeVisible();
+  });
+
+  test('Tree offers a Move path that does not need drag-and-drop', async ({ page }) => {
+    const id = await ensureWorkspace(page);
+    await page.goto('/?view=tree');
+    const row = page.locator(`[data-tree-row="${id}"]`);
+    await row.waitFor();
+
+    // FR56: "Move…" is in the row's menu, reached without a pointer, and it
+    // opens a dialog that names where the workspace can go.
+    await row.focus();
+    await page.keyboard.press('Shift+F10');
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Move…', exact: true }).click();
+    const dialog = page.locator('[data-tree-move-dialog] [role="dialog"]');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('[data-tree-move-cancel]')).toBeVisible();
+
+    // Escape closes it and gives focus back to the row that was being moved.
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(row).toBeFocused();
   });
 
   test('theatre width stays invariant before, during, and after modal use at supported widths', async ({
@@ -1003,8 +1034,10 @@ test.describe('Header disclosure coordination', () => {
     await page.goto('/');
     await page.locator('#cockpitRailToggle').click();
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
-    await page.locator('[data-cockpit-view="tree"]').click();
-    await page.locator(`[data-tree-row="${second}"]`).click();
+    // Opening workspace context is what closes Updates. Selecting in Tree no
+    // longer opens it (home-file-tree FR30), so ask for it the way every
+    // context-opening surface does.
+    await page.evaluate(id => window.OriHomeCockpit?.select?.(id), second);
     await expect(page.locator('#cockpitContextModal')).toBeVisible();
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
     await expect(page.locator(`.ws-map-tile[data-ws-id="${second}"]`)).toHaveClass(/is-selected/);
@@ -2226,7 +2259,9 @@ test.describe('group Map layout context (#346)', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator('#cockpitContextModal')).toBeHidden();
     await page.locator('#cockpitViewTree').click();
-    await page.locator(`[data-tree-row="${group}"]`).click();
+    // A Tree row opens the pane rather than the context modal (home-file-tree
+    // FR30), so reopen the group's context the way a non-Tree surface would.
+    await page.evaluate(id => window.OriHomeCockpit?.select?.(id), group);
 
     // Reopened in Tree, the same selected group stays openable while Map-only
     // controls are omitted.

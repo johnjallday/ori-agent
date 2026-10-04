@@ -3410,6 +3410,324 @@ smoke_baseline_export() {
   echo "ok   exported $rev ($short) to $dir"
 }
 
+# --- Home file tree (tasks/prd-home-file-tree.md) ---------------------------
+#
+# The Tree view on Home expands a workspace or a group into its notes, tickets,
+# files, memory and agents. These stages talk to an isolated demo server:
+#
+#   filetree <base-url> endpoints   create a workspace and a group, then call
+#                                   every Release 1 endpoint with each id and
+#                                   print the status and the start of the body.
+#                                   It answers PRD section 9: do the endpoints
+#                                   accept a group's id?
+#   filetree <base-url> seed        fill a NEW sandbox with demo contents (see
+#                                   filetree_seed) and print the ids
+#   filetree <base-url> wait        block until the server answers
+#   filetree <base-url> demo <stage> [light|dark] [sandbox-dir]
+#                                   drive the tree in a headless browser, check
+#                                   it, and take screenshots. Stages: tree,
+#                                   pane, note (give the sandbox directory and
+#                                   it also reads the note's file on disk),
+#                                   create, manage, finish
+#   filetree <base-url> demo-all [sandbox-dir]
+#                                   every stage in both themes, one PASS/FAIL
+#                                   line each
+filetree_probe() {
+  local method="$1" url="$2" body="${3:-}" out status
+  if [[ -n "$body" ]]; then
+    out=$(curl -s -w '\n%{http_code}' -X "$method" "$url" \
+      -H 'Content-Type: application/json' -d "$body")
+  else
+    out=$(curl -s -w '\n%{http_code}' -X "$method" "$url")
+  fi
+  status="${out##*$'\n'}"
+  printf '%-4s %-46s => %s  %s\n' "$method" "${url#"$BASE_URL"/api/workspaces/*/}" "$status" \
+    "$(printf '%s' "${out%$'\n'*}" | tr '\n' ' ' | cut -c1-240)"
+}
+
+filetree_create() {
+  local body="$1" created id
+  created=$(curl -s -X POST "$BASE_URL/api/workspaces" \
+    -H 'Content-Type: application/json' -d "$body")
+  id=$(echo "$created" | workspace_id)
+  [[ -n "$id" ]] || fail "could not create a workspace from $body: $created"
+  echo "$id"
+}
+
+# filetree_create_group creates a group the way the Create Group dialog does:
+# ask for the Group Manager plan, then create with that plan reviewed. A group
+# posted without the review is refused ("groups require a reviewed
+# group_roster").
+filetree_create_group() {
+  local name="$1" plan body
+  plan=$(curl -s -X POST "$BASE_URL/api/workspaces/template-agent-plan" \
+    -H 'Content-Type: application/json' \
+    -d "{\"group_roster\":true,\"group_name\":\"$name\"}")
+  body=$(echo "$plan" | python3 -c 'import sys,json
+plan = json.load(sys.stdin)
+manager = plan["agents"][0]
+print(json.dumps({
+    "name": sys.argv[1], "kind": "group", "group_roster": True,
+    "create_template_agents": True,
+    "template_agent_review": {
+        "version": 1, "plan_revision": plan["revision"],
+        "expectations": [{"index": 0, "name": manager["name"], "action": manager["action"]}],
+    },
+}))' "$name") || fail "could not read the group plan: $plan"
+  filetree_create "$body"
+}
+
+filetree_endpoints() {
+  local stamp ws group upload
+  stamp="$(date +%H%M%S)"
+  ws=$(filetree_create "{\"name\":\"Tree Probe $stamp\"}")
+  group=$(filetree_create_group "Tree Probe Group $stamp")
+  upload="${TMPDIR:-/tmp}/filetree-probe-$stamp.txt"
+  echo "probe upload $stamp" >"$upload"
+
+  local label id
+  for label in workspace group; do
+    id="$ws"
+    [[ "$label" == group ]] && id="$group"
+    echo "--- $label $id ---"
+    filetree_probe POST "$BASE_URL/api/workspaces/$id/notes" '{"name":"Probe note","content":"# Probe"}'
+    filetree_probe POST "$BASE_URL/api/workspaces/$id/tickets" \
+      '{"title":"Probe ticket","state":"backlog","source":"manual"}'
+    printf '%-4s %-46s => %s\n' POST "files (multipart, field file)" \
+      "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/workspaces/$id/files" -F "file=@$upload")"
+    printf '%-4s %-46s => %s\n' POST "files (multipart, folder_path=docs)" \
+      "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/workspaces/$id/files" -F "file=@$upload" -F 'folder_path=docs')"
+    filetree_probe GET "$BASE_URL/api/workspaces/$id/notes"
+    filetree_probe GET "$BASE_URL/api/workspaces/$id/tickets"
+    filetree_probe GET "$BASE_URL/api/workspaces/$id/files/tree"
+    filetree_probe GET "$BASE_URL/api/workspaces/$id/memory"
+    filetree_probe GET "$BASE_URL/api/workspaces/$id/agents"
+  done
+  rm -f "$upload"
+}
+
+# filetree_seed fills a fresh sandbox with what the tree is for: a workspace
+# with notes, tickets in several states, nested files of each preview kind and
+# memory; a group holding two workspaces plus a note and a file of its own; an
+# empty workspace; and one with 105 notes (the 100-row cap). Idempotent only in
+# the sense that it is meant for a new sandbox — run it once.
+filetree_seed() {
+  python3 - "$BASE_URL" <<'PY'
+import json, struct, sys, urllib.error, urllib.request, uuid, zlib
+
+base = sys.argv[1].rstrip("/")
+
+
+def call(method, path, body=None, headers=None):
+    data = None
+    hdrs = dict(headers or {})
+    if isinstance(body, (dict, list)):
+        data = json.dumps(body).encode()
+        hdrs["Content-Type"] = "application/json"
+    elif body is not None:
+        data = body
+    req = urllib.request.Request(base + path, data=data, method=method, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req) as res:
+            raw = res.read()
+            return res.status, (json.loads(raw) if raw else {})
+    except urllib.error.HTTPError as err:
+        return err.code, {"error": err.read().decode(errors="replace")[:200]}
+
+
+def must(method, path, body=None, headers=None):
+    status, payload = call(method, path, body, headers)
+    if status >= 400:
+        sys.exit(f"FAIL: {method} {path} => {status} {payload}")
+    return payload
+
+
+def workspace(name, **extra):
+    created = must("POST", "/api/workspaces", {"name": name, **extra})
+    return (created.get("folder") or created.get("workspace") or created)["id"]
+
+
+def group(name):
+    plan = must("POST", "/api/workspaces/template-agent-plan",
+                {"group_roster": True, "group_name": name})
+    manager = plan["agents"][0]
+    return workspace(name, kind="group", group_roster=True, create_template_agents=True,
+                     template_agent_review={
+                         "version": 1, "plan_revision": plan["revision"],
+                         "expectations": [{"index": 0, "name": manager["name"],
+                                           "action": manager["action"]}]})
+
+
+def note(ws, name, content, tags=None):
+    must("POST", f"/api/workspaces/{ws}/notes",
+         {"name": name, "content": content, "tags": tags or []})
+
+
+def ticket(ws, title, description="", state="backlog", then=(), tags=None):
+    created = must("POST", f"/api/workspaces/{ws}/tickets",
+                   {"title": title, "description": description, "state": state,
+                    "source": "manual", "tags": tags or []})
+    for step in then:
+        status, payload = call("POST", f"/api/workspaces/{ws}/tickets/{created['id']}/transition",
+                               {"to": step})
+        if status >= 400:
+            print(f"note: could not move '{title}' to {step}: {status} {payload}")
+            break
+
+
+def upload(ws, filename, content, folder=""):
+    boundary = uuid.uuid4().hex
+    parts = []
+    if folder:
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="folder_path"'
+                     f"\r\n\r\n{folder}\r\n".encode())
+    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
+                 f'filename="{filename}"\r\nContent-Type: application/octet-stream'
+                 "\r\n\r\n".encode() + content + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    must("POST", f"/api/workspaces/{ws}/files", b"".join(parts),
+         {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+
+
+def png(width=96, height=64, rgb=(63, 107, 69)):
+    def chunk(tag, data):
+        raw = tag + data
+        return struct.pack(">I", len(data)) + raw + struct.pack(">I", zlib.crc32(raw) & 0xFFFFFFFF)
+    row = b"\x00" + bytes(rgb) * width
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(row * height)) + chunk(b"IEND", b""))
+
+
+call("POST", "/api/onboarding/complete", {})
+for name, role in (("Scout", "researcher"), ("Quill", "synthesizer")):
+    call("POST", "/api/agents", {"name": name, "catalog_role": role})
+
+studio = workspace("Studio Notes", entry_agent_name="Scout", tags=["music", "home"])
+note(studio, "Weekly review",
+     "What moved this week, what is stuck, and what comes next.\n\n"
+     "## Moved\n\n- The lead vocal for Night Drive is recorded.\n"
+     "- The inbox is down to the threads that need a reply.\n\n"
+     "## Stuck\n\n- The Harbor Lights chorus still drifts against the click.\n\n"
+     "## Next\n\n1. Book studio time for backing vocals.\n"
+     "2. Send the Night Drive rough mix for **mastering notes**.\n\n"
+     "> Keep one reference track per song.\n\n`tempo: 92 bpm`\n", ["review"])
+note(studio, "hello", "First note in this workspace.\n")
+note(studio, "Studio ideas",
+     "Loose ideas that are not tickets yet.\n\n- Try the chorus a third lower.\n"
+     "- Record room tone before the next vocal session.\n", ["music", "ideas"])
+ticket(studio, "Reply to the mastering engineer",
+       "They asked which mix to master. Answer with the rough mix and the reference track.",
+       "ready", tags=["mix"])
+ticket(studio, "Book studio time for vocals", "A session for the backing vocals.",
+       "ready", then=["in_progress"])
+ticket(studio, "Sort the sample library",
+       "Group the one-shots by instrument and drop the duplicates.")
+ticket(studio, "Renew the domain", "Renewed.", "ready", then=["in_progress", "review", "done"])
+ticket(studio, "Old idea that went nowhere", "", "backlog", then=["cancelled"])
+upload(studio, "2026-10-04.md",
+       b"# Daily brief\n\n## Needs you\n\n- Reply to the mastering engineer\n\n"
+       b"## Working on\n\n- Book studio time for vocals\n", "briefs")
+upload(studio, "2026-10-03.md", b"# Daily brief\n\n## Done\n\n- Renew the domain\n", "briefs")
+upload(studio, "lead-vocal.wav", b"RIFF" + b"\x00" * 64, "stems/takes")
+upload(studio, "cover.png", png())
+upload(studio, "tempo.csv", b"song,bpm\nNight Drive,92\nHarbor Lights,104\n")
+upload(studio, "settings.json", b'{\n  "sample_rate": 48000,\n  "bit_depth": 24\n}\n')
+for text, kind in (("The daily brief goes out at 08:00.", "fact"),
+                   ("Mix reviews happen on Fridays.", "decision"),
+                   ("Keep replies to the mastering engineer short.", "preference")):
+    status, payload = call("POST", f"/api/workspaces/{studio}/memory/entries",
+                           {"text": text, "type": kind})
+    if status >= 400:
+        print(f"note: memory entry not added: {status} {payload}")
+
+music = group("Music")
+note(music, "Release plan", "# Release plan\n\nNight Drive first, Harbor Lights in the spring.\n",
+     ["plan"])
+upload(music, "label-contacts.txt", b"Mastering: studio@example.com\n")
+night = workspace("Night Drive", parent_id=music, entry_agent_name="Quill", tags=["music"])
+note(night, "Lyrics draft", "## Verse 1\n\n[Verse lyrics]\n\n## Chorus\n\n[Chorus lyrics]\n",
+     ["lyrics"])
+note(night, "Mix notes", "- The lead vocal sits too far back in the chorus.\n"
+     "- Check the mix in mono before sending it out.\n", ["mix"])
+ticket(night, "Record backing vocals", "Double the chorus and add one harmony.",
+       "ready", then=["in_progress"])
+ticket(night, "Tighten the chorus timing", "The second chorus enters early.", "ready")
+harbor = workspace("Harbor Lights", parent_id=music, tags=["music"])
+note(harbor, "Arrangement sketch", "Intro, two verses, a bridge and a long outro.\n")
+
+empty = workspace("Empty Shelf")
+archive = workspace("Archive", tags=["archive"])
+for i in range(105):
+    note(archive, f"Clipping {i + 1:03d}", f"Clipping number {i + 1}.\n")
+
+print(json.dumps({"studio": studio, "music": music, "night": night, "harbor": harbor,
+                  "empty": empty, "archive": archive}, indent=2))
+PY
+}
+
+# filetree_demo waits for the server and runs one stage of the browser demo
+# (scripts/demo-home-file-tree.mjs). Screenshots land in $TMPDIR/filetree-demo.
+filetree_demo() {
+  local stage="${4:-tree}" theme="${5:-light}" sandbox="${6:-}" root
+  smoke_show_wait
+  root="$(cd "$(dirname "$0")/.." && pwd -P)"
+  node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "${TMPDIR:-/tmp}/filetree-demo" "$stage" "$theme" "$sandbox"
+}
+
+# filetree_demo_all runs every stage of the browser demo in both themes and
+# prints one line per run: PASS, or FAIL with what failed. Exits non-zero if
+# any run failed. The sandbox directory lets the note stage read the file on
+# disk.
+filetree_demo_all() {
+  local sandbox="${4:-}" root out failed=0 stage theme
+  smoke_show_wait
+  root="$(cd "$(dirname "$0")/.." && pwd -P)"
+  out="${TMPDIR:-/tmp}/filetree-demo"
+  for stage in tree pane note create manage finish; do
+    for theme in light dark; do
+      if log=$(node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "$out" "$stage" "$theme" "$sandbox" 2>&1); then
+        echo "PASS $stage ($theme): $(printf '%s\n' "$log" | grep -c '^ok ') checks"
+      else
+        failed=$((failed + 1))
+        echo "FAIL $stage ($theme):"
+        printf '%s\n' "$log" | grep -v -e '^ok ' -e '^shot ' | sed 's/^/     /'
+      fi
+    done
+  done
+  echo "screenshots: $out"
+  [[ "$failed" -eq 0 ]] || fail "$failed demo run(s) failed"
+}
+
+smoke_filetree() {
+  case "${3:-}" in
+  endpoints) filetree_endpoints ;;
+  seed) filetree_seed ;;
+  wait) smoke_show_wait ;;
+  demo) filetree_demo "$@" ;;
+  demo-all) filetree_demo_all "$@" ;;
+  *) fail "usage: $0 filetree <base-url> {endpoints|seed|wait|demo <stage> [light|dark] [sandbox]|demo-all [sandbox]}" ;;
+  esac
+}
+
+# prettier-head says, for each file given, whether the committed version (HEAD)
+# passes Prettier. `prettier --write` on a whole file is only safe when it
+# does: a file that was already unformatted would have all of its old lines
+# rewritten into the diff, so there only the lines being changed are fixed.
+smoke_prettier_head() {
+  shift
+  [[ $# -gt 0 ]] || fail "usage: $0 prettier-head <file>..."
+  local file
+  for file in "$@"; do
+    if ! git cat-file -e "HEAD:$file" 2>/dev/null; then
+      echo "new        $file"
+    elif git show "HEAD:$file" | npx prettier --stdin-filepath "$file" --check >/dev/null 2>&1; then
+      echo "clean      $file"
+    else
+      echo "NOT clean  $file"
+    fi
+  done
+}
+
 # agent_state_digest fingerprints every runtime state file under a sandbox.
 agent_state_digest() {
   local dir="$1/agent_state"
@@ -3481,6 +3799,8 @@ execution) smoke_execution "${3:-}" ;;
 janitor-upgrade-seed) smoke_janitor_upgrade_seed "${3:-}" ;;
 janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 library-notifications) smoke_library_notifications "$@" ;;
+filetree) smoke_filetree "$@" ;;
+prettier-head) smoke_prettier_head "$@" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
@@ -3527,6 +3847,8 @@ library-notifications) smoke_library_notifications "$@" ;;
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
+  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | seed | wait | demo <tree|pane|note|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
+  echo "  $0 prettier-head <file>...               # was each file Prettier-clean at HEAD? (only then is --write on the whole file safe)" >&2
   exit 2
   ;;
 esac

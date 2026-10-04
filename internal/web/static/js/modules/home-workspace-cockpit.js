@@ -1647,7 +1647,71 @@ export function renderWorkspaceAreaStatusHTML(status) {
 // Tree is a peer VIEW owned by this coordinator: it renders and handles local
 // interaction, and hands every mutation back here so shared state, refresh, and
 // modal context stay single-authority (FR117).
-import { mountTree, ancestorIds } from './home-workspace-tree.js';
+import {
+  mountTree,
+  ancestorIds,
+  isWorkspaceRowKind,
+  removeWorkspaceTag,
+  revealTargets,
+  setRowExpanded
+} from './home-workspace-tree.js';
+// The Tree's contents and its reading pane (tasks/prd-home-file-tree.md). The
+// coordinator fetches a row's contents when the row is expanded and keeps what
+// is open; the Tree and the pane only draw what they are handed.
+import {
+  SECTION_FAILED,
+  SECTION_LOADING,
+  SECTION_READY,
+  createNote,
+  createTicket,
+  loadFilePreview,
+  loadMemory,
+  loadNote,
+  loadSections,
+  loadTicket,
+  openWorkspaceFile,
+  saveNoteContent,
+  sectionInfo,
+  sectionKey,
+  shouldReloadOnReturn,
+  uploadFile
+} from './home-tree-sources.js';
+import {
+  MENU_FILE_OPEN,
+  MENU_FILE_REVEAL,
+  MENU_NEW_NOTE,
+  MENU_NEW_TICKET,
+  MENU_OPEN_IN_WORKSPACE,
+  MENU_REFRESH,
+  MENU_UPLOAD
+} from './home-tree-menu.js';
+import {
+  ITEM_FAILED,
+  ITEM_LOADING,
+  ITEM_READY,
+  NOTE_EDITOR_ID,
+  activateTab,
+  closeTab,
+  createNoteController,
+  isNarrowTreeWidth,
+  leaveNoteThen,
+  mountPane,
+  openTab,
+  paneView,
+  showSaveStatus,
+  tabFromRow,
+  treeColumns
+} from './home-tree-pane.js';
+import {
+  applyTreeState,
+  dropMissingRows,
+  dropMissingTabs,
+  isGoneError,
+  readTreeState,
+  snapshotTreeState,
+  vanishedTabKeys,
+  writeTreeState
+} from './home-tree-state.js';
 import {
   deleteWorkspace as deleteWorkspaceAction,
   deleteWorkspaces as deleteWorkspacesAction,
@@ -1674,6 +1738,9 @@ import {
     root,
     map: document.getElementById('cockpitMap'),
     tree: document.getElementById('cockpitTree'),
+    // Tree view's two columns: the tree itself, and the pane beside it.
+    treeNav: document.getElementById('cockpitTreeNav'),
+    treePane: document.getElementById('cockpitTreePane'),
     areaTitle: document.querySelector('[data-cockpit-area-title]'),
     areaStatus: document.getElementById('cockpitWorkspaceStatus'),
     viewButtons: Array.from(document.querySelectorAll('[data-cockpit-view]')),
@@ -1778,9 +1845,36 @@ import {
     hqSiteView: null,
     // The workspace/group/HQ context to restore when Summary closes (FR91).
     priorContext: null,
-    // Tree management state. Deliberately session-scoped and deliberately NOT
-    // cleared by selection changes or by returning to Today (FR55, FR61).
+    // Tree management state. Deliberately NOT cleared by selection changes or
+    // by returning to Today (FR55, FR61). Which rows are open is remembered
+    // across reloads (see rememberTreeState); the bulk selection is not.
     collapsedGroups: new Set(),
+    // The file tree (home-file-tree). Groups and sections start open, so
+    // collapsedGroups records the ones closed; workspaces and folders start
+    // closed, so expandedRows records the ones opened.
+    expandedRows: new Set(),
+    // What has been fetched for each expanded workspace or group, by id:
+    // { sections: { notes: { status, rows, count, error }, … } }. Filled only
+    // for rows the user has expanded, and only in Tree view (FR17).
+    treeContents: {},
+    // Open tabs, the active one, and what has been loaded for each tab's item.
+    treeTabs: [],
+    activeTabKey: '',
+    treeTabItems: {},
+    // A note or ticket being named in the tree, before it exists:
+    // { workspaceId, section, kind, value, busy }. One at a time.
+    treeDraft: null,
+    // The workspace or group whose Move dialog is open, and the row a
+    // Shift-click selects from.
+    treeMoveId: '',
+    bulkAnchorId: '',
+    // The filter box's text. Not remembered across reloads: a filter left on
+    // would hide most of the tree with nothing on screen to say why.
+    treeFilter: '',
+    // The one-column layout (FR4): whether the Tree view is too narrow for two
+    // columns, and whether the pane has taken the tree's place.
+    treeNarrow: false,
+    treePaneShown: false,
     bulkSelection: new Set(),
     activeTags: new Set(),
     focusId: '',
@@ -1811,6 +1905,31 @@ import {
     error: null,
     inFlight: null
   };
+
+  // ---- what the Tree remembers between visits (home-file-tree FR68-FR70) ----
+  //
+  // Which rows are open, which tabs are open and which one is active are kept
+  // in the browser and put back here, before anything is drawn. Putting them
+  // back fetches nothing: contents are still loaded only when the Tree is on
+  // screen, so a visit that stays in Map view asks for none of it.
+  const treeStorage = (() => {
+    try {
+      return window.localStorage || null;
+    } catch (_) {
+      // Storage can be switched off; the tree then starts fresh each visit.
+      return null;
+    }
+  })();
+  let storedTreeText = '';
+  if (treeStorage && applyTreeState(state, readTreeState(treeStorage))) {
+    storedTreeText = JSON.stringify(snapshotTreeState(state));
+  }
+
+  /** Store the Tree's rows and tabs when they have changed. */
+  function rememberTreeState() {
+    if (!treeStorage) return;
+    storedTreeText = writeTreeState(treeStorage, snapshotTreeState(state), storedTreeText);
+  }
 
   function announce(message) {
     if (!els.railLive || !message) return;
@@ -2004,15 +2123,23 @@ import {
 
   // ---- Tree peer view ----
 
+  // What the last mountTree returned: the rows on screen, plus the Move and
+  // Delete actions the pane's overview buttons and the row menu reuse.
+  let treeHandle = null;
+
   function mountTreeView() {
-    if (!els.tree || state.view !== VIEW_TREE) return;
+    if (!els.treeNav || state.view !== VIEW_TREE) return;
     // Re-mounting replaces the rows, which would drop keyboard focus on the
     // floor mid-navigation. Restore it afterwards when it was ours to begin
-    // with, and never steal it when it was not (FR129).
-    const hadFocus = !!(document.activeElement && els.tree.contains(document.activeElement));
-    mountTree(els.tree, state, {
-      onSelect: id => selectItem(id, { invoker: document.activeElement, openModal: true }),
+    // with, and never steal it when it was not (FR129) — in particular not
+    // from the pane, where someone may be reading or typing.
+    const hadFocus = !!(document.activeElement && els.treeNav.contains(document.activeElement));
+    treeHandle = mountTree(els.treeNav, state, {
+      onOpenItem: (row, options) => openTreeItem(row, options),
       onOpen: id => openItem(id),
+      onRetry: (workspaceId, sectionId) => void loadTreeContents(workspaceId, [sectionId]),
+      onMenuAction: (action, row) => handleTreeMenuAction(action, row),
+      onDraftCommit: draft => void commitTreeDraft(draft),
       onRerender: () => mountTreeView(),
       onAnnounce: message => announce(message),
       onTrashed: (id, name) => {
@@ -2025,12 +2152,690 @@ import {
         await refreshQuietly();
       }
     });
-    if (hadFocus) {
+    // …unless the Tree has already put focus where it belongs: a row being
+    // named keeps the cursor in its input across redraws.
+    if (hadFocus && !els.treeNav.contains(document.activeElement)) {
       const target =
-        els.tree.querySelector('[data-tree-row][tabindex="0"]') ||
-        els.tree.querySelector('[data-tree-row]');
+        els.treeNav.querySelector('[data-tree-row][tabindex="0"]') ||
+        els.treeNav.querySelector('[data-tree-row]');
       if (target) target.focus();
     }
+    // A row that was asked to be revealed is scrolled into view once it is
+    // actually drawn — which, for a row inside a workspace that has only just
+    // been expanded, is a render or two later, when its section has loaded.
+    if (pendingRevealKey && treeHandle.rows.some(row => row.id === pendingRevealKey)) {
+      const rowEl = Array.from(els.treeNav.querySelectorAll('[data-tree-row]')).find(
+        el => el.getAttribute('data-tree-row') === pendingRevealKey
+      );
+      pendingRevealKey = '';
+      if (rowEl) rowEl.scrollIntoView({ block: 'nearest' });
+    }
+    syncTreeContents();
+    rememberTreeState();
+  }
+
+  let pendingRevealKey = '';
+
+  /** Expand whatever hides a row, and scroll to the row once it is drawn (FR28). */
+  function revealTreeRow(key) {
+    revealTargets(key, state.flattened).forEach(target =>
+      setRowExpanded(state, target.kind, target.id, true)
+    );
+    pendingRevealKey = key;
+  }
+
+  // ---- Tree contents: fetched when a row is expanded (FR17) ----
+
+  /**
+   * Fetch the contents of every expanded workspace and group that has none yet.
+   *
+   * Called after each Tree render and nowhere else, and the Tree only renders
+   * in Tree view, so Map view and collapsed rows never cause a request.
+   */
+  function syncTreeContents() {
+    if (!treeHandle) return;
+    treeHandle.rows.forEach(row => {
+      // A row the filter is showing open was not opened by the user: the
+      // filter searches what is loaded and never loads anything itself.
+      if (!isWorkspaceRowKind(row.kind) || !row.expanded || row.forced) return;
+      if (state.treeContents[row.id]) return;
+      void loadTreeContents(row.id);
+    });
+  }
+
+  let treeRenderQueued = false;
+
+  /** Redraw the tree once for a burst of section answers, not once per answer. */
+  function queueTreeRender() {
+    if (treeRenderQueued) return;
+    treeRenderQueued = true;
+    setTimeout(() => {
+      treeRenderQueued = false;
+      mountTreeView();
+      // An overview lists its sections with their counts, so it follows them.
+      const active = state.treeTabs.find(tab => tab.key === state.activeTabKey);
+      if (active && isWorkspaceRowKind(active.kind)) mountPaneView();
+    }, 0);
+  }
+
+  /**
+   * Load a workspace's or group's sections — all of them, or the ones named —
+   * and redraw as each one answers. A section that fails is announced and
+   * shows its own Retry; the others are unaffected (FR19, FR74).
+   */
+  function loadTreeContents(workspaceId, sections) {
+    const entry =
+      state.treeContents[workspaceId] || (state.treeContents[workspaceId] = { sections: {} });
+    return loadSections(
+      { id: workspaceId },
+      {
+        sections,
+        onSection: (sectionId, sectionState) => {
+          // A reload keeps the rows it already has on screen until the new
+          // ones arrive, rather than flashing "Loading…" over them.
+          const had = entry.sections[sectionId];
+          if (sectionState.status === SECTION_LOADING && had && had.status === SECTION_READY) {
+            return;
+          }
+          entry.sections[sectionId] = sectionState;
+          if (sectionState.status === SECTION_FAILED) {
+            const owner = findWorkspace(state.flattened, workspaceId);
+            const section = sectionInfo(sectionId);
+            announce(
+              `Couldn't load ${section ? section.label : sectionId} for ` +
+                `${(owner && owner.name) || 'this workspace'}.`
+            );
+          }
+          // A tab remembered from an earlier visit whose note, file or agent
+          // is not in the list any more is dropped without a word (FR69).
+          vanishedTabKeys(state.treeTabs, workspaceId, sectionId, sectionState).forEach(
+            dropRestoredTab
+          );
+          queueTreeRender();
+        }
+      }
+    );
+  }
+
+  // ---- Tree pane: tabs and the open item (FR22-FR31) ----
+
+  function mountPaneView({ focusTitle = false, focusEditor = false } = {}) {
+    if (!els.treePane || state.view !== VIEW_TREE) return;
+    mountPane(
+      els.treePane,
+      state,
+      {
+        onActivateTab: key => void activateTreeTab(key),
+        onCloseTab: key => void closeTreeTab(key),
+        onRetryTab: key => void loadTabItem(key, { force: true }),
+        onAction: (action, target) => handlePaneAction(action, target),
+        onBack: () => backToTree()
+      },
+      { focusTitle }
+    );
+    syncTreeColumns();
+    syncPaneNoteEditor({ focus: focusEditor });
+    rememberTreeState();
+    // An active tab that has never been asked for: one restored from the last
+    // visit, or one that became active because the tab before it went away.
+    // This is the only place a restored tab is fetched, and the pane is only
+    // drawn in Tree view, so Map view never causes the request (FR70).
+    const active = state.treeTabs.find(tab => tab.key === state.activeTabKey);
+    if (active && TAB_LOADERS[active.kind] && !state.treeTabItems[active.key] && !state.loading) {
+      void loadTabItem(active.key);
+    }
+  }
+
+  // ---- One column when there is no room for two (FR4) ----
+
+  /**
+   * Show the columns the current width allows: both, or — under 720px — the
+   * tree alone, with the pane taking its place while an item is open.
+   */
+  function syncTreeColumns() {
+    if (!els.tree) return;
+    if (state.treeTabs.length === 0) state.treePaneShown = false;
+    els.tree.classList.toggle('is-narrow', state.treeNarrow);
+    els.tree.dataset.columns = treeColumns({
+      narrow: state.treeNarrow,
+      paneShown: state.treePaneShown,
+      tabCount: state.treeTabs.length
+    });
+  }
+
+  /** "Back to tree" in the one-column layout: the tree returns, focus with it. */
+  function backToTree() {
+    // The note being edited goes off screen, so it is saved, as when leaving
+    // the Tree for the Map.
+    void noteController.flush();
+    state.treePaneShown = false;
+    syncTreeColumns();
+    if (!els.treeNav) return;
+    const row =
+      els.treeNav.querySelector('[data-tree-row].is-active') ||
+      els.treeNav.querySelector('[data-tree-row][tabindex="0"]');
+    if (row) row.focus();
+  }
+
+  // The width that matters is the Tree view's own, not the window's: Home's
+  // margins and the browser's zoom both change one without the other.
+  if (els.tree && typeof ResizeObserver === 'function') {
+    new ResizeObserver(entries => {
+      const width = entries[0] ? entries[0].contentRect.width : 0;
+      // Hidden (Home is on the Map) measures 0, which says nothing.
+      if (!(width > 0)) return;
+      const narrow = isNarrowTreeWidth(width);
+      if (narrow === state.treeNarrow) return;
+      state.treeNarrow = narrow;
+      syncTreeColumns();
+    }).observe(els.tree);
+  }
+
+  // ---- Reload on coming back to the browser tab (FR21) ----
+
+  // Nothing is pushed from the server, so a note added in another window shows
+  // up when the user comes back to this one — at most once every 30 seconds.
+  let lastReturnReload = Date.now();
+
+  function reloadTreeOnReturn() {
+    if (state.view !== VIEW_TREE || document.visibilityState === 'hidden' || !treeHandle) return;
+    const now = Date.now();
+    if (!shouldReloadOnReturn(now, lastReturnReload)) return;
+    lastReturnReload = now;
+    // Every expanded workspace and group whose contents are loaded. A row the
+    // filter is showing open is not one the user expanded.
+    treeHandle.rows.forEach(row => {
+      if (!isWorkspaceRowKind(row.kind) || !row.expanded || row.forced) return;
+      if (state.treeContents[row.id]) void loadTreeContents(row.id);
+    });
+    // The open item too — unless it is a note with words not yet saved, which
+    // a fresh copy from the server must not replace.
+    const key = state.activeTabKey;
+    if (key && !(noteController.activeKey() === key && noteController.isDirty())) {
+      void loadTabItem(key, { refresh: true });
+    }
+  }
+
+  // ---- Editing a note in the pane (FR41-FR45) ----
+
+  // The one note being edited. It mounts the existing note editor into the
+  // active note tab and saves through the same endpoint the note page uses.
+  const noteController = createNoteController({
+    mountEditor: host => window.NoteEditor.mount(host),
+    saveContent: (noteId, text, options) => saveNoteContent(noteId, text, options),
+    presence: window.NotePresence || null,
+    onStatus: (status, error, key) => {
+      showSaveStatus(els.treePane, status, error);
+      if (status !== 'error') return;
+      const tab = state.treeTabs.find(entry => entry.key === key);
+      announce(`Couldn't save ${tab ? tab.label : 'the note'}. Your text is kept; retry the save.`);
+    },
+    // Keep what the tab holds in step with what was saved, so the note is not
+    // shown at an older version the next time it is mounted.
+    onSaved: (key, text, updatedAt) => {
+      const item = state.treeTabItems[key];
+      if (item && item.value) item.value = { ...item.value, content: text, updatedAt };
+    },
+    onElsewhere: (key, open) => {
+      noteOpenElsewhereKey = open ? key : '';
+      showNoteElsewhereNotice();
+    }
+  });
+
+  // The tab key of the mounted note when another browser tab also has it open.
+  let noteOpenElsewhereKey = '';
+
+  function showNoteElsewhereNotice() {
+    const notice = els.treePane && els.treePane.querySelector('[data-pane-note-elsewhere]');
+    if (notice) notice.hidden = noteOpenElsewhereKey !== state.activeTabKey;
+  }
+
+  /**
+   * Mount the editor for the active note tab once its note has loaded.
+   *
+   * Runs after every draw of the pane. Mounting the note that is already
+   * mounted is a no-op, so this costs nothing while someone types.
+   */
+  function syncPaneNoteEditor({ focus = false } = {}) {
+    const tab = state.treeTabs.find(entry => entry.key === state.activeTabKey);
+    const item = tab ? state.treeTabItems[tab.key] : null;
+    if (!tab || tab.kind !== 'note' || !item || item.status !== ITEM_READY) return;
+    const element = document.getElementById(NOTE_EDITOR_ID);
+    if (!element || !window.NoteEditor) return;
+    // A note that was just created asked for the cursor before its content had
+    // loaded; give it the cursor now that there is an editor to put it in.
+    const wantsCursor = focus || pendingEditorFocusKey === tab.key;
+    if (pendingEditorFocusKey === tab.key) pendingEditorFocusKey = '';
+    noteController.attach(element, tab.key, item.value, { focus: wantsCursor });
+    showNoteElsewhereNotice();
+  }
+
+  let pendingEditorFocusKey = '';
+
+  // Changes to what the pane shows run one at a time, because each may first
+  // have to save the note being edited.
+  let paneQueue = Promise.resolve();
+
+  /**
+   * Make a change that leaves `nextActiveKey` as the active tab.
+   *
+   * When that takes the note being edited off screen, the note is saved first
+   * and the change runs only if the save worked. A failed save leaves the note
+   * tab open with the user's text and says so (FR43, FR44).
+   */
+  function changeTreeTab(nextActiveKey, change) {
+    paneQueue = paneQueue
+      .then(async () => {
+        const editing = noteController.activeKey();
+        if (!editing || editing === nextActiveKey) {
+          change();
+          return;
+        }
+        if (await leaveNoteThen(noteController, change)) return;
+        const message = "Couldn't save this note, so it is still open. Retry the save first.";
+        announce(message);
+        if (window.Toast) window.Toast.error(message);
+      })
+      .catch(err => console.error('home-workspace-cockpit: pane change failed', err));
+    return paneQueue;
+  }
+
+  /** Open a tree row in the pane. */
+  function openTreeItem(row, options) {
+    return openTreeTab(tabFromRow(row), options);
+  }
+
+  /**
+   * Open a tab (or switch to it), highlight its row and bring it into view.
+   *
+   * A workspace or group tab also becomes Home's shared selection, so switching
+   * to Map shows the same item selected. It does not open the context modal:
+   * in Tree view the pane is the detail view (FR28, FR30).
+   */
+  function openTreeTab(tab, { keyboard = false, focusEditor = false } = {}) {
+    const invoker = document.activeElement;
+    return changeTreeTab(tab.key, () => {
+      // Opened by hand, so no longer a tab that is only remembered.
+      const next = openTab(state.treeTabs, state.activeTabKey, { ...tab, restored: false });
+      state.treeTabs = next.tabs;
+      if (focusEditor) pendingEditorFocusKey = tab.key;
+      // In the one-column layout the pane now takes the tree's place (FR4).
+      state.treePaneShown = true;
+      showActiveTreeTab(next.activeKey, { invoker });
+      // Opening with Enter moves focus to the pane's title; a click leaves
+      // focus on the row that was clicked (FR72) — unless the row has just
+      // gone off screen with the tree, when the title is where to be.
+      mountPaneView({ focusTitle: keyboard || state.treeNarrow, focusEditor });
+    });
+  }
+
+  function activateTreeTab(key) {
+    return changeTreeTab(key, () => {
+      const next = activateTab(state.treeTabs, state.activeTabKey, key);
+      showActiveTreeTab(next.activeKey);
+      mountPaneView();
+    });
+  }
+
+  // Shared by opening and switching: make `key` the active tab, fetch what it
+  // shows (again, if it was already loaded, so a tab left open does not go
+  // stale), reveal its row, and redraw the tree.
+  function showActiveTreeTab(key, { invoker = null } = {}) {
+    state.activeTabKey = key;
+    const tab = state.treeTabs.find(entry => entry.key === key);
+    if (!tab) {
+      mountTreeView();
+      return;
+    }
+    void loadTabItem(key, { refresh: true });
+    revealTreeRow(key);
+    if (isWorkspaceRowKind(tab.kind)) selectItem(tab.workspaceId, { openModal: false, invoker });
+    else mountTreeView();
+  }
+
+  function closeTreeTab(key) {
+    const after = closeTab(state.treeTabs, state.activeTabKey, key);
+    return changeTreeTab(after.activeKey, () => {
+      const next = closeTab(state.treeTabs, state.activeTabKey, key);
+      const activeChanged = next.activeKey !== state.activeTabKey;
+      state.treeTabs = next.tabs;
+      delete state.treeTabItems[key];
+      if (activeChanged && next.activeKey) {
+        showActiveTreeTab(next.activeKey);
+      } else {
+        state.activeTabKey = next.activeKey;
+        mountTreeView();
+      }
+      mountPaneView();
+      // The button that was pressed is gone. Put focus on the tab that took
+      // its place, or back in the tree when nothing is open.
+      const target = next.activeKey
+        ? els.treePane && els.treePane.querySelector('.cockpit-pane-tab.is-active [data-pane-tab]')
+        : els.treeNav && els.treeNav.querySelector('[data-tree-row][tabindex="0"]');
+      if (target) target.focus();
+    });
+  }
+
+  // What each kind of tab fetches beyond its tree row. An agent, a workspace
+  // and a group are described entirely by data Home already holds.
+  const TAB_LOADERS = {
+    note: tab => loadNote(tab.meta.noteId),
+    ticket: tab => loadTicket(tab.workspaceId, tab.meta.ticketId),
+    file: tab => loadFilePreview(tab.workspaceId, tab.meta.path, { size: tab.meta.size }),
+    memory: tab => loadMemory(tab.workspaceId)
+  };
+
+  /**
+   * Load what a tab shows.
+   *
+   * The first load shows "Loading…". `refresh` reloads a tab that already has
+   * its item — it keeps showing what it has until the new answer arrives, and
+   * keeps it if the reload fails, so switching tabs never blanks one. `force`
+   * is the Retry button: back to "Loading…", failure reported.
+   */
+  async function loadTabItem(key, { force = false, refresh = false } = {}) {
+    const tab = state.treeTabs.find(entry => entry.key === key);
+    const load = tab && TAB_LOADERS[tab.kind];
+    if (!load) return;
+    const current = state.treeTabItems[key];
+    if (current && current.status === ITEM_LOADING) return;
+    const usable = !!current && current.status === ITEM_READY;
+    if (usable && !force && !refresh) return;
+    const quiet = usable && !force;
+    if (!quiet) {
+      state.treeTabItems[key] = { status: ITEM_LOADING, value: null, error: '' };
+      mountPaneView();
+    }
+    try {
+      const value = await load(tab);
+      state.treeTabItems[key] = { status: ITEM_READY, value, error: '' };
+      // It exists: from here on it is a tab like any other.
+      confirmRestoredTab(key);
+    } catch (err) {
+      // A tab remembered from an earlier visit whose item has since been
+      // deleted is dropped without a word (FR69).
+      if (tab.restored && isGoneError(err)) {
+        dropRestoredTab(key);
+        return;
+      }
+      if (quiet) return;
+      const message = err && err.message ? String(err.message) : 'Request failed';
+      state.treeTabItems[key] = { status: ITEM_FAILED, value: null, error: message };
+      announce(`Couldn't load ${tab.label}.`);
+    }
+    // The tab may have been closed while its item was on the way.
+    if (state.treeTabs.some(entry => entry.key === key)) mountPaneView();
+    else delete state.treeTabItems[key];
+  }
+
+  // ---- tabs remembered from an earlier visit (FR68, FR69) ----
+
+  /** A restored tab's item was found: stop treating the tab as unconfirmed. */
+  function confirmRestoredTab(key) {
+    if (!state.treeTabs.some(tab => tab.key === key && tab.restored)) return;
+    state.treeTabs = state.treeTabs.map(tab =>
+      tab.key === key ? { ...tab, restored: false } : tab
+    );
+  }
+
+  /**
+   * Take away a restored tab whose item no longer exists. Nothing is
+   * announced and nothing is reported as failed: the tab was never opened in
+   * this visit, so to the user it was simply not there.
+   */
+  function dropRestoredTab(key) {
+    const tab = state.treeTabs.find(entry => entry.key === key);
+    if (!tab || !tab.restored) return;
+    const next = closeTab(state.treeTabs, state.activeTabKey, key);
+    state.treeTabs = next.tabs;
+    state.activeTabKey = next.activeKey;
+    delete state.treeTabItems[key];
+    if (noteController.activeKey() === key) noteController.detach();
+    mountTreeView();
+    mountPaneView();
+  }
+
+  /** A button inside the pane was pressed; `target` is whatever it names. */
+  function handlePaneAction(action, target) {
+    const tab = state.treeTabs.find(entry => entry.key === state.activeTabKey);
+    if (!tab) return;
+    if (action === 'note-save-retry') {
+      // FR44: the failed save's own Retry. The save line reports the outcome.
+      void noteController.flush();
+    } else if (action === 'move') {
+      // The Move dialog is drawn with the tree, which in the one-column
+      // layout is behind the pane: bring the tree back first.
+      if (state.treeNarrow) backToTree();
+      if (treeHandle) treeHandle.openMoveDialog(tab.workspaceId);
+    } else if (action === 'delete') {
+      if (treeHandle) void treeHandle.deleteWorkspace(tab.workspaceId);
+    } else if (action === 'file-open' || action === 'file-reveal') {
+      void openFileFromPane(tab, action === 'file-reveal');
+    } else if (action === 'tag-filter') {
+      // A tag in an overview filters the tree, like its chip in the tag bar.
+      if (state.activeTags.has(target)) state.activeTags.delete(target);
+      else state.activeTags.add(target);
+      mountTreeView();
+      mountPaneView();
+      announce(
+        state.activeTags.has(target)
+          ? `Showing workspaces tagged ${target}.`
+          : `No longer filtering by ${target}.`
+      );
+    } else if (action === 'tag-remove') {
+      void removeTagFromOverview(tab.workspaceId, target);
+    } else if (action === 'reveal-section') {
+      // The section is a row in the tree; in one column, show the tree.
+      if (state.treeNarrow) backToTree();
+      revealSectionInTree(tab.workspaceId, target);
+    } else if (action === 'open-item') {
+      // The one item an overview links to directly is Memory.
+      openTreeTab({
+        key: target,
+        kind: 'memory',
+        workspaceId: tab.workspaceId,
+        label: 'Memory',
+        meta: {}
+      });
+    } else if (action === 'open-workspace') {
+      const child = findWorkspace(state.flattened, target);
+      if (!child) return;
+      const kind = isGroupWorkspace(child) ? 'group' : 'workspace';
+      setRowExpanded(state, kind, child.id, true);
+      openTreeTab({
+        key: child.id,
+        kind,
+        workspaceId: child.id,
+        label: String(child.name || ''),
+        meta: {}
+      });
+    }
+  }
+
+  /**
+   * Remove a tag from a workspace or group, from its overview (FR63). The
+   * workspace list is reloaded afterwards rather than edited in place.
+   */
+  async function removeTagFromOverview(workspaceId, tag) {
+    try {
+      await removeWorkspaceTag(state.flattened, workspaceId, tag);
+      // A filter on a tag nothing carries any more would hide every row.
+      state.activeTags.delete(tag);
+      announce(`Removed tag ${tag} from ${workspaceLabel(workspaceId)}.`);
+      await refreshQuietly();
+    } catch (err) {
+      const reason = err && err.message ? String(err.message) : 'Request failed';
+      reportTreeFailure(`Couldn't remove the tag ${tag}: ${reason}`);
+    }
+  }
+
+  /** Open a section in the tree and put keyboard focus on its row (FR39). */
+  function revealSectionInTree(workspaceId, sectionId) {
+    const key = sectionKey(workspaceId, sectionId);
+    revealTreeRow(key);
+    setRowExpanded(state, 'section', key, true);
+    state.focusId = key;
+    mountTreeView();
+    if (treeHandle) treeHandle.focusRow(key);
+  }
+
+  // ---- Creating from the tree (FR47-FR52) ----
+  //
+  // "Workspace" here means a workspace or a group: every endpoint below takes
+  // either id.
+
+  /** An item was chosen from a row's menu, or the header's New note was pressed. */
+  function handleTreeMenuAction(action, row) {
+    const workspaceId = row.workspaceId || row.id;
+    if (action === MENU_NEW_NOTE) startTreeDraft(workspaceId, 'notes', 'note');
+    else if (action === MENU_NEW_TICKET) startTreeDraft(workspaceId, 'backlog', 'ticket');
+    else if (action === MENU_UPLOAD) {
+      pickFileToUpload(workspaceId, row.kind === 'folder' ? String(row.meta.path || '') : '');
+    } else if (action === MENU_REFRESH) void refreshTreeRow(workspaceId);
+    else if (action === MENU_FILE_OPEN || action === MENU_FILE_REVEAL) {
+      void openFileFromPane(tabFromRow(row), action === MENU_FILE_REVEAL);
+    } else if (action === MENU_OPEN_IN_WORKSPACE) {
+      // The item's own place on the workspace page is the link its pane view
+      // leads with: the full note, the ticket in Tickets, the agent's page.
+      const view = paneView(tabFromRow(row), { flattened: state.flattened });
+      const link = view.actions.find(entry => entry.href);
+      if (link) window.location.href = link.href;
+    }
+  }
+
+  function workspaceLabel(workspaceId) {
+    const owner = findWorkspace(state.flattened, workspaceId);
+    return (owner && owner.name) || 'this workspace';
+  }
+
+  function reportTreeFailure(message) {
+    announce(message);
+    if (window.Toast) window.Toast.error(message);
+  }
+
+  /** Add the editable row where a new note or ticket is named (FR47, FR48). */
+  function startTreeDraft(workspaceId, sectionId, kind) {
+    if (!findWorkspace(state.flattened, workspaceId)) return;
+    // Opens the workspace and whatever is above it; the section is shown and
+    // opened by the draft itself, even a group's section hidden for being
+    // empty.
+    revealTreeRow(sectionKey(workspaceId, sectionId));
+    state.treeDraft = {
+      workspaceId,
+      section: sectionId,
+      kind,
+      value: '',
+      busy: false,
+      pendingFocus: true
+    };
+    mountTreeView();
+  }
+
+  /**
+   * Enter in the row being named: create the note or ticket, reload its
+   * section so the tree shows it, and open it in the pane (FR20, FR47, FR48).
+   *
+   * A refusal shows the server's reason and changes nothing: the row stays,
+   * with the name as typed, to try again or to cancel with Escape (FR51).
+   */
+  async function commitTreeDraft(draft) {
+    const { workspaceId, section, kind } = draft;
+    const noun = kind === 'note' ? 'note' : 'ticket';
+    state.treeDraft = { ...draft, busy: true };
+    mountTreeView();
+    let created;
+    try {
+      created =
+        kind === 'note'
+          ? await createNote(workspaceId, draft.value)
+          : await createTicket(workspaceId, draft.value);
+    } catch (err) {
+      const reason = err && err.message ? String(err.message) : 'Request failed';
+      state.treeDraft = { ...draft, busy: false, pendingFocus: true };
+      mountTreeView();
+      reportTreeFailure(`Couldn't create the ${noun}: ${reason}`);
+      return;
+    }
+    state.treeDraft = null;
+    await loadTreeContents(workspaceId, [section]);
+    announce(`Created ${noun} "${created.label}" in ${workspaceLabel(workspaceId)}.`);
+    // A new note opens with the cursor in the editor, ready to write.
+    await openTreeTab(tabFromRow(created), { focusEditor: kind === 'note' });
+  }
+
+  /**
+   * Upload file…: the system file picker, then the upload into `folderPath`
+   * (the top of `files/` when empty). The Files section reloads and the file
+   * opens in the pane (FR49).
+   */
+  function pickFileToUpload(workspaceId, folderPath) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.hidden = true;
+    input.setAttribute('data-tree-upload-input', '');
+    input.addEventListener('cancel', () => input.remove());
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (file) void uploadTreeFile(workspaceId, folderPath, file);
+    });
+    document.body.append(input);
+    input.click();
+  }
+
+  async function uploadTreeFile(workspaceId, folderPath, file) {
+    announce(`Uploading ${file.name}…`);
+    let uploaded;
+    try {
+      uploaded = await uploadFile(workspaceId, file, folderPath);
+    } catch (err) {
+      const reason = err && err.message ? String(err.message) : 'Request failed';
+      reportTreeFailure(`Couldn't upload ${file.name}: ${reason}`);
+      return;
+    }
+    await loadTreeContents(workspaceId, ['files']);
+    announce(`Uploaded ${file.name} to ${workspaceLabel(workspaceId)}.`);
+    await openTreeTab(tabFromRow(uploaded));
+  }
+
+  /** Refresh: reload every section of a workspace or group (FR21). */
+  async function refreshTreeRow(workspaceId) {
+    await loadTreeContents(workspaceId);
+    announce(`Refreshed ${workspaceLabel(workspaceId)}.`);
+  }
+
+  async function openFileFromPane(tab, reveal) {
+    try {
+      await openWorkspaceFile(tab.workspaceId, tab.meta.path, { reveal });
+      announce(reveal ? `Revealed ${tab.label} in the file manager.` : `Opened ${tab.label}.`);
+    } catch (err) {
+      const reason = err && err.message ? String(err.message) : 'Request failed';
+      const message = `Couldn't ${reveal ? 'reveal' : 'open'} ${tab.label}: ${reason}`;
+      announce(message);
+      if (window.Toast) window.Toast.error(message);
+    }
+  }
+
+  /**
+   * Close the tabs of workspaces and groups that no longer exist — deleted
+   * here, or gone after a rescan. Only called once a workspace list has
+   * actually loaded, so a failed refresh never closes anything.
+   */
+  function pruneTreeTabs() {
+    const live = new Set(state.flattened.map(ws => ws && ws.id));
+    // The rows remembered as open go the same way, so what is stored does not
+    // keep growing with workspaces that no longer exist.
+    state.expandedRows = new Set(dropMissingRows(state.expandedRows, live));
+    state.collapsedGroups = new Set(dropMissingRows(state.collapsedGroups, live));
+    const gone = state.treeTabs.filter(tab => !live.has(tab.workspaceId));
+    if (gone.length === 0) return;
+    const next = dropMissingTabs(state.treeTabs, state.activeTabKey, live);
+    state.treeTabs = next.tabs;
+    state.activeTabKey = next.activeKey;
+    gone.forEach(tab => delete state.treeTabItems[tab.key]);
+    // A note whose workspace is gone has nowhere left to be saved to.
+    const editing = noteController.activeKey();
+    if (editing && !state.treeTabs.some(tab => tab.key === editing)) noteController.detach();
   }
 
   /**
@@ -2194,6 +2999,10 @@ import {
   // ---- view state ----
 
   function applyView(view, { pushUrl = true } = {}) {
+    // Leaving Tree saves the note being edited first (home-file-tree FR43).
+    // The note stays mounted, hidden with the rest of the Tree, so its text is
+    // still there on the way back whether or not the save worked.
+    if (view !== VIEW_TREE && state.view === VIEW_TREE) void noteController.flush();
     state.view = view === VIEW_TREE ? VIEW_TREE : VIEW_MAP;
     els.viewButtons.forEach(btn => {
       const isActive = btn.getAttribute('data-cockpit-view') === state.view;
@@ -2224,6 +3033,7 @@ import {
     renderFilters();
     mountMap();
     mountTreeView();
+    mountPaneView();
     // Group layout controls are Map-only. Re-render the stable context body in
     // place on view changes without changing modal visibility.
     if (state.railState === RAIL_GROUP) renderRail({ announceChange: false });
@@ -3595,6 +4405,7 @@ import {
         state.flattened = flattenWorkspaceTree(state.tree);
         state.metadata = buildMapMetadata(state.flattened, state.tree);
         state.error = null;
+        pruneTreeTabs();
       } catch (err) {
         console.error('home-workspace-cockpit: failed to load workspaces', err);
         state.error = err;
@@ -3607,6 +4418,7 @@ import {
         renderFilters();
         mountMap();
         mountTreeView();
+        mountPaneView();
         renderToday();
         renderRail({ announceChange: false });
       }
@@ -3617,6 +4429,8 @@ import {
       renderFilters();
       applyFilterToMap();
       renderToday();
+      // A workspace overview in the Tree pane shows the next scheduled run.
+      mountPaneView();
       if (state.railState === RAIL_SUMMARY) renderRail({ announceChange: false });
     });
     // The economy rides alongside for the same reason (city-economy FR35). The
@@ -3661,6 +4475,7 @@ import {
         state.flattened = flattenWorkspaceTree(state.tree);
         state.metadata = buildMapMetadata(state.flattened, state.tree);
         state.error = null;
+        pruneTreeTabs();
       } catch (err) {
         // A failed background refresh keeps the last good data on screen rather
         // than blanking a working cockpit.
@@ -3671,6 +4486,7 @@ import {
         renderFilters();
         mountMap();
         mountTreeView();
+        mountPaneView();
         renderToday();
         renderRail({ announceChange: false });
         if (els.railContext) els.railContext.scrollTop = railScroll;
@@ -3749,8 +4565,21 @@ import {
   // timer: a tab made visible again (reused inside thirty seconds), or a
   // back/forward return from a shelf where a suggestion may have been handled.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') void refreshLibraryBadges();
+    if (document.visibilityState === 'visible') {
+      void refreshLibraryBadges();
+      reloadTreeOnReturn();
+    } else {
+      // A note being edited in the Tree pane is saved when the browser tab is
+      // put in the background, as the note page does (home-file-tree FR43).
+      void noteController.flush();
+    }
   });
+  // Coming back from another window does not change visibility, only focus.
+  window.addEventListener('focus', () => reloadTreeOnReturn());
+  // Leaving Home: a last save that can outlive the page. Both events are
+  // listened for, as on the note page, because neither fires in every case.
+  window.addEventListener('pagehide', () => noteController.keepalive());
+  window.addEventListener('beforeunload', () => noteController.keepalive());
   window.addEventListener('pageshow', event => {
     if (event.persisted) void refreshLibraryBadges({ force: true });
   });
