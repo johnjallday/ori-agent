@@ -11,10 +11,12 @@ import {
   ITEM_FAILED,
   ITEM_LOADING,
   ITEM_READY,
+  NARROW_TREE_WIDTH,
   NOTE_EDITOR_ID,
   activateTab,
   closeTab,
   createNoteController,
+  isNarrowTreeWidth,
   leaveNoteThen,
   nextRunLabel,
   openTab,
@@ -26,9 +28,49 @@ import {
   renderEmptyPaneHTML,
   renderPaneHTML,
   renderTabStripHTML,
-  tabFromRow
+  tabFromRow,
+  treeColumns
 } from './home-tree-pane.js';
 import { NoteAutoSaveTimer } from './note-editor.js';
+
+// ---------------------------------------------------------------------------
+// One column or two (FR4)
+// ---------------------------------------------------------------------------
+
+test('the Tree view is narrow under 720px, and exactly 720px is not', () => {
+  assert.equal(NARROW_TREE_WIDTH, 720);
+  assert.equal(isNarrowTreeWidth(719.5), true);
+  assert.equal(isNarrowTreeWidth(360), true);
+  assert.equal(isNarrowTreeWidth(720), false);
+  assert.equal(isNarrowTreeWidth(1440), false);
+});
+
+test('a hidden view measures 0, which is not "narrow"', () => {
+  // Home on the Map: the Tree is hidden and has no width. Treating that as
+  // narrow would put the Tree in one column the moment it is shown again.
+  assert.equal(isNarrowTreeWidth(0), false);
+  assert.equal(isNarrowTreeWidth(-1), false);
+  assert.equal(isNarrowTreeWidth(NaN), false);
+  assert.equal(isNarrowTreeWidth(undefined), false);
+});
+
+test('with room for two columns both show, whatever is open', () => {
+  assert.equal(treeColumns({ narrow: false, paneShown: false, tabCount: 0 }), 'both');
+  assert.equal(treeColumns({ narrow: false, paneShown: true, tabCount: 3 }), 'both');
+  assert.equal(treeColumns(), 'both');
+});
+
+test('narrow shows the tree; opening an item swaps in the pane; Back swaps the tree back', () => {
+  assert.equal(treeColumns({ narrow: true, paneShown: false, tabCount: 0 }), 'tree');
+  // Tabs remembered from the last visit do not take the tree's place by
+  // themselves: nothing was opened yet.
+  assert.equal(treeColumns({ narrow: true, paneShown: false, tabCount: 2 }), 'tree');
+  assert.equal(treeColumns({ narrow: true, paneShown: true, tabCount: 2 }), 'pane');
+});
+
+test('with the last tab closed the pane has nothing to show, so it is the tree again', () => {
+  assert.equal(treeColumns({ narrow: true, paneShown: true, tabCount: 0 }), 'tree');
+});
 
 const tab = (key, extra = {}) => ({
   key,

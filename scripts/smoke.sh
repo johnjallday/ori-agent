@@ -3428,7 +3428,7 @@ smoke_baseline_export() {
 #                                   it, and take screenshots. Stages: tree,
 #                                   pane, note (give the sandbox directory and
 #                                   it also reads the note's file on disk),
-#                                   create
+#                                   create, manage, finish
 #   filetree <base-url> demo-all [sandbox-dir]
 #                                   every stage in both themes, one PASS/FAIL
 #                                   line each
@@ -3683,7 +3683,7 @@ filetree_demo_all() {
   smoke_show_wait
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
   out="${TMPDIR:-/tmp}/filetree-demo"
-  for stage in tree pane note create manage; do
+  for stage in tree pane note create manage finish; do
     for theme in light dark; do
       if log=$(node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "$out" "$stage" "$theme" "$sandbox" 2>&1); then
         echo "PASS $stage ($theme): $(printf '%s\n' "$log" | grep -c '^ok ') checks"
@@ -3707,6 +3707,25 @@ smoke_filetree() {
   demo-all) filetree_demo_all "$@" ;;
   *) fail "usage: $0 filetree <base-url> {endpoints|seed|wait|demo <stage> [light|dark] [sandbox]|demo-all [sandbox]}" ;;
   esac
+}
+
+# prettier-head says, for each file given, whether the committed version (HEAD)
+# passes Prettier. `prettier --write` on a whole file is only safe when it
+# does: a file that was already unformatted would have all of its old lines
+# rewritten into the diff, so there only the lines being changed are fixed.
+smoke_prettier_head() {
+  shift
+  [[ $# -gt 0 ]] || fail "usage: $0 prettier-head <file>..."
+  local file
+  for file in "$@"; do
+    if ! git cat-file -e "HEAD:$file" 2>/dev/null; then
+      echo "new        $file"
+    elif git show "HEAD:$file" | npx prettier --stdin-filepath "$file" --check >/dev/null 2>&1; then
+      echo "clean      $file"
+    else
+      echo "NOT clean  $file"
+    fi
+  done
 }
 
 # agent_state_digest fingerprints every runtime state file under a sandbox.
@@ -3781,6 +3800,7 @@ janitor-upgrade-seed) smoke_janitor_upgrade_seed "${3:-}" ;;
 janitor-upgrade-verify) smoke_janitor_upgrade_verify "${3:-}" ;;
 library-notifications) smoke_library_notifications "$@" ;;
 filetree) smoke_filetree "$@" ;;
+prettier-head) smoke_prettier_head "$@" ;;
 *)
   echo "usage:" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
@@ -3827,7 +3847,8 @@ filetree) smoke_filetree "$@" ;;
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
-  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | seed | wait | demo <tree|pane|note|create|manage> [theme] [sandbox] | demo-all [sandbox]" >&2
+  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | seed | wait | demo <tree|pane|note|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
+  echo "  $0 prettier-head <file>...               # was each file Prettier-clean at HEAD? (only then is --write on the whole file safe)" >&2
   exit 2
   ;;
 esac

@@ -170,6 +170,7 @@ export default defineConfig([
       'internal/web/static/js/modules/home-tree-menu.js',
       'internal/web/static/js/modules/home-tree-pane.js',
       'internal/web/static/js/modules/home-tree-sources.js',
+      'internal/web/static/js/modules/home-tree-state.js',
       'internal/web/static/js/modules/home-workspace-cockpit.js',
       'internal/web/static/js/modules/home-workspace-tree.js',
       'internal/web/static/js/modules/plugin-init-banner.js',

@@ -18,6 +18,8 @@
  *   create Group 4: a note, a ticket and an upload made from the row menu.
  *   manage Group 5: Move by menu and by drag, a move that is refused, Delete
  *          and Undo, selecting rows and grouping them, and tag filters.
+ *   finish Group 6: the filter box, what is remembered across a reload, the
+ *          one-column layout, the reload on coming back, roles and contrast.
  *
  * Exits non-zero when a check fails, a console error appears, or a request
  * fails, so a page that renders but is quietly broken does not pass.
@@ -1787,12 +1789,725 @@ async function runManageStage({ stamp, names, ids, tags, madeGroups }) {
   );
 }
 
+// Group 6: the filter box, what is remembered across a reload, the one-column
+// layout, the reload on coming back to the browser tab, and accessibility.
+async function stageFinish() {
+  const stamp = Date.now().toString(36);
+  const names = {
+    recall: `Recall ${stamp}`,
+    unopened: `Unopened ${stamp}`,
+    note: `Blue hour ${stamp}`,
+    second: `Second verse ${stamp}`,
+    ticket: `Tune the snare ${stamp}`,
+    hidden: `Hidden gem ${stamp}`,
+    file: `deep-${stamp}.md`
+  };
+  const post = async (path, data) =>
+    (await page.request.post(`${baseUrl}${path}`, { data })).json();
+  const ids = {
+    recall: (await post('/api/workspaces', { name: names.recall })).folder.id,
+    unopened: (await post('/api/workspaces', { name: names.unopened })).folder.id
+  };
+  ids.note = (
+    await post(`/api/workspaces/${ids.recall}/notes`, {
+      name: names.note,
+      content: '# Blue hour\n\nThe light just after sunset.'
+    })
+  ).note.id;
+  ids.second = (
+    await post(`/api/workspaces/${ids.recall}/notes`, { name: names.second, content: 'Two.' })
+  ).note.id;
+  ids.ticket = (
+    await post(`/api/workspaces/${ids.recall}/tickets`, {
+      title: names.ticket,
+      state: 'backlog',
+      source: 'manual'
+    })
+  ).id;
+  await post(`/api/workspaces/${ids.unopened}/notes`, { name: names.hidden, content: 'Unseen.' });
+  await page.request.post(`${baseUrl}/api/workspaces/${ids.recall}/files`, {
+    multipart: {
+      folder_path: 'inbox',
+      file: { name: names.file, mimeType: 'text/markdown', buffer: Buffer.from('# Deep\n') }
+    }
+  });
+  try {
+    await runFinishStage({ stamp, names, ids });
+  } finally {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    for (const key of ['recall', 'unopened']) {
+      await page.request.delete(`${baseUrl}/api/workspaces/${ids[key]}?confirm=true`);
+    }
+  }
+}
+
+async function runFinishStage({ stamp, names, ids }) {
+  const nav = page.locator('#cockpitTreeNav');
+  const filter = nav.locator('[data-tree-filter]');
+  const clearFilter = nav.locator('[data-tree-filter-clear]');
+  const byId = id => nav.locator(`[data-tree-row="${id}"]`);
+  const live = () => page.locator('#cockpitRailLive').innerText();
+  const visibleRows = () =>
+    nav.locator('[data-tree-row]').evaluateAll(rows => rows.map(el => el.dataset.treeRow));
+  const noteKey = `${ids.recall}/n/${ids.note}`;
+  const secondKey = `${ids.recall}/n/${ids.second}`;
+  const ticketKey = `${ids.recall}/t/${ids.ticket}`;
+  const tabLabels = () => page.locator('.cockpit-pane-tab-label').allInnerTexts();
+  const stored = () =>
+    page.evaluate(() => JSON.parse(window.localStorage.getItem('ori.home.fileTree.v1') || 'null'));
+  const treeEl = page.locator('#cockpitTree');
+
+  await openTree();
+  await byId(ids.recall).scrollIntoViewIfNeeded();
+
+  // =========================================================================
+  // The filter box (FR65-FR67)
+  // =========================================================================
+  check(
+    (await filter.getAttribute('aria-label')) === 'Filter the tree by name' &&
+      (await filter.getAttribute('placeholder')) === 'Filter' &&
+      (await clearFilter.isHidden()),
+    'a named filter box sits above the tree; its clear button is hidden while it is empty'
+  );
+  const totalRows = (await visibleRows()).length;
+
+  // By workspace name.
+  await filter.click();
+  await page.keyboard.type('recall', { delay: 20 });
+  await expectEventually(
+    async () => (await visibleRows()).join() === ids.recall,
+    'typing narrows the tree to the workspace whose name matches'
+  );
+  check(
+    (await filter.evaluate(el => el === document.activeElement)) &&
+      (await filter.inputValue()) === 'recall',
+    'the cursor stays in the box while the tree redraws under it'
+  );
+  check(!(await clearFilter.isHidden()), 'the clear button appears once there is text');
+  await shot('f1-filter-workspace');
+
+  // Escape clears.
+  await page.keyboard.press('Escape');
+  await expectEventually(
+    async () => (await visibleRows()).length === totalRows && (await filter.inputValue()) === '',
+    'Escape clears the filter and every row comes back'
+  );
+
+  // Loaded contents are searched: open the workspace once, then close it.
+  await byId(ids.recall).locator('[data-tree-toggle]').click();
+  await byId(noteKey).waitFor();
+  await byId(ids.recall).locator('[data-tree-toggle]').click();
+  await expectEventually(
+    async () => (await byId(noteKey).count()) === 0,
+    'the workspace is closed again, its contents loaded'
+  );
+  const beforeFilter = contentRequests().length;
+  await filter.fill('blue hour');
+  await expectEventually(
+    async () =>
+      (await visibleRows()).join() === [ids.recall, `${ids.recall}/s/notes`, noteKey].join(),
+    'a loaded note is found by name, with only its workspace and section kept above it'
+  );
+  check(
+    (await byId(ids.recall).getAttribute('aria-expanded')) === 'true',
+    'the closed workspace is shown open while the filter holds a match inside it'
+  );
+  await shot('f2-filter-note');
+
+  // A file inside a closed folder.
+  await filter.fill('DEEP-');
+  await expectEventually(
+    async () =>
+      (await visibleRows()).length === 4 &&
+      (await nav.locator('[data-tree-kind="file"]').innerText()).includes('deep-'),
+    'a file in a closed folder is found, whatever the case typed, and the folder is shown open'
+  );
+  check(
+    (await nav.locator('[data-tree-kind="folder"]').getAttribute('aria-expanded')) === 'true',
+    '…with the folder open'
+  );
+
+  // Something in a workspace that was never expanded is not found, and the
+  // tree says why.
+  await filter.fill(names.hidden);
+  await nav.locator('.cockpit-tree-empty').waitFor();
+  check(
+    (await nav.locator('.cockpit-tree-empty').innerText()) === 'Nothing matches that filter.',
+    'no match: "Nothing matches that filter."'
+  );
+  check(
+    (await nav.locator('.cockpit-tree-empty-note').innerText()) ===
+      'Workspaces that have not been expanded yet are searched only after they are expanded.',
+    '…and, with workspaces never expanded, that their contents are searched only once expanded'
+  );
+  await expectEventually(
+    async () => (await live()) === 'Nothing matches that filter.',
+    'the empty result is announced'
+  );
+  check(
+    contentRequests().length === beforeFilter,
+    'filtering searches what is loaded and asks the server for nothing'
+  );
+  await shot('f3-filter-no-match');
+
+  // The clear button.
+  await clearFilter.click();
+  await expectEventually(
+    async () => (await visibleRows()).length === totalRows,
+    'the clear button brings every row back'
+  );
+  check(
+    (await filter.evaluate(el => el === document.activeElement)) && (await clearFilter.isHidden()),
+    '…leaves the cursor in the box, and hides itself'
+  );
+
+  // Down from the box goes to the rows; opening from a filtered tree works.
+  await filter.fill('blue hour');
+  await byId(noteKey).waitFor();
+  await filter.press('ArrowDown');
+  check(
+    await page.evaluate(() => document.activeElement?.hasAttribute('data-tree-row')),
+    'Down from the box moves focus to the rows'
+  );
+  await byId(noteKey).locator('.cockpit-tree-name').click();
+  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
+  check(
+    (await activeTab().innerText()).includes(names.note) &&
+      (await filter.inputValue()) === 'blue hour',
+    'an item opens from the filtered tree, and the filter stays as typed'
+  );
+  await clearFilter.click();
+
+  // =========================================================================
+  // Remembered across a reload (FR68-FR70)
+  // =========================================================================
+  // Three tabs — a note, a ticket, the workspace's overview — the note active,
+  // the workspace and one folder open, and the Backlog section closed.
+  await byId(ticketKey).locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="ticket"]').waitFor();
+  await byId(secondKey).locator('.cockpit-tree-name').click();
+  await page.waitForFunction(
+    name => document.querySelector('.cockpit-pane-tab.is-active')?.textContent.includes(name),
+    names.second
+  );
+  await byId(ids.recall).locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  await byId(`${ids.recall}/d/inbox`).locator('[data-tree-toggle]').click();
+  await byId(`${ids.recall}/s/backlog`).locator('[data-tree-toggle]').click();
+  await page.locator('.cockpit-pane-tab-label', { hasText: names.note }).click();
+  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
+  const labelsBefore = await tabLabels();
+  await expectEventually(async () => {
+    const saved = await stored();
+    return (
+      !!saved &&
+      saved.version === 1 &&
+      saved.tabs.length === 4 &&
+      saved.activeKey === noteKey &&
+      saved.expanded.includes(ids.recall) &&
+      saved.expanded.includes(`${ids.recall}/d/inbox`) &&
+      saved.collapsed.includes(`${ids.recall}/s/backlog`)
+    );
+  }, 'the open rows, the four tabs and the active tab are stored in the browser');
+  check(
+    !JSON.stringify(await stored()).includes('The light just after sunset'),
+    "a note's text is never stored there"
+  );
+
+  // Home in Map view: the remembered state is put back without a request.
+  const beforeMap = requests.length;
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#cockpitMap').waitFor({ state: 'visible' });
+  await settle(1500);
+  const mapRequests = requests.slice(beforeMap);
+  const treeOnly = mapRequests.filter(
+    entry =>
+      /\/api\/workspaces\/[^/]+\/(tickets|files\/tree|memory|agents)$/.test(entry.split(' ')[1]) ||
+      /\/api\/notes\/[^/]+$/.test(entry.split(' ')[1]) ||
+      /\/api\/workspaces\/[^/]+\/tickets\/[^/]+$/.test(entry.split(' ')[1])
+  );
+  check(
+    treeOnly.length === 0,
+    `in Map view the remembered tree asks for nothing (${treeOnly.length} request(s))`
+  );
+
+  // Switching to Tree shows it all again.
+  await page.locator('#cockpitViewTree').click();
+  await byId(ids.recall).waitFor();
+  await applyTheme();
+  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
+  check(
+    (await tabLabels()).join('|') === labelsBefore.join('|'),
+    `the same tabs come back, in the same order (${(await tabLabels()).length})`
+  );
+  check((await activeTab().innerText()).includes(names.note), 'the same tab is active');
+  check(
+    (await page.locator('#cockpitPaneNoteEditor').innerText()).includes('The light just after'),
+    'and its note is loaded and shown'
+  );
+  check(
+    (await byId(ids.recall).getAttribute('aria-expanded')) === 'true' &&
+      (await byId(`${ids.recall}/d/inbox`).getAttribute('aria-expanded')) === 'true' &&
+      (await byId(`${ids.recall}/s/backlog`).getAttribute('aria-expanded')) === 'false',
+    'the workspace and the folder are open and the Backlog section is closed, as they were left'
+  );
+  check(
+    (await byId(noteKey).getAttribute('aria-selected')) === 'true',
+    "the active tab's row is highlighted"
+  );
+  await shot('f4-restored');
+
+  // A straight reload in Tree view does the same.
+  await openTree();
+  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
+  check(
+    (await tabLabels()).join('|') === labelsBefore.join('|') &&
+      (await activeTab().innerText()).includes(names.note),
+    'a reload in Tree view restores the tabs and the active tab too'
+  );
+
+  // A remembered tab whose note has since been deleted is dropped silently.
+  await page.request.delete(`${baseUrl}/api/notes/${ids.note}`);
+  EXPECTED_FAILURES.push(new RegExp(`/api/notes/${ids.note}$`));
+  await openTree();
+  await expectEventually(
+    async () => !(await tabLabels()).some(label => label.includes(names.note)),
+    'after a reload, the tab of a note deleted meanwhile is gone'
+  );
+  await settle(500);
+  check(
+    (await tabLabels()).length === 3 &&
+      (await page.locator('.cockpit-pane-failed, [data-pane-retry]').count()) === 0 &&
+      !/couldn.t load/i.test(await live()),
+    'silently: the other three tabs remain, and nothing is reported as failed'
+  );
+  check(
+    (await activeTab().count()) === 1 &&
+      (await page.locator('.cockpit-pane-article').count()) === 1,
+    'the tab that took its place is active and shows its item'
+  );
+  check(
+    (await stored()).tabs.every(tab => tab.key !== noteKey),
+    'and it is gone from what is stored'
+  );
+
+  // Stored text that cannot be read is ignored, not fatal.
+  await page.evaluate(() => window.localStorage.setItem('ori.home.fileTree.v1', '{"version":1,'));
+  await openTree();
+  check(
+    (await tabLabels()).length === 0 &&
+      (await page.locator('.cockpit-pane-empty').count()) === 1 &&
+      (await byId(ids.recall).getAttribute('aria-expanded')) === 'false',
+    'with unreadable stored text the tree simply starts fresh'
+  );
+
+  // =========================================================================
+  // Coming back to the browser tab (FR21)
+  // =========================================================================
+  await byId(ids.recall).locator('[data-tree-toggle]').click();
+  await byId(secondKey).waitFor();
+  const later = `Added while away ${stamp}`;
+  await page.request.post(`${baseUrl}/api/workspaces/${ids.recall}/notes`, {
+    data: { name: later, content: 'From another window.' }
+  });
+  const sectionLoads = () =>
+    requests.filter(entry => entry === `GET /api/workspaces/${ids.recall}/notes`).length;
+  const beforeReturn = sectionLoads();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await settle(600);
+  check(
+    sectionLoads() === beforeReturn && (await rowByKind('note', later).count()) === 0,
+    'coming back within 30 seconds of the last load reloads nothing'
+  );
+  // Half a minute later.
+  await page.evaluate(() => {
+    const real = Date.now.bind(Date);
+    Date.now = () => real() + 31000;
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await rowByKind('note', later).waitFor();
+  check(
+    sectionLoads() === beforeReturn + 1,
+    'after 30 seconds, coming back reloads the open workspace once and the new note appears'
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await settle(600);
+  check(sectionLoads() === beforeReturn + 1, 'and coming back again straight away does not');
+
+  // =========================================================================
+  // One column under 720px (FR4)
+  // =========================================================================
+  await page.setViewportSize({ width: 640, height: 900 });
+  await expectEventually(
+    async () => (await treeEl.getAttribute('data-columns')) === 'tree',
+    'under 720px the Tree view goes to one column'
+  );
+  const narrow = await page.evaluate(() => {
+    const tree = document.getElementById('cockpitTree').getBoundingClientRect();
+    const navBox = document.getElementById('cockpitTreeNav').getBoundingClientRect();
+    return {
+      treeWidth: Math.round(tree.width),
+      navWidth: Math.round(navBox.width),
+      paneShown: document.getElementById('cockpitTreePane').offsetParent !== null,
+      sideways: document.documentElement.scrollWidth > window.innerWidth
+    };
+  });
+  check(
+    narrow.treeWidth < 720 && narrow.navWidth === narrow.treeWidth && !narrow.paneShown,
+    `only the tree is shown, at the full width (${narrow.navWidth}px of ${narrow.treeWidth}px)`
+  );
+  check(!narrow.sideways, 'the page does not scroll sideways');
+  await byId(secondKey).scrollIntoViewIfNeeded();
+  await shot('f5-narrow-tree');
+
+  await byId(secondKey).locator('.cockpit-tree-name').click();
+  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
+  const back = page.locator('#cockpitTreePane [data-pane-back]');
+  check(
+    (await treeEl.getAttribute('data-columns')) === 'pane' &&
+      (await nav.isHidden()) &&
+      (await back.isVisible()) &&
+      (await back.innerText()).trim() === 'Back to tree',
+    'opening an item replaces the tree with the pane, which has a "Back to tree" button'
+  );
+  check(
+    await page.evaluate(() => document.activeElement?.hasAttribute('data-pane-title')),
+    "focus moves to the item's title, since the row that was clicked is off screen"
+  );
+  check(
+    !(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)),
+    'the pane does not make the page scroll sideways either'
+  );
+  await shot('f6-narrow-pane');
+
+  await back.click();
+  check(
+    (await treeEl.getAttribute('data-columns')) === 'tree' &&
+      (await nav.isVisible()) &&
+      (await page.locator('#cockpitTreePane').isHidden()),
+    '"Back to tree" returns to the tree'
+  );
+  check(
+    await page.evaluate(
+      key => document.activeElement?.getAttribute('data-tree-row') === key,
+      secondKey
+    ),
+    "with focus on the open item's row"
+  );
+
+  // Closing the last tab from the pane goes back to the tree by itself.
+  await byId(secondKey).locator('.cockpit-tree-name').click();
+  await back.waitFor();
+  await page.locator('#cockpitTreePane [data-pane-close]').first().click();
+  await expectEventually(
+    async () => (await treeEl.getAttribute('data-columns')) === 'tree' && (await nav.isVisible()),
+    'closing the last tab in the pane brings the tree back'
+  );
+
+  // A button in the pane that acts on the tree brings the tree back with it:
+  // Move… opens its dialog there, and a section link goes to that row.
+  await byId(ids.recall).locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  await action('Move…').click();
+  await expectEventually(
+    async () =>
+      (await treeEl.getAttribute('data-columns')) === 'tree' &&
+      (await page.locator('[data-tree-move-dialog] [role="dialog"]').isVisible()),
+    'in one column, Move… in an overview returns to the tree, where its dialog opens'
+  );
+  await page.locator('[data-tree-move-cancel]').click();
+  await byId(ids.recall).locator('.cockpit-tree-name').click();
+  await back.waitFor();
+  await page.locator('.cockpit-pane-link', { hasText: 'Notes' }).click();
+  await expectEventually(
+    async () =>
+      (await treeEl.getAttribute('data-columns')) === 'tree' &&
+      (await page.evaluate(
+        key => document.activeElement?.getAttribute('data-tree-row') === key,
+        `${ids.recall}/s/notes`
+      )),
+    'and a section link returns to the tree with focus on that section'
+  );
+  await page.locator('#cockpitTreeNav [data-tree-row]').first().scrollIntoViewIfNeeded();
+
+  // Wide again: two columns, no Back button.
+  await byId(secondKey).locator('.cockpit-tree-name').click();
+  await back.waitFor();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectEventually(
+    async () => (await treeEl.getAttribute('data-columns')) === 'both',
+    'made wide again, the Tree view returns to two columns'
+  );
+  check(
+    (await nav.isVisible()) &&
+      (await page.locator('#cockpitTreePane').isVisible()) &&
+      (await back.isHidden()),
+    'both the tree and the pane show, and "Back to tree" is gone'
+  );
+
+  // =========================================================================
+  // Keyboard and semantics (FR71-FR73)
+  // =========================================================================
+  const semantics = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#cockpitTreeNav [data-tree-row]'));
+    const tabs = Array.from(document.querySelectorAll('#cockpitTreePane [role="tab"]'));
+    const panel = document.querySelector('#cockpitTreePane [role="tabpanel"]');
+    return {
+      trees: document.querySelectorAll('#cockpitTreeNav [role="tree"]').length,
+      allItems: rows.every(row => row.getAttribute('role') === 'treeitem'),
+      allLevels: rows.every(row => Number(row.getAttribute('aria-level')) >= 1),
+      allSelected: rows.every(row => row.hasAttribute('aria-selected')),
+      expandable: rows
+        .filter(row => row.querySelector('[data-tree-toggle]'))
+        .every(row => row.hasAttribute('aria-expanded')),
+      leaves: rows
+        .filter(row => !row.querySelector('[data-tree-toggle]'))
+        .every(row => !row.hasAttribute('aria-expanded')),
+      tabbable: rows.filter(row => row.getAttribute('tabindex') === '0').length,
+      kinds: [...new Set(rows.map(row => row.dataset.treeKind))].sort().join(','),
+      tablists: document.querySelectorAll('#cockpitTreePane [role="tablist"]').length,
+      tabsSelected: tabs.filter(tab => tab.getAttribute('aria-selected') === 'true').length,
+      tabsControl: tabs.every(tab => tab.getAttribute('aria-controls') === panel?.id),
+      panelLabelled: !!panel?.getAttribute('aria-labelledby') || !!panel?.getAttribute('aria-label')
+    };
+  });
+  check(
+    semantics.trees === 1 && semantics.allItems && semantics.allLevels && semantics.allSelected,
+    'one tree; every row is a treeitem with a level and a selected state'
+  );
+  check(
+    semantics.expandable && semantics.leaves,
+    'rows that can open say whether they are open; rows that cannot say nothing'
+  );
+  check(semantics.tabbable === 1, `exactly one row is in the tab order, across ${semantics.kinds}`);
+  check(
+    semantics.tablists === 1 &&
+      semantics.tabsSelected === 1 &&
+      semantics.tabsControl &&
+      semantics.panelLabelled,
+    'the tabs are a tablist of tabs, one selected, controlling a named tabpanel'
+  );
+
+  // Arrow keys walk and never open; Enter opens and moves focus to the title.
+  const tabsBeforeArrows = (await tabLabels()).join('|');
+  const activeBeforeArrows = await activeTab().innerText();
+  await byId(`${ids.recall}/s/notes`).focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowUp');
+  // The first note under Notes: the one added while away, which is not open.
+  const walkedTo = await page.evaluate(() => ({
+    kind: document.activeElement?.dataset.treeKind,
+    name: document.activeElement?.querySelector('.cockpit-tree-name')?.textContent
+  }));
+  check(
+    walkedTo.kind === 'note' &&
+      walkedTo.name === later &&
+      (await tabLabels()).join('|') === tabsBeforeArrows &&
+      (await activeTab().innerText()) === activeBeforeArrows,
+    'arrow keys walk onto notes without opening them'
+  );
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.activeElement?.hasAttribute('data-pane-title'));
+  check(
+    (await activeTab().innerText()).includes(later) &&
+      (await page.evaluate(() => document.activeElement?.textContent)) === later,
+    "Enter opens the row and moves focus to the pane's title"
+  );
+
+  // =========================================================================
+  // Contrast (FR75)
+  // =========================================================================
+  // Open the things whose colours are to be measured.
+  await filter.fill('zzzz-nothing');
+  await nav.locator('.cockpit-tree-empty').waitFor();
+  const emptyContrast = await measureContrast([
+    ['"Nothing matches" line', '#cockpitTreeNav .cockpit-tree-empty'],
+    ['"searched only after" line', '#cockpitTreeNav .cockpit-tree-empty-note'],
+    ['filter text', '#cockpitTreeNav [data-tree-filter]']
+  ]);
+  await clearFilter.click();
+  await byId(ids.recall).locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  await settle(300);
+  const contrast = [
+    ...emptyContrast,
+    ...(await measureContrast([
+      ['workspace and group names', '#cockpitTreeNav .cockpit-tree-row .cockpit-tree-name'],
+      ['section headings', '#cockpitTreeNav .is-kind-section .cockpit-tree-name'],
+      ['counts and ticket states', '#cockpitTreeNav .cockpit-tree-count'],
+      ['"No … yet" lines', '#cockpitTreeNav .is-kind-empty .cockpit-tree-name'],
+      ['the active row', '#cockpitTreeNav .cockpit-tree-row.is-active .cockpit-tree-name'],
+      ['directory path', '#cockpitTreeNav .cockpit-tree-root-path'],
+      ['directory badge', '#cockpitTreeNav .cockpit-tree-root-badge'],
+      ['header buttons', '#cockpitTreeNav .cockpit-tree-tool:not(:disabled)'],
+      ['tag chips', '#cockpitTreeNav .cockpit-tree-tagbar-chip'],
+      ['tags label', '#cockpitTreeNav .cockpit-tree-tagbar-label'],
+      [
+        'inactive tabs',
+        '#cockpitTreePane .cockpit-pane-tab:not(.is-active) .cockpit-pane-tab-label'
+      ],
+      ['the active tab', '#cockpitTreePane .cockpit-pane-tab.is-active .cockpit-pane-tab-label'],
+      ['breadcrumb', '#cockpitTreePane .cockpit-pane-crumbs'],
+      ['title', '#cockpitTreePane .cockpit-pane-title'],
+      ['"what and where" line', '#cockpitTreePane .cockpit-pane-sub'],
+      ['status chip', '#cockpitTreePane .cockpit-pane-chip'],
+      ['stat and list labels', '#cockpitTreePane .cockpit-pane-kicker'],
+      ['stat values', '#cockpitTreePane .cockpit-pane-stat-value'],
+      ['field names', '#cockpitTreePane .cockpit-pane-fields dt'],
+      ['section links', '#cockpitTreePane .cockpit-pane-link'],
+      ['Open workspace button', '#cockpitTreePane .cockpit-pane-actions .modern-btn-primary'],
+      ['Move… button', '#cockpitTreePane .cockpit-pane-actions .modern-btn-secondary'],
+      ['Delete button', '#cockpitTreePane .cockpit-pane-actions .modern-btn-danger']
+    ]))
+  ];
+  // The bar that appears with a selection has buttons of its own.
+  await byId(ids.recall).focus();
+  await page.keyboard.press('Space');
+  await nav.locator('[data-tree-bulkbar]').waitFor();
+  contrast.push(
+    ...(await measureContrast([
+      ['"N selected"', '#cockpitTreeNav .cockpit-tree-bulkcount'],
+      ['Select all and Cancel', '#cockpitTreeNav [data-tree-bulkbar] .modern-btn-secondary'],
+      ['Delete selected', '#cockpitTreeNav [data-tree-bulkbar] .modern-btn-danger'],
+      ['a selected row', '#cockpitTreeNav .cockpit-tree-row.is-picked .cockpit-tree-name']
+    ]))
+  );
+  await nav.locator('[data-tree-cancel-selection]').click();
+  contrast.forEach(entry => {
+    check(
+      entry.count === 0 || entry.ratio >= 4.5,
+      `contrast ${entry.count ? entry.ratio.toFixed(2) : 'n/a'}:1 for ${entry.name}` +
+        (entry.count ? ` (${entry.color} on ${entry.background})` : ' (none on screen)')
+    );
+  });
+  await shot('f7-overview');
+}
+
+// The lowest contrast ratio among the elements each selector matches: the
+// text colour against whatever is painted behind it, with translucent layers
+// blended in. Where a gradient is behind the text (Home's workspace area is
+// painted with one) every colour in the gradient is tried and the worst kept.
+async function measureContrast(pairs) {
+  return page.evaluate(list => {
+    const parse = value => {
+      const text = String(value || '').trim();
+      let match = text.match(/^#([0-9a-f]{6})$/i);
+      if (match) {
+        const hex = parseInt(match[1], 16);
+        return { r: hex >> 16, g: (hex >> 8) & 255, b: hex & 255, a: 1 };
+      }
+      match = text.match(/^rgba?\(([^)]+)\)$/);
+      if (match) {
+        const parts = match[1]
+          .split(/[\s,/]+/)
+          .filter(Boolean)
+          .map(Number);
+        return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+      }
+      match = text.match(/^color\(srgb ([^)]+)\)$/);
+      if (match) {
+        const parts = match[1]
+          .split(/[\s/]+/)
+          .filter(Boolean)
+          .map(Number);
+        return {
+          r: parts[0] * 255,
+          g: parts[1] * 255,
+          b: parts[2] * 255,
+          a: parts.length > 3 ? parts[3] : 1
+        };
+      }
+      return null;
+    };
+    const over = (top, bottom) => ({
+      r: top.r * top.a + bottom.r * (1 - top.a),
+      g: top.g * top.a + bottom.g * (1 - top.a),
+      b: top.b * top.a + bottom.b * (1 - top.a),
+      a: 1
+    });
+    // Behind everything is the page's own canvas colour.
+    const canvas = parse(
+      getComputedStyle(document.body).getPropertyValue('--home-command-canvas')
+    ) || { r: 255, g: 255, b: 255, a: 1 };
+    const coloursIn = text => {
+      const found = [];
+      const pattern = /rgba?\([^)]*\)|color\(srgb [^)]*\)/g;
+      for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+        const colour = parse(match[0]);
+        if (colour) found.push(colour);
+      }
+      return found;
+    };
+    // Every colour that may be behind an element's text: one for a plain
+    // background, each stop for a gradient. A stop under half strength is a
+    // texture drawn over the real background (grid lines, a faint glow), not
+    // the background itself.
+    const backgroundsOf = el => {
+      if (!el) return [canvas];
+      const style = getComputedStyle(el);
+      const colour = parse(style.backgroundColor);
+      let candidates;
+      if (colour && colour.a >= 1) {
+        candidates = [colour];
+      } else {
+        candidates = backgroundsOf(el.parentElement);
+        if (colour && colour.a > 0) candidates = candidates.map(below => over(colour, below));
+      }
+      if (/gradient\(/.test(style.backgroundImage)) {
+        const stops = coloursIn(style.backgroundImage).filter(stop => stop.a > 0.5);
+        if (stops.length) {
+          const under = candidates;
+          candidates = stops.flatMap(stop =>
+            stop.a >= 1 ? [stop] : under.map(below => over(stop, below))
+          );
+        }
+      }
+      return candidates;
+    };
+    const channel = value => {
+      const s = value / 255;
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = c => 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+    const show = c => `rgb(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)})`;
+    return list.map(([name, selector]) => {
+      let worst = null;
+      const elements = Array.from(document.querySelectorAll(selector)).filter(
+        el => el.offsetParent !== null
+      );
+      elements.forEach(el => {
+        const style = getComputedStyle(el);
+        const written = parse(style.color);
+        if (!written) return;
+        backgroundsOf(el).forEach(background => {
+          // Text drawn at less than full strength is blended with what is under it.
+          const opacity = Number(style.opacity);
+          const strength = written.a * (Number.isFinite(opacity) ? opacity : 1);
+          const colour = strength < 1 ? over({ ...written, a: strength }, background) : written;
+          const [light, dark] = [luminance(colour), luminance(background)].sort((a, b) => b - a);
+          const ratio = (light + 0.05) / (dark + 0.05);
+          if (!worst || ratio < worst.ratio) {
+            worst = { ratio, color: show(colour), background: show(background) };
+          }
+        });
+      });
+      return {
+        name,
+        count: elements.length,
+        ...(worst || { ratio: 0, color: '', background: '' })
+      };
+    });
+  }, pairs);
+}
+
 const stages = {
   tree: stageTree,
   pane: stagePane,
   note: stageNote,
   create: stageCreate,
   manage: stageManage,
+  finish: stageFinish,
   'map-requests': stageMapRequests
 };
 try {

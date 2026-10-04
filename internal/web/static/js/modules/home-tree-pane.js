@@ -103,6 +103,37 @@ export function closeTab(tabs, activeKey, key) {
 }
 
 // ---------------------------------------------------------------------------
+// One column or two (FR4)
+// ---------------------------------------------------------------------------
+
+/** Below this width the Tree view has room for one column only. */
+export const NARROW_TREE_WIDTH = 720;
+
+export const BACK_TO_TREE_LABEL = 'Back to tree';
+
+/**
+ * Whether a measured width of the Tree view calls for the one-column layout.
+ * A width of 0 is a view that is hidden (Home is on the Map), not a narrow
+ * one, and says nothing either way.
+ */
+export function isNarrowTreeWidth(width) {
+  return Number.isFinite(width) && width > 0 && width < NARROW_TREE_WIDTH;
+}
+
+/**
+ * Which columns are on screen: `'both'`, or in the one-column layout `'tree'`
+ * or `'pane'`.
+ *
+ * Narrow shows the tree. Opening an item swaps in the pane (`paneShown`), and
+ * "Back to tree" swaps the tree back. With nothing open there is nothing for
+ * the pane to show, so it is the tree again.
+ */
+export function treeColumns({ narrow = false, paneShown = false, tabCount = 0 } = {}) {
+  if (!narrow) return 'both';
+  return paneShown && tabCount > 0 ? 'pane' : 'tree';
+}
+
+// ---------------------------------------------------------------------------
 // View models (FR31)
 // ---------------------------------------------------------------------------
 
@@ -752,6 +783,12 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
   let panel = host.querySelector(':scope > .cockpit-pane-panel');
   if (!strip || !panel) {
     host.innerHTML =
+      // Shown only in the one-column layout, where the pane takes the tree's
+      // place and this is the way back (FR4).
+      '<div class="cockpit-pane-back-bar">' +
+      '<button type="button" class="cockpit-pane-back" data-pane-back>' +
+      `${iconHTML('back', { size: 14 })}<span>${BACK_TO_TREE_LABEL}</span></button>` +
+      '</div>' +
       '<div class="cockpit-pane-tabs" role="tablist" aria-label="Open items"></div>' +
       '<div class="cockpit-pane-panel" id="cockpitPanePanel" role="tabpanel" tabindex="-1"></div>';
     strip = host.querySelector(':scope > .cockpit-pane-tabs');
@@ -827,6 +864,10 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
   if (!bound) {
     host.addEventListener('click', event => {
       const handlers = bindings.get(host) || {};
+      if (event.target.closest('[data-pane-back]')) {
+        if (typeof handlers.onBack === 'function') handlers.onBack();
+        return;
+      }
       const close = event.target.closest('[data-pane-close]');
       if (close) {
         if (typeof handlers.onCloseTab === 'function') {

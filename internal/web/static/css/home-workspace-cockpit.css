@@ -1556,6 +1556,62 @@ body.home-command-page .ori-guide__launcher {
   border-right: 1px solid var(--hc-line);
 }
 
+/* One column when the Tree view itself is under 720px wide (FR4). The class
+   and the attribute are set from a measurement of the view, not from the
+   window: `is-narrow` says there is room for one column, `data-columns` says
+   which one is on screen. */
+.cockpit-tree.is-narrow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cockpit-tree.is-narrow .cockpit-tree-nav {
+  padding-right: 12px;
+  border-right: 0;
+}
+
+.cockpit-tree[data-columns="tree"] .cockpit-tree-pane,
+.cockpit-tree[data-columns="pane"] .cockpit-tree-nav {
+  display: none;
+}
+
+/* "Back to tree" exists only where the pane has taken the tree's place. */
+.cockpit-pane-back-bar {
+  display: none;
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--hc-line);
+  background: var(--hc-panel);
+}
+
+.cockpit-tree.is-narrow .cockpit-pane-back-bar {
+  display: flex;
+}
+
+.cockpit-pane-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 10px 0 6px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 6px;
+  background: var(--hc-panel-raised);
+  color: var(--hc-ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cockpit-pane-back:hover {
+  border-color: var(--hc-signal);
+}
+
+@media (pointer: coarse) {
+  .cockpit-pane-back {
+    min-height: 44px;
+  }
+}
+
 .cockpit-tree-toolbar {
   display: flex;
   flex-direction: column;
@@ -1654,6 +1710,30 @@ body.home-command-page .ori-guide__launcher {
 
 .cockpit-tree-bulkbar[hidden] {
   display: none;
+}
+
+/* The shared danger button writes red on a red tint, about 3:1. In the Tree
+   view the words are in full ink and the clay border and tint carry the
+   warning, which reads at well over 4.5:1 in both themes (FR75). */
+.cockpit-tree .modern-btn-danger,
+.cockpit-tree .modern-btn-danger:hover {
+  border-color: var(--hc-alert);
+  background: color-mix(in srgb, var(--hc-alert) 14%, var(--hc-panel-raised));
+  color: var(--hc-ink);
+}
+
+.cockpit-tree .modern-btn-danger:hover {
+  background: color-mix(in srgb, var(--hc-alert) 26%, var(--hc-panel-raised));
+}
+
+/* The shared primary button fades to a lighter green on which its white
+   words are 4.4:1. Here it is the one darker green throughout. */
+.cockpit-tree .modern-btn-primary {
+  background: var(--primary-color, #1f6b4e);
+}
+
+.cockpit-tree .modern-btn-primary:hover {
+  background: var(--primary-dark, #155039);
 }
 
 .cockpit-tree-bulkcount {
@@ -1981,7 +2061,94 @@ body.home-command-page .ori-guide__launcher {
 
 .cockpit-tree-empty {
   padding: 20px 8px;
-  color: var(--hc-ink-faint);
+  color: var(--hc-ink-dim);
+}
+
+.cockpit-tree-empty-note {
+  margin: -12px 0 0;
+  padding: 0 8px 20px;
+  color: var(--hc-ink-dim);
+  font-size: 12.5px;
+}
+
+/* The filter box (FR65). It sits between the header actions and the tag
+   chips, and stays in place while the rows under it are redrawn. */
+.cockpit-tree-filter {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.cockpit-tree-filter-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--hc-ink-dim);
+  fill: none;
+  pointer-events: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+}
+
+.cockpit-tree-filter-input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 30px 0 28px;
+  border: 1px solid var(--hc-line-bright);
+  border-radius: 6px;
+  background: var(--hc-panel-raised);
+  color: var(--hc-ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.cockpit-tree-filter-input::placeholder {
+  color: var(--hc-ink-dim);
+  opacity: 1;
+}
+
+.cockpit-tree-filter-input:focus {
+  border-color: var(--hc-signal);
+  outline: 2px solid color-mix(in srgb, var(--hc-signal) 35%, transparent);
+  outline-offset: 0;
+}
+
+.cockpit-tree-filter-clear {
+  position: absolute;
+  right: 3px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--hc-ink-dim);
+  cursor: pointer;
+  place-items: center;
+}
+
+.cockpit-tree-filter-clear[hidden] {
+  display: none;
+}
+
+.cockpit-tree-filter-clear:hover {
+  background: var(--hc-panel-deep);
+  color: var(--hc-ink);
+}
+
+@media (pointer: coarse) {
+  .cockpit-tree-filter-input {
+    height: 44px;
+  }
+
+  .cockpit-tree-filter-clear {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 /* Move dialog — the keyboard/touch parity path for drag-and-drop (FR51). */
@@ -2181,6 +2348,10 @@ body.home-command-page .ori-guide__launcher {
 .cockpit-pane-title:focus-visible {
   outline: 2px solid var(--hc-signal);
   outline-offset: 4px;
+}
+
+.cockpit-tree.is-narrow .cockpit-pane-title {
+  font-size: 24px;
 }
 
 .cockpit-pane-sub {

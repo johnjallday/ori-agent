@@ -25,6 +25,8 @@ import {
   capSection,
   loadSection,
   loadSections,
+  RETURN_RELOAD_INTERVAL,
+  shouldReloadOnReturn,
   loadNote,
   saveNoteContent,
   createNote,
@@ -504,6 +506,20 @@ test('loadSections can load only the sections asked for (retry, reload after cre
   assert.deepEqual(Object.keys(states), ['notes']);
 });
 
+test('coming back to the browser tab reloads at most once every 30 seconds (FR21)', () => {
+  assert.equal(RETURN_RELOAD_INTERVAL, 30000);
+  const start = 1_000_000;
+  assert.equal(shouldReloadOnReturn(start + 5000, start), false);
+  assert.equal(shouldReloadOnReturn(start + 29999, start), false);
+  assert.equal(shouldReloadOnReturn(start + 30000, start), true);
+  assert.equal(shouldReloadOnReturn(start + 600000, start), true);
+  // Never reloaded before: nothing to wait for.
+  assert.equal(shouldReloadOnReturn(start, undefined), true);
+  // A clock that cannot be read reloads nothing rather than everything.
+  assert.equal(shouldReloadOnReturn(NaN, start), false);
+  assert.equal(shouldReloadOnReturn(start + 10, start, 5), true);
+});
+
 test('loadSections with no workspace fetches nothing', async () => {
   const fetchImpl = stubFetch(ROUTES);
   assert.deepEqual(await loadSections(null, { fetchImpl }), {});
@@ -675,6 +691,26 @@ test('a file that cannot be read fails with the server reason', async () => {
     '/api/workspaces/ws1/files/gone.md': { status: 404, body: { message: 'File not found' } }
   });
   await assert.rejects(() => loadFilePreview('ws1', 'gone.md', { fetchImpl }), /File not found/);
+});
+
+test('a failed load carries its HTTP status, so "gone" can be told from "failed"', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/files/gone.md': { status: 404, body: { message: 'File not found' } },
+    '/api/workspaces/ws1/tickets/t1': { status: 500, body: { message: 'Backlog store is locked' } }
+    // /api/notes/n1 is not routed at all: the stub answers 404 with no body.
+  });
+  await assert.rejects(
+    () => loadFilePreview('ws1', 'gone.md', { fetchImpl }),
+    error => error.status === 404 && error.message === 'File not found'
+  );
+  await assert.rejects(
+    () => loadTicket('ws1', 't1', { fetchImpl }),
+    error => error.status === 500 && error.message === 'Backlog store is locked'
+  );
+  await assert.rejects(
+    () => loadNote('n1', { fetchImpl }),
+    error => error.status === 404 && error.message === 'HTTP 404'
+  );
 });
 
 test('Open and Reveal post the path inside the workspace', async () => {

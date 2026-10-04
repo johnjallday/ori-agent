@@ -450,6 +450,17 @@ export async function responseErrorMessage(response, fallback) {
   return body.length > 200 ? fallback : body;
 }
 
+/**
+ * The error for a response that was not OK: the server's reason as its
+ * message, and the HTTP status as `status`, so a caller can tell an item that
+ * is gone (404) from a request that failed.
+ */
+export async function responseError(response) {
+  const error = new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+  error.status = response.status;
+  return error;
+}
+
 function resolveFetch(fetchImpl) {
   const impl = fetchImpl || (typeof fetch === 'function' ? fetch : null);
   if (!impl) throw new Error('home-tree-sources: no fetch available');
@@ -464,10 +475,24 @@ export async function loadSection(workspaceId, sectionId, { fetchImpl } = {}) {
     headers: { Accept: 'application/json' }
   });
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+    throw await responseError(response);
   }
   const payload = await response.json();
   return capSection(workspaceId, sectionId, loader.shape(workspaceId, payload));
+}
+
+/**
+ * The least time between two reloads caused by coming back to the browser tab
+ * (FR21). Nothing is pushed from the server, so returning is when the tree
+ * catches up — but flicking between windows must not reload it every time.
+ */
+export const RETURN_RELOAD_INTERVAL = 30000;
+
+/** Whether enough time has passed since the last reload-on-return. */
+export function shouldReloadOnReturn(now, last, interval = RETURN_RELOAD_INTERVAL) {
+  if (!Number.isFinite(now)) return false;
+  if (!Number.isFinite(last)) return true;
+  return now - last >= interval;
 }
 
 // The three states a section can be in. `count` is null until it is known, so
@@ -532,7 +557,7 @@ export function loadSections(workspace, { fetchImpl, sections, onSection } = {})
 async function getJSON(url, fetchImpl) {
   const response = await resolveFetch(fetchImpl)(url, { headers: { Accept: 'application/json' } });
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+    throw await responseError(response);
   }
   return response.json();
 }
@@ -678,7 +703,7 @@ export async function loadFilePreview(workspaceId, path, { size = null, fetchImp
   }
   const response = await resolveFetch(fetchImpl)(url);
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+    throw await responseError(response);
   }
   const body = await response.text();
   if (body.length > FILE_PREVIEW_LIMIT) return { ...preview, tooLarge: true };
@@ -700,7 +725,7 @@ export async function openWorkspaceFile(workspaceId, path, { reveal = false, fet
     }
   );
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+    throw await responseError(response);
   }
 }
 
@@ -719,7 +744,7 @@ async function postJSON(url, body, fetchImpl) {
     body: JSON.stringify(body)
   });
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+    throw await responseError(response);
   }
   return response.json();
 }
@@ -776,7 +801,7 @@ export async function uploadFile(workspaceId, file, folderPath = '', { fetchImpl
     body: form
   });
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+    throw await responseError(response);
   }
   const data = await response.json();
   const meta = (data && data.attachment && data.attachment.file_meta) || {};
@@ -813,7 +838,7 @@ export async function saveNoteContent(noteId, content, { keepalive = false, fetc
   if (keepalive) return null;
   const response = await request;
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+    throw await responseError(response);
   }
   const data = await response.json();
   return { updatedAt: text(data && data.note && data.note.updated_at) };
@@ -825,7 +850,7 @@ export async function loadNote(noteId, { fetchImpl } = {}) {
     headers: { Accept: 'application/json' }
   });
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+    throw await responseError(response);
   }
   const note = await response.json();
   return {

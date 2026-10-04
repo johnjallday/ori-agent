@@ -32,10 +32,16 @@ import {
   rangeSelection,
   rowActivation,
   treeActiveRowId,
-  isWorkspaceRowKind
+  isWorkspaceRowKind,
+  normalizeFilter,
+  hasUnsearchedContents,
+  renderFilterBoxHTML,
+  FILTER_EMPTY_TEXT,
+  FILTER_UNSEARCHED_TEXT
 } from './home-workspace-tree.js';
 import {
   agentsToRows,
+  capSection,
   filesToRows,
   memoryToRows,
   notesToRows,
@@ -1244,4 +1250,214 @@ test('a tag filter that matches nothing says so, rather than showing an empty tr
   assert.match(out, /No workspaces match the selected tags/);
   // With no filter the copy is different, so the two states stay legible.
   assert.match(renderTreeHTML([], { activeTags: new Set() }), /No workspaces yet/);
+});
+
+// ---------------------------------------------------------------------------
+// The filter box (FR65-FR67)
+// ---------------------------------------------------------------------------
+
+function filteredRows(filter, { expanded = [], collapsed = [], contents = {}, draft } = {}) {
+  return visibleTreeRows(tree(), new Set(collapsed), 0, '', {
+    expanded: new Set(expanded),
+    contents,
+    draft,
+    filter
+  });
+}
+const ids = rows => rows.map(r => r.id);
+
+test('normalizeFilter trims and ignores case, and nothing typed is no filter', () => {
+  assert.equal(normalizeFilter('  ArRange '), 'arrange');
+  assert.equal(normalizeFilter(''), '');
+  assert.equal(normalizeFilter('   '), '');
+  assert.equal(normalizeFilter(null), '');
+  assert.equal(normalizeFilter(undefined), '');
+});
+
+test('an empty or blank filter leaves the tree exactly as it was', () => {
+  const options = { expanded: ['w4'], contents: { w4: contentsFor('w4') } };
+  assert.deepEqual(filteredRows('', options), expandedRows(options));
+  assert.deepEqual(filteredRows('   ', options), expandedRows(options));
+});
+
+test('the filter matches a workspace by name and keeps the groups above it (FR65, FR66)', () => {
+  const rows = filteredRows('db');
+  assert.deepEqual(ids(rows), ['g1', 'g2', 'w3']);
+  assert.deepEqual(
+    rows.map(r => r.depth),
+    [0, 1, 2]
+  );
+  // The groups are there only as the way to the match.
+  assert.equal(rows[0].forced, true);
+  assert.equal(rows[1].forced, true);
+  assert.equal(rows[2].forced, undefined);
+});
+
+test('the filter ignores case', () => {
+  assert.deepEqual(ids(filteredRows('STAND')), ['w4']);
+});
+
+test('a group that hides a match is shown open even though it was collapsed (FR66)', () => {
+  const rows = filteredRows('db', { collapsed: ['g1', 'g2'] });
+  assert.deepEqual(ids(rows), ['g1', 'g2', 'w3']);
+  assert.ok(rows.slice(0, 2).every(r => r.expanded === true));
+});
+
+test('a matching group keeps everything inside it, as the user has it', () => {
+  const rows = filteredRows('platform');
+  assert.deepEqual(ids(rows), ['g1', 'w1', 'w2', 'g2', 'w3']);
+  assert.equal(rows[0].forced, undefined);
+  // …including a part of it the user had closed.
+  assert.deepEqual(ids(filteredRows('platform', { collapsed: ['g2'] })), ['g1', 'w1', 'w2', 'g2']);
+  assert.deepEqual(ids(filteredRows('platform', { collapsed: ['g1'] })), ['g1']);
+});
+
+test('a matching workspace opens to all of its contents, not only the matching ones', () => {
+  const options = { expanded: ['w4'], contents: { w4: contentsFor('w4') } };
+  const all = expandedRows(options);
+  const rows = filteredRows('standalone', options);
+  assert.deepEqual(ids(rows), ids(all.slice(all.findIndex(r => r.id === 'w4'))));
+  assert.ok(rows.some(r => r.kind === 'note'));
+  assert.ok(rows.some(r => r.kind === 'memory'));
+  // Closed, it stays closed: the name matched, nothing inside was asked for.
+  assert.deepEqual(ids(filteredRows('standalone', { contents: options.contents })), ['w4']);
+});
+
+test('the filter finds loaded notes, tickets, files and agents by name (FR65)', () => {
+  const contents = { w4: contentsFor('w4') };
+  // The workspace is closed: its loaded contents are searched all the same,
+  // and the way to the match is shown open.
+  assert.deepEqual(ids(filteredRows('arrange', { contents })), ['w4', 'w4/s/notes', 'w4/n/n1']);
+  assert.deepEqual(ids(filteredRows('vocals', { contents })), ['w4', 'w4/s/backlog', 'w4/t/t1']);
+  assert.deepEqual(ids(filteredRows('scout', { contents })), ['w4', 'w4/s/agents', 'w4/a/Scout']);
+  const rows = filteredRows('arrange', { contents });
+  assert.equal(rows[0].expanded, true);
+  assert.equal(rows[0].forced, true);
+  assert.equal(rows[1].expanded, true);
+  assert.equal(rows[1].forced, true);
+  assert.deepEqual(
+    rows.map(r => r.depth),
+    [0, 1, 2]
+  );
+});
+
+test('a file inside a closed folder is found, with the folder shown open (FR66)', () => {
+  const contents = { w4: contentsFor('w4') };
+  const rows = filteredRows('lead', { contents });
+  assert.deepEqual(ids(rows), ['w4', 'w4/s/files', 'w4/d/stems', 'w4/f/stems/lead.wav']);
+  const folder = rows.find(r => r.kind === 'folder');
+  assert.equal(folder.expanded, true);
+  assert.equal(folder.forced, true);
+});
+
+test('a matching folder is kept as the user has it: closed stays closed', () => {
+  const contents = { w4: contentsFor('w4') };
+  assert.deepEqual(ids(filteredRows('stems', { contents })), ['w4', 'w4/s/files', 'w4/d/stems']);
+  assert.deepEqual(ids(filteredRows('stems', { contents, expanded: ['w4/d/stems'] })), [
+    'w4',
+    'w4/s/files',
+    'w4/d/stems',
+    'w4/f/stems/lead.wav'
+  ]);
+});
+
+test('positions describe the filtered rows, not the hidden ones', () => {
+  const rows = filteredRows('arrange', { contents: { w4: contentsFor('w4') } });
+  rows.forEach(row => {
+    assert.equal(row.posInSet, 1, row.id);
+    assert.equal(row.setSize, 1, row.id);
+  });
+});
+
+test('section names, Memory and the placeholder lines never match', () => {
+  // (The fixture's own BACKLOG.md file would be a real match for "backlog".)
+  const contents = {
+    w4: contentsFor('w4', {
+      notes: ready(notesToRows('w4', {})),
+      files: ready(filesToRows('w4', { files: [{ relative_path: 'stems/lead.wav' }] })),
+      agents: loading()
+    })
+  };
+  ['notes', 'backlog', 'files', 'memory', 'agents', 'loading', 'no notes yet'].forEach(word => {
+    assert.deepEqual(ids(filteredRows(word, { contents, expanded: ['w4'] })), [], word);
+  });
+});
+
+test('a section that failed or is still loading has nothing to search', () => {
+  const contents = { w4: contentsFor('w4', { notes: failed('boom'), backlog: loading() }) };
+  assert.deepEqual(ids(filteredRows('arrange', { contents })), []);
+  assert.deepEqual(ids(filteredRows('vocals', { contents })), []);
+  assert.deepEqual(ids(filteredRows('scout', { contents })), ['w4', 'w4/s/agents', 'w4/a/Scout']);
+});
+
+test('the "Open workspace to see all" row is not a match for "open"', () => {
+  const notes = Array.from({ length: 120 }, (_, i) => ({ id: `n${i}`, name: `Take ${i}` }));
+  const shaped = capSection('w4', 'notes', notesToRows('w4', { notes }));
+  const contents = { w4: contentsFor('w4', { notes: ready(shaped) }) };
+  assert.deepEqual(ids(filteredRows('open workspace', { contents })), []);
+  assert.equal(filteredRows('take 7', { contents }).filter(r => r.kind === 'note').length, 11);
+});
+
+test("a group's own notes are searched too", () => {
+  const contents = { g1: contentsFor('g1') };
+  assert.deepEqual(ids(filteredRows('weekly', { contents })), ['g1', 'g1/s/notes', 'g1/n/n2']);
+});
+
+test('a row being named stays on screen while a filter is on', () => {
+  const draft = { workspaceId: 'w4', section: 'notes', kind: 'note', value: 'New idea' };
+  const rows = filteredRows('zzz', { contents: { w4: contentsFor('w4') }, draft });
+  assert.deepEqual(ids(rows), ['w4', 'w4/s/notes', 'w4/draft/notes']);
+});
+
+test('the next sibling is the real one, even when the filter hides it', () => {
+  const rows = filteredRows('api');
+  assert.deepEqual(ids(rows), ['g1', 'w1']);
+  assert.equal(rows.find(r => r.id === 'w1').nextSiblingId, 'w2');
+});
+
+test('hasUnsearchedContents: true while any workspace or group has never been loaded', () => {
+  assert.equal(hasUnsearchedContents(tree(), {}), true);
+  const all = Object.fromEntries(['g1', 'w1', 'w2', 'g2', 'w3', 'w4'].map(id => [id, {}]));
+  assert.equal(hasUnsearchedContents(tree(), all), false);
+  const { w3, ...missingNested } = all;
+  assert.ok(w3);
+  assert.equal(hasUnsearchedContents(tree(), missingNested), true);
+  assert.equal(hasUnsearchedContents([], {}), false);
+  assert.equal(hasUnsearchedContents(null, null), false);
+});
+
+test('no match says so, and adds the second line only when it is true (FR67)', () => {
+  const searched = renderTreeHTML([], { filter: 'zzz', unsearched: false });
+  assert.match(searched, /<p class="cockpit-tree-empty">Nothing matches that filter\.<\/p>/);
+  assert.doesNotMatch(searched, /cockpit-tree-empty-note/);
+  const unsearched = renderTreeHTML([], { filter: 'zzz', unsearched: true });
+  assert.match(unsearched, /Nothing matches that filter\./);
+  assert.match(
+    unsearched,
+    /<p class="cockpit-tree-empty-note">Workspaces that have not been expanded yet are searched only after they are expanded\.<\/p>/
+  );
+  assert.equal(FILTER_EMPTY_TEXT, 'Nothing matches that filter.');
+  assert.ok(unsearched.includes(FILTER_UNSEARCHED_TEXT));
+});
+
+test('the filter message wins over the tag message, and a blank filter is no filter', () => {
+  assert.match(
+    renderTreeHTML([], { filter: 'zzz', activeTags: new Set(['music']) }),
+    /Nothing matches that filter/
+  );
+  assert.match(
+    renderTreeHTML([], { filter: '  ', activeTags: new Set(['music']) }),
+    /No workspaces match the selected tags/
+  );
+});
+
+test('the filter box is a named search field with a clear button that starts hidden', () => {
+  const box = renderFilterBoxHTML();
+  assert.match(box, /data-tree-filter-box role="search"/);
+  assert.match(
+    box,
+    /<input type="text"[^>]*data-tree-filter[^>]*aria-label="Filter the tree by name"/
+  );
+  assert.match(box, /placeholder="Filter"/);
+  assert.match(box, /data-tree-filter-clear[^>]*aria-label="Clear the filter"[^>]*hidden/);
 });

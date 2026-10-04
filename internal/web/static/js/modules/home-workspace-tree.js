@@ -149,10 +149,83 @@ function sectionState(contents, workspaceId, sectionId) {
   return state || { status: SECTION_LOADING, rows: [], count: null, error: '' };
 }
 
+// ---------------------------------------------------------------------------
+// The filter box (FR65-FR67)
+// ---------------------------------------------------------------------------
+//
+// With text in the filter box the tree keeps a row when its name contains the
+// text, and keeps the rows above it so it can be seen. A row kept only as the
+// way to a match is shown open whatever its own state (`forced`), with just
+// the matching rows inside it. A row that matches is shown as the user has
+// it, with everything inside it: finding "Night Drive" and then opening it
+// must show its notes, not an empty list.
+//
+// Only names are matched, and only of things the user made: groups,
+// workspaces, notes, tickets, files, folders and agents. Section headings and
+// the "Loading…" lines never match.
+
+/** The filter box's text as it is compared: trimmed, case ignored. */
+export function normalizeFilter(text) {
+  return String(text == null ? '' : text)
+    .trim()
+    .toLowerCase();
+}
+
+const FILTERED_CONTENT_KINDS = new Set(['note', 'ticket', 'file', 'folder', 'agent']);
+
+function nameMatches(name, filter) {
+  return String(name || '')
+    .toLowerCase()
+    .includes(filter);
+}
+
+// The same context with the filter off, for what is inside a matching row.
+function unfiltered(ctx) {
+  return ctx.filter ? { ...ctx, filter: '' } : ctx;
+}
+
+/**
+ * Whether some workspace or group has never had its contents loaded.
+ *
+ * The filter can only search what has been loaded, and contents load when a
+ * row is expanded; the "nothing matches" message says so when this is true
+ * (FR67).
+ */
+export function hasUnsearchedContents(nodes, contents) {
+  const loaded = contents || {};
+  const walk = list =>
+    (Array.isArray(list) ? list : []).some(
+      node => !!node && (!loaded[node.id] || walk(node.children))
+    );
+  return walk(nodes);
+}
+
 // A row from home-tree-sources.js → an item for the tree, with its folder
-// children when the folder is open.
+// children when the folder is open. With a filter on, null for a row that
+// neither matches nor holds a match.
 function contentItem(source, ctx) {
   const expandable = source.kind === 'folder';
+  if (ctx.filter) {
+    if (!FILTERED_CONTENT_KINDS.has(source.kind)) return null;
+    if (nameMatches(source.label, ctx.filter)) return contentItem(source, unfiltered(ctx));
+    const inside = expandable
+      ? source.children.map(child => contentItem(child, ctx)).filter(Boolean)
+      : [];
+    if (!inside.length) return null;
+    return {
+      row: {
+        id: source.id,
+        kind: source.kind,
+        name: source.label,
+        meta: source.meta || {},
+        workspaceId: source.workspaceId,
+        expandable: true,
+        expanded: true,
+        forced: true
+      },
+      children: inside
+    };
+  }
   const expanded = expandable ? ctx.expanded.has(source.id) : null;
   const item = {
     row: {
@@ -204,6 +277,35 @@ function sectionItems(node, isGroup, ctx) {
     // even a group's section that is hidden for being empty (FR47, FR52).
     const drafting =
       !!ctx.draft && ctx.draft.workspaceId === node.id && ctx.draft.section === info.id;
+
+    // With a filter on, a section is only the way to the matches inside it —
+    // and only what has been loaded can be matched. A row being named stays.
+    if (ctx.filter) {
+      if (!info.expandable) return;
+      const matches =
+        state.status === SECTION_READY
+          ? state.rows.map(source => contentItem(source, ctx)).filter(Boolean)
+          : [];
+      if (drafting) matches.unshift(draftItem(node.id, info.id, ctx.draft));
+      if (!matches.length) return;
+      items.push({
+        row: {
+          id: sectionKey(node.id, info.id),
+          kind: 'section',
+          name: info.label,
+          section: info.id,
+          count: state.count,
+          status: state.status,
+          workspaceId: node.id,
+          expandable: true,
+          expanded: true,
+          forced: true
+        },
+        children: matches
+      });
+      return;
+    }
+
     if (isGroup && !drafting) {
       if (state.status === SECTION_LOADING) return;
       if (state.status === SECTION_READY && !(state.count > 0)) return;
@@ -289,35 +391,50 @@ function draftItem(workspaceId, sectionId, draft) {
 
 function workspaceItems(nodes, ctx) {
   const siblings = (Array.isArray(nodes) ? nodes : []).filter(Boolean);
-  return siblings.map((node, index) => {
-    const children = Array.isArray(node.children) ? node.children.filter(Boolean) : [];
-    const group = isGroupWorkspace(node) || children.length > 0;
-    const kind = group ? 'group' : 'workspace';
-    const expanded = isRowExpanded(kind, node.id, ctx.collapsed, ctx.expanded);
-    const item = {
-      row: {
-        workspace: node,
-        id: node.id,
-        kind,
-        name: node.name || (group ? 'Group' : 'Untitled workspace'),
-        workspaceId: node.id,
-        isGroup: group,
-        hasChildren: children.length > 0,
-        expandable: true,
-        expanded,
-        childCount: children.length,
-        // The next workspace or group at this level, never a section row: it is
-        // what a drop "after this row" is placed in front of.
-        nextSiblingId: (siblings[index + 1] && siblings[index + 1].id) || ''
-      },
-      children: null
-    };
-    if (expanded) {
-      // A group's own children come first, then its sections (FR16).
-      item.children = [...workspaceItems(children, ctx), ...sectionItems(node, group, ctx)];
-    }
-    return item;
-  });
+  return siblings
+    .map((node, index) => {
+      const children = Array.isArray(node.children) ? node.children.filter(Boolean) : [];
+      const group = isGroupWorkspace(node) || children.length > 0;
+      const kind = group ? 'group' : 'workspace';
+      const name = node.name || (group ? 'Group' : 'Untitled workspace');
+      const item = {
+        row: {
+          workspace: node,
+          id: node.id,
+          kind,
+          name,
+          workspaceId: node.id,
+          isGroup: group,
+          hasChildren: children.length > 0,
+          expandable: true,
+          expanded: false,
+          childCount: children.length,
+          // The next workspace or group at this level, never a section row: it
+          // is what a drop "after this row" is placed in front of. It is the
+          // real next one even when a filter hides it.
+          nextSiblingId: (siblings[index + 1] && siblings[index + 1].id) || ''
+        },
+        children: null
+      };
+      // With a filter on, a row whose own name does not match stays only as
+      // the way to the matches inside it, and is shown open.
+      if (ctx.filter && !nameMatches(name, ctx.filter)) {
+        const inside = [...workspaceItems(children, ctx), ...sectionItems(node, group, ctx)];
+        if (!inside.length) return null;
+        item.row.expanded = true;
+        item.row.forced = true;
+        item.children = inside;
+        return item;
+      }
+      const own = unfiltered(ctx);
+      item.row.expanded = isRowExpanded(kind, node.id, own.collapsed, own.expanded);
+      if (item.row.expanded) {
+        // A group's own children come first, then its sections (FR16).
+        item.children = [...workspaceItems(children, own), ...sectionItems(node, group, own)];
+      }
+      return item;
+    })
+    .filter(Boolean);
 }
 
 function appendLevel(rows, items, depth, parentId) {
@@ -353,13 +470,18 @@ function appendLevel(rows, items, depth, parentId) {
  * `options.draft` is a note or ticket being named:
  * `{ workspaceId, section, kind, value }`. It adds one editable row at the top
  * of that section, and shows the section if it would otherwise be hidden.
+ *
+ * `options.filter` is the filter box's text. With it, only rows whose name
+ * contains it are kept, together with the rows above them, which are shown
+ * open and marked `forced` (FR65, FR66).
  */
 export function visibleTreeRows(nodes, collapsedIds, depth = 0, parentId = '', options = {}) {
   const ctx = {
     collapsed: collapsedIds instanceof Set ? collapsedIds : new Set(collapsedIds || []),
     expanded: options.expanded instanceof Set ? options.expanded : new Set(options.expanded || []),
     contents: options.contents || {},
-    draft: options.draft || null
+    draft: options.draft || null,
+    filter: normalizeFilter(options.filter)
   };
   const rows = [];
   appendLevel(rows, workspaceItems(nodes, ctx), depth, parentId);
@@ -690,6 +812,10 @@ function emptyDropHTML(row) {
   );
 }
 
+export const FILTER_EMPTY_TEXT = 'Nothing matches that filter.';
+export const FILTER_UNSEARCHED_TEXT =
+  'Workspaces that have not been expanded yet are searched only after they are expanded.';
+
 /**
  * Render the whole tree.
  *
@@ -702,9 +828,21 @@ export function renderTreeHTML(rows, ctx) {
     tabbableId: (rows[0] && rows[0].id) || '',
     bulkState: {},
     activeTags: new Set(),
+    filter: '',
+    unsearched: false,
     ...(ctx || {})
   };
   if (!rows.length) {
+    // FR67. The second line is there only when it is true: a workspace nobody
+    // has expanded has no contents loaded for the filter to look through.
+    if (normalizeFilter(context.filter)) {
+      return (
+        `<p class="cockpit-tree-empty">${FILTER_EMPTY_TEXT}</p>` +
+        (context.unsearched
+          ? `<p class="cockpit-tree-empty-note">${FILTER_UNSEARCHED_TEXT}</p>`
+          : '')
+      );
+    }
     return context.activeTags && context.activeTags.size > 0
       ? '<p class="cockpit-tree-empty">No workspaces match the selected tags.</p>'
       : '<p class="cockpit-tree-empty">No workspaces yet.</p>';
@@ -899,10 +1037,12 @@ export function mountTree(container, state, callbacks) {
     (state.metadata && state.metadata.tagsById) || {},
     activeTags
   );
+  const filter = normalizeFilter(state.treeFilter);
   const rows = visibleTreeRows(visibleTree, collapsed, 0, '', {
     expanded,
     contents: state.treeContents || {},
-    draft: state.treeDraft || null
+    draft: state.treeDraft || null,
+    filter
   });
   const activeId = treeActiveRowId(state);
 
@@ -931,9 +1071,8 @@ export function mountTree(container, state, callbacks) {
     : null;
   if (!moving) state.treeMoveId = '';
 
-  redrawing.add(container);
-  container.innerHTML =
-    renderToolbarHTML(state) +
+  const toolbarHTML = renderToolbarHTML(state);
+  const belowFilterHTML =
     renderTagFilterBarHTML(state) +
     renderBulkBarHTML(selected.size) +
     '<div class="cockpit-tree-scroll">' +
@@ -941,7 +1080,9 @@ export function mountTree(container, state, callbacks) {
       activeId,
       tabbableId,
       bulkState: bulkSelectionState(state.flattened, selected),
-      activeTags
+      activeTags,
+      filter,
+      unsearched: hasUnsearchedContents(visibleTree, state.treeContents)
     }) +
     '<div class="cockpit-tree-root-drop" data-tree-drop-into="">Drop here to move to the top level</div>' +
     '</div>' +
@@ -955,7 +1096,30 @@ export function mountTree(container, state, callbacks) {
         '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-move-cancel>Cancel</button>' +
         '</div></div>'
       : '<div class="cockpit-tree-move-dialog" data-tree-move-dialog hidden></div>');
+
+  // The filter box is the one part of the column that is never redrawn. The
+  // tree redraws on every character typed into it, and replacing the input
+  // would drop its cursor and break text being composed (an IME).
+  redrawing.add(container);
+  const filterBox = container.querySelector(':scope > [data-tree-filter-box]');
+  if (filterBox) {
+    Array.from(container.children).forEach(child => {
+      if (child !== filterBox) child.remove();
+    });
+    filterBox.insertAdjacentHTML('beforebegin', toolbarHTML);
+    filterBox.insertAdjacentHTML('afterend', belowFilterHTML);
+  } else {
+    container.innerHTML = toolbarHTML + renderFilterBoxHTML() + belowFilterHTML;
+  }
   redrawing.delete(container);
+  syncFilterBox(container, state.treeFilter);
+
+  // "Nothing matches" is said once, when the tree first runs out of matches.
+  const nothingMatches = filter !== '' && rows.length === 0;
+  if (nothingMatches && !state.treeFilterEmpty && typeof cb.onAnnounce === 'function') {
+    cb.onAnnounce(FILTER_EMPTY_TEXT);
+  }
+  state.treeFilterEmpty = nothingMatches;
 
   const scroller = container.querySelector('.cockpit-tree-scroll');
   if (scroller && scrollTop) scroller.scrollTop = scrollTop;
@@ -1075,6 +1239,35 @@ function renderToolbarHTML(state) {
     '</div>' +
     '</div>'
   );
+}
+
+/**
+ * The filter box above the tree (FR65).
+ *
+ * Drawn once and then left in place: `mountTree` redraws everything around
+ * it. The clear button is shown only while there is something to clear.
+ */
+export function renderFilterBoxHTML() {
+  return (
+    '<div class="cockpit-tree-filter" data-tree-filter-box role="search">' +
+    iconHTML('filter', { size: 14, className: 'cockpit-tree-filter-icon' }) +
+    '<input type="text" class="cockpit-tree-filter-input" data-tree-filter ' +
+    'placeholder="Filter" aria-label="Filter the tree by name" ' +
+    'autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">' +
+    '<button type="button" class="cockpit-tree-filter-clear" data-tree-filter-clear ' +
+    `aria-label="Clear the filter" title="Clear the filter" hidden>${iconHTML('close', { size: 12 })}</button>` +
+    '</div>'
+  );
+}
+
+// Bring the box in line with the state: its text when something other than
+// typing changed it (the clear button, Escape), and the clear button itself.
+function syncFilterBox(container, text) {
+  const value = String(text || '');
+  const input = container.querySelector('[data-tree-filter]');
+  if (input && input.value !== value && document.activeElement !== input) input.value = value;
+  const clear = container.querySelector('[data-tree-filter-clear]');
+  if (clear) clear.hidden = value === '';
 }
 
 /**
@@ -1223,6 +1416,32 @@ function bindTree(container, state, cb, rows) {
     if (openMenuFor(row, { x: e.clientX, y: e.clientY }, e)) e.preventDefault();
   });
 
+  // --- the filter box (FR65) -------------------------------------------------
+  // The tree narrows as the text changes. While text is being composed (an
+  // IME) the input reports every keystroke; the tree waits for the composed
+  // text, which arrives with `compositionend`.
+  const applyFilter = value => {
+    if (state.treeFilter === value) return;
+    state.treeFilter = value;
+    rerender();
+  };
+  on('input', e => {
+    if (!e.target.matches('[data-tree-filter]') || e.isComposing) return;
+    applyFilter(e.target.value);
+  });
+  on('compositionend', e => {
+    if (e.target.matches('[data-tree-filter]')) applyFilter(e.target.value);
+  });
+
+  function clearFilter() {
+    const input = container.querySelector('[data-tree-filter]');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    applyFilter('');
+  }
+
   // --- the row being named (FR47, FR48) ------------------------------------
   on('input', e => {
     if (!e.target.matches('[data-tree-draft]') || !state.treeDraft) return;
@@ -1259,6 +1478,7 @@ function bindTree(container, state, cb, rows) {
   const clickActions = [
     // Expand / collapse only: the caret never selects or opens (FR23).
     ['[data-tree-toggle]', el => toggleRow(rowsById.get(el.getAttribute('data-tree-toggle')))],
+    ['[data-tree-filter-clear]', () => clearFilter()],
     [
       '[data-tree-menu-for]',
       el => {
@@ -1373,6 +1593,23 @@ function bindTree(container, state, cb, rows) {
         e.preventDefault();
         e.stopPropagation();
         cancelDraft();
+      }
+      return;
+    }
+
+    // In the filter box: Escape clears it, and Down or Enter goes to the rows.
+    if (e.target.matches && e.target.matches('[data-tree-filter]')) {
+      if (e.isComposing) return;
+      if (e.key === 'Escape' && e.target.value !== '') {
+        e.preventDefault();
+        e.stopPropagation();
+        clearFilter();
+      } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        const first = container.querySelector('[data-tree-row][tabindex="0"]');
+        if (first) {
+          e.preventDefault();
+          first.focus();
+        }
       }
       return;
     }
