@@ -3,6 +3,8 @@ package personalassistant
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +61,71 @@ func TestInterviewSuggestion_FromARealScan(t *testing.T) {
 	if _, err := f.service.StoredOffer(ctx, "local", "  "); !errors.Is(err, ErrValidation) {
 		t.Fatalf("blank offer id err = %v", err)
 	}
+}
+
+// The picker and file modes through the real scan, with only the native dialog
+// replaced: a picked project names itself, and a file picked straight out of a
+// container folder does not turn that container into the answer.
+func TestInterviewSuggestion_FromPickedFoldersAndFiles(t *testing.T) {
+	ctx := context.Background()
+	suggest := func(t *testing.T, f *folderDigestFixture, scan func() (*FolderOfferView, error)) (InterviewSuggestion, bool) {
+		t.Helper()
+		view, err := scan()
+		if err != nil || view == nil {
+			t.Fatalf("scan: view=%+v err=%v", view, err)
+		}
+		offer, err := f.service.StoredOffer(ctx, "local", view.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return InterviewSuggestionFromOffer(offer)
+	}
+
+	t.Run("a picked project folder", func(t *testing.T) {
+		f := newFolderDigestFixture(t)
+		f.service.deps.Picker = fakeFolderPicker{path: filepath.Join(f.home, "Documents", "Thesis"), chosen: true}
+		got, ok := suggest(t, f, func() (*FolderOfferView, error) { return f.service.ScanPicked(ctx, "local") })
+		if !ok || got.Text != "Thesis, a LaTeX manuscript" || got.Folder != "Thesis" {
+			t.Fatalf("suggestion = %+v ok=%v", got, ok)
+		}
+	})
+	t.Run("a file picked inside a project", func(t *testing.T) {
+		f := newFolderDigestFixture(t)
+		f.service.deps.Picker = fakeFolderPicker{path: filepath.Join(f.home, "Documents", "Thesis", "main.tex"), chosen: true}
+		got, ok := suggest(t, f, func() (*FolderOfferView, error) { return f.service.ScanPickedFile(ctx, "local") })
+		if !ok || got.Folder != "Thesis" || strings.Contains(got.Text, "main.tex") {
+			t.Fatalf("suggestion = %+v ok=%v", got, ok)
+		}
+	})
+	t.Run("a file picked straight out of a container folder", func(t *testing.T) {
+		f := newFolderDigestFixture(t)
+		picked := filepath.Join(f.home, "Desktop", "paper.tex")
+		if err := os.WriteFile(picked, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f.service.deps.Picker = fakeFolderPicker{path: picked, chosen: true}
+		view, err := f.service.ScanPickedFile(ctx, "local")
+		if err != nil || view == nil || view.Verdict != "project" || view.Subject.Name != "Desktop" {
+			t.Fatalf("the scan should name Desktop as the project: %+v err=%v", view, err)
+		}
+		offer, err := f.service.StoredOffer(ctx, "local", view.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := InterviewSuggestionFromOffer(offer); ok {
+			t.Fatalf("Desktop was proposed as the answer: %+v", got)
+		}
+	})
+	t.Run("a cancelled dialog scans nothing", func(t *testing.T) {
+		f := newFolderDigestFixture(t)
+		f.service.deps.Picker = fakeFolderPicker{}
+		if view, err := f.service.ScanPicked(ctx, "local"); err != nil || view != nil {
+			t.Fatalf("view=%+v err=%v", view, err)
+		}
+		if offers, err := f.service.WaitingFolderOffers(ctx, "local"); err != nil || len(offers) != 0 {
+			t.Fatalf("a cancelled dialog recorded an offer: %+v err=%v", offers, err)
+		}
+	})
 }
 
 // bidiOverride is U+202E, a character the memory validator refuses. It is built
