@@ -120,6 +120,7 @@
   <link href="/css/character-picker.css" rel="stylesheet">
   <link href="/css/file-janitor.css" rel="stylesheet">
   <link href="/css/setup-wizard.css" rel="stylesheet">
+  <link href="/css/interview-wizard.css" rel="stylesheet">
   <link href="/css/blueprint-intake.css" rel="stylesheet">
   {{if index .Extra "HomeCommandBridge"}}<link href="/css/home-command.css" rel="stylesheet">
   <link href="/css/home-workspace-cockpit.css" rel="stylesheet">{{end}}
@@ -147,6 +148,9 @@
   <script defer src="/js/modules/ori-guide.js"></script>
   <script type="module" src="/js/modules/personal-assistant-panel.js"></script>
   <script type="module" src="/js/modules/assistant-led-setup.js"></script>
+  <!-- Every link to /profile#personalHQInterview opens the interview wizard in
+       place. The launcher fetches nothing until one is clicked. -->
+  <script type="module" src="/js/modules/personal-assistant-interview-launcher.js"></script>
   <!-- The "Set up email" card. Every email setup link points at /?setup=email,
        so the card loads on every page and opens in place. -->
   <link href="/css/email-setup.css" rel="stylesheet">

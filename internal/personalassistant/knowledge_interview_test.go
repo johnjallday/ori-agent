@@ -2,6 +2,7 @@ package personalassistant
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,6 +56,87 @@ func TestKnowledgeInterviewRowReceiptsAndExplicitCompletionAreIdempotent(t *test
 	memory, err := f.memory.Read("hq-local")
 	if err != nil || len(memory.Entries()) != 0 {
 		t.Fatalf("receipts invented canonical memory: %+v %v", memory.Entries(), err)
+	}
+}
+
+func TestKnowledgeInterviewPriorityHintUsesPlainFocusAreaWords(t *testing.T) {
+	// Written out rather than taken from the package constant, so a change to
+	// the wording has to be made on purpose in both places.
+	const fallback = "Name one project or goal, for example “Launch the portfolio site by March”. I'll keep it in mind when I help you."
+	tests := []struct {
+		name  string
+		areas []FocusArea
+		want  string
+	}{
+		{"plan my day", []FocusArea{FocusPlanMyDay}, "You mentioned planning your day. " + fallback},
+		{"commitments", []FocusArea{FocusTrackCommitments}, "You mentioned tracking commitments and follow-ups. " + fallback},
+		{"meetings", []FocusArea{FocusPrepareForMeetings}, "You mentioned preparing for meetings. " + fallback},
+		{"projects", []FocusArea{FocusKeepProjectsMoving}, "You mentioned keeping projects moving. " + fallback},
+		{"email", []FocusArea{FocusHelpWithEmail}, "You mentioned help with email. " + fallback},
+		{"songs", []FocusArea{FocusTrackSongsInProgress}, "You mentioned tracking songs in progress. " + fallback},
+		{"handoffs", []FocusArea{FocusChaseCollaboratorHandoffs}, "You mentioned chasing collaborator handoffs. " + fallback},
+		{"release dates", []FocusArea{FocusKeepReleaseDatesVisible}, "You mentioned keeping release dates visible. " + fallback},
+		{"project files", []FocusArea{FocusOrganizeProjectFiles}, "You mentioned organizing project files. " + fallback},
+		{"first area wins", []FocusArea{FocusHelpWithEmail, FocusPlanMyDay}, "You mentioned help with email. " + fallback},
+		{"something else", []FocusArea{FocusSomethingElse}, fallback},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newKnowledgeFixture(t)
+			ctx := context.Background()
+			state, err := f.relationships.GetState(ctx, "local")
+			if err != nil {
+				t.Fatal(err)
+			}
+			state.FocusAreas = tc.areas
+			if _, err := f.relationships.UpdateState(ctx, state, state.StateVersion); err != nil {
+				t.Fatal(err)
+			}
+			s := NewKnowledgeInterviewService(NewKnowledgeStore(f.resolver(), f.folder))
+			questions, err := s.Questions(ctx, "local")
+			if err != nil || len(questions) == 0 {
+				t.Fatalf("questions=%+v %v", questions, err)
+			}
+			if got := questions[0].Hint; got != tc.want {
+				t.Fatalf("hint = %q, want %q", got, tc.want)
+			}
+			// A question the user cannot picture an answer to gets skipped, so
+			// every question has to show what an answer looks like.
+			for _, question := range questions {
+				if !strings.Contains(question.Hint, "for example “") && !strings.Contains(question.Hint, "For example “") {
+					t.Fatalf("question %q has no example answer in its hint %q", question.ID, question.Hint)
+				}
+			}
+		})
+	}
+	t.Run("working agreement when no focus area is set", func(t *testing.T) {
+		f := newKnowledgeFixture(t)
+		ctx := context.Background()
+		state, err := f.relationships.GetState(ctx, "local")
+		if err != nil {
+			t.Fatal(err)
+		}
+		state.FocusAreas = nil
+		state.Mandate = "Keep my priorities visible."
+		if _, err := f.relationships.UpdateState(ctx, state, state.StateVersion); err != nil {
+			t.Fatal(err)
+		}
+		s := NewKnowledgeInterviewService(NewKnowledgeStore(f.resolver(), f.folder))
+		questions, err := s.Questions(ctx, "local")
+		if err != nil || len(questions) == 0 {
+			t.Fatalf("questions=%+v %v", questions, err)
+		}
+		want := "Your working agreement says “Keep my priorities visible”. " + fallback
+		if got := questions[0].Hint; got != want {
+			t.Fatalf("hint = %q, want %q", got, want)
+		}
+	})
+	// The state store rejects unknown focus areas, so the fallback for one is
+	// checked on the lookup the hint is built from.
+	for _, area := range []FocusArea{FocusSomethingElse, FocusArea("plan_my_decade"), FocusArea("")} {
+		if phrase, ok := focusAreaPhrases[area]; ok {
+			t.Fatalf("focus area %q has a hint phrase %q; it must use the default hint", area, phrase)
+		}
 	}
 }
 

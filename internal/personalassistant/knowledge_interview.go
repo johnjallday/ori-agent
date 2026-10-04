@@ -13,7 +13,7 @@ import (
 
 // InterviewQuestion is a deterministic prompt to the user, never a provider
 // call or an inferred commitment. Answers remain browser-local until an exact
-// final review and explicit Save these facts action.
+// final review and an explicit Save on the wizard's review step.
 type InterviewQuestion struct {
 	ID          string `json:"id"`
 	Prompt      string `json:"prompt"`
@@ -29,6 +29,27 @@ type KnowledgeInterviewService struct {
 	profiles ProfileCASStore
 	now      func() time.Time
 }
+
+// focusAreaPhrases turns a stored focus area into words for the question 1
+// hint. FocusSomethingElse and unknown values are absent on purpose: they get
+// the default hint rather than a raw id.
+var focusAreaPhrases = map[FocusArea]string{
+	FocusPlanMyDay:                 "planning your day",
+	FocusTrackCommitments:          "tracking commitments and follow-ups",
+	FocusPrepareForMeetings:        "preparing for meetings",
+	FocusKeepProjectsMoving:        "keeping projects moving",
+	FocusHelpWithEmail:             "help with email",
+	FocusTrackSongsInProgress:      "tracking songs in progress",
+	FocusChaseCollaboratorHandoffs: "chasing collaborator handoffs",
+	FocusKeepReleaseDatesVisible:   "keeping release dates visible",
+	FocusOrganizeProjectFiles:      "organizing project files",
+}
+
+const (
+	interviewPriorityHint        = "Name one project or goal, for example “Launch the portfolio site by March”. I'll keep it in mind when I help you."
+	interviewCommunicationHint   = "One preference is enough, for example “Keep answers short” or “Use metric units”."
+	interviewPersonOrRoutineHint = "For example “Sam reviews my drafts on Fridays” or “I plan the week every Sunday evening”."
+)
 
 func NewKnowledgeInterviewService(store *KnowledgeStore) *KnowledgeInterviewService {
 	return &KnowledgeInterviewService{store: store, now: time.Now}
@@ -49,21 +70,22 @@ func (s *KnowledgeInterviewService) Questions(ctx context.Context, userID string
 	if err := s.store.checkBinding(ctx, binding); err != nil {
 		return nil, err
 	}
-	hint := "Share one priority to keep in mind; nothing is saved until you review it."
+	// Every hint shows what an answer looks like: a bare question leaves the
+	// user guessing how specific to be.
+	hint := interviewPriorityHint
 	if state != nil {
 		if len(state.FocusAreas) > 0 {
-			area := strings.TrimSpace(string(state.FocusAreas[0]))
-			if len(area) <= 100 && !sensitive.ContainsSecretLikeText(area) {
-				hint = "You mentioned " + area + ". What, if anything, should I remember?"
+			if phrase, ok := focusAreaPhrases[state.FocusAreas[0]]; ok {
+				hint = "You mentioned " + phrase + ". " + interviewPriorityHint
 			}
 		} else if mandate := strings.TrimSpace(state.Mandate); mandate != "" && len(mandate) <= 100 && !sensitive.ContainsSecretLikeText(mandate) {
-			hint = "Your working agreement mentions " + mandate + ". Is there a priority to remember?"
+			hint = "Your working agreement says “" + strings.TrimRight(mandate, ".") + "”. " + interviewPriorityHint
 		}
 	}
 	return []InterviewQuestion{
-		{ID: "priority", Prompt: "What priority or project should I keep in mind?", Hint: hint, Category: "projects", Destination: "personal_hq"},
-		{ID: "communication", Prompt: "How would you like me to communicate or work with you?", Category: "how_you_work", Destination: "profile_or_personal_hq"},
-		{ID: "person_or_routine", Prompt: "Is there a person or recurring routine you'd like me to remember?", Category: "routines", Destination: "personal_hq"},
+		{ID: "priority", Prompt: "What's the main thing you're working on right now?", Hint: hint, Category: "projects", Destination: "personal_hq"},
+		{ID: "communication", Prompt: "How would you like me to communicate or work with you?", Hint: interviewCommunicationHint, Category: "how_you_work", Destination: "profile_or_personal_hq"},
+		{ID: "person_or_routine", Prompt: "Is there a person or recurring routine you'd like me to remember?", Hint: interviewPersonOrRoutineHint, Category: "routines", Destination: "personal_hq"},
 	}, nil
 }
 

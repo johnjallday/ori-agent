@@ -945,6 +945,9 @@ function init() {
     if (state.today)
       renderCompactRows(elements()?.doneItems, todayThreeSectionView(state.today).done);
   });
+  // A saved or deferred interview changes `interview_status`, which decides
+  // whether the "Optional interview" link shows.
+  document.addEventListener('personal-assistant-knowledge-changed', () => void loadToday());
   const more = document.getElementById('personalAssistantTodayMore');
   more?.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !more.open) return;
