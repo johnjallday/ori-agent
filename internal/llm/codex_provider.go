@@ -409,17 +409,22 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
+		msg := codexFailureDetail(stderr.String(), prompt)
 		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
+			msg = codexFailureDetail(stdout.String(), prompt)
 		}
+		interrupted := cliStoppedBySignal(err) || codexTurnInterrupted(msg)
 		if msg == "" {
 			msg = "codex exec failed"
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", fmt.Errorf("%s: %w", msg, ctxErr)
 		}
-		return "", fmt.Errorf("%s: %w", msg, err)
+		runErr := fmt.Errorf("%s: %w", msg, err)
+		if interrupted {
+			return "", NewProviderError(p.Name(), CategoryInterrupted, runErr)
+		}
+		return "", runErr
 	}
 
 	outBytes, err := os.ReadFile(tmpOutPath) // #nosec G304 -- path is returned by os.CreateTemp in this process
