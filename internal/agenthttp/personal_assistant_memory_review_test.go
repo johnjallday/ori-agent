@@ -130,6 +130,12 @@ func TestDetectAssistantMemoryRequest(t *testing.T) {
 		"remember that   Mina's  birthday is 3 March.": "Mina's birthday is 3 March",
 		"Please remember that 미나 생일은 3월 3일":            "미나 생일은 3월 3일",
 		"remember this": "",
+		// Any whitespace after "that" is the same request: the statement is
+		// never dropped because it was typed after a tab or on the next line.
+		"remember that\tMina likes jasmine tea":     "Mina likes jasmine tea",
+		"Remember That\nthe wifi name is Ferns.":    "the wifi name is Ferns",
+		"remember  that   I park on level 2  .  ":   "I park on level 2",
+		"İstanbul trip: remember that I fly at ten": "I fly at ten",
 	} {
 		if got := memoryStatementText(prompt); got != want {
 			t.Errorf("memoryStatementText(%q) = %q; want %q", prompt, got, want)

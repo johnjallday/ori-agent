@@ -8,7 +8,9 @@ import {
   findRememberedFact,
   memoryOutcome,
   memoryRequest,
-  missingValueHint
+  memoryUnavailableMessage,
+  missingValueHint,
+  reviewIsStale
 } from './personal-assistant-memory.js';
 import { MAX_FACT_BYTES, reviewTextValid } from './personal-hq-fact.js';
 
@@ -185,6 +187,26 @@ test('a refused save says why and keeps the wording', () => {
     7
   );
   assert.deepEqual(already, { kind: 'existing', item: approved });
+});
+
+test('a review is bound to the assistant state it was opened against', () => {
+  assert.equal(reviewIsStale(7, 7), false);
+  assert.equal(reviewIsStale(7, 8), true);
+  // Before the panel has reported a state there is nothing to compare with;
+  // the server's own version check still applies to the save.
+  assert.equal(reviewIsStale(0, 8), false);
+  assert.equal(reviewIsStale(undefined, 8), false);
+  assert.equal(reviewIsStale(Number.NaN, 8), false);
+});
+
+test('memory that cannot be read is explained in its own words', () => {
+  assert.equal(
+    memoryUnavailableMessage(409, 'Build Personal HQ before reviewing facts'),
+    'Build Personal HQ before reviewing facts. Nothing was remembered; your wording is still here.'
+  );
+  assert.match(memoryUnavailableMessage(409, ''), /needs attention before a fact/);
+  assert.match(memoryUnavailableMessage(0, ''), /unavailable right now/);
+  assert.match(memoryUnavailableMessage(503, undefined), /your wording is still here/);
 });
 
 test('categories are the existing reviewed-memory categories, with People first', () => {

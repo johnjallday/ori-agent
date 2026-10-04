@@ -15,7 +15,7 @@ export const CONVERSATION_ERRORS = {
   conversation_out_of_scope:
     'That conversation does not belong to your assistant’s Personal HQ. Nothing was sent; your message is back in the box.',
   conversation_unavailable:
-    'Conversation history could not be read. Nothing was sent; your message is back in the box.',
+    'Conversation history could not be read right now. Nothing was sent; your message is back in the box — try again in a moment.',
   assistant_not_ready: 'Finish personal assistant setup before opening conversations.'
 };
 
@@ -30,11 +30,14 @@ export function isPanelRequest(routeContext) {
 }
 
 /**
- * The tab's conversation ID after a reply. A refused conversation is dropped,
- * so the next message starts a new one instead of retrying a dead thread.
+ * The tab's conversation ID after a reply. A conversation that is gone or not
+ * the assistant's is dropped, so the next message starts a new one instead of
+ * retrying a dead thread. A history read that merely failed keeps the ID: the
+ * conversation is still there, and the retry belongs in it.
  */
 export function nextConversationId(currentId, reply) {
   if (!reply) return String(currentId || '');
+  if (reply.error === 'conversation_unavailable') return String(currentId || '');
   if (reply.error) return '';
   return String(reply.id || currentId || '');
 }
@@ -229,10 +232,15 @@ async function resume(id, options = {}) {
     }
     closeReviews();
     const conversation = result.body.conversation;
-    for (const message of result.body.messages || []) {
+    const messages = result.body.messages || [];
+    for (const message of messages) {
       const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
       attachMessage(row, conversation.id, message.id);
     }
+    // The panel keeps a bounded number of rows, so a long conversation shows
+    // its latest part even when the server returned all of it.
+    const shown = document.querySelectorAll('#homeAssistantConversation [data-message-id]').length;
+    const partial = result.body.truncated === true || shown < messages.length;
     // Which replies were saved, read from Personal HQ's Tickets. When that
     // read failed, nothing is labelled rather than labelled "not saved".
     if (Array.isArray(result.body.saved)) {
@@ -243,8 +251,8 @@ async function resume(id, options = {}) {
     closeList();
     setCurrent(conversation.id, conversation.title);
     setNote(
-      result.body.truncated
-        ? 'Showing the most recent messages of this conversation.'
+      partial
+        ? 'Showing the most recent messages of this conversation. Earlier ones are still stored.'
         : 'Continuing this conversation. ' + defaultNote()
     );
     return true;

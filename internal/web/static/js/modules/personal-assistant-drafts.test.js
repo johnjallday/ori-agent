@@ -7,6 +7,7 @@ import {
   draftCounts,
   draftSavePayload,
   draftUpdatePayload,
+  isEditableDraftState,
   pickWorkingDraft,
   receiptSummary,
   resumePlan,
@@ -180,23 +181,49 @@ const savedDraft = {
   href: '/workspaces/my-hq?ticket=t-5'
 };
 
-test('an update is sent against the version the user reviewed, never without one', () => {
-  const update = { current: { ...savedDraft, version: 3 }, target: { workspace_id: 'hq-1' } };
+test('an update is sent against the version and content the user reviewed', () => {
+  const update = {
+    current: { ...savedDraft, version: 3, digest: 'abc123' },
+    target: { workspace_id: 'hq-1' }
+  };
   assert.deepEqual(draftUpdatePayload(update, 'New title', 'New text'), {
     if_version: 3,
+    if_digest: 'abc123',
     title: 'New title',
     body: 'New text',
     target_workspace_id: 'hq-1'
   });
-  // No reviewed version is sent as 0, which the server refuses.
-  assert.equal(draftUpdatePayload({ target: { workspace_id: 'hq-1' } }, 't', 'b').if_version, 0);
+  // Nothing reviewed is sent as 0 and '', which the server refuses.
+  const unreviewed = draftUpdatePayload({ target: { workspace_id: 'hq-1' } }, 't', 'b');
+  assert.equal(unreviewed.if_version, 0);
+  assert.equal(unreviewed.if_digest, '');
   // The payload cannot carry state, owner, assignee, or schedule.
   assert.deepEqual(Object.keys(draftUpdatePayload(update, 't', 'b')).sort(), [
     'body',
+    'if_digest',
     'if_version',
     'target_workspace_id',
     'title'
   ]);
+});
+
+test('a saved draft is updatable from here only until work on it starts', () => {
+  assert.equal(isEditableDraftState('backlog'), true);
+  assert.equal(isEditableDraftState('ready'), true);
+  for (const state of ['in_progress', 'review', 'done', 'cancelled', '', undefined]) {
+    assert.equal(isEditableDraftState(state), false, String(state));
+  }
+});
+
+test('a draft whose source reply was not compared is not called changed', () => {
+  const unknown = { ...savedDraft };
+  delete unknown.matches_source;
+  assert.equal(savedDraftLabel(unknown), 'Saved as #5');
+  assert.doesNotMatch(workingDraftNote(unknown), /changed in Personal HQ/);
+  assert.match(
+    workingDraftNote({ ...savedDraft, matches_source: false }),
+    /changed in Personal HQ/
+  );
 });
 
 test('an update receipt says only the title and text changed', () => {

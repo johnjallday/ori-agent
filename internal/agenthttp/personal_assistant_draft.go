@@ -351,9 +351,27 @@ func (h *HomeAssistantAskHandler) saveDraft(ctx context.Context, req personalAss
 	}
 	receipt, err := h.Drafts.Save(input)
 	if err != nil {
-		return nil, draftSaveError(err)
+		return h.draftSaveOutcomeAfterError(input, target, err)
 	}
 	return draftReceipt(receipt, target), nil
+}
+
+// draftSaveOutcomeAfterError reports a failed save from what is stored now,
+// not from the error alone: a write can fail after the Ticket was persisted.
+// "Nothing was saved" is said only when a read confirms it.
+func (h *HomeAssistantAskHandler) draftSaveOutcomeAfterError(input workspace.AssistantDraftInput, target PersonalAssistantDraftTarget, err error) (*PersonalAssistantDraftReceipt, *draftRefusal) {
+	refusal := draftSaveError(err)
+	if refusal.code != PersonalAssistantDraftUnavailable {
+		return nil, refusal
+	}
+	prior, findErr := h.Drafts.Find(input)
+	switch {
+	case findErr == nil && prior != nil:
+		return draftReceipt(prior, target), nil
+	case findErr != nil:
+		refusal.message = "The backlog could not be written, and Ori could not confirm whether the draft was saved. Try again: the same save is never applied twice."
+	}
+	return nil, refusal
 }
 
 // DraftSaveHandler commits a reviewed draft as one HQ Backlog Ticket.
@@ -368,20 +386,93 @@ func (h *HomeAssistantAskHandler) DraftSaveHandler(w http.ResponseWriter, r *htt
 		refusal.write(w)
 		return
 	}
-	h.recordMutation(r.Context(), homeAssistantConversationIntent.Key, HomeActionCreateBacklogItem)
+	// A replay returns the Ticket an earlier attempt created; nothing was
+	// written this time.
+	if receipt.Created {
+		h.recordMutation(r.Context(), homeAssistantConversationIntent.Key, HomeActionCreateBacklogItem)
+	}
 	orihttp.WriteJSON(w, map[string]any{"receipt": receipt})
 }
 
 // --- the contextual request: "save this draft and put it in my todo list" ---
 
 var (
-	draftSaveLead        = regexp.MustCompile(`^(save|keep|store|put|add)\s+(this|that|it|the|my)\b`)
+	draftSaveLead        = regexp.MustCompile(`^(save|keep|store|put|add)\s+(\S.*)$`)
 	draftSaveDestination = regexp.MustCompile(`\b(to-?do|todos?|backlog|list|hq|for later)\b`)
-	draftSaveNoun        = regexp.MustCompile(`\b(draft|version|greeting|message|text|note|reply|answer|letter|post|one)\b`)
 	draftSaveQualifier   = regexp.MustCompile(`\b(earlier|previous|first|second|third|original|older|other|english|korean|japanese|chinese|spanish|french|german)\b`)
 	draftReminderMention = regexp.MustCompile(`\b(remind|reminder|reminders|notify me|alert me)\b`)
 	draftReminderLead    = regexp.MustCompile(`^(remind me|set (up )?a reminder|set (up )?an alarm)\b`)
 )
+
+// What a draft can be called, which words may describe a version of it, and
+// the words that end the object of the request ("save this draft *to* …").
+var (
+	draftSaveNouns      = wordSet("draft version greeting message text note reply answer letter post one")
+	draftSaveQualifiers = wordSet("earlier previous first second third original older other latest last new english korean japanese chinese spanish french german")
+	draftSaveObjectEnds = wordSet("to in into on onto for as and so then please too now with under at")
+)
+
+// draftSaveObjectWords bounds the describing words in "this birthday greeting".
+const draftSaveObjectWords = 4
+
+func wordSet(words string) map[string]bool {
+	set := map[string]bool{}
+	for _, word := range strings.Fields(words) {
+		set[word] = true
+	}
+	return set
+}
+
+// isDraftSaveObject reports whether the words after the verb name something
+// already in the conversation rather than new content to capture:
+//
+//	it                        save it for later
+//	this / that               save this · save this birthday greeting
+//	the / my + draft noun     save the draft · save the Korean version
+//
+// "the" and "my" may carry only a version qualifier, and "this"/"that" must end
+// in a draft noun when they describe anything. So "add the pricing rewrite to
+// the backlog in Website Redesign" and "add the milk order to my todo list"
+// are literal content, and stay with the existing backlog capture.
+func isDraftSaveObject(rest string) bool {
+	words := strings.Fields(rest)
+	if len(words) == 0 {
+		return false
+	}
+	const punctuation = ".,!?;:"
+	determiner := strings.TrimRight(words[0], punctuation)
+	ended := determiner != words[0]
+	var object []string
+	for _, raw := range words[1:] {
+		if ended {
+			break
+		}
+		word := strings.TrimRight(raw, punctuation)
+		if word == "" || draftSaveObjectEnds[word] {
+			break
+		}
+		object = append(object, word)
+		ended = word != raw
+	}
+	noun := len(object) > 0 && draftSaveNouns[object[len(object)-1]]
+	switch determiner {
+	case "it":
+		return len(object) == 0
+	case "this", "that":
+		return len(object) == 0 || (noun && len(object) <= draftSaveObjectWords)
+	case "the", "my":
+		if !noun {
+			return false
+		}
+		for _, word := range object[:len(object)-1] {
+			if !draftSaveQualifiers[word] {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
 
 // assistantDraftSaveRequest describes a typed request to save a draft.
 type assistantDraftSaveRequest struct {
@@ -400,15 +491,11 @@ type assistantDraftSaveRequest struct {
 func detectAssistantDraftSaveRequest(prompt string) assistantDraftSaveRequest {
 	text := stripCompositionPolitePrefixes(normalizeRouteToken(prompt))
 	lead := draftSaveLead.FindStringSubmatch(text)
-	if lead == nil {
+	if lead == nil || !isDraftSaveObject(lead[2]) {
 		return assistantDraftSaveRequest{}
 	}
-	verb, object := lead[1], lead[2]
-	destination := draftSaveDestination.MatchString(text)
-	switch {
-	case (verb == "put" || verb == "add") && !destination:
-		return assistantDraftSaveRequest{}
-	case (object == "the" || object == "my") && !destination && !draftSaveNoun.MatchString(text):
+	// "put" and "add" need somewhere to put it; "put this away" is not a save.
+	if verb := lead[1]; (verb == "put" || verb == "add") && !draftSaveDestination.MatchString(text) {
 		return assistantDraftSaveRequest{}
 	}
 	return assistantDraftSaveRequest{

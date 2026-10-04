@@ -41,7 +41,10 @@ type PersonalAssistantSavedDraft struct {
 	DisplayNumber string `json:"display_number"`
 	Title         string `json:"title"`
 	// Body is included for a single-draft read or review, not in lists.
-	Body          string `json:"body,omitempty"`
+	Body string `json:"body,omitempty"`
+	// Digest fingerprints the title and body shown here. An update sends it
+	// back as the content it was reviewed against.
+	Digest        string `json:"digest,omitempty"`
 	State         string `json:"state"`
 	StateLabel    string `json:"state_label"`
 	Version       int64  `json:"version"`
@@ -53,8 +56,11 @@ type PersonalAssistantSavedDraft struct {
 	ConversationID string `json:"conversation_id"`
 	MessageID      string `json:"message_id"`
 	// MatchesSource is false when the saved text is no longer the reply it was
-	// saved from (it was edited in Personal HQ or updated since).
-	MatchesSource bool `json:"matches_source"`
+	// saved from (it was edited in Personal HQ or updated since). It is absent
+	// when the source reply could not be read — the conversation is gone, or
+	// the reply is older than the messages read — because "not compared" is
+	// not "changed".
+	MatchesSource *bool `json:"matches_source,omitempty"`
 	// NewerReplies counts assistant replies after the source message that are
 	// not saved to this Ticket.
 	NewerReplies int `json:"newer_replies"`
@@ -80,6 +86,7 @@ func savedDraftView(link workspace.AssistantDraftLink, withBody bool) PersonalAs
 	}
 	if withBody {
 		view.Body = ticket.Description
+		view.Digest = workspace.AssistantDraftContentDigest(ticket.Title, ticket.Description)
 	}
 	return view
 }
@@ -93,7 +100,8 @@ func labelSavedDraft(view *PersonalAssistantSavedDraft, savedBody string, messag
 		isReply := strings.EqualFold(strings.TrimSpace(message.Role), llm.RoleAssistant) && strings.TrimSpace(message.Content) != ""
 		if message.ID == view.MessageID {
 			found = true
-			view.MatchesSource = strings.TrimSpace(message.Content) == savedBody
+			matches := strings.TrimSpace(message.Content) == savedBody
+			view.MatchesSource = &matches
 			continue
 		}
 		if found && isReply {
@@ -239,7 +247,9 @@ func (h *HomeAssistantAskHandler) DraftUpdateReviewHandler(w http.ResponseWriter
 }
 
 type personalAssistantDraftUpdateRequest struct {
+	// IfVersion and IfDigest are the reviewed draft's version and digest.
 	IfVersion         int64  `json:"if_version"`
+	IfDigest          string `json:"if_digest"`
 	Title             string `json:"title"`
 	Body              string `json:"body"`
 	TargetWorkspaceID string `json:"target_workspace_id"`
@@ -269,7 +279,8 @@ func (h *HomeAssistantAskHandler) DraftUpdateHandler(w http.ResponseWriter, r *h
 		return
 	}
 	receipt, err := h.Drafts.Update(workspace.AssistantDraftUpdateInput{
-		WorkspaceID: target.WorkspaceID, TicketID: link.Ticket.ID, IfVersion: req.IfVersion, Title: req.Title, Body: req.Body,
+		WorkspaceID: target.WorkspaceID, TicketID: link.Ticket.ID,
+		IfVersion: req.IfVersion, IfDigest: req.IfDigest, Title: req.Title, Body: req.Body,
 	})
 	var changed *workspace.AssistantDraftChangedError
 	switch {
@@ -288,16 +299,45 @@ func (h *HomeAssistantAskHandler) DraftUpdateHandler(w http.ResponseWriter, r *h
 		savedDraftNotFound().write(w)
 		return
 	case err != nil:
-		refusal := draftSaveError(err)
-		refusal.message = strings.ReplaceAll(refusal.message, "Nothing was saved", "Nothing was changed")
-		refusal.write(w)
-		return
+		verified, refusal := h.draftUpdateOutcomeAfterError(target.WorkspaceID, link.Ticket.ID, req, err)
+		if refusal != nil {
+			refusal.write(w)
+			return
+		}
+		receipt = verified
 	}
-	h.recordMutation(r.Context(), homeAssistantConversationIntent.Key, "update_backlog_item")
+	// A replay of an update that already landed changed nothing this time.
+	if receipt.Applied {
+		h.recordMutation(r.Context(), homeAssistantConversationIntent.Key, "update_backlog_item")
+	}
 	orihttp.WriteJSON(w, map[string]any{"receipt": PersonalAssistantDraftUpdateReceipt{
 		PersonalAssistantSavedDraft: savedDraftView(workspace.AssistantDraftLink{Ticket: receipt.Ticket, Key: link.Key}, false),
 		Applied:                     receipt.Applied,
 	}})
+}
+
+// draftUpdateOutcomeAfterError reports a failed update from what is stored now,
+// not from the error alone: a write can fail after the Ticket was changed.
+// "Nothing was changed" is said only when a read confirms it.
+func (h *HomeAssistantAskHandler) draftUpdateOutcomeAfterError(workspaceID, ticketID string, req personalAssistantDraftUpdateRequest, err error) (*workspace.AssistantDraftUpdateReceipt, *draftRefusal) {
+	refusal := draftSaveError(err)
+	refusal.message = strings.ReplaceAll(refusal.message, "Nothing was saved", "Nothing was changed")
+	if refusal.code != PersonalAssistantDraftUnavailable {
+		return nil, refusal
+	}
+	latest, getErr := h.Drafts.Get(workspaceID, ticketID)
+	title, body, _, normalizeErr := workspace.NormalizeAssistantDraft(req.Title, req.Body)
+	if getErr == nil && normalizeErr == nil {
+		ticket := latest.Ticket
+		if ticket.Version == req.IfVersion+1 && ticket.Title == title && ticket.Description == body {
+			return &workspace.AssistantDraftUpdateReceipt{Ticket: ticket, Applied: true}, nil
+		}
+		if ticket.Version == req.IfVersion && workspace.AssistantDraftContentDigest(ticket.Title, ticket.Description) == strings.TrimSpace(req.IfDigest) {
+			return nil, refusal
+		}
+	}
+	refusal.message = "The saved draft could not be written, and Ori could not confirm whether it changed. Open it in Personal HQ to check, then try again."
+	return nil, refusal
 }
 
 // --- the saved draft as conversation context ---

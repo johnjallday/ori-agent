@@ -62,11 +62,17 @@ func (f *draftFixture) updateReview(t *testing.T, ticketID, messageID string) (i
 		map[string]string{"conversation_id": "conv-1", "message_id": messageID})
 }
 
-// update proposes the Korean reply as the saved draft's new text.
-func (f *draftFixture) update(t *testing.T, ticketID string, version any, title string) (int, map[string]any) {
+// contentDigest is the digest a review of this Ticket carries.
+func contentDigest(ticket workspace.Ticket) string {
+	return workspace.AssistantDraftContentDigest(ticket.Title, ticket.Description)
+}
+
+// update proposes the Korean reply as the saved draft's new text, reviewed
+// against the given version and content digest.
+func (f *draftFixture) update(t *testing.T, ticketID string, version, digest any, title string) (int, map[string]any) {
 	t.Helper()
 	return f.ticketCall(t, f.handler.DraftUpdateHandler, http.MethodPost, ticketID, map[string]any{
-		"if_version": version, "title": title, "body": koreanDraft, "target_workspace_id": f.hq.ID,
+		"if_version": version, "if_digest": digest, "title": title, "body": koreanDraft, "target_workspace_id": f.hq.ID,
 	})
 }
 
@@ -120,6 +126,9 @@ func TestSavedDraft_OpensWithOrWithoutItsConversation(t *testing.T) {
 	if status != http.StatusOK || draft["body"] != englishDraft || draft["version"] != float64(ticket.Version) || conversation["available"] != true || conversation["id"] != "conv-1" {
 		t.Fatalf("status=%d body=%v", status, body)
 	}
+	if draft["matches_source"] != true {
+		t.Fatalf("matches_source=%v; the saved text is still the reply it came from", draft["matches_source"])
+	}
 
 	delete(f.store.sessions, "conv-1")
 	sessionsBefore := len(f.store.sessions)
@@ -127,6 +136,10 @@ func TestSavedDraft_OpensWithOrWithoutItsConversation(t *testing.T) {
 	draft, conversation = body["draft"].(map[string]any), body["conversation"].(map[string]any)
 	if status != http.StatusOK || draft["body"] != englishDraft || conversation["available"] != false || conversation["reason"] != PersonalAssistantConversationNotFound {
 		t.Fatalf("after chat deletion: status=%d body=%v", status, body)
+	}
+	// With no reply left to compare, the saved text is not reported as changed.
+	if value, present := draft["matches_source"]; present {
+		t.Fatalf("matches_source=%v for a draft whose source reply could not be read; want it absent", value)
 	}
 	if len(f.store.sessions) != sessionsBefore || len(f.ticketsIn(t, f.hq.ID)) != 1 || len(f.provider.requests) != 0 {
 		t.Fatalf("opening a saved draft recreated the chat, changed Tickets, or called the model")
@@ -172,11 +185,14 @@ func TestSavedDraft_ReviewThenUpdateChangesTheSameTicket(t *testing.T) {
 	if current["body"] != englishDraft || current["version"] != float64(ticket.Version) || update["body"] != koreanDraft || update["title"] != ticket.Title {
 		t.Fatalf("review must show the saved text and the proposal: %v", update)
 	}
+	if current["digest"] != contentDigest(ticket) {
+		t.Fatalf("the review must name the content it shows: %v", current["digest"])
+	}
 	if got := f.currentTicket(t, ticket.ID); got.Version != ticket.Version || got.Description != englishDraft {
 		t.Fatalf("opening the update review changed the Ticket: %+v", got)
 	}
 
-	status, body = f.update(t, ticket.ID, ticket.Version, "Birthday greeting (Korean)")
+	status, body = f.update(t, ticket.ID, ticket.Version, current["digest"], "Birthday greeting (Korean)")
 	receipt, _ := body["receipt"].(map[string]any)
 	if status != http.StatusOK || receipt["applied"] != true || receipt["ticket_id"] != ticket.ID || receipt["version"] != float64(ticket.Version+1) {
 		t.Fatalf("update: %d %v", status, body)
@@ -190,7 +206,7 @@ func TestSavedDraft_ReviewThenUpdateChangesTheSameTicket(t *testing.T) {
 	}
 
 	// 3.5: the same update again (a lost response) applies nothing twice.
-	status, body = f.update(t, ticket.ID, ticket.Version, "Birthday greeting (Korean)")
+	status, body = f.update(t, ticket.ID, ticket.Version, current["digest"], "Birthday greeting (Korean)")
 	receipt, _ = body["receipt"].(map[string]any)
 	if status != http.StatusOK || receipt["applied"] != false || f.currentTicket(t, ticket.ID).Version != ticket.Version+1 {
 		t.Fatalf("retry: %d %v", status, body)
@@ -206,7 +222,7 @@ func TestSavedDraft_StaleUpdateIsRefusedWithTheCurrentVersion(t *testing.T) {
 	if _, err := f.tickets.Update(f.hq.ID, ticket.ID, workspace.TicketUpdateInput{Description: &outside, IfVersion: ticket.Version}); err != nil {
 		t.Fatal(err)
 	}
-	status, body := f.update(t, ticket.ID, ticket.Version, ticket.Title)
+	status, body := f.update(t, ticket.ID, ticket.Version, contentDigest(ticket), ticket.Title)
 	current, _ := body["current"].(map[string]any)
 	if status != http.StatusConflict || body["error"] != PersonalAssistantSavedDraftChanged || current == nil {
 		t.Fatalf("status=%d body=%v", status, body)
@@ -217,9 +233,48 @@ func TestSavedDraft_StaleUpdateIsRefusedWithTheCurrentVersion(t *testing.T) {
 	if got := f.currentTicket(t, ticket.ID); got.Description != outside || len(f.ticketsIn(t, f.hq.ID)) != 1 {
 		t.Fatalf("a stale update overwrote the edit or became a new Ticket: %+v", got)
 	}
-	// The fresh version lets the user's proposal through.
-	if status, _ := f.update(t, ticket.ID, current["version"], ticket.Title); status != http.StatusOK {
+	// The fresh version and content let the user's proposal through.
+	if status, _ := f.update(t, ticket.ID, current["version"], current["digest"], ticket.Title); status != http.StatusOK {
 		t.Fatalf("update after refresh: %d", status)
+	}
+}
+
+// An editor that rewrites the saved text without moving its version (the old
+// task routes do) still makes the review stale: the update names the content
+// it was reviewed against, not only the version.
+func TestSavedDraft_EditThatKeepsTheVersionIsNotOverwritten(t *testing.T) {
+	f := newDraftFixture(t)
+	ticket := savedEnglish(t, f)
+	ws, err := f.workspaces.Get(f.hq.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const renamed = "Renamed in the old task panel"
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == ticket.ID {
+			ws.Tasks[i].Description = renamed
+		}
+	}
+	if err := f.workspaces.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.currentTicket(t, ticket.ID); got.Title != renamed || got.Version != ticket.Version {
+		t.Fatalf("fixture: the edit must change the text and keep the version: %+v", got)
+	}
+
+	status, body := f.update(t, ticket.ID, ticket.Version, contentDigest(ticket), ticket.Title)
+	current, _ := body["current"].(map[string]any)
+	if status != http.StatusConflict || body["error"] != PersonalAssistantSavedDraftChanged || current == nil || current["title"] != renamed {
+		t.Fatalf("status=%d body=%v", status, body)
+	}
+	if got := f.currentTicket(t, ticket.ID); got.Title != renamed || got.Description != englishDraft {
+		t.Fatalf("a stale update overwrote the edit: %+v", got)
+	}
+
+	// An update that does not say what it was reviewed against is refused.
+	status, body = f.update(t, ticket.ID, ticket.Version, "", ticket.Title)
+	if status != http.StatusUnprocessableEntity || body["error"] != PersonalAssistantDraftInvalid || f.currentTicket(t, ticket.ID).Description != englishDraft {
+		t.Fatalf("no reviewed content: status=%d body=%v", status, body)
 	}
 }
 
@@ -266,7 +321,7 @@ func TestSavedDraft_UpdateRefusals(t *testing.T) {
 			}
 			before := f.ticketsIn(t, f.hq.ID)
 			status, body := f.ticketCall(t, f.handler.DraftUpdateHandler, http.MethodPost, ticket.ID, map[string]any{
-				"if_version": version, "title": ticket.Title, "body": koreanDraft, "target_workspace_id": target,
+				"if_version": version, "if_digest": contentDigest(ticket), "title": ticket.Title, "body": koreanDraft, "target_workspace_id": target,
 			})
 			if status != tc.status || body["error"] != tc.code || body["receipt"] != nil {
 				t.Fatalf("status=%d body=%v; want %d %s", status, body, tc.status, tc.code)
@@ -361,7 +416,7 @@ func TestSavedDraft_RenamedAssistantStillOpensItsConversation(t *testing.T) {
 	if conversation := body["conversation"].(map[string]any); status != http.StatusOK || conversation["available"] != true {
 		t.Fatalf("after rename: status=%d body=%v", status, body)
 	}
-	if status, _ := f.update(t, ticket.ID, ticket.Version, ticket.Title); status != http.StatusOK {
+	if status, _ := f.update(t, ticket.ID, ticket.Version, contentDigest(ticket), ticket.Title); status != http.StatusOK {
 		t.Fatalf("update after rename: %d", status)
 	}
 }
@@ -378,7 +433,7 @@ func TestSavedDraft_NoModelIsNeededToSaveResumeOrUpdate(t *testing.T) {
 	if status, _ := f.updateReview(t, ticket.ID, "m4"); status != http.StatusOK {
 		t.Fatalf("update review without a model: %d", status)
 	}
-	if status, _ := f.update(t, ticket.ID, ticket.Version, ticket.Title); status != http.StatusOK {
+	if status, _ := f.update(t, ticket.ID, ticket.Version, contentDigest(ticket), ticket.Title); status != http.StatusOK {
 		t.Fatalf("update without a model: %d", status)
 	}
 	if len(f.provider.requests) != 0 {
@@ -400,6 +455,111 @@ func (failingDraftSaver) Update(workspace.AssistantDraftUpdateInput) (*workspace
 	return nil, errors.New("write /hq/workspace.json: no space left on device")
 }
 
+// landedDraftSaver performs the real write and then reports a failure, the way
+// a store can fail after the Ticket is already persisted.
+type landedDraftSaver struct {
+	PersonalAssistantDraftSaver
+}
+
+func (s landedDraftSaver) Save(input workspace.AssistantDraftInput) (*workspace.AssistantDraftReceipt, error) {
+	if _, err := s.PersonalAssistantDraftSaver.Save(input); err != nil {
+		return nil, err
+	}
+	return nil, errors.New("sync /hq/BACKLOG.md: device busy")
+}
+
+func (s landedDraftSaver) Update(input workspace.AssistantDraftUpdateInput) (*workspace.AssistantDraftUpdateReceipt, error) {
+	if _, err := s.PersonalAssistantDraftSaver.Update(input); err != nil {
+		return nil, err
+	}
+	return nil, errors.New("sync /hq/BACKLOG.md: device busy")
+}
+
+// blindDraftSaver fails a write and every read after it, so the outcome of the
+// write cannot be checked.
+type blindDraftSaver struct {
+	PersonalAssistantDraftSaver
+	broken bool
+}
+
+var errDraftStoreGone = errors.New("read /hq/workspace.json: input/output error")
+
+func (s *blindDraftSaver) Save(workspace.AssistantDraftInput) (*workspace.AssistantDraftReceipt, error) {
+	s.broken = true
+	return nil, errDraftStoreGone
+}
+
+func (s *blindDraftSaver) Update(workspace.AssistantDraftUpdateInput) (*workspace.AssistantDraftUpdateReceipt, error) {
+	s.broken = true
+	return nil, errDraftStoreGone
+}
+
+func (s *blindDraftSaver) Find(input workspace.AssistantDraftInput) (*workspace.AssistantDraftReceipt, error) {
+	if s.broken {
+		return nil, errDraftStoreGone
+	}
+	return s.PersonalAssistantDraftSaver.Find(input)
+}
+
+func (s *blindDraftSaver) Get(workspaceID, ticketID string) (*workspace.AssistantDraftLink, error) {
+	if s.broken {
+		return nil, errDraftStoreGone
+	}
+	return s.PersonalAssistantDraftSaver.Get(workspaceID, ticketID)
+}
+
+// A8: a failed write is reported from what is stored, not from the error. A
+// write that landed before failing is a save; a failure whose outcome cannot be
+// read is "could not confirm", never "nothing was saved".
+func TestSavedDraft_FailureIsReportedFromWhatIsStored(t *testing.T) {
+	t.Run("the write landed before the error", func(t *testing.T) {
+		f := newDraftFixture(t)
+		f.handler.SetDraftSaver(landedDraftSaver{PersonalAssistantDraftSaver: f.handler.Drafts})
+
+		review := mustReview(t, f, "m4")
+		status, body := f.save(t, review, nil)
+		receipt, _ := body["receipt"].(map[string]any)
+		tickets := f.ticketsIn(t, f.hq.ID)
+		if status != http.StatusOK || receipt == nil || len(tickets) != 1 || receipt["ticket_id"] != tickets[0].ID {
+			t.Fatalf("a save that landed must be reported as saved: %d %v (tickets=%d)", status, body, len(tickets))
+		}
+		// The same save again is still that one Ticket.
+		if status, _ := f.save(t, review, nil); status != http.StatusOK || len(f.ticketsIn(t, f.hq.ID)) != 1 {
+			t.Fatalf("retry after a landed save: %d, tickets=%d", status, len(f.ticketsIn(t, f.hq.ID)))
+		}
+
+		ticket := tickets[0]
+		status, body = f.update(t, ticket.ID, ticket.Version, contentDigest(ticket), "Birthday greeting, renamed")
+		receipt, _ = body["receipt"].(map[string]any)
+		if status != http.StatusOK || receipt == nil || receipt["applied"] != true || f.currentTicket(t, ticket.ID).Title != "Birthday greeting, renamed" {
+			t.Fatalf("an update that landed must be reported as applied: %d %v", status, body)
+		}
+	})
+
+	t.Run("the outcome cannot be read", func(t *testing.T) {
+		f := newDraftFixture(t)
+		ticket := savedEnglish(t, f)
+		blind := &blindDraftSaver{PersonalAssistantDraftSaver: f.handler.Drafts}
+		f.handler.SetDraftSaver(blind)
+
+		status, body := f.save(t, mustReview(t, f, "m4"), nil)
+		message, _ := body["message"].(string)
+		if status != http.StatusServiceUnavailable || strings.Contains(message, "Nothing was saved") || !strings.Contains(message, "could not confirm") {
+			t.Fatalf("unverifiable save: %d %v", status, body)
+		}
+		if strings.Contains(message, "workspace.json") || strings.Contains(message, "input/output") {
+			t.Fatalf("storage error text leaked to the user: %q", message)
+		}
+
+		blind.broken = false
+		status, body = f.update(t, ticket.ID, ticket.Version, contentDigest(ticket), ticket.Title)
+		message, _ = body["message"].(string)
+		if status != http.StatusServiceUnavailable || strings.Contains(message, "Nothing was changed") || !strings.Contains(message, "could not confirm") {
+			t.Fatalf("unverifiable update: %d %v", status, body)
+		}
+	})
+}
+
 // A8: a storage failure is reported as "nothing was saved/changed" without
 // leaking the underlying error, and nothing is written.
 func TestSavedDraft_StorageFailureIsReportedHonestly(t *testing.T) {
@@ -417,7 +577,7 @@ func TestSavedDraft_StorageFailureIsReportedHonestly(t *testing.T) {
 		t.Fatalf("storage error text leaked to the user: %q", message)
 	}
 
-	status, body = f.update(t, ticket.ID, ticket.Version, ticket.Title)
+	status, body = f.update(t, ticket.ID, ticket.Version, contentDigest(ticket), ticket.Title)
 	message, _ = body["message"].(string)
 	if status != http.StatusServiceUnavailable || !strings.Contains(message, "Nothing was changed") || strings.Contains(message, "workspace.json") {
 		t.Fatalf("update failure: %d %v", status, body)

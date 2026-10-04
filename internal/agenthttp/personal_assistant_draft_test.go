@@ -367,6 +367,29 @@ func TestDraftRequest_AsksInsteadOfGuessing(t *testing.T) {
 	}
 }
 
+// Explicit project capture is unchanged: literal content named for another
+// workspace's backlog still gets that workspace's own confirmation, in or out
+// of a conversation, instead of being taken for a draft save and declined.
+func TestDraftRequest_LiteralBacklogCaptureKeepsItsWorkspace(t *testing.T) {
+	f := newDraftFixture(t)
+	for _, conversation := range []string{"conv-1", ""} {
+		resp := f.ask("add the pricing rewrite to the backlog in Thesis", conversation)
+		if resp.DraftReview != nil || !resp.RequiresConfirmation || resp.Confirmation == nil ||
+			resp.Confirmation.ActionType != HomeActionCreateBacklogItem {
+			t.Fatalf("conversation %q: literal capture was not offered: %+v", conversation, resp)
+		}
+		if got := resp.Confirmation.Arguments["workspace_id"]; got != f.project.ID {
+			t.Fatalf("conversation %q: capture target = %v, want the named project %s", conversation, got, f.project.ID)
+		}
+		if got := resp.Confirmation.Arguments["description"]; got != "the pricing rewrite" {
+			t.Fatalf("conversation %q: captured %q", conversation, got)
+		}
+	}
+	if len(f.provider.requests) != 0 || len(f.ticketsIn(t, f.hq.ID)) != 0 || len(f.ticketsIn(t, f.project.ID)) != 0 {
+		t.Fatalf("an unconfirmed capture called the model or wrote a Ticket")
+	}
+}
+
 // A8: a reminder request does not block the save and is never promised.
 func TestDraftRequest_ReminderIsDeclinedWithoutBlockingTheSave(t *testing.T) {
 	f := newDraftFixture(t)
@@ -408,11 +431,21 @@ func TestDetectAssistantDraftSaveRequest(t *testing.T) {
 		"save this draft and put it in my todo list", "Save this", "please save that for later",
 		"can you save it to my backlog", "keep this", "put it in my to-do list", "add this to my backlog",
 		"save the draft", "save the Korean version", "store this in HQ",
+		"save this birthday greeting to my todo list", "keep that one", "save the earlier draft",
+		"save my draft, and remind me tomorrow", "Save this.", "add this draft to my backlog",
 	}
 	notSaves := []string{
 		"", "save the date for the party", "add buy milk to my todo list", "put the kettle on",
 		"how do I save a file?", "write a note about saving money", "saved by the bell",
 		"add a task to the Thesis backlog", "keep going", "make it warmer",
+		// Literal content belongs to the existing backlog capture, not to a
+		// draft save — with or without a destination word.
+		"add the pricing rewrite to the backlog in Website Redesign",
+		"add the milk order to my todo list",
+		"add this pricing rewrite to the Thesis backlog",
+		"save my passport renewal to the list",
+		"put the pricing note in the Thesis backlog",
+		"put this away", "add it up",
 	}
 	for _, prompt := range saves {
 		if !detectAssistantDraftSaveRequest(prompt).save {

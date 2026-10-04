@@ -243,10 +243,11 @@ func TestDraftResumeAndUpdate_ProductionWiring(t *testing.T) {
 	if status != http.StatusOK || update["body"] != revised || update["current"].(map[string]any)["body"] != first {
 		t.Fatalf("update review: %d %v", status, body)
 	}
-	version := update["current"].(map[string]any)["version"]
+	savedNow := update["current"].(map[string]any)
 
 	status, body = f.call(t, http.MethodPost, draftPath+"/update", map[string]any{
-		"if_version": version, "title": update["title"], "body": revised, "target_workspace_id": f.hqID,
+		"if_version": savedNow["version"], "if_digest": savedNow["digest"],
+		"title": update["title"], "body": revised, "target_workspace_id": f.hqID,
 	})
 	if receipt, _ := body["receipt"].(map[string]any); status != http.StatusOK || receipt["applied"] != true || receipt["ticket_id"] != ticketID {
 		t.Fatalf("update: %d %v", status, body)
@@ -265,7 +266,8 @@ func TestDraftResumeAndUpdate_ProductionWiring(t *testing.T) {
 		t.Fatalf("outside edit: %d %v", status, patched)
 	}
 	status, body = f.call(t, http.MethodPost, draftPath+"/update", map[string]any{
-		"if_version": tickets[0].Version, "title": update["title"], "body": first, "target_workspace_id": f.hqID,
+		"if_version": tickets[0].Version, "if_digest": workspace.AssistantDraftContentDigest(tickets[0].Title, tickets[0].Description),
+		"title": update["title"], "body": first, "target_workspace_id": f.hqID,
 	})
 	current, _ := body["current"].(map[string]any)
 	if status != http.StatusConflict || body["error"] != agenthttp.PersonalAssistantSavedDraftChanged || current["body"] != "Edited in Personal HQ" {

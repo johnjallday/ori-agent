@@ -136,11 +136,7 @@ export function memoryOutcome(status, item, readback, text, usedVersion, reason 
   }
   if (status === 409 && readback?.ok) {
     if (readback.stateVersion !== usedVersion) {
-      return {
-        kind: 'stale',
-        message:
-          'Your assistant’s setup changed while this was open. Nothing was remembered; your wording is still here — save again to use the current state.'
-      };
+      return { kind: 'stale', message: STALE_REVIEW_MESSAGE };
     }
     const why = String(reason || '').trim() || 'Personal HQ memory needs attention first';
     return {
@@ -155,11 +151,40 @@ export function memoryOutcome(status, item, readback, text, usedVersion, reason 
   };
 }
 
+/** Why Personal HQ memory could not be read before a save, in its own words when it gave any. */
+export function memoryUnavailableMessage(status, reason) {
+  const why =
+    String(reason || '').trim() ||
+    (status === 409
+      ? 'Personal HQ memory needs attention before a fact can be remembered'
+      : 'Personal HQ memory is unavailable right now');
+  return `${why.replace(/[.\s]+$/u, '')}. Nothing was remembered; your wording is still here.`;
+}
+
+/**
+ * Whether the assistant's state moved between opening the review and saving.
+ * The review was read against `openedVersion`; a save is only sent for that
+ * same state, so a hire, pause, or HQ change while it was open is noticed
+ * instead of being saved into whatever exists now.
+ */
+export function reviewIsStale(openedVersion, currentVersion) {
+  return (
+    Number.isSafeInteger(openedVersion) && openedVersion > 0 && openedVersion !== currentVersion
+  );
+}
+
+const STALE_REVIEW_MESSAGE =
+  'Your assistant’s setup changed while this was open. Nothing was remembered; your wording is still here — check it, then save again to use the current setup.';
+
 const state = {
   open: false,
   saving: false,
   retry: null,
   trigger: null,
+  // The assistant state version the panel last reported, and the one this
+  // review was opened against.
+  knownVersion: 0,
+  openedVersion: 0,
   els: null
 };
 
@@ -193,6 +218,7 @@ async function readKnowledge() {
     ok: result.ok && Number.isSafeInteger(stateVersion) && stateVersion > 0,
     status: result.status,
     stateVersion,
+    reason: result.ok ? '' : String(result.body?.message || ''),
     items: Array.isArray(result.body?.items) ? result.body.items : []
   };
 }
@@ -228,6 +254,7 @@ function open(review = {}, options = {}) {
   window.PersonalAssistantDrafts?.close?.();
   state.open = true;
   state.retry = null;
+  state.openedVersion = state.knownVersion;
   state.trigger = options.trigger || document.activeElement;
   const source = String(review.source || '').trim();
   els.source.hidden = !source;
@@ -294,17 +321,21 @@ async function submit(event) {
   sync();
   setStatus('Remembering…');
   try {
-    // The assistant's current state is read fresh for every attempt; the
-    // server refuses a save made against an older one.
+    // What is remembered now, and the assistant's current state. The server
+    // refuses a save made against an older state.
     const current = await readKnowledge();
     if (!current.ok) {
-      setStatus(
-        current.status === 409
-          ? 'Personal HQ memory needs attention before a fact can be remembered. Nothing was remembered; your wording is still here.'
-          : 'Personal HQ memory is unavailable right now. Nothing was remembered; your wording is still here.'
-      );
+      setStatus(memoryUnavailableMessage(current.status, current.reason));
       return false;
     }
+    if (reviewIsStale(state.openedVersion, current.stateVersion)) {
+      // Said once: the next save is the user's choice against the current state.
+      state.openedVersion = current.stateVersion;
+      state.retry = null;
+      setStatus(STALE_REVIEW_MESSAGE);
+      return false;
+    }
+    state.openedVersion = current.stateVersion;
     const existing = findRememberedFact(current.items, text);
     if (existing) {
       showReceipt({ kind: 'existing', item: existing }, text);
@@ -341,6 +372,8 @@ async function submit(event) {
       showReceipt(outcome, text);
       return true;
     }
+    // Told once; the next save is against the state just read.
+    if (outcome.kind === 'stale') state.openedVersion = readback.stateVersion;
     setStatus(outcome.message);
     if (outcome.kind === 'invalid') els.text.focus();
     return false;
@@ -407,6 +440,12 @@ function init() {
     })
   );
   state.els.facts.href = FACTS_HREF;
+  // The panel reports the relationship it loaded; a review opened later is
+  // bound to that state.
+  document.addEventListener('personal-assistant:status', event => {
+    const version = Number(event.detail?.personalAssistant?.state_version);
+    if (Number.isSafeInteger(version) && version > 0) state.knownVersion = version;
+  });
   form.addEventListener('submit', event => void submit(event));
   state.els.text.addEventListener('input', sync);
   state.els.cancel.addEventListener('click', close);

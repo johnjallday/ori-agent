@@ -126,10 +126,15 @@ export function saveFailure(status, body) {
   return { kind: 'blocked', message: message || 'This draft cannot be saved from here.' };
 }
 
-/** The update request: the form's text against the version the user reviewed. */
+/**
+ * The update request: the form's text against the saved draft the user
+ * reviewed — its version and the digest of the text they were shown. Both are
+ * sent because some editors change a Ticket's text without moving its version.
+ */
 export function draftUpdatePayload(update, title, body) {
   return {
     if_version: Number(update?.current?.version) || 0,
+    if_digest: String(update?.current?.digest || ''),
     title: String(title ?? ''),
     body: String(body ?? ''),
     target_workspace_id: String(update?.target?.workspace_id || '')
@@ -169,7 +174,7 @@ export function updateFailure(status, body) {
       kind: 'stale',
       current: body.current,
       message:
-        'This saved draft was changed in Personal HQ after you opened the review. Nothing was overwritten. The current version is shown below; check it, then update again if you still want to.'
+        'This saved draft was changed in Personal HQ after you opened the review. Nothing was overwritten. What is saved now is shown above under “Currently saved”; check it, then update again if you still want to.'
     };
   }
   if (status === 0 || status >= 500 || code === 'draft_save_unavailable') {
@@ -182,6 +187,11 @@ export function updateFailure(status, body) {
     };
   }
   return { kind: 'blocked', message: message || 'This saved draft cannot be updated from here.' };
+}
+
+/** A saved draft can be updated from a conversation until work on it starts. */
+export function isEditableDraftState(state) {
+  return state === 'backlog' || state === 'ready';
 }
 
 /** The label on a reply that was saved, including how the saved copy has moved on. */
@@ -364,7 +374,8 @@ function present(mode, review, options) {
 /** Opens the save review. Nothing has been saved at this point. */
 function open(review, options = {}) {
   const els = state.els;
-  if (!els || !review?.operation_id) return false;
+  // A save in flight keeps its form: its receipt must land on its own review.
+  if (!els || !review?.operation_id || state.saving) return false;
   present('save', review, options);
   els.heading.textContent = SAVE_ACTION_LABEL;
   els.target.textContent = `Saves to ${review.target?.name || 'Personal HQ'} · ${review.placement || 'Backlog'}`;
@@ -380,7 +391,7 @@ function open(review, options = {}) {
 /** Opens the update review: what is saved now, and the proposed revision. */
 function openUpdate(update, options = {}) {
   const els = state.els;
-  if (!els || !update?.current?.ticket_id) return false;
+  if (!els || !update?.current?.ticket_id || state.saving) return false;
   present('update', update, options);
   const number = update.current.display_number || 'saved draft';
   els.heading.textContent = `${UPDATE_ACTION_LABEL} ${number}`;
@@ -447,7 +458,8 @@ async function submitSave() {
     showReceipt(receiptSummary(receipt), receipt.href);
     setWorking({
       ...receipt,
-      editable: true,
+      // A retried save can return a Ticket whose work has since started.
+      editable: isEditableDraftState(receipt.state),
       matches_source: !receipt.changed_since,
       newer_replies: 0,
       conversation_id: review.source?.conversation_id,

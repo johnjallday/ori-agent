@@ -726,14 +726,17 @@ browser supplies one thing: an opaque conversation ID, or none.
 
 | Request | Result |
 |---|---|
-| No conversation ID | A new conversation. The session is created when the first turn is stored, so a failed first turn leaves nothing behind. |
+| No conversation ID | A new conversation. The session is created when the first turn is stored. A first turn that gets no answer, or that cannot be stored whole, leaves nothing behind: the session made for it is discarded. |
 | A conversation ID in scope | That conversation continues. |
 | An ID that no longer exists | Refused as `conversation_not_found`. Nothing is recreated. |
 | An ID in another workspace, bound to another agent, or left behind by a replaced assistant or a changed HQ | Refused as `conversation_out_of_scope`. |
 | The session store cannot be read | Refused as `conversation_unavailable`. |
 
-A refusal calls no model, stores nothing, and offers **New conversation**; the
-user's text stays in the composer. The server never adopts the tab's active
+A refusal calls no model and stores nothing; the user's text stays in the
+composer. A conversation that is gone or out of scope is dropped by the tab, so
+the next message starts a new one. `conversation_unavailable` is a failed read,
+not a dead thread: the tab keeps its conversation and the retry stays in it.
+The server never adopts the tab's active
 session, the route context's `session_id`, an `X-Session-ID` header, the most
 recent session, or a session found by title or agent display name. A rename
 keeps conversations in scope because the rename already carries session
@@ -754,7 +757,11 @@ them, so a later action can name the exact message it means.
 
 A turn is stored only after it is answered: the user's message, then the
 assistant's reply. If the reply cannot be stored, the answer is still shown and
-marked as not saved; Ori does not claim history it does not have.
+marked as not saved; Ori does not claim history it does not have. In an
+existing conversation the user's message may already be in its history when the
+reply fails to store. A turn carries no retry key, so sending a message again
+after its response was lost stores that turn again; unlike a save, a repeated
+turn writes nothing outside the conversation.
 
 A conversation stores answered turns and nothing else. A request for an action
 ("save this draft", "remember that…", "create a workspace…"), its review or
@@ -767,13 +774,30 @@ reply the user can point at, and no stored text ever stands in for an approval.
 | Kind | Where it lives | Who reads it |
 |---|---|---|
 | Unsent input | The composer only | No one until Send |
-| Conversation history | The session's messages, until the user deletes the session with the existing session controls | That one conversation |
+| Conversation history | The session's messages in Personal HQ, until the user deletes the session with the existing session controls | That conversation's own turns, and whatever already reads Personal HQ's sessions (below) |
 | Long-term memory | Reviewed Personal HQ memory and the global Profile | Every eligible assistant turn |
 
-Conversation history is never copied into memory, Today, Daily Brief, another
-conversation, or another agent's prompt. Deleting a conversation removes its
-history and nothing else: a saved Ticket or a remembered fact has its own owner
-and stays. Translating one message does not change the profile language.
+Conversation history is never copied into reviewed memory or the Profile, never
+replayed into another conversation's prompt, and never available to Ori Help.
+Deleting a conversation removes its history and nothing else: a saved Ticket or
+a remembered fact has its own owner and stays. Translating one message does not
+change the profile language.
+
+A conversation is an ordinary session in Personal HQ, not a private store. It
+is therefore visible wherever Personal HQ's sessions already are, exactly like a
+chat started from the HQ's own page:
+
+- **Personal HQ's session list**, where it is renamed and deleted.
+- **Daily Brief and the `home_sessions` tool**, which list recent sessions by
+  title and opening words. A conversation's title is the first line of its
+  first request, so that line can appear there.
+- **Agents working in Personal HQ**, which can list the HQ's sessions and read
+  their messages through the existing workspace session tools.
+
+Nothing in this feature adds a reader, and nothing hides these conversations
+from the existing ones. Keeping them out of Daily Brief or away from other HQ
+agents would be a separate decision about session visibility; it is not made
+here.
 
 ### Context bounds
 
@@ -783,8 +807,10 @@ agreement, Profile, reviewed HQ memory). The window is the most recent 40
 messages within 24,000 characters; one message contributes at most 6,000.
 Older turns stay stored and are left out of the prompt, and the response says
 so. Only user and assistant messages are replayed. A stored system-role message
-is never replayed, and an imported message is replayed as quoted history, not
-as a turn.
+is never replayed. A message from an imported history is not replayed as
+something the user or the assistant said here: it is given to the model as
+escaped reference data inside one quoting element, labelled as untrusted and
+never an instruction, and its text cannot close that element.
 
 No other workspace's transcript is injected. The read-only `home_*` tools
 return counts and titles, not message text.
@@ -864,8 +890,9 @@ The Ticket itself is the durable record of the save. Its immutable source key is
 assistant-draft:<conversation id>:<message id>:<operation id>:<payload digest>
 ```
 
-where the digest covers the target workspace and the normalized title and body.
-The key holds references and a fingerprint, never content. There is no
+where the digest covers the target workspace and the normalized title and body,
+each hashed with its length so no field's content can pass for a field
+boundary. The key holds references and a fingerprint, never content. There is no
 operation table, no stored review, and no second copy of the draft.
 
 | Attempt | Result |
@@ -887,10 +914,16 @@ failure.
 - **Saved**: read back from the Ticket — its number, state, owner workspace,
   and a link (`/workspaces/<slug>?ticket=<id>`). "Unassigned and not scheduled"
   is stated only when the Ticket shows it.
-- **Not saved**: a validation or refusal response. The form keeps the user's
-  text.
-- **Unknown**: no response arrived. Ori says it could not confirm the save and
-  offers the same save again; it does not claim success or failure.
+- **Not saved**: a validation or refusal response, or a failed write after
+  which a read confirms nothing was stored. The form keeps the user's text.
+- **Unknown**: no response arrived, or the write failed and what is stored
+  could not be read. Ori says it could not confirm the save and offers the same
+  save again; it does not claim success or failure.
+
+A failed write is reported from what is stored, not from the error: a write
+that failed after the Ticket was persisted is reported as saved, with that
+Ticket. The same holds for an update. A storage error's own text is logged and
+never shown.
 
 Ori cannot deliver reminders. A save request that also asks for one opens the
 review with that limitation stated and saves without a reminder; a reminder
@@ -899,8 +932,15 @@ request alone gets the limitation and no promise.
 ### Resuming a saved draft
 
 A saved draft is found by its canonical Ticket ID. There is no draft catalog,
-no title search, and no "most recent" guess. The link between a Ticket and its
-conversation is the Ticket's own source key, read and re-validated every time.
+no title search, and no "most recent session" guess. The link between a Ticket
+and its conversation is the Ticket's own source key, read and re-validated
+every time.
+
+A conversation can have several saved drafts, and each saved reply keeps its
+own "Saved as #n". The one a tab is *working on* — the draft a turn reads and
+**Update saved draft #n** names — is the one it already had, or, when a
+conversation is reopened in a tab that had none, the one saved from the latest
+reply. The number is always shown before anything is updated.
 
 | Starting from | What happens |
 |---|---|
@@ -914,7 +954,9 @@ The saved copy and the conversation are separate sources and neither is changed
 to match the other:
 
 - `matches_source: false` — the saved text is no longer the reply it was saved
-  from (edited in Personal HQ, or updated since). The label says so.
+  from (edited in Personal HQ, or updated since). The label says so. The field
+  is absent when that reply could not be read (the conversation is gone, or the
+  reply is older than the messages read): not compared is not "changed".
 - `newer_replies` — replies after the saved one. They are not part of the saved
   item until the user updates it.
 
@@ -934,18 +976,25 @@ conversation never deletes a saved Ticket or a remembered fact.
 **Update saved draft** is a second reviewed action on the same Ticket.
 
 - `POST /api/home-assistant/drafts/{ticketID}/review` writes nothing. It
-  returns the text saved now, its version, and the proposal: the chosen reply,
-  with the current title kept unless the user changes it.
+  returns the text saved now, its version, a digest of that title and text, and
+  the proposal: the chosen reply, with the current title kept unless the user
+  changes it.
 - `POST /api/home-assistant/drafts/{ticketID}/update` applies the reviewed
-  title and text through `TicketService.Update` with the reviewed version. A
-  version is required; there is no unversioned update.
+  title and text through `TicketService.Update`. It must name what was
+  reviewed — the version (`if_version`) and the digest (`if_digest`). Both are
+  required; there is no unversioned or unreviewed update.
+
+The version catches every canonical change. The digest is there because some
+older editors (the task routes, the markdown sync) rewrite a Ticket's text
+without moving its version; with the version alone, a review from before such
+an edit would overwrite it.
 
 It changes the title and the text. It cannot change state, owner, assignment,
 due date, schedule, or provenance, and it never creates a Ticket.
 
 | Situation | Result |
 |---|---|
-| The Ticket was edited, promoted, or otherwise changed since the review | `saved_draft_changed` with the current Ticket. Nothing is overwritten; the user's proposal stays in the form and is reviewed against the current version. |
+| The Ticket was edited, promoted, reordered, or otherwise changed since the review — by version or by content | `saved_draft_changed` with the current Ticket. Nothing is overwritten; the user's proposal stays in the form and is reviewed against what is saved now. Reordering the backlog moves every Ticket's version, so it also makes an open review stale: the check fails toward asking again. |
 | The same update is sent again after it landed (a lost response) | Recognized from the Ticket itself — exactly the reviewed text at exactly the next version — and reported as already applied. Nothing is written twice. |
 | The Ticket was deleted | `saved_draft_not_found`. It is not restored, and the update does not become a new save. |
 | Work has started or the Ticket is closed (In Progress, Review, Done, Cancelled) | `saved_draft_not_editable`. It is edited in Personal HQ. Backlog and Ready drafts can be updated. |
@@ -1004,8 +1053,8 @@ refused whole and stays in the form — it is never cut to fit.
 | Saved and read back | "Remembered in Personal HQ", with a link to review, edit, or forget it. |
 | The exact wording is already remembered | Reported as already remembered. Nothing is added. |
 | The response was lost, or the save could not be confirmed | The canonical list is read. If the fact is there it is reported as remembered; otherwise the user is told it could not be confirmed, and the same save — same retry key — can be sent again without being applied twice. |
-| The assistant's state changed while the review was open | Nothing is remembered; the wording stays in the form and the next save uses the current state. |
-| Personal HQ memory will not take it (queue full, needs repair, no HQ) | The reason the memory service gives is shown as given; the wording stays in the form. |
+| The assistant's state changed while the review was open (a pause, a rename, a rebuilt HQ) | The review is bound to the state version the panel had loaded when it opened. A save against a state that has since moved is not sent: the user is told once, the wording stays in the form, and saving again is their choice against the current state. The server independently refuses a save that names an older state version. |
+| Personal HQ memory cannot be read, or will not take the fact (queue full, needs repair, no HQ) | The reason the memory service gives is shown as given; the wording stays in the form. |
 
 A remembered fact creates no Ticket, follow-up, schedule, or notification, does
 not change the global profile, and adds nothing to the conversation. Editing or
@@ -1013,7 +1062,8 @@ forgetting it on the remembered-facts page changes reviewed memory from then
 on. It does not edit history: a conversation in which the fact was said still
 shows it, and continuing that same conversation still includes its own earlier
 turns. History is never turned back into a remembered fact, so forgetting is
-not undone by an old transcript, and other conversations do not see it.
+not undone by an old transcript, and that conversation's messages are not
+replayed into any other conversation.
 
 A paused assistant follows the same canonical service: the user can still
 remember a fact, and — as for all reviewed memory — a paused assistant is not
@@ -1363,6 +1413,35 @@ The package/API/browser suites must pin at least these cases:
 | Time-only commitment | `needs_decision` Follow-Up shown in preview before save |
 | Journal presentation | hidden in hire/Home; visible under Advanced “Assistant support” only |
 | Rename/restart | stable assistant/instance/workspace IDs; new display name everywhere |
+| Drafting request, then “make it warmer”, then “give it to me in Korean” | one conversation, one canonical Session in Personal HQ; no workspace, agent, Ticket, or fact created by drafting |
+| Conversation ID from another agent, another workspace, or the browser's chat session | refused; never adopted, never listed, nothing answered against it |
+| Request with no model configured, or a failed turn | truthful refusal; nothing stored; the typed text is returned to the composer |
+| Opening or cancelling the draft review | zero Tickets |
+| Confirmed draft save | one unassigned, unscheduled Backlog Ticket in the current Personal HQ holding the exact reviewed text |
+| Same save repeated (double click, retry, restart) | the same Ticket; `created: false` |
+| Same review ID with a changed title or text | `409`; nothing written |
+| Reopened saved draft | read only; the Ticket's version is unchanged |
+| Update reviewed against an older version, or against text an editor rewrote without moving the version | `saved_draft_changed`; the outside edit is kept and the proposal stays in the form |
+| Update with no reviewed version or no reviewed digest | refused; nothing written |
+| Write that fails after the Ticket was stored | reported as saved (or applied) from the stored Ticket; a failure whose outcome cannot be read is reported as unconfirmed, never as "nothing was saved" |
+| First turn of a new conversation that cannot be stored whole | the answer is shown as not saved; no empty or half-stored conversation remains |
+| Literal backlog capture naming another workspace ("add the pricing rewrite to the backlog in Thesis"), in or out of a conversation | that workspace's existing confirmation; never taken for a draft save |
+| Fact review opened, then the assistant's state changes | the save is not sent; the user is told and chooses again |
+| Update of a deleted, started, closed, or ordinary Ticket | refused; never restored, never turned into a new save |
+| Saved draft whose conversation was deleted | the Ticket still opens; a new conversation starts only when chosen; the deleted one is not recreated |
+| **Remember…** on a reply, a request, or “remember this” | review opens empty; no model call, no stored turn, zero facts |
+| Message about a birthday with no date | a hint that the date is missing; no date supplied |
+| Confirmed fact | one approved explicit fact in reviewed HQ memory; zero Tickets, follow-ups, schedules, or profile changes |
+| Fact over 500 UTF-8 bytes, multi-line, padded, or secret-like | refused whole; never cut |
+| Fact save repeated under the same key, or the same wording again | one fact |
+| Fact save whose response is lost | reported as unconfirmed, not as saved or failed; the retry reuses the same key |
+
+The conversation, draft, and memory rows are pinned by the handler and service
+tests in `internal/agenthttp`, `internal/workspace`, and `internal/server`, and
+in a browser by `tests/personal-assistant-drafts.spec.ts`. That spec has two
+groups: one with no mocks against real Sessions, Tickets, and facts, and one
+that mocks only the model's reply to check the panel. Neither proves what a
+model writes.
 
 ## Canonical onboarding evidence
 

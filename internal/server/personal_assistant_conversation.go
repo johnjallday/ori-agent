@@ -16,6 +16,7 @@ type personalAssistantConversationStore interface {
 	AddMessage(ctx context.Context, sessionID string, message *session.Message) error
 	GetMessages(ctx context.Context, sessionID string) ([]session.Message, error)
 	ListSessions(ctx context.Context, filter *session.SessionFilter, opts *session.ListOptions) (*session.ListResult, error)
+	DeleteSession(ctx context.Context, id string) error
 }
 
 // personalAssistantConversationAdapter presents canonical Sessions as the
@@ -82,6 +83,12 @@ func (a personalAssistantConversationAdapter) Append(ctx context.Context, id, ro
 	return agenthttp.PersonalAssistantConversationMessage{
 		ID: message.ID, Role: role, Content: content, CreatedAt: message.CreatedAt,
 	}, nil
+}
+
+// Discard deletes a session that Create just made and whose first turn could
+// not be stored, so a failed first turn leaves no empty conversation behind.
+func (a personalAssistantConversationAdapter) Discard(ctx context.Context, id string) error {
+	return a.store.DeleteSession(ctx, id)
 }
 
 func (a personalAssistantConversationAdapter) List(ctx context.Context, workspaceID, agentName string, limit int) ([]agenthttp.PersonalAssistantConversationRecord, error) {

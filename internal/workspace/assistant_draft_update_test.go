@@ -18,13 +18,21 @@ func saveDraftForUpdate(t *testing.T) (*AssistantDraftService, *TicketService, *
 
 const revisedDraft = "미나야, 생일 축하해! 🎂 올해도 건강하고 행복하길."
 
+// reviewedUpdate is an update reviewed against the Ticket as it was read: its
+// version and its content.
+func reviewedUpdate(workspaceID string, reviewed Ticket, title, body string) AssistantDraftUpdateInput {
+	return AssistantDraftUpdateInput{
+		WorkspaceID: workspaceID, TicketID: reviewed.ID, IfVersion: reviewed.Version,
+		IfDigest: AssistantDraftContentDigest(reviewed.Title, reviewed.Description),
+		Title:    title, Body: body,
+	}
+}
+
 // A4: an approved update changes the same Ticket's title and body and nothing
 // else.
 func TestAssistantDraftUpdate_ChangesOnlyTitleAndBody(t *testing.T) {
 	drafts, tickets, hq, saved := saveDraftForUpdate(t)
-	receipt, err := drafts.Update(AssistantDraftUpdateInput{
-		WorkspaceID: hq.ID, TicketID: saved.ID, IfVersion: saved.Version, Title: " Birthday greeting (shorter) ", Body: "\n" + revisedDraft + "\n",
-	})
+	receipt, err := drafts.Update(reviewedUpdate(hq.ID, saved, " Birthday greeting (shorter) ", "\n"+revisedDraft+"\n"))
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -53,9 +61,7 @@ func TestAssistantDraftUpdate_StaleReviewIsRefusedWithTheCurrentTicket(t *testin
 	if _, err := tickets.Update(hq.ID, saved.ID, TicketUpdateInput{Description: &outside, IfVersion: saved.Version}); err != nil {
 		t.Fatalf("outside edit: %v", err)
 	}
-	_, err := drafts.Update(AssistantDraftUpdateInput{
-		WorkspaceID: hq.ID, TicketID: saved.ID, IfVersion: saved.Version, Title: saved.Title, Body: revisedDraft,
-	})
+	_, err := drafts.Update(reviewedUpdate(hq.ID, saved, saved.Title, revisedDraft))
 	var changed *AssistantDraftChangedError
 	if !errors.As(err, &changed) || !errors.Is(err, ErrTicketVersionConflict) {
 		t.Fatalf("err=%v; want AssistantDraftChangedError", err)
@@ -69,12 +75,70 @@ func TestAssistantDraftUpdate_StaleReviewIsRefusedWithTheCurrentTicket(t *testin
 	}
 }
 
+// Some editors rewrite a Ticket's text without moving its version (the legacy
+// task routes and the markdown sync write the task's description, which is the
+// Ticket's title). The version alone would let a review from before that edit
+// overwrite it, so the reviewed content is compared too.
+func TestAssistantDraftUpdate_TextChangedWithoutAVersionChangeIsStale(t *testing.T) {
+	drafts, _, hq, saved := saveDraftForUpdate(t)
+	store := drafts.backlog.store
+	ws, err := store.Get(hq.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const legacy = "Renamed in the old task panel"
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == saved.ID {
+			ws.Tasks[i].Description = legacy
+		}
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	edited, err := drafts.Get(hq.ID, saved.ID)
+	if err != nil || edited.Ticket.Title != legacy || edited.Ticket.Version != saved.Version {
+		t.Fatalf("fixture: the edit must change the text and keep the version: %+v err=%v", edited, err)
+	}
+
+	_, err = drafts.Update(reviewedUpdate(hq.ID, saved, saved.Title, revisedDraft))
+	var changed *AssistantDraftChangedError
+	if !errors.As(err, &changed) || changed.Current.Title != legacy {
+		t.Fatalf("err=%v; want AssistantDraftChangedError carrying the edit", err)
+	}
+	if after, _ := drafts.Get(hq.ID, saved.ID); after.Ticket.Title != legacy || after.Ticket.Description != saved.Description || after.Ticket.Version != saved.Version {
+		t.Fatalf("a stale update overwrote the edit: %+v", after.Ticket)
+	}
+	// Reviewed against what is stored now, the proposal applies.
+	receipt, err := drafts.Update(reviewedUpdate(hq.ID, edited.Ticket, legacy, revisedDraft))
+	if err != nil || !receipt.Applied || receipt.Ticket.Title != legacy || receipt.Ticket.Description != revisedDraft {
+		t.Fatalf("update after a fresh review: %+v err=%v", receipt, err)
+	}
+}
+
+// One field's content can never pass for another's: a save whose title and
+// text were split differently is a different save.
+func TestAssistantDraftDigest_FieldBoundariesAreUnambiguous(t *testing.T) {
+	if AssistantDraftDigest("ws", "A\x00B", "C") == AssistantDraftDigest("ws", "A", "B\x00C") {
+		t.Fatal("a NUL in the title collided with a different title/text split")
+	}
+	if AssistantDraftDigest("ws", "AB", "C") == AssistantDraftDigest("ws", "A", "BC") {
+		t.Fatal("moving text between the title and the body kept the digest")
+	}
+	if AssistantDraftContentDigest("AB", "C") == AssistantDraftContentDigest("A", "BC") {
+		t.Fatal("the content digest ignores the field boundary")
+	}
+	first, again := AssistantDraftDigest("ws", "A", "B"), AssistantDraftDigest("ws", "A", "B")
+	if first != again || len(first) != assistantDraftDigestLength {
+		t.Fatalf("the digest is not stable or not the expected length: %q %q", first, again)
+	}
+}
+
 // A4/3.5: a retry of an update that already landed is recognized from the
 // Ticket itself and applies nothing twice. A later outside change is not
 // mistaken for it.
 func TestAssistantDraftUpdate_RetryAfterLostResponseIsNotASecondWrite(t *testing.T) {
 	drafts, tickets, hq, saved := saveDraftForUpdate(t)
-	input := AssistantDraftUpdateInput{WorkspaceID: hq.ID, TicketID: saved.ID, IfVersion: saved.Version, Title: saved.Title, Body: revisedDraft}
+	input := reviewedUpdate(hq.ID, saved, saved.Title, revisedDraft)
 	first, err := drafts.Update(input)
 	if err != nil {
 		t.Fatalf("first update: %v", err)
@@ -105,7 +169,7 @@ func TestAssistantDraftUpdate_DeletedTicketIsNotRecreated(t *testing.T) {
 	if err := tickets.Delete(hq.ID, saved.ID, 0); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	_, err := drafts.Update(AssistantDraftUpdateInput{WorkspaceID: hq.ID, TicketID: saved.ID, IfVersion: saved.Version, Title: saved.Title, Body: revisedDraft})
+	_, err := drafts.Update(reviewedUpdate(hq.ID, saved, saved.Title, revisedDraft))
 	if !errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("err=%v; want ErrTicketNotFound", err)
 	}
@@ -119,8 +183,8 @@ func TestAssistantDraftUpdate_DeletedTicketIsNotRecreated(t *testing.T) {
 // all, even with a fresh version.
 func TestAssistantDraftUpdate_RespectsTheTicketLifecycle(t *testing.T) {
 	drafts, tickets, hq, saved := saveDraftForUpdate(t)
-	update := func(version int64) error {
-		_, err := drafts.Update(AssistantDraftUpdateInput{WorkspaceID: hq.ID, TicketID: saved.ID, IfVersion: version, Title: saved.Title, Body: revisedDraft})
+	update := func(reviewed Ticket) error {
+		_, err := drafts.Update(reviewedUpdate(hq.ID, reviewed, saved.Title, revisedDraft))
 		return err
 	}
 
@@ -129,11 +193,11 @@ func TestAssistantDraftUpdate_RespectsTheTicketLifecycle(t *testing.T) {
 		t.Fatalf("promote: %v", err)
 	}
 	var changed *AssistantDraftChangedError
-	if err := update(saved.Version); !errors.As(err, &changed) || changed.Current.State != TicketStateReady {
+	if err := update(saved); !errors.As(err, &changed) || changed.Current.State != TicketStateReady {
 		t.Fatalf("a review from before the promotion must be stale: %v", err)
 	}
 	// Ready work that has not started may still be revised after a fresh review.
-	if err := update(ready.Version); err != nil {
+	if err := update(*ready); err != nil {
 		t.Fatalf("update of a Ready draft with its current version: %v", err)
 	}
 	link, _ := drafts.Get(hq.ID, saved.ID)
@@ -146,7 +210,7 @@ func TestAssistantDraftUpdate_RespectsTheTicketLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("transition to %s: %v", to, err)
 		}
-		if err := update(moved.Version); !errors.Is(err, ErrAssistantDraftNotEditable) {
+		if err := update(*moved); !errors.Is(err, ErrAssistantDraftNotEditable) {
 			t.Fatalf("%s: err=%v; want ErrAssistantDraftNotEditable", to, err)
 		}
 		after, _ := drafts.Get(hq.ID, saved.ID)
@@ -158,15 +222,26 @@ func TestAssistantDraftUpdate_RespectsTheTicketLifecycle(t *testing.T) {
 
 func TestAssistantDraftUpdate_RequiresAVersionAndASavedDraft(t *testing.T) {
 	drafts, tickets, hq, saved := saveDraftForUpdate(t)
-	_, err := drafts.Update(AssistantDraftUpdateInput{WorkspaceID: hq.ID, TicketID: saved.ID, IfVersion: 0, Title: saved.Title, Body: revisedDraft})
+	noVersion := reviewedUpdate(hq.ID, saved, saved.Title, revisedDraft)
+	noVersion.IfVersion = 0
+	_, err := drafts.Update(noVersion)
 	if validation, ok := IsTicketValidationError(err); !ok || validation.Field != "version" {
 		t.Fatalf("an update with no version must be refused, got %v", err)
+	}
+	noDigest := reviewedUpdate(hq.ID, saved, saved.Title, revisedDraft)
+	noDigest.IfDigest = " "
+	_, err = drafts.Update(noDigest)
+	if validation, ok := IsTicketValidationError(err); !ok || validation.Field != "digest" {
+		t.Fatalf("an update that does not name the reviewed content must be refused, got %v", err)
+	}
+	if link, _ := drafts.Get(hq.ID, saved.ID); link.Ticket.Version != saved.Version || link.Ticket.Description != saved.Description {
+		t.Fatalf("a refused update changed the Ticket: %+v", link.Ticket)
 	}
 
 	// An ordinary Ticket is not a saved draft: this path can neither read nor
 	// edit it, even with its real ID and version.
 	ordinary := mustCreateTicket(t, tickets, TicketCreateInput{WorkspaceID: hq.ID, State: TicketStateBacklog, Title: "Pay rent"})
-	_, err = drafts.Update(AssistantDraftUpdateInput{WorkspaceID: hq.ID, TicketID: ordinary.ID, IfVersion: ordinary.Version, Title: "x", Body: "y"})
+	_, err = drafts.Update(reviewedUpdate(hq.ID, *ordinary, "x", "y"))
 	if !errors.Is(err, ErrTicketNotFound) {
 		t.Fatalf("ordinary Ticket: err=%v; want ErrTicketNotFound", err)
 	}
@@ -196,7 +271,7 @@ func TestAssistantDraftUpdate_ConcurrentUpdatesExactlyOneWins(t *testing.T) {
 		bodies[i] = revisedDraft + string(rune('A'+i))
 		go func(body string) {
 			defer wg.Done()
-			_, err := drafts.Update(AssistantDraftUpdateInput{WorkspaceID: hq.ID, TicketID: saved.ID, IfVersion: saved.Version, Title: saved.Title, Body: body})
+			_, err := drafts.Update(reviewedUpdate(hq.ID, saved, saved.Title, body))
 			results <- err
 		}(bodies[i])
 	}

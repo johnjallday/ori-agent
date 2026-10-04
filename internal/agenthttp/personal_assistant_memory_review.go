@@ -30,6 +30,7 @@ const (
 
 var (
 	memoryStatementLead = regexp.MustCompile(`^remember that\s+\S`)
+	memoryStatementBody = regexp.MustCompile(`(?i)\bremember that (.+)$`)
 	memoryBareRequest   = regexp.MustCompile(`^remember (this|that|it)( fact)?( please| for me| too)?[.!]?$`)
 )
 
@@ -66,13 +67,13 @@ func isAssistantMemoryRequest(prompt string) bool {
 // memoryStatementText returns the fact stated after "remember that", with
 // whitespace collapsed and trailing punctuation trimmed. It does not truncate.
 func memoryStatementText(prompt string) string {
-	trimmed := strings.TrimSpace(prompt)
-	index := strings.Index(strings.ToLower(trimmed), "remember that ")
-	if index < 0 {
+	// Whitespace is collapsed first, so a tab or a line break after "that" is
+	// the same request as a space.
+	match := memoryStatementBody.FindStringSubmatch(strings.Join(strings.Fields(prompt), " "))
+	if match == nil {
 		return ""
 	}
-	text := strings.Join(strings.Fields(trimmed[index+len("remember that "):]), " ")
-	return strings.Trim(text, " .")
+	return strings.Trim(match[1], " .")
 }
 
 // handleMemoryRequest answers a typed memory request without a model.

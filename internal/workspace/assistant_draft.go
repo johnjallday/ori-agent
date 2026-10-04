@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -151,8 +152,26 @@ func firstSentence(line string) string {
 // AssistantDraftDigest fingerprints exactly what a save commits: the target
 // workspace and the normalized title and body.
 func AssistantDraftDigest(workspaceID, title, body string) string {
-	sum := sha256.Sum256([]byte(workspaceID + "\x00" + title + "\x00" + body))
-	return hex.EncodeToString(sum[:])[:assistantDraftDigestLength]
+	return assistantDraftFingerprint(workspaceID, title, body)
+}
+
+// AssistantDraftContentDigest fingerprints a saved draft's title and text as
+// they are stored now. An update names the content it was reviewed against
+// with it, because some editors change a Ticket's text without moving its
+// version.
+func AssistantDraftContentDigest(title, body string) string {
+	return assistantDraftFingerprint(title, body)
+}
+
+// assistantDraftFingerprint hashes the fields with their lengths, so no
+// field's content can pass for the boundary between two fields.
+func assistantDraftFingerprint(fields ...string) string {
+	hash := sha256.New()
+	for _, field := range fields {
+		hash.Write([]byte(strconv.Itoa(len(field)) + ":"))
+		hash.Write([]byte(field))
+	}
+	return hex.EncodeToString(hash.Sum(nil))[:assistantDraftDigestLength]
 }
 
 // SourceID renders the key as a Ticket source ID.
@@ -337,9 +356,14 @@ func AssistantDraftEditable(state TicketState) bool {
 type AssistantDraftUpdateInput struct {
 	WorkspaceID string
 	TicketID    string
-	IfVersion   int64
-	Title       string
-	Body        string
+	// IfVersion and IfDigest are the version and the content the user reviewed
+	// (AssistantDraftContentDigest). Both are required: the version catches
+	// every canonical change, and the digest catches an editor that rewrote
+	// the text without moving the version.
+	IfVersion int64
+	IfDigest  string
+	Title     string
+	Body      string
 }
 
 // AssistantDraftUpdateReceipt is the canonical result of an update.
@@ -380,12 +404,17 @@ func (s *AssistantDraftService) Update(input AssistantDraftUpdateInput) (*Assist
 	if input.IfVersion <= 0 {
 		return nil, invalidTicketField("version", "the reviewed version of the saved draft is required")
 	}
+	reviewed := strings.TrimSpace(input.IfDigest)
+	if reviewed == "" {
+		return nil, invalidTicketField("digest", "the reviewed content of the saved draft is required")
+	}
 	workspaceID, ticketID := strings.TrimSpace(input.WorkspaceID), strings.TrimSpace(input.TicketID)
 	current, err := s.Get(workspaceID, ticketID)
 	if err != nil {
 		return nil, err
 	}
-	if current.Ticket.Version != input.IfVersion {
+	stored := AssistantDraftContentDigest(current.Ticket.Title, current.Ticket.Description)
+	if current.Ticket.Version != input.IfVersion || stored != reviewed {
 		if current.Ticket.Version == input.IfVersion+1 && current.Ticket.Title == title && current.Ticket.Description == body {
 			return &AssistantDraftUpdateReceipt{Ticket: current.Ticket, Applied: false}, nil
 		}

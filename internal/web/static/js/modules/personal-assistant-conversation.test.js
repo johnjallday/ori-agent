@@ -35,6 +35,9 @@ test('the tab keeps its thread across replies and drops a refused one', () => {
   // A refused thread is never retried: the next message starts a new one.
   assert.equal(nextConversationId('conv-1', { error: 'conversation_not_found' }), '');
   assert.equal(nextConversationId('conv-1', { error: 'conversation_out_of_scope' }), '');
+  // A history read that failed is not a dead thread: the retry stays in it,
+  // instead of quietly starting a new conversation with no history.
+  assert.equal(nextConversationId('conv-1', { error: 'conversation_unavailable' }), 'conv-1');
   // A reply with no conversation at all leaves the tab alone.
   assert.equal(nextConversationId('conv-1', null), 'conv-1');
 });
