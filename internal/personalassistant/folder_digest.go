@@ -409,6 +409,29 @@ func (s *FolderDigestService) ResolvedProjectOfferForKey(ctx context.Context, us
 	return *found, true, nil
 }
 
+// StoredOffer returns one offer as the sidecar holds it, for a server-side
+// caller that needs more than the browser's view (the interview words its
+// suggestion from the subject and the queue). It is a pure read: no scan, no
+// promotion of a queued candidate, no write.
+func (s *FolderDigestService) StoredOffer(ctx context.Context, userID, offerID string) (FolderOffer, error) {
+	if s == nil || s.store == nil {
+		return FolderOffer{}, ErrRepairNeeded
+	}
+	offerID = strings.TrimSpace(offerID)
+	if offerID == "" || len(offerID) > folderRequestIDMax {
+		return FolderOffer{}, fmt.Errorf("%w: offer id", ErrValidation)
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return FolderOffer{}, err
+	}
+	stored := doc.Offer(offerID)
+	if stored == nil {
+		return FolderOffer{}, ErrFolderOfferNotFound
+	}
+	return *stored, nil
+}
+
 // FolderDigestService turns "show me a folder" into one explained offer and
 // records what the user answered.
 type FolderDigestService struct {

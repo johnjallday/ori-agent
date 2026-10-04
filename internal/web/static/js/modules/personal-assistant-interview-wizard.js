@@ -1,6 +1,15 @@
 import { reviewTextValid } from './personal-hq-knowledge.js';
+import { folderChooserView } from './personal-assistant-folder-chooser.js';
 
 const INTERVIEW_API = '/api/personal-assistant/knowledge/interview';
+const FOLDER_DIGEST_API = '/api/personal-assistant/folder-digest';
+// The one question a folder can answer: what the user is working on.
+const FOLDER_QUESTION_ID = 'priority';
+const FOLDER_CHOOSER_LABEL = 'Show me instead';
+const FOLDER_CHOOSER_NOTE =
+  'I only look at file names and types. This also leaves a setup suggestion for the folder on Home.';
+const FOLDER_SCAN_CAPTION = "From the folder you showed me. Edit it if that's not quite right.";
+const FOLDER_SCAN_FAILED = 'I could not look at that folder. Type your answer instead.';
 const MODAL_ID = 'personalHQInterviewWizard';
 const REVIEW_STEP = 'review';
 const MAX_ANSWER_BYTES = 500;
@@ -222,6 +231,41 @@ async function api(url, options) {
   return data;
 }
 
+// Loads what the folder chooser may offer. A failed read means no chooser: the
+// question then looks exactly as it does without this shortcut.
+async function loadFolderChooser() {
+  try {
+    const response = await fetch(FOLDER_DIGEST_API, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return folderChooserView(data?.folder_digest);
+  } catch {
+    return null;
+  }
+}
+
+// Asks the server to look at a folder and word an answer from it. The body is a
+// chip id or a picker flag, never a path. It never throws: the result says what
+// happened, so a failure changes nothing in the wizard.
+async function requestFolderSuggestion(body) {
+  try {
+    const response = await fetch(`${INTERVIEW_API}/suggest`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return { error: data.error || data.message || FOLDER_SCAN_FAILED };
+    return data;
+  } catch {
+    return { error: FOLDER_SCAN_FAILED };
+  }
+}
+
 function radioGroup({ name, legend, options, value, onChange }) {
   const set = node('fieldset', undefined, 'interview-wizard-radios');
   set.append(node('legend', legend));
@@ -312,6 +356,8 @@ export function openInterviewWizard(initialSnapshot) {
   let resetPartial = false;
   let savedRowIds = null; // set after a partial save; null otherwise
   let busy = false;
+  let folderChooser; // undefined until loaded; null when nothing can be chosen
+  let folderChooserLoad; // the one read of the chooser, shared by every render
 
   function persist() {
     saveInterviewDraft(storage, state.toDraft());
@@ -338,6 +384,81 @@ export function openInterviewWizard(initialSnapshot) {
     });
   }
 
+  function setChooserDisabled(disabled) {
+    for (const button of ui.stage.querySelectorAll('.interview-wizard-chip'))
+      button.disabled = disabled;
+  }
+
+  // Looks at one folder and, when it names a project, fills the answer in.
+  async function showFolder(body, label) {
+    if (busy) return;
+    busy = true;
+    renderButtons();
+    setChooserDisabled(true);
+    message(`Looking at ${label}…`);
+    const result = await requestFolderSuggestion(body);
+    busy = false;
+    if (!ui.modal.isConnected) return;
+    const suggestion = typeof result.suggestion?.text === 'string' ? result.suggestion : null;
+    if (suggestion) {
+      state.setAnswer(FOLDER_QUESTION_ID, { text: suggestion.text, suggestion });
+      persist();
+    }
+    if (suggestion && state.questions[state.index]?.id === FOLDER_QUESTION_ID) {
+      render();
+    } else {
+      setChooserDisabled(false);
+      renderButtons();
+    }
+    if (result.error) {
+      message(result.error, true);
+      return;
+    }
+    message(suggestion ? `Filled in “${suggestion.text}”.` : result.message || FOLDER_SCAN_FAILED);
+    // The scan recorded an offer; Home's folder card shows it when it is open.
+    try {
+      void Promise.resolve(window.PersonalAssistantFolder?.reload?.()).catch(() => {});
+    } catch {
+      // Home's card is optional here.
+    }
+  }
+
+  function drawFolderChooser(group, view) {
+    if (!view?.chips.length) return;
+    const label = node('p', FOLDER_CHOOSER_LABEL, 'interview-wizard-chooser-label');
+    label.id = 'interview-wizard-chooser-label';
+    group.setAttribute('aria-labelledby', label.id);
+    const chips = node('div', undefined, 'interview-wizard-chips');
+    for (const chip of view.chips) {
+      const button = node('button', chip.label, 'interview-wizard-chip');
+      button.type = 'button';
+      button.dataset.chip = chip.id;
+      button.disabled = busy;
+      button.addEventListener('click', () => void showFolder({ chip: chip.id }, chip.label));
+      chips.append(button);
+    }
+    group.append(label, chips, node('p', FOLDER_CHOOSER_NOTE, 'interview-wizard-chooser-note'));
+    group.hidden = false;
+  }
+
+  // The chooser sits above the answer box. It stays hidden, and the question
+  // stays as it always was, when the folders cannot be read or none exists.
+  function renderFolderChooser() {
+    const group = node('div', undefined, 'interview-wizard-chooser');
+    group.setAttribute('role', 'group');
+    group.hidden = true;
+    if (folderChooser !== undefined) {
+      drawFolderChooser(group, folderChooser);
+      return group;
+    }
+    folderChooserLoad ??= loadFolderChooser();
+    void folderChooserLoad.then(view => {
+      folderChooser = view;
+      if (group.isConnected) drawFolderChooser(group, view);
+    });
+    return group;
+  }
+
   function renderQuestion(question) {
     const answer = state.answer(question.id);
     const heading = node('h3', question.prompt, 'interview-wizard-prompt');
@@ -352,6 +473,7 @@ export function openInterviewWizard(initialSnapshot) {
       described.push(hint.id);
       ui.stage.append(hint);
     }
+    if (question.id === FOLDER_QUESTION_ID) ui.stage.append(renderFolderChooser());
 
     const input = node('textarea', undefined, 'form-control interview-wizard-input');
     input.id = `interview-answer-${question.id}`;
@@ -363,8 +485,16 @@ export function openInterviewWizard(initialSnapshot) {
     error.setAttribute('role', 'alert');
     const counter = node('small', answerCounterText(answer.text), 'interview-wizard-counter');
     counter.id = `interview-answer-counter-${question.id}`;
-    input.setAttribute('aria-describedby', [...described, error.id, counter.id].join(' '));
     ui.stage.append(input, error, counter);
+    // Says where a filled-in answer came from, for as long as it is unedited.
+    let caption;
+    if (answer.suggestion && answer.suggestion.text === answer.text) {
+      caption = node('p', FOLDER_SCAN_CAPTION, 'interview-wizard-caption');
+      caption.id = `interview-answer-caption-${question.id}`;
+      described.push(caption.id);
+      ui.stage.append(caption);
+    }
+    input.setAttribute('aria-describedby', [...described, error.id, counter.id].join(' '));
 
     const options = node('div', undefined, 'interview-wizard-options');
     options.hidden = answer.text.trim() === '';
@@ -429,6 +559,20 @@ export function openInterviewWizard(initialSnapshot) {
 
     input.addEventListener('input', () => {
       state.setAnswer(question.id, { text: input.value });
+      if (caption) {
+        // An edited answer is the user's own: it no longer carries the folder.
+        state.setAnswer(question.id, { suggestion: null });
+        input.setAttribute(
+          'aria-describedby',
+          input
+            .getAttribute('aria-describedby')
+            .split(' ')
+            .filter(id => id !== caption.id)
+            .join(' ')
+        );
+        caption.remove();
+        caption = undefined;
+      }
       error.textContent = '';
       input.removeAttribute('aria-invalid');
       counter.textContent = answerCounterText(input.value);

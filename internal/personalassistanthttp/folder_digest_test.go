@@ -31,6 +31,21 @@ type fakeFolderDigest struct {
 	setups []personalassistant.FolderSetupInput
 	// namedOffers records every offer id a GET asked for by name.
 	namedOffers []string
+	// stored holds the offers StoredOffer can return, by id; storedReads records
+	// every id it was asked for.
+	stored      map[string]personalassistant.FolderOffer
+	storedReads []string
+	// scanErr, when set, is what every scan returns.
+	scanErr error
+}
+
+func (f *fakeFolderDigest) StoredOffer(_ context.Context, _ string, offerID string) (personalassistant.FolderOffer, error) {
+	f.storedReads = append(f.storedReads, offerID)
+	offer, ok := f.stored[offerID]
+	if !ok {
+		return personalassistant.FolderOffer{}, personalassistant.ErrFolderOfferNotFound
+	}
+	return offer, nil
 }
 
 func (f *fakeFolderDigest) Current(context.Context, string) (personalassistant.FolderDigestView, error) {
@@ -58,6 +73,12 @@ func (f *fakeFolderDigest) MarkFirstPromptShown(ctx context.Context, userID stri
 
 func (f *fakeFolderDigest) ScanChip(_ context.Context, _ string, chip string) (personalassistant.FolderOfferView, error) {
 	f.chips = append(f.chips, chip)
+	if f.scanErr != nil {
+		return personalassistant.FolderOfferView{}, f.scanErr
+	}
+	if chip == "documents" {
+		return personalassistant.FolderOfferView{ID: "offer-docs", Verdict: "mixed", Folder: "Documents"}, nil
+	}
 	if chip != "downloads" {
 		return personalassistant.FolderOfferView{}, personalassistant.ErrFolderChipUnknown
 	}

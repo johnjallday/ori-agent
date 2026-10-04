@@ -1130,6 +1130,7 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/personal-assistant/knowledge/interview", s.Handlers.PersonalAssistant.GetKnowledgeInterview)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/interview/defer", s.Handlers.PersonalAssistant.DeferKnowledgeInterview)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/interview/save", s.Handlers.PersonalAssistant.SaveKnowledgeInterview)
+		mux.HandleFunc("POST /api/personal-assistant/knowledge/interview/suggest", s.Handlers.PersonalAssistant.SuggestKnowledgeInterview)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/explicit", s.Handlers.PersonalAssistant.SaveExplicitKnowledge)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/check-saved-apps", s.Handlers.PersonalAssistant.CheckSavedAppSuggestions)
 		mux.HandleFunc("POST /api/personal-assistant/knowledge/check-janitor", s.Handlers.PersonalAssistant.CheckJanitorSuggestions)

@@ -17,11 +17,14 @@ import {
   songFactsLabel,
   songLineText
 } from './library-open.js';
+import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { MODEL_SETTINGS_URL } from './setup-journey-account-steps.js';
 
-const DIGEST_ENDPOINT = '/api/personal-assistant/folder-digest';
+// The chooser's render decision lives in its own module so the interview wizard
+// can use it without mounting this card; it is re-exported for existing callers.
+export { FOLDER_CHIP_ICON, folderChooserView };
 
-export const FOLDER_CHIP_ICON = '\u{1F4C1}';
+const DIGEST_ENDPOINT = '/api/personal-assistant/folder-digest';
 
 // FOLDER_QUEST_ACTION_URL is where the "Show your assistant a folder" mission
 // card sends the user (show-folder-quest.js opens the chooser from it). The
@@ -36,35 +39,10 @@ export function folderActionAvailable(personalAssistant) {
   return state === 'active' || state === 'paused';
 }
 
-// folderChooserView is the chooser's render decision: which chips to show,
-// whether the native picker chip appears, and the note that replaces it.
 export function firstFolderPromptView(digest, available) {
   return {
     expand: available === true && digest?.prompt_first_folder === true,
     line: "Now let's explore a folder you're working in."
-  };
-}
-
-export function folderChooserView(digest) {
-  const chips = Array.isArray(digest?.chips)
-    ? digest.chips
-        .filter(chip => chip && typeof chip.id === 'string' && chip.id.trim())
-        .map(chip => ({ id: chip.id.trim(), label: String(chip.label || chip.id).trim() }))
-    : [];
-  const pickerVisible = digest?.picker_available === true;
-  // The server explains what can be chosen; the fallbacks only cover a
-  // payload without a note. A chooser with nothing to press must say so.
-  let note = String(digest?.picker_note || '').trim();
-  if (!note && !pickerVisible) {
-    note = chips.length ? 'Pick a folder from the list for now.' : 'No folder can be chosen here.';
-  }
-  return {
-    chips,
-    pickerVisible,
-    filePickerVisible: pickerVisible && digest?.file_picker_available === true,
-    pickerLabel: 'Pick another folder…',
-    filePickerLabel: 'Pick a file…',
-    note
   };
 }
 

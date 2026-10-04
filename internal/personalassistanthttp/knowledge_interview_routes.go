@@ -60,6 +60,53 @@ func (h *Handler) GetKnowledgeInterview(w http.ResponseWriter, r *http.Request) 
 	orihttp.Success(w, answer)
 }
 
+// interviewNoSuggestionMessage is shown when a folder names no single project
+// to propose. The wizard leaves the answer box as it was.
+const interviewNoSuggestionMessage = "I couldn't tell what this folder is for. Type your answer instead."
+
+// SuggestKnowledgeInterview proposes an answer to the interview's first
+// question from a folder the user shows the assistant. The body is a folder
+// scan's body (exactly one of chip, picker or file, never a path) and the scan
+// is the one Home runs, so the offer it records is also waiting there. Only the
+// proposed wording is returned; no fact is saved before the wizard's Save.
+func (h *Handler) SuggestKnowledgeInterview(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	req, ok := decodeFolderScanRequest(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	if req.Chip == "" {
+		orihttp.BadRequest(w, "Pick a folder from the list for now")
+		return
+	}
+	scanned, err := h.folderDigest.ScanChip(r.Context(), userID, req.Chip)
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	offer, err := h.folderDigest.StoredOffer(r.Context(), userID, scanned.ID)
+	if err != nil {
+		writeFolderDigestError(w, err)
+		return
+	}
+	suggestion, ok := personalassistant.InterviewSuggestionFromOffer(offer)
+	if !ok {
+		orihttp.Success(w, map[string]any{"suggestion": nil, "message": interviewNoSuggestionMessage})
+		return
+	}
+	orihttp.Success(w, map[string]any{"suggestion": suggestion})
+}
+
 func interviewSavedRows(interview *personalassistant.KnowledgeInterview) []string {
 	rows := make([]string, 0)
 	if interview == nil {
