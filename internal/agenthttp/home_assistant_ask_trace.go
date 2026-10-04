@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"context"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
@@ -18,10 +19,12 @@ func NewLoggingHomeAskTraceEmitter() *LoggingHomeAskTraceEmitter {
 }
 
 // RecordAskOutcome emits one structured telemetry line per home-harness outcome.
+// It records the prompt's length, never its text: a prompt can be a private
+// draft, and the foundation contract keeps prompts out of logs.
 func (e *LoggingHomeAskTraceEmitter) RecordAskOutcome(_ context.Context, trace HomeAskTrace) {
 	logger.Info("Home assistant ask", logger.Fields{
 		"scope":          "home_assistant.ask",
-		"prompt":         trace.Prompt,
+		"prompt_chars":   utf8.RuneCountInString(trace.Prompt),
 		"intent":         trace.Intent,
 		"window":         trace.Window,
 		"outcome":        trace.Outcome,

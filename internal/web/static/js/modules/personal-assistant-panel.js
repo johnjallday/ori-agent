@@ -39,8 +39,19 @@ export function boundedAssistantHandoff(value) {
     .join('');
 }
 
-export function canSubmitAssistantWork({ available, pending, text }) {
-  return available === true && pending !== true && String(text || '').trim().length > 0;
+export function canSubmitAssistantWork({ available, pending, busy, text }) {
+  return (
+    available === true && pending !== true && busy !== true && String(text || '').trim().length > 0
+  );
+}
+
+/**
+ * The composer text after an unsent message comes back. Text typed since the
+ * failed send is never overwritten.
+ */
+export function restoredDraft(current, unsent) {
+  const typed = String(current || '');
+  return typed.trim() ? typed : String(unsent || '');
 }
 
 export function assistantPanelViewForOpen(requested, { hasToday = false } = {}) {
@@ -249,6 +260,33 @@ function prefill(text) {
   return true;
 }
 
+let replyWatch = null;
+
+/**
+ * Replaces the "still replying" status once the reply is in, so the line does
+ * not keep describing a wait that is over.
+ */
+function announceWhenReplyArrives() {
+  if (replyWatch) return;
+  replyWatch = window.setInterval(() => {
+    if (window.OriAskRouting?.getState?.().busy === true) return;
+    window.clearInterval(replyWatch);
+    replyWatch = null;
+    if (String(state.els?.input?.value || '').trim()) {
+      setStatus('The reply is in. Send your message when you are ready.');
+    }
+  }, 400);
+}
+
+/** Puts a message that was not sent back in the composer. */
+function restoreDraft(text) {
+  if (!state.els?.input) return false;
+  const next = restoredDraft(state.els.input.value, text);
+  state.draft = next;
+  state.els.input.value = next;
+  return next === String(text || '');
+}
+
 function routeContext() {
   if (window.OriGuide?._collectContext) {
     const context = window.OriGuide._collectContext();
@@ -265,7 +303,19 @@ function submit(event) {
   event?.preventDefault();
   moveSharedWorkActivity();
   const text = String(state.els?.input?.value || '').trim();
-  if (!canSubmitAssistantWork({ available: state.view.available, pending: state.pending, text })) {
+  // While a reply is in flight the text stays in the box: sending it now would
+  // start a second turn before the first one has a conversation to join.
+  const busy = window.OriAskRouting?.getState?.().busy === true;
+  if (busy && text) {
+    setStatus(
+      `${state.view.name} is still replying. Your message is kept here; send it when the reply arrives.`
+    );
+    announceWhenReplyArrives();
+    return false;
+  }
+  if (
+    !canSubmitAssistantWork({ available: state.view.available, pending: state.pending, busy, text })
+  ) {
     return false;
   }
   if (!window.OriAskRouting || typeof window.OriAskRouting.submit !== 'function') {
@@ -371,6 +421,7 @@ const api = {
   open,
   close,
   prefill,
+  restoreDraft,
   refresh,
   applyPersonalAssistant,
   selectView,

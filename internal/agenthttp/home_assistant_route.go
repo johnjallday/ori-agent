@@ -363,6 +363,10 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		match = h.systemAssistantFallback(intent)
 	}
 
+	if routesToAssistantConversation(workContext, prompt, intent, routeContext, workspaceRecommended, match) {
+		return assistantConversationRoute(workContext), nil
+	}
+
 	resp := &HomeAssistantRouteResponse{
 		Intent:               intent.Key,
 		IntentVariant:        intentVariant,

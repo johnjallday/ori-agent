@@ -395,6 +395,10 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		if s.Storage.PersonalAssistantMemory != nil {
 			handler.SetPersonalAssistantMemoryWriter(s.Storage.PersonalAssistantMemory)
 		}
+		// Hired-assistant conversations are canonical Sessions in Personal HQ.
+		if s.Storage.SessionStore != nil {
+			handler.SetConversationStore(personalAssistantConversationAdapter{store: s.Storage.SessionStore})
+		}
 	}
 
 	// Ori Guide reuses the same system model, but only to reword an answer it
@@ -422,6 +426,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 				backlogService.SetEventBus(s.Workflow.EventBus)
 			}
 			mutator.backlogService = backlogService
+			// A reviewed conversation draft is saved through the same Backlog
+			// adapter, so it gets the same events and BACKLOG.md render.
+			handler.SetDraftSaver(workspace.NewAssistantDraftService(backlogService))
 		}
 		if s.Workflow != nil {
 			mutator.orchestrator = s.Workflow.WorkspaceOrchestrator

@@ -149,6 +149,107 @@
         <button type="submit" id="personalAssistantSend" class="personal-assistant-panel__send">Send</button>
       </form>
       <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
+      <!-- The conversation this tab is in. A conversation is a session in
+           Personal HQ; this bar only starts a new one or continues an earlier
+           one. Its note keeps history and long-term memory apart. -->
+      <div id="personalAssistantConversationBar" class="personal-assistant-conversation" hidden>
+        <div class="personal-assistant-conversation__head">
+          <p class="personal-assistant-conversation__current">
+            <span class="personal-assistant-conversation__eyebrow">Conversation</span>
+            <span id="personalAssistantConversationTitle" class="personal-assistant-conversation__title">New conversation</span>
+          </p>
+          <div class="personal-assistant-conversation__actions">
+            <button type="button" id="personalAssistantConversationNew"
+                    class="personal-assistant-conversation__button">New conversation</button>
+            <button type="button" id="personalAssistantConversationContinue"
+                    class="personal-assistant-conversation__button"
+                    aria-expanded="false" aria-controls="personalAssistantConversationList">Continue…</button>
+          </div>
+        </div>
+        <ul id="personalAssistantConversationList" class="personal-assistant-conversation__list"
+            aria-label="Earlier conversations" hidden></ul>
+        <p id="personalAssistantConversationNote" class="personal-assistant-conversation__note"
+           role="status" aria-live="polite"></p>
+        <!-- The saved draft this conversation is working on, read from Personal
+             HQ. Replies are not part of it until Update saved draft is chosen. -->
+        <div id="personalAssistantSavedDraft" class="personal-assistant-conversation__saved" hidden>
+          <p id="personalAssistantSavedDraftText" class="personal-assistant-conversation__note"></p>
+          <div class="personal-assistant-conversation__actions">
+            <a id="personalAssistantSavedDraftOpen" class="personal-assistant-conversation__button" href="#" hidden>Open in Personal HQ</a>
+            <button type="button" id="personalAssistantSavedDraftStart"
+                    class="personal-assistant-conversation__button" hidden>Start a new conversation about it</button>
+          </div>
+        </div>
+      </div>
+      <!-- Save to HQ backlog: the review of one reply before it is saved. It is
+           its own form, so Enter here can never send the composer above. Opening
+           it writes nothing; only Save to backlog does. -->
+      <form id="personalAssistantDraftReview" class="personal-assistant-review"
+            aria-labelledby="personalAssistantDraftReviewHeading" hidden novalidate>
+        <h3 id="personalAssistantDraftReviewHeading" class="personal-assistant-review__heading">Save to HQ backlog</h3>
+        <p id="personalAssistantDraftTarget" class="personal-assistant-review__target"></p>
+        <div data-draft-view="edit" class="personal-assistant-review__fields">
+          <!-- Update saved draft only: the text that is saved now, to compare
+               with the proposal below. -->
+          <details id="personalAssistantDraftCurrent" class="personal-assistant-review__current" hidden>
+            <summary id="personalAssistantDraftCurrentLabel">Currently saved</summary>
+            <pre id="personalAssistantDraftCurrentText" class="personal-assistant-review__current-text"></pre>
+          </details>
+          <label class="personal-assistant-review__label" for="personalAssistantDraftTitle">Title</label>
+          <input type="text" id="personalAssistantDraftTitle" class="personal-assistant-review__input"
+                 autocomplete="off" aria-describedby="personalAssistantDraftTitleHint">
+          <p id="personalAssistantDraftTitleHint" class="personal-assistant-review__hint"></p>
+          <label id="personalAssistantDraftBodyLabel" class="personal-assistant-review__label" for="personalAssistantDraftBody">Draft</label>
+          <textarea id="personalAssistantDraftBody" class="personal-assistant-review__input personal-assistant-review__body"
+                    rows="7" aria-describedby="personalAssistantDraftBodyHint"></textarea>
+          <p id="personalAssistantDraftBodyHint" class="personal-assistant-review__hint"></p>
+          <ul id="personalAssistantDraftNotes" class="personal-assistant-review__notes" hidden></ul>
+          <div class="personal-assistant-review__actions">
+            <button type="submit" id="personalAssistantDraftSave" class="personal-assistant-review__primary">Save to backlog</button>
+            <button type="button" id="personalAssistantDraftCancel" class="personal-assistant-review__secondary">Cancel</button>
+          </div>
+        </div>
+        <div data-draft-view="receipt" class="personal-assistant-review__fields" hidden>
+          <p id="personalAssistantDraftReceipt" class="personal-assistant-review__receipt"></p>
+          <div class="personal-assistant-review__actions">
+            <a id="personalAssistantDraftOpen" class="personal-assistant-review__primary" href="#">Open in Personal HQ</a>
+            <button type="button" id="personalAssistantDraftDone" class="personal-assistant-review__secondary">Done</button>
+          </div>
+        </div>
+        <p id="personalAssistantDraftStatus" class="personal-assistant-review__status" role="status" aria-live="polite"></p>
+      </form>
+      <!-- Remember…: the review of one personal fact. It is a different action
+           from saving a draft: one line the assistant may use again, kept in
+           Personal HQ memory. Opening it writes nothing. -->
+      <form id="personalAssistantMemoryReview" class="personal-assistant-review"
+            aria-labelledby="personalAssistantMemoryReviewHeading" hidden novalidate>
+        <h3 id="personalAssistantMemoryReviewHeading" class="personal-assistant-review__heading">Remember a fact</h3>
+        <p class="personal-assistant-review__target">Kept in Personal HQ memory, where you can edit or forget it. This does not save a draft or add anything to your backlog.</p>
+        <div data-memory-view="edit" class="personal-assistant-review__fields">
+          <p id="personalAssistantMemorySource" class="personal-assistant-review__hint" hidden></p>
+          <label class="personal-assistant-review__label" for="personalAssistantMemoryText">Fact to remember</label>
+          <input type="text" id="personalAssistantMemoryText" class="personal-assistant-review__input"
+                 autocomplete="off" placeholder="One fact, in your own words"
+                 aria-describedby="personalAssistantMemoryLimit personalAssistantMemoryProblem personalAssistantMemoryHint">
+          <p id="personalAssistantMemoryLimit" class="personal-assistant-review__hint">0 / 500 UTF-8 bytes</p>
+          <p id="personalAssistantMemoryProblem" class="personal-assistant-review__hint personal-assistant-review__problem" role="status" aria-live="polite"></p>
+          <p id="personalAssistantMemoryHint" class="personal-assistant-review__hint" hidden></p>
+          <label class="personal-assistant-review__label" for="personalAssistantMemoryCategory">Kind of fact</label>
+          <select id="personalAssistantMemoryCategory" class="personal-assistant-review__input"></select>
+          <div class="personal-assistant-review__actions">
+            <button type="submit" id="personalAssistantMemorySave" class="personal-assistant-review__primary">Remember this fact</button>
+            <button type="button" id="personalAssistantMemoryCancel" class="personal-assistant-review__secondary">Cancel</button>
+          </div>
+        </div>
+        <div data-memory-view="receipt" class="personal-assistant-review__fields" hidden>
+          <p id="personalAssistantMemoryReceipt" class="personal-assistant-review__receipt"></p>
+          <div class="personal-assistant-review__actions">
+            <a id="personalAssistantMemoryFacts" class="personal-assistant-review__primary" href="/profile#personalHQKnowledge">Review, edit, or forget it</a>
+            <button type="button" id="personalAssistantMemoryDone" class="personal-assistant-review__secondary">Done</button>
+          </div>
+        </div>
+        <p id="personalAssistantMemoryStatus" class="personal-assistant-review__status" role="status" aria-live="polite"></p>
+      </form>
       {{if ne .CurrentPage "index"}}
       {{template "assistant-led-setup.tmpl" .}}
       {{end}}
