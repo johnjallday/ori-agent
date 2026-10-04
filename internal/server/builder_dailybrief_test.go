@@ -384,6 +384,19 @@ func TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification(t 
 	if opportunities[0].WorkspaceID != workspaceID {
 		t.Fatalf("expected the opportunity to be scoped to the HQ workspace, got %q", opportunities[0].WorkspaceID)
 	}
+	// The item says where the brief is read and links straight to it: the
+	// Daily Brief station in this HQ, by its browser slug.
+	if got := opportunities[0].RecommendedAction; got != "Open My HQ to view your Daily Brief." {
+		t.Fatalf("recommended action = %q", got)
+	}
+	hq, err := builder.sessionStore.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("load hq: %v", err)
+	}
+	wantLink := "/workspaces/" + hq.FolderSlug + "?station=daily-brief"
+	if hq.FolderSlug == "" || opportunities[0].SourceURL != wantLink {
+		t.Fatalf("source url = %q, want %q", opportunities[0].SourceURL, wantLink)
+	}
 
 	// A manual refresh on the same day must not create a second
 	// notification (PRD FR63: manual/first-open never notify).

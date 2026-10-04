@@ -9,10 +9,15 @@ import {
   personalAssistantLauncherCue,
   personalAssistantLauncherCueTone,
   personalAssistantTodayView,
+  progressRowText,
+  progressRowVisible,
   resumeWorkspaceBuild,
   safeTodayRoute,
   specialistSetupView,
   studioSectionView,
+  summaryFoldAfter,
+  summaryStripText,
+  summaryStripView,
   todayLabel,
   todaySectionItems,
   todayThreeSectionView,
@@ -75,11 +80,137 @@ test('three Today sections hide empty rows and report unavailable sources only o
   assert.equal(view.working[0].detail, 'Waiting for your choice');
   assert.deepEqual(view.needs, []);
   assert.equal(view.footer, "Couldn't read: follow-ups, decisions.");
-  assert.equal(view.allClear, false);
-  assert.equal(todayThreeSectionView({ needs_you: { items: [] } }).allClear, true);
+  // The HQ's own status line is listed under Working on but is not work.
+  assert.equal(view.inProgress, 0);
+  assert.equal(view.doneToday, 0);
+});
+
+test('the progress row counts work in progress and what was done today', () => {
+  const now = new Date(2026, 9, 7, 15, 0, 0);
+  const at = (day, hour) => new Date(2026, 9, day, hour, 0, 0).toISOString();
+  const view = todayThreeSectionView(
+    {
+      working_on: {
+        items: [
+          { kind: 'hq_status', title: 'My HQ' },
+          { kind: 'folder_workspace', title: 'Song Sketches' },
+          { kind: 'janitor_work', title: 'File Janitor' }
+        ]
+      },
+      done: {
+        items: [
+          { kind: 'task_result', title: 'Sorted Samples', source_at: at(7, 9) },
+          { kind: 'task_result', title: 'Drafted a reply', source_at: at(7, 14) },
+          // Done keeps a week of results; yesterday's is not "done today".
+          { kind: 'task_result', title: 'Last night', source_at: at(6, 23) },
+          { kind: 'hq_setup', title: 'Set up My HQ', source_at: '0001-01-01T00:00:00Z' },
+          { kind: 'follow_up', title: 'No timestamp' }
+        ]
+      }
+    },
+    now
+  );
+  assert.equal(view.inProgress, 2);
+  assert.equal(view.doneToday, 2);
+  assert.equal(view.done.length, 5, 'the Done list itself still shows every item');
+  assert.equal(progressRowText(view.inProgress, view.doneToday), '2 in progress · 2 done today');
+
+  assert.equal(progressRowText(0, 0), '0 in progress · 0 done today');
+  assert.equal(progressRowText(1, 12), '1 in progress · 12 done today');
+  assert.equal(progressRowText(undefined, -3), '0 in progress · 0 done today');
+});
+
+test('the progress row is hidden only when there is no work, nothing done today and no meetings', () => {
+  assert.equal(progressRowVisible({ working: 0, done: 0, meetings: false }), false);
+  assert.equal(progressRowVisible({ working: 1, done: 0, meetings: false }), true);
+  assert.equal(progressRowVisible({ working: 0, done: 3, meetings: false }), true);
+  // Today's meetings are listed under Working on, so the row still expands.
+  assert.equal(progressRowVisible({ working: 0, done: 0, meetings: true }), true);
+});
+
+test('the top of the drawer folds when the user starts something, and only then', () => {
+  const rest = { started: false, expanded: false };
+  const folded = { started: true, expanded: false };
+  const shown = { started: true, expanded: true };
+
+  // Send and "Explore a folder" are the user starting something.
+  assert.deepEqual(summaryFoldAfter(rest, { type: 'sent' }), folded);
+  assert.deepEqual(summaryFoldAfter(rest, { type: 'folder', by: 'user' }), folded);
+  // The assistant speaking first (its first-folder prompt) folds nothing.
+  assert.deepEqual(summaryFoldAfter(rest, { type: 'folder', by: 'assistant' }), rest);
+  assert.deepEqual(summaryFoldAfter(rest, { type: 'folder' }), rest);
+
+  // Show and Hide reverse each other, and do nothing before a conversation.
+  assert.deepEqual(summaryFoldAfter(folded, { type: 'toggle' }), shown);
+  assert.deepEqual(summaryFoldAfter(shown, { type: 'toggle' }), folded);
+  assert.deepEqual(summaryFoldAfter(rest, { type: 'toggle' }), rest);
+  // Something under Needs you has to be seen.
+  assert.deepEqual(summaryFoldAfter(folded, { type: 'expand' }), shown);
+  assert.deepEqual(summaryFoldAfter(rest, { type: 'expand' }), rest);
+  // A second request folds again after the user had looked.
+  assert.deepEqual(summaryFoldAfter(shown, { type: 'sent' }), folded);
+
+  // Reopening with no conversation going shows everything in full again;
+  // reopening onto one leaves it as it was.
+  assert.deepEqual(summaryFoldAfter(folded, { type: 'opened', conversationActive: false }), rest);
+  assert.deepEqual(summaryFoldAfter(shown, { type: 'opened', conversationActive: false }), rest);
+  assert.deepEqual(summaryFoldAfter(folded, { type: 'opened', conversationActive: true }), folded);
+  assert.deepEqual(summaryFoldAfter(shown, { type: 'opened', conversationActive: true }), shown);
+
+  assert.deepEqual(summaryFoldAfter(folded, { type: 'something-else' }), folded);
+  assert.deepEqual(summaryFoldAfter(undefined, undefined), rest);
+});
+
+test('the summary strip says what it folded, and shows only when there is something', () => {
   assert.equal(
-    todayThreeSectionView({ needs_you: { items: [{ title: 'Confirm' }] } }).allClear,
-    false
+    summaryStripText({ needs: 2, brief: 'Brief ready', inProgress: 2, doneToday: 5 }),
+    'Needs you 2 · Brief ready · 2 in progress'
+  );
+  // A part with nothing to say is left out.
+  assert.equal(summaryStripText({ needs: 0, brief: 'Brief ready', inProgress: 0 }), 'Brief ready');
+  assert.equal(summaryStripText({ needs: 1, brief: '', inProgress: 0 }), 'Needs you 1');
+  // With nothing in progress, the row's other number is the one worth saying.
+  assert.equal(
+    summaryStripText({ brief: 'Brief failed', doneToday: 3 }),
+    'Brief failed · 3 done today'
+  );
+  assert.equal(summaryStripText({ needs: -1, inProgress: 'x' }), '');
+  assert.equal(summaryStripText(), '');
+
+  const text = 'Needs you 2';
+  assert.deepEqual(summaryStripView({ started: true, expanded: false }, text), {
+    visible: true,
+    expanded: false,
+    sectionsHidden: true,
+    toggleLabel: 'Show'
+  });
+  assert.deepEqual(summaryStripView({ started: true, expanded: true }, text), {
+    visible: true,
+    expanded: true,
+    sectionsHidden: false,
+    toggleLabel: 'Hide'
+  });
+  // Before a conversation nothing is folded, so there is no strip.
+  assert.equal(summaryStripView({ started: false, expanded: false }, text).visible, false);
+  assert.equal(summaryStripView({ started: false, expanded: false }, text).sectionsHidden, false);
+  // With nothing to summarise there is nothing to fold either.
+  assert.equal(summaryStripView({ started: true, expanded: false }, '').visible, false);
+  assert.equal(summaryStripView({ started: true, expanded: false }, '').sectionsHidden, false);
+});
+
+test('the summary strip is one control in the Today frame, wired to the sections it folds', () => {
+  const template = readFileSync(
+    new URL('../../../templates/components/personal-assistant-today.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.match(
+    template,
+    /id="personalAssistantSummaryToggle"[^>]*aria-expanded="false"[^>]*aria-controls="personalAssistantTodaySections"/
+  );
+  // The strip comes before what it stands for.
+  assert.ok(
+    template.indexOf('id="personalAssistantSummary"') <
+      template.indexOf('id="personalAssistantTodaySections"')
   );
 });
 

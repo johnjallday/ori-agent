@@ -14,8 +14,8 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
  *
  * What only a browser proves, and so what is here:
  *   - The Quests card follows the server's missions, and Mission 02's Start
- *     opens the assistant panel on Today with the folder chooser unfolded and
- *     the quest parameter scrubbed.
+ *     opens the assistant drawer with the folder chooser in its conversation
+ *     and the quest parameter scrubbed.
  *   - Deferring Mission 02 moves the card on to Mission 03.
  *   - The first-day plan completes Mission 03.
  * Mission 01 (Meet your assistant) is the hire, made here through the API;
@@ -29,8 +29,15 @@ test.describe.configure({ mode: 'serial' });
 
 // Messages the app logs on any fresh sandbox, unrelated to this feature: the
 // update checker has no network, and some pages probe resources a fresh
-// install does not have. Anything else is a failure.
-const KNOWN_NOISE = [/Failed to load resource/, /Error checking for updates/];
+// install does not have. The last one is the workspace page's setup monitor:
+// a poll it had in flight is cut off when a test leaves My HQ for Home, and
+// whether one is in flight at that moment is a matter of timing. Anything else
+// is a failure.
+const KNOWN_NOISE = [
+  /Failed to load resource/,
+  /Error checking for updates/,
+  /Failed to monitor task execution: TypeError: Failed to fetch/
+];
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -144,9 +151,9 @@ test('Mission 02: Start opens the folder chooser in the assistant panel', async 
   const card = await openQuests(page);
   await card.locator('[data-role="first-mission-action"]').click();
 
-  // The assistant panel opens on Today with the chooser unfolded; the quest
-  // parameter is scrubbed so a reload does not open it again.
-  await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible({ timeout: 15000 });
+  // The assistant drawer opens with the chooser unfolded; the quest parameter
+  // is scrubbed so a reload does not open it again.
+  await expect(page.locator('#personalAssistantToday')).toBeVisible({ timeout: 15000 });
   const chooser = page.locator('#personalAssistantFolderChooser');
   await expect(chooser).toBeVisible({ timeout: 15000 });
   await expect(chooser.locator('#personalAssistantFolderTitle')).toContainText('Which folder');
@@ -211,6 +218,42 @@ test('Mission 03, plan branch: the first-day plan completes it', async ({ page, 
   await expect
     .poll(() => missionStatus(request, 'pa-connect-source'), { timeout: 15000 })
     .toBe('completed');
+  expect(errors).toEqual([]);
+});
+
+// The brief is read in the Daily Brief station in My HQ. Opening Home, which
+// loads the assistant's Today, does not count as reading it; the station's
+// panel showing the brief does.
+test('Mission 04: Open Daily Brief goes to the station, and the panel showing a brief completes it', async ({
+  page,
+  request
+}) => {
+  test.skip(
+    (await missionStatus(request, 'pa-connect-source')) !== 'completed',
+    'needs Mission 03 completed by the earlier test'
+  );
+  const errors = watchErrors(page);
+
+  // Home has been opened several times by now and Today has served the brief.
+  const card = await openQuests(page);
+  await expect(card.locator('[data-role="first-mission-title"]')).toHaveText(
+    'Read your first Daily Brief'
+  );
+  expect(await missionStatus(request, 'pa-first-brief')).not.toBe('completed');
+
+  const open = card.locator('[data-role="first-mission-action"]');
+  await expect(open).toContainText('Open Daily Brief');
+  await expect(open).toHaveAttribute('href', /^\/workspaces\/[a-z0-9-]+\?station=daily-brief$/);
+  await open.click();
+
+  await expect(page.locator('.ws-cmd-modal-panel.is-daily-brief')).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('[data-brief="body"]')).not.toContainText(/Loading|Generating/, {
+    timeout: 30000
+  });
+  await expect
+    .poll(() => missionStatus(request, 'pa-first-brief'), { timeout: 15000 })
+    .toBe('completed');
+
   await page.goto('/');
   await page.locator('#cockpitQuestsToggle').click();
   await expect(page.locator('#questLog')).toContainText('Missions complete');

@@ -128,7 +128,28 @@ func TestPAFPanelHasDistinctHiddenComposer(t *testing.T) {
 	}
 }
 
-func TestPAFPanelRendersHomeTodayAndAskExactlyOnce(t *testing.T) {
+// assistantDrawerMarkup returns the Personal Assistant drawer's own markup from
+// a rendered page: from its opening tag to the tag that closes it. The drawer
+// nests other sections, so its end is the first one closed after the composer's
+// Send button, which is the last control inside it.
+func assistantDrawerMarkup(t *testing.T, html string) string {
+	t.Helper()
+	start := strings.Index(html, `<section id="personalAssistantPanel"`)
+	send := strings.Index(html, `id="personalAssistantSend"`)
+	if start < 0 || send < start {
+		t.Fatal("rendered page has no Personal Assistant drawer with a composer")
+	}
+	end := strings.Index(html[send:], `</section>`)
+	if end < 0 {
+		t.Fatal("the Personal Assistant drawer is never closed")
+	}
+	return html[start : send+end+len(`</section>`)]
+}
+
+// On Home the drawer is ONE view: the header, then what needs you, the brief
+// row and the progress row, then the conversation, and the composer last. There
+// are no tabs, and the Daily Brief itself is not in it.
+func TestPAFPanelRendersHomeAsOneViewWithTheComposerLast(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
 		t.Fatalf("LoadTemplates failed: %v", err)
@@ -142,34 +163,70 @@ func TestPAFPanelRendersHomeTodayAndAskExactlyOnce(t *testing.T) {
 		t.Fatalf("RenderTemplate(index) failed: %v", err)
 	}
 
-	for _, id := range []string{
-		`id="personalAssistantLauncher"`, `id="personalAssistantPanel"`,
-		`id="personalAssistantTabs"`, `id="personalAssistantTodayTab"`,
-		`id="personalAssistantAskTab"`, `id="personalAssistantTodayPanel"`,
-		`id="personalAssistantAskPanel"`, `id="personalAssistantToday"`,
-		`id="homeDailyBrief"`, `id="personalAssistantForm"`,
-	} {
+	// In reading order. Each controller id has exactly one mount.
+	order := []string{
+		`id="personalAssistantPanel"`,
+		`id="personalAssistantPanelTitle"`, `id="personalAssistantCheckIn"`,
+		`id="personalAssistantMore"`, `id="personalAssistantClose"`,
+		`id="personalAssistantScroll"`, `id="personalAssistantToday"`,
+		`id="personalAssistantTodayBanner"`, `id="personalAssistantSummary"`,
+		`id="personalAssistantNeedsYou"`,
+		`id="personalAssistantBriefRow"`, `id="personalAssistantProgressRow"`,
+		// The conversation: the shared activity, then the folder flow as a
+		// turn of its own (the request, the chooser, the scene, the offer).
+		`id="personalAssistantThread"`, `id="personalAssistantActivityMount"`,
+		`id="personalAssistantFolder"`, `id="personalAssistantFolderRequest"`,
+		`id="personalAssistantFolderChooser"`, `id="personalAssistantFolderScene"`,
+		`id="personalAssistantFolderOffer"`,
+		// The one suggestion, directly above the composer.
+		`id="personalAssistantPanelStatus"`, `id="personalAssistantChips"`,
+		`id="personalAssistantFolderChip"`, `id="personalAssistantForm"`,
+		`id="personalAssistantInput"`, `id="personalAssistantSend"`,
+	}
+	last := -1
+	for _, id := range order {
 		if got := strings.Count(html, id); got != 1 {
 			t.Errorf("rendered Home %s count = %d, want 1", id, got)
+			continue
+		}
+		at := strings.Index(html, id)
+		if at < last {
+			t.Errorf("rendered Home %s is out of order: the drawer reads header, needs you, brief row, progress row, conversation, chip, composer", id)
+		}
+		last = at
+	}
+	// Home lists what needs the user; the one-line stand-in is for other pages.
+	if strings.Contains(html, `id="personalAssistantNeedsLine"`) {
+		t.Error("rendered Home has the other pages' needs-you line as well as Needs you")
+	}
+	// The folder flow is in the conversation, not in Today's Needs you.
+	today := html[strings.Index(html, `id="personalAssistantToday"`):strings.Index(html, `id="personalAssistantThread"`)]
+	if strings.Contains(today, `personalAssistantFolder`) {
+		t.Error("the folder flow is still rendered inside Today; it belongs in the conversation")
+	}
+	if got := strings.Count(html, `id="personalAssistantLauncher"`); got != 1 {
+		t.Errorf("rendered Home launcher count = %d, want 1", got)
+	}
+
+	drawer := assistantDrawerMarkup(t, html)
+	for _, gone := range []string{`role="tablist"`, `role="tab"`, `role="tabpanel"`} {
+		if strings.Contains(drawer, gone) {
+			t.Errorf("the drawer still has a tab affordance: %s", gone)
 		}
 	}
-	for _, relation := range []string{
-		`role="tablist"`,
-		`role="tab" aria-selected="true" aria-controls="personalAssistantTodayPanel"`,
-		`role="tab" aria-selected="false" aria-controls="personalAssistantAskPanel"`,
-		`role="tabpanel" aria-labelledby="personalAssistantTodayTab"`,
-		`role="tabpanel" aria-labelledby="personalAssistantAskTab" hidden`,
-	} {
-		if !strings.Contains(html, relation) {
-			t.Errorf("rendered Home drawer missing relationship %q", relation)
-		}
+	// Nothing after the composer but the end of the drawer.
+	if tail := strings.TrimSpace(drawer[strings.LastIndex(drawer, `</form>`)+len(`</form>`):]); tail != `</section>` {
+		t.Errorf("the composer is not the last thing in the drawer; after it: %.80q", tail)
+	}
+
+	// The full Daily Brief is displayed in My HQ, never here.
+	if strings.Contains(html, `id="homeDailyBrief"`) {
+		t.Error("rendered Home still mounts the full Daily Brief")
 	}
 
 	dashboard := readTemplate(t, "templates/components/dashboard.tmpl")
-	for _, moved := range []string{`id="personalAssistantToday"`, `id="homeDailyBrief"`} {
-		if strings.Contains(dashboard, moved) {
-			t.Errorf("dashboard still owns moved drawer markup %s", moved)
-		}
+	if strings.Contains(dashboard, `id="personalAssistantToday"`) {
+		t.Error("dashboard still owns drawer markup id=\"personalAssistantToday\"")
 	}
 }
 
@@ -192,7 +249,11 @@ func TestHomeCockpitHasNoTodayOrWorkingAgreementGridSibling(t *testing.T) {
 	}
 }
 
-func TestPAFPanelKeepsNonHomePagesAskOnly(t *testing.T) {
+// On every other page the drawer is the same one view without Home's Today:
+// the header (with its check-in line and More menu), the conversation, the
+// chip, and the composer. It has no Needs you cards, brief row or progress
+// row, and no folder flow of its own: the chip goes to Home's.
+func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
 		t.Fatalf("LoadTemplates failed: %v", err)
@@ -206,20 +267,30 @@ func TestPAFPanelKeepsNonHomePagesAskOnly(t *testing.T) {
 		t.Fatalf("RenderTemplate(settings) failed: %v", err)
 	}
 	for _, absent := range []string{
-		`id="personalAssistantTabs"`, `id="personalAssistantTodayPanel"`,
-		`id="personalAssistantToday"`, `id="homeDailyBrief"`,
+		`id="personalAssistantToday"`, `id="personalAssistantNeedsYou"`,
+		`id="personalAssistantBriefRow"`, `id="personalAssistantProgressRow"`,
+		`id="personalAssistantSummary"`, `id="personalAssistantFolder"`,
+		`id="personalAssistantFolderOffer"`,
+		`id="homeDailyBrief"`,
 	} {
 		if strings.Contains(html, absent) {
 			t.Errorf("non-Home assistant panel unexpectedly contains %s", absent)
 		}
 	}
 	for _, present := range []string{
-		`id="personalAssistantPanel"`, `id="personalAssistantAskPanel"`,
-		`id="personalAssistantForm"`,
+		`id="personalAssistantPanel"`, `id="personalAssistantCheckIn"`,
+		`id="personalAssistantMore"`, `id="personalAssistantScroll"`,
+		// How much needs the user, in one line that goes to Home.
+		`id="personalAssistantNeedsLine"`,
+		`id="personalAssistantThread"`, `id="personalAssistantActivityMount"`,
+		`id="personalAssistantFolderChip"`, `id="personalAssistantForm"`,
 	} {
 		if got := strings.Count(html, present); got != 1 {
 			t.Errorf("non-Home %s count = %d, want 1", present, got)
 		}
+	}
+	if strings.Contains(assistantDrawerMarkup(t, html), `role="tab`) {
+		t.Error("the non-Home drawer has a tab affordance")
 	}
 }
 
@@ -227,7 +298,10 @@ func TestPAFPanelPresentsGuideAndAssistantRolesBeforeInput(t *testing.T) {
 	body := stripHTMLComments(readTemplate(t, "templates/components/ori-guide.tmpl"))
 	for _, want := range []string{
 		`id="oriGuideTitle">Ask Ori<`, `id="oriGuideRole" hidden>App Guide<`,
-		`class="personal-assistant-panel__role">Personal Assistant<`,
+		// The line under the assistant's name says "Personal Assistant" until
+		// the next check-in is known, and the launcher always carries the role.
+		`class="personal-assistant-panel__checkin">Personal Assistant<`,
+		`class="personal-assistant-launcher__role">Personal Assistant<`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("identity boundary missing %q", want)

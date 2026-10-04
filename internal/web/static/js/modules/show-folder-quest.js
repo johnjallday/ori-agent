@@ -2,9 +2,9 @@
  * show-folder-quest.js — Mission 03's start, "Show your assistant a folder".
  *
  * The mission card's Start links to /?quest=show-folder. On that arrival this
- * module opens the assistant's panel on Today and unfolds its folder chooser
- * (personal-assistant-folder.js), then scrubs the query without adding a
- * history entry, so a reload or a Back press does not open it again.
+ * module opens the assistant's drawer and starts the folder flow in its
+ * conversation (personal-assistant-folder.js), then scrubs the query without
+ * adding a history entry, so a reload or a Back press does not open it again.
  *
  * What it is:
  *   - Deterministic. No request of its own, no model, no copy: the panel and
@@ -45,12 +45,12 @@ export function scrubbedQuestURL(href) {
   }
 }
 
-// startShowFolderQuest opens the panel on Today and then the chooser. Returns
-// true once the panel opened; false when it could not yet (no status, no
+// startShowFolderQuest opens the assistant drawer and then the chooser. Returns
+// true once the drawer opened; false when it could not yet (no status, no
 // assistant), so the caller can try again on the next status.
 export function startShowFolderQuest({ panel, folder, launcher } = {}) {
   if (!panel || typeof panel.open !== 'function') return false;
-  if (!panel.open(launcher || null, { view: 'today' })) return false;
+  if (!panel.open(launcher || null)) return false;
   if (folder && typeof folder.open === 'function') folder.open();
   return true;
 }

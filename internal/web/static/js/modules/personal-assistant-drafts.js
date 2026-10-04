@@ -809,10 +809,7 @@ function openFromLocation() {
   const start = () => {
     const panel = window.PersonalAssistantPanel;
     if (!panel?._state?.view?.available) return false;
-    panel.open(document.getElementById('personalAssistantLauncher'), {
-      view: 'ask',
-      focusComposer: true
-    });
+    panel.open(document.getElementById('personalAssistantLauncher'));
     void resumeFromTicket(ticketId);
     return true;
   };

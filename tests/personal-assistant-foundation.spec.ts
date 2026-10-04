@@ -275,8 +275,8 @@ test.describe('Personal Assistant Foundation first value', () => {
           title: 'Read your first Daily Brief',
           why: 'Ori pulls your priorities into one morning brief.',
           status: 'available',
-          action_url: '/',
-          action_label: 'Open Today',
+          action_url: '/?panel=today',
+          action_label: 'Open Daily Brief',
           optional: true,
           ...lock
         }
@@ -1122,22 +1122,31 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect(page.locator('#personalAssistantLauncherAvatar .agent-avatar')).toHaveCount(1);
     await page.locator('#personalAssistantLauncher').click();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await expect(page.locator('#personalAssistantTodayTab')).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
+    // One view: no tabs, and the composer is ready the moment the drawer opens.
+    await expect(page.locator('#personalAssistantPanel [role="tab"]')).toHaveCount(0);
+    await expect(page.locator('#personalAssistantInput')).toBeFocused();
     await expect(page.locator('#personalAssistantToday')).toBeVisible();
     await expect(page.locator('#personalAssistantTodayTitle')).toHaveText('Today from Atlas');
+    // The header says when the next check-in is, in place of the fixed role.
+    await expect(page.locator('#personalAssistantCheckIn')).not.toHaveText('Personal Assistant');
+    await expect(page.locator('#personalAssistantCheckIn')).toContainText(
+      /Next check-in|No check-in scheduled/
+    );
     await expect(page.locator('#personalAssistantNeedsYouItems')).toContainText(
       'Review launch plan'
     );
     await expect(
       page.locator('#personalAssistantNeedsYouItems a').filter({ hasText: 'Waiting for Alex' })
     ).toHaveAttribute('href', '/workspaces/email-ops?follow_up=follow-email-1');
-    await expect(page.locator('#homeDailyBriefBody a').first()).toHaveAttribute(
-      'href',
-      '/workspaces/email-ops?follow_up=follow-email-1'
-    );
+    // The full Daily Brief is not in the drawer. One row stands for it and
+    // links to the Daily Brief station in My HQ, where the brief is read.
+    await expect(page.locator('#homeDailyBrief')).toHaveCount(0);
+    const briefRow = page.locator('#personalAssistantBriefRow');
+    await expect(briefRow).toBeVisible();
+    await expect(briefRow).toContainText("Today's brief");
+    await expect(briefRow).toContainText('ready since');
+    await expect(briefRow).toContainText('Open in My HQ');
+    await expect(briefRow).toHaveAttribute('href', '/workspaces/personal-hq?station=daily-brief');
     await page.screenshot({ path: testInfo.outputPath('today-email-ops-owner-links.png') });
     await expect(page.locator('#personalAssistantTodayHQ')).toHaveAttribute(
       'href',
@@ -1157,20 +1166,19 @@ test.describe('Personal Assistant Foundation first value', () => {
     expect(openState.camera).toEqual(closedLayout.camera);
     expect(openState.selectedWorkspace).toBe(closedLayout.selectedWorkspace);
 
-    // Bootstrap's nested settings modal is the topmost surface. Escape closes
-    // only it, leaves the Today drawer coherent, and returns focus to its
-    // triggering action.
-    await expect(page.locator('#homeDailyBrief')).toBeVisible();
-    await page.locator('#homeDailyBriefMenu > summary').click();
-    const briefSettings = page.locator('#homeDailyBriefSettingsBtn');
-    await briefSettings.click();
-    const settingsModal = page.locator('#homeDailyBriefSettingsModal');
-    await expect(settingsModal).toBeVisible();
-    await expect(settingsModal).toBeFocused();
-    await settingsModal.press('Escape');
-    await expect(settingsModal).toBeHidden();
+    // The More menu is the topmost surface while it is open. Escape closes only
+    // it, leaves the drawer open, and returns focus to the menu's button; a
+    // second Escape closes the drawer and returns focus to the launcher.
+    const more = page.locator('#personalAssistantMore > summary');
+    await more.click();
+    await expect(page.locator('#personalAssistantTodayAgreement')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#personalAssistantTodayAgreement')).toBeHidden();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await expect(briefSettings).toBeFocused();
+    await expect(more).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+    await expect(page.locator('#personalAssistantLauncher')).toBeFocused();
 
     await page.locator('#oriGuideMapTrigger').click();
     await expect(page.locator('#oriGuidePanel')).toBeVisible();
@@ -1189,7 +1197,6 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.getByRole('button', { name: 'Send to Atlas' }).click();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
     await expect(page.locator('#oriGuidePanel')).toBeHidden();
-    await expect(page.locator('#personalAssistantAskTab')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#personalAssistantInput')).toBeFocused();
     await expect(page.locator('#personalAssistantInput')).toHaveValue(handoffText);
     expect(routeCalls).toBe(0);
@@ -1199,12 +1206,8 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.locator('#personalAssistantClose').click();
     expect(routeCalls).toBe(0);
     await page.locator('#personalAssistantLauncher').click();
-    await expect(page.locator('#personalAssistantTodayTab')).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
-    await expect(page.locator('#personalAssistantInput')).toHaveValue(handoffText);
-    await page.locator('#personalAssistantAskTab').click();
+    // The draft is still in the composer, which is right there with focus.
+    await expect(page.locator('#personalAssistantInput')).toBeFocused();
     await expect(page.locator('#personalAssistantInput')).toHaveValue(handoffText);
     await expect(page.locator('#personalAssistantPanel #oriGuideActivity')).toHaveCount(0);
     await expect(page.locator('#oriGuidePanel #homeAssistantConversation')).toHaveCount(0);
@@ -1217,7 +1220,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     // Working agreement edits reuse canonical schedule values, rename the same
     // stable identity, and survive reload.
     await page.locator('#personalAssistantLauncher').click();
-    await page.locator('#personalAssistantTodayMore > summary').click();
+    await page.locator('#personalAssistantMore > summary').click();
     await page.locator('#personalAssistantTodayAgreement').click();
     await expect(page.locator('#personalAssistantContinuity')).toBeVisible();
     await expect(page.locator('#personalAssistantCapabilities')).toContainText(
@@ -1245,7 +1248,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.reload();
     await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Nova');
     await page.locator('#personalAssistantLauncher').click();
-    await page.locator('#personalAssistantTodayMore > summary').click();
+    await page.locator('#personalAssistantMore > summary').click();
     await page.locator('#personalAssistantTodayAgreement').click();
     await expect(page.locator('#personalAssistantContinuityName')).toHaveValue('Nova');
     await page.locator('#personalAssistantContinuityPause').click();
@@ -1259,16 +1262,13 @@ test.describe('Personal Assistant Foundation first value', () => {
       'Resumed with the preserved Daily Brief rhythm'
     );
     expect(relationshipState).toBe('active');
+    // Closing the working agreement goes back to the drawer it was opened from.
     await page.locator('#personalAssistantContinuityClose').click();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await expect(page.locator('#personalAssistantTodayTab')).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
+    await expect(page.locator('#personalAssistantInput')).toBeFocused();
 
     // Explicit memory is confirmation-gated. Cancel once, then confirm exactly
     // once; ordinary Help never receives or executes this action.
-    await page.locator('#personalAssistantAskTab').click();
     await page
       .locator('#personalAssistantInput')
       .fill('remember that Friday launches need a Thursday review');

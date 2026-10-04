@@ -101,116 +101,20 @@ body.home-command-page .home-command-bridge * {
   display: none;
 }
 
-.personal-assistant-today__header {
-  display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.personal-assistant-today__heading {
-  flex: 1;
-  min-width: 0;
-}
-
-.personal-assistant-today__title {
-  margin: 0;
-  color: var(--hc-ink);
-  font-family: "Fraunces", Georgia, serif;
-  font-size: clamp(22px, 3vw, 28px);
-  line-height: 1.12;
-  overflow-wrap: break-word;
-}
-
+/* The drawer's own frame (header, banner, Needs you, the brief and progress
+   rows) is styled in ori-guide.css with the assistant's paper tokens. What is
+   here styles the content Home puts inside it. */
 .personal-assistant-today__meta {
   margin: 5px 0 0;
   color: var(--hc-ink-dim);
   font-size: 13px;
 }
 
-.personal-assistant-today__more {
-  position: relative;
-  z-index: 10;
-  flex: 0 0 auto;
-}
-
-.personal-assistant-today__more > summary {
-  display: inline-flex;
-  min-height: 38px;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--hc-line-bright);
-  border-radius: 10px;
-  background: var(--hc-panel-raised);
-  color: var(--hc-ink);
-  font-size: 12px;
-  font-weight: 700;
-  list-style: none;
-  cursor: pointer;
-}
-
-.personal-assistant-today__more > summary::-webkit-details-marker {
-  display: none;
-}
-
-.personal-assistant-today__more > summary:hover,
-.personal-assistant-today__more[open] > summary {
-  border-color: var(--hc-signal);
-}
-
-.personal-assistant-today__more > summary:focus-visible {
-  outline: 2px solid var(--hc-signal);
-  outline-offset: 2px;
-}
-
-.personal-assistant-today__links {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  display: grid;
-  width: min(250px, calc(100vw - 48px));
-  padding: 5px;
-  border: 1px solid var(--hc-line-bright);
-  border-radius: 12px;
-  background: var(--hc-panel-raised);
-  box-shadow: var(--hc-shadow);
-}
-
-.personal-assistant-today__more:not([open]) .personal-assistant-today__links {
-  display: none;
-}
-
-.personal-assistant-today__links a,
 .personal-assistant-today__sections a,
 .personal-assistant-today__banner a {
   color: var(--hc-signal);
   font-weight: 700;
   overflow-wrap: anywhere;
-}
-
-.personal-assistant-today__links a {
-  display: flex;
-  min-height: 40px;
-  align-items: center;
-  padding: 7px 10px;
-  border-radius: 7px;
-  color: var(--hc-ink);
-  font-size: 13px;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.personal-assistant-today__links a[hidden] {
-  display: none;
-}
-
-.personal-assistant-today__links a:hover,
-.personal-assistant-today__links a:focus-visible {
-  background: color-mix(in srgb, var(--hc-signal) 15%, transparent);
-  color: var(--hc-ink);
-  outline-color: var(--hc-signal);
 }
 
 .personal-assistant-today__banner {
@@ -529,22 +433,17 @@ body.home-command-page .home-command-bridge * {
   font-size: 12px;
 }
 
-/* Folder intake is one surface, not separate scene/chooser/offer cards. */
+/* Folder intake is one turn in the assistant's conversation: the user's
+   request, then the chooser, the exploring scene and the offer card, each a
+   reply of its own. The turn's shape (.pa-thread*) is the drawer's, in
+   ori-guide.css; what is here is what each reply holds. */
 .pa-folder {
   display: grid;
-  gap: 10px;
-  margin: 0 0 14px;
+  gap: 8px;
+  margin: 0;
 }
 
-.pa-folder__experience {
-  display: block;
-  overflow: hidden;
-  border: 1px solid var(--hc-line-bright);
-  border-radius: 16px;
-  background: var(--hc-panel-raised);
-}
-
-.pa-folder__experience[hidden],
+.pa-folder[hidden],
 .pa-folder__chooser[hidden],
 .pa-folder__offer[hidden] {
   display: none;
@@ -558,6 +457,10 @@ body.home-command-page .home-command-bridge * {
   min-height: 112px;
   overflow: hidden;
   padding: 14px;
+}
+
+/* Named with the reply it is, so the scene keeps its own backdrop. */
+.pa-thread__reply.pa-folder__scene {
   background:
     radial-gradient(
       circle at 86% 20%,
@@ -759,7 +662,13 @@ body.home-command-page .home-command-bridge * {
   display: grid;
   gap: 8px;
   padding: 12px 14px;
-  border-top: 1px solid var(--hc-line);
+}
+
+/* Said with the question, before any folder is chosen. */
+.pa-folder__assurance {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 11px;
 }
 
 .pa-folder__prompt {
@@ -806,11 +715,16 @@ body.home-command-page .home-command-bridge * {
   font-size: 12px;
 }
 
-.pa-folder__offer {
+/* The offer asks for a decision, so it keeps the offer card's own colour as a
+   reply in the conversation and as a card under Needs you. */
+.pa-thread__reply.pa-folder__offer {
   margin: 0;
-  border: 0;
-  border-top: 1px solid var(--hc-line);
-  border-radius: 0;
+  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 8%, var(--hc-panel-raised));
+}
+
+.pa-thread__reply.pa-folder__offer[data-placement="needs"] {
+  border-radius: 14px;
 }
 
 /* The reason line: counts and kinds, always present, in smaller muted type. */
@@ -967,22 +881,6 @@ body.home-command-page .home-command-bridge * {
   border-color: var(--hc-signal, currentColor);
   color: var(--hc-signal, inherit);
   font-weight: 650;
-}
-
-.personal-assistant-today #homeDailyBrief {
-  margin-top: 14px;
-  border-radius: 12px;
-  box-shadow: none;
-}
-
-@media (max-width: 560px) {
-  .personal-assistant-today__title {
-    font-size: clamp(20px, 5vw, 26px);
-  }
-
-  .personal-assistant-today__sections {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 .home-command-strip,
@@ -2201,8 +2099,9 @@ a.quest-title:focus-visible {
 }
 
 /*
- * Daily Brief — the primary Home orientation region once a Personal HQ is
- * designated (PRD FR97). Shares the Command Bridge panel vocabulary.
+ * The panel vocabulary the Daily Brief introduced on Home. The brief itself is
+ * now read in the Daily Brief station in My HQ (daily-brief.css); these rules
+ * remain for the Home panels that share the look: Plugin updates and Calendar.
  */
 
 .home-daily-brief {
@@ -2258,9 +2157,9 @@ a.quest-title:focus-visible {
   gap: 8px;
 }
 
-/* Cached plugin notices reuse the Daily Brief panel vocabulary inside the
-   existing Updates flyout while remaining visually scannable as distinct
-   installed components. */
+/* Cached plugin notices reuse this panel vocabulary inside the existing
+   Updates flyout while remaining visually scannable as distinct installed
+   components. */
 .home-plugin-updates-list {
   display: grid;
   gap: 7px;
@@ -2288,73 +2187,6 @@ a.quest-title:focus-visible {
   overflow-wrap: anywhere;
 }
 
-/* Secondary Daily Brief actions behind a native <details> disclosure. Only
-   Refresh keeps permanent space in a ~320px rail; Open My HQ and Brief settings
-   are one click away and cost no JavaScript to reach. */
-.home-daily-brief-menu {
-  position: relative;
-}
-
-.home-daily-brief-menu-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--hc-line);
-  color: var(--hc-ink-soft, var(--hc-ink));
-  font-size: 14px;
-  line-height: 1;
-  list-style: none;
-  cursor: pointer;
-}
-
-/* Safari still paints the default marker without this. */
-.home-daily-brief-menu-toggle::-webkit-details-marker {
-  display: none;
-}
-
-.home-daily-brief-menu-toggle:hover,
-.home-daily-brief-menu[open] .home-daily-brief-menu-toggle {
-  border-color: var(--hc-signal);
-  color: var(--hc-ink);
-}
-
-/* Anchored to the toggle and above the brief body, so a short rail does not
-   push the panel behind the content below it. */
-.home-daily-brief-menu-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  min-width: 150px;
-  padding: 4px;
-  border: 1px solid var(--hc-line);
-  background: var(--hc-panel-deep, var(--hc-panel));
-  box-shadow: var(--hc-shadow);
-}
-
-.home-daily-brief-menu-item {
-  padding: 7px 10px;
-  border: 0;
-  background: none;
-  color: var(--hc-ink);
-  font-size: 11px;
-  text-align: left;
-  text-decoration: none;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.home-daily-brief-menu-item:hover,
-.home-daily-brief-menu-item:focus-visible {
-  background: color-mix(in srgb, var(--hc-signal) 16%, transparent);
-  color: var(--hc-ink);
-}
-
 .home-daily-brief-banner {
   display: flex;
   align-items: center;
@@ -2366,33 +2198,15 @@ a.quest-title:focus-visible {
   font-size: 9.5px;
 }
 
-.home-daily-brief-banner.is-failed {
-  border-color: var(--hc-alert);
-  color: var(--hc-alert);
-}
-
-.home-daily-brief-banner.is-partial,
 .home-daily-brief-banner.is-degraded {
   border-color: var(--hc-amber);
   color: var(--hc-amber);
-}
-
-.home-daily-brief-banner.is-loading {
-  border-color: var(--hc-idle);
-  color: var(--hc-idle);
 }
 
 .home-daily-brief-placeholder {
   padding: 8px 0;
   color: var(--hc-ink-faint);
   font-size: 9px;
-}
-
-.home-daily-brief-opening {
-  margin: 0 0 10px;
-  color: var(--hc-ink);
-  font-size: 11px;
-  line-height: 1.5;
 }
 
 .home-calendar-ops-next {
@@ -2423,132 +2237,12 @@ a.quest-title:focus-visible {
   color: var(--hc-amber);
 }
 
-.home-daily-brief-gaps {
-  margin: 0 0 10px;
-  color: var(--hc-amber);
-  font-size: 9px;
-}
-
-.home-daily-brief-quiet {
-  color: var(--hc-ink-faint);
-  font-size: 10px;
-}
-
-.home-daily-brief-section {
-  margin-bottom: 12px;
-}
-
-.home-daily-brief-section-title {
-  margin: 0 0 6px;
-  color: var(--hc-ink);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-}
-
-.home-daily-brief-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.home-daily-brief-item {
-  padding: 8px 10px;
-  border: 1px solid var(--hc-line);
-}
-
-.home-daily-brief-item-title {
-  color: var(--hc-ink);
-  font-size: 10.5px;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.home-daily-brief-item-title:hover,
-.home-daily-brief-item-title:focus-visible {
-  color: var(--hc-signal);
-  text-decoration: underline;
-}
-
-.home-daily-brief-item-ws {
-  margin-left: 8px;
-  color: var(--hc-ink-faint);
-  font-size: 8.5px;
-}
-
-.home-daily-brief-item-fact {
-  margin: 4px 0 0;
-  color: var(--hc-ink-dim);
-  font-size: 9.5px;
-}
-
-/* A meeting's time is its most important fact, so it reads as one. */
-.home-daily-brief-meeting .home-daily-brief-item-ws {
-  color: var(--hc-ink-dim);
-}
-
-.home-daily-brief-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 6px;
-  border: 1px solid var(--hc-line);
-  border-radius: 999px;
-  color: var(--hc-ink-dim);
-  font-size: 8.5px;
-  font-weight: 650;
-  line-height: 15px;
-}
-
-.home-daily-brief-badge[data-state="conflict"] {
-  border-color: var(--hc-alert);
-  color: var(--hc-alert);
-}
-
-.home-daily-brief-item-why {
-  margin: 4px 0 0;
-  font-size: 9.5px;
-}
-
-/* Suggestions/recommendations are visually distinguished from observed
-   facts without relying on color alone (PRD FR82/FR131). */
-.is-suggestion {
-  font-style: italic;
-}
-
-.is-suggestion::before {
-  margin-right: 4px;
-  font-style: normal;
-  content: "\2192";
-}
-
-.home-daily-brief-action-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.home-daily-brief-settings-form .home-daily-brief-days {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.home-daily-brief-history-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-}
-
-.home-daily-brief-history-empty {
-  color: var(--hc-ink-faint);
-}
-
 .pa-continuity {
+  /* The panel's own surface, and the one its fields and cards are mixed from.
+     Nothing in the app defines --surface-color, and a background that reads an
+     undefined variable is no background at all: the map showed through the
+     whole panel. It is Home's raised paper, in both themes. */
+  --surface-color: var(--hc-panel-raised, var(--bg-primary));
   position: fixed;
   z-index: 1045;
   top: max(calc(var(--navbar-offset, 76px) + 12px), 88px);
@@ -2562,6 +2256,7 @@ a.quest-title:focus-visible {
   border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
   border-radius: var(--radius-lg);
   background: var(--surface-color);
+  color: var(--hc-ink, var(--text-primary));
   box-shadow: 0 20px 56px rgb(0 0 0 / 30%);
 }
 

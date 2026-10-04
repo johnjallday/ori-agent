@@ -41,7 +41,8 @@ test('Home never mounts the retired installed-app offer', async ({ page, request
   });
   await page.goto('/?panel=today');
   await expect(page.locator('#personalAssistantToday')).toBeVisible();
-  await expect(page.locator('#personalAssistantFolder')).toBeVisible();
+  // The folder flow is the one thing on offer, from the chip above the composer.
+  await expect(page.locator('#personalAssistantFolderChip')).toBeVisible();
   await expect(page.locator('#personalAssistantSpecialistOffer')).toHaveCount(0);
   await expect(page.locator('#personalAssistantSpecialistManual')).toHaveCount(0);
   expect(offerDetectionCalls).toBe(0);

@@ -124,7 +124,7 @@
       blueprintRolesStaged: false,
       // buildSession is the assistant's build session for this open, or null
       // for the manual wizard. buildFirstMessage is a sentence the opener
-      // already heard (the assistant's Ask tab), posted as the first turn.
+      // already heard (the assistant's composer), posted as the first turn.
       buildSession: null,
       buildFirstMessage: String(options.buildFirstMessage || '').trim(),
       // buildResume opens straight into the open build: the user already

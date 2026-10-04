@@ -34,18 +34,19 @@ test('scrubbing drops only the quest parameter and keeps the rest of the URL', (
   assert.equal(scrubbedQuestURL('not a url'), null);
 });
 
-test('starting opens the panel on Today, then the chooser', () => {
+test('starting opens the assistant drawer, then the chooser', () => {
   const calls = [];
   const panel = {
-    open(trigger, options) {
-      calls.push(['panel', trigger, options.view]);
+    open(trigger, ...rest) {
+      // The drawer is one view: there is nothing to select when opening it.
+      calls.push(['panel', trigger, rest.length]);
       return true;
     }
   };
   const folder = { open: () => calls.push(['chooser']) };
   const launcher = { id: 'launcher' };
   assert.equal(startShowFolderQuest({ panel, folder, launcher }), true);
-  assert.deepEqual(calls, [['panel', launcher, 'today'], ['chooser']]);
+  assert.deepEqual(calls, [['panel', launcher, 0], ['chooser']]);
 });
 
 test('a panel that cannot open yet leaves the chooser closed and reports it', () => {

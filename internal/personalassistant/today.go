@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
@@ -279,11 +278,6 @@ type TodayService struct {
 		Read(context.Context, string) (*KnowledgeInterview, error)
 	}
 	now func() time.Time
-
-	// onBriefSeen fires the first time this process serves a user Today with a
-	// Daily Brief. briefSeen records who it already fired for.
-	onBriefSeen func(userID string)
-	briefSeen   sync.Map
 }
 
 func NewTodayService(relationship todayRelationshipReader, briefs todayBriefReader, workspaces workspace.Store, followUps todayFollowUpReader) *TodayService {
@@ -349,27 +343,9 @@ func (s *TodayService) SetWorkspaceBuildReader(reader WorkspaceBuildReader) {
 	}
 }
 
-// SetOnBriefSeen installs the callback fired the first time this process serves
-// a user Today with a Daily Brief revision, for an active or paused
-// relationship. It fires at most once per user per process and outside any
-// lock; the consumer must be idempotent across restarts. Startup wiring only.
-func (s *TodayService) SetOnBriefSeen(fn func(userID string)) {
-	if s != nil {
-		s.onBriefSeen = fn
-	}
-}
-
-// noteBriefSeen fires onBriefSeen once per user for this process.
-func (s *TodayService) noteBriefSeen(userID string) {
-	if s.onBriefSeen == nil {
-		return
-	}
-	if _, already := s.briefSeen.LoadOrStore(strings.TrimSpace(userID), struct{}{}); already {
-		return
-	}
-	s.onBriefSeen(userID)
-}
-
+// Get builds Today. Reading it has no side effect on the starter missions:
+// Today lists the brief's items, but the brief itself is displayed by the Daily
+// Brief station in My HQ, and that panel is what reports a brief as seen.
 func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection, error) {
 	now := time.Now().UTC()
 	if s != nil && s.now != nil {
@@ -455,10 +431,6 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 	followUpsByRef := s.loadFollowUps(ctx, userID, relationship, now, out)
 	meetingsByRef := s.loadMeetings(ctx, userID, relationship, now, out)
 	s.loadBrief(ctx, userID, ws.ID, route, tasksByID, followUpsByRef, meetingsByRef, out)
-	if out.Brief.RevisionID != "" {
-		// Only the active and paused states reach this point.
-		s.noteBriefSeen(userID)
-	}
 	out.Decisions = decisionsFromFollowUps(followUpsByRef, out.FollowUps.Health, now)
 	s.loadRemembered(ctx, userID, relationship.State, out)
 	out.Studio = s.loadStudio(userID, relationship.SpecialistSlug, relationship.HQWorkspaceID)

@@ -496,14 +496,13 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     return api && typeof api.current === 'function' ? api.current() || null : null;
   }
 
-  // openFolderChooser opens the assistant panel on Today and its chooser: the
-  // same two things the mission's Start does, without a page load.
+  // openFolderChooser opens the assistant drawer and its chooser: the same two
+  // things the mission's Start does, without a page load.
   function openFolderChooser() {
     const panel = window.PersonalAssistantPanel;
     const chooser = window.PersonalAssistantFolder;
     if (!panel || typeof panel.open !== 'function') return;
-    if (!panel.open(document.getElementById('personalAssistantLauncher'), { view: 'today' }))
-      return;
+    if (!panel.open(document.getElementById('personalAssistantLauncher'))) return;
     if (chooser && typeof chooser.open === 'function') chooser.open();
   }
 

@@ -4,10 +4,14 @@
 # isolated demo server.
 #
 # Usage:
-#   ./scripts/e2e-fresh.sh [--port PORT] [--tail N] [--rev REV] spec [spec ...] [-- playwright args]
+#   ./scripts/e2e-fresh.sh [--port PORT] [--tail N] [--rev REV] [--env KEY=VAL] spec [spec ...] [-- playwright args]
 #
 # --rev REV serves a build of another commit (for example origin/dev) instead
 # of the working tree, so the same specs give the baseline to compare with.
+#
+# --env KEY=VAL sets a variable for the Playwright run of every spec, for specs
+# that read one (FAKE_CALENDAR_MCP_BIN, …). Repeatable. It is passed on to
+# scripts/e2e.sh, so the command needs no `KEY=VAL` shell prefix.
 #
 # --sandbox-env NAME hands each spec its own sandbox path as NAME, for specs
 # that seed folders into the sandbox (ORI_SONG_FACTS_SANDBOX,
@@ -39,12 +43,21 @@ port=8947
 tail_lines=40
 rev=""
 sandbox_env=""
+extra_env=()
 specs=()
 pw_args=()
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--port)
 		port="${2:-}"
+		shift 2
+		;;
+	--env)
+		[[ "${2:-}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || {
+			echo "--env expects KEY=VALUE, got '${2:-}'" >&2
+			exit 2
+		}
+		extra_env+=(--env "$2")
 		shift 2
 		;;
 	--sandbox-env)
@@ -76,7 +89,7 @@ done
 	exit 2
 }
 [[ ${#specs[@]} -gt 0 ]] || {
-	echo "usage: $0 [--port PORT] [--tail N] [--rev REV] [--sandbox-env NAME] spec [spec ...] [-- playwright args]" >&2
+	echo "usage: $0 [--port PORT] [--tail N] [--rev REV] [--sandbox-env NAME] [--env KEY=VAL] spec [spec ...] [-- playwright args]" >&2
 	exit 2
 }
 [[ -z "$sandbox_env" || "$sandbox_env" =~ ^[A-Z][A-Z0-9_]*$ ]] || {
@@ -145,8 +158,8 @@ for spec in "${specs[@]}"; do
 
 	log="$sandbox/playwright.log"
 	status=0
-	env_args=()
-	[[ -z "$sandbox_env" ]] || env_args=(--env "$sandbox_env=$sandbox")
+	env_args=(${extra_env[@]+"${extra_env[@]}"})
+	[[ -z "$sandbox_env" ]] || env_args+=(--env "$sandbox_env=$sandbox")
 	# The ${a[@]+...} form: bash 3.2 calls an empty array unbound under set -u.
 	./scripts/e2e.sh --port "$port" --wait 180 --tail 0 ${env_args[@]+"${env_args[@]}"} "$spec" -- ${pw_args[@]+"${pw_args[@]}"} \
 		>"$log" 2>&1 || status=$?

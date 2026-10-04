@@ -255,7 +255,8 @@ The hire creates **no** workspace, no Personal HQ designation, no Journal or
 other support profile, no workspace membership, no Daily Brief configuration,
 and no tool/skill/MCP/Vault/filesystem change.
 
-After completion, the client opens Today on the HQ confirm card. HQ Build is
+After completion, the client opens the assistant drawer on the HQ confirm card
+(under Needs you). HQ Build is
 retired from the mission board but its completion event remains persisted.
 Plan my first day is a branch of Mission 03, and `?quest=plan-first-day`
 still does not open while `needs_hq`.
@@ -293,7 +294,7 @@ assistant, or delete-and-recreate as a repair.
 
 ## Guided Personal HQ Map quest
 
-The default post-hire path is now the HQ confirm card in Today's assistant panel.
+The default post-hire path is now the HQ confirm card under Needs you in the assistant drawer.
 It shows the proposed plan and waits for the user's **Build** confirmation before
 creating anything. The Map walkthrough at `/?quest=build-hq` remains an alternate
 path for people who prefer the guided site and the full HQ form. Both paths use
@@ -444,7 +445,7 @@ Mission 03.
 | 01 | `pa-meet-assistant` | Meet your assistant, `/?quest=meet-assistant` | the request that makes a hire durable (`HireResult.NewlyHired`), or a repair that leaves the relationship hired; never a replay |
 | 02 | `pa-show-folder` | Show your assistant a folder, `/?quest=show-folder`; while an offer is pending, the offer itself renders on the card with its own buttons | the folder offer's outcome — a workspace linked to the shown folder or a tidy prepared for it (`FolderDigestService.SetOnOutcome`), a `workspace.created` whose `entry_point` is `folder_digest`, or a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaching ready |
 | 03 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
-| 04 | `pa-first-brief` | Read your first Daily Brief, `/`; while open and with no model configured, adds "Add a model in Settings to generate one." | Today is first served with a Daily Brief revision for an active or paused relationship |
+| 04 | `pa-first-brief` | Read your first Daily Brief, **Open Daily Brief** → `/workspaces/<hq-slug>?station=daily-brief` (`/?panel=today` while no Personal HQ slug is known); while open and with no model configured, adds "Add a model in Settings to generate one." | the Daily Brief panel in My HQ first shows a brief for a hired assistant (`POST /api/personal-hq/brief/seen`, sent by the panel). Home preparing the brief in the background, or Today being read, does not complete it |
 
 Mission 01's completion is `personalassistanthttp.Handler.SetOnHired`, bound in
 `completeProgressionWiring`. Its evidence (`Snapshot.AssistantHired`) is the
@@ -506,8 +507,8 @@ How the card works:
   `MissionContext`. The widget shows the first mission that is neither
   completed nor skipped and lists the others beneath it. It holds no quest IDs.
 - Every completion is observed on the server. The browser never claims one.
-- Mission 02's start (`show-folder-quest.js`) opens the assistant panel on
-  Today with the folder chooser unfolded and scrubs `?quest=show-folder`
+- Mission 02's start (`show-folder-quest.js`) opens the assistant drawer,
+  starts the folder flow in its conversation and scrubs `?quest=show-folder`
   without a history entry. It makes no request of its own and never completes
   anything. A pending offer also renders on the mission card
   (`progression-widget.js`, matched on the action URL
@@ -539,21 +540,32 @@ URL remain as constants so persisted state that names it still loads.
 points it at a folder, the server looks at the folder's shape, and the
 assistant makes one explained offer.
 
-- **Entry.** Today's folder scene and chooser (`personal-assistant-today.tmpl`,
-  `#personalAssistantFolder`) are already expanded for an `active` or `paused`
-  relationship, even after a scan returns an offer or the panel is reopened.
-  There is no second inline launch button. Home's primary **Explore a folder**
-  header action opens the panel and focuses the chooser; Mission 02's Start
-  and the mission card still reach the same flow. Before HQ, Home opens its
-  confirm card instead.
+- **Entry.** One chip, **Explore a folder**, sits directly above the drawer's
+  composer for an `active` or `paused` relationship. On Home it starts the flow
+  as a turn in the drawer's conversation (`personal-assistant-folder.tmpl`,
+  `#personalAssistantFolder`, inside `#personalAssistantThread`); on every other
+  page it goes to `/?panel=today&folder=show`, which starts the same turn.
+  Home's primary **Explore a folder** header action, Mission 02's Start and the
+  mission card reach the same flow. Nothing opens by itself: at rest the
+  conversation is empty. The chip is disabled while a folder is being chosen
+  or explored. Before HQ, Home opens its confirm card instead.
 - **Choosing.** Chips name Downloads, Documents, and Desktop under the server's
   home; "Pick another folder…" runs the native picker on the server
   (`platform.ChooseFolder`, osascript). The browser never sends a filesystem
   path: `POST /api/personal-assistant/folder-digest/scan` accepts `{chip}` or
   `{picker: true}` and answers 400 to any `path`/`folder` key.
-- **Presentation.** The scene, chooser, and resulting offer share one card in
-  Needs you, ahead of the compact queue of other requests. A small visual field
-  trip beside the chooser uses the assistant's already-rendered avatar. A folder graphic starts moving
+- **Presentation.** The turn reads as a conversation: the user's request
+  ("Explore a folder"), then the assistant's replies in order — the chooser
+  ("Which folder should I explore?", the folder buttons, "A read-only peek.
+  Nothing moves."), the exploring scene once a folder is chosen, and the offer
+  card. Starting the turn folds Needs you, the brief row and the progress row
+  into the summary strip (see Surfaces and routing). The offer card is one
+  element: it is a reply in the conversation while the flow runs there, and
+  when a page loads onto an offer that is still waiting (`pending` or
+  `awaiting_outcome`) the same element is placed under Needs you instead, and
+  stays there while it is acted on, so it is never lost and never shown twice.
+  The scene's small visual field trip uses the assistant's already-rendered
+  avatar. A folder graphic starts moving
   only when a real scan begins (and finishes the motion on a fast response);
   the real server offer produces the finding badges,
   and a failed scan produces an error, never a made-up result. The explanation
@@ -602,7 +614,7 @@ assistant makes one explained offer.
   workspace; the modal's Cancel leaves the offer pending. A mixed or
   ambiguous offer's "Start with X" / "It's a project" shows the same confirm
   card (with Back) before anything is decided. A resolved project Set up stays
-  on Today and lists the server-observed workspace, primary linked folder,
+  on the card and lists the server-observed workspace, primary linked folder,
   blueprint, actual agent instances and seeded task as text-only receipt rows,
   then offers **Open <workspace>**. Reuse after an interrupted setup says
   "already set up"; an exact request replay returns the stored receipt.
@@ -615,8 +627,8 @@ assistant makes one explained offer.
   run is started over from, and a run still waiting for its folder is
   resumed); the decide response resolves the offer with the review batch's
   route, and the browser then shows the setup as it happened — the
-  assistant-led setup card in the Today panel with its receipts and
-  walkthrough, ending on the review — instead of jumping to the batch. A
+  assistant-led setup card under Needs you (shown again if the conversation
+  had folded it away) with its receipts and walkthrough, ending on the review — instead of jumping to the batch. A
   folder another File Janitor already manages opens that workspace instead
   (`outcome.existing`). A workspace that cannot be opened is a failed tidy
   (503) and the offer stays pending. **Adjust…** opens the ordinary File
@@ -631,12 +643,14 @@ assistant makes one explained offer.
   authority re-validates against the offer's key, the workspace's primary
   directory, and the marker on disk, and a hidden or moved folder turns the
   fact into "Needs review".
-- **First prompt.** After HQ becomes active, Today's chooser expands once per
-  relationship with "Now show me a folder you're working in." The
+- **First prompt.** After HQ becomes active, the chooser appears once per
+  relationship as the assistant's first message in the conversation, "Now
+  let's explore a folder you're working in.", with no request from the user
+  above it and without folding the top of the drawer. The
   `POST /api/personal-assistant/folder-digest/prompted` receipt persists this
   presentation server-side; Reset Getting Started clears it. No chooser opens
-  before HQ exists; further visits keep the chooser open without repeating the
-  one-time hand-over line.
+  before HQ exists, and further visits do not show it again: the chip is how a
+  folder is asked for.
 - **Mission.** See Mission 02 above. Every completion is server-observed.
 
 Today's Done section also gains one `janitor_result` line per File Janitor
@@ -662,25 +676,92 @@ it is not a peer assistant.
 Home is Map-first: the Workspace Map/Tree occupies the available cockpit
 viewport without an always-visible Today row. Its primary header action is
 **Explore a folder** after hire; before HQ it opens the HQ confirm card, and
-after HQ it opens the existing chooser. **New Workspace** stays a secondary
-header action and retains its full modal and Map create pad. The empty Map and
-launcher link to the chooser instead of instructing the user to create a
-workspace by hand. Today remains a Home-owned projection and is available on
-demand through the existing launcher and panel for that same bound Personal
-Assistant. Today's only three named sections are **Needs you**, **Working on**,
-and **Done**, in that display order. Needs you leads with the next action and
-collapses other requests under **Also needs you**; the server's records and
-ordering are unchanged. The Today heading leaves space for the assistant name
-and a short local check-in time. Its **More** menu preserves the distinct HQ,
-working agreement, workspace memory, remembered-facts review, optional
-interview, and Agents destinations rather than showing a wall of header links. Empty sections disappear, unhealthy sources are named
-once in a retryable footer, and machine reason/status identifiers are humanized.
-The old Decisions/Priorities/Remembered/FollowUps/Results JSON fields remain
-available for one release but no longer render as sections. Direct launcher
-activation on Home opens Today, while prefilled handoffs open the Ask composer. Other authenticated
-surfaces keep the existing Ask-only launcher behavior. This presentation change
-adds no Personal Assistant page or route and does not change identity,
-ownership, routing, confirmation, persistence, authorization, or API boundaries.
+after HQ it starts the folder flow in the assistant drawer. **New Workspace**
+stays a secondary header action and retains its full modal and Map create pad.
+The empty Map and launcher link to the folder flow instead of instructing the
+user to create a workspace by hand.
+
+### The assistant drawer
+
+`tasks/prd-assistant-drawer-redesign.md`. The Personal Assistant drawer is one
+view on every page. It has no tabs. From top to bottom:
+
+- **Header.** The assistant's name; under it the next check-in ("Next check-in
+  · Mon 5:00 PM", "Check-ins paused", "No check-in scheduled"), or the plain
+  role "Personal Assistant" until that is known; a **More** menu (an icon
+  button named "More assistant options") holding the distinct HQ, working
+  agreement, workspace memory, remembered-facts review, optional interview and
+  Agents destinations; and Close.
+- **A region that scrolls.** On Home it starts with the Today projection: the
+  status banner (paused, not hired, HQ not built, repair, no model), then
+  **Needs you** with its count in the heading, the **brief row** and the
+  **progress row**. Then the conversation.
+- **The chip**, "Explore a folder", directly above the composer.
+- **The composer**, always visible at the bottom. Opening the drawer puts focus
+  in it whenever the assistant can accept work, and on the first control in
+  the drawer when it cannot (the composer is then disabled).
+  `/?panel=today` still opens the drawer on Home.
+
+Today remains a Home-owned projection for the same bound Personal Assistant.
+Needs you is shown only when something is in it, leads with the next action
+(an unfinished workspace build, the HQ confirm card, a folder offer that was
+waiting) and collapses other requests under **Also needs you**; the server's
+records and ordering are unchanged. The **brief row** ("Today's brief · ready
+since 8:02 AM · Open in My HQ") is a link to the Daily Brief station; it says
+ready, being prepared, couldn't be generated, or when the first one is due, and
+is absent when there is no Personal HQ. The full Daily Brief is not rendered on
+Home. The **progress row** ("N in progress · M done today") expands **Working
+on** (with today's meetings) and **Done** in place, and is absent when there is
+nothing in progress, nothing done today and no meetings. Empty sections
+disappear, unhealthy sources are named once in a retryable footer, and machine
+reason/status identifiers are humanized. The old
+Decisions/Priorities/Remembered/FollowUps/Results JSON fields remain available
+for one release but do not render as sections.
+
+The conversation is empty until something happens: the shared work activity's
+idle text is not shown in the drawer (the Ask Ori guide panel, which uses the
+same activity block, is unchanged). When the user starts something (Send, or
+"Explore a folder") Needs you and the two rows fold into one **summary strip**
+("Needs you 2 · Brief ready · 2 in progress") with a Show/Hide control.
+Folding only hides them, so anything typed into a card is still there. A
+message the assistant starts by itself does not fold them, and reopening the
+drawer with no conversation going shows them in full again.
+
+Pages other than Home have no Today of their own. Their drawer reads
+`GET /api/personal-assistant/today` when it opens, for the header's check-in
+line and More links and for one line, "N need you", that links to
+`/?panel=today`. The line is hidden when nothing needs the user and reads "Open
+Home to see what needs you" when the number cannot be read. They show no brief
+row or progress row, and their chip goes to Home's folder flow.
+
+Home still keeps today's brief prepared: on load, with a Personal HQ and no
+brief for today, it asks the server for one (`POST /api/personal-hq/brief/open`)
+and follows the generation, so the assistant's lists and the brief row are
+current without the user visiting My HQ.
+
+This presentation adds no Personal Assistant page or route and does not change
+identity, ownership, routing, confirmation, persistence, authorization, or API
+boundaries.
+
+### The Daily Brief station
+
+The full Daily Brief is read in My HQ, in a station named **Daily Brief** (key
+`daily-brief`): a building in the fourth slot of the HQ map's station column
+and a row in the Stations rail, shown only for the designated Personal HQ. Its
+status line is one of "Ready · 8:02 AM", "Preparing…", "Failed", "Not
+scheduled", "Check-ins paused", or "No brief yet" (scheduled, nothing generated
+so far). Opening it shows the brief in a panel over the map with **Refresh**,
+**Brief settings** (the existing form and its recent history) and a list of
+earlier briefs, which open read-only. The panel's heading line says when the
+brief on screen was generated and when the next one is due.
+
+`/workspaces/<hq-slug>?station=daily-brief` opens My HQ with the panel already
+open and then leaves the address bar. The drawer's brief row, Mission 04's
+**Open Daily Brief**, the "Daily Brief is ready" Action Center item and a Daily
+Brief result card on Home's map all use that link. When the panel shows a
+brief it tells the server (`POST /api/personal-hq/brief/seen`), which is what
+completes Mission 04 for a hired assistant, and it marks the brief's result
+card on the map as opened.
 
 Read surfaces degrade safely when the binding, workspace, or agent is missing:
 they return a bounded unavailable/repair state, never a fabricated identity.
@@ -1213,7 +1294,7 @@ revision into authorized hired Home and bound HQ chat/task contexts. Native CLI
 runs without a verified hired principal continue to receive **no** managed
 facts. Other workspaces and Ori Guide never inherit this HQ projection.
 
-Home's Today panel, the hired assistant's global agent page, the current
+The assistant drawer's More menu, the hired assistant's global agent page, the current
 Personal HQ workspace and its bound entry-agent page link to
 `/profile#personalHQKnowledge` and the optional interview.
 The workspace/agent links require a current hired, correctly bound and available

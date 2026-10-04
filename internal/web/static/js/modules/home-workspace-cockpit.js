@@ -3843,7 +3843,7 @@ import {
     if (folderAction.target === 'folder' && !window.PersonalAssistantFolder?.openChooser)
       return false;
     if (folderAction.target === 'hq' && !window.PersonalAssistantHQCard?.show) return false;
-    const opened = window.PersonalAssistantPanel?.open?.(els.showFolderBtn, { view: 'today' });
+    const opened = window.PersonalAssistantPanel?.open?.(els.showFolderBtn);
     if (!opened) return false;
     if (folderAction.target === 'hq') window.PersonalAssistantHQCard.show();
     else window.PersonalAssistantFolder.openChooser();

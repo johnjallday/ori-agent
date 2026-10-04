@@ -1518,10 +1518,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* File Janitor's descriptor opts into the curated depot silhouette. It remains
-   one button: the sorting line, parcels, folder, location, and state are all
-   inert content inside the same keyboard/click target. */
-.ws-cmd-map-hq-station[data-station-visual="depot"] {
+/* A descriptor with a visualVariant opts into a curated building silhouette
+   (File Janitor's depot, the Daily Brief's briefing room). It remains one
+   button: the art, location, and state are all inert content inside the same
+   keyboard/click target. */
+.ws-cmd-map-hq-station.has-visual {
   grid-template-columns: 88px minmax(0, 1fr);
   grid-template-rows: auto auto auto;
   width: 226px;
@@ -1554,17 +1555,17 @@
   width: 92px;
   height: 68px;
 }
-.ws-cmd-map-hq-station[data-station-visual="depot"] .ws-cmd-map-hq-station-label {
+.ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-label {
   align-self: end;
   color: var(--ws-ink);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1.1px;
 }
-.ws-cmd-map-hq-station[data-station-visual="depot"] .ws-cmd-map-hq-station-location {
+.ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-location {
   align-self: center;
 }
-.ws-cmd-map-hq-station[data-station-visual="depot"] .ws-cmd-map-hq-station-state {
+.ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-state {
   align-self: start;
   display: flex;
   gap: 6px;
@@ -1579,7 +1580,7 @@
   overflow: visible;
   text-overflow: clip;
 }
-.ws-cmd-map-hq-station[data-station-visual="depot"] .ws-cmd-map-hq-station-state::before {
+.ws-cmd-map-hq-station.has-visual .ws-cmd-map-hq-station-state::before {
   content: "";
   flex: 0 0 auto;
   width: 6px;
@@ -1587,16 +1588,16 @@
   background: currentColor;
   box-shadow: 0 0 0 2px var(--ws-bg-2);
 }
-.ws-cmd-map-hq-station[data-station-visual="depot"]:hover {
+.ws-cmd-map-hq-station.has-visual:hover {
   background:
     linear-gradient(120deg, rgba(232, 181, 75, 0.16), transparent 48%),
     linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
 }
-.ws-cmd-map-hq-station[data-station-visual="depot"]:active {
+.ws-cmd-map-hq-station.has-visual:active {
   border-color: var(--ws-keeper);
   background: var(--ws-bg-2);
 }
-.ws-cmd-map-hq-station[data-station-visual="depot"]:focus-visible {
+.ws-cmd-map-hq-station.has-visual:focus-visible {
   outline-offset: 4px;
 }
 .ws-cmd-map-hq-station:hover {
@@ -5813,12 +5814,12 @@ button.ws-cmd-rpg-class-card:focus-visible {
 [data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station:hover {
   background: linear-gradient(180deg, #ffffff, rgba(239, 230, 211, 0.98) 74%);
 }
-[data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station[data-station-visual="depot"] {
+[data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station.has-visual {
   background:
     linear-gradient(120deg, rgba(155, 100, 27, 0.08), transparent 48%),
     linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
 }
-[data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station[data-station-visual="depot"]:hover {
+[data-bs-theme="light"] .ws-cmd-opmap .ws-cmd-map-hq-station.has-visual:hover {
   background:
     linear-gradient(120deg, rgba(155, 100, 27, 0.12), transparent 48%),
     linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));

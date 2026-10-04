@@ -44,9 +44,7 @@ async function openCard(page) {
   await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean(window.PersonalAssistantPanel?.open));
   await page.evaluate(() =>
-    window.PersonalAssistantPanel.open(document.getElementById('personalAssistantLauncher'), {
-      view: 'today'
-    })
+    window.PersonalAssistantPanel.open(document.getElementById('personalAssistantLauncher'))
   );
   const card = page.locator('#personalAssistantFolderOffer');
   await card.waitFor({ state: 'visible', timeout: 30_000 });

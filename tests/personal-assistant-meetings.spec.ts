@@ -1,20 +1,21 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 
 /**
- * Today's meetings on Today and in the Daily Brief (Issue #533), end to end.
+ * Today's meetings in the assistant drawer and in the Daily Brief (Issue
+ * #533), end to end.
  *
  * One fresh, isolated server for the whole file (describe.serial): a hire that
  * asked to be prepared for meetings sees Mission 04's "Connect your calendar"
  * nudge; after the in-repo fake calendar is connected through Calendar Ops,
- * Today lists today's meetings with the overlapping pair flagged, a meeting
- * opens in the Calendar console's drawer with "Prepare me", and the Daily
- * Brief leads with Today's Meetings.
+ * the drawer's progress row lists today's meetings with the overlapping pair
+ * flagged, a meeting opens in the Calendar console's drawer with "Prepare me",
+ * and the Daily Brief, in its station in My HQ, leads with Today's Meetings.
  *
  * Run (sandbox-off; Chromium cannot launch inside the agent sandbox):
  *
- *   eval "$(./scripts/demo-calendar-fixture.sh --build-only)"
- *   FAKE_CALENDAR_MCP_BIN="$FAKE_CALENDAR_MCP_BIN" \
- *     ./scripts/e2e-fresh.sh tests/personal-assistant-meetings.spec.ts -- --workers=1
+ *   ./scripts/demo-calendar-fixture.sh --build-only   # prints FAKE_CALENDAR_MCP_BIN=<path>
+ *   ./scripts/e2e-fresh.sh --env FAKE_CALENDAR_MCP_BIN=<path> \
+ *     tests/personal-assistant-meetings.spec.ts -- --workers=1
  *
  * Without FAKE_CALENDAR_MCP_BIN only the not-connected test runs.
  *
@@ -40,13 +41,32 @@ async function stubDetection(page: Page) {
   );
 }
 
-async function openToday(page: Page) {
+// openMeetings opens the drawer and expands its progress row: today's meetings
+// are listed with the work in progress, behind that one row.
+async function openMeetings(page: Page) {
   const launcher = page.locator('#personalAssistantLauncher');
   await expect(launcher).toBeVisible();
   if (await page.locator('#personalAssistantPanel').isHidden()) await launcher.click();
-  const todayTab = page.locator('#personalAssistantTodayTab');
-  if ((await todayTab.getAttribute('aria-selected')) !== 'true') await todayTab.click();
   await expect(page.locator('#personalAssistantToday')).toBeVisible();
+  const progress = page.locator('#personalAssistantProgressRow');
+  await expect(progress).toBeVisible();
+  if ((await progress.getAttribute('aria-expanded')) !== 'true') await progress.click();
+  await expect(page.locator('#personalAssistantTodayMeetingsSection')).toBeVisible();
+}
+
+// The Daily Brief is read in its station in My HQ; the drawer's brief row is
+// the way there.
+async function openDailyBriefStation(page: Page) {
+  const launcher = page.locator('#personalAssistantLauncher');
+  await expect(launcher).toBeVisible();
+  if (await page.locator('#personalAssistantPanel').isHidden()) await launcher.click();
+  const row = page.locator('#personalAssistantBriefRow');
+  await expect(row).toBeVisible();
+  await row.click();
+  await expect(page).toHaveURL(/\/workspaces\/[^?]+\?station=daily-brief/);
+  const panel = page.locator('.daily-brief-station');
+  await expect(panel).toBeVisible({ timeout: 15000 });
+  return panel;
 }
 
 // connectFakeCalendar is scripts/demo-calendar-fixture.sh in API calls: the
@@ -150,9 +170,8 @@ test.describe.serial("Today's meetings", () => {
   }) => {
     await stubDetection(page);
     await page.goto('/');
-    await openToday(page);
+    await openMeetings(page);
     const meetings = page.locator('#personalAssistantTodayMeetingsSection');
-    await expect(meetings).toBeVisible();
     await expect(meetings).toContainText('Connect a calendar and Today will list your meetings.');
     await expect(meetings.getByRole('link', { name: 'Connect your calendar' })).toHaveAttribute(
       'href',
@@ -176,7 +195,7 @@ test.describe.serial("Today's meetings", () => {
 
     await stubDetection(page);
     await page.goto('/');
-    await openToday(page);
+    await openMeetings(page);
     const meetings = page.locator('#personalAssistantTodayMeetingsSection');
     await expect(page.locator('#personalAssistantTodayMeetingsTitle')).toContainText('2 overlaps');
     await expect(
@@ -204,9 +223,9 @@ test.describe.serial("Today's meetings", () => {
     );
     await stubDetection(page);
     await page.goto('/');
-    await openToday(page);
-    await page.locator('#homeDailyBriefRefreshBtn').click();
-    const body = page.locator('#homeDailyBriefBody');
+    const panel = await openDailyBriefStation(page);
+    await panel.locator('[data-brief="refresh"]').click();
+    const body = panel.locator('[data-brief="body"]');
     await expect(body).toContainText("Today's Meetings", { timeout: 30000 });
     await expect(body).toContainText('Design review');
     await expect(body.locator('.home-daily-brief-badge[data-state="conflict"]')).toHaveCount(2);

@@ -223,7 +223,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			Summary:           "Your scheduled Daily Brief has been generated.",
 			Priority:          "medium",
 			Status:            workspace.OpportunityNew,
-			RecommendedAction: "Open Home to view your Daily Brief.",
+			RecommendedAction: "Open My HQ to view your Daily Brief.",
+			// The Action Center links the item to the Daily Brief station,
+			// where the brief is read. A workspace whose route cannot be read
+			// gets no link rather than a guessed one.
+			SourceURL: b.briefStationURLFor(cfg.WorkspaceID),
 		}
 		if _, _, err := opportunityStore.Upsert(opp); err != nil {
 			logger.Warn("dailybrief: failed to create action center notification", logger.Fields{"revision_id": rev.ID, "error": err})

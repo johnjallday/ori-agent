@@ -117,7 +117,6 @@ async function openAsk(page: Page): Promise<void> {
   const launcher = page.locator('#personalAssistantLauncher');
   await expect(launcher).toBeVisible({ timeout: 20000 });
   if (await page.locator('#personalAssistantPanel').isHidden()) await launcher.click();
-  await page.locator('#personalAssistantAskTab').click();
   await expect(page.locator('#personalAssistantConversationBar')).toBeVisible();
 }
 

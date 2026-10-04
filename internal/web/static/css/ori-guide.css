@@ -33,7 +33,11 @@
   }
 }
 
-.ori-guide {
+/* The paper palette. The Daily Brief panel in My HQ is the assistant's brief
+   moved out of this drawer, so it shares these tokens instead of copying them
+   (daily-brief.css). */
+.ori-guide,
+.daily-brief-station {
   --ori-paper: #f6ead6;
   --ori-paper-deep: #e8d6b4;
   --ori-ink: #3b2a12;
@@ -46,7 +50,9 @@
   --ori-accent-strong: #8a5a15;
   --ori-line: #d8c19b;
   --ori-surface: #fffaf1;
+}
 
+.ori-guide {
   position: fixed;
   right: 20px;
   bottom: 20px;
@@ -93,8 +99,6 @@
 .ori-guide__action:focus-visible,
 .ori-guide__topic:focus-visible,
 .personal-assistant-launcher:focus-visible,
-.personal-assistant-panel__close:focus-visible,
-.personal-assistant-panel__tab:focus-visible,
 .personal-assistant-panel__input:focus-visible,
 .personal-assistant-panel__send:focus-visible,
 .personal-assistant-panel a:focus-visible,
@@ -479,7 +483,8 @@
 
 /* ---- dark theme ----------------------------------------------------------------- */
 
-[data-bs-theme="dark"] .ori-guide {
+[data-bs-theme="dark"] .ori-guide,
+[data-bs-theme="dark"] .daily-brief-station {
   --ori-paper: #2f2820;
   --ori-paper-deep: #3b3227;
   --ori-ink: #f2e7d5;
@@ -495,7 +500,6 @@
 /* ---- hired personal assistant ------------------------------------------------------ */
 
 .ori-guide__role,
-.personal-assistant-panel__role,
 .personal-assistant-launcher__role {
   margin: 2px 0 0;
   color: var(--ori-accent-strong);
@@ -633,15 +637,29 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   box-shadow: 0 20px 56px rgb(0 0 0 / 30%);
 }
 
+/* The drawer is one column: a header, a region that scrolls, and the composer,
+   which is always the last thing in it and never scrolls away. */
+.personal-assistant-panel {
+  /* Accent that carries text. The strong amber fails contrast on the dark
+     surface, where the lighter one passes. */
+  --pa-accent-text: var(--ori-accent-strong);
+  --pa-ink-dim: color-mix(in srgb, var(--ori-ink) 72%, var(--ori-surface));
+
+  gap: 12px;
+}
+
+[data-bs-theme="dark"] .personal-assistant-panel {
+  --pa-accent-text: var(--ori-accent);
+}
+
 .personal-assistant-panel__header {
   display: flex;
   flex: none;
   align-items: center;
   gap: 10px;
-  margin-bottom: 12px;
 }
 
-.personal-assistant-panel__header > div:nth-child(2) {
+.personal-assistant-panel__ident {
   min-width: 0;
   flex: 1;
 }
@@ -649,92 +667,135 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 .personal-assistant-panel__title {
   overflow: hidden;
   margin: 0;
-  font-size: 18px;
+  font-size: 20px;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.personal-assistant-panel__close {
+/* When the next check-in is, under the assistant's name. */
+.personal-assistant-panel__checkin {
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The header's two icon buttons: More and Close. */
+.personal-assistant-panel__icon {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   flex: none;
   place-items: center;
   border: 1px solid var(--ori-line);
   border-radius: 10px;
-  background: transparent;
-  color: inherit;
-  font-size: 24px;
+  background: var(--ori-surface);
+  color: var(--ori-ink);
+  font-size: 16px;
+  list-style: none;
   cursor: pointer;
 }
 
-.personal-assistant-panel__tabs {
-  display: grid;
-  flex: none;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  margin-bottom: 12px;
-  padding: 4px;
-  border: 1px solid var(--ori-line);
-  border-radius: 12px;
+.personal-assistant-panel__icon::-webkit-details-marker {
+  display: none;
+}
+
+.personal-assistant-panel__icon:hover,
+.personal-assistant-panel__more[open] > .personal-assistant-panel__icon {
   background: var(--ori-paper);
 }
 
-.personal-assistant-panel__tab {
-  min-height: 38px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ori-ink);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
+.personal-assistant-panel__more {
+  position: relative;
+  flex: none;
 }
 
-.personal-assistant-panel__tab[aria-selected="true"] {
+.personal-assistant-panel__links {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  display: grid;
+  width: min(250px, calc(100vw - 48px));
+  padding: 5px;
+  border: 1px solid var(--ori-line);
+  border-radius: 12px;
   background: var(--ori-surface);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
-  color: var(--ori-accent-strong);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
 }
 
-.personal-assistant-panel__view {
+.personal-assistant-panel__more:not([open]) .personal-assistant-panel__links {
+  display: none;
+}
+
+.personal-assistant-panel__links a {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: var(--ori-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.personal-assistant-panel__links a[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__links a:hover,
+.personal-assistant-panel__links a:focus-visible {
+  background: var(--ori-paper);
+}
+
+/* Everything above the composer: what needs you, then the conversation. */
+.personal-assistant-panel__scroll {
+  display: flex;
   min-width: 0;
   min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-}
-
-.personal-assistant-panel__view[hidden] {
-  display: none;
-}
-
-.personal-assistant-panel__view--ask {
+  /* Room for the focus ring of a control at the very edge. */
   padding: 2px;
+}
+
+.personal-assistant-panel__scroll > * {
+  flex: none;
 }
 
 .personal-assistant-panel__form {
   display: grid;
+  flex: none;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  align-items: end;
+  gap: 10px;
+  margin: 0;
 }
 
 .personal-assistant-panel__input {
   width: 100%;
   min-height: 72px;
-  resize: vertical;
+  resize: none;
   border: 1px solid var(--ori-line);
-  border-radius: 10px;
+  border-radius: 14px;
   background: var(--ori-paper);
   color: var(--ori-ink);
-  padding: 10px 12px;
+  padding: 12px 14px;
 }
 
 .personal-assistant-panel__send {
   align-self: end;
-  min-height: 42px;
-  padding: 0 16px;
+  min-height: 44px;
+  padding: 0 18px;
   border: 0;
   border-radius: 10px;
   background: var(--ori-accent-strong);
@@ -747,17 +808,472 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   opacity: 0.55;
 }
 
+/* On a page that is not Home: how much needs the user, and the way there. */
+.personal-assistant-panel__needs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--ori-line);
+  border-left: 3px solid var(--ori-accent);
+  border-radius: 10px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.personal-assistant-panel__needs[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__needs:hover {
+  border-color: var(--ori-accent);
+  color: var(--ori-ink);
+}
+
+.personal-assistant-panel__needs i {
+  color: var(--pa-accent-text);
+}
+
+/* One suggestion, directly above the composer. */
+.personal-assistant-panel__chips {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.personal-assistant-panel__chips[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__chip {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.personal-assistant-panel__chip:hover:not(:disabled) {
+  border-color: var(--ori-accent);
+}
+
+.personal-assistant-panel__chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.personal-assistant-panel__chip i {
+  color: var(--pa-accent-text);
+}
+
+/* What the composer last did. It takes no room while it has nothing to say. */
 .personal-assistant-panel__status {
-  min-height: 1.4em;
-  margin: 8px 0;
+  flex: none;
+  margin: 0;
+  color: var(--pa-ink-dim);
   font-size: 12px;
-  opacity: 0.82;
+}
+
+.personal-assistant-panel__status:empty {
+  display: none;
 }
 
 .personal-assistant-panel__activity .ask-ori-activity {
   position: static;
   width: 100%;
   max-width: none;
+}
+
+/* Nothing has happened yet, so the conversation is empty. The shared activity
+   block's "is ready" heading and "Progress updates will appear here" lines say
+   only that, and are not shown here. The Ask Ori guide panel uses the same
+   block and is untouched: this rule is scoped to the assistant drawer. */
+.personal-assistant-panel__activity .ask-ori-activity.is-idle {
+  display: none;
+}
+
+.personal-assistant-panel__activity:not(:has(> .ask-ori-activity:not(.is-idle))) {
+  display: none;
+}
+
+/* The conversation: the shared activity and, on Home, the folder turn. It
+   takes no room until one of them has something in it. */
+.personal-assistant-panel__thread {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.personal-assistant-panel__thread:not(
+  :has(> .pa-thread:not([hidden]), > * > .ask-ori-activity:not(.is-idle))
+) {
+  display: none;
+}
+
+/* A turn that is not the shared activity's: what the user asked for, on the
+   right, and under it the assistant's replies, each a card of its own. */
+.pa-thread__request {
+  max-width: 85%;
+  justify-self: end;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 16px 16px 4px;
+  background: var(--ori-accent-strong);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pa-thread__request[hidden] {
+  display: none;
+}
+
+.pa-thread__reply {
+  overflow: hidden;
+  border: 1px solid var(--ori-line);
+  border-radius: 16px 16px 16px 4px;
+  background: var(--ori-paper);
+}
+
+/* ---- what needs you, the brief row and the progress row (Home) ---------------------- */
+
+.personal-assistant-panel .personal-assistant-today {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+}
+
+.personal-assistant-panel .personal-assistant-today[hidden] {
+  display: none;
+}
+
+/* One line under the header: paused, not hired, HQ not built, repair, no model. */
+.personal-assistant-panel .personal-assistant-today__banner {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ori-line);
+  border-left: 3px solid var(--ori-accent);
+  border-radius: 10px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 13px;
+}
+
+.personal-assistant-panel .personal-assistant-today__banner[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel .personal-assistant-today__banner a {
+  color: var(--pa-accent-text);
+  font-weight: 700;
+}
+
+/* What Needs you and the two rows fold into once a conversation starts. */
+.personal-assistant-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 13px;
+}
+
+.personal-assistant-summary[hidden] {
+  display: none;
+}
+
+.personal-assistant-summary__text {
+  min-width: 0;
+  font-weight: 600;
+}
+
+.personal-assistant-summary__toggle {
+  min-height: 32px;
+  flex: none;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pa-accent-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.personal-assistant-summary__toggle:hover {
+  background: var(--ori-surface);
+}
+
+.personal-assistant-panel .personal-assistant-today__sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+.personal-assistant-panel .personal-assistant-today__sections[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel .personal-assistant-today__needs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.personal-assistant-panel .personal-assistant-today__needs[hidden] {
+  display: none;
+}
+
+.personal-assistant-today__needs-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.personal-assistant-panel .personal-assistant-today__needs-head h4 {
+  margin: 0;
+  color: var(--pa-accent-text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.personal-assistant-today__count {
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ori-accent-strong);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* The cards placed in Needs you sit one under another, each on its own. */
+.personal-assistant-panel #personalAssistantNeedsYouCards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.personal-assistant-panel #personalAssistantNeedsYouCards:empty {
+  display: none;
+}
+
+.personal-assistant-panel #personalAssistantNeedsYouCards > * {
+  margin: 0;
+}
+
+/* An unfinished workspace build: what it is, and its two controls beside it. */
+.personal-assistant-panel .personal-assistant-today__build {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  list-style: none;
+}
+
+.personal-assistant-panel .personal-assistant-today__build li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--ori-line);
+  border-radius: 14px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.personal-assistant-panel .personal-assistant-today__build li > span {
+  grid-column: 1;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 1;
+}
+
+.personal-assistant-panel .personal-assistant-today__build .personal-assistant-today__actions {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  gap: 8px;
+  margin: 0;
+}
+
+.personal-assistant-panel .personal-assistant-today__action {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--pa-accent-text);
+  border-radius: 10px;
+  background: var(--ori-surface);
+  color: var(--pa-accent-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.personal-assistant-panel .personal-assistant-today__action--primary {
+  border-color: var(--ori-accent-strong);
+  background: var(--ori-accent-strong);
+  color: #fff;
+}
+
+.personal-assistant-panel .personal-assistant-today__queue {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--ori-line);
+}
+
+/* With no card above it the queue is the whole section, and needs no rule. */
+.personal-assistant-panel
+  #personalAssistantNeedsYouCards:not(:has(> :not([hidden])))
+  + .personal-assistant-today__queue {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.personal-assistant-panel .personal-assistant-today__queue summary {
+  color: var(--pa-accent-text);
+}
+
+.personal-assistant-glance {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ori-line);
+  border-radius: 14px;
+}
+
+.personal-assistant-glance[hidden],
+.personal-assistant-glance__row[hidden] {
+  display: none;
+}
+
+/* Named through the drawer so Home's link colour for Today's lists does not
+   repaint the brief row, which is a link. */
+.personal-assistant-panel .personal-assistant-glance__row {
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--ori-ink);
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.personal-assistant-glance__row:not([hidden]) ~ .personal-assistant-glance__row {
+  border-top: 1px solid var(--ori-line);
+}
+
+.personal-assistant-panel .personal-assistant-glance__row:hover {
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+}
+
+/* The rows sit flush in a clipped group, so their focus ring is drawn inside. */
+.personal-assistant-panel .personal-assistant-glance__row:focus-visible {
+  outline-offset: -3px;
+}
+
+.personal-assistant-glance__icon,
+.personal-assistant-glance__chevron {
+  flex: none;
+  color: var(--pa-accent-text);
+}
+
+.personal-assistant-glance__icon {
+  font-size: 18px;
+}
+
+.personal-assistant-glance__text {
+  min-width: 0;
+  flex: 1;
+}
+
+.personal-assistant-glance__label {
+  font-weight: 600;
+}
+
+.personal-assistant-glance__detail {
+  color: var(--pa-ink-dim);
+}
+
+.personal-assistant-glance__action {
+  flex: none;
+  color: var(--pa-accent-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.personal-assistant-glance__row[aria-expanded="true"] .personal-assistant-glance__chevron {
+  transform: rotate(180deg);
+}
+
+.personal-assistant-today__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.personal-assistant-today__progress[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel .personal-assistant-today__progress > section {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
+  background: var(--ori-paper);
+}
+
+.personal-assistant-panel .personal-assistant-today__progress > section[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel .personal-assistant-today__progress h4 {
+  margin: 0 0 8px;
+  color: var(--pa-accent-text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* ---- conversation bar --------------------------------------------------------------- */
@@ -1118,12 +1634,14 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
     border-radius: 20px 20px 0 0;
   }
 
-  .personal-assistant-panel__form {
-    grid-template-columns: 1fr;
+  /* The composer keeps its one row: stacking Send under the box would take
+     the room the conversation needs on a short sheet. */
+  .personal-assistant-panel__input {
+    min-height: 56px;
   }
 
-  .personal-assistant-panel__send {
-    width: 100%;
+  .personal-assistant-glance__action {
+    font-size: 12px;
   }
 }
 

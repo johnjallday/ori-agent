@@ -1,15 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
+  EXPLORE_FOLDER_URL,
+  NEEDS_YOU_URL,
+  assistantCheckInLine,
+  assistantChipView,
+  assistantMoreLinks,
+  assistantNeedsLine,
+  assistantOpenFocusTarget,
   assistantPanelShouldCloseOnKey,
-  assistantPanelViewForOpen,
-  assistantTabViewAfterKey,
   boundedAssistantHandoff,
   canSubmitAssistantWork,
   personalAssistantPanelView,
   restoreAssistantPanelFocus,
-  restoredDraft
+  restoredDraft,
+  safeTodayRoute
 } from './personal-assistant-panel.js';
 
 test('personal assistant panel covers unavailable, pre-hire, active, paused, and repair states', () => {
@@ -89,19 +96,204 @@ test('an unsent message returns to the composer without overwriting newer typing
   assert.equal(restoredDraft(null, null), '');
 });
 
-test('Home opens Today directly while non-Home and prefilled requests select Ask', () => {
-  assert.equal(assistantPanelViewForOpen('today', { hasToday: true }), 'today');
-  assert.equal(assistantPanelViewForOpen('today', { hasToday: false }), 'ask');
-  assert.equal(assistantPanelViewForOpen('ask', { hasToday: true }), 'ask');
+test('opening the drawer focuses the composer whenever the assistant can accept work', () => {
+  for (const state of ['active', 'paused']) {
+    assert.equal(assistantOpenFocusTarget(personalAssistantPanelView({ state })), 'composer');
+  }
+  // Not hired, HQ not built, repair needed, unknown: the composer is disabled,
+  // so focus goes to the first control in the drawer instead.
+  for (const state of [
+    'needs_hire',
+    'hiring',
+    'needs_hq',
+    'provisioning_hq',
+    'repair_needed',
+    'unavailable'
+  ]) {
+    assert.equal(
+      assistantOpenFocusTarget(personalAssistantPanelView({ state })),
+      'first-control',
+      state
+    );
+  }
+  assert.equal(assistantOpenFocusTarget(null), 'first-control');
 });
 
-test('Today and Ask tabs implement wrapping arrows plus Home and End', () => {
-  assert.equal(assistantTabViewAfterKey('today', 'ArrowRight'), 'ask');
-  assert.equal(assistantTabViewAfterKey('ask', 'ArrowRight'), 'today');
-  assert.equal(assistantTabViewAfterKey('today', 'ArrowLeft'), 'ask');
-  assert.equal(assistantTabViewAfterKey('ask', 'Home'), 'today');
-  assert.equal(assistantTabViewAfterKey('today', 'End'), 'ask');
-  assert.equal(assistantTabViewAfterKey('today', 'Enter'), 'today');
+test('"Explore a folder" is offered when the assistant can accept work, and waits its turn', () => {
+  // Active or paused already means a Personal HQ exists.
+  for (const state of ['active', 'paused']) {
+    const { available } = personalAssistantPanelView({ state });
+    assert.deepEqual(assistantChipView({ available, folderBusy: false }), {
+      visible: true,
+      disabled: false
+    });
+    // A folder is being chosen or explored: the chip stays, and cannot be pressed.
+    assert.deepEqual(assistantChipView({ available, folderBusy: true }), {
+      visible: true,
+      disabled: true
+    });
+  }
+  for (const state of ['needs_hire', 'needs_hq', 'provisioning_hq', 'repair_needed']) {
+    const { available } = personalAssistantPanelView({ state });
+    assert.equal(assistantChipView({ available }).visible, false, state);
+  }
+  assert.equal(assistantChipView().visible, false);
+  // Off Home the chip goes to Home's flow, which the drawer there starts.
+  assert.equal(EXPLORE_FOLDER_URL, '/?panel=today&folder=show');
+});
+
+test('a page that is not Home says how much needs the user, in one line that goes there', () => {
+  const items = count => Array.from({ length: count }, (_, i) => ({ kind: 'task', title: `${i}` }));
+  const today = count => ({ state: 'active', needs_you: { items: items(count) } });
+
+  assert.deepEqual(assistantNeedsLine(today(3)), { visible: true, text: '3 need you' });
+  assert.deepEqual(assistantNeedsLine(today(12)), { visible: true, text: '12 need you' });
+  assert.deepEqual(assistantNeedsLine(today(1)), { visible: true, text: '1 needs you' });
+  // Nothing needs the user: no line at all.
+  assert.deepEqual(assistantNeedsLine(today(0)), { visible: false, text: '' });
+  assert.deepEqual(assistantNeedsLine({ state: 'paused' }), { visible: false, text: '' });
+
+  // The number cannot be read. A missing line would read as "nothing needs
+  // you", so the line stays and points at Home.
+  const unknown = { visible: true, text: 'Open Home to see what needs you' };
+  assert.deepEqual(assistantNeedsLine(null, { failed: true }), unknown);
+  assert.deepEqual(assistantNeedsLine(today(2), { failed: true }), unknown);
+  assert.deepEqual(assistantNeedsLine(null), unknown);
+  assert.deepEqual(assistantNeedsLine({ state: 'unavailable' }), unknown);
+  assert.deepEqual(
+    assistantNeedsLine({
+      state: 'partial',
+      needs_you: { health: { status: 'unavailable' }, items: [] }
+    }),
+    unknown
+  );
+});
+
+test('the needs-you line is rendered on every page but Home, and links to Home', () => {
+  const drawer = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.equal((drawer.match(/id="personalAssistantNeedsLine"/g) || []).length, 1);
+  // Home renders its Today there instead: the line is the other branch.
+  assert.match(
+    drawer,
+    /\{\{if eq \.CurrentPage "index"\}\}\s*\{\{template "personal-assistant-today\.tmpl" \.\}\}\s*\{\{else\}\}[\s\S]*?id="personalAssistantNeedsLine"[\s\S]*?\{\{end\}\}/
+  );
+  const link = drawer.match(/<a id="personalAssistantNeedsLine"[^>]*>/)[0];
+  assert.ok(link.includes(`href="${NEEDS_YOU_URL}"`), link);
+  assert.match(link, /\shidden>/, 'hidden until the number is known');
+  assert.equal(NEEDS_YOU_URL, '/?panel=today');
+});
+
+test('the chip sits directly above the composer, on every page', () => {
+  const drawer = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  const chips = drawer.indexOf('id="personalAssistantChips"');
+  const form = drawer.indexOf('id="personalAssistantForm"');
+  assert.ok(chips > 0 && chips < form);
+  // Nothing else is between them, and it is outside the scrolling region.
+  assert.ok(drawer.indexOf('id="personalAssistantPanelStatus"') < chips);
+  assert.ok(drawer.indexOf('id="personalAssistantThread"') < chips);
+  assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 1);
+  assert.match(drawer, /id="personalAssistantFolderChip"[\s\S]{0,200}Explore a folder/);
+  // Not inside a part of the drawer that only some pages render: the last
+  // page condition before it has already ended.
+  const before = drawer.slice(0, chips);
+  const lastCondition = before.lastIndexOf('.CurrentPage "index"}}');
+  assert.ok(lastCondition > 0);
+  assert.match(before.slice(lastCondition), /\{\{end\}\}/);
+});
+
+test('the header line says when the next check-in is, in the wording Today used', () => {
+  assert.deepEqual(
+    assistantCheckInLine({ state: 'active', next_check_in: '2026-10-08T08:00:00Z' }),
+    { text: 'Next check-in · ', time: '2026-10-08T08:00:00Z' }
+  );
+  assert.deepEqual(assistantCheckInLine({ state: 'active' }), {
+    text: 'No check-in scheduled',
+    time: ''
+  });
+  // Paused wins over a stored time: nothing is coming while paused.
+  assert.deepEqual(
+    assistantCheckInLine({ state: 'paused', next_check_in: '2026-10-08T08:00:00Z' }),
+    { text: 'Check-ins paused', time: '' }
+  );
+  assert.deepEqual(assistantCheckInLine({ state: 'active', next_check_in: 'not a date' }), {
+    text: 'Next check-in unavailable',
+    time: ''
+  });
+  for (const state of ['partial', 'model_unavailable', 'healthy_empty']) {
+    assert.equal(assistantCheckInLine({ state }).text, 'No check-in scheduled', state);
+  }
+});
+
+test('the header line is the plain role until a check-in can be known', () => {
+  for (const today of [
+    null,
+    undefined,
+    {},
+    { state: 'loading' },
+    { state: 'unavailable' },
+    { state: 'needs_hire' },
+    { state: 'needs_hq' },
+    { state: 'repair_needed', next_check_in: '2026-10-08T08:00:00Z' }
+  ]) {
+    assert.deepEqual(assistantCheckInLine(today), { text: 'Personal Assistant', time: '' });
+  }
+});
+
+test('the More menu shows only links Today validated, and the interview only when offered', () => {
+  const links = assistantMoreLinks({
+    links: {
+      personal_hq: '/workspaces/my-hq',
+      working_agreement: '/?personal-assistant=working-agreement',
+      memory: '/workspaces/my-hq#memory',
+      advanced: '/agents'
+    },
+    interview_status: 'offered'
+  });
+  assert.deepEqual(links, {
+    personal_hq: '/workspaces/my-hq',
+    working_agreement: '/?personal-assistant=working-agreement',
+    memory: '/workspaces/my-hq#memory',
+    advanced: '/agents',
+    interview: true
+  });
+
+  const hostile = assistantMoreLinks({
+    links: { personal_hq: 'https://evil.example/', memory: '//evil.example', advanced: '' },
+    interview_status: 'completed'
+  });
+  assert.deepEqual(hostile, {
+    personal_hq: '',
+    working_agreement: '',
+    memory: '',
+    advanced: '',
+    interview: false
+  });
+  for (const status of ['available', 'offered', 'deferred']) {
+    assert.equal(assistantMoreLinks({ interview_status: status }).interview, true, status);
+  }
+  assert.equal(assistantMoreLinks(null).interview, false);
+});
+
+test('safeTodayRoute accepts same-origin paths and refuses everything else', () => {
+  assert.equal(safeTodayRoute('/workspaces/my-hq?station=daily-brief'), true);
+  assert.equal(safeTodayRoute('/'), true);
+  for (const route of [
+    '',
+    'workspaces/my-hq',
+    '//evil.example',
+    'https://evil.example/',
+    '/a/../b',
+    '/a\\b',
+    'javascript:alert(1)'
+  ]) {
+    assert.equal(safeTodayRoute(route), false, route);
+  }
 });
 
 test('Escape closes only an open drawer and focus returns only to a connected trigger', () => {

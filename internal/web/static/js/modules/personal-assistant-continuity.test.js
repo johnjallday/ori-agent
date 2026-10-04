@@ -40,24 +40,17 @@ test('unavailable capability copy never claims a healthy connection', () => {
   assert.doesNotMatch(lines.join(' '), /connected|available/i);
 });
 
-test('working agreement remembers the visible assistant view without targeting a hidden link', () => {
+test('working agreement returns to the assistant drawer only when it was opened from the open drawer', () => {
   const assistantTrigger = {
     closest: selector => (selector === '#personalAssistantPanel' ? {} : null)
   };
-  assert.deepEqual(
-    continuity.assistantReturnView(assistantTrigger, {
-      _state: { open: true, activeView: 'ask' }
-    }),
-    { fromAssistant: true, view: 'ask' }
+  const elsewhere = { closest: () => null };
+  assert.equal(continuity.openedFromAssistant(assistantTrigger, { _state: { open: true } }), true);
+  // A link inside a drawer that has since closed is not a place to go back to.
+  assert.equal(
+    continuity.openedFromAssistant(assistantTrigger, { _state: { open: false } }),
+    false
   );
-  assert.deepEqual(
-    continuity.assistantReturnView(assistantTrigger, {
-      _state: { open: false, activeView: 'ask' }
-    }),
-    { fromAssistant: false, view: 'today' }
-  );
-  assert.deepEqual(continuity.assistantReturnView(null, null), {
-    fromAssistant: false,
-    view: 'today'
-  });
+  assert.equal(continuity.openedFromAssistant(elsewhere, { _state: { open: true } }), false);
+  assert.equal(continuity.openedFromAssistant(null, null), false);
 });

@@ -144,10 +144,16 @@ func (b *ServerBuilder) completeProgressionWiring() {
 		})
 	}
 
-	// Read your first Daily Brief (Mission 05): Today served with a brief.
-	if b.personalAssistantToday != nil {
-		b.personalAssistantToday.SetOnBriefSeen(func(string) {
-			engine.Complete(progression.FirstBriefQuestID)
+	// Read your first Daily Brief (Mission 05): the Daily Brief panel in My HQ
+	// showing a brief. Opening the assistant drawer no longer counts; the brief
+	// is not displayed there. A hired assistant is still required, as it was
+	// when Today was the trigger: a brief in an HQ with no assistant must not
+	// complete a mission that is locked until the hire.
+	if b.dailyBriefHandler != nil {
+		b.dailyBriefHandler.SetOnBriefSeen(func(string) {
+			if b.assistantHired() {
+				engine.Complete(progression.FirstBriefQuestID)
+			}
 		})
 	}
 	// Show your assistant a folder (Mission 03): any accepted outcome — a

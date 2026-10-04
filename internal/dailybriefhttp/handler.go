@@ -36,6 +36,10 @@ type Handler struct {
 	service       *dailybrief.Service
 	personalHQ    *personalhq.Service
 	provider      userprofile.UserProvider
+
+	// onBriefSeen fires each time a user's Daily Brief panel reports that it
+	// is showing a brief.
+	onBriefSeen func(userID string)
 }
 
 // NewHandler constructs a Daily Brief HTTP handler. provider may be nil, in
@@ -49,6 +53,17 @@ func NewHandler(service *dailybrief.Service, personalHQ *personalhq.Service, pro
 
 // SetAdmissionGate is initialization-only, before serving requests.
 func (h *Handler) SetAdmissionGate(gate *resetstate.WorkGate) { h.admissionGate = gate }
+
+// SetOnBriefSeen installs the callback fired when the Daily Brief panel in My
+// HQ reports that it is showing a brief (MarkSeen). It fires on every such
+// report, outside any lock, so the consumer must be idempotent: the panel
+// reports each brief it shows, and a restart forgets nothing on its behalf.
+// Startup wiring only.
+func (h *Handler) SetOnBriefSeen(fn func(userID string)) {
+	if h != nil {
+		h.onBriefSeen = fn
+	}
+}
 
 func (h *Handler) enterMutation(w http.ResponseWriter) (func(), bool) {
 	release, err := h.admissionGate.Enter()
@@ -221,6 +236,47 @@ func (h *Handler) GetCurrent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orihttp.Success(w, map[string]any{"revision": rev})
+}
+
+// MarkSeen handles POST /api/personal-hq/brief/seen: the Daily Brief panel in
+// My HQ is showing the caller a brief. That panel is the one place a brief is
+// read, so this is what "the user has seen a brief" means; serving a brief to
+// any other surface does not count.
+//
+// It stores nothing about the brief. It checks that the caller's HQ really has
+// a brief to show, then tells the listener. Calling it again is harmless, and
+// with no brief it reports seen=false and tells no one.
+func (h *Handler) MarkSeen(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	release, ok := h.enterMutation(w)
+	if !ok {
+		return
+	}
+	defer release()
+	if h.unavailable() {
+		orihttp.ServiceUnavailable(w, "daily brief is unavailable")
+		return
+	}
+	userID, workspaceID, err := h.currentHQWorkspace(r.Context())
+	if err != nil {
+		respondHQError(w, err)
+		return
+	}
+	_, err = h.service.GetCurrent(r.Context(), workspaceID)
+	if errors.Is(err, dailybrief.ErrRevisionNotFound) {
+		orihttp.Success(w, map[string]any{"seen": false})
+		return
+	}
+	if err != nil {
+		orihttp.InternalError(w, "Failed to load current daily brief: "+err.Error())
+		return
+	}
+	if h.onBriefSeen != nil {
+		h.onBriefSeen(userID)
+	}
+	orihttp.Success(w, map[string]any{"seen": true})
 }
 
 // GetHistory handles GET /api/personal-hq/brief/history.

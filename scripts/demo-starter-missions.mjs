@@ -283,7 +283,7 @@ async function resultsStage() {
   // Today shows what was filed, where the user looks every day.
   await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
   await page.locator('#personalAssistantLauncher').click();
-  await page.locator('#personalAssistantTodayPanel').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('#personalAssistantToday').waitFor({ state: 'visible', timeout: 15000 });
   const line = page.locator('#personalAssistantTodayResults li', {
     hasText: /Filed \d+ files? into/
   });
@@ -374,13 +374,10 @@ async function folderStage() {
     page.locator('[data-role="first-mission-action"]').click()
   ]);
 
-  // The assistant panel opens on Today with the chooser unfolded.
+  // The assistant drawer opens with the chooser in its conversation.
   const chooser = page.locator('#personalAssistantFolderChooser');
   await chooser.waitFor({ state: 'visible', timeout: 15000 });
-  expect(
-    await page.locator('#personalAssistantTodayPanel').isVisible(),
-    'the assistant panel opened on Today'
-  );
+  expect(await page.locator('#personalAssistantToday').isVisible(), 'the assistant drawer opened');
   expect(!page.url().includes('quest='), '?quest= was dropped from the URL');
   const chips = await chooser.locator('button').allTextContents();
   console.log(`chips: ${chips.join(' | ')}`);

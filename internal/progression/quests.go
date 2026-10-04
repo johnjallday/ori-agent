@@ -41,7 +41,8 @@ const (
 	// ConnectSourceQuestID is Mission 04: one source connected, chosen from the
 	// hire's focus areas.
 	ConnectSourceQuestID = "pa-connect-source"
-	// FirstBriefQuestID is Mission 05: Today served with a Daily Brief.
+	// FirstBriefQuestID is Mission 05: the Daily Brief station in My HQ showing
+	// a brief.
 	FirstBriefQuestID = "pa-first-brief"
 )
 
@@ -79,6 +80,10 @@ type MissionContext struct {
 	EmailQuestURL string
 	// ModelConfigured is true when a model is available to generate a brief.
 	ModelConfigured bool
+	// DailyBriefURL opens the Daily Brief station's panel in My HQ, or is empty
+	// when there is no Personal HQ. The server passes it in so this package
+	// does not need to know how a workspace route is built.
+	DailyBriefURL string
 }
 
 // MissionWorkspace identifies a workspace a mission points at.
@@ -311,10 +316,15 @@ func PersonalAssistantGraph() Graph {
 			LockedUntil: MeetAssistantQuestID,
 			Title:       "Read your first Daily Brief",
 			Why:         firstBriefWhy,
-			ActionURL:   "/",
-			ActionLabel: "Open Today",
-			Satisfied:   func(s Snapshot) bool { return s.HasBriefRevision },
-			Resolve:     resolveFirstBrief,
+			// The static link is the fallback for a user with no Personal HQ:
+			// the assistant drawer, where building one starts. With an HQ,
+			// Resolve points the button at the Daily Brief station.
+			ActionURL:   FirstBriefFallbackURL,
+			ActionLabel: "Open Daily Brief",
+			// Live, the station's panel showing a brief completes it. This is
+			// the startup rule: an install that already has a brief is done.
+			Satisfied: func(s Snapshot) bool { return s.HasBriefRevision },
+			Resolve:   resolveFirstBrief,
 		},
 		retier("t1-first-message", 2),
 		retier("t1-personalize", 2),
@@ -337,14 +347,21 @@ func PersonalAssistantGraph() Graph {
 // firstBriefWhy is Mission 05's static why line.
 const firstBriefWhy = "Ori pulls your priorities, follow-ups, and anything you connected into one morning brief."
 
-// resolveFirstBrief tells a user with no model that one is needed before a
-// brief can be generated (PRD FR21). The mission stays optional, so this never
-// locks the next tier.
+// FirstBriefFallbackURL is where Mission 05's button goes when there is no
+// Personal HQ, and so no Daily Brief station to open: the assistant drawer on
+// Home, which is where building the HQ starts.
+const FirstBriefFallbackURL = "/?panel=today"
+
+// resolveFirstBrief points the button at the Daily Brief station in My HQ,
+// where the brief is read, and tells a user with no model that one is needed
+// before a brief can be generated (PRD FR21). The mission stays optional, so
+// this never locks the next tier.
 func resolveFirstBrief(ctx MissionContext) MissionPresentation {
-	if ctx.ModelConfigured {
-		return MissionPresentation{}
+	presentation := MissionPresentation{ActionURL: strings.TrimSpace(ctx.DailyBriefURL)}
+	if !ctx.ModelConfigured {
+		presentation.Hint = "Add a model in Settings to generate one."
 	}
-	return MissionPresentation{Hint: "Add a model in Settings to generate one."}
+	return presentation
 }
 
 // ConnectSourceBranch is the destination Mission 04 offers a user.

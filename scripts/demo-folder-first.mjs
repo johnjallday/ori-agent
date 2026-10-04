@@ -42,10 +42,10 @@ try {
   });
   await page.locator('#personalAssistantHQCard').waitFor({ state: 'visible' });
   if (!(await page.locator('#personalAssistantPanel').isVisible())) {
-    throw new Error('Today panel did not open on hire');
+    throw new Error('The assistant drawer did not open on hire');
   }
   if (await page.evaluate(() => window.OriPersonalHQQuest?.isActive())) {
-    throw new Error('Map quest started on the plain Today hand-over');
+    throw new Error('Map quest started on the plain hand-over to the drawer');
   }
   await shot('02-hq-card');
   await page.locator('#personalAssistantClose').click();
@@ -89,6 +89,10 @@ try {
   const hqReceipt = page.locator(
     '#personalAssistantDoneItems .personal-assistant-today__hq-receipt'
   );
+  // Done is behind the progress row.
+  const progressRow = page.locator('#personalAssistantProgressRow');
+  await progressRow.waitFor({ state: 'visible', timeout: 30000 });
+  await progressRow.click();
   await hqReceipt.locator('summary').waitFor({ timeout: 30000 });
   await hqReceipt.locator('summary').click();
   await hqReceipt.locator('li').first().waitFor({ timeout: 30000 });
@@ -110,20 +114,18 @@ try {
   await page.locator('#darkModeToggle').click();
   await page.waitForTimeout(350);
   await shot('04d-inline-chooser-dark');
-  await page.locator('#personalAssistantTodayMore > summary').click();
+  await page.locator('#personalAssistantMore > summary').click();
   await page.locator('#personalAssistantTodayAgreement').waitFor({ state: 'visible' });
   await shot('04e-more-menu-dark');
-  await page.locator('#personalAssistantTodayMore > summary').click();
+  await page.locator('#personalAssistantMore > summary').click();
   await page.locator('#darkModeToggle').click();
   await page.waitForTimeout(350);
   await page.goto(`${base}/?panel=today`);
-  await page.locator('#personalAssistantFolder').waitFor({ state: 'visible' });
-  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
-  if (
-    (await page.locator('#personalAssistantFolderTitle').textContent()).includes(
-      "Now let's explore"
-    )
-  ) {
+  // The prompt is shown once: after a reload the conversation is empty and the
+  // chip above the composer is how a folder is asked for.
+  await page.locator('#personalAssistantFolderChip:enabled').waitFor({ state: 'visible' });
+  await page.waitForTimeout(1000);
+  if (await page.locator('#personalAssistantFolderChooser').isVisible()) {
     throw new Error('first-folder hand-over repeated on reload');
   }
   await page.locator('#personalAssistantClose').click();
@@ -206,6 +208,8 @@ try {
   if (await page.locator('#personalAssistantFolderShowBtn').count()) {
     throw new Error('The redundant inline Explore a folder button returned');
   }
+  // Another folder is asked for with the chip above the composer.
+  await page.locator('#personalAssistantFolderChip').click();
   await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
   await page.locator('#personalAssistantFolderChips button[data-chip="desktop"]').click();
   await page.locator('#personalAssistantFolderOffer').waitFor({ state: 'visible' });
@@ -218,15 +222,17 @@ try {
   await shot('09-corpus-receipt');
   await page.reload();
   await page.locator('#personalAssistantLauncher').click();
+  await progressRow.waitFor({ state: 'visible', timeout: 30000 });
+  await progressRow.click();
   await page.locator('#personalAssistantDoneItems li').first().waitFor({ timeout: 30000 });
   console.log('Today results:', await page.locator('#personalAssistantDoneItems').innerText());
   await page.locator('#personalAssistantDoneItems').scrollIntoViewIfNeeded();
   await shot('10-seven-day-receipts');
   await page.setViewportSize({ width: 390, height: 844 });
   await shot('11-today-phone');
-  await page.locator('#personalAssistantTodayMore > summary').click();
+  await page.locator('#personalAssistantMore > summary').click();
   await shot('11b-more-menu-phone');
-  await page.locator('#personalAssistantTodayMore > summary').click();
+  await page.locator('#personalAssistantMore > summary').click();
   await page.setViewportSize({ width: 1280, height: 900 });
   // Force only one read to degrade, keeping the real server's other rows.
   await page.route('**/api/personal-assistant/today', async route => {

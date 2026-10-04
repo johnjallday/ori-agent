@@ -274,6 +274,8 @@ async function installFixtureRoutes(page: Page) {
         status: {
           valid: true,
           workspace_id: README_SCENES.personal_hq.id,
+          // The drawer's brief row links to the Daily Brief station by slug.
+          workspace: { folder_slug: 'northstar-personal-hq' },
           hq_onboarding_state: 'complete'
         }
       });
@@ -357,11 +359,48 @@ async function installFixtureRoutes(page: Page) {
           hq_workspace_id: README_SCENES.personal_hq.id,
           hq_workspace_slug: 'northstar-personal-hq',
           model: { status: 'available', available: true },
+          next_check_in: '2026-07-20T09:00:00.000Z',
           brief: { health: { status: 'available' }, items: [] },
           decisions: { health: { status: 'healthy_empty' }, items: [] },
           priorities: { health: { status: 'healthy_empty' }, items: [] },
           follow_ups: { health: { status: 'healthy_empty' }, items: [] },
           results: { health: { status: 'healthy_empty' }, items: [] },
+          // What the one-view drawer shows: one thing needing the user, work
+          // under way, and something finished today (the capture clock's day).
+          needs_you: {
+            health: { status: 'available' },
+            items: [
+              {
+                kind: 'decision',
+                title: 'Resolve launch readiness risks',
+                detail: 'Two launch tasks need a named owner before the review.',
+                route: '/workspaces/product-launch'
+              }
+            ]
+          },
+          working_on: {
+            health: { status: 'available' },
+            items: [
+              { kind: 'hq_status', title: 'Northstar Personal HQ' },
+              {
+                kind: 'task',
+                title: 'Review the launch checklist',
+                detail: 'Product Launch',
+                route: '/workspaces/product-launch'
+              }
+            ]
+          },
+          done: {
+            health: { status: 'available' },
+            items: [
+              {
+                kind: 'task_result',
+                title: 'Drafted the launch decision brief',
+                source_at: '2026-07-17T13:10:00.000Z'
+              }
+            ]
+          },
+          unavailable_sources: [],
           links: {
             personal_hq: '/workspaces/northstar-personal-hq',
             working_agreement: '/?personal-assistant=working-agreement',
@@ -1042,7 +1081,7 @@ async function captureScene(
     await expect(page.locator('body')).toContainText(definingText);
     const readinessRoot = page.locator(
       id === 'hero'
-        ? '#homeDailyBrief'
+        ? '#personalAssistantPanel'
         : id === 'action-center'
           ? '#action-center-list'
           : id === 'workspace-map'
@@ -1106,7 +1145,10 @@ test.afterAll(() => {
   );
 });
 
-test('captures the Home command bridge and populated Personal HQ Daily Brief', async ({ page }) => {
+// The Daily Brief itself is read in My HQ's Daily Brief station. Home's scene is
+// the command bridge with the assistant's one-view drawer open: what needs the
+// user, the row that links to today's brief, and the row that summarises work.
+test('captures the Home command bridge and the Personal Assistant drawer', async ({ page }) => {
   await captureScene(
     page,
     'hero',
@@ -1115,9 +1157,15 @@ test('captures the Home command bridge and populated Personal HQ Daily Brief', a
     'Resolve launch readiness risks',
     async scenePage => {
       await scenePage.locator('#personalAssistantLauncher').click();
-      await expect(scenePage.locator('#personalAssistantTodayPanel')).toBeVisible();
-      await expect(scenePage.locator('#homeDailyBrief')).toBeVisible();
-      await expect(scenePage.locator('#homeDailyBrief')).toContainText(
+      await expect(scenePage.locator('#personalAssistantToday')).toBeVisible();
+      await expect(scenePage.locator('#personalAssistantBriefRow')).toBeVisible();
+      await expect(scenePage.locator('#personalAssistantBriefRowStatus')).toContainText(
+        'ready since'
+      );
+      await expect(scenePage.locator('#personalAssistantProgressRow')).toBeVisible();
+      // The item that needs the user is under "Also needs you"; show it.
+      await scenePage.locator('#personalAssistantNeedsYouQueueTitle').click();
+      await expect(scenePage.locator('#personalAssistantNeedsYouItems')).toContainText(
         'Resolve launch readiness risks'
       );
     }

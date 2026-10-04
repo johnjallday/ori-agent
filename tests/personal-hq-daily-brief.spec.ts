@@ -92,9 +92,24 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     );
   });
 
-  async function openToday(page: Page) {
+  async function openDrawer(page: Page) {
     await page.locator('#personalAssistantLauncher').click();
-    await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible();
+    await expect(page.locator('#personalAssistantToday')).toBeVisible();
+  }
+
+  // The Daily Brief is read in its station in My HQ. Home's drawer keeps one
+  // row for it, and that row is the way there.
+  async function openBriefStation(page: Page) {
+    await page.goto('/');
+    await openDrawer(page);
+    const row = page.locator('#personalAssistantBriefRow');
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute('href', /\/workspaces\/[^?]+\?station=daily-brief$/);
+    await row.click();
+    await expect(page).toHaveURL(/\/workspaces\/[^?]+\?station=daily-brief/);
+    const panel = page.locator('.daily-brief-station');
+    await expect(panel).toBeVisible({ timeout: 15000 });
+    return panel;
   }
 
   // The direct focus intent remains the Map-level compatibility route for an
@@ -199,7 +214,6 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
-    await expect(page.locator('#homeDailyBrief')).toBeHidden();
     // HQ is retired from the mission board. The hired assistant still offers
     // its next mission without hiding the unbuilt Map site.
     await expect(page.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 02');
@@ -209,11 +223,16 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(
       page.locator('[data-role="quests"] .quest-item').filter({ hasText: 'Build My HQ' })
     ).toHaveCount(0);
+
+    // With no HQ there is no Daily Brief to link to, so the drawer has no row
+    // for one.
+    await openDrawer(page);
+    await expect(page.locator('#personalAssistantBriefRow')).toBeHidden();
   });
 
   // The Map-native action hands off to the existing setup modal and then
   // replaces the blueprint with the authoritative designated HQ landmark.
-  test('Build My HQ with defaults creates the workspace and Home shows the Daily Brief', async ({
+  test('Build My HQ with defaults creates the workspace and the Daily Brief is in its station', async ({
     page
   }) => {
     await page.goto('/?focus=personal-hq');
@@ -235,15 +254,23 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     expect((await rootResponse.json()).confirmed).toBe(true);
     assistantState = 'active';
     await page.reload();
-    await openToday(page);
-    await expect(page.locator('#homeDailyBrief')).toBeVisible();
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
+    // The full brief is no longer on Home at all.
+    await expect(page.locator('#homeDailyBrief')).toHaveCount(0);
 
-    // First-open generation runs in the background; the placeholder or the
-    // finished brief should appear, never a blank body.
-    await expect(page.locator('#homeDailyBriefBody')).not.toBeEmpty();
-    await expect(page.locator('#homeDailyBriefBody')).toContainText(/./, { timeout: 15000 });
-    await expect(page.locator('#homeDailyBriefOpenHQ')).toHaveAttribute('href', /\/workspaces\//);
+    // Home still prepares today's brief in the background, and the drawer's
+    // brief row says how that went.
+    await openDrawer(page);
+    await expect(page.locator('#personalAssistantBriefRow')).toBeVisible();
+    await expect(page.locator('#personalAssistantBriefRowStatus')).toContainText('ready since', {
+      timeout: 20000
+    });
+
+    // The row opens the station, where the brief is: never a blank body.
+    const panel = await openBriefStation(page);
+    const body = panel.locator('[data-brief="body"]');
+    await expect(body).not.toBeEmpty();
+    await expect(body).toContainText(/./, { timeout: 15000 });
   });
 
   test('the workspace Map shows the HQ badge on the designated workspace tile only', async ({
@@ -262,12 +289,13 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
   test('manual refresh replaces the current brief without hiding it while generating', async ({
     page
   }) => {
-    await page.goto('/');
-    await openToday(page);
-    await expect(page.locator('#homeDailyBrief')).toBeVisible();
-    const bodyBefore = await page.locator('#homeDailyBriefBody').innerText();
+    const panel = await openBriefStation(page);
+    const body = panel.locator('[data-brief="body"]');
+    const refresh = panel.locator('[data-brief="refresh"]');
+    await expect(body).not.toContainText('Loading your Daily Brief');
+    const bodyBefore = await body.innerText();
 
-    await page.locator('#homeDailyBriefRefreshBtn').click();
+    await refresh.click();
 
     // The refresh button disables while in flight — not asserted directly
     // here since generation against the deterministic fallback (no model
@@ -275,18 +303,15 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     // reliable window to observe the disabled state, but re-enabling by the
     // end and the body never emptying are exactly the behavior that matters
     // (the last successful brief is never hidden while refreshing).
-    await expect(page.locator('#homeDailyBriefRefreshBtn')).toBeEnabled({ timeout: 15000 });
-    await expect(page.locator('#homeDailyBriefBody')).not.toBeEmpty();
+    await expect(refresh).toBeEnabled({ timeout: 15000 });
+    await expect(body).not.toBeEmpty();
     expect(bodyBefore.length).toBeGreaterThan(0);
   });
 
   test('Brief settings modal opens scoped to the HQ and shows recent history', async ({ page }) => {
-    await page.goto('/');
-    await openToday(page);
-    // Secondary brief actions live behind the header's overflow disclosure;
-    // only Refresh keeps permanent space in Today.
-    await page.locator('#homeDailyBriefMenu > summary').click();
-    await page.locator('#homeDailyBriefSettingsBtn').click();
+    const panel = await openBriefStation(page);
+    // Refresh and Brief settings are the panel's two header actions.
+    await panel.locator('[data-brief="settings"]').click();
     await expect(page.locator('#homeDailyBriefSettingsModal')).toBeVisible();
     await expect(page.locator('#homeDailyBriefTimezone')).not.toHaveValue('');
     await expect(page.locator('#homeDailyBriefHistoryList li').first()).toBeVisible();

@@ -37,14 +37,11 @@
     ];
   }
 
-  function assistantReturnView(trigger, assistantPanel) {
-    const fromAssistant = Boolean(
-      trigger?.closest?.('#personalAssistantPanel') && assistantPanel?._state?.open
-    );
-    return {
-      fromAssistant,
-      view: fromAssistant ? assistantPanel?._state?.activeView || 'today' : 'today'
-    };
+  // Whether the working agreement was opened from the open assistant drawer, in
+  // which case closing it goes back to the drawer rather than to a link the
+  // drawer has since hidden.
+  function openedFromAssistant(trigger, assistantPanel) {
+    return Boolean(trigger?.closest?.('#personalAssistantPanel') && assistantPanel?._state?.open);
   }
 
   async function responseJSON(response) {
@@ -89,7 +86,6 @@
     let busy = false;
     let lastTrigger = null;
     let returnToAssistant = false;
-    let returnAssistantView = 'today';
 
     function announce(message, tone) {
       if (!els.status) return;
@@ -348,9 +344,7 @@
     function open(trigger) {
       lastTrigger = trigger || doc.activeElement;
       const assistantPanel = global.PersonalAssistantPanel;
-      const returnView = assistantReturnView(trigger, assistantPanel);
-      returnToAssistant = returnView.fromAssistant;
-      returnAssistantView = returnView.view;
+      returnToAssistant = openedFromAssistant(trigger, assistantPanel);
       if (returnToAssistant && typeof assistantPanel.close === 'function') {
         assistantPanel.close({ restoreFocus: false });
       }
@@ -369,10 +363,7 @@
       if (returnToAssistant && global.PersonalAssistantPanel?.open) {
         returnToAssistant = false;
         const launcher = doc.getElementById('personalAssistantLauncher');
-        global.PersonalAssistantPanel.open(launcher, {
-          view: returnAssistantView,
-          focusTab: true
-        });
+        global.PersonalAssistantPanel.open(launcher);
         return;
       }
       returnToAssistant = false;
@@ -414,7 +405,7 @@
     return { open, close, load, renderState, renderCapabilities };
   }
 
-  const api = { mount, splitList, conflictView, capabilityCopy, assistantReturnView };
+  const api = { mount, splitList, conflictView, capabilityCopy, openedFromAssistant };
   global.PersonalAssistantContinuity = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global.document) {

@@ -89,6 +89,19 @@
     return `<div style="font-size: 0.75rem; color: var(--text-secondary, #777); margin-top: 0.35rem;"><strong>Assistant suggestion</strong>${label}${confidence}${evidence}${sourceLink}</div>`;
   }
 
+  // A "Daily Brief ready" item links to the Daily Brief station in My HQ, where
+  // the brief is read. The link is rendered only for exactly the station
+  // address (/workspaces/<slug>?station=daily-brief, the shape
+  // daily-brief-station.js builds); any other source_url on any other item
+  // gets no link from here.
+  const DAILY_BRIEF_STATION_LINK = /^\/workspaces\/[a-z0-9][a-z0-9-]{0,79}\?station=daily-brief$/;
+
+  function dailyBriefLinkHTML(item) {
+    const sourceURL = String(item.source_url || '').trim();
+    if (!DAILY_BRIEF_STATION_LINK.test(sourceURL)) return '';
+    return `<div style="font-size: 0.75rem; margin-top: 0.35rem;"><a href="${escapeHtml(sourceURL)}">Open Daily Brief</a></div>`;
+  }
+
   function backlogActionHTML(item) {
     // A planned finding already has a linked Backlog item — offer a direct
     // deep link to it (Group 5's ?panel=backlog&task= contract) instead of
@@ -122,6 +135,7 @@
           </div>
           <div style="font-size: 0.85rem; color: var(--text-secondary, #555); margin-top: 0.25rem;">${escapeHtml(item.summary || '')}</div>
           ${assistantSourceHTML(item)}
+          ${dailyBriefLinkHTML(item)}
           <div style="font-size: 0.75rem; color: var(--text-secondary, #888); margin-top: 0.4rem;">
             <a href="${opened}" style="color: inherit; text-decoration: underline;">${escapeHtml(item.workspace_name || item.workspace_id)}</a>
             · ${fmtTime(item.updated_at)}
@@ -457,6 +471,7 @@
     priorityChip,
     backlogActionHTML,
     assistantSourceHTML,
+    dailyBriefLinkHTML,
     handleAddToBacklog,
     escapeHtml,
     fmtTime,

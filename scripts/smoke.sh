@@ -27,7 +27,9 @@
 # save times and adds showfolder model (the system model setup needs). Song
 # facts and a collection brief (tasks/tasks-song-facts-collection-brief.md)
 # makes seed-portfolio write real minimal REAPER projects with varied tempo,
-# track counts and lengths, and adds its [bad] songs.
+# track counts and lengths, and adds its [bad] songs. The assistant drawer
+# redesign (tasks/tasks-assistant-drawer-redesign.md) adds drawer, which waits
+# for the server and runs one stage of its browser demo.
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
@@ -1504,6 +1506,22 @@ smoke_starter() {
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
   out="${TMPDIR:-/tmp}/starter-demo"
   node "$root/scripts/demo-starter-missions.mjs" "$BASE_URL" "$out" "$stage" "${@:4}"
+}
+
+# smoke_drawer drives the assistant drawer redesign in a browser
+# (tasks/prd-assistant-drawer-redesign.md): it waits for the server, then runs
+# one stage of scripts/demo-assistant-drawer.mjs and saves its screenshots under
+# $TMPDIR/drawer-demo. Stages: station, brief-home, drawer, folder, other-pages
+# (a sandbox seeded with `showfolder <base-url> hq`; folder also needs
+# `showfolder <base-url> seed <sandbox>`), and drawer-setup then folder-first
+# (a fresh sandbox, in that order). Theme is light (default) or dark.
+smoke_drawer() {
+  local stage="${3:-}" theme="${4:-light}"
+  [[ -n "$stage" ]] || fail "usage: $0 drawer <base-url> <station|brief-home|drawer|drawer-setup|folder|folder-first|other-pages> [light|dark]"
+  smoke_show_wait
+  local root
+  root="$(cd "$(dirname "$0")/.." && pwd -P)"
+  node "$root/scripts/demo-assistant-drawer.mjs" "$BASE_URL" "${TMPDIR:-/tmp}/drawer-demo" "$stage" "$theme"
 }
 
 # smoke_show_folder drives "Show me a folder" (tasks/prd-show-me-a-folder.md).
@@ -3434,6 +3452,7 @@ blueprintintake | blueprint-intake) smoke_blueprint_intake "${3:-}" ;;
 starter) smoke_starter "$@" ;;
 meetassistant) smoke_meet_assistant "$@" ;;
 showfolder) smoke_show_folder "$@" ;;
+drawer) smoke_drawer "$@" ;;
 build-session) smoke_build_session "$@" ;;
 agent-type-api) smoke_agent_type_api ;;
 agent-type-strip) smoke_agent_type_strip "$@" ;;
@@ -3487,6 +3506,7 @@ library-notifications) smoke_library_notifications "$@" ;;
   echo "  $0 starter <base-url> <stage> [flags]    # starter missions: wait for the server, run a demo stage" >&2
   echo "  $0 meetassistant <base-url> <stage>      # Mission 01: onboard | status | hire [name] | demo <stage>" >&2
   echo "  $0 showfolder <base-url> <stage>         # Show me a folder: seed <sandbox> | hqcard | hq | today | scan <chip> | decide <offer> <d> [choice] | current" >&2
+  echo "  $0 drawer <base-url> <stage> [theme]     # assistant drawer redesign: wait for the server, run a browser demo stage" >&2
   echo "  $0 build-session <base-url> <stage>      # Build with your assistant: seed [provider] [model] | availability" >&2
   echo "  $0 reaper-blueprint <base-url>           # onboard + install/enable the reviewed REAPER blueprint" >&2
   echo "  $0 blueprint-details <base-url> <ws-id>  # parent, description, workspace_bootstrap of a workspace" >&2
