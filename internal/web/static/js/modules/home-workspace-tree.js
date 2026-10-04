@@ -44,6 +44,7 @@ import {
   sectionOfKind
 } from './home-tree-sources.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
+import { menuItemsFor, openRowMenu, rowHasMenu } from './home-tree-menu.js';
 
 // ---------------------------------------------------------------------------
 // Hierarchy shaping
@@ -191,7 +192,11 @@ function sectionItems(node, isGroup, ctx) {
   const items = [];
   SECTIONS.forEach(info => {
     const state = sectionState(ctx.contents, node.id, info.id);
-    if (isGroup) {
+    // A note or ticket being named here keeps its section on screen and open,
+    // even a group's section that is hidden for being empty (FR47, FR52).
+    const drafting =
+      !!ctx.draft && ctx.draft.workspaceId === node.id && ctx.draft.section === info.id;
+    if (isGroup && !drafting) {
       if (state.status === SECTION_LOADING) return;
       if (state.status === SECTION_READY && !(state.count > 0)) return;
     }
@@ -221,7 +226,7 @@ function sectionItems(node, isGroup, ctx) {
     }
 
     const id = sectionKey(node.id, info.id);
-    const expanded = isRowExpanded('section', id, ctx.collapsed, ctx.expanded);
+    const expanded = drafting || isRowExpanded('section', id, ctx.collapsed, ctx.expanded);
     const item = {
       row: {
         id,
@@ -244,14 +249,34 @@ function sectionItems(node, isGroup, ctx) {
           placeholderItem(node.id, 'failed', info.id, sectionFailedLabel(info.label))
         ];
       } else if (state.rows.length === 0) {
-        item.children = [placeholderItem(node.id, 'empty', info.id, info.empty)];
+        // The "No notes yet" line gives way to the row being named.
+        item.children = drafting ? [] : [placeholderItem(node.id, 'empty', info.id, info.empty)];
       } else {
         item.children = state.rows.map(source => contentItem(source, ctx));
       }
+      if (drafting) item.children.unshift(draftItem(node.id, info.id, ctx.draft));
     }
     items.push(item);
   });
   return items;
+}
+
+// The editable row where a new note or ticket is named, first in its section.
+function draftItem(workspaceId, sectionId, draft) {
+  return {
+    row: {
+      id: itemKey(workspaceId, 'draft', sectionId),
+      kind: 'draft',
+      name: String(draft.value || ''),
+      section: sectionId,
+      draftKind: draft.kind,
+      busy: !!draft.busy,
+      workspaceId,
+      expandable: false,
+      expanded: null
+    },
+    children: null
+  };
 }
 
 function workspaceItems(nodes, ctx) {
@@ -316,12 +341,17 @@ function appendLevel(rows, items, depth, parentId) {
  * `{ [id]: { sections: { notes: { status, rows, count }, … } } }`. With neither
  * (the Map's view of the tree, and the older tests) the result is the plain
  * group and workspace hierarchy.
+ *
+ * `options.draft` is a note or ticket being named:
+ * `{ workspaceId, section, kind, value }`. It adds one editable row at the top
+ * of that section, and shows the section if it would otherwise be hidden.
  */
 export function visibleTreeRows(nodes, collapsedIds, depth = 0, parentId = '', options = {}) {
   const ctx = {
     collapsed: collapsedIds instanceof Set ? collapsedIds : new Set(collapsedIds || []),
     expanded: options.expanded instanceof Set ? options.expanded : new Set(options.expanded || []),
-    contents: options.contents || {}
+    contents: options.contents || {},
+    draft: options.draft || null
   };
   const rows = [];
   appendLevel(rows, workspaceItems(nodes, ctx), depth, parentId);
@@ -539,7 +569,38 @@ function isDimRow(row) {
   return ['section', 'loading', 'empty', 'failed', 'more'].includes(row.kind);
 }
 
+// What a new item of each kind is called while it is being named.
+const DRAFT_COPY = {
+  note: { icon: 'note', placeholder: 'Note name', label: 'Name of the new note' },
+  ticket: { icon: 'ticket', placeholder: 'Ticket title', label: 'Title of the new ticket' }
+};
+
+/**
+ * The row where a new note or ticket is named (FR47, FR48): an input in the
+ * place of a name. Enter creates the item and Escape cancels; both are handled
+ * where the tree is mounted.
+ */
+function draftRowHTML(row) {
+  const copy = DRAFT_COPY[row.draftKind] || DRAFT_COPY.note;
+  return (
+    '<li class="cockpit-tree-node" role="none">' +
+    '<div class="cockpit-tree-row is-kind-draft" role="treeitem" ' +
+    `data-tree-row="${escapeHtml(row.id)}" data-tree-kind="draft" ` +
+    `data-parent-id="${escapeHtml(row.parentId)}" tabindex="-1" ` +
+    `aria-level="${row.depth + 1}" aria-posinset="${row.posInSet}" aria-setsize="${row.setSize}" ` +
+    `aria-selected="false" style="--tree-depth:${row.depth}">` +
+    '<span class="cockpit-tree-caret-space" aria-hidden="true"></span>' +
+    iconHTML(copy.icon) +
+    '<input type="text" class="cockpit-tree-input" data-tree-draft autocomplete="off" ' +
+    `maxlength="300" value="${escapeHtml(row.name)}" placeholder="${copy.placeholder}" ` +
+    `aria-label="${copy.label}. Enter to create, Escape to cancel."${row.busy ? ' disabled' : ''}>` +
+    '</div>' +
+    '</li>'
+  );
+}
+
 function rowHTML(row, ctx) {
+  if (row.kind === 'draft') return draftRowHTML(row);
   const id = escapeHtml(row.id);
   const name = escapeHtml(row.name);
   const isActive = ctx.activeId === row.id;
@@ -549,6 +610,12 @@ function rowHTML(row, ctx) {
   if (isActive) classes.push('is-active');
   if (picked) classes.push('is-picked');
   if (isDimRow(row)) classes.push('is-dim');
+  // The "⋯" button. It is out of the tab order — the keyboard opens the same
+  // menu with Shift+F10 or the Menu key on the row itself (FR54).
+  const more = rowHasMenu(row)
+    ? `<button type="button" class="cockpit-tree-more" data-tree-menu-for="${id}" tabindex="-1" ` +
+      `aria-haspopup="menu" aria-label="Actions for ${name}">${iconHTML('more', { size: 16 })}</button>`
+    : '';
 
   return (
     `<li class="cockpit-tree-node${row.isGroup ? ' is-group' : ''}" role="none">` +
@@ -572,6 +639,7 @@ function rowHTML(row, ctx) {
     iconHTML(rowIconName(row)) +
     `<span class="cockpit-tree-name" title="${name}">${name}</span>` +
     markerHTML(row) +
+    more +
     '</div>' +
     '</li>'
   );
@@ -720,8 +788,31 @@ export function rowActivation(row) {
   if (kind === 'section' || kind === 'folder') return 'toggle';
   if (kind === 'failed') return 'retry';
   if (kind === 'more') return 'visit';
-  if (kind === 'loading' || kind === 'empty') return '';
+  // The naming row is an input; clicking it must not open or toggle anything.
+  if (kind === 'loading' || kind === 'empty' || kind === 'draft') return '';
   return kind ? 'open' : '';
+}
+
+/**
+ * The workspace or group the "current row" belongs to (FR50).
+ *
+ * The header's New note button acts on it. The current row is the one with
+ * keyboard focus, else the open tab's, else Home's selection; '' when none of
+ * those names a workspace that still exists.
+ */
+export function contextWorkspaceId(state) {
+  const live = new Set(
+    (Array.isArray(state && state.flattened) ? state.flattened : []).map(ws => ws && ws.id)
+  );
+  for (const key of [
+    state && state.focusId,
+    state && state.activeTabKey,
+    state && state.selectedId
+  ]) {
+    const parsed = parseItemKey(key);
+    if (parsed && live.has(parsed.workspaceId)) return parsed.workspaceId;
+  }
+  return '';
 }
 
 /**
@@ -746,6 +837,11 @@ const bindings = new WeakMap();
  *                                  group row also becomes Home's selection)
  *   onOpen(id)                     go to a workspace's own page
  *   onRetry(workspaceId, section)  reload a section that failed
+ *   onMenuAction(action, row)      an item was chosen from a row's menu, or the
+ *                                  header's New note was pressed
+ *   onDraftCommit(draft)           Enter in the row being named; `draft.value`
+ *                                  is the name typed (`state.treeDraft` is the
+ *                                  row being named, set by the coordinator)
  *   onRerender()                   the Tree's own state changed; draw it again
  *   onChanged()                    a mutation landed; reload authoritative state
  *   onAnnounce(message)            polite live-region message
@@ -769,7 +865,8 @@ export function mountTree(container, state, callbacks) {
   );
   const rows = visibleTreeRows(visibleTree, collapsed, 0, '', {
     expanded,
-    contents: state.treeContents || {}
+    contents: state.treeContents || {},
+    draft: state.treeDraft || null
   });
   const activeId = treeActiveRowId(state);
 
@@ -782,10 +879,15 @@ export function mountTree(container, state, callbacks) {
       : (rows[0] && rows[0].id) || '';
 
   // The rows are redrawn on every change; the place the user had scrolled to
-  // must survive that.
+  // must survive that, and so must the cursor in a name being typed.
   const previousScroller = container.querySelector('.cockpit-tree-scroll');
   const scrollTop = previousScroller ? previousScroller.scrollTop : 0;
+  const typing = document.activeElement;
+  const draftHadFocus =
+    !!typing && container.contains(typing) && typing.hasAttribute('data-tree-draft');
+  const draftCaret = draftHadFocus ? typing.selectionStart : null;
 
+  redrawing.add(container);
   container.innerHTML =
     renderToolbarHTML(state) +
     renderTagFilterBarHTML(state) +
@@ -800,13 +902,29 @@ export function mountTree(container, state, callbacks) {
     '<div class="cockpit-tree-root-drop" data-tree-drop-into="">Drop here to move to the top level</div>' +
     '</div>' +
     '<div class="cockpit-tree-move-dialog" data-tree-move-dialog hidden></div>';
+  redrawing.delete(container);
 
   const scroller = container.querySelector('.cockpit-tree-scroll');
   if (scroller && scrollTop) scroller.scrollTop = scrollTop;
 
+  // A row being named takes focus when it first appears, and keeps it across
+  // redraws (a section finishing its load must not interrupt typing).
+  const draft = state.treeDraft || null;
+  const draftInput = container.querySelector('[data-tree-draft]');
+  if (draft && draftInput && !draftInput.disabled && (draft.pendingFocus || draftHadFocus)) {
+    draft.pendingFocus = false;
+    draftInput.focus();
+    const caret = draftCaret === null ? draftInput.value.length : draftCaret;
+    draftInput.setSelectionRange(caret, caret);
+  }
+
   const actions = bindTree(container, state, cb, rows);
   return { rows, tabbableId, ...actions };
 }
+
+// Columns whose rows are being replaced right now. Removing a focused input
+// can fire its blur; that blur is the redraw's doing, not the user leaving.
+const redrawing = new WeakSet();
 
 /**
  * Whether the toolbar's Undo has anything to restore.
@@ -828,6 +946,23 @@ function toolbarButtonHTML(label, icon, attributes) {
   return (
     `<button type="button" class="cockpit-tree-tool" aria-label="${escapeHtml(label)}" ` +
     `title="${escapeHtml(label)}" ${attributes}>${iconHTML(icon, { size: 16 })}</button>`
+  );
+}
+
+const NEW_NOTE_HINT = 'Pick a workspace first';
+
+/**
+ * The header's New note button (FR47, FR50).
+ *
+ * It acts on the workspace the current row belongs to. With none in context it
+ * is disabled — `aria-disabled`, not `disabled`, so it can still be reached and
+ * its tooltip says what is missing.
+ */
+function newNoteButtonHTML(enabled) {
+  return (
+    '<button type="button" class="cockpit-tree-tool" data-tree-new-note aria-label="New note" ' +
+    `title="${enabled ? 'New note' : NEW_NOTE_HINT}" aria-disabled="${enabled ? 'false' : 'true'}">` +
+    `${iconHTML('newNote', { size: 16 })}</button>`
   );
 }
 
@@ -859,6 +994,7 @@ function renderToolbarHTML(state) {
     `<span class="cockpit-tree-root-path" title="${escapeHtml(rootLabel)}">${escapeHtml(rootLabel)}</span>` +
     '</div>' +
     '<div class="cockpit-tree-toolbar-actions" role="group" aria-label="Workspace tree actions">' +
+    newNoteButtonHTML(contextWorkspaceId(state) !== '') +
     toolbarButtonHTML(
       'Create Workspace',
       'newWorkspace',
@@ -973,12 +1109,105 @@ function bindTree(container, state, cb, rows) {
     el.setAttribute('tabindex', '0');
     el.focus();
     state.focusId = id;
+    syncNewNoteButton();
   };
+
+  // The header's New note button follows the current row, which arrow keys
+  // change without a redraw (FR50).
+  const syncNewNoteButton = () => {
+    const button = container.querySelector('[data-tree-new-note]');
+    if (!button) return;
+    const enabled = contextWorkspaceId(state) !== '';
+    button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+    button.setAttribute('title', enabled ? 'New note' : NEW_NOTE_HINT);
+  };
+
+  // --- the row menu (FR54) -------------------------------------------------
+  const openMenuFor = (row, at, event) => {
+    const items = menuItemsFor(row);
+    if (items.length === 0) return false;
+    const findOrigin = () =>
+      Array.from(container.querySelectorAll('[data-tree-row]')).find(
+        el => el.getAttribute('data-tree-row') === row.id
+      ) || null;
+    state.focusId = row.id;
+    return openRowMenu({
+      items,
+      label: `Actions for ${row.name}`,
+      at,
+      origin: findOrigin(),
+      findOrigin,
+      event,
+      onChoose: action => {
+        if (typeof cb.onMenuAction === 'function') cb.onMenuAction(action, row);
+      }
+    });
+  };
+
+  on('contextmenu', e => {
+    const row = rowFor(e.target);
+    // A row with no menu keeps the browser's own; so does the naming input.
+    if (!row || e.target.closest('[data-tree-draft]')) return;
+    if (openMenuFor(row, { x: e.clientX, y: e.clientY }, e)) e.preventDefault();
+  });
+
+  // --- the row being named (FR47, FR48) ------------------------------------
+  on('input', e => {
+    if (!e.target.matches('[data-tree-draft]') || !state.treeDraft) return;
+    state.treeDraft.value = e.target.value;
+  });
+  on('focusout', e => {
+    if (!e.target.matches || !e.target.matches('[data-tree-draft]')) return;
+    if (redrawing.has(container) || !state.treeDraft || state.treeDraft.busy) return;
+    // Leaving an empty name is a cancel. A typed name is kept: it is only
+    // created by Enter and only thrown away by Escape.
+    if (e.target.value.trim() !== '') return;
+    cancelDraft({ refocus: false });
+  });
+
+  function cancelDraft({ refocus = true } = {}) {
+    const draft = state.treeDraft;
+    if (!draft) return;
+    state.treeDraft = null;
+    if (refocus) state.focusId = sectionKey(draft.workspaceId, draft.section);
+    rerender();
+    if (refocus) focusAfterRerender(state.focusId);
+  }
+
+  // rerender() replaces this column and its bindings, so the row is found
+  // again in the live document rather than through this closure.
+  function focusAfterRerender(id) {
+    const el = Array.from(container.querySelectorAll('[data-tree-row]')).find(
+      node => node.getAttribute('data-tree-row') === id
+    );
+    if (el) el.focus();
+  }
 
   // --- clicks --------------------------------------------------------------
   const clickActions = [
     // Expand / collapse only: the caret never selects or opens (FR23).
     ['[data-tree-toggle]', el => toggleRow(rowsById.get(el.getAttribute('data-tree-toggle')))],
+    [
+      '[data-tree-menu-for]',
+      el => {
+        const row = rowsById.get(el.getAttribute('data-tree-menu-for'));
+        const rect = el.getBoundingClientRect();
+        if (row) openMenuFor(row, { x: rect.left, y: rect.bottom + 2 }, null);
+      }
+    ],
+    [
+      '[data-tree-new-note]',
+      () => {
+        const workspaceId = contextWorkspaceId(state);
+        if (!workspaceId) {
+          announce(`${NEW_NOTE_HINT}.`);
+          return;
+        }
+        if (typeof cb.onMenuAction === 'function') {
+          cb.onMenuAction('new-note', { kind: 'workspace', id: workspaceId, workspaceId });
+        }
+      }
+    ],
     [
       '[data-tree-retry]',
       el => retry(el.getAttribute('data-tree-retry'), el.getAttribute('data-tree-retry-section'))
@@ -1033,12 +1262,38 @@ function bindTree(container, state, cb, rows) {
   });
 
   // --- keyboard ------------------------------------------------------------
+  // Arrow keys step over the row being named: it is typed in, not walked to.
+  const walkable = rows.filter(row => row.kind !== 'draft');
+
   on('keydown', e => {
+    // The row being named: Enter creates it, Escape cancels.
+    if (e.target.matches && e.target.matches('[data-tree-draft]')) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const draft = state.treeDraft;
+        if (draft && !draft.busy && typeof cb.onDraftCommit === 'function') {
+          cb.onDraftCommit({ ...draft, value: e.target.value });
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelDraft();
+      }
+      return;
+    }
+
     // Only keys pressed on the row itself: a focused Retry button keeps its
     // own Enter and Space.
     if (!e.target.matches || !e.target.matches('[data-tree-row]')) return;
     const row = rowFor(e.target);
     if (!row) return;
+
+    // The Menu key, or Shift+F10, opens the row's menu at the row (FR54).
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      const rect = e.target.getBoundingClientRect();
+      if (openMenuFor(row, { x: rect.left + 24, y: rect.bottom }, e)) e.preventDefault();
+      return;
+    }
 
     // Space adds a workspace or group to the bulk selection; Enter does what a
     // click on the name does (FR72, FR126).
@@ -1052,7 +1307,7 @@ function bindTree(container, state, cb, rows) {
       activateRow(row, { keyboard: true });
       return;
     }
-    const action = resolveTreeKey(e.key, row.id, rows);
+    const action = resolveTreeKey(e.key, row.id, walkable);
     if (!action) return;
     e.preventDefault();
     if (action.focusId) {

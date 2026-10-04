@@ -15,6 +15,7 @@
  *   pane   Group 2: one of each kind in the pane, and how tabs behave.
  *   note   Group 3: editing a note in the pane. Give the sandbox directory as
  *          a fifth argument and it also reads the note's file on disk.
+ *   create Group 4: a note, a ticket and an upload made from the row menu.
  *
  * Exits non-zero when a check fails, a console error appears, or a request
  * fails, so a page that renders but is quietly broken does not pass.
@@ -163,10 +164,15 @@ async function stageTree() {
   // Groups start expanded, so opening Tree fetches the group's sections — and
   // only the group's. Workspaces start collapsed.
   const afterTree = contentRequests().slice(baselineCount);
-  const groupIds = new Set(afterTree.map(entry => entry.split('/')[3]));
+  const fetchedIds = [...new Set(afterTree.map(entry => entry.split('/')[3]))].sort();
+  const groupRowIds = (
+    await page
+      .locator('#cockpitTreeNav [data-tree-row][data-tree-kind="group"]')
+      .evaluateAll(els => els.map(el => el.getAttribute('data-tree-row')))
+  ).sort();
   check(
-    afterTree.length === 5 && groupIds.size === 1,
-    `Tree with only the group expanded fetches 5 sections of 1 row (saw ${afterTree.length} for ${groupIds.size})`
+    afterTree.length === 5 * groupRowIds.length && fetchedIds.join(',') === groupRowIds.join(','),
+    `opening Tree fetches 5 sections for each expanded group and nothing for a collapsed workspace (${afterTree.length} requests, ${groupRowIds.length} group(s))`
   );
   check(
     (await rowByKind('section', 'Notes').count()) === 1,
@@ -220,7 +226,7 @@ async function stageTree() {
 
   // --- Open a note ---------------------------------------------------------
   await rowByKind('note', 'Weekly review').click();
-  await page.locator('.cockpit-pane-markdown').waitFor();
+  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
   const pane = await page.locator('.cockpit-pane-article').innerText();
   check(
     /Studio Notes\s*\/\s*Notes\s*\/\s*Weekly review/.test(pane),
@@ -228,7 +234,7 @@ async function stageTree() {
   );
   check(pane.includes('Note in Studio Notes'), 'the pane says "Note in Studio Notes"');
   check(
-    (await page.locator('.cockpit-pane-markdown h2').count()) === 3,
+    (await page.locator('#cockpitPaneNoteEditor h2').count()) === 3,
     'the note is rendered Markdown'
   );
   check(
@@ -284,7 +290,7 @@ async function stageTree() {
     'arrow keys open nothing'
   );
   await page.keyboard.press('Enter');
-  await page.locator('.cockpit-pane-markdown').waitFor();
+  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
   check(
     await page.evaluate(
       () => document.activeElement && document.activeElement.hasAttribute('data-pane-title')
@@ -950,10 +956,363 @@ async function expectEventually(probe, message, timeoutMs = 4000) {
   check(ok, message);
 }
 
+// A group created the way the Create Group dialog creates one, for a group
+// that starts with no notes of its own.
+async function createGroupByAPI(name) {
+  const plan = await (
+    await page.request.post(`${baseUrl}/api/workspaces/template-agent-plan`, {
+      data: { group_roster: true, group_name: name }
+    })
+  ).json();
+  const manager = plan.agents[0];
+  const created = await (
+    await page.request.post(`${baseUrl}/api/workspaces`, {
+      data: {
+        name,
+        kind: 'group',
+        group_roster: true,
+        create_template_agents: true,
+        template_agent_review: {
+          version: 1,
+          plan_revision: plan.revision,
+          expectations: [{ index: 0, name: manager.name, action: manager.action }]
+        }
+      }
+    })
+  ).json();
+  return created.folder.id;
+}
+
+// Group 4: creating a note, a ticket and an upload from the tree.
+async function stageCreate() {
+  const stamp = Date.now().toString(36);
+  const menu = page.locator('[data-tree-menu]');
+  const draft = page.locator('#cockpitTreeNav [data-tree-draft]');
+  const live = () => page.locator('#cockpitRailLive').innerText();
+  const posts = suffix =>
+    requests.filter(entry => entry.startsWith('POST ') && entry.endsWith(suffix)).length;
+  // This stage makes its own workspace and group and removes them at the end,
+  // so it never changes what the other stages find in the seeded sandbox.
+  const groupName = `Bare Group ${stamp}`;
+  const groupId = await createGroupByAPI(groupName);
+  const shelfName = `Scratch ${stamp}`;
+  const shelfCreated = await (
+    await page.request.post(`${baseUrl}/api/workspaces`, { data: { name: shelfName } })
+  ).json();
+  const scratchId = shelfCreated.folder.id;
+  // One folder under files/, so a folder's own menu can be tried.
+  await page.request.post(`${baseUrl}/api/workspaces/${scratchId}/files`, {
+    multipart: {
+      folder_path: 'inbox',
+      file: { name: 'first.txt', mimeType: 'text/plain', buffer: Buffer.from('first\n') }
+    }
+  });
+  const cleanUp = async () => {
+    await page.request.delete(
+      `${baseUrl}/api/workspaces/${groupId}?confirm=true&delete_mode=group_only`
+    );
+    await page.request.delete(`${baseUrl}/api/workspaces/${scratchId}?confirm=true`);
+  };
+  try {
+    await runCreateStage({
+      stamp,
+      menu,
+      draft,
+      live,
+      posts,
+      groupName,
+      groupId,
+      shelfName,
+      scratchId
+    });
+  } finally {
+    await cleanUp();
+  }
+}
+
+async function runCreateStage(options) {
+  const { stamp, menu, draft, live, posts, groupName, groupId, shelfName, scratchId } = options;
+  // The scratch workspace's own section rows, by key: other workspaces have
+  // sections with the same names.
+  const section = name => page.locator(`#cockpitTreeNav [data-tree-row="${scratchId}/s/${name}"]`);
+  await openTree();
+
+  // --- The header's New note needs a workspace in context (FR50) ----------
+  const newNote = page.locator('#cockpitTreeNav [data-tree-new-note]');
+  check(
+    (await newNote.getAttribute('aria-disabled')) === 'true' &&
+      (await newNote.getAttribute('title')) === 'Pick a workspace first',
+    'with no workspace in context the New note button is disabled and says to pick one'
+  );
+
+  // --- New note from a workspace's right-click menu (FR47) ----------------
+  const shelf = rowByKind('workspace', shelfName);
+  await shelf.click({ button: 'right' });
+  await menu.waitFor();
+  check(
+    (await menu.locator('[role="menuitem"]').allInnerTexts()).join(',') ===
+      'New note,New ticket,Upload file…,Refresh',
+    "right-click opens the workspace's menu: New note, New ticket, Upload file…, Refresh"
+  );
+  await shot('c1-row-menu');
+  await menu.getByRole('menuitem', { name: 'New note' }).click();
+  await draft.waitFor();
+  // Asked of the document, not of an element handle: the tree redraws as the
+  // workspace's sections load, and each redraw makes a new input.
+  const draftFocused = () =>
+    page.evaluate(() => !!document.activeElement?.hasAttribute('data-tree-draft'));
+  // Wait until a note has been created, opened and given the cursor, so the
+  // next step never starts while that is still happening.
+  const editorHasCursor = () =>
+    page.evaluate(() => {
+      const active = document.activeElement;
+      return (
+        !!active && !!active.closest('#cockpitPaneNoteEditor') && active.tagName === 'TEXTAREA'
+      );
+    });
+  check(
+    await draftFocused(),
+    'New note adds an editable row under Notes and puts the cursor in it'
+  );
+  check(
+    (await shelf.getAttribute('aria-expanded')) === 'true',
+    'the workspace opens to show the row'
+  );
+  const noteName = `Session log ${stamp}`;
+  await draft.fill(noteName);
+  await shot('c2-naming-a-note');
+  await draft.press('Enter');
+  await rowByKind('note', noteName).waitFor();
+  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
+  check((await draft.count()) === 0, 'Enter creates the note and the naming row goes away');
+  check((await activeTab().innerText()).includes(noteName), 'the new note opens in the pane');
+  await expectEventually(editorHasCursor, 'the cursor is in the editor, ready to write');
+  check((await live()).includes(`Created note "${noteName}"`), 'the result is announced');
+  await page.keyboard.type('First line of a new note.');
+  await page.waitForFunction(
+    () => document.querySelector('[data-pane-save-status]')?.textContent === 'Unsaved'
+  );
+  check(true, 'typing straight away edits the new note');
+  await shot('c3-note-created');
+
+  // --- Escape cancels (FR47) ----------------------------------------------
+  const before = posts('/notes');
+  await section('notes').hover();
+  await section('notes').locator('[data-tree-menu-for]').click();
+  await menu.waitFor();
+  check(
+    (await menu.locator('[role="menuitem"]').allInnerTexts()).join(',') === 'New note',
+    'the "⋯" button on Notes opens a menu with just New note'
+  );
+  await menu.getByRole('menuitem', { name: 'New note' }).click();
+  await draft.fill('Never created');
+  await draft.press('Escape');
+  check(
+    (await draft.count()) === 0 && posts('/notes') === before,
+    'Escape cancels: no row is left and nothing was sent'
+  );
+
+  // --- An empty name becomes "Untitled", from the header button (FR47) ----
+  await section('notes').focus();
+  check(
+    (await newNote.getAttribute('aria-disabled')) === 'false',
+    'with a row focused the header New note button is enabled'
+  );
+  await newNote.click();
+  await draft.waitFor();
+  const untitled = page.waitForResponse(
+    response => response.request().method() === 'POST' && response.url().endsWith('/notes')
+  );
+  await draft.press('Enter');
+  const untitledBody = (await untitled).request().postDataJSON();
+  check(untitledBody.name === 'Untitled', 'an empty name creates a note called "Untitled"');
+  await page.waitForFunction(() =>
+    document.querySelector('.cockpit-pane-tab.is-active')?.textContent.includes('Untitled')
+  );
+  await expectEventually(editorHasCursor, '…which opens with the cursor in the editor too');
+
+  // --- New ticket, by keyboard (FR48, FR54) -------------------------------
+  await section('backlog').focus();
+  await page.keyboard.press('Shift+F10');
+  await menu.waitFor();
+  check(
+    await page.evaluate(() => document.activeElement?.getAttribute('role') === 'menuitem'),
+    'Shift+F10 opens the row menu with focus on its first item'
+  );
+  await page.keyboard.press('Enter');
+  await draft.waitFor();
+  const ticketTitle = `Tune the snare ${stamp}`;
+  await page.keyboard.type(ticketTitle);
+  const ticketPosted = page.waitForResponse(
+    response => response.request().method() === 'POST' && response.url().endsWith('/tickets')
+  );
+  await page.keyboard.press('Enter');
+  const ticketBody = (await ticketPosted).request().postDataJSON();
+  check(
+    ticketBody.state === 'backlog' &&
+      ticketBody.source === 'manual' &&
+      ticketBody.title === ticketTitle,
+    'the ticket is created in state backlog with the manual source'
+  );
+  await rowByKind('ticket', ticketTitle).waitFor();
+  await page.locator('.cockpit-pane-article[data-pane-kind="ticket"]').waitFor();
+  check(
+    (await rowByKind('ticket', ticketTitle).innerText()).includes('Backlog') &&
+      (await activeTab().innerText()).includes(ticketTitle),
+    'the ticket appears under Backlog and opens in the pane'
+  );
+
+  // --- A refused create shows the reason and changes nothing (FR51) -------
+  EXPECTED_FAILURES.push(/\/api\/workspaces\/[0-9a-f-]+\/tickets$/);
+  await section('backlog').focus();
+  await page.keyboard.press('Shift+F10');
+  await menu.waitFor();
+  await page.keyboard.press('Enter');
+  await draft.waitFor();
+  const ticketRows = await page.locator('#cockpitTreeNav [data-tree-kind="ticket"]').count();
+  await draft.press('Enter');
+  await page.waitForFunction(() =>
+    document.getElementById('cockpitRailLive').textContent.includes("Couldn't create the ticket")
+  );
+  check(
+    (await live()) === "Couldn't create the ticket: title is required",
+    `a refused create shows the server's reason ("${await live()}")`
+  );
+  check(
+    (await page.locator('#cockpitTreeNav [data-tree-kind="ticket"]').count()) === ticketRows &&
+      (await draft.count()) === 1 &&
+      (await draftFocused()),
+    'the tree is unchanged, and the naming row is still there to retry or cancel'
+  );
+  await shot('c4-create-refused');
+  await draft.press('Escape');
+
+  // --- Upload file… (FR49) -------------------------------------------------
+  const pickAndUpload = async (rowLocator, name, content) => {
+    await rowLocator.click({ button: 'right' });
+    await menu.waitFor();
+    const chooser = page.waitForEvent('filechooser');
+    await menu.getByRole('menuitem', { name: 'Upload file…' }).click();
+    await (
+      await chooser
+    ).setFiles({
+      name,
+      mimeType: 'text/markdown',
+      buffer: Buffer.from(content)
+    });
+  };
+  const fileName = `setlist-${stamp}.md`;
+  await pickAndUpload(section('files'), fileName, '# Setlist\n\n- Night Drive\n');
+  await rowByKind('file', fileName).waitFor();
+  await page.locator('.cockpit-pane-markdown h1').waitFor();
+  check(
+    (await activeTab().innerText()).includes(fileName),
+    'an uploaded file appears under Files and opens in the pane'
+  );
+  check(
+    (await page.locator('.cockpit-pane-fields').innerText()).includes(fileName),
+    'at the top of files/'
+  );
+
+  // …into a folder, from the folder's own menu.
+  const folderFile = `notes-${stamp}.md`;
+  await pickAndUpload(rowByKind('folder', 'inbox'), folderFile, '# In a folder\n');
+  await rowByKind('file', folderFile).waitFor();
+  check(
+    /files\/inbox\/[0-9a-f]+_notes-/.test(await page.locator('.cockpit-pane-fields').innerText()) &&
+      (await rowByKind('folder', 'inbox').getAttribute('aria-expanded')) === 'true',
+    'a folder menu uploads into that folder, which opens to show the file'
+  );
+  await shot('c5-uploaded');
+
+  // --- A note in a group whose Notes section was hidden (FR52) ------------
+  const group = rowByKind('group', groupName);
+  await group.scrollIntoViewIfNeeded();
+  check(
+    (await page.locator(`[data-tree-row="${groupId}/s/notes"]`).count()) === 0,
+    'a group with no notes shows no Notes section'
+  );
+  await group.click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'New note' }).click();
+  await draft.waitFor();
+  check(
+    (await page.locator(`[data-tree-row="${groupId}/s/notes"]`).count()) === 1,
+    'naming a note in it makes the Notes section appear'
+  );
+  const groupNote = `Group plan ${stamp}`;
+  await draft.fill(groupNote);
+  await draft.press('Enter');
+  await rowByKind('note', groupNote).waitFor();
+  await page.locator('#cockpitPaneNoteEditor').waitFor();
+  check(
+    (await page.locator(`[data-tree-row="${groupId}/s/notes"] .cockpit-tree-count`).innerText()) ===
+      '1' && (await page.locator('.cockpit-pane-sub').innerText()).includes(`Note in ${groupName}`),
+    'the note is created in the group, and its Notes section stays, with a count of 1'
+  );
+  await shot('c6-note-in-a-group');
+
+  // --- Refresh from the menu (FR21) ---------------------------------------
+  const shelfId = await shelf.getAttribute('data-tree-row');
+  const outside = `Added elsewhere ${stamp}`;
+  await page.request.post(`${baseUrl}/api/workspaces/${shelfId}/notes`, {
+    data: { name: outside, content: 'Made by another window.' }
+  });
+  check((await rowByKind('note', outside).count()) === 0, 'a note made elsewhere is not shown yet');
+  await shelf.scrollIntoViewIfNeeded();
+  await shelf.click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Refresh' }).click();
+  await rowByKind('note', outside).waitFor();
+  check(true, 'Refresh in the menu reloads the row and the note appears');
+
+  // --- A redraw of the tree leaves an open menu alone ---------------------
+  // The tree redraws whenever a section finishes loading or the workspace
+  // list reloads, and puts its own scroll position back each time. With the
+  // tree scrolled, that used to close a menu that had only just been opened.
+  const scroller = page.locator('#cockpitTreeNav .cockpit-tree-scroll');
+  await scroller.evaluate(el => {
+    el.scrollTop = 40;
+  });
+  await settle(200);
+  await shelf.click({ button: 'right' });
+  await menu.waitFor();
+  await page.evaluate(() => window.OriHomeCockpit.refreshQuietly());
+  await settle(500);
+  check(
+    (await menu.count()) === 1 &&
+      (await page.evaluate(() => document.activeElement?.getAttribute('role') === 'menuitem')) &&
+      (await scroller.evaluate(el => el.scrollTop)) > 0,
+    'a redraw of the scrolled tree leaves the open menu, and its focus, alone'
+  );
+  await page.keyboard.press('Escape');
+  check(
+    await page.evaluate(
+      () => document.activeElement?.getAttribute('data-tree-kind') === 'workspace'
+    ),
+    '…and Escape still returns focus to the row, though its element was replaced'
+  );
+  await scroller.evaluate(el => {
+    el.scrollTop = 0;
+  });
+
+  // --- Dismissal ------------------------------------------------------------
+  await shelf.click({ button: 'right' });
+  await menu.waitFor();
+  await page.keyboard.press('Escape');
+  check(
+    (await menu.count()) === 0 && (await shelf.evaluate(el => el === document.activeElement)),
+    'Escape closes the menu and returns focus to its row'
+  );
+  await shelf.click({ button: 'right' });
+  await menu.waitFor();
+  await page.locator('#cockpitTreePane').click({ position: { x: 300, y: 300 } });
+  check((await menu.count()) === 0, 'a click elsewhere closes the menu');
+}
+
 const stages = {
   tree: stageTree,
   pane: stagePane,
   note: stageNote,
+  create: stageCreate,
   'map-requests': stageMapRequests
 };
 try {

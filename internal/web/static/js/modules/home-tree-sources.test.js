@@ -27,6 +27,9 @@ import {
   loadSections,
   loadNote,
   saveNoteContent,
+  createNote,
+  createTicket,
+  uploadFile,
   loadTicket,
   loadMemory,
   loadFilePreview,
@@ -734,4 +737,141 @@ test('a keepalive save is sent without waiting for an answer', async () => {
   assert.equal(await saveNoteContent('n1', 'last words', { keepalive: true, fetchImpl }), null);
   assert.equal(fetchImpl.requests[0].options.keepalive, true);
   assert.deepEqual(JSON.parse(fetchImpl.requests[0].options.body), { content: 'last words' });
+});
+
+// ---------------------------------------------------------------------------
+// Creating from the tree (FR47-FR49, FR51)
+// ---------------------------------------------------------------------------
+
+test('a new note is created with its name and comes back as a tree row', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/notes': { success: true, note: { id: 'n9', name: 'Mix notes' } }
+  });
+  const created = await createNote('ws1', '  Mix notes  ', { fetchImpl });
+  assert.deepEqual(created, {
+    id: 'ws1/n/n9',
+    kind: 'note',
+    label: 'Mix notes',
+    meta: { noteId: 'n9', updatedAt: '' },
+    children: [],
+    workspaceId: 'ws1'
+  });
+  const { options } = fetchImpl.requests[0];
+  assert.equal(options.method, 'POST');
+  assert.deepEqual(JSON.parse(options.body), { name: 'Mix notes', content: '' });
+});
+
+test('a note created with an empty name is called "Untitled" (FR47)', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/notes': { success: true, note: { id: 'n9', name: 'Untitled' } }
+  });
+  await createNote('ws1', '   ', { fetchImpl });
+  assert.equal(JSON.parse(fetchImpl.requests[0].options.body).name, 'Untitled');
+});
+
+test('a new ticket starts in the backlog with the manual source (FR48, D13)', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/tickets': {
+      id: 't9',
+      title: 'Book studio time',
+      state: 'backlog',
+      state_label: 'Backlog',
+      display_number: '#9'
+    }
+  });
+  const created = await createTicket('ws1', 'Book studio time', { fetchImpl });
+  assert.equal(created.id, 'ws1/t/t9');
+  assert.equal(created.label, 'Book studio time');
+  assert.deepEqual(created.meta, {
+    ticketId: 't9',
+    state: 'backlog',
+    stateLabel: 'Backlog',
+    finished: false,
+    number: '#9'
+  });
+  assert.deepEqual(JSON.parse(fetchImpl.requests[0].options.body), {
+    title: 'Book studio time',
+    state: 'backlog',
+    source: 'manual'
+  });
+});
+
+test('an upload sends the file and its folder, and returns the row for the stored name', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/files': {
+      attachment: {
+        file_meta: {
+          name: 'take.wav',
+          size: 68,
+          url: '/api/workspaces/ws1/files/stems/9d8ce3d6_take.wav',
+          relative_path: 'stems/9d8ce3d6_take.wav'
+        }
+      }
+    }
+  });
+  const file = new Blob(['RIFF'], { type: 'audio/wav' });
+  const created = await uploadFile('ws1', file, '/stems/', { fetchImpl });
+  // The server stores an upload under a prefixed name; the tree must show
+  // (and open) that one, not the name that was picked.
+  assert.equal(created.id, 'ws1/f/stems/9d8ce3d6_take.wav');
+  assert.equal(created.label, '9d8ce3d6_take.wav');
+  assert.deepEqual(created.meta, {
+    path: 'stems/9d8ce3d6_take.wav',
+    url: '/api/workspaces/ws1/files/stems/9d8ce3d6_take.wav',
+    size: 68
+  });
+  const { options } = fetchImpl.requests[0];
+  assert.equal(options.method, 'POST');
+  assert.ok(options.body instanceof FormData);
+  assert.ok(options.body.get('file') instanceof Blob);
+  assert.equal(options.body.get('folder_path'), 'stems');
+  // No Content-Type header: the browser must set the multipart boundary itself.
+  assert.equal(options.headers, undefined);
+});
+
+test('an upload to the top of files/ sends no folder at all', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/files': {
+      attachment: { file_meta: { relative_path: 'ab12cd34_a.txt', size: 1 } }
+    }
+  });
+  await uploadFile('ws1', new Blob(['x']), '', { fetchImpl });
+  assert.equal(fetchImpl.requests[0].options.body.has('folder_path'), false);
+});
+
+test('a refused create or upload rejects with the server reason, for the tree to show (FR51)', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/notes': { status: 404, body: { message: 'Workspace not found' } },
+    '/api/workspaces/ws1/tickets': {
+      status: 400,
+      body: { code: 'validation_error', message: 'title is required' }
+    },
+    '/api/workspaces/ws1/files': {
+      status: 400,
+      body: { message: 'File too large. Maximum size is 100 MB' }
+    }
+  });
+  await assert.rejects(() => createNote('ws1', 'x', { fetchImpl }), /Workspace not found/);
+  await assert.rejects(() => createTicket('ws1', '', { fetchImpl }), /title is required/);
+  await assert.rejects(
+    () => uploadFile('ws1', new Blob(['x']), '', { fetchImpl }),
+    /File too large\. Maximum size is 100 MB/
+  );
+});
+
+test('an answer without the new item is treated as a failure, not as an empty row', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/notes': { success: true },
+    '/api/workspaces/ws1/tickets': {},
+    '/api/workspaces/ws1/files': { attachment: {} }
+  });
+  await assert.rejects(() => createNote('ws1', 'x', { fetchImpl }), /did not return the new note/);
+  await assert.rejects(
+    () => createTicket('ws1', 'x', { fetchImpl }),
+    /did not return the new ticket/
+  );
+  await assert.rejects(
+    () => uploadFile('ws1', new Blob(['x']), '', { fetchImpl }),
+    /did not return the uploaded file/
+  );
 });

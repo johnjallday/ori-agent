@@ -167,6 +167,7 @@ export default defineConfig([
       'internal/web/static/js/modules/home-library-badges.js',
       'internal/web/static/js/modules/home-plugin-updates.js',
       'internal/web/static/js/modules/home-tree-icons.js',
+      'internal/web/static/js/modules/home-tree-menu.js',
       'internal/web/static/js/modules/home-tree-pane.js',
       'internal/web/static/js/modules/home-tree-sources.js',
       'internal/web/static/js/modules/home-workspace-cockpit.js',

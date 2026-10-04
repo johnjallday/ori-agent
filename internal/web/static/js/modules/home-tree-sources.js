@@ -74,7 +74,9 @@ const KEY_PREFIX = {
   more: 'more',
   loading: 'loading',
   failed: 'failed',
-  empty: 'empty'
+  empty: 'empty',
+  // The row where a new note or ticket is being named.
+  draft: 'draft'
 };
 
 const KIND_BY_PREFIX = Object.fromEntries(
@@ -700,6 +702,97 @@ export async function openWorkspaceFile(workspaceId, path, { reveal = false, fet
   if (!response.ok) {
     throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Creating from the tree (FR47-FR49)
+//
+// Each of these rejects with the server's own reason, which is what the tree
+// shows when a create or an upload is refused (FR51). "Workspace" below means a
+// workspace or a group: all three endpoints accept either id.
+// ---------------------------------------------------------------------------
+
+async function postJSON(url, body, fetchImpl) {
+  const response = await resolveFetch(fetchImpl)(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+  }
+  return response.json();
+}
+
+/**
+ * `POST /api/workspaces/{id}/notes` → the new note's row.
+ *
+ * An empty name becomes "Untitled" (FR47); the server's own default would be
+ * "Untitled Note".
+ */
+export async function createNote(workspaceId, name, { fetchImpl } = {}) {
+  const data = await postJSON(
+    `/api/workspaces/${enc(workspaceId)}/notes`,
+    { name: text(name) || 'Untitled', content: '' },
+    fetchImpl
+  );
+  const note = (data && data.note) || {};
+  if (!note.id) throw new Error('The server did not return the new note.');
+  return notesToRows(workspaceId, { notes: [note] }).rows[0];
+}
+
+/**
+ * `POST /api/workspaces/{id}/tickets` → the new ticket's row.
+ *
+ * Tickets made from the tree start in the backlog and use the existing
+ * `manual` source (decision D13).
+ */
+export async function createTicket(workspaceId, title, { fetchImpl } = {}) {
+  const ticket = await postJSON(
+    `/api/workspaces/${enc(workspaceId)}/tickets`,
+    { title: text(title), state: 'backlog', source: 'manual' },
+    fetchImpl
+  );
+  if (!ticket || !ticket.id) throw new Error('The server did not return the new ticket.');
+  return ticketsToRows(workspaceId, { tickets: [ticket] }).rows[0];
+}
+
+/**
+ * `POST /api/workspaces/{id}/files` (multipart) → the uploaded file's row.
+ *
+ * The file goes in the `file` field and the destination folder, when there is
+ * one, in `folder_path` — the first name the server's
+ * `workspaceFolderFormValue` looks for. With no folder it lands at the top of
+ * `files/`. The server stores an upload under a prefixed name, so the row is
+ * built from the path it reports, not from the name that was picked.
+ */
+export async function uploadFile(workspaceId, file, folderPath = '', { fetchImpl } = {}) {
+  const form = new FormData();
+  form.append('file', file);
+  const folder = String(folderPath || '').replace(/^\/+|\/+$/g, '');
+  if (folder) form.append('folder_path', folder);
+  const response = await resolveFetch(fetchImpl)(`/api/workspaces/${enc(workspaceId)}/files`, {
+    method: 'POST',
+    body: form
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+  }
+  const data = await response.json();
+  const meta = (data && data.attachment && data.attachment.file_meta) || {};
+  const path = text(meta.relative_path);
+  if (!path) throw new Error('The server did not return the uploaded file.');
+  return filesToRowsFlat(workspaceId, path, meta);
+}
+
+// One file row, without the folder nesting `filesToRows` builds: it is opened
+// as a tab, and the tree gets its folders from the reloaded listing.
+function filesToRowsFlat(workspaceId, path, meta) {
+  return row(workspaceId, 'file', path, path.split('/').pop(), {
+    path,
+    url: text(meta.url),
+    size: Number.isFinite(Number(meta.size)) ? Number(meta.size) : null
+  });
 }
 
 /**

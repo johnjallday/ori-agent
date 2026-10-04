@@ -28,6 +28,7 @@ import {
   isRowExpanded,
   setRowExpanded,
   revealTargets,
+  contextWorkspaceId,
   rowActivation,
   treeActiveRowId,
   isWorkspaceRowKind
@@ -514,6 +515,159 @@ test('applying revealTargets makes the row appear among the visible rows', () =>
     rowsAfter.some(r => r.id === 'w3/n/n1'),
     true
   );
+});
+
+// ---------------------------------------------------------------------------
+// The row where a new note or ticket is named (FR47, FR48, FR52)
+// ---------------------------------------------------------------------------
+
+function draftRows(draft, options = {}) {
+  return visibleTreeRows(tree(), new Set(options.collapsed || []), 0, '', {
+    expanded: new Set(options.expanded || []),
+    contents: options.contents || {},
+    draft
+  });
+}
+
+test('a note being named is the first row of its Notes section', () => {
+  const rows = draftRows(
+    { workspaceId: 'w4', section: 'notes', kind: 'note', value: 'Mix' },
+    { expanded: ['w4'], contents: { w4: contentsFor('w4') } }
+  );
+  const children = under(rows, 'w4/s/notes');
+  assert.equal(children[0].kind, 'draft');
+  assert.equal(children[0].id, 'w4/draft/notes');
+  assert.equal(children[0].name, 'Mix');
+  assert.equal(children[0].draftKind, 'note');
+  assert.equal(children[0].depth, 2);
+  // The notes that were already there follow it.
+  assert.deepEqual(
+    children.slice(1).map(r => r.name),
+    ['Arrangement', 'Weekly review']
+  );
+  // Only that one section has the row.
+  assert.equal(rows.filter(r => r.kind === 'draft').length, 1);
+});
+
+test('a ticket being named sits at the top of Backlog', () => {
+  const rows = draftRows(
+    { workspaceId: 'w4', section: 'backlog', kind: 'ticket', value: '' },
+    { expanded: ['w4'], contents: { w4: contentsFor('w4') } }
+  );
+  assert.equal(under(rows, 'w4/s/backlog')[0].kind, 'draft');
+  assert.equal(under(rows, 'w4/s/backlog')[0].draftKind, 'ticket');
+  assert.equal(under(rows, 'w4/s/notes')[0].kind, 'note');
+});
+
+test('naming a note opens a collapsed section, and replaces the "No notes yet" line', () => {
+  const rows = draftRows(
+    { workspaceId: 'w4', section: 'notes', kind: 'note', value: '' },
+    { expanded: ['w4'], collapsed: ['w4/s/notes'], contents: { w4: emptyContents() } }
+  );
+  assert.equal(rows.find(r => r.id === 'w4/s/notes').expanded, true);
+  assert.deepEqual(
+    under(rows, 'w4/s/notes').map(r => r.kind),
+    ['draft']
+  );
+});
+
+test("naming a note in a group shows the group's hidden Notes section (FR52)", () => {
+  const before = draftRows(null, { contents: { g1: emptyContents() } });
+  assert.equal(
+    before.some(r => r.id === 'g1/s/notes'),
+    false
+  );
+  const rows = draftRows(
+    { workspaceId: 'g1', section: 'notes', kind: 'note', value: '' },
+    { contents: { g1: emptyContents() } }
+  );
+  assert.deepEqual(
+    under(rows, 'g1').map(r => r.id),
+    ['w1', 'w2', 'g2', 'g1/s/notes']
+  );
+  assert.deepEqual(
+    under(rows, 'g1/s/notes').map(r => r.kind),
+    ['draft']
+  );
+  // Still true while the group's sections have not loaded at all.
+  const loadingRows = draftRows({ workspaceId: 'g1', section: 'notes', kind: 'note', value: '' });
+  assert.equal(
+    loadingRows.some(r => r.kind === 'draft'),
+    true
+  );
+});
+
+test('the row being named is an input with the typed name, not a name to click', () => {
+  const html = renderTreeHTML(
+    draftRows(
+      { workspaceId: 'w4', section: 'notes', kind: 'note', value: 'Mix "v2"' },
+      { expanded: ['w4'], contents: { w4: contentsFor('w4') } }
+    ),
+    { tabbableId: 'g1' }
+  );
+  assert.match(html, /<input type="text" class="cockpit-tree-input" data-tree-draft/);
+  assert.match(html, /value="Mix &quot;v2&quot;"/);
+  assert.match(html, /placeholder="Note name"/);
+  assert.match(html, /aria-label="Name of the new note\. Enter to create, Escape to cancel\."/);
+  // It is not in the roving tab order as a row, is not draggable, has no menu.
+  const draft = rowMarkup(html, 'w4/draft/notes');
+  assert.match(draft, /tabindex="-1"/);
+  assert.doesNotMatch(draft, /draggable|data-tree-menu-for/);
+  assert.equal(rowActivation({ kind: 'draft' }), '');
+});
+
+test('a ticket being named asks for a title, and is disabled while it is being created', () => {
+  const html = renderTreeHTML(
+    draftRows(
+      { workspaceId: 'w4', section: 'backlog', kind: 'ticket', value: 'Ship', busy: true },
+      { expanded: ['w4'], contents: { w4: contentsFor('w4') } }
+    ),
+    { tabbableId: 'g1' }
+  );
+  assert.match(html, /placeholder="Ticket title"/);
+  assert.match(html, /aria-label="Title of the new ticket\./);
+  assert.match(html, /data-tree-draft[^>]* disabled>/);
+});
+
+// ---------------------------------------------------------------------------
+// The row menu's "⋯" button and the header's New note (FR50, FR54)
+// ---------------------------------------------------------------------------
+
+test('rows with a menu carry a "⋯" button that is out of the tab order', () => {
+  const html = contentHTML({ expanded: ['w4'], contents: { w4: contentsFor('w4') } });
+  ['g1', 'w4', 'w4/s/notes', 'w4/s/backlog', 'w4/s/files', 'w4/d/stems'].forEach(id => {
+    const markup = rowMarkup(html, id);
+    assert.match(
+      markup,
+      /class="cockpit-tree-more"[^>]*tabindex="-1"[^>]*aria-haspopup="menu"/,
+      id
+    );
+  });
+  assert.match(rowMarkup(html, 'w4'), /aria-label="Actions for Standalone"/);
+  // Agents has nothing to create under it; neither do Memory or a ticket.
+  ['w4/s/agents', 'w4/m', 'w4/t/t1'].forEach(id =>
+    assert.doesNotMatch(rowMarkup(html, id), /cockpit-tree-more/, id)
+  );
+});
+
+test('the New note button acts on the workspace of the current row (FR50)', () => {
+  const flattened = flat();
+  // Keyboard focus on a note names its workspace.
+  assert.equal(contextWorkspaceId({ flattened, focusId: 'w3/n/n1' }), 'w3');
+  // Focus on a workspace or group row names that row; a group counts.
+  assert.equal(contextWorkspaceId({ flattened, focusId: 'g2' }), 'g2');
+  // No focus: the open tab, then Home's selection.
+  assert.equal(contextWorkspaceId({ flattened, activeTabKey: 'w4/t/t1', selectedId: 'w1' }), 'w4');
+  assert.equal(contextWorkspaceId({ flattened, selectedId: 'w1' }), 'w1');
+});
+
+test('with no workspace in context the New note button has nothing to act on', () => {
+  const flattened = flat();
+  assert.equal(contextWorkspaceId({ flattened }), '');
+  // A row whose workspace no longer exists does not count; the next one does.
+  assert.equal(contextWorkspaceId({ flattened, focusId: 'gone/n/n1' }), '');
+  assert.equal(contextWorkspaceId({ flattened, focusId: 'gone/n/n1', selectedId: 'w4' }), 'w4');
+  assert.equal(contextWorkspaceId(null), '');
 });
 
 test('rowActivation: names open, sections and folders only toggle (FR22-FR24)', () => {

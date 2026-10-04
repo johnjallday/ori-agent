@@ -3427,7 +3427,11 @@ smoke_baseline_export() {
 #                                   drive the tree in a headless browser, check
 #                                   it, and take screenshots. Stages: tree,
 #                                   pane, note (give the sandbox directory and
-#                                   it also reads the note's file on disk)
+#                                   it also reads the note's file on disk),
+#                                   create
+#   filetree <base-url> demo-all [sandbox-dir]
+#                                   every stage in both themes, one PASS/FAIL
+#                                   line each
 filetree_probe() {
   local method="$1" url="$2" body="${3:-}" out status
   if [[ -n "$body" ]]; then
@@ -3670,13 +3674,38 @@ filetree_demo() {
   node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "${TMPDIR:-/tmp}/filetree-demo" "$stage" "$theme" "$sandbox"
 }
 
+# filetree_demo_all runs every stage of the browser demo in both themes and
+# prints one line per run: PASS, or FAIL with what failed. Exits non-zero if
+# any run failed. The sandbox directory lets the note stage read the file on
+# disk.
+filetree_demo_all() {
+  local sandbox="${4:-}" root out failed=0 stage theme
+  smoke_show_wait
+  root="$(cd "$(dirname "$0")/.." && pwd -P)"
+  out="${TMPDIR:-/tmp}/filetree-demo"
+  for stage in tree pane note create; do
+    for theme in light dark; do
+      if log=$(node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "$out" "$stage" "$theme" "$sandbox" 2>&1); then
+        echo "PASS $stage ($theme): $(printf '%s\n' "$log" | grep -c '^ok ') checks"
+      else
+        failed=$((failed + 1))
+        echo "FAIL $stage ($theme):"
+        printf '%s\n' "$log" | grep -v -e '^ok ' -e '^shot ' | sed 's/^/     /'
+      fi
+    done
+  done
+  echo "screenshots: $out"
+  [[ "$failed" -eq 0 ]] || fail "$failed demo run(s) failed"
+}
+
 smoke_filetree() {
   case "${3:-}" in
   endpoints) filetree_endpoints ;;
   seed) filetree_seed ;;
   wait) smoke_show_wait ;;
   demo) filetree_demo "$@" ;;
-  *) fail "usage: $0 filetree <base-url> {endpoints|seed|wait|demo <stage> [light|dark]}" ;;
+  demo-all) filetree_demo_all "$@" ;;
+  *) fail "usage: $0 filetree <base-url> {endpoints|seed|wait|demo <stage> [light|dark] [sandbox]|demo-all [sandbox]}" ;;
   esac
 }
 
@@ -3798,7 +3827,7 @@ filetree) smoke_filetree "$@" ;;
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
-  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints (group ids accepted?) | seed (demo contents) | wait" >&2
+  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | seed | wait | demo <tree|pane|note|create> [theme] [sandbox] | demo-all [sandbox]" >&2
   exit 2
   ;;
 esac

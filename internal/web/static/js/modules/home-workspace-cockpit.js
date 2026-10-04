@@ -1659,6 +1659,10 @@ import {
 // is open; the Tree and the pane only draw what they are handed.
 import {
   SECTION_FAILED,
+  SECTION_LOADING,
+  SECTION_READY,
+  createNote,
+  createTicket,
   loadFilePreview,
   loadMemory,
   loadNote,
@@ -1667,8 +1671,10 @@ import {
   openWorkspaceFile,
   saveNoteContent,
   sectionInfo,
-  sectionKey
+  sectionKey,
+  uploadFile
 } from './home-tree-sources.js';
+import { MENU_NEW_NOTE, MENU_NEW_TICKET, MENU_REFRESH, MENU_UPLOAD } from './home-tree-menu.js';
 import {
   ITEM_FAILED,
   ITEM_LOADING,
@@ -1831,6 +1837,9 @@ import {
     treeTabs: [],
     activeTabKey: '',
     treeTabItems: {},
+    // A note or ticket being named in the tree, before it exists:
+    // { workspaceId, section, kind, value, busy }. One at a time.
+    treeDraft: null,
     bulkSelection: new Set(),
     activeTags: new Set(),
     focusId: '',
@@ -2069,6 +2078,8 @@ import {
       onOpenItem: (row, options) => openTreeItem(row, options),
       onOpen: id => openItem(id),
       onRetry: (workspaceId, sectionId) => void loadTreeContents(workspaceId, [sectionId]),
+      onMenuAction: (action, row) => handleTreeMenuAction(action, row),
+      onDraftCommit: draft => void commitTreeDraft(draft),
       onRerender: () => mountTreeView(),
       onAnnounce: message => announce(message),
       onTrashed: (id, name) => {
@@ -2081,7 +2092,9 @@ import {
         await refreshQuietly();
       }
     });
-    if (hadFocus) {
+    // …unless the Tree has already put focus where it belongs: a row being
+    // named keeps the cursor in its input across redraws.
+    if (hadFocus && !els.treeNav.contains(document.activeElement)) {
       const target =
         els.treeNav.querySelector('[data-tree-row][tabindex="0"]') ||
         els.treeNav.querySelector('[data-tree-row]');
@@ -2155,6 +2168,12 @@ import {
       {
         sections,
         onSection: (sectionId, sectionState) => {
+          // A reload keeps the rows it already has on screen until the new
+          // ones arrive, rather than flashing "Loading…" over them.
+          const had = entry.sections[sectionId];
+          if (sectionState.status === SECTION_LOADING && had && had.status === SECTION_READY) {
+            return;
+          }
           entry.sections[sectionId] = sectionState;
           if (sectionState.status === SECTION_FAILED) {
             const owner = findWorkspace(state.flattened, workspaceId);
@@ -2234,9 +2253,15 @@ import {
     if (!tab || tab.kind !== 'note' || !item || item.status !== ITEM_READY) return;
     const element = document.getElementById(NOTE_EDITOR_ID);
     if (!element || !window.NoteEditor) return;
-    noteController.attach(element, tab.key, item.value, { focus });
+    // A note that was just created asked for the cursor before its content had
+    // loaded; give it the cursor now that there is an editor to put it in.
+    const wantsCursor = focus || pendingEditorFocusKey === tab.key;
+    if (pendingEditorFocusKey === tab.key) pendingEditorFocusKey = '';
+    noteController.attach(element, tab.key, item.value, { focus: wantsCursor });
     showNoteElsewhereNotice();
   }
+
+  let pendingEditorFocusKey = '';
 
   // Changes to what the pane shows run one at a time, because each may first
   // have to save the note being edited.
@@ -2283,6 +2308,7 @@ import {
     return changeTreeTab(tab.key, () => {
       const next = openTab(state.treeTabs, state.activeTabKey, tab);
       state.treeTabs = next.tabs;
+      if (focusEditor) pendingEditorFocusKey = tab.key;
       showActiveTreeTab(next.activeKey, { invoker });
       // Opening with Enter moves focus to the pane's title; a click leaves
       // focus on the row that was clicked (FR72).
@@ -2428,6 +2454,122 @@ import {
     state.focusId = key;
     mountTreeView();
     if (treeHandle) treeHandle.focusRow(key);
+  }
+
+  // ---- Creating from the tree (FR47-FR52) ----
+  //
+  // "Workspace" here means a workspace or a group: every endpoint below takes
+  // either id.
+
+  /** An item was chosen from a row's menu, or the header's New note was pressed. */
+  function handleTreeMenuAction(action, row) {
+    const workspaceId = row.workspaceId || row.id;
+    if (action === MENU_NEW_NOTE) startTreeDraft(workspaceId, 'notes', 'note');
+    else if (action === MENU_NEW_TICKET) startTreeDraft(workspaceId, 'backlog', 'ticket');
+    else if (action === MENU_UPLOAD) {
+      pickFileToUpload(workspaceId, row.kind === 'folder' ? String(row.meta.path || '') : '');
+    } else if (action === MENU_REFRESH) void refreshTreeRow(workspaceId);
+  }
+
+  function workspaceLabel(workspaceId) {
+    const owner = findWorkspace(state.flattened, workspaceId);
+    return (owner && owner.name) || 'this workspace';
+  }
+
+  function reportTreeFailure(message) {
+    announce(message);
+    if (window.Toast) window.Toast.error(message);
+  }
+
+  /** Add the editable row where a new note or ticket is named (FR47, FR48). */
+  function startTreeDraft(workspaceId, sectionId, kind) {
+    if (!findWorkspace(state.flattened, workspaceId)) return;
+    // Opens the workspace and whatever is above it; the section is shown and
+    // opened by the draft itself, even a group's section hidden for being
+    // empty.
+    revealTreeRow(sectionKey(workspaceId, sectionId));
+    state.treeDraft = {
+      workspaceId,
+      section: sectionId,
+      kind,
+      value: '',
+      busy: false,
+      pendingFocus: true
+    };
+    mountTreeView();
+  }
+
+  /**
+   * Enter in the row being named: create the note or ticket, reload its
+   * section so the tree shows it, and open it in the pane (FR20, FR47, FR48).
+   *
+   * A refusal shows the server's reason and changes nothing: the row stays,
+   * with the name as typed, to try again or to cancel with Escape (FR51).
+   */
+  async function commitTreeDraft(draft) {
+    const { workspaceId, section, kind } = draft;
+    const noun = kind === 'note' ? 'note' : 'ticket';
+    state.treeDraft = { ...draft, busy: true };
+    mountTreeView();
+    let created;
+    try {
+      created =
+        kind === 'note'
+          ? await createNote(workspaceId, draft.value)
+          : await createTicket(workspaceId, draft.value);
+    } catch (err) {
+      const reason = err && err.message ? String(err.message) : 'Request failed';
+      state.treeDraft = { ...draft, busy: false, pendingFocus: true };
+      mountTreeView();
+      reportTreeFailure(`Couldn't create the ${noun}: ${reason}`);
+      return;
+    }
+    state.treeDraft = null;
+    await loadTreeContents(workspaceId, [section]);
+    announce(`Created ${noun} "${created.label}" in ${workspaceLabel(workspaceId)}.`);
+    // A new note opens with the cursor in the editor, ready to write.
+    await openTreeTab(tabFromRow(created), { focusEditor: kind === 'note' });
+  }
+
+  /**
+   * Upload file…: the system file picker, then the upload into `folderPath`
+   * (the top of `files/` when empty). The Files section reloads and the file
+   * opens in the pane (FR49).
+   */
+  function pickFileToUpload(workspaceId, folderPath) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.hidden = true;
+    input.setAttribute('data-tree-upload-input', '');
+    input.addEventListener('cancel', () => input.remove());
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      if (file) void uploadTreeFile(workspaceId, folderPath, file);
+    });
+    document.body.append(input);
+    input.click();
+  }
+
+  async function uploadTreeFile(workspaceId, folderPath, file) {
+    announce(`Uploading ${file.name}…`);
+    let uploaded;
+    try {
+      uploaded = await uploadFile(workspaceId, file, folderPath);
+    } catch (err) {
+      const reason = err && err.message ? String(err.message) : 'Request failed';
+      reportTreeFailure(`Couldn't upload ${file.name}: ${reason}`);
+      return;
+    }
+    await loadTreeContents(workspaceId, ['files']);
+    announce(`Uploaded ${file.name} to ${workspaceLabel(workspaceId)}.`);
+    await openTreeTab(tabFromRow(uploaded));
+  }
+
+  /** Refresh: reload every section of a workspace or group (FR21). */
+  async function refreshTreeRow(workspaceId) {
+    await loadTreeContents(workspaceId);
+    announce(`Refreshed ${workspaceLabel(workspaceId)}.`);
   }
 
   async function openFileFromPane(tab, reveal) {
