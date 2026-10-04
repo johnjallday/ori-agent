@@ -1907,10 +1907,8 @@ async function revealSetupWalkthrough(offer) {
   if (!projection?.run) return false;
   const panel = window.PersonalAssistantPanel;
   if (panel && typeof panel.open === 'function') {
-    panel.open(document.getElementById('personalAssistantLauncher'), {
-      view: 'today',
-      focusTab: false
-    });
+    // The setup card is what this opens the drawer for, so focus is left to it.
+    panel.open(document.getElementById('personalAssistantLauncher'), { focus: false });
   }
   const card = document.getElementById('assistantLedSetup');
   card?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });

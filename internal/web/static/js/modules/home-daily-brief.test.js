@@ -15,7 +15,8 @@ import {
   briefDateLabel,
   earlierBriefLabel,
   earlierBriefs,
-  needsFreshBrief
+  needsFreshBrief,
+  prepareTodaysBrief
 } from './home-daily-brief.js';
 
 test('needsFreshBrief is true with no brief or only an earlier day’s, in the brief’s own zone', () => {
@@ -73,18 +74,32 @@ test('earlierBriefs lists openable briefs from before today, newest first', () =
   assert.deepEqual(earlierBriefs(undefined, today), []);
 });
 
-test('Daily Brief has one stable Today mount and no Updates copy', () => {
-  const todayTemplate = readFileSync(
-    new URL('../../../templates/components/personal-assistant-today.tmpl', import.meta.url),
-    'utf8'
+test('the full Daily Brief is mounted nowhere on Home; the drawer keeps one row for it', () => {
+  const read = name =>
+    readFileSync(new URL(`../../../templates/components/${name}`, import.meta.url), 'utf8');
+  const todayTemplate = read('personal-assistant-today.tmpl');
+  const dashboardTemplate = read('dashboard.tmpl');
+  const drawerTemplate = read('ori-guide.tmpl');
+  for (const template of [todayTemplate, dashboardTemplate, drawerTemplate]) {
+    assert.doesNotMatch(template, /id="homeDailyBrief"|id="homeDailyBriefBody"/);
+    assert.doesNotMatch(template, /personalAssistantTodayBriefMount|moveDailyBrief/);
+  }
+  assert.equal((todayTemplate.match(/id="personalAssistantBriefRow"/g) || []).length, 1);
+  // The Brief settings dialog goes where the brief is: the workspace page
+  // includes it for My HQ, and Home, which has nothing to open it, does not.
+  assert.doesNotMatch(dashboardTemplate, /daily-brief-settings-modal\.tmpl/);
+  assert.match(
+    readFileSync(
+      new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url),
+      'utf8'
+    ),
+    /\{\{if \.Extra\.IsPersonalHQ\}\}[\s\S]{0,200}template "daily-brief-settings-modal\.tmpl"/
   );
-  const dashboardTemplate = readFileSync(
-    new URL('../../../templates/components/dashboard.tmpl', import.meta.url),
-    'utf8'
+  assert.equal(
+    (read('daily-brief-settings-modal.tmpl').match(/id="homeDailyBriefSettingsModal"/g) || [])
+      .length,
+    1
   );
-  assert.equal((todayTemplate.match(/id="homeDailyBrief"/g) || []).length, 1);
-  assert.equal((dashboardTemplate.match(/id="homeDailyBrief"/g) || []).length, 0);
-  assert.doesNotMatch(todayTemplate, /personalAssistantTodayBriefMount|moveDailyBrief/);
 });
 
 test('parseContent decodes a revision content_json, degrading to {} on garbage', () => {
@@ -503,4 +518,93 @@ test('renderContent says No meetings today only when a calendar was read', () =>
   assert.match(connected, /No meetings today\./);
   const none = renderContent({});
   assert.doesNotMatch(none, /Meetings|meetings today/);
+});
+
+// A fetch that answers the brief endpoints from a small script and records
+// what was asked. `current` is a list: each read takes the next entry, and the
+// last one repeats.
+function briefServer({ config = { timezone: 'UTC' }, current, status = { status: 'idle' } }) {
+  const calls = [];
+  const revisions = [...current];
+  return {
+    calls,
+    fetch: async (url, options = {}) => {
+      calls.push(`${options.method || 'GET'} ${url}`);
+      const body =
+        url === '/api/personal-hq/brief/config'
+          ? { config }
+          : url === '/api/personal-hq/brief/current'
+            ? { revision: revisions.length > 1 ? revisions.shift() : revisions[0] }
+            : url === '/api/personal-hq/brief/status'
+              ? status
+              : { status: 'pending' };
+      return { ok: true, status: 200, json: async () => body };
+    }
+  };
+}
+
+test('prepareTodaysBrief asks for nothing when today already has a brief', async () => {
+  const originalFetch = globalThis.fetch;
+  const today = localDateInZone('UTC');
+  const server = briefServer({ current: [{ id: 'rev-today', local_date: today }] });
+  globalThis.fetch = server.fetch;
+  try {
+    const states = [];
+    await prepareTodaysBrief({ onState: state => states.push(state) });
+    assert.equal(states.length, 1);
+    assert.equal(states[0].revision.id, 'rev-today');
+    assert.equal(states[0].settled, true);
+    assert.equal(states[0].config.timezone, 'UTC');
+    assert.ok(
+      !server.calls.some(call => call.startsWith('POST')),
+      'nothing was requested: ' + server.calls.join(', ')
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('prepareTodaysBrief asks the server for today’s brief when there is none, then reports it', async () => {
+  const originalFetch = globalThis.fetch;
+  const today = localDateInZone('UTC');
+  for (const before of [null, { id: 'rev-yesterday', local_date: '2000-01-01' }]) {
+    const server = briefServer({ current: [before, { id: 'rev-today', local_date: today }] });
+    globalThis.fetch = server.fetch;
+    try {
+      const states = [];
+      await prepareTodaysBrief({ onState: state => states.push(state) });
+      assert.equal(
+        server.calls.filter(call => call === 'POST /api/personal-hq/brief/open').length,
+        1
+      );
+      assert.equal(states.length, 2);
+      // First what there was (still on its way), then the prepared brief.
+      assert.deepEqual(states[0].revision, before);
+      assert.equal(states[0].settled, false);
+      assert.equal(states[1].revision.id, 'rev-today');
+      assert.equal(states[1].settled, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+});
+
+test('prepareTodaysBrief carries a failed attempt so the failure survives a reload', async () => {
+  const originalFetch = globalThis.fetch;
+  const today = localDateInZone('UTC');
+  const server = briefServer({
+    current: [{ id: 'rev-today', local_date: today }],
+    status: { status: 'failed' }
+  });
+  globalThis.fetch = server.fetch;
+  try {
+    const states = [];
+    await prepareTodaysBrief({ onState: state => states.push(state) });
+    assert.equal(states.length, 1);
+    assert.equal(states[0].claim.status, 'failed');
+    assert.equal(states[0].revision.id, 'rev-today', 'the last good brief is kept');
+    assert.ok(!server.calls.some(call => call.startsWith('POST')));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

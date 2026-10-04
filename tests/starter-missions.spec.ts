@@ -29,8 +29,15 @@ test.describe.configure({ mode: 'serial' });
 
 // Messages the app logs on any fresh sandbox, unrelated to this feature: the
 // update checker has no network, and some pages probe resources a fresh
-// install does not have. Anything else is a failure.
-const KNOWN_NOISE = [/Failed to load resource/, /Error checking for updates/];
+// install does not have. The last one is the workspace page's setup monitor:
+// a poll it had in flight is cut off when a test leaves My HQ for Home, and
+// whether one is in flight at that moment is a matter of timing. Anything else
+// is a failure.
+const KNOWN_NOISE = [
+  /Failed to load resource/,
+  /Error checking for updates/,
+  /Failed to monitor task execution: TypeError: Failed to fetch/
+];
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -144,9 +151,9 @@ test('Mission 02: Start opens the folder chooser in the assistant panel', async 
   const card = await openQuests(page);
   await card.locator('[data-role="first-mission-action"]').click();
 
-  // The assistant panel opens on Today with the chooser unfolded; the quest
-  // parameter is scrubbed so a reload does not open it again.
-  await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible({ timeout: 15000 });
+  // The assistant drawer opens with the chooser unfolded; the quest parameter
+  // is scrubbed so a reload does not open it again.
+  await expect(page.locator('#personalAssistantToday')).toBeVisible({ timeout: 15000 });
   const chooser = page.locator('#personalAssistantFolderChooser');
   await expect(chooser).toBeVisible({ timeout: 15000 });
   await expect(chooser.locator('#personalAssistantFolderTitle')).toContainText('Which folder');

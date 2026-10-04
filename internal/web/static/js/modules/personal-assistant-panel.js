@@ -54,19 +54,14 @@ export function restoredDraft(current, unsent) {
   return typed.trim() ? typed : String(unsent || '');
 }
 
-export function assistantPanelViewForOpen(requested, { hasToday = false } = {}) {
-  if (requested === 'ask') return 'ask';
-  return hasToday ? 'today' : 'ask';
-}
-
-export function assistantTabViewAfterKey(current, key) {
-  const views = ['today', 'ask'];
-  const index = Math.max(0, views.indexOf(current));
-  if (key === 'Home') return views[0];
-  if (key === 'End') return views[views.length - 1];
-  if (key === 'ArrowRight') return views[(index + 1) % views.length];
-  if (key === 'ArrowLeft') return views[(index - 1 + views.length) % views.length];
-  return current;
+/**
+ * Where keyboard focus goes when the drawer opens. The composer is the point of
+ * the drawer, so it gets focus whenever the assistant can accept work. When it
+ * cannot (not hired, HQ not built, repair needed) the composer is disabled, and
+ * focus goes to the first control in the drawer instead.
+ */
+export function assistantOpenFocusTarget(view) {
+  return view?.available === true ? 'composer' : 'first-control';
 }
 
 export function assistantPanelShouldCloseOnKey(key, open, topmostOverlayOpen = false) {
@@ -81,12 +76,67 @@ export function restoreAssistantPanelFocus(trigger, ownerDocument) {
   return true;
 }
 
+/** A link the drawer may render: a same-origin path with no tricks in it. */
+export function safeTodayRoute(value) {
+  const route = String(value || '');
+  if (!route.startsWith('/') || route.startsWith('//') || route.includes('://')) return false;
+  try {
+    const rawPath = route.split(/[?#]/, 1)[0];
+    const decodedPath = decodeURIComponent(rawPath);
+    if (
+      decodedPath.includes('\\') ||
+      [...decodedPath].some(character => {
+        const code = character.charCodeAt(0);
+        return code < 32 || code === 127;
+      }) ||
+      decodedPath.split('/').some(segment => segment === '.' || segment === '..')
+    ) {
+      return false;
+    }
+    const parsed = new URL(route, 'http://ori.local');
+    return parsed.origin === 'http://ori.local';
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * The line under the assistant's name: when the next check-in is. `time` is an
+ * ISO instant to render after `text`. Until Today is known, or when it cannot
+ * say (not hired, no HQ, repair, unavailable), the line is the plain role.
+ */
+export function assistantCheckInLine(today) {
+  const state = String(today?.state || '');
+  if (!['active', 'paused', 'partial', 'model_unavailable', 'healthy_empty'].includes(state)) {
+    return { text: 'Personal Assistant', time: '' };
+  }
+  if (state === 'paused') return { text: 'Check-ins paused', time: '' };
+  if (!today.next_check_in) return { text: 'No check-in scheduled', time: '' };
+  if (Number.isNaN(new Date(today.next_check_in).getTime())) {
+    return { text: 'Next check-in unavailable', time: '' };
+  }
+  return { text: 'Next check-in · ', time: String(today.next_check_in) };
+}
+
+/** Which of the More menu's links to show, from Today's validated routes. */
+export function assistantMoreLinks(today) {
+  const links = today?.links || {};
+  const route = key => (safeTodayRoute(links[key]) ? String(links[key]) : '');
+  return {
+    personal_hq: route('personal_hq'),
+    working_agreement: route('working_agreement'),
+    memory: route('memory'),
+    advanced: route('advanced'),
+    interview: ['available', 'offered', 'deferred'].includes(today?.interview_status)
+  };
+}
+
 const state = {
   view: personalAssistantPanelView(null),
   personalAssistant: null,
+  today: null,
   pending: false,
   open: false,
-  activeView: 'ask',
   draft: '',
   lastTrigger: null,
   els: null
@@ -125,6 +175,9 @@ function renderIdentity() {
   els.launcherAvatar.innerHTML = avatar;
   els.panelAvatar.innerHTML = avatar;
   els.panel.dataset.relationshipState = view.state;
+  // Home says these in the banner under the header. A page without that banner
+  // says them here, above the composer, so they are never said twice.
+  if (els.todayBanner) return;
   if (view.paused) {
     setStatus('Paused proactively. Direct questions still use the same confirmation gates.');
   } else if (view.needsHQ && els.status) {
@@ -136,6 +189,50 @@ function renderIdentity() {
   }
 }
 
+function setMenuLink(link, route) {
+  if (!link) return;
+  link.hidden = !route;
+  if (route) link.href = route;
+}
+
+/** The header's check-in line and More links, from the Today the drawer has. */
+function renderHeader() {
+  const els = state.els;
+  if (!els) return;
+  if (els.checkIn) {
+    const line = assistantCheckInLine(state.today);
+    els.checkIn.replaceChildren(line.text);
+    if (line.time) {
+      const date = new Date(line.time);
+      const time = document.createElement('time');
+      time.dateTime = line.time;
+      time.textContent = new Intl.DateTimeFormat(undefined, {
+        weekday: 'short',
+        hour: 'numeric',
+        minute: '2-digit'
+      }).format(date);
+      time.title = date.toLocaleString();
+      els.checkIn.append(time);
+    }
+  }
+  const links = assistantMoreLinks(state.today);
+  setMenuLink(els.links.personal_hq, links.personal_hq);
+  setMenuLink(els.links.working_agreement, links.working_agreement);
+  setMenuLink(els.links.memory, links.memory);
+  // Manage agents is always offered; Today may only move where it points.
+  if (els.links.advanced && links.advanced) els.links.advanced.href = links.advanced;
+  if (els.links.interview) els.links.interview.hidden = !links.interview;
+}
+
+/**
+ * Gives the drawer the Today it should describe in its header. Home passes the
+ * projection it already loaded; null means "not known yet".
+ */
+function setToday(today) {
+  state.today = today || null;
+  renderHeader();
+}
+
 function moveSharedWorkActivity() {
   const activity = document.getElementById('homeAssistantThinkingModal');
   if (!activity || !state.els?.activityMount || !state.view.available) return;
@@ -144,33 +241,6 @@ function moveSharedWorkActivity() {
   }
   activity.hidden = false;
   activity.dataset.homeAssistantPanelScope = 'personal-assistant';
-}
-
-function selectView(requested, { focusTab = false, focusComposer = false } = {}) {
-  if (!state.els) return 'ask';
-  const hasToday = Boolean(state.els.todayTab && state.els.todayPanel);
-  const view = assistantPanelViewForOpen(requested, { hasToday });
-  state.activeView = view;
-  state.els.panel.dataset.view = view;
-
-  const pairs = [
-    ['today', state.els.todayTab, state.els.todayPanel],
-    ['ask', state.els.askTab, state.els.askPanel]
-  ];
-  pairs.forEach(([name, tab, panel]) => {
-    if (!panel) return;
-    const selected = name === view;
-    panel.hidden = !selected;
-    if (tab) {
-      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
-      tab.tabIndex = selected ? 0 : -1;
-    }
-  });
-
-  const activeTab = view === 'today' ? state.els.todayTab : state.els.askTab;
-  if (focusComposer && view === 'ask') state.els.input?.focus();
-  else if (focusTab) activeTab?.focus();
-  return view;
 }
 
 function applyPersonalAssistant(personalAssistant) {
@@ -213,10 +283,15 @@ async function refresh() {
   }
 }
 
+function closeMoreMenu() {
+  if (state.els?.more?.open) state.els.more.open = false;
+}
+
 function close(options = {}) {
   if (!state.open || !state.els) return;
   state.open = false;
   state.draft = state.els.input.value;
+  closeMoreMenu();
   state.els.panel.hidden = true;
   state.els.launcher.setAttribute('aria-expanded', 'false');
   const trigger = state.lastTrigger;
@@ -224,6 +299,23 @@ function close(options = {}) {
   if (options?.restoreFocus !== false) restoreAssistantPanelFocus(trigger, document);
 }
 
+/** The first control in the drawer, in reading order, that can take focus. */
+function firstControl() {
+  const candidates = state.els.panel.querySelectorAll(
+    'a[href], button:not([disabled]), summary, input:not([disabled]), textarea:not([disabled]), select:not([disabled])'
+  );
+  return Array.from(candidates).find(el => el.getClientRects().length > 0) || null;
+}
+
+function focusOnOpen() {
+  if (assistantOpenFocusTarget(state.view) === 'composer') state.els.input.focus();
+  else firstControl()?.focus();
+}
+
+/**
+ * Opens the drawer. There is one view, so there is nothing to select; a caller
+ * that is about to put focus somewhere of its own passes `{ focus: false }`.
+ */
 function open(trigger, options = {}) {
   if (!state.view.visible || !state.els) return false;
   if (window.OriGuide?.close) window.OriGuide.close();
@@ -234,23 +326,21 @@ function open(trigger, options = {}) {
   state.els.panel.hidden = false;
   state.els.launcher.setAttribute('aria-expanded', 'true');
   state.els.input.value = state.draft;
-  const requested = options.view === 'ask' ? 'ask' : 'today';
-  const selected = selectView(requested, {
-    focusTab: options.focusTab !== false,
-    focusComposer: options.focusComposer === true
-  });
-  if (selected === 'ask' && !state.els.askTab && options.focusComposer !== false) {
-    state.els.input.focus();
-  }
+  if (options.focus !== false) focusOnOpen();
   // Rename/pause/repair changes are server-owned. Refresh on every open rather
   // than trusting the hire-time name or local storage.
   void refresh();
+  try {
+    document.dispatchEvent(new CustomEvent('personal-assistant:opened'));
+  } catch (_) {
+    // Listeners only tidy their own surface; none is required to open.
+  }
   return true;
 }
 
 function prefill(text) {
   if (!state.view.available) return false;
-  if (!open(state.els?.launcher, { view: 'ask', focusComposer: true })) return false;
+  if (!open(state.els?.launcher)) return false;
   const bounded = boundedAssistantHandoff(text);
   state.draft = bounded;
   state.els.input.value = bounded;
@@ -344,6 +434,11 @@ function submit(event) {
   operation.catch(() =>
     setStatus('The request could not be routed. Nothing ran without confirmation.')
   );
+  try {
+    document.dispatchEvent(new CustomEvent('personal-assistant:sent'));
+  } catch (_) {
+    // Listeners only tidy their own surface; none is required to send.
+  }
   return true;
 }
 
@@ -359,36 +454,38 @@ function init() {
     launcherAvatar: document.getElementById('personalAssistantLauncherAvatar'),
     panelAvatar: document.getElementById('personalAssistantPanelAvatar'),
     title: document.getElementById('personalAssistantPanelTitle'),
+    checkIn: document.getElementById('personalAssistantCheckIn'),
+    more: document.getElementById('personalAssistantMore'),
     close: document.getElementById('personalAssistantClose'),
     form: document.getElementById('personalAssistantForm'),
     input: document.getElementById('personalAssistantInput'),
     send: document.getElementById('personalAssistantSend'),
     status: document.getElementById('personalAssistantPanelStatus'),
     activityMount: document.getElementById('personalAssistantActivityMount'),
-    todayTab: document.getElementById('personalAssistantTodayTab'),
-    askTab: document.getElementById('personalAssistantAskTab'),
-    todayPanel: document.getElementById('personalAssistantTodayPanel'),
-    askPanel: document.getElementById('personalAssistantAskPanel')
+    // Present on Home only, where it carries the paused and Build HQ messages.
+    todayBanner: document.getElementById('personalAssistantTodayBanner'),
+    links: {
+      personal_hq: document.getElementById('personalAssistantTodayHQ'),
+      working_agreement: document.getElementById('personalAssistantTodayAgreement'),
+      memory: document.getElementById('personalAssistantTodayMemory'),
+      advanced: document.getElementById('personalAssistantTodayAdvanced'),
+      interview: document.getElementById('personalAssistantTodayInterview')
+    }
   };
-  launcher.addEventListener('click', () =>
-    state.open ? close() : open(launcher, { view: 'today', focusTab: true })
-  );
+  launcher.addEventListener('click', () => (state.open ? close() : open(launcher)));
   state.els.close?.addEventListener('click', close);
   state.els.form?.addEventListener('submit', submit);
-  state.els.todayTab?.addEventListener('click', () => selectView('today', { focusTab: true }));
-  state.els.askTab?.addEventListener('click', () => selectView('ask', { focusComposer: true }));
-  [state.els.todayTab, state.els.askTab].filter(Boolean).forEach(tab => {
-    tab.addEventListener('keydown', event => {
-      const next = assistantTabViewAfterKey(state.activeView, event.key);
-      if (
-        next === state.activeView ||
-        !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
-      ) {
-        return;
-      }
-      event.preventDefault();
-      selectView(next, { focusTab: true });
-    });
+
+  const more = state.els.more;
+  more?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !more.open) return;
+    event.preventDefault();
+    event.stopPropagation(); // Escape closes this menu, not the assistant drawer.
+    more.open = false;
+    more.querySelector('summary')?.focus();
+  });
+  document.addEventListener('click', event => {
+    if (more?.open && !more.contains(event.target)) more.open = false;
   });
   document.addEventListener('keydown', event => {
     // Bootstrap removes `.show` before this bubbling listener runs, so the
@@ -403,13 +500,15 @@ function init() {
   });
   window.addEventListener('resize', syncPanelViewport);
   syncPanelViewport();
-  // Only Home has Today. Wait for the server-owned identity before opening the
-  // drawer; a query string must not make an unhired assistant appear hired.
-  const requestedToday =
-    Boolean(state.els.todayPanel) &&
+  renderHeader();
+  // `/?panel=today` opens the drawer on Home. Wait for the server-owned
+  // identity first; a query string must not make an unhired assistant appear
+  // hired.
+  const requestedOpen =
+    Boolean(state.els.todayBanner) &&
     new URLSearchParams(window.location.search).get('panel') === 'today';
   void refresh().then(() => {
-    if (!requestedToday || !open(launcher, { view: 'today' })) return;
+    if (!requestedOpen || !open(launcher)) return;
     const url = new URL(window.location.href);
     url.searchParams.delete('panel');
     window.history.replaceState(null, '', url.pathname + url.search + url.hash);
@@ -424,7 +523,7 @@ const api = {
   restoreDraft,
   refresh,
   applyPersonalAssistant,
-  selectView,
+  setToday,
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantPanel = api;

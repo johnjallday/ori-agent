@@ -45,12 +45,12 @@ export function scrubbedQuestURL(href) {
   }
 }
 
-// startShowFolderQuest opens the panel on Today and then the chooser. Returns
-// true once the panel opened; false when it could not yet (no status, no
+// startShowFolderQuest opens the assistant drawer and then the chooser. Returns
+// true once the drawer opened; false when it could not yet (no status, no
 // assistant), so the caller can try again on the next status.
 export function startShowFolderQuest({ panel, folder, launcher } = {}) {
   if (!panel || typeof panel.open !== 'function') return false;
-  if (!panel.open(launcher || null, { view: 'today' })) return false;
+  if (!panel.open(launcher || null)) return false;
   if (folder && typeof folder.open === 'function') folder.open();
   return true;
 }

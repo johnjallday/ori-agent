@@ -2,6 +2,18 @@ import {
   MEET_ASSISTANT_AGENTS_ROUTE,
   MEET_ASSISTANT_QUEST_ROUTE
 } from './personal-assistant-hire.js';
+import { safeTodayRoute } from './personal-assistant-panel.js';
+import { prepareTodaysBrief } from './home-daily-brief.js';
+import {
+  dailyBriefRowStatus,
+  dailyBriefStationLink,
+  dailyBriefStatus
+} from './daily-brief-station.js';
+import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+
+// The drawer's shared link check lives with the drawer; it is re-exported here
+// for the callers and tests that have always read it from Home.
+export { safeTodayRoute };
 
 const TODAY_ENDPOINT = '/api/personal-assistant/today';
 
@@ -73,7 +85,8 @@ export function todaySectionItems(section) {
       detail: String(item?.detail || '').replace(/\b[a-z]+(?:_[a-z]+)+\b/g, todayLabel),
       attribution: String(item?.attribution || '').trim(),
       route: safeTodayRoute(item?.route) ? String(item.route) : '',
-      kind: String(item?.kind || '')
+      kind: String(item?.kind || ''),
+      sourceAt: String(item?.source_at || '')
     };
     // An unfinished build is acted on in place, so it keeps its id and the
     // controls the server named; every other row is a link and keeps neither.
@@ -115,7 +128,14 @@ async function discardWorkspaceBuild(id, button) {
   void loadToday();
 }
 
-export function todayThreeSectionView(today) {
+// Whether an item's own timestamp falls on the viewer's current day.
+function happenedToday(sourceAt, now) {
+  const at = new Date(sourceAt || '');
+  if (Number.isNaN(at.getTime()) || at.getFullYear() < 2000) return false;
+  return at.toDateString() === now.toDateString();
+}
+
+export function todayThreeSectionView(today, now = new Date()) {
   const working = todaySectionItems(today?.working_on);
   const needs = todaySectionItems(today?.needs_you);
   const done = todaySectionItems(today?.done);
@@ -132,7 +152,11 @@ export function todayThreeSectionView(today) {
     done,
     sources,
     footer: sources.length ? `Couldn't read: ${sources.join(', ')}.` : '',
-    allClear: !needs.length && !sources.length
+    // What the progress row counts. The HQ's own status line sits in Working
+    // on but is not work in progress, and Done keeps a week of results, of
+    // which only today's are "done today".
+    inProgress: working.filter(row => row.kind !== 'hq_status').length,
+    doneToday: done.filter(row => happenedToday(row.sourceAt, now)).length
   };
 }
 
@@ -355,27 +379,16 @@ export function meetingsSectionView(meetings) {
   };
 }
 
-export function safeTodayRoute(value) {
-  const route = String(value || '');
-  if (!route.startsWith('/') || route.startsWith('//') || route.includes('://')) return false;
-  try {
-    const rawPath = route.split(/[?#]/, 1)[0];
-    const decodedPath = decodeURIComponent(rawPath);
-    if (
-      decodedPath.includes('\\') ||
-      [...decodedPath].some(character => {
-        const code = character.charCodeAt(0);
-        return code < 32 || code === 127;
-      }) ||
-      decodedPath.split('/').some(segment => segment === '.' || segment === '..')
-    ) {
-      return false;
-    }
-    const parsed = new URL(route, 'http://ori.local');
-    return parsed.origin === 'http://ori.local';
-  } catch (_) {
-    return false;
-  }
+// progressRowText is the one line that summarises work in the drawer.
+export function progressRowText(working, done) {
+  const count = value => Math.max(0, Number(value) || 0);
+  return `${count(working)} in progress · ${count(done)} done today`;
+}
+
+// progressRowVisible: the row has nothing to summarise, and nothing to expand,
+// when no work is in progress, none was done today and there are no meetings.
+export function progressRowVisible({ working, done, meetings }) {
+  return Number(working) > 0 || Number(done) > 0 || meetings === true;
 }
 
 export function personalAssistantLauncherCue(personalAssistant, today) {
@@ -410,7 +423,11 @@ const state = {
   relationship: null,
   root: null,
   sequence: 0,
-  emptyEligible: false
+  // The Daily Brief as Home last read it, for the drawer's brief row. hq is
+  // null until Home has looked, then false (no Personal HQ) or { slug }.
+  brief: { hq: null, revision: null, config: null, generation: '' },
+  // Whether the progress row's lists (Working on, Done) are expanded.
+  progressOpen: false
 };
 
 function elements() {
@@ -420,50 +437,40 @@ function elements() {
     root,
     launcherStatus: document.getElementById('personalAssistantLauncherStatus'),
     title: document.getElementById('personalAssistantTodayTitle'),
-    meta: document.getElementById('personalAssistantTodayMeta'),
     banner: document.getElementById('personalAssistantTodayBanner'),
     sections: document.getElementById('personalAssistantTodaySections'),
     workingSection: document.getElementById('personalAssistantWorkingOn'),
     workingContent: document.getElementById('personalAssistantWorkingOnContent'),
     workingItems: document.getElementById('personalAssistantWorkingOnItems'),
     needsSection: document.getElementById('personalAssistantNeedsYou'),
+    needsCount: document.getElementById('personalAssistantNeedsYouCount'),
     needsCards: document.getElementById('personalAssistantNeedsYouCards'),
     needsQueue: document.getElementById('personalAssistantNeedsYouQueue'),
     needsQueueTitle: document.getElementById('personalAssistantNeedsYouQueueTitle'),
     needsQueueCards: document.getElementById('personalAssistantNeedsYouQueueCards'),
     needsItems: document.getElementById('personalAssistantNeedsYouItems'),
-    allClear: document.getElementById('personalAssistantTodayAllClear'),
+    glance: document.getElementById('personalAssistantGlance'),
+    briefRow: document.getElementById('personalAssistantBriefRow'),
+    briefRowStatus: document.getElementById('personalAssistantBriefRowStatus'),
+    progressRow: document.getElementById('personalAssistantProgressRow'),
+    progressText: document.getElementById('personalAssistantProgressText'),
+    progressAction: document.getElementById('personalAssistantProgressAction'),
+    progressLists: document.getElementById('personalAssistantProgressLists'),
     doneSection: document.getElementById('personalAssistantDone'),
     doneItems: document.getElementById('personalAssistantDoneItems'),
     footer: document.getElementById('personalAssistantTodayFooter'),
     unavailable: document.getElementById('personalAssistantTodayUnavailable'),
     retry: document.getElementById('personalAssistantTodayRetry'),
-    decisions: document.getElementById('personalAssistantTodayDecisions'),
-    remembered: document.getElementById('personalAssistantTodayRemembered'),
-    interview: document.getElementById('personalAssistantTodayInterview'),
-    priorities: document.getElementById('personalAssistantTodayPriorities'),
-    followUps: document.getElementById('personalAssistantTodayFollowUps'),
-    results: document.getElementById('personalAssistantTodayResults'),
     setup: document.getElementById('personalAssistantSpecialistSetup'),
     setupTitle: document.getElementById('personalAssistantSpecialistSetupTitle'),
     setupStatus: document.getElementById('personalAssistantSpecialistSetupStatus'),
     setupSamples: document.getElementById('personalAssistantSpecialistSetupSamples'),
     setupRuns: document.getElementById('personalAssistantSpecialistSetupRuns'),
     setupActions: document.getElementById('personalAssistantSpecialistSetupActions'),
-    studioSection: document.getElementById('personalAssistantTodayStudioSection'),
-    studioTitle: document.getElementById('personalAssistantTodayStudioTitle'),
-    studio: document.getElementById('personalAssistantTodayStudio'),
-    studioNote: document.getElementById('personalAssistantTodayStudioNote'),
     meetingsSection: document.getElementById('personalAssistantTodayMeetingsSection'),
     meetingsTitle: document.getElementById('personalAssistantTodayMeetingsTitle'),
     meetings: document.getElementById('personalAssistantTodayMeetings'),
-    meetingsNote: document.getElementById('personalAssistantTodayMeetingsNote'),
-    links: {
-      personal_hq: document.getElementById('personalAssistantTodayHQ'),
-      working_agreement: document.getElementById('personalAssistantTodayAgreement'),
-      memory: document.getElementById('personalAssistantTodayMemory'),
-      advanced: document.getElementById('personalAssistantTodayAdvanced')
-    }
+    meetingsNote: document.getElementById('personalAssistantTodayMeetingsNote')
   };
 }
 
@@ -665,13 +672,6 @@ function renderMeetings(els, meetings) {
   els.meetingsNote.hidden = !els.meetingsNote.childNodes.length;
 }
 
-function setLink(link, route) {
-  if (!link) return;
-  const safe = safeTodayRoute(route);
-  link.hidden = !safe;
-  if (safe) link.href = String(route);
-}
-
 function renderLauncherCue(els, today = state.today) {
   if (!els?.launcherStatus) return;
   const cue = personalAssistantLauncherCue(state.relationship, today);
@@ -691,17 +691,95 @@ function syncNeedsQueue(els = elements()) {
   return count;
 }
 
-function syncAllClear(els = elements()) {
-  if (!els?.allClear) return;
-  // A folder offer can arrive after the Today read. Do not say "Nothing needs
-  // you" over an open chooser, an offer, or an HQ confirmation.
-  const visibleCard = [
-    document.getElementById('personalAssistantFolderScene'),
-    document.getElementById('personalAssistantFolderOffer'),
-    document.getElementById('personalAssistantHQCard')
-  ].some(card => card && !card.hidden);
-  const hidden = !state.emptyEligible || visibleCard || syncNeedsQueue(els) > 0;
-  if (els.allClear.hidden !== hidden) els.allClear.hidden = hidden;
+// Needs you is shown only when something is in it, and its heading carries the
+// number: the cards placed in it (an unfinished build, the HQ confirmation, a
+// folder offer) plus everything in "Also needs you". Cards arrive and leave
+// after the Today read, so this is counted from what is actually there.
+function syncNeedsYou(els = elements()) {
+  if (!els?.needsSection) return 0;
+  const queued = syncNeedsQueue(els);
+  const cards = Array.from(els.needsCards?.children || []).reduce((count, card) => {
+    if (card.hidden) return count;
+    // The unfinished-build list is one element holding one row per build.
+    if (card.id === 'personalAssistantNeedsYouBuild') return count + card.childElementCount;
+    // A card that wraps several parts needs the user only while one shows.
+    const parts = card.querySelectorAll(':scope > [data-needs-part]');
+    if (parts.length && Array.from(parts).every(part => part.hidden)) return count;
+    return count + 1;
+  }, 0);
+  const count = cards + queued;
+  const hidden = count === 0;
+  if (els.needsSection.hidden !== hidden) els.needsSection.hidden = hidden;
+  if (els.needsCount && els.needsCount.textContent !== String(count)) {
+    els.needsCount.textContent = String(count);
+  }
+  syncGlance(els);
+  return count;
+}
+
+// The brief row and the progress row share one bordered group; it goes when
+// both rows do.
+function syncGlance(els = elements()) {
+  if (!els?.glance) return;
+  const hidden = Boolean(els.briefRow?.hidden) && Boolean(els.progressRow?.hidden);
+  if (els.glance.hidden !== hidden) els.glance.hidden = hidden;
+}
+
+// The one row that stands in for the Daily Brief: where it is, and what state
+// it is in. It links to the Daily Brief station in My HQ, where the brief is
+// read. Hidden until Home knows there is a Personal HQ, and when there is none.
+function renderBriefRow(els = elements()) {
+  if (!els?.briefRow) return;
+  const { hq, revision, config, generation } = state.brief;
+  const link = hq ? dailyBriefStationLink(hq.slug) : '';
+  const today = personalAssistantTodayView(state.today);
+  // The row belongs to the assistant's Today, so it follows the sections.
+  const shown = Boolean(link) && (today.active || today.paused || today.partial);
+  els.briefRow.hidden = !shown;
+  if (shown) {
+    els.briefRow.href = link;
+    const status = dailyBriefStatus({
+      revision,
+      config,
+      generation,
+      paused: today.paused || state.relationship?.state === 'paused'
+    });
+    if (els.briefRowStatus) els.briefRowStatus.textContent = ` · ${dailyBriefRowStatus(status)}`;
+  }
+  syncGlance(els);
+}
+
+// The row that summarises work. Activating it expands Working on (with today's
+// meetings) and Done in place; activating it again collapses them.
+function renderProgressRow(els, sections) {
+  if (!els?.progressRow) return;
+  const meetings = Boolean(els.meetingsSection) && !els.meetingsSection.hidden;
+  const shown = progressRowVisible({
+    working: sections.inProgress,
+    done: sections.doneToday,
+    meetings
+  });
+  els.progressRow.hidden = !shown;
+  if (!shown) state.progressOpen = false;
+  if (els.progressText) {
+    els.progressText.textContent = progressRowText(sections.inProgress, sections.doneToday);
+  }
+  syncProgressLists(els);
+  syncGlance(els);
+}
+
+function syncProgressLists(els = elements()) {
+  if (!els?.progressRow) return;
+  const open = state.progressOpen && !els.progressRow.hidden;
+  els.progressRow.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (els.progressAction) els.progressAction.textContent = open ? 'Hide' : 'Show';
+  if (els.progressLists) els.progressLists.hidden = !open;
+}
+
+// The drawer's header says when the next check-in is and holds the More
+// links; both come from the Today that Home already has.
+function shareTodayWithDrawer(today) {
+  window.PersonalAssistantPanel?.setToday?.(today || null);
 }
 
 function renderToday(today) {
@@ -712,26 +790,7 @@ function renderToday(today) {
   els.root.hidden = false;
   els.root.dataset.state = view.state;
   els.title.textContent = `Today from ${view.displayName}`;
-  if (view.paused) {
-    els.meta.textContent = 'Check-ins paused';
-  } else if (today?.next_check_in) {
-    const date = new Date(today.next_check_in);
-    if (Number.isNaN(date.getTime())) {
-      els.meta.textContent = 'Next check-in unavailable';
-    } else {
-      const time = document.createElement('time');
-      time.dateTime = today.next_check_in;
-      time.textContent = new Intl.DateTimeFormat(undefined, {
-        weekday: 'short',
-        hour: 'numeric',
-        minute: '2-digit'
-      }).format(date);
-      time.title = date.toLocaleString();
-      els.meta.replaceChildren('Next check-in · ', time);
-    }
-  } else {
-    els.meta.textContent = 'No check-in scheduled';
-  }
+  shareTodayWithDrawer(today);
 
   if (view.repair) {
     els.banner.textContent =
@@ -764,8 +823,6 @@ function renderToday(today) {
   }
 
   const sections = todayThreeSectionView(today);
-  if (els.interview)
-    els.interview.hidden = !['available', 'offered', 'deferred'].includes(today?.interview_status);
   renderMeetings(els, today?.meetings);
   // The unavailable source appears once in the footer, not as an empty
   // calendar or results placeholder.
@@ -784,28 +841,16 @@ function renderToday(today) {
     true
   );
   renderCompactRows(els.doneItems, sections.done);
-  const queueCount = syncNeedsQueue(els);
   if (els.workingSection)
-    els.workingSection.hidden = !(
-      sections.working.length ||
-      !document.getElementById('homeDailyBrief')?.hidden ||
-      !els.meetingsSection?.hidden
-    );
-  if (els.needsSection)
-    els.needsSection.hidden = !(
-      sections.needs.length ||
-      !document.getElementById('personalAssistantFolder')?.hidden ||
-      !document.getElementById('personalAssistantHQCard')?.hidden ||
-      queueCount > 0
-    );
+    els.workingSection.hidden = !(sections.working.length || !els.meetingsSection?.hidden);
   if (els.doneSection) els.doneSection.hidden = !sections.done.length;
-  state.emptyEligible = sections.allClear && view.active;
-  syncAllClear(els);
   if (els.footer) els.footer.hidden = !sections.footer;
   if (els.unavailable) els.unavailable.textContent = sections.footer;
   if (els.sections)
     els.sections.hidden = !(view.active || view.paused || view.partial || view.needsHQ);
-  Object.entries(els.links).forEach(([key, link]) => setLink(link, today?.links?.[key]));
+  renderProgressRow(els, sections);
+  renderBriefRow(els);
+  syncNeedsYou(els);
   els.banner.hidden = !els.banner.textContent.trim();
   renderLauncherCue(els, today);
 }
@@ -815,6 +860,7 @@ function renderRelationship(personalAssistant, view) {
   if (!els) return;
   state.relationship = personalAssistant || null;
   state.today = null;
+  shareTodayWithDrawer(null);
   if (els.setup) els.setup.hidden = true;
   renderLauncherCue(els, null);
   if (!view?.known) {
@@ -828,11 +874,13 @@ function renderRelationship(personalAssistant, view) {
   // unlike needsHire, where nothing has been chosen yet.
   const named = view.available || view.needsHQ;
   els.title.textContent = named ? `Today from ${view.name}` : 'Your personal assistant';
-  els.meta.textContent = view.available ? 'Loading the latest Today records…' : '';
   els.sections.hidden = !view.available && !view.needsHQ;
-  if (els.needsSection && view.needsHQ) els.needsSection.hidden = false;
-  if (els.workingSection && view.needsHQ) els.workingSection.hidden = true;
-  if (els.doneSection && view.needsHQ) els.doneSection.hidden = true;
+  // Until Today is read there is no work to summarise and no brief to point at.
+  if (els.progressRow) els.progressRow.hidden = true;
+  state.progressOpen = false;
+  syncProgressLists(els);
+  renderBriefRow(els);
+  syncNeedsYou(els);
   if (view.repair) {
     const repairStep = String(personalAssistant?.repair_step || '').trim();
     const recoverable = repairStep === 'relationship_recovery';
@@ -895,43 +943,65 @@ async function loadToday() {
     els.root.hidden = false;
     els.root.dataset.state = 'unavailable';
     els.title.textContent = `Today from ${state.relationship?.display_name || 'your assistant'}`;
+    // Nothing is known, so nothing is listed: an empty drawer here would read
+    // as "all clear", and this message is what stands in its place.
     els.banner.textContent =
       'Today is temporarily unavailable. The Workspace Map and the rest of Home remain available; no all-clear is being shown.';
+    els.banner.hidden = false;
     els.sections.hidden = true;
+    shareTodayWithDrawer(null);
     renderLauncherCue(els, { state: 'unavailable' });
   }
+}
+
+// Home keeps today's Daily Brief prepared. The brief is displayed in My HQ, but
+// the assistant's lists are built from its items, so they must not wait for the
+// user to go there. This needs no brief markup: it reads whether there is a
+// Personal HQ, asks the server for today's brief when there is none, and keeps
+// the drawer's brief row in step.
+async function keepTodaysBriefPrepared() {
+  const brief = state.brief;
+  try {
+    if (!onboardingGateDecision(await loadOnboardingStatus()).allowWorkspaceHydration) return;
+    const response = await fetch('/api/personal-hq/status', {
+      headers: { Accept: 'application/json' }
+    });
+    const status = response.ok ? (await response.json())?.status : null;
+    const slug = String(status?.workspace?.folder_slug || '').trim();
+    brief.hq = status?.valid && slug ? { slug } : false;
+  } catch (_) {
+    brief.hq = false;
+  }
+  renderBriefRow();
+  if (!brief.hq) return;
+  await prepareTodaysBrief({
+    onState: ({ revision, config, claim }) => {
+      brief.revision = revision;
+      brief.config = config;
+      brief.generation = String((claim && claim.status) || '');
+      renderBriefRow();
+    },
+    onProgress: status => {
+      brief.generation = status;
+      renderBriefRow();
+    }
+  });
 }
 
 function init() {
   state.root = document.getElementById('personalAssistantToday');
   if (!state.root) return;
-  // Place existing card controllers inside the new three-section hierarchy
-  // without remounting or duplicating any of their event handlers.
-  const working = document.getElementById('personalAssistantWorkingOnContent');
+  // Place existing card controllers inside Needs you without remounting or
+  // duplicating any of their event handlers.
   const needs = document.getElementById('personalAssistantNeedsYouCards');
-  if (working) {
-    const brief = document.getElementById('homeDailyBrief');
-    if (brief) working.append(brief);
-  }
   if (needs && typeof MutationObserver !== 'undefined') {
-    new MutationObserver(() => {
-      const els = elements();
-      const queueCount = syncNeedsQueue(els);
-      if (state.today && els?.needsSection) {
-        const visible =
-          todayThreeSectionView(state.today).needs.length ||
-          !document.getElementById('personalAssistantFolder')?.hidden ||
-          !document.getElementById('personalAssistantHQCard')?.hidden ||
-          queueCount > 0;
-        if (els.needsSection.hidden === !!visible) els.needsSection.hidden = !visible;
-      }
-      syncAllClear(els);
-    }).observe(document.getElementById('personalAssistantNeedsYou'), {
-      subtree: true,
-      attributes: true,
-      childList: true,
-      attributeFilter: ['hidden']
-    });
+    // Cards show and hide themselves after the Today read (the HQ
+    // confirmation, a folder offer, a setup card), so the section and its
+    // count follow what is actually in it.
+    new MutationObserver(() => syncNeedsYou()).observe(
+      document.getElementById('personalAssistantNeedsYou'),
+      { subtree: true, attributes: true, childList: true, attributeFilter: ['hidden'] }
+    );
   }
   ['personalAssistantHQCard', 'personalAssistantFolder'].forEach(id => {
     const node = document.getElementById(id);
@@ -948,16 +1018,9 @@ function init() {
   // A saved or deferred interview changes `interview_status`, which decides
   // whether the "Optional interview" link shows.
   document.addEventListener('personal-assistant-knowledge-changed', () => void loadToday());
-  const more = document.getElementById('personalAssistantTodayMore');
-  more?.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || !more.open) return;
-    event.preventDefault();
-    event.stopPropagation(); // Escape closes this menu, not the assistant drawer.
-    more.open = false;
-    more.querySelector('summary')?.focus();
-  });
-  document.addEventListener('click', event => {
-    if (more?.open && !more.contains(event.target)) more.open = false;
+  document.getElementById('personalAssistantProgressRow')?.addEventListener('click', () => {
+    state.progressOpen = !state.progressOpen;
+    syncProgressLists();
   });
   document
     .getElementById('personalAssistantTodayRetry')
@@ -970,6 +1033,7 @@ function init() {
     renderRelationship(panelState.personalAssistant, panelState.view);
   }
   window.PersonalAssistantToday = { refresh: loadToday };
+  void keepTodaysBriefPrepared();
 }
 
 if (typeof document !== 'undefined') {

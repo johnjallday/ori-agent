@@ -238,7 +238,7 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     await expect(page.locator('#personalHQInterviewStatus')).toContainText('Deferred');
     await page.goto('/');
     await page.locator('#personalAssistantLauncher').click();
-    await page.locator('#personalAssistantTodayMore > summary').click();
+    await page.locator('#personalAssistantMore > summary').click();
     const interviewLink = page.locator('#personalAssistantTodayInterview');
     await expect(interviewLink).toBeVisible();
     const homeUrl = page.url();
@@ -298,7 +298,7 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     );
     await rememberedSection.scrollIntoViewIfNeeded();
     await rememberedSection.screenshot({ path: 'test-results/532-today-remembered-recap.png' });
-    await page.locator('#personalAssistantTodayMore > summary').click();
+    await page.locator('#personalAssistantMore > summary').click();
     await page.getByRole('link', { name: 'Review remembered facts' }).click();
     await expect(page).toHaveURL(/\/profile#personalHQKnowledge$/);
     const priority = page

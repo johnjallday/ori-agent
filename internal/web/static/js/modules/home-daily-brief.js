@@ -1,14 +1,15 @@
-// home-daily-brief.js — the Home Daily Brief region (PRD FR53/FR97, task
-// 7.2-7.4/7.9). Primary Home orientation surface once a valid Personal HQ is
-// designated; entirely hidden (no fetch loop, no hidden brief store) when it
-// is not (FR69). Purely additive: no-op on pages without #homeDailyBrief.
+// home-daily-brief.js — the Daily Brief: how one is rendered, how today's is
+// kept prepared, and the controller for the surface that displays it.
 //
-// Pure rendering/decision helpers are exported (loaded as type="module",
-// mirroring personal-hq-onboarding.js) so home-daily-brief.test.js can
-// exercise them under plain Node with no DOM/network — `document`/`window`
-// are genuinely undefined there, so the DOM-wiring IIFE below simply no-ops.
-
-import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+// The name is historical. The brief used to be displayed on Home, in the
+// assistant drawer; it is now displayed by the Daily Brief station in My HQ
+// (workspace-command.js mounts the controller there). Home still asks for
+// today's brief when it loads (personal-assistant-home.js), because the
+// drawer's lists are built from the brief's items.
+//
+// Nothing here runs on import. Pure rendering/decision helpers are exported so
+// home-daily-brief.test.js can exercise them under plain Node with no DOM or
+// network.
 
 // parseContent safely decodes a Revision's ContentJSON. Returns {} (never
 // throws) on missing/invalid JSON so a corrupt revision degrades to an
@@ -459,6 +460,103 @@ export function earlierBriefs(history, today) {
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
+// ---- keeping today's brief prepared (no DOM) ----
+//
+// Home asks for today's brief when it loads, because the assistant drawer's
+// lists are built from the brief's items; the Daily Brief panel in My HQ asks
+// when it opens. Neither needs any brief markup to do that, so the request
+// lives here, apart from the surface that displays a brief.
+
+async function briefJSON(url) {
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+  return res.json();
+}
+
+function briefSleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// settleBriefGeneration waits until no brief is being generated, then reads
+// the current one. onProgress(status) is called on each wait. Resolves to
+// { revision, claim }, or null when the current brief could not be read, in
+// which case the caller keeps what it had.
+//
+// requested is true right after the caller asked for a generation: the server
+// accepts that request before its claim exists, so the first status read can
+// still describe the previous attempt. The claim gets a moment to appear.
+export async function settleBriefGeneration({ requested = false, onProgress } = {}) {
+  if (requested) await briefSleep(400);
+  const deadline = Date.now() + 90000;
+  let claim = null;
+  while (Date.now() < deadline) {
+    try {
+      claim = await briefJSON('/api/personal-hq/brief/status');
+    } catch (_) {
+      break;
+    }
+    const status = claim && claim.status;
+    if (status !== 'pending' && status !== 'running') break;
+    if (typeof onProgress === 'function') onProgress(status);
+    await briefSleep(1500);
+  }
+  try {
+    const current = await briefJSON('/api/personal-hq/brief/current');
+    return { revision: current.revision || null, claim };
+  } catch (_) {
+    return null;
+  }
+}
+
+// prepareTodaysBrief reads the Personal HQ's brief and, when there is none for
+// today, asks the server to prepare it and waits for the outcome. A brief that
+// is already being prepared is waited for rather than requested twice.
+//
+//   onState({ revision, config, claim, settled }) — what is known now: once
+//     when the brief is first read, and again when a generation finishes.
+//     claim is the latest generation attempt (so a failure survives a reload);
+//     settled is false while a brief is still on its way.
+//   onProgress(status) — on each wait while a generation is running.
+//
+// The caller must already know a valid Personal HQ exists.
+export async function prepareTodaysBrief({ onState, onProgress } = {}) {
+  const report = state => {
+    if (typeof onState === 'function') onState(state);
+  };
+  let config = null;
+  try {
+    config = (await briefJSON('/api/personal-hq/brief/config')).config;
+  } catch (_) {
+    // generation can still succeed with the server's defaults
+  }
+  let revision = null;
+  try {
+    revision = (await briefJSON('/api/personal-hq/brief/current')).revision || null;
+  } catch (_) {
+    // treated the same as "no brief yet"
+  }
+  let claim = null;
+  try {
+    claim = await briefJSON('/api/personal-hq/brief/status');
+  } catch (_) {
+    // without it the caller simply has the brief
+  }
+  const active = Boolean(claim) && ['pending', 'running'].includes(claim.status);
+  const fresh = needsFreshBrief(revision, config);
+  report({ revision, config, claim, settled: !fresh && !active });
+  if (!active && !fresh) return;
+
+  if (!active) {
+    try {
+      await fetch('/api/personal-hq/brief/open', { method: 'POST' });
+    } catch (_) {
+      // the wait below simply finds nothing running
+    }
+  }
+  const outcome = await settleBriefGeneration({ requested: !active, onProgress });
+  if (outcome) report({ revision: outcome.revision, config, claim: outcome.claim, settled: true });
+}
+
 // mountDailyBrief wires one Daily Brief surface into the elements it is given:
 // it loads the current brief, asks the server for today's when there is none,
 // lists earlier briefs, and owns Refresh and Brief settings. The host supplies
@@ -466,29 +564,27 @@ export function earlierBriefs(history, today) {
 // in.
 //
 //   els     — { root, title, meta, body, banner, refreshBtn, settingsBtn,
-//               openHQLink, history, historyWrap }; only root is required.
-//               history is where the earlier briefs are listed; historyWrap
-//               is hidden while there are none.
-//   options — hq: { workspaceId } when the host already knows the page is the
-//               designated Personal HQ (skips the designation read);
-//             gate(): resolves false to leave the surface untouched;
+//               history, historyWrap }; only root is required. history is
+//               where the earlier briefs are listed; historyWrap is hidden
+//               while there are none.
+//   options — hq: { workspaceId }: the designated Personal HQ this surface
+//               belongs to (required: the host is that HQ's own page);
 //             metaText(revision, config, { earlier }): the line under the
 //               heading; earlier is true for a brief from a previous day;
 //             onSeen(revision, hqWorkspaceId): once per brief that is shown
 //               while the surface is on screen;
 //             onChange({ revision, config, generation }): whenever today's
-//               brief or its generation state changes;
-//             onUnavailable(): no valid Personal HQ.
+//               brief or its generation state changes.
 //
-// Returns { load, refresh, setOnScreen }, or null without a DOM.
+// Returns { load, refresh, setOnScreen }, or null without a DOM or an HQ.
 export function mountDailyBrief(els, options = {}) {
-  if (typeof document === 'undefined' || !els || !els.root) return null;
+  const hqWorkspaceId = String((options.hq && options.hq.workspaceId) || '').trim();
+  if (typeof document === 'undefined' || !els || !els.root || !hqWorkspaceId) return null;
   const { title: titleEl, meta: metaEl, body: bodyEl, banner: bannerEl } = els;
-  const { openHQLink, refreshBtn, settingsBtn } = els;
+  const { refreshBtn, settingsBtn } = els;
   const { history: historyEl, historyWrap } = els;
 
   let currentConfig = null;
-  let hqWorkspaceId = (options.hq && options.hq.workspaceId) || null;
   let polling = false;
   // Today's brief as last read, kept apart from what is on screen: an earlier
   // brief can be on screen (pinned) while today's is still being generated.
@@ -513,18 +609,7 @@ export function mountDailyBrief(els, options = {}) {
     markBriefSeen();
   }
 
-  async function fetchJSON(url, options) {
-    const res = await fetch(
-      url,
-      Object.assign({ headers: { Accept: 'application/json' } }, options || {})
-    );
-    if (!res.ok) throw new Error(`${url} -> ${res.status}`);
-    return res.json();
-  }
-
-  function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
+  const fetchJSON = briefJSON;
 
   function renderBanner(banner) {
     if (!bannerEl) return;
@@ -697,38 +782,20 @@ export function mountDailyBrief(els, options = {}) {
     paintContent(revision, currentConfig);
   }
 
-  // requested is true right after this surface asked for a generation: the
-  // server accepts that request before its claim exists, so the first status
-  // read can still describe the previous attempt. Give the claim a moment.
+  // The station's status follows a generation while it runs.
+  function noteProgress(status) {
+    if (typeof options.onChange === 'function') {
+      options.onChange({ revision: today.revision, config: currentConfig, generation: status });
+    }
+  }
+
   async function pollUntilSettled(requested = false) {
     if (polling) return;
     polling = true;
     try {
-      if (requested) await sleep(400);
-      const deadline = Date.now() + 90000;
-      let statusResp = null;
-      while (Date.now() < deadline) {
-        try {
-          statusResp = await fetchJSON('/api/personal-hq/brief/status');
-        } catch (_) {
-          break;
-        }
-        const st = statusResp && statusResp.status;
-        if (st !== 'pending' && st !== 'running') break;
-        if (typeof options.onChange === 'function') {
-          options.onChange({ revision: today.revision, config: currentConfig, generation: st });
-        }
-        await sleep(1500);
-      }
-      let revision = null;
-      try {
-        const cur = await fetchJSON('/api/personal-hq/brief/current');
-        revision = cur.revision;
-      } catch (_) {
-        // keep whatever was already rendered
-        return;
-      }
-      render(revision, currentConfig, statusResp, true);
+      const outcome = await settleBriefGeneration({ requested, onProgress: noteProgress });
+      if (!outcome) return; // keep whatever was already rendered
+      render(outcome.revision, currentConfig, outcome.claim, true);
       // A new day's brief turns yesterday's into an earlier one.
       void loadHistory();
     } finally {
@@ -870,73 +937,28 @@ export function mountDailyBrief(els, options = {}) {
   }
 
   async function loadOnce() {
-    if (typeof options.gate === 'function' && !(await options.gate())) return;
-
-    if (!hqWorkspaceId) {
-      let status;
-      try {
-        const statusResp = await fetchJSON('/api/personal-hq/status');
-        status = statusResp.status;
-      } catch (_) {
-        status = null;
-      }
-      if (!status || !status.valid) {
-        if (typeof options.onUnavailable === 'function') options.onUnavailable();
-        return;
-      }
-      hqWorkspaceId = status.workspace_id;
-      const hqWorkspaceSlug = String(status.workspace?.folder_slug || '').trim();
-      if (openHQLink)
-        openHQLink.href = hqWorkspaceSlug
-          ? `/workspaces/${encodeURIComponent(hqWorkspaceSlug)}`
-          : '#';
-    }
     els.root.hidden = false;
     // Every load starts on today's brief, whatever was on screen before.
     pinned = null;
     if (refreshBtn) refreshBtn.hidden = false;
-
-    let config = null;
-    try {
-      const cfgResp = await fetchJSON('/api/personal-hq/brief/config');
-      config = cfgResp.config;
-    } catch (_) {
-      // proceed without config metadata; generation can still succeed with
-      // server-side defaults
+    if (polling) {
+      // A refresh from this surface is still running; show what there is.
+      renderHistory();
+      paintToday();
+      return;
     }
-
-    let revision = null;
+    polling = true;
     try {
-      const cur = await fetchJSON('/api/personal-hq/brief/current');
-      revision = cur.revision;
-    } catch (_) {
-      // treated the same as "no revision yet" below
-    }
-
-    // What the latest attempt came to: a brief that failed stays visible as a
-    // failure after a reload, and one already being prepared is waited for
-    // rather than requested twice.
-    let generation = null;
-    try {
-      generation = await fetchJSON('/api/personal-hq/brief/status');
-    } catch (_) {
-      // without it the surface simply shows the brief it has
-    }
-    const active = Boolean(generation) && ['pending', 'running'].includes(generation.status);
-    const fresh = needsFreshBrief(revision, config);
-    render(revision, config, generation, !fresh && !active);
-    void loadHistory();
-
-    if (active) {
-      await pollUntilSettled();
-    } else if (fresh) {
-      try {
-        await fetch('/api/personal-hq/brief/open', { method: 'POST' });
-      } catch (_) {
-        // pollUntilSettled will simply observe idle/no-op and keep showing
-        // whatever was already rendered above
-      }
-      await pollUntilSettled(true);
+      await prepareTodaysBrief({
+        onState: ({ revision, config, claim, settled }) => {
+          render(revision, config, claim, settled);
+          // A new day's brief turns yesterday's into an earlier one.
+          void loadHistory();
+        },
+        onProgress: noteProgress
+      });
+    } finally {
+      polling = false;
     }
   }
 
@@ -945,35 +967,3 @@ export function mountDailyBrief(els, options = {}) {
   wireSettingsForm();
   return { load, refresh: runRefresh, setOnScreen };
 }
-
-// ---- Home (no-op without #homeDailyBrief; genuinely no-op under plain Node,
-// where window/document don't exist at all) ----
-(function () {
-  if (typeof document === 'undefined') return;
-  const section = document.getElementById('homeDailyBrief');
-  if (!section) return;
-
-  // The drawer never reports a brief as seen. The Daily Brief panel in My HQ
-  // is where a brief is read: it clears the map's result cards and completes
-  // the first-brief mission (workspace-command.js).
-  const brief = mountDailyBrief(
-    {
-      root: section,
-      title: document.getElementById('homeDailyBriefTitle'),
-      meta: document.getElementById('homeDailyBriefMeta'),
-      body: document.getElementById('homeDailyBriefBody'),
-      banner: document.getElementById('homeDailyBriefBanner'),
-      openHQLink: document.getElementById('homeDailyBriefOpenHQ'),
-      refreshBtn: document.getElementById('homeDailyBriefRefreshBtn'),
-      settingsBtn: document.getElementById('homeDailyBriefSettingsBtn')
-    },
-    {
-      gate: async () =>
-        onboardingGateDecision(await loadOnboardingStatus()).allowWorkspaceHydration,
-      onUnavailable: () => {
-        section.hidden = true;
-      }
-    }
-  );
-  void brief.load();
-})();

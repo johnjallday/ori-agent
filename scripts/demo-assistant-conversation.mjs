@@ -64,8 +64,6 @@ async function openAsk() {
   const launcher = page.locator('#personalAssistantLauncher');
   await launcher.waitFor({ state: 'visible', timeout: 20000 });
   if (await page.locator('#personalAssistantPanel').isHidden()) await launcher.click();
-  const askTab = page.locator('#personalAssistantAskTab');
-  if (await askTab.count()) await askTab.click();
   await page
     .locator('#personalAssistantConversationBar')
     .waitFor({ state: 'visible', timeout: 20000 });

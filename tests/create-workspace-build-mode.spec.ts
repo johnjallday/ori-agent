@@ -518,7 +518,6 @@ test('the assistant’s create confirmation opens the build with the request as 
   await page.request.post('/api/onboarding/skip').catch(() => {});
   await page.goto('/');
   await page.locator('#personalAssistantLauncher').click();
-  await page.locator('#personalAssistantAskTab').click();
   await page.locator('#personalAssistantInput').fill(ask);
   await page.locator('#personalAssistantSend').click();
   await page.getByRole('button', { name: 'Confirm', exact: true }).click();

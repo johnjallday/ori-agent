@@ -1,58 +1,20 @@
 {{define "personal-assistant-today.tmpl"}}
-<!-- Home owns this Today projection, but the shared Personal Assistant drawer
-     owns its presentation. It is rendered only on Home by ori-guide.tmpl so
-     every controller ID has one stable mount and non-Home pages remain Ask-only. -->
+<!-- Home owns this Today projection, and the Personal Assistant drawer shows it
+     at the top of its one view: a status banner, what needs you, a row that
+     links to the Daily Brief, and a row that summarises work. It is rendered
+     only on Home by ori-guide.tmpl, so every controller id has one stable
+     mount.
+
+     The Daily Brief itself is not here. It is read in the Daily Brief station
+     in My HQ; the drawer keeps one row that links to it. -->
 <section id="personalAssistantToday" class="personal-assistant-today" data-state="loading"
          aria-labelledby="personalAssistantTodayTitle" hidden>
-  <header class="personal-assistant-today__header">
-    <div class="personal-assistant-today__heading">
-      <h3 id="personalAssistantTodayTitle" class="personal-assistant-today__title">Today</h3>
-      <p id="personalAssistantTodayMeta" class="personal-assistant-today__meta"></p>
-    </div>
-    <details id="personalAssistantTodayMore" class="personal-assistant-today__more">
-      <summary aria-label="More assistant options">More <span aria-hidden="true">⋯</span></summary>
-      <nav class="personal-assistant-today__links" aria-label="Personal assistant details">
-        <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
-        <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
-        <a id="personalAssistantTodayMemory" href="/" hidden>Workspace memory</a>
-        <a href="/profile#personalHQKnowledge">Review remembered facts</a>
-        <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" hidden>Optional interview</a>
-        <a id="personalAssistantTodayAdvanced" href="/agents">Manage agents</a>
-      </nav>
-    </details>
-  </header>
+  <!-- Names the region for assistive technology. The drawer's own header
+       already shows the assistant's name, so this is not repeated visually. -->
+  <h3 id="personalAssistantTodayTitle" class="visually-hidden">Today</h3>
   <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
 
   {{template "assistant-led-setup.tmpl" .}}
-
-  <!-- The Daily Brief has one final, drawer-owned mount. Its existing module
-       still owns loading, generation, refresh, history, and degraded states. -->
-  <section id="homeDailyBrief" class="home-daily-brief" data-state="loading"
-           aria-labelledby="homeDailyBriefTitle" hidden>
-    <header class="home-daily-brief-header">
-      <div class="home-daily-brief-heading">
-        <span class="home-daily-brief-eyebrow">Daily Brief</span>
-        <h4 id="homeDailyBriefTitle" class="home-daily-brief-title">Today</h4>
-        <p id="homeDailyBriefMeta" class="home-daily-brief-meta"></p>
-      </div>
-      <div class="home-daily-brief-actions">
-        <button type="button" id="homeDailyBriefRefreshBtn" class="modern-btn modern-btn-primary modern-btn-sm">Refresh</button>
-        <details class="home-daily-brief-menu" id="homeDailyBriefMenu">
-          <summary class="home-daily-brief-menu-toggle" aria-label="More Daily Brief actions" title="More actions">
-            <span aria-hidden="true">&#8943;</span>
-          </summary>
-          <div class="home-daily-brief-menu-panel">
-            <a id="homeDailyBriefOpenHQ" href="/" class="home-daily-brief-menu-item">Open My HQ</a>
-            <button type="button" id="homeDailyBriefSettingsBtn" class="home-daily-brief-menu-item">Brief settings</button>
-          </div>
-        </details>
-      </div>
-    </header>
-    <div id="homeDailyBriefBanner" class="home-daily-brief-banner" role="status" aria-live="polite" hidden></div>
-    <div id="homeDailyBriefBody" class="home-daily-brief-body" aria-live="polite">
-      <div class="home-daily-brief-placeholder">Loading your Daily Brief…</div>
-    </div>
-  </section>
 
   <!-- The hired assistant proposes HQ before any folder work is available. -->
   <section id="personalAssistantHQCard" class="pa-specialist-offer pa-hq-card"
@@ -88,7 +50,7 @@
        assistant, never before the hire or while HQ is being built. -->
   <section id="personalAssistantFolder" class="pa-folder pa-folder__experience" data-state="idle"
            aria-labelledby="personalAssistantFolderTitle" hidden>
-    <div id="personalAssistantFolderScene" class="pa-folder__scene" data-phase="choosing" hidden>
+    <div id="personalAssistantFolderScene" class="pa-folder__scene" data-phase="choosing" data-needs-part hidden>
       <div class="pa-folder__scene-copy">
         <p class="pa-folder__scene-kicker">A little field trip</p>
         <p id="personalAssistantFolderSceneLabel" class="pa-folder__scene-label" role="status" aria-live="polite"></p>
@@ -105,14 +67,14 @@
         <span class="pa-folder__scene-spark"></span>
       </div>
     </div>
-    <div id="personalAssistantFolderChooser" class="pa-folder__chooser" hidden>
+    <div id="personalAssistantFolderChooser" class="pa-folder__chooser" data-needs-part hidden>
       <p id="personalAssistantFolderTitle" class="pa-folder__prompt">Which folder should I explore?</p>
       <div id="personalAssistantFolderChips" class="pa-folder__chips" role="group" aria-label="Folders"></div>
       <p id="personalAssistantFolderNote" class="pa-folder__note" hidden></p>
       <p id="personalAssistantFolderStatus" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
     </div>
     <section id="personalAssistantFolderOffer" class="pa-specialist-offer pa-folder__offer"
-             aria-labelledby="personalAssistantFolderOfferHeadline" hidden>
+             aria-labelledby="personalAssistantFolderOfferHeadline" data-needs-part hidden>
       <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
       <p id="personalAssistantFolderOfferQuestion" class="pa-specialist-offer__question"></p>
       <p id="personalAssistantFolderOfferCapability" class="pa-folder__note" hidden></p>
@@ -142,9 +104,14 @@
   </section>
 
   <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
-    <section id="personalAssistantNeedsYou" aria-labelledby="personalAssistantNeedsYouTitle" hidden>
-      <h4 id="personalAssistantNeedsYouTitle">Needs you</h4>
-      <p id="personalAssistantTodayAllClear" hidden>Nothing needs you right now.</p>
+    <!-- What needs the user's decision comes first, and only when there is
+         something: an empty section would read as an all-clear. -->
+    <section id="personalAssistantNeedsYou" class="personal-assistant-today__needs"
+             aria-labelledby="personalAssistantNeedsYouTitle" hidden>
+      <div class="personal-assistant-today__needs-head">
+        <h4 id="personalAssistantNeedsYouTitle">Needs you</h4>
+        <span id="personalAssistantNeedsYouCount" class="personal-assistant-today__count">0</span>
+      </div>
       <div id="personalAssistantNeedsYouCards"></div>
       <details id="personalAssistantNeedsYouQueue" class="personal-assistant-today__queue" hidden>
         <summary id="personalAssistantNeedsYouQueueTitle">Also needs you</summary>
@@ -152,21 +119,48 @@
         <ul id="personalAssistantNeedsYouItems"></ul>
       </details>
     </section>
-    <section id="personalAssistantWorkingOn" aria-labelledby="personalAssistantWorkingOnTitle" hidden>
-      <h4 id="personalAssistantWorkingOnTitle">Working on</h4>
-      <div id="personalAssistantWorkingOnContent"></div>
-      <section id="personalAssistantTodayMeetingsSection" class="personal-assistant-today__meetings"
-               aria-labelledby="personalAssistantTodayMeetingsTitle" hidden>
-        <h5 id="personalAssistantTodayMeetingsTitle">Meetings</h5>
-        <ul id="personalAssistantTodayMeetings"></ul>
-        <p id="personalAssistantTodayMeetingsNote" class="personal-assistant-today__meta"></p>
+
+    <!-- Two rows: where the brief is, and how much work is under way. -->
+    <div id="personalAssistantGlance" class="personal-assistant-glance" role="group"
+         aria-label="Today at a glance" hidden>
+      <a id="personalAssistantBriefRow" class="personal-assistant-glance__row" href="#" hidden>
+        <i class="bi bi-file-earmark-text personal-assistant-glance__icon" aria-hidden="true"></i>
+        <span class="personal-assistant-glance__text">
+          <span class="personal-assistant-glance__label">Today's brief</span>
+          <span id="personalAssistantBriefRowStatus" class="personal-assistant-glance__detail"></span>
+        </span>
+        <span class="personal-assistant-glance__action">Open in My HQ</span>
+        <i class="bi bi-chevron-right personal-assistant-glance__chevron" aria-hidden="true"></i>
+      </a>
+      <button type="button" id="personalAssistantProgressRow" class="personal-assistant-glance__row"
+              aria-expanded="false" aria-controls="personalAssistantProgressLists" hidden>
+        <i class="bi bi-clock personal-assistant-glance__icon" aria-hidden="true"></i>
+        <span class="personal-assistant-glance__text">
+          <span id="personalAssistantProgressText" class="personal-assistant-glance__label"></span>
+        </span>
+        <span id="personalAssistantProgressAction" class="personal-assistant-glance__action">Show</span>
+        <i class="bi bi-chevron-down personal-assistant-glance__chevron" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <!-- What the progress row expands, in place. -->
+    <div id="personalAssistantProgressLists" class="personal-assistant-today__progress" hidden>
+      <section id="personalAssistantWorkingOn" aria-labelledby="personalAssistantWorkingOnTitle" hidden>
+        <h4 id="personalAssistantWorkingOnTitle">Working on</h4>
+        <div id="personalAssistantWorkingOnContent"></div>
+        <section id="personalAssistantTodayMeetingsSection" class="personal-assistant-today__meetings"
+                 aria-labelledby="personalAssistantTodayMeetingsTitle" hidden>
+          <h5 id="personalAssistantTodayMeetingsTitle">Meetings</h5>
+          <ul id="personalAssistantTodayMeetings"></ul>
+          <p id="personalAssistantTodayMeetingsNote" class="personal-assistant-today__meta"></p>
+        </section>
+        <ul id="personalAssistantWorkingOnItems"></ul>
       </section>
-      <ul id="personalAssistantWorkingOnItems"></ul>
-    </section>
-    <section id="personalAssistantDone" aria-labelledby="personalAssistantDoneTitle" hidden>
-      <h4 id="personalAssistantDoneTitle">Done</h4>
-      <ul id="personalAssistantDoneItems"></ul>
-    </section>
+      <section id="personalAssistantDone" aria-labelledby="personalAssistantDoneTitle" hidden>
+        <h4 id="personalAssistantDoneTitle">Done</h4>
+        <ul id="personalAssistantDoneItems"></ul>
+      </section>
+    </div>
   </div>
   <footer id="personalAssistantTodayFooter" class="personal-assistant-today__meta" hidden>
     <span id="personalAssistantTodayUnavailable"></span>

@@ -103,7 +103,13 @@
   <!-- The personal assistant gets one separate primary work composer. The
        existing work activity node above is moved into this host after the
        authoritative relationship read, so routing, planning, and confirmation
-       logic are reused rather than copied. -->
+       logic are reused rather than copied.
+
+       The drawer is ONE view, on every page: header, then a region that
+       scrolls (what needs you, then the conversation), then the composer, which
+       is always visible at the bottom. There are no tabs. Home adds the Today
+       projection at the top of the scrolling region; every other page shows the
+       conversation alone. -->
   <button type="button" class="personal-assistant-launcher" id="personalAssistantLauncher"
           aria-expanded="false" aria-controls="personalAssistantPanel" hidden>
     <span id="personalAssistantLauncherAvatar" class="personal-assistant-launcher__avatar" aria-hidden="true"></span>
@@ -117,38 +123,36 @@
            aria-labelledby="personalAssistantPanelTitle" hidden>
     <header class="personal-assistant-panel__header">
       <span id="personalAssistantPanelAvatar" class="personal-assistant-panel__avatar" aria-hidden="true"></span>
-      <div>
+      <div class="personal-assistant-panel__ident">
         <h2 id="personalAssistantPanelTitle" class="personal-assistant-panel__title">Personal assistant</h2>
-        <p class="personal-assistant-panel__role">Personal Assistant</p>
+        <!-- When the next check-in is. "Personal Assistant" until that is known. -->
+        <p id="personalAssistantCheckIn" class="personal-assistant-panel__checkin">Personal Assistant</p>
       </div>
-      <button type="button" id="personalAssistantClose" class="personal-assistant-panel__close"
-              aria-label="Close personal assistant">&times;</button>
+      <details id="personalAssistantMore" class="personal-assistant-panel__more">
+        <summary class="personal-assistant-panel__icon" aria-label="More assistant options">
+          <i class="bi bi-three-dots" aria-hidden="true"></i>
+        </summary>
+        <nav class="personal-assistant-panel__links" aria-label="Personal assistant details">
+          <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
+          <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
+          <a id="personalAssistantTodayMemory" href="/" hidden>Workspace memory</a>
+          <a href="/profile#personalHQKnowledge">Review remembered facts</a>
+          <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" hidden>Optional interview</a>
+          <a id="personalAssistantTodayAdvanced" href="/agents">Manage agents</a>
+        </nav>
+      </details>
+      <button type="button" id="personalAssistantClose" class="personal-assistant-panel__icon"
+              aria-label="Close personal assistant">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
     </header>
 
-    {{if eq .CurrentPage "index"}}
-    <div id="personalAssistantTabs" class="personal-assistant-panel__tabs" role="tablist"
-         aria-label="Personal assistant views">
-      <button type="button" id="personalAssistantTodayTab" class="personal-assistant-panel__tab"
-              role="tab" aria-selected="true" aria-controls="personalAssistantTodayPanel">Today</button>
-      <button type="button" id="personalAssistantAskTab" class="personal-assistant-panel__tab"
-              role="tab" aria-selected="false" aria-controls="personalAssistantAskPanel" tabindex="-1">Ask</button>
-    </div>
-    <div id="personalAssistantTodayPanel" class="personal-assistant-panel__view personal-assistant-panel__view--today"
-         role="tabpanel" aria-labelledby="personalAssistantTodayTab">
+    <!-- Everything above the composer scrolls here when it does not fit. -->
+    <div id="personalAssistantScroll" class="personal-assistant-panel__scroll">
+      {{if eq .CurrentPage "index"}}
       {{template "personal-assistant-today.tmpl" .}}
-    </div>
-    {{end}}
+      {{end}}
 
-    <div id="personalAssistantAskPanel" class="personal-assistant-panel__view personal-assistant-panel__view--ask"
-         {{if eq .CurrentPage "index"}}role="tabpanel" aria-labelledby="personalAssistantAskTab" hidden{{end}}>
-      <form id="personalAssistantForm" class="personal-assistant-panel__form">
-        <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
-        <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="3"
-                  maxlength="2000" autocomplete="off"
-                  placeholder="Ask a question or describe what you want help with"></textarea>
-        <button type="submit" id="personalAssistantSend" class="personal-assistant-panel__send">Send</button>
-      </form>
-      <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
       <!-- The conversation this tab is in. A conversation is a session in
            Personal HQ; this bar only starts a new one or continues an earlier
            one. Its note keeps history and long-term memory apart. -->
@@ -182,8 +186,8 @@
         </div>
       </div>
       <!-- Save to HQ backlog: the review of one reply before it is saved. It is
-           its own form, so Enter here can never send the composer above. Opening
-           it writes nothing; only Save to backlog does. -->
+           its own form, so Enter here can never send the composer. Opening it
+           writes nothing; only Save to backlog does. -->
       <form id="personalAssistantDraftReview" class="personal-assistant-review"
             aria-labelledby="personalAssistantDraftReviewHeading" hidden novalidate>
         <h3 id="personalAssistantDraftReviewHeading" class="personal-assistant-review__heading">Save to HQ backlog</h3>
@@ -253,8 +257,20 @@
       {{if ne .CurrentPage "index"}}
       {{template "assistant-led-setup.tmpl" .}}
       {{end}}
+      <!-- The conversation: routing, planning, confirmations and replies land
+           here once a request is sent. Nothing is shown while it is idle. -->
       <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
     </div>
+
+    <!-- The composer is the last thing in the drawer and never scrolls away. -->
+    <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
+    <form id="personalAssistantForm" class="personal-assistant-panel__form">
+      <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
+      <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="2"
+                maxlength="2000" autocomplete="off"
+                placeholder="Ask a question or describe what you want help with"></textarea>
+      <button type="submit" id="personalAssistantSend" class="personal-assistant-panel__send">Send</button>
+    </form>
   </section>
 </div>
 {{end}}

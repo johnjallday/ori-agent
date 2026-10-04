@@ -9,6 +9,11 @@
 //   brief-home  the station as the brief's home: the mission card's link, the
 //             mission completing when the panel shows a brief, earlier briefs,
 //             and the Action Center link
+//   drawer    the assistant drawer on Home as one view: at rest, the More
+//             menu, the progress row, Needs you (sample data), paused, narrow,
+//             /?panel=today, and the brief row opening the station
+//   drawer-setup  the drawer before the assistant can accept work: before
+//             hiring, then hired with no HQ. Needs a FRESH sandbox.
 //
 // Seed the server first: ./scripts/smoke.sh showfolder <base-url> hq
 // theme is "light" (default) or "dark".
@@ -439,27 +444,246 @@ async function briefHome() {
   check(true, 'the Action Center link opened the Daily Brief panel');
 }
 
-// The assistant drawer on Home, as it opens from the launcher.
-async function drawer() {
-  await personalHQ();
-  await page.goto(`${base}/`);
+const PANEL = '#personalAssistantPanel';
+
+// The idle filler the redesign removes: text whose only message is that
+// nothing has happened yet (PRD requirement 22).
+const IDLE_FILLER = [
+  'is ready',
+  'Ready for your next task',
+  'Conversation History',
+  'Progress updates will appear here'
+];
+
+async function openDrawer(path = '/') {
+  await page.goto(`${base}${path}`);
   const launcher = page.locator('#personalAssistantLauncher');
   await launcher.waitFor({ state: 'visible', timeout: 20000 });
   await applyTheme();
-  await launcher.click();
-  await page.locator('#personalAssistantPanel').waitFor({ state: 'visible' });
+  if (await page.locator(PANEL).isHidden()) await launcher.click();
+  await page.locator(PANEL).waitFor({ state: 'visible' });
   await page.waitForTimeout(1500); // Today and the brief load after the drawer opens
-  await shot('01-home-open');
-  console.log(
-    'focused on open:',
-    await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName)
+}
+
+const focusedId = () =>
+  page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
+
+async function assistantState() {
+  return (await (await page.request.get(`${base}/api/personal-assistant`)).json())
+    .personal_assistant;
+}
+
+// The assistant drawer on Home: one view, composer always at the bottom.
+async function drawer() {
+  const { slug } = await personalHQ();
+
+  // At rest.
+  await openDrawer();
+  check(
+    (await focusedId()) === 'personalAssistantInput',
+    'the composer has focus when the drawer opens'
   );
+  check((await page.locator(`${PANEL} [role="tab"]`).count()) === 0, 'there are no tabs');
+  const visibleText = await page.locator(PANEL).innerText();
+  for (const filler of IDLE_FILLER) {
+    check(!visibleText.includes(filler), `an idle drawer does not say "${filler}"`);
+  }
+  check(
+    (await page.locator(`${PANEL} #homeDailyBrief, ${PANEL} .home-daily-brief-section`).count()) ===
+      0,
+    'the full Daily Brief is not rendered in the drawer'
+  );
+  console.log('header line:', await page.locator('#personalAssistantCheckIn').innerText());
+  console.log(
+    'brief row:',
+    (await page.locator('#personalAssistantBriefRow').innerText()).replace(/\s+/g, ' ')
+  );
+  console.log(
+    'progress row:',
+    (await page.locator('#personalAssistantProgressRow').innerText()).replace(/\s+/g, ' ')
+  );
+  await shot('01-at-rest');
+
+  // The More menu holds the links Today's own More used to.
+  await page.locator('#personalAssistantMore > summary').click();
+  console.log(
+    'More:',
+    JSON.stringify(await page.locator('#personalAssistantMore a:not([hidden])').allTextContents())
+  );
+  await shot('02-more-menu');
+  await page.keyboard.press('Escape');
+  check(await page.locator(PANEL).isVisible(), 'Escape closes the More menu, not the drawer');
+
+  // The progress row expands Working on and Done in place, and collapses.
+  const progress = page.locator('#personalAssistantProgressRow');
+  if (await progress.isVisible()) {
+    await progress.click();
+    check((await progress.getAttribute('aria-expanded')) === 'true', 'the progress row expands');
+    await page.locator('#personalAssistantProgressLists').scrollIntoViewIfNeeded();
+    await shot('03-progress-expanded');
+    await progress.click();
+    check(await page.locator('#personalAssistantProgressLists').isHidden(), 'and collapses again');
+  } else {
+    console.log('progress row hidden: nothing in progress, nothing done today, no meetings');
+  }
+
+  // Sample data for the layout only: several things needing you, work under
+  // way, and a meeting. The page, the drawer and its scripts are the real ones.
+  const real = await (await page.request.get(`${base}/api/personal-assistant/today`)).json();
+  const sample = structuredClone(real);
+  sample.today.needs_you = {
+    health: { status: 'available' },
+    items: [
+      {
+        id: 'demo-build',
+        kind: 'workspace_build',
+        title: 'Finish building Song Sketches',
+        detail: 'Workspace build paused at step 2 of 4',
+        actions: ['resume', 'discard']
+      },
+      {
+        id: 'demo-email',
+        kind: 'follow_up',
+        title: '3 emails are waiting for a reply',
+        detail: 'Email Ops',
+        route: `/workspaces/${slug}`
+      },
+      {
+        id: 'demo-choice',
+        kind: 'task',
+        title: 'Pick a release date',
+        detail: 'waiting_for_choice',
+        route: `/workspaces/${slug}`
+      }
+    ]
+  };
+  sample.today.working_on.items = [
+    ...(sample.today.working_on.items || []),
+    {
+      id: 'demo-w1',
+      kind: 'folder_workspace',
+      title: 'Sorting the Samples folder',
+      detail: 'Music Production Library',
+      route: `/workspaces/${slug}`
+    },
+    {
+      id: 'demo-w2',
+      kind: 'janitor_work',
+      title: 'Drafting a reply to the studio booking',
+      detail: 'Email Ops',
+      route: `/workspaces/${slug}`
+    }
+  ];
+  await page.route('**/api/personal-assistant/today', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(sample) })
+  );
+  await openDrawer();
+  console.log(
+    'needs you count (sample data):',
+    await page.locator('#personalAssistantNeedsYouCount').innerText()
+  );
+  await shot('04-needs-you-sample');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(400);
+  await shot('05-narrow-sample');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.unroute('**/api/personal-assistant/today');
+
+  // Paused: the banner says so, and so does the header line.
+  const before = await assistantState();
+  await page.request.post(`${base}/api/personal-assistant/pause`, {
+    data: { if_version: before.state_version }
+  });
+  await openDrawer();
+  console.log('paused header line:', await page.locator('#personalAssistantCheckIn').innerText());
+  console.log('paused banner:', await page.locator('#personalAssistantTodayBanner').innerText());
+  check(
+    (await focusedId()) === 'personalAssistantInput',
+    'a paused assistant still takes the composer focus'
+  );
+  await shot('06-paused');
+  await page.request.post(`${base}/api/personal-assistant/resume`, {
+    data: { if_version: (await assistantState()).state_version }
+  });
+
+  // /?panel=today still opens the drawer, and the parameter leaves the address.
+  await page.goto(`${base}/?panel=today`);
+  await page.locator(PANEL).waitFor({ state: 'visible', timeout: 20000 });
+  await page.waitForFunction(() => !window.location.search.includes('panel='));
+  check(true, '/?panel=today opens the drawer');
+
+  // The brief row opens the Daily Brief station.
+  await page.waitForFunction(() => !document.getElementById('personalAssistantBriefRow')?.hidden);
+  await page.locator('#personalAssistantBriefRow').click();
+  await page
+    .locator('.ws-cmd-modal-panel.is-daily-brief')
+    .waitFor({ state: 'visible', timeout: 20000 });
+  check(true, `the brief row opened the Daily Brief panel at ${new URL(page.url()).pathname}`);
+}
+
+// The drawer before the assistant can accept work: not hired, then hired with
+// no HQ. Run it against a FRESH sandbox.
+async function drawerSetup() {
+  await page.request.post(`${base}/api/onboarding/skip`);
+  await page.request.post(`${base}/api/settings/workspace-root`, { data: { workspace_root: '' } });
+  let assistant = await assistantState();
+  if (assistant.state === 'needs_hire') {
+    await page.goto(`${base}/?panel=today`);
+    await page.waitForTimeout(2000);
+    await applyTheme();
+    check(
+      await page.locator('#personalAssistantLauncher').isHidden(),
+      'before hiring there is no assistant launcher'
+    );
+    check(
+      await page.locator(PANEL).isHidden(),
+      'and /?panel=today cannot open a drawer for an unhired assistant'
+    );
+    await shot('01-before-hiring');
+    await page.request.post(`${base}/api/personal-assistant/hire`, {
+      data: {
+        request_id: 'drawer-setup-hire',
+        if_version: assistant.state_version ?? 0,
+        display_name: 'Atlas',
+        mandate: 'Keep my projects moving.',
+        focus_areas: ['plan_my_day']
+      }
+    });
+    assistant = await assistantState();
+  }
+  check(
+    assistant.state === 'needs_hq',
+    `this sandbox has a hired assistant and no HQ (${assistant.state})`
+  );
+  await openDrawer();
+  await page.locator('#personalAssistantHQCard').waitFor({ state: 'visible', timeout: 15000 });
+  console.log('focused on open:', await focusedId());
+  check(
+    await page.locator('#personalAssistantInput').isDisabled(),
+    'the composer is disabled until HQ exists'
+  );
+  check(
+    (await page.evaluate(
+      () => document.activeElement?.closest('#personalAssistantPanel') !== null
+    )) && (await focusedId()) !== 'personalAssistantInput',
+    'focus goes to the first control in the drawer instead'
+  );
+  console.log(
+    'needs you count:',
+    await page.locator('#personalAssistantNeedsYouCount').innerText()
+  );
+  check(
+    await page.locator('#personalAssistantBriefRow').isHidden(),
+    'with no HQ there is no brief row'
+  );
+  await shot('02-hired-no-hq');
 }
 
 try {
   if (stage === 'station') await station();
   else if (stage === 'brief-home') await briefHome();
   else if (stage === 'drawer') await drawer();
+  else if (stage === 'drawer-setup') await drawerSetup();
   else throw new Error(`unknown stage: ${stage}`);
 } finally {
   if (problems.length) {

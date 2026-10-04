@@ -8,6 +8,7 @@ import {
   dailyBriefStatus,
   isDailyBriefStationLink,
   nextBriefDue,
+  dailyBriefRowStatus,
   scheduleClock,
   stationFromSearch
 } from './daily-brief-station.js';
@@ -239,4 +240,48 @@ test('an earlier brief says only when it was generated, never when the next is d
     briefPanelMeta({ revision: earlier, config: config(), earlier: true, paused: true, now: NOW }),
     /^Generated Oct 5 at 8:02\sAM\.$/
   );
+});
+
+// What the assistant drawer's "Today's brief" row says after its label.
+test('the brief row says ready since when, being prepared, or that it could not be generated', () => {
+  const row = input =>
+    dailyBriefRowStatus(dailyBriefStatus({ config: config(), now: NOW, ...input }));
+  assert.match(row({ generation: 'succeeded', revision: revision() }), /^ready since 8:02\sAM$/);
+  assert.equal(row({ generation: 'running', revision: revision() }), 'being prepared');
+  assert.equal(row({ generation: 'pending', revision: null }), 'being prepared');
+  assert.equal(row({ generation: 'failed', revision: revision() }), 'couldn’t be generated');
+  assert.equal(row({ generation: 'failed', revision: null }), 'couldn’t be generated');
+});
+
+test('with no brief yet the row says when the first one is due', () => {
+  assert.match(
+    dailyBriefRowStatus(
+      dailyBriefStatus({ generation: 'idle', revision: null, config: config(), now: NOW })
+    ),
+    /^first one due tomorrow at 8:00\sAM$/
+  );
+  // A schedule that names no future time still says there is no brief.
+  assert.equal(dailyBriefRowStatus({ kind: 'due', due: '' }), 'no brief yet');
+  assert.equal(dailyBriefRowStatus(null), 'no brief yet');
+});
+
+test('the brief row names the other states too: an earlier brief, paused, unscheduled', () => {
+  const earlier = revision({ local_date: '2026-10-06', generated_at: '2026-10-06T08:02:00Z' });
+  assert.equal(
+    dailyBriefRowStatus(dailyBriefStatus({ revision: earlier, config: config(), now: NOW })),
+    'ready since Oct 6'
+  );
+  assert.equal(
+    dailyBriefRowStatus(
+      dailyBriefStatus({ revision: earlier, config: config(), paused: true, now: NOW })
+    ),
+    'check-ins paused'
+  );
+  assert.equal(
+    dailyBriefRowStatus(
+      dailyBriefStatus({ revision: null, config: config({ schedule_enabled: false }), now: NOW })
+    ),
+    'not scheduled'
+  );
+  assert.equal(dailyBriefRowStatus({ kind: 'ready', today: true, time: '' }), 'ready');
 });

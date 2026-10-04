@@ -9,6 +9,8 @@ import {
   personalAssistantLauncherCue,
   personalAssistantLauncherCueTone,
   personalAssistantTodayView,
+  progressRowText,
+  progressRowVisible,
   resumeWorkspaceBuild,
   safeTodayRoute,
   specialistSetupView,
@@ -75,12 +77,52 @@ test('three Today sections hide empty rows and report unavailable sources only o
   assert.equal(view.working[0].detail, 'Waiting for your choice');
   assert.deepEqual(view.needs, []);
   assert.equal(view.footer, "Couldn't read: follow-ups, decisions.");
-  assert.equal(view.allClear, false);
-  assert.equal(todayThreeSectionView({ needs_you: { items: [] } }).allClear, true);
-  assert.equal(
-    todayThreeSectionView({ needs_you: { items: [{ title: 'Confirm' }] } }).allClear,
-    false
+  // The HQ's own status line is listed under Working on but is not work.
+  assert.equal(view.inProgress, 0);
+  assert.equal(view.doneToday, 0);
+});
+
+test('the progress row counts work in progress and what was done today', () => {
+  const now = new Date(2026, 9, 7, 15, 0, 0);
+  const at = (day, hour) => new Date(2026, 9, day, hour, 0, 0).toISOString();
+  const view = todayThreeSectionView(
+    {
+      working_on: {
+        items: [
+          { kind: 'hq_status', title: 'My HQ' },
+          { kind: 'folder_workspace', title: 'Song Sketches' },
+          { kind: 'janitor_work', title: 'File Janitor' }
+        ]
+      },
+      done: {
+        items: [
+          { kind: 'task_result', title: 'Sorted Samples', source_at: at(7, 9) },
+          { kind: 'task_result', title: 'Drafted a reply', source_at: at(7, 14) },
+          // Done keeps a week of results; yesterday's is not "done today".
+          { kind: 'task_result', title: 'Last night', source_at: at(6, 23) },
+          { kind: 'hq_setup', title: 'Set up My HQ', source_at: '0001-01-01T00:00:00Z' },
+          { kind: 'follow_up', title: 'No timestamp' }
+        ]
+      }
+    },
+    now
   );
+  assert.equal(view.inProgress, 2);
+  assert.equal(view.doneToday, 2);
+  assert.equal(view.done.length, 5, 'the Done list itself still shows every item');
+  assert.equal(progressRowText(view.inProgress, view.doneToday), '2 in progress · 2 done today');
+
+  assert.equal(progressRowText(0, 0), '0 in progress · 0 done today');
+  assert.equal(progressRowText(1, 12), '1 in progress · 12 done today');
+  assert.equal(progressRowText(undefined, -3), '0 in progress · 0 done today');
+});
+
+test('the progress row is hidden only when there is no work, nothing done today and no meetings', () => {
+  assert.equal(progressRowVisible({ working: 0, done: 0, meetings: false }), false);
+  assert.equal(progressRowVisible({ working: 1, done: 0, meetings: false }), true);
+  assert.equal(progressRowVisible({ working: 0, done: 3, meetings: false }), true);
+  // Today's meetings are listed under Working on, so the row still expands.
+  assert.equal(progressRowVisible({ working: 0, done: 0, meetings: true }), true);
 });
 
 test('Today view distinguishes active, paused, partial, no-model, empty, and fatal states', () => {

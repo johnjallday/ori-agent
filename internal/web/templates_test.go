@@ -637,10 +637,11 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		// Creation reuses the existing modal contract (FR105).
 		`id="cockpitCreateWorkspaceBtn"`,
 		`data-bs-target="#addFolderModal"`,
-		// Home's Daily Brief now has one stable mount inside the on-demand
-		// Personal Assistant Today panel. Calendar and activity remain in Updates.
-		`id="personalAssistantTodayPanel"`,
-		`id="homeDailyBrief"`,
+		// The Personal Assistant drawer shows Today at the top of its one view.
+		// The Daily Brief is read in My HQ; the drawer keeps a row that links
+		// to it. Calendar and activity remain in Updates.
+		`id="personalAssistantToday"`,
+		`id="personalAssistantBriefRow"`,
 		`id="homeCalendarOpsPortal"`,
 		`id="homeRecentActivity"`,
 		`id="questLog"`,
@@ -693,6 +694,10 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		// home-workspace-map-ui-refresh: Quick Capture is a dialog now, not a
 		// row in the workspace area that pushed the map down.
 		`id="cockpitCapturePanel"`,
+		// The Daily Brief and its settings dialog live in My HQ's Daily Brief
+		// station; Home has nothing left that opens the dialog.
+		`id="homeDailyBrief"`,
+		`id="homeDailyBriefSettingsModal"`,
 	} {
 		if strings.Contains(html, gone) {
 			t.Errorf("rendered Home page still contains retired element %q", gone)

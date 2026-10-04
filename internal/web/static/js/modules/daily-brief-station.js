@@ -189,6 +189,27 @@ export function dailyBriefStationState(status) {
   }
 }
 
+// dailyBriefRowStatus is what the assistant drawer's "Today's brief" row says
+// after its label: the same state as the station, in the drawer's own words.
+export function dailyBriefRowStatus(status) {
+  switch (status && status.kind) {
+    case 'preparing':
+      return 'being prepared';
+    case 'failed':
+      return 'couldn’t be generated';
+    case 'ready': {
+      const since = status.today ? status.time : status.date;
+      return since ? `ready since ${since}` : 'ready';
+    }
+    case 'paused':
+      return 'check-ins paused';
+    case 'not_scheduled':
+      return 'not scheduled';
+    default:
+      return status && status.due ? `first one due ${status.due}` : 'no brief yet';
+  }
+}
+
 // briefPanelMeta is the line under the panel's heading: when the brief on
 // screen was generated, and when the next one is due. An earlier brief, opened
 // from the list, says only when it was generated.

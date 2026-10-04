@@ -2,14 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  assistantCheckInLine,
+  assistantMoreLinks,
+  assistantOpenFocusTarget,
   assistantPanelShouldCloseOnKey,
-  assistantPanelViewForOpen,
-  assistantTabViewAfterKey,
   boundedAssistantHandoff,
   canSubmitAssistantWork,
   personalAssistantPanelView,
   restoreAssistantPanelFocus,
-  restoredDraft
+  restoredDraft,
+  safeTodayRoute
 } from './personal-assistant-panel.js';
 
 test('personal assistant panel covers unavailable, pre-hire, active, paused, and repair states', () => {
@@ -89,19 +91,116 @@ test('an unsent message returns to the composer without overwriting newer typing
   assert.equal(restoredDraft(null, null), '');
 });
 
-test('Home opens Today directly while non-Home and prefilled requests select Ask', () => {
-  assert.equal(assistantPanelViewForOpen('today', { hasToday: true }), 'today');
-  assert.equal(assistantPanelViewForOpen('today', { hasToday: false }), 'ask');
-  assert.equal(assistantPanelViewForOpen('ask', { hasToday: true }), 'ask');
+test('opening the drawer focuses the composer whenever the assistant can accept work', () => {
+  for (const state of ['active', 'paused']) {
+    assert.equal(assistantOpenFocusTarget(personalAssistantPanelView({ state })), 'composer');
+  }
+  // Not hired, HQ not built, repair needed, unknown: the composer is disabled,
+  // so focus goes to the first control in the drawer instead.
+  for (const state of [
+    'needs_hire',
+    'hiring',
+    'needs_hq',
+    'provisioning_hq',
+    'repair_needed',
+    'unavailable'
+  ]) {
+    assert.equal(
+      assistantOpenFocusTarget(personalAssistantPanelView({ state })),
+      'first-control',
+      state
+    );
+  }
+  assert.equal(assistantOpenFocusTarget(null), 'first-control');
 });
 
-test('Today and Ask tabs implement wrapping arrows plus Home and End', () => {
-  assert.equal(assistantTabViewAfterKey('today', 'ArrowRight'), 'ask');
-  assert.equal(assistantTabViewAfterKey('ask', 'ArrowRight'), 'today');
-  assert.equal(assistantTabViewAfterKey('today', 'ArrowLeft'), 'ask');
-  assert.equal(assistantTabViewAfterKey('ask', 'Home'), 'today');
-  assert.equal(assistantTabViewAfterKey('today', 'End'), 'ask');
-  assert.equal(assistantTabViewAfterKey('today', 'Enter'), 'today');
+test('the header line says when the next check-in is, in the wording Today used', () => {
+  assert.deepEqual(
+    assistantCheckInLine({ state: 'active', next_check_in: '2026-10-08T08:00:00Z' }),
+    { text: 'Next check-in · ', time: '2026-10-08T08:00:00Z' }
+  );
+  assert.deepEqual(assistantCheckInLine({ state: 'active' }), {
+    text: 'No check-in scheduled',
+    time: ''
+  });
+  // Paused wins over a stored time: nothing is coming while paused.
+  assert.deepEqual(
+    assistantCheckInLine({ state: 'paused', next_check_in: '2026-10-08T08:00:00Z' }),
+    { text: 'Check-ins paused', time: '' }
+  );
+  assert.deepEqual(assistantCheckInLine({ state: 'active', next_check_in: 'not a date' }), {
+    text: 'Next check-in unavailable',
+    time: ''
+  });
+  for (const state of ['partial', 'model_unavailable', 'healthy_empty']) {
+    assert.equal(assistantCheckInLine({ state }).text, 'No check-in scheduled', state);
+  }
+});
+
+test('the header line is the plain role until a check-in can be known', () => {
+  for (const today of [
+    null,
+    undefined,
+    {},
+    { state: 'loading' },
+    { state: 'unavailable' },
+    { state: 'needs_hire' },
+    { state: 'needs_hq' },
+    { state: 'repair_needed', next_check_in: '2026-10-08T08:00:00Z' }
+  ]) {
+    assert.deepEqual(assistantCheckInLine(today), { text: 'Personal Assistant', time: '' });
+  }
+});
+
+test('the More menu shows only links Today validated, and the interview only when offered', () => {
+  const links = assistantMoreLinks({
+    links: {
+      personal_hq: '/workspaces/my-hq',
+      working_agreement: '/?personal-assistant=working-agreement',
+      memory: '/workspaces/my-hq#memory',
+      advanced: '/agents'
+    },
+    interview_status: 'offered'
+  });
+  assert.deepEqual(links, {
+    personal_hq: '/workspaces/my-hq',
+    working_agreement: '/?personal-assistant=working-agreement',
+    memory: '/workspaces/my-hq#memory',
+    advanced: '/agents',
+    interview: true
+  });
+
+  const hostile = assistantMoreLinks({
+    links: { personal_hq: 'https://evil.example/', memory: '//evil.example', advanced: '' },
+    interview_status: 'completed'
+  });
+  assert.deepEqual(hostile, {
+    personal_hq: '',
+    working_agreement: '',
+    memory: '',
+    advanced: '',
+    interview: false
+  });
+  for (const status of ['available', 'offered', 'deferred']) {
+    assert.equal(assistantMoreLinks({ interview_status: status }).interview, true, status);
+  }
+  assert.equal(assistantMoreLinks(null).interview, false);
+});
+
+test('safeTodayRoute accepts same-origin paths and refuses everything else', () => {
+  assert.equal(safeTodayRoute('/workspaces/my-hq?station=daily-brief'), true);
+  assert.equal(safeTodayRoute('/'), true);
+  for (const route of [
+    '',
+    'workspaces/my-hq',
+    '//evil.example',
+    'https://evil.example/',
+    '/a/../b',
+    '/a\\b',
+    'javascript:alert(1)'
+  ]) {
+    assert.equal(safeTodayRoute(route), false, route);
+  }
 });
 
 test('Escape closes only an open drawer and focus returns only to a connected trigger', () => {

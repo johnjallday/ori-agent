@@ -147,13 +147,11 @@ async function installStage() {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await acceptMusicSpecialist(page);
 
-  // Home's specialist setup card, in the assistant's Today panel.
+  // Home's specialist setup card, under Needs you in the assistant drawer.
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   const launcher = page.locator('#personalAssistantLauncher');
   await launcher.waitFor({ state: 'visible', timeout: 20000 });
   if (await page.locator('#personalAssistantPanel').isHidden()) await launcher.click();
-  const todayTab = page.locator('#personalAssistantTodayTab');
-  if ((await todayTab.getAttribute('aria-selected')) !== 'true') await todayTab.click();
   const card = page.locator('#personalAssistantSpecialistSetup');
   await card.waitFor({ state: 'visible', timeout: 20000 });
   await card.scrollIntoViewIfNeeded();
