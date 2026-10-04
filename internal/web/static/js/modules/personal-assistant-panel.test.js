@@ -4,9 +4,11 @@ import { readFileSync } from 'node:fs';
 
 import {
   EXPLORE_FOLDER_URL,
+  NEEDS_YOU_URL,
   assistantCheckInLine,
   assistantChipView,
   assistantMoreLinks,
+  assistantNeedsLine,
   assistantOpenFocusTarget,
   assistantPanelShouldCloseOnKey,
   boundedAssistantHandoff,
@@ -138,6 +140,50 @@ test('"Explore a folder" is offered when the assistant can accept work, and wait
   assert.equal(assistantChipView().visible, false);
   // Off Home the chip goes to Home's flow, which the drawer there starts.
   assert.equal(EXPLORE_FOLDER_URL, '/?panel=today&folder=show');
+});
+
+test('a page that is not Home says how much needs the user, in one line that goes there', () => {
+  const items = count => Array.from({ length: count }, (_, i) => ({ kind: 'task', title: `${i}` }));
+  const today = count => ({ state: 'active', needs_you: { items: items(count) } });
+
+  assert.deepEqual(assistantNeedsLine(today(3)), { visible: true, text: '3 need you' });
+  assert.deepEqual(assistantNeedsLine(today(12)), { visible: true, text: '12 need you' });
+  assert.deepEqual(assistantNeedsLine(today(1)), { visible: true, text: '1 needs you' });
+  // Nothing needs the user: no line at all.
+  assert.deepEqual(assistantNeedsLine(today(0)), { visible: false, text: '' });
+  assert.deepEqual(assistantNeedsLine({ state: 'paused' }), { visible: false, text: '' });
+
+  // The number cannot be read. A missing line would read as "nothing needs
+  // you", so the line stays and points at Home.
+  const unknown = { visible: true, text: 'Open Home to see what needs you' };
+  assert.deepEqual(assistantNeedsLine(null, { failed: true }), unknown);
+  assert.deepEqual(assistantNeedsLine(today(2), { failed: true }), unknown);
+  assert.deepEqual(assistantNeedsLine(null), unknown);
+  assert.deepEqual(assistantNeedsLine({ state: 'unavailable' }), unknown);
+  assert.deepEqual(
+    assistantNeedsLine({
+      state: 'partial',
+      needs_you: { health: { status: 'unavailable' }, items: [] }
+    }),
+    unknown
+  );
+});
+
+test('the needs-you line is rendered on every page but Home, and links to Home', () => {
+  const drawer = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  assert.equal((drawer.match(/id="personalAssistantNeedsLine"/g) || []).length, 1);
+  // Home renders its Today there instead: the line is the other branch.
+  assert.match(
+    drawer,
+    /\{\{if eq \.CurrentPage "index"\}\}\s*\{\{template "personal-assistant-today\.tmpl" \.\}\}\s*\{\{else\}\}[\s\S]*?id="personalAssistantNeedsLine"[\s\S]*?\{\{end\}\}/
+  );
+  const link = drawer.match(/<a id="personalAssistantNeedsLine"[^>]*>/)[0];
+  assert.ok(link.includes(`href="${NEEDS_YOU_URL}"`), link);
+  assert.match(link, /\shidden>/, 'hidden until the number is known');
+  assert.equal(NEEDS_YOU_URL, '/?panel=today');
 });
 
 test('the chip sits directly above the composer, on every page', () => {

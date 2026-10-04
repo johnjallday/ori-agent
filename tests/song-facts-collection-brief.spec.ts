@@ -103,8 +103,7 @@ async function openCard(page: Page) {
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
   await page.evaluate(() =>
     (window as any).PersonalAssistantPanel?.open?.(
-      document.getElementById('personalAssistantLauncher'),
-      { view: 'today' }
+      document.getElementById('personalAssistantLauncher')
     )
   );
   const card = page.locator('#personalAssistantFolderOffer');

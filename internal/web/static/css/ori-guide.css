@@ -808,6 +808,36 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   opacity: 0.55;
 }
 
+/* On a page that is not Home: how much needs the user, and the way there. */
+.personal-assistant-panel__needs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--ori-line);
+  border-left: 3px solid var(--ori-accent);
+  border-radius: 10px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.personal-assistant-panel__needs[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__needs:hover {
+  border-color: var(--ori-accent);
+  color: var(--ori-ink);
+}
+
+.personal-assistant-panel__needs i {
+  color: var(--pa-accent-text);
+}
+
 /* One suggestion, directly above the composer. */
 .personal-assistant-panel__chips {
   display: flex;
@@ -1120,6 +1150,14 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   margin: 0;
   padding-top: 8px;
   border-top: 1px solid var(--ori-line);
+}
+
+/* With no card above it the queue is the whole section, and needs no rule. */
+.personal-assistant-panel
+  #personalAssistantNeedsYouCards:not(:has(> :not([hidden])))
+  + .personal-assistant-today__queue {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .personal-assistant-panel .personal-assistant-today__queue summary {

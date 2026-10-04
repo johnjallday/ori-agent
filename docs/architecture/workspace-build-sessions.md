@@ -136,12 +136,12 @@ the workspace's template provenance. An unknown or closed id never blocks the cr
 | Eligibility, step math, patch extraction                      | `internal/web/static/js/modules/workspace-creator-state.js`               |
 | Team patch apply / serialize / restore                        | `internal/web/static/js/modules/create-workspace-team-draft.js`           |
 | Today "Finish building …"                                     | `internal/web/static/js/modules/personal-assistant-home.js`               |
-| Ask tab / home-assistant hand-off                             | `internal/web/static/js/modules/dashboard.js` (`openBuildWithAssistant`)  |
+| Assistant composer / home-assistant hand-off                  | `internal/web/static/js/modules/dashboard.js` (`openBuildWithAssistant`)  |
 | "How this was set up"                                         | `internal/web/static/js/modules/workspace-command.js`                     |
 
 - **Eligible openers**: Home "New Workspace" (`home_cockpit_create`), the Map's create
   pad (`workspace_map_build`, placement preserved), the Workspaces hub
-  (`workspace_hub_create`), and the assistant's Ask tab (`personal_assistant_ask`, the
+  (`workspace_hub_create`), and the assistant's composer (`personal_assistant_ask`, the
   sentence becomes the first turn). Every other opener, import mode, a fixed kind, and
   Group all keep the manual wizard.
 - **Applying a turn**: the fields listed in `applied` go through the wizard's own setters

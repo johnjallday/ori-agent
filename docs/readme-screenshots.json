@@ -34,19 +34,23 @@
       "timezone": "UTC",
       "required_visible_selectors": [
         ".home-command-bridge",
-        "#homeDailyBrief",
-        "#homeDailyBriefBody"
+        "#personalAssistantPanel",
+        "#personalAssistantBriefRow"
       ],
       "caption": "Home brings the command bridge and a focused Personal HQ Daily Brief into one starting point.",
       "alt_text": "Ori Agent Home in dark mode showing the command bridge above a populated Personal HQ Daily Brief.",
       "display_width": 820,
       "owner_paths": [
         "internal/web/templates/components/dashboard.tmpl",
-        "internal/web/static/js/modules/home-daily-brief.js",
+        "internal/web/templates/components/ori-guide.tmpl",
+        "internal/web/templates/components/personal-assistant-today.tmpl",
+        "internal/web/static/js/modules/personal-assistant-home.js",
+        "internal/web/static/js/modules/personal-assistant-panel.js",
         "internal/web/static/js/modules/dashboard.js",
         "internal/web/static/js/modules/home-workspace-cockpit.js",
         "internal/web/static/css/home-command.css",
-        "internal/web/static/css/home-workspace-cockpit.css"
+        "internal/web/static/css/home-workspace-cockpit.css",
+        "internal/web/static/css/ori-guide.css"
       ],
       "accepted_sha256": "fdf09c527cd15ccb14c651d13c50c7cdaf0ee96d476302590fc1ed4e2e67486b",
       "accepted_bytes": 60748

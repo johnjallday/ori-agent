@@ -49,10 +49,10 @@ async function installActivePersonalAssistant(page: Page) {
   );
 }
 
+// The drawer is one view: opening it puts focus in the composer.
 async function openPersonalAssistantAsk(page: Page) {
   await page.locator('#personalAssistantLauncher').click();
-  await page.locator('#personalAssistantAskTab').click();
-  await expect(page.locator('#personalAssistantAskPanel')).toBeVisible();
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   await expect(page.locator('#personalAssistantInput')).toBeFocused();
 }
 
@@ -563,7 +563,8 @@ test.describe('Home First Run', () => {
     await expect(page.locator('#homeAssistantCard')).toBeHidden();
     await expect(page.locator('#homeCockpit')).toBeVisible();
     await page.locator('#personalAssistantLauncher').click();
-    await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await expect(page.locator('#personalAssistantToday')).toBeVisible();
   });
 
   test('preserves an Ask draft across the on-demand drawer lifecycle', async ({ page }) => {
@@ -585,8 +586,7 @@ test.describe('Home First Run', () => {
     await expect(page.locator('#personalAssistantLauncher')).toBeFocused();
 
     await page.locator('#personalAssistantLauncher').click();
-    await expect(page.locator('#personalAssistantTodayPanel')).toBeVisible();
-    await page.locator('#personalAssistantAskTab').click();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
     await expect(input).toHaveValue('Summarize current operations');
   });
 
@@ -837,7 +837,7 @@ test.describe('Home First Run', () => {
     }
   });
 
-  test('keeps Daily Brief in Personal Assistant Today while Updates retains its own sections', async ({
+  test('keeps the Daily Brief off Home, as one row in the assistant drawer, while Updates retains its own sections', async ({
     page
   }) => {
     await page.setViewportSize({ width: 1512, height: 805 });
@@ -858,13 +858,16 @@ test.describe('Home First Run', () => {
 
     await page.goto('/');
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
+    // The full brief is read in My HQ's Daily Brief station. Home keeps one
+    // row for it, in the assistant's drawer, and nothing in Updates.
     const ownership = await page.evaluate(() => {
-      const brief = document.getElementById('homeDailyBrief');
+      const row = document.getElementById('personalAssistantBriefRow');
       const updates = document.getElementById('cockpitUpdatesFlyoutBody');
       return {
-        briefCount: document.querySelectorAll('#homeDailyBrief').length,
-        inToday: Boolean(brief?.closest('#personalAssistantTodayPanel')),
-        inUpdates: Boolean(brief?.closest('#cockpitUpdatesFlyoutBody')),
+        fullBriefCount: document.querySelectorAll('#homeDailyBrief').length,
+        rowCount: document.querySelectorAll('#personalAssistantBriefRow').length,
+        inDrawer: Boolean(row?.closest('#personalAssistantPanel')),
+        inUpdates: Boolean(row?.closest('#cockpitUpdatesFlyoutBody')),
         updatesOwnSections: [
           'cockpitTodayAttention',
           'cockpitTodayScheduled',
@@ -875,8 +878,9 @@ test.describe('Home First Run', () => {
       };
     });
 
-    expect(ownership.briefCount).toBe(1);
-    expect(ownership.inToday).toBe(true);
+    expect(ownership.fullBriefCount).toBe(0);
+    expect(ownership.rowCount).toBe(1);
+    expect(ownership.inDrawer).toBe(true);
     expect(ownership.inUpdates).toBe(false);
     expect(ownership.updatesOwnSections).toBe(true);
   });
@@ -2893,7 +2897,10 @@ test.describe('Personal Assistant surface ownership', () => {
       await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
       await page.locator('#personalAssistantLauncher').click();
       await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-      await expect(page.locator('#personalAssistantTodayTab')).toHaveCount(0);
+      // Off Home the drawer has no Today of its own: the conversation, the
+      // chip and the composer.
+      await expect(page.locator('#personalAssistantToday')).toHaveCount(0);
+      await expect(page.locator('#personalAssistantPanel [role="tab"]')).toHaveCount(0);
       await expect(page.locator('#personalAssistantInput')).toBeVisible();
       await expect(page.locator('#hubSupportChat')).toHaveCount(0);
     } finally {

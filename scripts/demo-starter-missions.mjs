@@ -374,7 +374,7 @@ async function folderStage() {
     page.locator('[data-role="first-mission-action"]').click()
   ]);
 
-  // The assistant panel opens on Today with the chooser unfolded.
+  // The assistant drawer opens with the chooser in its conversation.
   const chooser = page.locator('#personalAssistantFolderChooser');
   await chooser.waitFor({ state: 'visible', timeout: 15000 });
   expect(await page.locator('#personalAssistantToday').isVisible(), 'the assistant drawer opened');

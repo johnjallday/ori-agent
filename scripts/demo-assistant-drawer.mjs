@@ -21,6 +21,9 @@
 //               ./scripts/smoke.sh showfolder <base-url> seed <sandbox>
 //   folder-first  the assistant's one first-folder prompt. Run it against the
 //             sandbox drawer-setup left (hired, no HQ).
+//   other-pages  the drawer on a workspace page and on the Agents page: the
+//             header, the "N need you" line, the chip landing on Home, and
+//             sending a request.
 //
 // Seed the server first: ./scripts/smoke.sh showfolder <base-url> hq
 // theme is "light" (default) or "dark".
@@ -889,6 +892,139 @@ async function folderFirst() {
   await shot('02-after-reload');
 }
 
+// The drawer on pages that are not Home: the header, one "N need you" line,
+// the conversation, the chip and the composer.
+async function otherPages() {
+  const { slug } = await personalHQ();
+  const line = page.locator('#personalAssistantNeedsLine');
+  const real = await (await page.request.get(`${base}/api/personal-assistant/today`)).json();
+  const realCount = real.today?.needs_you?.items?.length ?? 0;
+  console.log('needs_you items on the server:', realCount);
+
+  for (const [name, path] of [
+    ['workspace', `/workspaces/${slug}`],
+    ['agents', '/agents']
+  ]) {
+    await openDrawer(path);
+    check(
+      (await page.locator('#personalAssistantToday').count()) === 0,
+      `${name}: no Today of its own`
+    );
+    check(
+      (await page
+        .locator(
+          '#personalAssistantBriefRow, #personalAssistantProgressRow, #personalAssistantFolder'
+        )
+        .count()) === 0,
+      `${name}: no brief row, progress row or folder flow`
+    );
+    console.log(
+      `${name} header line:`,
+      await page.locator('#personalAssistantCheckIn').innerText()
+    );
+    check(
+      (await page.locator('#personalAssistantCheckIn').innerText()) !== 'Personal Assistant',
+      `${name}: the header says when the next check-in is`
+    );
+    await page.locator('#personalAssistantMore > summary').click();
+    console.log(
+      `${name} More:`,
+      JSON.stringify(await page.locator('#personalAssistantMore a:not([hidden])').allTextContents())
+    );
+    await page.keyboard.press('Escape');
+    check(
+      (await line.isVisible()) === realCount > 0,
+      `${name}: the needs-you line shows only when something needs you`
+    );
+    check(await page.locator(CHIP).isVisible(), `${name}: the chip is above the composer`);
+    await page.locator('#personalAssistantInput').focus();
+    await shot(`01-${name}`);
+  }
+
+  // Sample data for the line only: three things need the user.
+  const sample = structuredClone(real);
+  sample.today.needs_you = {
+    health: { status: 'available' },
+    items: ['Pick a release date', 'Approve the tidy of Downloads', 'Reply to the studio'].map(
+      title => ({ kind: 'task', title })
+    )
+  };
+  await page.route('**/api/personal-assistant/today', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(sample) })
+  );
+  await openDrawer('/agents');
+  await line.waitFor({ state: 'visible' });
+  console.log('line:', (await line.innerText()).trim(), '→', await line.getAttribute('href'));
+  check((await line.innerText()).trim() === '3 need you', 'the line reads "3 need you"');
+  await shot('02-agents-three-need-you');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(400);
+  await shot('03-agents-narrow');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.unroute('**/api/personal-assistant/today');
+
+  // The line lands on Home with the drawer open, where the items are listed.
+  await line.click();
+  await page.locator('#personalAssistantToday').waitFor({ state: 'visible', timeout: 20000 });
+  check(new URL(page.url()).pathname === '/', 'the line lands on Home with the drawer open');
+
+  // The number cannot be read: the line still points at Home.
+  await page.route('**/api/personal-assistant/today', route => route.fulfill({ status: 503 }));
+  await openDrawer('/agents');
+  await line.waitFor({ state: 'visible' });
+  console.log('unreadable:', (await line.innerText()).trim());
+  check(
+    (await line.innerText()).trim() === 'Open Home to see what needs you',
+    'when it cannot be read the line says to open Home'
+  );
+  check(
+    (await page.locator('#personalAssistantCheckIn').innerText()) === 'Personal Assistant',
+    'and the header falls back to the plain role'
+  );
+  await shot('04-agents-unreadable');
+  await page.unroute('**/api/personal-assistant/today');
+
+  // The chip lands on Home and starts the folder flow there.
+  await openDrawer(`/workspaces/${slug}`);
+  await page.locator(CHIP).click();
+  await page
+    .locator('#personalAssistantFolderChooser')
+    .waitFor({ state: 'visible', timeout: 20000 });
+  check(new URL(page.url()).pathname === '/', 'the chip lands on Home');
+  check(
+    await page.locator('#personalAssistantFolderRequest').isVisible(),
+    'and starts the folder flow in the conversation'
+  );
+  await shot('05-chip-landed-on-home');
+
+  // Sending a request from a workspace page, which has the work controller.
+  const status = page.locator('#personalAssistantPanelStatus');
+  await openDrawer(`/workspaces/${slug}`);
+  await page.locator('#personalAssistantInput').fill('What should I look at first today?');
+  await page.locator('#personalAssistantSend').click();
+  await page.waitForTimeout(2500);
+  console.log('workspace, after Send:', (await status.innerText()).trim());
+  check(
+    (await page.locator('#personalAssistantInput').inputValue()) === '',
+    'the request was sent from a workspace page'
+  );
+  check(
+    !(await status.innerText()).includes('unavailable on this page'),
+    'and the work controller took it'
+  );
+  await page.locator('#personalAssistantActivityMount').scrollIntoViewIfNeeded();
+  await shot('06-workspace-sent');
+
+  // The Agents page has never loaded the work controller (dashboard.js), so
+  // its composer says so instead of sending. That is not changed here.
+  await openDrawer('/agents');
+  await page.locator('#personalAssistantInput').fill('What should I look at first today?');
+  await page.locator('#personalAssistantSend').click();
+  await page.waitForTimeout(1000);
+  console.log('agents, after Send:', (await status.innerText()).trim());
+  await shot('07-agents-send');
+}
+
 try {
   if (stage === 'station') await station();
   else if (stage === 'brief-home') await briefHome();
@@ -896,6 +1032,7 @@ try {
   else if (stage === 'drawer-setup') await drawerSetup();
   else if (stage === 'folder') await folder();
   else if (stage === 'folder-first') await folderFirst();
+  else if (stage === 'other-pages') await otherPages();
   else throw new Error(`unknown stage: ${stage}`);
 } finally {
   if (problems.length) {

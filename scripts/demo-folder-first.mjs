@@ -42,10 +42,10 @@ try {
   });
   await page.locator('#personalAssistantHQCard').waitFor({ state: 'visible' });
   if (!(await page.locator('#personalAssistantPanel').isVisible())) {
-    throw new Error('Today panel did not open on hire');
+    throw new Error('The assistant drawer did not open on hire');
   }
   if (await page.evaluate(() => window.OriPersonalHQQuest?.isActive())) {
-    throw new Error('Map quest started on the plain Today hand-over');
+    throw new Error('Map quest started on the plain hand-over to the drawer');
   }
   await shot('02-hq-card');
   await page.locator('#personalAssistantClose').click();

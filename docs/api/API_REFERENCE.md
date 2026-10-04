@@ -1337,7 +1337,7 @@ Bodies are capped at 256 KiB and must be one JSON object with only the fields na
 
 - `entry_point` (required): `home_cockpit_create`, `workspace_map_build`, `workspace_hub_create`, or `personal_assistant_ask`. Any other opener is `400`.
 - `parent_id` (optional): the group the opener was inside; kept only when it is one of the user's groups.
-- `first_message` (optional, ≤ 2,000 characters): run as the first turn (the Ask tab's sentence).
+- `first_message` (optional, ≤ 2,000 characters): run as the first turn (the sentence typed in the assistant's composer).
 
 There is at most one open build per user. When one is open it is returned unchanged with `200` and `"resumed": true`, and `first_message` is not run (the client asks Resume or Start over). Otherwise `201` with the new session:
 

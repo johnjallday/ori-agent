@@ -1,4 +1,5 @@
 const STATUS_ENDPOINT = '/api/personal-assistant';
+const TODAY_ENDPOINT = '/api/personal-assistant/today';
 const HANDOFF_LIMIT = 400;
 
 export function personalAssistantPanelView(personalAssistant) {
@@ -129,6 +130,25 @@ export function assistantMoreLinks(today) {
     advanced: route('advanced'),
     interview: ['available', 'offered', 'deferred'].includes(today?.interview_status)
   };
+}
+
+/** Where what needs the user is listed: Home, with the drawer open. */
+export const NEEDS_YOU_URL = '/?panel=today';
+
+/**
+ * The one line a page other than Home shows for what needs the user: how many
+ * things, linking to Home, where they are listed. Nothing is shown when nothing
+ * needs them. When the number cannot be read the line still points at Home,
+ * because a missing line would read as "nothing needs you".
+ */
+export function assistantNeedsLine(today, { failed = false } = {}) {
+  const unknown = { visible: true, text: 'Open Home to see what needs you' };
+  if (failed || !today || String(today.state || '') === 'unavailable') return unknown;
+  const needs = today.needs_you;
+  if (String(needs?.health?.status || '') === 'unavailable') return unknown;
+  const count = Array.isArray(needs?.items) ? needs.items.length : 0;
+  if (!count) return { visible: false, text: '' };
+  return { visible: true, text: count === 1 ? '1 needs you' : `${count} need you` };
 }
 
 /** Where "Explore a folder" goes from a page that is not Home. */
@@ -275,6 +295,38 @@ function setToday(today) {
   renderHeader();
 }
 
+function renderNeedsLine(line) {
+  const els = state.els;
+  if (!els?.needsLine) return;
+  els.needsLine.hidden = !line.visible;
+  if (els.needsLineText) els.needsLineText.textContent = line.text;
+}
+
+let todayRead = 0;
+
+/**
+ * A page other than Home has no Today of its own, so the drawer reads it when
+ * it opens: for the header's check-in line and More links, and for the one
+ * line that says how much needs the user. Home gives the drawer its Today
+ * through setToday and never comes here.
+ */
+async function readTodayForThisPage() {
+  if (!state.els?.needsLine) return;
+  const read = ++todayRead;
+  try {
+    const response = await fetch(TODAY_ENDPOINT, { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error(`today ${response.status}`);
+    const today = (await response.json())?.today || null;
+    if (read !== todayRead) return;
+    setToday(today);
+    renderNeedsLine(assistantNeedsLine(today));
+  } catch (_) {
+    if (read !== todayRead) return;
+    setToday(null);
+    renderNeedsLine(assistantNeedsLine(null, { failed: true }));
+  }
+}
+
 function moveSharedWorkActivity() {
   const activity = document.getElementById('homeAssistantThinkingModal');
   if (!activity || !state.els?.activityMount || !state.view.available) return;
@@ -372,6 +424,7 @@ function open(trigger, options = {}) {
   // Rename/pause/repair changes are server-owned. Refresh on every open rather
   // than trusting the hire-time name or local storage.
   void refresh();
+  void readTodayForThisPage();
   try {
     document.dispatchEvent(new CustomEvent('personal-assistant:opened'));
   } catch (_) {
@@ -508,6 +561,9 @@ function init() {
     activityMount: document.getElementById('personalAssistantActivityMount'),
     // Present on Home only, where it carries the paused and Build HQ messages.
     todayBanner: document.getElementById('personalAssistantTodayBanner'),
+    // Present on every other page: how much needs the user, linking to Home.
+    needsLine: document.getElementById('personalAssistantNeedsLine'),
+    needsLineText: document.getElementById('personalAssistantNeedsLineText'),
     links: {
       personal_hq: document.getElementById('personalAssistantTodayHQ'),
       working_agreement: document.getElementById('personalAssistantTodayAgreement'),

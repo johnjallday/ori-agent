@@ -348,8 +348,7 @@ test('showing a folder fills question 1, and only Save stores it', async ({ page
     await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
     await page.evaluate(() =>
       (window as any).PersonalAssistantPanel?.open?.(
-        document.getElementById('personalAssistantLauncher'),
-        { view: 'today' }
+        document.getElementById('personalAssistantLauncher')
       )
     );
     const card = page.locator('#personalAssistantFolderOffer');

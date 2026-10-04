@@ -13,9 +13,9 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
  *
  * Run (sandbox-off; Chromium cannot launch inside the agent sandbox):
  *
- *   eval "$(./scripts/demo-calendar-fixture.sh --build-only)"
- *   FAKE_CALENDAR_MCP_BIN="$FAKE_CALENDAR_MCP_BIN" \
- *     ./scripts/e2e-fresh.sh tests/personal-assistant-meetings.spec.ts -- --workers=1
+ *   ./scripts/demo-calendar-fixture.sh --build-only   # prints FAKE_CALENDAR_MCP_BIN=<path>
+ *   ./scripts/e2e-fresh.sh --env FAKE_CALENDAR_MCP_BIN=<path> \
+ *     tests/personal-assistant-meetings.spec.ts -- --workers=1
  *
  * Without FAKE_CALENDAR_MCP_BIN only the not-connected test runs.
  *

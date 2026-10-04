@@ -14,8 +14,8 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
  *
  * What only a browser proves, and so what is here:
  *   - The Quests card follows the server's missions, and Mission 02's Start
- *     opens the assistant panel on Today with the folder chooser unfolded and
- *     the quest parameter scrubbed.
+ *     opens the assistant drawer with the folder chooser in its conversation
+ *     and the quest parameter scrubbed.
  *   - Deferring Mission 02 moves the card on to Mission 03.
  *   - The first-day plan completes Mission 03.
  * Mission 01 (Meet your assistant) is the hire, made here through the API;

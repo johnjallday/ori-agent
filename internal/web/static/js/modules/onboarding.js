@@ -349,8 +349,10 @@ export class OnboardingManager {
     document
       .getElementById('pafApplyAssignmentBtn')
       ?.addEventListener('click', () => this.applyFirstAssignment());
-    document.getElementById('pafOpenTodayBtn')?.addEventListener('click', () => {
-      window.location.href = '/?view=today';
+    // The items just created are in the assistant's drawer on Home, and its
+    // brief row leads to the Daily Brief in My HQ.
+    document.getElementById('pafOpenAssistantBtn')?.addEventListener('click', () => {
+      window.location.href = '/?panel=today';
     });
     this.modal.addEventListener('keydown', event => {
       if (event.key === 'Escape' && this.assignmentQuestMode) {
@@ -1587,7 +1589,7 @@ export class OnboardingManager {
     if (next) {
       next.textContent = view.nextCheckIn
         ? `Next scheduled check-in: ${new Date(view.nextCheckIn).toLocaleString()}`
-        : 'No scheduled check-in is enabled. You can refresh Today whenever you want.';
+        : 'No scheduled check-in is enabled. You can refresh the Daily Brief in My HQ whenever you want.';
     }
     title?.focus();
   }

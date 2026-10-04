@@ -126,7 +126,7 @@ try {
       await page.click(selector, options);
       await page.waitForTimeout(500);
     } else if (kind === 'pane') {
-      // After an opener other than "open" (a menu item, the Ask tab): wait for
+      // After an opener other than "open" (a menu item, the assistant's composer): wait for
       // the build pane and the first turn to settle.
       await page.waitForSelector('#addFolderModal.show', { timeout: 15000 });
       await page

@@ -151,6 +151,15 @@
     <div id="personalAssistantScroll" class="personal-assistant-panel__scroll">
       {{if eq .CurrentPage "index"}}
       {{template "personal-assistant-today.tmpl" .}}
+      {{else}}
+      <!-- What needs the user is listed on Home. Every other page says only how
+           much there is, in one line that goes there. Hidden when nothing does;
+           when the number cannot be read it still points at Home. -->
+      <a id="personalAssistantNeedsLine" class="personal-assistant-panel__needs"
+         href="/?panel=today" hidden>
+        <span id="personalAssistantNeedsLineText"></span>
+        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+      </a>
       {{end}}
 
       <!-- The conversation this tab is in. A conversation is a session in

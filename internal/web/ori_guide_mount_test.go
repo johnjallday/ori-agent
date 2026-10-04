@@ -195,6 +195,10 @@ func TestPAFPanelRendersHomeAsOneViewWithTheComposerLast(t *testing.T) {
 		}
 		last = at
 	}
+	// Home lists what needs the user; the one-line stand-in is for other pages.
+	if strings.Contains(html, `id="personalAssistantNeedsLine"`) {
+		t.Error("rendered Home has the other pages' needs-you line as well as Needs you")
+	}
 	// The folder flow is in the conversation, not in Today's Needs you.
 	today := html[strings.Index(html, `id="personalAssistantToday"`):strings.Index(html, `id="personalAssistantThread"`)]
 	if strings.Contains(today, `personalAssistantFolder`) {
@@ -276,6 +280,8 @@ func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 	for _, present := range []string{
 		`id="personalAssistantPanel"`, `id="personalAssistantCheckIn"`,
 		`id="personalAssistantMore"`, `id="personalAssistantScroll"`,
+		// How much needs the user, in one line that goes to Home.
+		`id="personalAssistantNeedsLine"`,
 		`id="personalAssistantThread"`, `id="personalAssistantActivityMount"`,
 		`id="personalAssistantFolderChip"`, `id="personalAssistantForm"`,
 	} {

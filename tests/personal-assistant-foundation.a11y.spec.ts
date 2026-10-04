@@ -286,6 +286,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     const visited = await tabBackThroughDrawer(page);
     const names = visited.map(stop => stop.name);
     for (const expected of [
+      'personalAssistantFolderChip',
       'personalAssistantProgressRow',
       'personalAssistantBriefRow',
       'personalAssistantClose',
@@ -353,6 +354,139 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(agreement).toBeHidden();
     await expect(assistantDialog).toBeVisible();
     await expect(page.locator('#personalAssistantInput')).toBeFocused();
+  });
+
+  test('the chip and the summary strip are operable from the keyboard', async ({ page }) => {
+    await mockCompletedOnboarding(page);
+    await mockAssistantState(page);
+    // The folder read is the server's own; this fixture has no folders to offer.
+    await page.route('**/api/personal-assistant/folder-digest', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          folder_digest: {
+            offer: null,
+            chips: [{ id: 'documents', label: 'Documents' }],
+            picker_available: false,
+            prompt_first_folder: false
+          }
+        })
+      })
+    );
+    await page.goto('/');
+    const launcher = page.getByRole('button', { name: /Atlas Personal Assistant/i });
+    await launcher.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#personalAssistantInput')).toBeFocused();
+
+    // The chip is the control just before the composer, and it has a name.
+    const chip = page
+      .getByRole('dialog', { name: 'Atlas' })
+      .getByRole('button', { name: 'Explore a folder', exact: true });
+    await page.keyboard.press('Shift+Tab');
+    await expect(chip).toBeFocused();
+    await expect(chip).toHaveAttribute('id', 'personalAssistantFolderChip');
+    expect(await contrastRatio(page, '#personalAssistantFolderChip')).toBeGreaterThanOrEqual(4.5);
+
+    // Nothing is folded until the user starts something.
+    const strip = page.locator('#personalAssistantSummary');
+    const toggle = page.locator('#personalAssistantSummaryToggle');
+    await expect(strip).toBeHidden();
+    await page.keyboard.press('Enter');
+
+    // The request and the assistant's reply are in the conversation, focus is
+    // on the first folder, and the chip waits its turn.
+    await expect(page.locator('#personalAssistantFolderRequest')).toBeVisible();
+    await expect(
+      page.locator('#personalAssistantFolderChips button[data-chip="documents"]')
+    ).toBeFocused();
+    await expect(chip).toBeDisabled();
+
+    // The strip is a real disclosure for what it folded.
+    await expect(strip).toBeVisible();
+    await expect(toggle).toHaveText('Show');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toHaveAttribute('aria-controls', 'personalAssistantTodaySections');
+    await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
+    for (const selector of ['#personalAssistantSummaryText', '#personalAssistantSummaryToggle']) {
+      expect(await contrastRatio(page, selector), `contrast of ${selector}`).toBeGreaterThanOrEqual(
+        4.5
+      );
+    }
+    // Reached with the keyboard, it shows where focus is.
+    await page.locator('#personalAssistantInput').focus();
+    const stops = await tabBackThroughDrawer(page);
+    expect(stops.map(stop => stop.name)).toContain('personalAssistantSummaryToggle');
+    expect(stops.filter(stop => !stop.outlined).map(stop => stop.name)).toEqual([]);
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(toggle).toHaveText('Hide');
+    await expect(page.locator('#personalAssistantBriefRow')).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#personalAssistantBriefRow')).toBeHidden();
+  });
+
+  test('on another page the needs-you line is a named link with readable text', async ({
+    page
+  }) => {
+    await mockCompletedOnboarding(page);
+    await mockAssistantState(page);
+    // Two things need the user. A page that is not Home says only how many.
+    await page.route('**/api/personal-assistant/today', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          today: {
+            state: 'active',
+            relationship_state: 'active',
+            display_name: 'Atlas',
+            next_check_in: new Date(Date.now() + 86400000).toISOString(),
+            needs_you: {
+              health: { status: 'available' },
+              items: [
+                { kind: 'task', title: 'Pick a release date' },
+                { kind: 'follow_up', title: 'Reply to the studio' }
+              ]
+            },
+            links: { personal_hq: '/workspaces/personal-hq', advanced: '/agents' }
+          }
+        })
+      })
+    );
+    await page.goto('/settings');
+    const launcher = page.getByRole('button', { name: /Atlas Personal Assistant/i });
+    await launcher.focus();
+    await page.keyboard.press('Enter');
+    const assistantDialog = page.getByRole('dialog', { name: 'Atlas' });
+    await expect(assistantDialog).toBeVisible();
+    await expect(page.locator('#personalAssistantInput')).toBeFocused();
+
+    const line = page.locator('#personalAssistantNeedsLine');
+    await expect(line).toBeVisible();
+    await expect(line).toHaveAttribute('href', '/?panel=today');
+    await expect(assistantDialog.getByRole('link', { name: '2 need you' })).toHaveCount(1);
+    expect(await contrastRatio(page, '#personalAssistantNeedsLineText')).toBeGreaterThanOrEqual(
+      4.5
+    );
+    // Reached with the keyboard, the line and the chip show where focus is.
+    const stops = await tabBackThroughDrawer(page);
+    const names = stops.map(stop => stop.name);
+    expect(names).toContain('personalAssistantNeedsLine');
+    expect(names).toContain('personalAssistantFolderChip');
+    expect(stops.filter(stop => !stop.outlined).map(stop => stop.name)).toEqual([]);
+    // The header works here too: the check-in line and the More links.
+    await expect(page.locator('#personalAssistantCheckIn')).not.toHaveText('Personal Assistant');
+    await expect(page.locator('#personalAssistantMore > summary')).toHaveAttribute(
+      'aria-label',
+      'More assistant options'
+    );
+    // No Today of its own, and no tabs.
+    await expect(page.locator('#personalAssistantToday')).toHaveCount(0);
+    await expect(assistantDialog.getByRole('tab')).toHaveCount(0);
   });
 
   for (const scenario of [
