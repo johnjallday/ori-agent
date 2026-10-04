@@ -190,8 +190,9 @@ export function dailyBriefStationState(status) {
 }
 
 // briefPanelMeta is the line under the panel's heading: when the brief on
-// screen was generated, and when the next one is due.
-export function briefPanelMeta({ revision, config, paused, now } = {}) {
+// screen was generated, and when the next one is due. An earlier brief, opened
+// from the list, says only when it was generated.
+export function briefPanelMeta({ revision, config, paused, earlier, now } = {}) {
   const timeZone = (config && config.timezone) || 'UTC';
   const sentences = [];
   if (revision) {
@@ -203,6 +204,7 @@ export function briefPanelMeta({ revision, config, paused, now } = {}) {
       sentences.push(time ? `Generated ${date} at ${time}.` : `Generated ${date}.`);
     }
   }
+  if (earlier) return sentences.join(' ');
   if (paused) sentences.push('Check-ins paused.');
   else {
     const due = nextBriefDue(config, now);

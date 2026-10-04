@@ -211,3 +211,85 @@ func TestServiceUnavailableWhenNotConfigured(t *testing.T) {
 		t.Fatalf("expected 503, got %d", rec.Code)
 	}
 }
+
+// markSeen posts to the seen endpoint and returns the status and "seen" flag.
+func markSeen(t *testing.T, handler *Handler) (int, bool) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/personal-hq/brief/seen", nil)
+	rec := httptest.NewRecorder()
+	handler.MarkSeen(rec, req)
+	var got struct {
+		Seen bool `json:"seen"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	return rec.Code, got.Seen
+}
+
+// The Daily Brief panel reports the brief it is showing. With a brief to show
+// the listener is told; the report can be repeated without harm.
+func TestMarkSeen_TellsTheListenerWhenTheHQHasABrief(t *testing.T) {
+	handler, hq, workspaces := newTestHandler(t)
+	designateHQ(t, hq, workspaces, "ws-hq")
+	ctx := context.Background()
+	if _, err := handler.service.UpdateConfig(ctx, dailybrief.Config{WorkspaceID: "ws-hq", UserID: userprofile.LocalUserID}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	if _, err := handler.service.RequestGenerationNow(ctx, "ws-hq", userprofile.LocalUserID, dailybrief.TriggerManual); err != nil {
+		t.Fatalf("RequestGenerationNow: %v", err)
+	}
+
+	var told []string
+	handler.SetOnBriefSeen(func(userID string) { told = append(told, userID) })
+
+	for attempt := range 2 {
+		code, seen := markSeen(t, handler)
+		if code != http.StatusOK || !seen {
+			t.Fatalf("attempt %d: status=%d seen=%t, want 200 and seen", attempt, code, seen)
+		}
+	}
+	if len(told) != 2 || told[0] != userprofile.LocalUserID {
+		t.Fatalf("listener told %v, want the local user on each report", told)
+	}
+}
+
+// A report with nothing to back it changes nothing: no brief means not seen,
+// and no HQ means there is no panel to have shown one.
+func TestMarkSeen_TellsNoOneWithoutABrief(t *testing.T) {
+	handler, hq, workspaces := newTestHandler(t)
+	fires := 0
+	handler.SetOnBriefSeen(func(string) { fires++ })
+
+	if code, _ := markSeen(t, handler); code != http.StatusNotFound {
+		t.Fatalf("no HQ: status = %d, want 404", code)
+	}
+
+	designateHQ(t, hq, workspaces, "ws-hq")
+	code, seen := markSeen(t, handler)
+	if code != http.StatusOK || seen {
+		t.Fatalf("HQ with no brief: status=%d seen=%t, want 200 and not seen", code, seen)
+	}
+	if fires != 0 {
+		t.Fatalf("listener fired %d times with no brief to show", fires)
+	}
+
+	// Unset, a report is simply accepted.
+	handler.SetOnBriefSeen(nil)
+	if code, _ := markSeen(t, handler); code != http.StatusOK {
+		t.Fatalf("no listener: status = %d, want 200", code)
+	}
+}
+
+func TestMarkSeen_RejectsWrongVerbAndAnUnconfiguredService(t *testing.T) {
+	handler, _, _ := newTestHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/personal-hq/brief/seen", nil)
+	rec := httptest.NewRecorder()
+	handler.MarkSeen(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET: status = %d, want 405", rec.Code)
+	}
+
+	unconfigured := NewHandler(nil, nil, userprofile.LocalUserProvider{})
+	if code, _ := markSeen(t, unconfigured); code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured: status = %d, want 503", code)
+	}
+}

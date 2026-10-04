@@ -11430,8 +11430,9 @@ test('parcels: the popover says Deliveries, marks what needs a look, and opens t
   h.cardsOpened[0].onPrimary({ parcel: { kind: 'task', workspace_id: 'ws-1', ref_id: 't9' } });
   assert.equal(h.window.location.href, '/workspaces/alpha?task=t9&result=1');
 
-  // A janitor scan opens its review; a brief opens the assistant's Today panel,
-  // or the HQ's page when there is no panel on this page.
+  // A janitor scan opens its review; a brief opens the Daily Brief station in
+  // its HQ, which is where a brief is read. It never opens the assistant
+  // drawer, even when one is on the page.
   h.cardsOpened[0].onPrimary({ parcel: { kind: 'file_janitor', workspace_id: 'ws-1' } });
   assert.equal(h.window.location.href, '/workspaces/alpha?panel=file-janitor');
   const opened = [];
@@ -11440,14 +11441,8 @@ test('parcels: the popover says Deliveries, marks what needs a look, and opens t
   };
   h.window.location.href = '';
   h.cardsOpened[0].onPrimary({ parcel: { kind: 'daily_brief', workspace_id: 'ws-1' } });
-  assert.deepEqual(
-    opened.map(options => options.view),
-    ['today']
-  );
-  assert.equal(h.window.location.href, '', 'no navigation when the panel opened');
-  h.window.PersonalAssistantPanel = { open: () => false };
-  h.cardsOpened[0].onPrimary({ parcel: { kind: 'daily_brief', workspace_id: 'ws-1' } });
-  assert.equal(h.window.location.href, '/workspaces/alpha');
+  assert.equal(h.window.location.href, '/workspaces/alpha?station=daily-brief');
+  assert.deepEqual(opened, [], 'the assistant drawer is not where a brief is read');
 });
 
 test('parcels: with only Farm runs the popover keeps its old title and hint', async () => {

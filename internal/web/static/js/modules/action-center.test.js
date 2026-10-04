@@ -96,6 +96,53 @@ test('assistantSourceHTML refuses client-forged external source URLs', () => {
   assert.ok(!html.includes('Open source'));
 });
 
+test('a Daily Brief ready item links to the Daily Brief station in My HQ', () => {
+  const { api } = loadActionCenter();
+  const html = api.rowHTML({
+    id: 'o-brief',
+    workspace_id: 'hq-uuid',
+    workspace_slug: 'my-hq',
+    workspace_name: 'My HQ',
+    title: 'Daily Brief ready — 2026-10-07',
+    summary: 'Your scheduled Daily Brief has been generated.',
+    source_url: '/workspaces/my-hq?station=daily-brief',
+    status: 'new'
+  });
+  assert.match(html, /<a href="\/workspaces\/my-hq\?station=daily-brief">Open Daily Brief<\/a>/);
+  // It is not an assistant suggestion, so it carries none of that framing.
+  assert.ok(!html.includes('Assistant suggestion'));
+  assert.ok(!html.includes('Open source'));
+});
+
+test('dailyBriefLinkHTML accepts exactly the station link and nothing broader', () => {
+  const { api } = loadActionCenter();
+  for (const source_url of [
+    '/workspaces/my-hq',
+    '/workspaces/my-hq?station=watchtower',
+    '/workspaces/my-hq?station=daily-brief&next=//evil.example',
+    '/workspaces/my-hq/assistant?station=daily-brief',
+    '/workspaces/my-hq?station=daily-brief#x',
+    '/workspaces/My HQ?station=daily-brief',
+    'https://evil.example/workspaces/my-hq?station=daily-brief',
+    '//evil.example/workspaces/my-hq?station=daily-brief',
+    'javascript:alert(1)',
+    ''
+  ]) {
+    assert.equal(api.dailyBriefLinkHTML({ source_url }), '', source_url);
+  }
+  // An assistant suggestion's own link is untouched by this rule.
+  const suggestion = api.rowHTML({
+    id: 'o-assistant',
+    workspace_id: 'ws-1',
+    source_type: 'assistant_suggestion',
+    source_url: '/workspaces/song-one/assistant',
+    title: 'Review the pattern',
+    status: 'new'
+  });
+  assert.match(suggestion, /href="\/workspaces\/song-one\/assistant"[^>]*>Open source</);
+  assert.ok(!suggestion.includes('Open Daily Brief'));
+});
+
 test("rowHTML shows a View in Backlog deep link once planned, using Group 5's panel=backlog contract (FR26, 29, 59)", () => {
   const { api } = loadActionCenter();
   const html = api.rowHTML({

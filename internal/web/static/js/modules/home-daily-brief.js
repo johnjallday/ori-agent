@@ -9,7 +9,6 @@
 // are genuinely undefined there, so the DOM-wiring IIFE below simply no-ops.
 
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
-import { openParcelByRef } from './parcel-open.js';
 
 // parseContent safely decodes a Revision's ContentJSON. Returns {} (never
 // throws) on missing/invalid JSON so a corrupt revision degrades to an
@@ -412,20 +411,73 @@ export function needsFreshBrief(revision, config, now) {
   return revision.local_date !== localDateInZone(config ? config.timezone : 'UTC', now);
 }
 
+// A stored local date (YYYY-MM-DD) as UTC midnight, so it is never shifted
+// through the viewer's time zone. NaN when it is not a date.
+function localDateUTC(localDate) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(localDate || ''));
+  return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : NaN;
+}
+
+// briefDateLabel names the day a brief is for: "Sat, Oct 3".
+export function briefDateLabel(localDate) {
+  const at = localDateUTC(localDate);
+  if (Number.isNaN(at)) return String(localDate || '');
+  return new Date(at).toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC'
+  });
+}
+
+// earlierBriefLabel is how an earlier brief is listed beside today's:
+// "Yesterday", "3 days ago", and a plain date from a week back.
+export function earlierBriefLabel(localDate, today) {
+  const days = Math.round((localDateUTC(today) - localDateUTC(localDate)) / 86400000);
+  if (days === 1) return 'Yesterday';
+  if (days >= 2 && days <= 6) return `${days} days ago`;
+  return briefDateLabel(localDate);
+}
+
+// earlierBriefs lists the briefs from before today that can still be opened,
+// newest first. Each day opens its current revision, or the newest readable
+// one; a day whose only attempts failed has nothing to open and is left out.
+export function earlierBriefs(history, today) {
+  return (Array.isArray(history) ? history : [])
+    .filter(
+      row =>
+        row &&
+        !Number.isNaN(localDateUTC(row.local_date)) &&
+        String(row.local_date) < String(today || '') &&
+        (row.current_revision_id || row.latest_revision_id)
+    )
+    .map(row => ({
+      date: String(row.local_date),
+      revisionId: String(row.current_revision_id || row.latest_revision_id),
+      label: earlierBriefLabel(row.local_date, today)
+    }))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
 // mountDailyBrief wires one Daily Brief surface into the elements it is given:
 // it loads the current brief, asks the server for today's when there is none,
-// and owns Refresh and Brief settings. The host supplies the elements, so the
-// controller does not care which page or panel it lives in.
+// lists earlier briefs, and owns Refresh and Brief settings. The host supplies
+// the elements, so the controller does not care which page or panel it lives
+// in.
 //
 //   els     — { root, title, meta, body, banner, refreshBtn, settingsBtn,
-//               openHQLink }; only root is required.
+//               openHQLink, history, historyWrap }; only root is required.
+//               history is where the earlier briefs are listed; historyWrap
+//               is hidden while there are none.
 //   options — hq: { workspaceId } when the host already knows the page is the
 //               designated Personal HQ (skips the designation read);
 //             gate(): resolves false to leave the surface untouched;
-//             metaText(revision, config): the line under the heading;
+//             metaText(revision, config, { earlier }): the line under the
+//               heading; earlier is true for a brief from a previous day;
 //             onSeen(revision, hqWorkspaceId): once per brief that is shown
 //               while the surface is on screen;
-//             onChange({ revision, config, generation }): after every render;
+//             onChange({ revision, config, generation }): whenever today's
+//               brief or its generation state changes;
 //             onUnavailable(): no valid Personal HQ.
 //
 // Returns { load, refresh, setOnScreen }, or null without a DOM.
@@ -433,10 +485,16 @@ export function mountDailyBrief(els, options = {}) {
   if (typeof document === 'undefined' || !els || !els.root) return null;
   const { title: titleEl, meta: metaEl, body: bodyEl, banner: bannerEl } = els;
   const { openHQLink, refreshBtn, settingsBtn } = els;
+  const { history: historyEl, historyWrap } = els;
 
   let currentConfig = null;
   let hqWorkspaceId = (options.hq && options.hq.workspaceId) || null;
   let polling = false;
+  // Today's brief as last read, kept apart from what is on screen: an earlier
+  // brief can be on screen (pinned) while today's is still being generated.
+  let today = { revision: null, claim: null, settled: false };
+  let earlier = [];
+  let pinned = null;
 
   // A brief counts as seen once it is rendered while its surface is actually
   // on screen, and only once per revision.
@@ -488,8 +546,8 @@ export function mountDailyBrief(els, options = {}) {
     }
   }
 
-  function metaText(revision, config) {
-    if (typeof options.metaText === 'function') return options.metaText(revision, config);
+  function metaText(revision, config, about = {}) {
+    if (typeof options.metaText === 'function') return options.metaText(revision, config, about);
     const relativeTimeFn =
       window.RelativeTime && typeof window.RelativeTime.formatRelativeTime === 'function'
         ? window.RelativeTime.formatRelativeTime
@@ -497,43 +555,146 @@ export function mountDailyBrief(els, options = {}) {
     return formatMeta(revision, config, relativeTimeFn);
   }
 
-  // settled is true once nothing is being generated, so an empty surface can
-  // say there is no brief instead of promising one.
+  function placeholder(text) {
+    if (bodyEl) bodyEl.innerHTML = `<div class="home-daily-brief-placeholder">${text}</div>`;
+  }
+
+  function paintContent(revision, config) {
+    if (!bodyEl) return;
+    bodyEl.innerHTML = renderContent(parseContent(revision), {
+      timeZone: (config && config.timezone) || undefined
+    });
+  }
+
+  // render records today's brief and paints it unless an earlier brief is on
+  // screen. settled is true once nothing is being generated, so an empty
+  // surface can say there is no brief instead of promising one.
   function render(revision, config, latestClaim, settled = false) {
     currentConfig = config;
-    renderedRevision = revision || null;
     lastClaim = latestClaim || null;
+    today = { revision: revision || null, claim: lastClaim, settled };
     const generation = String((latestClaim && latestClaim.status) || '');
     if (typeof options.onChange === 'function') {
       options.onChange({ revision: revision || null, config, generation });
     }
+    if (!pinned) paintToday();
+  }
+
+  function paintToday() {
+    const { revision, claim, settled } = today;
+    const config = currentConfig;
+    renderedRevision = revision;
     if (!revision) {
       if (titleEl) titleEl.textContent = 'Today';
       if (metaEl) metaEl.textContent = metaText(null, config);
-      renderBanner(computeBanner(null, latestClaim));
-      if (bodyEl) {
-        const failed = generation === 'failed';
-        const text = failed
+      renderBanner(computeBanner(null, claim));
+      placeholder(
+        claim && claim.status === 'failed'
           ? 'Your Daily Brief could not be generated.'
           : settled
             ? 'No Daily Brief yet.'
-            : 'Generating your Daily Brief…';
-        bodyEl.innerHTML = `<div class="home-daily-brief-placeholder">${text}</div>`;
-      }
+            : 'Generating your Daily Brief…'
+      );
       return;
     }
     if (titleEl)
       titleEl.textContent =
         revision.local_date === localDateInZone((config && config.timezone) || 'UTC')
           ? 'Today'
-          : revision.local_date;
+          : briefDateLabel(revision.local_date);
     if (metaEl) metaEl.textContent = metaText(revision, config);
-    renderBanner(computeBanner(revision, latestClaim));
-    if (bodyEl)
-      bodyEl.innerHTML = renderContent(parseContent(revision), {
-        timeZone: (config && config.timezone) || undefined
-      });
+    renderBanner(computeBanner(revision, claim));
+    paintContent(revision, config);
     markBriefSeen();
+  }
+
+  // ---- earlier briefs: listed beside today's, opened read-only ----
+
+  function historyButton(label, item) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'daily-brief-station__earlier-item';
+    button.textContent = label;
+    if (item) button.title = briefDateLabel(item.date);
+    const selected = item ? pinned === item : !pinned;
+    if (selected) button.setAttribute('aria-current', 'true');
+    button.addEventListener('click', () => {
+      if (item) void showEarlier(item);
+      else showToday();
+      // The list was rebuilt; keep the keyboard where the user just was.
+      historyEl.querySelector('[aria-current="true"]')?.focus();
+    });
+    return button;
+  }
+
+  function renderHistory() {
+    if (!historyEl) return;
+    if (historyWrap) historyWrap.hidden = earlier.length === 0;
+    const buttons = [
+      historyButton('Today', null),
+      ...earlier.map(item => historyButton(item.label, item))
+    ];
+    historyEl.replaceChildren(
+      ...buttons.map(button => {
+        const row = document.createElement('li');
+        row.append(button);
+        return row;
+      })
+    );
+  }
+
+  async function loadHistory() {
+    if (!historyEl) return;
+    let rows;
+    try {
+      rows = (await fetchJSON('/api/personal-hq/brief/history')).history;
+    } catch (_) {
+      return; // the list keeps what it had
+    }
+    const previous = pinned;
+    earlier = earlierBriefs(
+      rows,
+      localDateInZone((currentConfig && currentConfig.timezone) || 'UTC')
+    );
+    // The same day is still the one on screen after the list is re-read.
+    if (previous) pinned = earlier.find(item => item.date === previous.date) || previous;
+    renderHistory();
+  }
+
+  function showToday() {
+    pinned = null;
+    if (refreshBtn) refreshBtn.hidden = false;
+    renderHistory();
+    paintToday();
+  }
+
+  // An earlier brief is read-only: no Refresh, and nothing about it changes
+  // what today's brief is.
+  async function showEarlier(item) {
+    pinned = item;
+    if (refreshBtn) refreshBtn.hidden = true;
+    renderHistory();
+    if (titleEl) titleEl.textContent = briefDateLabel(item.date);
+    if (metaEl) metaEl.textContent = '';
+    renderBanner(null);
+    placeholder('Loading this brief…');
+    let revision = null;
+    try {
+      const data = await fetchJSON(
+        `/api/workspaces/${encodeURIComponent(hqWorkspaceId)}/daily-briefs/${encodeURIComponent(item.revisionId)}`
+      );
+      revision = data && data.revision;
+    } catch (_) {
+      revision = null;
+    }
+    if (pinned !== item) return; // another brief was chosen meanwhile
+    if (!revision) {
+      placeholder('This brief could not be opened.');
+      return;
+    }
+    if (metaEl) metaEl.textContent = metaText(revision, currentConfig, { earlier: true });
+    renderBanner(computeBanner(revision, null));
+    paintContent(revision, currentConfig);
   }
 
   // requested is true right after this surface asked for a generation: the
@@ -555,7 +716,7 @@ export function mountDailyBrief(els, options = {}) {
         const st = statusResp && statusResp.status;
         if (st !== 'pending' && st !== 'running') break;
         if (typeof options.onChange === 'function') {
-          options.onChange({ revision: renderedRevision, config: currentConfig, generation: st });
+          options.onChange({ revision: today.revision, config: currentConfig, generation: st });
         }
         await sleep(1500);
       }
@@ -568,6 +729,8 @@ export function mountDailyBrief(els, options = {}) {
         return;
       }
       render(revision, currentConfig, statusResp, true);
+      // A new day's brief turns yesterday's into an earlier one.
+      void loadHistory();
     } finally {
       polling = false;
     }
@@ -648,7 +811,7 @@ export function mountDailyBrief(els, options = {}) {
   async function reloadConfig() {
     try {
       const cfgResp = await fetchJSON('/api/personal-hq/brief/config');
-      render(renderedRevision, cfgResp.config, lastClaim, true);
+      render(today.revision, cfgResp.config, lastClaim, true);
     } catch (_) {
       // the surface keeps the config it had
     }
@@ -729,6 +892,9 @@ export function mountDailyBrief(els, options = {}) {
           : '#';
     }
     els.root.hidden = false;
+    // Every load starts on today's brief, whatever was on screen before.
+    pinned = null;
+    if (refreshBtn) refreshBtn.hidden = false;
 
     let config = null;
     try {
@@ -759,6 +925,7 @@ export function mountDailyBrief(els, options = {}) {
     const active = Boolean(generation) && ['pending', 'running'].includes(generation.status);
     const fresh = needsFreshBrief(revision, config);
     render(revision, config, generation, !fresh && !active);
+    void loadHistory();
 
     if (active) {
       await pollUntilSettled();
@@ -786,9 +953,9 @@ export function mountDailyBrief(els, options = {}) {
   const section = document.getElementById('homeDailyBrief');
   if (!section) return;
 
-  // Seeing the brief opens the map's Daily Brief parcels (task-run-show FR40).
-  // This section is rendered while its drawer is still closed, so "seen" waits
-  // until it is actually on screen.
+  // The drawer never reports a brief as seen. The Daily Brief panel in My HQ
+  // is where a brief is read: it clears the map's result cards and completes
+  // the first-brief mission (workspace-command.js).
   const brief = mountDailyBrief(
     {
       root: section,
@@ -805,15 +972,8 @@ export function mountDailyBrief(els, options = {}) {
         onboardingGateDecision(await loadOnboardingStatus()).allowWorkspaceHydration,
       onUnavailable: () => {
         section.hidden = true;
-      },
-      onSeen: (_revision, hqWorkspaceId) =>
-        void openParcelByRef({ kind: 'daily_brief', workspaceId: hqWorkspaceId })
+      }
     }
   );
-  if (typeof IntersectionObserver === 'function') {
-    new IntersectionObserver(entries => {
-      brief.setOnScreen(entries.some(entry => entry.isIntersecting));
-    }).observe(section);
-  }
   void brief.load();
 })();

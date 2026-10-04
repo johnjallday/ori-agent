@@ -168,6 +168,69 @@
   font-size: 12px;
 }
 
+/* ---- earlier briefs, beside today's ------------------------------------------------ */
+
+.daily-brief-station__earlier {
+  display: flex;
+  width: 196px;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 20px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--ori-line);
+  background: var(--ori-paper);
+}
+
+.daily-brief-station__earlier[hidden] {
+  display: none;
+}
+
+.daily-brief-station__earlier-title {
+  margin: 0 0 4px;
+  color: var(--brief-accent-text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.daily-brief-station__earlier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.daily-brief-station__earlier-item {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ori-ink);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.daily-brief-station__earlier-item:hover {
+  background: color-mix(in srgb, var(--ori-paper-deep) 55%, transparent);
+}
+
+.daily-brief-station__earlier-item[aria-current="true"] {
+  background: var(--ori-paper-deep);
+  font-weight: 700;
+}
+
 /* ---- the brief's own content, on paper ------------------------------------------- */
 
 .daily-brief-station .home-daily-brief-banner {
@@ -374,7 +437,24 @@
     padding: 0 12px;
   }
 
+  /* The list stacks under the brief, and the two scroll as one column. */
+  .daily-brief-station__layout {
+    flex-direction: column;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
   .daily-brief-station__main {
+    flex: none;
     padding: 16px;
+    overflow-y: visible;
+  }
+
+  .daily-brief-station__earlier {
+    width: auto;
+    padding: 16px;
+    overflow-y: visible;
+    border-top: 1px solid var(--ori-line);
+    border-left: 0;
   }
 }

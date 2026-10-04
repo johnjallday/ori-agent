@@ -227,3 +227,16 @@ test('briefPanelMeta says when the brief was generated and when the next is due'
     /^Next brief tomorrow at 8:00\sAM\.$/
   );
 });
+
+test('an earlier brief says only when it was generated, never when the next is due', () => {
+  const earlier = revision({ local_date: '2026-10-05', generated_at: '2026-10-05T08:02:00Z' });
+  assert.match(
+    briefPanelMeta({ revision: earlier, config: config(), earlier: true, now: NOW }),
+    /^Generated Oct 5 at 8:02\sAM\.$/
+  );
+  // Paused check-ins are today's news, not an old brief's.
+  assert.match(
+    briefPanelMeta({ revision: earlier, config: config(), earlier: true, paused: true, now: NOW }),
+    /^Generated Oct 5 at 8:02\sAM\.$/
+  );
+});

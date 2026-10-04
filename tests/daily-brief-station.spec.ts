@@ -18,6 +18,15 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 const STATION = '[data-cmd-hq-station="daily-brief"]';
 const PANEL = '.ws-cmd-modal-panel.is-daily-brief';
 
+// Two time zones that are one calendar day apart right now. The HQ is built in
+// the earlier one, so every brief until the history test is for that date;
+// moving the brief to the later zone then makes "today" a new day without
+// waiting for midnight. Dates only ever move forward, as they do for a user.
+const [ZONE_EARLIER, ZONE_LATER] =
+  new Date().getUTCHours() < 11 ? ['Pacific/Pago_Pago', 'UTC'] : ['UTC', 'Pacific/Kiritimati'];
+const dateIn = (timeZone: string) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
+
 async function buildHQ(request: APIRequestContext): Promise<string> {
   await request.post('/api/onboarding/skip');
   await request.post('/api/settings/workspace-root', { data: { workspace_root: '' } });
@@ -41,7 +50,7 @@ async function buildHQ(request: APIRequestContext): Promise<string> {
         request_id: 'brief-station-hq',
         if_version: hired.state_version,
         name: 'My HQ',
-        timezone: 'UTC'
+        timezone: ZONE_EARLIER
       }
     });
     expect(hq.ok(), await hq.text()).toBeTruthy();
@@ -180,6 +189,122 @@ test.describe.serial('Daily Brief station in My HQ', () => {
     await page.reload();
     await expect(page.locator('#workspaceCommandView')).toBeVisible();
     await expect(page.locator(PANEL)).toHaveCount(0);
+  });
+
+  test('earlier briefs are listed beside today’s and open read-only', async ({ page, request }) => {
+    // Two days of real briefs without waiting for midnight: the tests above
+    // left a brief for the earlier zone's date; the brief now moves to a zone
+    // that is already on the next day, and the panel prepares "today's".
+    const currentDate = async () =>
+      (await (await request.get('/api/personal-hq/brief/current')).json()).revision?.local_date;
+    expect(await currentDate()).toBe(dateIn(ZONE_EARLIER));
+    const saved = await request.put('/api/personal-hq/brief/config', {
+      data: {
+        timezone: ZONE_LATER,
+        schedule_time: '08:00',
+        schedule_days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+        schedule_enabled: true
+      }
+    });
+    expect(saved.ok(), await saved.text()).toBeTruthy();
+
+    // Opening the panel finds no brief for the new "today" and asks for one.
+    await openPanel(page, slug);
+    await expect.poll(currentDate, { timeout: 30000 }).toBe(dateIn(ZONE_LATER));
+    await briefShown(page);
+
+    const earlier = page.locator('[data-brief="history-wrap"]');
+    await expect(earlier).toBeVisible();
+    await expect(earlier.getByRole('heading', { name: 'Earlier briefs' })).toBeVisible();
+    const items = earlier.getByRole('button');
+    await expect(items).toHaveText(['Today', 'Yesterday']);
+    await expect(items.nth(0)).toHaveAttribute('aria-current', 'true');
+    await expect(page.locator('[data-brief="title"]')).toHaveText('Today');
+
+    // An earlier brief is read-only: its own date and generation time, no
+    // Refresh, and nothing about when the next one is due.
+    await items.nth(1).click();
+    await expect(page.locator('[data-brief="title"]')).not.toHaveText('Today');
+    await expect(page.locator('[data-brief="title"]')).toHaveText(/^\w{3}, \w{3} \d{1,2}$/);
+    await expect(page.locator('[data-brief="meta"]')).toHaveText(/^Generated .+\.$/);
+    await expect(page.locator('[data-brief="meta"]')).not.toContainText(/Next brief|scheduled/);
+    await expect(page.locator('[data-brief="body"]')).not.toContainText(/Loading|could not/);
+    await expect(page.locator('[data-brief="body"]')).not.toBeEmpty();
+    await expect(page.locator('[data-brief="refresh"]')).toBeHidden();
+    await expect(items.nth(1)).toHaveAttribute('aria-current', 'true');
+    await expect(items.nth(1)).toBeFocused();
+
+    // "Today" returns to today's brief, with Refresh back.
+    await items.nth(0).click();
+    await expect(page.locator('[data-brief="title"]')).toHaveText('Today');
+    await expect(page.locator('[data-brief="meta"]')).toContainText(/Next brief .+\./);
+    await expect(page.locator('[data-brief="refresh"]')).toBeVisible();
+    await expect(items.nth(0)).toHaveAttribute('aria-current', 'true');
+
+    // Narrow layout: the list stacks under the brief instead of beside it.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const main = await page.locator('.daily-brief-station__main').boundingBox();
+    const list = await earlier.boundingBox();
+    expect(main && list).toBeTruthy();
+    expect(list!.y).toBeGreaterThanOrEqual(main!.y + main!.height - 1);
+    expect(Math.abs(list!.x - main!.x)).toBeLessThan(2);
+  });
+
+  // The brief's panel is where it counts as read: the map's Daily Brief result
+  // card is opened by it, and its own action leads to the panel.
+  test('the panel showing a brief tells the server it was seen', async ({ page }) => {
+    const seen = page.waitForRequest(
+      request =>
+        request.method() === 'POST' && request.url().endsWith('/api/personal-hq/brief/seen')
+    );
+    const opened = page.waitForRequest(
+      request =>
+        request.method() === 'POST' &&
+        request.url().endsWith('/api/workspace-map/parcels/open-by-ref') &&
+        (request.postDataJSON()?.kind ?? '') === 'daily_brief'
+    );
+    await openPanel(page, slug);
+    await briefShown(page);
+    expect((await (await seen).response())?.status()).toBe(200);
+    await opened;
+  });
+
+  // The "Daily Brief ready" item is created by a scheduled generation, which a
+  // browser cannot trigger; the server's part is covered in Go
+  // (TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification).
+  // Here the list is answered with that item to prove the page renders its
+  // link and the link opens the panel.
+  test('a Daily Brief ready item in the Action Center opens the station', async ({ page }) => {
+    await page.route('**/api/action-center/opportunities*', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: [
+            {
+              id: 'brief-ready-1',
+              workspace_id: 'hq',
+              workspace_slug: slug,
+              workspace_name: 'My HQ',
+              title: 'Daily Brief ready — 2026-10-07',
+              summary: 'Your scheduled Daily Brief has been generated.',
+              priority: 'medium',
+              status: 'new',
+              recommended_action: 'Open My HQ to view your Daily Brief.',
+              source_url: `/workspaces/${slug}?station=daily-brief`,
+              updated_at: new Date().toISOString()
+            }
+          ]
+        })
+      })
+    );
+    await page.goto('/action-center');
+    const link = page.getByRole('link', { name: 'Open Daily Brief' });
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute('href', `/workspaces/${slug}?station=daily-brief`);
+    await link.click();
+    await expect(page.locator(PANEL)).toBeVisible();
+    await briefShown(page);
   });
 
   test('a workspace that is not the Personal HQ has no Daily Brief station', async ({

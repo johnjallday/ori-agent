@@ -3952,6 +3952,12 @@
     if (opts && opts.taskId) {
       query = '?panel=tasks&task=' + encodeURIComponent(opts.taskId);
     }
+    // ?station=<key> opens the page with that station's panel already open
+    // (the Daily Brief station in My HQ). The address is the one
+    // daily-brief-station.js builds for every other surface.
+    if (opts && opts.station) {
+      query = '?station=' + encodeURIComponent(opts.station);
+    }
     window.location.href = '/workspaces/' + encodeURIComponent(slug) + query;
   }
 
@@ -6434,16 +6440,13 @@
 
   /** Open one parcel into the result card (FR44, FR47). */
   // Where a card's primary action goes (FR44): a task's result, the Daily Brief
-  // in the assistant's Today panel, or the File Janitor's review.
+  // station in My HQ (where a brief is read), or the File Janitor's review.
   function followParcel(parcel) {
     if (!parcel || !parcel.workspace_id) return;
     if (parcel.kind === 'task' && parcel.ref_id) {
       openWorkspace(parcel.workspace_id, { taskResultId: parcel.ref_id });
     } else if (parcel.kind === 'daily_brief') {
-      var panel = window.PersonalAssistantPanel;
-      var shown =
-        panel && typeof panel.open === 'function' ? panel.open(null, { view: 'today' }) : false;
-      if (!shown) openWorkspace(parcel.workspace_id);
+      openWorkspace(parcel.workspace_id, { station: 'daily-brief' });
     } else if (parcel.kind === 'file_janitor') {
       openWorkspace(parcel.workspace_id, { panel: 'file-janitor' });
     }

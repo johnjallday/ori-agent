@@ -5935,7 +5935,7 @@ test('the page forwards its realtime events to the Operations map, not to a grou
   assert.deepEqual(group.layerCalls, [], "a group's scoped map follows the shared feed instead");
 });
 
-test('a card from this map opens a task result, the janitor review, or Home for a brief', () => {
+test('a card from this map opens a task result or the janitor review', () => {
   const { commandView } = showCommandView();
   const shown = [];
   commandView.page.showTaskResult = id => shown.push(id);
@@ -5950,10 +5950,102 @@ test('a card from this map opens a task result, the janitor review, or Home for 
     commandView.followMapParcel({ kind: 'file_janitor', ref_id: 'batch-1' });
     assert.deepEqual(shown, ['t1']);
     assert.deepEqual(opened, [{ tab: 'review' }]);
-    commandView.followMapParcel({ kind: 'daily_brief', ref_id: 'rev-1' });
-    assert.equal(globalThis.window.location.href, '/');
+    assert.equal(globalThis.window.location.href, '/workspaces/lab');
   } finally {
     globalThis.window = originalWindow;
+  }
+});
+
+test('a Daily Brief card on My HQ opens the station panel in place', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { location: { href: '/workspaces/my-hq' } };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const opened = [];
+    hq.openDailyBriefPanel = trigger => opened.push(trigger);
+    hq.followMapParcel({ kind: 'daily_brief', ref_id: 'rev-1' });
+    assert.deepEqual(opened, [null]);
+    assert.equal(globalThis.window.location.href, '/workspaces/my-hq', 'no navigation');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a Daily Brief card anywhere else goes to the station in the current HQ, or Home with none', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  try {
+    const { commandView } = showCommandView();
+    globalThis.window = { location: { href: '/workspaces/lab' } };
+    const asked = [];
+    globalThis.fetch = async url => {
+      asked.push(url);
+      return {
+        ok: true,
+        json: async () => ({ status: { valid: true, workspace: { folder_slug: 'my-hq' } } })
+      };
+    };
+    await commandView.goToDailyBriefStation();
+    assert.deepEqual(asked, ['/api/personal-hq/status']);
+    assert.equal(globalThis.window.location.href, '/workspaces/my-hq?station=daily-brief');
+
+    // No HQ, an unusable slug, or a failed read all fall back to Home.
+    for (const reply of [
+      async () => ({ ok: true, json: async () => ({ status: { valid: false } }) }),
+      async () => ({
+        ok: true,
+        json: async () => ({ status: { workspace: { folder_slug: '../x' } } })
+      }),
+      async () => ({ ok: false, status: 500 }),
+      async () => {
+        throw new Error('offline');
+      }
+    ]) {
+      globalThis.window = { location: { href: '/workspaces/lab' } };
+      globalThis.fetch = reply;
+      await commandView.goToDailyBriefStation();
+      assert.equal(globalThis.window.location.href, '/');
+    }
+
+    // The card's action on a page that is not the HQ takes that route.
+    let went = 0;
+    commandView.goToDailyBriefStation = async () => {
+      went += 1;
+    };
+    commandView.followMapParcel({ kind: 'daily_brief', ref_id: 'rev-1' });
+    assert.equal(went, 1);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the panel showing a brief clears the map cards and tells the server it was seen', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push([options.method || 'GET', url, options.body || '']);
+    return { ok: true, status: 200, json: async () => ({ opened: 1, seen: true }) };
+  };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    let reloaded = 0;
+    hq.mapActivity = {
+      loadParcels: () => {
+        reloaded += 1;
+      }
+    };
+    hq.noteDailyBriefSeen('hq-1');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.map(call => call.slice(0, 2)).sort(), [
+      ['POST', '/api/personal-hq/brief/seen'],
+      ['POST', '/api/workspace-map/parcels/open-by-ref']
+    ]);
+    const openBody = calls.find(call => call[1].endsWith('open-by-ref'))[2];
+    assert.deepEqual(JSON.parse(openBody), { kind: 'daily_brief', workspace_id: 'hq-1' });
+    assert.equal(reloaded, 1, 'the map reloads its cards once one was opened');
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

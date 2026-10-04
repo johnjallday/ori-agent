@@ -34,9 +34,11 @@ import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { flattenWorkspaceTree, buildMapMetadata } from './workspace-map-snapshot.js';
 import { OperationsMapActivity } from './operations-map-activity.js';
 import { mountDailyBrief } from './home-daily-brief.js';
+import { openParcelByRef } from './parcel-open.js';
 import {
   DAILY_BRIEF_STATION,
   briefPanelMeta,
+  dailyBriefStationLink,
   dailyBriefStationState,
   dailyBriefStatus,
   stationFromSearch
@@ -743,8 +745,8 @@ export class WorkspaceCommandView {
   }
 
   // Where a result card's primary action goes from this page: the task's
-  // result, this workspace's File Janitor review, or Home for the Daily Brief,
-  // which lives in the assistant's Today panel there.
+  // result, this workspace's File Janitor review, or the Daily Brief station,
+  // which is where a brief is read.
   followMapParcel(parcel) {
     if (!parcel) return;
     const page = this.page || {};
@@ -758,7 +760,30 @@ export class WorkspaceCommandView {
       if (janitor && typeof janitor.open === 'function') janitor.open({ tab: 'review' });
       return;
     }
-    if (parcel.kind === 'daily_brief') window.location.href = '/';
+    if (parcel.kind === 'daily_brief') {
+      // On My HQ the station is right here; anywhere else, go to it.
+      if (this.isPersonalHQ()) this.openDailyBriefPanel(null);
+      else void this.goToDailyBriefStation();
+    }
+  }
+
+  // Navigates to the Daily Brief station of the Personal HQ this installation
+  // has now. A brief's card can outlive its workspace being the HQ, so the
+  // destination is read rather than assumed; with no HQ it is Home.
+  async goToDailyBriefStation() {
+    let target = '/';
+    try {
+      const response = await fetch('/api/personal-hq/status', {
+        headers: { Accept: 'application/json' }
+      });
+      if (response && response.ok) {
+        const status = (await response.json())?.status;
+        target = dailyBriefStationLink(status?.workspace?.folder_slug) || '/';
+      }
+    } catch {
+      /* Home is the fallback */
+    }
+    window.location.href = target;
   }
 
   /** The page forwards every realtime event it receives (FR30: no second stream). */
@@ -7109,7 +7134,7 @@ export class WorkspaceCommandView {
       '<button type="button" class="daily-brief-station__icon" data-cmd-modal-action="close" aria-label="Close Daily Brief">' +
       '<i class="bi bi-x-lg" aria-hidden="true"></i></button>' +
       '</header>' +
-      '<div class="daily-brief-station__layout">' +
+      '<div class="daily-brief-station__layout" data-brief-scroll>' +
       '<div class="daily-brief-station__main" data-brief-scroll>' +
       '<div class="daily-brief-station__heading">' +
       '<h3 class="daily-brief-station__title" data-brief="title">Today</h3>' +
@@ -7120,11 +7145,21 @@ export class WorkspaceCommandView {
       '<div class="home-daily-brief-placeholder">Loading your Daily Brief…</div>' +
       '</div>' +
       '</div>' +
+      '<aside class="daily-brief-station__earlier" data-brief="history-wrap" data-brief-scroll aria-labelledby="dailyBriefEarlierTitle" hidden>' +
+      '<h3 class="daily-brief-station__earlier-title" id="dailyBriefEarlierTitle">Earlier briefs</h3>' +
+      '<ul class="daily-brief-station__earlier-list" data-brief="history"></ul>' +
+      '</aside>' +
       '</div>';
     const part = name => root.querySelector('[data-brief="' + name + '"]');
-    const metaText = (revision, config) =>
-      briefPanelMeta({ revision, config, paused: this.dailyBriefStationData().paused });
+    const metaText = (revision, config, about = {}) =>
+      briefPanelMeta({
+        revision,
+        config,
+        earlier: about.earlier === true,
+        paused: this.dailyBriefStationData().paused
+      });
     let shown = { revision: null, config: null };
+    let onToday = true;
     const brief = mountDailyBrief(
       {
         root,
@@ -7133,27 +7168,49 @@ export class WorkspaceCommandView {
         body: part('body'),
         banner: part('banner'),
         refreshBtn: part('refresh'),
-        settingsBtn: part('settings')
+        settingsBtn: part('settings'),
+        history: part('history'),
+        historyWrap: part('history-wrap')
       },
       {
         hq: { workspaceId: this.watchtowerWorkspaceID() },
-        metaText,
+        metaText: (revision, config, about = {}) => {
+          onToday = about.earlier !== true;
+          return metaText(revision, config, about);
+        },
         onChange: change => {
           shown = change;
           this.noteDailyBriefPanelChange(change);
-        }
+        },
+        onSeen: (_revision, hqWorkspaceId) => this.noteDailyBriefSeen(hqWorkspaceId)
       }
     );
     if (!brief) return null;
     this._dailyBriefPanel = {
       root,
       brief,
-      // "Check-ins paused" can arrive after the brief has rendered.
+      // "Check-ins paused" can arrive after the brief has rendered. An earlier
+      // brief's line says nothing about check-ins, so it is left alone.
       repaintMeta: () => {
-        part('meta').textContent = metaText(shown.revision, shown.config);
+        if (onToday) part('meta').textContent = metaText(shown.revision, shown.config);
       }
     };
     return this._dailyBriefPanel;
+  }
+
+  // The panel showing a brief is what counts as the user having seen it: the
+  // map's Daily Brief result cards are cleared and the server is told, which
+  // completes "Read your first Daily Brief". Both are fire-and-forget; reading
+  // the brief never waits on them.
+  noteDailyBriefSeen(hqWorkspaceId) {
+    Promise.resolve(openParcelByRef({ kind: 'daily_brief', workspaceId: hqWorkspaceId }))
+      .then(opened => {
+        // The card this page was showing for the brief is now opened too.
+        if (opened && this.mapActivity) void this.mapActivity.loadParcels();
+      })
+      .catch(() => {});
+    if (typeof fetch !== 'function') return;
+    Promise.resolve(fetch('/api/personal-hq/brief/seen', { method: 'POST' })).catch(() => {});
   }
 
   // Attaches the panel into the stat modal; a repaint while it is already
@@ -7177,11 +7234,12 @@ export class WorkspaceCommandView {
     const view = this._dailyBriefPanel;
     if (!view || this.statModalSection !== DAILY_BRIEF_STATION) return;
     if (typeof document === 'undefined') return;
-    const scroller = view.root.querySelector('[data-brief-scroll]');
     const focused = document.activeElement;
     this._dailyBriefPanelView = {
-      scroller,
-      top: scroller ? scroller.scrollTop : 0,
+      scrolled: Array.from(view.root.querySelectorAll('[data-brief-scroll]')).map(el => [
+        el,
+        el.scrollTop
+      ]),
       focused: focused && view.root.contains(focused) ? focused : null
     };
   }
@@ -7190,7 +7248,9 @@ export class WorkspaceCommandView {
     const kept = this._dailyBriefPanelView;
     this._dailyBriefPanelView = null;
     if (!kept) return;
-    if (kept.scroller) kept.scroller.scrollTop = kept.top;
+    kept.scrolled.forEach(([el, top]) => {
+      el.scrollTop = top;
+    });
     if (kept.focused && kept.focused.isConnected && typeof kept.focused.focus === 'function') {
       kept.focused.focus({ preventScroll: true });
     }

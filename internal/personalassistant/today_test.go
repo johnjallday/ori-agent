@@ -810,73 +810,26 @@ func todayBriefRevision(now time.Time) *dailybrief.Revision {
 	return &dailybrief.Revision{ID: "brief-1", WorkspaceID: "hq-1", UserID: "local", ContentJSON: string(encoded), GeneratedAt: now}
 }
 
-// Mission 04 completes the first time Today is served with a brief.
-func TestTodayService_OnBriefSeenFiresOnceWhenABriefIsServed(t *testing.T) {
+// Today still carries the brief it was served, active or paused: the drawer's
+// lists are built from its items. What it no longer does is report the brief
+// as seen; the Daily Brief panel in My HQ does that (dailybriefhttp.MarkSeen).
+func TestTodayService_ServesTheBriefRevisionWhetherActiveOrPaused(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	store, _ := newTodayWorkspace(t, now)
 
-	var seen []string
-	service := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()},
-		stubTodayBrief{revision: todayBriefRevision(now)}, store, stubTodayFollowUps{})
-	service.now = func() time.Time { return now }
-	service.SetOnBriefSeen(func(userID string) { seen = append(seen, userID) })
-
-	for range 3 {
-		if _, err := service.Get(context.Background(), "local"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(seen) != 1 || seen[0] != "local" {
-		t.Fatalf("brief seen fired %v, want once for local", seen)
-	}
-
-	// Paused still shows the brief, so it counts too.
 	paused := baseTodayProjection()
 	paused.State = APIStatePaused
-	pausedService := NewTodayService(stubTodayRelationship{projection: paused},
-		stubTodayBrief{revision: todayBriefRevision(now)}, store, stubTodayFollowUps{})
-	pausedService.now = func() time.Time { return now }
-	var pausedSeen int
-	pausedService.SetOnBriefSeen(func(string) { pausedSeen++ })
-	if _, err := pausedService.Get(context.Background(), "local"); err != nil {
-		t.Fatal(err)
-	}
-	if pausedSeen != 1 {
-		t.Fatalf("paused relationship brief seen = %d, want 1", pausedSeen)
-	}
-}
-
-func TestTodayService_OnBriefSeenNeverFiresWithoutAServedBrief(t *testing.T) {
-	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	store, _ := newTodayWorkspace(t, now)
-	var fires int
-	hook := func(string) { fires++ }
-
-	noBrief := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()},
-		stubTodayBrief{err: dailybrief.ErrRevisionNotFound}, store, stubTodayFollowUps{})
-	noBrief.now = func() time.Time { return now }
-	noBrief.SetOnBriefSeen(hook)
-	if _, err := noBrief.Get(context.Background(), "local"); err != nil {
-		t.Fatal(err)
-	}
-
-	needsHQ := &Projection{State: APIStateNeedsHQ, Availability: Availability{Model: availableSource()}}
-	noHQ := NewTodayService(stubTodayRelationship{projection: needsHQ},
-		stubTodayBrief{revision: todayBriefRevision(now)}, store, stubTodayFollowUps{})
-	noHQ.SetOnBriefSeen(hook)
-	if _, err := noHQ.Get(context.Background(), "local"); err != nil {
-		t.Fatal(err)
-	}
-	if fires != 0 {
-		t.Fatalf("brief seen fired %d times without a served brief", fires)
-	}
-
-	// Unset, a served brief is simply not observed.
-	unset := NewTodayService(stubTodayRelationship{projection: baseTodayProjection()},
-		stubTodayBrief{revision: todayBriefRevision(now)}, store, stubTodayFollowUps{})
-	unset.now = func() time.Time { return now }
-	if _, err := unset.Get(context.Background(), "local"); err != nil {
-		t.Fatal(err)
+	for name, projection := range map[string]*Projection{"active": baseTodayProjection(), "paused": paused} {
+		service := NewTodayService(stubTodayRelationship{projection: projection},
+			stubTodayBrief{revision: todayBriefRevision(now)}, store, stubTodayFollowUps{})
+		service.now = func() time.Time { return now }
+		got, err := service.Get(context.Background(), "local")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.Brief.RevisionID != "brief-1" {
+			t.Fatalf("%s: Today served brief revision %q, want brief-1", name, got.Brief.RevisionID)
+		}
 	}
 }
 

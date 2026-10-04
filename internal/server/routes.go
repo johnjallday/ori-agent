@@ -1337,6 +1337,7 @@ func registerDailyBriefRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/personal-hq/brief/status", s.Handlers.DailyBrief.GetStatus)
 		mux.HandleFunc("POST /api/personal-hq/brief/open", s.Handlers.DailyBrief.RequestFirstOpen)
 		mux.HandleFunc("POST /api/personal-hq/brief/refresh", s.Handlers.DailyBrief.RequestRefresh)
+		mux.HandleFunc("POST /api/personal-hq/brief/seen", s.Handlers.DailyBrief.MarkSeen)
 		// A workspace's own brief history, readable when it is not the HQ
 		// here (e.g. imported with its history as a workspace only).
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/daily-briefs", s.Handlers.DailyBrief.GetWorkspaceHistory)

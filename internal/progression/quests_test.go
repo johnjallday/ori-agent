@@ -101,7 +101,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 		{MeetAssistantQuestID, "Meet your assistant", MeetAssistantActionURL, "Start", false, ""},
 		{ShowFolderQuestID, "Show your assistant a folder", ShowFolderActionURL, "Start", true, MeetAssistantQuestID},
 		{ConnectSourceQuestID, "Plan my first day", PlanFirstDayActionURL, "Start", true, MeetAssistantQuestID},
-		{FirstBriefQuestID, "Read your first Daily Brief", "/", "Open Today", true, MeetAssistantQuestID},
+		{FirstBriefQuestID, "Read your first Daily Brief", FirstBriefFallbackURL, "Open Daily Brief", true, MeetAssistantQuestID},
 	}
 	for i, want := range wantMissions {
 		q := graph.Quests[i]
@@ -511,6 +511,16 @@ func TestResolveFirstBrief_AsksForAModelOnlyWhenNoneIsConfigured(t *testing.T) {
 		t.Fatalf("without a model = %+v", got)
 	}
 
+	// With a Personal HQ the button opens the Daily Brief station; a blank link
+	// from the server keeps the fallback.
+	station := "/workspaces/my-hq?station=daily-brief"
+	if got := resolveFirstBrief(MissionContext{ModelConfigured: true, DailyBriefURL: station}); got != (MissionPresentation{ActionURL: station}) {
+		t.Fatalf("with an HQ = %+v", got)
+	}
+	if got := resolveFirstBrief(MissionContext{ModelConfigured: true, DailyBriefURL: "  "}); got.ActionURL != "" {
+		t.Fatalf("a blank station link was kept: %+v", got)
+	}
+
 	// Through the engine: the hint follows the why line while Mission 05 is
 	// open, and disappears once it is done, where the advice no longer applies.
 	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()),
@@ -527,9 +537,22 @@ func TestResolveFirstBrief_AsksForAModelOnlyWhenNoneIsConfigured(t *testing.T) {
 	if why := brief().Why; why != firstBriefWhy+" Add a model in Settings to generate one." {
 		t.Fatalf("open Mission 05 why = %q", why)
 	}
+	// No HQ: the button reads Open Daily Brief and falls back to the drawer.
+	if card := brief(); card.ActionLabel != "Open Daily Brief" || card.ActionURL != FirstBriefFallbackURL {
+		t.Fatalf("Mission 05 with no HQ: label=%q url=%q", card.ActionLabel, card.ActionURL)
+	}
 	e.Complete(FirstBriefQuestID)
 	if why := brief().Why; why != firstBriefWhy {
 		t.Fatalf("completed Mission 05 still advises: %q", why)
+	}
+
+	// With an HQ the same card opens the station.
+	withHQ := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()),
+		WithMissionContext(func() MissionContext { return MissionContext{DailyBriefURL: station} }))
+	for _, m := range withHQ.Status().Missions {
+		if m.ID == FirstBriefQuestID && (m.ActionLabel != "Open Daily Brief" || m.ActionURL != station) {
+			t.Fatalf("Mission 05 with an HQ: label=%q url=%q", m.ActionLabel, m.ActionURL)
+		}
 	}
 }
 

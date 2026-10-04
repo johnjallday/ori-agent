@@ -211,6 +211,42 @@ test('Mission 03, plan branch: the first-day plan completes it', async ({ page, 
   await expect
     .poll(() => missionStatus(request, 'pa-connect-source'), { timeout: 15000 })
     .toBe('completed');
+  expect(errors).toEqual([]);
+});
+
+// The brief is read in the Daily Brief station in My HQ. Opening Home, which
+// loads the assistant's Today, does not count as reading it; the station's
+// panel showing the brief does.
+test('Mission 04: Open Daily Brief goes to the station, and the panel showing a brief completes it', async ({
+  page,
+  request
+}) => {
+  test.skip(
+    (await missionStatus(request, 'pa-connect-source')) !== 'completed',
+    'needs Mission 03 completed by the earlier test'
+  );
+  const errors = watchErrors(page);
+
+  // Home has been opened several times by now and Today has served the brief.
+  const card = await openQuests(page);
+  await expect(card.locator('[data-role="first-mission-title"]')).toHaveText(
+    'Read your first Daily Brief'
+  );
+  expect(await missionStatus(request, 'pa-first-brief')).not.toBe('completed');
+
+  const open = card.locator('[data-role="first-mission-action"]');
+  await expect(open).toContainText('Open Daily Brief');
+  await expect(open).toHaveAttribute('href', /^\/workspaces\/[a-z0-9-]+\?station=daily-brief$/);
+  await open.click();
+
+  await expect(page.locator('.ws-cmd-modal-panel.is-daily-brief')).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('[data-brief="body"]')).not.toContainText(/Loading|Generating/, {
+    timeout: 30000
+  });
+  await expect
+    .poll(() => missionStatus(request, 'pa-first-brief'), { timeout: 15000 })
+    .toBe('completed');
+
   await page.goto('/');
   await page.locator('#cockpitQuestsToggle').click();
   await expect(page.locator('#questLog')).toContainText('Missions complete');

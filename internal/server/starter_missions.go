@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/hostquests"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -77,7 +78,36 @@ func (b *ServerBuilder) starterMissionContext() progression.MissionContext {
 		mission.EmailQuestStarted = b.emailSetupStarted()
 	}
 
+	// Read your first Daily Brief opens the station where the brief is read.
+	mission.DailyBriefURL = b.dailyBriefStationURL(ctx)
+
 	return mission
+}
+
+// dailyBriefStationURL is the link that opens the Daily Brief station's panel
+// in the local user's Personal HQ, or "" when no valid HQ is designated.
+func (b *ServerBuilder) dailyBriefStationURL(ctx context.Context) string {
+	if b == nil || b.personalHQService == nil {
+		return ""
+	}
+	status, err := b.personalHQService.Status(ctx, userprofile.LocalUserID)
+	if err != nil || !status.Valid || status.Workspace == nil {
+		return ""
+	}
+	return dailybrief.StationURL(status.Workspace.FolderSlug)
+}
+
+// briefStationURLFor is the Daily Brief station link for the workspace a brief
+// belongs to, or "" when that workspace's browser route cannot be read.
+func (b *ServerBuilder) briefStationURLFor(workspaceID string) string {
+	if b == nil || b.sessionStore == nil {
+		return ""
+	}
+	ws, err := b.sessionStore.GetWorkspace(context.Background(), strings.TrimSpace(workspaceID))
+	if err != nil || ws == nil {
+		return ""
+	}
+	return dailybrief.StationURL(ws.FolderSlug)
 }
 
 // emailSetupStatus reads the guided Email Ops setup without creating it.

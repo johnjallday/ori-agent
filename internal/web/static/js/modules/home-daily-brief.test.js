@@ -11,8 +11,67 @@ import {
   isQuietDay,
   renderContent,
   formatMeetingTime,
-  meetingPrepText
+  meetingPrepText,
+  briefDateLabel,
+  earlierBriefLabel,
+  earlierBriefs,
+  needsFreshBrief
 } from './home-daily-brief.js';
+
+test('needsFreshBrief is true with no brief or only an earlier day’s, in the brief’s own zone', () => {
+  const now = new Date('2026-10-07T03:00:00Z');
+  assert.equal(needsFreshBrief(null, { timezone: 'UTC' }, now), true);
+  assert.equal(needsFreshBrief({ local_date: '2026-10-07' }, { timezone: 'UTC' }, now), false);
+  assert.equal(needsFreshBrief({ local_date: '2026-10-06' }, { timezone: 'UTC' }, now), true);
+  // 03:00 UTC on the 7th is still the 6th in New York.
+  const eastern = { timezone: 'America/New_York' };
+  assert.equal(needsFreshBrief({ local_date: '2026-10-06' }, eastern, now), false);
+  assert.equal(needsFreshBrief({ local_date: '2026-10-07' }, eastern, now), true);
+  // No config falls back to UTC rather than throwing.
+  assert.equal(needsFreshBrief({ local_date: '2026-10-07' }, null, now), false);
+});
+
+test('briefDateLabel names a stored local date without shifting it through a time zone', () => {
+  assert.equal(briefDateLabel('2026-10-03'), 'Sat, Oct 3');
+  assert.equal(briefDateLabel('2026-01-01'), 'Thu, Jan 1');
+  assert.equal(briefDateLabel('not-a-date'), 'not-a-date');
+  assert.equal(briefDateLabel(''), '');
+});
+
+test('earlierBriefLabel says Yesterday, then days ago, then the date from a week back', () => {
+  const today = '2026-10-07';
+  assert.equal(earlierBriefLabel('2026-10-06', today), 'Yesterday');
+  assert.equal(earlierBriefLabel('2026-10-05', today), '2 days ago');
+  assert.equal(earlierBriefLabel('2026-10-01', today), '6 days ago');
+  assert.equal(earlierBriefLabel('2026-09-30', today), 'Wed, Sep 30');
+  assert.equal(earlierBriefLabel('2026-08-01', today), 'Sat, Aug 1');
+});
+
+test('earlierBriefs lists openable briefs from before today, newest first', () => {
+  const today = '2026-10-07';
+  const history = [
+    {
+      local_date: '2026-10-05',
+      current_revision_id: '',
+      latest_revision_id: 'rev-5',
+      status: 'partial'
+    },
+    { local_date: '2026-10-07', current_revision_id: 'rev-7', status: 'succeeded' },
+    { local_date: '2026-10-06', current_revision_id: 'rev-6', latest_revision_id: 'rev-6b' },
+    // Every attempt that day failed: nothing to open.
+    { local_date: '2026-10-04', current_revision_id: '', latest_revision_id: '', status: 'failed' },
+    { local_date: 'garbage', current_revision_id: 'rev-x' },
+    null
+  ];
+  assert.deepEqual(earlierBriefs(history, today), [
+    { date: '2026-10-06', revisionId: 'rev-6', label: 'Yesterday' },
+    { date: '2026-10-05', revisionId: 'rev-5', label: '2 days ago' }
+  ]);
+  // Today's own brief is never listed as an earlier one.
+  assert.deepEqual(earlierBriefs([history[1]], today), []);
+  assert.deepEqual(earlierBriefs(null, today), []);
+  assert.deepEqual(earlierBriefs(undefined, today), []);
+});
 
 test('Daily Brief has one stable Today mount and no Updates copy', () => {
   const todayTemplate = readFileSync(
