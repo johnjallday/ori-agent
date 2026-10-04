@@ -168,6 +168,11 @@ function closeReviews() {
   window.PersonalAssistantDrafts?.close?.();
 }
 
+/** Leaving a conversation also stops working on the draft saved from it. */
+function leaveSavedDraft() {
+  window.PersonalAssistantDrafts?.clearWorking?.();
+}
+
 /** Clears the tab's thread, its rendered log, and any pending confirmation. */
 function startNew() {
   if (window.OriAskRouting?.resetConversation && !window.OriAskRouting.resetConversation()) {
@@ -175,6 +180,7 @@ function startNew() {
     return false;
   }
   closeReviews();
+  leaveSavedDraft();
   closeList();
   setCurrent('', '');
   setNote('New conversation. Nothing is saved until you send a message.');
@@ -224,6 +230,13 @@ async function resume(id, options = {}) {
     for (const message of result.body.messages || []) {
       const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
       attachMessage(row, conversation.id, message.id);
+    }
+    // Which replies were saved, read from Personal HQ's Tickets. When that
+    // read failed, nothing is labelled rather than labelled "not saved".
+    if (Array.isArray(result.body.saved)) {
+      window.PersonalAssistantDrafts?.applySaved?.(result.body.saved);
+    } else {
+      leaveSavedDraft();
     }
     closeList();
     setCurrent(conversation.id, conversation.title);
@@ -341,6 +354,7 @@ function applyReply(data, rows = {}) {
   if (reply.stored) {
     attachMessage(rows.userRow, nextId, reply.user_message_id);
     attachMessage(rows.assistantRow, nextId, reply.assistant_message_id);
+    if (reply.assistant_message_id) window.PersonalAssistantDrafts?.replyAdded?.();
   }
   setCurrent(nextId, reply.title);
   const notice = conversationNotice(data, state.assistantName);

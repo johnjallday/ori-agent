@@ -10307,6 +10307,14 @@
       }
       if (conversationRef) {
         payload.conversation = conversationRef;
+        // The saved draft this conversation is working on, by Ticket ID, so
+        // the turn reads its current text. A turn never writes it.
+        var drafts = window.PersonalAssistantDrafts;
+        var draftRef =
+          drafts && typeof drafts.workingRef === 'function' ? drafts.workingRef() : null;
+        if (draftRef && !confirmedAction) {
+          payload.draft = draftRef;
+        }
       }
 
       var data = await API.post('/api/home-assistant/ask', payload);
@@ -10318,6 +10326,14 @@
         conversationRef && conversations && typeof conversations.applyReply === 'function'
           ? conversations.applyReply(data, { userRow: userRow, assistantRow: assistantRow })
           : null;
+      if (
+        data &&
+        data.draft_context &&
+        window.PersonalAssistantDrafts &&
+        typeof window.PersonalAssistantDrafts.applyContext === 'function'
+      ) {
+        window.PersonalAssistantDrafts.applyContext(data.draft_context);
+      }
       // A refused or unanswered turn was not sent: put the text back so it can
       // be sent again instead of retyped.
       if (conversationResult && conversationResult.restoreInput && !confirmedAction) {

@@ -586,6 +586,31 @@ test('the reverse lookup returns navigable summaries, not mutable tickets', asyn
   assert.equal('legalTransitions' in summaries[0], false);
 });
 
+test('only a draft saved from an assistant conversation links back to it', () => {
+  const { api } = loadTickets();
+  const draft = api.normalizeTicket(
+    serverTicket({
+      id: 'tkt 5/a',
+      source: 'assistant',
+      source_id: 'assistant-draft:conv-1:msg-4:op-1:0123456789abcdef0123456789abcdef'
+    })
+  );
+  // The link carries the Ticket's stable ID and nothing from its content.
+  assert.equal(api.assistantDraftResumeHref(draft), '/?assistant_draft=tkt%205%2Fa');
+
+  // Other assistant captures, and other sources, get no link.
+  const handoff = api.normalizeTicket(
+    serverTicket({ source: 'assistant', source_id: 'assistant-handoff-abc' })
+  );
+  const manual = api.normalizeTicket(
+    serverTicket({ source: 'manual', source_id: 'assistant-draft:c:m:o:d' })
+  );
+  assert.equal(api.assistantDraftResumeHref(handoff), '');
+  assert.equal(api.assistantDraftResumeHref(manual), '');
+  assert.equal(api.assistantDraftResumeHref(api.normalizeTicket(serverTicket())), '');
+  assert.equal(api.assistantDraftResumeHref(null), '');
+});
+
 test('state metadata never relies on color alone', () => {
   const { api } = loadTickets();
   // Every state carries a distinct human-readable label; `tone` is a

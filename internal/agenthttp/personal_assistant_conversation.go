@@ -408,7 +408,16 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 			ID: message.ID, Role: role, Content: message.Content, CreatedAt: message.CreatedAt, Imported: message.Imported,
 		})
 	}
-	orihttp.WriteJSON(w, map[string]any{
+	body := map[string]any{
 		"conversation": conversationSummary(record), "messages": views, "truncated": truncated,
-	})
+	}
+	// Drafts saved from this conversation, read from the HQ's Tickets. A read
+	// failure is stated; it is not shown as "nothing was saved".
+	saved, err := h.savedDraftsForConversation(scope, record.ID, messages)
+	if err != nil {
+		body["saved_unavailable"] = true
+	} else {
+		body["saved"] = saved
+	}
+	orihttp.WriteJSON(w, body)
 }

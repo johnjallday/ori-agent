@@ -170,6 +170,16 @@
             aria-label="Earlier conversations" hidden></ul>
         <p id="personalAssistantConversationNote" class="personal-assistant-conversation__note"
            role="status" aria-live="polite"></p>
+        <!-- The saved draft this conversation is working on, read from Personal
+             HQ. Replies are not part of it until Update saved draft is chosen. -->
+        <div id="personalAssistantSavedDraft" class="personal-assistant-conversation__saved" hidden>
+          <p id="personalAssistantSavedDraftText" class="personal-assistant-conversation__note"></p>
+          <div class="personal-assistant-conversation__actions">
+            <a id="personalAssistantSavedDraftOpen" class="personal-assistant-conversation__button" href="#" hidden>Open in Personal HQ</a>
+            <button type="button" id="personalAssistantSavedDraftStart"
+                    class="personal-assistant-conversation__button" hidden>Start a new conversation about it</button>
+          </div>
+        </div>
       </div>
       <!-- Save to HQ backlog: the review of one reply before it is saved. It is
            its own form, so Enter here can never send the composer above. Opening
@@ -179,11 +189,17 @@
         <h3 id="personalAssistantDraftReviewHeading" class="personal-assistant-review__heading">Save to HQ backlog</h3>
         <p id="personalAssistantDraftTarget" class="personal-assistant-review__target"></p>
         <div data-draft-view="edit" class="personal-assistant-review__fields">
+          <!-- Update saved draft only: the text that is saved now, to compare
+               with the proposal below. -->
+          <details id="personalAssistantDraftCurrent" class="personal-assistant-review__current" hidden>
+            <summary id="personalAssistantDraftCurrentLabel">Currently saved</summary>
+            <pre id="personalAssistantDraftCurrentText" class="personal-assistant-review__current-text"></pre>
+          </details>
           <label class="personal-assistant-review__label" for="personalAssistantDraftTitle">Title</label>
           <input type="text" id="personalAssistantDraftTitle" class="personal-assistant-review__input"
                  autocomplete="off" aria-describedby="personalAssistantDraftTitleHint">
           <p id="personalAssistantDraftTitleHint" class="personal-assistant-review__hint"></p>
-          <label class="personal-assistant-review__label" for="personalAssistantDraftBody">Draft</label>
+          <label id="personalAssistantDraftBodyLabel" class="personal-assistant-review__label" for="personalAssistantDraftBody">Draft</label>
           <textarea id="personalAssistantDraftBody" class="personal-assistant-review__input personal-assistant-review__body"
                     rows="7" aria-describedby="personalAssistantDraftBodyHint"></textarea>
           <p id="personalAssistantDraftBodyHint" class="personal-assistant-review__hint"></p>

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -197,6 +198,98 @@ func TestDraftSave_ProductionWiring(t *testing.T) {
 	// No personal memory, no extra workspace, no agent came from saving a draft.
 	if status, knowledge := f.call(t, http.MethodGet, "/api/personal-assistant/knowledge", nil); status == http.StatusOK && strings.Contains(mustJSON(t, knowledge), "생일") {
 		t.Fatalf("saving a draft wrote memory: %v", knowledge)
+	}
+}
+
+// Resume and update on the production wiring: the conversation read lists the
+// saved item, the update review writes nothing, the update changes the same
+// canonical Ticket, an outside edit makes the next update stale, and deleting
+// the chat leaves the Ticket in place without recreating the chat.
+func TestDraftResumeAndUpdate_ProductionWiring(t *testing.T) {
+	f := newDraftServerFixture(t)
+	ctx := context.Background()
+	const first = "Hi Jun, thank you for watering my plants while I was away."
+	const revised = "Jun — thank you for watering my plants! 🌱"
+	conversationID, messageID := f.seedConversation(t, first)
+
+	_, reviewed := f.call(t, http.MethodPost, "/api/home-assistant/drafts/review", map[string]string{"conversation_id": conversationID, "message_id": messageID})
+	review := reviewed["review"].(map[string]any)
+	status, saved := f.call(t, http.MethodPost, "/api/home-assistant/drafts/save", map[string]any{
+		"operation_id": review["operation_id"], "title": "Thank-you note for Jun", "body": review["body"],
+		"target_workspace_id": f.hqID, "source": review["source"],
+	})
+	if status != http.StatusOK {
+		t.Fatalf("save: %d %v", status, saved)
+	}
+	ticketID := saved["receipt"].(map[string]any)["ticket_id"].(string)
+	draftPath := "/api/home-assistant/drafts/" + ticketID
+
+	// A later reply in the same conversation is not part of the saved item.
+	revision := &session.Message{Role: session.RoleAssistant, Content: revised}
+	if err := f.builder.sessionStore.AddMessage(ctx, conversationID, revision); err != nil {
+		t.Fatal(err)
+	}
+	status, read := f.call(t, http.MethodGet, "/api/home-assistant/conversations/"+conversationID, nil)
+	items, _ := read["saved"].([]any)
+	if status != http.StatusOK || len(items) != 1 {
+		t.Fatalf("conversation read: %d %v", status, read)
+	}
+	if item := items[0].(map[string]any); item["ticket_id"] != ticketID || item["message_id"] != messageID || item["newer_replies"] != float64(1) || item["matches_source"] != true {
+		t.Fatalf("saved item labels: %v", item)
+	}
+
+	status, body := f.call(t, http.MethodPost, draftPath+"/review", map[string]string{"conversation_id": conversationID, "message_id": revision.ID})
+	update, _ := body["update"].(map[string]any)
+	if status != http.StatusOK || update["body"] != revised || update["current"].(map[string]any)["body"] != first {
+		t.Fatalf("update review: %d %v", status, body)
+	}
+	version := update["current"].(map[string]any)["version"]
+
+	status, body = f.call(t, http.MethodPost, draftPath+"/update", map[string]any{
+		"if_version": version, "title": update["title"], "body": revised, "target_workspace_id": f.hqID,
+	})
+	if receipt, _ := body["receipt"].(map[string]any); status != http.StatusOK || receipt["applied"] != true || receipt["ticket_id"] != ticketID {
+		t.Fatalf("update: %d %v", status, body)
+	}
+	tickets := f.hqTickets(t)
+	if len(tickets) != 1 || tickets[0].ID != ticketID || tickets[0].Description != revised || tickets[0].State != workspace.TicketStateBacklog || tickets[0].Assignee != "" {
+		t.Fatalf("after update: %+v", tickets)
+	}
+
+	// An edit through the canonical Ticket route, then an update reviewed
+	// against the old version: refused, with the current text returned.
+	status, patched := f.call(t, http.MethodPatch, "/api/workspaces/"+f.hqID+"/tickets/"+ticketID, map[string]any{
+		"description": "Edited in Personal HQ", "version": tickets[0].Version,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("outside edit: %d %v", status, patched)
+	}
+	status, body = f.call(t, http.MethodPost, draftPath+"/update", map[string]any{
+		"if_version": tickets[0].Version, "title": update["title"], "body": first, "target_workspace_id": f.hqID,
+	})
+	current, _ := body["current"].(map[string]any)
+	if status != http.StatusConflict || body["error"] != agenthttp.PersonalAssistantSavedDraftChanged || current["body"] != "Edited in Personal HQ" {
+		t.Fatalf("stale update: %d %v", status, body)
+	}
+	if after := f.hqTickets(t); len(after) != 1 || after[0].Description != "Edited in Personal HQ" {
+		t.Fatalf("a stale update overwrote the edit: %+v", after)
+	}
+
+	// Delete the chat with the existing session route. The Ticket stays, the
+	// chat is reported gone, and nothing recreates it.
+	if status, _ := f.call(t, http.MethodDelete, "/api/sessions/"+conversationID, nil); status != http.StatusNoContent {
+		t.Fatalf("delete session: %d", status)
+	}
+	status, body = f.call(t, http.MethodGet, draftPath, nil)
+	conversation, _ := body["conversation"].(map[string]any)
+	if status != http.StatusOK || body["draft"].(map[string]any)["body"] != "Edited in Personal HQ" || conversation["available"] != false || conversation["reason"] != agenthttp.PersonalAssistantConversationNotFound {
+		t.Fatalf("saved draft after chat deletion: %d %v", status, body)
+	}
+	if _, err := f.builder.sessionStore.GetSession(ctx, conversationID); err == nil {
+		t.Fatal("reading the saved draft recreated its deleted conversation")
+	}
+	if status, listed := f.call(t, http.MethodGet, "/api/home-assistant/conversations", nil); status != http.StatusOK || len(listed["conversations"].([]any)) != 0 {
+		t.Fatalf("conversation list after deletion: %d %v", status, listed)
 	}
 }
 

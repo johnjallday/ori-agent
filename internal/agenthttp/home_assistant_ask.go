@@ -85,6 +85,9 @@ type HomeAssistantAskRequest struct {
 	// Conversation asks for the turn to be part of a hired-assistant
 	// conversation. Its ID is opaque; the server derives the owner.
 	Conversation *HomeAssistantConversationRef `json:"conversation,omitempty"`
+	// Draft names the saved draft the conversation is working on, so the turn
+	// sees its current text. It is read, never written, by a turn.
+	Draft *HomeAssistantDraftRef `json:"draft,omitempty"`
 }
 
 // HomeAssistantAskResponse is the response for POST /api/home-assistant/ask.
@@ -110,6 +113,9 @@ type HomeAssistantAskResponse struct {
 	// DraftReview opens the save-to-backlog review for a typed "save this
 	// draft" request. Nothing has been written when it is set.
 	DraftReview *PersonalAssistantDraftReview `json:"draft_review,omitempty"`
+	// DraftContext reports whether the saved draft the request named was read
+	// for this turn.
+	DraftContext *HomeAssistantDraftContext `json:"draft_context,omitempty"`
 }
 
 // HomeActionMutator executes confirmed state-changing actions. The server wires a
@@ -364,21 +370,27 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	// No Home Snapshot is injected and no app counts are reported; the
 	// read-only home tools stay available in case the user asks about the app.
 	if intent == homeAssistantConversationIntent.Key && workContext != nil && workContext.ReadyForWork() {
+		// The saved draft the conversation is working on is read fresh for this
+		// turn, so the assistant revises what is stored now, not a stale reply.
+		savedDraft, draftContext := h.savedDraftPromptContext(req.Draft, workContext)
 		answer, err := h.runModel(ctx, modelTurn{
 			system:      buildAssistantConversationSystemPrompt(workContext),
 			history:     history,
-			user:        buildAssistantConversationUserPrompt(prompt, workContext),
+			user:        buildAssistantConversationUserPrompt(prompt, workContext) + savedDraft,
 			sources:     promptSources,
 			temperature: 0.6,
 		})
 		if err != nil {
-			return h.conversationModelUnavailable(ctx, prompt, intent, workContext, conversation, err)
+			resp := h.conversationModelUnavailable(ctx, prompt, intent, workContext, conversation, err)
+			resp.DraftContext = draftContext
+			return resp
 		}
 		answer = strings.TrimSpace(answer)
 		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "answered"})
 		return HomeAssistantAskResponse{
 			Response: answer, Intent: intent, Identity: identity,
 			Conversation: h.storeTurn(ctx, conversation, prompt, answer),
+			DraftContext: draftContext,
 		}
 	}
 

@@ -896,6 +896,62 @@ Ori cannot deliver reminders. A save request that also asks for one opens the
 review with that limitation stated and saves without a reminder; a reminder
 request alone gets the limitation and no promise.
 
+### Resuming a saved draft
+
+A saved draft is found by its canonical Ticket ID. There is no draft catalog,
+no title search, and no "most recent" guess. The link between a Ticket and its
+conversation is the Ticket's own source key, read and re-validated every time.
+
+| Starting from | What happens |
+|---|---|
+| The conversation (**Continue…**, or a reload in the same tab) | `GET /api/home-assistant/conversations/{id}` also returns `saved`: the Tickets saved from that conversation, each with its message ID, state, version, and link. The reply it came from is labelled "Saved as #n". |
+| The Ticket in Personal HQ | The Ticket detail offers **Continue this draft with your assistant** (`/?assistant_draft=<ticket id>`). `GET /api/home-assistant/drafts/{ticketID}` returns the Ticket as it is now and whether its conversation can still be opened. |
+
+Opening either one only reads. It calls no model, runs no task, and changes no
+Ticket.
+
+The saved copy and the conversation are separate sources and neither is changed
+to match the other:
+
+- `matches_source: false` — the saved text is no longer the reply it was saved
+  from (edited in Personal HQ, or updated since). The label says so.
+- `newer_replies` — replies after the saved one. They are not part of the saved
+  item until the user updates it.
+
+While a tab is working on a saved draft, each turn names it by Ticket ID. The
+server reads its current title and text for that turn and gives them to the
+model as bounded, untrusted reference data, so "make my saved draft shorter"
+works from what is stored now. A turn never writes the Ticket. A draft that can
+no longer be read is reported and the turn runs without it.
+
+If the source conversation was deleted, the Ticket still opens. Ori says the
+conversation is gone and offers to start a new one about the saved draft; the
+user chooses. The deleted conversation is never recreated, and deleting a
+conversation never deletes a saved Ticket or a remembered fact.
+
+### Updating a saved draft
+
+**Update saved draft** is a second reviewed action on the same Ticket.
+
+- `POST /api/home-assistant/drafts/{ticketID}/review` writes nothing. It
+  returns the text saved now, its version, and the proposal: the chosen reply,
+  with the current title kept unless the user changes it.
+- `POST /api/home-assistant/drafts/{ticketID}/update` applies the reviewed
+  title and text through `TicketService.Update` with the reviewed version. A
+  version is required; there is no unversioned update.
+
+It changes the title and the text. It cannot change state, owner, assignment,
+due date, schedule, or provenance, and it never creates a Ticket.
+
+| Situation | Result |
+|---|---|
+| The Ticket was edited, promoted, or otherwise changed since the review | `saved_draft_changed` with the current Ticket. Nothing is overwritten; the user's proposal stays in the form and is reviewed against the current version. |
+| The same update is sent again after it landed (a lost response) | Recognized from the Ticket itself — exactly the reviewed text at exactly the next version — and reported as already applied. Nothing is written twice. |
+| The Ticket was deleted | `saved_draft_not_found`. It is not restored, and the update does not become a new save. |
+| Work has started or the Ticket is closed (In Progress, Review, Done, Cancelled) | `saved_draft_not_editable`. It is edited in Personal HQ. Backlog and Ready drafts can be updated. |
+| Personal HQ was replaced | The old HQ's Ticket is not reachable through the new one. |
+| The Ticket is not a saved draft | Not found: this path cannot read or edit ordinary Tickets. |
+
 ## Delegation and ownership
 
 The personal assistant owns intake and remains the user-visible delegator.

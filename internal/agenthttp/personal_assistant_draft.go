@@ -43,6 +43,9 @@ const (
 type PersonalAssistantDraftSaver interface {
 	Find(input workspace.AssistantDraftInput) (*workspace.AssistantDraftReceipt, error)
 	Save(input workspace.AssistantDraftInput) (*workspace.AssistantDraftReceipt, error)
+	Get(workspaceID, ticketID string) (*workspace.AssistantDraftLink, error)
+	ListByConversation(workspaceID, conversationID string) ([]workspace.AssistantDraftLink, error)
+	Update(input workspace.AssistantDraftUpdateInput) (*workspace.AssistantDraftUpdateReceipt, error)
 }
 
 // PersonalAssistantDraftTarget is the server-resolved destination of a save.

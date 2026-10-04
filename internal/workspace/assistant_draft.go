@@ -30,6 +30,11 @@ const (
 // earlier save stands; the new payload is refused.
 var ErrAssistantDraftConflict = errors.New("this save was already used for different content")
 
+// ErrAssistantDraftNotEditable means the saved draft has moved past the point
+// where the assistant's update review may change its text: work on it has
+// started or it is closed.
+var ErrAssistantDraftNotEditable = errors.New("this saved draft can no longer be updated from a conversation")
+
 // AssistantDraftKey is the parsed source key of a saved draft.
 type AssistantDraftKey struct {
 	ConversationID string
@@ -273,4 +278,135 @@ func (s *AssistantDraftService) Save(input AssistantDraftInput) (*AssistantDraft
 		s.backlog.renderAfterMutation(ticket.OwningWorkspaceID)
 	}
 	return s.receipt(ticket, created, title, body), nil
+}
+
+// AssistantDraftLink is a saved draft and the conversation message it came
+// from, read from the Ticket's own source key.
+type AssistantDraftLink struct {
+	Ticket Ticket
+	Key    AssistantDraftKey
+}
+
+// Get returns one saved draft from its owning workspace. A Ticket that does
+// not exist there, or that is not a saved draft, is ErrTicketNotFound: this
+// path never reads or changes ordinary Tickets.
+func (s *AssistantDraftService) Get(workspaceID, ticketID string) (*AssistantDraftLink, error) {
+	ws, err := s.backlog.store.Get(strings.TrimSpace(workspaceID))
+	if err != nil {
+		return nil, err
+	}
+	task, err := ws.GetTask(strings.TrimSpace(ticketID))
+	if err != nil {
+		return nil, ErrTicketNotFound
+	}
+	key, ok := assistantDraftKeyOf(task)
+	if !ok {
+		return nil, ErrTicketNotFound
+	}
+	return &AssistantDraftLink{Ticket: NewTicket(task, ws.ID, ws.Name, ws.FolderSlug), Key: key}, nil
+}
+
+// ListByConversation returns the drafts saved from one conversation, oldest
+// first. It reads the workspace's Tickets; there is no separate draft catalog.
+func (s *AssistantDraftService) ListByConversation(workspaceID, conversationID string) ([]AssistantDraftLink, error) {
+	conversationID = strings.TrimSpace(conversationID)
+	ws, err := s.backlog.store.Get(strings.TrimSpace(workspaceID))
+	if err != nil {
+		return nil, err
+	}
+	var links []AssistantDraftLink
+	for i := range ws.Tasks {
+		key, ok := assistantDraftKeyOf(&ws.Tasks[i])
+		if !ok || key.ConversationID != conversationID {
+			continue
+		}
+		links = append(links, AssistantDraftLink{Ticket: NewTicket(&ws.Tasks[i], ws.ID, ws.Name, ws.FolderSlug), Key: key})
+	}
+	return links, nil
+}
+
+// AssistantDraftEditable reports whether a saved draft's text may still be
+// changed by an update review: only while it is waiting in Backlog or Ready.
+// Once work has started, or the Ticket is closed, it is edited where it lives.
+func AssistantDraftEditable(state TicketState) bool {
+	return state == TicketStateBacklog || state == TicketStateReady
+}
+
+// AssistantDraftUpdateInput is one reviewed update of a saved draft. IfVersion
+// is the Ticket version the user reviewed against and is required.
+type AssistantDraftUpdateInput struct {
+	WorkspaceID string
+	TicketID    string
+	IfVersion   int64
+	Title       string
+	Body        string
+}
+
+// AssistantDraftUpdateReceipt is the canonical result of an update.
+type AssistantDraftUpdateReceipt struct {
+	Ticket Ticket
+	// Applied is false when this exact update had already been applied (a
+	// retry after a lost response); nothing was written again.
+	Applied bool
+}
+
+// AssistantDraftChangedError reports that the saved draft is no longer the
+// version the user reviewed. Current is the Ticket as it is now, so the caller
+// can show it for a fresh review instead of overwriting it.
+type AssistantDraftChangedError struct {
+	Current Ticket
+}
+
+func (e *AssistantDraftChangedError) Error() string {
+	return "the saved draft changed since it was reviewed"
+}
+
+func (e *AssistantDraftChangedError) Unwrap() error { return ErrTicketVersionConflict }
+
+// Update changes a saved draft's title and body, and nothing else, through the
+// canonical Ticket service with the reviewed version. It never changes state,
+// owner, assignment, schedule, or provenance, and never recreates a deleted
+// Ticket.
+//
+// A retry of an update that already landed is recognized from the canonical
+// record: the Ticket holds exactly the reviewed text at exactly the next
+// version. Anything else at a different version is a change by someone else and
+// is refused with the current Ticket attached.
+func (s *AssistantDraftService) Update(input AssistantDraftUpdateInput) (*AssistantDraftUpdateReceipt, error) {
+	title, body, _, err := NormalizeAssistantDraft(input.Title, input.Body)
+	if err != nil {
+		return nil, err
+	}
+	if input.IfVersion <= 0 {
+		return nil, invalidTicketField("version", "the reviewed version of the saved draft is required")
+	}
+	workspaceID, ticketID := strings.TrimSpace(input.WorkspaceID), strings.TrimSpace(input.TicketID)
+	current, err := s.Get(workspaceID, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Ticket.Version != input.IfVersion {
+		if current.Ticket.Version == input.IfVersion+1 && current.Ticket.Title == title && current.Ticket.Description == body {
+			return &AssistantDraftUpdateReceipt{Ticket: current.Ticket, Applied: false}, nil
+		}
+		return nil, &AssistantDraftChangedError{Current: current.Ticket}
+	}
+	if !AssistantDraftEditable(current.Ticket.State) {
+		return nil, ErrAssistantDraftNotEditable
+	}
+	updated, err := s.backlog.tickets().Update(workspaceID, ticketID, TicketUpdateInput{
+		Title: &title, Description: &body, IfVersion: input.IfVersion,
+	})
+	if errors.Is(err, ErrTicketVersionConflict) {
+		// Someone changed it between the read above and the write.
+		if latest, getErr := s.Get(workspaceID, ticketID); getErr == nil {
+			return nil, &AssistantDraftChangedError{Current: latest.Ticket}
+		}
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.backlog.renderAfterMutation(workspaceID)
+	return &AssistantDraftUpdateReceipt{Ticket: *updated, Applied: true}, nil
 }

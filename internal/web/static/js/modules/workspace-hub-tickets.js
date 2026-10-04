@@ -1066,6 +1066,17 @@
     }
   }
 
+  /**
+   * The link back to the assistant conversation a saved draft came from, or ''
+   * for any other Ticket. The link carries only the Ticket's stable ID; the
+   * server decides whether that conversation can still be opened.
+   */
+  function assistantDraftResumeHref(ticket) {
+    if (!ticket || ticket.source !== 'assistant') return '';
+    if (!String(ticket.sourceId || '').startsWith('assistant-draft:')) return '';
+    return '/?assistant_draft=' + encodeURIComponent(ticket.id);
+  }
+
   function appendDetailRow(parent, label, value) {
     if (!value) return;
     const row = document.createElement('div');
@@ -1125,6 +1136,17 @@
     appendDetailRow(summary, 'Reference', ticket.referenceUrl);
     appendDetailRow(summary, 'Source', ticket.source);
     body.appendChild(summary);
+
+    // A draft saved from an assistant conversation can be continued there.
+    // Following the link only reads; nothing about this Ticket changes.
+    const resumeHref = assistantDraftResumeHref(ticket);
+    if (resumeHref) {
+      const resume = document.createElement('a');
+      resume.className = 'ticket-detail-assistant-draft';
+      resume.href = resumeHref;
+      resume.textContent = 'Continue this draft with your assistant';
+      body.appendChild(resume);
+    }
 
     if (ticket.description) {
       const description = document.createElement('pre');
@@ -1878,6 +1900,7 @@
     CAPTURE_STATES,
     TicketApiError,
     api,
+    assistantDraftResumeHref,
     canTransitionTo,
     formatQualifiedNumber,
     formatTicketNumber,

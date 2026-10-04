@@ -13,12 +13,18 @@
  *   conversation  draft -> "make it warmer" -> "give it to me in Korean", then
  *                 reload (same tab keeps the thread), New conversation, and
  *                 Continue back into the first one.
+ *   save          two versions, save the Korean one to the HQ backlog, verify
+ *                 the Ticket, retry the same save, and the typed request.
+ *   resume-save   save one draft and record it in <outDir>/resume-state.json.
+ *   resume        run after restarting the server on the same sandbox: reopen
+ *                 the saved draft, update the same Ticket, hit a conflict from
+ *                 an outside edit, and open it after its chat was deleted.
  *
  * Prints one JSON evidence object: conversation IDs, canonical message IDs,
  * what the sessions API holds, and any console errors or failed requests.
  */
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const [baseUrl, outDir, stage = 'conversation'] = process.argv.slice(2);
@@ -440,9 +446,277 @@ async function saveStage() {
   };
 }
 
+const resumeStateFile = join(out, 'resume-state.json');
+
+const draftBar = () =>
+  page.evaluate(() => ({
+    visible: !document.getElementById('personalAssistantSavedDraft').hidden,
+    text: document.getElementById('personalAssistantSavedDraftText').textContent,
+    startOffered: !document.getElementById('personalAssistantSavedDraftStart').hidden,
+    conversationId: window.PersonalAssistantConversation.currentId(),
+    working: window.PersonalAssistantDrafts._state.working?.ticket_id || ''
+  }));
+
+const updateReview = () =>
+  page.evaluate(() => ({
+    heading: document.getElementById('personalAssistantDraftReviewHeading').textContent,
+    target: document.getElementById('personalAssistantDraftTarget').textContent,
+    currentShown: !document.getElementById('personalAssistantDraftCurrent').hidden,
+    current: document.getElementById('personalAssistantDraftCurrentText').textContent,
+    proposed: document.getElementById('personalAssistantDraftBody').value,
+    title: document.getElementById('personalAssistantDraftTitle').value,
+    status: document.getElementById('personalAssistantDraftStatus').textContent,
+    receipt: document.getElementById('personalAssistantDraftReceipt').textContent,
+    version: window.PersonalAssistantDrafts._state.review?.current?.version || 0
+  }));
+
+const ticketOf = async (workspaceId, ticketId) =>
+  (await api(`/api/workspaces/${workspaceId}/tickets/${ticketId}`)).body?.ticket ||
+  (await api(`/api/workspaces/${workspaceId}/tickets/${ticketId}`)).body;
+
+async function waitForReview() {
+  await page.locator('#personalAssistantDraftReview').waitFor({ state: 'visible', timeout: 30000 });
+}
+
+/*
+ * resume-save: draft and save one item, and write what was saved to
+ * <outDir>/resume-state.json. Restart the server on the same sandbox, then run
+ * the resume stage.
+ */
+async function resumeSaveStage() {
+  await openAsk();
+  await page
+    .locator('#personalAssistantConversationNew')
+    .click({ force: true })
+    .catch(() => {});
+  const hq = (await api('/api/personal-assistant')).body.personal_assistant.hq_workspace_id;
+  const draft = await say(
+    'Write a two-sentence thank-you note to my neighbour Jun for watering my plants.'
+  );
+  await page
+    .locator(`#homeAssistantConversation [data-message-id="${draft.messageId}"]`)
+    .locator('[data-message-action="save-draft"]')
+    .click();
+  await waitForReview();
+  await page.locator('#personalAssistantDraftTitle').fill('Thank-you note for Jun');
+  await page.locator('#personalAssistantDraftSave').click();
+  await page
+    .locator('#personalAssistantDraftReview [data-draft-view="receipt"]')
+    .waitFor({ state: 'visible', timeout: 30000 });
+  const ticket = (await assistantTickets(hq)).find(item =>
+    item.source_id.includes(draft.messageId)
+  );
+  const saved = {
+    hq,
+    conversationId: draft.conversationId,
+    messageId: draft.messageId,
+    ticketId: ticket.id,
+    number: ticket.display_number,
+    version: ticket.version,
+    body: ticket.description
+  };
+  writeFileSync(resumeStateFile, JSON.stringify(saved, null, 2));
+  evidence.steps.push({ step: 'saved-before-restart', saved, bar: await draftBar() });
+}
+
+/*
+ * resume: after a server restart on the same data, reopen the saved draft from
+ * the conversation list and from its Ticket, update the same Ticket, hit a
+ * conflict from an outside edit, and open it after its chat was deleted.
+ */
+async function resumeStage() {
+  const saved = JSON.parse(readFileSync(resumeStateFile, 'utf8'));
+  await openAsk();
+
+  // A fresh browser has no thread: reopen it from the validated list.
+  await page.locator('#personalAssistantConversationContinue').click();
+  const entry = page.locator(
+    `#personalAssistantConversationList [data-conversation-id="${saved.conversationId}"]`
+  );
+  await entry.waitFor({ state: 'visible', timeout: 20000 });
+  await entry.click();
+  await page.waitForFunction(
+    id => window.PersonalAssistantDrafts._state.working?.ticket_id === id,
+    saved.ticketId,
+    { timeout: 20000 }
+  );
+  const reopened = await rows();
+  const afterRestart = await ticketOf(saved.hq, saved.ticketId);
+  evidence.steps.push({
+    step: 'reopened-after-restart',
+    messages: reopened.length,
+    savedBadge: reopened.find(row => row.messageId === saved.messageId)?.saved,
+    bar: await draftBar(),
+    ticketUnchanged:
+      afterRestart.version === saved.version && afterRestart.description === saved.body,
+    shot: await shot('20-reopened')
+  });
+
+  // Revise, then review the update of the same Ticket.
+  const shorter = await say('make it one sentence');
+  evidence.steps.push({ step: 'revised', actions: shorter.actions, bar: await draftBar() });
+  const replyRow = page.locator(
+    `#homeAssistantConversation [data-message-id="${shorter.messageId}"]`
+  );
+  await replyRow.locator('[data-message-action="update-draft"]').click();
+  await waitForReview();
+  const review = await updateReview();
+  evidence.steps.push({
+    step: 'update-review',
+    review,
+    currentIsSavedText: review.current === saved.body,
+    proposedIsReply: review.proposed === shorter.text,
+    ticketUntouched: (await ticketOf(saved.hq, saved.ticketId)).version === saved.version,
+    shot: await shot('21-update-review')
+  });
+  await page.locator('#personalAssistantDraftSave').click();
+  await page
+    .locator('#personalAssistantDraftReview [data-draft-view="receipt"]')
+    .waitFor({ state: 'visible', timeout: 30000 });
+  const updated = await ticketOf(saved.hq, saved.ticketId);
+  evidence.steps.push({
+    step: 'updated',
+    receipt: (await updateReview()).receipt,
+    sameTicket: updated.id === saved.ticketId && updated.display_number === saved.number,
+    bodyIsReply: updated.description === shorter.text,
+    version: `${saved.version} -> ${updated.version}`,
+    state: updated.state,
+    assignee: updated.assignee || '',
+    draftTickets: (await assistantTickets(saved.hq)).filter(item => item.id === saved.ticketId)
+      .length,
+    shot: await shot('22-updated')
+  });
+  await page.locator('#personalAssistantDraftDone').click();
+
+  // A conflicting edit from another surface: the review goes stale and
+  // nothing is overwritten.
+  const again = await say('add a plant emoji at the end');
+  await page
+    .locator(`#homeAssistantConversation [data-message-id="${again.messageId}"]`)
+    .locator('[data-message-action="update-draft"]')
+    .click();
+  await waitForReview();
+  const outside = 'Edited directly in Personal HQ while the review was open.';
+  const patch = await page.evaluate(
+    async ([url, body]) => {
+      const response = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      return response.status;
+    },
+    [
+      `/api/workspaces/${saved.hq}/tickets/${saved.ticketId}`,
+      { description: outside, version: updated.version }
+    ]
+  );
+  await page.locator('#personalAssistantDraftSave').click();
+  await page.waitForFunction(
+    () =>
+      document
+        .getElementById('personalAssistantDraftStatus')
+        .textContent.includes('Nothing was overwritten'),
+    null,
+    { timeout: 30000 }
+  );
+  const stale = await updateReview();
+  const afterConflict = await ticketOf(saved.hq, saved.ticketId);
+  evidence.steps.push({
+    step: 'conflict',
+    outsideEditStatus: patch,
+    status: stale.status,
+    currentNowShowsOutsideEdit: stale.current === outside,
+    proposalKept: stale.proposed === again.text,
+    ticketKeptOutsideEdit: afterConflict.description === outside,
+    sameTicket: afterConflict.id === saved.ticketId,
+    shot: await shot('23-conflict')
+  });
+  await page.locator('#personalAssistantDraftCancel').click();
+
+  // Open the saved item from its Ticket link.
+  await page.goto(`${baseUrl}/?assistant_draft=${saved.ticketId}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await page.waitForFunction(
+    id => window.PersonalAssistantDrafts?._state.working?.ticket_id === id,
+    saved.ticketId,
+    { timeout: 30000 }
+  );
+  evidence.steps.push({
+    step: 'opened-from-ticket',
+    url: page.url(),
+    bar: await draftBar(),
+    panelOpen: await page.locator('#personalAssistantPanel').isVisible(),
+    shot: await shot('24-from-ticket')
+  });
+
+  // Delete the chat with the existing session control, then open the Ticket again.
+  const deleted = await page.evaluate(async id => {
+    const response = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+    return response.status;
+  }, saved.conversationId);
+  await page.goto(`${baseUrl}/?assistant_draft=${saved.ticketId}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await page
+    .locator('#personalAssistantSavedDraftStart')
+    .waitFor({ state: 'visible', timeout: 30000 });
+  const gone = await draftBar();
+  evidence.steps.push({
+    step: 'chat-deleted',
+    deleteStatus: deleted,
+    bar: gone,
+    ticketStillThere: (await ticketOf(saved.hq, saved.ticketId)).id === saved.ticketId,
+    shot: await shot('25-chat-deleted')
+  });
+  await page.locator('#personalAssistantSavedDraftStart').click();
+  const fresh = await say('rewrite my saved draft so it rhymes');
+  const sessions = (await api('/api/sessions?limit=50&sort=updated_desc')).body?.sessions || [];
+  evidence.steps.push({
+    step: 'new-conversation-from-saved-draft',
+    reply: fresh.text,
+    newConversation: fresh.conversationId !== saved.conversationId,
+    deletedChatRecreated: sessions.some(item => item.id === saved.conversationId),
+    bar: await draftBar(),
+    ticketUntouched: (await ticketOf(saved.hq, saved.ticketId)).description === outside,
+    shot: await shot('26-new-from-saved')
+  });
+
+  // A review belongs to its conversation: starting a new one closes it and
+  // stops working on the saved draft.
+  await page
+    .locator(`#homeAssistantConversation [data-message-id="${fresh.messageId}"]`)
+    .locator('[data-message-action="save-draft"]')
+    .click();
+  await waitForReview();
+  await page.locator('#personalAssistantConversationNew').click();
+  evidence.steps.push({
+    step: 'new-conversation-closes-review',
+    reviewOpen: await page.locator('#personalAssistantDraftReview').isVisible(),
+    bar: await draftBar()
+  });
+
+  // The saved Ticket in Personal HQ links back to the assistant.
+  const hqSlug = (await ticketOf(saved.hq, saved.ticketId)).owning_workspace_slug;
+  await page.goto(`${baseUrl}/workspaces/${hqSlug}?ticket=${saved.ticketId}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  const link = page.locator('.ticket-detail-assistant-draft');
+  await link.waitFor({ state: 'visible', timeout: 30000 });
+  evidence.steps.push({
+    step: 'ticket-links-back',
+    text: await link.textContent(),
+    href: await link.getAttribute('href'),
+    shot: await shot('27-ticket-link')
+  });
+}
+
 try {
   if (stage === 'conversation') await conversationStage();
   else if (stage === 'save') await saveStage();
+  else if (stage === 'resume-save') await resumeSaveStage();
+  else if (stage === 'resume') await resumeStage();
   else throw new Error(`unknown stage: ${stage}`);
 } catch (error) {
   evidence.error = String(error && error.stack ? error.stack : error);
