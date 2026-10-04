@@ -104,38 +104,79 @@ func (p *IMAPProvider) SearchThreads(ctx context.Context, account Account, q Que
 		return ThreadPage{}, ErrProvider
 	}
 
-	var metas []imapMeta
+	var page ThreadPage
 	err = p.withSession(ctx, account, func(c *client.Client) error {
 		inbox, err := selectIMAPMailbox(c, imapInbox, false)
 		if err != nil {
 			return err
 		}
-		metas, err = scanIMAPMailbox(c, inbox, p.now().AddDate(0, 0, -q.LookbackDays))
-		return err
+		metas, err := scanIMAPMailbox(c, inbox, p.now().AddDate(0, 0, -q.LookbackDays))
+		if err != nil {
+			return err
+		}
+		groups, next := pageIMAPThreads(groupIMAPThreads(metas), account, q, before)
+		if q.WithSnippets {
+			if err := attachIMAPSnippets(c, inbox, groups); err != nil {
+				return err
+			}
+		}
+		page.NextPageToken = next
+		for _, group := range groups {
+			page.Threads = append(page.Threads, group.thread(account))
+		}
+		return nil
 	})
 	if err != nil {
 		return ThreadPage{}, err
 	}
+	return page, nil
+}
 
-	var page ThreadPage
+// pageIMAPThreads picks one page of conversations, newest first, and the cursor
+// for the next page ("" when this is the last).
+func pageIMAPThreads(groups []imapThreadGroup, account Account, q Query, before uint32) ([]imapThreadGroup, string) {
+	var picked []imapThreadGroup
 	var lastUID uint32
-	for _, group := range groupIMAPThreads(metas) {
+	for _, group := range groups {
 		if before != 0 && group.lastUID >= before {
 			continue // already returned on an earlier page
 		}
-		thread := group.thread(account)
-		if q.WaitingOnUserOnly && !thread.WaitingOnUser {
+		if q.WaitingOnUserOnly && !group.thread(account).WaitingOnUser {
 			continue
 		}
-		if len(page.Threads) == q.MaxResults {
+		if len(picked) == q.MaxResults {
 			// More remain: the cursor is the last thread this page returned.
-			page.NextPageToken = encodeIMAPPageToken(lastUID)
-			break
+			return picked, encodeIMAPPageToken(lastUID)
 		}
-		page.Threads = append(page.Threads, thread)
+		picked = append(picked, group)
 		lastUID = group.lastUID
 	}
-	return page, nil
+	return picked, ""
+}
+
+// attachIMAPSnippets reads the bounded text of each conversation's newest
+// message, in one batch for the whole page.
+func attachIMAPSnippets(c *client.Client, mailbox imapMailboxRef, groups []imapThreadGroup) error {
+	var uids []uint32
+	for _, group := range groups {
+		if n := len(group.messages); n > 0 {
+			uids = append(uids, group.messages[n-1].uid)
+		}
+	}
+	withText, err := fetchIMAPMeta(c, uids, mailbox, true)
+	if err != nil {
+		return err
+	}
+	text := make(map[uint32]string, len(withText))
+	for _, meta := range withText {
+		text[meta.uid] = meta.snippet
+	}
+	for i := range groups {
+		if n := len(groups[i].messages); n > 0 {
+			groups[i].messages[n-1].snippet = text[groups[i].messages[n-1].uid]
+		}
+	}
+	return nil
 }
 
 // GetThread returns one conversation with its bounded, sanitized message text.
@@ -393,17 +434,15 @@ func newIMAPClient(ctx context.Context, conn net.Conn) (*client.Client, error) {
 	return c, nil
 }
 
-// fetchIMAPMeta reads the envelope, flags, and threading headers for uids in the
-// selected mailbox, and with bodies set, each message's bounded text.
+// fetchIMAPMeta reads the envelope, flags, threading and sender-signal headers
+// for uids in the selected mailbox, and with bodies set, each message's bounded
+// text.
 func fetchIMAPMeta(c *client.Client, uids []uint32, mailbox imapMailboxRef, bodies bool) ([]imapMeta, error) {
 	if len(uids) == 0 {
 		return nil, nil
 	}
-	references := &imap.BodySectionName{
-		BodyPartName: imap.BodyPartName{Specifier: imap.HeaderSpecifier, Fields: []string{"References"}},
-		Peek:         true,
-	}
-	items := []imap.FetchItem{imap.FetchUid, imap.FetchFlags, imap.FetchInternalDate, imap.FetchEnvelope, references.FetchItem()}
+	headers := imapHeaderSection()
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchFlags, imap.FetchInternalDate, imap.FetchEnvelope, headers.FetchItem()}
 	if bodies {
 		items = append(items, imap.FetchBodyStructure)
 	}
@@ -411,7 +450,7 @@ func fetchIMAPMeta(c *client.Client, uids []uint32, mailbox imapMailboxRef, bodi
 	var metas []imapMeta
 	textParts := map[uint32]imapTextPart{}
 	err := fetchIMAP(c, uids, items, func(msg *imap.Message) {
-		meta := imapMetaFromMessage(msg, references, mailbox)
+		meta := imapMetaFromMessage(msg, headers, mailbox)
 		metas = append(metas, meta)
 		if bodies {
 			if part, ok := pickIMAPTextPart(msg.BodyStructure); ok {

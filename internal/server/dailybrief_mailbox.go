@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/emailtriage"
 	"github.com/johnjallday/ori-agent/internal/mailbox"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -30,6 +32,8 @@ type dailyBriefMailboxSource struct {
 	accounts       emailAccountResolver
 	provider       mailbox.MailboxProvider
 	emailOpsSource func() workspace.EmailOpsWorkspaceSource
+	// triage, when set, sorts the inbox the way the "Needs you" list does.
+	triage *emailtriage.Service
 }
 
 func newDailyBriefMailboxSource(hq *personalhq.Service, workspaces workspace.Store, accounts emailAccountResolver, provider mailbox.MailboxProvider, emailOpsSource func() workspace.EmailOpsWorkspaceSource) *dailyBriefMailboxSource {
@@ -94,9 +98,23 @@ func (s *dailyBriefMailboxSource) BriefEmailThreads(ctx context.Context, userID 
 
 	readCtx, cancel := context.WithTimeout(ctx, briefEmailReadTimeout)
 	defer cancel()
-	page, err := s.provider.SearchThreads(readCtx, mailbox.Account{
-		ID: acc.ID, Provider: string(acc.Provider), EmailAddress: acc.EmailAddress,
-	}, mailbox.Query{MaxResults: briefEmailMaxThreads})
+	account := mailbox.Account{ID: acc.ID, Provider: string(acc.Provider), EmailAddress: acc.EmailAddress}
+
+	// The same sorting as the "Needs you" list, without asking the model:
+	// newsletters and receipts no longer count as waiting on the user, and a
+	// question the user opened but never answered still does.
+	if s.triage != nil {
+		list, err := s.triage.Peek(readCtx, ws.ID, account)
+		switch {
+		case err == nil:
+			return triagedBriefThreads(list, ws.ID, acc.ID), nil
+		case !errors.Is(err, emailtriage.ErrBusy):
+			return nil, err // a real read failure → the brief records a named gap
+		}
+		// A full read is running; read the inbox directly rather than wait.
+	}
+
+	page, err := s.provider.SearchThreads(readCtx, account, mailbox.Query{MaxResults: briefEmailMaxThreads})
 	if err != nil {
 		return nil, err // a real read failure → the brief records a named gap
 	}
@@ -118,6 +136,29 @@ func (s *dailyBriefMailboxSource) BriefEmailThreads(ctx context.Context, userID 
 		})
 	}
 	return out, nil
+}
+
+// triagedBriefThreads gives the brief what needs the user first, then what is
+// worth knowing. Ignorable mail is left out entirely.
+func triagedBriefThreads(list emailtriage.List, workspaceID, accountID string) []dailybrief.EmailThreadSnapshot {
+	out := make([]dailybrief.EmailThreadSnapshot, 0, briefEmailMaxThreads)
+	add := func(items []emailtriage.Item, waiting bool) {
+		for _, item := range items {
+			if len(out) == briefEmailMaxThreads {
+				return
+			}
+			out = append(out, dailybrief.EmailThreadSnapshot{
+				Ref: dailybrief.SourceRef{
+					WorkspaceID: workspaceID, EntityType: "email_thread", EntityID: item.ThreadID,
+					AccountID: accountID, Timestamp: item.LastMessageAt,
+				},
+				Subject: item.Subject, From: item.From, WaitingOnUser: waiting, Unread: item.Unread,
+			})
+		}
+	}
+	add(list.NeedsYou, true)
+	add(list.FYI, false)
+	return out
 }
 
 // counterpartyLabel picks a human sender label for a thread from its (already

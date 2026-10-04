@@ -613,6 +613,72 @@ func TestIMAPCheckLogin(t *testing.T) {
 	}
 }
 
+// The list says who sent each message, so newsletters and machine mail can be
+// told from people without reading anything.
+func TestIMAPSearchThreadsCarriesSenderSignals(t *testing.T) {
+	s := newTestIMAPServer(t)
+	now := time.Now()
+	s.deliver(imapInbox, testMail{
+		from: "news@shop.example", subject: "Sale", messageID: "n1@example.com", date: now.Add(-3 * time.Hour),
+		headers: []string{"Content-Type: text/plain", "List-Unsubscribe: <mailto:unsub@shop.example>"}, body: "50% off",
+	})
+	s.deliver(imapInbox, testMail{
+		from: "no-reply@bank.example", subject: "Statement ready", messageID: "a1@example.com", date: now.Add(-2 * time.Hour),
+		headers: []string{"Content-Type: text/plain", "Auto-Submitted: auto-generated"}, body: "Your statement",
+	})
+	s.deliver(imapInbox, testMail{
+		from: "sam@example.com", to: "team@example.com", subject: "Offsite", messageID: "p1@example.com", date: now.Add(-time.Hour),
+		headers: []string{"Content-Type: text/plain", "Cc: " + testIMAPOwner}, body: "Can everyone make Friday?",
+	})
+
+	page, err := s.provider(testIMAPPassword).SearchThreads(context.Background(), imapTestAccount(), Query{WithSnippets: true})
+	if err != nil || len(page.Threads) != 3 {
+		t.Fatalf("SearchThreads = %d threads, %v", len(page.Threads), err)
+	}
+	bySubject := map[string]Message{}
+	for _, th := range page.Threads {
+		bySubject[th.Subject] = th.Messages[len(th.Messages)-1]
+	}
+	if m := bySubject["Sale"]; !m.Bulk || m.AutoSubmitted {
+		t.Fatalf("newsletter = bulk %v, auto %v; want bulk only", m.Bulk, m.AutoSubmitted)
+	}
+	if m := bySubject["Statement ready"]; m.Bulk || !m.AutoSubmitted {
+		t.Fatalf("statement = bulk %v, auto %v; want auto-submitted only", m.Bulk, m.AutoSubmitted)
+	}
+	offsite := bySubject["Offsite"]
+	if offsite.Bulk || offsite.AutoSubmitted || len(offsite.Cc) != 1 || offsite.Cc[0].Address != testIMAPOwner {
+		t.Fatalf("person's message = %+v; want no signals and the user in Cc", offsite)
+	}
+	if offsite.Snippet != "Can everyone make Friday?" {
+		t.Fatalf("snippet = %q, want the newest message's text", offsite.Snippet)
+	}
+
+	plain, err := s.provider(testIMAPPassword).SearchThreads(context.Background(), imapTestAccount(), Query{})
+	if err != nil || plain.Threads[0].Messages[0].Snippet != "" {
+		t.Fatalf("a list without WithSnippets read message text: %+v, %v", plain.Threads[0].Messages[0], err)
+	}
+}
+
+func TestSenderSignals(t *testing.T) {
+	cases := []struct {
+		headers    map[string]string
+		bulk, auto bool
+	}{
+		{map[string]string{}, false, false},
+		{map[string]string{"List-Id": "<team.example.com>"}, true, false},
+		{map[string]string{"Precedence": " Bulk "}, true, false},
+		{map[string]string{"Precedence": "first-class"}, false, false},
+		{map[string]string{"Auto-Submitted": "auto-replied"}, false, true},
+		{map[string]string{"Auto-Submitted": "no"}, false, false},
+	}
+	for _, tc := range cases {
+		bulk, auto := senderSignals(func(name string) string { return tc.headers[name] })
+		if bulk != tc.bulk || auto != tc.auto {
+			t.Errorf("senderSignals(%v) = %v, %v; want %v, %v", tc.headers, bulk, auto, tc.bulk, tc.auto)
+		}
+	}
+}
+
 func TestIMAPWrongPasswordIsExpired(t *testing.T) {
 	s := newTestIMAPServer(t)
 	_, err := s.provider("wrong-password").SearchThreads(context.Background(), imapTestAccount(), Query{})

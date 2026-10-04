@@ -1,0 +1,175 @@
+/* The "Needs you" panel (email-needs-you.js) on a workspace with a linked
+   mailbox. Paper and ink match the email setup card. */
+
+.needs-you {
+  --ny-ink: var(--cozy-ink, #2b2417);
+  --ny-dim: var(--cozy-ink-dim, #5d5442);
+  --ny-line: var(--cozy-line, #cdbf9f);
+  --ny-paper: var(--cozy-paper-raised, #fdfaf2);
+  --ny-moss: var(--cozy-moss, #4a6b4a);
+  --ny-amber: var(--cozy-amber-strong, #a8741a);
+  --ny-clay: var(--cozy-clay, #b0502f);
+
+  margin: 0 0 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--ny-line);
+  border-radius: 12px;
+  background: var(--ny-paper);
+  color: var(--ny-ink);
+}
+
+.needs-you[hidden] {
+  display: none;
+}
+
+.needs-you__head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.needs-you__title {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.needs-you__count {
+  min-width: 1.5rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: var(--ny-moss);
+  color: #fff;
+  font-size: 0.8rem;
+  line-height: 1.5rem;
+  text-align: center;
+}
+
+.needs-you__status,
+.needs-you__empty,
+.needs-you__note {
+  margin: 0.6rem 0 0;
+  color: var(--ny-dim);
+}
+
+.needs-you__note {
+  font-size: 0.85rem;
+}
+
+.needs-you__problem {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid var(--ny-amber);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ny-amber) 10%, transparent);
+}
+
+.needs-you .btn-primary {
+  border-color: var(--ny-moss);
+  background: var(--ny-moss);
+  color: #fff;
+}
+
+.needs-you__problem p {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+
+.needs-you__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.needs-you__row {
+  padding: 0.55rem 0;
+  border-top: 1px solid color-mix(in srgb, var(--ny-line) 60%, transparent);
+}
+
+.needs-you__row:first-child {
+  border-top: 0;
+}
+
+.needs-you__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+
+.needs-you__from {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.needs-you__age,
+.needs-you__tracked {
+  color: var(--ny-dim);
+}
+
+.needs-you__kind {
+  padding: 0 0.4rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ny-moss) 14%, transparent);
+  color: var(--ny-moss);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.needs-you__kind--deadline {
+  background: color-mix(in srgb, var(--ny-clay) 14%, transparent);
+  color: var(--ny-clay);
+}
+
+.needs-you__kind--decision {
+  background: color-mix(in srgb, var(--ny-amber) 16%, transparent);
+  color: var(--ny-amber);
+}
+
+.needs-you__subject {
+  margin: 0.15rem 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.needs-you__why {
+  margin: 0.1rem 0 0;
+  color: var(--ny-dim);
+}
+
+.needs-you__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.2rem;
+}
+
+.needs-you__action {
+  padding: 0;
+  margin-right: 0.6rem;
+  color: var(--ny-moss);
+  font-size: 0.85rem;
+}
+
+.needs-you__group {
+  margin-top: 0.6rem;
+}
+
+.needs-you__group summary {
+  color: var(--ny-dim);
+  cursor: pointer;
+  font-size: 0.9rem;
+}

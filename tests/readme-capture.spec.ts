@@ -640,6 +640,12 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { history: [] });
       return;
     }
+    // Every workspace page asks for its "Needs you" email list; a workspace
+    // with no mailbox linked answers linked=false and the panel stays hidden.
+    if (/^\/api\/workspaces\/[^/]+\/email\/needs-you$/.test(url.pathname)) {
+      await json(route, { linked: false });
+      return;
+    }
     if (
       url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/mission`
     ) {
