@@ -3,6 +3,7 @@ package orchestrationhttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -224,6 +225,61 @@ func TestDecideRetry_CancellationIsNotRetried(t *testing.T) {
 	}
 	if verdict.Category != llm.CategoryCanceled {
 		t.Fatalf("category = %q, want canceled", verdict.Category)
+	}
+}
+
+// A CLI provider stopped from outside (Ctrl-C on the server reaches its child)
+// blocks with a reason that says so and offers Retry. It used to be "an error
+// Ori couldn't classify. Retrying may not help" — for a run that only needed
+// starting again.
+func TestDecideRetry_InterruptedRunOffersRetry(t *testing.T) {
+	interrupted := fmt.Errorf("LLM call failed: %w",
+		llm.NewProviderError("codex", llm.CategoryInterrupted, errors.New("turn interrupted: exit status 1")))
+
+	verdict := decideRetry(noJitter(), interrupted, 1, time.Minute, noEvidence())
+	if verdict.Retry {
+		t.Fatal("an interrupted run must not be retried automatically: Ori is usually stopping")
+	}
+	if verdict.Category != llm.CategoryInterrupted {
+		t.Fatalf("category = %q, want interrupted", verdict.Category)
+	}
+	if !strings.Contains(verdict.Reason, "stopped before it answered") || strings.Contains(verdict.Reason, "couldn't classify") {
+		t.Fatalf("reason = %q, want it to say the provider was interrupted", verdict.Reason)
+	}
+	// Nothing to repair, so no repair action crowds out Retry.
+	if verdict.Action != nil {
+		t.Fatalf("action = %+v, want none", verdict.Action)
+	}
+	if actions := retrySuggestedActions(verdict); len(actions) == 0 || actions[0] != "retry" {
+		t.Fatalf("actions = %v, want retry offered first", actions)
+	}
+}
+
+// The same failure through a whole run: what the task on disk tells the user.
+func TestTaskRun_InterruptedProviderBlocksOnceAndOffersRetry(t *testing.T) {
+	task := workspace.Task{ID: "task-interrupted", To: "Ori", Description: "set up your Personal HQ"}
+	store, held := newRunWorkspace(t, false, task)
+	model := &stubWorkspaceTaskExecutor{err: fmt.Errorf("LLM call failed: %w",
+		llm.NewProviderError("codex", llm.CategoryInterrupted, errors.New("turn interrupted: exit status 1")))}
+
+	if err := runToEnd(t, store, held, task.ID, model); err == nil {
+		t.Fatal("expected the interrupted run to fail")
+	}
+	if calls := model.calls.Load(); calls != 1 {
+		t.Fatalf("the model was called %d times, want 1: an interrupted run is not retried automatically", calls)
+	}
+
+	_, got := onDisk(t, store, held.ID, task.ID)
+	if got.Status != workspace.TaskStatusWaitingForChoice {
+		t.Fatalf("task on disk is %q, want waiting for the user's choice", got.Status)
+	}
+	humanLoop, _ := got.Context["human_loop"].(map[string]any)
+	question, _ := humanLoop["question"].(string)
+	if !strings.Contains(question, "stopped before it answered") || strings.Contains(question, "couldn't classify") {
+		t.Fatalf("question = %q, want it to say the provider was interrupted", question)
+	}
+	if actions := fmt.Sprint(humanLoop["suggested_actions"]); !strings.Contains(actions, "retry") {
+		t.Fatalf("suggested actions = %s, want retry offered", actions)
 	}
 }
 

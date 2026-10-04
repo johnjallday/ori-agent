@@ -57,6 +57,12 @@ const (
 	CategoryNetwork ErrorCategory = "network"
 	// CategoryCanceled: the caller canceled; never retry a cancellation.
 	CategoryCanceled ErrorCategory = "canceled"
+	// CategoryInterrupted: a CLI-backed provider's process was stopped from
+	// outside before it answered — in practice a signal that reached it because
+	// Ori itself was being stopped. The request was fine, but it is not retried
+	// automatically: a retry started during a shutdown is interrupted the same
+	// way, or outlives the server as an orphan.
+	CategoryInterrupted ErrorCategory = "interrupted"
 	// CategoryNotConfigured: no API key or provider configuration.
 	CategoryNotConfigured ErrorCategory = "not_configured"
 	// CategoryUnknown: unclassified. Treated as deterministic — an unknown error
@@ -190,6 +196,7 @@ var defaultActions = map[ErrorCategory]UserAction{
 	CategoryTimeout:            ActionRetry,
 	CategoryNetwork:            ActionRetry,
 	CategoryCanceled:           ActionNone,
+	CategoryInterrupted:        ActionRetry,
 	CategoryUnknown:            ActionRetry,
 }
 
@@ -210,6 +217,7 @@ var defaultMessages = map[ErrorCategory]string{
 	CategoryTimeout:            "The request to your AI provider timed out.",
 	CategoryNetwork:            "Ori couldn't reach your AI provider.",
 	CategoryCanceled:           "The task was canceled.",
+	CategoryInterrupted:        "Your AI provider's command-line tool was stopped before it answered, usually because Ori itself was stopping. Nothing is wrong with the task; run it again.",
 	CategoryUnknown:            "The task failed with an error Ori couldn't classify. Retrying may not help.",
 }
 

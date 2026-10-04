@@ -233,6 +233,22 @@ func TestClassifyProviderError_Cancellation(t *testing.T) {
 	}
 }
 
+// An interrupted CLI run needs no repair, only a rerun — and the rerun is the
+// user's to start, because the usual cause is Ori itself stopping.
+func TestProviderError_InterruptedAsksForARerun(t *testing.T) {
+	got := ClassifyProviderError("", fmt.Errorf("LLM call failed: %w",
+		NewProviderError("codex", CategoryInterrupted, errors.New("turn interrupted: exit status 1"))), 0, "")
+	if got.Category != CategoryInterrupted || got.Retryable {
+		t.Fatalf("interrupted = %+v, want interrupted and not retried automatically", got)
+	}
+	if got.Action != ActionRetry {
+		t.Fatalf("action = %q, want %q", got.Action, ActionRetry)
+	}
+	if !strings.Contains(got.Message, "run it again") || strings.Contains(got.Message, "couldn't classify") {
+		t.Fatalf("message = %q, want it to say the task only needs running again", got.Message)
+	}
+}
+
 // Pre-response transport failures are the classic safe retry: nothing was
 // produced, so repeating the request cannot duplicate work.
 func TestClassifyProviderError_Transport(t *testing.T) {

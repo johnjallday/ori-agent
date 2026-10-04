@@ -26,6 +26,7 @@ func TestRetryPolicy_DeterministicFailuresAreNeverRetried(t *testing.T) {
 		CategoryContextLength,
 		CategoryPolicyRejection,
 		CategoryCanceled,
+		CategoryInterrupted,
 		CategoryUnknown,
 	} {
 		err := NewProviderError("openai", category, errors.New("x"))
