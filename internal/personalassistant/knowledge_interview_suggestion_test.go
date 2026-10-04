@@ -61,6 +61,10 @@ func TestInterviewSuggestion_FromARealScan(t *testing.T) {
 	}
 }
 
+// bidiOverride is U+202E, a character the memory validator refuses. It is built
+// from its code point so no invisible character sits in this file.
+const bidiOverride = string(rune(0x202e))
+
 // interviewFolderFixture is an interview over the same Personal HQ as a folder
 // digest, with a lifecycle service that can approve a project fact.
 type interviewFolderFixture struct {
@@ -343,7 +347,7 @@ func TestInterviewSuggestionFromOffer(t *testing.T) {
 		{"a declined folder gives nothing", offer(folderdigest.KindDeclined, tidy), "", ""},
 		{"a project verdict with a tidy subject gives nothing", offer(folderdigest.KindProject, tidy), "", ""},
 		{"a portfolio gives nothing", portfolio, "", ""},
-		{"a name the validator refuses gives nothing", offer(folderdigest.KindProject, project("Thesis‮", "LaTeX manuscript")), "", ""},
+		{"a name the validator refuses gives nothing", offer(folderdigest.KindProject, project("Thesis"+bidiOverride, "LaTeX manuscript")), "", ""},
 		{"a text over the answer limit gives nothing", offer(folderdigest.KindProject, project(strings.Repeat("n", 250), strings.Repeat("m", 250))), "", ""},
 		{"a nameless subject gives nothing", offer(folderdigest.KindProject, project("  ", "LaTeX manuscript")), "", ""},
 	} {
@@ -384,7 +388,7 @@ func TestInterviewSuggestionFromOffer_Alternates(t *testing.T) {
 			// The same wording twice is offered once.
 			candidate("website", "Node.js package", FolderChoiceProject),
 			// A refused name is skipped, not a reason to drop the rest.
-			candidate("bad‮name", "", FolderChoiceProject),
+			candidate("bad"+bidiOverride+"name", "", FolderChoiceProject),
 			candidate("Documents", "", FolderChoiceTidy),
 			candidate("Notes", "Obsidian vault", FolderChoiceProject),
 			// The subject's own wording is never repeated as an alternate.
