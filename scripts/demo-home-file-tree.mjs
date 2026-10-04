@@ -12,15 +12,18 @@
  * Stages:
  *   tree   Group 1: the split layout, slim rows, lazy contents, a note in the
  *          pane, and proof that Map view asks for none of it.
+ *   pane   Group 2: one of each kind in the pane, and how tabs behave.
+ *   note   Group 3: editing a note in the pane. Give the sandbox directory as
+ *          a fifth argument and it also reads the note's file on disk.
  *
  * Exits non-zero when a check fails, a console error appears, or a request
  * fails, so a page that renders but is quietly broken does not pass.
  */
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const [baseUrl, outDirArg, stage = 'tree', theme = 'light'] = process.argv.slice(2);
+const [baseUrl, outDirArg, stage = 'tree', theme = 'light', sandbox = ''] = process.argv.slice(2);
 if (!baseUrl || !outDirArg) {
   console.error(
     'usage: node scripts/demo-home-file-tree.mjs <baseUrl> <outDir> <stage> [light|dark]'
@@ -69,6 +72,9 @@ const EXPECTED_FAILURES = [/\/api\/agents\?name=Ask%20Ori$/];
 page.on('console', message => {
   if (message.type() !== 'error') return;
   if (/Failed to load resource/.test(message.text())) return;
+  // The update checker asks GitHub on every page; a sandbox may be offline, and
+  // a navigation cuts the request short. Neither is the tree's doing.
+  if (/Error checking for updates/.test(message.text())) return;
   problems.push(`console: ${message.text()}`);
 });
 page.on('pageerror', error => problems.push(`page error: ${error.message}`));
@@ -706,7 +712,250 @@ async function stagePane() {
   );
 }
 
-const stages = { tree: stageTree, pane: stagePane, 'map-requests': stageMapRequests };
+// Group 3: a note is edited in the pane with the existing editor.
+async function stageNote() {
+  const stamp = Date.now().toString(36);
+  const editor = page.locator('#cockpitPaneNoteEditor');
+  const saveLine = page.locator('[data-pane-save-status]');
+  const notePut = response =>
+    response.request().method() === 'PUT' && /\/api\/notes\/[0-9a-f-]+$/.test(response.url());
+  const noteOnServer = async id =>
+    (await (await page.request.get(`${baseUrl}/api/notes/${id}`)).json()).content;
+  // Click a rendered line to edit it, go to its end, and type.
+  const typeAtEndOfFirstLine = async words => {
+    await editor.locator('.note-live-line-rendered').first().click();
+    await editor.locator('.note-live-line-input').first().waitFor();
+    await page.keyboard.press('End');
+    await page.keyboard.type(words);
+  };
+
+  await openTree();
+  await expand('workspace', 'Studio Notes');
+  await rowByKind('note', 'hello').click();
+  await editor.locator('.note-live-line').first().waitFor();
+  const noteId = await editor.getAttribute('data-pane-editor');
+
+  // --- The existing editor, one of it (FR41) -------------------------------
+  check(
+    (await editor.getAttribute('class')).includes('note-live-editor') &&
+      (await page.locator('#cockpitTreePane .note-live-editor').count()) === 1,
+    'the note is shown in the existing note editor, and there is one editor'
+  );
+  check(
+    (await article().innerText()).includes('First note in this workspace.'),
+    'the note text is shown'
+  );
+  check(
+    /\/workspaces\/studio-notes\/notes\/[0-9a-f-]{36}$/.test(
+      await action('Open full note').getAttribute('href')
+    ),
+    '"Open full note" links to the note page'
+  );
+
+  // --- Typing autosaves, with the note page's save states (FR42) -----------
+  const firstSave = page.waitForResponse(notePut);
+  await typeAtEndOfFirstLine(` Edited in the pane ${stamp}.`);
+  await page.waitForFunction(
+    () => document.querySelector('[data-pane-save-status]').textContent === 'Unsaved'
+  );
+  check(true, 'typing shows "Unsaved"');
+  const saveResponse = await firstSave;
+  check(saveResponse.ok(), `autosave PUTs /api/notes/{id} after the editor's own delay`);
+  check(
+    Object.keys(saveResponse.request().postDataJSON()).join(',') === 'content',
+    'the save sends only the text'
+  );
+  await page.waitForFunction(
+    () => document.querySelector('[data-pane-save-status]').textContent === 'Saved'
+  );
+  check(true, 'then "Saved"');
+  await shot('n1-edited-and-saved');
+
+  // --- Save before switching tab (FR43) ------------------------------------
+  await page.keyboard.type(' Then switched tab.');
+  check((await saveLine.innerText()) === 'Unsaved', 'more typing is unsaved again');
+  const beforeSwitch = page.waitForResponse(notePut);
+  await rowByKind('note', 'Studio ideas').click();
+  check((await beforeSwitch).ok(), 'switching tab saves first, without waiting for the timer');
+  await page.waitForFunction(() =>
+    document.querySelector('.cockpit-pane-tab.is-active')?.textContent.includes('Studio ideas')
+  );
+  check((await noteOnServer(noteId)).includes('Then switched tab.'), 'the edit reached the server');
+  check(
+    (await page.locator('#cockpitTreePane .note-live-editor').count()) === 1 &&
+      (await editor.getAttribute('data-pane-editor')) !== noteId,
+    'the editor now holds the other note, and there is still only one'
+  );
+
+  // --- Save before closing the tab (FR43) ----------------------------------
+  await page.locator('.cockpit-pane-tab-label', { hasText: 'hello' }).click();
+  await page.waitForFunction(
+    id => document.getElementById('cockpitPaneNoteEditor')?.getAttribute('data-pane-editor') === id,
+    noteId
+  );
+  await editor.locator('.note-live-line').first().waitFor();
+  await typeAtEndOfFirstLine(' Then closed the tab.');
+  const beforeClose = page.waitForResponse(notePut);
+  await activeTab().locator('[data-pane-close]').click();
+  check((await beforeClose).ok(), 'closing the tab saves first');
+  check((await noteOnServer(noteId)).includes('Then closed the tab.'), '…and the edit is kept');
+
+  // --- Save before switching to Map (FR43) ---------------------------------
+  await rowByKind('note', 'hello').click();
+  await page.waitForFunction(
+    id => document.getElementById('cockpitPaneNoteEditor')?.getAttribute('data-pane-editor') === id,
+    noteId
+  );
+  await editor.locator('.note-live-line').first().waitFor();
+  await typeAtEndOfFirstLine(' Then went to the Map.');
+  const beforeMap = page.waitForResponse(notePut);
+  await page.locator('#cockpitViewMap').click();
+  check((await beforeMap).ok(), 'switching to Map saves first');
+  await page.locator('#cockpitViewTree').click();
+  await editor.locator('.note-live-line').first().waitFor();
+  // The line being edited is a textarea, whose text is its value.
+  const editorText = () =>
+    editor.evaluate(el =>
+      [el.innerText, ...Array.from(el.querySelectorAll('textarea'), input => input.value)].join(
+        '\n'
+      )
+    );
+  check(
+    (await editorText()).includes('Then went to the Map.'),
+    'back in Tree the note is as it was left'
+  );
+
+  // --- A failed save keeps the tab and the text, and offers Retry (FR44) ---
+  // The 500 below is induced on purpose, so it is not a page problem.
+  EXPECTED_FAILURES.push(/\/api\/notes\/[0-9a-f-]+$/);
+  await page.route('**/api/notes/*', route =>
+    route.request().method() === 'PUT'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 'internal_error', message: 'Failed to update note' })
+        })
+      : route.continue()
+  );
+  await typeAtEndOfFirstLine(' This save will fail.');
+  await rowByKind('note', 'Studio ideas').click();
+  await page.waitForFunction(() =>
+    document.querySelector('[data-pane-save-status]').textContent.startsWith('Save failed')
+  );
+  check(
+    (await activeTab().innerText()).includes('hello'),
+    'a failed save keeps the note tab open instead of switching'
+  );
+  check(
+    (await saveLine.innerText()) === 'Save failed: Failed to update note. Your text is kept.',
+    `the save line says the save failed and why ("${await saveLine.innerText()}")`
+  );
+  check(
+    (await editor.innerText()).includes('This save will fail.') ||
+      (await editor.locator('.note-live-line-input').first().inputValue()).includes(
+        'This save will fail.'
+      ),
+    "the user's text is still in the editor"
+  );
+  check(await page.locator('[data-pane-save-retry]').isVisible(), 'Retry is offered');
+  await shot('n2-save-failed');
+  await page.unroute('**/api/notes/*');
+  const retried = page.waitForResponse(notePut);
+  await page.locator('[data-pane-save-retry]').click();
+  check((await retried).ok(), 'Retry saves');
+  await page.waitForFunction(
+    () => document.querySelector('[data-pane-save-status]').textContent === 'Saved'
+  );
+  check(
+    (await noteOnServer(noteId)).includes('This save will fail.') &&
+      (await page.locator('[data-pane-save-retry]').isHidden()),
+    'after Retry the text is saved and Retry is gone'
+  );
+
+  // --- The same note open in another tab is reported (FR45) ----------------
+  const other = await context.newPage();
+  await other.goto(`${baseUrl}/workspaces/studio-notes/notes/${noteId}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await other.locator('#notePreviewContent .note-live-line').first().waitFor();
+  await rowByKind('note', 'Studio ideas').click();
+  await page.waitForFunction(() =>
+    document.querySelector('.cockpit-pane-tab.is-active')?.textContent.includes('Studio ideas')
+  );
+  await page.locator('.cockpit-pane-tab-label', { hasText: 'hello' }).click();
+  await page.locator('[data-pane-note-elsewhere]:not([hidden])').waitFor();
+  check(true, 'a note that is also open on the note page in another tab says so');
+  await shot('n3-open-elsewhere');
+
+  // --- Reload, the note page, and the file on disk all match ---------------
+  const expected = await noteOnServer(noteId);
+  check(
+    (await other.locator('#noteContentInput').inputValue()) !== undefined,
+    'the note page has the note open'
+  );
+  await other.reload({ waitUntil: 'domcontentloaded' });
+  await other.locator('#notePreviewContent .note-live-line').first().waitFor();
+  check(
+    (await other.locator('#noteContentInput').inputValue()) === expected,
+    'the note page shows exactly what the pane saved'
+  );
+  await other.close();
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#cockpitTreeNav [data-tree-row]').first().waitFor();
+  await applyTheme();
+  await expand('workspace', 'Studio Notes');
+  await rowByKind('note', 'hello').click();
+  await editor.locator('.note-live-line').first().waitFor();
+  check(
+    (await page.evaluate(() => document.getElementById('cockpitPaneNoteEditor').innerText))
+      .replace(/\s+/g, ' ')
+      .includes(`Edited in the pane ${stamp}. Then switched tab. Then closed the tab.`),
+    'after a reload the pane shows the edited note'
+  );
+  await shot('n4-after-reload');
+
+  if (sandbox) {
+    const dir = join(sandbox, 'Ori Workspaces', 'studio-notes', 'notes');
+    const file = readdirSync(dir).find(name => name.startsWith('hello--'));
+    const onDisk = file ? readFileSync(join(dir, file), 'utf8') : '';
+    check(
+      !!file && onDisk.includes(expected.trim()),
+      `the note's file under notes/ holds the same text (${file || 'no file found'})`
+    );
+  } else {
+    console.log('skip the on-disk check: no sandbox directory was given');
+  }
+
+  // --- Leaving Home with unsaved text (FR43) -------------------------------
+  await typeAtEndOfFirstLine(' Last words before leaving.');
+  await Promise.all([
+    page.waitForURL(/\/workspaces\/studio-notes\/notes\//),
+    action('Open full note').click()
+  ]);
+  await page.locator('#notePreviewContent .note-live-line').first().waitFor();
+  await expectEventually(
+    async () => (await noteOnServer(noteId)).includes('Last words before leaving.'),
+    'leaving Home sends a last save, and the note page has the words'
+  );
+}
+
+async function expectEventually(probe, message, timeoutMs = 4000) {
+  const deadline = Date.now() + timeoutMs;
+  let ok = await probe();
+  while (!ok && Date.now() < deadline) {
+    await settle(150);
+    ok = await probe();
+  }
+  check(ok, message);
+}
+
+const stages = {
+  tree: stageTree,
+  pane: stagePane,
+  note: stageNote,
+  'map-requests': stageMapRequests
+};
 try {
   if (!stages[stage])
     throw new Error(`unknown stage "${stage}" (have: ${Object.keys(stages).join(', ')})`);

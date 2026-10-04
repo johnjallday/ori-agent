@@ -1665,6 +1665,7 @@ import {
   loadSections,
   loadTicket,
   openWorkspaceFile,
+  saveNoteContent,
   sectionInfo,
   sectionKey
 } from './home-tree-sources.js';
@@ -1672,10 +1673,14 @@ import {
   ITEM_FAILED,
   ITEM_LOADING,
   ITEM_READY,
+  NOTE_EDITOR_ID,
   activateTab,
   closeTab,
+  createNoteController,
+  leaveNoteThen,
   mountPane,
   openTab,
+  showSaveStatus,
   tabFromRow
 } from './home-tree-pane.js';
 import {
@@ -2167,24 +2172,103 @@ import {
 
   // ---- Tree pane: tabs and the open item (FR22-FR31) ----
 
-  function mountPaneView({ focusTitle = false } = {}) {
+  function mountPaneView({ focusTitle = false, focusEditor = false } = {}) {
     if (!els.treePane || state.view !== VIEW_TREE) return;
     mountPane(
       els.treePane,
       state,
       {
-        onActivateTab: key => activateTreeTab(key),
-        onCloseTab: key => closeTreeTab(key),
+        onActivateTab: key => void activateTreeTab(key),
+        onCloseTab: key => void closeTreeTab(key),
         onRetryTab: key => void loadTabItem(key, { force: true }),
         onAction: (action, target) => handlePaneAction(action, target)
       },
       { focusTitle }
     );
+    syncPaneNoteEditor({ focus: focusEditor });
+  }
+
+  // ---- Editing a note in the pane (FR41-FR45) ----
+
+  // The one note being edited. It mounts the existing note editor into the
+  // active note tab and saves through the same endpoint the note page uses.
+  const noteController = createNoteController({
+    mountEditor: host => window.NoteEditor.mount(host),
+    saveContent: (noteId, text, options) => saveNoteContent(noteId, text, options),
+    presence: window.NotePresence || null,
+    onStatus: (status, error, key) => {
+      showSaveStatus(els.treePane, status, error);
+      if (status !== 'error') return;
+      const tab = state.treeTabs.find(entry => entry.key === key);
+      announce(`Couldn't save ${tab ? tab.label : 'the note'}. Your text is kept; retry the save.`);
+    },
+    // Keep what the tab holds in step with what was saved, so the note is not
+    // shown at an older version the next time it is mounted.
+    onSaved: (key, text, updatedAt) => {
+      const item = state.treeTabItems[key];
+      if (item && item.value) item.value = { ...item.value, content: text, updatedAt };
+    },
+    onElsewhere: (key, open) => {
+      noteOpenElsewhereKey = open ? key : '';
+      showNoteElsewhereNotice();
+    }
+  });
+
+  // The tab key of the mounted note when another browser tab also has it open.
+  let noteOpenElsewhereKey = '';
+
+  function showNoteElsewhereNotice() {
+    const notice = els.treePane && els.treePane.querySelector('[data-pane-note-elsewhere]');
+    if (notice) notice.hidden = noteOpenElsewhereKey !== state.activeTabKey;
+  }
+
+  /**
+   * Mount the editor for the active note tab once its note has loaded.
+   *
+   * Runs after every draw of the pane. Mounting the note that is already
+   * mounted is a no-op, so this costs nothing while someone types.
+   */
+  function syncPaneNoteEditor({ focus = false } = {}) {
+    const tab = state.treeTabs.find(entry => entry.key === state.activeTabKey);
+    const item = tab ? state.treeTabItems[tab.key] : null;
+    if (!tab || tab.kind !== 'note' || !item || item.status !== ITEM_READY) return;
+    const element = document.getElementById(NOTE_EDITOR_ID);
+    if (!element || !window.NoteEditor) return;
+    noteController.attach(element, tab.key, item.value, { focus });
+    showNoteElsewhereNotice();
+  }
+
+  // Changes to what the pane shows run one at a time, because each may first
+  // have to save the note being edited.
+  let paneQueue = Promise.resolve();
+
+  /**
+   * Make a change that leaves `nextActiveKey` as the active tab.
+   *
+   * When that takes the note being edited off screen, the note is saved first
+   * and the change runs only if the save worked. A failed save leaves the note
+   * tab open with the user's text and says so (FR43, FR44).
+   */
+  function changeTreeTab(nextActiveKey, change) {
+    paneQueue = paneQueue
+      .then(async () => {
+        const editing = noteController.activeKey();
+        if (!editing || editing === nextActiveKey) {
+          change();
+          return;
+        }
+        if (await leaveNoteThen(noteController, change)) return;
+        const message = "Couldn't save this note, so it is still open. Retry the save first.";
+        announce(message);
+        if (window.Toast) window.Toast.error(message);
+      })
+      .catch(err => console.error('home-workspace-cockpit: pane change failed', err));
+    return paneQueue;
   }
 
   /** Open a tree row in the pane. */
   function openTreeItem(row, options) {
-    openTreeTab(tabFromRow(row), options);
+    return openTreeTab(tabFromRow(row), options);
   }
 
   /**
@@ -2194,19 +2278,24 @@ import {
    * to Map shows the same item selected. It does not open the context modal:
    * in Tree view the pane is the detail view (FR28, FR30).
    */
-  function openTreeTab(tab, { keyboard = false } = {}) {
-    const next = openTab(state.treeTabs, state.activeTabKey, tab);
-    state.treeTabs = next.tabs;
-    showActiveTreeTab(next.activeKey, { invoker: document.activeElement });
-    // Opening with Enter moves focus to the pane's title; a click leaves focus
-    // on the row that was clicked (FR72).
-    mountPaneView({ focusTitle: keyboard });
+  function openTreeTab(tab, { keyboard = false, focusEditor = false } = {}) {
+    const invoker = document.activeElement;
+    return changeTreeTab(tab.key, () => {
+      const next = openTab(state.treeTabs, state.activeTabKey, tab);
+      state.treeTabs = next.tabs;
+      showActiveTreeTab(next.activeKey, { invoker });
+      // Opening with Enter moves focus to the pane's title; a click leaves
+      // focus on the row that was clicked (FR72).
+      mountPaneView({ focusTitle: keyboard, focusEditor });
+    });
   }
 
   function activateTreeTab(key) {
-    const next = activateTab(state.treeTabs, state.activeTabKey, key);
-    showActiveTreeTab(next.activeKey);
-    mountPaneView();
+    return changeTreeTab(key, () => {
+      const next = activateTab(state.treeTabs, state.activeTabKey, key);
+      showActiveTreeTab(next.activeKey);
+      mountPaneView();
+    });
   }
 
   // Shared by opening and switching: make `key` the active tab, fetch what it
@@ -2226,23 +2315,26 @@ import {
   }
 
   function closeTreeTab(key) {
-    const next = closeTab(state.treeTabs, state.activeTabKey, key);
-    const activeChanged = next.activeKey !== state.activeTabKey;
-    state.treeTabs = next.tabs;
-    delete state.treeTabItems[key];
-    if (activeChanged && next.activeKey) {
-      showActiveTreeTab(next.activeKey);
-    } else {
-      state.activeTabKey = next.activeKey;
-      mountTreeView();
-    }
-    mountPaneView();
-    // The button that was pressed is gone. Put focus on the tab that took its
-    // place, or back in the tree when nothing is open.
-    const target = next.activeKey
-      ? els.treePane && els.treePane.querySelector('.cockpit-pane-tab.is-active [data-pane-tab]')
-      : els.treeNav && els.treeNav.querySelector('[data-tree-row][tabindex="0"]');
-    if (target) target.focus();
+    const after = closeTab(state.treeTabs, state.activeTabKey, key);
+    return changeTreeTab(after.activeKey, () => {
+      const next = closeTab(state.treeTabs, state.activeTabKey, key);
+      const activeChanged = next.activeKey !== state.activeTabKey;
+      state.treeTabs = next.tabs;
+      delete state.treeTabItems[key];
+      if (activeChanged && next.activeKey) {
+        showActiveTreeTab(next.activeKey);
+      } else {
+        state.activeTabKey = next.activeKey;
+        mountTreeView();
+      }
+      mountPaneView();
+      // The button that was pressed is gone. Put focus on the tab that took
+      // its place, or back in the tree when nothing is open.
+      const target = next.activeKey
+        ? els.treePane && els.treePane.querySelector('.cockpit-pane-tab.is-active [data-pane-tab]')
+        : els.treeNav && els.treeNav.querySelector('[data-tree-row][tabindex="0"]');
+      if (target) target.focus();
+    });
   }
 
   // What each kind of tab fetches beyond its tree row. An agent, a workspace
@@ -2293,7 +2385,10 @@ import {
   function handlePaneAction(action, target) {
     const tab = state.treeTabs.find(entry => entry.key === state.activeTabKey);
     if (!tab) return;
-    if (action === 'move') {
+    if (action === 'note-save-retry') {
+      // FR44: the failed save's own Retry. The save line reports the outcome.
+      void noteController.flush();
+    } else if (action === 'move') {
       if (treeHandle) treeHandle.openMoveDialog(tab.workspaceId);
     } else if (action === 'delete') {
       if (treeHandle) void treeHandle.deleteWorkspace(tab.workspaceId);
@@ -2362,6 +2457,9 @@ import {
       state.activeTabKey = next.activeKey;
       delete state.treeTabItems[tab.key];
     });
+    // A note whose workspace is gone has nowhere left to be saved to.
+    const editing = noteController.activeKey();
+    if (editing && !state.treeTabs.some(tab => tab.key === editing)) noteController.detach();
   }
 
   /**
@@ -2525,6 +2623,10 @@ import {
   // ---- view state ----
 
   function applyView(view, { pushUrl = true } = {}) {
+    // Leaving Tree saves the note being edited first (home-file-tree FR43).
+    // The note stays mounted, hidden with the rest of the Tree, so its text is
+    // still there on the way back whether or not the save worked.
+    if (view !== VIEW_TREE && state.view === VIEW_TREE) void noteController.flush();
     state.view = view === VIEW_TREE ? VIEW_TREE : VIEW_MAP;
     els.viewButtons.forEach(btn => {
       const isActive = btn.getAttribute('data-cockpit-view') === state.view;
@@ -4088,7 +4190,14 @@ import {
   // back/forward return from a shelf where a suggestion may have been handled.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void refreshLibraryBadges();
+    // A note being edited in the Tree pane is saved when the browser tab is
+    // put in the background, as the note page does (home-file-tree FR43).
+    else void noteController.flush();
   });
+  // Leaving Home: a last save that can outlive the page. Both events are
+  // listened for, as on the note page, because neither fires in every case.
+  window.addEventListener('pagehide', () => noteController.keepalive());
+  window.addEventListener('beforeunload', () => noteController.keepalive());
   window.addEventListener('pageshow', event => {
     if (event.persisted) void refreshLibraryBadges({ force: true });
   });

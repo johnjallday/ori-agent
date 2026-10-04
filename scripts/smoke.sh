@@ -3423,9 +3423,11 @@ smoke_baseline_export() {
 #   filetree <base-url> seed        fill a NEW sandbox with demo contents (see
 #                                   filetree_seed) and print the ids
 #   filetree <base-url> wait        block until the server answers
-#   filetree <base-url> demo <stage> [light|dark]
+#   filetree <base-url> demo <stage> [light|dark] [sandbox-dir]
 #                                   drive the tree in a headless browser, check
-#                                   it, and take screenshots
+#                                   it, and take screenshots. Stages: tree,
+#                                   pane, note (give the sandbox directory and
+#                                   it also reads the note's file on disk)
 filetree_probe() {
   local method="$1" url="$2" body="${3:-}" out status
   if [[ -n "$body" ]]; then
@@ -3662,10 +3664,10 @@ PY
 # filetree_demo waits for the server and runs one stage of the browser demo
 # (scripts/demo-home-file-tree.mjs). Screenshots land in $TMPDIR/filetree-demo.
 filetree_demo() {
-  local stage="${4:-tree}" theme="${5:-light}" root
+  local stage="${4:-tree}" theme="${5:-light}" sandbox="${6:-}" root
   smoke_show_wait
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
-  node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "${TMPDIR:-/tmp}/filetree-demo" "$stage" "$theme"
+  node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "${TMPDIR:-/tmp}/filetree-demo" "$stage" "$theme" "$sandbox"
 }
 
 smoke_filetree() {

@@ -11,19 +11,24 @@ import {
   ITEM_FAILED,
   ITEM_LOADING,
   ITEM_READY,
+  NOTE_EDITOR_ID,
   activateTab,
   closeTab,
+  createNoteController,
+  leaveNoteThen,
   nextRunLabel,
   openTab,
   paneCrumbs,
   paneSubline,
   paneView,
+  saveStatusText,
   sectionLinks,
   renderEmptyPaneHTML,
   renderPaneHTML,
   renderTabStripHTML,
   tabFromRow
 } from './home-tree-pane.js';
+import { NoteAutoSaveTimer } from './note-editor.js';
 
 const tab = (key, extra = {}) => ({
   key,
@@ -257,7 +262,7 @@ test('a workspace, group or Memory breadcrumb stops at itself', () => {
 
 const NOTE_TAB = tab('ws1/n/n1', { kind: 'note', label: 'Lyrics draft', meta: { noteId: 'n1' } });
 
-test('a note that has loaded shows its tags and its content as Markdown', () => {
+test('a note that has loaded shows its tags and a slot for the editor (FR32, FR41)', () => {
   const view = paneView(NOTE_TAB, {
     flattened: FLAT,
     item: {
@@ -269,8 +274,9 @@ test('a note that has loaded shows its tags and its content as Markdown', () => 
   assert.equal(view.title, 'Lyrics draft');
   assert.equal(view.sub, 'Note in Night Drive');
   assert.deepEqual(view.tags, ['lyrics']);
-  assert.equal(view.body.type, 'markdown');
-  assert.equal(view.body.markdown, '## Verse 1\n\nWords.');
+  // The note's text is not part of the view: the editor holds it, so a redraw
+  // of the pane cannot disturb what is being typed.
+  assert.deepEqual(view.body, { type: 'editor', noteId: 'n1' });
   // FR32: "Open full note" goes to the note page.
   assert.deepEqual(view.actions, [
     { label: 'Open full note', href: '/workspaces/night-drive/notes/n1', primary: true }
@@ -365,7 +371,36 @@ test('the pane shows the breadcrumb, the title and the "what and where" line (FR
   );
   assert.match(html, /Note in Night Drive/);
   assert.match(html, /class="cockpit-pane-tag">#lyrics</);
-  assert.match(html, /class="cockpit-pane-markdown"/);
+});
+
+test('a note is drawn as one element for the existing editor, plus its save line', () => {
+  const html = renderPaneHTML(
+    paneView(NOTE_TAB, {
+      flattened: FLAT,
+      item: { status: ITEM_READY, value: { name: 'Lyrics draft', content: 'Hi', tags: [] } }
+    })
+  );
+  // The id the editor is told to draw into, and the two classes its shared
+  // styles are keyed on.
+  assert.match(html, new RegExp(`id="${NOTE_EDITOR_ID}"`));
+  assert.match(html, /class="note-preview-content note-live-editor cockpit-pane-editor"/);
+  assert.match(html, /data-pane-editor="n1"/);
+  assert.match(html, /role="textbox" aria-multiline="true"/);
+  assert.match(html, /data-pane-save-status role="status"/);
+  assert.match(html, /data-pane-save-retry hidden/);
+  // The text itself is never in the markup.
+  assert.doesNotMatch(html, />Hi</);
+});
+
+test('two redraws of the same note produce identical markup, so the editor is left alone', () => {
+  const draw = content =>
+    renderPaneHTML(
+      paneView(NOTE_TAB, {
+        flattened: FLAT,
+        item: { status: ITEM_READY, value: { name: 'Lyrics draft', content, tags: ['a'] } }
+      })
+    );
+  assert.equal(draw('first version'), draw('typed a lot more since'));
 });
 
 test('a loading pane says so; a failed one gives the reason and a Retry', () => {
@@ -381,11 +416,329 @@ test('a loading pane says so; a failed one gives the reason and a Retry', () => 
   assert.match(failed, /data-pane-retry="ws1\/n\/n1"/);
 });
 
-test('an empty note says it is empty rather than showing a blank pane', () => {
+test('an empty Markdown file says it is empty rather than showing a blank pane', () => {
   const html = renderPaneHTML(
-    paneView(NOTE_TAB, { flattened: FLAT, item: { status: ITEM_READY, value: { content: '  ' } } })
+    paneView(tab('ws1/f/a.md', { kind: 'file', label: 'a.md', meta: { path: 'a.md' } }), {
+      flattened: FLAT,
+      item: { status: ITEM_READY, value: { kind: 'markdown', text: '  ' } }
+    })
   );
-  assert.match(html, /This note is empty\./);
+  assert.match(html, /This file is empty\./);
+});
+
+// ---------------------------------------------------------------------------
+// Editing a note (FR41-FR45)
+// ---------------------------------------------------------------------------
+
+// A stand-in for window.NoteEditor.mount. It keeps the REAL autosave timer, so
+// the dirty / saving / saved / error transitions under test are the editor's
+// own; only the drawing is faked.
+function fakeEditor() {
+  const mounts = [];
+  const mount = host => {
+    const bundle = {
+      host,
+      renders: [],
+      destroyed: false,
+      history: { reset() {} },
+      autosave: new NoteAutoSaveTimer({
+        delayMs: 60_000,
+        onFlush: host.onAutosaveFlush,
+        onStatusChange: host.onAutosaveStatusChange
+      }),
+      render(options) {
+        this.renders.push(options || {});
+      },
+      destroy() {
+        this.destroyed = true;
+        this.autosave.cancel();
+      },
+      // What typing does: change the text, then arm the autosave timer.
+      type(text) {
+        host.setContent(text);
+        this.autosave.schedule();
+      }
+    };
+    mounts.push(bundle);
+    return bundle;
+  };
+  return { mount, mounts };
+}
+
+function fakePresence(openElsewhere = false) {
+  const log = [];
+  return {
+    log,
+    claimOpenNote: (id, surface) => log.push(`claim ${id} ${surface}`),
+    releaseOpenNote: id => log.push(`release ${id}`),
+    isOpenElsewhere: async () => ({ open: openElsewhere })
+  };
+}
+
+const NOTE = { id: 'n1', content: 'first', updatedAt: '2026-10-04T10:00:00Z' };
+const ELEMENT = { id: NOTE_EDITOR_ID };
+
+function controllerWith(saveContent, extra = {}) {
+  const editor = fakeEditor();
+  const statuses = [];
+  const saved = [];
+  const controller = createNoteController({
+    mountEditor: editor.mount,
+    saveContent,
+    onStatus: (status, error) => statuses.push(error ? `${status}: ${error}` : status),
+    onSaved: (key, text) => saved.push(`${key} <- ${text}`),
+    ...extra
+  });
+  return { controller, editor, statuses, saved };
+}
+
+test('the editor is mounted with the host options the note page uses for a second pane', () => {
+  const { controller, editor } = controllerWith(async () => ({}));
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  const { host, renders } = editor.mounts[0];
+  assert.equal(host.previewPaneId, NOTE_EDITOR_ID);
+  assert.equal(host.enableToc, false);
+  assert.equal(host.aiAssist, undefined);
+  assert.equal(host.isPreviewMode(), true);
+  assert.equal(host.getContent(), 'first');
+  assert.deepEqual(host.getContentLines(), ['first']);
+  host.setContentLines(['a', 'b']);
+  assert.equal(controller.content(), 'a\nb');
+  // An empty note is one empty line, which is what gives it somewhere to click.
+  host.setContent('');
+  assert.deepEqual(host.getContentLines(), ['']);
+  assert.equal(renders.length, 1);
+});
+
+test('only one editor exists: mounting another note takes the first one down (FR41)', () => {
+  const { controller, editor } = controllerWith(async () => ({}));
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  controller.attach(ELEMENT, 'ws1/n/n2', { id: 'n2', content: 'second' });
+  assert.equal(editor.mounts.length, 2);
+  assert.equal(editor.mounts[0].destroyed, true);
+  assert.equal(editor.mounts[1].destroyed, false);
+  assert.equal(controller.activeKey(), 'ws1/n/n2');
+  assert.equal(controller.content(), 'second');
+});
+
+test('mounting the note that is already mounted changes nothing', () => {
+  const { controller, editor } = controllerWith(async () => ({}));
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  editor.mounts[0].type('typed');
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  assert.equal(editor.mounts.length, 1);
+  assert.equal(editor.mounts[0].renders.length, 1);
+  assert.equal(controller.content(), 'typed');
+});
+
+test('a redrawn pane hands over a new element, and the same text is drawn into it', () => {
+  const { controller, editor } = controllerWith(async () => ({}));
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  editor.mounts[0].type('typed');
+  controller.attach({ id: NOTE_EDITOR_ID }, 'ws1/n/n1', NOTE);
+  assert.equal(editor.mounts.length, 1);
+  assert.equal(editor.mounts[0].renders.length, 2);
+  assert.equal(controller.content(), 'typed');
+});
+
+test('autosave sends the current text to the save call and reports saving, then saved (FR42)', async () => {
+  const calls = [];
+  const { controller, editor, statuses, saved } = controllerWith(async (id, text) => {
+    calls.push(`${id}: ${text}`);
+    return { updatedAt: '2026-10-04T11:00:00Z' };
+  });
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  editor.mounts[0].type('first, edited');
+  assert.equal(controller.isDirty(), true);
+  assert.equal(await controller.flush(), true);
+  assert.deepEqual(calls, ['n1: first, edited']);
+  assert.deepEqual(statuses, ['unsaved', 'saving', 'saved']);
+  assert.deepEqual(saved, ['ws1/n/n1 <- first, edited']);
+  assert.equal(controller.isDirty(), false);
+});
+
+test('with nothing unsaved, a flush sends nothing', async () => {
+  const calls = [];
+  const { controller } = controllerWith(async () => calls.push('save'));
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  assert.equal(await controller.flush(), true);
+  assert.deepEqual(calls, []);
+  // Nothing mounted at all is also "nothing to save".
+  controller.detach();
+  assert.equal(await controller.flush(), true);
+});
+
+test('leaving a note saves it BEFORE the switch happens (FR43)', async () => {
+  const order = [];
+  let finishSave;
+  const { controller, editor } = controllerWith(
+    (id, text) =>
+      new Promise(resolve => {
+        order.push(`save started: ${text}`);
+        finishSave = () => {
+          order.push('save finished');
+          resolve({});
+        };
+      })
+  );
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  editor.mounts[0].type('unsaved words');
+
+  const leaving = leaveNoteThen(controller, () => order.push('switched tab'));
+  await Promise.resolve();
+  // The save is on its way and the switch has not happened.
+  assert.deepEqual(order, ['save started: unsaved words']);
+  assert.equal(controller.activeKey(), 'ws1/n/n1');
+
+  finishSave();
+  assert.equal(await leaving, true);
+  assert.deepEqual(order, ['save started: unsaved words', 'save finished', 'switched tab']);
+  // The editor is taken down only after the save, and before the switch.
+  assert.equal(editor.mounts[0].destroyed, true);
+  assert.equal(controller.activeKey(), '');
+});
+
+test('leaving a note with nothing unsaved switches at once, without a save', async () => {
+  const calls = [];
+  const { controller } = controllerWith(async () => calls.push('save'));
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  let switched = false;
+  assert.equal(
+    await leaveNoteThen(controller, () => {
+      switched = true;
+    }),
+    true
+  );
+  assert.equal(switched, true);
+  assert.deepEqual(calls, []);
+});
+
+test('a failed save keeps the tab, the text and says why; the switch does not happen (FR44)', async () => {
+  let fail = true;
+  const { controller, editor, statuses, saved } = controllerWith(async () => {
+    if (fail) throw new Error('Failed to update note');
+    return {};
+  });
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  editor.mounts[0].type('words that must not be lost');
+
+  let switched = false;
+  const left = await leaveNoteThen(controller, () => {
+    switched = true;
+  });
+  assert.equal(left, false);
+  assert.equal(switched, false);
+  // Still mounted, still holding the text, still unsaved.
+  assert.equal(controller.activeKey(), 'ws1/n/n1');
+  assert.equal(editor.mounts[0].destroyed, false);
+  assert.equal(controller.content(), 'words that must not be lost');
+  assert.equal(controller.isDirty(), true);
+  assert.deepEqual(controller.status(), { status: 'error', error: 'Failed to update note' });
+  assert.equal(statuses[statuses.length - 1], 'error: Failed to update note');
+  assert.deepEqual(saved, []);
+
+  // Retry is the same save again; once it works the note can be left.
+  fail = false;
+  assert.equal(await controller.flush(), true);
+  assert.deepEqual(saved, ['ws1/n/n1 <- words that must not be lost']);
+  assert.equal(statuses[statuses.length - 1], 'saved');
+  assert.equal(await leaveNoteThen(controller, () => {}), true);
+});
+
+test('text typed while a save is in flight is saved again, not lost', async () => {
+  const calls = [];
+  let release;
+  const { controller, editor } = controllerWith((id, text) => {
+    calls.push(text);
+    if (calls.length > 1) return Promise.resolve({});
+    return new Promise(resolve => {
+      release = () => resolve({});
+    });
+  });
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  editor.mounts[0].type('one');
+  const first = controller.flush();
+  await Promise.resolve();
+  editor.mounts[0].type('one two');
+  release();
+  // The first save landed, but the editor is dirty again: not safe to leave.
+  assert.equal(await first, false);
+  assert.equal(controller.isDirty(), true);
+  assert.equal(await controller.flush(), true);
+  assert.deepEqual(calls, ['one', 'one two']);
+});
+
+test('a newer version from the server replaces the text only when nothing is unsaved (FR45)', () => {
+  const { controller, editor } = controllerWith(async () => ({}));
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  const newer = { id: 'n1', content: 'edited elsewhere', updatedAt: '2026-10-04T12:00:00Z' };
+
+  // Unsaved text here: the newer version is not allowed to wipe it.
+  editor.mounts[0].type('my unsaved text');
+  controller.attach(ELEMENT, 'ws1/n/n1', newer);
+  assert.equal(controller.content(), 'my unsaved text');
+
+  // Nothing unsaved: the newer version is shown.
+  editor.mounts[0].autosave.markClean();
+  controller.attach(ELEMENT, 'ws1/n/n1', newer);
+  assert.equal(controller.content(), 'edited elsewhere');
+
+  // An OLDER copy (a slow reload answering late) never replaces newer text.
+  controller.attach(ELEMENT, 'ws1/n/n1', {
+    id: 'n1',
+    content: 'stale',
+    updatedAt: '2026-10-04T09:00:00Z'
+  });
+  assert.equal(controller.content(), 'edited elsewhere');
+});
+
+test('the note is claimed while mounted and released after, as the note page does (FR45)', async () => {
+  const presence = fakePresence(true);
+  const elsewhere = [];
+  const { controller } = controllerWith(async () => ({}), {
+    presence,
+    onElsewhere: (key, open) => elsewhere.push(`${key} ${open}`)
+  });
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(presence.log, ['claim n1 home']);
+  assert.deepEqual(elsewhere, ['ws1/n/n1 true']);
+  controller.detach();
+  assert.deepEqual(presence.log, ['claim n1 home', 'release n1']);
+});
+
+test('a new note is opened with the cursor on its first line', () => {
+  const { controller, editor } = controllerWith(async () => ({}));
+  controller.attach(ELEMENT, 'ws1/n/n1', { id: 'n1', content: '' }, { focus: true });
+  assert.deepEqual(editor.mounts[0].renders[0], { focusLineIndex: 0, cursorPosition: 0 });
+});
+
+test('leaving the page sends one keepalive save, and only when something is unsaved', () => {
+  const calls = [];
+  const { controller, editor } = controllerWith(async (id, text, options) => {
+    calls.push({ id, text, keepalive: !!(options && options.keepalive) });
+    return null;
+  });
+  controller.keepalive(); // nothing mounted
+  controller.attach(ELEMENT, 'ws1/n/n1', NOTE);
+  controller.keepalive(); // nothing unsaved
+  assert.deepEqual(calls, []);
+  editor.mounts[0].type('closing the tab mid-sentence');
+  controller.keepalive(); // pagehide
+  controller.keepalive(); // beforeunload, same text
+  assert.deepEqual(calls, [{ id: 'n1', text: 'closing the tab mid-sentence', keepalive: true }]);
+});
+
+test('the save line uses the note page words and adds the reason to a failure', () => {
+  assert.equal(saveStatusText('unsaved'), 'Unsaved');
+  assert.equal(saveStatusText('saving'), 'Saving…');
+  assert.equal(saveStatusText('saved'), 'Saved');
+  assert.equal(saveStatusText('error'), 'Save failed. Your text is kept.');
+  assert.equal(
+    saveStatusText('error', 'Failed to update note'),
+    'Save failed: Failed to update note. Your text is kept.'
+  );
+  assert.equal(saveStatusText(''), '');
 });
 
 test('names and tags are escaped everywhere they are printed', () => {

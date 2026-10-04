@@ -306,7 +306,10 @@ export function sectionLinks(workspaceId, sections, { hideEmpty = false } = {}) 
 }
 
 const VIEW_FILLERS = {
-  // FR32. The body is the note's Markdown; the editor replaces it in place.
+  // FR32, FR41. The body is a slot for the existing note editor, which the
+  // cockpit mounts into it; the note's text never goes through this view, so
+  // redrawing the pane does not disturb what is being typed. Tags are shown
+  // read-only, and everything else the note page offers is one click away.
   note(view, { tab, workspace, value }) {
     const slug = slugOf(workspace);
     if (slug) {
@@ -319,11 +322,7 @@ const VIEW_FILLERS = {
     if (!value) return;
     retitle(view, value.name);
     view.tags = Array.isArray(value.tags) ? value.tags : [];
-    view.body = {
-      type: 'markdown',
-      markdown: String(value.content ?? ''),
-      empty: 'This note is empty.'
-    };
+    view.body = { type: 'editor', noteId: String(tab.meta.noteId || '') };
   },
 
   // FR33, read-only.
@@ -526,8 +525,26 @@ function actionHTML(action) {
   );
 }
 
+/** The id the note editor draws into. One note is mounted at a time (FR41). */
+export const NOTE_EDITOR_ID = 'cockpitPaneNoteEditor';
+
 function previewHTML(body) {
   if (!body) return '';
+  if (body.type === 'editor') {
+    // The save line sits above the editor; both are filled in after drawing
+    // (see createNoteController), never by a redraw of the pane.
+    return (
+      '<div class="cockpit-pane-savebar">' +
+      '<span class="cockpit-pane-save-status" data-pane-save-status role="status" aria-live="polite"></span>' +
+      '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-pane-save-retry hidden>Retry</button>' +
+      '</div>' +
+      '<p class="cockpit-pane-note" data-pane-note-elsewhere hidden>' +
+      'This note is also open in another browser tab. Whichever is saved last is kept.</p>' +
+      `<div id="${NOTE_EDITOR_ID}" class="note-preview-content note-live-editor cockpit-pane-editor" ` +
+      `data-pane-editor="${escapeHtml(body.noteId)}" role="textbox" aria-multiline="true" ` +
+      'aria-label="Note text. Click a line to edit it." tabindex="0"></div>'
+    );
+  }
   if (body.type === 'markdown') {
     return body.markdown.trim()
       ? `<div class="cockpit-pane-markdown">${renderMarkdown(body.markdown)}</div>`
@@ -799,6 +816,10 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
         }
         return;
       }
+      if (event.target.closest('[data-pane-save-retry]')) {
+        if (typeof handlers.onAction === 'function') handlers.onAction('note-save-retry', '');
+        return;
+      }
       const action = event.target.closest('[data-pane-action]');
       if (action && typeof handlers.onAction === 'function') {
         handlers.onAction(
@@ -813,4 +834,237 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
     const title = panel.querySelector('[data-pane-title]');
     if (title) title.focus({ preventScroll: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Note editing (FR41-FR45)
+// ---------------------------------------------------------------------------
+
+// The note page's own words for each save state.
+const SAVE_STATUS_WORDS = {
+  unsaved: 'Unsaved',
+  saving: 'Saving…',
+  saved: 'Saved',
+  error: 'Save failed'
+};
+
+/** The save line's text: the state, and for a failure the server's reason. */
+export function saveStatusText(status, error = '') {
+  const words = SAVE_STATUS_WORDS[status] || '';
+  if (status === 'error' && error) return `${words}: ${error}. Your text is kept.`;
+  if (status === 'error') return `${words}. Your text is kept.`;
+  return words;
+}
+
+const savedTimers = new WeakMap();
+
+/**
+ * Show a save state on the pane's save line (FR42, FR44).
+ *
+ * Written straight into the two elements rather than by redrawing the pane,
+ * because a redraw would rebuild the editor under the cursor. "Saved" clears
+ * itself after a moment, as it does on the note page; a failure stays, with
+ * Retry beside it.
+ */
+export function showSaveStatus(host, status, error = '') {
+  if (!host) return;
+  const line = host.querySelector('[data-pane-save-status]');
+  const retry = host.querySelector('[data-pane-save-retry]');
+  if (!line) return;
+  clearTimeout(savedTimers.get(host));
+  line.textContent = saveStatusText(status, error);
+  line.dataset.status = status || '';
+  if (retry) retry.hidden = status !== 'error';
+  if (status === 'saved') {
+    savedTimers.set(
+      host,
+      setTimeout(() => {
+        if (line.isConnected && line.dataset.status === 'saved') line.textContent = '';
+      }, 1500)
+    );
+  }
+}
+
+/**
+ * The one note being edited in the pane.
+ *
+ * It mounts the EXISTING note editor (`window.NoteEditor.mount`, passed in as
+ * `mountEditor`) for the active note tab and takes it down again, so only one
+ * editor ever exists (FR41). The editor's own autosave timer decides when to
+ * save; this supplies what a save does. The text lives here, in memory, which
+ * is what lets a failed save keep it (FR44).
+ *
+ *   mountEditor(host)                 window.NoteEditor.mount
+ *   saveContent(noteId, text, opts)   resolves when saved, rejects with the reason
+ *   presence                          window.NotePresence, or null
+ *   onStatus(status, error, key)      'unsaved' | 'saving' | 'saved' | 'error'
+ *   onSaved(key, text, updatedAt)     a save landed
+ *   onElsewhere(key, open)            the note is (not) open in another tab
+ *
+ * A note changed somewhere else is handled the way the note page handles it,
+ * with the same module (note-presence.js): the note is claimed while it is
+ * mounted and released after, and another tab holding it is reported. There is
+ * no overwrite rule here; as on the note page, the last save is the one kept
+ * (FR45).
+ */
+export function createNoteController({
+  mountEditor,
+  saveContent,
+  presence = null,
+  onStatus = () => {},
+  onSaved = () => {},
+  onElsewhere = () => {}
+}) {
+  let current = null;
+
+  const isDirty = () => !!current && current.bundle.autosave.isDirty();
+
+  function detach() {
+    if (!current) return;
+    const session = current;
+    current = null;
+    session.bundle.destroy();
+    if (presence) presence.releaseOpenNote(session.noteId);
+  }
+
+  function start(element, key, note) {
+    const session = {
+      key,
+      noteId: String(note.id),
+      content: String(note.content ?? ''),
+      updatedAt: String(note.updatedAt || ''),
+      element,
+      status: '',
+      error: '',
+      bundle: null
+    };
+    session.bundle = mountEditor({
+      previewPaneId: element.id,
+      // The Outline rail and AI assist belong to the note page (FR46).
+      enableToc: false,
+      getContent: () => session.content,
+      setContent: value => {
+        session.content = String(value ?? '');
+      },
+      getContentLines: () => (session.content.length > 0 ? session.content.split('\n') : ['']),
+      setContentLines: lines => {
+        session.content = (lines || []).join('\n');
+      },
+      isPreviewMode: () => true,
+      onAutosaveFlush: async () => {
+        // Send what is on screen now; typing during the request marks the
+        // editor dirty again and the timer saves once more.
+        const sending = session.content;
+        try {
+          const result = await saveContent(session.noteId, sending);
+          session.error = '';
+          if (result && result.updatedAt) session.updatedAt = result.updatedAt;
+          onSaved(session.key, sending, session.updatedAt);
+          return true;
+        } catch (err) {
+          session.error = err && err.message ? String(err.message) : 'Request failed';
+          return false;
+        }
+      },
+      onAutosaveStatusChange: status => {
+        session.status = status;
+        onStatus(status, session.error, session.key);
+      }
+    });
+    current = session;
+    if (presence) {
+      presence.claimOpenNote(session.noteId, 'home');
+      Promise.resolve(presence.isOpenElsewhere(session.noteId)).then(
+        answer => {
+          if (current === session) onElsewhere(session.key, !!(answer && answer.open));
+        },
+        () => {}
+      );
+    }
+    return session;
+  }
+
+  /**
+   * Show `note` in `element`.
+   *
+   * The same note again is the common case and changes nothing — unless the
+   * pane was redrawn and handed over a new, empty element, or a newer version
+   * of the note has arrived and nothing is unsaved here. A different note
+   * replaces the mounted one; the caller must have saved first (see
+   * `leaveNoteThen`). `focus` puts the cursor on the first line.
+   */
+  function attach(element, key, note, { focus = false } = {}) {
+    if (current && current.key === key) {
+      const redrawn = current.element !== element;
+      current.element = element;
+      const newer =
+        !isDirty() &&
+        String(note.content ?? '') !== current.content &&
+        Date.parse(note.updatedAt || '') > Date.parse(current.updatedAt || '');
+      if (newer) {
+        current.content = String(note.content ?? '');
+        current.updatedAt = String(note.updatedAt || '');
+        current.bundle.history.reset();
+      }
+      if (redrawn || newer) {
+        current.bundle.render();
+        onStatus(current.status, current.error, current.key);
+      }
+      return;
+    }
+    detach();
+    const session = start(element, key, note);
+    session.bundle.render(focus ? { focusLineIndex: 0, cursorPosition: 0 } : {});
+  }
+
+  /** Save now if anything is unsaved. Resolves `false` when the save failed. */
+  function flush() {
+    if (!current) return Promise.resolve(true);
+    return current.bundle.autosave.flushImmediate();
+  }
+
+  /**
+   * Send a last save that can outlive the page (FR43, leaving Home). There is
+   * no answer to wait for, so nothing is reported.
+   */
+  function keepalive() {
+    // `pagehide` and `beforeunload` both call this; send a given text once.
+    if (!isDirty() || current.keepaliveSent === current.content) return;
+    current.keepaliveSent = current.content;
+    current.bundle.autosave.cancel();
+    try {
+      Promise.resolve(saveContent(current.noteId, current.content, { keepalive: true })).catch(
+        () => {}
+      );
+    } catch (_) {
+      // The page is closing; there is nowhere left to report this.
+    }
+  }
+
+  return {
+    attach,
+    detach,
+    flush,
+    keepalive,
+    isDirty,
+    activeKey: () => (current ? current.key : ''),
+    content: () => (current ? current.content : ''),
+    status: () => (current ? { status: current.status, error: current.error } : null)
+  };
+}
+
+/**
+ * Save the mounted note, then do something that takes it off screen (FR43).
+ *
+ * `proceed` runs only after the save has finished and worked; it is where the
+ * caller switches tab, closes the tab, or changes view. When the save fails
+ * nothing happens: the note stays mounted with the user's text and its save
+ * line says so (FR44). Resolves `true` when `proceed` ran.
+ */
+export async function leaveNoteThen(controller, proceed) {
+  const saved = await controller.flush();
+  if (!saved) return false;
+  controller.detach();
+  proceed();
+  return true;
 }

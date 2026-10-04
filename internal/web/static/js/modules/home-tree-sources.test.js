@@ -26,6 +26,7 @@ import {
   loadSection,
   loadSections,
   loadNote,
+  saveNoteContent,
   loadTicket,
   loadMemory,
   loadFilePreview,
@@ -701,4 +702,36 @@ test('a failed Open reports the server reason', async () => {
     () => openWorkspaceFile('ws1', 'a.md', { fetchImpl }),
     /desktop opening is unavailable/
   );
+});
+
+// ---------------------------------------------------------------------------
+// Saving a note from the pane (FR42)
+// ---------------------------------------------------------------------------
+
+test('saving a note PUTs only its text, so the name and tags are left alone', async () => {
+  const fetchImpl = stubFetch({
+    '/api/notes/n1': { success: true, note: { id: 'n1', updated_at: '2026-10-04T11:00:00Z' } }
+  });
+  const result = await saveNoteContent('n1', '# Plan\n\nEdited.', { fetchImpl });
+  assert.deepEqual(result, { updatedAt: '2026-10-04T11:00:00Z' });
+  const { options } = fetchImpl.requests[0];
+  assert.equal(options.method, 'PUT');
+  assert.deepEqual(JSON.parse(options.body), { content: '# Plan\n\nEdited.' });
+  assert.equal(options.keepalive, false);
+});
+
+test('a refused save rejects with the server reason, for the save line to show', async () => {
+  const fetchImpl = stubFetch({
+    '/api/notes/n1': { status: 500, body: { message: 'Failed to update note' } }
+  });
+  await assert.rejects(() => saveNoteContent('n1', 'x', { fetchImpl }), /Failed to update note/);
+  await assert.rejects(() => saveNoteContent('gone', 'x', { fetchImpl }), /HTTP 404/);
+});
+
+test('a keepalive save is sent without waiting for an answer', async () => {
+  const fetchImpl = stubFetch({});
+  // No route: an awaited save would reject with HTTP 404. This one does not.
+  assert.equal(await saveNoteContent('n1', 'last words', { keepalive: true, fetchImpl }), null);
+  assert.equal(fetchImpl.requests[0].options.keepalive, true);
+  assert.deepEqual(JSON.parse(fetchImpl.requests[0].options.body), { content: 'last words' });
 });

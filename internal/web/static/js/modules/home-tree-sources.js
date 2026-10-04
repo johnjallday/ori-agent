@@ -702,6 +702,30 @@ export async function openWorkspaceFile(workspaceId, path, { reveal = false, fet
   }
 }
 
+/**
+ * `PUT /api/notes/{id}` with the note's text — the save the pane's editor
+ * makes. Only `content` is sent, so the note's name and tags are left alone.
+ *
+ * `keepalive` lets the request outlive the page, for a save sent while the
+ * page is closing; there is then no answer to wait for. Throws with the
+ * server's reason when the save is refused.
+ */
+export async function saveNoteContent(noteId, content, { keepalive = false, fetchImpl } = {}) {
+  const request = resolveFetch(fetchImpl)(`/api/notes/${enc(noteId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: String(content ?? '') }),
+    keepalive
+  });
+  if (keepalive) return null;
+  const response = await request;
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+  }
+  const data = await response.json();
+  return { updatedAt: text(data && data.note && data.note.updated_at) };
+}
+
 /** `GET /api/notes/{id}` → the whole note, content included. */
 export async function loadNote(noteId, { fetchImpl } = {}) {
   const response = await resolveFetch(fetchImpl)(`/api/notes/${enc(noteId)}`, {
