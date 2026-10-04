@@ -116,6 +116,9 @@ type HomeAssistantAskResponse struct {
 	// DraftContext reports whether the saved draft the request named was read
 	// for this turn.
 	DraftContext *HomeAssistantDraftContext `json:"draft_context,omitempty"`
+	// MemoryReview opens the editable fact review for a typed "remember…"
+	// request. Nothing has been written when it is set.
+	MemoryReview *PersonalAssistantMemoryReview `json:"memory_review,omitempty"`
 }
 
 // HomeActionMutator executes confirmed state-changing actions. The server wires a
@@ -314,12 +317,12 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return HomeAssistantAskResponse{Response: question, Intent: intent, Identity: identity}
 	}
 
-	if conf := detectPersonalAssistantRememberRequest(prompt, workContext); conf != nil {
-		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "confirmation_required", ConfirmedType: conf.ActionType})
-		return HomeAssistantAskResponse{
-			Response: conf.Summary, Intent: intent, Identity: identity,
-			RequiresConfirmation: true, Confirmation: conf,
-		}
+	// "Remember that…" never writes on its own. In a conversation it opens the
+	// editable fact review; an allowlisted global preference keeps its existing
+	// confirmation.
+	if resp, handled := h.handleMemoryRequest(prompt, intent, identity, workContext, conversation != nil); handled {
+		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "confirmation_required", ConfirmedType: HomeActionRemember})
+		return resp
 	}
 
 	// "Save this draft…" opens a review of a reply already in the conversation.

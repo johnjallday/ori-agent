@@ -952,6 +952,74 @@ due date, schedule, or provenance, and it never creates a Ticket.
 | Personal HQ was replaced | The old HQ's Ticket is not reachable through the new one. |
 | The Ticket is not a saved draft | Not found: this path cannot read or edit ordinary Tickets. |
 
+## Remembering a fact from a conversation
+
+**Remember…** is a third action, separate from the conversation and from
+**Save to HQ backlog**. A draft is kept as a backlog item; a fact is one line
+the assistant may use again later. Neither one does the other's job, and
+neither sets a reminder.
+
+It adds no store, route, or rule of its own. The save is the existing explicit
+reviewed-memory action described under
+[Reviewed Personal HQ memory](#reviewed-personal-hq-memory-532):
+`POST /api/personal-assistant/knowledge/explicit` with the current assistant
+state version, one retry key per action, an existing category, and the exact
+wording. The same line is then edited or forgotten on the remembered-facts page
+(`/profile#personalHQKnowledge`).
+
+### Opening the review
+
+The review opens from **Remember…** on any stored message, or from a typed
+request in the conversation ("remember this", "remember that …"). Opening it
+is local: nothing is requested from a model, written, or queued as a
+suggestion, and a typed request is not stored as a conversation turn.
+
+What the review starts with:
+
+| Chosen context | Starting text |
+|---|---|
+| "remember that _statement_" | The statement, editable. |
+| A short statement the user wrote themselves | That statement, editable. |
+| A reply the assistant wrote (a greeting, a draft, an example) | Empty. A generated reply is never offered as a fact. |
+| The user's request or question ("write…", "translate…", "when is…?") | Empty. |
+| "remember this" with nothing stated | Empty: the user says what to remember. |
+
+A date-bound subject with no date in the chosen message (a birthday, an
+anniversary) gets a hint that the date is missing. Ori never supplies one: a
+date the model used in an example is not a fact, and a birthday the user did not
+give stays unknown. Translating a draft is not a language preference; only an
+explicit preference statement reaches the existing global-profile confirmation,
+which is unchanged.
+
+### Saving
+
+The review shows the exact wording, the destination (Personal HQ memory), the
+kind of fact, and the UTF-8 byte count against the existing 500-byte limit.
+Choosing **Remember this fact** is the user's approval of that wording; nothing
+else is. Text over the limit, blank, multi-line, padded, or secret-like is
+refused whole and stays in the form — it is never cut to fit.
+
+| Situation | Result |
+|---|---|
+| Saved and read back | "Remembered in Personal HQ", with a link to review, edit, or forget it. |
+| The exact wording is already remembered | Reported as already remembered. Nothing is added. |
+| The response was lost, or the save could not be confirmed | The canonical list is read. If the fact is there it is reported as remembered; otherwise the user is told it could not be confirmed, and the same save — same retry key — can be sent again without being applied twice. |
+| The assistant's state changed while the review was open | Nothing is remembered; the wording stays in the form and the next save uses the current state. |
+| Personal HQ memory will not take it (queue full, needs repair, no HQ) | The reason the memory service gives is shown as given; the wording stays in the form. |
+
+A remembered fact creates no Ticket, follow-up, schedule, or notification, does
+not change the global profile, and adds nothing to the conversation. Editing or
+forgetting it on the remembered-facts page changes reviewed memory from then
+on. It does not edit history: a conversation in which the fact was said still
+shows it, and continuing that same conversation still includes its own earlier
+turns. History is never turned back into a remembered fact, so forgetting is
+not undone by an old transcript, and other conversations do not see it.
+
+A paused assistant follows the same canonical service: the user can still
+remember a fact, and — as for all reviewed memory — a paused assistant is not
+given those facts as context. Saving never calls a model, so it does not depend
+on one being configured.
+
 ## Delegation and ownership
 
 The personal assistant owns intake and remains the user-visible delegator.

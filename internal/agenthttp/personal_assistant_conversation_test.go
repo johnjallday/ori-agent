@@ -558,14 +558,13 @@ func TestConversation_ActionsAndConfirmationsAreNotStoredAsTurns(t *testing.T) {
 	f := newConversationFixture(t)
 	f.store.seed("mine", "hq-owned", "nova-profile-key")
 
-	for _, prompt := range []string{
-		"remember that my launch is Friday",
-		"create a workspace called Launch",
-	} {
-		preview := f.say(prompt, "mine")
-		if !preview.RequiresConfirmation || preview.Conversation != nil {
-			t.Fatalf("%q: %+v", prompt, preview)
-		}
+	memory := f.say("remember that my launch is Friday", "mine")
+	if memory.MemoryReview == nil || memory.Conversation != nil {
+		t.Fatalf("memory request: %+v", memory)
+	}
+	preview := f.say("create a workspace called Launch", "mine")
+	if !preview.RequiresConfirmation || preview.Conversation != nil {
+		t.Fatalf("workspace request: %+v", preview)
 	}
 	confirmed := f.handler.Ask(context.Background(), HomeAssistantAskRequest{
 		Intent: homeAssistantConversationIntent.Key, Conversation: &HomeAssistantConversationRef{ID: "mine"},

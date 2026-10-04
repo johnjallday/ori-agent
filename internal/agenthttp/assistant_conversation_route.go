@@ -84,7 +84,7 @@ func routesToAssistantConversation(
 	// Saving a draft from the conversation is the assistant's own reviewed
 	// action. It is never handed to a specialist that happened to match a word
 	// such as "todo".
-	if isAssistantDraftSaveRequest(prompt) {
+	if isAssistantDraftSaveRequest(prompt) || isAssistantMemoryRequest(prompt) {
 		return true
 	}
 	if workspaceRecommended {

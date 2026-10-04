@@ -19,6 +19,9 @@
  *   resume        run after restarting the server on the same sandbox: reopen
  *                 the saved draft, update the same Ticket, hit a conflict from
  *                 an outside edit, and open it after its chat was deleted.
+ *   remember      a greeting with no date, Remember… (no date is supplied), the
+ *                 user's own wording saved to reviewed HQ memory, then edited
+ *                 and forgotten on the remembered-facts page.
  *
  * Prints one JSON evidence object: conversation IDs, canonical message IDs,
  * what the sessions API holds, and any console errors or failed requests.
@@ -712,11 +715,251 @@ async function resumeStage() {
   });
 }
 
+const memoryReview = () =>
+  page.evaluate(() => {
+    const form = document.getElementById('personalAssistantMemoryReview');
+    const text = id => document.getElementById(id).textContent;
+    return {
+      open: !form.hidden,
+      text: document.getElementById('personalAssistantMemoryText').value,
+      category: document.getElementById('personalAssistantMemoryCategory').value,
+      source: text('personalAssistantMemorySource'),
+      hint: text('personalAssistantMemoryHint'),
+      limit: text('personalAssistantMemoryLimit'),
+      problem: text('personalAssistantMemoryProblem'),
+      status: text('personalAssistantMemoryStatus'),
+      saveDisabled: document.getElementById('personalAssistantMemorySave').disabled,
+      receipt: text('personalAssistantMemoryReceipt'),
+      receiptVisible: !form.querySelector('[data-memory-view="receipt"]').hidden,
+      draftReviewOpen: !document.getElementById('personalAssistantDraftReview').hidden,
+      focused: document.activeElement?.id || document.activeElement?.dataset?.messageAction || ''
+    };
+  });
+
+const knowledge = async () => {
+  const result = await api('/api/personal-assistant/knowledge');
+  return {
+    status: result.status,
+    stateVersion: result.body?.state_version,
+    approved: (result.body?.items || [])
+      .filter(item => item.state === 'approved')
+      .map(item => ({ id: item.id, text: item.text, category: item.category }))
+  };
+};
+
+// Everything a remembered fact must leave alone.
+const sideEffects = async hq => ({
+  tickets: ((await api(`/api/workspaces/${hq}/tickets?archive=all&limit=200`)).body?.tickets || [])
+    .length,
+  // The global profile (language, style, units) and when it last changed.
+  profile: JSON.stringify(
+    (await api('/api/personal-assistant/knowledge/interview')).body?.profile ?? null
+  ),
+  notificationPermission: await page.evaluate(() =>
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
+  )
+});
+
+/*
+ * remember: a greeting that never says the date, then Remember… — the review
+ * starts without a date, the user adds one, it is saved to reviewed HQ memory,
+ * and the remembered-facts page edits and forgets it.
+ */
+async function rememberStage() {
+  await openAsk();
+  await page
+    .locator('#personalAssistantConversationNew')
+    .click({ force: true })
+    .catch(() => {});
+  const assistant = (await api('/api/personal-assistant')).body.personal_assistant;
+  const hq = assistant.hq_workspace_id;
+  const before = { knowledge: await knowledge(), effects: await sideEffects(hq) };
+
+  const greeting = await say('Write a short birthday greeting for my friend Mina.');
+  const all = await rows();
+  const request = all[all.length - 2];
+  evidence.steps.push({
+    step: 'greeting',
+    request,
+    greeting,
+    everyStoredRowOffersRemember: all.every(row => row.actions.includes('Remember…'))
+  });
+
+  // Remember… on the assistant's greeting: the review starts empty.
+  const greetingRow = page.locator(
+    `#homeAssistantConversation [data-message-id="${greeting.messageId}"]`
+  );
+  await greetingRow.locator('[data-message-action="remember"]').click();
+  await page
+    .locator('#personalAssistantMemoryReview')
+    .waitFor({ state: 'visible', timeout: 20000 });
+  const fromGreeting = await memoryReview();
+  evidence.steps.push({
+    step: 'review-from-greeting',
+    review: fromGreeting,
+    startsEmpty: fromGreeting.text === '',
+    nothingRemembered: (await knowledge()).approved.length === before.knowledge.approved.length,
+    shot: await shot('30-review-from-greeting')
+  });
+
+  // Escape cancels only the review and returns focus to the action.
+  await page.keyboard.press('Escape');
+  const afterEscape = await memoryReview();
+  evidence.steps.push({
+    step: 'escape',
+    reviewClosed: !afterEscape.open,
+    panelStillOpen: await page.locator('#personalAssistantPanel').isVisible(),
+    focusBackOnAction: afterEscape.focused === 'remember'
+  });
+
+  // Remember… on the user's own request: still no date, and none is supplied.
+  await page
+    .locator(`#homeAssistantConversation [data-message-id="${request.messageId}"]`)
+    .locator('[data-message-action="remember"]')
+    .click();
+  await page
+    .locator('#personalAssistantMemoryReview')
+    .waitFor({ state: 'visible', timeout: 20000 });
+  const fromRequest = await memoryReview();
+  evidence.steps.push({
+    step: 'review-from-request',
+    review: fromRequest,
+    noDateSupplied: !/\d/.test(fromRequest.text),
+    shot: await shot('31-review-no-date')
+  });
+
+  // Over the limit: refused in place, never cut.
+  const field = page.locator('#personalAssistantMemoryText');
+  await field.fill('가'.repeat(167));
+  const overLimit = await memoryReview();
+  evidence.steps.push({
+    step: 'over-limit',
+    limit: overLimit.limit,
+    problem: overLimit.problem,
+    saveDisabled: overLimit.saveDisabled,
+    keptWhole: overLimit.text.length === 167,
+    shot: await shot('32-over-limit')
+  });
+
+  // The user writes the fact, date included, and saves it by keyboard.
+  const fact = "Mina's birthday is 3 March";
+  await field.fill(fact);
+  const ready = await memoryReview();
+  await field.press('Enter');
+  await page
+    .locator('#personalAssistantMemoryReview [data-memory-view="receipt"]')
+    .waitFor({ state: 'visible', timeout: 30000 });
+  const receipt = await memoryReview();
+  const afterSave = { knowledge: await knowledge(), effects: await sideEffects(hq) };
+  evidence.steps.push({
+    step: 'remembered',
+    limitBeforeSave: ready.limit,
+    category: ready.category,
+    receipt: receipt.receipt,
+    approved: afterSave.knowledge.approved,
+    exactlyOneAdded:
+      afterSave.knowledge.approved.length === before.knowledge.approved.length + 1 &&
+      afterSave.knowledge.approved.some(item => item.text === fact && item.category === 'people'),
+    effectsBefore: before.effects,
+    effectsAfter: afterSave.effects,
+    conversationRows: (await rows()).length,
+    shot: await shot('33-remembered')
+  });
+  await page.locator('#personalAssistantMemoryDone').click();
+
+  // Remembering it again adds nothing.
+  await greetingRow.locator('[data-message-action="remember"]').click();
+  await field.fill(fact);
+  await field.press('Enter');
+  await page
+    .locator('#personalAssistantMemoryReview [data-memory-view="receipt"]')
+    .waitFor({ state: 'visible', timeout: 30000 });
+  evidence.steps.push({
+    step: 'remember-again',
+    receipt: (await memoryReview()).receipt,
+    approvedCount: (await knowledge()).approved.length
+  });
+  await page.locator('#personalAssistantMemoryDone').click();
+
+  // The typed request opens the same review with the statement as a start.
+  await page.locator('#personalAssistantInput').fill('remember that Mina likes jasmine tea');
+  await page.locator('#personalAssistantSend').click();
+  await page
+    .locator('#personalAssistantMemoryReview')
+    .waitFor({ state: 'visible', timeout: 30000 });
+  const typed = await memoryReview();
+  evidence.steps.push({
+    step: 'typed-request',
+    text: typed.text,
+    draftReviewOpen: typed.draftReviewOpen,
+    approvedCount: (await knowledge()).approved.length,
+    shot: await shot('34-typed-request')
+  });
+  await page.locator('#personalAssistantMemoryCancel').click();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await greetingRow.locator('[data-message-action="remember"]').click();
+  await page
+    .locator('#personalAssistantMemoryReview')
+    .waitFor({ state: 'visible', timeout: 20000 });
+  const narrow = await page.evaluate(() => {
+    const form = document.getElementById('personalAssistantMemoryReview').getBoundingClientRect();
+    const save = document.getElementById('personalAssistantMemorySave').getBoundingClientRect();
+    return {
+      fitsWidth: form.right <= window.innerWidth + 1 && form.left >= -1,
+      saveHeight: Math.round(save.height),
+      pageScrollsSideways: document.documentElement.scrollWidth > window.innerWidth + 1
+    };
+  });
+  evidence.steps.push({ step: 'narrow', ...narrow, shot: await shot('35-narrow') });
+  await page.locator('#personalAssistantMemoryCancel').click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // The remembered-facts page: the fact is there, and is edited then forgotten.
+  page.on('dialog', dialog => void dialog.accept());
+  await page.goto(`${baseUrl}/profile#personalHQKnowledge`, { waitUntil: 'domcontentloaded' });
+  const card = page.locator('#personalHQKnowledge .reviewed-knowledge-item', { hasText: fact });
+  await card.waitFor({ state: 'visible', timeout: 30000 });
+  await card.scrollIntoViewIfNeeded();
+  evidence.steps.push({
+    step: 'facts-page',
+    card: (await card.textContent()).replace(/\s+/g, ' ').trim(),
+    shot: await shot('36-facts-page')
+  });
+
+  const edited = "Mina's birthday is 4 March";
+  await card.getByRole('button', { name: 'Edit', exact: true }).click();
+  await card.locator('.reviewed-knowledge-edit textarea').fill(edited);
+  await card.locator('.reviewed-knowledge-edit button[type="submit"]').click();
+  const editedCard = page.locator('#personalHQKnowledge .reviewed-knowledge-item', {
+    hasText: edited
+  });
+  await editedCard.waitFor({ state: 'visible', timeout: 30000 });
+  evidence.steps.push({
+    step: 'edited',
+    approved: (await knowledge()).approved,
+    shot: await shot('37-edited')
+  });
+
+  await editedCard.getByRole('button', { name: 'Forget', exact: true }).click();
+  await editedCard.waitFor({ state: 'detached', timeout: 30000 });
+  const afterForget = await knowledge();
+  evidence.steps.push({
+    step: 'forgotten',
+    approved: afterForget.approved,
+    backToStart: afterForget.approved.length === before.knowledge.approved.length,
+    shot: await shot('38-forgotten')
+  });
+
+  evidence.canonical = { hq, effectsAtEnd: await sideEffects(hq), effectsAtStart: before.effects };
+}
+
 try {
   if (stage === 'conversation') await conversationStage();
   else if (stage === 'save') await saveStage();
   else if (stage === 'resume-save') await resumeSaveStage();
   else if (stage === 'resume') await resumeStage();
+  else if (stage === 'remember') await rememberStage();
   else throw new Error(`unknown stage: ${stage}`);
 } catch (error) {
   evidence.error = String(error && error.stack ? error.stack : error);

@@ -161,11 +161,13 @@ function closeList() {
 function attachMessage(row, conversationId, messageId) {
   if (!tagMessageRow(row, conversationId, messageId)) return;
   window.PersonalAssistantDrafts?.decorate?.(row);
+  window.PersonalAssistantMemory?.decorate?.(row);
 }
 
 /** A review belongs to the conversation it was opened in; leaving it closes it. */
 function closeReviews() {
   window.PersonalAssistantDrafts?.close?.();
+  window.PersonalAssistantMemory?.close?.();
 }
 
 /** Leaving a conversation also stops working on the draft saved from it. */

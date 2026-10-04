@@ -218,6 +218,38 @@
         </div>
         <p id="personalAssistantDraftStatus" class="personal-assistant-review__status" role="status" aria-live="polite"></p>
       </form>
+      <!-- Remember…: the review of one personal fact. It is a different action
+           from saving a draft: one line the assistant may use again, kept in
+           Personal HQ memory. Opening it writes nothing. -->
+      <form id="personalAssistantMemoryReview" class="personal-assistant-review"
+            aria-labelledby="personalAssistantMemoryReviewHeading" hidden novalidate>
+        <h3 id="personalAssistantMemoryReviewHeading" class="personal-assistant-review__heading">Remember a fact</h3>
+        <p class="personal-assistant-review__target">Kept in Personal HQ memory, where you can edit or forget it. This does not save a draft or add anything to your backlog.</p>
+        <div data-memory-view="edit" class="personal-assistant-review__fields">
+          <p id="personalAssistantMemorySource" class="personal-assistant-review__hint" hidden></p>
+          <label class="personal-assistant-review__label" for="personalAssistantMemoryText">Fact to remember</label>
+          <input type="text" id="personalAssistantMemoryText" class="personal-assistant-review__input"
+                 autocomplete="off" placeholder="One fact, in your own words"
+                 aria-describedby="personalAssistantMemoryLimit personalAssistantMemoryProblem personalAssistantMemoryHint">
+          <p id="personalAssistantMemoryLimit" class="personal-assistant-review__hint">0 / 500 UTF-8 bytes</p>
+          <p id="personalAssistantMemoryProblem" class="personal-assistant-review__hint personal-assistant-review__problem" role="status" aria-live="polite"></p>
+          <p id="personalAssistantMemoryHint" class="personal-assistant-review__hint" hidden></p>
+          <label class="personal-assistant-review__label" for="personalAssistantMemoryCategory">Kind of fact</label>
+          <select id="personalAssistantMemoryCategory" class="personal-assistant-review__input"></select>
+          <div class="personal-assistant-review__actions">
+            <button type="submit" id="personalAssistantMemorySave" class="personal-assistant-review__primary">Remember this fact</button>
+            <button type="button" id="personalAssistantMemoryCancel" class="personal-assistant-review__secondary">Cancel</button>
+          </div>
+        </div>
+        <div data-memory-view="receipt" class="personal-assistant-review__fields" hidden>
+          <p id="personalAssistantMemoryReceipt" class="personal-assistant-review__receipt"></p>
+          <div class="personal-assistant-review__actions">
+            <a id="personalAssistantMemoryFacts" class="personal-assistant-review__primary" href="/profile#personalHQKnowledge">Review, edit, or forget it</a>
+            <button type="button" id="personalAssistantMemoryDone" class="personal-assistant-review__secondary">Done</button>
+          </div>
+        </div>
+        <p id="personalAssistantMemoryStatus" class="personal-assistant-review__status" role="status" aria-live="polite"></p>
+      </form>
       {{if ne .CurrentPage "index"}}
       {{template "assistant-led-setup.tmpl" .}}
       {{end}}

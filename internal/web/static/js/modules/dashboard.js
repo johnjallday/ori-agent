@@ -10358,6 +10358,19 @@
         return;
       }
 
+      // "Remember that…" opens the editable fact review. Nothing has been
+      // written; the review is where the user confirms the exact wording.
+      if (
+        data &&
+        data.memory_review &&
+        window.PersonalAssistantMemory &&
+        typeof window.PersonalAssistantMemory.open === 'function'
+      ) {
+        setHomeAssistantRoutingSummary('', '');
+        window.PersonalAssistantMemory.open({ text: String(data.memory_review.text || '') }, {});
+        return;
+      }
+
       if (isConversation) {
         // The conversation bar already says what happened to a stored turn, so
         // the routing summary stays quiet unless the turn needs attention.

@@ -342,6 +342,9 @@ function showCurrent(current) {
 
 function present(mode, review, options) {
   const els = state.els;
+  // One review at a time: a draft review and a fact review are different
+  // actions and are never open together.
+  window.PersonalAssistantMemory?.close?.();
   state.mode = mode;
   state.review = review;
   state.saving = false;
@@ -573,7 +576,10 @@ function actionButton(actions, name, label, onClick) {
     button.className = 'personal-assistant-message__action';
     button.dataset.messageAction = name;
     button.addEventListener('click', () => onClick(button));
-    actions.append(button);
+    // Draft actions stay ahead of the secondary Remember… action.
+    const remember = actions.querySelector('[data-message-action="remember"]');
+    if (remember) actions.insertBefore(button, remember);
+    else actions.append(button);
   }
   button.textContent = label;
   return button;

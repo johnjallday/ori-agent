@@ -901,6 +901,21 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   font-weight: 600;
 }
 
+/* Remember… is secondary: it reads as a quieter action than saving a draft. */
+.personal-assistant-message__action--secondary {
+  border-style: dashed;
+  font-weight: 500;
+}
+
+.personal-assistant-review__problem:empty {
+  display: none;
+}
+
+.personal-assistant-review__problem {
+  color: #b3261e;
+  opacity: 1;
+}
+
 .personal-assistant-message__action:disabled {
   cursor: progress;
   opacity: 0.55;
