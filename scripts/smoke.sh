@@ -2007,6 +2007,25 @@ smoke_specialist() {
   echo "PASS specialist"
 }
 
+# smoke_interview_seed gets a fresh demo sandbox to the state the interview
+# wizard needs: a confirmed Workspace Directory, a hired assistant and a built
+# Personal HQ. Until then GET .../knowledge/interview answers 409. It prints the
+# interview status and the question 1 hint so the wizard can be driven next.
+smoke_interview_seed() {
+  local hire version
+  expect_status 200 POST "$BASE_URL/api/settings/workspace-root" '{"workspace_root":""}'
+  hire=$(curl -s -X POST "$BASE_URL/api/personal-assistant/hire" -H 'Content-Type: application/json' \
+    -d '{"request_id":"smoke-interview-hire","if_version":0,"display_name":"Atlas","mandate":"Keep my priorities visible.","focus_areas":["plan_my_day"]}')
+  version=$(printf '%s' "$hire" | json_field 'personal_assistant.state_version')
+  [[ -n "$version" ]] || fail "hire did not return a state_version: $hire"
+  expect_status 201 POST "$BASE_URL/api/personal-assistant/hq" \
+    "{\"request_id\":\"smoke-interview-hq\",\"if_version\":$version,\"name\":\"My HQ\",\"timezone\":\"UTC\"}"
+  local snapshot
+  snapshot=$(curl -s "$BASE_URL/api/personal-assistant/knowledge/interview")
+  echo "interview status = $(printf '%s' "$snapshot" | json_field 'status')"
+  echo "question 1 hint  = $(printf '%s' "$snapshot" | json_field 'questions.0.hint')"
+}
+
 # smoke_agentseed fills an isolated sandbox with a roster that actually exercises
 # the /agents page.
 #
@@ -3410,6 +3429,7 @@ economypending) smoke_economy_pending "$@" ;;
 agentseed) smoke_agentseed "${3:-default}" ;;
 agentmap) smoke_agentmap ;;
 specialist) smoke_specialist ;;
+interview-seed) smoke_interview_seed ;;
 seed) seed_demo ;;
 rootswitch) smoke_rootswitch "${3:-}" ;;
 slot) smoke_slot "${3:-}" ;;
@@ -3460,6 +3480,7 @@ library-notifications) smoke_library_notifications "$@" ;;
   echo "  $0 agentseed <base-url> [sandbox-name]   # fill a sandbox with a demo agent roster" >&2
   echo "  $0 agentmap <base-url>                   # Agent Map layout API checks" >&2
   echo "  $0 specialist <base-url>                 # domain-specialist onboarding API checks" >&2
+  echo "  $0 interview-seed <base-url>             # interview wizard: confirm root, hire, build Personal HQ, print the interview status" >&2
   echo "  $0 economyseed <base-url>                # City Economy: walk the earning half of the loop" >&2
   echo "  $0 economyearn <base-url> [count]        # City Economy: earn Craft by chatting" >&2
   echo "  $0 economyquote <base-url> [ws] [task]   # City Economy: price a cadence change" >&2
