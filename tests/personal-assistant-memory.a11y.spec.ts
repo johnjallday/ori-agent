@@ -112,8 +112,65 @@ test('reviewed interview stays keyboard-usable and an all-skipped review saves n
   await page.keyboard.press('Escape');
   await expect(wizard).toHaveCount(0);
   await expect(start).toBeFocused();
+
+  // Question 1's folder chooser. Mocked: this sandbox has no folders to show,
+  // and the wizard's markup, not the scan, is what is checked here.
+  await page.route('**/api/personal-assistant/folder-digest', route =>
+    route.fulfill({
+      json: {
+        folder_digest: {
+          offer: null,
+          chips: [{ id: 'documents', label: 'Documents' }],
+          picker_available: false,
+          file_picker_available: false,
+          picker_note: 'Pick a folder from the list for now.',
+          paused: false,
+          prompt_first_folder: false
+        }
+      }
+    })
+  );
+  await page.route('**/api/personal-assistant/knowledge/interview/suggest', route =>
+    route.fulfill({
+      json: {
+        suggestion: {
+          text: 'Thesis, a LaTeX manuscript',
+          folder: 'Thesis',
+          alternates: [{ text: 'website, a Node.js package', folder: 'website' }]
+        }
+      }
+    })
+  );
   await start.press('Enter');
   await expect(wizard).toBeVisible();
+  const box = wizard.getByRole('textbox', { name: /working on right now/i });
+  await expect(box).toBeFocused();
+  const chooser = wizard.getByRole('group', { name: 'Show me instead' });
+  await expect(chooser).toBeVisible();
+  // The chooser comes before the box, so Shift+Tab reaches its last button.
+  await page.keyboard.press('Shift+Tab');
+  const chip = chooser.getByRole('button', { name: 'Documents' });
+  await expect(chip).toBeFocused();
+  await chip.press('Enter');
+  // The result is announced, focus lands in the box, and the caption that says
+  // where the answer came from is part of the box's description.
+  await expect(wizard.getByRole('status')).toHaveText('Filled in “Thesis, a LaTeX manuscript”.');
+  await expect(box).toBeFocused();
+  await expect(box).toHaveValue('Thesis, a LaTeX manuscript');
+  const caption = wizard.locator('.interview-wizard-caption');
+  await expect(caption).toContainText('From the folder you showed me');
+  expect(await box.getAttribute('aria-describedby')).toContain((await caption.getAttribute('id'))!);
+  const alternates = wizard.getByRole('group', { name: 'Also in this folder:' });
+  await expect(
+    alternates.getByRole('button', { name: 'website, a Node.js package' })
+  ).toBeVisible();
+  for (const part of [chooser, alternates]) {
+    const partBounds = await part.boundingBox();
+    expect(partBounds).toBeTruthy();
+    expect(partBounds!.x + partBounds!.width).toBeLessThanOrEqual(390 + 1);
+  }
+  await page.unroute('**/api/personal-assistant/folder-digest');
+  await page.unroute('**/api/personal-assistant/knowledge/interview/suggest');
 
   const answer = wizard.getByRole('textbox');
   await answer.fill('é'.repeat(251));

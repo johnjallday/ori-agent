@@ -2026,6 +2026,21 @@ smoke_interview_seed() {
   echo "question 1 hint  = $(printf '%s' "$snapshot" | json_field 'questions.0.hint')"
 }
 
+# smoke_interview_folder_seed gets a fresh demo sandbox ready for the
+# interview's folder feed in one command: it waits for the server, runs the
+# interview-seed steps (hire, Personal HQ) and fills the sandbox home with the
+# showfolder seed folders, so question 1's chooser has Documents (three
+# projects plus loose files), Downloads (a dump) and Desktop (nearly empty).
+#
+# Usage: ./scripts/smoke.sh interview-folder-seed <base-url> <sandbox-dir>
+smoke_interview_folder_seed() {
+  local home="${3:-}"
+  [[ -n "$home" && -d "$home" ]] || fail "usage: $0 interview-folder-seed <base-url> <sandbox-dir>"
+  smoke_show_wait
+  smoke_interview_seed
+  smoke_show_folder showfolder "$BASE_URL" seed "$home"
+}
+
 # smoke_agentseed fills an isolated sandbox with a roster that actually exercises
 # the /agents page.
 #
@@ -3430,6 +3445,7 @@ agentseed) smoke_agentseed "${3:-default}" ;;
 agentmap) smoke_agentmap ;;
 specialist) smoke_specialist ;;
 interview-seed) smoke_interview_seed ;;
+interview-folder-seed) smoke_interview_folder_seed "$@" ;;
 seed) seed_demo ;;
 rootswitch) smoke_rootswitch "${3:-}" ;;
 slot) smoke_slot "${3:-}" ;;
@@ -3481,6 +3497,7 @@ library-notifications) smoke_library_notifications "$@" ;;
   echo "  $0 agentmap <base-url>                   # Agent Map layout API checks" >&2
   echo "  $0 specialist <base-url>                 # domain-specialist onboarding API checks" >&2
   echo "  $0 interview-seed <base-url>             # interview wizard: confirm root, hire, build Personal HQ, print the interview status" >&2
+  echo "  $0 interview-folder-seed <base-url> <sandbox>  # interview folder feed: interview-seed plus Documents, Downloads and Desktop in the sandbox" >&2
   echo "  $0 economyseed <base-url>                # City Economy: walk the earning half of the loop" >&2
   echo "  $0 economyearn <base-url> [count]        # City Economy: earn Craft by chatting" >&2
   echo "  $0 economyquote <base-url> [ws] [task]   # City Economy: price a cadence change" >&2

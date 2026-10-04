@@ -1453,6 +1453,58 @@ Chat and task runs in a workspace with a linked directory get two tools:
 
 Both are read-only; nothing here writes to a linked directory.
 
+## Personal Assistant Interview API
+
+The optional three-question interview (contract in `docs/architecture/personal-assistant-foundation-contract.md`). Its first question, "What's the main thing you're working on right now?", can be answered by showing the assistant a folder: the scan proposes wording, the user confirms or edits it, and nothing is saved before the wizard's Save (`POST /api/personal-assistant/knowledge/interview/save`). Available only once Personal HQ is built (`409` otherwise).
+
+### Get the Interview
+
+**Endpoint:** `GET /api/personal-assistant/knowledge/interview`
+
+```json
+{
+  "questions": [{ "id": "priority", "prompt": "…", "hint": "…", "category": "projects", "destination": "personal_hq" }],
+  "status": "offered",
+  "state_version": 3,
+  "profile": { "updated_at": "…", "preferences": { "response_style": "", "units": "", "language": "" } },
+  "suggestion": {
+    "text": "Thesis, a LaTeX manuscript",
+    "folder": "Thesis",
+    "alternates": [{ "text": "website, a Node.js package", "folder": "website" }]
+  },
+  "remembered_project": "You are working on a project in the folder Thesis."
+}
+```
+
+A pure read: it offers nothing, saves no draft and scans no folder. Two fields are optional and come from folders the user already showed the assistant:
+
+- `suggestion` — wording for question 1 from a folder offer still waiting on Home (pending, or set aside with **Later**). It is sent only when the offer names one project; a dump, an empty or unclassified folder and a whole collection give none. `alternates` (at most three) are the folder's other projects. `folder` is a base name, never a path.
+- `remembered_project` — the current text of the newest project fact already approved from a folder (a **yes** on Home). A project that is remembered is not also sent as a `suggestion`, nor listed among another suggestion's `alternates`.
+
+Both are left out when there is nothing to report or the folder record cannot be read; the rest of the response is unaffected. The wizard prefills question 1 from `suggestion` only on a fresh open: a stored draft always wins.
+
+### Suggest an Answer from a Folder
+
+**Endpoint:** `POST /api/personal-assistant/knowledge/interview/suggest`
+
+```json
+{ "chip": "documents" }
+```
+
+Exactly one of `{ "chip": "<id>" }`, `{ "picker": true }` or `{ "file": true }`: the same body as [Scan a Folder](#scan-a-folder), with the same refusal of every other field (a `path`- or `folder`-named field is `400` before anything is looked at). It runs the one folder scan Home runs, so the scan reads file names, types and dates only, **and it records the same offer**: the folder's setup suggestion is then waiting on Home, and an offer that was already pending there moves to later. No workspace is created and no fact is saved.
+
+```json
+{ "suggestion": { "text": "Thesis, a LaTeX manuscript", "folder": "Thesis", "alternates": [] } }
+```
+
+A folder with no single project to propose answers `200` with an explicit null and a message to show:
+
+```json
+{ "suggestion": null, "message": "I couldn't tell what this folder is for. Type your answer instead." }
+```
+
+A cancelled native dialog answers `{ "cancelled": true }` and records nothing. Errors read as they do for a scan (`400` unknown chip, missing folder or a root that cannot be looked at; `409` when the dialog is unavailable or Personal HQ is not built), except a scan that is still running, which is `409` with "I'm still looking at the last folder. Try again in a moment."
+
 ## Home Project Library Notifications API
 
 After a reviewed library scan completes, a program Home keeps a small, model-free digest of what the scan found, may ask its bound Manager for at most three inert suggestions, and shows both through navigation-only entry points (PRD `library-manager-notifications`; contract in `docs/architecture/project-library.md`). Every route below is for the authenticated owner of that exact Home: any other owner, a linked project's ID, or a Home without an assistant program gets `404`. No route here scans, reads a folder, grants anything or changes notes.
