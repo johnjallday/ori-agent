@@ -1246,6 +1246,68 @@ Identical wording written by an outside editor at a different version is a
 conflict, not an interview save. A fresh explicit final review can supersede
 an uncommitted prepare record without altering previously saved rows. Unsaved
 drafts live only in the browser.
+
+**Answering the first question with a folder.** Question 1 ("What's the main
+thing you're working on right now?") offers the same chooser as Home's "Show me
+a folder" above its answer box: the known-folder chips and, where the native
+dialog can run, **Pick a folder…** and **Pick a file…**. Choosing one calls
+`POST /api/personal-assistant/knowledge/interview/suggest`, which:
+
+- accepts exactly one of a chip id, `picker` or `file`, and refuses every other
+  field with `400`. The browser never sends a path; a folder arrives as a chip
+  id or through the dialog that runs on the server.
+- runs the one existing scan (`FolderDigestService.ScanChip`, `ScanPicked`,
+  `ScanPickedFile`). It reads file names, types and dates only, opens no file
+  and calls no model.
+- returns only proposed wording, for example "Thesis, a LaTeX manuscript", with
+  up to three alternates when the folder holds more projects. A dump, an empty
+  or unclassified folder, and a whole collection give no suggestion and a plain
+  message instead.
+
+A folder feed fills in the answer and nothing else. It creates no workspace and
+saves no fact: the wording becomes a fact only through the wizard's own Save,
+exactly like a typed answer (source `explicit`). The user's typing is never
+overwritten; when the box already holds their own text the suggestion waits as
+a "Use …" button. Only question 1 is prefilled: a folder cannot say how the
+user wants to be talked to, and the folder source is barred from naming people
+or routines.
+
+The scan has one side effect the wizard states under the chooser: because it is
+the ordinary scan, it records the folder's offer, so the setup suggestion is
+waiting on Home afterwards and an offer already pending there becomes "later".
+A scan alone does not complete the "Show your assistant a folder" mission; an
+accepted outcome on Home still does.
+
+`GET /api/personal-assistant/knowledge/interview` stays a pure read (no scan, no
+write, no promotion of a queued offer) and may add two optional fields.
+`suggestion` words an offer still waiting on Home (pending or "later"), so a
+folder shown earlier prefills question 1 on a fresh open; a stored draft always
+wins over it. `remembered_project` is the current text of the newest project
+fact approved from a folder: it is named in the question's hint and the box is
+left empty.
+
+The snapshot and a scan started in the wizard word their suggestion through one
+function, so they cannot disagree about what is worth proposing:
+
+- A project already remembered from a folder is never proposed again. The
+  folder's next project takes its place; when every project is remembered the
+  wizard says so instead of "I couldn't tell".
+- "Remembered" is the dossier's own test (`ReviewItems`): the source still
+  revalidates and the canonical line still matches. A fact the dossier shows as
+  needing review is not claimed as remembered, and its project may be proposed.
+- A project the user declined on Home is not brought back by an older offer
+  about the same folder that was set aside for later.
+- A whole Downloads, Documents or Desktop is never the answer. A file picked
+  straight out of one makes that folder the scan's project; the wizard then
+  asks the user to type instead.
+
+Two limits are accepted. A folder confirmed in the interview and later set up on
+Home leaves two similarly worded project facts, one `explicit` and one
+`folder_scan`. And drawing the chooser reads `GET
+/api/personal-assistant/folder-digest`, the same read Home's card makes, which
+can bring a due "later" offer back to pending; opening the interview therefore
+has the effect of opening Home on the offer queue, and no other.
+
 Today reads only currently eligible reviewed priorities/work-style facts and
 completed, unchanged global preference receipts. A SQL-owned monotonic
 per-field generation (migration 63; no copied values) ties each receipt to the

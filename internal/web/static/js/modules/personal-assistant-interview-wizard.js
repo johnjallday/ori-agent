@@ -1,6 +1,20 @@
 import { reviewTextValid } from './personal-hq-knowledge.js';
+import { folderChooserView } from './personal-assistant-folder-chooser.js';
 
 const INTERVIEW_API = '/api/personal-assistant/knowledge/interview';
+const FOLDER_DIGEST_API = '/api/personal-assistant/folder-digest';
+// The one question a folder can answer: what the user is working on.
+const FOLDER_QUESTION_ID = 'priority';
+const MAX_ALTERNATES = 3;
+const FOLDER_CHOOSER_LABEL = 'Show me instead';
+const FOLDER_PICK_LABEL = 'Pick a folder…';
+const FOLDER_CHOOSER_NOTE =
+  'I only look at file names and types. This also leaves a setup suggestion for the folder on Home.';
+const FOLDER_SCAN_CAPTION = "From the folder you showed me. Edit it if that's not quite right.";
+const FOLDER_EARLIER_CAPTION =
+  "From a folder you showed me earlier. Edit it if that's not quite right.";
+const EARLIER_SOURCE = 'earlier';
+const FOLDER_SCAN_FAILED = 'I could not look at that folder. Type your answer instead.';
 const MODAL_ID = 'personalHQInterviewWizard';
 const REVIEW_STEP = 'review';
 const MAX_ANSWER_BYTES = 500;
@@ -140,15 +154,93 @@ export function hasInterviewDraft(storage) {
   return Boolean(draft?.answers.some(answer => typeof answer?.text === 'string' && answer.text));
 }
 
+// A suggestion is wording a folder proposed for question 1. Only its text, the
+// folder's name and (one level of) alternates are kept, whether it came from
+// the server or from a stored draft; anything without a text is no suggestion.
+export function cleanSuggestion(value, nested = false) {
+  if (!value || typeof value.text !== 'string' || value.text === '') return null;
+  const clean = { text: value.text, folder: typeof value.folder === 'string' ? value.folder : '' };
+  // Set by the wizard, never by the server: the folder was shown before this
+  // interview was opened, so the caption says "earlier".
+  if (!nested && value.source === EARLIER_SOURCE) clean.source = EARLIER_SOURCE;
+  if (!nested && Array.isArray(value.alternates)) {
+    const alternates = value.alternates
+      .map(item => cleanSuggestion(item, true))
+      .filter(Boolean)
+      .slice(0, MAX_ALTERNATES);
+    if (alternates.length) clean.alternates = alternates;
+  }
+  return clean;
+}
+
+// The caption under the box shows only while the text is exactly the stored
+// suggestion. Once the text is edited the answer is the user's own.
+export function suggestionCaptionVisible(answer) {
+  return typeof answer?.suggestion?.text === 'string' && answer.suggestion.text === answer.text;
+}
+
+// Says where a suggestion came from: a folder shown just now in the wizard, or
+// one shown on Home before the interview was opened.
+export function suggestionCaptionText(suggestion) {
+  return suggestion?.source === EARLIER_SOURCE ? FOLDER_EARLIER_CAPTION : FOLDER_SCAN_CAPTION;
+}
+
+// The line added to question 1's hint when a project is already remembered
+// from a folder. Empty when there is nothing remembered.
+export function rememberedProjectLine(text) {
+  if (typeof text !== 'string') return '';
+  const fact = text.trim().replace(/\.+$/u, '');
+  if (!fact) return '';
+  return `I already remember: “${fact}”. Add anything that matters more right now, or skip.`;
+}
+
+// Returns the answer a new suggestion leaves behind. It never overwrites what
+// the user typed: an empty box, or one still holding an unedited suggestion,
+// takes the new text; anything else keeps its text and holds the suggestion as
+// `pending` for the user to choose.
+export function applySuggestion(answer, suggestion) {
+  const clean = cleanSuggestion(suggestion);
+  if (!clean) return { ...answer };
+  if (answer.text.trim() === '' || suggestionCaptionVisible(answer))
+    return { ...answer, text: clean.text, suggestion: clean, pending: null };
+  return { ...answer, pending: clean };
+}
+
+// The user chose the pending suggestion over what they typed.
+export function usePendingSuggestion(answer) {
+  if (!answer.pending) return { ...answer };
+  return { ...answer, text: answer.pending.text, suggestion: answer.pending, pending: null };
+}
+
+// Promotes one alternate to the suggestion, keeping the rest (and the one it
+// replaces) as alternates so the user can still change their mind.
+export function alternateSuggestion(suggestion, index) {
+  const alternates = suggestion?.alternates || [];
+  const chosen = alternates[index];
+  if (!chosen) return cleanSuggestion(suggestion);
+  return cleanSuggestion({
+    text: chosen.text,
+    folder: chosen.folder,
+    source: suggestion.source,
+    alternates: [
+      { text: suggestion.text, folder: suggestion.folder },
+      ...alternates.filter((_, i) => i !== index)
+    ]
+  });
+}
+
 // Pure wizard state: one step per question in server order, then Review.
-export function createInterviewWizardState(questions, draft) {
+// `snapshot` may carry a suggestion from a folder shown before the interview.
+export function createInterviewWizardState(questions, draft, snapshot) {
   const list = Array.isArray(questions) ? questions : [];
   const answers = list.map(question => ({
     id: question.id,
     text: '',
     destination: 'personal_hq',
     preference: question.id === 'communication' ? 'response_style' : '',
-    category: question.category
+    category: question.category,
+    // Only question 1 can be answered from a folder.
+    ...(question.id === FOLDER_QUESTION_ID ? { suggestion: null, pending: null } : {})
   }));
   let index = 0;
   const reviewIndex = list.length;
@@ -157,6 +249,10 @@ export function createInterviewWizardState(questions, draft) {
     const answer = answers.find(item => item.id === saved?.id);
     if (!answer) continue;
     if (typeof saved.text === 'string') answer.text = saved.text;
+    if (answer.id === FOLDER_QUESTION_ID) {
+      answer.suggestion = cleanSuggestion(saved.suggestion);
+      answer.pending = cleanSuggestion(saved.pending);
+    }
     if (answer.id === 'communication') {
       if (saved.destination === 'profile' || saved.destination === 'personal_hq')
         answer.destination = saved.destination;
@@ -167,6 +263,18 @@ export function createInterviewWizardState(questions, draft) {
   }
   if (Number.isInteger(draft?.stepIndex))
     index = Math.min(Math.max(draft.stepIndex, 0), reviewIndex);
+
+  // A folder shown earlier prefills question 1 on a fresh open only. A draft,
+  // even one whose answer was cleared, is the user's own and always wins.
+  const earlier = draft ? null : cleanSuggestion(snapshot?.suggestion);
+  const folderAnswer = answers.find(answer => answer.id === FOLDER_QUESTION_ID);
+  if (earlier && folderAnswer) {
+    earlier.source = EARLIER_SOURCE;
+    // With a project already remembered the box stays empty, and a different
+    // folder's suggestion waits as a choice instead of filling it.
+    if (rememberedProjectLine(snapshot?.remembered_project)) folderAnswer.pending = earlier;
+    else Object.assign(folderAnswer, applySuggestion(folderAnswer, earlier));
+  }
 
   return {
     questions: list,
@@ -220,6 +328,41 @@ async function api(url, options) {
     throw error;
   }
   return data;
+}
+
+// Loads what the folder chooser may offer. A failed read means no chooser: the
+// question then looks exactly as it does without this shortcut.
+async function loadFolderChooser() {
+  try {
+    const response = await fetch(FOLDER_DIGEST_API, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return folderChooserView(data?.folder_digest);
+  } catch {
+    return null;
+  }
+}
+
+// Asks the server to look at a folder and word an answer from it. The body is a
+// chip id or a picker flag, never a path. It never throws: the result says what
+// happened, so a failure changes nothing in the wizard.
+async function requestFolderSuggestion(body) {
+  try {
+    const response = await fetch(`${INTERVIEW_API}/suggest`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return { error: data.error || data.message || FOLDER_SCAN_FAILED };
+    return data;
+  } catch {
+    return { error: FOLDER_SCAN_FAILED };
+  }
 }
 
 function radioGroup({ name, legend, options, value, onChange }) {
@@ -305,13 +448,15 @@ export function openInterviewWizard(initialSnapshot) {
   const storage = browserStorage();
   let snapshot = initialSnapshot;
   const draft = loadInterviewDraft(storage);
-  const state = createInterviewWizardState(snapshot.questions, draft);
+  const state = createInterviewWizardState(snapshot.questions, draft, snapshot);
   const ui = buildModal();
   let prepared;
   let retry;
   let resetPartial = false;
   let savedRowIds = null; // set after a partial save; null otherwise
   let busy = false;
+  let folderChooser; // undefined until loaded; null when nothing can be chosen
+  let folderChooserLoad; // the one read of the chooser, shared by every render
 
   function persist() {
     saveInterviewDraft(storage, state.toDraft());
@@ -338,6 +483,198 @@ export function openInterviewWizard(initialSnapshot) {
     });
   }
 
+  function setChooserDisabled(disabled) {
+    for (const button of ui.stage.querySelectorAll('.interview-wizard-chip'))
+      button.disabled = disabled;
+  }
+
+  // Puts a changed question 1 answer in place, redraws the step (which moves
+  // focus to the answer box) and announces what happened in the status line.
+  function setFolderAnswer(answer, announcement) {
+    state.setAnswer(FOLDER_QUESTION_ID, answer);
+    persist();
+    if (state.questions[state.index]?.id === FOLDER_QUESTION_ID) render();
+    message(announcement);
+  }
+
+  // Offers a suggestion to question 1. Typed text is never replaced: the
+  // suggestion then waits under the box as a button.
+  function offerSuggestion(suggestion) {
+    const answer = applySuggestion(state.answer(FOLDER_QUESTION_ID), suggestion);
+    setFolderAnswer(
+      answer,
+      answer.pending
+        ? `I found “${answer.pending.text}”. I kept what you typed; use the button under the box to switch.`
+        : `Filled in “${answer.text}”.`
+    );
+  }
+
+  // A scan records an offer and may set another aside, so Home's folder card
+  // must redraw from the server. It only exists on Home; elsewhere this is a
+  // no-op.
+  function reloadHomeFolderCard() {
+    try {
+      void Promise.resolve(window.PersonalAssistantFolder?.reload?.()).catch(() => {});
+    } catch {
+      // Home's card is optional here.
+    }
+  }
+
+  // Looks at one folder and, when it names a project, offers it as the answer.
+  // `waiting` is the status line while the scan or the native dialog is open;
+  // `trigger` is the button that was pressed.
+  async function showFolder(body, waiting, trigger) {
+    if (busy) return; // a second click while a scan runs does nothing
+    busy = true;
+    renderButtons();
+    message(waiting);
+    const result = await requestFolderSuggestion(body);
+    busy = false;
+    // Before anything else: the wizard may have been closed while the scan or
+    // the dialog was open, and Home would otherwise keep showing an offer the
+    // scan has already set aside.
+    if (!result.cancelled) reloadHomeFolderCard();
+    if (!ui.modal.isConnected) return;
+    renderButtons();
+    const suggestion = result.error || result.cancelled ? null : cleanSuggestion(result.suggestion);
+    if (suggestion) {
+      offerSuggestion(suggestion); // redraws the step and focuses the answer box
+      return;
+    }
+    if (result.error) message(result.error, true);
+    else if (result.cancelled) message('');
+    else message(typeof result.message === 'string' ? result.message : FOLDER_SCAN_FAILED);
+    // Nothing was redrawn, and the pressed button lost focus while it was
+    // disabled: put focus back where the user was.
+    if (trigger?.isConnected) trigger.focus();
+  }
+
+  function folderButton(label, onClick) {
+    const button = node('button', label, 'interview-wizard-chip');
+    button.type = 'button';
+    button.disabled = busy;
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  function drawFolderChooser(group, view) {
+    if (!view || !(view.chips.length || view.pickerVisible)) return;
+    const label = node('p', FOLDER_CHOOSER_LABEL, 'interview-wizard-chooser-label');
+    label.id = 'interview-wizard-chooser-label';
+    group.setAttribute('aria-labelledby', label.id);
+    const chips = node('div', undefined, 'interview-wizard-chips');
+    for (const chip of view.chips) {
+      const button = folderButton(
+        chip.label,
+        () => void showFolder({ chip: chip.id }, `Looking at ${chip.label}…`, button)
+      );
+      button.dataset.chip = chip.id;
+      chips.append(button);
+    }
+    if (view.pickerVisible) {
+      const button = folderButton(
+        FOLDER_PICK_LABEL,
+        () => void showFolder({ picker: true }, 'Choose a folder in the dialog…', button)
+      );
+      button.dataset.picker = 'folder';
+      chips.append(button);
+    }
+    if (view.filePickerVisible) {
+      const button = folderButton(
+        view.filePickerLabel,
+        () => void showFolder({ file: true }, 'Choose a file in the dialog…', button)
+      );
+      button.dataset.picker = 'file';
+      chips.append(button);
+    }
+    group.append(label, chips);
+    // The server's note explains a missing dialog (a sandboxed session has none).
+    if (view.note) group.append(node('p', view.note, 'interview-wizard-chooser-note'));
+    // What a scan does is part of the group's description, so it is read with it.
+    const note = node('p', FOLDER_CHOOSER_NOTE, 'interview-wizard-chooser-note');
+    note.id = 'interview-wizard-chooser-note';
+    group.setAttribute('aria-describedby', note.id);
+    group.append(note);
+    group.hidden = false;
+  }
+
+  // Under the answer box: where a filled-in answer came from, the folder's
+  // other projects, and a suggestion that is waiting because the user had
+  // already typed. Returns the caption's id when it shows, for the box to cite.
+  function drawSuggestionExtras(extras, answer) {
+    extras.replaceChildren();
+    let captionId = '';
+    if (suggestionCaptionVisible(answer)) {
+      const caption = node(
+        'p',
+        suggestionCaptionText(answer.suggestion),
+        'interview-wizard-caption'
+      );
+      caption.id = 'interview-answer-caption';
+      captionId = caption.id;
+      extras.append(caption);
+      const alternates = answer.suggestion.alternates || [];
+      if (alternates.length) {
+        const group = node('div', undefined, 'interview-wizard-alternates');
+        group.setAttribute('role', 'group');
+        const label = node('p', 'Also in this folder:', 'interview-wizard-chooser-label');
+        label.id = 'interview-wizard-alternates-label';
+        group.setAttribute('aria-labelledby', label.id);
+        const chips = node('div', undefined, 'interview-wizard-chips');
+        alternates.forEach((alternate, index) => {
+          const button = folderButton(alternate.text, () => {
+            if (busy) return;
+            const current = state.answer(FOLDER_QUESTION_ID);
+            const next = applySuggestion(current, alternateSuggestion(current.suggestion, index));
+            setFolderAnswer(next, `Filled in “${next.text}”.`);
+          });
+          button.dataset.alternate = String(index);
+          chips.append(button);
+        });
+        group.append(label, chips);
+        extras.append(group);
+      }
+    }
+    if (answer.pending) {
+      extras.append(
+        node(
+          'p',
+          answer.pending.source === EARLIER_SOURCE
+            ? 'From a folder you showed me earlier:'
+            : 'From the folder you showed me:',
+          'interview-wizard-caption'
+        )
+      );
+      const use = folderButton(`Use “${answer.pending.text}”`, () => {
+        if (busy) return;
+        const next = usePendingSuggestion(state.answer(FOLDER_QUESTION_ID));
+        setFolderAnswer(next, `Filled in “${next.text}”.`);
+      });
+      use.classList.add('interview-wizard-use');
+      extras.append(use);
+    }
+    extras.hidden = !extras.childElementCount;
+    return captionId;
+  }
+
+  // The chooser sits above the answer box. It stays hidden, and the question
+  // stays as it always was, when the folders cannot be read or none exists.
+  function renderFolderChooser() {
+    const group = node('div', undefined, 'interview-wizard-chooser');
+    group.setAttribute('role', 'group');
+    group.hidden = true;
+    if (folderChooser !== undefined) {
+      drawFolderChooser(group, folderChooser);
+      return group;
+    }
+    folderChooserLoad ??= loadFolderChooser();
+    void folderChooserLoad.then(view => {
+      folderChooser = view;
+      if (group.isConnected) drawFolderChooser(group, view);
+    });
+    return group;
+  }
+
   function renderQuestion(question) {
     const answer = state.answer(question.id);
     const heading = node('h3', question.prompt, 'interview-wizard-prompt');
@@ -352,6 +689,17 @@ export function openInterviewWizard(initialSnapshot) {
       described.push(hint.id);
       ui.stage.append(hint);
     }
+    if (question.id === FOLDER_QUESTION_ID) {
+      const remembered = rememberedProjectLine(snapshot?.remembered_project);
+      if (remembered) {
+        // Read with the field, like the hint it extends.
+        const line = node('p', remembered, 'interview-wizard-hint');
+        line.id = 'interview-wizard-remembered';
+        described.push(line.id);
+        ui.stage.append(line);
+      }
+      ui.stage.append(renderFolderChooser());
+    }
 
     const input = node('textarea', undefined, 'form-control interview-wizard-input');
     input.id = `interview-answer-${question.id}`;
@@ -363,8 +711,21 @@ export function openInterviewWizard(initialSnapshot) {
     error.setAttribute('role', 'alert');
     const counter = node('small', answerCounterText(answer.text), 'interview-wizard-counter');
     counter.id = `interview-answer-counter-${question.id}`;
-    input.setAttribute('aria-describedby', [...described, error.id, counter.id].join(' '));
     ui.stage.append(input, error, counter);
+    const extras =
+      question.id === FOLDER_QUESTION_ID
+        ? node('div', undefined, 'interview-wizard-suggestion')
+        : null;
+    // The caption is part of the box's description for as long as it shows.
+    const describe = () => {
+      const captionId = extras ? drawSuggestionExtras(extras, answer) : '';
+      input.setAttribute(
+        'aria-describedby',
+        [...described, ...(captionId ? [captionId] : []), error.id, counter.id].join(' ')
+      );
+    };
+    if (extras) ui.stage.append(extras);
+    describe();
 
     const options = node('div', undefined, 'interview-wizard-options');
     options.hidden = answer.text.trim() === '';
@@ -429,6 +790,11 @@ export function openInterviewWizard(initialSnapshot) {
 
     input.addEventListener('input', () => {
       state.setAnswer(question.id, { text: input.value });
+      if (answer.suggestion && !suggestionCaptionVisible(answer)) {
+        // An edited answer is the user's own: it no longer carries the folder.
+        state.setAnswer(question.id, { suggestion: null });
+        describe();
+      }
       error.textContent = '';
       input.removeAttribute('aria-invalid');
       counter.textContent = answerCounterText(input.value);
@@ -513,7 +879,11 @@ export function openInterviewWizard(initialSnapshot) {
     ui.back.textContent = state.index === 0 ? 'Not now' : 'Back';
     ui.back.disabled = busy;
     ui.skip.hidden = review;
+    // A scan can keep the wizard busy for as long as a native dialog is open,
+    // so every control that does nothing meanwhile says so, the chooser included.
+    ui.skip.disabled = busy;
     ui.next.disabled = busy;
+    setChooserDisabled(busy);
     if (review) {
       const count = prepared?.length ?? 0;
       ui.next.textContent = savedRowIds
@@ -675,6 +1045,9 @@ export function openInterviewWizard(initialSnapshot) {
     if (busy || state.isReview()) return;
     const question = state.questions[state.index];
     state.setAnswer(question.id, { text: '' });
+    // A skipped question 1 also lets go of what a folder proposed for it.
+    if (question.id === FOLDER_QUESTION_ID)
+      state.setAnswer(question.id, { suggestion: null, pending: null });
     state.next();
     persist();
     message('Skipped. Nothing from that question will be saved.');

@@ -53,6 +53,65 @@
   color: var(--text-secondary);
 }
 
+/* Question 1's folder shortcut: a labelled row of chips above the answer box. */
+.interview-wizard-chooser {
+  margin: 0 0 0.75rem;
+}
+
+.interview-wizard-chooser-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.interview-wizard-chip {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.interview-wizard-chip:hover,
+.interview-wizard-chip:focus-visible {
+  border-color: var(--primary-color);
+}
+
+.interview-wizard-chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.interview-wizard-chooser-note,
+.interview-wizard-caption {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* Under the answer box: the caption, the folder's other projects, and a
+   suggestion waiting for the user to choose it over what they typed. */
+.interview-wizard-alternates {
+  margin-top: 0.5rem;
+}
+
+.interview-wizard-use {
+  margin-top: 0.5rem;
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 .interview-wizard-input {
   resize: none;
 }

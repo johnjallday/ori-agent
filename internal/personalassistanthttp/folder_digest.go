@@ -20,6 +20,9 @@ import (
 type FolderDigestService interface {
 	Current(ctx context.Context, userID string) (personalassistant.FolderDigestView, error)
 	CurrentOffer(ctx context.Context, userID, offerID string) (personalassistant.FolderDigestView, error)
+	// StoredOffer reads one offer as stored. It never reaches the browser whole:
+	// the interview words a suggestion from it and returns only that text.
+	StoredOffer(ctx context.Context, userID, offerID string) (personalassistant.FolderOffer, error)
 	MarkFirstPromptShown(ctx context.Context, userID string) (personalassistant.FolderDigestView, error)
 	ScanChip(ctx context.Context, userID, chip string) (personalassistant.FolderOfferView, error)
 	ScanPicked(ctx context.Context, userID string) (*personalassistant.FolderOfferView, error)
@@ -149,20 +152,12 @@ type folderScanRequest struct {
 	File   bool   `json:"file"`
 }
 
-// ScanFolderDigest scans a known folder ({"chip": "downloads"}) or opens the
-// native dialog ({"picker": true}). Any other field, a path above all, is
-// refused before anything is looked at.
-func (h *Handler) ScanFolderDigest(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodPost) {
-		return
-	}
-	if h == nil || h.folderDigest == nil {
-		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
-		return
-	}
+// decodeFolderScanRequest reads a scan request and requires exactly one mode.
+// Every route that starts a scan shares it, so none can accept a path.
+func decodeFolderScanRequest(w http.ResponseWriter, r *http.Request) (folderScanRequest, bool) {
 	var req folderScanRequest
 	if !decodeFolderDigestBody(w, r, &req, "chip", "picker", "file") {
-		return
+		return folderScanRequest{}, false
 	}
 	req.Chip = strings.TrimSpace(req.Chip)
 	options := 0
@@ -177,6 +172,24 @@ func (h *Handler) ScanFolderDigest(w http.ResponseWriter, r *http.Request) {
 	}
 	if options != 1 {
 		orihttp.BadRequest(w, "Choose one folder, file, or picker mode")
+		return folderScanRequest{}, false
+	}
+	return req, true
+}
+
+// ScanFolderDigest scans a known folder ({"chip": "downloads"}) or opens the
+// native dialog ({"picker": true}). Any other field, a path above all, is
+// refused before anything is looked at.
+func (h *Handler) ScanFolderDigest(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.folderDigest == nil {
+		orihttp.ServiceUnavailable(w, "Show me a folder is unavailable")
+		return
+	}
+	req, ok := decodeFolderScanRequest(w, r)
+	if !ok {
 		return
 	}
 	userID, ok := h.currentUserID(w, r)

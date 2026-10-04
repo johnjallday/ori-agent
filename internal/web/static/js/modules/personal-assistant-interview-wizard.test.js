@@ -3,15 +3,22 @@ import assert from 'node:assert/strict';
 import {
   ANSWER_COUNTER_THRESHOLD,
   DRAFT_KEY,
+  alternateSuggestion,
   answerCounterText,
+  applySuggestion,
   clearInterviewDraft,
+  cleanSuggestion,
   createInterviewWizardState,
   destinationLabel,
   hasInterviewDraft,
   interviewAnswerError,
   loadInterviewDraft,
+  rememberedProjectLine,
   reviewedInterviewRows,
-  saveInterviewDraft
+  saveInterviewDraft,
+  suggestionCaptionText,
+  suggestionCaptionVisible,
+  usePendingSuggestion
 } from './personal-assistant-interview-wizard.js';
 
 function memoryStorage() {
@@ -193,6 +200,241 @@ test('a draft cannot inject unknown questions, destinations or out-of-range step
   assert.equal(restored.answer('priority').category, 'projects');
   assert.equal(restored.answer('communication').destination, 'personal_hq');
   assert.equal(restored.answer('communication').preference, 'response_style');
+});
+
+test('a draft restores only a suggestion whose text is a string, and only on question 1', () => {
+  const restored = createInterviewWizardState(questions, {
+    answers: [
+      {
+        id: 'priority',
+        text: 'kept',
+        suggestion: { text: { toString: () => 'injected' }, folder: 'Thesis' },
+        pending: {
+          text: 'Thesis, a LaTeX manuscript',
+          folder: 42,
+          path: '/Users/me/Documents/Thesis',
+          alternates: [
+            {
+              text: 'website, a Node.js package',
+              folder: 'website',
+              alternates: [{ text: 'deep' }]
+            },
+            { text: 7 },
+            null,
+            { text: 'b' },
+            { text: 'c' },
+            { text: 'd' }
+          ]
+        }
+      },
+      { id: 'communication', text: 'brief', suggestion: { text: 'not a folder question' } }
+    ]
+  });
+  const priority = restored.answer('priority');
+  assert.equal(priority.suggestion, null);
+  assert.deepEqual(priority.pending, {
+    text: 'Thesis, a LaTeX manuscript',
+    folder: '',
+    alternates: [
+      { text: 'website, a Node.js package', folder: 'website' },
+      { text: 'b', folder: '' },
+      { text: 'c', folder: '' }
+    ]
+  });
+  assert.equal('suggestion' in restored.answer('communication'), false);
+
+  for (const bad of [null, undefined, 'text', 7, {}, { text: '' }, { text: null }, []]) {
+    assert.equal(cleanSuggestion(bad), null, JSON.stringify(bad));
+  }
+});
+
+const thesis = {
+  text: 'Thesis, a LaTeX manuscript',
+  folder: 'Thesis',
+  alternates: [
+    { text: 'website, a Node.js package', folder: 'website' },
+    { text: 'Album', folder: 'Album' }
+  ]
+};
+
+test('applySuggestion fills an empty box and never overwrites typed text', () => {
+  const empty = createInterviewWizardState(questions).answer('priority');
+  const filled = applySuggestion(empty, thesis);
+  assert.equal(filled.text, thesis.text);
+  assert.deepEqual(filled.suggestion, thesis);
+  assert.equal(filled.pending, null);
+  assert.equal(empty.text, '', 'the answer it was given is not changed');
+
+  // Only spaces is still an empty box.
+  assert.equal(applySuggestion({ ...empty, text: '   ' }, thesis).text, thesis.text);
+
+  // An unedited earlier suggestion is replaced by a newer one.
+  const album = { text: 'Album', folder: 'Album' };
+  const replaced = applySuggestion(filled, album);
+  assert.equal(replaced.text, 'Album');
+  assert.deepEqual(replaced.suggestion, album);
+  assert.equal(replaced.pending, null);
+
+  // Typed text stays; the suggestion waits as pending.
+  const typed = { ...empty, text: 'Ship the portfolio' };
+  const kept = applySuggestion(typed, thesis);
+  assert.equal(kept.text, 'Ship the portfolio');
+  assert.equal(kept.suggestion, null);
+  assert.deepEqual(kept.pending, thesis);
+
+  // An edited suggestion is typed text too.
+  const edited = { ...filled, text: 'Thesis, due in March' };
+  const afterEdit = applySuggestion(edited, album);
+  assert.equal(afterEdit.text, 'Thesis, due in March');
+  assert.deepEqual(afterEdit.pending, album);
+
+  // Something that is not a suggestion changes nothing.
+  assert.deepEqual(applySuggestion(typed, { text: 5 }), typed);
+  assert.deepEqual(applySuggestion(typed, null), typed);
+});
+
+test('usePendingSuggestion applies the waiting suggestion on request', () => {
+  const typed = { ...createInterviewWizardState(questions).answer('priority'), text: 'Mine' };
+  const waiting = applySuggestion(typed, thesis);
+  const used = usePendingSuggestion(waiting);
+  assert.equal(used.text, thesis.text);
+  assert.deepEqual(used.suggestion, thesis);
+  assert.equal(used.pending, null);
+  assert.deepEqual(usePendingSuggestion(typed), typed, 'nothing pending, nothing changes');
+});
+
+test('the caption shows only while the text is exactly the stored suggestion', () => {
+  const answer = applySuggestion(createInterviewWizardState(questions).answer('priority'), thesis);
+  assert.equal(suggestionCaptionVisible(answer), true);
+  assert.equal(suggestionCaptionVisible({ ...answer, text: `${thesis.text} ` }), false);
+  assert.equal(suggestionCaptionVisible({ ...answer, text: '' }), false);
+  assert.equal(suggestionCaptionVisible({ ...answer, suggestion: null }), false);
+  assert.equal(suggestionCaptionVisible({ text: 'typed', pending: thesis }), false);
+  assert.equal(suggestionCaptionVisible({ text: '' }), false);
+  assert.equal(suggestionCaptionVisible(undefined), false);
+});
+
+test('choosing an alternate keeps the other projects on offer', () => {
+  const chosen = alternateSuggestion(thesis, 0);
+  assert.deepEqual(chosen, {
+    text: 'website, a Node.js package',
+    folder: 'website',
+    alternates: [
+      { text: 'Thesis, a LaTeX manuscript', folder: 'Thesis' },
+      { text: 'Album', folder: 'Album' }
+    ]
+  });
+  // It is applied through applySuggestion: the box holds the unedited suggestion.
+  const answer = applySuggestion(createInterviewWizardState(questions).answer('priority'), thesis);
+  const switched = applySuggestion(answer, chosen);
+  assert.equal(switched.text, 'website, a Node.js package');
+  assert.equal(suggestionCaptionVisible(switched), true);
+  // An index that is not there leaves the suggestion as it was.
+  assert.deepEqual(alternateSuggestion(thesis, 9), thesis);
+});
+
+test('a fresh open prefills question 1 from a folder shown earlier', () => {
+  const state = createInterviewWizardState(questions, null, { suggestion: thesis });
+  const answer = state.answer('priority');
+  assert.equal(answer.text, thesis.text);
+  assert.equal(answer.suggestion.source, 'earlier');
+  assert.deepEqual(answer.suggestion.alternates, thesis.alternates);
+  assert.equal(suggestionCaptionVisible(answer), true);
+  assert.match(suggestionCaptionText(answer.suggestion), /showed me earlier/);
+  assert.match(suggestionCaptionText(thesis), /^From the folder you showed me\./);
+  // The other questions are never prefilled.
+  assert.equal(state.answer('communication').text, '');
+  assert.equal(state.answer('person_or_routine').text, '');
+
+  // "earlier" survives the draft, and an alternate chosen from it keeps it.
+  const storage = memoryStorage();
+  saveInterviewDraft(storage, state.toDraft());
+  const resumed = createInterviewWizardState(questions, loadInterviewDraft(storage));
+  assert.equal(resumed.answer('priority').suggestion.source, 'earlier');
+  assert.equal(alternateSuggestion(answer.suggestion, 1).source, 'earlier');
+  // The server cannot claim a source of its own.
+  assert.equal('source' in cleanSuggestion({ text: 'x', source: 'server' }), false);
+
+  // Nothing to prefill: a snapshot without a usable suggestion.
+  for (const snapshot of [undefined, {}, { suggestion: null }, { suggestion: { text: 9 } }]) {
+    assert.equal(createInterviewWizardState(questions, null, snapshot).answer('priority').text, '');
+  }
+});
+
+test('a draft always wins over a suggestion from the snapshot', () => {
+  const snapshot = { suggestion: thesis };
+  const typed = createInterviewWizardState(
+    questions,
+    { answers: [{ id: 'priority', text: 'Ship the portfolio' }], stepIndex: 0 },
+    snapshot
+  );
+  assert.equal(typed.answer('priority').text, 'Ship the portfolio');
+  assert.equal(typed.answer('priority').suggestion, null);
+  assert.equal(typed.answer('priority').pending, null);
+
+  // A draft whose answer was cleared is still the user's own choice.
+  const cleared = createInterviewWizardState(
+    questions,
+    { answers: [{ id: 'priority', text: '' }], stepIndex: 1 },
+    snapshot
+  );
+  assert.equal(cleared.answer('priority').text, '');
+  assert.equal(cleared.answer('priority').pending, null);
+  assert.equal(cleared.index, 1);
+});
+
+test('a remembered project leaves the box empty and says so in the hint', () => {
+  assert.equal(
+    rememberedProjectLine('You are working on a project in the folder Thesis.'),
+    'I already remember: “You are working on a project in the folder Thesis”. Add anything that matters more right now, or skip.'
+  );
+  for (const nothing of [undefined, null, '', '   ', '.', 7, {}]) {
+    assert.equal(rememberedProjectLine(nothing), '', JSON.stringify(nothing));
+  }
+
+  const remembered = 'You are working on a project in the folder Thesis.';
+  const alone = createInterviewWizardState(questions, null, { remembered_project: remembered });
+  assert.equal(alone.answer('priority').text, '');
+  assert.equal(alone.answer('priority').pending, null);
+
+  // A different folder still waiting is offered as a choice, not filled in.
+  const website = { text: 'website, a Node.js package', folder: 'website' };
+  const both = createInterviewWizardState(questions, null, {
+    remembered_project: remembered,
+    suggestion: website
+  });
+  assert.equal(both.answer('priority').text, '');
+  assert.equal(both.answer('priority').suggestion, null);
+  assert.deepEqual(both.answer('priority').pending, { ...website, source: 'earlier' });
+  assert.equal(usePendingSuggestion(both.answer('priority')).text, website.text);
+});
+
+test('a suggestion and its caption survive close and resume through the draft', () => {
+  const storage = memoryStorage();
+  const state = createInterviewWizardState(questions);
+  state.setAnswer('priority', applySuggestion(state.answer('priority'), thesis));
+  saveInterviewDraft(storage, state.toDraft());
+
+  const resumed = createInterviewWizardState(questions, loadInterviewDraft(storage));
+  assert.equal(resumed.answer('priority').text, thesis.text);
+  assert.deepEqual(resumed.answer('priority').suggestion, thesis);
+  assert.equal(suggestionCaptionVisible(resumed.answer('priority')), true);
+
+  // A waiting suggestion is kept beside the typed text.
+  const typing = createInterviewWizardState(questions);
+  typing.setAnswer('priority', { text: 'Mine' });
+  typing.setAnswer('priority', applySuggestion(typing.answer('priority'), thesis));
+  saveInterviewDraft(storage, typing.toDraft());
+  const again = createInterviewWizardState(questions, loadInterviewDraft(storage));
+  assert.equal(again.answer('priority').text, 'Mine');
+  assert.deepEqual(again.answer('priority').pending, thesis);
+  assert.equal(suggestionCaptionVisible(again.answer('priority')), false);
+
+  // What a folder proposed is never part of what is saved.
+  const rows = reviewedInterviewRows(resumed.toAnswers());
+  assert.deepEqual(rows, [
+    { row_id: 'priority', destination: 'personal_hq', category: 'projects', text: thesis.text }
+  ]);
 });
 
 test('the draft helper survives unavailable or throwing storage', () => {
