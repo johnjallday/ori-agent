@@ -3683,7 +3683,7 @@ filetree_demo_all() {
   smoke_show_wait
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
   out="${TMPDIR:-/tmp}/filetree-demo"
-  for stage in tree pane note create; do
+  for stage in tree pane note create manage; do
     for theme in light dark; do
       if log=$(node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "$out" "$stage" "$theme" "$sandbox" 2>&1); then
         echo "PASS $stage ($theme): $(printf '%s\n' "$log" | grep -c '^ok ') checks"
@@ -3827,7 +3827,7 @@ filetree) smoke_filetree "$@" ;;
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
-  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | seed | wait | demo <tree|pane|note|create> [theme] [sandbox] | demo-all [sandbox]" >&2
+  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | seed | wait | demo <tree|pane|note|create|manage> [theme] [sandbox] | demo-all [sandbox]" >&2
   exit 2
   ;;
 esac

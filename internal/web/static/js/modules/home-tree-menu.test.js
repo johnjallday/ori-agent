@@ -7,8 +7,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  MENU_DELETE,
+  MENU_FILE_OPEN,
+  MENU_FILE_REVEAL,
+  MENU_MOVE,
   MENU_NEW_NOTE,
   MENU_NEW_TICKET,
+  MENU_OPEN,
+  MENU_OPEN_IN_WORKSPACE,
+  MENU_OPEN_PAGE,
   MENU_REFRESH,
   MENU_UPLOAD,
   menuItemsFor,
@@ -23,16 +30,78 @@ const labels = row =>
     .filter(entry => !entry.divider)
     .map(entry => entry.label);
 
-test('a workspace and a group offer New note, New ticket, Upload file… and Refresh (FR55)', () => {
-  const expected = ['New note', 'New ticket', 'Upload file…', 'Refresh'];
-  assert.deepEqual(labels({ kind: 'workspace' }), expected);
-  assert.deepEqual(labels({ kind: 'group' }), expected);
+test('a workspace and a group carry the whole management menu (FR55)', () => {
+  assert.deepEqual(labels({ kind: 'workspace' }), [
+    'Open workspace',
+    'New note',
+    'New ticket',
+    'Upload file…',
+    'Refresh',
+    'Move…',
+    'Delete'
+  ]);
+  assert.deepEqual(labels({ kind: 'group' }), [
+    'Open group',
+    'New note',
+    'New ticket',
+    'Upload file…',
+    'Refresh',
+    'Move…',
+    'Delete'
+  ]);
   assert.deepEqual(
     menuItemsFor({ kind: 'workspace' })
       .filter(entry => !entry.divider)
       .map(entry => entry.action),
-    [MENU_NEW_NOTE, MENU_NEW_TICKET, MENU_UPLOAD, MENU_REFRESH]
+    [
+      MENU_OPEN_PAGE,
+      MENU_NEW_NOTE,
+      MENU_NEW_TICKET,
+      MENU_UPLOAD,
+      MENU_REFRESH,
+      MENU_MOVE,
+      MENU_DELETE
+    ]
   );
+});
+
+test('Delete is the one item marked as dangerous', () => {
+  const dangerous = menuItemsFor({ kind: 'group' }).filter(entry => entry.danger);
+  assert.deepEqual(
+    dangerous.map(entry => entry.label),
+    ['Delete']
+  );
+  assert.match(
+    renderMenuHTML(menuItemsFor({ kind: 'group' }), 'Actions'),
+    /class="ori-context-item ori-context-danger"[^>]*data-tree-menu-action="delete"/
+  );
+});
+
+test('a note, a ticket and an agent offer Open and Open in workspace (FR55)', () => {
+  ['note', 'ticket', 'agent'].forEach(kind => {
+    assert.deepEqual(labels({ kind }), ['Open', 'Open in workspace'], kind);
+    assert.deepEqual(
+      menuItemsFor({ kind }).map(entry => entry.action),
+      [MENU_OPEN, MENU_OPEN_IN_WORKSPACE],
+      kind
+    );
+  });
+});
+
+test('a file offers Open, Open in default app and Reveal in Finder (FR55)', () => {
+  assert.deepEqual(labels({ kind: 'file' }), ['Open', 'Open in default app', 'Reveal in Finder']);
+  assert.deepEqual(
+    menuItemsFor({ kind: 'file' }).map(entry => entry.action),
+    [MENU_OPEN, MENU_FILE_OPEN, MENU_FILE_REVEAL]
+  );
+});
+
+test('content rows cannot be moved or deleted from the tree (non-goal)', () => {
+  ['note', 'ticket', 'agent', 'file', 'folder', 'memory'].forEach(kind => {
+    const actions = menuItemsFor({ kind, section: 'files' }).map(entry => entry.action);
+    assert.equal(actions.includes(MENU_MOVE), false, kind);
+    assert.equal(actions.includes(MENU_DELETE), false, kind);
+  });
 });
 
 test('each section offers the one thing that can be created in it (FR55)', () => {
@@ -63,8 +132,8 @@ test('the menu is drawn with menu semantics, one tabbable item at a time', () =>
   const html = renderMenuHTML(menuItemsFor({ kind: 'workspace' }), 'Actions for My HQ');
   assert.match(html, /class="ori-context-menu cockpit-tree-menu"/);
   assert.match(html, /role="menu" aria-label="Actions for My HQ"/);
-  assert.equal((html.match(/role="menuitem"/g) || []).length, 4);
-  assert.equal((html.match(/role="separator"/g) || []).length, 1);
+  assert.equal((html.match(/role="menuitem"/g) || []).length, 7);
+  assert.equal((html.match(/role="separator"/g) || []).length, 3);
   assert.doesNotMatch(html, /tabindex="0"/);
   assert.match(html, /data-tree-menu-action="new-note"[^>]*>New note</);
 });

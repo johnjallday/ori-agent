@@ -262,12 +262,12 @@ test.describe('Home workspace cockpit', () => {
     await skipOnboarding(page);
   });
 
-  // restored in 5.7
-  test.fixme('routes Map and Tree Group actions through the shared creator', async ({ page }) => {
+  test('routes Map and Tree Group actions through the shared creator', async ({ page }) => {
     await ensureWorkspace(page);
-    await page.request.post('/api/workspaces', {
+    const second = await page.request.post('/api/workspaces', {
       data: { name: `Second groupable workspace ${Date.now()}`, workspace_preset: 'general' }
     });
+    const reviewedMember = (await second.json())?.folder?.id as string;
     await page.goto('/');
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'ready');
 
@@ -296,19 +296,26 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#workspaceCreatorKindGroup')).toBeChecked();
     await dismissCreator(page);
 
-    await page.locator('[data-tree-check]').first().check();
+    // The Tree picks rows with Cmd/Ctrl-click; the bar that offers "Group
+    // selected" appears only while something is picked.
+    const memberRow = page.locator(`[data-tree-row="${reviewedMember}"]`);
+    await memberRow.locator('.cockpit-tree-name').click({ modifiers: ['ControlOrMeta'] });
+    await expect(memberRow).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('button', { name: 'Group selected', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Group selected', exact: true }).click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
     await expect(page.locator('#workspaceCreatorKindFixedNotice')).toContainText(
       'keeps that choice fixed'
     );
-    const reviewedMember = await page
-      .locator('[data-tree-check]')
-      .first()
-      .getAttribute('data-tree-check');
     await page.locator('#folderNameInput').fill('Reviewed Tree Group');
     await page.locator('#wizardNextBtn').click();
+    // The creator reviews the group's Manager before it will go on to Review.
+    const creator = page.locator('#addFolderModal');
+    await creator.locator('[data-team-agent-setup]').click();
+    await expect(page.locator('#addAgentModal')).toBeVisible();
+    await page.locator('#createAgentBtn').click();
+    await expect(page.locator('#addAgentModal')).toBeHidden();
+    await creator.getByRole('button', { name: 'Review →' }).click();
     await expect(page.locator('#workspaceReviewSummary')).toContainText(
       'top-level workspace will move'
     );
@@ -784,13 +791,27 @@ test.describe('Home workspace cockpit', () => {
     }
   });
 
-  // restored in 5.7
-  test.fixme('Tree offers a Move path that does not need drag-and-drop', async ({ page }) => {
-    await ensureWorkspace(page);
+  test('Tree offers a Move path that does not need drag-and-drop', async ({ page }) => {
+    const id = await ensureWorkspace(page);
     await page.goto('/?view=tree');
-    await page.locator('[data-tree-row]').first().waitFor();
-    // FR51: a non-drag Move path is present.
-    await expect(page.locator('[data-tree-move]').first()).toBeVisible();
+    const row = page.locator(`[data-tree-row="${id}"]`);
+    await row.waitFor();
+
+    // FR56: "Move…" is in the row's menu, reached without a pointer, and it
+    // opens a dialog that names where the workspace can go.
+    await row.focus();
+    await page.keyboard.press('Shift+F10');
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Move…', exact: true }).click();
+    const dialog = page.locator('[data-tree-move-dialog] [role="dialog"]');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('[data-tree-move-cancel]')).toBeVisible();
+
+    // Escape closes it and gives focus back to the row that was being moved.
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(row).toBeFocused();
   });
 
   test('theatre width stays invariant before, during, and after modal use at supported widths', async ({

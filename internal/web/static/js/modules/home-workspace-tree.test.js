@@ -29,6 +29,7 @@ import {
   setRowExpanded,
   revealTargets,
   contextWorkspaceId,
+  rangeSelection,
   rowActivation,
   treeActiveRowId,
   isWorkspaceRowKind
@@ -635,7 +636,18 @@ test('a ticket being named asks for a title, and is disabled while it is being c
 
 test('rows with a menu carry a "⋯" button that is out of the tab order', () => {
   const html = contentHTML({ expanded: ['w4'], contents: { w4: contentsFor('w4') } });
-  ['g1', 'w4', 'w4/s/notes', 'w4/s/backlog', 'w4/s/files', 'w4/d/stems'].forEach(id => {
+  [
+    'g1',
+    'w4',
+    'w4/s/notes',
+    'w4/s/backlog',
+    'w4/s/files',
+    'w4/d/stems',
+    'w4/n/n1',
+    'w4/t/t1',
+    'w4/f/BACKLOG.md',
+    'w4/a/Scout'
+  ].forEach(id => {
     const markup = rowMarkup(html, id);
     assert.match(
       markup,
@@ -644,8 +656,9 @@ test('rows with a menu carry a "⋯" button that is out of the tab order', () =>
     );
   });
   assert.match(rowMarkup(html, 'w4'), /aria-label="Actions for Standalone"/);
-  // Agents has nothing to create under it; neither do Memory or a ticket.
-  ['w4/s/agents', 'w4/m', 'w4/t/t1'].forEach(id =>
+  // The Agents section has nothing to create under it, and Memory is opened by
+  // a click: neither has a menu.
+  ['w4/s/agents', 'w4/m'].forEach(id =>
     assert.doesNotMatch(rowMarkup(html, id), /cockpit-tree-more/, id)
   );
 });
@@ -916,6 +929,56 @@ test('a row picked for a bulk action is marked apart from the open item (FR60)',
   assert.match(rowMarkup(out, 'w1'), /is-kind-workspace is-picked"/);
   assert.match(rowMarkup(out, 'w2'), /is-kind-workspace is-active"/);
   assert.doesNotMatch(rowMarkup(out, 'w2'), /is-picked/);
+  // Said two different ways to a screen reader as well: checked is "picked for
+  // a bulk action", selected is "the open item".
+  assert.match(rowMarkup(out, 'w1'), /aria-selected="false" aria-checked="true"/);
+  assert.match(rowMarkup(out, 'w2'), /aria-selected="true" aria-checked="false"/);
+});
+
+test('a group with only some of its workspaces picked is "mixed", not picked', () => {
+  const out = html(new Set(), { bulkState: bulkSelectionState(flat(), new Set(['w1'])) });
+  assert.match(rowMarkup(out, 'g1'), /is-kind-group is-partly-picked"/);
+  assert.match(rowMarkup(out, 'g1'), /aria-checked="mixed"/);
+  // Every workspace in it picked: the group is picked too.
+  const all = html(new Set(), {
+    bulkState: bulkSelectionState(flat(), new Set(['w1', 'w2', 'g2', 'w3']))
+  });
+  assert.match(rowMarkup(all, 'g1'), /is-kind-group is-picked"/);
+});
+
+test('only workspace and group rows can be picked: content rows carry no aria-checked (FR62)', () => {
+  const out = contentHTML(
+    { expanded: ['w4'], contents: { w4: contentsFor('w4') } },
+    { bulkState: bulkSelectionState(flat(), new Set(['w4'])) }
+  );
+  assert.match(rowMarkup(out, 'w4'), /aria-checked="true"/);
+  ['w4/s/notes', 'w4/n/n1', 'w4/t/t1', 'w4/f/BACKLOG.md', 'w4/m'].forEach(id => {
+    assert.doesNotMatch(rowMarkup(out, id), /aria-checked|is-picked/, id);
+  });
+});
+
+test('Shift-click selects every workspace and group row between the anchor and the click (FR60)', () => {
+  const visible = rows(); // g1, w1, w2, g2, w3, w4
+  assert.deepEqual(rangeSelection(visible, 'w1', 'g2'), ['w1', 'w2', 'g2']);
+  // Upwards works the same.
+  assert.deepEqual(rangeSelection(visible, 'w4', 'w2'), ['w2', 'g2', 'w3', 'w4']);
+  assert.deepEqual(rangeSelection(visible, 'w2', 'w2'), ['w2']);
+});
+
+test('a range skips the notes, tickets and files between two workspaces (FR62)', () => {
+  const visible = expandedRows({ expanded: ['w1'], contents: { w1: contentsFor('w1') } });
+  // w1 is open, so its sections and items sit between w1 and w2 on screen.
+  assert.ok(visible.findIndex(r => r.id === 'w2') - visible.findIndex(r => r.id === 'w1') > 5);
+  assert.deepEqual(rangeSelection(visible, 'w1', 'g2'), ['w1', 'w2', 'g2']);
+});
+
+test('a range with no usable anchor is just the row that was clicked', () => {
+  const visible = rows();
+  assert.deepEqual(rangeSelection(visible, '', 'w2'), ['w2']);
+  assert.deepEqual(rangeSelection(visible, 'gone', 'w2'), ['w2']);
+  // A content row cannot anchor a range, and cannot be its end.
+  assert.deepEqual(rangeSelection(visible, 'w1/n/n1', 'w2'), ['w2']);
+  assert.deepEqual(rangeSelection(visible, 'w1', 'w1/n/n1'), []);
 });
 
 test('a workspace row shows its attention count and names its status in words (FR8)', () => {

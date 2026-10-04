@@ -16,6 +16,8 @@
  *   note   Group 3: editing a note in the pane. Give the sandbox directory as
  *          a fifth argument and it also reads the note's file on disk.
  *   create Group 4: a note, a ticket and an upload made from the row menu.
+ *   manage Group 5: Move by menu and by drag, a move that is refused, Delete
+ *          and Undo, selecting rows and grouping them, and tag filters.
  *
  * Exits non-zero when a check fails, a console error appears, or a request
  * fails, so a page that renders but is quietly broken does not pass.
@@ -74,8 +76,11 @@ page.on('console', message => {
   if (message.type() !== 'error') return;
   if (/Failed to load resource/.test(message.text())) return;
   // The update checker asks GitHub on every page; a sandbox may be offline, and
-  // a navigation cuts the request short. Neither is the tree's doing.
+  // a navigation cuts the request short. Neither is the tree's doing. The same
+  // goes for the model list every page loads for its agent dialogs: leaving
+  // Home while it is still on its way logs "Failed to fetch".
   if (/Error checking for updates/.test(message.text())) return;
+  if (/\[Agents\] Failed to load providers[\s\S]*Failed to fetch/.test(message.text())) return;
   problems.push(`console: ${message.text()}`);
 });
 page.on('pageerror', error => problems.push(`page error: ${error.message}`));
@@ -1051,8 +1056,8 @@ async function runCreateStage(options) {
   await menu.waitFor();
   check(
     (await menu.locator('[role="menuitem"]').allInnerTexts()).join(',') ===
-      'New note,New ticket,Upload file…,Refresh',
-    "right-click opens the workspace's menu: New note, New ticket, Upload file…, Refresh"
+      'Open workspace,New note,New ticket,Upload file…,Refresh,Move…,Delete',
+    "right-click opens the workspace's menu, from Open workspace to Delete"
   );
   await shot('c1-row-menu');
   await menu.getByRole('menuitem', { name: 'New note' }).click();
@@ -1308,11 +1313,486 @@ async function runCreateStage(options) {
   check((await menu.count()) === 0, 'a click elsewhere closes the menu');
 }
 
+// Group 5: the management tools, now in the row menu and multi-select.
+async function stageManage() {
+  const stamp = Date.now().toString(36);
+  const names = {
+    group: `Crate ${stamp}`,
+    alpha: `Alpha ${stamp}`,
+    beta: `Beta ${stamp}`,
+    gamma: `Gamma ${stamp}`,
+    delta: `Delta ${stamp}`,
+    made: `Picked ${stamp}`
+  };
+  const tags = { filter: `demo-${stamp}`, spare: `spare-${stamp}` };
+  // Its own workspaces and group, removed at the end, so nothing it moves,
+  // deletes or groups belongs to another stage.
+  const create = async name =>
+    (await (await page.request.post(`${baseUrl}/api/workspaces`, { data: { name } })).json()).folder
+      .id;
+  const ids = { group: await createGroupByAPI(names.group) };
+  for (const key of ['alpha', 'beta', 'gamma', 'delta']) ids[key] = await create(names[key]);
+  await page.request.patch(`${baseUrl}/api/workspaces/${ids.alpha}`, {
+    data: { tags: [tags.filter, tags.spare] }
+  });
+  await page.request.post(`${baseUrl}/api/workspaces/${ids.gamma}/notes`, {
+    data: { name: `Loose note ${stamp}`, content: 'A note, to show what cannot be dragged.' }
+  });
+  const madeGroups = [ids.group];
+  try {
+    await runManageStage({ stamp, names, ids, tags, madeGroups });
+  } finally {
+    // Groups first: removing only the group puts its workspaces back at the top.
+    for (const id of madeGroups) {
+      await page.request.delete(
+        `${baseUrl}/api/workspaces/${id}?confirm=true&delete_mode=group_only`
+      );
+    }
+    for (const key of ['alpha', 'beta', 'gamma', 'delta']) {
+      await page.request.delete(`${baseUrl}/api/workspaces/${ids[key]}?confirm=true`);
+    }
+  }
+}
+
+async function runManageStage({ stamp, names, ids, tags, madeGroups }) {
+  const menu = page.locator('[data-tree-menu]');
+  const live = () => page.locator('#cockpitRailLive').innerText();
+  const byId = id => page.locator(`#cockpitTreeNav [data-tree-row="${id}"]`);
+  const parentOf = id => byId(id).getAttribute('data-parent-id');
+  const patches = () => requests.filter(entry => entry.startsWith('PATCH /api/workspaces/')).length;
+  const moveDialog = page.locator('[data-tree-move-dialog] [role="dialog"]');
+  const bulkBar = page.locator('#cockpitTreeNav [data-tree-bulkbar]');
+  const menuLabels = async () =>
+    (await menu.locator('[role="menuitem"]').allInnerTexts()).join(',');
+  await openTree();
+  for (const key of ['group', 'alpha', 'beta', 'gamma', 'delta']) await byId(ids[key]).waitFor();
+  await byId(ids.alpha).scrollIntoViewIfNeeded();
+
+  // --- The slim row: no checkbox, no column of buttons (FR53) -------------
+  check(
+    (await page
+      .locator(
+        '#cockpitTreeNav [data-tree-check], #cockpitTreeNav .cockpit-tree-actions, #cockpitTreeNav .cockpit-tree-metrics'
+      )
+      .count()) === 0,
+    'rows carry no checkbox, no metric cells and no buttons of their own'
+  );
+  check(
+    (await byId(ids.alpha).evaluate(el => el.getBoundingClientRect().height)) <= 32,
+    'a workspace row is one slim line'
+  );
+
+  // --- The header actions are still there, and named (FR53, FR64) ---------
+  const toolbar = page.locator('#cockpitTreeNav .cockpit-tree-toolbar-actions');
+  for (const label of ['New note', 'Create Workspace', 'Create Group', 'Import Folder', 'Rescan']) {
+    check(
+      (await toolbar.getByRole('button', { name: label, exact: true }).count()) === 1,
+      `the header has a "${label}" button with that name`
+    );
+  }
+  check(
+    (await toolbar.getByRole('link', { name: 'Manage directory', exact: true }).count()) === 1 &&
+      (await toolbar.getByRole('button', { name: 'Undo', exact: true }).isDisabled()),
+    'and Manage directory, and an Undo that is disabled while there is nothing to undo'
+  );
+
+  // --- The menus (FR55) ----------------------------------------------------
+  await byId(ids.gamma).locator('[data-tree-toggle]').click();
+  const looseNote = rowByKind('note', `Loose note ${stamp}`);
+  await looseNote.waitFor();
+  await looseNote.click({ button: 'right' });
+  await menu.waitFor();
+  check(
+    (await menuLabels()) === 'Open,Open in workspace',
+    "a note's menu: Open, Open in workspace"
+  );
+  await page.keyboard.press('Escape');
+  await byId(ids.group).click({ button: 'right' });
+  await menu.waitFor();
+  check(
+    (await menuLabels()) === 'Open group,New note,New ticket,Upload file…,Refresh,Move…,Delete',
+    "a group's menu: Open group, New note, New ticket, Upload file…, Refresh, Move…, Delete"
+  );
+  await page.keyboard.press('Escape');
+
+  // --- Move… from the menu (FR56) ------------------------------------------
+  await byId(ids.alpha).click({ button: 'right' });
+  await menu.waitFor();
+  await shot('m1-workspace-menu');
+  await menu.getByRole('menuitem', { name: 'Move…', exact: true }).click();
+  await moveDialog.waitFor();
+  const destinations = await moveDialog.locator('[data-tree-move-to]').allInnerTexts();
+  check(
+    destinations.includes(names.group) && !destinations.includes('Top level'),
+    'Move… opens the Move dialog: every group, and no "Top level" for a row already there'
+  );
+  check(
+    await page.evaluate(() => !!document.activeElement?.closest('[data-tree-move-dialog]')),
+    'focus moves into the dialog'
+  );
+  await shot('m2-move-dialog');
+  // A redraw of the tree (a reload of the workspace list) must not close it.
+  await page.evaluate(() => window.OriHomeCockpit.refreshQuietly());
+  await settle(500);
+  check((await moveDialog.count()) === 1, 'the dialog stays open while the tree redraws');
+  await moveDialog.locator('[data-tree-move-to]', { hasText: names.group }).click();
+  await expectEventually(
+    async () => (await parentOf(ids.alpha)) === ids.group,
+    'choosing the group moves the workspace into it'
+  );
+  check((await live()) === 'Workspace moved.', 'the move is announced');
+  check((await moveDialog.count()) === 0, 'and the dialog closes');
+
+  // Escape closes the dialog and goes back to the row.
+  await byId(ids.alpha).focus();
+  await page.keyboard.press('Shift+F10');
+  await menu.getByRole('menuitem', { name: 'Move…', exact: true }).click();
+  await moveDialog.waitFor();
+  check(
+    (await moveDialog.locator('[data-tree-move-to]').allInnerTexts()).includes('Top level'),
+    'inside a group, the dialog offers "Top level"'
+  );
+  await page.keyboard.press('Escape');
+  check(
+    (await moveDialog.count()) === 0 &&
+      (await byId(ids.alpha).evaluate(el => el === document.activeElement)),
+    'Escape closes the Move dialog and returns focus to the row'
+  );
+
+  // --- Move by drag (FR57) --------------------------------------------------
+  // Dragged by hand so the row being dragged over can be looked at mid-drag.
+  const dragOver = async (fromId, toId) => {
+    await byId(fromId).locator('.cockpit-tree-name').hover();
+    await page.mouse.down();
+    await byId(toId).locator('.cockpit-tree-name').hover();
+    await byId(toId).locator('.cockpit-tree-name').hover();
+  };
+  await dragOver(ids.beta, ids.group);
+  check(
+    await byId(ids.group).evaluate(el => el.classList.contains('is-drop-into')),
+    'dragging a workspace over a group marks the group as where it will land'
+  );
+  await shot('m3-dragging');
+  await page.mouse.up();
+  await expectEventually(
+    async () => (await parentOf(ids.beta)) === ids.group,
+    'dropping it there moves the workspace into the group'
+  );
+
+  // --- A move that is not allowed (FR57) -----------------------------------
+  const beforeIllegal = patches();
+  await dragOver(ids.group, ids.alpha);
+  check(
+    !(await byId(ids.alpha).evaluate(el => el.classList.contains('is-drop-target'))),
+    'a group dragged over a workspace inside it is given nowhere to drop'
+  );
+  await page.mouse.up();
+  await expectEventually(
+    async () => (await live()) === `"${names.group}" cannot be moved into itself.`,
+    'letting go there is refused, and the reason is announced'
+  );
+  await page.getByText('cannot be moved into itself').last().waitFor();
+  check(true, 'and shown');
+  await settle(400);
+  await shot('m3b-move-refused');
+  check(
+    patches() === beforeIllegal && (await parentOf(ids.group)) === '',
+    'nothing moves and nothing is sent'
+  );
+  await byId(ids.group).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Move…', exact: true }).click();
+  await moveDialog.waitFor();
+  const groupDestinations = await moveDialog.locator('[data-tree-move-to]').allInnerTexts();
+  check(
+    !groupDestinations.includes(names.alpha) && !groupDestinations.includes(names.group),
+    "and the group's Move dialog does not offer the group itself or what is inside it"
+  );
+  await moveDialog.locator('[data-tree-move-cancel]').click();
+
+  // Content rows cannot be dragged at all (FR57, FR62).
+  check(
+    (await looseNote.getAttribute('draggable')) === null &&
+      (await byId(`${ids.gamma}/s/notes`).getAttribute('draggable')) === null &&
+      (await byId(ids.gamma).getAttribute('draggable')) === 'true',
+    'only workspace and group rows can be dragged: a note and a section cannot'
+  );
+
+  // --- Delete, then Undo (FR58, FR59) --------------------------------------
+  const undo = toolbar.getByRole('button', { name: 'Undo', exact: true });
+  await byId(ids.delta).locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  check((await activeTab().innerText()).includes(names.delta), 'a workspace is open in a tab');
+  await byId(ids.delta).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Delete', exact: true }).click();
+  const confirmDelete = page.locator('dialog.ws-delete-dialog');
+  await confirmDelete.waitFor();
+  check(
+    (await confirmDelete.innerText()).includes(`Delete "${names.delta}"?`) &&
+      (await confirmDelete.innerText()).includes('restored with Undo'),
+    'Delete asks first, in the same dialog the Map uses'
+  );
+  await shot('m4-delete-confirm');
+  await confirmDelete.getByRole('button', { name: 'Cancel' }).click();
+  await settle(300);
+  check(
+    (await byId(ids.delta).count()) === 1 && (await undo.isDisabled()),
+    'Cancel deletes nothing'
+  );
+  await byId(ids.delta).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Delete', exact: true }).click();
+  await confirmDelete.waitFor();
+  await confirmDelete.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expectEventually(
+    async () => (await byId(ids.delta).count()) === 0,
+    'confirming removes the workspace from the tree'
+  );
+  await expectEventually(
+    async () =>
+      (await page.locator('.cockpit-pane-tab-label', { hasText: names.delta }).count()) === 0,
+    'and closes its tab'
+  );
+  check(!(await undo.isDisabled()), 'Undo in the header becomes available');
+  await shot('m5-deleted');
+  await undo.click();
+  await byId(ids.delta).waitFor();
+  check(
+    (await live()) === `Restored ${names.delta}.` && (await undo.isDisabled()),
+    'Undo puts the workspace back and says so'
+  );
+
+  // --- Selecting rows (FR60, FR61, FR62) -----------------------------------
+  check((await bulkBar.isHidden()) === true, 'with nothing selected there is no bar');
+  await byId(ids.gamma).locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  await byId(ids.delta)
+    .locator('.cockpit-tree-name')
+    .click({ modifiers: ['ControlOrMeta'] });
+  await bulkBar.waitFor();
+  const look = id =>
+    byId(id).evaluate(el => ({
+      checked: el.getAttribute('aria-checked'),
+      selected: el.getAttribute('aria-selected'),
+      picked: el.classList.contains('is-picked'),
+      active: el.classList.contains('is-active'),
+      outline: getComputedStyle(el).outlineStyle,
+      background: getComputedStyle(el).backgroundColor
+    }));
+  const open = await look(ids.gamma);
+  const picked = await look(ids.delta);
+  check(
+    picked.checked === 'true' && picked.selected === 'false' && picked.picked && !picked.active,
+    'Cmd/Ctrl-click selects a row without opening it'
+  );
+  check(
+    open.selected === 'true' &&
+      open.checked === 'false' &&
+      (open.outline !== picked.outline || open.background !== picked.background),
+    'a selected row looks different from the row whose tab is open'
+  );
+  check(
+    (await activeTab().innerText()).includes(names.gamma),
+    'and the open tab stays where it was'
+  );
+  // The count is set in capitals by the stylesheet, which innerText reflects.
+  const barText = async () => (await bulkBar.innerText()).replace(/\s+/g, ' ').trim().toLowerCase();
+  check(
+    (await barText()) === '1 selected select all group selected delete selected cancel',
+    'the bar appears: "1 selected", Select all, Group selected, Delete selected, Cancel'
+  );
+
+  // Shift-click selects the range of workspace rows in between.
+  await byId(ids.gamma)
+    .locator('.cockpit-tree-name')
+    .click({ modifiers: ['Shift'] });
+  const between = await page.evaluate(
+    ([from, to]) => {
+      const rows = Array.from(
+        document.querySelectorAll('#cockpitTreeNav [data-tree-row][aria-checked]')
+      );
+      const ids = rows.map(el => el.getAttribute('data-tree-row'));
+      const [a, b] = [ids.indexOf(from), ids.indexOf(to)].sort((x, y) => x - y);
+      return rows.slice(a, b + 1).map(el => el.getAttribute('aria-checked'));
+    },
+    [ids.delta, ids.gamma]
+  );
+  check(
+    between.length >= 2 && between.every(value => value === 'true'),
+    `Shift-click selects every workspace row from the last one picked (${between.length} rows)`
+  );
+  check(
+    (await looseNote.getAttribute('aria-checked')) === null,
+    'the notes in between are not part of the selection'
+  );
+
+  // On a content row a modified click is a plain click.
+  await looseNote.click({ modifiers: ['ControlOrMeta'] });
+  await page.locator('#cockpitPaneNoteEditor').waitFor();
+  check(
+    (await activeTab().innerText()).includes('Loose note') &&
+      (await looseNote.getAttribute('aria-checked')) === null,
+    'Cmd/Ctrl-click on a note just opens it: content rows cannot be selected'
+  );
+
+  // Cancel clears the selection; Space selects from the keyboard.
+  await bulkBar.getByRole('button', { name: 'Cancel', exact: true }).click();
+  check(
+    (await bulkBar.isHidden()) === true &&
+      (await page.locator('#cockpitTreeNav [aria-checked="true"]').count()) === 0,
+    'Cancel clears the selection and the bar goes'
+  );
+  await byId(ids.gamma).focus();
+  await page.keyboard.press('Space');
+  check(
+    (await byId(ids.gamma).getAttribute('aria-checked')) === 'true' &&
+      (await byId(ids.gamma).evaluate(el => el === document.activeElement)),
+    'Space selects the focused row and keeps focus on it'
+  );
+  await byId(ids.delta)
+    .locator('.cockpit-tree-name')
+    .click({ modifiers: ['ControlOrMeta'] });
+  check((await barText()).startsWith('2 selected'), 'a second row makes it "2 selected"');
+  await shot('m6-two-selected');
+
+  // --- Group selected (FR61) -----------------------------------------------
+  await bulkBar.getByRole('button', { name: 'Group selected', exact: true }).click();
+  const creator = page.locator('#addFolderModal');
+  await creator.waitFor();
+  check(
+    (await page.locator('#workspaceCreatorKindFixedNotice').innerText()).includes(
+      'keeps that choice fixed'
+    ),
+    'Group selected opens the Create Group dialog, set to make a group'
+  );
+  await settle(300);
+  await page.locator('#folderNameInput').fill(names.made);
+  await page.locator('#wizardNextBtn').click();
+  // The dialog's own roster step: the group's Manager is reviewed before the
+  // group can be created. Nothing here is the tree's, it only has to be passed.
+  await creator.locator('[data-team-agent-setup]').click();
+  await page.locator('#addAgentModal').waitFor();
+  await page.locator('#createAgentBtn').click();
+  await page.locator('#addAgentModal').waitFor({ state: 'hidden' });
+  await creator.getByRole('button', { name: 'Review →' }).click();
+  await page.locator('#workspaceReviewSummary').waitFor();
+  check(
+    (await page.locator('#workspaceReviewSummary').innerText()).includes(
+      'top-level workspaces will move'
+    ),
+    'its review step says the two selected workspaces will move into the group'
+  );
+  await shot('m7-group-review');
+  const groupCreated = page.waitForResponse(
+    response =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/workspaces'
+  );
+  await page.locator('#createFolderBtn').click();
+  const madeId = (await (await groupCreated).json()).folder.id;
+  madeGroups.push(madeId);
+  await creator.waitFor({ state: 'hidden' });
+  await expectEventually(
+    async () =>
+      (await byId(madeId).count()) === 1 &&
+      (await parentOf(ids.gamma)) === madeId &&
+      (await parentOf(ids.delta)) === madeId,
+    'the new group appears with both workspaces inside it',
+    8000
+  );
+  await expectEventually(
+    async () => (await bulkBar.isHidden()) === true,
+    'and the selection is cleared'
+  );
+  await byId(madeId).scrollIntoViewIfNeeded();
+  await shot('m8-grouped');
+
+  // --- Tags (FR63) -----------------------------------------------------------
+  const tagBar = page.locator('#cockpitTreeNav .cockpit-tree-tagbar');
+  const chip = tag => tagBar.locator(`[data-tree-tag-filter="${tag}"]`);
+  check((await chip(tags.filter).count()) === 1, "the workspace's tag is a chip above the tree");
+  check(
+    (await tagBar.locator('[data-tree-tag-clear]').count()) === 0,
+    '"Clear tag filters" is not shown while no filter is on'
+  );
+  await chip(tags.filter).click();
+  await expectEventually(
+    async () => (await byId(ids.delta).count()) === 0,
+    'pressing the chip hides workspaces without the tag'
+  );
+  check(
+    (await byId(ids.alpha).count()) === 1 &&
+      (await byId(ids.group).count()) === 1 &&
+      (await chip(tags.filter).getAttribute('aria-pressed')) === 'true',
+    'the tagged workspace stays, inside its group, and the chip reads as pressed'
+  );
+  await shot('m9-tag-filter');
+  await tagBar.getByRole('button', { name: 'Clear tag filters', exact: true }).click();
+  await byId(ids.delta).waitFor();
+  check(
+    (await chip(tags.filter).getAttribute('aria-pressed')) === 'false',
+    '"Clear tag filters" brings every row back'
+  );
+
+  // The same tags, in the workspace's overview.
+  await byId(ids.alpha).scrollIntoViewIfNeeded();
+  await byId(ids.alpha).locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  const paneTag = tag =>
+    page.locator(`#cockpitTreePane [data-pane-action="tag-filter"][data-pane-target="${tag}"]`);
+  await paneTag(tags.filter).waitFor();
+  check(
+    (await paneTag(tags.filter).getAttribute('aria-label')) ===
+      `Filter the tree by tag ${tags.filter}`,
+    'the overview shows the tags as buttons, named for what they do'
+  );
+  await paneTag(tags.filter).click();
+  await expectEventually(
+    async () =>
+      (await byId(ids.delta).count()) === 0 &&
+      (await paneTag(tags.filter).getAttribute('aria-pressed')) === 'true' &&
+      (await chip(tags.filter).getAttribute('aria-pressed')) === 'true',
+    'pressing a tag in the overview filters the tree, and both places show it pressed'
+  );
+  check((await live()) === `Showing workspaces tagged ${tags.filter}.`, 'the filter is announced');
+  check(
+    await page.evaluate(
+      () => document.activeElement?.getAttribute('data-pane-action') === 'tag-filter'
+    ),
+    'focus stays on the tag that was pressed'
+  );
+  await shot('m10-overview-tags');
+  await paneTag(tags.filter).click();
+  await byId(ids.delta).waitFor();
+
+  // Removing a tag.
+  const tagsSent = page.waitForResponse(
+    response =>
+      response.request().method() === 'PATCH' &&
+      new URL(response.url()).pathname === `/api/workspaces/${ids.alpha}`
+  );
+  await page
+    .locator(`#cockpitTreePane [data-pane-action="tag-remove"][data-pane-target="${tags.spare}"]`)
+    .click();
+  const sent = (await tagsSent).request().postDataJSON();
+  check(
+    JSON.stringify(sent.tags) === JSON.stringify([tags.filter]),
+    'removing a tag saves the workspace with the remaining tags'
+  );
+  await expectEventually(
+    async () => (await paneTag(tags.spare).count()) === 0 && (await chip(tags.spare).count()) === 0,
+    'the tag goes from the overview and, with no workspace carrying it, from the chips'
+  );
+  check(
+    (await live()) === `Removed tag ${tags.spare} from ${names.alpha}.`,
+    'the removal is announced'
+  );
+}
+
 const stages = {
   tree: stageTree,
   pane: stagePane,
   note: stageNote,
   create: stageCreate,
+  manage: stageManage,
   'map-requests': stageMapRequests
 };
 try {

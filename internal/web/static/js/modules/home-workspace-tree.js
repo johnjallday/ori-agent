@@ -44,7 +44,15 @@ import {
   sectionOfKind
 } from './home-tree-sources.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
-import { menuItemsFor, openRowMenu, rowHasMenu } from './home-tree-menu.js';
+import {
+  MENU_DELETE,
+  MENU_MOVE,
+  MENU_OPEN,
+  MENU_OPEN_PAGE,
+  menuItemsFor,
+  openRowMenu,
+  rowHasMenu
+} from './home-tree-menu.js';
 
 // ---------------------------------------------------------------------------
 // Hierarchy shaping
@@ -504,6 +512,25 @@ export function bulkSelectionState(flattened, selectedIds) {
   return stateById;
 }
 
+/**
+ * The workspace and group rows a Shift-click selects (FR60): every one on
+ * screen from the anchor row to the clicked row, in either direction.
+ *
+ * `rows` is the visible row list. Content rows in between are skipped — only
+ * workspaces and groups can be selected (FR62). With no usable anchor the
+ * clicked row alone is returned.
+ */
+export function rangeSelection(rows, anchorId, toId) {
+  const order = (Array.isArray(rows) ? rows : [])
+    .filter(row => isWorkspaceRowKind(row.kind))
+    .map(row => row.id);
+  const to = order.indexOf(toId);
+  if (to < 0) return [];
+  const from = order.indexOf(anchorId);
+  if (from < 0) return [toId];
+  return order.slice(Math.min(from, to), Math.max(from, to) + 1);
+}
+
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
@@ -605,10 +632,16 @@ function rowHTML(row, ctx) {
   const name = escapeHtml(row.name);
   const isActive = ctx.activeId === row.id;
   const isWorkspaceRow = isWorkspaceRowKind(row.kind);
-  const picked = isWorkspaceRow && !!(ctx.bulkState[row.id] && ctx.bulkState[row.id].checked);
+  // Picked for a bulk action — a different thing from being the open item, and
+  // said differently: `aria-checked` here, `aria-selected` for the open item.
+  // A group with only some of its workspaces picked is "mixed" (FR60).
+  const bulk = (isWorkspaceRow && ctx.bulkState[row.id]) || {};
+  const picked = !!bulk.checked;
+  const partlyPicked = !picked && !!bulk.indeterminate;
   const classes = ['cockpit-tree-row', `is-kind-${row.kind}`];
   if (isActive) classes.push('is-active');
   if (picked) classes.push('is-picked');
+  if (partlyPicked) classes.push('is-partly-picked');
   if (isDimRow(row)) classes.push('is-dim');
   // The "⋯" button. It is out of the tab order — the keyboard opens the same
   // menu with Shift+F10 or the Menu key on the row itself (FR54).
@@ -629,6 +662,9 @@ function rowHTML(row, ctx) {
     `aria-level="${row.depth + 1}" aria-posinset="${row.posInSet}" aria-setsize="${row.setSize}" ` +
     (row.expandable ? `aria-expanded="${row.expanded ? 'true' : 'false'}" ` : '') +
     `aria-selected="${isActive ? 'true' : 'false'}" ` +
+    (isWorkspaceRow
+      ? `aria-checked="${picked ? 'true' : partlyPicked ? 'mixed' : 'false'}" `
+      : '') +
     `style="--tree-depth:${row.depth}">` +
     (row.expandable
       ? `<button type="button" class="cockpit-tree-caret" data-tree-toggle="${id}" tabindex="-1" ` +
@@ -886,6 +922,14 @@ export function mountTree(container, state, callbacks) {
   const draftHadFocus =
     !!typing && container.contains(typing) && typing.hasAttribute('data-tree-draft');
   const draftCaret = draftHadFocus ? typing.selectionStart : null;
+  // The Move dialog is drawn with the tree, so it too keeps focus over a
+  // redraw. A row that has gone (deleted meanwhile) takes its dialog with it.
+  const moveHadFocus =
+    !!typing && container.contains(typing) && !!typing.closest('[data-tree-move-dialog]');
+  const moving = state.treeMoveId
+    ? (state.flattened || []).find(ws => ws && ws.id === state.treeMoveId) || null
+    : null;
+  if (!moving) state.treeMoveId = '';
 
   redrawing.add(container);
   container.innerHTML =
@@ -901,11 +945,26 @@ export function mountTree(container, state, callbacks) {
     }) +
     '<div class="cockpit-tree-root-drop" data-tree-drop-into="">Drop here to move to the top level</div>' +
     '</div>' +
-    '<div class="cockpit-tree-move-dialog" data-tree-move-dialog hidden></div>';
+    (moving
+      ? '<div class="cockpit-tree-move-dialog" data-tree-move-dialog>' +
+        `<div class="cockpit-tree-move-panel" role="dialog" aria-label="Move ${escapeHtml(moving.name || 'workspace')}">` +
+        renderMoveDialogHTML(
+          moving.name || 'this workspace',
+          moveDestinations(state.flattened, moving.id)
+        ) +
+        '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-move-cancel>Cancel</button>' +
+        '</div></div>'
+      : '<div class="cockpit-tree-move-dialog" data-tree-move-dialog hidden></div>');
   redrawing.delete(container);
 
   const scroller = container.querySelector('.cockpit-tree-scroll');
   if (scroller && scrollTop) scroller.scrollTop = scrollTop;
+
+  if (moving && (state.treeMoveFocus || moveHadFocus)) {
+    state.treeMoveFocus = false;
+    const first = container.querySelector('[data-tree-move-dialog] button');
+    if (first) first.focus();
+  }
 
   // A row being named takes focus when it first appears, and keeps it across
   // redraws (a section finishing its load must not interrupt typing).
@@ -1139,7 +1198,20 @@ function bindTree(container, state, cb, rows) {
       findOrigin,
       event,
       onChoose: action => {
-        if (typeof cb.onMenuAction === 'function') cb.onMenuAction(action, row);
+        // What the tree can do itself it does; creating, refreshing and the
+        // rest go back to the coordinator.
+        if (action === MENU_OPEN) {
+          // Opened from the keyboard, the item takes focus as it does on Enter.
+          activateRow(row, { keyboard: !!event && event.type === 'keydown' });
+        } else if (action === MENU_OPEN_PAGE) {
+          if (typeof cb.onOpen === 'function') cb.onOpen(row.id);
+        } else if (action === MENU_MOVE) {
+          openMoveDialog(row.id);
+        } else if (action === MENU_DELETE) {
+          void performDelete(row.id);
+        } else if (typeof cb.onMenuAction === 'function') {
+          cb.onMenuAction(action, row);
+        }
       }
     });
   };
@@ -1246,7 +1318,19 @@ function bindTree(container, state, cb, rows) {
       }
     ],
     ['[data-tree-group-selected]', () => void createGroup(Array.from(state.bulkSelection))],
-    ['[data-tree-delete-selected]', () => void deleteSelected()]
+    ['[data-tree-delete-selected]', () => void deleteSelected()],
+    [
+      '[data-tree-move-to]',
+      el => {
+        const id = state.treeMoveId;
+        state.treeMoveId = '';
+        state.focusId = id;
+        rerender();
+        focusAfterRerender(id);
+        void performMove(id, el.getAttribute('data-tree-move-to'));
+      }
+    ],
+    ['[data-tree-move-cancel]', () => closeMoveDialog()]
   ];
 
   on('click', e => {
@@ -1258,7 +1342,18 @@ function bindTree(container, state, cb, rows) {
       }
     }
     const row = rowFor(e.target);
-    if (row) activateRow(row, { keyboard: false });
+    if (!row) return;
+    // Multi-select is for workspace and group rows only; on a content row a
+    // modified click is a plain click (FR60, FR62).
+    if (isWorkspaceRowKind(row.kind) && (e.metaKey || e.ctrlKey)) {
+      toggleBulk(row.id);
+      return;
+    }
+    if (isWorkspaceRowKind(row.kind) && e.shiftKey) {
+      selectBulkRange(row.id);
+      return;
+    }
+    activateRow(row, { keyboard: false });
   });
 
   // --- keyboard ------------------------------------------------------------
@@ -1279,6 +1374,14 @@ function bindTree(container, state, cb, rows) {
         e.stopPropagation();
         cancelDraft();
       }
+      return;
+    }
+
+    // Escape closes the Move dialog and returns to the row being moved.
+    if (e.key === 'Escape' && e.target.closest && e.target.closest('[data-tree-move-dialog]')) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMoveDialog();
       return;
     }
 
@@ -1447,6 +1550,8 @@ function bindTree(container, state, cb, rows) {
     }
   }
 
+  // Cmd/Ctrl-click, or Space on the row: add a workspace or group to the bulk
+  // selection, or take it out (FR60).
   function toggleBulk(id) {
     if (state.bulkSelection.has(id)) state.bulkSelection.delete(id);
     else state.bulkSelection.add(id);
@@ -1455,38 +1560,43 @@ function bindTree(container, state, cb, rows) {
       if (state.bulkSelection.has(id)) state.bulkSelection.add(childId);
       else state.bulkSelection.delete(childId);
     });
+    // The next Shift-click selects from here.
+    state.bulkAnchorId = id;
     state.focusId = id;
     rerender();
   }
 
+  // Shift-click: select every workspace and group row from the last row
+  // toggled (or focused) to this one (FR60).
+  function selectBulkRange(toId) {
+    rangeSelection(rows, state.bulkAnchorId || state.focusId, toId).forEach(id => {
+      state.bulkSelection.add(id);
+      descendantIds(state.flattened, id).forEach(childId => state.bulkSelection.add(childId));
+    });
+    state.focusId = toId;
+    rerender();
+  }
+
+  /**
+   * Open the Move dialog for a workspace or group: the list of legal
+   * destinations, so moving never depends on drag-and-drop (FR56).
+   *
+   * Which row is being moved is kept in `state.treeMoveId` and the dialog is
+   * drawn with the tree, so a redraw (a section finishing its load) does not
+   * close a dialog that is open.
+   */
   function openMoveDialog(id) {
-    const dialog = container.querySelector('[data-tree-move-dialog]');
-    if (!dialog) return;
-    const moving = state.flattened.find(row => row.id === id);
-    const destinations = moveDestinations(state.flattened, id);
-    dialog.innerHTML =
-      '<div class="cockpit-tree-move-panel" role="dialog" aria-label="Move workspace">' +
-      renderMoveDialogHTML((moving && moving.name) || 'this workspace', destinations) +
-      '<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tree-move-cancel>Cancel</button>' +
-      '</div>';
-    dialog.hidden = false;
-    dialog.querySelectorAll('[data-tree-move-to]').forEach(btn =>
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        dialog.hidden = true;
-        void performMove(id, btn.getAttribute('data-tree-move-to'));
-      })
-    );
-    const cancel = dialog.querySelector('[data-tree-move-cancel]');
-    if (cancel) {
-      cancel.addEventListener('click', e => {
-        e.stopPropagation();
-        dialog.hidden = true;
-        focusRow(id);
-      });
-    }
-    const first = dialog.querySelector('button');
-    if (first) first.focus();
+    state.treeMoveId = id;
+    state.treeMoveFocus = true;
+    rerender();
+  }
+
+  function closeMoveDialog() {
+    const id = state.treeMoveId;
+    state.treeMoveId = '';
+    state.focusId = id;
+    rerender();
+    focusAfterRerender(id);
   }
 
   async function performMove(movingId, targetParentId, beforeId = '') {

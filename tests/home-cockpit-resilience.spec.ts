@@ -198,16 +198,18 @@ test.describe('Home cockpit resilience', () => {
     await expect(page.locator('#cockpitMap .ws-map-canvas')).toHaveCount(1);
   });
 
-  // restored in 5.7
-  test.fixme('Tree expansion and bulk selection survive repeated view switches', async ({
-    page
-  }) => {
-    await ensureWorkspace(page);
+  test('Tree expansion and bulk selection survive repeated view switches', async ({ page }) => {
+    const id = await ensureWorkspace(page);
     await page.goto('/?view=tree');
-    await page.locator('[data-tree-row]').first().waitFor();
+    const row = page.locator(`[data-tree-row="${id}"]`);
+    await row.waitFor();
 
-    // Take a bulk selection, then bounce through Map several times.
-    await page.locator('[data-tree-check]').first().click();
+    // Open the workspace and pick it for a bulk action (Cmd/Ctrl-click), then
+    // bounce through Map several times.
+    await row.locator('[data-tree-toggle]').click();
+    await expect(row).toHaveAttribute('aria-expanded', 'true');
+    await row.locator('.cockpit-tree-name').click({ modifiers: ['ControlOrMeta'] });
+    await expect(row).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('[data-tree-bulkbar]')).toBeVisible();
 
     for (let i = 0; i < 5; i++) {
@@ -216,9 +218,11 @@ test.describe('Home cockpit resilience', () => {
     }
     await page.waitForTimeout(400);
 
-    // FR55: bulk selection is current-session state and must survive.
-    await expect(page.locator('[data-tree-check]:checked')).toHaveCount(1);
-    await expect(page.locator('[data-tree-bulkbar]')).toBeVisible();
+    // Both are current-session state and must survive: which rows are open,
+    // and which are picked.
+    await expect(row).toHaveAttribute('aria-expanded', 'true');
+    await expect(row).toHaveAttribute('aria-checked', 'true');
+    await expect(page.locator('[data-tree-bulkbar]')).toContainText('1 selected');
     // Still exactly one tree, one tabbable row.
     await expect(page.locator('#cockpitTree [role="tree"]')).toHaveCount(1);
     await expect(page.locator('[data-tree-row][tabindex="0"]')).toHaveCount(1);

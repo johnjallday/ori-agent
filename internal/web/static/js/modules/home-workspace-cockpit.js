@@ -1651,6 +1651,7 @@ import {
   mountTree,
   ancestorIds,
   isWorkspaceRowKind,
+  removeWorkspaceTag,
   revealTargets,
   setRowExpanded
 } from './home-workspace-tree.js';
@@ -1674,7 +1675,15 @@ import {
   sectionKey,
   uploadFile
 } from './home-tree-sources.js';
-import { MENU_NEW_NOTE, MENU_NEW_TICKET, MENU_REFRESH, MENU_UPLOAD } from './home-tree-menu.js';
+import {
+  MENU_FILE_OPEN,
+  MENU_FILE_REVEAL,
+  MENU_NEW_NOTE,
+  MENU_NEW_TICKET,
+  MENU_OPEN_IN_WORKSPACE,
+  MENU_REFRESH,
+  MENU_UPLOAD
+} from './home-tree-menu.js';
 import {
   ITEM_FAILED,
   ITEM_LOADING,
@@ -1686,6 +1695,7 @@ import {
   leaveNoteThen,
   mountPane,
   openTab,
+  paneView,
   showSaveStatus,
   tabFromRow
 } from './home-tree-pane.js';
@@ -1840,6 +1850,10 @@ import {
     // A note or ticket being named in the tree, before it exists:
     // { workspaceId, section, kind, value, busy }. One at a time.
     treeDraft: null,
+    // The workspace or group whose Move dialog is open, and the row a
+    // Shift-click selects from.
+    treeMoveId: '',
+    bulkAnchorId: '',
     bulkSelection: new Set(),
     activeTags: new Set(),
     focusId: '',
@@ -2420,6 +2434,19 @@ import {
       if (treeHandle) void treeHandle.deleteWorkspace(tab.workspaceId);
     } else if (action === 'file-open' || action === 'file-reveal') {
       void openFileFromPane(tab, action === 'file-reveal');
+    } else if (action === 'tag-filter') {
+      // A tag in an overview filters the tree, like its chip in the tag bar.
+      if (state.activeTags.has(target)) state.activeTags.delete(target);
+      else state.activeTags.add(target);
+      mountTreeView();
+      mountPaneView();
+      announce(
+        state.activeTags.has(target)
+          ? `Showing workspaces tagged ${target}.`
+          : `No longer filtering by ${target}.`
+      );
+    } else if (action === 'tag-remove') {
+      void removeTagFromOverview(tab.workspaceId, target);
     } else if (action === 'reveal-section') {
       revealSectionInTree(tab.workspaceId, target);
     } else if (action === 'open-item') {
@@ -2446,6 +2473,23 @@ import {
     }
   }
 
+  /**
+   * Remove a tag from a workspace or group, from its overview (FR63). The
+   * workspace list is reloaded afterwards rather than edited in place.
+   */
+  async function removeTagFromOverview(workspaceId, tag) {
+    try {
+      await removeWorkspaceTag(state.flattened, workspaceId, tag);
+      // A filter on a tag nothing carries any more would hide every row.
+      state.activeTags.delete(tag);
+      announce(`Removed tag ${tag} from ${workspaceLabel(workspaceId)}.`);
+      await refreshQuietly();
+    } catch (err) {
+      const reason = err && err.message ? String(err.message) : 'Request failed';
+      reportTreeFailure(`Couldn't remove the tag ${tag}: ${reason}`);
+    }
+  }
+
   /** Open a section in the tree and put keyboard focus on its row (FR39). */
   function revealSectionInTree(workspaceId, sectionId) {
     const key = sectionKey(workspaceId, sectionId);
@@ -2469,6 +2513,15 @@ import {
     else if (action === MENU_UPLOAD) {
       pickFileToUpload(workspaceId, row.kind === 'folder' ? String(row.meta.path || '') : '');
     } else if (action === MENU_REFRESH) void refreshTreeRow(workspaceId);
+    else if (action === MENU_FILE_OPEN || action === MENU_FILE_REVEAL) {
+      void openFileFromPane(tabFromRow(row), action === MENU_FILE_REVEAL);
+    } else if (action === MENU_OPEN_IN_WORKSPACE) {
+      // The item's own place on the workspace page is the link its pane view
+      // leads with: the full note, the ticket in Tickets, the agent's page.
+      const view = paneView(tabFromRow(row), { flattened: state.flattened });
+      const link = view.actions.find(entry => entry.href);
+      if (link) window.location.href = link.href;
+    }
   }
 
   function workspaceLabel(workspaceId) {

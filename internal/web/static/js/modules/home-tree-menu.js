@@ -18,30 +18,53 @@ export const MENU_NEW_NOTE = 'new-note';
 export const MENU_NEW_TICKET = 'new-ticket';
 export const MENU_UPLOAD = 'upload';
 export const MENU_REFRESH = 'refresh';
+// Open in the pane, which is what a click on the row's name does.
+export const MENU_OPEN = 'open';
+// Go to the workspace's or group's own page.
+export const MENU_OPEN_PAGE = 'open-page';
+// Go to the item's own place on the workspace page: the full note, the ticket
+// in Tickets, the agent's page.
+export const MENU_OPEN_IN_WORKSPACE = 'open-in-workspace';
+export const MENU_MOVE = 'move';
+export const MENU_DELETE = 'delete';
+export const MENU_FILE_OPEN = 'file-open';
+export const MENU_FILE_REVEAL = 'file-reveal';
 
-const item = (action, label) => ({ action, label });
+const item = (action, label, extra) => ({ action, label, ...extra });
+const DIVIDER = { divider: true };
 
 /**
  * The menu for a row, as a list of `{ action, label }` (and `{ divider: true }`
  * between groups). An empty list means the row has no menu, and no "⋯" button.
  *
- * In this release of the menu a row offers what can be created under it:
+ * This is the PRD's menu table (FR55) for Release 1 rows:
  *
- *   group, workspace   New note, New ticket, Upload file…, Refresh
+ *   group              Open group, New note, New ticket, Upload file…,
+ *                      Refresh, Move…, Delete
+ *   workspace          Open workspace, New note, New ticket, Upload file…,
+ *                      Refresh, Move…, Delete
  *   Notes section      New note
  *   Backlog section    New ticket
  *   Files section,
  *   a folder in Files  Upload file…
+ *   note, ticket,
+ *   agent              Open, Open in workspace
+ *   file under files/  Open, Open in default app, Reveal in Finder
  */
 export function menuItemsFor(row) {
   const kind = row && row.kind;
   if (kind === 'group' || kind === 'workspace') {
     return [
+      item(MENU_OPEN_PAGE, kind === 'group' ? 'Open group' : 'Open workspace'),
+      DIVIDER,
       item(MENU_NEW_NOTE, 'New note'),
       item(MENU_NEW_TICKET, 'New ticket'),
       item(MENU_UPLOAD, 'Upload file…'),
-      { divider: true },
-      item(MENU_REFRESH, 'Refresh')
+      DIVIDER,
+      item(MENU_REFRESH, 'Refresh'),
+      DIVIDER,
+      item(MENU_MOVE, 'Move…'),
+      item(MENU_DELETE, 'Delete', { danger: true })
     ];
   }
   if (kind === 'section') {
@@ -51,6 +74,16 @@ export function menuItemsFor(row) {
     return [];
   }
   if (kind === 'folder') return [item(MENU_UPLOAD, 'Upload file…')];
+  if (kind === 'note' || kind === 'ticket' || kind === 'agent') {
+    return [item(MENU_OPEN, 'Open'), item(MENU_OPEN_IN_WORKSPACE, 'Open in workspace')];
+  }
+  if (kind === 'file') {
+    return [
+      item(MENU_OPEN, 'Open'),
+      item(MENU_FILE_OPEN, 'Open in default app'),
+      item(MENU_FILE_REVEAL, 'Reveal in Finder')
+    ];
+  }
   return [];
 }
 

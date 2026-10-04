@@ -305,6 +305,16 @@ export function sectionLinks(workspaceId, sections, { hideEmpty = false } = {}) 
   return links;
 }
 
+// A workspace's or group's tags, in its overview. Unlike a note's or a
+// ticket's, these can be used: each one filters the tree, as its chip in the
+// tag bar does, and can be removed (FR63).
+function fillOverviewTags(view, tab, context) {
+  view.tags = (context.tagsById && context.tagsById[tab.workspaceId]) || [];
+  view.tagsEditable = true;
+  const active = context.activeTags instanceof Set ? context.activeTags : new Set();
+  view.activeTags = view.tags.filter(tag => active.has(tag));
+}
+
 const VIEW_FILLERS = {
   // FR32, FR41. The body is a slot for the existing note editor, which the
   // cockpit mounts into it; the note's text never goes through this view, so
@@ -421,7 +431,7 @@ const VIEW_FILLERS = {
     if (!workspace) return;
     const rail = workspaceRailView(workspace);
     view.chip = { label: rail.status.label, tone: STATUS_TONES[rail.status.status] || 'mute' };
-    view.tags = (context.tagsById && context.tagsById[tab.workspaceId]) || [];
+    fillOverviewTags(view, tab, context);
     if (rail.openHref)
       view.actions.push({ label: 'Open workspace', href: rail.openHref, primary: true });
     view.actions.push(
@@ -446,7 +456,7 @@ const VIEW_FILLERS = {
   group(view, { tab, workspace, flattened, context }) {
     if (!workspace) return;
     const rail = groupRailView(workspace, flattened, { view: 'tree' });
-    view.tags = (context.tagsById && context.tagsById[tab.workspaceId]) || [];
+    fillOverviewTags(view, tab, context);
     if (rail.openHref)
       view.actions.push({ label: 'Open group', href: rail.openHref, primary: true });
     view.actions.push(
@@ -655,6 +665,27 @@ function contentHTML(view) {
   return parts.filter(Boolean).join('');
 }
 
+function readOnlyTagHTML(tag) {
+  return `<span class="cockpit-pane-tag">#${escapeHtml(tag)}</span>`;
+}
+
+// A tag that filters the tree when pressed and can be removed. Whether it is
+// filtering is said by `aria-pressed` and a tick, not by colour alone.
+function editableTagHTML(tag, view) {
+  const name = escapeHtml(tag);
+  const active = (view.activeTags || []).includes(tag);
+  return (
+    `<span class="cockpit-pane-tag is-editable${active ? ' is-active' : ''}">` +
+    `<button type="button" class="cockpit-pane-tag-filter" data-pane-action="tag-filter" ` +
+    `data-pane-target="${name}" aria-pressed="${active ? 'true' : 'false'}" ` +
+    `aria-label="Filter the tree by tag ${name}">#${name}</button>` +
+    `<button type="button" class="cockpit-pane-tag-remove" data-pane-action="tag-remove" ` +
+    `data-pane-target="${name}" aria-label="Remove tag ${name} from ${escapeHtml(view.title)}">` +
+    `${iconHTML('close', { size: 10 })}</button>` +
+    '</span>'
+  );
+}
+
 /**
  * The pane for one tab: breadcrumb, title, the "what and where" line with the
  * item's state and tags, its buttons, then its contents (FR31-FR40).
@@ -664,7 +695,7 @@ export function renderPaneHTML(view) {
     ? `<span class="cockpit-pane-chip is-${escapeHtml(view.chip.tone)}">${escapeHtml(view.chip.label)}</span>`
     : '';
   const tags = (view.tags || [])
-    .map(tag => `<span class="cockpit-pane-tag">#${escapeHtml(tag)}</span>`)
+    .map(tag => (view.tagsEditable ? editableTagHTML(tag, view) : readOnlyTagHTML(tag)))
     .join('');
   const actions = view.actions.length
     ? `<div class="cockpit-pane-actions">${view.actions.map(actionHTML).join('')}</div>`
@@ -737,7 +768,8 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
           item: (state.treeTabItems || {})[active.key] || null,
           sections: contents ? contents.sections : null,
           tagsById: (state.metadata && state.metadata.tagsById) || {},
-          scheduleIndex: state.scheduleIndex
+          scheduleIndex: state.scheduleIndex,
+          activeTags: state.activeTags
         })
       )
     : renderEmptyPaneHTML();

@@ -1110,3 +1110,77 @@ test('overview buttons are links where they navigate and buttons where they act'
   assert.match(html, /class="cockpit-pane-chip is-warn">Needs attention</);
   assert.match(html, /class="cockpit-pane-stat-value">3</);
 });
+
+// ---------------------------------------------------------------------------
+// Tags in an overview (FR63)
+// ---------------------------------------------------------------------------
+
+test("a workspace's tags can filter the tree and be removed, from its overview", () => {
+  const view = paneView(tab('ws1', { kind: 'workspace' }), {
+    flattened: FLAT,
+    tagsById: { ws1: ['music', 'reaper'] },
+    activeTags: new Set(['music'])
+  });
+  assert.equal(view.tagsEditable, true);
+  assert.deepEqual(view.activeTags, ['music']);
+  const html = renderPaneHTML(view);
+  // Filtering: a toggle that says whether it is on.
+  assert.match(
+    html,
+    /data-pane-action="tag-filter" data-pane-target="music" aria-pressed="true" aria-label="Filter the tree by tag music">#music</
+  );
+  assert.match(html, /data-pane-target="reaper" aria-pressed="false"/);
+  assert.match(html, /class="cockpit-pane-tag is-editable is-active"/);
+  // Removing: named for the tag and the workspace it comes off.
+  assert.match(
+    html,
+    /data-pane-action="tag-remove" data-pane-target="reaper" aria-label="Remove tag reaper from Night Drive"/
+  );
+});
+
+test("a group's tags work the same way", () => {
+  const html = renderPaneHTML(
+    paneView(tab('g1', { kind: 'group', workspaceId: 'g1' }), {
+      flattened: FLAT,
+      tagsById: { g1: ['music'] }
+    })
+  );
+  assert.match(html, /data-pane-action="tag-filter" data-pane-target="music"/);
+  assert.match(html, /aria-label="Remove tag music from Music"/);
+});
+
+test("a note's and a ticket's tags stay read-only (FR32, FR33)", () => {
+  const note = renderPaneHTML(
+    paneView(NOTE_TAB, {
+      flattened: FLAT,
+      item: ready({ name: 'Lyrics draft', content: '', tags: ['lyrics'] })
+    })
+  );
+  const ticket = renderPaneHTML(
+    paneView(TICKET_TAB, {
+      flattened: FLAT,
+      item: ready({
+        title: 'T',
+        state: 'ready',
+        stateLabel: 'Ready',
+        description: '',
+        tags: ['mix']
+      })
+    })
+  );
+  [note, ticket].forEach(html => {
+    assert.doesNotMatch(html, /tag-filter|tag-remove|is-editable/);
+    assert.match(html, /<span class="cockpit-pane-tag">#/);
+  });
+});
+
+test('a hostile tag is escaped in its label, its target and its names', () => {
+  const html = renderPaneHTML(
+    paneView(tab('ws1', { kind: 'workspace' }), {
+      flattened: FLAT,
+      tagsById: { ws1: ['"><img src=x>'] }
+    })
+  );
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /data-pane-target="&quot;&gt;&lt;img src=x&gt;"/);
+});

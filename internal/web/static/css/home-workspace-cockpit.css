@@ -1469,7 +1469,6 @@ body.home-command-page .ori-guide__launcher {
   outline-offset: 2px;
 }
 
-.cockpit-tree-action,
 .cockpit-tree-caret {
   min-height: 24px;
 }
@@ -1697,6 +1696,8 @@ body.home-command-page .ori-guide__launcher {
   border-radius: 6px;
   color: var(--hc-ink);
   cursor: pointer;
+  /* Shift-click selects a range of rows, not the text between them. */
+  user-select: none;
 }
 
 .cockpit-tree-row:hover {
@@ -1711,10 +1712,23 @@ body.home-command-page .ori-guide__launcher {
 }
 
 /* A row picked for a bulk action is outlined, not filled, so it never reads as
-   the open item (FR60). */
+   the open item (FR60). A group with only some of its workspaces picked gets
+   the same outline, dotted. */
 .cockpit-tree-row.is-picked {
-  outline: 1px dashed var(--hc-signal);
+  outline: 2px dashed var(--hc-signal);
+  outline-offset: -2px;
+}
+
+.cockpit-tree-row.is-partly-picked {
+  outline: 1px dotted var(--hc-ink-dim);
   outline-offset: -1px;
+}
+
+/* A picked row also carries a tick, so the selection is not shape alone. */
+.cockpit-tree-row.is-picked > .cockpit-tree-name::before {
+  content: "✓ ";
+  color: var(--hc-signal);
+  font-weight: 700;
 }
 
 .cockpit-tree-row:focus-visible {
@@ -1936,124 +1950,6 @@ body.home-command-page .ori-guide__launcher {
     height: 44px;
     flex-basis: 44px;
   }
-}
-
-/* Row metadata: status stays an uppercase chip because it is a state label, but
-   at a size that does not need squinting. --hc-ink-faint at 9px was below the
-   AA floor for anyone reading it as information rather than decoration. */
-.cockpit-tree-kind,
-.cockpit-tree-status,
-.cockpit-tree-next {
-  flex: 0 0 auto;
-  color: var(--hc-ink-dim);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.cockpit-tree-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.cockpit-tree-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.cockpit-tree-status.is-attention {
-  color: var(--hc-alert);
-}
-
-.cockpit-tree-status.is-running,
-.cockpit-tree-status.is-active {
-  color: var(--hc-signal);
-}
-
-.cockpit-tree-next[data-unavailable="true"] {
-  font-style: italic;
-  opacity: 0.7;
-}
-
-.cockpit-tree-metrics {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 8px;
-}
-
-.cockpit-tree-metric {
-  color: var(--hc-ink-faint);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9.5px;
-  white-space: nowrap;
-}
-
-.cockpit-tree-metric b {
-  color: var(--hc-ink);
-}
-
-.cockpit-tree-metric b[data-unavailable="true"] {
-  color: var(--hc-ink-faint);
-  font-weight: 400;
-}
-
-.cockpit-tree-tags {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 4px;
-}
-
-.cockpit-tree-tag {
-  padding: 1px 5px;
-  border: 1px solid var(--hc-line);
-  color: var(--hc-ink-dim);
-  font-size: 9px;
-}
-
-.cockpit-tree-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 4px;
-}
-
-/* Tree is the hierarchy-management peer of Map, so its per-row actions get to
-   look like buttons rather than 9px monospace tokens — they are how a user
-   moves and removes real workspaces (PRD FR-9/FR-10). Sentence case, on the
-   shared step grid, at a size a pointer can actually hit. */
-.cockpit-tree-action {
-  padding: 3px 9px;
-  border: 1px solid var(--hc-line);
-  border-radius: var(--cozy-radius, 8px);
-  background: var(--hc-panel-deep);
-  color: var(--hc-ink-dim);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.cockpit-tree-action:hover,
-.cockpit-tree-action:focus-visible {
-  border-color: var(--hc-signal);
-  color: var(--hc-ink);
-}
-
-/* Delete reads as destructive before it is hovered, not only after. A control
-   that only announces itself on hover is no warning to a keyboard user
-   arrowing through the tree. */
-.cockpit-tree-action.is-danger {
-  border-color: color-mix(in srgb, var(--hc-alert) 45%, var(--hc-line));
-  color: var(--hc-alert);
-}
-
-.cockpit-tree-action.is-danger:hover,
-.cockpit-tree-action.is-danger:focus-visible {
-  border-color: var(--hc-alert);
-  background: color-mix(in srgb, var(--hc-alert) 12%, var(--hc-panel-deep));
-  color: var(--hc-alert);
 }
 
 .cockpit-tree-empty-drop,
@@ -2302,6 +2198,56 @@ body.home-command-page .ori-guide__launcher {
   border-radius: 999px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 11px;
+}
+
+/* A workspace's tag in its overview: press it to filter the tree by it, or its
+   × to remove it (FR63). */
+.cockpit-pane-tag.is-editable {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  overflow: hidden;
+}
+
+.cockpit-pane-tag.is-editable.is-active {
+  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 16%, var(--hc-panel-raised));
+}
+
+.cockpit-pane-tag-filter,
+.cockpit-pane-tag-remove {
+  min-height: 22px;
+  border: 0;
+  background: none;
+  color: var(--hc-ink-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.cockpit-pane-tag-filter {
+  padding: 0 4px 0 8px;
+}
+
+.cockpit-pane-tag-filter[aria-pressed="true"] {
+  color: var(--hc-ink);
+}
+
+.cockpit-pane-tag-filter[aria-pressed="true"]::before {
+  content: "✓ ";
+}
+
+.cockpit-pane-tag-remove {
+  display: grid;
+  width: 22px;
+  padding: 0;
+  border-left: 1px solid var(--hc-line);
+  place-items: center;
+}
+
+.cockpit-pane-tag-filter:hover,
+.cockpit-pane-tag-remove:hover {
+  background: var(--hc-panel);
+  color: var(--hc-ink);
 }
 
 .cockpit-pane-rule {
@@ -2689,7 +2635,8 @@ body.home-command-page .ori-guide__launcher {
   box-shadow: inset 0 0 0 2px var(--hc-signal);
 }
 
-/* Tag filter bar and per-row tag chips (FR54). */
+/* Tag filter bar (FR63). The chips filter the tree; a workspace's own tags are
+   shown, filtered by and removed in its overview tab (.cockpit-pane-tag). */
 .cockpit-tree-tagbar {
   display: flex;
   flex-wrap: wrap;
@@ -2703,9 +2650,9 @@ body.home-command-page .ori-guide__launcher {
 }
 
 .cockpit-tree-tagbar-label {
-  color: var(--hc-ink-faint);
+  color: var(--hc-ink-dim);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
@@ -2714,9 +2661,10 @@ body.home-command-page .ori-guide__launcher {
 .cockpit-tree-tagbar-clear {
   padding: 2px 8px;
   border: 1px solid var(--hc-line);
+  border-radius: 999px;
   background: var(--hc-panel-deep);
   color: var(--hc-ink-dim);
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -2726,39 +2674,9 @@ body.home-command-page .ori-guide__launcher {
   color: var(--hc-ink);
 }
 
+/* A tick as well as a tint: which tags are filtering is not left to colour. */
 .cockpit-tree-tagbar-chip[aria-pressed="true"]::before {
   content: "✓ ";
-}
-
-.cockpit-tree-tag {
-  display: inline-flex;
-  align-items: center;
-  overflow: hidden;
-  border: 1px solid var(--hc-line);
-}
-
-.cockpit-tree-tag.is-active {
-  border-color: var(--hc-signal);
-}
-
-.cockpit-tree-tag-filter,
-.cockpit-tree-tag-remove {
-  padding: 1px 5px;
-  border: 0;
-  background: none;
-  color: var(--hc-ink-dim);
-  font-size: 9px;
-  cursor: pointer;
-}
-
-.cockpit-tree-tag-remove {
-  border-left: 1px solid var(--hc-line);
-  color: var(--hc-ink-faint);
-}
-
-.cockpit-tree-tag-remove:hover,
-.cockpit-tree-tag-remove:focus-visible {
-  color: var(--hc-alert);
 }
 
 /* --------------------------------------------------------------------------
