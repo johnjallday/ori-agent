@@ -432,6 +432,31 @@ func (s *FolderDigestService) StoredOffer(ctx context.Context, userID, offerID s
 	return *stored, nil
 }
 
+// WaitingFolderOffers returns the offers the user has not answered yet: the
+// pending one first, then those set aside for later, newest first. Unlike
+// Current it is a pure read: a due "later" offer is not brought back and no
+// queued candidate is promoted.
+func (s *FolderDigestService) WaitingFolderOffers(ctx context.Context, userID string) ([]FolderOffer, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrRepairNeeded
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	var waiting, later []FolderOffer
+	for _, offer := range doc.Offers {
+		switch offer.Status {
+		case FolderOfferPending:
+			waiting = append(waiting, offer)
+		case FolderOfferLater:
+			later = append(later, offer)
+		}
+	}
+	sort.SliceStable(later, func(i, j int) bool { return later[i].CreatedAt.After(later[j].CreatedAt) })
+	return append(waiting, later...), nil
+}
+
 // FolderDigestService turns "show me a folder" into one explained offer and
 // records what the user answered.
 type FolderDigestService struct {

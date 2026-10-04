@@ -363,6 +363,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		})
 		interview := personalassistant.NewKnowledgeInterviewService(knowledge)
 		interview.SetReviewedMemoryWriter(b.personalAssistantMemory)
+		// wireFolderDigest ran above, so the digest exists by now. A nil
+		// service must stay a nil reader, not a non-nil interface around nil.
+		if b.personalAssistantFolderDigest != nil {
+			interview.SetFolderOffers(b.personalAssistantFolderDigest)
+		}
 		interviewReader = interview
 		if cas, ok := b.userStore.(personalassistant.ProfileCASStore); ok {
 			interview.SetCanonicalSavers(learning, cas)

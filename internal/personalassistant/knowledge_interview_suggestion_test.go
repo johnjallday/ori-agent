@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
@@ -57,6 +58,258 @@ func TestInterviewSuggestion_FromARealScan(t *testing.T) {
 	}
 	if _, err := f.service.StoredOffer(ctx, "local", "  "); !errors.Is(err, ErrValidation) {
 		t.Fatalf("blank offer id err = %v", err)
+	}
+}
+
+// interviewFolderFixture is an interview over the same Personal HQ as a folder
+// digest, with a lifecycle service that can approve a project fact.
+type interviewFolderFixture struct {
+	*folderDigestFixture
+	knowledge *KnowledgeStore
+	learning  *KnowledgeLearningService
+	interview *KnowledgeInterviewService
+}
+
+func newInterviewFolderFixture(t *testing.T) *interviewFolderFixture {
+	t.Helper()
+	f := newFolderDigestFixture(t)
+	knowledge := NewKnowledgeStore(f.resolver(), f.folder)
+	interview := NewKnowledgeInterviewService(knowledge)
+	interview.SetFolderOffers(f.service)
+	return &interviewFolderFixture{
+		folderDigestFixture: f, knowledge: knowledge, interview: interview,
+		learning: NewKnowledgeLifecycleService(knowledge, f.memory, acceptFolderScanAuthority{}),
+	}
+}
+
+// versions reads both sidecars' versions, to prove a read wrote nothing.
+func (f *interviewFolderFixture) versions(t *testing.T) [2]int64 {
+	t.Helper()
+	digest, err := f.store.Read(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	knowledge, err := f.knowledge.Read(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return [2]int64{digest.Version, knowledge.Version}
+}
+
+// rememberSubject approves the project fact a yes on Home would save for the
+// offer's subject.
+func (f *interviewFolderFixture) rememberSubject(t *testing.T, offerID string) {
+	t.Helper()
+	offer, err := f.service.StoredOffer(context.Background(), "local", offerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	offer.Outcome = &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: "ws-" + offer.Subject.Name}
+	if learned := NewFolderScanProducer(f.learning).LearnFromOffer(context.Background(), "local", offer); !learned.Remembered {
+		t.Fatalf("project fact was not approved: %+v", learned)
+	}
+}
+
+type failingFolderOffers struct{ calls int }
+
+func (r *failingFolderOffers) WaitingFolderOffers(context.Context, string) ([]FolderOffer, error) {
+	r.calls++
+	return nil, errors.New("folder digest unreadable")
+}
+
+func TestInterviewFolderSnapshot_PrefillsFromAnOfferStillWaiting(t *testing.T) {
+	f := newInterviewFolderFixture(t)
+	ctx := context.Background()
+
+	empty, err := f.interview.FolderSnapshot(ctx, "local")
+	if err != nil || empty.Suggestion != nil || empty.RememberedProject != "" {
+		t.Fatalf("nothing shown yet: %+v err=%v", empty, err)
+	}
+
+	scanned, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := f.versions(t)
+	pending, err := f.interview.FolderSnapshot(ctx, "local")
+	if err != nil || pending.Suggestion == nil || pending.Suggestion.Text != "Thesis, a LaTeX manuscript" ||
+		len(pending.Suggestion.Alternates) != 2 || pending.RememberedProject != "" {
+		t.Fatalf("pending project offer: %+v err=%v", pending, err)
+	}
+	if after := f.versions(t); after != before {
+		t.Fatalf("the snapshot wrote: %v -> %v", before, after)
+	}
+
+	// Set aside for later on Home: still proposed, and still without a scan.
+	if _, err := f.service.Decide(ctx, "local", scanned.ID, FolderDecisionInput{Decision: FolderDecisionLater, RequestID: "req-later"}); err != nil {
+		t.Fatal(err)
+	}
+	before = f.versions(t)
+	later, err := f.interview.FolderSnapshot(ctx, "local")
+	if err != nil || later.Suggestion == nil || later.Suggestion.Text != "Thesis, a LaTeX manuscript" {
+		t.Fatalf("later offer: %+v err=%v", later, err)
+	}
+	if after := f.versions(t); after != before {
+		t.Fatalf("the snapshot wrote: %v -> %v", before, after)
+	}
+	// The read must not bring the offer back the way Home's Current does.
+	f.now = f.now.Add(8 * 24 * time.Hour)
+	if _, err := f.interview.FolderSnapshot(ctx, "local"); err != nil {
+		t.Fatal(err)
+	}
+	if stored, _ := f.service.StoredOffer(ctx, "local", scanned.ID); stored.Status != FolderOfferLater {
+		t.Fatalf("the snapshot promoted a due offer: %s", stored.Status)
+	}
+
+	// A newer dump is the pending offer; the project set aside is still the answer.
+	if _, err := f.service.ScanChip(ctx, "local", "downloads"); err != nil {
+		t.Fatal(err)
+	}
+	behindDump, err := f.interview.FolderSnapshot(ctx, "local")
+	if err != nil || behindDump.Suggestion == nil || behindDump.Suggestion.Folder != "Thesis" {
+		t.Fatalf("project behind a dump: %+v err=%v", behindDump, err)
+	}
+}
+
+func TestInterviewFolderSnapshot_NothingToPropose(t *testing.T) {
+	ctx := context.Background()
+	t.Run("a pending dump offer", func(t *testing.T) {
+		f := newInterviewFolderFixture(t)
+		if _, err := f.service.ScanChip(ctx, "local", "downloads"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := f.interview.FolderSnapshot(ctx, "local")
+		if err != nil || got.Suggestion != nil || got.RememberedProject != "" {
+			t.Fatalf("snapshot = %+v err=%v", got, err)
+		}
+	})
+	t.Run("a declined offer", func(t *testing.T) {
+		f := newInterviewFolderFixture(t)
+		scanned, err := f.service.ScanChip(ctx, "local", "documents")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Decide(ctx, "local", scanned.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "req-no"}); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := f.interview.FolderSnapshot(ctx, "local"); err != nil || got.Suggestion != nil {
+			t.Fatalf("snapshot = %+v err=%v", got, err)
+		}
+	})
+	t.Run("no folder reader", func(t *testing.T) {
+		f := newInterviewFolderFixture(t)
+		if _, err := f.service.ScanChip(ctx, "local", "documents"); err != nil {
+			t.Fatal(err)
+		}
+		f.interview.SetFolderOffers(nil)
+		if got, err := f.interview.FolderSnapshot(ctx, "local"); err != nil || got.Suggestion != nil {
+			t.Fatalf("snapshot = %+v err=%v", got, err)
+		}
+	})
+	t.Run("a failing folder reader leaves the rest standing", func(t *testing.T) {
+		f := newInterviewFolderFixture(t)
+		scanned, err := f.service.ScanChip(ctx, "local", "documents")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.rememberSubject(t, scanned.ID)
+		reader := &failingFolderOffers{}
+		f.interview.SetFolderOffers(reader)
+		got, err := f.interview.FolderSnapshot(ctx, "local")
+		if err != nil || got.Suggestion != nil || got.RememberedProject == "" || reader.calls != 1 {
+			t.Fatalf("snapshot = %+v err=%v calls=%d", got, err, reader.calls)
+		}
+	})
+}
+
+func TestInterviewFolderSnapshot_RememberedProjectIsNotProposedAgain(t *testing.T) {
+	f := newInterviewFolderFixture(t)
+	ctx := context.Background()
+	scanned, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.rememberSubject(t, scanned.ID)
+
+	// The offer about Thesis is still waiting, but Thesis is already remembered.
+	before := f.versions(t)
+	got, err := f.interview.FolderSnapshot(ctx, "local")
+	if err != nil || got.RememberedProject != "You are working on a project in the folder Thesis." || got.Suggestion != nil {
+		t.Fatalf("snapshot = %+v err=%v", got, err)
+	}
+	if after := f.versions(t); after != before {
+		t.Fatalf("the snapshot wrote: %v -> %v", before, after)
+	}
+
+	// A different project still waiting is proposed beside the remembered one,
+	// and the remembered one is not among its alternates.
+	if _, err := f.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
+		offer := d.Offer(scanned.ID)
+		thesis := offer.Subject
+		offer.Subject, offer.Queue = offer.Queue[0], append([]FolderCandidateRecord{thesis}, offer.Queue[1:]...)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = f.interview.FolderSnapshot(ctx, "local")
+	if err != nil || got.RememberedProject == "" || got.Suggestion == nil || got.Suggestion.Folder != "website" {
+		t.Fatalf("snapshot = %+v err=%v", got, err)
+	}
+	for _, alternate := range got.Suggestion.Alternates {
+		if alternate.Folder == "Thesis" {
+			t.Fatalf("a remembered project is offered as an alternate: %+v", got.Suggestion.Alternates)
+		}
+	}
+
+	// A candidate, rejected or forgotten fact is not "remembered".
+	doc, err := f.knowledge.Read(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range doc.Items {
+		if item.Category != "projects" {
+			continue
+		}
+		if _, err := f.learning.ForgetApproved(ctx, "local", item.ID, item.Version, "forget-thesis"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err = f.interview.FolderSnapshot(ctx, "local"); err != nil || got.RememberedProject != "" {
+		t.Fatalf("a forgotten project is still reported: %+v err=%v", got, err)
+	}
+}
+
+// A scan started from the interview is an ordinary scan: its offer waits on
+// Home, and reading it for the interview answers nothing on the user's behalf.
+func TestInterviewFolderFeed_LeavesHomesOfferUsable(t *testing.T) {
+	f := newInterviewFolderFixture(t)
+	ctx := context.Background()
+	outcomes := 0
+	f.service.SetOnOutcome(func(context.Context, string, FolderOffer) { outcomes++ })
+
+	scanned, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.StoredOffer(ctx, "local", scanned.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.interview.FolderSnapshot(ctx, "local"); err != nil {
+		t.Fatal(err)
+	}
+	if outcomes != 0 {
+		t.Fatalf("a scan alone reported %d outcomes; the mission completes on an accepted outcome only", outcomes)
+	}
+	view, err := f.service.Current(ctx, "local")
+	if err != nil || view.Offer == nil || view.Offer.ID != scanned.ID || view.Offer.Status != FolderOfferPending || view.Offer.Decision != "" {
+		t.Fatalf("Home's offer after the interview read: %+v err=%v", view.Offer, err)
+	}
+	// Home can still answer it afterwards.
+	decided, err := f.service.Decide(ctx, "local", scanned.ID, FolderDecisionInput{
+		Decision: FolderDecisionYes, Choice: FolderChoiceProject, RequestID: "req-yes",
+	})
+	if err != nil || decided.Status != FolderOfferAwaitingOutcome {
+		t.Fatalf("yes on Home after the interview: %+v err=%v", decided, err)
 	}
 }
 

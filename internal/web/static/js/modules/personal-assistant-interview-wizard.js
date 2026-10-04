@@ -11,6 +11,9 @@ const FOLDER_PICK_LABEL = 'Pick a folder…';
 const FOLDER_CHOOSER_NOTE =
   'I only look at file names and types. This also leaves a setup suggestion for the folder on Home.';
 const FOLDER_SCAN_CAPTION = "From the folder you showed me. Edit it if that's not quite right.";
+const FOLDER_EARLIER_CAPTION =
+  "From a folder you showed me earlier. Edit it if that's not quite right.";
+const EARLIER_SOURCE = 'earlier';
 const FOLDER_SCAN_FAILED = 'I could not look at that folder. Type your answer instead.';
 const MODAL_ID = 'personalHQInterviewWizard';
 const REVIEW_STEP = 'review';
@@ -157,6 +160,9 @@ export function hasInterviewDraft(storage) {
 export function cleanSuggestion(value, nested = false) {
   if (!value || typeof value.text !== 'string' || value.text === '') return null;
   const clean = { text: value.text, folder: typeof value.folder === 'string' ? value.folder : '' };
+  // Set by the wizard, never by the server: the folder was shown before this
+  // interview was opened, so the caption says "earlier".
+  if (!nested && value.source === EARLIER_SOURCE) clean.source = EARLIER_SOURCE;
   if (!nested && Array.isArray(value.alternates)) {
     const alternates = value.alternates
       .map(item => cleanSuggestion(item, true))
@@ -171,6 +177,21 @@ export function cleanSuggestion(value, nested = false) {
 // suggestion. Once the text is edited the answer is the user's own.
 export function suggestionCaptionVisible(answer) {
   return typeof answer?.suggestion?.text === 'string' && answer.suggestion.text === answer.text;
+}
+
+// Says where a suggestion came from: a folder shown just now in the wizard, or
+// one shown on Home before the interview was opened.
+export function suggestionCaptionText(suggestion) {
+  return suggestion?.source === EARLIER_SOURCE ? FOLDER_EARLIER_CAPTION : FOLDER_SCAN_CAPTION;
+}
+
+// The line added to question 1's hint when a project is already remembered
+// from a folder. Empty when there is nothing remembered.
+export function rememberedProjectLine(text) {
+  if (typeof text !== 'string') return '';
+  const fact = text.trim().replace(/\.+$/u, '');
+  if (!fact) return '';
+  return `I already remember: “${fact}”. Add anything that matters more right now, or skip.`;
 }
 
 // Returns the answer a new suggestion leaves behind. It never overwrites what
@@ -200,6 +221,7 @@ export function alternateSuggestion(suggestion, index) {
   return cleanSuggestion({
     text: chosen.text,
     folder: chosen.folder,
+    source: suggestion.source,
     alternates: [
       { text: suggestion.text, folder: suggestion.folder },
       ...alternates.filter((_, i) => i !== index)
@@ -208,7 +230,8 @@ export function alternateSuggestion(suggestion, index) {
 }
 
 // Pure wizard state: one step per question in server order, then Review.
-export function createInterviewWizardState(questions, draft) {
+// `snapshot` may carry a suggestion from a folder shown before the interview.
+export function createInterviewWizardState(questions, draft, snapshot) {
   const list = Array.isArray(questions) ? questions : [];
   const answers = list.map(question => ({
     id: question.id,
@@ -240,6 +263,18 @@ export function createInterviewWizardState(questions, draft) {
   }
   if (Number.isInteger(draft?.stepIndex))
     index = Math.min(Math.max(draft.stepIndex, 0), reviewIndex);
+
+  // A folder shown earlier prefills question 1 on a fresh open only. A draft,
+  // even one whose answer was cleared, is the user's own and always wins.
+  const earlier = draft ? null : cleanSuggestion(snapshot?.suggestion);
+  const folderAnswer = answers.find(answer => answer.id === FOLDER_QUESTION_ID);
+  if (earlier && folderAnswer) {
+    earlier.source = EARLIER_SOURCE;
+    // With a project already remembered the box stays empty, and a different
+    // folder's suggestion waits as a choice instead of filling it.
+    if (rememberedProjectLine(snapshot?.remembered_project)) folderAnswer.pending = earlier;
+    else Object.assign(folderAnswer, applySuggestion(folderAnswer, earlier));
+  }
 
   return {
     questions: list,
@@ -413,7 +448,7 @@ export function openInterviewWizard(initialSnapshot) {
   const storage = browserStorage();
   let snapshot = initialSnapshot;
   const draft = loadInterviewDraft(storage);
-  const state = createInterviewWizardState(snapshot.questions, draft);
+  const state = createInterviewWizardState(snapshot.questions, draft, snapshot);
   const ui = buildModal();
   let prepared;
   let retry;
@@ -558,7 +593,11 @@ export function openInterviewWizard(initialSnapshot) {
     extras.replaceChildren();
     let captionId = '';
     if (suggestionCaptionVisible(answer)) {
-      const caption = node('p', FOLDER_SCAN_CAPTION, 'interview-wizard-caption');
+      const caption = node(
+        'p',
+        suggestionCaptionText(answer.suggestion),
+        'interview-wizard-caption'
+      );
       caption.id = 'interview-answer-caption';
       captionId = caption.id;
       extras.append(caption);
@@ -585,6 +624,15 @@ export function openInterviewWizard(initialSnapshot) {
       }
     }
     if (answer.pending) {
+      extras.append(
+        node(
+          'p',
+          answer.pending.source === EARLIER_SOURCE
+            ? 'From a folder you showed me earlier:'
+            : 'From the folder you showed me:',
+          'interview-wizard-caption'
+        )
+      );
       const use = folderButton(`Use “${answer.pending.text}”`, () => {
         if (busy) return;
         const next = usePendingSuggestion(state.answer(FOLDER_QUESTION_ID));
@@ -629,7 +677,17 @@ export function openInterviewWizard(initialSnapshot) {
       described.push(hint.id);
       ui.stage.append(hint);
     }
-    if (question.id === FOLDER_QUESTION_ID) ui.stage.append(renderFolderChooser());
+    if (question.id === FOLDER_QUESTION_ID) {
+      const remembered = rememberedProjectLine(snapshot?.remembered_project);
+      if (remembered) {
+        // Read with the field, like the hint it extends.
+        const line = node('p', remembered, 'interview-wizard-hint');
+        line.id = 'interview-wizard-remembered';
+        described.push(line.id);
+        ui.stage.append(line);
+      }
+      ui.stage.append(renderFolderChooser());
+    }
 
     const input = node('textarea', undefined, 'form-control interview-wizard-input');
     input.id = `interview-answer-${question.id}`;

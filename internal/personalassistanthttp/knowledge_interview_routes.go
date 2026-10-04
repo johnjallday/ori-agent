@@ -17,9 +17,12 @@ func (h *Handler) SetKnowledgeInterview(service *personalassistant.KnowledgeInte
 	}
 }
 
-// GetKnowledgeInterview is a pure post-HQ read: it does not offer an interview
-// or save drafts. Only current deterministic questions, status and a bounded
-// profile-preference snapshot are returned for exact user review.
+// GetKnowledgeInterview is a pure post-HQ read: it does not offer an interview,
+// save drafts or scan a folder. It returns the current deterministic questions,
+// the status and a bounded profile-preference snapshot for exact user review.
+// When the user has already shown the assistant a folder it also returns
+// `suggestion` (wording for question 1 from an offer still waiting on Home) or
+// `remembered_project` (the project fact already approved from a folder).
 func (h *Handler) GetKnowledgeInterview(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
@@ -57,6 +60,16 @@ func (h *Handler) GetKnowledgeInterview(w http.ResponseWriter, r *http.Request) 
 	}
 	if profile != nil {
 		answer["profile"] = profile
+	}
+	// Folders the user already showed the assistant can prefill question 1.
+	// Both fields are optional: a failed read leaves them out, never the rest.
+	if folders, err := h.interview.FolderSnapshot(r.Context(), userID); err == nil {
+		if folders.Suggestion != nil {
+			answer["suggestion"] = folders.Suggestion
+		}
+		if folders.RememberedProject != "" {
+			answer["remembered_project"] = folders.RememberedProject
+		}
 	}
 	orihttp.Success(w, answer)
 }

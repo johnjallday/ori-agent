@@ -1,7 +1,9 @@
 package personalassistant
 
 import (
+	"context"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -75,6 +77,92 @@ func interviewSuggestionForCandidate(candidate FolderCandidateRecord) (Interview
 		return InterviewSuggestion{}, false
 	}
 	return InterviewSuggestion{Text: clean, Folder: name}, true
+}
+
+// InterviewFolderOffers is the interview's read-only view of the folders the
+// user has shown the assistant. An implementation must neither scan nor write.
+type InterviewFolderOffers interface {
+	// WaitingFolderOffers returns the offers the user has not answered: the
+	// pending one first, then those set aside for later, newest first.
+	WaitingFolderOffers(ctx context.Context, userID string) ([]FolderOffer, error)
+}
+
+// SetFolderOffers lets the interview prefill its first question from a folder
+// the user already showed the assistant on Home.
+func (s *KnowledgeInterviewService) SetFolderOffers(reader InterviewFolderOffers) {
+	if s != nil {
+		s.folders = reader
+	}
+}
+
+// InterviewFolderSnapshot is what folders already shown add to question 1.
+type InterviewFolderSnapshot struct {
+	// Suggestion words an offer still waiting on Home; nil when there is none.
+	Suggestion *InterviewSuggestion
+	// RememberedProject is the current text of the newest project fact that
+	// was approved from a folder; empty when there is none.
+	RememberedProject string
+}
+
+// FolderSnapshot reads what the assistant already knows from folders. It is
+// pure: it never scans and never writes. A project already remembered from a
+// folder is reported as remembered and not proposed again. The suggestion is
+// optional, so a missing or failing folder reader only leaves it out.
+func (s *KnowledgeInterviewService) FolderSnapshot(ctx context.Context, userID string) (InterviewFolderSnapshot, error) {
+	if s == nil || s.store == nil {
+		return InterviewFolderSnapshot{}, ErrRepairNeeded
+	}
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return InterviewFolderSnapshot{}, err
+	}
+	var snapshot InterviewFolderSnapshot
+	var newest time.Time
+	// remembered holds the folder keys the approved project facts came from.
+	remembered := map[string]bool{}
+	for _, item := range doc.Items {
+		if item.State != KnowledgeApproved || item.Category != "projects" || item.SourceKind != FolderScanSourceKind {
+			continue
+		}
+		for _, revision := range item.Revisions {
+			if revision.ID != item.CurrentRevisionID {
+				continue
+			}
+			for _, evidence := range revision.Evidence {
+				if evidence.SourceKind == FolderScanSourceKind {
+					remembered[evidence.SourceID] = true
+				}
+			}
+			text := strings.TrimSpace(revision.Text)
+			if text != "" && (snapshot.RememberedProject == "" || item.UpdatedAt.After(newest)) {
+				snapshot.RememberedProject, newest = text, item.UpdatedAt
+			}
+		}
+	}
+	if s.folders == nil {
+		return snapshot, nil
+	}
+	offers, err := s.folders.WaitingFolderOffers(ctx, userID)
+	if err != nil {
+		return snapshot, nil
+	}
+	for _, offer := range offers {
+		if remembered[offer.Subject.Key] {
+			continue
+		}
+		queue := make([]FolderCandidateRecord, 0, len(offer.Queue))
+		for _, candidate := range offer.Queue {
+			if !remembered[candidate.Key] {
+				queue = append(queue, candidate)
+			}
+		}
+		offer.Queue = queue
+		if suggestion, ok := InterviewSuggestionFromOffer(offer); ok {
+			snapshot.Suggestion = &suggestion
+			break
+		}
+	}
+	return snapshot, nil
 }
 
 // indefiniteArticle picks "an" before a vowel letter and "a" otherwise.

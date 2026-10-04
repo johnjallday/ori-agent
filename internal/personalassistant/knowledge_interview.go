@@ -27,7 +27,9 @@ type KnowledgeInterviewService struct {
 	learning *KnowledgeLearningService
 	memory   *MemoryService
 	profiles ProfileCASStore
-	now      func() time.Time
+	// folders is optional: without it question 1 is never prefilled.
+	folders InterviewFolderOffers
+	now     func() time.Time
 }
 
 // focusAreaPhrases turns a stored focus area into words for the question 1
