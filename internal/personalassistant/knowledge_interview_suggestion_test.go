@@ -72,17 +72,32 @@ type interviewFolderFixture struct {
 	knowledge *KnowledgeStore
 	learning  *KnowledgeLearningService
 	interview *KnowledgeInterviewService
+	authority *switchableFolderAuthority
+}
+
+// switchableFolderAuthority revalidates folder_scan facts until gone is set,
+// the way a folder that was moved, or whose workspace was deleted, stops doing.
+type switchableFolderAuthority struct{ gone bool }
+
+func (a *switchableFolderAuthority) Revalidate(_ context.Context, _ KnowledgeBinding, item KnowledgeItem) error {
+	if a.gone || item.SourceKind != FolderScanSourceKind {
+		return ErrRepairNeeded
+	}
+	return nil
 }
 
 func newInterviewFolderFixture(t *testing.T) *interviewFolderFixture {
 	t.Helper()
 	f := newFolderDigestFixture(t)
 	knowledge := NewKnowledgeStore(f.resolver(), f.folder)
+	authority := &switchableFolderAuthority{}
+	learning := NewKnowledgeLifecycleService(knowledge, f.memory, authority)
 	interview := NewKnowledgeInterviewService(knowledge)
 	interview.SetFolderOffers(f.service)
+	interview.SetCanonicalSavers(learning, f.profileStore)
 	return &interviewFolderFixture{
 		folderDigestFixture: f, knowledge: knowledge, interview: interview,
-		learning: NewKnowledgeLifecycleService(knowledge, f.memory, acceptFolderScanAuthority{}),
+		learning: learning, authority: authority,
 	}
 }
 
@@ -108,10 +123,35 @@ func (f *interviewFolderFixture) rememberSubject(t *testing.T, offerID string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	offer.Outcome = &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: "ws-" + offer.Subject.Name}
+	f.rememberCandidate(t, offer, offer.Subject)
+}
+
+// rememberCandidate approves the project fact for one candidate of an offer,
+// as a later yes on Home about that candidate would.
+func (f *interviewFolderFixture) rememberCandidate(t *testing.T, offer FolderOffer, candidate FolderCandidateRecord) {
+	t.Helper()
+	offer.ID = "resolved-" + candidate.Name
+	offer.Subject = candidate
+	offer.Outcome = &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: "ws-" + candidate.Name}
 	if learned := NewFolderScanProducer(f.learning).LearnFromOffer(context.Background(), "local", offer); !learned.Remembered {
-		t.Fatalf("project fact was not approved: %+v", learned)
+		t.Fatalf("project fact for %s was not approved: %+v", candidate.Name, learned)
 	}
+}
+
+// projectFact returns the approved project fact, for a lifecycle action on it.
+func (f *interviewFolderFixture) projectFact(t *testing.T) KnowledgeItem {
+	t.Helper()
+	doc, err := f.knowledge.Read(context.Background(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range doc.Items {
+		if item.Category == "projects" && item.State == KnowledgeApproved {
+			return item
+		}
+	}
+	t.Fatal("no approved project fact")
+	return KnowledgeItem{}
 }
 
 type failingFolderOffers struct{ calls int }
@@ -235,51 +275,117 @@ func TestInterviewFolderSnapshot_RememberedProjectIsNotProposedAgain(t *testing.
 	}
 	f.rememberSubject(t, scanned.ID)
 
-	// The offer about Thesis is still waiting, but Thesis is already remembered.
+	// The offer about Thesis is still waiting, but Thesis is already remembered:
+	// the folder's next project is proposed instead, and Thesis is not among
+	// its alternates.
 	before := f.versions(t)
 	got, err := f.interview.FolderSnapshot(ctx, "local")
-	if err != nil || got.RememberedProject != "You are working on a project in the folder Thesis." || got.Suggestion != nil {
+	if err != nil || got.RememberedProject != "You are working on a project in the folder Thesis." ||
+		got.Suggestion == nil || got.Suggestion.Folder != "website" {
 		t.Fatalf("snapshot = %+v err=%v", got, err)
+	}
+	if len(got.Suggestion.Alternates) != 1 || got.Suggestion.Alternates[0].Folder != "Album" {
+		t.Fatalf("alternates = %+v", got.Suggestion.Alternates)
 	}
 	if after := f.versions(t); after != before {
 		t.Fatalf("the snapshot wrote: %v -> %v", before, after)
 	}
 
-	// A different project still waiting is proposed beside the remembered one,
-	// and the remembered one is not among its alternates.
-	if _, err := f.store.Mutate(ctx, "local", func(d *FolderDigestDocument) error {
-		offer := d.Offer(scanned.ID)
-		thesis := offer.Subject
-		offer.Subject, offer.Queue = offer.Queue[0], append([]FolderCandidateRecord{thesis}, offer.Queue[1:]...)
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got, err = f.interview.FolderSnapshot(ctx, "local")
-	if err != nil || got.RememberedProject == "" || got.Suggestion == nil || got.Suggestion.Folder != "website" {
-		t.Fatalf("snapshot = %+v err=%v", got, err)
-	}
-	for _, alternate := range got.Suggestion.Alternates {
-		if alternate.Folder == "Thesis" {
-			t.Fatalf("a remembered project is offered as an alternate: %+v", got.Suggestion.Alternates)
-		}
-	}
-
-	// A candidate, rejected or forgotten fact is not "remembered".
-	doc, err := f.knowledge.Read(ctx, "local")
+	// A scan started in the wizard words the same offer the same way.
+	offer, err := f.service.StoredOffer(ctx, "local", scanned.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, item := range doc.Items {
-		if item.Category != "projects" {
-			continue
-		}
-		if _, err := f.learning.ForgetApproved(ctx, "local", item.ID, item.Version, "forget-thesis"); err != nil {
-			t.Fatal(err)
-		}
+	suggested, ok, remembered := f.interview.SuggestionFromOffer(ctx, "local", offer)
+	if !ok || remembered || suggested.Folder != "website" || len(suggested.Alternates) != 1 {
+		t.Fatalf("suggestion = %+v ok=%v remembered=%v", suggested, ok, remembered)
+	}
+	if after := f.versions(t); after != before {
+		t.Fatalf("SuggestionFromOffer wrote: %v -> %v", before, after)
+	}
+
+	// Rewording the fact drops its evidence from the new revision. The folder
+	// it came from is still known, and the new wording is what is reported.
+	fact := f.projectFact(t)
+	if _, err := f.learning.EditApproved(ctx, "local", fact.ID, fact.Version, "reword-thesis", "My thesis is the priority"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = f.interview.FolderSnapshot(ctx, "local")
+	if err != nil || got.RememberedProject != "My thesis is the priority" || got.Suggestion == nil || got.Suggestion.Folder != "website" {
+		t.Fatalf("after rewording: %+v err=%v", got, err)
+	}
+
+	// The folder went away: the dossier shows the fact as needing review, so it
+	// is no longer claimed as remembered and its project may be proposed again.
+	f.authority.gone = true
+	got, err = f.interview.FolderSnapshot(ctx, "local")
+	if err != nil || got.RememberedProject != "" || got.Suggestion == nil || got.Suggestion.Folder != "Thesis" {
+		t.Fatalf("with a stale source: %+v err=%v", got, err)
+	}
+	f.authority.gone = false
+
+	// A forgotten fact is not "remembered" either.
+	fact = f.projectFact(t)
+	if _, err := f.learning.ForgetApproved(ctx, "local", fact.ID, fact.Version, "forget-thesis"); err != nil {
+		t.Fatal(err)
 	}
 	if got, err = f.interview.FolderSnapshot(ctx, "local"); err != nil || got.RememberedProject != "" {
 		t.Fatalf("a forgotten project is still reported: %+v err=%v", got, err)
+	}
+}
+
+func TestInterviewFolderSnapshot_EveryProjectRemembered(t *testing.T) {
+	f := newInterviewFolderFixture(t)
+	ctx := context.Background()
+	scanned, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	offer, err := f.service.StoredOffer(ctx, "local", scanned.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Leave one project so the suggestion is built from a single candidate.
+	offer.Queue = offer.Queue[:1]
+	f.rememberCandidate(t, offer, offer.Subject)
+	f.rememberCandidate(t, offer, offer.Queue[0])
+
+	suggested, ok, remembered := f.interview.SuggestionFromOffer(ctx, "local", offer)
+	if ok || !remembered {
+		t.Fatalf("every project is remembered: %+v ok=%v remembered=%v", suggested, ok, remembered)
+	}
+
+	// Without the lifecycle service nothing is claimed and nothing is hidden.
+	bare := NewKnowledgeInterviewService(f.knowledge)
+	bare.SetFolderOffers(f.service)
+	got, err := bare.FolderSnapshot(ctx, "local")
+	if err != nil || got.RememberedProject != "" || got.Suggestion == nil || got.Suggestion.Folder != "Thesis" {
+		t.Fatalf("unwired snapshot = %+v err=%v", got, err)
+	}
+}
+
+// Saying no to a newer offer about a project must not let an older offer about
+// the same project, set aside for later, bring it back in the interview.
+func TestInterviewFolderSnapshot_DeclinedProjectStaysDeclined(t *testing.T) {
+	f := newInterviewFolderFixture(t)
+	ctx := context.Background()
+	first, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.service.ScanChip(ctx, "local", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored, _ := f.service.StoredOffer(ctx, "local", first.ID); stored.Status != FolderOfferLater {
+		t.Fatalf("the first offer should be set aside: %s", stored.Status)
+	}
+	if _, err := f.service.Decide(ctx, "local", second.ID, FolderDecisionInput{Decision: FolderDecisionNo, RequestID: "req-no"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.interview.FolderSnapshot(ctx, "local")
+	if err != nil || got.Suggestion != nil {
+		t.Fatalf("a declined project came back: %+v err=%v", got, err)
 	}
 }
 
@@ -321,6 +427,10 @@ func TestInterviewSuggestionFromOffer(t *testing.T) {
 	project := func(name, marker string) FolderCandidateRecord {
 		return FolderCandidateRecord{Key: strings.Repeat("a", 64), Name: name, Kind: FolderChoiceProject, Marker: marker}
 	}
+	root := func(candidate FolderCandidateRecord) FolderCandidateRecord {
+		candidate.IsRoot = true
+		return candidate
+	}
 	tidy := FolderCandidateRecord{Key: strings.Repeat("b", 64), Name: "Downloads", Kind: FolderChoiceTidy}
 	offer := func(verdict folderdigest.Kind, subject FolderCandidateRecord) FolderOffer {
 		return FolderOffer{ID: "offer-1", Verdict: string(verdict), Subject: subject, FolderName: "Documents"}
@@ -350,6 +460,13 @@ func TestInterviewSuggestionFromOffer(t *testing.T) {
 		{"a name the validator refuses gives nothing", offer(folderdigest.KindProject, project("Thesis"+bidiOverride, "LaTeX manuscript")), "", ""},
 		{"a text over the answer limit gives nothing", offer(folderdigest.KindProject, project(strings.Repeat("n", 250), strings.Repeat("m", 250))), "", ""},
 		{"a nameless subject gives nothing", offer(folderdigest.KindProject, project("  ", "LaTeX manuscript")), "", ""},
+		// A file picked straight out of Downloads makes Downloads the scan's
+		// project; the container is never the answer.
+		{"a whole Downloads folder gives nothing", offer(folderdigest.KindProject, root(project("Downloads", ""))), "", ""},
+		{"a whole documents folder gives nothing", offer(folderdigest.KindProject, root(project("documents", "git repository"))), "", ""},
+		{"a whole Desktop folder gives nothing", offer(folderdigest.KindMixed, root(project("Desktop", ""))), "", ""},
+		{"any other root folder is proposed", offer(folderdigest.KindProject, root(project("Novel", ""))), "Novel", "Novel"},
+		{"a subfolder that happens to be called Documents is proposed", offer(folderdigest.KindProject, project("Documents", "")), "Documents", "Documents"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := InterviewSuggestionFromOffer(tc.offer)
@@ -410,5 +527,64 @@ func TestInterviewSuggestionFromOffer_Alternates(t *testing.T) {
 	offer.Subject = candidate("Documents", "", FolderChoiceTidy)
 	if got, ok := InterviewSuggestionFromOffer(offer); ok {
 		t.Fatalf("a tidy subject proposed %+v", got)
+	}
+}
+
+func TestInterviewSuggestionExcluding_RememberedProjects(t *testing.T) {
+	candidate := func(key byte, name, marker, kind string) FolderCandidateRecord {
+		return FolderCandidateRecord{Key: strings.Repeat(string(key), 64), Name: name, Kind: kind, Marker: marker}
+	}
+	thesis := candidate('a', "Thesis", "LaTeX manuscript", FolderChoiceProject)
+	website := candidate('b', "website", "Node.js package", FolderChoiceProject)
+	album := candidate('c', "Album", "", FolderChoiceProject)
+	loose := candidate('d', "Documents", "", FolderChoiceTidy)
+	offer := FolderOffer{
+		ID: "offer-1", Verdict: string(folderdigest.KindMixed),
+		Subject: thesis, Queue: []FolderCandidateRecord{website, album, loose},
+	}
+	keys := func(candidates ...FolderCandidateRecord) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range candidates {
+			out[c.Key] = true
+		}
+		return out
+	}
+	folders := func(s InterviewSuggestion) string {
+		out := []string{s.Folder}
+		for _, alternate := range s.Alternates {
+			out = append(out, alternate.Folder)
+		}
+		return strings.Join(out, ",")
+	}
+
+	for _, tc := range []struct {
+		name       string
+		remembered map[string]bool
+		want       string
+		allKnown   bool
+	}{
+		{"nothing remembered", nil, "Thesis,website,Album", false},
+		{"a remembered alternate is dropped", keys(website), "Thesis,Album", false},
+		{"a remembered subject gives way to the next project", keys(thesis), "website,Album", false},
+		{"two remembered leave the third", keys(thesis, website), "Album", false},
+		{"every project remembered proposes nothing", keys(thesis, website, album), "", true},
+		// Loose files are not a project, so they neither stand in nor count.
+		{"only the tidy candidate is left", keys(thesis, website, album, loose), "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok, allKnown := interviewSuggestionExcluding(offer, tc.remembered)
+			if ok != (tc.want != "") || allKnown != tc.allKnown {
+				t.Fatalf("ok=%v allKnown=%v suggestion=%+v", ok, allKnown, got)
+			}
+			if ok && folders(got) != tc.want {
+				t.Fatalf("folders = %s, want %s", folders(got), tc.want)
+			}
+		})
+	}
+
+	// A dump was never a project, so "already remembered" is not the reason.
+	dump := FolderOffer{ID: "offer-2", Verdict: string(folderdigest.KindDump), Subject: loose}
+	if _, ok, allKnown := interviewSuggestionExcluding(dump, keys(loose)); ok || allKnown {
+		t.Fatalf("a dump: ok=%v allKnown=%v", ok, allKnown)
 	}
 }

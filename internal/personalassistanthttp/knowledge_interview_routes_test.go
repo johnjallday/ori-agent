@@ -147,6 +147,21 @@ func TestSuggestKnowledgeInterview_DumpChipSaysItCouldNotTell(t *testing.T) {
 	}
 }
 
+// A scan that worked but whose offer is already gone (an empty folder's closed
+// offer can be pruned in the same write) is "nothing to propose", not an error.
+func TestSuggestKnowledgeInterview_PrunedOfferIsNotAFailedLook(t *testing.T) {
+	fake := interviewSuggestFake()
+	delete(fake.stored, "offer-1")
+	w := postInterviewSuggest(newFolderDigestHandler(fake), `{"chip":"downloads"}`)
+	body := decodeInterviewSuggest(t, w)
+	if w.Code != http.StatusOK || body.Suggestion != nil || body.Message != "I couldn't tell what this folder is for. Type your answer instead." {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if len(fake.storedReads) != 1 {
+		t.Fatalf("reads = %v", fake.storedReads)
+	}
+}
+
 func TestSuggestKnowledgeInterview_PickerAndFileModes(t *testing.T) {
 	t.Run("a picked folder proposes the answer and its alternates", func(t *testing.T) {
 		fake := interviewSuggestFake()

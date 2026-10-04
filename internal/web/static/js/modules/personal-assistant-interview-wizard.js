@@ -509,36 +509,44 @@ export function openInterviewWizard(initialSnapshot) {
     );
   }
 
-  // Looks at one folder and, when it names a project, offers it as the answer.
-  // `waiting` is the status line while the scan or the native dialog is open.
-  async function showFolder(body, waiting) {
-    if (busy) return; // a second click while a scan runs does nothing
-    busy = true;
-    renderButtons();
-    setChooserDisabled(true);
-    message(waiting);
-    const result = await requestFolderSuggestion(body);
-    busy = false;
-    if (!ui.modal.isConnected) return;
-    setChooserDisabled(false);
-    renderButtons();
-    if (result.error) {
-      message(result.error, true);
-      return;
-    }
-    if (result.cancelled) {
-      message('');
-      return;
-    }
-    const suggestion = cleanSuggestion(result.suggestion);
-    if (suggestion) offerSuggestion(suggestion);
-    else message(typeof result.message === 'string' ? result.message : FOLDER_SCAN_FAILED);
-    // The scan recorded an offer; Home's folder card shows it when it is open.
+  // A scan records an offer and may set another aside, so Home's folder card
+  // must redraw from the server. It only exists on Home; elsewhere this is a
+  // no-op.
+  function reloadHomeFolderCard() {
     try {
       void Promise.resolve(window.PersonalAssistantFolder?.reload?.()).catch(() => {});
     } catch {
       // Home's card is optional here.
     }
+  }
+
+  // Looks at one folder and, when it names a project, offers it as the answer.
+  // `waiting` is the status line while the scan or the native dialog is open;
+  // `trigger` is the button that was pressed.
+  async function showFolder(body, waiting, trigger) {
+    if (busy) return; // a second click while a scan runs does nothing
+    busy = true;
+    renderButtons();
+    message(waiting);
+    const result = await requestFolderSuggestion(body);
+    busy = false;
+    // Before anything else: the wizard may have been closed while the scan or
+    // the dialog was open, and Home would otherwise keep showing an offer the
+    // scan has already set aside.
+    if (!result.cancelled) reloadHomeFolderCard();
+    if (!ui.modal.isConnected) return;
+    renderButtons();
+    const suggestion = result.error || result.cancelled ? null : cleanSuggestion(result.suggestion);
+    if (suggestion) {
+      offerSuggestion(suggestion); // redraws the step and focuses the answer box
+      return;
+    }
+    if (result.error) message(result.error, true);
+    else if (result.cancelled) message('');
+    else message(typeof result.message === 'string' ? result.message : FOLDER_SCAN_FAILED);
+    // Nothing was redrawn, and the pressed button lost focus while it was
+    // disabled: put focus back where the user was.
+    if (trigger?.isConnected) trigger.focus();
   }
 
   function folderButton(label, onClick) {
@@ -558,7 +566,7 @@ export function openInterviewWizard(initialSnapshot) {
     for (const chip of view.chips) {
       const button = folderButton(
         chip.label,
-        () => void showFolder({ chip: chip.id }, `Looking at ${chip.label}…`)
+        () => void showFolder({ chip: chip.id }, `Looking at ${chip.label}…`, button)
       );
       button.dataset.chip = chip.id;
       chips.append(button);
@@ -566,7 +574,7 @@ export function openInterviewWizard(initialSnapshot) {
     if (view.pickerVisible) {
       const button = folderButton(
         FOLDER_PICK_LABEL,
-        () => void showFolder({ picker: true }, 'Choose a folder in the dialog…')
+        () => void showFolder({ picker: true }, 'Choose a folder in the dialog…', button)
       );
       button.dataset.picker = 'folder';
       chips.append(button);
@@ -574,7 +582,7 @@ export function openInterviewWizard(initialSnapshot) {
     if (view.filePickerVisible) {
       const button = folderButton(
         view.filePickerLabel,
-        () => void showFolder({ file: true }, 'Choose a file in the dialog…')
+        () => void showFolder({ file: true }, 'Choose a file in the dialog…', button)
       );
       button.dataset.picker = 'file';
       chips.append(button);
@@ -582,7 +590,11 @@ export function openInterviewWizard(initialSnapshot) {
     group.append(label, chips);
     // The server's note explains a missing dialog (a sandboxed session has none).
     if (view.note) group.append(node('p', view.note, 'interview-wizard-chooser-note'));
-    group.append(node('p', FOLDER_CHOOSER_NOTE, 'interview-wizard-chooser-note'));
+    // What a scan does is part of the group's description, so it is read with it.
+    const note = node('p', FOLDER_CHOOSER_NOTE, 'interview-wizard-chooser-note');
+    note.id = 'interview-wizard-chooser-note';
+    group.setAttribute('aria-describedby', note.id);
+    group.append(note);
     group.hidden = false;
   }
 
@@ -867,7 +879,11 @@ export function openInterviewWizard(initialSnapshot) {
     ui.back.textContent = state.index === 0 ? 'Not now' : 'Back';
     ui.back.disabled = busy;
     ui.skip.hidden = review;
+    // A scan can keep the wizard busy for as long as a native dialog is open,
+    // so every control that does nothing meanwhile says so, the chooser included.
+    ui.skip.disabled = busy;
     ui.next.disabled = busy;
+    setChooserDisabled(busy);
     if (review) {
       const count = prepared?.length ?? 0;
       ui.next.textContent = savedRowIds

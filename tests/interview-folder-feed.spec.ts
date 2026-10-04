@@ -130,13 +130,18 @@ test('a cancelled folder dialog changes nothing', async ({ page }) => {
 
   await chooser.getByRole('button', { name: 'Pick a folder…' }).click();
   await expect(wizard.getByRole('status')).toHaveText('Choose a folder in the dialog…');
-  // Nothing else can be started while the dialog is open.
+  // Nothing else can be started while the dialog is open, and every control
+  // that would do nothing says so.
   for (const button of await chooser.getByRole('button').all()) await expect(button).toBeDisabled();
-  await expect(wizard.getByRole('button', { name: 'Next' })).toBeDisabled();
+  for (const name of ['Next', 'Skip', 'Not now'])
+    await expect(wizard.getByRole('button', { name })).toBeDisabled();
   release();
 
   await expect(wizard.getByRole('status')).toHaveText('');
-  await expect(chooser.getByRole('button', { name: 'Pick a folder…' })).toBeEnabled();
+  // Focus returns to the button that opened the dialog.
+  await expect(chooser.getByRole('button', { name: 'Pick a folder…' })).toBeFocused();
+  for (const name of ['Next', 'Skip', 'Not now'])
+    await expect(wizard.getByRole('button', { name })).toBeEnabled();
   await expect(wizard.getByRole('textbox')).toHaveValue('Ship the portfolio site');
   await expect(wizard.locator('.interview-wizard-caption')).toHaveCount(0);
   await expect(wizard.locator('.interview-wizard-use')).toHaveCount(0);
@@ -179,7 +184,30 @@ test('a scan that is still running says so and changes nothing', async ({ page }
   await expect(status).toHaveClass(/is-warning/);
   await expect(wizard.getByRole('textbox')).toHaveValue('My own answer');
   await expect(wizard.locator('.interview-wizard-use')).toHaveCount(0);
-  await expect(wizard.getByRole('button', { name: 'Documents' })).toBeEnabled();
+  await expect(wizard.getByRole('button', { name: 'Documents' })).toBeFocused();
+});
+
+test('a folder whose project is already remembered says so instead of proposing it', async ({
+  page
+}) => {
+  await mockSuggest(page, route =>
+    route.fulfill({
+      json: {
+        suggestion: null,
+        message:
+          'I already remember the project in this folder. Add anything that matters more right now, or skip.'
+      }
+    })
+  );
+  const wizard = await openWizard(page);
+  await wizard.getByRole('button', { name: 'Documents' }).click();
+  const status = wizard.getByRole('status');
+  await expect(status).toHaveText(
+    'I already remember the project in this folder. Add anything that matters more right now, or skip.'
+  );
+  await expect(status).not.toHaveClass(/is-warning/);
+  await expect(wizard.getByRole('textbox')).toHaveValue('');
+  await expect(wizard.getByRole('button', { name: 'Documents' })).toBeFocused();
 });
 
 test('a project already remembered is named in the hint and the box stays empty', async ({

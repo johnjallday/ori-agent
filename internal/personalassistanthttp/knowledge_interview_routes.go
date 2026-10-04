@@ -78,6 +78,10 @@ func (h *Handler) GetKnowledgeInterview(w http.ResponseWriter, r *http.Request) 
 // to propose. The wizard leaves the answer box as it was.
 const interviewNoSuggestionMessage = "I couldn't tell what this folder is for. Type your answer instead."
 
+// interviewRememberedMessage is shown when every project in the folder is
+// already remembered from Home, so there is nothing new to propose.
+const interviewRememberedMessage = "I already remember the project in this folder. Add anything that matters more right now, or skip."
+
 // interviewScanBusyMessage is the wizard's wording for a scan that is still
 // running. Every other scan refusal reads as it does on Home.
 const interviewScanBusyMessage = "I'm still looking at the last folder. Try again in a moment."
@@ -117,16 +121,34 @@ func (h *Handler) SuggestKnowledgeInterview(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	offer, err := h.folderDigest.StoredOffer(r.Context(), userID, scanned.ID)
+	if errors.Is(err, personalassistant.ErrFolderOfferNotFound) {
+		// The scan worked. An offer with nothing to decide (an empty folder) can
+		// be pruned in the same write when the history is full: that is "nothing
+		// to propose", not a failed look.
+		orihttp.Success(w, map[string]any{"suggestion": nil, "message": interviewNoSuggestionMessage})
+		return
+	}
 	if err != nil {
 		writeFolderDigestError(w, err)
 		return
 	}
-	suggestion, ok := personalassistant.InterviewSuggestionFromOffer(offer)
-	if !ok {
-		orihttp.Success(w, map[string]any{"suggestion": nil, "message": interviewNoSuggestionMessage})
-		return
+	// The interview service leaves out a project already remembered from a
+	// folder; without it the offer is worded as it stands.
+	var suggestion personalassistant.InterviewSuggestion
+	var remembered bool
+	if h.interview != nil {
+		suggestion, ok, remembered = h.interview.SuggestionFromOffer(r.Context(), userID, offer)
+	} else {
+		suggestion, ok = personalassistant.InterviewSuggestionFromOffer(offer)
 	}
-	orihttp.Success(w, map[string]any{"suggestion": suggestion})
+	switch {
+	case ok:
+		orihttp.Success(w, map[string]any{"suggestion": suggestion})
+	case remembered:
+		orihttp.Success(w, map[string]any{"suggestion": nil, "message": interviewRememberedMessage})
+	default:
+		orihttp.Success(w, map[string]any{"suggestion": nil, "message": interviewNoSuggestionMessage})
+	}
 }
 
 // scanForInterview runs the one scan the request names, through the same

@@ -150,4 +150,38 @@ func TestInterviewFolderFeed_SuggestsWithoutSavingOrSettingUp(t *testing.T) {
 		home1.FolderDigest.Offer.Status != personalassistant.FolderOfferPending || home1.FolderDigest.Offer.Subject.Name != "Thesis" {
 		t.Fatalf("Home's offer after the interview scan: %d %s", digest.Code, digest.Body.String())
 	}
+
+	// Home can still set that offer up. Only then is the project remembered,
+	// a workspace made, and the mission completed.
+	setUp := call(http.MethodPost, "/api/personal-assistant/folder-digest/offers/"+home1.FolderDigest.Offer.ID+"/decide",
+		`{"decision":"yes","choice":"project","create":true,"request_id":"feed-set-up"}`)
+	var resolved struct {
+		Offer personalassistant.FolderOfferView `json:"offer"`
+	}
+	if setUp.Code != http.StatusOK || json.Unmarshal(setUp.Body.Bytes(), &resolved) != nil ||
+		resolved.Offer.Status != personalassistant.FolderOfferResolved || resolved.Offer.Outcome == nil || !resolved.Offer.Outcome.Remembered {
+		t.Fatalf("set up from Home after the interview scan: %d %s", setUp.Code, setUp.Body.String())
+	}
+	if after := countWorkspaces(); after != workspacesBefore+1 {
+		t.Fatalf("Home's set up should create one workspace: %d -> %d", workspacesBefore, after)
+	}
+	if builder.progressionEngine != nil && !builder.progressionEngine.HasCompleted(progression.ShowFolderQuestID) {
+		t.Fatal("an accepted outcome on Home did not complete the show-a-folder mission")
+	}
+
+	// The interview now names the project as remembered and stops proposing it,
+	// on a fresh open and when the same folder is shown again in the wizard.
+	const rememberedFact = "You are working on a project in the folder Thesis."
+	if after := read(); after.RememberedProject != rememberedFact || after.Suggestion != nil {
+		t.Fatalf("snapshot after Home's set up: %+v", after)
+	}
+	again := call(http.MethodPost, interview+"/suggest", `{"chip":"documents"}`)
+	var reshown struct {
+		Suggestion *personalassistant.InterviewSuggestion `json:"suggestion"`
+		Message    string                                 `json:"message"`
+	}
+	if again.Code != http.StatusOK || json.Unmarshal(again.Body.Bytes(), &reshown) != nil || reshown.Suggestion != nil ||
+		reshown.Message != "I already remember the project in this folder. Add anything that matters more right now, or skip." {
+		t.Fatalf("showing a remembered folder again: %d %s", again.Code, again.Body.String())
+	}
 }

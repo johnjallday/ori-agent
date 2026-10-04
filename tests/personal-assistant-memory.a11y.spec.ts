@@ -147,6 +147,8 @@ test('reviewed interview stays keyboard-usable and an all-skipped review saves n
   await expect(box).toBeFocused();
   const chooser = wizard.getByRole('group', { name: 'Show me instead' });
   await expect(chooser).toBeVisible();
+  // What a scan does is read with the group, not left as stray text.
+  await expect(chooser).toHaveAccessibleDescription(/I only look at file names and types/);
   // The chooser comes before the box, so Shift+Tab reaches its last button.
   await page.keyboard.press('Shift+Tab');
   const chip = chooser.getByRole('button', { name: 'Documents' });
