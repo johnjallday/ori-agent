@@ -36,7 +36,7 @@ test('reviewed interview stays keyboard-usable and an all-skipped review saves n
   const before = await (await request.get('/api/personal-assistant/knowledge')).json();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/profile#personalHQInterview');
+  await page.goto('/profile');
   const shell = page.locator('#personalHQInterview');
   await expect(shell).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('#reviewedDossierSources')).toContainText('No durable app observation');
@@ -85,31 +85,69 @@ test('reviewed interview stays keyboard-usable and an all-skipped review saves n
       .getByRole('link', { name: /Set up email|Set up Calendar/i })
   ).toHaveCount(0);
   await page.unroute('**/api/personal-assistant/capabilities');
-  const start = page.getByRole('button', { name: 'Start or resume interview' });
+  const wizard = page.getByRole('dialog', { name: 'Tell your assistant what matters' });
+  // Deep link: the wizard opens in place instead of relying on scroll position.
+  await page.goto('/profile#personalHQInterview');
+  await page.reload(); // goto with only a new hash is not a page load
+  await expect(wizard).toBeVisible();
+  await expect(wizard.getByRole('textbox')).toBeFocused(); // fade-in done; Esc is ignored before
+  await page.keyboard.press('Escape');
+  await expect(wizard).toHaveCount(0);
+
+  const start = page.getByRole('button', { name: 'Start interview' });
   await start.focus();
   await start.press('Enter');
-  await expect(page.locator('#interview-answer-priority')).toBeFocused();
-  await expect(page.getByRole('textbox', { name: /priority or project/i })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: /communicate/i })).toBeVisible();
-  await expect(page.locator('#personalHQInterviewStatus')).toHaveAttribute('role', 'status');
-  await page.locator('#interview-answer-priority').fill('é'.repeat(251));
-  await page.getByRole('button', { name: 'Review my answers' }).click();
-  await expect(page.locator('#personalHQInterviewStatus')).toContainText('500 UTF-8 bytes');
-  await expect(page.locator('#interview-answer-priority')).toBeFocused();
-  await page.locator('#interview-answer-priority').fill('');
-  await page.getByRole('button', { name: 'Skip this question' }).first().click();
-  await expect(page.locator('#interview-answer-priority')).toHaveValue('');
-  await page.getByRole('button', { name: 'Review my answers' }).click();
-  await expect(page.locator('#personalHQInterviewSelected')).toContainText(
-    'All three answers skipped'
+  await expect(wizard).toBeVisible();
+  await expect(wizard.getByRole('textbox', { name: /working on right now/i })).toBeFocused();
+  // Each question shows an example answer, and it is read with the field.
+  const hint = wizard.locator('.interview-wizard-hint');
+  await expect(hint).toContainText('for example');
+  expect(await wizard.getByRole('textbox').getAttribute('aria-describedby')).toContain(
+    (await hint.getAttribute('id'))!
   );
-  await expect(page.locator('#personalHQInterviewFinal h3')).toBeFocused();
-  await expect(page.getByRole('button', { name: 'Save these facts' })).toBeVisible();
+  await expect(wizard.locator('[aria-current="step"]')).toContainText('Priority');
+  await expect(wizard.locator('[aria-current="step"]')).toHaveCount(1);
+  await expect(wizard.getByRole('status')).toHaveAttribute('aria-live', 'polite');
+  // Esc closes the wizard and focus returns to the control that opened it.
+  await page.keyboard.press('Escape');
+  await expect(wizard).toHaveCount(0);
+  await expect(start).toBeFocused();
+  await start.press('Enter');
+  await expect(wizard).toBeVisible();
+
+  const answer = wizard.getByRole('textbox');
+  await answer.fill('é'.repeat(251));
+  await answer.press('Enter');
+  const problem = wizard.locator('.interview-wizard-error');
+  await expect(problem).toContainText('too long');
+  await expect(problem).toHaveAttribute('role', 'alert');
+  await expect(answer).toHaveAttribute('aria-invalid', 'true');
+  const problemId = await problem.getAttribute('id');
+  expect(await answer.getAttribute('aria-describedby')).toContain(problemId!);
+  await expect(answer).toBeFocused();
+  await expect(answer).toHaveValue('é'.repeat(251)); // never trimmed or changed
+  await expect(wizard.locator('[aria-current="step"]')).toContainText('Priority');
+
+  await answer.fill('');
+  await wizard.getByRole('button', { name: 'Skip' }).click();
+  await expect(wizard.locator('[aria-current="step"]')).toContainText('Working style');
+  await expect(wizard.getByRole('textbox', { name: /communicate/i })).toBeFocused();
+  await wizard.getByRole('button', { name: 'Skip' }).click();
+  await expect(wizard.getByRole('textbox', { name: /person or recurring routine/i })).toBeFocused();
+  await wizard.getByRole('button', { name: 'Skip' }).click();
+  await expect(wizard.locator('[aria-current="step"]')).toContainText('Review');
+  await expect(
+    wizard.getByRole('heading', { name: 'Review exactly what will be saved' })
+  ).toBeFocused();
+  await expect(wizard).toContainText('All three answers skipped');
   const afterReview = await (await request.get('/api/personal-assistant/knowledge')).json();
   expect(afterReview.items).toHaveLength(before.items.length);
-  const save = page.getByRole('button', { name: 'Save these facts' });
+  const save = wizard.getByRole('button', { name: 'Finish without saving' });
   await save.focus();
   await save.press('Enter');
+  await expect(wizard.getByRole('heading', { name: 'Finished. Nothing was saved.' })).toBeVisible();
+  await wizard.getByRole('button', { name: 'Done' }).press('Enter');
+  await expect(wizard).toHaveCount(0);
   await expect(page.locator('#personalHQInterviewStatus')).toContainText('complete');
   const completed = await (await request.get('/api/personal-assistant/knowledge')).json();
   expect(completed.items).toHaveLength(before.items.length);

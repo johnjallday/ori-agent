@@ -214,6 +214,8 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-hq-knowledge.js',
       'internal/web/static/js/modules/personal-hq-sources.js',
       'internal/web/static/js/modules/personal-assistant-interview.js',
+      'internal/web/static/js/modules/personal-assistant-interview-wizard.js',
+      'internal/web/static/js/modules/personal-assistant-interview-launcher.js',
       'internal/web/static/js/modules/workspace-tags-card.js',
       'internal/web/static/js/modules/workspace-command.js',
       'internal/web/static/js/modules/workspace-execution-controller.js',

@@ -189,6 +189,7 @@ type claudeCLIResponse struct {
 	Result           string          `json:"result"`
 	StructuredOutput json.RawMessage `json:"structured_output"`
 	Errors           []string        `json:"errors"`
+	TerminalReason   string          `json:"terminal_reason"`
 }
 
 // buildClaudeArgs assembles the claude CLI args. A non-nil nat selects the
@@ -305,7 +306,13 @@ func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, reasoning
 		if msg == "" {
 			msg = "claude CLI failed"
 		}
-		return "", fmt.Errorf("%s: %w", msg, err)
+		runErr := fmt.Errorf("%s: %w", msg, err)
+		var failed claudeCLIResponse
+		_ = json.Unmarshal(stdout.Bytes(), &failed)
+		if cliStoppedBySignal(err) || claudeRunAborted(failed) {
+			return "", NewProviderError(p.Name(), CategoryInterrupted, runErr)
+		}
+		return "", runErr
 	}
 
 	out := stdout.Bytes()
@@ -325,6 +332,10 @@ func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, reasoning
 		}
 		if msg == "" {
 			msg = "claude CLI error"
+		}
+		if claudeRunAborted(resp) {
+			return "", NewProviderError(p.Name(), CategoryInterrupted,
+				fmt.Errorf("claude CLI run ended as %s: %s", resp.TerminalReason, msg))
 		}
 		return "", fmt.Errorf("%s", msg)
 	}

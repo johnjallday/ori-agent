@@ -1229,8 +1229,11 @@ profile-target Forget recovery primitive is defensive for a previously
 recorded target, not a new producer or a source-consent shortcut.
 
 The optional three-question interview is offered only after a successful HQ
-activation. Read and defer do not save answers. The user can skip every row or
-edit its text, category and destination before an explicit **Save these facts**.
+activation. It runs as a modal wizard, one question per step, opened in place
+from every entry link and from the `/profile#personalHQInterview` deep link;
+drafts stay in the browser's `sessionStorage` until saved. Read and defer do not
+save answers. The user can skip every row or edit its text, category and
+destination before an explicit **Save** on the final review step.
 HQ rows cross the existing `MemoryService.Remember` validation/authority
 boundary and its reviewed-HQ journal seam; a selected global communication
 preference uses a one-field `userprofile` compare-and-swap, with per-row saved

@@ -634,69 +634,17 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   margin: 0.35rem 0 0.65rem;
 }
 
-.reviewed-interview-actions,
-#personalHQInterviewFinal {
+.reviewed-interview-actions {
   display: flex;
   gap: 0.65rem;
   flex-wrap: wrap;
   align-items: center;
 }
 
-#personalHQInterviewFinal {
-  display: block;
-  padding: 1rem;
-  margin-top: 1rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-}
-
-#personalHQInterviewFinal[hidden],
-#personalHQInterviewForm[hidden],
 #personalHQInterviewStart[hidden],
 #personalHQInterviewDefer[hidden],
 #personalHQInterviewBuild[hidden] {
   display: none;
-}
-
-.reviewed-interview-questions {
-  display: grid;
-  gap: 1rem;
-  margin: 1rem 0;
-}
-
-.reviewed-interview-question {
-  display: grid;
-  gap: 0.45rem;
-  min-width: 0;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 1rem;
-}
-
-.reviewed-interview-question legend {
-  font-weight: 700;
-  font-size: 1rem;
-  color: var(--text-primary);
-}
-
-.reviewed-interview-question label {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.reviewed-interview-question textarea {
-  resize: vertical;
-  max-width: 100%;
-}
-
-.reviewed-interview-question small {
-  color: var(--text-secondary);
-}
-
-#personalHQInterviewSelected li {
-  margin: 0.5rem 0;
-  overflow-wrap: anywhere;
 }
 
 /* The HQ review is a quiet ledger: pending hypotheses on one side, exact
