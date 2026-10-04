@@ -1320,6 +1320,12 @@
   <!-- Shared modals (includes Add Agent modal used by Assistant) -->
   {{template "modals.tmpl" .}}
 
+  {{if .Extra.IsPersonalHQ}}
+  <!-- Brief settings, opened from the Daily Brief station's panel. Only the
+       designated Personal HQ has that station. -->
+  {{template "daily-brief-settings-modal.tmpl" .}}
+  {{end}}
+
   <div class="modal fade" id="workspace-detail-goal-modal" tabindex="-1" aria-labelledby="workspace-detail-goal-modal-title" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
       <form class="modal-content workspace-detail-goal-modal-content" id="workspace-detail-goal-modal-form">

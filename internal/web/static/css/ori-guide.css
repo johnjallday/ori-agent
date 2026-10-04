@@ -33,7 +33,11 @@
   }
 }
 
-.ori-guide {
+/* The paper palette. The Daily Brief panel in My HQ is the assistant's brief
+   moved out of this drawer, so it shares these tokens instead of copying them
+   (daily-brief.css). */
+.ori-guide,
+.daily-brief-station {
   --ori-paper: #f6ead6;
   --ori-paper-deep: #e8d6b4;
   --ori-ink: #3b2a12;
@@ -46,7 +50,9 @@
   --ori-accent-strong: #8a5a15;
   --ori-line: #d8c19b;
   --ori-surface: #fffaf1;
+}
 
+.ori-guide {
   position: fixed;
   right: 20px;
   bottom: 20px;
@@ -479,7 +485,8 @@
 
 /* ---- dark theme ----------------------------------------------------------------- */
 
-[data-bs-theme="dark"] .ori-guide {
+[data-bs-theme="dark"] .ori-guide,
+[data-bs-theme="dark"] .daily-brief-station {
   --ori-paper: #2f2820;
   --ori-paper-deep: #3b3227;
   --ori-ink: #f2e7d5;

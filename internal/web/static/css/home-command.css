@@ -2531,23 +2531,6 @@ a.quest-title:focus-visible {
   gap: 8px;
 }
 
-.home-daily-brief-settings-form .home-daily-brief-days {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.home-daily-brief-history-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-}
-
-.home-daily-brief-history-empty {
-  color: var(--hc-ink-faint);
-}
-
 .pa-continuity {
   position: fixed;
   z-index: 1045;

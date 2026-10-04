@@ -1,0 +1,380 @@
+/*
+ * Daily Brief — the brief's home is the Daily Brief station in My HQ.
+ *
+ * The panel opens inside Workspace Command's stat modal but reads as the
+ * assistant's own paper, not as a tactical readout: it is the brief that used
+ * to sit in the assistant drawer. Its colours are the drawer's tokens
+ * (ori-guide.css shares them with .daily-brief-station); nothing new is
+ * defined here.
+ *
+ * Loaded on every page: the Brief settings dialog opens from Home and from
+ * My HQ.
+ */
+
+/* ---- the panel shell ---------------------------------------------------------- */
+
+/* The panel is tall, so it is kept clear of the navbar, which sits above the
+   stat modal and grows to several rows on a narrow screen. */
+.ws-cmd-modal:has(> .ws-cmd-modal-panel.is-daily-brief) {
+  padding-top: calc(var(--navbar-offset, 76px) + 12px);
+}
+
+/* The stat modal's tactical frame gives way to the paper panel. */
+.ws-cmd-modal-panel.is-daily-brief {
+  max-width: min(760px, 96vw);
+  height: min(760px, calc(100dvh - var(--navbar-offset, 76px) - 36px));
+  max-height: none;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  clip-path: none;
+  /* The panel is re-attached whenever the map repaints; replaying the
+     entrance each time would flash. */
+  animation: none;
+}
+
+.daily-brief-station {
+  /* Accent that carries text. The strong amber fails contrast on the dark
+     surface, where the lighter one passes. */
+  --brief-accent-text: var(--ori-accent-strong);
+  --brief-ink-dim: color-mix(in srgb, var(--ori-ink) 74%, var(--ori-surface));
+
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ori-line);
+  border-radius: 18px;
+  background: var(--ori-surface);
+  box-shadow: 0 20px 56px rgb(0 0 0 / 30%);
+  color: var(--ori-ink);
+  font-family: Manrope, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+[data-bs-theme="dark"] .daily-brief-station {
+  --brief-accent-text: var(--ori-accent);
+}
+
+.daily-brief-station__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--ori-line);
+}
+
+.daily-brief-station__ident {
+  min-width: 0;
+  flex: 1;
+}
+
+.daily-brief-station__eyebrow {
+  margin: 0;
+  color: var(--brief-accent-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.daily-brief-station__name {
+  margin: 2px 0 0;
+  color: var(--ori-ink);
+  font-family: Fraunces, Georgia, serif;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.daily-brief-station__refresh,
+.daily-brief-station__icon {
+  display: inline-flex;
+  height: 44px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 10px;
+  background: var(--ori-surface);
+  font: inherit;
+  cursor: pointer;
+}
+
+.daily-brief-station__refresh {
+  padding: 0 16px;
+  border: 1px solid var(--brief-accent-text);
+  color: var(--brief-accent-text);
+  font-weight: 700;
+}
+
+.daily-brief-station__icon {
+  width: 44px;
+  border: 1px solid var(--ori-line);
+  color: var(--ori-ink);
+  font-size: 16px;
+}
+
+.daily-brief-station__refresh:hover,
+.daily-brief-station__icon:hover {
+  background: var(--ori-paper);
+}
+
+.daily-brief-station__refresh:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.daily-brief-station button:focus-visible,
+.daily-brief-station a:focus-visible {
+  outline: 3px solid var(--ori-accent);
+  outline-offset: 2px;
+}
+
+.daily-brief-station__layout {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.daily-brief-station__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.daily-brief-station__title {
+  margin: 0;
+  color: var(--ori-ink);
+  font-family: Fraunces, Georgia, serif;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.daily-brief-station__meta {
+  margin: 4px 0 0;
+  color: var(--brief-ink-dim);
+  font-size: 12px;
+}
+
+/* ---- the brief's own content, on paper ------------------------------------------- */
+
+.daily-brief-station .home-daily-brief-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--ori-line);
+  border-radius: 12px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 13px;
+}
+
+.daily-brief-station .home-daily-brief-banner[hidden] {
+  display: none;
+}
+
+.daily-brief-station .home-daily-brief-banner.is-failed,
+.daily-brief-station .home-daily-brief-banner.is-partial,
+.daily-brief-station .home-daily-brief-banner.is-degraded {
+  border-color: var(--ori-accent);
+  font-weight: 600;
+}
+
+.daily-brief-station .home-daily-brief-banner button {
+  min-height: 36px;
+  flex: none;
+  padding: 0 14px;
+  border: 1px solid var(--brief-accent-text);
+  border-radius: 10px;
+  background: var(--ori-surface);
+  color: var(--brief-accent-text);
+  font: inherit;
+  font-weight: 700;
+}
+
+.daily-brief-station .home-daily-brief-placeholder,
+.daily-brief-station .home-daily-brief-quiet {
+  color: var(--brief-ink-dim);
+  font-size: 14px;
+}
+
+.daily-brief-station .home-daily-brief-opening {
+  margin: 0 0 18px;
+  color: var(--ori-ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.daily-brief-station .home-daily-brief-gaps {
+  margin: 0 0 18px;
+  color: var(--ori-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.daily-brief-station .home-daily-brief-section {
+  margin: 0 0 18px;
+}
+
+.daily-brief-station .home-daily-brief-section-title {
+  margin: 0 0 8px;
+  color: var(--brief-accent-text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.daily-brief-station .home-daily-brief-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--ori-line);
+  border-radius: 14px;
+  list-style: none;
+}
+
+.daily-brief-station .home-daily-brief-item {
+  padding: 12px 14px;
+}
+
+.daily-brief-station .home-daily-brief-item + .home-daily-brief-item {
+  border-top: 1px solid var(--ori-line);
+}
+
+.daily-brief-station .home-daily-brief-item-title {
+  color: var(--ori-ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.daily-brief-station .home-daily-brief-item-title:hover {
+  text-decoration: underline;
+}
+
+.daily-brief-station .home-daily-brief-item-ws {
+  margin-left: 8px;
+  color: var(--brief-ink-dim);
+  font-size: 12px;
+}
+
+.daily-brief-station .home-daily-brief-item-fact,
+.daily-brief-station .home-daily-brief-item-why {
+  margin: 4px 0 0;
+  color: var(--brief-ink-dim);
+  font-size: 12px;
+}
+
+.daily-brief-station .home-daily-brief-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  color: var(--ori-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.daily-brief-station .home-daily-brief-badge[data-state="conflict"] {
+  border-color: var(--ori-accent);
+}
+
+/* Suggestions are told apart from observed facts without relying on colour. */
+.daily-brief-station .is-suggestion {
+  font-style: italic;
+}
+
+.daily-brief-station .is-suggestion::before {
+  margin-right: 4px;
+  font-style: normal;
+  content: "\2192";
+}
+
+.daily-brief-station .home-daily-brief-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.daily-brief-station .home-daily-brief-action-row a {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: var(--ori-surface);
+  color: var(--ori-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* ---- Brief settings dialog (Home and My HQ) ---------------------------------------- */
+
+.home-daily-brief-settings-form .home-daily-brief-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.home-daily-brief-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.home-daily-brief-history-empty {
+  opacity: 0.7;
+}
+
+/* ---- narrow layout ----------------------------------------------------------------- */
+
+@media (max-width: 760px) {
+  .ws-cmd-modal:has(> .ws-cmd-modal-panel.is-daily-brief) {
+    padding: calc(var(--navbar-offset, 76px) + 8px) 8px 8px;
+  }
+
+  .ws-cmd-modal-panel.is-daily-brief {
+    max-width: 100%;
+    height: calc(100dvh - var(--navbar-offset, 76px) - 16px);
+  }
+
+  .daily-brief-station__head {
+    gap: 8px;
+    padding: 12px 14px;
+  }
+
+  .daily-brief-station__name {
+    font-size: 18px;
+  }
+
+  .daily-brief-station__refresh {
+    padding: 0 12px;
+  }
+
+  .daily-brief-station__main {
+    padding: 16px;
+  }
+}

@@ -33,6 +33,14 @@ import {
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { flattenWorkspaceTree, buildMapMetadata } from './workspace-map-snapshot.js';
 import { OperationsMapActivity } from './operations-map-activity.js';
+import { mountDailyBrief } from './home-daily-brief.js';
+import {
+  DAILY_BRIEF_STATION,
+  briefPanelMeta,
+  dailyBriefStationState,
+  dailyBriefStatus,
+  stationFromSearch
+} from './daily-brief-station.js';
 import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
@@ -139,6 +147,10 @@ export class WorkspaceCommandView {
     this._urlStateApplied = false;
     this._urlSyncEnabled = false;
     this._lastSyncedURLState = null;
+    // `?station=` is read here too: URL normalization drops parameters it does
+    // not own, and the station can only open once the workspace has loaded.
+    this._bootStation =
+      typeof window !== 'undefined' ? stationFromSearch(window.location.search) : '';
     this.viewMode = resolveEffectiveMode(
       this._urlBootState && this._urlBootState.mode,
       this.readCommandViewModePreference()
@@ -859,10 +871,38 @@ export class WorkspaceCommandView {
     tickets.setFilterState(state);
   }
 
+  /**
+   * Opens a station's panel when the URL carries `?station=<key>`, then takes
+   * the parameter off the address bar so a reload does not reopen it.
+   *
+   * The Daily Brief station exists only on the designated Personal HQ, and
+   * that is known only once the workspace has loaded, so this waits for it;
+   * refresh() calls again when the data arrives. On any other workspace the
+   * link is dropped without opening anything.
+   */
+  applyStationDeepLink() {
+    if (!this._bootStation || typeof window === 'undefined') return;
+    const workspace = this.page && this.page.workspace;
+    if (!workspace || !workspace.id) return;
+    const station = this._bootStation;
+    this._bootStation = '';
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('station')) {
+        url.searchParams.delete('station');
+        window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+      }
+    } catch {
+      /* the panel still opens; only the address bar keeps the parameter */
+    }
+    if (station === DAILY_BRIEF_STATION && this.isPersonalHQ()) this.openDailyBriefPanel(null);
+  }
+
   applyBootURLState() {
     this.applyTicketDeepLink();
     if (this._urlStateApplied || !this._urlBootState) {
       this._urlSyncEnabled = true;
+      this.applyStationDeepLink();
       return;
     }
     const page = this.page || {};
@@ -944,6 +984,7 @@ export class WorkspaceCommandView {
     }
     // Normalize the URL to the sanitized state without adding a history entry.
     this.syncURLState({ replace: true });
+    this.applyStationDeepLink();
   }
 
   /** Current URL-relevant state derived from live view state. */
@@ -1901,6 +1942,7 @@ export class WorkspaceCommandView {
     this.rememberCapabilityInspectorFocus();
     this.rememberLoadoutAddFocus();
     this.captureAgentDeckViewState();
+    this.captureDailyBriefPanelView();
     if (this.commandTagInput) {
       try {
         this.commandTagDraft = this.commandTagInput.getTags();
@@ -1991,6 +2033,7 @@ export class WorkspaceCommandView {
       if (this.statModalSection) {
         this.renderStatModalBody();
         this.setCommandBackgroundInert(true);
+        this.restoreDailyBriefPanelView();
       }
     }
 
@@ -2257,6 +2300,8 @@ export class WorkspaceCommandView {
         return { title: 'Watchtower', addLabel: '' };
       case 'calendar-ops':
         return { title: 'Calendar Ops', addLabel: '' };
+      case DAILY_BRIEF_STATION:
+        return { title: 'Daily Brief', addLabel: '' };
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
@@ -2329,9 +2374,28 @@ export class WorkspaceCommandView {
     if (wasTools) {
       this.releaseToolsModalSurface();
     }
+    if (this._dailyBriefPanel) this._dailyBriefPanel.brief.setOnScreen(false);
     if (this.statModalEl) this.statModalEl.hidden = true;
     this.setCommandBackgroundInert(false);
-    if (trigger && typeof trigger.focus === 'function') trigger.focus();
+    const opener = this.resolveStatModalTrigger(trigger);
+    if (opener && typeof opener.focus === 'function') opener.focus();
+  }
+
+  // render() rebuilds the container, so the element that opened a panel may be
+  // gone by the time the panel closes. A station's opener is found again by its
+  // key, so focus still returns to where the user was.
+  resolveStatModalTrigger(trigger) {
+    if (!trigger || trigger.isConnected !== false) return trigger;
+    const key =
+      typeof trigger.getAttribute === 'function' ? trigger.getAttribute('data-cmd-hq-station') : '';
+    if (!key || !this.container || typeof this.container.querySelectorAll !== 'function') {
+      return null;
+    }
+    const kind = trigger.classList ? trigger.classList[0] : '';
+    const matches = Array.from(this.container.querySelectorAll('[data-cmd-hq-station]')).filter(
+      el => el.getAttribute('data-cmd-hq-station') === key
+    );
+    return matches.find(el => el.classList && el.classList[0] === kind) || matches[0] || null;
   }
 
   setCommandBackgroundInert(isInert) {
@@ -2435,7 +2499,12 @@ export class WorkspaceCommandView {
     // Config-surface and Tools modals get the wide panel treatment.
     const isConfig = this.statModalHoldsSharedSurface();
     if (panel.classList) panel.classList.toggle('is-config', isConfig);
-    panel.innerHTML = this.statModalHTML(this.statModalSection);
+    // The Daily Brief panel is live DOM with its own controller, so it is
+    // attached rather than re-serialized on every repaint.
+    const isBrief = this.statModalSection === DAILY_BRIEF_STATION;
+    if (panel.classList) panel.classList.toggle('is-daily-brief', isBrief);
+    if (isBrief) this.mountDailyBriefPanel(panel);
+    else panel.innerHTML = this.statModalHTML(this.statModalSection);
     this.syncBoardSurface();
     this.syncConfigModalSurface();
     this.syncToolsModalSurface();
@@ -6467,9 +6536,11 @@ export class WorkspaceCommandView {
   }
 
   // Data-driven HQ station registry (FR9): an ordered list of descriptors.
-  // Adding a future station (Daily Brief, Follow-ups, Journal) means adding
-  // one entry here — no new rendering plumbing. Watchtower comes first so the
-  // HQ's cross-workspace attention signal is the most visible station.
+  // Adding a future station (Follow-ups, Journal) means adding one entry
+  // here — no new rendering plumbing. Watchtower comes first so the HQ's
+  // cross-workspace attention signal is the most visible station. Add new
+  // stations at the END: default map slots follow this order, so inserting
+  // one earlier would move every station the user never dragged.
   hqStationRegistry() {
     return [
       {
@@ -6492,6 +6563,14 @@ export class WorkspaceCommandView {
         icon: 'bi-calendar-check',
         state: () => this.hqCalendarOpsStationState(),
         action: trigger => this.openCalendarOpsPanel(trigger)
+      },
+      {
+        key: DAILY_BRIEF_STATION,
+        label: 'Daily Brief',
+        icon: 'bi-newspaper',
+        visualVariant: 'briefing',
+        state: () => this.hqDailyBriefStationState(),
+        action: trigger => this.openDailyBriefPanel(trigger)
       }
     ];
   }
@@ -6878,6 +6957,243 @@ export class WorkspaceCommandView {
     const state = this.calendarOpsPortalState();
     this.requestCalendarOpsPortalData(state.status === 'error');
     this.openStatModal('calendar-ops', trigger);
+  }
+
+  // Daily Brief station: where the brief is read, refreshed and configured.
+  // Its short status is cached per HQ like the other stations', so a workspace
+  // switch never shows another HQ's brief state.
+  dailyBriefStationData() {
+    const workspaceID = this.watchtowerWorkspaceID();
+    if (!this._dailyBriefStation || this._dailyBriefStation.workspaceID !== workspaceID) {
+      this._dailyBriefStation = {
+        workspaceID,
+        status: 'idle',
+        generation: '',
+        revision: null,
+        config: null,
+        paused: false
+      };
+    }
+    return this._dailyBriefStation;
+  }
+
+  hqDailyBriefStationState() {
+    const data = this.dailyBriefStationData();
+    if (data.status === 'idle' && this.active) this.requestDailyBriefStationData();
+    switch (data.status) {
+      case 'error':
+        return {
+          value: 'Unavailable',
+          description: 'Daily Brief status unavailable',
+          tone: 'degraded'
+        };
+      case 'ready':
+        return dailyBriefStationState(dailyBriefStatus(data));
+      default:
+        return { value: 'Loading…', description: 'loading the Daily Brief', tone: 'loading' };
+    }
+  }
+
+  // Reads what the station's short status needs: whether a brief is being
+  // generated, the current brief, its schedule, and whether check-ins are
+  // paused. A failed read degrades the badge and never breaks the map.
+  requestDailyBriefStationData(force = false) {
+    if (!this.isPersonalHQ()) return;
+    const data = this.dailyBriefStationData();
+    if (!data.workspaceID) return;
+    if (data.status === 'loading') return;
+    if (!force && data.status === 'ready') return;
+    if (typeof fetch !== 'function') {
+      data.status = 'error';
+      return;
+    }
+
+    data.status = 'loading';
+    const requestID = (this._dailyBriefStationRequestID || 0) + 1;
+    this._dailyBriefStationRequestID = requestID;
+    const getJSON = async (url, optional = false) => {
+      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!response || !response.ok) {
+        if (optional) return null;
+        throw new Error('Daily Brief request failed' + (response ? ': ' + response.status : ''));
+      }
+      return response.json();
+    };
+
+    Promise.all([
+      getJSON('/api/personal-hq/brief/status'),
+      getJSON('/api/personal-hq/brief/current'),
+      getJSON('/api/personal-hq/brief/config'),
+      // Only "check-ins paused" comes from here; the brief stands without it.
+      getJSON('/api/personal-assistant', true).catch(() => null)
+    ])
+      .then(([generation, current, config, assistant]) => {
+        if (this._dailyBriefStationRequestID !== requestID) return;
+        const latest = this.dailyBriefStationData();
+        if (latest.workspaceID !== data.workspaceID) return;
+        latest.status = 'ready';
+        latest.generation = String((generation && generation.status) || '');
+        latest.revision = (current && current.revision) || null;
+        latest.config = (config && config.config) || null;
+        latest.paused =
+          String((assistant && assistant.personal_assistant?.state) || '') === 'paused';
+        this.refreshDailyBriefStationSurface();
+      })
+      .catch(() => {
+        if (this._dailyBriefStationRequestID !== requestID) return;
+        const latest = this.dailyBriefStationData();
+        if (latest.workspaceID !== data.workspaceID) return;
+        latest.status = 'error';
+        this.refreshDailyBriefStationSurface();
+      });
+  }
+
+  refreshDailyBriefStationSurface() {
+    if (this.active) this.render();
+    if (this._dailyBriefPanel) this._dailyBriefPanel.repaintMeta();
+  }
+
+  // The open panel is the freshest source for the station's status: every
+  // render of the brief (a refresh settling, a saved schedule) lands here.
+  noteDailyBriefPanelChange({ revision, config, generation }) {
+    const data = this.dailyBriefStationData();
+    const before = data.status === 'ready' ? this.hqDailyBriefStationState().value : '';
+    data.status = 'ready';
+    data.revision = revision || null;
+    data.config = config || data.config;
+    data.generation = String(generation || '');
+    if (this.active && this.hqDailyBriefStationState().value !== before) this.render();
+  }
+
+  // Opening the panel is what loads the brief, and what asks the server for
+  // today's when there is none yet.
+  openDailyBriefPanel(trigger) {
+    const data = this.dailyBriefStationData();
+    if (data.status === 'idle' || data.status === 'error') {
+      this.requestDailyBriefStationData(true);
+    }
+    // A direct link has no opener; closing the panel then lands on the
+    // station itself rather than nowhere.
+    const opener =
+      trigger ||
+      (this.container && typeof this.container.querySelector === 'function'
+        ? this.container.querySelector('[data-cmd-hq-station="' + DAILY_BRIEF_STATION + '"]')
+        : null);
+    this.openStatModal(DAILY_BRIEF_STATION, opener);
+    const view = this._dailyBriefPanel;
+    if (!view) return;
+    view.brief.setOnScreen(true);
+    void view.brief.load();
+  }
+
+  // Builds the panel once and keeps it: the brief controller holds live
+  // elements and listeners, so the panel is attached into the modal rather
+  // than rebuilt from a string each time the map repaints.
+  ensureDailyBriefPanel() {
+    if (this._dailyBriefPanel) return this._dailyBriefPanel;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+      return null;
+    }
+    const root = document.createElement('div');
+    root.className = 'daily-brief-station';
+    root.innerHTML =
+      '<header class="daily-brief-station__head">' +
+      '<div class="daily-brief-station__ident">' +
+      '<p class="daily-brief-station__eyebrow">My HQ station</p>' +
+      '<h2 class="daily-brief-station__name">Daily Brief</h2>' +
+      '</div>' +
+      '<button type="button" class="daily-brief-station__refresh" data-brief="refresh">' +
+      '<i class="bi bi-arrow-clockwise" aria-hidden="true"></i>Refresh</button>' +
+      '<button type="button" class="daily-brief-station__icon" data-brief="settings" aria-label="Brief settings">' +
+      '<i class="bi bi-sliders" aria-hidden="true"></i></button>' +
+      '<button type="button" class="daily-brief-station__icon" data-cmd-modal-action="close" aria-label="Close Daily Brief">' +
+      '<i class="bi bi-x-lg" aria-hidden="true"></i></button>' +
+      '</header>' +
+      '<div class="daily-brief-station__layout">' +
+      '<div class="daily-brief-station__main" data-brief-scroll>' +
+      '<div class="daily-brief-station__heading">' +
+      '<h3 class="daily-brief-station__title" data-brief="title">Today</h3>' +
+      '<p class="daily-brief-station__meta" data-brief="meta"></p>' +
+      '</div>' +
+      '<div class="home-daily-brief-banner" data-brief="banner" role="status" aria-live="polite" hidden></div>' +
+      '<div class="daily-brief-station__body" data-brief="body" aria-live="polite">' +
+      '<div class="home-daily-brief-placeholder">Loading your Daily Brief…</div>' +
+      '</div>' +
+      '</div>' +
+      '</div>';
+    const part = name => root.querySelector('[data-brief="' + name + '"]');
+    const metaText = (revision, config) =>
+      briefPanelMeta({ revision, config, paused: this.dailyBriefStationData().paused });
+    let shown = { revision: null, config: null };
+    const brief = mountDailyBrief(
+      {
+        root,
+        title: part('title'),
+        meta: part('meta'),
+        body: part('body'),
+        banner: part('banner'),
+        refreshBtn: part('refresh'),
+        settingsBtn: part('settings')
+      },
+      {
+        hq: { workspaceId: this.watchtowerWorkspaceID() },
+        metaText,
+        onChange: change => {
+          shown = change;
+          this.noteDailyBriefPanelChange(change);
+        }
+      }
+    );
+    if (!brief) return null;
+    this._dailyBriefPanel = {
+      root,
+      brief,
+      // "Check-ins paused" can arrive after the brief has rendered.
+      repaintMeta: () => {
+        part('meta').textContent = metaText(shown.revision, shown.config);
+      }
+    };
+    return this._dailyBriefPanel;
+  }
+
+  // Attaches the panel into the stat modal; a repaint while it is already
+  // there leaves it alone.
+  mountDailyBriefPanel(panel) {
+    const view = this.ensureDailyBriefPanel();
+    if (!view) {
+      panel.innerHTML = this.modalEmptyHTML('The Daily Brief is unavailable on this page.');
+      return;
+    }
+    if (view.root.parentNode === panel) return;
+    panel.innerHTML = '';
+    panel.appendChild(view.root);
+  }
+
+  // render() rebuilds the container, which detaches the stat modal for a
+  // moment. Someone reading the brief would lose their place and their focus,
+  // so both are carried across.
+  captureDailyBriefPanelView() {
+    this._dailyBriefPanelView = null;
+    const view = this._dailyBriefPanel;
+    if (!view || this.statModalSection !== DAILY_BRIEF_STATION) return;
+    if (typeof document === 'undefined') return;
+    const scroller = view.root.querySelector('[data-brief-scroll]');
+    const focused = document.activeElement;
+    this._dailyBriefPanelView = {
+      scroller,
+      top: scroller ? scroller.scrollTop : 0,
+      focused: focused && view.root.contains(focused) ? focused : null
+    };
+  }
+
+  restoreDailyBriefPanelView() {
+    const kept = this._dailyBriefPanelView;
+    this._dailyBriefPanelView = null;
+    if (!kept) return;
+    if (kept.scroller) kept.scroller.scrollTop = kept.top;
+    if (kept.focused && kept.focused.isConnected && typeof kept.focused.focus === 'function') {
+      kept.focused.focus({ preventScroll: true });
+    }
   }
 
   // Routes the "no Calendar Ops workspace yet" CTA into the existing

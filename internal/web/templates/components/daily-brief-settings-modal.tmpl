@@ -1,0 +1,53 @@
+{{define "daily-brief-settings-modal.tmpl"}}
+<!-- Brief settings dialog: the Personal HQ's own brief config plus its recent
+     history. Opened by the Daily Brief panel in My HQ and, on Home, by the
+     assistant's brief; both pages include it once, and home-daily-brief.js
+     binds it by id. It sits at the end of the page so no scrolling region
+     clips it. -->
+<div class="modal fade" id="homeDailyBriefSettingsModal" tabindex="-1" aria-labelledby="homeDailyBriefSettingsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 id="homeDailyBriefSettingsModalLabel" class="modal-title">Daily Brief settings</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="homeDailyBriefSettingsForm" class="home-daily-brief-settings-form">
+          <div class="mb-3">
+            <label class="form-label" for="homeDailyBriefTimezone">Timezone</label>
+            <input type="text" class="modern-input" id="homeDailyBriefTimezone" name="timezone" autocomplete="off" placeholder="UTC">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="homeDailyBriefTime">Scheduled time</label>
+            <input type="text" class="modern-input" id="homeDailyBriefTime" name="schedule_time" autocomplete="off" placeholder="08:00">
+          </div>
+          <fieldset class="mb-3">
+            <legend class="form-label">Days</legend>
+            <div class="home-daily-brief-days" role="group" aria-label="Scheduled days">
+              <label><input type="checkbox" value="mon"> Mon</label>
+              <label><input type="checkbox" value="tue"> Tue</label>
+              <label><input type="checkbox" value="wed"> Wed</label>
+              <label><input type="checkbox" value="thu"> Thu</label>
+              <label><input type="checkbox" value="fri"> Fri</label>
+              <label><input type="checkbox" value="sat"> Sat</label>
+              <label><input type="checkbox" value="sun"> Sun</label>
+            </div>
+          </fieldset>
+          <div class="mb-3 form-check">
+            <input type="checkbox" class="form-check-input" id="homeDailyBriefScheduleEnabled" name="schedule_enabled">
+            <label class="form-check-label" for="homeDailyBriefScheduleEnabled">Generate automatically on schedule</label>
+          </div>
+          <div class="mb-3 form-check">
+            <input type="checkbox" class="form-check-input" id="homeDailyBriefNotify" name="notify_on_ready">
+            <label class="form-check-label" for="homeDailyBriefNotify">Notify in Action Center when a scheduled brief is ready</label>
+          </div>
+          <button type="submit" class="modern-btn modern-btn-primary">Save settings</button>
+        </form>
+        <hr>
+        <h6>Recent history</h6>
+        <ul id="homeDailyBriefHistoryList" class="home-daily-brief-history-list"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

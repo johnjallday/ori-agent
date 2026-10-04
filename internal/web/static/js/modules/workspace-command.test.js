@@ -4383,7 +4383,260 @@ test('renderMapHQStations emits fractional coordinates as CSS custom props and i
     assert.match(html, /--station-y:25\.00%/);
     // Every registered station renders; the unknown key contributes nothing.
     assert.doesNotMatch(html, /data-cmd-hq-station="journal"/);
-    assert.equal((html.match(/data-cmd-hq-station=/g) || []).length, 3);
+    assert.equal((html.match(/data-cmd-hq-station=/g) || []).length, 4);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the Daily Brief station is last, so the other HQ stations keep their default slots', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    assert.deepEqual(
+      hq.hqStationRegistry().map(station => station.key),
+      ['watchtower', 'email', 'calendar-ops', 'daily-brief']
+    );
+    // The three stations that existed before still stack from the first slot.
+    ['watchtower', 'email', 'calendar-ops'].forEach((key, slot) => {
+      assert.deepEqual(hq.hqStationPosition(key), hq.hqStationDefaultPosition(slot));
+    });
+    // The new one takes the fourth: x 0.9, y 0.22 + 3 × 0.17.
+    const brief = hq.hqStationPosition('daily-brief');
+    assert.equal(brief.x, 0.9);
+    assert.ok(Math.abs(brief.y - 0.73) < 1e-9);
+
+    // It can be dragged like the others: a saved position wins.
+    const moved = makeHQCommandView({
+      id: 'hq-1',
+      layout: { station_positions: { 'daily-brief': { x: 0.3, y: 0.4 } } }
+    });
+    assert.deepEqual(moved.hqStationPosition('daily-brief'), { x: 0.3, y: 0.4 });
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('only the designated Personal HQ has a Daily Brief station', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    assert.ok(hq.mapStationRegistry().some(station => station.key === 'daily-brief'));
+    assert.match(hq.renderStationsRailPanel(), /data-cmd-hq-station="daily-brief"/);
+
+    const plain = makeHQCommandView({ id: 'ws-1', designation: '' });
+    assert.equal(
+      plain.mapStationRegistry().some(station => station.key === 'daily-brief'),
+      false
+    );
+    assert.doesNotMatch(plain.renderMapHQStations(), /daily-brief/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the Daily Brief station draws the briefing building and names its status', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceBuildingArt: {
+      svgForVariant: (variant, options) =>
+        '<svg data-building-variant="' + variant + '" data-context="' + options.context + '"></svg>'
+    }
+  };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq._dailyBriefStation = {
+      workspaceID: 'hq-1',
+      status: 'ready',
+      generation: 'running',
+      revision: null,
+      config: null,
+      paused: false
+    };
+    const html = hq.renderMapHQStations();
+    assert.match(html, /data-cmd-hq-station="daily-brief" data-station-visual="briefing"/);
+    assert.match(html, /data-building-variant="briefing" data-context="station"/);
+    assert.match(
+      html,
+      /aria-label="Daily Brief station, Preparing…, the Daily Brief is being prepared"/
+    );
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('Daily Brief station status covers loading, each brief state, and a failed read', () => {
+  const hq = makeHQCommandView({ id: 'hq-1' });
+  assert.deepEqual(hq.hqDailyBriefStationState(), {
+    value: 'Loading…',
+    description: 'loading the Daily Brief',
+    tone: 'loading'
+  });
+
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(new Date());
+  const config = {
+    timezone: 'UTC',
+    schedule_enabled: true,
+    schedule_time: '08:00',
+    schedule_days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  };
+  hq._dailyBriefStation = {
+    workspaceID: 'hq-1',
+    status: 'ready',
+    generation: 'succeeded',
+    revision: { id: 'rev-1', local_date: today, generated_at: today + 'T08:02:00Z' },
+    config,
+    paused: false
+  };
+  assert.match(hq.hqDailyBriefStationState().value, /^Ready · 8:02\sAM$/);
+  assert.equal(hq.hqDailyBriefStationState().tone, 'clear');
+
+  hq._dailyBriefStation.generation = 'running';
+  assert.equal(hq.hqDailyBriefStationState().value, 'Preparing…');
+
+  hq._dailyBriefStation.generation = 'failed';
+  assert.equal(hq.hqDailyBriefStationState().value, 'Failed');
+  assert.equal(hq.hqDailyBriefStationState().tone, 'degraded');
+
+  hq._dailyBriefStation.generation = 'idle';
+  hq._dailyBriefStation.revision = null;
+  hq._dailyBriefStation.paused = true;
+  assert.equal(hq.hqDailyBriefStationState().value, 'Check-ins paused');
+
+  hq._dailyBriefStation.paused = false;
+  hq._dailyBriefStation.config = { ...config, schedule_enabled: false };
+  assert.equal(hq.hqDailyBriefStationState().value, 'Not scheduled');
+
+  hq._dailyBriefStation.status = 'error';
+  assert.equal(hq.hqDailyBriefStationState().value, 'Unavailable');
+  assert.equal(hq.hqDailyBriefStationState().tone, 'degraded');
+});
+
+test('the Daily Brief station reads the brief status, current brief, schedule, and pause state', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(new Date());
+  const bodies = {
+    '/api/personal-hq/brief/status': { status: 'idle' },
+    '/api/personal-hq/brief/current': {
+      revision: { id: 'rev-1', local_date: today, generated_at: today + 'T08:02:00Z' }
+    },
+    '/api/personal-hq/brief/config': { config: { timezone: 'UTC', schedule_enabled: true } },
+    '/api/personal-assistant': { personal_assistant: { state: 'paused' } }
+  };
+  globalThis.fetch = async url => {
+    calls.push(url);
+    return { ok: true, json: async () => bodies[url] };
+  };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.active = true;
+    let renders = 0;
+    hq.render = () => {
+      renders += 1;
+    };
+    hq.hqDailyBriefStationState();
+    assert.equal(hq.dailyBriefStationData().status, 'loading');
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls.sort(), Object.keys(bodies).sort());
+    const data = hq.dailyBriefStationData();
+    assert.equal(data.status, 'ready');
+    assert.equal(data.paused, true);
+    assert.equal(renders, 1);
+    assert.match(hq.hqDailyBriefStationState().value, /^Ready · 8:02\sAM$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a failed brief read degrades the station, and a missing assistant read does not', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async url =>
+      url === '/api/personal-assistant'
+        ? { ok: false, status: 503 }
+        : { ok: true, json: async () => ({ status: 'idle', revision: null, config: null }) };
+    const lenient = makeHQCommandView({ id: 'hq-1' });
+    lenient.active = true;
+    lenient.render = () => {};
+    lenient.hqDailyBriefStationState();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(lenient.dailyBriefStationData().status, 'ready');
+    assert.equal(lenient.dailyBriefStationData().paused, false);
+
+    globalThis.fetch = async () => ({ ok: false, status: 500 });
+    const failed = makeHQCommandView({ id: 'hq-1' });
+    failed.active = true;
+    failed.render = () => {};
+    failed.hqDailyBriefStationState();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(failed.dailyBriefStationData().status, 'error');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('activating the Daily Brief station opens its panel', () => {
+  const hq = makeHQCommandView({ id: 'hq-1' });
+  const opened = [];
+  hq.openStatModal = (section, trigger) => opened.push([section, trigger]);
+  hq.requestDailyBriefStationData = () => {};
+  const trigger = { id: 'station-button' };
+  hq.runHQStationAction('daily-brief', trigger);
+  assert.deepEqual(opened, [['daily-brief', trigger]]);
+  assert.deepEqual(hq.statSectionMeta('daily-brief'), { title: 'Daily Brief', addLabel: '' });
+});
+
+test('?station=daily-brief opens the panel once the workspace has loaded, then leaves the address bar', () => {
+  const originalWindow = globalThis.window;
+  const replaced = [];
+  globalThis.window = {
+    location: { href: 'http://ori.local/workspaces/my-hq?mode=map&station=daily-brief' },
+    history: { state: { kept: true }, replaceState: (...args) => replaced.push(args) }
+  };
+  try {
+    const hq = makeHQCommandView();
+    hq._bootStation = 'daily-brief';
+    const opened = [];
+    hq.openDailyBriefPanel = trigger => opened.push(trigger);
+
+    // No workspace id yet: nothing opens, and the link is still pending.
+    hq.applyStationDeepLink();
+    assert.deepEqual(opened, []);
+    assert.equal(hq._bootStation, 'daily-brief');
+
+    hq.page.workspace.id = 'hq-1';
+    hq.applyStationDeepLink();
+    assert.deepEqual(opened, [null]);
+    assert.deepEqual(replaced, [[{ kept: true }, '', '/workspaces/my-hq?mode=map']]);
+
+    // Once applied it never opens again.
+    hq.applyStationDeepLink();
+    assert.equal(opened.length, 1);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('?station=daily-brief on a workspace that is not the Personal HQ opens nothing', () => {
+  const originalWindow = globalThis.window;
+  const replaced = [];
+  globalThis.window = {
+    location: { href: 'http://ori.local/workspaces/other?station=daily-brief' },
+    history: { state: null, replaceState: (...args) => replaced.push(args) }
+  };
+  try {
+    const plain = makeHQCommandView({ id: 'ws-1', designation: '' });
+    plain._bootStation = 'daily-brief';
+    const opened = [];
+    plain.openDailyBriefPanel = trigger => opened.push(trigger);
+    plain.applyStationDeepLink();
+    assert.deepEqual(opened, []);
+    // The stray parameter is still taken off the address bar.
+    assert.deepEqual(replaced, [[null, '', '/workspaces/other']]);
   } finally {
     globalThis.window = originalWindow;
   }

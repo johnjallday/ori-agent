@@ -405,42 +405,54 @@ export function renderContent(content, options = {}) {
   return parts.join('');
 }
 
-// ---- DOM wiring (no-op without #homeDailyBrief; genuinely no-op under
-// plain Node, where window/document don't exist at all) ----
-(function () {
-  if (typeof document === 'undefined') return;
-  const section = document.getElementById('homeDailyBrief');
-  if (!section) return;
+// needsFreshBrief is true when there is no brief for today in the brief's own
+// time zone: none at all, or only an earlier day's.
+export function needsFreshBrief(revision, config, now) {
+  if (!revision) return true;
+  return revision.local_date !== localDateInZone(config ? config.timezone : 'UTC', now);
+}
 
-  const titleEl = document.getElementById('homeDailyBriefTitle');
-  const metaEl = document.getElementById('homeDailyBriefMeta');
-  const bodyEl = document.getElementById('homeDailyBriefBody');
-  const bannerEl = document.getElementById('homeDailyBriefBanner');
-  const openHQLink = document.getElementById('homeDailyBriefOpenHQ');
-  const refreshBtn = document.getElementById('homeDailyBriefRefreshBtn');
-  const settingsBtn = document.getElementById('homeDailyBriefSettingsBtn');
+// mountDailyBrief wires one Daily Brief surface into the elements it is given:
+// it loads the current brief, asks the server for today's when there is none,
+// and owns Refresh and Brief settings. The host supplies the elements, so the
+// controller does not care which page or panel it lives in.
+//
+//   els     — { root, title, meta, body, banner, refreshBtn, settingsBtn,
+//               openHQLink }; only root is required.
+//   options — hq: { workspaceId } when the host already knows the page is the
+//               designated Personal HQ (skips the designation read);
+//             gate(): resolves false to leave the surface untouched;
+//             metaText(revision, config): the line under the heading;
+//             onSeen(revision, hqWorkspaceId): once per brief that is shown
+//               while the surface is on screen;
+//             onChange({ revision, config, generation }): after every render;
+//             onUnavailable(): no valid Personal HQ.
+//
+// Returns { load, refresh, setOnScreen }, or null without a DOM.
+export function mountDailyBrief(els, options = {}) {
+  if (typeof document === 'undefined' || !els || !els.root) return null;
+  const { title: titleEl, meta: metaEl, body: bodyEl, banner: bannerEl } = els;
+  const { openHQLink, refreshBtn, settingsBtn } = els;
 
   let currentConfig = null;
-  let hqWorkspaceId = null;
+  let hqWorkspaceId = (options.hq && options.hq.workspaceId) || null;
   let polling = false;
 
-  // Seeing the brief opens the map's Daily Brief parcels (task-run-show FR40).
-  // This section is rendered while its drawer is still closed, so "seen" waits
-  // until it is actually on screen, and happens once per revision.
-  let renderedRevisionId = '';
+  // A brief counts as seen once it is rendered while its surface is actually
+  // on screen, and only once per revision.
+  let renderedRevision = null;
+  let lastClaim = null;
   let seenRevisionId = '';
   let briefOnScreen = false;
   function markBriefSeen() {
-    if (!briefOnScreen || !hqWorkspaceId || !renderedRevisionId) return;
-    if (renderedRevisionId === seenRevisionId) return;
-    seenRevisionId = renderedRevisionId;
-    void openParcelByRef({ kind: 'daily_brief', workspaceId: hqWorkspaceId });
+    const id = String((renderedRevision && renderedRevision.id) || '');
+    if (!briefOnScreen || !hqWorkspaceId || !id || id === seenRevisionId) return;
+    seenRevisionId = id;
+    if (typeof options.onSeen === 'function') options.onSeen(renderedRevision, hqWorkspaceId);
   }
-  if (typeof IntersectionObserver === 'function') {
-    new IntersectionObserver(entries => {
-      briefOnScreen = entries.some(entry => entry.isIntersecting);
-      markBriefSeen();
-    }).observe(section);
+  function setOnScreen(onScreen) {
+    briefOnScreen = Boolean(onScreen);
+    markBriefSeen();
   }
 
   async function fetchJSON(url, options) {
@@ -476,16 +488,37 @@ export function renderContent(content, options = {}) {
     }
   }
 
-  function render(revision, config, latestClaim) {
+  function metaText(revision, config) {
+    if (typeof options.metaText === 'function') return options.metaText(revision, config);
+    const relativeTimeFn =
+      window.RelativeTime && typeof window.RelativeTime.formatRelativeTime === 'function'
+        ? window.RelativeTime.formatRelativeTime
+        : null;
+    return formatMeta(revision, config, relativeTimeFn);
+  }
+
+  // settled is true once nothing is being generated, so an empty surface can
+  // say there is no brief instead of promising one.
+  function render(revision, config, latestClaim, settled = false) {
     currentConfig = config;
+    renderedRevision = revision || null;
+    lastClaim = latestClaim || null;
+    const generation = String((latestClaim && latestClaim.status) || '');
+    if (typeof options.onChange === 'function') {
+      options.onChange({ revision: revision || null, config, generation });
+    }
     if (!revision) {
-      if (metaEl) metaEl.textContent = '';
+      if (titleEl) titleEl.textContent = 'Today';
+      if (metaEl) metaEl.textContent = metaText(null, config);
       renderBanner(computeBanner(null, latestClaim));
       if (bodyEl) {
-        bodyEl.innerHTML =
-          latestClaim && latestClaim.status === 'failed'
-            ? '<div class="home-daily-brief-placeholder">Your Daily Brief could not be generated.</div>'
-            : '<div class="home-daily-brief-placeholder">Generating your Daily Brief…</div>';
+        const failed = generation === 'failed';
+        const text = failed
+          ? 'Your Daily Brief could not be generated.'
+          : settled
+            ? 'No Daily Brief yet.'
+            : 'Generating your Daily Brief…';
+        bodyEl.innerHTML = `<div class="home-daily-brief-placeholder">${text}</div>`;
       }
       return;
     }
@@ -494,24 +527,23 @@ export function renderContent(content, options = {}) {
         revision.local_date === localDateInZone((config && config.timezone) || 'UTC')
           ? 'Today'
           : revision.local_date;
-    const relativeTimeFn =
-      window.RelativeTime && typeof window.RelativeTime.formatRelativeTime === 'function'
-        ? window.RelativeTime.formatRelativeTime
-        : null;
-    if (metaEl) metaEl.textContent = formatMeta(revision, config, relativeTimeFn);
+    if (metaEl) metaEl.textContent = metaText(revision, config);
     renderBanner(computeBanner(revision, latestClaim));
     if (bodyEl)
       bodyEl.innerHTML = renderContent(parseContent(revision), {
         timeZone: (config && config.timezone) || undefined
       });
-    renderedRevisionId = String(revision.id || '');
     markBriefSeen();
   }
 
-  async function pollUntilSettled() {
+  // requested is true right after this surface asked for a generation: the
+  // server accepts that request before its claim exists, so the first status
+  // read can still describe the previous attempt. Give the claim a moment.
+  async function pollUntilSettled(requested = false) {
     if (polling) return;
     polling = true;
     try {
+      if (requested) await sleep(400);
       const deadline = Date.now() + 90000;
       let statusResp = null;
       while (Date.now() < deadline) {
@@ -522,6 +554,9 @@ export function renderContent(content, options = {}) {
         }
         const st = statusResp && statusResp.status;
         if (st !== 'pending' && st !== 'running') break;
+        if (typeof options.onChange === 'function') {
+          options.onChange({ revision: renderedRevision, config: currentConfig, generation: st });
+        }
         await sleep(1500);
       }
       let revision = null;
@@ -532,7 +567,7 @@ export function renderContent(content, options = {}) {
         // keep whatever was already rendered
         return;
       }
-      render(revision, currentConfig, statusResp);
+      render(revision, currentConfig, statusResp, true);
     } finally {
       polling = false;
     }
@@ -547,7 +582,7 @@ export function renderContent(content, options = {}) {
       // fall through to polling — a transient network failure just means
       // nothing changes; the button re-enables and the user can retry.
     }
-    await pollUntilSettled();
+    await pollUntilSettled(true);
     if (refreshBtn) refreshBtn.disabled = false;
   }
 
@@ -560,8 +595,8 @@ export function renderContent(content, options = {}) {
       modalEl.addEventListener(
         'hidden.bs.modal',
         () => {
-          const drawer = document.getElementById('personalAssistantPanel');
-          if (!drawer?.hidden && settingsBtn?.isConnected) settingsBtn.focus();
+          // Back to the button that opened it, when that button is still shown.
+          if (settingsBtn?.isConnected && settingsBtn.getClientRects().length) settingsBtn.focus();
         },
         { once: true }
       );
@@ -608,9 +643,22 @@ export function renderContent(content, options = {}) {
     }
   }
 
+  // The saved schedule changes what "next brief" means, so the surface reads
+  // the config again and repaints the brief it already has.
+  async function reloadConfig() {
+    try {
+      const cfgResp = await fetchJSON('/api/personal-hq/brief/config');
+      render(renderedRevision, cfgResp.config, lastClaim, true);
+    } catch (_) {
+      // the surface keeps the config it had
+    }
+  }
+
   function wireSettingsForm() {
     const form = document.getElementById('homeDailyBriefSettingsForm');
-    if (!form) return;
+    // One form per page, wired once however many times a surface mounts.
+    if (!form || form.dataset.briefWired === 'true') return;
+    form.dataset.briefWired = 'true';
     form.addEventListener('submit', async evt => {
       evt.preventDefault();
       const days = Array.from(form.querySelectorAll('.home-daily-brief-days input:checked')).map(
@@ -634,6 +682,7 @@ export function renderContent(content, options = {}) {
         if (window.Toast && typeof window.Toast.success === 'function') {
           window.Toast.success('Daily Brief settings saved.', 'Saved');
         }
+        await reloadConfig();
       } catch (_) {
         if (window.Toast && typeof window.Toast.error === 'function') {
           window.Toast.error('Could not save Daily Brief settings.', 'Save failed');
@@ -644,29 +693,42 @@ export function renderContent(content, options = {}) {
     });
   }
 
-  async function bootstrap() {
-    const onboardingStatus = await loadOnboardingStatus();
-    if (!onboardingGateDecision(onboardingStatus).allowWorkspaceHydration) return;
+  let loading = null;
 
-    let status;
-    try {
-      const statusResp = await fetchJSON('/api/personal-hq/status');
-      status = statusResp.status;
-    } catch (_) {
-      section.hidden = true;
-      return;
+  // load reads the current brief and, when there is none for today, asks the
+  // server to prepare it. A second call while one is running joins it.
+  function load() {
+    if (!loading) {
+      loading = loadOnce().finally(() => {
+        loading = null;
+      });
     }
-    if (!status || !status.valid) {
-      section.hidden = true;
-      return;
+    return loading;
+  }
+
+  async function loadOnce() {
+    if (typeof options.gate === 'function' && !(await options.gate())) return;
+
+    if (!hqWorkspaceId) {
+      let status;
+      try {
+        const statusResp = await fetchJSON('/api/personal-hq/status');
+        status = statusResp.status;
+      } catch (_) {
+        status = null;
+      }
+      if (!status || !status.valid) {
+        if (typeof options.onUnavailable === 'function') options.onUnavailable();
+        return;
+      }
+      hqWorkspaceId = status.workspace_id;
+      const hqWorkspaceSlug = String(status.workspace?.folder_slug || '').trim();
+      if (openHQLink)
+        openHQLink.href = hqWorkspaceSlug
+          ? `/workspaces/${encodeURIComponent(hqWorkspaceSlug)}`
+          : '#';
     }
-    hqWorkspaceId = status.workspace_id;
-    const hqWorkspaceSlug = String(status.workspace?.folder_slug || '').trim();
-    section.hidden = false;
-    if (openHQLink)
-      openHQLink.href = hqWorkspaceSlug
-        ? `/workspaces/${encodeURIComponent(hqWorkspaceSlug)}`
-        : '#';
+    els.root.hidden = false;
 
     let config = null;
     try {
@@ -685,23 +747,73 @@ export function renderContent(content, options = {}) {
       // treated the same as "no revision yet" below
     }
 
-    render(revision, config, null);
+    // What the latest attempt came to: a brief that failed stays visible as a
+    // failure after a reload, and one already being prepared is waited for
+    // rather than requested twice.
+    let generation = null;
+    try {
+      generation = await fetchJSON('/api/personal-hq/brief/status');
+    } catch (_) {
+      // without it the surface simply shows the brief it has
+    }
+    const active = Boolean(generation) && ['pending', 'running'].includes(generation.status);
+    const fresh = needsFreshBrief(revision, config);
+    render(revision, config, generation, !fresh && !active);
 
-    const today = localDateInZone(config ? config.timezone : 'UTC');
-    const needsFreshBrief = !revision || revision.local_date !== today;
-    if (needsFreshBrief) {
+    if (active) {
+      await pollUntilSettled();
+    } else if (fresh) {
       try {
         await fetch('/api/personal-hq/brief/open', { method: 'POST' });
       } catch (_) {
         // pollUntilSettled will simply observe idle/no-op and keep showing
         // whatever was already rendered above
       }
-      await pollUntilSettled();
+      await pollUntilSettled(true);
     }
   }
 
   if (refreshBtn) refreshBtn.addEventListener('click', () => runRefresh());
   if (settingsBtn) settingsBtn.addEventListener('click', () => openSettingsModal());
   wireSettingsForm();
-  bootstrap();
+  return { load, refresh: runRefresh, setOnScreen };
+}
+
+// ---- Home (no-op without #homeDailyBrief; genuinely no-op under plain Node,
+// where window/document don't exist at all) ----
+(function () {
+  if (typeof document === 'undefined') return;
+  const section = document.getElementById('homeDailyBrief');
+  if (!section) return;
+
+  // Seeing the brief opens the map's Daily Brief parcels (task-run-show FR40).
+  // This section is rendered while its drawer is still closed, so "seen" waits
+  // until it is actually on screen.
+  const brief = mountDailyBrief(
+    {
+      root: section,
+      title: document.getElementById('homeDailyBriefTitle'),
+      meta: document.getElementById('homeDailyBriefMeta'),
+      body: document.getElementById('homeDailyBriefBody'),
+      banner: document.getElementById('homeDailyBriefBanner'),
+      openHQLink: document.getElementById('homeDailyBriefOpenHQ'),
+      refreshBtn: document.getElementById('homeDailyBriefRefreshBtn'),
+      settingsBtn: document.getElementById('homeDailyBriefSettingsBtn')
+    },
+    {
+      gate: async () =>
+        onboardingGateDecision(await loadOnboardingStatus()).allowWorkspaceHydration,
+      onUnavailable: () => {
+        section.hidden = true;
+      },
+      onSeen: (_revision, hqWorkspaceId) =>
+        void openParcelByRef({ kind: 'daily_brief', workspaceId: hqWorkspaceId })
+    }
+  );
+  if (typeof IntersectionObserver === 'function') {
+    new IntersectionObserver(entries => {
+      brief.setOnScreen(entries.some(entry => entry.isIntersecting));
+    }).observe(section);
+  }
+  void brief.load();
 })();
