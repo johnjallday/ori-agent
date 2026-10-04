@@ -1,6 +1,7 @@
 package personalassistanthttp
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -64,6 +65,10 @@ func (h *Handler) GetKnowledgeInterview(w http.ResponseWriter, r *http.Request) 
 // to propose. The wizard leaves the answer box as it was.
 const interviewNoSuggestionMessage = "I couldn't tell what this folder is for. Type your answer instead."
 
+// interviewScanBusyMessage is the wizard's wording for a scan that is still
+// running. Every other scan refusal reads as it does on Home.
+const interviewScanBusyMessage = "I'm still looking at the last folder. Try again in a moment."
+
 // SuggestKnowledgeInterview proposes an answer to the interview's first
 // question from a folder the user shows the assistant. The body is a folder
 // scan's body (exactly one of chip, picker or file, never a path) and the scan
@@ -85,13 +90,17 @@ func (h *Handler) SuggestKnowledgeInterview(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	if req.Chip == "" {
-		orihttp.BadRequest(w, "Pick a folder from the list for now")
+	scanned, err := h.scanForInterview(r.Context(), userID, req)
+	if errors.Is(err, personalassistant.ErrFolderScanBusy) {
+		orihttp.Conflict(w, interviewScanBusyMessage)
 		return
 	}
-	scanned, err := h.folderDigest.ScanChip(r.Context(), userID, req.Chip)
 	if err != nil {
 		writeFolderDigestError(w, err)
+		return
+	}
+	if scanned == nil {
+		orihttp.Success(w, map[string]any{"cancelled": true})
 		return
 	}
 	offer, err := h.folderDigest.StoredOffer(r.Context(), userID, scanned.ID)
@@ -105,6 +114,22 @@ func (h *Handler) SuggestKnowledgeInterview(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	orihttp.Success(w, map[string]any{"suggestion": suggestion})
+}
+
+// scanForInterview runs the one scan the request names, through the same
+// service calls Home uses. A cancelled dialog is a nil offer with no error.
+func (h *Handler) scanForInterview(ctx context.Context, userID string, req folderScanRequest) (*personalassistant.FolderOfferView, error) {
+	switch {
+	case req.Picker:
+		return h.folderDigest.ScanPicked(ctx, userID)
+	case req.File:
+		return h.folderDigest.ScanPickedFile(ctx, userID)
+	}
+	offer, err := h.folderDigest.ScanChip(ctx, userID, req.Chip)
+	if err != nil {
+		return nil, err
+	}
+	return &offer, nil
 }
 
 func interviewSavedRows(interview *personalassistant.KnowledgeInterview) []string {

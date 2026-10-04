@@ -30,6 +30,11 @@ func TestInterviewSuggestion_FromARealScan(t *testing.T) {
 	if !ok || suggestion.Text != "Thesis, a LaTeX manuscript" || suggestion.Folder != "Thesis" {
 		t.Fatalf("suggestion = %+v ok=%v", suggestion, ok)
 	}
+	// The folder's other two projects follow; its loose files are not a project.
+	if len(suggestion.Alternates) != 2 || suggestion.Alternates[0].Text != "website, a Node.js package" ||
+		suggestion.Alternates[1].Text != "Album, a REAPER session" || suggestion.Alternates[1].Folder != "Album" {
+		t.Fatalf("alternates = %+v", suggestion.Alternates)
+	}
 	after, err := f.store.Read(ctx, "local")
 	if err != nil || after.Version != before.Version {
 		t.Fatalf("StoredOffer wrote: version %d -> %d err=%v", before.Version, after.Version, err)
@@ -101,5 +106,52 @@ func TestInterviewSuggestionFromOffer(t *testing.T) {
 				t.Fatalf("alternates = %+v, want none", got.Alternates)
 			}
 		})
+	}
+}
+
+func TestInterviewSuggestionFromOffer_Alternates(t *testing.T) {
+	candidate := func(name, marker, kind string) FolderCandidateRecord {
+		return FolderCandidateRecord{Key: strings.Repeat("c", 64), Name: name, Kind: kind, Marker: marker}
+	}
+	texts := func(s InterviewSuggestion) []string {
+		out := make([]string, 0, len(s.Alternates))
+		for _, alternate := range s.Alternates {
+			if len(alternate.Alternates) != 0 {
+				t.Fatalf("an alternate carries its own alternates: %+v", alternate)
+			}
+			out = append(out, alternate.Text+"|"+alternate.Folder)
+		}
+		return out
+	}
+	offer := FolderOffer{
+		ID: "offer-1", Verdict: string(folderdigest.KindMixed),
+		Subject: candidate("Thesis", "LaTeX manuscript", FolderChoiceProject),
+		Queue: []FolderCandidateRecord{
+			candidate("website", "Node.js package", FolderChoiceProject),
+			// The same wording twice is offered once.
+			candidate("website", "Node.js package", FolderChoiceProject),
+			// A refused name is skipped, not a reason to drop the rest.
+			candidate("bad‮name", "", FolderChoiceProject),
+			candidate("Documents", "", FolderChoiceTidy),
+			candidate("Notes", "Obsidian vault", FolderChoiceProject),
+			// The subject's own wording is never repeated as an alternate.
+			candidate("Thesis", "LaTeX manuscript", FolderChoiceProject),
+			candidate("Sketches", "", FolderChoiceProject),
+			candidate("Fourth", "git repository", FolderChoiceProject),
+		},
+	}
+	got, ok := InterviewSuggestionFromOffer(offer)
+	if !ok || got.Text != "Thesis, a LaTeX manuscript" {
+		t.Fatalf("suggestion = %+v ok=%v", got, ok)
+	}
+	want := []string{"website, a Node.js package|website", "Notes, an Obsidian vault|Notes", "Sketches|Sketches"}
+	if strings.Join(texts(got), ";") != strings.Join(want, ";") {
+		t.Fatalf("alternates = %v, want %v (at most three projects, in queue order)", texts(got), want)
+	}
+
+	// A subject that cannot be proposed gives nothing, whatever the queue holds.
+	offer.Subject = candidate("Documents", "", FolderChoiceTidy)
+	if got, ok := InterviewSuggestionFromOffer(offer); ok {
+		t.Fatalf("a tidy subject proposed %+v", got)
 	}
 }

@@ -7,6 +7,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// interviewSuggestionMaxAlternates bounds the "Also in this folder" choices.
+const interviewSuggestionMaxAlternates = 3
+
 // InterviewSuggestion is a proposed answer to the interview's first question,
 // worded from a folder the user showed the assistant. It is text to confirm or
 // edit, never a saved fact: Folder is a base name, and nothing here is a path.
@@ -32,7 +35,25 @@ func InterviewSuggestionFromOffer(offer FolderOffer) (InterviewSuggestion, bool)
 	default:
 		return InterviewSuggestion{}, false
 	}
-	return interviewSuggestionForCandidate(offer.Subject)
+	suggestion, ok := interviewSuggestionForCandidate(offer.Subject)
+	if !ok {
+		return InterviewSuggestion{}, false
+	}
+	// The other projects the scan found in the same folder are offered as
+	// alternates, in the scan's own rank order. A tidy candidate is not one.
+	seen := map[string]bool{suggestion.Text: true}
+	for _, candidate := range offer.Queue {
+		if len(suggestion.Alternates) == interviewSuggestionMaxAlternates {
+			break
+		}
+		alternate, ok := interviewSuggestionForCandidate(candidate)
+		if !ok || seen[alternate.Text] {
+			continue
+		}
+		seen[alternate.Text] = true
+		suggestion.Alternates = append(suggestion.Alternates, alternate)
+	}
+	return suggestion, true
 }
 
 // interviewSuggestionForCandidate builds "<Name>, a <Marker>" (or the bare

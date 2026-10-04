@@ -29,6 +29,20 @@ func interviewSuggestFake() *fakeFolderDigest {
 			FolderKey: key, FolderName: "Downloads",
 			Subject: personalassistant.FolderCandidateRecord{Key: key, Name: "Downloads", Kind: personalassistant.FolderChoiceTidy},
 		},
+		// The fake's picked folder and picked file.
+		"offer-2": {
+			ID: "offer-2", Status: personalassistant.FolderOfferPending, Verdict: "project",
+			FolderKey: key, FolderName: "Thesis",
+			Subject: personalassistant.FolderCandidateRecord{Key: key, Name: "Thesis", Kind: personalassistant.FolderChoiceProject, Marker: "LaTeX manuscript", IsRoot: true},
+			Queue: []personalassistant.FolderCandidateRecord{
+				{Key: key, Name: "appendix", Kind: personalassistant.FolderChoiceProject, Marker: "outline", RelPath: "appendix"},
+			},
+		},
+		"offer-3": {
+			ID: "offer-3", Status: personalassistant.FolderOfferPending, Verdict: "project",
+			FolderKey: key, FolderName: "Album", EntryName: "Song.wav",
+			Subject: personalassistant.FolderCandidateRecord{Key: key, Name: "Album", Kind: personalassistant.FolderChoiceProject, IsRoot: true},
+		},
 	}}
 }
 
@@ -133,6 +147,56 @@ func TestSuggestKnowledgeInterview_DumpChipSaysItCouldNotTell(t *testing.T) {
 	}
 }
 
+func TestSuggestKnowledgeInterview_PickerAndFileModes(t *testing.T) {
+	t.Run("a picked folder proposes the answer and its alternates", func(t *testing.T) {
+		fake := interviewSuggestFake()
+		w := postInterviewSuggest(newFolderDigestHandler(fake), `{"picker":true}`)
+		body := decodeInterviewSuggest(t, w)
+		if w.Code != http.StatusOK || body.Suggestion == nil || body.Suggestion.Text != "Thesis, a LaTeX manuscript" || body.Cancelled {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		if len(body.Suggestion.Alternates) != 1 || body.Suggestion.Alternates[0].Text != "appendix, an outline" || body.Suggestion.Alternates[0].Folder != "appendix" {
+			t.Fatalf("alternates = %+v", body.Suggestion.Alternates)
+		}
+		if fake.picks != 1 || fake.filePicks != 0 || len(fake.chips) != 0 || len(fake.storedReads) != 1 || fake.storedReads[0] != "offer-2" {
+			t.Fatalf("picks=%d files=%d chips=%v reads=%v", fake.picks, fake.filePicks, fake.chips, fake.storedReads)
+		}
+	})
+	t.Run("a picked file proposes its folder and never names the file", func(t *testing.T) {
+		fake := interviewSuggestFake()
+		w := postInterviewSuggest(newFolderDigestHandler(fake), `{"file":true}`)
+		body := decodeInterviewSuggest(t, w)
+		if w.Code != http.StatusOK || body.Suggestion == nil || body.Suggestion.Text != "Album" || body.Suggestion.Folder != "Album" {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "Song.wav") || fake.filePicks != 1 || fake.picks != 0 {
+			t.Fatalf("body=%s files=%d picks=%d", w.Body.String(), fake.filePicks, fake.picks)
+		}
+	})
+	for _, mode := range []string{`{"picker":true}`, `{"file":true}`} {
+		t.Run("a cancelled dialog changes nothing "+mode, func(t *testing.T) {
+			fake := interviewSuggestFake()
+			fake.cancel = true
+			w := postInterviewSuggest(newFolderDigestHandler(fake), mode)
+			if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"cancelled":true}` {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if len(fake.storedReads) != 0 {
+				t.Fatalf("a cancelled dialog read an offer: %v", fake.storedReads)
+			}
+		})
+		t.Run("an unavailable dialog is refused "+mode, func(t *testing.T) {
+			fake := interviewSuggestFake()
+			fake.scanErr = personalassistant.ErrFolderPickerUnavailable
+			w := postInterviewSuggest(newFolderDigestHandler(fake), mode)
+			body := decodeInterviewSuggest(t, w)
+			if w.Code != http.StatusConflict || body.Message != "The folder dialog is unavailable here. Pick a folder from the list" || body.Suggestion != nil {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestSuggestKnowledgeInterview_ScanErrorsReadLikeHome(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -142,7 +206,9 @@ func TestSuggestKnowledgeInterview_ScanErrorsReadLikeHome(t *testing.T) {
 	}{
 		{"unknown chip", personalassistant.ErrFolderChipUnknown, http.StatusBadRequest, "That is not one of the folders Ori can look at"},
 		{"missing chip folder", personalassistant.ErrFolderChipMissing, http.StatusBadRequest, "That folder is not on this computer"},
-		{"scan in progress", personalassistant.ErrFolderScanBusy, http.StatusConflict, "Ori is still looking at a folder. Try again in a moment"},
+		// The one refusal the wizard words itself.
+		{"scan in progress", personalassistant.ErrFolderScanBusy, http.StatusConflict, "I'm still looking at the last folder. Try again in a moment."},
+		{"picker switched off", personalassistant.ErrFolderPickerUnavailable, http.StatusConflict, "The folder dialog is unavailable here. Pick a folder from the list"},
 		{"no Personal HQ", personalassistant.ErrNeedsHQ, http.StatusConflict, "Build Personal HQ before showing a folder"},
 		{"unreadable folder", &personalassistant.FolderRootError{Message: "Ori is not allowed to look inside that folder. Choose a different folder."}, http.StatusBadRequest, "Ori is not allowed to look inside that folder. Choose a different folder."},
 	} {

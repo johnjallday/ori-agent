@@ -99,6 +99,19 @@
   color: var(--text-secondary);
 }
 
+/* Under the answer box: the caption, the folder's other projects, and a
+   suggestion waiting for the user to choose it over what they typed. */
+.interview-wizard-alternates {
+  margin-top: 0.5rem;
+}
+
+.interview-wizard-use {
+  margin-top: 0.5rem;
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 .interview-wizard-input {
   resize: none;
 }

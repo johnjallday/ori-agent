@@ -87,6 +87,9 @@ func (f *fakeFolderDigest) ScanChip(_ context.Context, _ string, chip string) (p
 
 func (f *fakeFolderDigest) ScanPicked(context.Context, string) (*personalassistant.FolderOfferView, error) {
 	f.picks++
+	if f.scanErr != nil {
+		return nil, f.scanErr
+	}
 	if f.cancel {
 		return nil, nil
 	}
@@ -95,6 +98,9 @@ func (f *fakeFolderDigest) ScanPicked(context.Context, string) (*personalassista
 
 func (f *fakeFolderDigest) ScanPickedFile(context.Context, string) (*personalassistant.FolderOfferView, error) {
 	f.filePicks++
+	if f.scanErr != nil {
+		return nil, f.scanErr
+	}
 	if f.cancel {
 		return nil, nil
 	}
