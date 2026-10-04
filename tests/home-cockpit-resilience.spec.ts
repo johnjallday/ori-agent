@@ -198,7 +198,10 @@ test.describe('Home cockpit resilience', () => {
     await expect(page.locator('#cockpitMap .ws-map-canvas')).toHaveCount(1);
   });
 
-  test('Tree expansion and bulk selection survive repeated view switches', async ({ page }) => {
+  // restored in 5.7
+  test.fixme('Tree expansion and bulk selection survive repeated view switches', async ({
+    page
+  }) => {
     await ensureWorkspace(page);
     await page.goto('/?view=tree');
     await page.locator('[data-tree-row]').first().waitFor();

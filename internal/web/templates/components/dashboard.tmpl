@@ -453,7 +453,14 @@
         <!-- Map and Tree occupy the SAME layout slot; activating one hides the
              other, never a drawer or overlay (FR18). -->
         <div id="cockpitMap" class="ws-map cockpit-map" role="region" aria-label="Workspace map" tabindex="-1" hidden></div>
-        <div id="cockpitTree" class="cockpit-tree" role="region" aria-label="Workspace tree" tabindex="-1" hidden></div>
+        <!-- Tree is a file explorer in two columns (home-file-tree FR2): the
+             slim tree on the left, and the pane where a clicked item opens on
+             the right. They are separate hosts on purpose: the tree redraws on
+             every expand, and that must never rebuild the pane beside it. -->
+        <div id="cockpitTree" class="cockpit-tree" role="region" aria-label="Workspace tree" tabindex="-1" hidden>
+          <nav id="cockpitTreeNav" class="cockpit-tree-nav" aria-label="Workspaces and their contents"></nav>
+          <section id="cockpitTreePane" class="cockpit-tree-pane" aria-label="Open item"></section>
+        </div>
         <div id="cockpitWorkspaceStatus" class="cockpit-area-status" role="status" aria-live="polite"></div>
       </div>
     </section>
