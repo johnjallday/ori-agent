@@ -760,6 +760,123 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   max-width: none;
 }
 
+/* ---- conversation bar --------------------------------------------------------------- */
+
+.personal-assistant-conversation {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
+  background: var(--ori-paper);
+}
+
+.personal-assistant-conversation[hidden],
+.personal-assistant-conversation__list[hidden] {
+  display: none;
+}
+
+.personal-assistant-conversation__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+
+.personal-assistant-conversation__current {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+}
+
+.personal-assistant-conversation__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.personal-assistant-conversation__title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-conversation__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.personal-assistant-conversation__button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ori-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.personal-assistant-conversation__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.personal-assistant-conversation__list {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.personal-assistant-conversation__item {
+  display: grid;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ori-ink);
+  text-align: left;
+}
+
+.personal-assistant-conversation__item:hover,
+.personal-assistant-conversation__item[aria-current="true"] {
+  border-color: var(--ori-line);
+}
+
+.personal-assistant-conversation__item-title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-conversation__item-meta,
+.personal-assistant-conversation__empty,
+.personal-assistant-conversation__manage,
+.personal-assistant-conversation__note {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.82;
+}
+
+.personal-assistant-conversation__empty,
+.personal-assistant-conversation__manage {
+  padding: 4px 8px;
+}
+
 /* ---- narrow layout ---------------------------------------------------------------- */
 
 /* Below this width the Personal Assistant becomes a full-width bottom sheet.

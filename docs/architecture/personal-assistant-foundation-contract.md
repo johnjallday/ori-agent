@@ -686,6 +686,124 @@ Read surfaces degrade safely when the binding, workspace, or agent is missing:
 they return a bounded unavailable/repair state, never a fabricated identity.
 The personal-assistant service is a required part of the canonical server build.
 
+## Assistant conversations
+
+An everyday request to the hired assistant — write this, make it warmer, give it
+to me in Korean — is a conversation, not a handoff. It needs no new agent,
+project workspace, connection, or setup mission.
+
+### Which requests are conversations
+
+`/api/home-assistant/route` returns intent `assistant_conversation` with route
+mode `home_inline` only when all of these hold:
+
+- the relationship is `active` or `paused`;
+- the request carries no workspace context (a workspace page, or a workspace
+  selected on the Home Map, keeps its existing workspace route);
+- the request is not a complex project build that recommends a workspace;
+- the request is either a general request with no more specific intent, or a
+  composition request (it opens with a writing verb such as write, draft,
+  rewrite, translate, or a follow-up such as “make it …”); and
+- no specialist agent matched it. The protected system assistant and the hired
+  profile itself are not specialists for this rule.
+
+Everything else keeps its route: utility lookups, app activity and navigation,
+workspace creation, and email, calendar, or app-launch requests that a
+specialist can take. A composition request never forces the user to create an
+agent or a connection, so "write an email to my landlord" is drafted in the
+conversation when no email specialist exists and goes to that specialist when
+one does. The response never names the protected system assistant as the
+handler.
+
+### Identity and scope
+
+A conversation is one canonical `Session` in the designated Personal HQ:
+`Session.FolderID` is the HQ workspace ID and `Session.AgentName` is the hired
+profile's agent-store key. There is no second transcript store.
+
+The server derives both values from the relationship on every request. The
+browser supplies one thing: an opaque conversation ID, or none.
+
+| Request | Result |
+|---|---|
+| No conversation ID | A new conversation. The session is created when the first turn is stored, so a failed first turn leaves nothing behind. |
+| A conversation ID in scope | That conversation continues. |
+| An ID that no longer exists | Refused as `conversation_not_found`. Nothing is recreated. |
+| An ID in another workspace, bound to another agent, or left behind by a replaced assistant or a changed HQ | Refused as `conversation_out_of_scope`. |
+| The session store cannot be read | Refused as `conversation_unavailable`. |
+
+A refusal calls no model, stores nothing, and offers **New conversation**; the
+user's text stays in the composer. The server never adopts the tab's active
+session, the route context's `session_id`, an `X-Session-ID` header, the most
+recent session, or a session found by title or agent display name. A rename
+keeps conversations in scope because the rename already carries session
+bindings to the new profile name.
+
+Reads are validated the same way. `GET /api/home-assistant/conversations` lists
+the conversations in scope and `GET /api/home-assistant/conversations/{id}`
+returns one, both by canonical session and message ID. Ori Help has neither
+route nor the store behind them.
+
+### Continuation and new conversation
+
+Each tab holds its own current conversation ID, so two tabs never share a
+thread by accident. **New conversation** clears the tab's ID and any pending
+confirmation. **Continue** picks a conversation from the validated list. Every
+stored turn returns its canonical message IDs, and the rendered messages carry
+them, so a later action can name the exact message it means.
+
+A turn is stored only after it is answered: the user's message, then the
+assistant's reply. If the reply cannot be stored, the answer is still shown and
+marked as not saved; Ori does not claim history it does not have.
+
+### History is not memory
+
+| Kind | Where it lives | Who reads it |
+|---|---|---|
+| Unsent input | The composer only | No one until Send |
+| Conversation history | The session's messages, until the user deletes the session with the existing session controls | That one conversation |
+| Long-term memory | Reviewed Personal HQ memory and the global Profile | Every eligible assistant turn |
+
+Conversation history is never copied into memory, Today, Daily Brief, another
+conversation, or another agent's prompt. Deleting a conversation removes its
+history and nothing else: a saved Ticket or a remembered fact has its own owner
+and stays. Translating one message does not change the profile language.
+
+### Context bounds
+
+A turn's prompt holds the system prompt, a window of the current conversation,
+the current request, and the existing eligible personal context (working
+agreement, Profile, reviewed HQ memory). The window is the most recent 40
+messages within 24,000 characters; one message contributes at most 6,000.
+Older turns stay stored and are left out of the prompt, and the response says
+so. Only user and assistant messages are replayed. A stored system-role message
+is never replayed, and an imported message is replayed as quoted history, not
+as a turn.
+
+No other workspace's transcript is injected. The read-only `home_*` tools
+return counts and titles, not message text.
+
+### No authority from a transcript
+
+Nothing in a conversation can authorize a write — not the user's earlier
+messages, the assistant's replies, imported history, or an old confirmation.
+Every write is prepared and confirmed in the current request against the
+current relationship version, and executed only by the server's confirmed-action
+path. A pending confirmation is not stored as an executable record and does not
+follow the user into another conversation. The model has read-only tools in a
+conversation; it cannot save, remember, schedule, send, or run anything.
+
+### Model
+
+A conversation uses the configured system model through the existing provider
+factory — the same model the relationship's `model` availability reports. When
+none resolves, the turn returns the existing "choose a model" state, stores
+nothing, and keeps the user's text. Ori does not switch to another provider or
+to the agent profile's own settings to produce an answer.
+
+A paused relationship still answers a direct request and keeps every
+confirmation gate; it starts no routine and no background run.
+
 ## Delegation and ownership
 
 The personal assistant owns intake and remains the user-visible delegator.

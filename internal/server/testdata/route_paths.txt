@@ -31,6 +31,8 @@
 /api/folder-picker/select-path
 /api/folders
 /api/home-assistant/ask
+/api/home-assistant/conversations
+/api/home-assistant/conversations/x
 /api/home-assistant/route
 /api/home-assistant/trace
 /api/hooks

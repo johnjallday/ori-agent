@@ -82,6 +82,9 @@ type HomeAssistantAskRequest struct {
 	Context         *HomeAssistantRouteContext `json:"context,omitempty"`
 	DateWindow      string                     `json:"date_window,omitempty"`
 	ConfirmedAction *HomeAction                `json:"confirmed_action,omitempty"`
+	// Conversation asks for the turn to be part of a hired-assistant
+	// conversation. Its ID is opaque; the server derives the owner.
+	Conversation *HomeAssistantConversationRef `json:"conversation,omitempty"`
 }
 
 // HomeAssistantAskResponse is the response for POST /api/home-assistant/ask.
@@ -99,6 +102,11 @@ type HomeAssistantAskResponse struct {
 	Actions              []HomeAction            `json:"actions,omitempty"`
 	RequiresConfirmation bool                    `json:"requires_confirmation,omitempty"`
 	Confirmation         *HomeActionConfirmation `json:"confirmation,omitempty"`
+	// Conversation is set only for a hired-assistant conversation turn.
+	Conversation *HomeAssistantConversationState `json:"conversation,omitempty"`
+	// ModelUnavailable marks a turn that got no model answer, so the browser
+	// can keep the user's text instead of treating the reply as an answer.
+	ModelUnavailable bool `json:"model_unavailable,omitempty"`
 }
 
 // HomeActionMutator executes confirmed state-changing actions. The server wires a
@@ -150,7 +158,10 @@ type HomeAssistantAskHandler struct {
 	Trace                    homeAskTraceEmitter
 	PersonalAssistantContext PersonalAssistantContextProvider
 	PersonalAssistantMemory  PersonalAssistantMemoryWriter
-	UserID                   string
+	// Conversations is the canonical session store behind hired-assistant
+	// conversations; nil keeps every turn stateless.
+	Conversations PersonalAssistantConversationStore
+	UserID        string
 	// WorkspaceBuildAvailable reports whether "Build with your assistant" can
 	// take a create-workspace request; nil keeps the direct create.
 	WorkspaceBuildAvailable func(ctx context.Context) bool
@@ -262,12 +273,25 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	}
 	identity := homeAssistantIdentity(workContext)
 
+	// A hired-assistant conversation is validated against the relationship
+	// resolved above before anything else runs. A conversation that may not be
+	// used stops the request: no model call, no write, no confirmed action.
+	conversation, refusal := h.openConversation(ctx, req.Conversation, workContext)
+	if refusal != "" {
+		return conversationRefusal(refusal, intent, identity)
+	}
+
 	// Confirmed mutation path: execute only known action types (FR #24). The
 	// relationship is freshly resolved above so stale/replaced HQ state cannot
 	// execute a previously prepared action.
 	if req.ConfirmedAction != nil {
 		resp := h.executeConfirmedAction(ctx, intent, *req.ConfirmedAction)
 		resp.Identity = identity
+		// The outcome joins a conversation that already exists; a confirmation
+		// alone never starts one.
+		if conversation != nil && conversation.id != "" {
+			resp.Conversation = h.storeTurn(ctx, conversation, "", resp.Response)
+		}
 		return resp
 	}
 
@@ -284,6 +308,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return HomeAssistantAskResponse{
 			Response: conf.Summary, Intent: intent, Identity: identity,
 			RequiresConfirmation: true, Confirmation: conf,
+			Conversation: h.storeTurn(ctx, conversation, prompt, conf.Summary),
 		}
 	}
 
@@ -299,9 +324,13 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 			Identity:             identity,
 			RequiresConfirmation: true,
 			Confirmation:         conf,
+			Conversation:         h.storeTurn(ctx, conversation, prompt, conf.Summary),
 		}
 	} else if decline != "" {
-		return HomeAssistantAskResponse{Response: decline, Intent: intent, Identity: identity}
+		return HomeAssistantAskResponse{
+			Response: decline, Intent: intent, Identity: identity,
+			Conversation: h.storeTurn(ctx, conversation, prompt, decline),
+		}
 	}
 
 	// Explicit, supported mutation request: ask for confirmation before doing
@@ -315,28 +344,90 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 			Identity:             identity,
 			RequiresConfirmation: true,
 			Confirmation:         conf,
+			Conversation:         h.storeTurn(ctx, conversation, prompt, conf.Summary),
+		}
+	}
+
+	promptSources := personalAssistantPromptSources(h.Sources, workContext)
+	var history []llm.Message
+	if conversation != nil {
+		history = conversation.history
+	}
+
+	// An everyday request to the hired assistant: answer the request itself.
+	// No Home Snapshot is injected and no app counts are reported; the
+	// read-only home tools stay available in case the user asks about the app.
+	if intent == homeAssistantConversationIntent.Key && workContext != nil && workContext.ReadyForWork() {
+		answer, err := h.runModel(ctx, modelTurn{
+			system:      buildAssistantConversationSystemPrompt(workContext),
+			history:     history,
+			user:        buildAssistantConversationUserPrompt(prompt, workContext),
+			sources:     promptSources,
+			temperature: 0.6,
+		})
+		if err != nil {
+			return h.conversationModelUnavailable(ctx, prompt, intent, workContext, conversation, err)
+		}
+		answer = strings.TrimSpace(answer)
+		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "answered"})
+		return HomeAssistantAskResponse{
+			Response: answer, Intent: intent, Identity: identity,
+			Conversation: h.storeTurn(ctx, conversation, prompt, answer),
 		}
 	}
 
 	window := NormalizeHomeDateWindow(req.DateWindow, DefaultHomeDateWindowForPrompt(prompt))
-	promptSources := personalAssistantPromptSources(h.Sources, workContext)
 	snapshot := BuildHomeSnapshot(ctx, promptSources, window)
 	snapshot = sanitizePersonalAssistantSnapshot(snapshot, workContext)
 
-	answer, err := h.generateAnswer(ctx, prompt, intent, snapshot, promptSources, workContext)
+	answer, err := h.generateAnswer(ctx, prompt, intent, snapshot, promptSources, workContext, history)
 	if err != nil {
-		return h.modelUnavailableResponse(ctx, prompt, intent, snapshot, workContext, err)
+		resp := h.modelUnavailableResponse(ctx, prompt, intent, snapshot, workContext, err)
+		resp.Conversation = unstoredConversation(conversation)
+		return resp
 	}
+	answer = strings.TrimSpace(answer)
 
 	actions := h.buildNextStepActions(intent, prompt, snapshot)
 	meta := snapshot.Meta
 	h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Window: string(window), Outcome: "answered", ActionCount: len(actions), Degraded: meta.Degraded})
 	return HomeAssistantAskResponse{
-		Response:     strings.TrimSpace(answer),
+		Response:     answer,
 		Intent:       intent,
 		Identity:     identity,
 		SnapshotMeta: &meta,
 		Actions:      actions,
+		Conversation: h.storeTurn(ctx, conversation, prompt, answer),
+	}
+}
+
+// unstoredConversation reports a turn that was not stored, keeping the
+// conversation the browser was in.
+func unstoredConversation(conversation *openConversation) *HomeAssistantConversationState {
+	if conversation == nil {
+		return nil
+	}
+	return &HomeAssistantConversationState{ID: conversation.id, Title: conversation.title, HistoryTruncated: conversation.truncated}
+}
+
+// conversationModelUnavailable is the honest "no answer" for a conversation
+// turn. Nothing is stored and no other provider is tried; the browser keeps
+// the user's text so it can be sent again.
+func (h *HomeAssistantAskHandler) conversationModelUnavailable(ctx context.Context, prompt, intent string, workContext *PersonalAssistantWorkContext, conversation *openConversation, err error) HomeAssistantAskResponse {
+	name := boundedContextText(workContext.DisplayName, 100)
+	if name == "" {
+		name = "Your assistant"
+	}
+	msg := fmt.Sprintf("%s could not reach the system model, so there is no answer yet. Your message was not sent; try again in a moment.", name)
+	if errors.Is(err, errHomeModelNotConfigured) {
+		msg = fmt.Sprintf("%s needs a system model to answer. Choose one in Settings, then send your message again.", name)
+	}
+	h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "model_unavailable", ActionCount: 1})
+	return HomeAssistantAskResponse{
+		Response: msg, Intent: intent, Identity: homeAssistantIdentity(workContext),
+		Actions:          []HomeAction{{ID: "nav-settings", Type: HomeActionNavigate, Label: "Go to Settings", Href: "/settings"}},
+		Conversation:     unstoredConversation(conversation),
+		ModelUnavailable: true,
 	}
 }
 
@@ -366,22 +457,42 @@ func homeAssistantIdentity(workContext *PersonalAssistantWorkContext) *HomeAssis
 	}
 }
 
-func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, intent string, snapshot HomeSnapshot, promptSources HomeSnapshotSources, workContext *PersonalAssistantWorkContext) (string, error) {
+func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, intent string, snapshot HomeSnapshot, promptSources HomeSnapshotSources, workContext *PersonalAssistantWorkContext, history []llm.Message) (string, error) {
+	// First-run greeting: a user with no workspaces yet is at "first contact".
+	// The behavior naturally turns off once they create their first workspace.
+	firstRun := snapshot.Meta.WorkspaceCount == 0
+	return h.runModel(ctx, modelTurn{
+		system:      buildHomeSystemPromptWithAssistant(firstRun, workContext),
+		history:     history,
+		user:        buildHomeUserPromptWithAssistant(prompt, intent, snapshot, workContext),
+		sources:     promptSources,
+		temperature: 0.3,
+	})
+}
+
+// modelTurn is one prepared request to the system model: the system prompt,
+// the bounded history of the current conversation (if any), and this turn.
+type modelTurn struct {
+	system      string
+	history     []llm.Message
+	user        string
+	sources     HomeSnapshotSources
+	temperature float64
+}
+
+// runModel sends one turn to the configured system model with the read-only
+// home tools and returns the final text.
+func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) (string, error) {
 	provider, model, err := h.resolveProvider()
 	if err != nil {
 		return "", err
 	}
-	registry := newHomeToolRegistry(promptSources)
-	// First-run greeting: a user with no workspaces yet is at "first contact".
-	// The behavior naturally turns off once they create their first workspace.
-	firstRun := snapshot.Meta.WorkspaceCount == 0
-	systemPrompt := buildHomeSystemPromptWithAssistant(firstRun, workContext)
-	userPrompt := buildHomeUserPromptWithAssistant(prompt, intent, snapshot, workContext)
+	registry := newHomeToolRegistry(turn.sources)
 
-	conversation := []llm.Message{
-		llm.NewSystemMessage(systemPrompt),
-		llm.NewUserMessage(userPrompt),
-	}
+	conversation := make([]llm.Message, 0, len(turn.history)+2)
+	conversation = append(conversation, llm.NewSystemMessage(turn.system))
+	conversation = append(conversation, turn.history...)
+	conversation = append(conversation, llm.NewUserMessage(turn.user))
 	tools := registry.Definitions()
 
 	for round := 0; round < homeMaxToolRounds; round++ {
@@ -389,7 +500,7 @@ func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, in
 			Model:       model,
 			Messages:    conversation,
 			Tools:       tools,
-			Temperature: 0.3,
+			Temperature: turn.temperature,
 		})
 		if chatErr != nil {
 			return "", chatErr
@@ -418,7 +529,7 @@ func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, in
 		}
 	}
 	// Tool budget exhausted: make one final tool-free attempt for a summary.
-	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, Messages: conversation, Temperature: 0.3})
+	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, Messages: conversation, Temperature: turn.temperature})
 	if chatErr != nil {
 		return "", chatErr
 	}
@@ -466,7 +577,7 @@ func (h *HomeAssistantAskHandler) modelUnavailableResponse(ctx context.Context, 
 	}}
 	actions = append(actions, h.buildNextStepActions(intent, "", snapshot)...)
 	h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Window: string(meta.Window), Outcome: "model_unavailable", ActionCount: len(actions), Degraded: meta.Degraded})
-	return HomeAssistantAskResponse{Response: msg, Intent: intent, Identity: homeAssistantIdentity(workContext), SnapshotMeta: &meta, Actions: actions}
+	return HomeAssistantAskResponse{Response: msg, Intent: intent, Identity: homeAssistantIdentity(workContext), SnapshotMeta: &meta, Actions: actions, ModelUnavailable: true}
 }
 
 func describeSnapshotBriefly(s HomeSnapshot) string {

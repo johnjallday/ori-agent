@@ -395,6 +395,10 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		if s.Storage.PersonalAssistantMemory != nil {
 			handler.SetPersonalAssistantMemoryWriter(s.Storage.PersonalAssistantMemory)
 		}
+		// Hired-assistant conversations are canonical Sessions in Personal HQ.
+		if s.Storage.SessionStore != nil {
+			handler.SetConversationStore(personalAssistantConversationAdapter{store: s.Storage.SessionStore})
+		}
 	}
 
 	// Ori Guide reuses the same system model, but only to reword an answer it

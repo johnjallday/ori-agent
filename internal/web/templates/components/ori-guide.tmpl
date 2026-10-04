@@ -149,6 +149,28 @@
         <button type="submit" id="personalAssistantSend" class="personal-assistant-panel__send">Send</button>
       </form>
       <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
+      <!-- The conversation this tab is in. A conversation is a session in
+           Personal HQ; this bar only starts a new one or continues an earlier
+           one. Its note keeps history and long-term memory apart. -->
+      <div id="personalAssistantConversationBar" class="personal-assistant-conversation" hidden>
+        <div class="personal-assistant-conversation__head">
+          <p class="personal-assistant-conversation__current">
+            <span class="personal-assistant-conversation__eyebrow">Conversation</span>
+            <span id="personalAssistantConversationTitle" class="personal-assistant-conversation__title">New conversation</span>
+          </p>
+          <div class="personal-assistant-conversation__actions">
+            <button type="button" id="personalAssistantConversationNew"
+                    class="personal-assistant-conversation__button">New conversation</button>
+            <button type="button" id="personalAssistantConversationContinue"
+                    class="personal-assistant-conversation__button"
+                    aria-expanded="false" aria-controls="personalAssistantConversationList">Continue…</button>
+          </div>
+        </div>
+        <ul id="personalAssistantConversationList" class="personal-assistant-conversation__list"
+            aria-label="Earlier conversations" hidden></ul>
+        <p id="personalAssistantConversationNote" class="personal-assistant-conversation__note"
+           role="status" aria-live="polite"></p>
+      </div>
       {{if ne .CurrentPage "index"}}
       {{template "assistant-led-setup.tmpl" .}}
       {{end}}

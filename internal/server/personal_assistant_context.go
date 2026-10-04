@@ -45,6 +45,7 @@ func (a personalAssistantContextAdapter) ResolvePersonalAssistantContext(ctx con
 
 	out.DisplayName = projection.DisplayName
 	out.HQWorkspaceID = projection.HQWorkspaceID
+	out.ConversationAgent = projection.GlobalAgentProfile
 	out.Mandate = projection.Mandate
 	out.FocusAreas = make([]string, 0, len(projection.FocusAreas))
 	for _, area := range projection.FocusAreas {

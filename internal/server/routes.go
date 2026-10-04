@@ -328,8 +328,13 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/home-assistant/trace/summary", homeAssistantRouteHandler.TraceSummaryHandler)
 
 	// Home harness inline endpoint: answers app-introspection / app-navigation
-	// prompts using the cross-workspace home snapshot and read-only home tools.
-	mux.HandleFunc("/api/home-assistant/ask", s.newHomeAssistantAskHandler().AskHandler)
+	// prompts using the cross-workspace home snapshot and read-only home tools,
+	// and holds the hired assistant's everyday conversations. The two reads
+	// list and open those conversations; both validate the relationship first.
+	homeAssistantAskHandler := s.newHomeAssistantAskHandler()
+	mux.HandleFunc("/api/home-assistant/ask", homeAssistantAskHandler.AskHandler)
+	mux.HandleFunc("GET /api/home-assistant/conversations", homeAssistantAskHandler.ConversationsHandler)
+	mux.HandleFunc("GET /api/home-assistant/conversations/{id}", homeAssistantAskHandler.ConversationHandler)
 }
 
 // registerSettingsRoutes registers settings, API keys, vault mount, Web3 (capability-gated), and reset.

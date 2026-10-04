@@ -119,6 +119,16 @@
       preferredPlugins: [],
       suggestedName: 'Ask Ori',
       tags: ['navigation']
+    },
+    // An everyday request the hired personal assistant answers itself, in its
+    // own conversation. Only the server assigns it; it is never detected here.
+    assistant_conversation: {
+      key: 'assistant_conversation',
+      label: 'conversation',
+      keywords: [],
+      preferredPlugins: [],
+      suggestedName: 'Personal Assistant',
+      tags: ['conversation']
     }
   };
 
@@ -405,7 +415,10 @@
     workspacePromptMode: 'task',
     personalAssistantDisplayName: '',
     workspaceEntryAgentName: '',
-    workspaceEntryWorkspaceId: ''
+    workspaceEntryWorkspaceId: '',
+    // The most recently rendered user message, so its row can be marked with
+    // the canonical message ID once the turn is stored.
+    lastUserRow: null
   };
 
   var homeAssistantThinkingModalInstance = null;
@@ -1955,10 +1968,12 @@
     renderHomeAssistantInlineReply();
   }
 
+  // Returns the rendered row so a caller can mark it with the canonical message
+  // ID once the server has stored the turn.
   function appendHomeAssistantMessage(role, text) {
     var els = getHomeAssistantElements();
     var conversation = els.conversation;
-    if (!conversation) return;
+    if (!conversation) return null;
 
     if (!conversation.dataset.initialized) {
       conversation.innerHTML = '';
@@ -1969,6 +1984,8 @@
     row.style.display = 'flex';
     row.style.marginBottom = '0.65rem';
     row.style.justifyContent = role === 'user' ? 'flex-end' : 'flex-start';
+    row.dataset.messageRole = role === 'user' ? 'user' : 'assistant';
+    if (role === 'user') homeAssistantState.lastUserRow = row;
 
     var messageText = typeof text === 'string' ? text : String(text == null ? '' : text);
     var structuredText = formatHomeAssistantStructuredMessage(messageText);
@@ -2033,6 +2050,7 @@
       // Message rendering must not depend on optional workspace listeners.
     }
     openHomeAssistantThinkingModal();
+    return row;
   }
 
   function formatHomeAssistantStructuredMessage(text) {
@@ -10250,7 +10268,22 @@
     if (!text) return;
     options = options || {};
     var confirmedAction = options.confirmedAction || null;
-    var summaryLabel = intent === 'app_navigation' ? 'Navigation' : 'Activity';
+    var isConversation = intent === 'assistant_conversation';
+    var summaryLabel = isConversation
+      ? getHomeAssistantActivityLabel()
+      : intent === 'app_navigation'
+        ? 'Navigation'
+        : 'Activity';
+    // A request from the Personal Assistant panel is a turn in the hired
+    // assistant's conversation. The module supplies only an opaque ID; the
+    // server decides who owns the conversation.
+    var conversations = window.PersonalAssistantConversation || null;
+    var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var conversationRef =
+      conversations && typeof conversations.request === 'function'
+        ? conversations.request(normalizedContext)
+        : null;
+    var userRow = confirmedAction ? null : homeAssistantState.lastUserRow;
 
     setHomeAssistantBusy(true, confirmedAction ? 'Applying…' : 'Thinking…');
     renderHomeAssistantActions([]);
@@ -10258,23 +10291,37 @@
       summaryLabel,
       confirmedAction
         ? 'Applying your confirmed action…'
-        : 'Reviewing your workspaces, tasks, and activity…'
+        : isConversation
+          ? 'Writing a reply…'
+          : 'Reviewing your workspaces, tasks, and activity…'
     );
 
     try {
       var payload = {
         prompt: text,
         intent: intent,
-        context: normalizeHomeRouteContext(routeContext)
+        context: normalizedContext
       };
       if (confirmedAction) {
         payload.confirmed_action = confirmedAction;
       }
+      if (conversationRef) {
+        payload.conversation = conversationRef;
+      }
 
       var data = await API.post('/api/home-assistant/ask', payload);
       var responseText = String((data && data.response) || '').trim();
-      if (responseText) {
-        appendHomeAssistantMessage('assistant', responseText);
+      var assistantRow = responseText
+        ? appendHomeAssistantMessage('assistant', responseText)
+        : null;
+      var conversationResult =
+        conversationRef && conversations && typeof conversations.applyReply === 'function'
+          ? conversations.applyReply(data, { userRow: userRow, assistantRow: assistantRow })
+          : null;
+      // A refused or unanswered turn was not sent: put the text back so it can
+      // be sent again instead of retyped.
+      if (conversationResult && conversationResult.restoreInput && !confirmedAction) {
+        restorePersonalAssistantDraft(text);
       }
 
       if (data && data.requires_confirmation && data.confirmation) {
@@ -10282,20 +10329,38 @@
         return;
       }
 
-      setHomeAssistantRoutingSummary(summaryLabel, formatHomeAskSummary(data));
+      if (isConversation) {
+        // The conversation bar already says what happened to a stored turn, so
+        // the routing summary stays quiet unless the turn needs attention.
+        var needsAttention =
+          conversationResult && (conversationResult.restoreInput || !conversationResult.stored);
+        setHomeAssistantRoutingSummary(
+          needsAttention ? summaryLabel : '',
+          needsAttention ? conversationResult.notice : ''
+        );
+      } else {
+        setHomeAssistantRoutingSummary(summaryLabel, formatHomeAskSummary(data));
+      }
       var buttons = buildHomeActionButtons(data && data.actions, routeContext, intent);
-      buttons.push({
-        label: 'Ask Another Task',
-        variant: 'secondary',
-        onClick: function () {
-          focusHomeAssistantInput();
-        }
-      });
+      // A conversation continues in the composer above it; it needs no
+      // "ask another task" prompt after every reply.
+      if (!isConversation) {
+        buttons.push({
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
+        });
+      }
       renderHomeAssistantActions(buttons);
     } catch (error) {
       dashLog.debug('Home inline ask failed', { error: (error && error.message) || error });
       appendHomeAssistantMessage('assistant', 'I could not answer that right now. Please retry.');
       setHomeAssistantRoutingSummary(summaryLabel + ' Failed', 'Could not complete the request.');
+      if (conversationRef && !confirmedAction) {
+        restorePersonalAssistantDraft(text);
+      }
       renderHomeAssistantActions([
         {
           label: 'Retry',
@@ -10314,6 +10379,15 @@
       ]);
     } finally {
       setHomeAssistantBusy(false);
+    }
+  }
+
+  // restorePersonalAssistantDraft puts an unsent message back in the Personal
+  // Assistant composer. It never overwrites text the user has typed since.
+  function restorePersonalAssistantDraft(text) {
+    var panel = window.PersonalAssistantPanel;
+    if (panel && typeof panel.restoreDraft === 'function') {
+      panel.restoreDraft(text);
     }
   }
 
@@ -13204,11 +13278,14 @@
 
       // Home harness inline path (hybrid): answer app activity / navigation asks
       // here instead of routing to an agent. Backend route is authoritative; the
-      // local detector covers the route-unavailable fallback.
+      // local detector covers the route-unavailable fallback. An everyday
+      // request to the hired assistant (assistant_conversation) is answered the
+      // same way and only the server ever assigns that intent.
       if (
         !inWorkspaceContext &&
         (homeAssistantState.pendingIntent.key === 'app_introspection' ||
-          homeAssistantState.pendingIntent.key === 'app_navigation')
+          homeAssistantState.pendingIntent.key === 'app_navigation' ||
+          homeAssistantState.pendingIntent.key === 'assistant_conversation')
       ) {
         await runHomeAssistantInline(text, routeContext, homeAssistantState.pendingIntent.key);
         return;
@@ -13686,6 +13763,31 @@
     homeAssistantState.personalAssistantDisplayName = String(name || '').trim();
     syncHomeAssistantModalHeading();
     syncHomeAssistantLauncher();
+  };
+  // Conversation seam for the Personal Assistant panel: render a stored message
+  // and clear the rendered thread. Clearing also drops any pending
+  // confirmation, so one conversation's review never follows the user into
+  // another. It refuses while a reply is in flight.
+  window.OriAskRouting.appendMessage = function (role, text) {
+    return appendHomeAssistantMessage(role === 'user' ? 'user' : 'assistant', text);
+  };
+  window.OriAskRouting.resetConversation = function () {
+    if (homeAssistantState.busy) return false;
+    var els = getHomeAssistantElements();
+    if (els.conversation) {
+      els.conversation.replaceChildren();
+      els.conversation.dataset.initialized = 'true';
+    }
+    homeAssistantState.lastUserRow = null;
+    homeAssistantState.pendingPrompt = '';
+    homeAssistantState.awaitingCreateConfirmation = false;
+    clearHomeAssistantPlanning();
+    clearHomeAssistantInlineReply();
+    renderHomeAssistantActions([]);
+    setHomeAssistantRoutingSummary('', '');
+    syncHomeAssistantConversationSection();
+    syncHomeAssistantLauncher();
+    return true;
   };
   window.OriAskRouting.getState = function () {
     return {

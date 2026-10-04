@@ -8,7 +8,8 @@ import {
   boundedAssistantHandoff,
   canSubmitAssistantWork,
   personalAssistantPanelView,
-  restoreAssistantPanelFocus
+  restoreAssistantPanelFocus,
+  restoredDraft
 } from './personal-assistant-panel.js';
 
 test('personal assistant panel covers unavailable, pre-hire, active, paused, and repair states', () => {
@@ -69,6 +70,23 @@ test('assistant composer refuses empty, unavailable, pending, and double-click s
   assert.equal(canSubmitAssistantWork({ available: false, pending: false, text: 'help' }), false);
   assert.equal(canSubmitAssistantWork({ available: true, pending: true, text: 'help' }), false);
   assert.equal(canSubmitAssistantWork({ available: true, pending: false, text: '  ' }), false);
+  // A reply still in flight blocks a second turn: it has no conversation to join yet.
+  assert.equal(
+    canSubmitAssistantWork({ available: true, pending: false, busy: true, text: 'help' }),
+    false
+  );
+  assert.equal(
+    canSubmitAssistantWork({ available: true, pending: false, busy: false, text: 'help' }),
+    true
+  );
+});
+
+test('an unsent message returns to the composer without overwriting newer typing', () => {
+  assert.equal(restoredDraft('', 'make it warmer'), 'make it warmer');
+  assert.equal(restoredDraft('   ', 'make it warmer'), 'make it warmer');
+  assert.equal(restoredDraft('typed since', 'make it warmer'), 'typed since');
+  assert.equal(restoredDraft('', '생일 축하해 🎂'), '생일 축하해 🎂');
+  assert.equal(restoredDraft(null, null), '');
 });
 
 test('Home opens Today directly while non-Home and prefilled requests select Ask', () => {
