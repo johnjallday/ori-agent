@@ -1,0 +1,100 @@
+/* Assistant interview wizard (#personalHQInterviewWizard). Stepper rules come
+   from setup-wizard.css (.setup-wizard-steps); this file only adds the rest. */
+
+.interview-wizard .interview-wizard-content {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.interview-wizard .modal-header,
+.interview-wizard .modal-footer {
+  border-color: var(--border-color);
+}
+
+.interview-wizard .modal-title {
+  font-size: 1.15rem;
+  color: var(--text-primary);
+}
+
+.interview-wizard-progress {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.interview-wizard-body {
+  min-height: 14rem;
+}
+
+.interview-wizard-status {
+  min-height: 1.25rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-status.is-warning {
+  color: var(--danger-color, #c62828);
+}
+
+.interview-wizard-prompt {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.interview-wizard-prompt:focus {
+  outline: none;
+}
+
+.interview-wizard-hint {
+  margin: 0 0 0.75rem;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-input {
+  resize: none;
+}
+
+.interview-wizard-field {
+  margin-top: 0.75rem;
+}
+
+.interview-wizard-field label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-field[hidden] {
+  display: none;
+}
+
+.interview-wizard-review {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.interview-wizard-review li {
+  margin-bottom: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.interview-wizard-footer {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.interview-wizard-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.interview-wizard-actions {
+  display: flex;
+  gap: 0.5rem;
+}
