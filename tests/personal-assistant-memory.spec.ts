@@ -85,8 +85,13 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     await page.locator('[data-cmd-system-tab="memory"]').click();
     await expect(page.locator('#workspace-detail-config-memory-pane')).toBeVisible();
     await expect(page.locator('#workspace-detail-memory-add-type')).toBeVisible();
+    const hqUrl = page.url();
     await page.locator('#personalHQKnowledgeEntry a[href="/profile#personalHQInterview"]').click();
-    await expect(page).toHaveURL(/\/profile#personalHQInterview$/);
+    await expect(page.locator('#personalHQInterviewWizard')).toBeVisible();
+    expect(page.url()).toBe(hqUrl); // opens in place, no navigation
+    await expect(page.locator('#personalHQInterviewWizard').getByRole('textbox')).toBeFocused(); // fade-in done
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#personalHQInterviewWizard')).toHaveCount(0);
     await page.goto(`${hqPath}/agents/Atlas`);
     await expect(page.locator('#personalHQAgentKnowledgeEntry')).toBeVisible();
     await page
@@ -236,21 +241,28 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     await page.locator('#personalAssistantTodayMore > summary').click();
     const interviewLink = page.locator('#personalAssistantTodayInterview');
     await expect(interviewLink).toBeVisible();
+    const homeUrl = page.url();
     await interviewLink.click();
-    await expect(page).toHaveURL(/\/profile#personalHQInterview$/);
+    const wizard = page.locator('#personalHQInterviewWizard');
+    await expect(wizard).toBeVisible();
+    expect(page.url()).toBe(homeUrl); // opens in place on Home
     const interviewStartedAt = Date.now(); // excludes hire, HQ setup, deferral and return navigation
-    await page.getByRole('button', { name: 'Start or resume interview' }).click();
-    await page.locator('#interview-answer-priority').fill('Review the next release plan');
-    await page.locator('#interview-answer-communication').fill('concise');
-    await page.locator('#interview-destination-communication').selectOption('profile');
-    await page.getByRole('button', { name: 'Skip this question' }).last().click();
-    await page.getByRole('button', { name: 'Review my answers' }).click();
-    await expect(page.locator('#personalHQInterviewSelected')).toContainText(
-      'Review the next release plan'
-    );
-    await expect(page.locator('#personalHQInterviewSelected')).toContainText('Global profile');
+    await wizard.getByRole('textbox').fill('Review the next release plan');
+    await wizard.getByRole('button', { name: 'Next' }).click();
+    await wizard.getByRole('textbox').fill('concise');
+    await wizard.getByLabel('Every workspace').check();
+    await wizard.getByRole('button', { name: 'Next' }).click();
+    await wizard.getByRole('button', { name: 'Skip' }).click();
+    const review = wizard.locator('.interview-wizard-review');
+    await expect(review).toContainText('Review the next release plan');
+    await expect(review).toContainText('Your global profile · Response style');
+    await expect(review).toContainText('Skipped');
     await page.screenshot({ path: 'test-results/532-interview-final-review.png', fullPage: true });
-    await page.getByRole('button', { name: 'Save these facts' }).click();
+    await wizard.getByRole('button', { name: 'Save 2 facts' }).click();
+    await expect(wizard.getByRole('heading', { name: 'Saved 2 facts.' })).toBeVisible();
+    await wizard.getByRole('button', { name: 'Done' }).click();
+    await expect(wizard).toHaveCount(0);
+    await page.goto('/profile');
     await expect(page.locator('#personalHQInterviewStatus')).toContainText('complete');
     const interviewAutomationMS = Date.now() - interviewStartedAt;
     test.info().annotations.push({
@@ -407,6 +419,85 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
       (await (await page.request.get('/api/user/profile')).json()).profile.preferences
         .response_style
     ).toBe('detailed');
+  });
+
+  // UI-only failure fixture: the real server cannot be made to fail the second
+  // row on demand, so the interview snapshot and the save response are mocked.
+  test('a partial interview save marks each row Saved or Not saved and offers Retry', async ({
+    page
+  }) => {
+    const live = await (
+      await page.request.get('/api/personal-assistant/knowledge/interview')
+    ).json();
+    const snapshot = {
+      profile: live.profile,
+      state_version: live.state_version,
+      status: 'offered',
+      saved_rows: [],
+      questions: [
+        {
+          id: 'priority',
+          prompt: 'What priority or project should I keep in mind?',
+          category: 'projects',
+          destination: 'personal_hq'
+        },
+        {
+          id: 'communication',
+          prompt: 'How would you like me to communicate or work with you?',
+          category: 'how_you_work',
+          destination: 'profile_or_personal_hq'
+        },
+        {
+          id: 'person_or_routine',
+          prompt: "Is there a person or recurring routine you'd like me to remember?",
+          category: 'routines',
+          destination: 'personal_hq'
+        }
+      ]
+    };
+    await page.route('**/api/personal-assistant/knowledge/interview', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(snapshot)
+      })
+    );
+    const saves: string[] = [];
+    await page.route('**/api/personal-assistant/knowledge/interview/save', route => {
+      saves.push(route.request().postData() || '');
+      return route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: 'the second row could not be saved',
+          interview: { saved_rows: ['priority'] }
+        })
+      });
+    });
+    await page.goto('/profile');
+    await expect(page.locator('#personalHQInterview')).toHaveAttribute('aria-busy', 'false');
+    await page.locator('#personalHQInterviewStart').click();
+    const wizard = page.locator('#personalHQInterviewWizard');
+    await wizard.getByRole('textbox').fill('Alpha plan');
+    await wizard.getByRole('button', { name: 'Next' }).click();
+    await wizard.getByRole('textbox').fill('Beta style');
+    await wizard.getByRole('button', { name: 'Next' }).click();
+    await wizard.getByRole('textbox').fill('Gamma routine');
+    await wizard.getByRole('button', { name: 'Next' }).click();
+    await wizard.getByRole('button', { name: 'Save 3 facts' }).click();
+
+    const rows = wizard.locator('.interview-wizard-review-row');
+    await expect(rows.nth(0)).toContainText('Saved');
+    await expect(rows.nth(0)).not.toContainText('Not saved');
+    await expect(rows.nth(1)).toContainText('Not saved');
+    await expect(rows.nth(2)).toContainText('Not saved');
+    await expect(wizard.getByRole('button', { name: 'Retry' })).toBeVisible();
+    await expect(wizard.getByRole('status')).toContainText('Press Retry');
+    expect(saves).toHaveLength(1);
+    await wizard.getByRole('button', { name: 'Retry' }).click();
+    await expect.poll(() => saves.length).toBe(2);
+    expect(JSON.parse(saves[1]).reset_partial).toBe(true);
+    expect(JSON.parse(saves[0]).reset_partial).toBe(false);
   });
 
   test('three actual approved Janitor moves lead to review and a successful undo suspends memory', async ({

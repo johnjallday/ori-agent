@@ -13,7 +13,7 @@ import (
 
 // InterviewQuestion is a deterministic prompt to the user, never a provider
 // call or an inferred commitment. Answers remain browser-local until an exact
-// final review and explicit Save these facts action.
+// final review and an explicit Save on the wizard's review step.
 type InterviewQuestion struct {
 	ID          string `json:"id"`
 	Prompt      string `json:"prompt"`

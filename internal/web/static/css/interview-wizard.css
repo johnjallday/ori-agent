@@ -114,6 +114,22 @@
   color: var(--text-secondary);
 }
 
+/* The global 44px touch target (common.css) would turn a radio into a large
+   circle on a phone: the radio keeps its size and its label becomes the target. */
+@media (max-width: 768px) {
+  .interview-wizard-radios .form-check-input {
+    min-height: 0;
+    min-width: 0;
+    margin-top: 0.8rem; /* centre the dot on the 44px label row */
+  }
+
+  .interview-wizard-radios .form-check-label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
+
 .interview-wizard-radio-note {
   display: block;
   margin-left: 1.5rem;
