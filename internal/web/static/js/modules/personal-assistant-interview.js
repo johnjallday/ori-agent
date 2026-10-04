@@ -69,7 +69,7 @@ export function mountPersonalAssistantInterview(root = document) {
     }
   }
 
-  start.addEventListener('click', async () => {
+  async function openWizard() {
     if (!snapshot?.questions || busy) return;
     busy = true;
     try {
@@ -77,9 +77,13 @@ export function mountPersonalAssistantInterview(root = document) {
     } finally {
       busy = false;
     }
-    await load();
     start.focus();
-  });
+  }
+
+  // The wizard can be opened from any page, so the card refreshes on its close
+  // event rather than on its own Start click.
+  document.addEventListener('personal-assistant-interview-closed', () => void load());
+  start.addEventListener('click', () => void openWizard());
   defer.addEventListener('click', async () => {
     if (busy) return;
     busy = true;
@@ -94,7 +98,14 @@ export function mountPersonalAssistantInterview(root = document) {
       busy = false;
     }
   });
-  void load();
+  // /profile#personalHQInterview: the browser jumps to the anchor before the
+  // sections above it have loaded, so open the wizard, or once the card has
+  // settled scroll to it.
+  void load().then(() => {
+    if (location.hash !== '#personalHQInterview') return;
+    if (snapshot?.questions?.length && snapshot.status !== 'completed') void openWizard();
+    else shell.scrollIntoView({ block: 'start' });
+  });
   return { load };
 }
 

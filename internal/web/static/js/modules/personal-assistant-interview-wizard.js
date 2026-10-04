@@ -681,6 +681,7 @@ export function openInterviewWizard(initialSnapshot) {
       bootstrap.Modal.getInstance(ui.modal)?.dispose();
       ui.modal.remove();
       if (opener?.isConnected && !opener.hidden) opener.focus();
+      document.dispatchEvent(new CustomEvent('personal-assistant-interview-closed'));
       resolve();
     });
     render();
