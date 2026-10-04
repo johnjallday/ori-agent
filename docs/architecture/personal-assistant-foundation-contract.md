@@ -756,6 +756,12 @@ A turn is stored only after it is answered: the user's message, then the
 assistant's reply. If the reply cannot be stored, the answer is still shown and
 marked as not saved; Ori does not claim history it does not have.
 
+A conversation stores answered turns and nothing else. A request for an action
+("save this draft", "remember that…", "create a workspace…"), its review or
+confirmation prompt, and its outcome are shown in the panel but are not written
+into the conversation. Every assistant message in a conversation is therefore a
+reply the user can point at, and no stored text ever stands in for an approval.
+
 ### History is not memory
 
 | Kind | Where it lives | Who reads it |
@@ -788,10 +794,11 @@ return counts and titles, not message text.
 Nothing in a conversation can authorize a write — not the user's earlier
 messages, the assistant's replies, imported history, or an old confirmation.
 Every write is prepared and confirmed in the current request against the
-current relationship version, and executed only by the server's confirmed-action
-path. A pending confirmation is not stored as an executable record and does not
-follow the user into another conversation. The model has read-only tools in a
-conversation; it cannot save, remember, schedule, send, or run anything.
+current relationship, and executed only by the server's confirmed-action or
+reviewed-save path. A pending confirmation or review is never stored as an
+executable record and does not follow the user into another conversation. The
+model has read-only tools in a conversation; it cannot save, remember,
+schedule, send, or run anything.
 
 ### Model
 
@@ -803,6 +810,91 @@ to the agent profile's own settings to produce an answer.
 
 A paused relationship still answers a direct request and keeps every
 confirmation gate; it starts no routine and no background run.
+
+## Saving a draft to the HQ backlog
+
+**Save to HQ backlog** keeps one reply from a conversation as one Backlog Ticket
+in Personal HQ. It is a reviewed, two-step action. Neither step calls a model,
+and nothing a model, a transcript, or the draft's own text says can start,
+approve, or redirect it.
+
+### Review
+
+`POST /api/home-assistant/drafts/review` takes a conversation ID and a message
+ID and writes nothing. The server:
+
+- resolves the relationship and its conversation scope, as for any turn;
+- reads the chosen message from the canonical session — the browser never
+  supplies the text — and accepts only an assistant reply in that conversation;
+- resolves the designated Personal HQ by its stable ID, never by name; and
+- returns the review: the exact message text, a suggested single-line title,
+  the HQ's name and ID, the placement ("Backlog · unassigned · not
+  scheduled"), the canonical Ticket limits, and one **operation ID**.
+
+The only normalization is the canonical Ticket validators' removal of
+surrounding blank space, and the review says so when it applies. Text that
+exceeds a Ticket limit is shown whole with a note; it is never cut.
+
+The typed request ("save this draft and put it in my todo list") opens the same
+review for the latest reply in the conversation. It asks instead of guessing
+when the request names another version, when there is nothing to save, or when
+it names a workspace other than Personal HQ — a conversation draft is not
+redirected into a project, and the words of the request are never captured as
+the item.
+
+### Save
+
+`POST /api/home-assistant/drafts/save` commits the title and draft in the form —
+the user's final, attested text — under the review's operation ID:
+
+1. The relationship and the HQ are resolved again. A target that is no longer
+   the designated HQ is refused as `target_changed`.
+2. An earlier attempt of this same save is looked up. If it exists, its Ticket
+   is returned and nothing is written.
+3. Otherwise the source message is validated again and one Ticket is created
+   through the canonical Ticket service: Backlog, source `assistant`, title and
+   description as reviewed. It has no assignee, no schedule, no due date, and
+   is not runnable. No Note, memory fact, agent, or workspace is created.
+
+### One save, one Ticket
+
+The Ticket itself is the durable record of the save. Its immutable source key is
+
+```text
+assistant-draft:<conversation id>:<message id>:<operation id>:<payload digest>
+```
+
+where the digest covers the target workspace and the normalized title and body.
+The key holds references and a fingerprint, never content. There is no
+operation table, no stored review, and no second copy of the draft.
+
+| Attempt | Result |
+|---|---|
+| Same operation, same content (double-click, retry, retry after restart) | The first Ticket, `created: false` |
+| The same, after the Ticket was edited or promoted | The same Ticket as it is now, `changed_since: true`; nothing is overwritten |
+| The same, after the source conversation was deleted | The same Ticket; a deleted chat does not turn a completed save into "not saved" |
+| Same operation, different content, target, or source | Refused as `operation_conflict`, naming the Ticket already saved |
+| A new review of the same message | A new operation and a new Ticket |
+| The Ticket was deleted, then the save is retried | A new Ticket: a deleted Ticket leaves no evidence, and retrying is a new save |
+
+The replay lookup and the insert share the workspace's atomic update, so
+concurrent attempts settle on exactly one Ticket. The browser sends the same
+operation ID on every attempt of a review and never mints another to get past a
+failure.
+
+### Outcomes the user is told
+
+- **Saved**: read back from the Ticket — its number, state, owner workspace,
+  and a link (`/workspaces/<slug>?ticket=<id>`). "Unassigned and not scheduled"
+  is stated only when the Ticket shows it.
+- **Not saved**: a validation or refusal response. The form keeps the user's
+  text.
+- **Unknown**: no response arrived. Ori says it could not confirm the save and
+  offers the same save again; it does not claim success or failure.
+
+Ori cannot deliver reminders. A save request that also asks for one opens the
+review with that limitation stated and saves without a reminder; a reminder
+request alone gets the limitation and no promise.
 
 ## Delegation and ownership
 

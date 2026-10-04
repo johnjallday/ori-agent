@@ -420,6 +420,26 @@ func (s *TicketService) Create(input TicketCreateInput) (*Ticket, error) {
 // concurrent retries return the same stable Ticket instead of racing a scan
 // against creation. created is false when the original record is replayed.
 func (s *TicketService) CreateIdempotent(input TicketCreateInput) (ticket *Ticket, created bool, err error) {
+	return s.createIdempotent(input, func(candidate, requested *Task) (bool, error) {
+		if candidate.SourceType != requested.SourceType || candidate.SourceID != requested.SourceID {
+			return false, nil
+		}
+		if !sameTicketCreationPayload(candidate, requested) {
+			return false, fmt.Errorf("%w: %s/%s", ErrTicketSourceConflict, requested.SourceType, requested.SourceID)
+		}
+		return true, nil
+	})
+}
+
+// ticketReplayMatcher decides whether an existing record is the result of an
+// earlier attempt at the same creation. It returns (true, nil) to replay that
+// record, (false, nil) to keep looking, and an error to refuse the request.
+type ticketReplayMatcher func(candidate, requested *Task) (bool, error)
+
+// createIdempotent is the shared at-most-once creation core. The replay lookup
+// and the insert share the workspace's atomic update, so the matcher's decision
+// and the creation can never interleave with another attempt.
+func (s *TicketService) createIdempotent(input TicketCreateInput, replay ticketReplayMatcher) (ticket *Ticket, created bool, err error) {
 	if strings.TrimSpace(input.SourceID) == "" {
 		return nil, false, invalidTicketField("source_id", "source_id is required for idempotent creation")
 	}
@@ -438,10 +458,11 @@ func (s *TicketService) CreateIdempotent(input TicketCreateInput) (ticket *Ticke
 	err = s.store.Update(workspaceID, func(ws *Workspace) error {
 		for i := range ws.Tasks {
 			candidate := &ws.Tasks[i]
-			if candidate.SourceType == task.SourceType && candidate.SourceID == task.SourceID {
-				if !sameTicketCreationPayload(candidate, &task) {
-					return fmt.Errorf("%w: %s/%s", ErrTicketSourceConflict, task.SourceType, task.SourceID)
-				}
+			matched, matchErr := replay(candidate, &task)
+			if matchErr != nil {
+				return matchErr
+			}
+			if matched {
 				persisted = *candidate
 				return nil
 			}

@@ -426,6 +426,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 				backlogService.SetEventBus(s.Workflow.EventBus)
 			}
 			mutator.backlogService = backlogService
+			// A reviewed conversation draft is saved through the same Backlog
+			// adapter, so it gets the same events and BACKLOG.md render.
+			handler.SetDraftSaver(workspace.NewAssistantDraftService(backlogService))
 		}
 		if s.Workflow != nil {
 			mutator.orchestrator = s.Workflow.WorkspaceOrchestrator

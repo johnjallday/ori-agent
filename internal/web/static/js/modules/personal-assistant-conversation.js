@@ -154,12 +154,27 @@ function closeList() {
   state.els.resume.setAttribute('aria-expanded', 'false');
 }
 
+/**
+ * Marks a rendered message with its canonical IDs and gives a stored assistant
+ * reply its message actions. An unsaved row gets neither.
+ */
+function attachMessage(row, conversationId, messageId) {
+  if (!tagMessageRow(row, conversationId, messageId)) return;
+  window.PersonalAssistantDrafts?.decorate?.(row);
+}
+
+/** A review belongs to the conversation it was opened in; leaving it closes it. */
+function closeReviews() {
+  window.PersonalAssistantDrafts?.close?.();
+}
+
 /** Clears the tab's thread, its rendered log, and any pending confirmation. */
 function startNew() {
   if (window.OriAskRouting?.resetConversation && !window.OriAskRouting.resetConversation()) {
     setNote('Wait for the current reply before starting a new conversation.');
     return false;
   }
+  closeReviews();
   closeList();
   setCurrent('', '');
   setNote('New conversation. Nothing is saved until you send a message.');
@@ -204,10 +219,11 @@ async function resume(id, options = {}) {
       setNote('Wait for the current reply before opening another conversation.');
       return false;
     }
+    closeReviews();
     const conversation = result.body.conversation;
     for (const message of result.body.messages || []) {
       const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
-      tagMessageRow(row, conversation.id, message.id);
+      attachMessage(row, conversation.id, message.id);
     }
     closeList();
     setCurrent(conversation.id, conversation.title);
@@ -323,8 +339,8 @@ function applyReply(data, rows = {}) {
   if (!reply) return { notice: '', stored: false, restoreInput: shouldRestoreInput(data) };
   const nextId = nextConversationId(state.id, reply);
   if (reply.stored) {
-    tagMessageRow(rows.userRow, nextId, reply.user_message_id);
-    tagMessageRow(rows.assistantRow, nextId, reply.assistant_message_id);
+    attachMessage(rows.userRow, nextId, reply.user_message_id);
+    attachMessage(rows.assistantRow, nextId, reply.assistant_message_id);
   }
   setCurrent(nextId, reply.title);
   const notice = conversationNotice(data, state.assistantName);
@@ -366,6 +382,8 @@ const api = {
   applyReply,
   startNew,
   resume,
+  // Lets a message action report a refusal in the conversation bar.
+  notify: setNote,
   currentId: () => state.id,
   _state: state
 };

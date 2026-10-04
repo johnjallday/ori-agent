@@ -107,6 +107,9 @@ type HomeAssistantAskResponse struct {
 	// ModelUnavailable marks a turn that got no model answer, so the browser
 	// can keep the user's text instead of treating the reply as an answer.
 	ModelUnavailable bool `json:"model_unavailable,omitempty"`
+	// DraftReview opens the save-to-backlog review for a typed "save this
+	// draft" request. Nothing has been written when it is set.
+	DraftReview *PersonalAssistantDraftReview `json:"draft_review,omitempty"`
 }
 
 // HomeActionMutator executes confirmed state-changing actions. The server wires a
@@ -161,7 +164,10 @@ type HomeAssistantAskHandler struct {
 	// Conversations is the canonical session store behind hired-assistant
 	// conversations; nil keeps every turn stateless.
 	Conversations PersonalAssistantConversationStore
-	UserID        string
+	// Drafts saves a reviewed conversation draft as one HQ Backlog Ticket; nil
+	// leaves the save action unavailable.
+	Drafts PersonalAssistantDraftSaver
+	UserID string
 	// WorkspaceBuildAvailable reports whether "Build with your assistant" can
 	// take a create-workspace request; nil keeps the direct create.
 	WorkspaceBuildAvailable func(ctx context.Context) bool
@@ -284,14 +290,13 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	// Confirmed mutation path: execute only known action types (FR #24). The
 	// relationship is freshly resolved above so stale/replaced HQ state cannot
 	// execute a previously prepared action.
+	// A conversation stores answered turns only. Action requests, confirmation
+	// prompts, and their outcomes below are not stored in it, so every
+	// assistant message in a conversation is a reply the user can point at, and
+	// no stored text ever stands in for an approval.
 	if req.ConfirmedAction != nil {
 		resp := h.executeConfirmedAction(ctx, intent, *req.ConfirmedAction)
 		resp.Identity = identity
-		// The outcome joins a conversation that already exists; a confirmation
-		// alone never starts one.
-		if conversation != nil && conversation.id != "" {
-			resp.Conversation = h.storeTurn(ctx, conversation, "", resp.Response)
-		}
 		return resp
 	}
 
@@ -308,8 +313,14 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return HomeAssistantAskResponse{
 			Response: conf.Summary, Intent: intent, Identity: identity,
 			RequiresConfirmation: true, Confirmation: conf,
-			Conversation: h.storeTurn(ctx, conversation, prompt, conf.Summary),
 		}
+	}
+
+	// "Save this draft…" opens a review of a reply already in the conversation.
+	// It runs before backlog capture so a draft is never captured as the
+	// literal words of the request, and before any model call.
+	if resp, handled := h.handleDraftSaveRequest(prompt, intent, identity, workContext, conversation); handled {
+		return resp
 	}
 
 	// Backlog capture (PRD workspace-backlog FR23-25) is checked as its own
@@ -324,13 +335,9 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 			Identity:             identity,
 			RequiresConfirmation: true,
 			Confirmation:         conf,
-			Conversation:         h.storeTurn(ctx, conversation, prompt, conf.Summary),
 		}
 	} else if decline != "" {
-		return HomeAssistantAskResponse{
-			Response: decline, Intent: intent, Identity: identity,
-			Conversation: h.storeTurn(ctx, conversation, prompt, decline),
-		}
+		return HomeAssistantAskResponse{Response: decline, Intent: intent, Identity: identity}
 	}
 
 	// Explicit, supported mutation request: ask for confirmation before doing
@@ -344,7 +351,6 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 			Identity:             identity,
 			RequiresConfirmation: true,
 			Confirmation:         conf,
-			Conversation:         h.storeTurn(ctx, conversation, prompt, conf.Summary),
 		}
 	}
 

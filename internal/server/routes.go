@@ -335,6 +335,9 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/home-assistant/ask", homeAssistantAskHandler.AskHandler)
 	mux.HandleFunc("GET /api/home-assistant/conversations", homeAssistantAskHandler.ConversationsHandler)
 	mux.HandleFunc("GET /api/home-assistant/conversations/{id}", homeAssistantAskHandler.ConversationHandler)
+	// Saving a conversation draft to the HQ backlog: review (no write), then save.
+	mux.HandleFunc("POST /api/home-assistant/drafts/review", homeAssistantAskHandler.DraftReviewHandler)
+	mux.HandleFunc("POST /api/home-assistant/drafts/save", homeAssistantAskHandler.DraftSaveHandler)
 }
 
 // registerSettingsRoutes registers settings, API keys, vault mount, Web3 (capability-gated), and reset.

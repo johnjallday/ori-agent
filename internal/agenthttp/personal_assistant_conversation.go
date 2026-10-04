@@ -113,9 +113,12 @@ func (s personalAssistantConversationScope) owns(record PersonalAssistantConvers
 // openConversation is one request's validated view of a conversation. A zero
 // id means "new": the session is created only when the first turn is stored.
 type openConversation struct {
-	scope     personalAssistantConversationScope
-	id        string
-	title     string
+	scope personalAssistantConversationScope
+	id    string
+	title string
+	// messages are the stored messages, by canonical ID, so an action can
+	// name the exact message it means.
+	messages  []PersonalAssistantConversationMessage
 	history   []llm.Message
 	truncated bool
 }
@@ -158,6 +161,7 @@ func (h *HomeAssistantAskHandler) openConversation(ctx context.Context, ref *Hom
 	}
 	conversation.id = record.ID
 	conversation.title = record.Title
+	conversation.messages = messages
 	conversation.history, conversation.truncated = conversationHistoryWindow(messages)
 	return conversation, ""
 }

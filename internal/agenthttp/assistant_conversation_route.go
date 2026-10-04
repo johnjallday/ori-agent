@@ -34,11 +34,9 @@ var compositionLeads = []string{
 	"give it to me ", "give me that in ", "give me it in ", "say it ", "put it in ",
 }
 
-// isCompositionRequest reports whether the prompt opens by asking for text to
-// be written or reshaped. Composing needs no connector, so such a request never
-// has to create an agent or a connection to be answered.
-func isCompositionRequest(prompt string) bool {
-	text := normalizeRouteToken(prompt)
+// stripCompositionPolitePrefixes removes leading politeness and connectives
+// from an already-normalized prompt so its opening verb can be read.
+func stripCompositionPolitePrefixes(text string) string {
 	for stripped := true; stripped; {
 		stripped = false
 		for _, prefix := range compositionPolitePrefixes {
@@ -48,6 +46,14 @@ func isCompositionRequest(prompt string) bool {
 			}
 		}
 	}
+	return text
+}
+
+// isCompositionRequest reports whether the prompt opens by asking for text to
+// be written or reshaped. Composing needs no connector, so such a request never
+// has to create an agent or a connection to be answered.
+func isCompositionRequest(prompt string) bool {
+	text := stripCompositionPolitePrefixes(normalizeRouteToken(prompt))
 	for _, lead := range compositionLeads {
 		if strings.HasPrefix(text, lead) || text == strings.TrimSpace(lead) {
 			return true
@@ -72,7 +78,16 @@ func routesToAssistantConversation(
 	if workContext == nil || !workContext.ReadyForWork() {
 		return false
 	}
-	if routeContext.hasWorkspaceContext() || workspaceRecommended {
+	if routeContext.hasWorkspaceContext() {
+		return false
+	}
+	// Saving a draft from the conversation is the assistant's own reviewed
+	// action. It is never handed to a specialist that happened to match a word
+	// such as "todo".
+	if isAssistantDraftSaveRequest(prompt) {
+		return true
+	}
+	if workspaceRecommended {
 		return false
 	}
 	switch intent.Key {

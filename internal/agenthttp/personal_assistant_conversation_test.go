@@ -551,23 +551,31 @@ func TestConversation_TranscriptGrantsNoAuthority(t *testing.T) {
 	}
 }
 
-func TestConversation_ConfirmedOutcomeJoinsAnExistingThreadOnly(t *testing.T) {
+// A conversation stores answered turns only. An action request, its
+// confirmation prompt, and its outcome are not written into it, so every
+// assistant message in a conversation is a reply the user can point at.
+func TestConversation_ActionsAndConfirmationsAreNotStoredAsTurns(t *testing.T) {
 	f := newConversationFixture(t)
 	f.store.seed("mine", "hq-owned", "nova-profile-key")
-	action := &HomeAction{Type: HomeActionCreateWorkspace, Arguments: map[string]any{"name": "Launch"}}
 
-	inThread := f.handler.Ask(context.Background(), HomeAssistantAskRequest{
-		Intent: homeAssistantConversationIntent.Key, Conversation: &HomeAssistantConversationRef{ID: "mine"}, ConfirmedAction: action,
-	})
-	stored := f.store.sessions["mine"].messages
-	if f.mutator.created != "Launch" || len(stored) != 1 || stored[0].Role != llm.RoleAssistant || inThread.Conversation.AssistantMessageID != stored[0].ID {
-		t.Fatalf("outcome was not recorded in the thread: %+v", stored)
+	for _, prompt := range []string{
+		"remember that my launch is Friday",
+		"create a workspace called Launch",
+	} {
+		preview := f.say(prompt, "mine")
+		if !preview.RequiresConfirmation || preview.Conversation != nil {
+			t.Fatalf("%q: %+v", prompt, preview)
+		}
 	}
-	noThread := f.handler.Ask(context.Background(), HomeAssistantAskRequest{
-		Intent: homeAssistantConversationIntent.Key, Conversation: &HomeAssistantConversationRef{}, ConfirmedAction: action,
+	confirmed := f.handler.Ask(context.Background(), HomeAssistantAskRequest{
+		Intent: homeAssistantConversationIntent.Key, Conversation: &HomeAssistantConversationRef{ID: "mine"},
+		ConfirmedAction: &HomeAction{Type: HomeActionCreateWorkspace, Arguments: map[string]any{"name": "Launch"}},
 	})
-	if noThread.Conversation != nil || len(f.store.sessions) != 1 {
-		t.Fatalf("a confirmation alone started a conversation: %+v", noThread.Conversation)
+	if f.mutator.created != "Launch" || confirmed.Conversation != nil {
+		t.Fatalf("confirmed action: created=%q %+v", f.mutator.created, confirmed.Conversation)
+	}
+	if f.store.messageCount() != 0 || len(f.store.sessions) != 1 || len(f.provider.requests) != 0 {
+		t.Fatalf("an action was stored as a turn or reached the model: messages=%d sessions=%d", f.store.messageCount(), len(f.store.sessions))
 	}
 }
 

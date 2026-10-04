@@ -10329,6 +10329,19 @@
         return;
       }
 
+      // "Save this draft…" opens the same review the message action opens.
+      // Nothing has been written; the review itself is the confirmation step.
+      if (
+        data &&
+        data.draft_review &&
+        window.PersonalAssistantDrafts &&
+        typeof window.PersonalAssistantDrafts.open === 'function'
+      ) {
+        setHomeAssistantRoutingSummary('', '');
+        window.PersonalAssistantDrafts.open(data.draft_review, {});
+        return;
+      }
+
       if (isConversation) {
         // The conversation bar already says what happened to a stored turn, so
         // the routing summary stays quiet unless the turn needs attention.

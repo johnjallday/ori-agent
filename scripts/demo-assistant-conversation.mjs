@@ -68,7 +68,12 @@ const rows = () =>
       role: node.dataset.messageRole,
       messageId: node.dataset.messageId || '',
       conversationId: node.dataset.conversationId || '',
-      text: node.textContent.trim()
+      // The reply itself, without the message actions rendered beneath it.
+      text: (node.firstElementChild?.firstChild?.textContent || node.textContent).trim(),
+      actions: Array.from(node.querySelectorAll('[data-message-action]')).map(
+        button => button.textContent
+      ),
+      saved: node.querySelector('.personal-assistant-message__saved')?.textContent || ''
     }))
   );
 
@@ -104,9 +109,7 @@ async function api(path) {
   }, path);
 }
 
-try {
-  if (stage !== 'conversation') throw new Error(`unknown stage: ${stage}`);
-
+async function conversationStage() {
   await openAsk();
   const before = await api('/api/workspaces');
   evidence.steps.push({
@@ -252,6 +255,195 @@ try {
       ? after.body.length
       : (after.body?.workspaces || []).length
   };
+}
+
+const review = () =>
+  page.evaluate(() => {
+    const form = document.getElementById('personalAssistantDraftReview');
+    const state = window.PersonalAssistantDrafts._state;
+    return {
+      open: !form.hidden,
+      target: document.getElementById('personalAssistantDraftTarget').textContent,
+      title: document.getElementById('personalAssistantDraftTitle').value,
+      body: document.getElementById('personalAssistantDraftBody').value,
+      notes: Array.from(document.querySelectorAll('#personalAssistantDraftNotes li')).map(
+        item => item.textContent
+      ),
+      status: document.getElementById('personalAssistantDraftStatus').textContent,
+      receipt: document.getElementById('personalAssistantDraftReceipt').textContent,
+      receiptVisible: !form.querySelector('[data-draft-view="receipt"]').hidden,
+      openHref: document.getElementById('personalAssistantDraftOpen').getAttribute('href'),
+      operationId: state.review?.operation_id || '',
+      payload: state.review
+        ? {
+            operation_id: state.review.operation_id,
+            target_workspace_id: state.review.target.workspace_id,
+            source: state.review.source
+          }
+        : null
+    };
+  });
+
+const assistantTickets = async workspaceId => {
+  const result = await api(
+    `/api/workspaces/${workspaceId}/tickets?source=assistant&archive=all&limit=100`
+  );
+  return (result.body?.tickets || []).filter(ticket =>
+    String(ticket.source_id || '').startsWith('assistant-draft:')
+  );
+};
+
+async function post(path, body) {
+  return page.evaluate(
+    async ([url, payload]) => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return { status: response.status, body: await response.json().catch(() => null) };
+    },
+    [path, body]
+  );
+}
+
+/*
+ * save: two versions of a draft, choose the Korean one, review and save it to
+ * the HQ backlog, verify the canonical Ticket, retry the same save, and show
+ * that an older version and the typed request open the same review.
+ */
+async function saveStage() {
+  await openAsk();
+  await page
+    .locator('#personalAssistantConversationNew')
+    .click({ force: true })
+    .catch(() => {});
+  const assistant = (await api('/api/personal-assistant')).body.personal_assistant;
+  const hq = assistant.hq_workspace_id;
+  const ticketsBefore = (await assistantTickets(hq)).length;
+
+  const english = await say('Write a short birthday greeting for my friend Mina.');
+  const korean = await say('give it to me in Korean');
+  evidence.steps.push({ step: 'two-versions', english, korean });
+
+  // Choose the Korean version with its own action. Opening the review saves nothing.
+  const koreanRow = page.locator(
+    `#homeAssistantConversation [data-message-id="${korean.messageId}"]`
+  );
+  await koreanRow.locator('[data-message-action="save-draft"]').click();
+  await page.locator('#personalAssistantDraftReview').waitFor({ state: 'visible', timeout: 20000 });
+  const opened = await review();
+  evidence.steps.push({
+    step: 'review-opened',
+    review: opened,
+    bodyIsExactReply: opened.body === korean.text,
+    ticketsAfterOpening: (await assistantTickets(hq)).length - ticketsBefore,
+    shot: await shot('10-review')
+  });
+
+  await page.locator('#personalAssistantDraftTitle').fill('Birthday greeting for Mina (Korean)');
+  const saveRequest = {
+    ...opened.payload,
+    title: 'Birthday greeting for Mina (Korean)',
+    body: opened.body
+  };
+  await page.locator('#personalAssistantDraftSave').click();
+  await page
+    .locator('#personalAssistantDraftReview [data-draft-view="receipt"]')
+    .waitFor({ state: 'visible', timeout: 30000 });
+  const receipt = await review();
+  const saved = await assistantTickets(hq);
+  const ticket = saved.find(item => item.source_id.includes(korean.messageId));
+  evidence.steps.push({
+    step: 'saved',
+    receipt: receipt.receipt,
+    openHref: receipt.openHref,
+    rowBadge: (await rows()).find(row => row.messageId === korean.messageId)?.saved,
+    ticketsAdded: saved.length - ticketsBefore,
+    ticket: ticket && {
+      id: ticket.id,
+      number: ticket.display_number,
+      title: ticket.title,
+      state: ticket.state,
+      assignee: ticket.assignee || '',
+      scheduled: Boolean(ticket.schedule_enabled || ticket.due_date),
+      bodyIsExactReply: ticket.description === korean.text,
+      source: ticket.source
+    },
+    shot: await shot('11-receipt')
+  });
+
+  // The same save again — a retry after a lost response — is the same Ticket.
+  const retry = await post('/api/home-assistant/drafts/save', saveRequest);
+  evidence.steps.push({
+    step: 'retry-same-save',
+    status: retry.status,
+    created: retry.body?.receipt?.created,
+    sameTicket: retry.body?.receipt?.ticket_id === ticket?.id,
+    ticketsAdded: (await assistantTickets(hq)).length - ticketsBefore
+  });
+  // The same review with different text is refused.
+  const changed = await post('/api/home-assistant/drafts/save', {
+    ...saveRequest,
+    body: `${opened.body} (edited)`
+  });
+  evidence.steps.push({
+    step: 'retry-changed-payload',
+    status: changed.status,
+    error: changed.body?.error,
+    ticketsAdded: (await assistantTickets(hq)).length - ticketsBefore
+  });
+  await page.locator('#personalAssistantDraftDone').click();
+
+  // The older English version is still selectable; cancel writes nothing.
+  await page
+    .locator(`#homeAssistantConversation [data-message-id="${english.messageId}"]`)
+    .locator('[data-message-action="save-draft"]')
+    .click();
+  await page.locator('#personalAssistantDraftReview').waitFor({ state: 'visible', timeout: 20000 });
+  const older = await review();
+  await page.keyboard.press('Escape');
+  evidence.steps.push({
+    step: 'older-version-then-escape',
+    bodyIsOlderReply: older.body === english.text,
+    reviewClosed: !(await review()).open,
+    panelStillOpen: await page.locator('#personalAssistantPanel').isVisible(),
+    ticketsAdded: (await assistantTickets(hq)).length - ticketsBefore
+  });
+
+  // The typed request opens the same review for the latest reply, plus the
+  // reminder limitation, and saves nothing until confirmed.
+  await page.locator('#personalAssistantInput').fill('save this draft and remind me tomorrow');
+  await page.locator('#personalAssistantSend').click();
+  await page.locator('#personalAssistantDraftReview').waitFor({ state: 'visible', timeout: 30000 });
+  const typed = await review();
+  evidence.steps.push({
+    step: 'typed-request',
+    bodyIsLatestReply: typed.body === korean.text,
+    notes: typed.notes,
+    lastAssistantLine: (await rows()).filter(row => row.role === 'assistant').pop()?.text,
+    shot: await shot('12-typed-request-review')
+  });
+  await page.locator('#personalAssistantDraftCancel').click();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await koreanRow.locator('[data-message-action="save-draft"]').click();
+  await page.locator('#personalAssistantDraftReview').waitFor({ state: 'visible', timeout: 20000 });
+  evidence.steps.push({ step: 'narrow-review', shot: await shot('13-narrow-review') });
+  await page.locator('#personalAssistantDraftCancel').click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  evidence.canonical = {
+    hq,
+    draftTicketsAdded: (await assistantTickets(hq)).length - ticketsBefore,
+    memoryAfter: (await api('/api/personal-assistant/knowledge')).status
+  };
+}
+
+try {
+  if (stage === 'conversation') await conversationStage();
+  else if (stage === 'save') await saveStage();
+  else throw new Error(`unknown stage: ${stage}`);
 } catch (error) {
   evidence.error = String(error && error.stack ? error.stack : error);
   evidence.failureShot = await shot('failure').catch(() => '');

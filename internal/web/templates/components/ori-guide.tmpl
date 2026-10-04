@@ -171,6 +171,37 @@
         <p id="personalAssistantConversationNote" class="personal-assistant-conversation__note"
            role="status" aria-live="polite"></p>
       </div>
+      <!-- Save to HQ backlog: the review of one reply before it is saved. It is
+           its own form, so Enter here can never send the composer above. Opening
+           it writes nothing; only Save to backlog does. -->
+      <form id="personalAssistantDraftReview" class="personal-assistant-review"
+            aria-labelledby="personalAssistantDraftReviewHeading" hidden novalidate>
+        <h3 id="personalAssistantDraftReviewHeading" class="personal-assistant-review__heading">Save to HQ backlog</h3>
+        <p id="personalAssistantDraftTarget" class="personal-assistant-review__target"></p>
+        <div data-draft-view="edit" class="personal-assistant-review__fields">
+          <label class="personal-assistant-review__label" for="personalAssistantDraftTitle">Title</label>
+          <input type="text" id="personalAssistantDraftTitle" class="personal-assistant-review__input"
+                 autocomplete="off" aria-describedby="personalAssistantDraftTitleHint">
+          <p id="personalAssistantDraftTitleHint" class="personal-assistant-review__hint"></p>
+          <label class="personal-assistant-review__label" for="personalAssistantDraftBody">Draft</label>
+          <textarea id="personalAssistantDraftBody" class="personal-assistant-review__input personal-assistant-review__body"
+                    rows="7" aria-describedby="personalAssistantDraftBodyHint"></textarea>
+          <p id="personalAssistantDraftBodyHint" class="personal-assistant-review__hint"></p>
+          <ul id="personalAssistantDraftNotes" class="personal-assistant-review__notes" hidden></ul>
+          <div class="personal-assistant-review__actions">
+            <button type="submit" id="personalAssistantDraftSave" class="personal-assistant-review__primary">Save to backlog</button>
+            <button type="button" id="personalAssistantDraftCancel" class="personal-assistant-review__secondary">Cancel</button>
+          </div>
+        </div>
+        <div data-draft-view="receipt" class="personal-assistant-review__fields" hidden>
+          <p id="personalAssistantDraftReceipt" class="personal-assistant-review__receipt"></p>
+          <div class="personal-assistant-review__actions">
+            <a id="personalAssistantDraftOpen" class="personal-assistant-review__primary" href="#">Open in Personal HQ</a>
+            <button type="button" id="personalAssistantDraftDone" class="personal-assistant-review__secondary">Done</button>
+          </div>
+        </div>
+        <p id="personalAssistantDraftStatus" class="personal-assistant-review__status" role="status" aria-live="polite"></p>
+      </form>
       {{if ne .CurrentPage "index"}}
       {{template "assistant-led-setup.tmpl" .}}
       {{end}}

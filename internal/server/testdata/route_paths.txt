@@ -33,6 +33,8 @@
 /api/home-assistant/ask
 /api/home-assistant/conversations
 /api/home-assistant/conversations/x
+/api/home-assistant/drafts/review
+/api/home-assistant/drafts/save
 /api/home-assistant/route
 /api/home-assistant/trace
 /api/hooks

@@ -155,6 +155,7 @@ export default defineConfig([
       'internal/web/static/js/modules/ori-spotlight.js',
       'internal/web/static/js/modules/personal-assistant-panel.js',
       'internal/web/static/js/modules/personal-assistant-conversation.js',
+      'internal/web/static/js/modules/personal-assistant-drafts.js',
       'internal/web/static/js/modules/personal-assistant-continuity.js',
       'internal/web/static/js/modules/personal-hq-email-setup.js',
       'internal/web/static/js/modules/home-calendar-ops-portal.js',

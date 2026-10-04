@@ -877,6 +877,148 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   padding: 4px 8px;
 }
 
+/* ---- message actions and the save review --------------------------------------------- */
+
+.personal-assistant-message__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ori-line);
+  white-space: normal;
+}
+
+.personal-assistant-message__action {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--ori-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ori-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.personal-assistant-message__action:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
+.personal-assistant-message__saved {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.personal-assistant-review {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 10px;
+  border: 1px solid var(--ori-accent-strong);
+  border-radius: 10px;
+  background: var(--ori-paper);
+}
+
+.personal-assistant-review[hidden],
+.personal-assistant-review [hidden] {
+  display: none;
+}
+
+.personal-assistant-review__heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.personal-assistant-review__target,
+.personal-assistant-review__hint,
+.personal-assistant-review__status,
+.personal-assistant-review__notes {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.personal-assistant-review__notes {
+  padding-left: 18px;
+}
+
+.personal-assistant-review__fields {
+  display: grid;
+  gap: 4px;
+}
+
+.personal-assistant-review__label {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.personal-assistant-review__input {
+  width: 100%;
+  border: 1px solid var(--ori-line);
+  border-radius: 8px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.personal-assistant-review__input[aria-invalid="true"] {
+  border-color: #b3261e;
+}
+
+.personal-assistant-review__body {
+  min-height: 120px;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.personal-assistant-review__receipt {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.personal-assistant-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.personal-assistant-review__primary,
+.personal-assistant-review__secondary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.personal-assistant-review__primary {
+  border: 0;
+  background: var(--ori-accent-strong);
+  color: #fff;
+}
+
+.personal-assistant-review__primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.personal-assistant-review__secondary {
+  border: 1px solid var(--ori-line);
+  background: transparent;
+  color: var(--ori-ink);
+}
+
 /* ---- narrow layout ---------------------------------------------------------------- */
 
 /* Below this width the Personal Assistant becomes a full-width bottom sheet.
