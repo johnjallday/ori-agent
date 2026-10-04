@@ -343,6 +343,15 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.keyboard.press('Enter');
     const agreement = page.getByRole('dialog', { name: 'How your assistant works with you' });
     await expect(agreement).toBeVisible();
+    // The dialog sits over the map, so it needs a background of its own: an
+    // opaque colour, not the see-through default.
+    const agreementBackground = await agreement.evaluate(
+      el => getComputedStyle(el).backgroundColor
+    );
+    expect(agreementBackground).toMatch(/^(rgb|color)\(/);
+    expect(await contrastRatio(page, '#personalAssistantContinuity h2')).toBeGreaterThanOrEqual(
+      4.5
+    );
     await expect(page.getByRole('button', { name: 'Close working agreement' })).toBeFocused();
     await expect(page.getByLabel('Mandate')).toBeVisible();
     await expect(page.getByLabel('Brief scope')).toBeVisible();

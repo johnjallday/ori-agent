@@ -524,6 +524,23 @@ async function drawer() {
   await page.keyboard.press('Escape');
   check(await page.locator(PANEL).isVisible(), 'Escape closes the More menu, not the drawer');
 
+  // Working agreement, from the More menu: a panel over the map with a
+  // background of its own, and closing it goes back to the drawer.
+  await page.locator('#personalAssistantMore > summary').click();
+  await page.locator('#personalAssistantTodayAgreement').click();
+  const agreement = page.locator('#personalAssistantContinuity');
+  await agreement.waitFor({ state: 'visible' });
+  const agreementBackground = await agreement.evaluate(el => getComputedStyle(el).backgroundColor);
+  check(
+    !/rgba\(0, 0, 0, 0\)|transparent/.test(agreementBackground),
+    `the working agreement has an opaque background (${agreementBackground})`
+  );
+  await page.waitForTimeout(600);
+  await shot('02b-working-agreement');
+  await agreement.getByRole('button', { name: 'Close working agreement' }).click();
+  await page.locator(PANEL).waitFor({ state: 'visible' });
+  check(await agreement.isHidden(), 'closing the working agreement returns to the drawer');
+
   // The progress row expands Working on and Done in place, and collapses.
   const progress = page.locator('#personalAssistantProgressRow');
   if (await progress.isVisible()) {

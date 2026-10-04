@@ -2238,6 +2238,11 @@ a.quest-title:focus-visible {
 }
 
 .pa-continuity {
+  /* The panel's own surface, and the one its fields and cards are mixed from.
+     Nothing in the app defines --surface-color, and a background that reads an
+     undefined variable is no background at all: the map showed through the
+     whole panel. It is Home's raised paper, in both themes. */
+  --surface-color: var(--hc-panel-raised, var(--bg-primary));
   position: fixed;
   z-index: 1045;
   top: max(calc(var(--navbar-offset, 76px) + 12px), 88px);
@@ -2251,6 +2256,7 @@ a.quest-title:focus-visible {
   border: 1px solid color-mix(in srgb, var(--primary-color) 24%, var(--border-color));
   border-radius: var(--radius-lg);
   background: var(--surface-color);
+  color: var(--hc-ink, var(--text-primary));
   box-shadow: 0 20px 56px rgb(0 0 0 / 30%);
 }
 
