@@ -1511,7 +1511,9 @@ case "$1 $2" in
     # merged BEFORE publication while its RC was being tested. No date filter.
     printf 'feat: merged during RC testing (#381)\n'
     printf 'feat: merged after stable publication (#380)\n'
+    printf 'Merge pull request #382 from johnjallday/feature/landed-with-a-merge-commit\n'
     printf 'chore: local maintenance without a delivery PR\n'
+    printf 'Merge pull request #379 from johnjallday/release/v0.0.106\n'
     printf 'Merge released branch back into dev\n'
     ;;
   *)
@@ -1929,11 +1931,12 @@ grep -Fq "Latest release: v0.0.106 (published 2026-08-15T10:00:00Z)" \
   "$fixture_root/release-output"
 grep -Fq "https://github.com/johnjallday/ori-agent/releases/tag/v0.0.106" \
   "$fixture_root/release-output"
-# Both PRs absent from the released tree count, including the one merged
-# during RC testing. Non-PR subjects do not contribute to the cadence count.
+# Every PR absent from the released tree counts, including the one merged
+# during RC testing and the one landed with a merge commit. Non-PR subjects and
+# the release merge-back do not contribute to the cadence count.
 check "release counts unshipped PRs by ancestry, not publication time" \
   "$(grep -Fc 'PR(s) merged into dev since v0.0.106' "$fixture_root/release-output" || true)" "1"
-grep -Fq "2 PR(s) merged into dev since v0.0.106." "$fixture_root/release-output"
+grep -Fq "3 PR(s) merged into dev since v0.0.106." "$fixture_root/release-output"
 grep -Fq $'CALL\trelease\tview\t--json\ttagName,publishedAt,url\t--template' \
   "$gh_calls"
 grep -Fq $'CALL\tapi\t--paginate\trepos/{owner}/{repo}/compare/v0.0.106...dev?per_page=100\t--jq' \
@@ -1975,13 +1978,13 @@ check "picker implementation summary loads the shared table" \
   "$(grep -c 'demo     Implementing' <<< "$implementation_summary")" "1"
 load_picker_release_status
 check "picker release summary uses the exact merged-PR count" \
-  "$picker_release_summary" "2 PRs merged into dev since v0.0.106."
-check "picker release summary retains the numeric count" "$picker_release_count" "2"
+  "$picker_release_summary" "3 PRs merged into dev since v0.0.106."
+check "picker release summary retains the numeric count" "$picker_release_count" "3"
 render_picker 0 0 0 > "$fixture_root/picker-release-output"
 grep -Fq "Ongoing implementations  [w] full details  [d] finish (wt done)" \
   "$fixture_root/picker-release-output"
 grep -Fq "demo     Implementing" "$fixture_root/picker-release-output"
-grep -Fq "Release  2 PRs merged into dev since v0.0.106." \
+grep -Fq "Release  3 PRs merged into dev since v0.0.106." \
   "$fixture_root/picker-release-output"
 check "picker release refresh makes exactly two reads" "$(count_gh_calls)" "2"
 

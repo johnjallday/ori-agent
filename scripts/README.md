@@ -314,8 +314,9 @@ fails, the banner reports `Release status unavailable` while the Issue list
 remains usable.
 
 It is read-only — `gh release view` plus a paginated GitHub compare read of
-`<stable-tag>...dev`. It counts the same squash-merge subjects (`(#N)`) as the
-cadence gate. Membership follows **commit ancestry**, not publication time:
+`<stable-tag>...dev`. It counts the same PR subjects as the cadence gate: a
+squash merge's `(#N)` or a merge commit's `Merge pull request #N`, never the
+release merge-back. Membership follows **commit ancestry**, not publication time:
 PRs merged while an RC was being tested are still unshipped, even when their
 merge preceded stable publication. A release with nothing merged since prints
 `No PRs merged into dev since <tag>.` rather than a blank line. Either read

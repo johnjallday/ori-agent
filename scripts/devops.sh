@@ -512,6 +512,7 @@ release_merged_count=0
 load_release_status() {
   local release_line pr_output
   local subject
+  local merged_pr='^Merge pull request #[0-9]+ from [^/[:space:]]+/'
 
   release_tag=""
   release_published=""
@@ -532,7 +533,10 @@ load_release_status() {
 
   # Publication may happen days after the RC was frozen. Compare ancestry,
   # not publishedAt: PRs merged while the RC was tested are still unshipped.
-  # Match the same squash-merge subjects used by the release cadence gate.
+  # Match the PR subjects the release cadence gate counts: a squash merge's
+  # (#N) suffix or a merge commit's "Merge pull request #N", except the release
+  # merge-back. The gate reads only dev's own line; compare also lists a merged
+  # branch's commits, so one of those ending in (#N) is counted here too.
   if ! [[ "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     printf 'latest release is not a stable vX.Y.Z tag.\n' >&2
     return 1
@@ -542,7 +546,8 @@ load_release_status() {
     --jq '.commits[].commit.message | split("\n")[0]')" || return $?
 
   while IFS= read -r subject; do
-    if [[ "$subject" =~ \(#[0-9]+\)$ ]]; then
+    if [[ "$subject" =~ \(#[0-9]+\)$ ]] ||
+       [[ "$subject" =~ $merged_pr && ! "$subject" =~ ${merged_pr}release/ ]]; then
       release_merged_count=$((release_merged_count + 1))
     fi
   done <<< "$pr_output"

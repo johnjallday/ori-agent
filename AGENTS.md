@@ -144,8 +144,8 @@ preview. Scripted launches require `--kind` and `--yes`; see
 `release` additionally delegates to `gh release view` and a paginated GitHub
 compare read of `<stable-tag>...dev`. Feature delivery targets `dev`, while
 Releases snapshot `main`, so this is the queue that has landed but not shipped.
-It counts squash-merge subjects (`(#N)`) by commit ancestry, not publication
-time: PRs merged while an RC was being tested remain in the unshipped queue. The picker
+It counts PR subjects (a squash merge's `(#N)` or a merge commit's
+`Merge pull request #N`) by commit ancestry, not publication time: PRs merged while an RC was being tested remain in the unshipped queue. The picker
 loads this count and the implementation overview once on entry and again on
 `r`; either dashboard section can report itself unavailable without hiding the
 Issue list. The one-shot

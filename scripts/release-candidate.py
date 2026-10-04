@@ -199,6 +199,15 @@ class Repository:
         return version, sha, branch
 
 
+def landed_pr(subject):
+    """A squash merge ends in (#N); a merge commit names the PR and its branch."""
+    if re.search(r"\(#[0-9]+\)$", subject):
+        return True
+    # The release merge-back has to be a merge commit, and it ships nothing new.
+    merged = re.match(r"Merge pull request #[0-9]+ from [^/\s]+/(\S+)", subject)
+    return bool(merged) and not merged[1].startswith("release/")
+
+
 def evaluate(repo, candidate=""):
     output(ready=False)
     check_hold()
@@ -221,8 +230,10 @@ def evaluate(repo, candidate=""):
         if not repo.ancestor(repo.branches["main"], sha) or not repo.ancestor(repo.tags[latest], sha):
             summary("HOLD — merge the last release branch back into dev with a merge commit (not squash).")
             return
-        subjects = git("log", f"{repo.tags[latest]}..{sha}", "--format=%s").splitlines()
-        prs = [subject for subject in subjects if re.search(r"\(#[0-9]+\)$", subject)]
+        # dev's own line holds one commit per landed PR, whichever merge button
+        # was used; a merged branch's commits sit behind the second parent.
+        subjects = git("log", "--first-parent", f"{repo.tags[latest]}..{sha}", "--format=%s").splitlines()
+        prs = [subject for subject in subjects if landed_pr(subject)]
         minimum = int(os.environ.get("RELEASE_MIN_PRS", "10"))
         if minimum < 1:
             raise Refusal("RELEASE_MIN_PRS must be positive")
