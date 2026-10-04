@@ -131,6 +131,18 @@ export function assistantMoreLinks(today) {
   };
 }
 
+/** Where "Explore a folder" goes from a page that is not Home. */
+export const EXPLORE_FOLDER_URL = '/?panel=today&folder=show';
+
+/**
+ * The one suggestion above the composer, "Explore a folder". It is offered when
+ * the assistant can accept work, which already means a Personal HQ exists, and
+ * is disabled while a folder is being chosen or explored.
+ */
+export function assistantChipView({ available, folderBusy } = {}) {
+  return { visible: available === true, disabled: folderBusy === true };
+}
+
 const state = {
   view: personalAssistantPanelView(null),
   personalAssistant: null,
@@ -139,6 +151,8 @@ const state = {
   open: false,
   draft: '',
   lastTrigger: null,
+  // True while Home's folder flow is waiting for a folder or exploring one.
+  folderBusy: false,
   els: null
 };
 
@@ -175,6 +189,7 @@ function renderIdentity() {
   els.launcherAvatar.innerHTML = avatar;
   els.panelAvatar.innerHTML = avatar;
   els.panel.dataset.relationshipState = view.state;
+  renderChip();
   // Home says these in the banner under the header. A page without that banner
   // says them here, above the composer, so they are never said twice.
   if (els.todayBanner) return;
@@ -187,6 +202,33 @@ function renderIdentity() {
     link.textContent = 'Build Personal HQ';
     els.status.append(link);
   }
+}
+
+function renderChip() {
+  const els = state.els;
+  if (!els?.chips || !els.folderChip) return;
+  const chip = assistantChipView({
+    available: state.view.available,
+    folderBusy: state.folderBusy
+  });
+  els.chips.hidden = !chip.visible;
+  els.folderChip.disabled = chip.disabled;
+}
+
+/** Home's folder flow says when a folder is being chosen or explored. */
+function setFolderBusy(busy) {
+  state.folderBusy = busy === true;
+  renderChip();
+}
+
+/**
+ * "Explore a folder". Home runs the flow in this drawer's conversation; every
+ * other page has no folder flow of its own, so it goes to Home's.
+ */
+function exploreFolder() {
+  const folder = window.PersonalAssistantFolder;
+  if (folder && typeof folder.open === 'function') folder.open();
+  else window.location.assign(EXPLORE_FOLDER_URL);
 }
 
 function setMenuLink(link, route) {
@@ -461,6 +503,8 @@ function init() {
     input: document.getElementById('personalAssistantInput'),
     send: document.getElementById('personalAssistantSend'),
     status: document.getElementById('personalAssistantPanelStatus'),
+    chips: document.getElementById('personalAssistantChips'),
+    folderChip: document.getElementById('personalAssistantFolderChip'),
     activityMount: document.getElementById('personalAssistantActivityMount'),
     // Present on Home only, where it carries the paused and Build HQ messages.
     todayBanner: document.getElementById('personalAssistantTodayBanner'),
@@ -475,6 +519,7 @@ function init() {
   launcher.addEventListener('click', () => (state.open ? close() : open(launcher)));
   state.els.close?.addEventListener('click', close);
   state.els.form?.addEventListener('submit', submit);
+  state.els.folderChip?.addEventListener('click', exploreFolder);
 
   const more = state.els.more;
   more?.addEventListener('keydown', event => {
@@ -524,6 +569,7 @@ const api = {
   refresh,
   applyPersonalAssistant,
   setToday,
+  setFolderBusy,
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantPanel = api;

@@ -6,13 +6,25 @@
      mount.
 
      The Daily Brief itself is not here. It is read in the Daily Brief station
-     in My HQ; the drawer keeps one row that links to it. -->
+     in My HQ; the drawer keeps one row that links to it. The folder flow is
+     not here either: it runs in the conversation (personal-assistant-
+     folder.tmpl), and only an offer still waiting for an answer when the page
+     loads is placed in Needs you. -->
 <section id="personalAssistantToday" class="personal-assistant-today" data-state="loading"
          aria-labelledby="personalAssistantTodayTitle" hidden>
   <!-- Names the region for assistive technology. The drawer's own header
        already shows the assistant's name, so this is not repeated visually. -->
   <h3 id="personalAssistantTodayTitle" class="visually-hidden">Today</h3>
   <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
+
+  <!-- Once the user starts a conversation, Needs you and the two rows fold into
+       this one line so the conversation has the room. The control shows them
+       again; folding only hides them, so nothing typed into a card is lost. -->
+  <div id="personalAssistantSummary" class="personal-assistant-summary" hidden>
+    <span id="personalAssistantSummaryText" class="personal-assistant-summary__text"></span>
+    <button type="button" id="personalAssistantSummaryToggle" class="personal-assistant-summary__toggle"
+            aria-expanded="false" aria-controls="personalAssistantTodaySections">Show</button>
+  </div>
 
   {{template "assistant-led-setup.tmpl" .}}
 
@@ -42,51 +54,6 @@
     </div>
     <p id="personalAssistantHQStatus" role="status" aria-live="polite"></p>
     <p id="personalAssistantHQError" class="pa-specialist-offer__error" role="alert" hidden></p>
-  </section>
-
-  <!-- Show me a folder: the assistant's first proactive act. The chooser names
-       folders by identifier and the server resolves them; the offer card is
-       built from counts and names only. Shown for an active or paused
-       assistant, never before the hire or while HQ is being built. -->
-  <section id="personalAssistantFolder" class="pa-folder pa-folder__experience" data-state="idle"
-           aria-labelledby="personalAssistantFolderTitle" hidden>
-    <div id="personalAssistantFolderScene" class="pa-folder__scene" data-phase="choosing" data-needs-part hidden>
-      <div class="pa-folder__scene-copy">
-        <p class="pa-folder__scene-kicker">A little field trip</p>
-        <p id="personalAssistantFolderSceneLabel" class="pa-folder__scene-label" role="status" aria-live="polite"></p>
-        <div id="personalAssistantFolderSceneFinds" class="pa-folder__scene-finds"></div>
-        <p class="pa-folder__scene-assurance">A read-only peek. Nothing moves.</p>
-      </div>
-      <div class="pa-folder__scene-art" aria-hidden="true">
-        <span id="personalAssistantFolderSceneAvatar" class="pa-folder__scene-avatar"></span>
-        <svg class="pa-folder__scene-folder" viewBox="0 0 52 45" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M3 8a4 4 0 0 1 4-4h13l5 5h20a4 4 0 0 1 4 4v25a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V8Z" fill="currentColor" stroke="currentColor" stroke-width="3"/>
-          <path d="M4 18h44v20a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V18Z" fill="var(--hc-panel)" stroke="currentColor" stroke-width="3"/>
-          <path d="M17 26h18M17 32h11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        <span class="pa-folder__scene-spark"></span>
-      </div>
-    </div>
-    <div id="personalAssistantFolderChooser" class="pa-folder__chooser" data-needs-part hidden>
-      <p id="personalAssistantFolderTitle" class="pa-folder__prompt">Which folder should I explore?</p>
-      <div id="personalAssistantFolderChips" class="pa-folder__chips" role="group" aria-label="Folders"></div>
-      <p id="personalAssistantFolderNote" class="pa-folder__note" hidden></p>
-      <p id="personalAssistantFolderStatus" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
-    </div>
-    <section id="personalAssistantFolderOffer" class="pa-specialist-offer pa-folder__offer"
-             aria-labelledby="personalAssistantFolderOfferHeadline" data-needs-part hidden>
-      <p id="personalAssistantFolderOfferHeadline" class="pa-specialist-offer__headline"></p>
-      <p id="personalAssistantFolderOfferQuestion" class="pa-specialist-offer__question"></p>
-      <p id="personalAssistantFolderOfferCapability" class="pa-folder__note" hidden></p>
-      <details class="pa-folder__why"><summary>Why this suggestion?</summary>
-        <p id="personalAssistantFolderOfferReason" class="pa-folder__reason"></p>
-      </details>
-      <ul id="personalAssistantFolderPlan" class="pa-folder__plan" aria-label="What Set up does" hidden></ul>
-      <ul id="personalAssistantFolderReceipt" class="pa-folder__receipt" hidden></ul>
-      <div id="personalAssistantFolderOfferActions" class="pa-specialist-offer__actions"></div>
-      <p id="personalAssistantFolderOfferNote" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
-      <p id="personalAssistantFolderOfferError" class="pa-specialist-offer__error" role="alert" hidden></p>
-    </section>
   </section>
 
   <!-- Canonical setup/program/add-on reporting. Controls either navigate to a

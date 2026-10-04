@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
+  EXPLORE_FOLDER_URL,
   assistantCheckInLine,
+  assistantChipView,
   assistantMoreLinks,
   assistantOpenFocusTarget,
   assistantPanelShouldCloseOnKey,
@@ -112,6 +115,50 @@ test('opening the drawer focuses the composer whenever the assistant can accept 
     );
   }
   assert.equal(assistantOpenFocusTarget(null), 'first-control');
+});
+
+test('"Explore a folder" is offered when the assistant can accept work, and waits its turn', () => {
+  // Active or paused already means a Personal HQ exists.
+  for (const state of ['active', 'paused']) {
+    const { available } = personalAssistantPanelView({ state });
+    assert.deepEqual(assistantChipView({ available, folderBusy: false }), {
+      visible: true,
+      disabled: false
+    });
+    // A folder is being chosen or explored: the chip stays, and cannot be pressed.
+    assert.deepEqual(assistantChipView({ available, folderBusy: true }), {
+      visible: true,
+      disabled: true
+    });
+  }
+  for (const state of ['needs_hire', 'needs_hq', 'provisioning_hq', 'repair_needed']) {
+    const { available } = personalAssistantPanelView({ state });
+    assert.equal(assistantChipView({ available }).visible, false, state);
+  }
+  assert.equal(assistantChipView().visible, false);
+  // Off Home the chip goes to Home's flow, which the drawer there starts.
+  assert.equal(EXPLORE_FOLDER_URL, '/?panel=today&folder=show');
+});
+
+test('the chip sits directly above the composer, on every page', () => {
+  const drawer = readFileSync(
+    new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
+    'utf8'
+  );
+  const chips = drawer.indexOf('id="personalAssistantChips"');
+  const form = drawer.indexOf('id="personalAssistantForm"');
+  assert.ok(chips > 0 && chips < form);
+  // Nothing else is between them, and it is outside the scrolling region.
+  assert.ok(drawer.indexOf('id="personalAssistantPanelStatus"') < chips);
+  assert.ok(drawer.indexOf('id="personalAssistantThread"') < chips);
+  assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 1);
+  assert.match(drawer, /id="personalAssistantFolderChip"[\s\S]{0,200}Explore a folder/);
+  // Not inside a part of the drawer that only some pages render: the last
+  // page condition before it has already ended.
+  const before = drawer.slice(0, chips);
+  const lastCondition = before.lastIndexOf('.CurrentPage "index"}}');
+  assert.ok(lastCondition > 0);
+  assert.match(before.slice(lastCondition), /\{\{end\}\}/);
 });
 
 test('the header line says when the next check-in is, in the wording Today used', () => {

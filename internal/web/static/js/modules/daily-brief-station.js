@@ -210,6 +210,22 @@ export function dailyBriefRowStatus(status) {
   }
 }
 
+// dailyBriefStripStatus is the brief's two or three words in the drawer's
+// folded summary ("Needs you 2 · Brief ready · 2 in progress"). The brief row
+// says the rest once the summary is shown again.
+export function dailyBriefStripStatus(status) {
+  switch (status && status.kind) {
+    case 'preparing':
+      return 'Brief being prepared';
+    case 'failed':
+      return 'Brief failed';
+    case 'ready':
+      return 'Brief ready';
+    default:
+      return 'No brief yet';
+  }
+}
+
 // briefPanelMeta is the line under the panel's heading: when the brief on
 // screen was generated, and when the next one is due. An earlier brief, opened
 // from the list, says only when it was generated.

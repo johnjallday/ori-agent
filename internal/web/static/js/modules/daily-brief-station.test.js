@@ -9,6 +9,7 @@ import {
   isDailyBriefStationLink,
   nextBriefDue,
   dailyBriefRowStatus,
+  dailyBriefStripStatus,
   scheduleClock,
   stationFromSearch
 } from './daily-brief-station.js';
@@ -263,6 +264,18 @@ test('with no brief yet the row says when the first one is due', () => {
   // A schedule that names no future time still says there is no brief.
   assert.equal(dailyBriefRowStatus({ kind: 'due', due: '' }), 'no brief yet');
   assert.equal(dailyBriefRowStatus(null), 'no brief yet');
+});
+
+// What the drawer's folded summary says about the brief, in two or three words.
+test('the summary strip says the brief is ready, being prepared, failed, or not there yet', () => {
+  const strip = input =>
+    dailyBriefStripStatus(dailyBriefStatus({ config: config(), now: NOW, ...input }));
+  assert.equal(strip({ generation: 'succeeded', revision: revision() }), 'Brief ready');
+  assert.equal(strip({ generation: 'running', revision: revision() }), 'Brief being prepared');
+  assert.equal(strip({ generation: 'failed', revision: null }), 'Brief failed');
+  assert.equal(strip({ generation: 'idle', revision: null }), 'No brief yet');
+  assert.equal(strip({ generation: 'idle', revision: null, paused: true }), 'No brief yet');
+  assert.equal(dailyBriefStripStatus(null), 'No brief yet');
 });
 
 test('the brief row names the other states too: an earlier brief, paused, unscheduled', () => {

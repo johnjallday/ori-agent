@@ -808,6 +808,45 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   opacity: 0.55;
 }
 
+/* One suggestion, directly above the composer. */
+.personal-assistant-panel__chips {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.personal-assistant-panel__chips[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__chip {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.personal-assistant-panel__chip:hover:not(:disabled) {
+  border-color: var(--ori-accent);
+}
+
+.personal-assistant-panel__chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.personal-assistant-panel__chip i {
+  color: var(--pa-accent-text);
+}
+
 /* What the composer last did. It takes no room while it has nothing to say. */
 .personal-assistant-panel__status {
   flex: none;
@@ -836,6 +875,46 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 
 .personal-assistant-panel__activity:not(:has(> .ask-ori-activity:not(.is-idle))) {
   display: none;
+}
+
+/* The conversation: the shared activity and, on Home, the folder turn. It
+   takes no room until one of them has something in it. */
+.personal-assistant-panel__thread {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.personal-assistant-panel__thread:not(
+  :has(> .pa-thread:not([hidden]), > * > .ask-ori-activity:not(.is-idle))
+) {
+  display: none;
+}
+
+/* A turn that is not the shared activity's: what the user asked for, on the
+   right, and under it the assistant's replies, each a card of its own. */
+.pa-thread__request {
+  max-width: 85%;
+  justify-self: end;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 16px 16px 4px;
+  background: var(--ori-accent-strong);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pa-thread__request[hidden] {
+  display: none;
+}
+
+.pa-thread__reply {
+  overflow: hidden;
+  border: 1px solid var(--ori-line);
+  border-radius: 16px 16px 16px 4px;
+  background: var(--ori-paper);
 }
 
 /* ---- what needs you, the brief row and the progress row (Home) ---------------------- */
@@ -870,6 +949,45 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 .personal-assistant-panel .personal-assistant-today__banner a {
   color: var(--pa-accent-text);
   font-weight: 700;
+}
+
+/* What Needs you and the two rows fold into once a conversation starts. */
+.personal-assistant-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 13px;
+}
+
+.personal-assistant-summary[hidden] {
+  display: none;
+}
+
+.personal-assistant-summary__text {
+  min-width: 0;
+  font-weight: 600;
+}
+
+.personal-assistant-summary__toggle {
+  min-height: 32px;
+  flex: none;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pa-accent-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.personal-assistant-summary__toggle:hover {
+  background: var(--ori-surface);
 }
 
 .personal-assistant-panel .personal-assistant-today__sections {

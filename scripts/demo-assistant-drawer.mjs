@@ -14,6 +14,13 @@
 //             /?panel=today, and the brief row opening the station
 //   drawer-setup  the drawer before the assistant can accept work: before
 //             hiring, then hired with no HQ. Needs a FRESH sandbox.
+//   folder    the folder flow in the conversation: the chip, the chooser, the
+//             scene, the offer, Later, the summary strip, a reload onto an
+//             unanswered offer, Set up, the toolbar button and the link.
+//             Seed folders first:
+//               ./scripts/smoke.sh showfolder <base-url> seed <sandbox>
+//   folder-first  the assistant's one first-folder prompt. Run it against the
+//             sandbox drawer-setup left (hired, no HQ).
 //
 // Seed the server first: ./scripts/smoke.sh showfolder <base-url> hq
 // theme is "light" (default) or "dark".
@@ -679,11 +686,216 @@ async function drawerSetup() {
   await shot('02-hired-no-hq');
 }
 
+const FOLDER = '#personalAssistantFolder';
+const CHIP = '#personalAssistantFolderChip';
+const STRIP = '#personalAssistantSummary';
+const SECTIONS = '#personalAssistantTodaySections';
+const OFFER = '#personalAssistantFolderOffer';
+
+const offerText = async () => (await page.locator(OFFER).innerText()).replace(/\s+/g, ' ').trim();
+
+async function currentOffer() {
+  return (await (await page.request.get(`${base}/api/personal-assistant/folder-digest`)).json())
+    ?.folder_digest?.offer;
+}
+
+// The folder flow, as a turn in the conversation. Needs the sandbox's folders:
+//   ./scripts/smoke.sh showfolder <base-url> seed <sandbox>
+async function folder() {
+  await personalHQ();
+  // This stage is about a folder the user asks for; the assistant's own first
+  // prompt has its own stage (folder-first), so a fresh sandbox records it as
+  // already shown.
+  await page.request.post(`${base}/api/personal-assistant/folder-digest/prompted`);
+  const chip = page.locator(CHIP);
+  const chooser = page.locator('#personalAssistantFolderChooser');
+  const request = page.locator('#personalAssistantFolderRequest');
+  const toggle = page.locator('#personalAssistantSummaryToggle');
+
+  // At rest: the chip is there, the conversation is empty, nothing is folded.
+  await openDrawer();
+  check(await chip.isVisible(), 'the chip sits above the composer');
+  check(await chip.isEnabled(), 'and can be pressed');
+  const chipBox = await chip.boundingBox();
+  const inputBox = await page.locator('#personalAssistantInput').boundingBox();
+  check(
+    chipBox.y + chipBox.height <= inputBox.y && inputBox.y - (chipBox.y + chipBox.height) < 24,
+    'directly above it'
+  );
+  if (!(await currentOffer())) {
+    check(await page.locator(FOLDER).isHidden(), 'at rest the conversation has no folder turn');
+  }
+  check(await page.locator(STRIP).isHidden(), 'and nothing is folded');
+  await shot('01-at-rest');
+
+  // The chip: the request, then the chooser as the assistant's reply.
+  await chip.click();
+  await chooser.waitFor({ state: 'visible' });
+  check((await request.innerText()).includes('Explore a folder'), 'the request is shown');
+  console.log('chooser:', (await chooser.innerText()).replace(/\s+/g, ' ').trim());
+  check(
+    (await chooser.innerText()).includes('A read-only peek. Nothing moves.'),
+    'the chooser says nothing moves'
+  );
+  check(await chip.isDisabled(), 'the chip is disabled while a folder is being chosen');
+  check(await page.locator(STRIP).isVisible(), 'the top folds into the summary strip');
+  check(await page.locator(SECTIONS).isHidden(), 'which hides Needs you and the two rows');
+  console.log('strip:', await page.locator('#personalAssistantSummaryText').innerText());
+  await shot('02-chooser');
+
+  // Show and Hide reverse the fold.
+  await toggle.click();
+  check((await toggle.getAttribute('aria-expanded')) === 'true', 'Show expands it');
+  check(await page.locator(SECTIONS).isVisible(), 'and the sections are back');
+  await shot('03-strip-shown');
+  await toggle.click();
+  check(await page.locator(SECTIONS).isHidden(), 'Hide folds it again');
+
+  // Choosing a folder: the scene, then the offer, as further replies.
+  await chooser.locator('[data-chip="downloads"]').click();
+  await page.locator(OFFER).waitFor({ state: 'visible', timeout: 20000 });
+  check(await page.locator('#personalAssistantFolderScene').isVisible(), 'the scene is shown');
+  check(
+    await page.locator(`${FOLDER} ${OFFER}`).isVisible(),
+    'the offer is a reply in the conversation'
+  );
+  check(await chooser.isHidden(), 'the chooser is done');
+  check(await chip.isEnabled(), 'and the chip can be pressed again');
+  console.log('offer:', await offerText());
+  await page.locator(OFFER).scrollIntoViewIfNeeded();
+  await shot('04-offer');
+
+  // Not now: the offer says so and stays where it was answered.
+  await page.locator(`${OFFER} [data-folder-action="later"]`).click();
+  await page.waitForFunction(
+    selector => document.querySelector(selector)?.dataset.status === 'later',
+    OFFER
+  );
+  console.log('after Later:', await offerText());
+  await shot('05-later');
+
+  // Again, for a folder with projects in it; this one is left unanswered.
+  await chip.click();
+  await chooser.waitFor({ state: 'visible' });
+  console.log(
+    'second chooser title:',
+    await page.locator('#personalAssistantFolderTitle').innerText()
+  );
+  await chooser.locator('[data-chip="documents"]').click();
+  await page.waitForFunction(
+    selector => document.querySelector(selector)?.dataset.status === 'pending',
+    OFFER,
+    { timeout: 20000 }
+  );
+  console.log('offer:', await offerText());
+  await shot('06-second-offer');
+
+  // A request sent now goes below the folder turn: the latest is nearest the composer.
+  const before = await page.evaluate(() =>
+    Array.from(document.getElementById('personalAssistantThread').children, node => node.id)
+  );
+  console.log('conversation order while the folder turn is latest:', before.join(' → '));
+
+  // Reload onto the unanswered offer: it is a card in Needs you, not lost.
+  await openDrawer();
+  check(
+    await page.locator(`#personalAssistantNeedsYouCards ${OFFER}`).isVisible(),
+    'after a reload the unanswered offer is a card in Needs you'
+  );
+  check(await page.locator(FOLDER).isHidden(), 'and the conversation is empty');
+  check((await page.locator(OFFER).count()) === 1, 'there is one offer card, not two');
+  check(await page.locator(STRIP).isHidden(), 'everything is shown in full again');
+  console.log(
+    'needs you count:',
+    await page.locator('#personalAssistantNeedsYouCount').innerText()
+  );
+  await shot('07-reload-offer-in-needs-you');
+
+  // Set up, from that card: the plan is confirmed first, then run.
+  await page.locator(`${OFFER} [data-folder-action="tidy"]`).click();
+  console.log('plan:', await offerText());
+  await shot('08-plan');
+  await page.locator(`${OFFER} [data-folder-action="setup"]`).click();
+  await page.waitForFunction(
+    async () => {
+      const response = await fetch('/api/personal-assistant/folder-digest');
+      return (await response.json())?.folder_digest?.offer?.status === 'resolved';
+    },
+    null,
+    { timeout: 60000 }
+  );
+  await page.waitForTimeout(1500);
+  console.log('after Set up:', new URL(page.url()).pathname + new URL(page.url()).search);
+  await shot('09-set-up');
+
+  // The toolbar's button starts the same turn.
+  await page.goto(`${base}/`);
+  await page.locator('#cockpitShowFolderBtn').waitFor({ state: 'visible', timeout: 20000 });
+  await applyTheme();
+  await page.locator('#cockpitShowFolderBtn').click();
+  await chooser.waitFor({ state: 'visible' });
+  check(await request.isVisible(), 'the toolbar button starts the same turn, with the request');
+  check(await page.locator(SECTIONS).isHidden(), 'and folds the top');
+  await shot('10-toolbar');
+
+  // So does the link.
+  await page.goto(`${base}/?panel=today&folder=show`);
+  await chooser.waitFor({ state: 'visible', timeout: 20000 });
+  await applyTheme();
+  check(await request.isVisible(), '/?panel=today&folder=show starts it too');
+  await page.waitForFunction(() => !window.location.search.includes('folder='));
+  check(true, 'and the parameters leave the address');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(400);
+  await shot('11-link-narrow');
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Reopening with the turn still going keeps the fold; a fresh page shows all.
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#personalAssistantLauncher').click();
+  check(await page.locator(SECTIONS).isHidden(), 'reopening onto the turn keeps it folded');
+}
+
+// The assistant's one first-folder prompt. Run it against a sandbox where the
+// assistant is hired and My HQ has not been built (drawer-setup leaves one).
+async function folderFirst() {
+  let assistant = await assistantState();
+  check(assistant.state === 'needs_hq', `this sandbox is hired with no HQ (${assistant.state})`);
+  const built = await page.request.post(`${base}/api/personal-assistant/hq`, {
+    data: {
+      request_id: 'drawer-demo-first-folder',
+      if_version: assistant.state_version,
+      name: 'My HQ',
+      timezone: 'UTC'
+    }
+  });
+  check(built.ok(), 'My HQ is built');
+  await openDrawer();
+  const chooser = page.locator('#personalAssistantFolderChooser');
+  await chooser.waitFor({ state: 'visible', timeout: 20000 });
+  console.log('first message:', (await chooser.innerText()).replace(/\s+/g, ' ').trim());
+  check(
+    await page.locator('#personalAssistantFolderRequest').isHidden(),
+    'the assistant speaks first: there is no request above its prompt'
+  );
+  check(await page.locator(STRIP).isHidden(), 'and nothing is folded');
+  check(await page.locator(CHIP).isDisabled(), 'the chip waits while a folder is being chosen');
+  await shot('01-first-folder-prompt');
+
+  // The server shows it once per assistant.
+  await openDrawer();
+  check(await chooser.isHidden(), 'a reload does not show the prompt again');
+  check(await page.locator(CHIP).isEnabled(), 'and the chip is ready');
+  await shot('02-after-reload');
+}
+
 try {
   if (stage === 'station') await station();
   else if (stage === 'brief-home') await briefHome();
   else if (stage === 'drawer') await drawer();
   else if (stage === 'drawer-setup') await drawerSetup();
+  else if (stage === 'folder') await folder();
+  else if (stage === 'folder-first') await folderFirst();
   else throw new Error(`unknown stage: ${stage}`);
 } finally {
   if (problems.length) {

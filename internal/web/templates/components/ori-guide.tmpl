@@ -258,12 +258,26 @@
       {{template "assistant-led-setup.tmpl" .}}
       {{end}}
       <!-- The conversation: routing, planning, confirmations and replies land
-           here once a request is sent. Nothing is shown while it is idle. -->
-      <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
+           here once a request is sent, and on Home the folder flow runs here
+           as a turn of its own. Nothing is shown while it is idle. Whichever
+           of the two was used last is kept nearest the composer. -->
+      <div id="personalAssistantThread" class="personal-assistant-panel__thread">
+        <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
+        {{if eq .CurrentPage "index"}}
+        {{template "personal-assistant-folder.tmpl" .}}
+        {{end}}
+      </div>
     </div>
 
-    <!-- The composer is the last thing in the drawer and never scrolls away. -->
+    <!-- The composer is the last thing in the drawer and never scrolls away.
+         One suggestion sits directly above it. -->
     <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
+    <div id="personalAssistantChips" class="personal-assistant-panel__chips" hidden>
+      <button type="button" id="personalAssistantFolderChip" class="personal-assistant-panel__chip">
+        <i class="bi bi-folder2-open" aria-hidden="true"></i>
+        <span>Explore a folder</span>
+      </button>
+    </div>
     <form id="personalAssistantForm" class="personal-assistant-panel__form">
       <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
       <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="2"

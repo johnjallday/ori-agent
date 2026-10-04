@@ -169,10 +169,18 @@ func TestPAFPanelRendersHomeAsOneViewWithTheComposerLast(t *testing.T) {
 		`id="personalAssistantPanelTitle"`, `id="personalAssistantCheckIn"`,
 		`id="personalAssistantMore"`, `id="personalAssistantClose"`,
 		`id="personalAssistantScroll"`, `id="personalAssistantToday"`,
-		`id="personalAssistantTodayBanner"`, `id="personalAssistantNeedsYou"`,
+		`id="personalAssistantTodayBanner"`, `id="personalAssistantSummary"`,
+		`id="personalAssistantNeedsYou"`,
 		`id="personalAssistantBriefRow"`, `id="personalAssistantProgressRow"`,
-		`id="personalAssistantActivityMount"`,
-		`id="personalAssistantPanelStatus"`, `id="personalAssistantForm"`,
+		// The conversation: the shared activity, then the folder flow as a
+		// turn of its own (the request, the chooser, the scene, the offer).
+		`id="personalAssistantThread"`, `id="personalAssistantActivityMount"`,
+		`id="personalAssistantFolder"`, `id="personalAssistantFolderRequest"`,
+		`id="personalAssistantFolderChooser"`, `id="personalAssistantFolderScene"`,
+		`id="personalAssistantFolderOffer"`,
+		// The one suggestion, directly above the composer.
+		`id="personalAssistantPanelStatus"`, `id="personalAssistantChips"`,
+		`id="personalAssistantFolderChip"`, `id="personalAssistantForm"`,
 		`id="personalAssistantInput"`, `id="personalAssistantSend"`,
 	}
 	last := -1
@@ -183,9 +191,14 @@ func TestPAFPanelRendersHomeAsOneViewWithTheComposerLast(t *testing.T) {
 		}
 		at := strings.Index(html, id)
 		if at < last {
-			t.Errorf("rendered Home %s is out of order: the drawer reads header, needs you, brief row, progress row, conversation, composer", id)
+			t.Errorf("rendered Home %s is out of order: the drawer reads header, needs you, brief row, progress row, conversation, chip, composer", id)
 		}
 		last = at
+	}
+	// The folder flow is in the conversation, not in Today's Needs you.
+	today := html[strings.Index(html, `id="personalAssistantToday"`):strings.Index(html, `id="personalAssistantThread"`)]
+	if strings.Contains(today, `personalAssistantFolder`) {
+		t.Error("the folder flow is still rendered inside Today; it belongs in the conversation")
 	}
 	if got := strings.Count(html, `id="personalAssistantLauncher"`); got != 1 {
 		t.Errorf("rendered Home launcher count = %d, want 1", got)
@@ -233,8 +246,9 @@ func TestHomeCockpitHasNoTodayOrWorkingAgreementGridSibling(t *testing.T) {
 }
 
 // On every other page the drawer is the same one view without Home's Today:
-// the header (with its check-in line and More menu), the conversation, and the
-// composer. It has no Needs you cards, brief row or progress row.
+// the header (with its check-in line and More menu), the conversation, the
+// chip, and the composer. It has no Needs you cards, brief row or progress
+// row, and no folder flow of its own: the chip goes to Home's.
 func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
@@ -251,6 +265,8 @@ func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 	for _, absent := range []string{
 		`id="personalAssistantToday"`, `id="personalAssistantNeedsYou"`,
 		`id="personalAssistantBriefRow"`, `id="personalAssistantProgressRow"`,
+		`id="personalAssistantSummary"`, `id="personalAssistantFolder"`,
+		`id="personalAssistantFolderOffer"`,
 		`id="homeDailyBrief"`,
 	} {
 		if strings.Contains(html, absent) {
@@ -260,7 +276,8 @@ func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 	for _, present := range []string{
 		`id="personalAssistantPanel"`, `id="personalAssistantCheckIn"`,
 		`id="personalAssistantMore"`, `id="personalAssistantScroll"`,
-		`id="personalAssistantActivityMount"`, `id="personalAssistantForm"`,
+		`id="personalAssistantThread"`, `id="personalAssistantActivityMount"`,
+		`id="personalAssistantFolderChip"`, `id="personalAssistantForm"`,
 	} {
 		if got := strings.Count(html, present); got != 1 {
 			t.Errorf("non-Home %s count = %d, want 1", present, got)

@@ -433,22 +433,17 @@ body.home-command-page .home-command-bridge * {
   font-size: 12px;
 }
 
-/* Folder intake is one surface, not separate scene/chooser/offer cards. */
+/* Folder intake is one turn in the assistant's conversation: the user's
+   request, then the chooser, the exploring scene and the offer card, each a
+   reply of its own. The turn's shape (.pa-thread*) is the drawer's, in
+   ori-guide.css; what is here is what each reply holds. */
 .pa-folder {
   display: grid;
-  gap: 10px;
-  margin: 0 0 14px;
+  gap: 8px;
+  margin: 0;
 }
 
-.pa-folder__experience {
-  display: block;
-  overflow: hidden;
-  border: 1px solid var(--hc-line-bright);
-  border-radius: 16px;
-  background: var(--hc-panel-raised);
-}
-
-.pa-folder__experience[hidden],
+.pa-folder[hidden],
 .pa-folder__chooser[hidden],
 .pa-folder__offer[hidden] {
   display: none;
@@ -462,6 +457,10 @@ body.home-command-page .home-command-bridge * {
   min-height: 112px;
   overflow: hidden;
   padding: 14px;
+}
+
+/* Named with the reply it is, so the scene keeps its own backdrop. */
+.pa-thread__reply.pa-folder__scene {
   background:
     radial-gradient(
       circle at 86% 20%,
@@ -663,7 +662,13 @@ body.home-command-page .home-command-bridge * {
   display: grid;
   gap: 8px;
   padding: 12px 14px;
-  border-top: 1px solid var(--hc-line);
+}
+
+/* Said with the question, before any folder is chosen. */
+.pa-folder__assurance {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 11px;
 }
 
 .pa-folder__prompt {
@@ -710,11 +715,16 @@ body.home-command-page .home-command-bridge * {
   font-size: 12px;
 }
 
-.pa-folder__offer {
+/* The offer asks for a decision, so it keeps the offer card's own colour as a
+   reply in the conversation and as a card under Needs you. */
+.pa-thread__reply.pa-folder__offer {
   margin: 0;
-  border: 0;
-  border-top: 1px solid var(--hc-line);
-  border-radius: 0;
+  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 8%, var(--hc-panel-raised));
+}
+
+.pa-thread__reply.pa-folder__offer[data-placement="needs"] {
+  border-radius: 14px;
 }
 
 /* The reason line: counts and kinds, always present, in smaller muted type. */

@@ -4,7 +4,11 @@ import { readFileSync } from 'node:fs';
 
 import {
   folderActionAvailable,
+  folderChipBusy,
   folderChooserView,
+  folderOfferWaiting,
+  folderPinnedOffer,
+  folderPlacement,
   folderSceneView,
   firstFolderPromptView,
   folderOfferView,
@@ -534,14 +538,10 @@ test('the chooser explains itself when there is nothing to choose', () => {
 });
 
 test('the folder field trip mirrors real scan state and only server-observed counts', () => {
-  assert.equal(folderSceneView().visible, false);
-  assert.deepEqual(folderSceneView({ chooserOpen: true }), {
-    visible: true,
-    phase: 'choosing',
-    label: 'Ready when you are.',
-    finds: []
-  });
-  assert.deepEqual(folderSceneView({ chooserOpen: true, scanning: true, scanName: 'Documents' }), {
+  // While a folder is still being chosen the chooser is the assistant's whole
+  // reply: the scene is the reply that follows, once there is a folder.
+  assert.deepEqual(folderSceneView(), { visible: false, phase: 'choosing', label: '', finds: [] });
+  assert.deepEqual(folderSceneView({ scanning: true, scanName: 'Documents' }), {
     visible: true,
     phase: 'scanning',
     label: 'Exploring Documents…',
@@ -586,6 +586,91 @@ test('the folder field trip mirrors real scan state and only server-observed cou
     }).finds,
     ['LaTeX manuscript']
   );
+});
+
+test('the folder flow shows in the conversation, and a waiting offer in Needs you', () => {
+  const pending = { id: 'o1', status: 'pending', verdict: 'project' };
+  const running = { id: 'o2', status: 'awaiting_outcome', verdict: 'project' };
+  const resolved = { id: 'o3', status: 'resolved', verdict: 'project' };
+
+  // Waiting means the user still has something to do with it.
+  assert.equal(folderOfferWaiting(pending), true);
+  assert.equal(folderOfferWaiting(running), true);
+  for (const status of ['resolved', 'declined', 'later', 'closed', '']) {
+    assert.equal(folderOfferWaiting({ id: 'o', status }), false, status);
+  }
+  assert.equal(folderOfferWaiting({ status: 'pending' }), false, 'an offer with no id');
+  assert.equal(folderOfferWaiting(null), false);
+
+  // A page that loads onto a waiting offer pins it; nothing else is pinned.
+  assert.equal(folderPinnedOffer({ inThread: false, pinned: '', offer: pending }), 'o1');
+  assert.equal(folderPinnedOffer({ inThread: false, pinned: '', offer: running }), 'o2');
+  assert.equal(folderPinnedOffer({ inThread: false, pinned: '', offer: resolved }), '');
+  assert.equal(folderPinnedOffer({ inThread: false, pinned: '', offer: null }), '');
+  // The card acted on under Needs you stays there through a later read...
+  assert.equal(folderPinnedOffer({ inThread: false, pinned: 'o3', offer: resolved }), 'o3');
+  // ...but a different, finished offer does not take its place.
+  assert.equal(folderPinnedOffer({ inThread: false, pinned: 'o1', offer: resolved }), '');
+  // Once the flow is in the conversation, the conversation has the card.
+  assert.equal(folderPinnedOffer({ inThread: true, pinned: 'o1', offer: pending }), '');
+
+  const place = options => folderPlacement({ available: true, ...options });
+  assert.equal(place({ inThread: true, pinned: '', offer: pending }), 'thread');
+  assert.equal(place({ inThread: true, pinned: '', offer: null }), 'thread');
+  assert.equal(place({ inThread: false, pinned: 'o1', offer: pending }), 'needs');
+  assert.equal(place({ inThread: false, pinned: 'o3', offer: resolved }), 'needs');
+  // At rest, with nothing waiting, the conversation is empty.
+  assert.equal(place({ inThread: false, pinned: '', offer: resolved }), 'none');
+  assert.equal(place({ inThread: false, pinned: '', offer: null }), 'none');
+  assert.equal(place({ inThread: false, pinned: 'o1', offer: null }), 'none');
+  // Never before the hire or while HQ is being built.
+  assert.equal(
+    folderPlacement({ available: false, inThread: true, pinned: 'o1', offer: pending }),
+    'none'
+  );
+});
+
+test('"Explore a folder" is disabled while a folder is being chosen or explored', () => {
+  assert.equal(folderChipBusy({ inThread: true, chooserOpen: true }), true);
+  assert.equal(folderChipBusy({ inThread: true, scanning: true }), true);
+  assert.equal(folderChipBusy({ inThread: true, busy: true }), true);
+  // An offer on screen, in the conversation or under Needs you, does not.
+  assert.equal(folderChipBusy({ inThread: true }), false);
+  assert.equal(folderChipBusy({ inThread: false, chooserOpen: true }), false);
+  assert.equal(folderChipBusy(), false);
+});
+
+test('the folder turn is rendered once, in the conversation, with the chooser first', () => {
+  const read = name =>
+    readFileSync(new URL(`../../../templates/components/${name}`, import.meta.url), 'utf8');
+  const turn = read('personal-assistant-folder.tmpl');
+  const today = read('personal-assistant-today.tmpl');
+  const drawer = read('ori-guide.tmpl');
+  assert.doesNotMatch(today, /personalAssistantFolder/);
+  assert.match(
+    drawer,
+    /id="personalAssistantThread"[\s\S]*\{\{if eq \.CurrentPage "index"\}\}\s*\{\{template "personal-assistant-folder\.tmpl" \.\}\}/
+  );
+  for (const id of [
+    'personalAssistantFolder',
+    'personalAssistantFolderRequest',
+    'personalAssistantFolderChooser',
+    'personalAssistantFolderScene',
+    'personalAssistantFolderOffer'
+  ]) {
+    assert.equal((turn.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, id);
+  }
+  // The user's request, then the assistant's replies in the order they come.
+  const order = ['Request', 'Chooser', 'Scene', 'Offer'].map(part =>
+    turn.indexOf(`id="personalAssistantFolder${part}"`)
+  );
+  assert.deepEqual(
+    order,
+    [...order].sort((a, b) => a - b)
+  );
+  assert.match(turn, /Explore a folder/);
+  assert.match(turn, /Which folder should I explore\?/);
+  assert.match(turn, /class="pa-folder__assurance">A read-only peek\. Nothing moves\./);
 });
 
 const thesisOffer = {

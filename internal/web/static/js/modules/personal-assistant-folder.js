@@ -2,9 +2,11 @@
 //
 // The user points the assistant at a folder; the server looks at its shape
 // (names, dates, kinds, project markers — never contents) and returns one
-// explained offer. This module owns the chooser sheet and the offer card in
-// the Home assistant panel. It never sends a filesystem location — chips are
-// identifiers the server resolves, and the native picker runs server-side.
+// explained offer. This module owns the chooser, the exploring scene and the
+// offer card, which appear in the Home assistant drawer's conversation as the
+// assistant's replies to "Explore a folder". It never sends a filesystem
+// location — chips are identifiers the server resolves, and the native picker
+// runs server-side.
 
 import {
   lastSavedLabel,
@@ -46,18 +48,53 @@ export function firstFolderPromptView(digest, available) {
   };
 }
 
+// folderOfferWaiting reports whether an offer still needs the user: it has not
+// been answered, or it was answered yes and its setup has not finished.
+export function folderOfferWaiting(offer) {
+  const status = String(offer?.status || '').trim();
+  return Boolean(offer?.id) && (status === 'pending' || status === 'awaiting_outcome');
+}
+
+// folderPlacement says where the folder flow shows in the drawer. While it
+// runs in the conversation ('thread') the chooser, the scene and the offer card
+// are the assistant's replies there. An offer that was already waiting when the
+// page loaded has no conversation around it, so its card goes in Needs you
+// ('needs') and stays there while it is acted on. Otherwise nothing shows.
+export function folderPlacement({ available, inThread, pinned, offer } = {}) {
+  if (available !== true) return 'none';
+  if (inThread === true) return 'thread';
+  const id = String(offer?.id || '');
+  return id && id === String(pinned || '') ? 'needs' : 'none';
+}
+
+// folderPinnedOffer is the offer to keep in Needs you after a digest read: one
+// that is waiting, or the one already placed there (the user may be part-way
+// through acting on it). Nothing is pinned while the flow is in the conversation.
+export function folderPinnedOffer({ inThread, pinned, offer } = {}) {
+  const id = String(offer?.id || '');
+  if (inThread === true || !id) return '';
+  return folderOfferWaiting(offer) || id === String(pinned || '') ? id : '';
+}
+
+// folderChipBusy: "Explore a folder" cannot be asked for again while a folder
+// is being chosen or explored.
+export function folderChipBusy({ inThread, chooserOpen, scanning, busy } = {}) {
+  return inThread === true && (chooserOpen === true || scanning === true || busy === true);
+}
+
 // A view of what the server has actually observed. A folder graphic moving
 // towards the portrait is only a metaphor: no files are moved or uploaded.
 // Never derive counts or a blueprint from a proposed workspace plan.
+//
+// The scene is the assistant's reply once a folder has been chosen. While one
+// is still being chosen the chooser is the whole reply, so there is no scene.
 export function folderSceneView({
-  chooserOpen = false,
   scanning = false,
   failed = false,
   scanName = '',
   offer = null
 } = {}) {
   const offered = folderOfferView(offer).visible;
-  if (!chooserOpen && !offered) return { visible: false, phase: 'choosing', label: '', finds: [] };
   if (scanning) {
     return {
       visible: true,
@@ -85,7 +122,7 @@ export function folderSceneView({
       finds
     };
   }
-  return { visible: true, phase: 'choosing', label: 'Ready when you are.', finds: [] };
+  return { visible: false, phase: 'choosing', label: '', finds: [] };
 }
 
 function segments(parts) {
@@ -748,6 +785,13 @@ const state = {
   available: false,
   handOver: false,
   prompting: false,
+  // The flow is running in the conversation: the user asked for it, or the
+  // assistant opened it with its one first-folder prompt.
+  inThread: false,
+  // The user asked, so their request is shown above the assistant's replies.
+  userAsked: false,
+  // The offer placed in Needs you because it was waiting when the page loaded.
+  pinned: '',
   // The plan being confirmed on the card before anything is decided:
   // 'project', 'tidy', or ''.
   confirm: '',
@@ -844,6 +888,10 @@ function elements() {
   if (!root) return null;
   return {
     root,
+    thread: document.getElementById('personalAssistantThread'),
+    activity: document.getElementById('personalAssistantActivityMount'),
+    needs: document.getElementById('personalAssistantNeedsYouCards'),
+    request: document.getElementById('personalAssistantFolderRequest'),
     chooser: document.getElementById('personalAssistantFolderChooser'),
     scene: document.getElementById('personalAssistantFolderScene'),
     sceneAvatar: document.getElementById('personalAssistantFolderSceneAvatar'),
@@ -1223,7 +1271,6 @@ function renderScene() {
   const els = elements();
   if (!els?.scene) return;
   const view = folderSceneView({
-    chooserOpen: state.chooserOpen,
     scanning: state.scanning,
     failed: state.scanFailed,
     scanName: state.scanName,
@@ -1252,12 +1299,18 @@ function renderScene() {
   }
 }
 
-function renderOffer() {
+function renderOffer(place) {
   const els = elements();
   if (!els?.offer) return;
   const view = folderOfferView(state.offer, { confirm: state.confirm });
   const receipt = folderReceiptView(state.offer);
-  els.offer.hidden = !view.visible;
+  // The one offer card is a reply in the conversation while the flow runs
+  // there, and a card in Needs you when it was found waiting on load. It is
+  // moved, never copied, so its controls and their handlers stay the same.
+  const home = place === 'needs' && els.needs ? els.needs : els.root;
+  if (els.offer.parentElement !== home) home.append(els.offer);
+  els.offer.dataset.placement = place;
+  els.offer.hidden = !view.visible || place === 'none';
   els.root.dataset.state = view.visible
     ? `offer-${view.verdict}`
     : state.chooserOpen
@@ -1359,13 +1412,44 @@ function renderOffer() {
 function render() {
   const els = elements();
   if (!els) return;
-  els.root.hidden = !state.available;
-  if (!state.available) return;
+  const place = folderPlacement({
+    available: state.available,
+    inThread: state.inThread,
+    pinned: state.pinned,
+    offer: state.offer
+  });
+  els.root.hidden = place !== 'thread';
+  if (els.request) els.request.hidden = !(place === 'thread' && state.userAsked);
+  window.PersonalAssistantPanel?.setFolderBusy?.(state.available && folderChipBusy(state));
+  if (!state.available) {
+    if (els.offer) els.offer.hidden = true;
+    return;
+  }
   renderChooser();
-  renderOffer();
+  renderOffer(place);
   renderScene();
   renderRunModal();
   syncSetupPolling();
+}
+
+// enterThread starts the flow in the conversation, or keeps it there. When the
+// user asked, their request is shown, the turn becomes the latest thing in the
+// conversation, and Home is told so it can fold what is above. The assistant's
+// own first-folder prompt does neither: it is a message, not a request.
+function enterThread({ byUser }) {
+  state.inThread = true;
+  state.pinned = '';
+  if (!byUser) return;
+  state.userAsked = true;
+  const els = elements();
+  if (els?.thread && els.thread.lastElementChild !== els.root) els.thread.append(els.root);
+  try {
+    document.dispatchEvent(
+      new CustomEvent('personal-assistant:folder-started', { detail: { by: 'user' } })
+    );
+  } catch (_) {
+    // Listeners only tidy their own surface; none is required to start.
+  }
 }
 
 // runAction carries out one of the offer's actions, wherever its button was
@@ -1707,12 +1791,19 @@ function act(actionId) {
   return true;
 }
 
+// openChooser is the user asking to explore a folder: the chip above the
+// composer, Home's toolbar button, the `folder=show` link, the mission's
+// Start, or an offer's own "Show another folder". Every one of them starts
+// the same turn in the conversation.
 function openChooser() {
+  if (!state.available) return;
+  enterThread({ byUser: true });
   state.chooserOpen = true;
   state.scanFailed = false;
   showError('');
   render();
   const els = elements();
+  els?.root?.scrollIntoView?.({ block: 'nearest' });
   els?.chips?.querySelector('button')?.focus?.();
 }
 
@@ -1727,13 +1818,17 @@ async function load() {
     state.digest = payload?.folder_digest || null;
     state.offer = state.digest?.offer || null;
     state.confirm = '';
+    state.pinned = folderPinnedOffer(state);
     const prompt = firstFolderPromptView(state.digest, state.available);
     if (prompt.expand && !state.prompting) {
       revealFirstPrompt = true;
+      // The assistant speaks first: its prompt is the first message in the
+      // conversation, with no request from the user above it.
+      enterThread({ byUser: false });
       state.handOver = true;
       state.chooserOpen = true;
       state.prompting = true;
-      // The panel expands immediately; persisting the receipt cannot delay it.
+      // The chooser shows immediately; persisting the receipt cannot delay it.
       void fetch(`${DIGEST_ENDPOINT}/prompted`, { method: 'POST' })
         .then(response => {
           if (!response.ok) throw new Error('Could not save the folder prompt');
@@ -1748,17 +1843,22 @@ async function load() {
     state.digest = state.digest || { chips: [], picker_available: false };
   }
   render();
-  // The brief and HQ receipt precede Needs you and can put the first prompt
-  // below the fold. Reveal it once inside an already-open drawer, without
-  // scrolling Home when the relationship changes in a closed panel.
+  // What needs the user comes before the conversation and can put the first
+  // prompt below the fold. Reveal it once inside an already-open drawer,
+  // without scrolling Home when the relationship changes in a closed panel.
   if (revealFirstPrompt && !document.getElementById('personalAssistantPanel')?.hidden) {
-    elements()?.scene?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
+    elements()?.chooser?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
   }
   announceOffer();
 }
 
 async function scan(body) {
   if (state.busy) return;
+  // Exploring happens in the conversation. A scan asked for from a card in
+  // Needs you ("Pick it again") starts the turn there; one asked for from the
+  // chooser is already in it. The dialog's own status line is in the chooser.
+  enterThread({ byUser: !state.inThread });
+  if (body.picker || body.file) state.chooserOpen = true;
   state.busy = true;
   state.scanning = !body.picker && !body.file;
   state.scanFailed = false;
@@ -1797,6 +1897,9 @@ async function scan(body) {
     state.freshScan = Boolean(state.offer);
     state.confirm = '';
     state.handOver = false;
+    // The folder is chosen: the scene and the offer are the replies now, and
+    // "Explore a folder" can be asked for again.
+    if (state.offer) state.chooserOpen = false;
     showStatus('');
     announceOffer();
   } catch (_) {
@@ -1806,6 +1909,8 @@ async function scan(body) {
     state.scanning = false;
     state.busy = false;
     render();
+    // What the assistant found is its newest reply: bring it into view.
+    if (state.freshScan) elements()?.offer?.scrollIntoView?.({ block: 'nearest' });
     if (pendingProjectRun?.offerID === state.offer?.id && !state.offer?.needs_pick) {
       void onSetupProjectReady(pendingProjectRun.runID);
     }
@@ -1834,13 +1939,12 @@ async function postOffer(offerId, action, body) {
 
 function showOfferFailure(payload) {
   if (payload?.needs_pick) {
-    // Said on the card that was pressed as well as in the chooser, and the
-    // card itself now offers Pick it again.
+    // Said on the card that was pressed, which now offers Pick it again, and
+    // in the chooser as well when that is open.
     const message = String(payload?.error || 'Pick the folder again.');
     showError(message);
     if (state.offer) state.offer = { ...state.offer, needs_pick: true };
-    state.chooserOpen = true;
-    showStatus(message);
+    if (state.chooserOpen) showStatus(message);
     return;
   }
   showError(String(payload?.error || 'That could not be saved. Try again.'));
@@ -1887,7 +1991,7 @@ async function decide(action) {
 }
 
 // revealSetupWalkthrough shows a fresh tidy as the setup it was: the
-// assistant-led setup card (in the Today panel) with its receipts — the
+// assistant-led setup card (under Needs you) with its receipts — the
 // workspace, the File Curator, the folder, the paused watch, the first scan —
 // and its walkthrough open, ending on the review. Returns false when there is
 // no fresh run to show (the folder was already managed, or the card is not on
@@ -1910,6 +2014,8 @@ async function revealSetupWalkthrough(offer) {
     // The setup card is what this opens the drawer for, so focus is left to it.
     panel.open(document.getElementById('personalAssistantLauncher'), { focus: false });
   }
+  // The card is under Needs you, which the conversation folded away.
+  window.PersonalAssistantToday?.expand?.();
   const card = document.getElementById('assistantLedSetup');
   card?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
   const milestones = projection.milestones || [];
@@ -1988,7 +2094,7 @@ function startProjectOutcome(action) {
 let resolvingProjectRun = '';
 let pendingProjectRun = null;
 // Called before workspace navigation as well as when a ready quest is
-// reopened after a restart. The offer ID must still be the card in Today.
+// reopened after a restart. The offer ID must still be the card on Home.
 export async function resolveFolderProjectRun(runID, offerID) {
   if (state.offer?.id !== offerID) return;
   await onSetupProjectReady(runID);
@@ -2029,14 +2135,24 @@ function onStatus(personalAssistant) {
   if (!available) {
     state.handOver = false;
     state.chooserOpen = false;
+    state.inThread = false;
+    state.userAsked = false;
     render();
     return;
   }
-  // The folder field trip is the action in Needs you, not a second button
-  // the user must press. Keep the chooser available beside any current offer.
-  state.chooserOpen = true;
+  // Nothing opens by itself: the chooser is asked for with "Explore a folder",
+  // and the read below decides whether the assistant speaks first or an offer
+  // is still waiting.
   if (changed || !state.digest) void load();
   else render();
+}
+
+// The conversation keeps whichever of its two parts was used last nearest the
+// composer: a request sent after the folder turn goes below it.
+function keepLatestLast() {
+  const els = elements();
+  if (!els?.thread || !els.activity || els.root.hidden) return;
+  if (els.thread.lastElementChild !== els.activity) els.thread.append(els.activity);
 }
 
 function init() {
@@ -2048,6 +2164,7 @@ function init() {
   window.addEventListener('ori:setup-project-ready', event => {
     void onSetupProjectReady(String(event.detail?.run_id || ''));
   });
+  document.addEventListener('personal-assistant:sent', keepLatestLast);
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   window.PersonalAssistantFolder = {
