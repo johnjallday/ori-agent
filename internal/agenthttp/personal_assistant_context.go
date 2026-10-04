@@ -28,8 +28,7 @@ type PersonalAssistantContextSource struct {
 
 // PersonalAssistantWorkContext is the narrow work-path projection resolved for
 // the current user on every turn. It intentionally has no stable assistant ID,
-// global agent profile name, credentials, or tool configuration: those values
-// are not prompt material.
+// credentials, or tool configuration: those values are not prompt material.
 type PersonalAssistantWorkContext struct {
 	State         string
 	StateVersion  int64
@@ -38,9 +37,13 @@ type PersonalAssistantWorkContext struct {
 	Mandate       string
 	FocusAreas    []string
 	HQWorkspaceID string
-	UserProfile   string
-	HQMemory      string
-	Sources       map[string]PersonalAssistantContextSource
+	// ConversationAgent is the hired profile's agent-store key. Together with
+	// HQWorkspaceID it scopes the assistant's conversations to canonical
+	// Sessions. It is a binding key only and is never rendered into a prompt.
+	ConversationAgent string
+	UserProfile       string
+	HQMemory          string
+	Sources           map[string]PersonalAssistantContextSource
 }
 
 func (c *PersonalAssistantWorkContext) ReadyForWork() bool {

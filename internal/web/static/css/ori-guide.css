@@ -760,6 +760,326 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   max-width: none;
 }
 
+/* ---- conversation bar --------------------------------------------------------------- */
+
+.personal-assistant-conversation {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
+  background: var(--ori-paper);
+}
+
+.personal-assistant-conversation[hidden],
+.personal-assistant-conversation__list[hidden] {
+  display: none;
+}
+
+.personal-assistant-conversation__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+
+.personal-assistant-conversation__current {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+}
+
+.personal-assistant-conversation__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.personal-assistant-conversation__title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-conversation__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.personal-assistant-conversation__button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ori-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.personal-assistant-conversation__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.personal-assistant-conversation__list {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.personal-assistant-conversation__item {
+  display: grid;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ori-ink);
+  text-align: left;
+}
+
+.personal-assistant-conversation__item:hover,
+.personal-assistant-conversation__item[aria-current="true"] {
+  border-color: var(--ori-line);
+}
+
+.personal-assistant-conversation__item-title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-conversation__item-meta,
+.personal-assistant-conversation__empty,
+.personal-assistant-conversation__manage,
+.personal-assistant-conversation__note {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.82;
+}
+
+.personal-assistant-conversation__empty,
+.personal-assistant-conversation__manage {
+  padding: 4px 8px;
+}
+
+/* ---- message actions and the save review --------------------------------------------- */
+
+.personal-assistant-message__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ori-line);
+  white-space: normal;
+}
+
+.personal-assistant-message__action {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--ori-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ori-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Remember… is secondary: it reads as a quieter action than saving a draft. */
+.personal-assistant-message__action--secondary {
+  border-style: dashed;
+  font-weight: 500;
+}
+
+.personal-assistant-review__problem:empty {
+  display: none;
+}
+
+.personal-assistant-review__problem {
+  color: #b3261e;
+  opacity: 1;
+}
+
+.personal-assistant-message__action:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
+.personal-assistant-message__saved {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.personal-assistant-review {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 10px;
+  border: 1px solid var(--ori-accent-strong);
+  border-radius: 10px;
+  background: var(--ori-paper);
+}
+
+.personal-assistant-review[hidden],
+.personal-assistant-review [hidden] {
+  display: none;
+}
+
+.personal-assistant-review__heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.personal-assistant-review__target,
+.personal-assistant-review__hint,
+.personal-assistant-review__status,
+.personal-assistant-review__notes {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.personal-assistant-review__notes {
+  padding-left: 18px;
+}
+
+.personal-assistant-review__fields {
+  display: grid;
+  gap: 4px;
+}
+
+.personal-assistant-review__label {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.personal-assistant-review__input {
+  width: 100%;
+  border: 1px solid var(--ori-line);
+  border-radius: 8px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.personal-assistant-review__input[aria-invalid="true"] {
+  border-color: #b3261e;
+}
+
+.personal-assistant-review__body {
+  min-height: 120px;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.personal-assistant-review__current {
+  padding: 6px 8px;
+  border: 1px dashed var(--ori-line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.personal-assistant-review__current > summary {
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.personal-assistant-review__current-text {
+  max-height: 160px;
+  margin: 6px 0 0;
+  overflow: auto;
+  font: inherit;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-conversation__saved {
+  display: grid;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ori-line);
+}
+
+.personal-assistant-conversation__saved[hidden],
+.personal-assistant-conversation__saved [hidden] {
+  display: none;
+}
+
+.personal-assistant-conversation__saved a.personal-assistant-conversation__button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.ticket-detail-assistant-draft {
+  display: inline-block;
+  margin: 8px 0;
+  font-weight: 600;
+}
+
+.personal-assistant-review__receipt {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.personal-assistant-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.personal-assistant-review__primary,
+.personal-assistant-review__secondary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.personal-assistant-review__primary {
+  border: 0;
+  background: var(--ori-accent-strong);
+  color: #fff;
+}
+
+.personal-assistant-review__primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.personal-assistant-review__secondary {
+  border: 1px solid var(--ori-line);
+  background: transparent;
+  color: var(--ori-ink);
+}
+
 /* ---- narrow layout ---------------------------------------------------------------- */
 
 /* Below this width the Personal Assistant becomes a full-width bottom sheet.

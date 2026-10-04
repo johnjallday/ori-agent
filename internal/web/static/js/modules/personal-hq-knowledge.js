@@ -1,8 +1,11 @@
 import { renderDossierSources, safeDossierRoute } from './personal-hq-sources.js';
+import { factByteLength, newRequestID, reviewTextValid } from './personal-hq-fact.js';
+
+// The fact rules live in personal-hq-fact.js so the assistant's Remember…
+// review applies exactly the same ones; this page's behavior is unchanged.
+export { reviewTextValid };
 
 const REVIEW_API = '/api/personal-assistant/knowledge';
-const MAX_FACT_BYTES = 500;
-const encoder = new TextEncoder();
 
 const CATEGORIES = {
   how_you_work: 'How you work',
@@ -57,25 +60,6 @@ export function dossierEmptyGuidance(category, calendar) {
   return { message: 'No approved Personal HQ facts in this section yet.' };
 }
 
-export function reviewTextValid(text) {
-  return (
-    typeof text === 'string' &&
-    text.length > 0 &&
-    text.trim() === text &&
-    text === text.split(/\s+/u).join(' ') &&
-    !Array.from(text).some(character => {
-      const code = character.codePointAt(0);
-      return (
-        code < 32 ||
-        (code >= 127 && code <= 159) ||
-        (code >= 0x202a && code <= 0x202e) ||
-        (code >= 0x2066 && code <= 0x2069)
-      );
-    }) &&
-    encoder.encode(text).length <= MAX_FACT_BYTES
-  );
-}
-
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -105,14 +89,6 @@ function reviewDate(value) {
     month: 'short',
     day: 'numeric'
   });
-}
-
-function newRequestID() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  if (!globalThis.crypto?.getRandomValues)
-    throw new Error('Secure retry IDs are unavailable. Reload on a secure connection.');
-  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export function mountPersonalHQKnowledge(root = document) {
@@ -357,9 +333,9 @@ export function mountPersonalHQKnowledge(root = document) {
     input.maxLength = 500;
     input.id = `review-wording-${item.id}`;
     label.htmlFor = input.id;
-    const limit = element('small', '', `${encoder.encode(input.value).length} / 500 UTF-8 bytes`);
+    const limit = element('small', '', `${factByteLength(input.value)} / 500 UTF-8 bytes`);
     input.addEventListener('input', () => {
-      limit.textContent = `${encoder.encode(input.value).length} / 500 UTF-8 bytes`;
+      limit.textContent = `${factByteLength(input.value)} / 500 UTF-8 bytes`;
     });
     const save = element(
       'button',
@@ -561,7 +537,7 @@ export function mountPersonalHQKnowledge(root = document) {
     }
   }
   addText?.addEventListener('input', () => {
-    addLimit.textContent = `${encoder.encode(addText.value).length} / 500 UTF-8 bytes`;
+    addLimit.textContent = `${factByteLength(addText.value)} / 500 UTF-8 bytes`;
   });
   addForm?.addEventListener('submit', saveExplicit);
   document.addEventListener('personal-assistant-knowledge-changed', () => {

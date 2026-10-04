@@ -103,8 +103,16 @@ func TestGuideMarkupHasOneOfEachControl(t *testing.T) {
 // relationship and then makes Help and work mutually exclusive.
 func TestPAFPanelHasDistinctHiddenComposer(t *testing.T) {
 	body := readTemplate(t, "templates/components/ori-guide.tmpl")
-	if got := strings.Count(body, "<form"); got != 2 {
-		t.Errorf("template has %d forms, want one Help and one PAF work composer", got)
+	// Exactly two composers take a prompt: Help and the PAF work composer. The
+	// only other forms are reviews of an action the user already chose (saving
+	// a reply), and each starts hidden so it can never be a second place to
+	// type a request.
+	reviews := strings.Count(body, `class="personal-assistant-review"`)
+	if got := strings.Count(body, "<form"); got != 2+reviews {
+		t.Errorf("template has %d forms, want one Help composer, one PAF work composer, and %d review form(s)", got, reviews)
+	}
+	if hidden := strings.Count(body, "hidden novalidate>"); hidden != reviews {
+		t.Errorf("%d of %d review form(s) start hidden; every review must", hidden, reviews)
 	}
 	for _, marker := range []string{
 		`id="oriGuideForm"`, `id="personalAssistantForm"`,

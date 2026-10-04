@@ -425,6 +425,66 @@ When the Personal Assistant can build a workspace with the user (see [Workspace 
 
 The client does not send `build_workspace` back. Confirm opens Create Workspace in build mode (entry point `personal_assistant_ask`) with `first_message` as the assistant's first turn. If build mode stopped being available in the meantime, the client opens the ordinary dialog seeded with `name` instead.
 
+### Assistant Conversations, Saved Drafts, and Remember…
+
+With a hired assistant and a Personal HQ, an everyday writing request (route
+intent `assistant_conversation`) is answered as a turn of a stored
+conversation. The behavior and its limits are specified in
+[`docs/architecture/personal-assistant-foundation-contract.md`](../architecture/personal-assistant-foundation-contract.md)
+("Assistant conversations", "Saving a draft to the HQ backlog", "Remembering a
+fact from a conversation"); this section lists the routes.
+
+**Conversation turn:** `POST /api/home-assistant/ask` with two more optional
+request fields:
+
+- `conversation`: `{ "id": "<conversation id>" }` to continue a conversation, or `{}` to start one. The ID is validated against the current assistant and Personal HQ on every request; it is never taken from the browser's chat session.
+- `draft`: `{ "ticket_id": "<ticket id>" }` when the conversation is working on a saved draft, so the turn reads that draft's current text. A turn never writes it.
+
+and these response fields:
+
+- `conversation`: `id`, `title`, `started`, `stored`, `user_message_id`, `assistant_message_id`, `history_truncated`, or `error` (`conversation_not_found`, `conversation_out_of_scope`, `conversation_unavailable`). Only an answered turn is stored. When `stored` is false nothing was saved and the client returns the text to the composer.
+- `model_unavailable`: `true` when no model could answer.
+- `draft_review`: present when the prompt asked to save the draft ("save this draft and put it in my todo list"). It is the same object `POST …/drafts/review` returns. Nothing has been written.
+- `memory_review`: present when the prompt asked to remember something. `{ "text", "destination", "max_bytes" }` — editable starting text (empty when no fact was stated). Nothing has been written, no model was called, and the request is not stored as a turn.
+- `draft_context`: `{ "ticket_id", "available", "display_number", "version" }` — whether the saved draft named in `draft` could be read for this turn.
+
+**Conversations (read only):**
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/home-assistant/conversations` | `conversations` (`id`, `title`, `message_count`, `updated_at`) that belong to the current assistant in the current Personal HQ, and `manage_href`. |
+| `GET /api/home-assistant/conversations/{id}` | `conversation`, `messages` (`id`, `role`, `content`, `created_at`, `imported`), `truncated`, and `saved` — the drafts saved from it (or `saved_unavailable`). |
+
+Conversations are canonical Sessions; they are renamed and deleted through the
+Sessions API. Deleting one never deletes a saved Ticket or a remembered fact.
+
+**Saved drafts:**
+
+| Endpoint | Body | Effect |
+|---|---|---|
+| `POST /api/home-assistant/drafts/review` | `conversation_id`, `message_id` | Writes nothing. Returns `review`: `operation_id`, suggested `title`, exact `body`, `target` (the current Personal HQ), `source`, `placement`, `notes`, `limits`. |
+| `POST /api/home-assistant/drafts/save` | `operation_id`, `title`, `body`, `target_workspace_id`, `source` | Creates one unassigned, unscheduled Backlog Ticket. Returns `receipt` (`ticket_id`, `display_number`, `version`, `href`, `created`, `changed_since`). The same request again returns the same Ticket with `created: false`. |
+| `GET /api/home-assistant/drafts/{ticketID}` | — | Read only. Returns `draft` — the Ticket's current title, text, `digest`, state, `version`, `editable`, its source conversation and message, `newer_replies`, and `matches_source` (absent when the source reply could not be read) — and `conversation` (`id`, `available`, `reason`): whether its source conversation can still be continued. |
+| `POST /api/home-assistant/drafts/{ticketID}/review` | `conversation_id`, `message_id` | Writes nothing. Returns `update`: `current` (what is saved now, with its `version` and `digest`) beside the proposed `title` and `body`. |
+| `POST /api/home-assistant/drafts/{ticketID}/update` | `if_version`, `if_digest`, `title`, `body`, `target_workspace_id` | Changes the title and text of that Ticket only. `if_version` and `if_digest` — the reviewed `current.version` and `current.digest` — are both required. Returns `receipt` with `applied` (false when this exact update had already been applied). |
+
+Refusals are JSON with `error` (a code) and a `message` written for the user,
+plus `field` when one input is at fault: `assistant_not_ready`,
+`draft_save_unavailable`, `target_unavailable`, `target_changed`,
+`source_message_not_found`, `source_not_savable`, `invalid_draft`,
+`operation_conflict` (409: the same review ID with different text),
+`saved_draft_not_found`, `saved_draft_changed` (409: the Ticket's version or
+text changed since the review; `current` carries what is saved now and nothing
+is overwritten), and `saved_draft_not_editable` (409: work has started or the
+Ticket is closed). An `operation_conflict` carries `saved`, the Ticket the
+earlier save created. These routes read and edit saved assistant drafts only; an
+ordinary Ticket is not found through them.
+
+**Remember…** adds no route. The reviewed fact is saved with the existing
+`POST /api/personal-assistant/knowledge/explicit` (`state_version`,
+`request_id`, `category`, `text`) and is edited or forgotten through the
+existing reviewed-memory routes.
+
 ## Settings API
 
 ### Get Agent Settings
