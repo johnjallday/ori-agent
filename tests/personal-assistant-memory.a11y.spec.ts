@@ -98,7 +98,13 @@ test('reviewed interview stays keyboard-usable and an all-skipped review saves n
   await start.focus();
   await start.press('Enter');
   await expect(wizard).toBeVisible();
-  await expect(wizard.getByRole('textbox', { name: /priority or project/i })).toBeFocused();
+  await expect(wizard.getByRole('textbox', { name: /working on right now/i })).toBeFocused();
+  // Each question shows an example answer, and it is read with the field.
+  const hint = wizard.locator('.interview-wizard-hint');
+  await expect(hint).toContainText('for example');
+  expect(await wizard.getByRole('textbox').getAttribute('aria-describedby')).toContain(
+    (await hint.getAttribute('id'))!
+  );
   await expect(wizard.locator('[aria-current="step"]')).toContainText('Priority');
   await expect(wizard.locator('[aria-current="step"]')).toHaveCount(1);
   await expect(wizard.getByRole('status')).toHaveAttribute('aria-live', 'polite');

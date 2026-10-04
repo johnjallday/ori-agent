@@ -344,7 +344,14 @@ export function openInterviewWizard(initialSnapshot) {
     heading.id = `interview-wizard-prompt-${question.id}`;
     heading.tabIndex = -1;
     ui.stage.append(heading);
-    if (question.hint) ui.stage.append(node('p', question.hint, 'interview-wizard-hint'));
+    const described = [];
+    if (question.hint) {
+      // The hint carries the example answer, so it is read with the field.
+      const hint = node('p', question.hint, 'interview-wizard-hint');
+      hint.id = `interview-wizard-hint-${question.id}`;
+      described.push(hint.id);
+      ui.stage.append(hint);
+    }
 
     const input = node('textarea', undefined, 'form-control interview-wizard-input');
     input.id = `interview-answer-${question.id}`;
@@ -356,7 +363,7 @@ export function openInterviewWizard(initialSnapshot) {
     error.setAttribute('role', 'alert');
     const counter = node('small', answerCounterText(answer.text), 'interview-wizard-counter');
     counter.id = `interview-answer-counter-${question.id}`;
-    input.setAttribute('aria-describedby', `${error.id} ${counter.id}`);
+    input.setAttribute('aria-describedby', [...described, error.id, counter.id].join(' '));
     ui.stage.append(input, error, counter);
 
     const options = node('div', undefined, 'interview-wizard-options');

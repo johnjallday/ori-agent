@@ -437,7 +437,7 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
       questions: [
         {
           id: 'priority',
-          prompt: 'What priority or project should I keep in mind?',
+          prompt: "What's the main thing you're working on right now?",
           category: 'projects',
           destination: 'personal_hq'
         },

@@ -45,6 +45,12 @@ var focusAreaPhrases = map[FocusArea]string{
 	FocusOrganizeProjectFiles:      "organizing project files",
 }
 
+const (
+	interviewPriorityHint        = "Name one project or goal, for example “Launch the portfolio site by March”. I'll keep it in mind when I help you."
+	interviewCommunicationHint   = "One preference is enough, for example “Keep answers short” or “Use metric units”."
+	interviewPersonOrRoutineHint = "For example “Sam reviews my drafts on Fridays” or “I plan the week every Sunday evening”."
+)
+
 func NewKnowledgeInterviewService(store *KnowledgeStore) *KnowledgeInterviewService {
 	return &KnowledgeInterviewService{store: store, now: time.Now}
 }
@@ -64,20 +70,22 @@ func (s *KnowledgeInterviewService) Questions(ctx context.Context, userID string
 	if err := s.store.checkBinding(ctx, binding); err != nil {
 		return nil, err
 	}
-	hint := "Share one priority to keep in mind; nothing is saved until you review it."
+	// Every hint shows what an answer looks like: a bare question leaves the
+	// user guessing how specific to be.
+	hint := interviewPriorityHint
 	if state != nil {
 		if len(state.FocusAreas) > 0 {
 			if phrase, ok := focusAreaPhrases[state.FocusAreas[0]]; ok {
-				hint = "You mentioned " + phrase + ". What, if anything, should I remember?"
+				hint = "You mentioned " + phrase + ". " + interviewPriorityHint
 			}
 		} else if mandate := strings.TrimSpace(state.Mandate); mandate != "" && len(mandate) <= 100 && !sensitive.ContainsSecretLikeText(mandate) {
-			hint = "Your working agreement mentions " + mandate + ". Is there a priority to remember?"
+			hint = "Your working agreement says “" + strings.TrimRight(mandate, ".") + "”. " + interviewPriorityHint
 		}
 	}
 	return []InterviewQuestion{
-		{ID: "priority", Prompt: "What priority or project should I keep in mind?", Hint: hint, Category: "projects", Destination: "personal_hq"},
-		{ID: "communication", Prompt: "How would you like me to communicate or work with you?", Category: "how_you_work", Destination: "profile_or_personal_hq"},
-		{ID: "person_or_routine", Prompt: "Is there a person or recurring routine you'd like me to remember?", Category: "routines", Destination: "personal_hq"},
+		{ID: "priority", Prompt: "What's the main thing you're working on right now?", Hint: hint, Category: "projects", Destination: "personal_hq"},
+		{ID: "communication", Prompt: "How would you like me to communicate or work with you?", Hint: interviewCommunicationHint, Category: "how_you_work", Destination: "profile_or_personal_hq"},
+		{ID: "person_or_routine", Prompt: "Is there a person or recurring routine you'd like me to remember?", Hint: interviewPersonOrRoutineHint, Category: "routines", Destination: "personal_hq"},
 	}, nil
 }
 
