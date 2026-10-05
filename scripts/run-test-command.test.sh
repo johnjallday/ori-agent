@@ -56,17 +56,15 @@ done
 # The wrapper nests TMPDIR under its own per-run directory
 # (ori-test-run.XXXXXX/tmp), which can push a Unix-domain socket fixture
 # past macOS's short sockaddr_un.sun_path limit. Reproduce a deliberately
-# long parent here and prove the Herdr socket fixture still passes through
-# the wrapper (tools/herdr-devflow/internal/herdr uses an owned short
-# socket directory instead of TMPDIR-derived paths for its socket files).
+# long parent here and prove an Ori-owned short socket fixture passes through
+# the wrapper, without depending on a package from the external toolbox.
 if [[ "$(uname -s)" == "Darwin" ]]; then
 	repo_root="$(cd "$script_dir/.." && pwd -P)"
 	long_parent="$fixture_root/deliberately-long-parent-temp-directory-to-exceed-the-unix-domain-socket-sockaddr-un-path-limit-on-macos"
 	mkdir -p "$long_parent"
 	if ! (cd "$repo_root" && ORI_SKIP_CACHE_PRUNE=1 TMPDIR="$long_parent" \
-		"$runner" go test ./tools/herdr-devflow/internal/herdr/... \
-		-run 'TestCallSocketUsesJSONLines|TestAgentListAndWorkspaceClosePreferTheStructuredSocket'); then
-		printf 'Herdr Unix-socket fixture failed under a long TMPDIR parent.\n' >&2
+		"$runner" go test ./scripts/testdata/short-socket -run TestShortSocketUnderLongTMPDIR); then
+		printf 'Ori Unix-socket fixture failed under a long TMPDIR parent.\n' >&2
 		exit 1
 	fi
 fi

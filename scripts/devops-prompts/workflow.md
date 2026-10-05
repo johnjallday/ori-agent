@@ -1,1 +1,0 @@
-Review the development workflow from selecting an Issue through planning, implementation, review, and cleanup. Where is the user likely wasting time or repeating manual steps? Recommend one small improvement that would pay off across future changes. Reuse existing commands and helpers where possible; distinguish documented behavior from observed friction.

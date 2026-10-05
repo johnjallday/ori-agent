@@ -23,17 +23,13 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$repo_root"
 
 # Paths that may mention the old file because they are a record of the past, or
-# because their whole job is asserting the file is gone.
+# because their whole job is asserting the file is gone. Product workspace
+# artifact fixtures are a different namespace from this repository's backlog.
 typeset -a historical
 historical=(
   "docs/feature-discovery/reports/"   # dated discovery reports, written at the time
   "scripts/check-backlog-docs.sh"     # this file
-  "scripts/devops-cli.test.sh"        # asserts the retired commands and helper are gone
-  "scripts/wt-herd.test.sh"           # asserts no backlog commit is ever created
-  "tools/herdr-devflow/internal/overview/types.go"        # schema-version note
-  "tools/herdr-devflow/internal/overview/sanitize_test.go" # writes one, proves it is ignored
-  "tools/herdr-devflow/internal/app/dispatch_test.go"      # same, through the CLI
-  "tools/herdr-devflow/internal/overview/service_test.go"  # same, through the collector
+  "scripts/demo-home-file-tree.mjs"  # product workspace group document, not repo workflow
 )
 
 function is_historical {

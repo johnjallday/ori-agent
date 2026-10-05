@@ -53,12 +53,11 @@ assert_excluded 'ori-agent/tests/user/scenarios$'
 assert_excluded 'ori-agent/tests/user/workflows$'
 assert_excluded 'ori-agent/test/smoke/local-models$'
 
-# Intended unit-test scope must survive: production packages, and the
-# separate herdr-devflow tool built from this module (including the
-# package that owns the Unix-socket fixtures).
+# Intended application scope survives, without a hidden toolbox dependency.
 assert_included 'ori-agent/internal/llm$'
 assert_included 'ori-agent/cmd/server$'
-assert_included 'ori-agent/tools/herdr-devflow/internal/herdr$'
+assert_excluded 'ori-agent/tools/herdr-devflow/'
+assert_excluded 'ori-devtools'
 
 # --platform is what the macOS CI leg runs. It must keep every package that
 # carries per-GOOS source (derived from the files the toolchain excludes for
@@ -69,9 +68,9 @@ assert_included 'ori-agent/tools/herdr-devflow/internal/herdr$'
 assert_platform_included 'ori-agent/internal/platform$'
 assert_platform_included 'ori-agent/internal/nativemenubar$'
 assert_platform_included 'ori-agent/cmd/menubar$'
-assert_platform_included 'ori-agent/tools/herdr-devflow/internal/wakeservice$'
 assert_platform_included 'ori-agent/cmd/server$'
-assert_platform_included 'ori-agent/tools/herdr-devflow/internal/app$'
+assert_platform_excluded 'ori-agent/tools/herdr-devflow/'
+assert_platform_excluded 'ori-devtools'
 assert_platform_excluded 'ori-agent/internal/sessionhttp$'
 assert_platform_excluded 'ori-agent/internal/llm$'
 assert_platform_excluded 'node_modules'

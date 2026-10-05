@@ -1,0 +1,2 @@
+# Exact renderer fixture: the two trailing spaces encode Markdown line breaks.
+internal/workspaceplan/testdata/devtools-approved-tasks.md whitespace=-blank-at-eol

@@ -34,7 +34,7 @@ fi
 
 # A dry run prints the plan in CI's order and executes nothing.
 full="$(cd "$repo_root" && bash scripts/ci-local.sh --dry-run --no-fetch --readme)"
-grep -q 'ci-local: gates: gofmt vet wails-modes lint-new unit-tests test-js lint-js format-js character-assets gosec-new readme$' <<<"$full" || {
+grep -q 'ci-local: gates: gofmt vet wails-modes lint-new unit-tests devtools test-js lint-js format-js character-assets gosec-new readme$' <<<"$full" || {
   echo "unexpected full plan:" >&2
   printf '%s\n' "$full" >&2
   exit 1
@@ -42,7 +42,7 @@ grep -q 'ci-local: gates: gofmt vet wails-modes lint-new unit-tests test-js lint
 grep -q 'ci-local: dry run, nothing executed' <<<"$full"
 
 quick="$(cd "$repo_root" && bash scripts/ci-local.sh --dry-run --no-fetch --quick)"
-grep -q 'ci-local: gates: gofmt vet wails-modes lint-new test-unit test-js lint-js format-js character-assets$' <<<"$quick" || {
+grep -q 'ci-local: gates: gofmt vet wails-modes lint-new test-unit devtools test-js lint-js format-js character-assets$' <<<"$quick" || {
   echo "unexpected quick plan:" >&2
   printf '%s\n' "$quick" >&2
   exit 1
@@ -51,7 +51,7 @@ grep -q 'readme gate skipped (--quick)' <<<"$quick"
 
 skipped="$(cd "$repo_root" && bash scripts/ci-local.sh --dry-run --no-fetch --no-readme)"
 grep -q 'readme gate skipped (--no-readme)' <<<"$skipped"
-grep -q 'ci-local: gates: gofmt vet wails-modes lint-new unit-tests test-js lint-js format-js character-assets gosec-new$' <<<"$skipped"
+grep -q 'ci-local: gates: gofmt vet wails-modes lint-new unit-tests devtools test-js lint-js format-js character-assets gosec-new$' <<<"$skipped"
 
 if (cd "$repo_root" && bash scripts/ci-local.sh --dry-run --bogus >/dev/null 2>&1); then
   echo "an unknown flag was accepted" >&2

@@ -15,12 +15,12 @@ This directory contains detailed documentation for Ori Agent.
 - [LLM Provider Guide](../internal/llm/README.md) - LLM provider abstraction and implementation
 
 ### Feature Guides
-- [Ori–Herdr Devflow Bridge](./herdr-devflow.md) - Local programmable Herdr worktree and agent workflow,
-  including Overnight Runs
-- [Herdr Wake Service macOS dogfood](./herdr-standalone-wake-dogfood.md) - Manual standalone daemon,
-  coexistence, recovery, and uninstall verification
-- [Claude usage-signal contract](./herdr-devflow-claude-usage-signal.md) - What Ori reads to recognize a
-  Claude session limit, and everything it deliberately does not
+- [External development tools](./devtools.md) - Source/target/runtime boundary,
+  retained commands, offline validation and recovery
+- [Ori–Herdr Devflow Bridge](./herdr-devflow.md) - Entry to the external operating guide
+- [Herdr Wake Service macOS dogfood](./herdr-standalone-wake-dogfood.md) - Entry to the
+  separately authorized external manual protocol
+- [Claude usage-signal contract](./herdr-devflow-claude-usage-signal.md) - External contract location
 - [Scheduler Nodes Guide](./SCHEDULER_NODES_GUIDE.md) - Complete guide to using scheduler nodes for task automation
 - [Multi-Agent Support](./features/multi-agent-support.md) - Running multiple agents
 - [Home Assistant Task Routing](./features/home-assistant-task-routing.md) - "Ask Ori" task routing
@@ -60,7 +60,7 @@ This directory contains detailed documentation for Ori Agent.
 - [System Home Context Routing Plan](./features/system-home-context-routing-plan.md) - Home context routing plan
 - [PRD-to-Task Coverage Audit](./PRD_TASK_COVERAGE_AUDIT.md) - Final planning-quality check before creating a feature worktree
 - [Open-Core Boundaries](./architecture/open-core-boundaries.md) - Separation of OSS core and private services
-- [Herdr Standalone Wake v1 Contract](./architecture/herdr-standalone-wake-v1-contract.md) - Fixed installer, platform, path, ownership, and compatibility decisions
+- [Herdr Standalone Wake v1 Contract](./architecture/herdr-standalone-wake-v1-contract.md) - Location of the verbatim accepted contract in the external toolbox
 - [Workspace Build Sessions](./architecture/workspace-build-sessions.md) - "Build with your assistant": the draft is the create request, validation, storage, privacy
 
 ### UI Documentation
@@ -111,7 +111,7 @@ docs/
 │   └── workspace-runs-harness-model.md
 │
 ├── architecture/
-│   ├── herdr-standalone-wake-v1-contract.md # Standalone wake privilege and compatibility contract
+│   ├── herdr-standalone-wake-v1-contract.md # External accepted-contract compatibility link
 │   └── open-core-boundaries.md         # Open-core vs private service boundaries
 │
 └── ui/

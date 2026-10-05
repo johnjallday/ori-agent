@@ -91,11 +91,8 @@ menubar: ## Build the menu bar app
 	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(MENUBAR_BINARY_NAME) ./cmd/menubar
 	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/$(MENUBAR_BINARY_NAME)$(NC)"
 
-herdr-devflow: ## Build the Ori-to-Herdr devflow helper
-	@echo "$(BLUE)Building Herdr devflow helper...$(NC)"
-	$(GOBUILD) -o $(BUILD_DIR)/herdr-devflow ./tools/herdr-devflow/cmd/herdr-devflow
-	$(GOBUILD) -o $(BUILD_DIR)/herdr-wake ./tools/herdr-devflow/cmd/herdr-wake
-	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/herdr-devflow$(NC)"
+herdr-devflow: ## Explicitly build the selected external toolbox (not an app dependency)
+	@bash scripts/devtools-make.sh build
 
 
 icons: ## Generate menubar and app icons from SVG
@@ -178,7 +175,15 @@ test: ## Run all tests (unit + integration; excludes node_modules)
 	$(TEST_RUNNER) $(GOTEST) -v $$(go list ./... | grep -v '/node_modules/')
 	@echo "$(GREEN)✓ All tests passed$(NC)"
 
-.PHONY: test-release
+.PHONY: test-release test-devtools
+# Application-owned contracts: fake tools only, never fetch/install a companion.
+test-devtools: ## Test workflow wrappers and Ori project adapters offline
+	@python3 scripts/devtools-wrappers.test.py
+	@python3 scripts/devtools-project.test.py
+	@zsh scripts/wt-demo-codex.test.sh
+	@bash scripts/devops-release-candidate.test.sh
+	@zsh scripts/check-backlog-docs.sh
+
 test-release: ## Test RC lifecycle and installer probes offline (temporary Git remotes only)
 	@python3 scripts/release-candidate.test.py
 	@python3 scripts/rc-test-report.test.py
@@ -195,25 +200,11 @@ test-unit-verbose: ## Run unit tests with -v output, for focused diagnosis
 	$(TEST_RUNNER) $(GOTEST) -v -short $$(./scripts/list-unit-packages.sh)
 	@echo "$(GREEN)✓ Unit tests passed$(NC)"
 
-test-herdr-devflow-cross: ## Cross-compile the local Herdr helper for supported targets
-	@mkdir -p $(BUILD_DIR)
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(BUILD_DIR)/herdr-devflow-darwin-arm64 ./tools/herdr-devflow/cmd/herdr-devflow
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(BUILD_DIR)/herdr-wake-darwin-arm64 ./tools/herdr-devflow/cmd/herdr-wake
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BUILD_DIR)/herdr-devflow-linux-amd64 ./tools/herdr-devflow/cmd/herdr-devflow
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BUILD_DIR)/herdr-wake-linux-amd64 ./tools/herdr-devflow/cmd/herdr-wake
-	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BUILD_DIR)/herdr-devflow-windows-amd64.exe ./tools/herdr-devflow/cmd/herdr-devflow
-	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BUILD_DIR)/herdr-wake-windows-amd64.exe ./tools/herdr-devflow/cmd/herdr-wake
+test-herdr-devflow-cross: ## Explicitly cross-build the selected external toolbox
+	@bash scripts/devtools-make.sh cross
 
-test-herdr-devflow: test-herdr-devflow-cross ## Run focused Ori-to-Herdr bridge tests
-	$(TEST_RUNNER) $(GOTEST) ./tools/herdr-devflow/...
-	@$(TEST_RUNNER) bash scripts/herdr-devflow.test.sh
-	@$(TEST_RUNNER) zsh scripts/wt-done-archive.test.sh
-	@$(TEST_RUNNER) zsh scripts/wt-herd.test.sh
-	@$(TEST_RUNNER) zsh scripts/wt-config.test.sh
-	@$(TEST_RUNNER) zsh scripts/wt-demo-codex.test.sh
-	@$(TEST_RUNNER) zsh scripts/wt-done-repl.test.sh
-	@$(TEST_RUNNER) bash scripts/devops-cli.test.sh
-	@$(TEST_RUNNER) zsh scripts/check-backlog-docs.sh
+test-herdr-devflow: test-devtools test-herdr-devflow-cross ## Explicit companion tests plus Ori adapter contracts
+	@bash scripts/devtools-make.sh test
 
 test-integration: ## Run integration tests (needs OPENAI_API_KEY; sets the provider opt-in)
 	@echo "$(BLUE)Running integration tests...$(NC)"

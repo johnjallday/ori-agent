@@ -1,6 +1,9 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides product architecture guidance to Claude Code (claude.ai/code).
+`AGENTS.md` is authoritative for repository safety, validation and worktrees.
+Personal workflow implementations live in a separate local repository; read
+`docs/devtools.md` for the retained entrypoints, selection and recovery contract.
 
 ## Project Overview
 
@@ -83,7 +86,7 @@ go fmt ./...
 
 # Using Makefile
 make test
-make lint          # Requires golangci-lint
+make lint-new      # CI's changed-code ratchet; not the whole-tree baseline
 ```
 
 ## Architecture Overview
@@ -378,9 +381,12 @@ This project follows a feature branch workflow with squash merging.
 - `chore/` - Maintenance tasks
 
 **Commands**:
-- Always use `git switch` instead of `git checkout`
-- Create branch: `git switch -c feature/descriptive-name`
-- Switch branch: `git switch main`
+- Implement in an isolated worktree via `wt new` or `wt start`, not a branch
+  switch in shared `ori-agent-dev`; see `AGENTS.md`.
+- Source Ori's `scripts/wt.sh` in zsh. The implementation is external; selection
+  failure must not become a reason to work in shared dev or bypass safety.
+- Prefer `git switch` over `git checkout` only inside the appropriate isolated
+  checkout; never switch the shared planning/review checkout.
 
 **Commit message format**: Present tense, descriptive
 - ✅ "Add workspace skill bindings"

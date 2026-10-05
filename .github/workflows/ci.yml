@@ -21,6 +21,27 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/main' }}
 
 jobs:
+  devtools-contract:
+    name: Ori workflow adapter contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install shell contract dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zsh ripgrep
+      - name: Install documentation-check dependency (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: brew install ripgrep
+      - name: Offline wrappers and project adapters (no companion clone)
+        run: make test-devtools
+
   release-contract:
     name: Release lifecycle contract
     runs-on: ubuntu-latest
