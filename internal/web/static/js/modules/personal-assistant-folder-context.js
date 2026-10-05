@@ -60,7 +60,7 @@ export function createFolderContextController({
       revision: saved.revision || '',
       observation: saved.observation || null,
       accepted: saved.observation || null,
-      authority: saved.authority || '',
+      authority: saved.authority || (saved.historical ? state.authority || 'historical' : ''),
       preview: false,
       pending: false,
       notice: ''
@@ -187,6 +187,14 @@ async function jsonRequest(url, body) {
 let controller;
 let elements;
 let chooserGeneration = 0;
+let lastEventKey;
+
+function updateSendHint() {
+  if (!elements?.hint) return;
+  elements.hint.hidden =
+    !controller?.state.observation ||
+    Boolean(document.getElementById('personalAssistantInput')?.value.trim());
+}
 const node = (tag, text, className = '') => {
   const element = document.createElement(tag);
   element.textContent = text;
@@ -215,7 +223,8 @@ function render(state) {
     ? `Discussing saved observations only (${state.authority}). Pick again for fresh inspection or setup. File contents have not been read.`
     : '';
   elements.status.textContent = state.notice;
-  window.PersonalAssistantPanel?.setFolderBusy?.(state.pending);
+  updateSendHint();
+  window.PersonalAssistantPanel?.setFolderBusy?.(state.pending, 'context');
   window.PersonalAssistantConversation?.refresh?.();
 }
 
@@ -263,7 +272,64 @@ async function open() {
 function reset(id = '', saved = {}) {
   if (elements) elements.chooser.hidden = true;
   chooserGeneration++;
+  lastEventKey = undefined;
   controller?.reset(id, saved);
+}
+
+// Only the server's typed event channel reaches here. Ordinary model prose
+// never becomes a card or an executable setup control.
+function renderEvent(id, event, beforeRow) {
+  if (!id || !event) return null;
+  const observation = event.observation;
+  const key = `${observation?.id || 'removed'}:${event.offer_id || ''}`;
+  if (lastEventKey === key) return null;
+  lastEventKey = key;
+  const row = node('section', '', 'personal-assistant-folder-context');
+  row.dataset.folderEventId = id;
+  row.dataset.messageRole = 'folder_context';
+  row.setAttribute(
+    'aria-label',
+    observation ? 'Saved folder observations' : 'Folder context removed'
+  );
+  if (observation) {
+    row.append(
+      node(
+        'p',
+        `${observation.folder} · saved observations`,
+        'personal-assistant-folder-context__eyebrow'
+      )
+    );
+    row.append(node('p', observationSummary(observation)));
+    row.append(
+      node(
+        'p',
+        'File contents have not been read. These are dated observations, not permission to inspect again.'
+      )
+    );
+    const detail = node('details', '');
+    detail.append(node('summary', 'Observed projects and coverage'));
+    detail.append(
+      node(
+        'p',
+        (observation.projects || [])
+          .map(
+            project =>
+              `${project.name}${project.marker ? ` (${project.marker})` : ''}: ${project.files} observed files`
+          )
+          .join(' · ')
+      )
+    );
+    detail.append(node('p', coverageSummary(observation)));
+    row.append(detail);
+  } else {
+    row.append(
+      node(
+        'p',
+        'Folder context removed. Earlier discussion remains history; completed setup is unchanged.'
+      )
+    );
+  }
+  return window.OriAskRouting?.appendContextEvent?.(row, beforeRow) || null;
 }
 
 function init() {
@@ -281,17 +347,26 @@ function init() {
     projects: document.getElementById('personalAssistantFolderProjects'),
     coverage: document.getElementById('personalAssistantFolderCoverage'),
     history: document.getElementById('personalAssistantFolderHistorical'),
-    status: document.getElementById('personalAssistantContextStatus')
+    status: document.getElementById('personalAssistantContextStatus'),
+    hint: document.getElementById('personalAssistantFolderSendHint')
   };
   controller = createFolderContextController({
     post: jsonRequest,
     changed: render,
     uuid: () => crypto.randomUUID(),
     currentId: () => window.PersonalAssistantConversation?.currentId?.() || '',
-    isBusy: () => window.OriAskRouting?.getState?.().busy === true
+    isBusy: () =>
+      window.OriAskRouting?.getState?.().busy === true ||
+      window.PersonalAssistantConversation?.isLoading?.() === true
   });
+  document.getElementById('personalAssistantInput')?.addEventListener('input', updateSendHint);
+  document.addEventListener('personal-assistant:sent', updateSendHint);
   elements.remove.addEventListener('click', async () => {
-    if (await controller.remove()) elements.add.focus();
+    const saved = controller.state.accepted;
+    if (await controller.remove()) {
+      if (saved) renderEvent(controller.state.revision, { version: 1 });
+      elements.add.focus();
+    }
   });
   document
     .getElementById('personalAssistantFolderChooserCancel')
@@ -308,7 +383,16 @@ function init() {
 const api = {
   open,
   reset,
-  hydrate: reset,
+  hydrate: (id, saved) => {
+    // Resume has already rendered canonical events; keep their deduplication key.
+    chooserGeneration++;
+    if (elements) elements.chooser.hidden = true;
+    controller?.reset(id, saved);
+  },
+  renderEvent,
+  resetEvents: () => {
+    lastEventKey = undefined;
+  },
   request: () => controller?.request() || null,
   accepted: (id, saved) => controller?.accepted(id, saved),
   isPending: () => controller?.state.pending === true,

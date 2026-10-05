@@ -371,7 +371,12 @@ test.describe('Personal Assistant Foundation accessibility', () => {
   test('the chip and the summary strip are operable from the keyboard', async ({ page }) => {
     await mockCompletedOnboarding(page);
     await mockAssistantState(page);
-    // The folder read is the server's own; this fixture has no folders to offer.
+    // Browser-only availability fixtures; choosing is not a scan or a send.
+    await page.route('**/api/home-assistant/folder-context/choices', route =>
+      route.fulfill({
+        json: { chips: [{ id: 'documents', label: 'Documents' }], picker_available: false }
+      })
+    );
     await page.route('**/api/personal-assistant/folder-digest', route =>
       route.fulfill({
         status: 200,
@@ -395,7 +400,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     // The chip is the control just before the composer, and it has a name.
     const chip = page
       .getByRole('dialog', { name: 'Atlas' })
-      .getByRole('button', { name: 'Explore a folder', exact: true });
+      .getByRole('button', { name: 'Add folder', exact: true });
     await page.keyboard.press('Shift+Tab');
     await expect(chip).toBeFocused();
     await expect(chip).toHaveAttribute('id', 'personalAssistantFolderChip');
@@ -407,13 +412,17 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await expect(strip).toBeVisible();
     await page.keyboard.press('Enter');
 
-    // The request and the assistant's reply are in the conversation, focus is
-    // on the first folder, and the chip waits its turn.
-    await expect(page.locator('#personalAssistantFolderRequest')).toBeVisible();
-    await expect(
-      page.locator('#personalAssistantFolderChips button[data-chip="documents"]')
-    ).toBeFocused();
-    await expect(chip).toBeDisabled();
+    // Opening the local chooser fabricates no user request or model answer.
+    const chooser = page.locator('#personalAssistantContextChooser');
+    const documents = page
+      .locator('#personalAssistantFolderChoices')
+      .getByRole('button', { name: 'Documents', exact: true });
+    await expect(chooser).toBeVisible();
+    await expect(documents).toBeFocused();
+    await expect(chooser).toContainText('Nothing goes to your configured model until Send');
+    await page.keyboard.press('Escape');
+    await expect(chooser).toBeHidden();
+    await expect(chip).toBeFocused();
 
     // The strip is a real disclosure for what it folded.
     await expect(strip).toBeVisible();

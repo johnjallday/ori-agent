@@ -149,6 +149,30 @@ test('accepted context detach checks revision, failure keeps attachment and succ
   assert.equal(f.controller.state.revision, 'r2');
 });
 
+test('accepted first turn binds the exact folder to its conversation and followup revision', async () => {
+  const f = fixture(async () => ({ observation: observation('a'), revision: '' }));
+  await f.controller.select('chip', 'documents');
+  f.setId('canonical');
+  f.controller.accepted('canonical', { revision: 'event-1', observation: observation('a') });
+  assert.deepEqual(f.controller.request(), { selection_id: 'a', revision: 'event-1' });
+  assert.equal(f.controller.state.preview, false);
+  f.controller.accepted('canonical', { revision: 'event-2', observation: observation('a') });
+  assert.deepEqual(f.controller.request(), { selection_id: 'a', revision: 'event-2' });
+  f.setId('');
+  f.controller.reset();
+  assert.equal(f.controller.request(), null);
+});
+
+test('successful local replacement adopts the retirement revision without saving new evidence', async () => {
+  const f = fixture(async () => ({ observation: observation('b'), revision: 'retired-a' }));
+  f.setId('canonical');
+  f.controller.reset('canonical', { revision: 'event-a', observation: observation('a') });
+  await f.controller.select('chip', 'desktop');
+  assert.equal(f.controller.state.preview, true);
+  assert.equal(f.controller.state.accepted, null);
+  assert.deepEqual(f.controller.request(), { selection_id: 'b', revision: 'retired-a' });
+});
+
 test('historical snapshot is explicit; busy turn cannot mutate its context', async () => {
   const f = fixture(async () => {
     throw new Error('must not call');
@@ -156,6 +180,9 @@ test('historical snapshot is explicit; busy turn cannot mutate its context', asy
   f.setId('saved');
   f.controller.reset('saved', { revision: 'r1', observation: observation('a'), authority: 'lost' });
   assert.deepEqual(f.controller.request(), { selection_id: 'a', revision: 'r1', historical: true });
+  f.controller.accepted('saved', { revision: 'r2', observation: observation('a'), historical: true });
+  assert.equal(f.controller.state.authority, 'lost');
+  assert.deepEqual(f.controller.request(), { selection_id: 'a', revision: 'r2', historical: true });
   f.setBusy(true);
   assert.equal(await f.controller.select('picker'), false);
   assert.equal(await f.controller.remove(), false);

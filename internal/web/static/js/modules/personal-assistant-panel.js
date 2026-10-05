@@ -236,7 +236,10 @@ function renderChip() {
 }
 
 /** Home's folder flow says when a folder is being chosen or explored. */
-function setFolderBusy(busy) {
+function setFolderBusy(busy, source = 'legacy') {
+  // The old Home offer chooser can remain open for an unrelated setup. Its
+  // visibility is not an in-flight composer selection and must not lock Add.
+  if (source === 'legacy' && window.PersonalAssistantFolderContext) return;
   state.folderBusy = busy === true;
   renderChip();
 }
@@ -473,6 +476,7 @@ function restoreDraft(text) {
   const next = restoredDraft(state.els.input.value, text);
   state.draft = next;
   state.els.input.value = next;
+  state.els.input.dispatchEvent(new Event('input', { bubbles: true }));
   return next === String(text || '');
 }
 
@@ -491,7 +495,13 @@ function routeContext() {
 function submit(event) {
   event?.preventDefault();
   moveSharedWorkActivity();
-  const text = String(state.els?.input?.value || '').trim();
+  const text =
+    String(state.els?.input?.value || '').trim() ||
+    (window.PersonalAssistantFolderContext?.hasFolder?.() ? 'Explore this folder' : '');
+  if (window.PersonalAssistantConversation?.isLoading?.()) {
+    setStatus('Wait for the conversation to open before sending. Your draft is kept.');
+    return false;
+  }
   // While a reply is in flight the text stays in the box: sending it now would
   // start a second turn before the first one has a conversation to join.
   const busy = window.OriAskRouting?.getState?.().busy === true;

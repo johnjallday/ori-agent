@@ -26,6 +26,7 @@ type folderObservationStub struct {
 	target      foldercontext.Target
 	onObserve   func()
 	status      personalassistant.FolderContinuationReason
+	statusCalls int
 }
 
 func newFolderObservationStub() *folderObservationStub {
@@ -56,6 +57,7 @@ func (s *folderObservationStub) Resolve(_ context.Context, target foldercontext.
 	return &copy, nil
 }
 func (s *folderObservationStub) Status(context.Context, foldercontext.Target, foldercontext.Observation) personalassistant.FolderContinuationReason {
+	s.statusCalls++
 	return s.status
 }
 func (s *folderObservationStub) BindSaved(target foldercontext.Target, id, conversationID string) {

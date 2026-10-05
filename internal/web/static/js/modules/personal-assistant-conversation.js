@@ -16,7 +16,13 @@ export const CONVERSATION_ERRORS = {
     'That conversation does not belong to your assistant’s Personal HQ. Nothing was sent; your message is back in the box.',
   conversation_unavailable:
     'Conversation history could not be read right now. Nothing was sent; your message is back in the box — try again in a moment.',
-  assistant_not_ready: 'Finish personal assistant setup before opening conversations.'
+  assistant_not_ready: 'Finish personal assistant setup before opening conversations.',
+  folder_context_conflict:
+    'This conversation’s folder context changed. Reopen it before sending; your draft is kept.',
+  folder_context_unavailable:
+    'That folder selection is unavailable. Reopen this conversation to discuss its saved observations, or pick again. Your draft is kept.',
+  folder_context_save_failed:
+    'This reply was not saved with its folder context. Your draft and intended folder are kept; check the conversation before retrying.'
 };
 
 /** The only conversation input a request carries: an opaque ID, or none. */
@@ -37,7 +43,11 @@ export function isPanelRequest(routeContext) {
  */
 export function nextConversationId(currentId, reply) {
   if (!reply) return String(currentId || '');
-  if (reply.error === 'conversation_unavailable') return String(currentId || '');
+  if (
+    reply.error === 'conversation_unavailable' ||
+    String(reply.error || '').startsWith('folder_context_')
+  )
+    return String(currentId || '');
   if (reply.error) return '';
   return String(reply.id || currentId || '');
 }
@@ -98,6 +108,7 @@ const state = {
   available: false,
   hydrated: false,
   loading: false,
+  generation: 0,
   els: null
 };
 
@@ -179,6 +190,7 @@ function startNew() {
     setNote('Wait for the current reply before starting a new conversation.');
     return false;
   }
+  state.generation++;
   closeReviews();
   leaveSavedDraft();
   closeList();
@@ -205,8 +217,10 @@ async function resume(id, options = {}) {
   const target = String(id || '').trim();
   if (!target || state.loading) return false;
   state.loading = true;
+  const generation = ++state.generation;
   try {
     const result = await readJSON(`${LIST_ENDPOINT}/${encodeURIComponent(target)}`);
+    if (generation !== state.generation) return false;
     if (!result.ok || !result.body?.conversation) {
       const code = String(result.body?.error || 'conversation_unavailable');
       // A thread that is gone or no longer in scope is dropped, never recreated.
@@ -227,16 +241,23 @@ async function resume(id, options = {}) {
       return false;
     }
     closeReviews();
+    window.PersonalAssistantFolderContext?.resetEvents?.();
     const conversation = result.body.conversation;
     const messages = result.body.messages || [];
     for (const message of messages) {
+      if (message.role === 'folder_context' && message.folder_context) {
+        window.PersonalAssistantFolderContext?.renderEvent?.(message.id, message.folder_context);
+        continue;
+      }
       const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
       attachMessage(row, conversation.id, message.id);
     }
     // The panel keeps a bounded number of rows, so a long conversation shows
     // its latest part even when the server returned all of it.
     const shown = document.querySelectorAll('#homeAssistantConversation [data-message-id]').length;
-    const partial = result.body.truncated === true || shown < messages.length;
+    const partial =
+      result.body.truncated === true ||
+      shown < messages.filter(message => message.role !== 'folder_context').length;
     // Which replies were saved, read from Personal HQ's Tickets. When that
     // read failed, nothing is labelled rather than labelled "not saved".
     if (Array.isArray(result.body.saved)) {
@@ -366,6 +387,18 @@ function applyReply(data, rows = {}) {
     if (reply.assistant_message_id) window.PersonalAssistantDrafts?.replyAdded?.();
   }
   setCurrent(nextId, reply.title);
+  if (reply.stored && data.folder_context) {
+    window.PersonalAssistantFolderContext?.renderEvent?.(
+      data.folder_context.revision,
+      {
+        version: 1,
+        observation: data.folder_context.observation,
+        offer_id: data.folder_context.offer_id
+      },
+      rows.userRow
+    );
+    window.PersonalAssistantFolderContext?.accepted?.(nextId, data.folder_context);
+  }
   const notice = conversationNotice(data);
   setNote(notice);
   return { notice, stored: reply.stored === true, restoreInput: shouldRestoreInput(data) };
@@ -409,6 +442,7 @@ const api = {
   notify: setNote,
   currentId: () => state.id,
   refresh: render,
+  isLoading: () => state.loading,
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantConversation = api;

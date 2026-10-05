@@ -50,6 +50,7 @@ type PersonalAssistantFolderState struct {
 	Observation *foldercontext.Observation                 `json:"observation,omitempty"`
 	Authority   personalassistant.FolderContinuationReason `json:"authority,omitempty"`
 	OfferID     string                                     `json:"offer_id,omitempty"`
+	Historical  bool                                       `json:"historical,omitempty"`
 }
 
 // PersonalAssistantFolderObservations is the host-owned local observation seam.
@@ -126,19 +127,18 @@ func (h *HomeAssistantAskHandler) folderState(ctx context.Context, target folder
 	if !scope.owns(record) {
 		return state, foldercontext.ErrInvalid
 	}
+	return folderStateFromMessages(messages), nil
+}
+
+func folderStateFromMessages(messages []PersonalAssistantConversationMessage) PersonalAssistantFolderState {
+	state := PersonalAssistantFolderState{}
 	for _, message := range messages {
 		if message.Imported || message.FolderContext == nil {
 			continue
 		}
 		state = PersonalAssistantFolderState{Revision: message.ID, Observation: message.FolderContext.Observation, OfferID: message.FolderContext.OfferID}
 	}
-	if state.Observation != nil {
-		state.Authority = personalassistant.FolderContinuationLost
-		if h.FolderObservations != nil {
-			state.Authority = h.FolderObservations.Status(ctx, target, *state.Observation)
-		}
-	}
-	return state, nil
+	return state
 }
 
 func (h *HomeAssistantAskHandler) folderExpected(ctx context.Context, target foldercontext.Target, revision string) (PersonalAssistantFolderState, error) {

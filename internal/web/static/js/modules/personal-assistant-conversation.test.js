@@ -97,6 +97,25 @@ test('saved turns stay quiet while history limitations remain explicit', () => {
   }
 });
 
+test('folder failures preserve the intended conversation and recover the draft', () => {
+  for (const error of [
+    'folder_context_conflict',
+    'folder_context_unavailable',
+    'folder_context_save_failed'
+  ]) {
+    assert.equal(nextConversationId('owned', { error }), 'owned');
+    assert.equal(
+      shouldRestoreInput({
+        response: 'Possibly unsaved reply',
+        conversation: { id: 'owned', error }
+      }),
+      true
+    );
+    assert.equal(conversationNotice({ conversation: { error } }), CONVERSATION_ERRORS[error]);
+  }
+  assert.match(CONVERSATION_ERRORS.folder_context_save_failed, /not saved/);
+});
+
 test('conversation labels are stable for same-day, older, and malformed entries', () => {
   const now = new Date('2026-10-04T15:00:00');
   const today = conversationLabel(

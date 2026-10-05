@@ -1983,7 +1983,9 @@
     if (!conversation) return null;
     var scroll = conversation.closest('.personal-assistant-panel__scroll') || conversation;
     var followLatest =
-      scroll === conversation || scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
+      scroll === conversation ||
+      role === 'user' ||
+      scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
 
     if (!conversation.dataset.initialized) {
       conversation.innerHTML = '';
@@ -10271,6 +10273,50 @@
     }
   }
 
+  // Explicit personal-folder turns must not enter local create/specialist
+  // shortcuts, including an old natural-language yes. Capture the exact refs
+  // once, validate at Route, and validate again at Ask; never fall back locally.
+  async function runPersonalFolderTurn(text, routeContext, folderRef) {
+    var conversations = window.PersonalAssistantConversation;
+    var conversationRef = conversations && conversations.request(routeContext);
+    clearHomeAssistantPlanning();
+    clearHomeAssistantInlineReply();
+    homeAssistantState.awaitingCreateConfirmation = false;
+    homeAssistantState.pendingPrompt = text;
+    homeAssistantState.pendingIntent = HOME_INTENTS.assistant_conversation;
+    appendHomeAssistantMessage('user', text);
+    setHomeAssistantBusy(true, 'Checking folder context…');
+    renderHomeAssistantActions([]);
+    try {
+      var route = await API.post('/api/home-assistant/route', {
+        prompt: text,
+        context: routeContext,
+        conversation: conversationRef,
+        folder_context: folderRef
+      });
+      if (
+        !route ||
+        route.intent !== 'assistant_conversation' ||
+        route.route_mode !== 'home_inline'
+      ) {
+        throw new Error('Folder conversation routing unavailable');
+      }
+      await runHomeAssistantInline(text, routeContext, 'assistant_conversation', {
+        conversationRef: conversationRef,
+        folderRef: folderRef
+      });
+    } catch (_) {
+      var notice =
+        'The folder context could not be validated. Nothing was sent to the model. Your draft is kept; reopen the conversation or pick again before sending.';
+      appendHomeAssistantMessage('assistant', notice);
+      conversations && conversations.notify(notice);
+      restorePersonalAssistantDraft(text);
+      setHomeAssistantRoutingSummary('', '');
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
   // Home harness inline path: answer app_introspection / app_navigation prompts
   // by calling /api/home-assistant/ask, which builds the cross-workspace snapshot
   // and runs the model server-side. The frontend only renders the answer and the
@@ -10292,9 +10338,10 @@
     var conversations = window.PersonalAssistantConversation || null;
     var normalizedContext = normalizeHomeRouteContext(routeContext);
     var conversationRef =
-      conversations && typeof conversations.request === 'function'
+      options.conversationRef ||
+      (conversations && typeof conversations.request === 'function'
         ? conversations.request(normalizedContext)
-        : null;
+        : null);
     var userRow = confirmedAction ? null : homeAssistantState.lastUserRow;
 
     setHomeAssistantBusy(true, confirmedAction ? 'Applying…' : 'Thinking…');
@@ -10319,6 +10366,7 @@
       }
       if (conversationRef) {
         payload.conversation = conversationRef;
+        if (options.folderRef && !confirmedAction) payload.folder_context = options.folderRef;
         // The saved draft this conversation is working on, by Ticket ID, so
         // the turn reads its current text. A turn never writes it.
         var drafts = window.PersonalAssistantDrafts;
@@ -10330,6 +10378,16 @@
       }
 
       var data = await API.post('/api/home-assistant/ask', payload);
+      if (conversationRef && conversations.currentId() !== String(conversationRef.id || '')) {
+        conversations.notify(
+          'That reply belongs to the earlier conversation. Reopen it to see its saved history.'
+        );
+        return;
+      }
+      var personalScroll = conversationRef && document.getElementById('personalAssistantScroll');
+      var followPersonalReply =
+        personalScroll &&
+        personalScroll.scrollHeight - personalScroll.scrollTop - personalScroll.clientHeight < 48;
       var responseText = String((data && data.response) || '').trim();
       var assistantRow = responseText
         ? appendHomeAssistantMessage('assistant', responseText)
@@ -10338,6 +10396,9 @@
         conversationRef && conversations && typeof conversations.applyReply === 'function'
           ? conversations.applyReply(data, { userRow: userRow, assistantRow: assistantRow })
           : null;
+      // Message menus, typed observation rows and preview retirement are one
+      // render batch. Follow the batch only if the user was already at the end.
+      if (followPersonalReply) personalScroll.scrollTop = personalScroll.scrollHeight;
       if (
         data &&
         data.draft_context &&
@@ -10414,6 +10475,13 @@
       setHomeAssistantRoutingSummary(summaryLabel + ' Failed', 'Could not complete the request.');
       if (conversationRef && !confirmedAction) {
         restorePersonalAssistantDraft(text);
+      }
+      if (options.folderRef) {
+        conversations.notify(
+          'The reply could not be received. It may have been saved. Reopen the conversation to check before sending again; your draft and intended folder are kept.'
+        );
+        renderHomeAssistantActions([]);
+        return;
       }
       renderHomeAssistantActions([
         {
@@ -13116,6 +13184,15 @@
   async function handleHomeAssistantPrompt(prompt, options) {
     var text = String(prompt || '').trim();
     if (!text) return;
+    var folderRouteContext = normalizeHomeRouteContext(options && options.routeContext);
+    var folderRef =
+      folderRouteContext.origin === 'personal_assistant_panel' &&
+      window.PersonalAssistantFolderContext &&
+      window.PersonalAssistantFolderContext.request();
+    if (folderRef) {
+      await runPersonalFolderTurn(text, folderRouteContext, folderRef);
+      return;
+    }
     clearHomeAssistantPlanning();
     clearHomeAssistantInlineReply();
     setHomeAssistantMode('new_task');
@@ -13824,6 +13901,24 @@
   // another. It refuses while a reply is in flight.
   window.OriAskRouting.appendMessage = function (role, text) {
     return appendHomeAssistantMessage(role === 'user' ? 'user' : 'assistant', text);
+  };
+  window.OriAskRouting.appendContextEvent = function (row, beforeRow) {
+    var conversation = getHomeAssistantElements().conversation;
+    if (!conversation || !row) return null;
+    var scroll = conversation.closest('.personal-assistant-panel__scroll') || conversation;
+    var followLatest = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
+    if (!conversation.dataset.initialized) conversation.replaceChildren();
+    conversation.dataset.initialized = 'true';
+    conversation.insertBefore(
+      row,
+      beforeRow && beforeRow.parentElement === conversation ? beforeRow : null
+    );
+    while (conversation.children.length > HOME_ASSISTANT_MESSAGE_LIMIT)
+      conversation.removeChild(conversation.firstChild);
+    syncHomeAssistantConversationSection();
+    syncHomeAssistantLauncher();
+    if (followLatest) scroll.scrollTop = scroll.scrollHeight;
+    return row;
   };
   window.OriAskRouting.resetConversation = function () {
     if (homeAssistantState.busy) return false;

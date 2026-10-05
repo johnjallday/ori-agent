@@ -13,6 +13,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
 // Context bounds for one conversation turn. Older turns stay stored; they are
@@ -135,6 +136,20 @@ func (h *HomeAssistantAskHandler) SetConversationStore(store PersonalAssistantCo
 	h.Conversations = store
 }
 
+// readConversation bypasses cached owner/message projections when the canonical
+// adapter supports folder events. Legacy adapters remain text-only.
+func (h *HomeAssistantAskHandler) readConversation(ctx context.Context, id string) (PersonalAssistantConversationRecord, []PersonalAssistantConversationMessage, error) {
+	if store := h.folderStore(); store != nil {
+		return store.ReadFolderConversation(ctx, id)
+	}
+	record, err := h.Conversations.Get(ctx, id)
+	if err != nil {
+		return record, nil, err
+	}
+	messages, err := h.Conversations.Messages(ctx, id)
+	return record, messages, err
+}
+
 // openConversation validates the requested conversation against the freshly
 // resolved relationship. It returns (nil, "") when the request does not use a
 // conversation, and a refusal code when the requested one may not be used.
@@ -151,7 +166,7 @@ func (h *HomeAssistantAskHandler) openConversation(ctx context.Context, ref *Hom
 	if id == "" {
 		return conversation, ""
 	}
-	record, err := h.Conversations.Get(ctx, id)
+	record, messages, err := h.readConversation(ctx, id)
 	if errors.Is(err, ErrPersonalAssistantConversationNotFound) {
 		return nil, PersonalAssistantConversationNotFound
 	}
@@ -160,10 +175,6 @@ func (h *HomeAssistantAskHandler) openConversation(ctx context.Context, ref *Hom
 	}
 	if !scope.owns(record) {
 		return nil, PersonalAssistantConversationOutOfScope
-	}
-	messages, err := h.Conversations.Messages(ctx, record.ID)
-	if err != nil {
-		return nil, PersonalAssistantConversationUnavailable
 	}
 	conversation.id = record.ID
 	conversation.title = record.Title
@@ -331,11 +342,12 @@ type personalAssistantConversationSummary struct {
 }
 
 type personalAssistantConversationMessageView struct {
-	ID        string    `json:"id"`
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
-	Imported  bool      `json:"imported,omitempty"`
+	ID            string               `json:"id"`
+	Role          string               `json:"role"`
+	Content       string               `json:"content"`
+	CreatedAt     time.Time            `json:"created_at"`
+	Imported      bool                 `json:"imported,omitempty"`
+	FolderContext *foldercontext.Event `json:"folder_context,omitempty"`
 }
 
 func conversationSummary(record PersonalAssistantConversationRecord) personalAssistantConversationSummary {
@@ -409,7 +421,7 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 	if !ok {
 		return
 	}
-	record, err := h.Conversations.Get(r.Context(), strings.TrimSpace(r.PathValue("id")))
+	record, messages, err := h.readConversation(r.Context(), strings.TrimSpace(r.PathValue("id")))
 	if errors.Is(err, ErrPersonalAssistantConversationNotFound) {
 		writeConversationError(w, http.StatusNotFound, PersonalAssistantConversationNotFound, "That conversation no longer exists.")
 		return
@@ -422,10 +434,12 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 		writeConversationError(w, http.StatusConflict, PersonalAssistantConversationOutOfScope, "That conversation does not belong to your assistant's Personal HQ.")
 		return
 	}
-	messages, err := h.Conversations.Messages(r.Context(), record.ID)
-	if err != nil {
-		writeConversationError(w, http.StatusServiceUnavailable, PersonalAssistantConversationUnavailable, "That conversation could not be read right now.")
-		return
+	folderState := folderStateFromMessages(messages)
+	if folderState.Observation != nil {
+		folderState.Authority = personalassistant.FolderContinuationLost
+		if target, err := h.folderTarget(scope, record.ID, ""); err == nil && h.FolderObservations != nil {
+			folderState.Authority = h.FolderObservations.Status(r.Context(), target, *folderState.Observation)
+		}
 	}
 	truncated := false
 	if len(messages) > personalAssistantConversationReadMessages {
@@ -435,6 +449,10 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 	views := make([]personalAssistantConversationMessageView, 0, len(messages))
 	for _, message := range messages {
 		role := strings.ToLower(strings.TrimSpace(message.Role))
+		if message.FolderContext != nil && !message.Imported {
+			views = append(views, personalAssistantConversationMessageView{ID: message.ID, Role: "folder_context", CreatedAt: message.CreatedAt, FolderContext: message.FolderContext})
+			continue
+		}
 		if role != llm.RoleUser && role != llm.RoleAssistant {
 			continue
 		}
@@ -443,7 +461,7 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 		})
 	}
 	body := map[string]any{
-		"conversation": conversationSummary(record), "messages": views, "truncated": truncated,
+		"conversation": conversationSummary(record), "messages": views, "truncated": truncated, "folder_context": folderState,
 	}
 	// Drafts saved from this conversation, read from the HQ's Tickets. A read
 	// failure is stated; it is not shown as "nothing was saved".

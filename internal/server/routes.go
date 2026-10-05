@@ -332,6 +332,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	// and holds the hired assistant's everyday conversations. The two reads
 	// list and open those conversations; both validate the relationship first.
 	homeAssistantAskHandler := s.newHomeAssistantAskHandler()
+	homeAssistantRouteHandler.FolderConversation = homeAssistantAskHandler.FolderConversationRoute
 	mux.HandleFunc("/api/home-assistant/ask", homeAssistantAskHandler.AskHandler)
 	mux.HandleFunc("GET /api/home-assistant/conversations", homeAssistantAskHandler.ConversationsHandler)
 	mux.HandleFunc("GET /api/home-assistant/conversations/{id}", homeAssistantAskHandler.ConversationHandler)

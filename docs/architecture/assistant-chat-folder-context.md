@@ -136,6 +136,31 @@ receipt and provider-specific gates remain the sole execution path. Canonical
 outcome references are read back in the owning conversation; hydration executes
 nothing.
 
+## Implemented contextual turns (group 3)
+
+Route and Ask independently validate supplied references before specialist or
+create detection. Ask holds an in-process conversation gate through provider and
+atomic canonical storage; the store rechecks owner/revision after generation.
+The actual provider prompt receives an identifier-free JSON projection, escaped
+inside a reference-data delimiter. Content-reading requests get an explicit
+metadata-only refusal without a provider call. Ordinary text-only callers retain
+their existing behavior.
+
+An explicit historical turn can use only the exact active canonical snapshot;
+it neither resolves nor identity-checks the source folder. Hydration reports
+lost/expired/changed authority separately. Detach prevents even historical
+reactivation. Failed first saves discard the newly created Session where
+possible; transport uncertainty asks the user to reopen history, never retries.
+The drawer hydrates chronological typed events and deduplicates unchanged
+observations without conflating them with assistant replies or message actions.
+
+Real-host browser evidence uses the production Ollama HTTP adapter against a
+controlled loopback provider, including a server restart. Maintained browser
+controller tests explicitly fixture selection/Route/Ask/history; race-enabled
+handler tests capture real provider request construction and canonical writes.
+Neither is a live LLM or native-picker smoke. Optional setup below remains the
+next implementation group, not a completed consequence path.
+
 ## Dependencies and evidence limits
 
 Host-only: no plugin manifest, blueprint, release or pin changes are required.
