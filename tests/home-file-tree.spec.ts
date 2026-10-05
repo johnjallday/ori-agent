@@ -1,4 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 /**
  * The Home file tree and its reading pane (tasks/prd-home-file-tree.md,
@@ -6,8 +9,11 @@ import { test, expect, Page } from '@playwright/test';
  * editing a note, creating from the row menu, selecting rows, filtering, the
  * one-column layout, and what is remembered across a reload.
  *
+ * Release 2 adds Outputs, Linked folders and Chats. The outputs test writes
+ * into the workspace's outputs/ folder, so it needs the sandbox path.
+ *
  * Not part of CI — run against an isolated server:
- *   ./scripts/e2e-fresh.sh tests/home-file-tree.spec.ts
+ *   ./scripts/e2e-fresh.sh --sandbox-env ORI_SANDBOX tests/home-file-tree.spec.ts
  *
  * Every test makes its own workspace and removes it, and finds its rows by
  * the workspace's id, so the tests can run side by side on one server.
@@ -428,5 +434,159 @@ test.describe('Home file tree', () => {
     await expect(page.locator('#cockpitTreeNav')).toBeVisible();
     await expect(page.locator('#cockpitTreePane')).toBeVisible();
     await expect(back).toBeHidden();
+  });
+
+  // ---- Release 2 (tasks/prd-home-file-tree-r2.md): Outputs, Linked folders, Chats
+
+  /** The folder a workspace keeps its outputs in, when it is inside the sandbox. */
+  async function outputsFolder(page: Page, workspaceId: string): Promise<string> {
+    const sandbox = process.env.ORI_SANDBOX;
+    test.skip(!sandbox, 'needs the sandbox path: ./scripts/e2e-fresh.sh --sandbox-env ORI_SANDBOX');
+    const answer = await (
+      await page.request.get(`/api/workspaces/${workspaceId}/output-dir`)
+    ).json();
+    const folder = answer.output_dir as string;
+    const root = fs.realpathSync(sandbox as string);
+    const real = fs.realpathSync(path.dirname(folder));
+    expect(real.startsWith(root + path.sep)).toBe(true);
+    return folder;
+  }
+
+  test('outputs appear only when there are some, open in the pane, and offer no Open or Reveal', async ({
+    page
+  }) => {
+    const ws = await seedWorkspace(page, 'Tree outputs');
+    const folder = await outputsFolder(page, ws.id);
+    await openTree(page, ws.id);
+    await expand(page, ws.id);
+    // No outputs yet: no Outputs row.
+    await expect(row(page, `${ws.id}/m`)).toBeVisible();
+    await expect(row(page, `${ws.id}/s/outputs`)).toHaveCount(0);
+
+    fs.mkdirSync(path.join(folder, 'runs'), { recursive: true });
+    fs.writeFileSync(path.join(folder, 'runs', 'report.md'), '# Run report\n\nAll done.\n');
+    fs.writeFileSync(path.join(folder, 'summary.txt'), 'plain summary');
+    // Refresh from the workspace's menu reloads its sections.
+    await row(page, ws.id).click({ button: 'right' });
+    await menu(page).getByRole('menuitem', { name: 'Refresh' }).click();
+    const section = row(page, `${ws.id}/s/outputs`);
+    await expect(section).toBeVisible();
+    await expect(section.locator('.cockpit-tree-count')).toHaveText('2');
+
+    await row(page, `${ws.id}/od/runs`).click();
+    await name(page, `${ws.id}/o/runs/report.md`).click();
+    await expect(page.locator('.cockpit-pane-markdown h1')).toHaveText('Run report');
+    await expect(page.locator('.cockpit-pane-sub')).toContainText('Output in');
+    await expect(page.locator('#cockpitTreePane .cockpit-pane-actions')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Reveal in Finder/ })).toHaveCount(0);
+
+    await name(page, `${ws.id}/o/summary.txt`).click();
+    await expect(page.locator('.cockpit-pane-pre')).toHaveText('plain summary');
+
+    // The section's menu offers Show outputs folder, and an output only Open.
+    await section.click({ button: 'right' });
+    await expect(menu(page).getByRole('menuitem')).toHaveText(['Show outputs folder']);
+    await page.keyboard.press('Escape');
+    await row(page, `${ws.id}/o/summary.txt`).click({ button: 'right' });
+    await expect(menu(page).getByRole('menuitem')).toHaveText(['Open']);
+    await page.keyboard.press('Escape');
+  });
+
+  test('a linked folder loads its files only when its row is opened, and a page in it is shown as text', async ({
+    page
+  }) => {
+    const ws = await seedWorkspace(page, 'Tree linked');
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ori-linked-'));
+    try {
+      fs.mkdirSync(path.join(outside, 'site'));
+      fs.writeFileSync(path.join(outside, 'readme.md'), '# Linked readme\n');
+      fs.writeFileSync(path.join(outside, 'site', 'index.html'), '<script>window.__ran=1</script>');
+      fs.mkdirSync(path.join(outside, '.git'));
+      fs.writeFileSync(path.join(outside, '.git', 'config'), 'x');
+      const linked = await (
+        await page.request.post(`/api/workspaces/${ws.id}/directories`, {
+          data: { name: 'Reference', path: outside }
+        })
+      ).json();
+      const dirId = linked.directory.id as string;
+
+      const listings: string[] = [];
+      page.on('request', request => {
+        if (request.url().endsWith(`/directories/${dirId}/files`)) listings.push(request.url());
+      });
+      await openTree(page, ws.id);
+      await expand(page, ws.id);
+      // The workspace's own folder is not an outside folder: one row, not two.
+      const section = row(page, `${ws.id}/s/linked`);
+      await expect(section.locator('.cockpit-tree-count')).toHaveText('1');
+      const folder = row(page, `${ws.id}/l/${dirId}`);
+      await expect(folder).toContainText('Reference');
+      expect(listings).toHaveLength(0);
+
+      await folder.click();
+      await row(page, `${ws.id}/lf/${dirId}/readme.md`).waitFor();
+      expect(listings).toHaveLength(1);
+      await expect(folder.locator('.cockpit-tree-count')).toHaveText('2');
+      // .git is hidden.
+      await expect(page.locator('#cockpitTreeNav [data-tree-row*="/.git"]')).toHaveCount(0);
+
+      await name(page, `${ws.id}/lf/${dirId}/readme.md`).click();
+      await expect(page.locator('.cockpit-pane-markdown h1')).toHaveText('Linked readme');
+      await expect(page.locator('.cockpit-pane-sub')).toContainText('Linked file in');
+      await row(page, `${ws.id}/ld/${dirId}/site`).click();
+      await name(page, `${ws.id}/lf/${dirId}/site/index.html`).click();
+      await expect(page.locator('.cockpit-pane-pre')).toContainText('<script>');
+      expect(await page.evaluate(() => (window as unknown as { __ran?: number }).__ran)).toBe(
+        undefined
+      );
+      expect(listings).toHaveLength(1);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a chat shows its last 20 messages, and Open chat opens it in the chat panel', async ({
+    page
+  }) => {
+    const ws = await seedWorkspace(page, 'Tree chats');
+    const made = await (
+      await page.request.post('/api/sessions', {
+        data: { title: 'Long chat', folder_id: ws.id }
+      })
+    ).json();
+    const chatId = made.session.id as string;
+    for (let i = 1; i <= 23; i += 1) {
+      await page.request.post(`/api/sessions/${chatId}/messages`, {
+        data: { role: i % 2 ? 'user' : 'assistant', content: `Message ${i}` }
+      });
+    }
+    await page.request.post(`/api/sessions/${chatId}/messages`, {
+      data: { role: 'system', content: 'Hidden instruction' }
+    });
+    await openTree(page, ws.id);
+    await expand(page, ws.id);
+    const section = row(page, `${ws.id}/s/chats`);
+    await expect(section.locator('.cockpit-tree-count')).toHaveText('1');
+
+    await name(page, `${ws.id}/c/${chatId}`).click();
+    const messages = page.locator('#cockpitTreePane .cockpit-chat-message');
+    await expect(messages).toHaveCount(20);
+    await expect(messages.first()).toContainText('Message 4');
+    await expect(messages.last()).toContainText('Message 23');
+    await expect(page.locator('#cockpitTreePane')).not.toContainText('Hidden instruction');
+    await expect(page.locator('#cockpitTreePane')).toContainText(
+      'Earlier messages are in the chat.'
+    );
+    await expect(page.locator('#cockpitTreePane textarea, #cockpitTreePane input')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Open chat', exact: true }).click();
+    await expect(page.locator('body')).toHaveClass(/chat-panel-open/);
+    expect(new URL(page.url()).pathname).toBe('/');
+
+    // Deleting the chat drops its remembered tab quietly on the next visit.
+    await page.request.delete(`/api/sessions/${chatId}`);
+    await openTree(page, ws.id);
+    await expect(tabs(page).filter({ hasText: 'Long chat' })).toHaveCount(0);
+    await expect(page.locator('#cockpitTreePane [data-pane-retry]')).toHaveCount(0);
   });
 });

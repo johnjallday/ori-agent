@@ -3641,6 +3641,182 @@ async function stageChats() {
   await shot('c5-chats-final');
 }
 
+// Release 2, group 4: the three new sections for a GROUP (D10, FR16). The
+// seeded Music group has an output, a linked folder and a chat; a group made
+// here has none of them, so it must show none of the three rows.
+async function stageGroups() {
+  const nav = page.locator('#cockpitTreeNav');
+  const stamp = Date.now().toString(36);
+  const emptyName = `Bare Group ${stamp}`;
+  const emptyId = await createGroupByAPI(emptyName);
+  try {
+    await openTree();
+    const musicId = await rowByKind('group', 'Music').getAttribute('data-tree-row');
+    await expectEventually(async () => {
+      const names = await sectionNames(musicId);
+      return ['Outputs', 'Linked folders', 'Chats'].every(name => names.includes(name));
+    }, 'the Music group shows its own Outputs, Linked folders and Chats');
+    const names = await sectionNames(musicId);
+    const at = ['Files', 'Outputs', 'Linked folders', 'Chats'].map(name => names.indexOf(name));
+    check(
+      at[0] >= 0 && at.every((place, i) => i === 0 || place === at[i - 1] + 1),
+      `Outputs, Linked folders and Chats follow Files, in that order (${names.join(',')})`
+    );
+    for (const [kind, count] of [
+      ['outputs', '1'],
+      ['linked', '1'],
+      ['chats', '1']
+    ]) {
+      check(
+        (await nav
+          .locator(`[data-tree-row="${musicId}/s/${kind}"] .cockpit-tree-count`)
+          .innerText()) === count,
+        `the group's ${kind} section counts ${count}`
+      );
+    }
+    // An output of the group opens and previews.
+    await nav.locator(`[data-tree-row="${musicId}/od/summary"]`).click();
+    await nav.locator(`[data-tree-row="${musicId}/o/summary/weekly.md"]`).click();
+    await page.locator('.cockpit-pane-markdown h1', { hasText: 'Group summary' }).waitFor();
+    check(
+      (await page.locator('.cockpit-pane-sub').innerText()).includes('Output in Music'),
+      "a group's output opens in the pane"
+    );
+    // Its linked folder loads on opening its row and a file previews.
+    await nav.locator(`[data-tree-row="${musicId}/s/linked"] [data-tree-toggle]`).waitFor();
+    await rowByKind('linked', 'Masters').click();
+    const masters = nav.locator(`[data-tree-row^="${musicId}/lf/"]`).first();
+    await masters.waitFor();
+    await masters.click();
+    await page.locator('.cockpit-pane-markdown h1', { hasText: 'Masters' }).waitFor();
+    check(
+      (await page.locator('.cockpit-pane-sub').innerText()).includes('Linked file in Music'),
+      "a group's linked-folder file opens in the pane"
+    );
+    // Its chat opens.
+    await rowByKind('chat', 'Release planning').click();
+    await page.locator('.cockpit-chat-list').waitFor();
+    check(
+      (await page.locator('#cockpitTreePane .cockpit-chat-message').count()) === 3 &&
+        (await page.locator('.cockpit-pane-sub').innerText()).includes('Chat in Music'),
+      "a group's chat opens with its 3 messages"
+    );
+    // Accessibility of the new rows (4.4): tree semantics, one row in the tab
+    // order, and every new kind present and named.
+    check(
+      (await nav.locator("[data-tree-row][tabindex='0']").count()) === 1,
+      'exactly one row is in the tab order with every new kind open'
+    );
+    const kindsOnScreen = await nav
+      .locator('[data-tree-row]')
+      .evaluateAll(els => [...new Set(els.map(el => el.getAttribute('data-tree-kind')))]);
+    const wanted = ['output', 'outputFolder', 'linked', 'linkedFile', 'chat'];
+    check(
+      wanted.every(kind => kindsOnScreen.includes(kind)),
+      `rows of every new kind are on screen (${wanted.filter(k => kindsOnScreen.includes(k)).join(',')})`
+    );
+    check(
+      await nav
+        .locator('[data-tree-row]')
+        .evaluateAll(els =>
+          els
+            .filter(el =>
+              ['output', 'outputFolder', 'linked', 'linkedFile', 'chat'].includes(
+                el.getAttribute('data-tree-kind')
+              )
+            )
+            .every(
+              el =>
+                el.getAttribute('role') === 'treeitem' &&
+                Number(el.getAttribute('aria-level')) >= 2 &&
+                el.hasAttribute('aria-selected') &&
+                (['outputFolder', 'linked'].includes(el.getAttribute('data-tree-kind'))
+                  ? el.hasAttribute('aria-expanded')
+                  : !el.hasAttribute('aria-expanded'))
+            )
+        ),
+      'the new rows are treeitems with a level, aria-selected, and aria-expanded only where they open'
+    );
+    await shot('g1-group-sections');
+
+    // A group with none of them shows none of the three rows, nor an empty line.
+    await expectEventually(
+      async () => (await nav.locator(`[data-tree-row="${emptyId}"]`).count()) === 1,
+      'a group made for this check is in the tree'
+    );
+    await settle(800);
+    const emptyNames = await sectionNames(emptyId);
+    check(
+      !emptyNames.some(name => ['Outputs', 'Linked folders', 'Chats'].includes(name)),
+      `a group with no outputs, links or chats shows none of those rows (${emptyNames.join(',') || 'no sections'})`
+    );
+    await shot('g2-empty-group');
+  } finally {
+    await page.request.delete(
+      `${baseUrl}/api/workspaces/${emptyId}?confirm=true&delete_mode=group_only`
+    );
+  }
+}
+
+// Release 2, group 4: one column under 720px (FR4) with all eight sections.
+async function stageNarrow() {
+  await page.setViewportSize({ width: 600, height: 900 });
+  await openTree();
+  const nav = page.locator('#cockpitTreeNav');
+  const tree = page.locator('#cockpitTree');
+  const sideways = () =>
+    page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  await expectEventually(
+    async () => (await tree.getAttribute('data-columns')) === 'tree',
+    'under 720px only the tree is shown'
+  );
+  await expand('workspace', 'Studio Notes');
+  const studioId = await rowByKind('workspace', 'Studio Notes').getAttribute('data-tree-row');
+  await expectEventually(
+    async () => (await sectionNames(studioId)).join(',') === STUDIO_SECTIONS,
+    `all eight sections show (${STUDIO_SECTIONS})`
+  );
+  check(!(await sideways()), 'the page does not scroll sideways');
+  await rowByKind('section', 'Outputs').scrollIntoViewIfNeeded();
+  await shot('n1-narrow-tree');
+
+  // One of each new kind: opening swaps the pane in; Back returns the tree.
+  const cases = [
+    ['output', 'weekly-report.md', '.cockpit-pane-markdown h1'],
+    ['chat', 'Mix review', '.cockpit-chat-list']
+  ];
+  for (const [kind, name, ready] of cases) {
+    if (kind === 'output') await expand('section', 'Outputs');
+    await rowByKind(kind, name).click();
+    await page.locator(ready).waitFor();
+    check(
+      (await tree.getAttribute('data-columns')) === 'pane' &&
+        (await page.locator('[data-pane-back]').count()) === 1,
+      `opening a ${kind} replaces the tree with the pane, with a "Back to tree" button`
+    );
+    check(!(await sideways()), `the ${kind} pane does not make the page scroll sideways`);
+    await shot(`n2-narrow-${kind}`);
+    await page.locator('[data-pane-back]').click();
+    check(
+      (await tree.getAttribute('data-columns')) === 'tree' &&
+        (await rowByKind(kind, name).getAttribute('aria-selected')) === 'true',
+      `Back to tree shows the tree again, with the ${kind}'s row highlighted`
+    );
+  }
+  // A linked file, through its folder row.
+  await expand('section', 'Linked folders');
+  await rowByKind('linked', 'Reference tracks').click();
+  const readme = nav.locator('[data-tree-kind="linkedFile"]', { hasText: 'readme.md' }).first();
+  await readme.waitFor();
+  await readme.click();
+  await page.locator('.cockpit-pane-markdown h1').waitFor();
+  check(
+    (await tree.getAttribute('data-columns')) === 'pane' && !(await sideways()),
+    'a linked file opens in the one-column pane without sideways scroll'
+  );
+  await shot('n2-narrow-linkedFile');
+}
+
 // The lowest contrast ratio among the elements each selector matches: the
 // text colour against whatever is painted behind it, with translucent layers
 // blended in. Where a gradient is behind the text (Home's workspace area is
@@ -3768,6 +3944,8 @@ const stages = {
   outputs: stageOutputs,
   linked: stageLinked,
   chats: stageChats,
+  groups: stageGroups,
+  narrow: stageNarrow,
   'map-requests': stageMapRequests
 };
 try {

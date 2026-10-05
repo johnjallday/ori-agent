@@ -3823,6 +3823,11 @@ chat(studio, "Mix review", 25, "Scout")
 chat(studio, "Quick question", 2, "Scout")
 
 music = group("Music")
+# The group has contents of the new kinds too: an output, a linked folder, a chat.
+if sandbox:
+    output(music, "summary/weekly.md", b"# Group summary\n\nAll three songs are on track.\n")
+    linked_folder(music, "Masters", "masters", {"masters-list.md": b"# Masters\n\nFinal files.\n"})
+chat(music, "Release planning", 3)
 note(music, "Release plan", "# Release plan\n\nNight Drive first, Harbor Lights in the spring.\n",
      ["plan"])
 upload(music, "label-contacts.txt", b"Mastering: studio@example.com\n")
@@ -3865,7 +3870,7 @@ filetree_demo_all() {
   smoke_show_wait
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
   out="${TMPDIR:-/tmp}/filetree-demo"
-  for stage in tree pane note outputs linked chats create manage finish; do
+  for stage in tree pane note outputs linked chats groups narrow create manage finish; do
     for theme in light dark; do
       if log=$(node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "$out" "$stage" "$theme" "$sandbox" 2>&1); then
         echo "PASS $stage ($theme): $(printf '%s\n' "$log" | grep -c '^ok ') checks"
@@ -4031,7 +4036,7 @@ prettier-head) smoke_prettier_head "$@" ;;
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
-  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|linked|chats|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
+  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|linked|chats|groups|narrow|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
   echo "  $0 prettier-head <file>...               # was each file Prettier-clean at HEAD? (only then is --write on the whole file safe)" >&2
   exit 2
   ;;
