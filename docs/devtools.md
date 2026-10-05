@@ -4,15 +4,18 @@
 entrypoints now delegate to the selected companion. Original helper sources and
 an immutable legacy-script fixture remain until the final compatibility gate.
 Independent companion gates, fake-only Ori adapter checks and the paired Git
-lifecycle pass. Installed-runtime validation is still incomplete: do not run
-setup or delete the remaining embedded sources to try this candidate.
+lifecycle pass. Offline runtime/staging and legacy-caller compatibility are now
+covered; real installed-runtime activation remains NOT RUN. Source selection
+alone does not authorize setup or a service update.
 
 Independent CLI milestone: companion `ca5b6b3c4f743c0c79a163fdcd096a83c8831c02`
 (`make build test test-race check cross` passed). This is not a runtime cutover
 pin; the adapter/installed-caller gates below still apply.
 Wrapper/adapter milestone: companion `9d78c085996666ee0a32a8805a00eecfad46c548`,
 validated with the paired fixture lifecycle and same-shell candidate rollback.
-Live/runtime compatibility remains pending group 4.
+Runtime compatibility milestone: companion
+`8abec2e11f07e19f65adb7ca87de2d5e0a1574a5` (`make build test check`, race/cross,
+app/worktree race and paired gates passed). Live activation is separate.
 
 The approved destination is the separate, local-only `ori-devtools` repository at
 `/Users/jjdev/Projects/ori/devtools`. No remote, publication, installer run, or
@@ -41,7 +44,7 @@ The [accepted wake v1 contract](architecture/herdr-standalone-wake-v1-contract.m
 is unchanged. Away's `com.ori.wt-away-tick` owner is distinct from
 `com.ori.herdr-wake`; neither may cancel the other's events.
 
-## Selection and targeting (to implement)
+## Selection and targeting
 
 ### Tool selection
 
@@ -96,7 +99,9 @@ Avoid cached target/source globals surviving a switch between worktrees.
 
 - `HERDR_DEVFLOW_USE_SOURCE=1` runs only selected companion source with
   `GOWORK=off`; no old Ori `bin/` or stable-runtime helper substitution. Go program
-  arguments follow the package path directly, with no extra `--` token.
+  arguments follow the package path directly, with no extra `--` token. Cleanup
+  instead builds a private temporary executable and removes it on exit, preserving
+  safety statuses 20/21 that `go run` would otherwise collapse to 1.
 - An explicit `ORI_DEVTOOLS_HOME` is candidate mode: prefer its source by default
   so an ignored old binary cannot masquerade as the candidate. An explicit
   `HERDR_DEVFLOW_BINARY` may select a paired prebuilt only after its companion
@@ -237,8 +242,8 @@ untouched. Live agents, GitHub writes and platform operations remain untested.
 
 ## Recovery and cutover gate
 
-Until a committed companion exists, continue using the original Ori commands.
-After cutover, an owner can select a known-good **durable** local candidate with
+The companion is a separate durable local repository, not an installed runtime.
+An owner can select a known-good **durable** local candidate with
 `ORI_DEVTOOLS_HOME`; unset it to return to the approved stable location. Validate
 its contract, source revision, fixture hash and helper provenance before use.
 A bad explicit selection must fail rather than appear to roll back successfully.
@@ -249,9 +254,38 @@ paths must pass the same integration tests before deleting embedded tooling.
 
 Rollback selects source; it does **not** reinstall a helper, reset state, cancel
 jobs, switch active agents, or modify root-owned wake files. Installed-runtime
-refresh is a separate explicitly authorized operation. Detailed operator commands
-and exact tested revisions will be added at group 4; all live runtime/privileged
-capabilities remain **NOT RUN** until directly exercised with authorization.
+refresh is a separate explicitly authorized operation. The selected companion's
+`docs/cutover.md` is the detailed operator guide. From the intended Ori checkout:
+
+```zsh
+ori=$(git rev-parse --show-toplevel)
+export ORI_DEVTOOLS_HOME=/Users/jjdev/Projects/ori/devtools
+git -C "$ORI_DEVTOOLS_HOME" status --short
+git -C "$ORI_DEVTOOLS_HOME" rev-parse HEAD
+source "$ori/scripts/wt.sh"
+```
+
+For wrapper-independent recovery, set `HERDR_DEVFLOW_REPO_ROOT="$ori"`, invoke
+`bash "$ORI_DEVTOOLS_HOME/scripts/herdr-devflow.sh" --repo-root "$ori" help`,
+or source `"$ORI_DEVTOOLS_HOME/scripts/wt.sh"` directly. Select another reviewed
+**durable** checkout to roll back source; unset `ORI_DEVTOOLS_HOME` to return to
+the approved location. Do not rewrite that stable checkout underneath jobs.
+
+An interactive export does not change an installed launchd job's environment.
+Legacy Away jobs continue through the retained Ori path and fixed stable source;
+plugin/continuation jobs continue through their stable installed binary. Preserve
+those paths, queues and schedules. Inspect active consumers before any separately
+authorized refresh; do not drain/cancel/reinstall automatically. All live
+runtime/privileged capabilities remain **NOT RUN**.
+
+Offline evidence includes the real candidate replaying unchanged plugin and
+continuation argv against temporary version-1 state with source unavailable;
+corrupt/future state is refused unchanged. The sanitized Away caller test uses a
+fake installation and redirects only the disposable selector's fixed default.
+Setup/wake tests assert separate build roots, `GOWORK=off`, failed-build retention,
+private staging, digest/administrator argv, and unsupported-platform refusal.
+Existing state/retry/locking, native-session and cleanup suites remain in the
+companion; no schema, ID, wake ownership or state-reset operation was introduced.
 
 Execution evidence and the checkout inventory are in the ignored active
 `tasks/findings-extract-devflow-tooling.md`. The canonical planning protocol stays

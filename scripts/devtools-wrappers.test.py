@@ -9,6 +9,9 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
+ENTRIES = ("devops.sh", "herdr-devflow.sh", "away-dispatch.sh", "away-tick.sh",
+           "away/install-herdr-telegram.sh", "away/install-pmset-helper.sh",
+           "away/install-pmset-sudoers.sh", "away/pmset-helper.sh")
 
 
 class WrapperTests(unittest.TestCase):
@@ -35,9 +38,10 @@ print(json.dumps(dict(argv=sys.argv[1:], target=os.environ.get('HERDR_DEVFLOW_RE
 print('fixture stderr', file=sys.stderr)
 raise SystemExit(int(os.environ.get('FIXTURE_EXIT', '0')))
 ''')
-        for name in ("devops.sh", "herdr-devflow.sh"):
+        for name in ENTRIES:
+            (self.tool / "scripts" / name).parent.mkdir(parents=True, exist_ok=True)
             (self.tool / "scripts" / name).write_text('''#!/usr/bin/env bash
-if [[ "${DEVOPS_SOURCE_ONLY:-}" == 1 ]]; then
+if [[ "${DEVOPS_SOURCE_ONLY:-}" == 1 || "${AWAY_DISPATCH_SOURCE_ONLY:-}" == 1 ]]; then
   fixture_sourced() { printf 'source functions remain in caller'; }
   return 37
 fi
@@ -56,7 +60,8 @@ exec python3 "$ORI_DEVTOOLS_HOME/record.py" "$@"
         (target / "scripts/lib").mkdir(parents=True)
         subprocess.run(["git", "init", "-q", str(target)], env=self.env, check=True)
         (target / "go.mod").write_text("module github.com/johnjallday/ori-agent\n")
-        for entry in ("devops.sh", "herdr-devflow.sh", "wt.sh", "lib/devtools-selector.sh"):
+        for entry in (*ENTRIES, "wt.sh", "lib/devtools-selector.sh"):
+            (target / "scripts" / entry).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / "scripts" / entry, target / "scripts" / entry)
         return target
 
@@ -67,10 +72,11 @@ exec python3 "$ORI_DEVTOOLS_HOME/record.py" "$@"
 
     def test_argv_stdin_target_and_child_exit_are_preserved(self):
         args = ["value with spaces", "$(touch not-executed)", "--", "", "quoted'\"text"]
-        for entry in ("devops.sh", "herdr-devflow.sh"):
+        for entry in ENTRIES:
             for target in (self.ori, self.other):
                 for code in (0, 20, 21, 37):
-                    result = self.run_command(["bash", target / "scripts" / entry, *args],
+                    shell = "zsh" if entry == "away-tick.sh" else "bash"
+                    result = self.run_command([shell, target / "scripts" / entry, *args],
                                               {"FIXTURE_EXIT": str(code)}, "line one\nline two\n")
                     self.assertEqual(result.returncode, code, result.stderr)
                     self.assertEqual(json.loads(result.stdout), dict(
@@ -122,6 +128,25 @@ exec python3 "$ORI_DEVTOOLS_HOME/record.py" "$@"
                                   "fixture", self.ori / "scripts/devops.sh"])
         self.assertEqual(result.returncode, 37, result.stderr)
         self.assertEqual(result.stdout, "source functions remain in caller")
+
+    def test_away_source_only_and_sanitized_installed_tick(self):
+        result = self.run_command(["bash", "-c",
+                                  'AWAY_DISPATCH_SOURCE_ONLY=1 source "$1"; code=$?; fixture_sourced; exit "$code"',
+                                  "fixture", self.ori / "scripts/away-dispatch.sh"])
+        self.assertEqual(result.returncode, 37, result.stderr)
+        self.assertIn("source functions remain", result.stdout)
+        # Redirect only the fixed default in this disposable selector to the
+        # fake installation. The real owner-selected path is never written.
+        selector = self.ori / "scripts/lib/devtools-selector.sh"
+        original = selector.read_text()
+        self.assertEqual(original.count("/Users/jjdev/Projects/ori/devtools"), 1)
+        selector.write_text(original.replace("/Users/jjdev/Projects/ori/devtools", str(self.tool)))
+        result = self.run_command(["env", "-i", "HOME=" + str(self.root),
+                                  "PATH=" + self.env["PATH"], "zsh", "-f",
+                                  self.ori / "scripts/away-tick.sh"], cwd=self.root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["target"], str(self.ori))
+        self.assertEqual(json.loads(result.stdout)["tool"], str(self.tool))
 
     def test_sourced_wt_is_lazy_and_survives_function_only_snapshot(self):
         snapshot = self.root / "functions.zsh"
