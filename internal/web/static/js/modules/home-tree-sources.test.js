@@ -18,9 +18,25 @@ import {
   notesToRows,
   ticketsToRows,
   filesToRows,
+  outputsToRows,
+  chatsToRows,
+  chatToView,
+  loadChat,
+  CHAT_MESSAGE_LIMIT,
+  linkedToRows,
+  linkedFilesToRows,
+  capLinkedFolder,
+  isInsideFolder,
+  ownFolderOf,
+  loadLinkedFolder,
+  loadLinkedPreview,
+  linkedFileURL,
+  linkedPreviewKind,
   memoryToRows,
   agentsToRows,
   countFiles,
+  isFolderKind,
+  folderKindOf,
   isHiddenPath,
   capSection,
   loadSection,
@@ -35,9 +51,12 @@ import {
   loadTicket,
   loadMemory,
   loadFilePreview,
+  loadOutputPreview,
   filePreviewKind,
   workspaceFileURL,
+  workspaceOutputURL,
   openWorkspaceFile,
+  showOutputsFolder,
   ticketStateLabel,
   ticketSourceLabel,
   FILE_PREVIEW_LIMIT,
@@ -108,6 +127,11 @@ test('sectionOfKind says which section holds a row', () => {
   assert.equal(sectionOfKind('ticket'), 'backlog');
   assert.equal(sectionOfKind('file'), 'files');
   assert.equal(sectionOfKind('folder'), 'files');
+  assert.equal(sectionOfKind('output'), 'outputs');
+  assert.equal(sectionOfKind('outputFolder'), 'outputs');
+  assert.equal(sectionOfKind('linked'), 'linked');
+  assert.equal(sectionOfKind('linkedFolder'), 'linked');
+  assert.equal(sectionOfKind('linkedFile'), 'linked');
   assert.equal(sectionOfKind('memory'), 'memory');
   assert.equal(sectionOfKind('agent'), 'agents');
   assert.equal(sectionOfKind('workspace'), '');
@@ -122,6 +146,7 @@ test('every loader returns rows of the one common shape', () => {
     notesToRows('ws1', { notes: [{ id: 'n1', name: 'Plan' }] }).rows,
     ticketsToRows('ws1', { tickets: [{ id: 't1', title: 'Ship', state: 'ready' }] }).rows,
     filesToRows('ws1', { files: [{ relative_path: 'docs/a.md', name: 'a.md' }] }).rows,
+    outputsToRows('ws1', { files: [{ relative_path: 'runs/a.md', name: 'a.md' }] }).rows,
     agentsToRows('ws1', { agents: [{ name: 'Scout', role: 'researcher', model: 'm' }] }).rows
   ];
   samples.forEach(rows => {
@@ -263,6 +288,272 @@ test('hidden and internal files never become rows (FR15)', () => {
   assert.equal(count, 1);
 });
 
+// --- Outputs: the Files listing under kinds of its own (FR9, FR10, FR12) ---
+
+test('outputs become nested rows of their own kinds, folders first, counted inside sub-folders', () => {
+  const { rows, count } = outputsToRows('ws1', {
+    files: [
+      { relative_path: 'summary.md', name: 'summary.md', size: 12 },
+      { relative_path: 'runs', name: 'runs', is_dir: true },
+      { relative_path: 'runs/2026-10-04/report.md', name: 'report.md' },
+      { relative_path: 'runs/chart.png', name: 'chart.png' },
+      { relative_path: 'empty', name: 'empty', is_dir: true }
+    ]
+  });
+  assert.deepEqual(
+    rows.map(r => `${r.kind}:${r.label}`),
+    ['outputFolder:empty', 'outputFolder:runs', 'output:summary.md']
+  );
+  const runs = rows[1];
+  assert.deepEqual(
+    runs.children.map(r => `${r.kind}:${r.label}`),
+    ['outputFolder:2026-10-04', 'output:chart.png']
+  );
+  assert.equal(runs.id, 'ws1/od/runs');
+  assert.equal(runs.children[0].children[0].id, 'ws1/o/runs/2026-10-04/report.md');
+  assert.equal(runs.meta.fileCount, 2);
+  assert.equal(rows[0].meta.fileCount, 0);
+  assert.deepEqual(rows[2].meta, { path: 'summary.md', url: '', size: 12 });
+  assert.equal(count, 3);
+});
+
+test('an output never shares a key with a file of the same path under files/', () => {
+  const listing = { files: [{ relative_path: 'docs/report.md' }] };
+  const file = filesToRows('ws1', listing).rows[0];
+  const output = outputsToRows('ws1', listing).rows[0];
+  assert.notEqual(file.id, output.id);
+  assert.notEqual(file.children[0].id, output.children[0].id);
+  assert.deepEqual(parseItemKey(output.children[0].id), {
+    workspaceId: 'ws1',
+    kind: 'output',
+    itemId: 'docs/report.md'
+  });
+  assert.deepEqual(parseItemKey(output.id), {
+    workspaceId: 'ws1',
+    kind: 'outputFolder',
+    itemId: 'docs'
+  });
+});
+
+test('hidden files are left out of outputs too, and a malformed answer is no outputs', () => {
+  const { rows, count } = outputsToRows('ws1', {
+    files: [
+      { relative_path: '.ori/state.json' },
+      { relative_path: 'runs/.DS_Store' },
+      { relative_path: 'runs/keep.md' }
+    ]
+  });
+  assert.equal(count, 1);
+  assert.equal(rows[0].children.length, 1);
+  [null, undefined, {}, { files: 'nope' }].forEach(payload =>
+    assert.deepEqual(outputsToRows('ws1', payload), { rows: [], count: 0 })
+  );
+});
+
+test('a folder row is told from a file row in every section that has folders', () => {
+  assert.equal(isFolderKind('folder'), true);
+  assert.equal(isFolderKind('outputFolder'), true);
+  assert.equal(isFolderKind('linkedFolder'), true);
+  // A linked folder's own row is not one: its contents load when it is opened.
+  ['file', 'output', 'linkedFile', 'linked', 'note', 'section', 'workspace', undefined].forEach(
+    kind => assert.equal(isFolderKind(kind), false, String(kind))
+  );
+  assert.equal(folderKindOf('file'), 'folder');
+  assert.equal(folderKindOf('output'), 'outputFolder');
+  assert.equal(folderKindOf('outputFolder'), 'outputFolder');
+  assert.equal(folderKindOf('linkedFile'), 'linkedFolder');
+  assert.equal(folderKindOf('linked'), '');
+  assert.equal(folderKindOf('note'), '');
+});
+
+// --- Linked folders -------------------------------------------------------
+
+const OWN = '/Users/me/Ori Workspaces/studio-notes';
+const DIRECTORIES = {
+  count: 4,
+  directories: [
+    // What every workspace is created with: a reference to its own folder.
+    { id: 'own', name: 'studio-notes', path: OWN },
+    { id: 'd2', name: 'Reference tracks', path: '/Users/me/Music/Reference tracks' },
+    { id: 'd1', name: '', path: '/Volumes/Samples/drum-kits/' },
+    { id: 'd3', name: 'album art', path: '/Users/me/Pictures/album art' }
+  ]
+};
+
+test('the linked-folder keys carry the folder id, and round-trip', () => {
+  assert.equal(itemKey('ws1', 'linked', 'd1'), 'ws1/l/d1');
+  assert.equal(itemKey('ws1', 'linkedFolder', 'd1/docs'), 'ws1/ld/d1/docs');
+  assert.equal(itemKey('ws1', 'linkedFile', 'd1/docs/plan.md'), 'ws1/lf/d1/docs/plan.md');
+  assert.deepEqual(parseItemKey('ws1/lf/d1/docs/plan.md'), {
+    workspaceId: 'ws1',
+    kind: 'linkedFile',
+    itemId: 'd1/docs/plan.md'
+  });
+  assert.deepEqual(parseItemKey('ws1/l/d1'), { workspaceId: 'ws1', kind: 'linked', itemId: 'd1' });
+});
+
+test('a path is inside a folder when it is that folder or below it, not beside it', () => {
+  assert.equal(isInsideFolder(OWN, OWN), true);
+  assert.equal(isInsideFolder(`${OWN}/`, OWN), true);
+  assert.equal(isInsideFolder(`${OWN}/files`, OWN), true);
+  assert.equal(isInsideFolder(`${OWN}-old`, OWN), false);
+  assert.equal(isInsideFolder('/Users/me/Ori Workspaces', OWN), false);
+  assert.equal(isInsideFolder('C:\\Ori\\studio\\files', 'C:\\Ori\\studio'), true);
+  // Nothing known about the workspace's own folder: nothing is "inside" it.
+  assert.equal(isInsideFolder(OWN, ''), false);
+  assert.equal(isInsideFolder('', OWN), false);
+});
+
+test("the workspace's own folder is the one that holds its outputs folder", () => {
+  assert.equal(ownFolderOf({ output_dir: `${OWN}/outputs` }), OWN);
+  assert.equal(ownFolderOf({ output_dir: `${OWN}/outputs/` }), OWN);
+  assert.equal(ownFolderOf({ output_dir: 'C:\\Ori\\studio\\outputs' }), 'C:/Ori/studio');
+  assert.equal(ownFolderOf({}), '');
+  assert.equal(ownFolderOf(null), '');
+  assert.equal(ownFolderOf({ output_dir: 'outputs' }), '');
+});
+
+test('linked folders are listed by name, without the workspace own folder', () => {
+  const { rows, count } = linkedToRows('ws1', DIRECTORIES, OWN);
+  assert.deepEqual(
+    rows.map(r => `${r.kind}:${r.label}`),
+    // A folder with no name of its own is called by the last part of its path.
+    ['linked:album art', 'linked:drum-kits', 'linked:Reference tracks']
+  );
+  // The count is the number of folders: no file has been listed (2.2).
+  assert.equal(count, 3);
+  assert.equal(rows[1].id, 'ws1/l/d1');
+  assert.deepEqual(rows[1].meta, { dirId: 'd1', path: '/Volumes/Samples/drum-kits/' });
+  assert.deepEqual(rows[1].children, []);
+});
+
+test("a group's own files/ folder is not a linked folder either", () => {
+  const group = '/Users/me/Ori Workspaces/music';
+  const { rows } = linkedToRows(
+    'g1',
+    {
+      directories: [
+        { id: 'own', name: 'music', path: `${group}/files` },
+        { id: 'd1', name: 'Masters', path: '/Volumes/Masters' }
+      ]
+    },
+    group
+  );
+  assert.deepEqual(
+    rows.map(r => r.label),
+    ['Masters']
+  );
+});
+
+test('a workspace that links to nothing has no linked folders', () => {
+  assert.deepEqual(
+    linkedToRows('ws1', { directories: [{ id: 'own', name: 's', path: OWN }] }, OWN),
+    { rows: [], count: 0 }
+  );
+  [null, undefined, {}, { directories: 'nope' }].forEach(payload =>
+    assert.deepEqual(linkedToRows('ws1', payload, OWN), { rows: [], count: 0 })
+  );
+});
+
+test("a linked folder's files become nested rows that carry the folder's id and name", () => {
+  const { rows, count } = linkedFilesToRows(
+    'ws1',
+    'd1',
+    {
+      files: [
+        { name: 'readme.md', relative_path: 'readme.md', size: 15, is_dir: false },
+        { name: 'kits', relative_path: 'kits', is_dir: true },
+        { name: 'kick.wav', relative_path: 'kits/808/kick.wav', size: 900, is_dir: false },
+        { name: 'notes.txt', relative_path: 'kits/notes.txt', is_dir: false }
+      ]
+    },
+    'drum-kits'
+  );
+  assert.deepEqual(
+    rows.map(r => `${r.kind}:${r.label}`),
+    ['linkedFolder:kits', 'linkedFile:readme.md']
+  );
+  assert.equal(count, 3);
+  const kits = rows[0];
+  assert.equal(kits.id, 'ws1/ld/d1/kits');
+  assert.equal(kits.meta.fileCount, 2);
+  assert.equal(kits.children[0].id, 'ws1/ld/d1/kits/808');
+  const kick = kits.children[0].children[0];
+  assert.equal(kick.id, 'ws1/lf/d1/kits/808/kick.wav');
+  assert.deepEqual(kick.meta, {
+    dirId: 'd1',
+    dirName: 'drum-kits',
+    path: 'kits/808/kick.wav',
+    url: '',
+    size: 900
+  });
+});
+
+test('what Files hides is hidden in a linked folder: dot-folders, workspace.json, lock files', () => {
+  const { rows, count } = linkedFilesToRows('ws1', 'd1', {
+    files: [
+      { relative_path: '.git', is_dir: true },
+      { relative_path: '.git/config' },
+      { relative_path: '.DS_Store' },
+      { relative_path: 'src/.env' },
+      { relative_path: 'src/main.go' },
+      { relative_path: 'yarn.lock' },
+      // A folder that is itself a registered workspace: an ordinary folder.
+      {
+        relative_path: 'side-project',
+        is_dir: true,
+        is_workspace: true,
+        workspace_id: 'ws9',
+        workspace_name: 'Side Project'
+      },
+      { relative_path: 'side-project/workspace.json' },
+      { relative_path: 'side-project/notes/idea.md' }
+    ]
+  });
+  assert.equal(count, 2);
+  assert.deepEqual(
+    rows.map(r => `${r.kind}:${r.label}`),
+    ['linkedFolder:side-project', 'linkedFolder:src']
+  );
+  assert.equal(rows[0].kind, 'linkedFolder');
+  assert.equal(rows[0].meta.workspaceId, undefined);
+  assert.deepEqual(
+    rows[1].children.map(r => r.label),
+    ['main.go']
+  );
+});
+
+test('the same path in two linked folders, and under files/, has three different keys', () => {
+  const listing = { files: [{ relative_path: 'docs/plan.md' }] };
+  const keys = [
+    linkedFilesToRows('ws1', 'd1', listing).rows[0].children[0].id,
+    linkedFilesToRows('ws1', 'd2', listing).rows[0].children[0].id,
+    filesToRows('ws1', listing).rows[0].children[0].id
+  ];
+  assert.equal(new Set(keys).size, 3);
+});
+
+test('a linked folder of more than 100 files shows the first 100 and "Open workspace to see all N"', () => {
+  const files = [];
+  for (let i = 0; i < 130; i += 1) files.push({ relative_path: `f${String(i).padStart(3, '0')}` });
+  const capped = capLinkedFolder('ws1', 'd1', linkedFilesToRows('ws1', 'd1', { files }));
+  assert.equal(capped.count, 130);
+  assert.equal(capped.rows.length, SECTION_ROW_LIMIT + 1);
+  const more = capped.rows[SECTION_ROW_LIMIT];
+  assert.equal(more.kind, 'more');
+  assert.equal(more.label, 'Open workspace to see all 130');
+  // Its key names the folder, so two capped folders never share a row.
+  assert.equal(more.id, 'ws1/more/linked/d1');
+  assert.deepEqual(more.meta, { section: 'linked', total: 130 });
+  const whole = capLinkedFolder(
+    'ws1',
+    'd1',
+    linkedFilesToRows('ws1', 'd1', { files: files.slice(0, 100) })
+  );
+  assert.equal(whole.rows.length, 100);
+  assert.equal(whole.count, 100);
+});
+
 test('memory has no rows; its entries feed the pane and its count the badge', () => {
   const shaped = memoryToRows('ws1', {
     entries: [{ index: 0, type: 'decision', date: '2026-10-01', text: 'Ship on Fridays.' }],
@@ -387,6 +678,29 @@ test('the files cap counts files, not folders, and keeps the folders that lead t
   assert.equal(more.label, 'Open workspace to see all 160');
 });
 
+test('outputs are capped the way files are: 100 files, then "Open workspace to see all N"', () => {
+  const files = [];
+  for (let i = 0; i < 70; i += 1)
+    files.push({ relative_path: `runs/r${String(i).padStart(3, '0')}` });
+  for (let i = 0; i < 70; i += 1)
+    files.push({ relative_path: `t${String(i).padStart(3, '0')}.md` });
+  const capped = capSection('ws1', 'outputs', outputsToRows('ws1', { files }));
+  assert.equal(capped.count, 140);
+  const more = capped.rows[capped.rows.length - 1];
+  assert.equal(more.kind, 'more');
+  assert.equal(more.label, 'Open workspace to see all 140');
+  assert.equal(more.id, 'ws1/more/outputs');
+  // The folder's 70 files, then the first 30 at the top.
+  assert.equal(capped.rows[0].children.length, 70);
+  assert.equal(countFiles(capped.rows.slice(0, -1)), SECTION_ROW_LIMIT);
+  // At the limit nothing is cut and nothing is added.
+  const whole = capSection('ws1', 'outputs', outputsToRows('ws1', { files: files.slice(0, 100) }));
+  assert.equal(
+    whole.rows.some(r => r.kind === 'more'),
+    false
+  );
+});
+
 test('memory is never capped: it is one row, not a list', () => {
   const entries = Array.from({ length: 150 }, (_, i) => ({ text: `Entry ${i}` }));
   const capped = capSection('ws1', 'memory', memoryToRows('ws1', { entries }));
@@ -402,6 +716,15 @@ const ROUTES = {
   '/api/workspaces/ws1/notes': { notes: [{ id: 'n1', name: 'Plan' }] },
   '/api/workspaces/ws1/tickets': { tickets: [{ id: 't1', title: 'Ship', state: 'ready' }] },
   '/api/workspaces/ws1/files/tree': { files: [{ relative_path: 'BACKLOG.md' }] },
+  '/api/workspaces/ws1/outputs/tree': { files: [{ relative_path: 'report.md' }] },
+  // Linked folders take two answers: the folders, and where the workspace's
+  // own folder is.
+  '/api/workspaces/ws1/directories': DIRECTORIES,
+  '/api/workspaces/ws1/output-dir': { output_dir: `${OWN}/outputs` },
+  '/api/sessions?folder_id=ws1&limit=101': {
+    sessions: [{ id: 'c1', title: 'Plan the release', agent_name: 'Scout' }],
+    total: 1
+  },
   '/api/workspaces/ws1/memory': { entries: [] },
   '/api/workspaces/ws1/agents': { agents: [{ name: 'Scout' }] }
 };
@@ -418,7 +741,7 @@ test('loadSection encodes the workspace id and rejects an unknown section', asyn
   const fetchImpl = stubFetch({ '/api/workspaces/a%2Fb/agents': { agents: [] } });
   await loadSection('a/b', 'agents', { fetchImpl });
   assert.deepEqual(fetchImpl.calls, ['/api/workspaces/a%2Fb/agents']);
-  await assert.rejects(() => loadSection('ws1', 'outputs', { fetchImpl }), /unknown section/);
+  await assert.rejects(() => loadSection('ws1', 'spaceship', { fetchImpl }), /unknown section/);
 });
 
 test('loadSections loads every section in parallel and reports each one twice', async () => {
@@ -429,7 +752,7 @@ test('loadSections loads every section in parallel and reports each one twice', 
     { fetchImpl, onSection: (id, state) => seen.push(`${id}:${state.status}`) }
   );
   assert.deepEqual([...fetchImpl.calls].sort(), Object.keys(ROUTES).sort());
-  // All five are reported as loading before any of them answers.
+  // Every one is reported as loading before any of them answers.
   assert.deepEqual(
     seen.slice(0, SECTION_IDS.length),
     SECTION_IDS.map(id => `${id}:${SECTION_LOADING}`)
@@ -441,6 +764,190 @@ test('loadSections loads every section in parallel and reports each one twice', 
   assert.deepEqual(Object.keys(states).sort(), [...SECTION_IDS].sort());
   assert.equal(states.notes.count, 1);
   assert.equal(states.memory.count, 0);
+});
+
+test('the Linked folders section asks for the folders and the own folder, and for no file', async () => {
+  const fetchImpl = stubFetch(ROUTES);
+  const linked = await loadSection('ws1', 'linked', { fetchImpl });
+  assert.deepEqual([...fetchImpl.calls].sort(), [
+    '/api/workspaces/ws1/directories',
+    '/api/workspaces/ws1/output-dir'
+  ]);
+  assert.deepEqual(
+    linked.rows.map(r => r.label),
+    ['album art', 'drum-kits', 'Reference tracks']
+  );
+  assert.equal(linked.count, 3);
+});
+
+test('either answer failing fails the Linked folders section, with the reason (FR19)', async () => {
+  const refused = { status: 500, body: { message: 'Workspace store is locked' } };
+  for (const url of ['/api/workspaces/ws1/directories', '/api/workspaces/ws1/output-dir']) {
+    const states = await loadSections(
+      { id: 'ws1' },
+      { fetchImpl: stubFetch({ ...ROUTES, [url]: refused }) }
+    );
+    assert.equal(states.linked.status, SECTION_FAILED, url);
+    assert.equal(states.linked.error, 'Workspace store is locked');
+    assert.equal(states.notes.status, SECTION_READY);
+  }
+});
+
+test("a linked folder's files are one request, made only when asked for", async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/directories/d1/files': {
+      files: [{ relative_path: 'kits/kick.wav', size: 9 }, { relative_path: 'readme.md' }]
+    }
+  });
+  const folder = await loadLinkedFolder('ws1', 'd1', { name: 'drum-kits', fetchImpl });
+  assert.deepEqual(fetchImpl.calls, ['/api/workspaces/ws1/directories/d1/files']);
+  assert.equal(folder.count, 2);
+  assert.equal(folder.rows[0].children[0].id, 'ws1/lf/d1/kits/kick.wav');
+  assert.equal(folder.rows[1].meta.dirName, 'drum-kits');
+});
+
+test('a linked folder over the limit arrives capped, and one that is gone fails with the reason', async () => {
+  const files = Array.from({ length: 101 }, (_, i) => ({ relative_path: `f${i}` }));
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/directories/d1/files': { files },
+    '/api/workspaces/ws1/directories/d2/files': {
+      status: 400,
+      body: { message: 'Failed to list files: no such file or directory' }
+    }
+  });
+  const capped = await loadLinkedFolder('ws1', 'd1', { fetchImpl });
+  assert.equal(capped.count, 101);
+  assert.equal(capped.rows[SECTION_ROW_LIMIT].kind, 'more');
+  await assert.rejects(
+    () => loadLinkedFolder('ws1', 'd2', { fetchImpl }),
+    error => error.status === 400 && /no such file or directory/.test(error.message)
+  );
+});
+
+// --- Chats ---
+
+test('chats keep the API order, take the title or "Untitled chat", and carry what the tab needs', () => {
+  const { rows, count } = chatsToRows('ws1', {
+    sessions: [
+      { id: 'c2', title: 'Newest', agent_name: 'Scout', updated_at: '2026-10-05T10:00:00Z' },
+      { id: 'c1', title: '  ' },
+      { title: 'no id' }
+    ],
+    total: 2
+  });
+  assert.deepEqual(
+    rows.map(r => `${r.kind}:${r.label}`),
+    ['chat:Newest', 'chat:Untitled chat']
+  );
+  assert.equal(count, 2);
+  assert.equal(rows[0].id, 'ws1/c/c2');
+  assert.deepEqual(rows[0].meta, {
+    chatId: 'c2',
+    agentName: 'Scout',
+    updatedAt: '2026-10-05T10:00:00Z'
+  });
+  assert.deepEqual(parseItemKey(rows[0].id), { workspaceId: 'ws1', kind: 'chat', itemId: 'c2' });
+  assert.equal(sectionOfKind('chat'), 'chats');
+  [null, {}, { sessions: 'x' }].forEach(p =>
+    assert.deepEqual(chatsToRows('ws1', p), { rows: [], count: 0 })
+  );
+});
+
+test('101 chats are asked for, 100 shown, then "Open workspace to see all N"', async () => {
+  const sessions = Array.from({ length: 101 }, (_, i) => ({ id: `c${i}`, title: `Chat ${i}` }));
+  const fetchImpl = stubFetch({
+    '/api/sessions?folder_id=ws%201&limit=101': { sessions, total: 240 }
+  });
+  const chats = await loadSection('ws 1', 'chats', { fetchImpl });
+  assert.equal(chats.rows.length, SECTION_ROW_LIMIT + 1);
+  assert.equal(chats.count, 240);
+  assert.equal(chats.rows[SECTION_ROW_LIMIT].label, 'Open workspace to see all 240');
+});
+
+test('a chat becomes its last 20 written messages, in order, with "earlier" said (D12)', () => {
+  const message = (i, role = 'user') => ({
+    id: `m${i}`,
+    role,
+    content: `Message ${i}`,
+    created_at: '2026-10-05T10:00:00Z'
+  });
+  const make = n => ({
+    id: 'c1',
+    title: 'Plan',
+    agent_name: 'Scout',
+    updated_at: '2026-10-05T11:00:00Z',
+    messages: Array.from({ length: n }, (_, i) => message(i, i % 2 ? 'assistant' : 'user'))
+  });
+  const twentyOne = chatToView(make(21));
+  assert.equal(twentyOne.messages.length, CHAT_MESSAGE_LIMIT);
+  assert.equal(twentyOne.messages[0].text, 'Message 1');
+  assert.equal(twentyOne.messages[19].text, 'Message 20');
+  assert.equal(twentyOne.earlier, true);
+  const exactly = chatToView(make(20));
+  assert.equal(exactly.messages.length, 20);
+  assert.equal(exactly.earlier, false);
+  const none = chatToView({ id: 'c1', title: '' });
+  assert.deepEqual(none.messages, []);
+  assert.equal(none.title, 'Untitled chat');
+  assert.equal(none.earlier, false);
+});
+
+test('system messages, other roles and empty messages are left out, and do not count', () => {
+  const view = chatToView({
+    id: 'c1',
+    messages: [
+      { role: 'system', content: 'You are helpful.' },
+      { role: 'user', content: 'Hi' },
+      { role: 'tool', content: '{"x":1}' },
+      { role: 'assistant', content: '   ' },
+      { role: 'assistant', content: 'Hello' }
+    ]
+  });
+  assert.deepEqual(
+    view.messages.map(m => `${m.role}:${m.text}`),
+    ['user:Hi', 'assistant:Hello']
+  );
+  assert.equal(view.earlier, false);
+});
+
+test('loadChat reads the one session answer, and a deleted chat is a 404', async () => {
+  const fetchImpl = stubFetch({
+    '/api/sessions/c1': {
+      id: 'c1',
+      title: 'Plan',
+      messages: [{ role: 'user', content: 'Hi' }]
+    }
+  });
+  const chat = await loadChat('c1', { fetchImpl });
+  assert.deepEqual(fetchImpl.calls, ['/api/sessions/c1']);
+  assert.equal(chat.messages.length, 1);
+  await assert.rejects(
+    () => loadChat('gone', { fetchImpl }),
+    error => error.status === 404
+  );
+});
+
+test('the Outputs section loads from the outputs listing', async () => {
+  const fetchImpl = stubFetch(ROUTES);
+  const outputs = await loadSection('ws1', 'outputs', { fetchImpl });
+  assert.deepEqual(fetchImpl.calls, ['/api/workspaces/ws1/outputs/tree']);
+  assert.equal(outputs.rows[0].kind, 'output');
+  assert.equal(outputs.rows[0].id, 'ws1/o/report.md');
+  assert.equal(outputs.count, 1);
+});
+
+test('outputs that fail to load are a failed section with the server reason (FR19)', async () => {
+  const fetchImpl = stubFetch({
+    ...ROUTES,
+    '/api/workspaces/ws1/outputs/tree': { status: 500, body: { message: 'Failed to list outputs' } }
+  });
+  const states = await loadSections({ id: 'ws1' }, { fetchImpl });
+  assert.equal(states.outputs.status, SECTION_FAILED);
+  assert.equal(states.outputs.error, 'Failed to list outputs');
+  assert.equal(states.outputs.count, null);
+  ['notes', 'backlog', 'files', 'memory', 'agents'].forEach(id =>
+    assert.equal(states[id].status, SECTION_READY, id)
+  );
 });
 
 test('one failing section never blocks the others, and carries the server reason (FR19)', async () => {
@@ -479,10 +986,10 @@ test('a slow section does not hold back a fast one', async () => {
       }
     }
   );
-  // Let the four fast sections answer while Notes is still waiting.
+  // Let the fast sections answer while Notes is still waiting.
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(ready.includes('notes'), false);
-  assert.equal(ready.length, 4);
+  assert.equal(ready.length, SECTION_IDS.length - 1);
   release();
   await done;
   assert.equal(ready.includes('notes'), true);
@@ -710,6 +1217,148 @@ test('a failed load carries its HTTP status, so "gone" can be told from "failed"
   await assert.rejects(
     () => loadNote('n1', { fetchImpl }),
     error => error.status === 404 && error.message === 'HTTP 404'
+  );
+});
+
+// --- Outputs: the same preview from another address (FR35) ---
+
+test('an output address encodes each segment and never points into files/', () => {
+  assert.equal(
+    workspaceOutputURL('ws 1', 'runs/Q3 #1/what?.md'),
+    '/api/workspaces/ws%201/outputs/runs/Q3%20%231/what%3F.md'
+  );
+  assert.notEqual(workspaceOutputURL('ws1', 'a.md'), workspaceFileURL('ws1', 'a.md'));
+});
+
+test('an output is previewed by the Files rules, read from the outputs address', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/outputs/runs/report.md': '# Report\n',
+    '/api/workspaces/ws1/outputs/data.csv': 'a,b\n1,2\n',
+    // The same paths under files/ hold something else, and must not be read.
+    '/api/workspaces/ws1/files/runs/report.md': '# Not this one\n'
+  });
+  assert.deepEqual(await loadOutputPreview('ws1', 'runs/report.md', { fetchImpl }), {
+    kind: 'markdown',
+    url: '/api/workspaces/ws1/outputs/runs/report.md',
+    text: '# Report\n',
+    tooLarge: false
+  });
+  assert.equal((await loadOutputPreview('ws1', 'data.csv', { fetchImpl })).kind, 'text');
+  assert.deepEqual(fetchImpl.calls, [
+    '/api/workspaces/ws1/outputs/runs/report.md',
+    '/api/workspaces/ws1/outputs/data.csv'
+  ]);
+});
+
+test('an output image or unknown file is not fetched, and a large one is not either', async () => {
+  const fetchImpl = stubFetch({});
+  assert.deepEqual(await loadOutputPreview('ws1', 'runs/chart.png', { fetchImpl }), {
+    kind: 'image',
+    url: '/api/workspaces/ws1/outputs/runs/chart.png',
+    text: '',
+    tooLarge: false
+  });
+  assert.equal((await loadOutputPreview('ws1', 'mix.wav', { fetchImpl })).kind, 'none');
+  const huge = await loadOutputPreview('ws1', 'run.log', {
+    size: FILE_PREVIEW_LIMIT + 1,
+    fetchImpl
+  });
+  assert.equal(huge.tooLarge, true);
+  assert.deepEqual(fetchImpl.calls, []);
+});
+
+test('an output that is gone fails with status 404, so its remembered tab can be dropped', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/outputs/gone.md': { status: 404, body: { message: 'File not found' } }
+  });
+  await assert.rejects(
+    () => loadOutputPreview('ws1', 'gone.md', { fetchImpl }),
+    error => error.status === 404 && error.message === 'File not found'
+  );
+});
+
+test('"Show outputs folder" posts to the workspace and reports a refusal', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws%201/output-dir/open': { output_dir: '/x/outputs', workspace_id: 'ws 1' },
+    '/api/workspaces/ws2/output-dir/open': {
+      status: 500,
+      body: { message: 'Failed to open output directory: desktop opening is unavailable' }
+    }
+  });
+  await showOutputsFolder('ws 1', { fetchImpl });
+  assert.deepEqual(fetchImpl.calls, ['/api/workspaces/ws%201/output-dir/open']);
+  assert.equal(fetchImpl.requests[0].options.method, 'POST');
+  await assert.rejects(
+    () => showOutputsFolder('ws2', { fetchImpl }),
+    /desktop opening is unavailable/
+  );
+});
+
+// --- Linked folders: read as text or drawn as an image, never opened (FR35) ---
+
+test('a linked file address names its folder and encodes each segment', () => {
+  assert.equal(
+    linkedFileURL('ws 1', 'd 1', 'kits/808 #2/what?.md'),
+    '/api/workspaces/ws%201/directories/d%201/files/kits/808%20%232/what%3F.md'
+  );
+});
+
+test('a linked file is previewed by the Files rules, except that an SVG has no preview', () => {
+  assert.equal(linkedPreviewKind('readme.md'), 'markdown');
+  assert.equal(linkedPreviewKind('page.html'), 'text');
+  assert.equal(linkedPreviewKind('data.csv'), 'text');
+  assert.equal(linkedPreviewKind('cover.png'), 'image');
+  assert.equal(linkedPreviewKind('photo.JPG'), 'image');
+  assert.equal(linkedPreviewKind('kick.wav'), 'none');
+  // Served as plain bytes, which no browser draws as an SVG.
+  assert.equal(linkedPreviewKind('logo.svg'), 'none');
+  assert.equal(linkedPreviewKind('art/LOGO.SVG'), 'none');
+  assert.equal(filePreviewKind('logo.svg'), 'image');
+});
+
+test('a linked .html file is fetched as text, to be shown as text', async () => {
+  const page = '<script>alert(1)</script>';
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/directories/d1/files/site/index.html': page,
+    '/api/workspaces/ws1/directories/d1/files/readme.md': '# Kits\n'
+  });
+  assert.deepEqual(await loadLinkedPreview('ws1', 'd1', 'site/index.html', { fetchImpl }), {
+    kind: 'text',
+    url: '/api/workspaces/ws1/directories/d1/files/site/index.html',
+    text: page,
+    tooLarge: false
+  });
+  assert.equal((await loadLinkedPreview('ws1', 'd1', 'readme.md', { fetchImpl })).kind, 'markdown');
+});
+
+test('a linked image, an SVG, an unknown file and a large one are never fetched', async () => {
+  const fetchImpl = stubFetch({});
+  assert.deepEqual(await loadLinkedPreview('ws1', 'd1', 'cover.png', { fetchImpl }), {
+    kind: 'image',
+    url: '/api/workspaces/ws1/directories/d1/files/cover.png',
+    text: '',
+    tooLarge: false
+  });
+  assert.equal((await loadLinkedPreview('ws1', 'd1', 'logo.svg', { fetchImpl })).kind, 'none');
+  assert.equal((await loadLinkedPreview('ws1', 'd1', 'kick.wav', { fetchImpl })).kind, 'none');
+  const huge = await loadLinkedPreview('ws1', 'd1', 'dump.json', {
+    size: FILE_PREVIEW_LIMIT + 1,
+    fetchImpl
+  });
+  assert.equal(huge.tooLarge, true);
+  assert.deepEqual(fetchImpl.calls, []);
+});
+
+test('a linked file that is gone, or whose folder was unlinked, fails with status 404', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/directories/d1/files/gone.md': {
+      status: 404,
+      body: { message: 'file not found: gone.md' }
+    }
+  });
+  await assert.rejects(
+    () => loadLinkedPreview('ws1', 'd1', 'gone.md', { fetchImpl }),
+    error => error.status === 404 && /file not found/.test(error.message)
   );
 });
 

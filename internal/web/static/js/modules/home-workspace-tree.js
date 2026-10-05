@@ -37,6 +37,8 @@ import {
   SECTION_FAILED,
   SECTION_LOADING,
   SECTION_READY,
+  folderKindOf,
+  isFolderKind,
   itemKey,
   parseItemKey,
   sectionInfo,
@@ -123,12 +125,23 @@ export function revealTargets(key, flattened) {
   if (info && info.expandable && parsed.kind !== 'section') {
     targets.push({ kind: 'section', id: sectionKey(parsed.workspaceId, sectionId) });
   }
-  if (parsed.kind === 'file' || parsed.kind === 'folder') {
-    const folders = parsed.itemId.split('/').slice(0, -1);
+  // A file, in Files or in Outputs, sits under the folders of its own section.
+  // One inside a linked folder sits under that folder's row first: its item
+  // id starts with the linked folder's id.
+  const folderKind = folderKindOf(parsed.kind);
+  if (folderKind) {
+    let segments = parsed.itemId.split('/');
+    let scope = '';
+    if (folderKind === 'linkedFolder') {
+      scope = `${segments[0]}/`;
+      targets.push({ kind: 'linked', id: itemKey(parsed.workspaceId, 'linked', segments[0]) });
+      segments = segments.slice(1);
+    }
+    const folders = segments.slice(0, -1);
     folders.forEach((_, index) => {
       targets.push({
-        kind: 'folder',
-        id: itemKey(parsed.workspaceId, 'folder', folders.slice(0, index + 1).join('/'))
+        kind: folderKind,
+        id: itemKey(parsed.workspaceId, folderKind, scope + folders.slice(0, index + 1).join('/'))
       });
     });
   }
@@ -160,9 +173,11 @@ function sectionState(contents, workspaceId, sectionId) {
 // it, with everything inside it: finding "Night Drive" and then opening it
 // must show its notes, not an empty list.
 //
-// Only names are matched, and only of things the user made: groups,
-// workspaces, notes, tickets, files, folders and agents. Section headings and
-// the "Loading…" lines never match.
+// Only names are matched, and only of things the user or a task run made:
+// groups, workspaces, notes, tickets, files, outputs, linked folders and what
+// is in them, folders and agents. Section headings and the "Loading…" lines
+// never match. The filter searches what has been loaded and loads nothing: a
+// linked folder nobody has opened is matched by its own name only.
 
 /** The filter box's text as it is compared: trimmed, case ignored. */
 export function normalizeFilter(text) {
@@ -171,7 +186,19 @@ export function normalizeFilter(text) {
     .toLowerCase();
 }
 
-const FILTERED_CONTENT_KINDS = new Set(['note', 'ticket', 'file', 'folder', 'agent']);
+const FILTERED_CONTENT_KINDS = new Set([
+  'note',
+  'ticket',
+  'file',
+  'folder',
+  'output',
+  'outputFolder',
+  'linked',
+  'linkedFolder',
+  'linkedFile',
+  'chat',
+  'agent'
+]);
 
 function nameMatches(name, filter) {
   return String(name || '')
@@ -204,7 +231,8 @@ export function hasUnsearchedContents(nodes, contents) {
 // children when the folder is open. With a filter on, null for a row that
 // neither matches nor holds a match.
 function contentItem(source, ctx) {
-  const expandable = source.kind === 'folder';
+  if (source.kind === 'linked') return linkedItem(source, ctx);
+  const expandable = isFolderKind(source.kind);
   if (ctx.filter) {
     if (!FILTERED_CONTENT_KINDS.has(source.kind)) return null;
     if (nameMatches(source.label, ctx.filter)) return contentItem(source, unfiltered(ctx));
@@ -242,12 +270,74 @@ function contentItem(source, ctx) {
   if (expandable && expanded) {
     item.children = source.children.length
       ? source.children.map(child => contentItem(child, ctx))
-      : [placeholderItem(source.workspaceId, 'empty', 'files', 'Empty folder', source.id)];
+      : [
+          placeholderItem(
+            source.workspaceId,
+            'empty',
+            sectionOfKind(source.kind),
+            'Empty folder',
+            source.id
+          )
+        ];
   }
   return item;
 }
 
-function placeholderItem(workspaceId, kind, sectionId, name, scope = '') {
+/**
+ * The row of one linked folder (an outside folder the workspace links to).
+ *
+ * Its files are not part of the section's load. They are fetched on their own
+ * once the row has been opened, and kept in
+ * `contents[workspaceId].linked[directoryId]` as `{ status, rows, count }` —
+ * so the row has the three states a section has: loading, failed with a
+ * retry, and ready (its file count beside its name, "Empty folder" inside it
+ * when it holds nothing).
+ */
+function linkedItem(source, ctx) {
+  const dirId = String((source.meta && source.meta.dirId) || '');
+  const entry = ctx.contents[source.workspaceId];
+  const state = (entry && entry.linked && entry.linked[dirId]) || null;
+  const ready = !!state && state.status === SECTION_READY;
+  const row = {
+    id: source.id,
+    kind: 'linked',
+    name: source.label,
+    meta: source.meta || {},
+    workspaceId: source.workspaceId,
+    // Unknown until the folder has been opened and has answered.
+    count: ready ? state.count : null,
+    expandable: true,
+    expanded: false
+  };
+  if (ctx.filter) {
+    if (nameMatches(source.label, ctx.filter)) return linkedItem(source, unfiltered(ctx));
+    // Only a folder that has been loaded can be searched; the filter never
+    // loads one.
+    const inside = ready ? state.rows.map(child => contentItem(child, ctx)).filter(Boolean) : [];
+    if (!inside.length) return null;
+    return { row: { ...row, expanded: true, forced: true }, children: inside };
+  }
+  row.expanded = ctx.expanded.has(source.id);
+  const item = { row, children: null };
+  if (!row.expanded) return item;
+  const line = (kind, name) =>
+    placeholderItem(source.workspaceId, kind, sectionOfKind('linked'), name, source.id, { dirId });
+  if (!state || state.status === SECTION_LOADING) {
+    item.children = [line('loading', 'Loading…')];
+  } else if (state.status === SECTION_FAILED) {
+    item.children = [line('failed', sectionFailedLabel(source.label))];
+  } else if (state.rows.length === 0) {
+    item.children = [line('empty', 'Empty folder')];
+  } else {
+    item.children = state.rows.map(child => contentItem(child, ctx));
+  }
+  return item;
+}
+
+// A line that stands in for rows: "Loading…", "No notes yet", "Couldn't load
+// Notes". `scope` makes its key unique when it is not the section's only one
+// (the line inside a folder); `extra` adds what a retry needs to know.
+function placeholderItem(workspaceId, kind, sectionId, name, scope = '', extra = {}) {
   return {
     row: {
       id: itemKey(workspaceId, kind, scope || sectionId),
@@ -256,7 +346,8 @@ function placeholderItem(workspaceId, kind, sectionId, name, scope = '') {
       section: sectionId,
       workspaceId,
       expandable: false,
-      expanded: null
+      expanded: null,
+      ...extra
     },
     children: null
   };
@@ -265,9 +356,11 @@ function placeholderItem(workspaceId, kind, sectionId, name, scope = '') {
 /**
  * The section items of one workspace or group, in FR9's order.
  *
- * A workspace always shows every section. A group shows only the sections that
- * hold something, and only once their data has arrived; a section that failed
- * to load still shows, so it can be retried (FR13, FR16, FR19).
+ * A workspace always shows its sections, except the ones FR9 marks "only when
+ * not empty" (`optional`: Outputs, Linked folders). A group shows only the sections that hold
+ * something. A hidden section appears once its data has arrived and it is not
+ * empty; one that failed to load still shows, so it can be retried (FR9, FR13,
+ * FR16, FR19).
  */
 function sectionItems(node, isGroup, ctx) {
   const items = [];
@@ -306,7 +399,7 @@ function sectionItems(node, isGroup, ctx) {
       return;
     }
 
-    if (isGroup && !drafting) {
+    if ((isGroup || info.optional) && !drafting) {
       if (state.status === SECTION_LOADING) return;
       if (state.status === SECTION_READY && !(state.count > 0)) return;
     }
@@ -694,7 +787,8 @@ function markerHTML(row) {
     );
   }
   if (row.kind === 'group') return '<span class="visually-hidden">Group</span>';
-  if (row.kind === 'section' || row.kind === 'memory') {
+  // A linked folder's count is its files, known once it has been opened.
+  if (row.kind === 'section' || row.kind === 'memory' || row.kind === 'linked') {
     return row.count === null || row.count === undefined
       ? ''
       : `<span class="cockpit-tree-count">${escapeHtml(row.count)}</span>`;
@@ -703,9 +797,12 @@ function markerHTML(row) {
     return `<span class="cockpit-tree-count">${escapeHtml((row.meta && row.meta.stateLabel) || '')}</span>`;
   }
   if (row.kind === 'failed') {
+    // A failed linked folder retries that folder, not its whole section.
     return (
       `<button type="button" class="cockpit-tree-retry" data-tree-retry="${escapeHtml(row.workspaceId)}" ` +
-      `data-tree-retry-section="${escapeHtml(row.section)}" tabindex="-1">Retry</button>`
+      `data-tree-retry-section="${escapeHtml(row.section)}" ` +
+      (row.dirId ? `data-tree-retry-folder="${escapeHtml(row.dirId)}" ` : '') +
+      'tabindex="-1">Retry</button>'
     );
   }
   return '';
@@ -959,7 +1056,7 @@ export function resolveTreeKey(key, currentId, rows) {
 export function rowActivation(row) {
   const kind = row && row.kind;
   if (isWorkspaceRowKind(kind)) return 'open';
-  if (kind === 'section' || kind === 'folder') return 'toggle';
+  if (kind === 'section' || kind === 'linked' || isFolderKind(kind)) return 'toggle';
   if (kind === 'failed') return 'retry';
   if (kind === 'more') return 'visit';
   // The naming row is an input; clicking it must not open or toggle anything.
@@ -1010,7 +1107,10 @@ const bindings = new WeakMap();
  *   onOpenItem(row, { keyboard })  open a row in the pane (a workspace or
  *                                  group row also becomes Home's selection)
  *   onOpen(id)                     go to a workspace's own page
- *   onRetry(workspaceId, section)  reload a section that failed
+ *   onRetry(workspaceId, section, dirId)
+ *                                  reload a section that failed, or — when
+ *                                  `dirId` is given — the files of that one
+ *                                  linked folder
  *   onMenuAction(action, row)      an item was chosen from a row's menu, or the
  *                                  header's New note was pressed
  *   onDraftCommit(draft)           Enter in the row being named; `draft.value`
@@ -1502,7 +1602,12 @@ function bindTree(container, state, cb, rows) {
     ],
     [
       '[data-tree-retry]',
-      el => retry(el.getAttribute('data-tree-retry'), el.getAttribute('data-tree-retry-section'))
+      el =>
+        retry(
+          el.getAttribute('data-tree-retry'),
+          el.getAttribute('data-tree-retry-section'),
+          el.getAttribute('data-tree-retry-folder') || ''
+        )
     ],
     [
       '[data-tree-tag-filter]',
@@ -1766,8 +1871,10 @@ function bindTree(container, state, cb, rows) {
     rerender();
   }
 
-  function retry(workspaceId, sectionId) {
-    if (typeof cb.onRetry === 'function') cb.onRetry(workspaceId, sectionId);
+  // `dirId` names the linked folder whose own files failed to load; without
+  // it the whole section is retried.
+  function retry(workspaceId, sectionId, dirId = '') {
+    if (typeof cb.onRetry === 'function') cb.onRetry(workspaceId, sectionId, dirId);
   }
 
   function activateRow(row, { keyboard }) {
@@ -1776,7 +1883,7 @@ function bindTree(container, state, cb, rows) {
     if (action === 'toggle') {
       toggleRow(row);
     } else if (action === 'retry') {
-      retry(row.workspaceId, row.section);
+      retry(row.workspaceId, row.section, row.dirId || '');
     } else if (action === 'visit') {
       if (typeof cb.onOpen === 'function') cb.onOpen(row.workspaceId);
     } else if (action === 'open') {

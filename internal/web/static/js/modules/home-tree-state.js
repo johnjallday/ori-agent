@@ -26,7 +26,18 @@ export const MAX_STORED_TABS = 40;
 export const MAX_STORED_ROWS = 2000;
 
 // The kinds of row that open in a tab.
-const TAB_KINDS = new Set(['note', 'ticket', 'file', 'memory', 'agent', 'workspace', 'group']);
+const TAB_KINDS = new Set([
+  'note',
+  'ticket',
+  'file',
+  'output',
+  'linkedFile',
+  'chat',
+  'memory',
+  'agent',
+  'workspace',
+  'group'
+]);
 
 function isText(value) {
   return typeof value === 'string' && value !== '';
@@ -213,12 +224,19 @@ function hasMoreRow(rows) {
 // The sections whose list is everything the workspace has. Backlog is not one
 // of them: it lists open, top-level tickets, so a ticket missing from it may
 // simply be finished.
-const COMPLETE_LIST_KINDS = { note: 'notes', file: 'files', agent: 'agents' };
+const COMPLETE_LIST_KINDS = {
+  note: 'notes',
+  file: 'files',
+  output: 'outputs',
+  chat: 'chats',
+  agent: 'agents'
+};
 
 /**
  * The restored tabs a loaded section proves are gone (FR69).
  *
- * A note, file or agent that is not in its workspace's list no longer exists
+ * A note, file, output or agent that is not in its workspace's list no longer
+ * exists
  * — provided the list is whole, which it is not once it has been cut at the
  * row limit. Only tabs still marked `restored` are considered: one opened in
  * this visit is never closed behind the user's back.
@@ -235,6 +253,44 @@ export function vanishedTabKeys(tabs, workspaceId, sectionId, section) {
         COMPLETE_LIST_KINDS[tab.kind] === sectionId &&
         !present.has(tab.key)
     )
+    .map(tab => tab.key);
+}
+
+// The linked folder a remembered file tab belongs to. Its key says so
+// (`ws1/lf/<directory id>/docs/plan.md`), so a tab stored without its `meta`
+// is still placed.
+function linkedFolderOfTab(tab) {
+  const parsed = parseItemKey(tab.key);
+  return parsed && parsed.kind === 'linkedFile' ? parsed.itemId.split('/')[0] : '';
+}
+
+/**
+ * The restored linked-file tabs that a loaded linked folder, or the loaded
+ * list of linked folders, proves are gone (FR69).
+ *
+ * Pass `dirId` and that folder's own loaded files (`folder`): a file tab of
+ * that folder that is not among them is gone. Pass no `dirId` and the loaded
+ * Linked folders section: a file tab whose folder is no longer linked is
+ * gone. Either list proves something only when it is whole — ready, and not
+ * cut at the row limit.
+ */
+export function vanishedLinkedTabKeys(tabs, workspaceId, { dirId = '', folder, section } = {}) {
+  const list = dirId ? folder : section;
+  if (!list || list.status !== 'ready' || hasMoreRow(list.rows)) return [];
+  const present = collectIds(list.rows, new Set());
+  const linkedIds = new Set(
+    (Array.isArray(list.rows) ? list.rows : []).map(row =>
+      String((row.meta && row.meta.dirId) || '')
+    )
+  );
+  return (Array.isArray(tabs) ? tabs : [])
+    .filter(tab => {
+      if (!tab || tab.restored !== true || tab.kind !== 'linkedFile') return false;
+      if (tab.workspaceId !== workspaceId) return false;
+      const owner = linkedFolderOfTab(tab);
+      if (!owner) return false;
+      return dirId ? owner === dirId && !present.has(tab.key) : !linkedIds.has(owner);
+    })
     .map(tab => tab.key);
 }
 

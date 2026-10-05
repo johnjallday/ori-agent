@@ -17,6 +17,14 @@ const PATHS = {
   agent:
     'M8 7.6a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2zM3 13.8c.5-2.5 2.4-3.9 5-3.9s4.5 1.4 5 3.9',
   file: 'M4 1.8h5.5l3 3v9.4H4zM9.5 1.8v3h3',
+  // A tray with an arrow dropping into it: what task runs have saved.
+  outputs: 'M2.5 9.5v3.5h11V9.5M8 2.5v7M5.4 7 8 9.6 10.6 7',
+  // Two links of a chain: folders that live outside the workspace.
+  linkedFolders:
+    'M6.9 9.1a2.4 2.4 0 0 0 3.4 0l2-2a2.4 2.4 0 0 0-3.4-3.4l-.8.8M9.1 6.9a2.4 2.4 0 0 0-3.4 0l-2 2a2.4 2.4 0 0 0 3.4 3.4l.8-.8',
+  // A folder with an arrow leaving it: one outside folder.
+  linked: 'M1.5 4.5h4.2l1.6 1.7h7.2v6.8h-13zM6.2 9.6h3.6M8.4 8.2l1.4 1.4-1.4 1.4',
+  chats: 'M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z',
   ticket: 'M3 3h10v10H3z',
   ticketDone: 'M3 3h10v10H3zM5.6 8.2l1.8 1.8 3.2-3.8',
   close: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
@@ -36,8 +44,21 @@ const SECTION_ICONS = {
   notes: 'note',
   backlog: 'backlog',
   files: 'folder',
+  outputs: 'outputs',
+  linked: 'linkedFolders',
+  chats: 'chats',
   memory: 'memory',
   agents: 'agent'
+};
+
+// A row kind drawn with another kind's icon: an output or a file in a linked
+// folder is a file, and the folder it sits in is a folder.
+const KIND_ICONS = {
+  output: 'file',
+  outputFolder: 'folder',
+  linkedFile: 'file',
+  linkedFolder: 'folder',
+  chat: 'chats'
 };
 
 /** The icon name for a tree row. */
@@ -46,6 +67,7 @@ export function rowIconName(row) {
   if (kind === 'section') return SECTION_ICONS[row.section] || 'folder';
   if (kind === 'ticket') return row.meta && row.meta.finished ? 'ticketDone' : 'ticket';
   if (kind === 'memory') return 'memory';
+  if (KIND_ICONS[kind]) return KIND_ICONS[kind];
   if (PATHS[kind]) return kind;
   return '';
 }
