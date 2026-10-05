@@ -34,6 +34,7 @@ export const SECTION_BACKLOG = 'backlog';
 export const SECTION_FILES = 'files';
 export const SECTION_OUTPUTS = 'outputs';
 export const SECTION_LINKED = 'linked';
+export const SECTION_CHATS = 'chats';
 export const SECTION_MEMORY = 'memory';
 export const SECTION_AGENTS = 'agents';
 
@@ -64,6 +65,7 @@ export const SECTIONS = [
     expandable: true,
     optional: true
   },
+  { id: SECTION_CHATS, label: 'Chats', empty: 'No chats yet', expandable: true, optional: true },
   { id: SECTION_MEMORY, label: 'Memory', empty: '', expandable: false },
   { id: SECTION_AGENTS, label: 'Agents', empty: 'No agents yet', expandable: true }
 ];
@@ -100,6 +102,7 @@ const KEY_PREFIX = {
   linked: 'l',
   linkedFolder: 'ld',
   linkedFile: 'lf',
+  chat: 'c',
   memory: 'm',
   agent: 'a',
   more: 'more',
@@ -154,6 +157,7 @@ export function sectionOfKind(kind) {
   if (kind === 'file' || kind === 'folder') return SECTION_FILES;
   if (kind === 'output' || kind === 'outputFolder') return SECTION_OUTPUTS;
   if (kind === 'linked' || kind === 'linkedFolder' || kind === 'linkedFile') return SECTION_LINKED;
+  if (kind === 'chat') return SECTION_CHATS;
   if (kind === 'memory') return SECTION_MEMORY;
   if (kind === 'agent') return SECTION_AGENTS;
   return '';
@@ -467,6 +471,75 @@ export function linkedFilesToRows(workspaceId, dirId, payload, dirName = '') {
   });
 }
 
+// --- Chats ----------------------------------------------------------------
+
+/**
+ * How many chats the Chats section asks for: one more than it shows, which is
+ * how "more than 100" is told from "exactly 100" (FR14). The list's own
+ * default is 50.
+ */
+export const CHAT_LIST_LIMIT = SECTION_ROW_LIMIT + 1;
+
+/**
+ * `GET /api/sessions?folder_id={id}` → one row per chat, in the API's order,
+ * which is newest first by when it was last updated (FR9).
+ *
+ * `total` is every chat the workspace has, and can exceed the rows returned;
+ * that is what the "Open workspace to see all N" row reports.
+ */
+export function chatsToRows(workspaceId, payload) {
+  const sessions = Array.isArray(payload && payload.sessions) ? payload.sessions : [];
+  const rows = sessions
+    .filter(session => session && session.id)
+    .map(session =>
+      row(workspaceId, 'chat', String(session.id), text(session.title) || 'Untitled chat', {
+        chatId: String(session.id),
+        agentName: text(session.agent_name),
+        updatedAt: text(session.updated_at)
+      })
+    );
+  const total = Number(payload && payload.total);
+  return {
+    rows,
+    count: Number.isFinite(total) && total > rows.length ? Math.trunc(total) : rows.length
+  };
+}
+
+/** A chat tab shows this many messages: the last ones (decision D12). */
+export const CHAT_MESSAGE_LIMIT = 20;
+
+// The roles a chat tab shows. A stored chat can also hold `system` messages
+// (instructions, not conversation); those are left out.
+const SHOWN_CHAT_ROLES = new Set(['user', 'assistant']);
+
+/**
+ * One whole chat (`GET /api/sessions/{id}`) → what its tab shows.
+ *
+ * The last `CHAT_MESSAGE_LIMIT` messages that someone wrote — you, or the
+ * agent — in the order they were sent. `earlier` says there were more before
+ * them; the rest is behind "Open chat".
+ */
+export function chatToView(session, fallbackId = '') {
+  const data = session || {};
+  const written = (Array.isArray(data.messages) ? data.messages : []).filter(
+    message => message && SHOWN_CHAT_ROLES.has(text(message.role)) && text(message.content)
+  );
+  return {
+    id: String(data.id || fallbackId),
+    workspaceId: text(data.folder_id),
+    title: text(data.title) || 'Untitled chat',
+    agentName: text(data.agent_name),
+    updatedAt: text(data.updated_at),
+    earlier: written.length > CHAT_MESSAGE_LIMIT,
+    messages: written.slice(-CHAT_MESSAGE_LIMIT).map(message => ({
+      id: String(message.id || ''),
+      role: text(message.role),
+      text: String(message.content),
+      at: text(message.created_at)
+    }))
+  };
+}
+
 /**
  * `GET /api/workspaces/{id}/memory` → no rows, one list for the pane.
  *
@@ -616,6 +689,10 @@ const LOADERS = {
       ]);
       return linkedToRows(id, directories, ownFolderOf(outputDir));
     }
+  },
+  [SECTION_CHATS]: {
+    url: id => `/api/sessions?folder_id=${enc(id)}&limit=${CHAT_LIST_LIMIT}`,
+    shape: chatsToRows
   },
   [SECTION_MEMORY]: { url: id => `/api/workspaces/${enc(id)}/memory`, shape: memoryToRows },
   [SECTION_AGENTS]: { url: id => `/api/workspaces/${enc(id)}/agents`, shape: agentsToRows }
@@ -786,6 +863,19 @@ export async function loadTicket(workspaceId, ticketId, { fetchImpl } = {}) {
     source: text(ticket.source),
     sourceLabel: ticketSourceLabel(ticket.source)
   };
+}
+
+/**
+ * `GET /api/sessions/{id}` → what the chat tab shows.
+ *
+ * The whole chat comes back in this one answer, messages included, and a chat
+ * that has been deleted answers 404 — which is how its remembered tab is
+ * dropped. (`GET /api/sessions/{id}/messages` answers 200 with no messages
+ * for a chat that does not exist, so it cannot tell a deleted chat from an
+ * empty one.)
+ */
+export async function loadChat(chatId, { fetchImpl } = {}) {
+  return chatToView(await getJSON(`/api/sessions/${enc(chatId)}`, fetchImpl), chatId);
 }
 
 /** `GET /api/workspaces/{id}/memory` → the entries the Memory tab lists. */

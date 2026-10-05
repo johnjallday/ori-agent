@@ -32,6 +32,7 @@ const TAB_KINDS = new Set([
   'file',
   'output',
   'linkedFile',
+  'chat',
   'memory',
   'agent',
   'workspace',
@@ -227,6 +228,7 @@ const COMPLETE_LIST_KINDS = {
   note: 'notes',
   file: 'files',
   output: 'outputs',
+  chat: 'chats',
   agent: 'agents'
 };
 

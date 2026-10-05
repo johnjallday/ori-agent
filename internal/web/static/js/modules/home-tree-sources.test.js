@@ -19,6 +19,10 @@ import {
   ticketsToRows,
   filesToRows,
   outputsToRows,
+  chatsToRows,
+  chatToView,
+  loadChat,
+  CHAT_MESSAGE_LIMIT,
   linkedToRows,
   linkedFilesToRows,
   capLinkedFolder,
@@ -717,6 +721,10 @@ const ROUTES = {
   // own folder is.
   '/api/workspaces/ws1/directories': DIRECTORIES,
   '/api/workspaces/ws1/output-dir': { output_dir: `${OWN}/outputs` },
+  '/api/sessions?folder_id=ws1&limit=101': {
+    sessions: [{ id: 'c1', title: 'Plan the release', agent_name: 'Scout' }],
+    total: 1
+  },
   '/api/workspaces/ws1/memory': { entries: [] },
   '/api/workspaces/ws1/agents': { agents: [{ name: 'Scout' }] }
 };
@@ -813,6 +821,109 @@ test('a linked folder over the limit arrives capped, and one that is gone fails 
   await assert.rejects(
     () => loadLinkedFolder('ws1', 'd2', { fetchImpl }),
     error => error.status === 400 && /no such file or directory/.test(error.message)
+  );
+});
+
+// --- Chats ---
+
+test('chats keep the API order, take the title or "Untitled chat", and carry what the tab needs', () => {
+  const { rows, count } = chatsToRows('ws1', {
+    sessions: [
+      { id: 'c2', title: 'Newest', agent_name: 'Scout', updated_at: '2026-10-05T10:00:00Z' },
+      { id: 'c1', title: '  ' },
+      { title: 'no id' }
+    ],
+    total: 2
+  });
+  assert.deepEqual(
+    rows.map(r => `${r.kind}:${r.label}`),
+    ['chat:Newest', 'chat:Untitled chat']
+  );
+  assert.equal(count, 2);
+  assert.equal(rows[0].id, 'ws1/c/c2');
+  assert.deepEqual(rows[0].meta, {
+    chatId: 'c2',
+    agentName: 'Scout',
+    updatedAt: '2026-10-05T10:00:00Z'
+  });
+  assert.deepEqual(parseItemKey(rows[0].id), { workspaceId: 'ws1', kind: 'chat', itemId: 'c2' });
+  assert.equal(sectionOfKind('chat'), 'chats');
+  [null, {}, { sessions: 'x' }].forEach(p =>
+    assert.deepEqual(chatsToRows('ws1', p), { rows: [], count: 0 })
+  );
+});
+
+test('101 chats are asked for, 100 shown, then "Open workspace to see all N"', async () => {
+  const sessions = Array.from({ length: 101 }, (_, i) => ({ id: `c${i}`, title: `Chat ${i}` }));
+  const fetchImpl = stubFetch({
+    '/api/sessions?folder_id=ws%201&limit=101': { sessions, total: 240 }
+  });
+  const chats = await loadSection('ws 1', 'chats', { fetchImpl });
+  assert.equal(chats.rows.length, SECTION_ROW_LIMIT + 1);
+  assert.equal(chats.count, 240);
+  assert.equal(chats.rows[SECTION_ROW_LIMIT].label, 'Open workspace to see all 240');
+});
+
+test('a chat becomes its last 20 written messages, in order, with "earlier" said (D12)', () => {
+  const message = (i, role = 'user') => ({
+    id: `m${i}`,
+    role,
+    content: `Message ${i}`,
+    created_at: '2026-10-05T10:00:00Z'
+  });
+  const make = n => ({
+    id: 'c1',
+    title: 'Plan',
+    agent_name: 'Scout',
+    updated_at: '2026-10-05T11:00:00Z',
+    messages: Array.from({ length: n }, (_, i) => message(i, i % 2 ? 'assistant' : 'user'))
+  });
+  const twentyOne = chatToView(make(21));
+  assert.equal(twentyOne.messages.length, CHAT_MESSAGE_LIMIT);
+  assert.equal(twentyOne.messages[0].text, 'Message 1');
+  assert.equal(twentyOne.messages[19].text, 'Message 20');
+  assert.equal(twentyOne.earlier, true);
+  const exactly = chatToView(make(20));
+  assert.equal(exactly.messages.length, 20);
+  assert.equal(exactly.earlier, false);
+  const none = chatToView({ id: 'c1', title: '' });
+  assert.deepEqual(none.messages, []);
+  assert.equal(none.title, 'Untitled chat');
+  assert.equal(none.earlier, false);
+});
+
+test('system messages, other roles and empty messages are left out, and do not count', () => {
+  const view = chatToView({
+    id: 'c1',
+    messages: [
+      { role: 'system', content: 'You are helpful.' },
+      { role: 'user', content: 'Hi' },
+      { role: 'tool', content: '{"x":1}' },
+      { role: 'assistant', content: '   ' },
+      { role: 'assistant', content: 'Hello' }
+    ]
+  });
+  assert.deepEqual(
+    view.messages.map(m => `${m.role}:${m.text}`),
+    ['user:Hi', 'assistant:Hello']
+  );
+  assert.equal(view.earlier, false);
+});
+
+test('loadChat reads the one session answer, and a deleted chat is a 404', async () => {
+  const fetchImpl = stubFetch({
+    '/api/sessions/c1': {
+      id: 'c1',
+      title: 'Plan',
+      messages: [{ role: 'user', content: 'Hi' }]
+    }
+  });
+  const chat = await loadChat('c1', { fetchImpl });
+  assert.deepEqual(fetchImpl.calls, ['/api/sessions/c1']);
+  assert.equal(chat.messages.length, 1);
+  await assert.rejects(
+    () => loadChat('gone', { fetchImpl }),
+    error => error.status === 404
   );
 });
 

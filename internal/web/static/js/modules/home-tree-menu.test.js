@@ -78,8 +78,8 @@ test('Delete is the one item marked as dangerous', () => {
   );
 });
 
-test('a note, a ticket and an agent offer Open and Open in workspace (FR55)', () => {
-  ['note', 'ticket', 'agent'].forEach(kind => {
+test('a note, a ticket, an agent and a chat offer Open and Open in workspace (FR55)', () => {
+  ['note', 'ticket', 'agent', 'chat'].forEach(kind => {
     assert.deepEqual(labels({ kind }), ['Open', 'Open in workspace'], kind);
     assert.deepEqual(
       menuItemsFor({ kind }).map(entry => entry.action),

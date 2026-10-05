@@ -559,6 +559,39 @@ test('a linked file is proved gone only by a whole list, and never one opened in
   );
 });
 
+// --- Chats ------------------------------------------------------------------
+
+const chatTab = {
+  key: 'ws1/c/c1',
+  kind: 'chat',
+  workspaceId: 'ws1',
+  label: 'Plan',
+  meta: { chatId: 'c1' }
+};
+
+test('a chat tab is remembered and put back (FR68)', () => {
+  const state = homeState({ treeTabs: [chatTab], activeTabKey: chatTab.key });
+  const back = parseTreeState(JSON.stringify(snapshotTreeState(state)));
+  assert.deepEqual(back.tabs, [chatTab]);
+  const home = {};
+  applyTreeState(home, back);
+  assert.equal(home.treeTabs[0].restored, true);
+});
+
+test('a restored chat that is not in the whole Chats list is gone; a cut list proves nothing (FR69)', () => {
+  const open = [restored(chatTab)];
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'chats', readySection([])), [chatTab.key]);
+  assert.deepEqual(
+    vanishedTabKeys(open, 'ws1', 'chats', readySection([{ id: chatTab.key, kind: 'chat' }])),
+    []
+  );
+  assert.deepEqual(
+    vanishedTabKeys(open, 'ws1', 'chats', readySection([{ id: 'ws1/more/chats', kind: 'more' }])),
+    []
+  );
+  assert.deepEqual(vanishedTabKeys([chatTab], 'ws1', 'chats', readySection([])), []);
+});
+
 test('only a list that is whole can prove something is gone', () => {
   const open = [restored(noteTab)];
   // Cut at the row limit: the note may be one of the rows not shown.

@@ -42,6 +42,7 @@ import {
 import {
   agentsToRows,
   capSection,
+  chatsToRows,
   filesToRows,
   linkedFilesToRows,
   linkedToRows,
@@ -1705,6 +1706,59 @@ test('the filter does not find outputs that have not loaded, or that failed to',
     const contents = { w4: contentsFor('w4', { outputs }) };
     assert.deepEqual(ids(filteredRows('report', { contents })), []);
   });
+});
+
+// --- Chats ---
+
+const someChats = id =>
+  ready(
+    chatsToRows(id, {
+      sessions: [
+        { id: 'c2', title: 'Plan the release' },
+        { id: 'c1', title: 'Mix review' }
+      ]
+    })
+  );
+
+test('Chats comes after Linked folders, newest first, with its count; hidden when none (FR9)', () => {
+  const rows = expandedRows({
+    expanded: ['w4'],
+    contents: { w4: contentsFor('w4', { chats: someChats('w4') }) }
+  });
+  assert.deepEqual(
+    under(rows, 'w4').map(r => r.name),
+    ['Notes', 'Backlog', 'Files', 'Chats', 'Memory', 'Agents']
+  );
+  assert.equal(rows.find(r => r.id === 'w4/s/chats').count, 2);
+  assert.deepEqual(
+    under(rows, 'w4/s/chats').map(r => `${r.kind}:${r.name}`),
+    ['chat:Plan the release', 'chat:Mix review']
+  );
+  assert.equal(rowActivation(rows.find(r => r.id === 'w4/c/c1')), 'open');
+  [loading(), ready(chatsToRows('w4', { sessions: [] }))].forEach(chats => {
+    const hidden = expandedRows({
+      expanded: ['w4'],
+      contents: { w4: contentsFor('w4', { chats }) }
+    });
+    assert.equal(
+      hidden.some(r => r.id === 'w4/s/chats'),
+      false
+    );
+  });
+  const bad = expandedRows({
+    expanded: ['w4'],
+    contents: { w4: contentsFor('w4', { chats: failed('x') }) }
+  });
+  assert.equal(under(bad, 'w4/s/chats')[0].name, "Couldn't load Chats");
+});
+
+test('the filter finds a chat by its title; a chat is revealed under its section', () => {
+  const contents = { w4: contentsFor('w4', { chats: someChats('w4') }) };
+  assert.deepEqual(ids(filteredRows('mix', { contents })), ['w4', 'w4/s/chats', 'w4/c/c1']);
+  assert.deepEqual(revealTargets('w4/c/c1', flat()), [
+    { kind: 'workspace', id: 'w4' },
+    { kind: 'section', id: 'w4/s/chats' }
+  ]);
 });
 
 test('the filter finds a linked folder by its name, and leaves it as the user has it', () => {

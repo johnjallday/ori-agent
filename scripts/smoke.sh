@@ -3802,6 +3802,26 @@ else:
     print("note: no sandbox directory was given, so no outputs were written and no folder "
           "was linked (filetree <base-url> seed <sandbox-dir>)")
 
+def chat(ws, title, count, agent=""):
+    """A chat in the workspace: COUNT messages, user and assistant in turn."""
+    created = must("POST", "/api/sessions", {"title": title, "folder_id": ws,
+                                              "agent_name": agent})
+    chat_id = created["session"]["id"]
+    for i in range(count):
+        role = "user" if i % 2 == 0 else "assistant"
+        body = (f"Question {i + 1}: what is left on the release list?" if role == "user"
+                else f"Answer {i + 1}: **two items** remain.<script>window.__chatRan=true</script>"
+                     "<img src=\"data:image/gif;base64,R0lGODlhAQABAAAAACw=\" "
+                     "onerror=\"window.__chatRan=true\">")
+        must("POST", f"/api/sessions/{chat_id}/messages", {"role": role, "content": body})
+    return chat_id
+
+
+# Two chats in Studio Notes, the longer one made first so the short one is the
+# newest. The other seeded workspaces have none.
+chat(studio, "Mix review", 25, "Scout")
+chat(studio, "Quick question", 2, "Scout")
+
 music = group("Music")
 note(music, "Release plan", "# Release plan\n\nNight Drive first, Harbor Lights in the spring.\n",
      ["plan"])
@@ -3845,7 +3865,7 @@ filetree_demo_all() {
   smoke_show_wait
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
   out="${TMPDIR:-/tmp}/filetree-demo"
-  for stage in tree pane note outputs linked create manage finish; do
+  for stage in tree pane note outputs linked chats create manage finish; do
     for theme in light dark; do
       if log=$(node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "$out" "$stage" "$theme" "$sandbox" 2>&1); then
         echo "PASS $stage ($theme): $(printf '%s\n' "$log" | grep -c '^ok ') checks"
@@ -4011,7 +4031,7 @@ prettier-head) smoke_prettier_head "$@" ;;
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
-  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|linked|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
+  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|linked|chats|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
   echo "  $0 prettier-head <file>...               # was each file Prettier-clean at HEAD? (only then is --write on the whole file safe)" >&2
   exit 2
   ;;

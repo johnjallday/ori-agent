@@ -196,6 +196,7 @@ const FILTERED_CONTENT_KINDS = new Set([
   'linked',
   'linkedFolder',
   'linkedFile',
+  'chat',
   'agent'
 ]);
 

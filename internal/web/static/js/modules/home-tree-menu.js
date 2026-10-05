@@ -85,7 +85,7 @@ export function menuItemsFor(row) {
     return [];
   }
   if (kind === 'folder') return [item(MENU_UPLOAD, 'Upload file…')];
-  if (kind === 'note' || kind === 'ticket' || kind === 'agent') {
+  if (kind === 'note' || kind === 'ticket' || kind === 'agent' || kind === 'chat') {
     return [item(MENU_OPEN, 'Open'), item(MENU_OPEN_IN_WORKSPACE, 'Open in workspace')];
   }
   if (kind === 'file') {

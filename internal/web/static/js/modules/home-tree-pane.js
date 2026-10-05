@@ -166,6 +166,7 @@ const KIND_NOUNS = {
   file: 'File',
   output: 'Output',
   linkedFile: 'Linked file',
+  chat: 'Chat',
   agent: 'Agent'
 };
 
@@ -359,6 +360,13 @@ function fillOverviewTags(view, tab, context) {
   view.activeTags = view.tags.filter(tag => active.has(tag));
 }
 
+/** A time as the chat tab says it; a time that cannot be read reads "—". */
+export function chatTimeLabel(value, locale) {
+  const at = new Date(String(value || ''));
+  if (Number.isNaN(at.getTime())) return '—';
+  return at.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 // A loaded file preview as the pane's body (FR34): Markdown rendered, other
 // text as it is, an image inline, anything else "No preview".
 function previewBody(tab, value) {
@@ -450,6 +458,24 @@ const VIEW_FILLERS = {
       { label: 'Path', value: `${linkedFolderName(tab)}/${String(tab.meta.path || '')}` }
     ];
     if (value) view.body = previewBody(tab, value);
+  },
+
+  // FR36, D12, read-only: when it was last updated and the last 20 messages.
+  // "Open chat" opens it in Home's chat panel, where it can be continued.
+  chat(view, { value }) {
+    view.actions = [{ label: 'Open chat', action: 'chat-open', primary: true }];
+    if (!value) return;
+    retitle(view, value.title);
+    view.fields = [{ label: 'Updated', value: chatTimeLabel(value.updatedAt) }];
+    view.body = {
+      type: 'chat',
+      messages: value.messages.map(message => ({
+        ...message,
+        who: message.role === 'user' ? 'You' : value.agentName || 'Assistant',
+        at: chatTimeLabel(message.at)
+      })),
+      earlier: value.earlier
+    };
   },
 
   // FR37, read-only: the entries as a list.
@@ -619,6 +645,27 @@ function previewHTML(body) {
       `<div id="${NOTE_EDITOR_ID}" class="note-preview-content note-live-editor cockpit-pane-editor" ` +
       `data-pane-editor="${escapeHtml(body.noteId)}" role="textbox" aria-multiline="true" ` +
       'aria-label="Note text. Click a line to edit it." tabindex="0"></div>'
+    );
+  }
+  if (body.type === 'chat') {
+    // Read-only: no input. Message text is rendered Markdown, which is
+    // sanitised; it is never put in as raw HTML.
+    const items = body.messages
+      .map(
+        message =>
+          `<li class="cockpit-chat-message is-${escapeHtml(message.role)}">` +
+          `<div class="cockpit-chat-who"><span>${escapeHtml(message.who)}</span>` +
+          `<span class="cockpit-chat-time">${escapeHtml(message.at)}</span></div>` +
+          `<div class="cockpit-pane-markdown">${renderMarkdown(message.text)}</div></li>`
+      )
+      .join('');
+    return (
+      (body.earlier
+        ? '<p class="cockpit-pane-note" data-chat-earlier>Earlier messages are in the chat.</p>'
+        : '') +
+      (items
+        ? `<ol class="cockpit-chat-list" aria-label="Messages, oldest first">${items}</ol>`
+        : '<p class="cockpit-pane-note">No messages in this chat yet.</p>')
     );
   }
   if (body.type === 'markdown') {

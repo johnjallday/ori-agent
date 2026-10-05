@@ -65,7 +65,7 @@ const CONTENT_REQUEST =
 const SECTION_REQUESTS = 8;
 // The sections of the seeded Studio Notes workspace, as the tree lists them. A
 // workspace with no outputs and no linked folder shows the plain list.
-const STUDIO_SECTIONS = 'Notes,Backlog,Files,Outputs,Linked folders,Memory,Agents';
+const STUDIO_SECTIONS = 'Notes,Backlog,Files,Outputs,Linked folders,Chats,Memory,Agents';
 const PLAIN_SECTIONS = 'Notes,Backlog,Files,Memory,Agents';
 
 const problems = [];
@@ -3347,6 +3347,300 @@ async function stageLinked() {
   await shot('l8-linked-final');
 }
 
+// Release 2, group 3: a workspace's chats.
+async function stageChats() {
+  const nav = page.locator('#cockpitTreeNav');
+  const menu = page.locator('[data-tree-menu]');
+  const live = () => page.locator('#cockpitRailLive').innerText();
+  const byId = id => nav.locator(`[data-tree-row="${id}"]`);
+  const tabLabels = () => page.locator('.cockpit-pane-tab-label').allInnerTexts();
+  const stored = () =>
+    page.evaluate(() => JSON.parse(window.localStorage.getItem('ori.home.fileTree.v1') || 'null'));
+  const childNames = parentId =>
+    nav
+      .locator('[data-tree-row]')
+      .evaluateAll(
+        (els, parent) =>
+          els
+            .filter(el => el.getAttribute('data-parent-id') === parent)
+            .map(el => el.querySelector('.cockpit-tree-name')?.textContent || ''),
+        parentId
+      );
+  const messages = () => page.locator('#cockpitTreePane .cockpit-chat-message');
+  const wholeChatReads = () =>
+    requests.filter(entry => /^GET \/api\/sessions\/[0-9a-f-]{36}$/.test(entry)).length;
+
+  // --- Map view reads no chat (FR17) ----------------------------------------
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#cockpitMap').waitFor({ state: 'visible' });
+  await settle(1500);
+  const mapReads = wholeChatReads();
+  await page.locator('#cockpitViewTree').click();
+  await nav.locator('[data-tree-row]').first().waitFor();
+  await applyTheme();
+  await settle(600);
+  const studioId = await rowByKind('workspace', 'Studio Notes').getAttribute('data-tree-row');
+  const nightId = await rowByKind('workspace', 'Night Drive').getAttribute('data-tree-row');
+  const section = `${studioId}/s/chats`;
+
+  // --- No chats, no row; chats, a row with its count, newest first ----------
+  await expand('workspace', 'Night Drive');
+  await rowByKind('note', 'Lyrics draft').waitFor();
+  await settle(400);
+  check(
+    (await sectionNames(nightId)).join(',') === PLAIN_SECTIONS,
+    'a workspace with no chats shows no Chats row'
+  );
+  await rowByKind('workspace', 'Night Drive').locator('[data-tree-toggle]').click();
+  await expand('workspace', 'Studio Notes');
+  await expectEventually(
+    async () => (await sectionNames(studioId)).join(',') === STUDIO_SECTIONS,
+    `Chats comes after Linked folders and before Memory (${STUDIO_SECTIONS})`
+  );
+  check(
+    (await byId(section).locator('.cockpit-tree-count').innerText()) === '2',
+    'the Chats row counts its 2 chats'
+  );
+  check(
+    (await childNames(section)).join(',') === 'Quick question,Mix review',
+    `chats are newest first (${(await childNames(section)).join(',')})`
+  );
+  check(
+    wholeChatReads() === mapReads,
+    'expanding the workspace lists its chats but reads none of them'
+  );
+  await byId(section).scrollIntoViewIfNeeded();
+  await shot('c1-chats-section');
+
+  // --- A long chat: the last 20, in order, with the earlier-messages line ---
+  const longKey = await rowByKind('chat', 'Mix review').getAttribute('data-tree-row');
+  const longId = longKey.split('/c/')[1];
+  await rowByKind('chat', 'Mix review').click();
+  await page.locator('.cockpit-chat-list').waitFor();
+  const article = page.locator('#cockpitTreePane .cockpit-pane-article');
+  check((await messages().count()) === 20, 'a chat of 25 messages shows the last 20');
+  const first = await messages().first().innerText();
+  const last = await messages().last().innerText();
+  check(
+    first.includes('Answer 6') && last.includes('Question 25'),
+    'they are messages 6 to 25, oldest first'
+  );
+  check(
+    (await article.innerText()).includes('Earlier messages are in the chat.'),
+    'it says "Earlier messages are in the chat."'
+  );
+  check(
+    (await messages().first().locator('.cockpit-chat-who').innerText()).startsWith('Scout') &&
+      (await messages().nth(1).locator('.cockpit-chat-who').innerText()).startsWith('You'),
+    'each message says who wrote it: You, or the agent by name'
+  );
+  check(
+    (await messages().first().locator('strong').count()) === 1 &&
+      (await page
+        .locator(
+          '#cockpitTreePane .cockpit-chat-list script, #cockpitTreePane .cockpit-chat-list [onerror]'
+        )
+        .count()) === 0 &&
+      (await page.evaluate(() => window.__chatRan)) === undefined,
+    'message text is rendered Markdown, and the <script> and <img onerror> in it are stripped and never run'
+  );
+  check(
+    (await page.locator('#cockpitTreePane textarea, #cockpitTreePane input').count()) === 0,
+    'the chat is read-only: no input box'
+  );
+  check(
+    (await page.locator('.cockpit-pane-sub').innerText()).includes('Chat in Studio Notes') &&
+      (await page.locator('.cockpit-pane-crumbs').innerText()).replace(/\s*\/\s*/g, ' / ') ===
+        'Studio Notes / Chats / Mix review',
+    'the pane says "Chat in Studio Notes" and the breadcrumb ends Chats / Mix review'
+  );
+  await shot('c2-long-chat');
+
+  // --- A short chat has no such line ----------------------------------------
+  await rowByKind('chat', 'Quick question').click();
+  await page.locator('.cockpit-pane-tab.is-active', { hasText: 'Quick question' }).waitFor();
+  await expectEventually(
+    async () => (await messages().count()) === 2,
+    'a short chat shows both messages'
+  );
+  check(
+    !(await article.innerText()).includes('Earlier messages'),
+    'a chat of 2 messages has no "earlier messages" line'
+  );
+  await shot('c3-short-chat');
+
+  // --- Open chat opens it in Home's chat panel -------------------------------
+  const openChat = page.locator('#cockpitTreePane [data-pane-action="chat-open"]');
+  check((await openChat.count()) === 1, 'the pane has an "Open chat" button');
+  await rowByKind('chat', 'Mix review').click();
+  await page.locator('.cockpit-chat-list').waitFor();
+  await openChat.click();
+  await expectEventually(
+    () => page.evaluate(() => document.body.classList.contains('chat-panel-open')),
+    'Open chat opens the chat panel'
+  );
+  await expectEventually(
+    () => page.evaluate(id => window.sessionManager?.activeSessionId === id, longId),
+    'the panel is on that chat'
+  );
+  check(new URL(page.url()).pathname === '/', 'without leaving Home');
+  await shot('c4-chat-panel');
+  await page.evaluate(() => window.chatPanel.close());
+
+  // --- Menu -----------------------------------------------------------------
+  await rowByKind('chat', 'Quick question').click({ button: 'right' });
+  await menu.waitFor();
+  check(
+    (await menu.locator('[role="menuitem"]').allInnerTexts()).join(',') ===
+      'Open,Open in workspace',
+    'a chat row offers Open and Open in workspace'
+  );
+  await page.keyboard.press('Escape');
+
+  // --- The filter finds a chat by title -------------------------------------
+  const filter = nav.locator('[data-tree-filter]');
+  await filter.fill('quick');
+  await rowByKind('chat', 'Quick question').waitFor();
+  check(
+    (await rowByKind('chat', 'Mix review').count()) === 0,
+    'the filter finds a chat by its title and hides the rest'
+  );
+  await filter.fill('');
+  await rowByKind('chat', 'Mix review').waitFor();
+
+  // --- The overview lists Chats ---------------------------------------------
+  await rowByKind('workspace', 'Studio Notes').locator('.cockpit-tree-name').click();
+  await page.waitForFunction(() =>
+    document.querySelector('.cockpit-pane-tab.is-active')?.textContent.includes('Studio Notes')
+  );
+  await settle(400);
+  const links = (await page.locator('.cockpit-pane-link').allInnerTexts()).map(entry =>
+    entry.replace(/\s+/g, ' ').trim()
+  );
+  check(
+    links.includes('Chats 2'),
+    `the overview lists Chats with its count (${links.join(' | ')})`
+  );
+
+  // --- Remembered across a reload; Map view reads nothing -------------------
+  await rowByKind('chat', 'Mix review').click();
+  await page.locator('.cockpit-chat-list').waitFor();
+  const chatKey = `${studioId}/c/${longId}`;
+  await expectEventually(async () => {
+    const saved = await stored();
+    return !!saved && saved.activeKey === chatKey && saved.tabs.some(tab => tab.kind === 'chat');
+  }, 'the chat tab is stored in the browser');
+  const labelsBefore = await tabLabels();
+  const beforeMap = wholeChatReads();
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#cockpitMap').waitFor({ state: 'visible' });
+  await settle(1500);
+  check(wholeChatReads() === beforeMap, 'in Map view the remembered chat tab reads nothing');
+  await openTree();
+  await page.locator('.cockpit-chat-list').waitFor();
+  check(
+    (await tabLabels()).join('|') === labelsBefore.join('|') && (await messages().count()) === 20,
+    'after a reload the same tabs are back and the chat is shown'
+  );
+
+  // --- New messages appear on returning to the tab (FR21) -------------------
+  // On a scratch chat, deleted at the end, so the seeded chats are left as found.
+  const makeChat = async (title, count) => {
+    const made = await (
+      await page.request.post(`${baseUrl}/api/sessions`, {
+        data: { title, folder_id: studioId }
+      })
+    ).json();
+    for (let i = 0; i < count; i += 1) {
+      await page.request.post(`${baseUrl}/api/sessions/${made.session.id}/messages`, {
+        data: { role: i % 2 ? 'assistant' : 'user', content: `Scratch ${i}` }
+      });
+    }
+    return made.session.id;
+  };
+  const liveId = await makeChat('Live chat', 20);
+  const shiftClock = ms =>
+    page.evaluate(by => {
+      const real = Date.now.bind(Date);
+      Date.now = () => real() + by;
+    }, ms);
+  await shiftClock(31000);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await rowByKind('chat', 'Live chat').waitFor();
+  await rowByKind('chat', 'Live chat').click();
+  await expectEventually(async () => (await messages().count()) === 20, 'a scratch chat opens');
+  const fresh = `Fresh message ${Date.now().toString(36)}`;
+  await page.request.post(`${baseUrl}/api/sessions/${liveId}/messages`, {
+    data: { role: 'user', content: fresh }
+  });
+  await shiftClock(31000);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expectEventually(
+    async () => (await messages().last().innerText()).includes(fresh),
+    'returning to the tab reloads the open chat: the new message is last'
+  );
+  check(
+    (await messages().count()) === 20 && (await page.locator('[data-chat-earlier]').count()) === 1,
+    'and it is still the last 20, now with the earlier-messages line'
+  );
+  await page.request.delete(`${baseUrl}/api/sessions/${liveId}`);
+  EXPECTED_FAILURES.push(new RegExp(`/api/sessions/${liveId}$`));
+
+  // --- A deleted chat's remembered tab is dropped silently (FR69) -----------
+  const doomedId = await makeChat('Doomed chat', 1);
+  await shiftClock(62000);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await rowByKind('chat', 'Doomed chat').waitFor();
+  await rowByKind('chat', 'Doomed chat').click();
+  await expectEventually(async () => (await messages().count()) === 1, 'the new chat opens');
+  await expectEventually(
+    async () => (await stored())?.activeKey === `${studioId}/c/${doomedId}`,
+    'its tab is stored'
+  );
+  await page.request.delete(`${baseUrl}/api/sessions/${doomedId}`);
+  EXPECTED_FAILURES.push(new RegExp(`/api/sessions/${doomedId}$`));
+  const labelsWithDoomed = await tabLabels();
+  await openTree();
+  await expectEventually(
+    async () => !(await tabLabels()).some(label => label.includes('Doomed chat')),
+    'after a reload, the tab of a deleted chat is gone'
+  );
+  await settle(500);
+  check(
+    // The scratch chat deleted just before is gone from the strip too.
+    (await tabLabels()).join('|') ===
+      labelsWithDoomed.filter(label => !/Doomed chat|Live chat/.test(label)).join('|') &&
+      (await page.locator('.cockpit-pane-failed, [data-pane-retry]').count()) === 0 &&
+      !/couldn.t load/i.test(await live()),
+    'silently: the other tabs remain and nothing is reported as failed'
+  );
+
+  // --- Contrast -------------------------------------------------------------
+  await rowByKind('chat', 'Mix review').click();
+  await page.locator('.cockpit-chat-list').waitFor();
+  const attr = id => `[data-tree-row="${id}"]`;
+  (
+    await measureContrast([
+      ['the Chats row', `#cockpitTreeNav ${attr(section)} .cockpit-tree-name`],
+      ['the Chats count', `#cockpitTreeNav ${attr(section)} .cockpit-tree-count`],
+      ['a chat row', `#cockpitTreeNav ${attr(`${studioId}/c/${longId}`)} .cockpit-tree-name`],
+      ['a message', '#cockpitTreePane .cockpit-chat-message .cockpit-pane-markdown'],
+      ['a message author', '#cockpitTreePane .cockpit-chat-who > span:first-child'],
+      ['a message time', '#cockpitTreePane .cockpit-chat-time'],
+      ['"Earlier messages…"', '#cockpitTreePane [data-chat-earlier]'],
+      ['the "Updated" line', '#cockpitTreePane .cockpit-pane-fields dd'],
+      ['the "Chat in …" line', '#cockpitTreePane .cockpit-pane-sub']
+    ])
+  ).forEach(entry => {
+    check(
+      entry.count > 0 && entry.ratio >= 4.5,
+      `contrast ${entry.count ? entry.ratio.toFixed(2) : 'n/a'}:1 for ${entry.name}` +
+        (entry.count ? ` (${entry.color} on ${entry.background})` : ' (none on screen)')
+    );
+  });
+  await shot('c5-chats-final');
+}
+
 // The lowest contrast ratio among the elements each selector matches: the
 // text colour against whatever is painted behind it, with translucent layers
 // blended in. Where a gradient is behind the text (Home's workspace area is
@@ -3473,6 +3767,7 @@ const stages = {
   finish: stageFinish,
   outputs: stageOutputs,
   linked: stageLinked,
+  chats: stageChats,
   'map-requests': stageMapRequests
 };
 try {

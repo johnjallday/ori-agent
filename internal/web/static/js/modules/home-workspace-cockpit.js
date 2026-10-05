@@ -1664,6 +1664,7 @@ import {
   SECTION_READY,
   createNote,
   createTicket,
+  loadChat,
   loadFilePreview,
   loadLinkedFolder,
   loadLinkedPreview,
@@ -2612,6 +2613,7 @@ import {
     output: tab => loadOutputPreview(tab.workspaceId, tab.meta.path, { size: tab.meta.size }),
     linkedFile: tab =>
       loadLinkedPreview(tab.workspaceId, tab.meta.dirId, tab.meta.path, { size: tab.meta.size }),
+    chat: tab => loadChat(tab.meta.chatId),
     memory: tab => loadMemory(tab.workspaceId)
   };
 
@@ -2699,6 +2701,8 @@ import {
       if (treeHandle) treeHandle.openMoveDialog(tab.workspaceId);
     } else if (action === 'delete') {
       if (treeHandle) void treeHandle.deleteWorkspace(tab.workspaceId);
+    } else if (action === 'chat-open') {
+      openChatInPanel(tab);
     } else if (action === 'file-open' || action === 'file-reveal') {
       void openFileFromPane(tab, action === 'file-reveal');
     } else if (action === 'tag-filter') {
@@ -2786,6 +2790,11 @@ import {
       void openFileFromPane(tabFromRow(row), action === MENU_FILE_REVEAL);
     } else if (action === MENU_SHOW_OUTPUTS) {
       void showOutputsFolderOf(workspaceId);
+    } else if (action === MENU_OPEN_IN_WORKSPACE && row.kind === 'chat') {
+      // No address opens one chat on the workspace page, so it is the page.
+      const owner = findWorkspace(state.flattened, workspaceId);
+      const slug = String((owner && owner.folder_slug) || '').trim();
+      if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
     } else if (action === MENU_OPEN_IN_WORKSPACE) {
       // The item's own place on the workspace page is the link its pane view
       // leads with: the full note, the ticket in Tickets, the agent's page.
@@ -2911,6 +2920,28 @@ import {
       announce(message);
       if (window.Toast) window.Toast.error(message);
     }
+  }
+
+  /**
+   * "Open chat": the chat opens in Home's chat panel, as the workspace page
+   * opens one. Without the panel it falls back to the workspace page.
+   */
+  function openChatInPanel(tab) {
+    const manager = window.sessionManager;
+    if (
+      window.chatPanel &&
+      typeof window.chatPanel.open === 'function' &&
+      manager &&
+      typeof manager.switchToSession === 'function'
+    ) {
+      window.chatPanel.open();
+      void manager.switchToSession(tab.meta.chatId);
+      announce(`Opened ${tab.label} in the chat panel.`);
+      return;
+    }
+    const owner = findWorkspace(state.flattened, tab.workspaceId);
+    const slug = String((owner && owner.folder_slug) || '').trim();
+    if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
   }
 
   /**

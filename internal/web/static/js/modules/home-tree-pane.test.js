@@ -18,6 +18,7 @@ import {
   createNoteController,
   isNarrowTreeWidth,
   leaveNoteThen,
+  chatTimeLabel,
   nextRunLabel,
   openTab,
   paneCrumbs,
@@ -1107,6 +1108,102 @@ test('a linked .html file is drawn as escaped text: nothing in it becomes markup
   assert.doesNotMatch(html, /<script>|<h1>Kit list|<img src=x/);
   // And its address is never the target of a link or a frame.
   assert.doesNotMatch(html, /<iframe|<a [^>]*directories\/d1\/files/);
+});
+
+// ---------------------------------------------------------------------------
+// Chat (FR36, D12)
+// ---------------------------------------------------------------------------
+
+const chatTab = tab('ws1/c/c1', { kind: 'chat', label: 'Plan', meta: { chatId: 'c1' } });
+const chatValue = (n, extra = {}) => ({
+  id: 'c1',
+  title: 'Plan the release',
+  agentName: 'Scout',
+  updatedAt: '2026-10-05T11:00:00Z',
+  earlier: false,
+  messages: Array.from({ length: n }, (_, i) => ({
+    id: `m${i}`,
+    role: i % 2 ? 'assistant' : 'user',
+    text: `Message ${i}`,
+    at: '2026-10-05T10:00:00Z'
+  })),
+  ...extra
+});
+
+test('a chat says who wrote each message, keeps the order and offers only "Open chat"', () => {
+  const view = paneView(chatTab, { flattened: FLAT, item: ready(chatValue(2)) });
+  assert.equal(view.sub, 'Chat in Night Drive');
+  assert.deepEqual(view.crumbs, ['Music', 'Night Drive', 'Chats', 'Plan the release']);
+  assert.deepEqual(
+    view.body.messages.map(m => `${m.who}: ${m.text}`),
+    ['You: Message 0', 'Scout: Message 1']
+  );
+  assert.deepEqual(view.actions, [{ label: 'Open chat', action: 'chat-open', primary: true }]);
+  assert.equal(view.fields[0].label, 'Updated');
+  assert.notEqual(view.fields[0].value, '—');
+  const html = renderPaneHTML(view);
+  assert.match(html, /data-pane-action="chat-open"/);
+  assert.doesNotMatch(html, /<textarea|<input|data-chat-earlier/);
+  assert.ok(html.indexOf('Message 0') < html.indexOf('Message 1'));
+  // An agent with no name on record is "Assistant".
+  const nameless = paneView(chatTab, {
+    flattened: FLAT,
+    item: ready(chatValue(2, { agentName: '' }))
+  });
+  assert.equal(nameless.body.messages[1].who, 'Assistant');
+});
+
+test('a chat of more than 20 messages says the earlier ones are in the chat; exactly 20 does not', () => {
+  const more = renderPaneHTML(
+    paneView(chatTab, { flattened: FLAT, item: ready(chatValue(20, { earlier: true })) })
+  );
+  assert.match(more, /Earlier messages are in the chat\./);
+  const exact = renderPaneHTML(paneView(chatTab, { flattened: FLAT, item: ready(chatValue(20)) }));
+  assert.doesNotMatch(exact, /Earlier messages/);
+});
+
+test('a chat with no messages says so, and a loading or failed one has no list', () => {
+  assert.match(
+    renderPaneHTML(paneView(chatTab, { flattened: FLAT, item: ready(chatValue(0)) })),
+    /No messages in this chat yet\./
+  );
+  const loading = paneView(chatTab, { flattened: FLAT, item: { status: 'loading' } });
+  assert.equal(loading.body, null);
+  assert.deepEqual(
+    loading.actions.map(a => a.action),
+    ['chat-open']
+  );
+});
+
+test('message text is rendered Markdown, never raw HTML, and the author is escaped', () => {
+  const view = paneView(chatTab, {
+    flattened: FLAT,
+    item: ready(
+      chatValue(1, {
+        agentName: '<b>Evil</b>',
+        messages: [
+          {
+            id: 'm',
+            role: 'assistant',
+            text: '**bold** <img src=x onerror=alert(1)>',
+            at: '2026-10-05T10:00:00Z'
+          }
+        ]
+      })
+    )
+  });
+  const html = renderPaneHTML(view);
+  assert.match(html, /&lt;b&gt;Evil&lt;\/b&gt;/);
+  assert.match(html, /<strong>bold<\/strong>/);
+  // The tag in the message came out as text, not as an element.
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(html, /<b>Evil|<img/);
+});
+
+test('chatTimeLabel says a time, and "—" for one it cannot read', () => {
+  assert.match(chatTimeLabel('2026-10-05T11:00:00Z', 'en-US'), /Oct 5, 2026/);
+  assert.equal(chatTimeLabel(''), '—');
+  assert.equal(chatTimeLabel('nope'), '—');
 });
 
 // ---------------------------------------------------------------------------

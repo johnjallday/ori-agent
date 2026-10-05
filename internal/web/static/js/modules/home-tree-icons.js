@@ -24,6 +24,7 @@ const PATHS = {
     'M6.9 9.1a2.4 2.4 0 0 0 3.4 0l2-2a2.4 2.4 0 0 0-3.4-3.4l-.8.8M9.1 6.9a2.4 2.4 0 0 0-3.4 0l-2 2a2.4 2.4 0 0 0 3.4 3.4l.8-.8',
   // A folder with an arrow leaving it: one outside folder.
   linked: 'M1.5 4.5h4.2l1.6 1.7h7.2v6.8h-13zM6.2 9.6h3.6M8.4 8.2l1.4 1.4-1.4 1.4',
+  chats: 'M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z',
   ticket: 'M3 3h10v10H3z',
   ticketDone: 'M3 3h10v10H3zM5.6 8.2l1.8 1.8 3.2-3.8',
   close: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
@@ -45,6 +46,7 @@ const SECTION_ICONS = {
   files: 'folder',
   outputs: 'outputs',
   linked: 'linkedFolders',
+  chats: 'chats',
   memory: 'memory',
   agents: 'agent'
 };
@@ -55,7 +57,8 @@ const KIND_ICONS = {
   output: 'file',
   outputFolder: 'folder',
   linkedFile: 'file',
-  linkedFolder: 'folder'
+  linkedFolder: 'folder',
+  chat: 'chats'
 };
 
 /** The icon name for a tree row. */
