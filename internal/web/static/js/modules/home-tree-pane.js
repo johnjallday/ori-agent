@@ -31,6 +31,7 @@ import {
   PREVIEW_TEXT,
   SECTIONS,
   SECTION_READY,
+  folderKindOf,
   itemKey,
   sectionInfo,
   sectionOfKind
@@ -163,6 +164,9 @@ const KIND_NOUNS = {
   note: 'Note',
   ticket: 'Ticket',
   file: 'File',
+  output: 'Output',
+  linkedFile: 'Linked file',
+  chat: 'Chat',
   agent: 'Agent'
 };
 
@@ -186,6 +190,12 @@ export function paneSubline(tab, workspace, parent) {
   return `${KIND_NOUNS[tab.kind] || 'Item'} in ${where}`;
 }
 
+// What the linked folder a file sits in is called. A tab keeps the name it
+// was opened with; one that lost it still has something to show.
+function linkedFolderName(tab) {
+  return String((tab.meta && tab.meta.dirName) || '') || 'Linked folder';
+}
+
 /**
  * The breadcrumb, outermost first: groups, the workspace, the section, any
  * folders, then the item (FR31). A workspace or group tab stops at itself.
@@ -197,7 +207,10 @@ export function paneCrumbs(tab, flattened) {
   const section = sectionInfo(sectionOfKind(tab.kind));
   if (section) crumbs.push(section.label);
   if (tab.kind === 'memory') return crumbs;
-  if (tab.kind === 'file') {
+  // A file is reached through its folders: under files/ or outputs/, or —
+  // inside a linked folder — under that folder's own name first.
+  if (tab.kind === 'linkedFile') crumbs.push(linkedFolderName(tab));
+  if (folderKindOf(tab.kind)) {
     const folders = String((tab.meta && tab.meta.path) || '')
       .split('/')
       .filter(Boolean)
@@ -315,14 +328,15 @@ export function nextRunLabel(workspaceId, scheduleIndex, locale) {
  * The sections of a workspace or group as overview links, with counts.
  *
  * A count that has not loaded reads "—", never "0". A group lists only the
- * sections that hold something, as its tree does (FR16, FR39, FR40).
+ * sections that hold something, as its tree does, and so does a workspace for
+ * a section shown only when it is not empty (FR9, FR16, FR39, FR40).
  */
 export function sectionLinks(workspaceId, sections, { hideEmpty = false } = {}) {
   const links = [];
   SECTIONS.forEach(info => {
     const state = (sections && sections[info.id]) || null;
     const ready = !!state && state.status === SECTION_READY;
-    if (hideEmpty && !(ready && state.count > 0)) return;
+    if ((hideEmpty || info.optional) && !(ready && state.count > 0)) return;
     links.push({
       label: info.label,
       icon: rowIconName({ kind: 'section', section: info.id }),
@@ -344,6 +358,27 @@ function fillOverviewTags(view, tab, context) {
   view.tagsEditable = true;
   const active = context.activeTags instanceof Set ? context.activeTags : new Set();
   view.activeTags = view.tags.filter(tag => active.has(tag));
+}
+
+/** A time as the chat tab says it; a time that cannot be read reads "—". */
+export function chatTimeLabel(value, locale) {
+  const at = new Date(String(value || ''));
+  if (Number.isNaN(at.getTime())) return '—';
+  return at.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+// A loaded file preview as the pane's body (FR34): Markdown rendered, other
+// text as it is, an image inline, anything else "No preview".
+function previewBody(tab, value) {
+  if (value.tooLarge) return { type: 'none', text: 'This file is too large to preview here.' };
+  if (value.kind === PREVIEW_MARKDOWN) {
+    return { type: 'markdown', markdown: value.text, empty: 'This file is empty.' };
+  }
+  if (value.kind === PREVIEW_TEXT) {
+    return { type: 'text', text: value.text, empty: 'This file is empty.' };
+  }
+  if (value.kind === PREVIEW_IMAGE) return { type: 'image', src: value.url, alt: tab.label };
+  return { type: 'none', text: 'No preview' };
 }
 
 const VIEW_FILLERS = {
@@ -403,18 +438,44 @@ const VIEW_FILLERS = {
     ];
     view.fields = [{ label: 'Path', value: `files/${path}` }];
     if (path === 'BACKLOG.md') view.lead = 'Ori keeps this file in step with the backlog.';
+    if (value) view.body = previewBody(tab, value);
+  },
+
+  // FR35, read-only: a file a task run saved under outputs/. The Files
+  // preview, without "Open" and "Reveal in Finder" (decision D15); the folder
+  // as a whole is shown from the Outputs section's menu.
+  output(view, { tab, value }) {
+    view.fields = [{ label: 'Path', value: `outputs/${String(tab.meta.path || '')}` }];
+    if (value) view.body = previewBody(tab, value);
+  },
+
+  // FR35, read-only: a file inside a folder the workspace links to. The
+  // output-file view: the same preview, no "Open" or "Reveal in Finder" (D15).
+  // Its text is fetched and shown as text — the file is never opened as a
+  // page, which matters for an .html file in someone's own folder.
+  linkedFile(view, { tab, value }) {
+    view.fields = [
+      { label: 'Path', value: `${linkedFolderName(tab)}/${String(tab.meta.path || '')}` }
+    ];
+    if (value) view.body = previewBody(tab, value);
+  },
+
+  // FR36, D12, read-only: when it was last updated and the last 20 messages.
+  // "Open chat" opens it in Home's chat panel, where it can be continued.
+  chat(view, { value }) {
+    view.actions = [{ label: 'Open chat', action: 'chat-open', primary: true }];
     if (!value) return;
-    if (value.tooLarge) {
-      view.body = { type: 'none', text: 'This file is too large to preview here.' };
-    } else if (value.kind === PREVIEW_MARKDOWN) {
-      view.body = { type: 'markdown', markdown: value.text, empty: 'This file is empty.' };
-    } else if (value.kind === PREVIEW_TEXT) {
-      view.body = { type: 'text', text: value.text, empty: 'This file is empty.' };
-    } else if (value.kind === PREVIEW_IMAGE) {
-      view.body = { type: 'image', src: value.url, alt: tab.label };
-    } else {
-      view.body = { type: 'none', text: 'No preview' };
-    }
+    retitle(view, value.title);
+    view.fields = [{ label: 'Updated', value: chatTimeLabel(value.updatedAt) }];
+    view.body = {
+      type: 'chat',
+      messages: value.messages.map(message => ({
+        ...message,
+        who: message.role === 'user' ? 'You' : value.agentName || 'Assistant',
+        at: chatTimeLabel(message.at)
+      })),
+      earlier: value.earlier
+    };
   },
 
   // FR37, read-only: the entries as a list.
@@ -584,6 +645,27 @@ function previewHTML(body) {
       `<div id="${NOTE_EDITOR_ID}" class="note-preview-content note-live-editor cockpit-pane-editor" ` +
       `data-pane-editor="${escapeHtml(body.noteId)}" role="textbox" aria-multiline="true" ` +
       'aria-label="Note text. Click a line to edit it." tabindex="0"></div>'
+    );
+  }
+  if (body.type === 'chat') {
+    // Read-only: no input. Message text is rendered Markdown, which is
+    // sanitised; it is never put in as raw HTML.
+    const items = body.messages
+      .map(
+        message =>
+          `<li class="cockpit-chat-message is-${escapeHtml(message.role)}">` +
+          `<div class="cockpit-chat-who"><span>${escapeHtml(message.who)}</span>` +
+          `<span class="cockpit-chat-time">${escapeHtml(message.at)}</span></div>` +
+          `<div class="cockpit-pane-markdown">${renderMarkdown(message.text)}</div></li>`
+      )
+      .join('');
+    return (
+      (body.earlier
+        ? '<p class="cockpit-pane-note" data-chat-earlier>Earlier messages are in the chat.</p>'
+        : '') +
+      (items
+        ? `<ol class="cockpit-chat-list" aria-label="Messages, oldest first">${items}</ol>`
+        : '<p class="cockpit-pane-note">No messages in this chat yet.</p>')
     );
   }
   if (body.type === 'markdown') {

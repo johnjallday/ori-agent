@@ -2784,6 +2784,48 @@ body.home-command-page .ori-guide__launcher {
   }
 }
 
+/* A chat tab: the last messages, oldest first, read-only. The author is said
+   in words ("You", the agent's name); the user's messages are also set apart
+   by an indent and a filled panel, never by colour alone. */
+.cockpit-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cockpit-chat-message {
+  max-width: 760px;
+  padding: 10px 14px;
+  border: 1px solid var(--hc-line);
+  border-radius: 8px;
+  background: var(--hc-panel-raised);
+}
+
+.cockpit-chat-message.is-user {
+  margin-left: 32px;
+  background: var(--hc-panel);
+}
+
+.cockpit-chat-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.cockpit-chat-time {
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 400;
+}
+
 /* A selected group district reads as selected the same way a site does. */
 .cockpit-map .ws-map-district-tag.is-selected {
   border-color: var(--hc-signal);

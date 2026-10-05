@@ -75,6 +75,13 @@ func RegisterRoutes(mux *http.ServeMux, h *HTTPHandler) {
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/files", h.UploadFile)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/files/{relativePath...}", h.ServeFile)
 
+	// Outputs: what task runs saved under the workspace's outputs/ folder,
+	// read-only. The literal /outputs/tree wins over the wildcard, as
+	// /files/tree does, so an output named "tree" at the top of the folder is
+	// listed but cannot be read by this route.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/outputs/tree", h.GetWorkspaceOutputsTree)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/outputs/{relativePath...}", h.ServeWorkspaceOutputFile)
+
 	// Agents: list profiles + in-place model edit (G2e). The /agents/{name}/*
 	// sub-resources are registered separately in server/routes.go; POST/DELETE
 	// /agents fall through to the session handler (add/remove agent).

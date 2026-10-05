@@ -29,6 +29,8 @@ export const MENU_MOVE = 'move';
 export const MENU_DELETE = 'delete';
 export const MENU_FILE_OPEN = 'file-open';
 export const MENU_FILE_REVEAL = 'file-reveal';
+// Show the workspace's outputs/ folder in the file manager.
+export const MENU_SHOW_OUTPUTS = 'show-outputs';
 
 const item = (action, label, extra) => ({ action, label, ...extra });
 const DIVIDER = { divider: true };
@@ -37,7 +39,7 @@ const DIVIDER = { divider: true };
  * The menu for a row, as a list of `{ action, label }` (and `{ divider: true }`
  * between groups). An empty list means the row has no menu, and no "⋯" button.
  *
- * This is the PRD's menu table (FR55) for Release 1 rows:
+ * This is the PRD's menu table (FR55):
  *
  *   group              Open group, New note, New ticket, Upload file…,
  *                      Refresh, Move…, Delete
@@ -47,9 +49,17 @@ const DIVIDER = { divider: true };
  *   Backlog section    New ticket
  *   Files section,
  *   a folder in Files  Upload file…
+ *   Outputs section    Show outputs folder
  *   note, ticket,
  *   agent              Open, Open in workspace
  *   file under files/  Open, Open in default app, Reveal in Finder
+ *   output file,
+ *   linked-folder file Open
+ *
+ * A folder in Outputs has no menu: nothing is uploaded into outputs/, and
+ * one output file is not opened or revealed on its own (decision D15). A
+ * linked folder and the folders inside it have none either; the workspace's
+ * Refresh reloads the linked folders that are open.
  */
 export function menuItemsFor(row) {
   const kind = row && row.kind;
@@ -71,10 +81,11 @@ export function menuItemsFor(row) {
     if (row.section === 'notes') return [item(MENU_NEW_NOTE, 'New note')];
     if (row.section === 'backlog') return [item(MENU_NEW_TICKET, 'New ticket')];
     if (row.section === 'files') return [item(MENU_UPLOAD, 'Upload file…')];
+    if (row.section === 'outputs') return [item(MENU_SHOW_OUTPUTS, 'Show outputs folder')];
     return [];
   }
   if (kind === 'folder') return [item(MENU_UPLOAD, 'Upload file…')];
-  if (kind === 'note' || kind === 'ticket' || kind === 'agent') {
+  if (kind === 'note' || kind === 'ticket' || kind === 'agent' || kind === 'chat') {
     return [item(MENU_OPEN, 'Open'), item(MENU_OPEN_IN_WORKSPACE, 'Open in workspace')];
   }
   if (kind === 'file') {
@@ -84,6 +95,7 @@ export function menuItemsFor(row) {
       item(MENU_FILE_REVEAL, 'Reveal in Finder')
     ];
   }
+  if (kind === 'output' || kind === 'linkedFile') return [item(MENU_OPEN, 'Open')];
   return [];
 }
 
