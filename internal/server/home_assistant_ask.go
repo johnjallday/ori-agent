@@ -400,6 +400,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		if s.Storage.SessionStore != nil {
 			handler.SetConversationStore(personalAssistantConversationAdapter{store: s.Storage.SessionStore})
 		}
+		if s.Storage.PersonalAssistantFolderObservations != nil {
+			handler.SetFolderSetups(s.Storage.PersonalAssistantFolderObservations)
+		}
 	}
 
 	// Ori Guide reuses the same system model, but only to reword an answer it

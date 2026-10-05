@@ -28,15 +28,18 @@ type heldFolderObservation struct {
 	identity    string
 	result      folderdigest.Result
 	observation foldercontext.Observation
+	saved       bool // once consumed, this ID can never masquerade as fresh staging
 }
 
 // FolderObservationService borrows the trusted picker/scan dependencies, never
 // the digest's mutating ScanChip/ScanPicked APIs. Paths remain process-local.
 type FolderObservationService struct {
-	digest     *FolderDigestService
-	mu         sync.Mutex
-	selections map[string]heldFolderObservation
-	busy       map[string]bool
+	digest      *FolderDigestService
+	mu          sync.Mutex
+	selections  map[string]heldFolderObservation
+	busy        map[string]bool
+	reviewGuard func(context.Context, FolderOffer) error
+	reviewLease func(foldercontext.Target) (func(), bool)
 }
 
 func NewFolderObservationService(digest *FolderDigestService) *FolderObservationService {
@@ -216,6 +219,18 @@ func (s *FolderObservationService) Status(ctx context.Context, target foldercont
 	return reason
 }
 
+// WasSaved checks process-local consumption only, without touching the source.
+// The host still requires the exact active canonical snapshot for such IDs.
+func (s *FolderObservationService) WasSaved(target foldercontext.Target, id string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	selection, ok := s.selections[id]
+	return ok && selection.target == target && selection.saved
+}
+
 // BindSaved moves exactly one staged selection to its newly saved conversation.
 // It does not restore a missing selection, and is called only after persistence.
 func (s *FolderObservationService) BindSaved(target foldercontext.Target, id, conversationID string) {
@@ -225,10 +240,11 @@ func (s *FolderObservationService) BindSaved(target foldercontext.Target, id, co
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	selection, ok := s.selections[id]
-	if !ok || selection.target != target || target.ConversationID != "" {
+	if !ok || selection.target != target || (target.ConversationID != "" && target.ConversationID != conversationID) {
 		return
 	}
 	selection.target.ConversationID, selection.target.DraftID = conversationID, ""
+	selection.saved = true
 	s.selections[id] = selection
 }
 
@@ -276,7 +292,7 @@ func summarizeFolder(result folderdigest.Result, id string) foldercontext.Observ
 		if name == "" {
 			name = "Unnamed folder"
 		}
-		project := foldercontext.Project{ID: fmt.Sprintf("candidate-%d", index), Name: name, Files: candidate.FileCount}
+		project := foldercontext.Project{ID: fmt.Sprintf("candidate-%d", index), Name: name, Files: candidate.FileCount, Root: candidate.IsRoot}
 		if candidate.Marker != nil {
 			project.Marker = foldercontext.DisplayName(candidate.Marker.Name)
 		}

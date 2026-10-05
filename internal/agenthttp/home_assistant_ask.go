@@ -177,6 +177,7 @@ type HomeAssistantAskHandler struct {
 	// conversations; nil keeps every turn stateless.
 	Conversations      PersonalAssistantConversationStore
 	FolderObservations PersonalAssistantFolderObservations
+	FolderSetups       PersonalAssistantFolderSetups
 	folderRequests     folderRequestGate
 	// Drafts saves a reviewed conversation draft as one HQ Backlog Ticket; nil
 	// leaves the save action unavailable.

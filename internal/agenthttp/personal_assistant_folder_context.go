@@ -62,6 +62,7 @@ type PersonalAssistantFolderObservations interface {
 	Resolve(context.Context, foldercontext.Target, string) (*foldercontext.Observation, error)
 	Status(context.Context, foldercontext.Target, foldercontext.Observation) personalassistant.FolderContinuationReason
 	BindSaved(foldercontext.Target, string, string)
+	WasSaved(foldercontext.Target, string) bool
 }
 
 // PersonalAssistantFolderConversationStore is an optional extension of the
@@ -128,6 +129,34 @@ func (h *HomeAssistantAskHandler) folderState(ctx context.Context, target folder
 		return state, foldercontext.ErrInvalid
 	}
 	return folderStateFromMessages(messages), nil
+}
+
+// A live reference that was already retired in this thread is not staging.
+// Knowing its ID from history must not resurrect setup or discussion authority.
+func (h *HomeAssistantAskHandler) resolveFolderObservation(ctx context.Context, target foldercontext.Target, id string) (*foldercontext.Observation, error) {
+	if target.ConversationID != "" {
+		store := h.folderStore()
+		if store == nil {
+			return nil, foldercontext.ErrInvalid
+		}
+		record, messages, err := store.ReadFolderConversation(ctx, target.ConversationID)
+		scope := personalAssistantConversationScope{workspaceID: target.WorkspaceID, agentName: target.AgentName}
+		if err != nil || !scope.owns(record) {
+			return nil, foldercontext.ErrInvalid
+		}
+		state := folderStateFromMessages(messages)
+		if state.Observation == nil || state.Observation.ID != id {
+			if h.FolderObservations.WasSaved(target, id) {
+				return nil, foldercontext.ErrInvalid
+			}
+			for _, message := range messages {
+				if !message.Imported && message.FolderContext != nil && message.FolderContext.Observation != nil && message.FolderContext.Observation.ID == id {
+					return nil, foldercontext.ErrInvalid
+				}
+			}
+		}
+	}
+	return h.FolderObservations.Resolve(ctx, target, id)
 }
 
 func folderStateFromMessages(messages []PersonalAssistantConversationMessage) PersonalAssistantFolderState {

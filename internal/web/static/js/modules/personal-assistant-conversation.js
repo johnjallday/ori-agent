@@ -271,6 +271,10 @@ async function resume(id, options = {}) {
       conversation.id,
       result.body.folder_context || {}
     );
+    window.PersonalAssistantFolderSetup?.hydrate?.(
+      conversation.id,
+      result.body.folder_reviews || {}
+    );
     setNote(
       partial
         ? 'Showing the most recent messages of this conversation. Earlier ones are still stored.'

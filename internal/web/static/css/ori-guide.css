@@ -921,6 +921,20 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   min-height: 40px;
 }
 
+.personal-assistant-panel #personalAssistantReviewFolderSetup {
+  color: var(--pa-accent-text);
+  text-underline-offset: 3px;
+}
+
+.personal-assistant-panel #personalAssistantFolderWorkspaceNameLabel {
+  display: block;
+  margin: 8px 0;
+}
+
+.personal-assistant-panel #personalAssistantFolderWorkspaceNameLabel[hidden] {
+  display: none;
+}
+
 /* Reused compact choice buttons. */
 .personal-assistant-panel__chips {
   display: flex;

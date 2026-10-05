@@ -27,6 +27,7 @@ type folderObservationStub struct {
 	onObserve   func()
 	status      personalassistant.FolderContinuationReason
 	statusCalls int
+	saved       bool
 }
 
 func newFolderObservationStub() *folderObservationStub {
@@ -40,6 +41,7 @@ func (s *folderObservationStub) Choices(context.Context, string) (personalassist
 func (s *folderObservationStub) Observe(_ context.Context, target foldercontext.Target, mode, chip string) (*foldercontext.Observation, error) {
 	s.calls++
 	s.target = target
+	s.saved = false
 	if s.onObserve != nil {
 		s.onObserve()
 	}
@@ -63,7 +65,11 @@ func (s *folderObservationStub) Status(context.Context, foldercontext.Target, fo
 func (s *folderObservationStub) BindSaved(target foldercontext.Target, id, conversationID string) {
 	if target == s.target && id == s.observation.ID {
 		s.target.ConversationID, s.target.DraftID = conversationID, ""
+		s.saved = true
 	}
+}
+func (s *folderObservationStub) WasSaved(target foldercontext.Target, id string) bool {
+	return s.saved && target == s.target && id == s.observation.ID
 }
 
 func folderHTTP(handler http.HandlerFunc, body string) *httptest.ResponseRecorder {

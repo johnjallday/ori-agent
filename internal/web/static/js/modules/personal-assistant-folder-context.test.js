@@ -180,11 +180,62 @@ test('historical snapshot is explicit; busy turn cannot mutate its context', asy
   f.setId('saved');
   f.controller.reset('saved', { revision: 'r1', observation: observation('a'), authority: 'lost' });
   assert.deepEqual(f.controller.request(), { selection_id: 'a', revision: 'r1', historical: true });
-  f.controller.accepted('saved', { revision: 'r2', observation: observation('a'), historical: true });
+  f.controller.accepted('saved', {
+    revision: 'r2',
+    observation: observation('a'),
+    historical: true
+  });
   assert.equal(f.controller.state.authority, 'lost');
   assert.deepEqual(f.controller.request(), { selection_id: 'a', revision: 'r2', historical: true });
   f.setBusy(true);
   assert.equal(await f.controller.select('picker'), false);
   assert.equal(await f.controller.remove(), false);
   assert.equal(f.calls.length, 0);
+});
+
+test('explicit review sends opaque candidate and scope, never contents or a model turn', async () => {
+  const f = fixture(async url =>
+    url.endsWith('/select')
+      ? { observation: observation('a') }
+      : { conversation: { id: 'saved', stored: true } }
+  );
+  await f.controller.select('chip', 'documents');
+  const result = await f.controller.review('root');
+  assert.equal(result.conversation.id, 'saved');
+  assert.deepEqual(f.calls[1], {
+    url: '/api/home-assistant/folder-context/review',
+    body: { draft_id: 'opaque-draft', revision: '', selection_id: 'a', candidate_id: 'root' }
+  });
+  assert.equal(f.controller.state.pending, false);
+  f.setId('saved');
+  f.controller.accepted('saved', {
+    observation: observation('a'),
+    revision: 'r1',
+    offer_id: 'offer'
+  });
+  await f.controller.review('', true);
+  assert.deepEqual(f.calls[2].body, {
+    conversation_id: 'saved',
+    revision: 'r1',
+    offer_id: 'offer'
+  });
+});
+
+test('late review cannot bind a new conversation and historical context cannot request setup', async () => {
+  const pending = deferred();
+  const f = fixture(() => pending.promise);
+  f.controller.reset('', { observation: observation('a') });
+  const review = f.controller.review('root');
+  f.setId('other');
+  f.controller.reset('other');
+  pending.resolve({ conversation: { id: 'wrong', stored: true } });
+  assert.equal(await review, null);
+  assert.equal(f.controller.state.observation, null);
+  f.controller.reset('other', {
+    observation: observation('old'),
+    revision: 'r1',
+    authority: 'lost'
+  });
+  assert.equal(await f.controller.review('root'), null);
+  assert.equal(f.calls.length, 1);
 });

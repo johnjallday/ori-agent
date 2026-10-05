@@ -23,13 +23,13 @@ const (
 var ErrInvalid = errors.New("folder context is invalid")
 
 // Target is supplied by the host after checking canonical conversation ownership.
-// DraftID is used only until the first answered turn is saved.
+// DraftID is used only until an answered turn or explicit setup review is saved.
 type Target struct {
-	UserID         string
-	WorkspaceID    string
-	AgentName      string
-	ConversationID string
-	DraftID        string
+	UserID         string `json:"user_id"`
+	WorkspaceID    string `json:"workspace_id"`
+	AgentName      string `json:"agent_name"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	DraftID        string `json:"draft_id,omitempty"`
 }
 
 func (t Target) Valid() bool {
@@ -47,6 +47,7 @@ type Project struct {
 	Name   string `json:"name"`
 	Files  int    `json:"files"`
 	Marker string `json:"marker,omitempty"` // known marker label, not arbitrary filename
+	Root   bool   `json:"root,omitempty"`
 }
 
 type Coverage struct {

@@ -38,16 +38,30 @@ test('the assistant portrait explores only while a scan is in flight, then shows
       })
     })
   );
+  await page.route('**/api/home-assistant/folder-context/choices', route =>
+    route.fulfill({
+      json: {
+        chips: [{ id: 'documents', label: 'Documents' }],
+        picker_available: false
+      }
+    })
+  );
+  const mutations: string[] = [];
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    // Today retains its existing read receipt; it is not a folder/setup action.
+    if (request.method() === 'POST' && path !== '/api/personal-hq/brief/open') mutations.push(path);
+  });
   let finishScan: (() => void) | undefined;
   let requestedChip = '';
   let failNext = false;
-  await page.route('**/api/personal-assistant/folder-digest/scan', async route => {
+  await page.route('**/api/home-assistant/folder-context/select', async route => {
     requestedChip = route.request().postDataJSON().chip;
     if (failNext) {
       await route.fulfill({
         status: 503,
         contentType: 'application/json',
-        body: '{"error":"Temporarily unavailable"}'
+        body: '{"error":"unavailable","message":"Temporarily unavailable"}'
       });
       return;
     }
@@ -58,36 +72,45 @@ test('the assistant portrait explores only while a scan is in flight, then shows
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        offer: {
-          id: 'scene-offer',
-          status: 'pending',
-          verdict: 'mixed',
+        observation: {
+          version: 1,
+          id: 'scene-selection',
           folder: 'Documents',
-          subject: { name: 'Thesis' },
-          projects_count: 3,
-          loose_files: 40,
-          reason: '3 projects and 40 loose files',
-          create_available: true
+          scanned_at: '2026-10-05T10:00:00Z',
+          files: 43,
+          entries: 46,
+          kinds: [
+            { name: '.txt', count: 40 },
+            { name: '.md', count: 3 }
+          ],
+          projects: ['Thesis', 'website', 'Album'].map((name, i) => ({
+            id: `candidate-${i}`,
+            name,
+            files: 1
+          })),
+          coverage: { max_depth: 3, max_entries: 5000, budget_seconds: 3, partial: false }
         }
       })
     });
   });
-  // The link opens the drawer and starts the folder flow as a turn in the
-  // conversation: the request, then the chooser as the assistant's reply.
+  // Browser selection fixture: the link opens only local controls, not a
+  // fabricated user/model exchange or a shared setup offer.
   await page.goto('/?panel=today&folder=show');
   const scene = page.locator('#personalAssistantFolderScene');
-  const turn = page.locator('#personalAssistantThread #personalAssistantFolder');
-  const chooser = page.locator('#personalAssistantFolderChooser');
+  const turn = page.locator('.personal-assistant-panel__scroll');
+  const chooser = page.locator('#personalAssistantContextChooser');
   const chip = page.locator('#personalAssistantFolderChip');
-  await expect(turn.locator('#personalAssistantFolderChooser')).toBeVisible();
-  await expect(page.locator('#personalAssistantFolderRequest')).toContainText('Explore a folder');
-  await expect(chooser).toContainText('Which folder should I explore?');
-  await expect(chooser).toContainText('A read-only peek. Nothing moves.');
+  await expect(turn.locator('#personalAssistantContextChooser')).toBeVisible();
+  await expect(page.locator('#personalAssistantFolderRequest')).toBeHidden();
+  await expect(page.locator('#homeAssistantConversation [data-message-role]')).toHaveCount(0);
+  await expect(chooser).toContainText('Add folder context');
+  await expect(chooser).toContainText('Nothing goes to your configured model until Send');
   // The scene is the reply after a folder is chosen, not before.
   await expect(scene).toBeHidden();
-  // One folder at a time: the chip waits while this one is being chosen.
+  // Opening choices is not a scan, model turn, or setup decision.
   await expect(chip).toBeVisible();
-  await expect(chip).toBeDisabled();
+  await expect(chip).toBeEnabled();
+  expect(mutations).toEqual([]);
   await expect(page.locator('#personalAssistantHQCard')).toBeHidden();
   await expect(page.locator('#personalAssistantNeedsYouQueue')).toBeHidden();
   await expect(page.locator('#personalAssistantTodayTitle')).toHaveText('Today from Atlas');
@@ -145,7 +168,7 @@ test('the assistant portrait explores only while a scan is in flight, then shows
     const top = (id: string) => document.getElementById(id)!.getBoundingClientRect().top;
     return [
       top('personalAssistantSummary'),
-      top('personalAssistantFolder'),
+      top('personalAssistantContextChooser'),
       top('personalAssistantFolderChip'),
       top('personalAssistantInput')
     ];
@@ -154,7 +177,10 @@ test('the assistant portrait explores only while a scan is in flight, then shows
 
   await expect(page.locator('#personalAssistantFolderShowBtn')).toHaveCount(0);
   await expect(chooser).toBeVisible();
-  await page.locator('#personalAssistantFolderChips button[data-chip="documents"]').click();
+  await page
+    .locator('#personalAssistantFolderChoices')
+    .getByRole('button', { name: 'Documents', exact: true })
+    .click();
   await expect(scene).toBeVisible();
   await expect(scene).toHaveAttribute('data-phase', 'scanning');
   await expect(scene.locator('#personalAssistantFolderSceneAvatar .agent-avatar')).toBeVisible();
@@ -173,22 +199,19 @@ test('the assistant portrait explores only while a scan is in flight, then shows
     .evaluate(el => getComputedStyle(el).animationName);
   expect(motion).toContain('pa-folder-nibble');
   finishScan?.();
-  await expect(scene).toHaveAttribute('data-phase', 'found');
-  // The folder is chosen: the scene and the offer are the replies now, and
-  // another folder can be asked for.
+  await expect(scene).toBeHidden();
   await expect(chooser).toBeHidden();
   await expect(chip).toBeEnabled();
-  await expect(scene.locator('#personalAssistantFolderSceneFinds')).toHaveText(
-    '3 projects40 loose files'
-  );
-  await expect(turn.locator('#personalAssistantFolderOffer')).toBeVisible();
-  await expect(
-    page.locator('#personalAssistantNeedsYouCards #personalAssistantFolderOffer')
-  ).toHaveCount(0);
-  await expect(page.locator('#personalAssistantFolderOffer .pa-folder__why')).toBeVisible();
-  await expect(page.locator('#personalAssistantFolderOfferReason')).toBeHidden();
-  await page.locator('#personalAssistantFolderOffer .pa-folder__why summary').click();
-  await expect(page.locator('#personalAssistantFolderOfferReason')).toBeVisible();
+  const preview = page.locator('#personalAssistantFolderPreview');
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText('43 files observed');
+  await expect(preview).toContainText('File contents have not been read');
+  await preview.locator('summary').click();
+  await expect(preview).toContainText('Thesis');
+  await expect(preview).toContainText('website');
+  await expect(preview).toContainText('Album');
+  await expect(page.locator('#personalAssistantFolderOffer')).toBeHidden();
+  expect(mutations).toEqual(['/api/home-assistant/folder-context/select']);
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const reduced = await scene
@@ -202,17 +225,18 @@ test('the assistant portrait explores only while a scan is in flight, then shows
   // Asking again reopens the chooser in the same turn.
   failNext = true;
   await chip.click();
-  await expect(page.locator('#personalAssistantFolderTitle')).toHaveText(
-    'Or explore another folder'
-  );
-  await page.locator('#personalAssistantFolderChips button[data-chip="documents"]').click();
-  await expect(scene).toHaveAttribute('data-phase', 'error');
-  await expect(scene.locator('#personalAssistantFolderSceneFinds')).toBeEmpty();
-  await expect(page.locator('#personalAssistantFolderStatus')).toHaveText(
+  await expect(chooser).toBeVisible();
+  await page
+    .locator('#personalAssistantFolderChoices')
+    .getByRole('button', { name: 'Documents', exact: true })
+    .click();
+  await expect(scene).toBeHidden();
+  await expect(preview).toContainText('43 files observed');
+  await expect(page.locator('#personalAssistantContextStatus')).toHaveText(
     'Temporarily unavailable'
   );
   await page.setViewportSize({ width: 390, height: 800 });
-  await expect(scene).toBeVisible();
+  await expect(preview).toBeVisible();
   await moreToggle.click();
   await expect(more.getByRole('link', { name: 'Workspace memory' })).toBeVisible();
   const widths = await page.evaluate(() => [
@@ -231,13 +255,16 @@ test('the assistant portrait explores only while a scan is in flight, then shows
     payload.today.interview_status = 'offered';
     await route.fulfill({ response, json: payload });
   });
-  // A fresh page with nothing waiting: no folder turn, nothing folded, and the
-  // chip ready.
+  // No unsent folder survives a reload. Unrelated attention starts compact,
+  // but its original decision and HQ receipt remain available behind Show.
   await page.reload();
   await page.locator('#personalAssistantLauncher').click();
-  await expect(page.locator('#personalAssistantNeedsYou')).toBeVisible();
+  await expect(page.locator('#personalAssistantNeedsYou')).toBeHidden();
   await expect(page.locator('#personalAssistantFolder')).toBeHidden();
-  await expect(summary).toBeHidden();
+  await expect(summary).toBeVisible();
+  await expect(summaryToggle).toHaveAttribute('aria-expanded', 'false');
+  await summaryToggle.click();
+  await expect(page.locator('#personalAssistantNeedsYou')).toBeVisible();
   await expect(chip).toBeEnabled();
   await moreToggle.click();
   await expect(page.locator('#personalAssistantTodayInterview')).toHaveAttribute(

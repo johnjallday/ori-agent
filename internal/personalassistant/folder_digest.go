@@ -172,8 +172,10 @@ type FolderWorkspaceLinker interface {
 type FolderCreateRequest struct {
 	UserID  string
 	OfferID string
-	// Name is the folder's base name, the workspace's name too.
+	// Name is the proposed workspace name, defaulting to the folder's base name.
 	Name string
+	// FolderName preserves the observed folder label when Name was adjusted.
+	FolderName string
 	// Path is the folder's canonical absolute path from the offer the server
 	// holds.
 	Path  string
@@ -477,6 +479,11 @@ type FolderDigestService struct {
 	store *FolderDigestStore
 	deps  FolderDigestDeps
 
+	// Conversation offers never reconstruct a chip path or outlive their
+	// canonical review authority. Wired once alongside the observation service.
+	conversationSource func(FolderOffer) (string, bool)
+	conversationLease  func(context.Context, FolderOffer) (func(), error)
+
 	mu       sync.Mutex
 	paths    map[string]string // offer id → canonical root; memory only (FR27)
 	scanning map[string]bool   // user id → a scan is in flight
@@ -524,18 +531,20 @@ type FolderDigestView struct {
 // FolderOfferView is an offer as the browser sees it: names and counts,
 // never a path.
 type FolderOfferView struct {
-	ID            string                   `json:"id"`
-	Status        FolderOfferStatus        `json:"status"`
-	Verdict       string                   `json:"verdict"`
-	Reason        string                   `json:"reason"`
-	Partial       bool                     `json:"partial,omitempty"`
-	Folder        string                   `json:"folder"`
-	Chip          string                   `json:"chip,omitempty"`
-	Subject       FolderSubjectView        `json:"subject"`
-	ProjectsCount int                      `json:"projects_count,omitempty"`
-	Portfolio     *FolderPortfolioEvidence `json:"portfolio,omitempty"`
-	LooseFiles    int                      `json:"loose_files,omitempty"`
-	LooseKinds    int                      `json:"loose_kinds,omitempty"`
+	ReviewDigest   string                   `json:"review_digest,omitempty"`
+	ConversationID string                   `json:"conversation_id,omitempty"`
+	ID             string                   `json:"id"`
+	Status         FolderOfferStatus        `json:"status"`
+	Verdict        string                   `json:"verdict"`
+	Reason         string                   `json:"reason"`
+	Partial        bool                     `json:"partial,omitempty"`
+	Folder         string                   `json:"folder"`
+	Chip           string                   `json:"chip,omitempty"`
+	Subject        FolderSubjectView        `json:"subject"`
+	ProjectsCount  int                      `json:"projects_count,omitempty"`
+	Portfolio      *FolderPortfolioEvidence `json:"portfolio,omitempty"`
+	LooseFiles     int                      `json:"loose_files,omitempty"`
+	LooseKinds     int                      `json:"loose_kinds,omitempty"`
 	// Remember says whether the card may promise "I will also remember"
 	// (FR22, FR39, FR52).
 	Remember bool `json:"remember"`
@@ -614,7 +623,9 @@ type FolderDecisionInput struct {
 	// Create asks the assistant to set the project workspace up itself (the
 	// card's confirmed plan) rather than wait for the Create Workspace modal.
 	// Ignored for anything but a project yes.
-	Create bool
+	Create        bool
+	WorkspaceName string // optional adjustment on a conversation-bound generic review
+	ReviewDigest  string
 }
 
 func (s *FolderDigestService) now() time.Time { return s.deps.Now() }
@@ -1042,15 +1053,42 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 	// and a retried click can try again (FR33).
 	var tidy *FolderTidyResult
 	var created *FolderCreateResult
-	if input.Decision == FolderDecisionYes {
-		doc, err := s.store.Read(ctx, userID)
+	doc, err := s.store.Read(ctx, userID)
+	if err != nil {
+		return FolderOfferView{}, err
+	}
+	offer := doc.Offer(offerID)
+	if offer == nil {
+		return FolderOfferView{}, ErrFolderOfferNotFound
+	}
+	input.WorkspaceName = strings.TrimSpace(input.WorkspaceName)
+	if input.WorkspaceName != "" && (offer.ConversationReview == nil || !input.Create || validateFolderName(input.WorkspaceName) != nil) {
+		return FolderOfferView{}, fmt.Errorf("%w: workspace name", ErrValidation)
+	}
+	if doc.Receipt(input.RequestID) == nil && offer.Status == FolderOfferPending {
+		release, guardErr := s.acquireConversationReview(ctx, *offer)
+		if guardErr != nil {
+			return FolderOfferView{}, guardErr
+		}
+		defer release()
+		// The first read may have raced a just-finished confirmation. Re-read
+		// under the lease before any creator, not only when recording its result.
+		doc, err = s.store.Read(ctx, userID)
 		if err != nil {
 			return FolderOfferView{}, err
 		}
-		offer := doc.Offer(offerID)
-		if offer == nil {
-			return FolderOfferView{}, ErrFolderOfferNotFound
+		offer = doc.Offer(offerID)
+		if offer == nil || offer.Status != FolderOfferPending {
+			return FolderOfferView{}, ErrFolderOfferDecided
 		}
+	}
+	if input.Decision == FolderDecisionYes && input.Create && offer.ConversationReview != nil && offer.Status == FolderOfferPending {
+		view := s.viewFor(ctx, userID, *offer, binding.Paused)
+		if input.ReviewDigest == "" || input.ReviewDigest != view.ReviewDigest {
+			return view, ErrFolderPlanChanged
+		}
+	}
+	if input.Decision == FolderDecisionYes {
 		if input.Create && isProjectCapabilityOffer(*offer) {
 			return FolderOfferView{}, ErrFolderOutcomeUnavailable
 		}
@@ -1070,7 +1108,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 				}
 				tidy = &result
 			case choice == FolderChoiceProject && input.Create:
-				result, err := s.runCreate(ctx, userID, *offer, input.RequestID)
+				result, err := s.runCreate(ctx, userID, *offer, input.RequestID, input.WorkspaceName)
 				if err != nil {
 					return FolderOfferView{}, err
 				}
@@ -1181,7 +1219,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 // runCreate has the host set the project workspace up for the offer's
 // subject: the folder's name, the shape's installed blueprint, the folder
 // linked, the first task seeded.
-func (s *FolderDigestService) runCreate(ctx context.Context, userID string, offer FolderOffer, requestID string) (FolderCreateResult, error) {
+func (s *FolderDigestService) runCreate(ctx context.Context, userID string, offer FolderOffer, requestID, workspaceName string) (FolderCreateResult, error) {
 	if s.deps.Creator == nil {
 		return FolderCreateResult{}, ErrFolderOutcomeUnavailable
 	}
@@ -1190,8 +1228,11 @@ func (s *FolderDigestService) runCreate(ctx context.Context, userID string, offe
 		return FolderCreateResult{}, err
 	}
 	blueprint, _, _ := s.blueprintForOffer(offer)
+	if workspaceName == "" {
+		workspaceName = offer.Subject.Name
+	}
 	result, err := s.deps.Creator.CreateProjectWorkspace(ctx, FolderCreateRequest{
-		UserID: userID, OfferID: offer.ID, Name: offer.Subject.Name, Path: path,
+		UserID: userID, OfferID: offer.ID, Name: workspaceName, FolderName: offer.Subject.Name, Path: path,
 		Shape: folderdigest.Shape(offer.Subject.Shape), Blueprint: blueprint, RequestID: requestID,
 	})
 	if err != nil {
@@ -1667,6 +1708,11 @@ func (s *FolderDigestService) PortfolioProvider(ctx context.Context, userID, off
 		offer.DecidedAt == nil || offer.CapabilitySuppressed || offer.Portfolio == nil {
 		return "", ErrFolderOfferDecided
 	}
+	if offer.ConversationReview != nil {
+		if _, ok := s.rootPath(*offer); !ok {
+			return "", ErrFolderSelection
+		}
+	}
 	return offer.Portfolio.ProviderKey, nil
 }
 
@@ -1986,6 +2032,9 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 		ProjectsCount: offer.ProjectsCount, Portfolio: offer.Portfolio, LooseFiles: offer.LooseFiles, LooseKinds: offer.LooseKinds,
 		Decision: offer.Decision, Choice: offer.Choice, Outcome: offer.Outcome,
 	}
+	if offer.ConversationReview != nil {
+		v.ConversationID = offer.ConversationReview.Target.ConversationID
+	}
 	if offer.Status == FolderOfferPending || offer.Status == FolderOfferAwaitingOutcome {
 		_, ok := s.rootPath(offer)
 		v.NeedsPick = !ok
@@ -2061,6 +2110,9 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 		}
 	}
 	s.attachSetupRun(offer, &v)
+	if offer.ConversationReview != nil && v.CreateAvailable && v.Capability == nil {
+		v.ReviewDigest = conversationReviewDigest(offer, v)
+	}
 	return v
 }
 
@@ -2134,6 +2186,12 @@ func (s *FolderDigestService) rememberPath(offerID, root string) {
 // chip it came from after a restart. A picker-chosen folder is known only to
 // the process that scanned it.
 func (s *FolderDigestService) rootPath(offer FolderOffer) (string, bool) {
+	if offer.ConversationReview != nil {
+		if s.conversationSource == nil {
+			return "", false
+		}
+		return s.conversationSource(offer)
+	}
 	s.mu.Lock()
 	root, ok := s.paths[offer.ID]
 	s.mu.Unlock()

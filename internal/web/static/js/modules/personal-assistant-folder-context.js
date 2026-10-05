@@ -10,7 +10,8 @@ export function observationSummary(observation) {
   if (!observation) return '';
   const kinds = (observation.kinds || []).map(kind => `${kind.count} ${kind.name}`).join(' · ');
   const partial = observation.coverage?.partial ? 'Partial look' : 'Bounded look';
-  return `${partial}: ${observation.files || 0} files observed${kinds ? ` · ${kinds}` : ''}.`;
+  const files = observation.files || 0;
+  return `${partial}: ${files} ${files === 1 ? 'file' : 'files'} observed${kinds ? ` · ${kinds}` : ''}.`;
 }
 
 export function coverageSummary(observation) {
@@ -36,9 +37,12 @@ export function createFolderContextController({
     revision: '',
     observation: null,
     accepted: null,
+    offerId: '',
     authority: '',
     preview: false,
     pending: false,
+    selecting: false,
+    scanName: '',
     generation: 0,
     notice: ''
   };
@@ -60,9 +64,12 @@ export function createFolderContextController({
       revision: saved.revision || '',
       observation: saved.observation || null,
       accepted: saved.observation || null,
+      offerId: saved.offer_id || '',
       authority: saved.authority || (saved.historical ? state.authority || 'historical' : ''),
       preview: false,
       pending: false,
+      selecting: false,
+      scanName: '',
       notice: ''
     });
     changed(state);
@@ -75,6 +82,8 @@ export function createFolderContextController({
     const generation = ++state.generation;
     const owner = state.conversationId;
     state.pending = true;
+    state.selecting = true;
+    state.scanName = chip ? chip[0].toUpperCase() + chip.slice(1) : '';
     notify('Looking at folder metadata locally… No file contents are read.');
     try {
       const result = await post(`${ENDPOINT}/select`, {
@@ -91,6 +100,7 @@ export function createFolderContextController({
       if (typeof result.revision === 'string' && result.revision !== state.revision) {
         state.revision = result.revision;
         state.accepted = null; // server retired the previous binding/reviews
+        state.offerId = '';
       }
       state.authority = '';
       state.preview = true;
@@ -106,6 +116,7 @@ export function createFolderContextController({
     } finally {
       if (generation === state.generation) {
         state.pending = false;
+        state.selecting = false;
         changed(state);
       }
     }
@@ -131,6 +142,7 @@ export function createFolderContextController({
       }
       state.observation = null;
       state.accepted = null;
+      state.offerId = '';
       state.preview = false;
       state.authority = '';
       notify(
@@ -164,7 +176,45 @@ export function createFolderContextController({
     if (!saved) return;
     reset(id, saved);
   }
-  return { state, select, remove, reset, request, accepted, notify };
+  async function review(candidateId, close = false, offerId = state.offerId) {
+    if (
+      isBusy() ||
+      state.pending ||
+      (close ? !state.conversationId || !offerId : !state.observation || state.authority)
+    )
+      return null;
+    const generation = ++state.generation;
+    const owner = state.conversationId;
+    state.pending = true;
+    notify(
+      close
+        ? 'Closing this review…'
+        : 'Preparing the existing setup review… Nothing is created or sent to a model.'
+    );
+    try {
+      const result = await post(`${ENDPOINT}/review${close ? '/close' : ''}`, {
+        ...target(),
+        ...(close
+          ? { offer_id: offerId }
+          : { selection_id: state.observation.id, candidate_id: candidateId })
+      });
+      if (generation !== state.generation || currentId() !== owner) return null;
+      return result;
+    } catch (error) {
+      if (generation === state.generation)
+        notify(
+          error.message ||
+            'The review could not be saved. Reopen this conversation before retrying.'
+        );
+      return null;
+    } finally {
+      if (generation === state.generation) {
+        state.pending = false;
+        changed(state);
+      }
+    }
+  }
+  return { state, select, remove, reset, request, accepted, review, notify };
 }
 
 async function jsonRequest(url, body) {
@@ -226,6 +276,8 @@ function render(state) {
   updateSendHint();
   window.PersonalAssistantPanel?.setFolderBusy?.(state.pending, 'context');
   window.PersonalAssistantConversation?.refresh?.();
+  window.PersonalAssistantFolder?.contextProgress?.(state);
+  window.PersonalAssistantFolderSetup?.contextChanged?.(state);
 }
 
 function closeChooser() {
@@ -282,16 +334,35 @@ function renderEvent(id, event, beforeRow) {
   if (!id || !event) return null;
   const observation = event.observation;
   const key = `${observation?.id || 'removed'}:${event.offer_id || ''}`;
-  if (lastEventKey === key) return null;
+  const rendered = Array.from(document.querySelectorAll('[data-folder-context-key]'));
+  if (
+    (observation || lastEventKey === key) &&
+    rendered.some(row => row.dataset.folderContextKey === key)
+  ) {
+    lastEventKey = key;
+    return null;
+  }
+  const alreadyObserved =
+    observation && rendered.some(row => row.dataset.folderObservationId === observation.id);
   lastEventKey = key;
   const row = node('section', '', 'personal-assistant-folder-context');
   row.dataset.folderEventId = id;
+  row.dataset.folderContextKey = key;
   row.dataset.messageRole = 'folder_context';
   row.setAttribute(
     'aria-label',
     observation ? 'Saved folder observations' : 'Folder context removed'
   );
-  if (observation) {
+  if (alreadyObserved) {
+    row.append(
+      node(
+        'p',
+        `${observation.folder} · workspace setup review`,
+        'personal-assistant-folder-context__eyebrow'
+      )
+    );
+  } else if (observation) {
+    row.dataset.folderObservationId = observation.id;
     row.append(
       node(
         'p',
@@ -328,6 +399,11 @@ function renderEvent(id, event, beforeRow) {
         'Folder context removed. Earlier discussion remains history; completed setup is unchanged.'
       )
     );
+  }
+  if (event.offer_id) {
+    const slot = node('div', 'Loading saved setup review…');
+    slot.dataset.folderReviewId = event.offer_id;
+    row.append(slot);
   }
   return window.OriAskRouting?.appendContextEvent?.(row, beforeRow) || null;
 }
@@ -390,6 +466,15 @@ const api = {
     controller?.reset(id, saved);
   },
   renderEvent,
+  guide: () => {
+    if (controller && !controller.state.observation && !controller.state.conversationId)
+      controller.notify(
+        'Add a folder to discuss its structure, or review a workspace setup. Nothing happens automatically.'
+      );
+  },
+  review: (candidateId, close = false, offerId) => controller?.review(candidateId, close, offerId),
+  current: () => controller?.state,
+  notify: message => controller?.notify(message),
   resetEvents: () => {
     lastEventKey = undefined;
   },

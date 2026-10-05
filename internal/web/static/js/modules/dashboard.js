@@ -1457,6 +1457,7 @@
     if (!section) return;
 
     var hasConversation = hasHomeAssistantConversation();
+    syncHomeAssistantActivityIdle();
     var hasStructuredStep =
       hasVisibleHomeAssistantPlanning() || hasVisibleHomeAssistantInlineReply();
     var hasFailureState = hasHomeAssistantFailureState();
@@ -2041,6 +2042,7 @@
     conversation.appendChild(row);
 
     while (conversation.children.length > HOME_ASSISTANT_MESSAGE_LIMIT) {
+      window.PersonalAssistantFolderSetup?.park?.(conversation.firstChild);
       conversation.removeChild(conversation.firstChild);
     }
     syncHomeAssistantConversationSection();
@@ -13913,8 +13915,10 @@
       row,
       beforeRow && beforeRow.parentElement === conversation ? beforeRow : null
     );
-    while (conversation.children.length > HOME_ASSISTANT_MESSAGE_LIMIT)
+    while (conversation.children.length > HOME_ASSISTANT_MESSAGE_LIMIT) {
+      window.PersonalAssistantFolderSetup?.park?.(conversation.firstChild);
       conversation.removeChild(conversation.firstChild);
+    }
     syncHomeAssistantConversationSection();
     syncHomeAssistantLauncher();
     if (followLatest) scroll.scrollTop = scroll.scrollHeight;
@@ -13922,6 +13926,7 @@
   };
   window.OriAskRouting.resetConversation = function () {
     if (homeAssistantState.busy) return false;
+    window.PersonalAssistantFolderSetup?.park?.();
     var els = getHomeAssistantElements();
     if (els.conversation) {
       els.conversation.replaceChildren();

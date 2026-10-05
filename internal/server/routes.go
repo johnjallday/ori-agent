@@ -339,6 +339,8 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/home-assistant/folder-context/choices", homeAssistantAskHandler.FolderChoicesHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/select", homeAssistantAskHandler.SelectFolderContextHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/detach", homeAssistantAskHandler.DetachFolderContextHandler)
+	mux.HandleFunc("POST /api/home-assistant/folder-context/review", homeAssistantAskHandler.ReviewFolderSetupHandler)
+	mux.HandleFunc("POST /api/home-assistant/folder-context/review/close", homeAssistantAskHandler.CloseFolderReviewHandler)
 	// Saving a conversation draft to the HQ backlog: review (no write), then save.
 	mux.HandleFunc("POST /api/home-assistant/drafts/review", homeAssistantAskHandler.DraftReviewHandler)
 	mux.HandleFunc("POST /api/home-assistant/drafts/save", homeAssistantAskHandler.DraftSaveHandler)

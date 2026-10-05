@@ -16,6 +16,25 @@ async function shot(name) {
   await page.screenshot({ path });
   console.log(path);
 }
+async function reviewCandidate(name) {
+  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  const chooser = page.locator('#personalAssistantFolderSetupChoices');
+  if (await chooser.isVisible()) {
+    const value = await page
+      .locator('#personalAssistantFolderSetupCandidate')
+      .evaluate(
+        (select, name) =>
+          Array.from(select.options).find(option => option.textContent.startsWith(name))?.value,
+        name
+      );
+    if (!value) throw new Error(`The bounded preview did not disclose ${name}`);
+    await page.locator('#personalAssistantFolderSetupCandidate').selectOption(value);
+    await chooser.getByRole('button', { name: 'Review selection', exact: true }).click();
+  }
+  await page
+    .locator('#homeAssistantConversation #personalAssistantFolderOffer')
+    .waitFor({ state: 'visible' });
+}
 try {
   await page.goto(`${base}/agents`);
   const complete = await page.evaluate(async () => {
@@ -91,6 +110,8 @@ try {
   );
   // Done is behind the progress row.
   const progressRow = page.locator('#personalAssistantProgressRow');
+  const attention = page.locator('#personalAssistantSummaryToggle');
+  if ((await attention.getAttribute('aria-expanded')) === 'false') await attention.click();
   await progressRow.waitFor({ state: 'visible', timeout: 30000 });
   await progressRow.click();
   await hqReceipt.locator('summary').waitFor({ timeout: 30000 });
@@ -101,15 +122,15 @@ try {
   console.log('receipt:', await hqReceipt.innerText());
   await hqReceipt.locator('li').last().scrollIntoViewIfNeeded();
   await shot('03-hq-receipt');
-  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
-  await page.locator('#personalAssistantFolderChooser').scrollIntoViewIfNeeded();
+  await page.locator('#personalAssistantFolderChip:enabled').waitFor({ state: 'visible' });
   if (
-    !(await page.locator('#personalAssistantFolderTitle').textContent()).includes(
-      "Now let's explore a folder"
-    )
-  ) {
-    throw new Error('first-folder hand-over did not appear after HQ build');
-  }
+    !(await page.locator('#personalAssistantContextStatus').textContent()).includes('Add a folder')
+  )
+    throw new Error('first-folder guidance did not appear after HQ build');
+  if (await page.locator('#homeAssistantConversation [data-message-role]').count())
+    throw new Error('guidance fabricated a conversation turn');
+  await page.locator('#personalAssistantFolderChip').click();
+  await page.locator('#personalAssistantContextChooser').waitFor({ state: 'visible' });
   await shot('04-first-folder-prompt');
   await page.locator('#darkModeToggle').click();
   await page.waitForTimeout(350);
@@ -125,15 +146,15 @@ try {
   // chip above the composer is how a folder is asked for.
   await page.locator('#personalAssistantFolderChip:enabled').waitFor({ state: 'visible' });
   await page.waitForTimeout(1000);
-  if (await page.locator('#personalAssistantFolderChooser').isVisible()) {
+  if (await page.locator('#personalAssistantContextChooser').isVisible()) {
     throw new Error('first-folder hand-over repeated on reload');
   }
   await page.locator('#personalAssistantClose').click();
   await page.locator('#cockpitShowFolderBtn').click();
-  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
+  await page.locator('#personalAssistantContextChooser').waitFor({ state: 'visible' });
   await shot('04b-home-action-opens-chooser');
   await page.goto(`${base}/?panel=today&folder=show`);
-  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
+  await page.locator('#personalAssistantContextChooser').waitFor({ state: 'visible' });
   if (new URL(page.url()).searchParams.has('folder'))
     throw new Error('folder deep link was not consumed');
   await page.locator('#personalAssistantClose').click();
@@ -156,24 +177,35 @@ try {
   await page.locator('#resetGettingStartedBtn').click();
   await page.locator('#resetGettingStartedStatus').getByText('Getting Started reset').waitFor();
   await page.goto(`${base}/?panel=today`);
-  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
+  await page.locator('#personalAssistantFolderChip:enabled').waitFor({ state: 'visible' });
+  if (
+    !(await page.locator('#personalAssistantContextStatus').textContent()).includes('Add a folder')
+  )
+    throw new Error('reset did not rearm folder guidance');
+  await page.locator('#personalAssistantFolderChip').click();
+  await page.locator('#personalAssistantContextChooser').waitFor({ state: 'visible' });
   await shot('06-reset-rearms-prompt');
   // Hold the real request briefly so the visual intake can be captured while
   // the server is genuinely still scanning. No response body is fabricated.
   await page.route(
-    '**/api/personal-assistant/folder-digest/scan',
+    '**/api/home-assistant/folder-context/select',
     async route => {
       await new Promise(resolve => setTimeout(resolve, 1500));
       await route.continue();
     },
     { times: 1 }
   );
-  await page.locator('#personalAssistantFolderChips button[data-chip="documents"]').click();
+  await page
+    .locator('#personalAssistantFolderChoices')
+    .getByRole('button', { name: 'Documents', exact: true })
+    .click();
   await page.locator('#personalAssistantFolderScene[data-phase="scanning"]').waitFor();
   await page.waitForTimeout(240);
   await shot('06a-avatar-digests-folder');
-  await page.locator('#personalAssistantFolderOffer').waitFor({ state: 'visible' });
-  await page.locator('#personalAssistantFolderOfferActions').getByText('Start with Thesis').click();
+  await page.locator('#personalAssistantFolderPreview').waitFor({ state: 'visible' });
+  if (await page.locator('#personalAssistantFolderOffer').isVisible())
+    throw new Error('selection automatically proposed setup');
+  await reviewCandidate('Thesis');
   await shot('07-project-confirm');
   let setupRequest;
   page.on('request', request => {
@@ -210,9 +242,13 @@ try {
   }
   // Another folder is asked for with the chip above the composer.
   await page.locator('#personalAssistantFolderChip').click();
-  await page.locator('#personalAssistantFolderChooser').waitFor({ state: 'visible' });
-  await page.locator('#personalAssistantFolderChips button[data-chip="desktop"]').click();
-  await page.locator('#personalAssistantFolderOffer').waitFor({ state: 'visible' });
+  await page.locator('#personalAssistantContextChooser').waitFor({ state: 'visible' });
+  await page
+    .locator('#personalAssistantFolderChoices')
+    .getByRole('button', { name: 'Desktop', exact: true })
+    .click();
+  await page.locator('#personalAssistantFolderPreview').waitFor({ state: 'visible' });
+  await reviewCandidate('Desktop');
   await page
     .locator('#personalAssistantFolderOfferActions')
     .getByText('Set up', { exact: true })
@@ -222,6 +258,7 @@ try {
   await shot('09-corpus-receipt');
   await page.reload();
   await page.locator('#personalAssistantLauncher').click();
+  if ((await attention.getAttribute('aria-expanded')) === 'false') await attention.click();
   await progressRow.waitFor({ state: 'visible', timeout: 30000 });
   await progressRow.click();
   await page.locator('#personalAssistantDoneItems li').first().waitFor({ timeout: 30000 });

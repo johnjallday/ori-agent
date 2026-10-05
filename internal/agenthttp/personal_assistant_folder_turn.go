@@ -38,7 +38,7 @@ func (h *HomeAssistantAskHandler) prepareFolderTurn(ctx context.Context, convers
 		}
 		observation = state.Observation
 	} else {
-		observation, err = h.FolderObservations.Resolve(ctx, target, ref.SelectionID)
+		observation, err = h.resolveFolderObservation(ctx, target, ref.SelectionID)
 		if err != nil {
 			return nil, err
 		}

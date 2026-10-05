@@ -32,7 +32,7 @@
   separate provider/root/staffing gates. Neither model prose nor a saved card
   is confirmation. An unrelated pending offer must remain untouched on attach.
 
-## Chosen contract (implementation target)
+## Implemented contract
 
 ### Local observations and authority
 
@@ -126,11 +126,14 @@ status. A provider cannot invent trusted setup buttons.
 
 Only explicit Review workspace setup mints a canonical digest offer. The handoff
 checks current conversation revision, selection owner/expiry/directory identity,
-and explicit candidate (never silently the first of several). Candidate paths
+and explicit candidate (never silently the first of several; the whole root is
+labeled separately). Candidate paths
 come from the held scan, not HTTP. It refuses an unrelated pending offer rather
 than postponing it; retries reuse the same linked offer. Attachment-bound offers
-carry a server-owned conversation/revision link, checked again at every existing
-confirmation entry point; detach/replacement makes unconfirmed reviews stale.
+carry server-owned conversation/observation/candidate provenance, not paths or
+permissions. The current canonical offer reference is checked under the same
+in-process lease as folder turns and mutations. Detach/replacement makes
+unconfirmed reviews stale.
 Completed outcomes are not undone. The existing creator, reviewed plan digest,
 receipt and provider-specific gates remain the sole execution path. Canonical
 outcome references are read back in the owning conversation; hydration executes
@@ -158,14 +161,69 @@ Real-host browser evidence uses the production Ollama HTTP adapter against a
 controlled loopback provider, including a server restart. Maintained browser
 controller tests explicitly fixture selection/Route/Ask/history; race-enabled
 handler tests capture real provider request construction and canonical writes.
-Neither is a live LLM or native-picker smoke. Optional setup below remains the
-next implementation group, not a completed consequence path.
+Neither is a live LLM or native-picker smoke.
+
+## Implemented optional review (group 4)
+
+`POST /api/home-assistant/folder-context/review` accepts references only. It may
+save an initial event-only conversation without a configured model. The returned
+offer is unusable until its reference is canonically stored and staging is bound.
+Failed writes close newly proposed sidecars and discard newly created Sessions
+where possible. Reads project at most sixteen unique recent review references.
+
+`POST /api/home-assistant/folder-context/review/close` retires the canonical
+reference before closing the sidecar. Keep chatting is neither No thanks nor
+Later: it creates no preference, tombstone, workspace, task, or learned memory.
+Outdated pending reviews can also be closed without reauthorizing their source.
+For a deleted or moved conversation, explicit closure checks the sidecar's
+original user/HQ/profile provenance, then retires only that orphaned sidecar.
+A read failure is not proof of deletion, and an empty revision cannot close a
+live active review. No foreign Session is edited. This prevents an orphaned
+pending offer from blocking all future reviews without resurrecting authority.
+An unrelated pending review is refused, never displaced.
+
+The existing card is moved into its canonical review slot, never cloned. It is
+parked before history reset/trimming. Repeated observations are not repeated as
+new model answers; setup events have compact review headings. Old slots retain
+closed-review explanations or persisted receipts. The composer permits explicit
+candidate selection, generic workspace-name adjustment and cancellation.
+Generic cards disclose their actual blank/blueprint type, linking, first-task
+and remembering effects. Future file reading belongs to the confirmed
+workspace's separate permissions, not this metadata conversation.
+
+Generic confirmations bind the offer/observation/subject/type/remembering state
+through a review digest. Specialized setup retains its existing plan digest,
+project-file selection, provider availability, root-grant and staffing gates.
+Both use the existing creator/runner and receipts. Name adjustment does not
+rename the linked source label. Confirmed work may continue after detach, but
+its owning conversation and exact trusted review must still exist; deletion,
+import and ownership changes cannot authorize continuation.
+
+Process-local selections now record whether they have ever been saved. A
+consumed ID is accepted for discussion or a new review only when it is still
+the active canonical snapshot. Detach, import, or moving a Session away and
+back cannot make an old ID look like fresh staging. This marker is not a grant
+and does not survive restart.
+
+The shared head loads the work controller and card styles once; every drawer
+host has the same single card mount. Settings and other non-Home pages can send,
+rehydrate and review in place, not only show a local preview. Late setup replies
+and polling cannot replace another conversation's review.
+
+Home toolbar, mission and legacy folder links delegate to the same composer
+chooser. First-folder guidance is not a fabricated exchange. The existing
+portrait animation is reused only while local selection is pending, followed
+by bounded preview facts, not an automatic setup offer. New Workspace remains
+a separate flow. Real-host/no-model browser tests and the updated folder-first
+demo exercise canonical review, cancellation, creation, replay and receipts.
 
 ## Dependencies and evidence limits
 
 Host-only: no plugin manifest, blueprint, release or pin changes are required.
 Existing provider availability is checked rather than invented. Generic folder
 fixtures prove the base path; provider/native-picker smokes require separately
-available sandbox prerequisites. This document records the settled design, not
-completion of its implementation or live validation; the task checklist tracks
-those independently.
+available sandbox prerequisites. Local evidence is under
+`tasks/evidence/assistant-chat-folder-context/` (`folder-chat/`, `folder-setup/`
+and `folder-first/`). Live vendor-model and native-picker checks remain NOT RUN;
+conditional music-provider browser suites also require their own sandbox
+configuration. The checklist records actual validation separately from design.

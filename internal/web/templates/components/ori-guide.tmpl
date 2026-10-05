@@ -271,9 +271,7 @@
            of the two was used last is kept nearest the composer. -->
       <div id="personalAssistantThread" class="personal-assistant-panel__thread">
         <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
-        {{if eq .CurrentPage "index"}}
         {{template "personal-assistant-folder.tmpl" .}}
-        {{end}}
       </div>
       <section id="personalAssistantContextChooser" class="personal-assistant-folder-context" aria-labelledby="personalAssistantFolderChooserTitle" hidden>
         <h3 id="personalAssistantFolderChooserTitle">Add folder context</h3>
@@ -281,16 +279,25 @@
         <div id="personalAssistantFolderChoices" class="personal-assistant-panel__chips"></div>
         <button type="button" id="personalAssistantFolderChooserCancel" class="personal-assistant-conversation__button">Cancel</button>
       </section>
+      <div id="personalAssistantContextProgress"></div>
       <section id="personalAssistantFolderPreview" class="personal-assistant-folder-context" aria-label="Local folder preview" hidden>
         <p class="personal-assistant-folder-context__eyebrow">Local preview · not sent</p>
+        <p>File contents have not been read.</p>
         <p id="personalAssistantFolderSummary"></p>
         <p id="personalAssistantFolderProjects"></p>
         <details>
           <summary>Coverage and what Send shares</summary>
           <p id="personalAssistantFolderCoverage"></p>
-          <p>File contents have not been read. Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.</p>
+          <p>Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.</p>
         </details>
         <p>Send your question, or send “Explore this folder” to discuss this snapshot. No workspace is created.</p>
+      </section>
+      <section id="personalAssistantFolderSetupChoices" class="personal-assistant-folder-context" aria-label="Choose what to set up" hidden>
+        <label for="personalAssistantFolderSetupCandidate">Which observed folder should the workspace use?</label>
+        <select id="personalAssistantFolderSetupCandidate" class="form-select form-select-sm" required></select>
+        <p class="personal-assistant-folder-context__note">This saves a setup review in this conversation. It sends nothing to a model and creates nothing until you confirm.</p>
+        <button type="button" id="personalAssistantFolderSetupReview" class="btn btn-sm btn-outline-secondary">Review selection</button>
+        <button type="button" id="personalAssistantFolderSetupCancel" class="btn btn-sm btn-link">Keep chatting</button>
       </section>
       <p id="personalAssistantFolderHistorical" class="personal-assistant-folder-context__note" hidden></p>
       <p id="personalAssistantContextStatus" class="personal-assistant-folder-context__note" role="status" aria-live="polite"></p>
@@ -308,6 +315,7 @@
           <span id="personalAssistantActiveFolderName"></span>
           <button type="button" id="personalAssistantRemoveFolder" aria-label="Remove folder context">×</button>
         </span>
+        <button type="button" id="personalAssistantReviewFolderSetup" class="btn btn-sm btn-link" aria-label="Review workspace setup" aria-controls="personalAssistantFolderSetupChoices" aria-expanded="false" hidden>Review setup</button>
         <span id="personalAssistantFolderSendHint" class="personal-assistant-folder-context__note" hidden>Empty Send: “Explore this folder”</span>
       </div>
       <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>

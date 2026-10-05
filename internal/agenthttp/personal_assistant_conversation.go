@@ -463,6 +463,9 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 	body := map[string]any{
 		"conversation": conversationSummary(record), "messages": views, "truncated": truncated, "folder_context": folderState,
 	}
+	if target, targetErr := h.folderTarget(scope, record.ID, ""); targetErr == nil {
+		body["folder_reviews"] = h.folderReviewViews(r.Context(), target, messages)
+	}
 	// Drafts saved from this conversation, read from the HQ's Tickets. A read
 	// failure is stated; it is not shown as "nothing was saved".
 	saved, err := h.savedDraftsForConversation(scope, record.ID, messages)
