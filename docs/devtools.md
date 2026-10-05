@@ -1,8 +1,9 @@
 # Ori development-tool extraction contract
 
-**Status: staged source cutover, not an installed capability.** Ori's three
-entrypoints now delegate to the selected companion. Original helper sources and
-an immutable legacy-script fixture remain until the final compatibility gate.
+**Status: source ownership cutover, not installed activation.** Ori's workflow
+and legacy Away entrypoints delegate to the selected companion. Embedded helper
+sources, tool suites/prompts/templates and temporary migration fixtures have been
+removed after the committed companion's compatibility gates passed.
 Independent companion gates, fake-only Ori adapter checks and the paired Git
 lifecycle pass. Offline runtime/staging and legacy-caller compatibility are now
 covered; real installed-runtime activation remains NOT RUN. Source selection
@@ -15,7 +16,9 @@ Wrapper/adapter milestone: companion `9d78c085996666ee0a32a8805a00eecfad46c548`,
 validated with the paired fixture lifecycle and same-shell candidate rollback.
 Runtime compatibility milestone: companion
 `8abec2e11f07e19f65adb7ca87de2d5e0a1574a5` (`make build test check`, race/cross,
-app/worktree race and paired gates passed). Live activation is separate.
+app/worktree race and paired gates passed). Final companion delivery revision:
+`0c7f0cf2231e8f6f9f651d3dbca79de5075c6a1f` (independent build/test/static/race/cross
+and paired checks passed). Live activation is separate.
 
 The approved destination is the separate, local-only `ori-devtools` repository at
 `/Users/jjdev/Projects/ori/devtools`. No remote, publication, installer run, or
@@ -119,7 +122,7 @@ Avoid cached target/source globals surviving a switch between worktrees.
   remains Ori-owned. Installed plugin/dispatcher invocation continues to use
   the already-installed stable binary; source selection alone never refreshes it.
 
-## Authoritative move / retain / adapter manifest
+## Historical extraction manifest and retained ownership
 
 Extraction source revision: `8c076a15bb32895c114705a1e3a2cdf72395572c` from
 `https://github.com/johnjallday/ori-agent.git`. Preserve relative paths, Apache-2.0
@@ -149,14 +152,22 @@ installed copies. Do not rewrite Ori history. Unlisted application files stay.
 | `scripts/devtools-baseline.test.py` | Temporary pre-cutover characterization harness; retire or port it at deletion, never require embedded tool sources in normal post-cutover Ori tests |
 | `internal/workspaceplan/devtools_fixture_test.go`, `internal/workspaceplan/testdata/devtools-approved-tasks.md` | Retain producer contract; companion carries identical Markdown and consumer assertion |
 
-**Temporary layout:** keep all legacy files at their original paths throughout
-group 2. Before group 3 replaces entrypoints, retain an immutable fixture copy of
-the manifest's original scripts/libraries/assets under
-`tests/fixtures/devtools-legacy/` with provenance; never select it implicitly at
-runtime. An exact `git archive` of the baseline offers recovery independent of
-replaced wrappers. Group 5 removes migration copies only after the durable
-companion and both sides' tests pass. Old active worktrees retain their own files;
-no bulk edits, rebases, or runtime resets.
+The table records **extraction-base paths**, not files still present in Ori.
+The staged migration retained originals and immutable script fixtures until the
+independent, paired and runtime-compatibility gates passed. Those temporary
+copies and the baseline-only harness are now retired. An exact `git archive` of
+baseline `8c076a15bb32895c114705a1e3a2cdf72395572c` remains historical recovery
+independent of replaced wrappers; it is never an implicit runtime fallback.
+Existing active worktrees keep their own files: no bulk edits, rebases or resets.
+
+`make herdr-devflow`, `make test-herdr-devflow` and
+`make test-herdr-devflow-cross` are explicit convenience delegation through
+`scripts/devtools-make.sh`. They are not normal app build/test dependencies;
+artifacts and tool/platform/race coverage belong to the companion. Ori's package
+enumeration excludes the removed tool tree. Both extracted dependencies (TOML
+and x/sys) are also used by the application, so no module removal is warranted.
+`scripts/devtools-setup-skill.sh` resolves the one matching external operating
+skill read-only; the retained Ori skill delegates without a harness-wide install.
 
 ## Adapter invariants
 
@@ -209,14 +220,14 @@ command installs tools or touches live state.
 ## Artifact fixture and compatibility matrix
 
 Ori owns `internal/workspaceplan/testdata/devtools-approved-tasks.md`, rendered
-from the minimal Bridge Plan already tested by the embedded consumer. The
-producer test compares exact bytes. Companion tests will carry an identical
-fixture and assert the next task is
+from the minimal Bridge Plan characterized before extraction. The producer test
+compares exact bytes; the companion carries an identical fixture and asserts the
+next task is
 `1.1 Wire the approved path — _unassigned_`, with no planning-starter marker.
-Run `python3 scripts/devtools-baseline.test.py` for the legacy CLI characterization
-(no real worktree creation or live service calls). Source-mode unknown commands
-currently exit 1 through `go run`, while prebuilt execution returns 2; preserve
-and explicitly test that distinction rather than claim status parity.
+The now-retired baseline harness characterized the original CLI before cutover.
+Source-mode unknown commands exit 1 through `go run`, while prebuilt execution
+returns 2; companion tests preserve that distinction. Cleanup is deliberately
+separate: its selected-source temporary executable preserves safety codes 20/21.
 
 Optional paired validation compares fixture bytes/hashes between exact candidate
 paths. Never copy/import the renderer into the companion. A mismatch is a
@@ -234,8 +245,10 @@ cross-repository gate failure requiring review, not automatic fixture overwrite.
 | Toolbox or unrelated checkout as target | Reject before external calls or state writes |
 | Existing feature/planner/schedule/overnight state | Same common-dir identity and schema; unknown/corrupt data fails closed; no reset, duplicate agent, or namespace migration |
 
-New-tool rows are **requirements, not verified support** until paired tests pass.
-Group-1 fixtures used inert Git metadata under the original no-worktree rule.
+These rows have offline fixture evidence, not live-system certification. The
+old-script baseline remains historical evidence; active user worktrees were not
+modified or re-run. Group-1 fixtures used inert Git metadata under the original
+no-worktree rule.
 The user subsequently authorized linked worktrees only inside disposable test
 repositories. The lifecycle gates exercise these; existing user worktrees remain
 untouched. Live agents, GitHub writes and platform operations remain untested.

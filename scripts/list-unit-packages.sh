@@ -16,9 +16,9 @@ set -euo pipefail
 #     test-ollama) with its own opt-in/environment contract; none of them
 #     are "unit" packages of ori-agent.
 #
-# Everything else - cmd/, internal/, tools/, scripts/ - is in scope,
-# including tools/herdr-devflow, which is a separate tool built from this
-# module but still unit-tested the same way.
+# Every remaining application package in this module is in scope. The external
+# devtools module owns its own Go/platform/race gates; normal Ori tests neither
+# enumerate nor require that checkout.
 #
 # Usage:
 #   list-unit-packages.sh              # every unit package (default)
@@ -68,7 +68,7 @@ fi
 # A package is platform-conditional when the toolchain had to *exclude* one of
 # its files for the host GOOS - that is exactly the set with _darwin/_windows/
 # _unix variants or build-tagged stubs (internal/platform, internal/location,
-# internal/nativemenubar, cmd/menubar, the herdr-devflow wake stack, ...).
+# internal/nativemenubar, cmd/menubar, ...).
 # Deriving it means a package that grows a platform variant later is picked up
 # without anyone remembering to edit this list.
 #
@@ -82,7 +82,6 @@ fi
 # internal/platform, which is derived above.
 darwin_gated_tests=(
 	github.com/johnjallday/ori-agent/cmd/server
-	github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/app
 )
 
 platform_packages="$(go list -e -f '{{if or .IgnoredGoFiles .IgnoredOtherFiles}}{{.ImportPath}}{{end}}' ./...)"

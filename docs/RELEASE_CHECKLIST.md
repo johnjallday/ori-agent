@@ -236,8 +236,12 @@ of this workflow.
 
 ```bash
 make test-release                 # offline temp Git remotes + installed-server fixture
-bash scripts/devops-cli.test.sh    # ancestry-based dashboard regression
+bash scripts/devops-release-candidate.test.sh  # Ori-owned RC adapter regression
 ```
+
+The ancestry-based DevOps dashboard regression now lives in the selected
+companion's `scripts/devops-cli.test.sh`; its independent test gate owns that
+coverage. Ori lifecycle tests do not require the companion (see `docs/devtools.md`).
 
 Workflow YAML also needs actionlint. For a delivery PR, run the repository's
 normal `make test`, `make lint-new`, scoped security checks where applicable,

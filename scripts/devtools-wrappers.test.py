@@ -60,7 +60,8 @@ exec python3 "$ORI_DEVTOOLS_HOME/record.py" "$@"
         (target / "scripts/lib").mkdir(parents=True)
         subprocess.run(["git", "init", "-q", str(target)], env=self.env, check=True)
         (target / "go.mod").write_text("module github.com/johnjallday/ori-agent\n")
-        for entry in (*ENTRIES, "wt.sh", "lib/devtools-selector.sh"):
+        for entry in (*ENTRIES, "wt.sh", "lib/devtools-selector.sh",
+                      "devtools-make.sh", "devtools-setup-skill.sh"):
             (target / "scripts" / entry).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / "scripts" / entry, target / "scripts" / entry)
         return target
@@ -147,6 +148,40 @@ exec python3 "$ORI_DEVTOOLS_HOME/record.py" "$@"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["target"], str(self.ori))
         self.assertEqual(json.loads(result.stdout)["tool"], str(self.tool))
+
+    def test_setup_skill_resolution_is_read_only_and_refuses_missing_content(self):
+        skill = self.tool / ".agents/skills/setup-herdr/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("# Fixture operating skill\n")
+        entry = self.ori / "scripts/devtools-setup-skill.sh"
+        result = self.run_command(["bash", entry])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(skill) + "\n")
+        skill.unlink()
+        result = self.run_command(["bash", entry])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("devtools-setup-skill.sh", (ROOT / ".agents/skills/setup-herdr/SKILL.md").read_text())
+
+    def test_explicit_make_convenience_targets_do_not_build_in_ori(self):
+        (self.tool / "Makefile").write_text("# fake companion\n")
+        fake = self.root / "fake bin"
+        fake.mkdir()
+        make = fake / "make"
+        make.write_text('#!/bin/sh\nexec python3 "$ORI_DEVTOOLS_HOME/record.py" "$@"\n')
+        make.chmod(0o700)
+        env = {"PATH": str(fake) + os.pathsep + self.env["PATH"], "FIXTURE_EXIT": "31"}
+        entry = self.ori / "scripts/devtools-make.sh"
+        for target in ("build", "test", "cross"):
+            result = self.run_command(["bash", entry, target], env)
+            self.assertEqual(result.returncode, 31, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["argv"], ["-C", str(self.tool), target])
+        result = self.run_command(["bash", entry, "install"], env)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(result.stdout, "")
+        (self.tool / "Makefile").unlink()
+        result = self.run_command(["bash", entry, "build"], env)
+        self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_sourced_wt_is_lazy_and_survives_function_only_snapshot(self):
         snapshot = self.root / "functions.zsh"
