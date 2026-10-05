@@ -368,6 +368,96 @@ test('browser fixture: non-Home cancel/error/replacement retains drafts and late
   expect(await page.locator('#personalAssistantFolderChip').count()).toBe(1);
 });
 
+for (const theme of ['light', 'dark']) {
+  test(`browser fixture: ${theme} keyboard, narrow layout and zoom keep one thread and composer`, async ({
+    page
+  }) => {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const fixture = await installFixture(page);
+    await open(page, '/settings');
+    const chip = page.locator('#personalAssistantFolderChip');
+    let releaseChoices: (() => Promise<void>) | undefined;
+    await page.route(
+      '**/api/home-assistant/folder-context/choices',
+      route => {
+        releaseChoices = () =>
+          route.fulfill({ json: { chips: [{ id: 'documents', label: 'Documents' }] } });
+      },
+      { times: 1 }
+    );
+    await chip.focus();
+    await chip.press('Enter');
+    await expect(page.locator('#personalAssistantFolderChooserCancel')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(chip).toBeFocused();
+    await expect.poll(() => Boolean(releaseChoices)).toBe(true);
+    await releaseChoices!();
+    await expect(page.locator('#personalAssistantContextChooser')).toBeHidden();
+    await expect(chip).toBeFocused();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await chip.press('Enter');
+    await page
+      .locator('#personalAssistantFolderChoices')
+      .getByRole('button', { name: 'Documents', exact: true })
+      .press('Enter');
+    await expect(chip).toBeFocused();
+    expect(fixture.requests).toHaveLength(0);
+    await expect(page.locator('#personalAssistantFolderPreview')).toContainText(
+      'File contents have not been read'
+    );
+    await page.locator('#personalAssistantRemoveFolder').press('Enter');
+    await expect(chip).toBeFocused();
+    await choose(page);
+    await say(page, 'Discuss this long goal without reading contents. '.repeat(20));
+    const actions = page
+      .locator('#homeAssistantConversation .personal-assistant-message__toggle')
+      .first();
+    await actions.press('Enter');
+    await page.keyboard.press('Escape');
+    await expect(actions).toBeFocused();
+    for (const [width, height, zoom] of [
+      [1440, 900, 1],
+      [390, 844, 1],
+      [720, 450, 2]
+    ]) {
+      // Half the desktop CSS viewport exercises 200%-zoom-equivalent reflow,
+      // not an OS/browser zoom automation claim.
+      await page.setViewportSize({ width, height });
+      const layout = await page.evaluate(() => {
+        const input = document.getElementById('personalAssistantInput')!.getBoundingClientRect();
+        const panel = document.getElementById('personalAssistantPanel')!;
+        const bounds = panel.getBoundingClientRect();
+        const log = document.getElementById('homeAssistantConversation')!;
+        return {
+          inputVisible: input.top >= 0 && input.bottom <= innerHeight + 1,
+          // Settings already overflows at phone width with the drawer closed;
+          // scope this contract to the changed assistant surface.
+          overflow:
+            panel.scrollWidth > panel.clientWidth + 1 ||
+            bounds.left < -1 ||
+            bounds.right > innerWidth + 1,
+          nestedScroll: ['auto', 'scroll'].includes(getComputedStyle(log).overflowY),
+          mounts: document.querySelectorAll('#homeAssistantConversation').length
+        };
+      });
+      expect(layout, `${theme} ${width}px zoom=${zoom}`).toEqual({
+        inputVisible: true,
+        overflow: false,
+        nestedScroll: false,
+        mounts: 1
+      });
+    }
+    for (let i = 0; i < 3; i++) {
+      await page.locator('#personalAssistantClose').press('Enter');
+      await page.locator('#personalAssistantLauncher').press('Enter');
+    }
+    await expect(page.locator('#homeAssistantConversation [data-folder-event-id]')).toHaveCount(1);
+    await expect(page.locator('#personalAssistantFolderOffer')).toHaveCount(1);
+    expect(fixture.requests.filter(request => request.stage === 'ask')).toHaveLength(1);
+  });
+}
+
 test('browser fixture: model/network failure keeps exact intended folder and never auto-retries', async ({
   page
 }) => {

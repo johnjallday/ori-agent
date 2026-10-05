@@ -280,12 +280,12 @@ function render(state) {
   window.PersonalAssistantFolderSetup?.contextChanged?.(state);
 }
 
-function closeChooser() {
+function closeChooser({ restoreFocus = true } = {}) {
   chooserGeneration++;
   if (!elements) return;
   elements.chooser.hidden = true;
   elements.add.setAttribute('aria-expanded', 'false');
-  elements.add.focus();
+  if (restoreFocus) elements.add.focus();
 }
 
 async function open() {
@@ -298,6 +298,8 @@ async function open() {
   elements.chooser.hidden = false;
   elements.add.setAttribute('aria-expanded', 'true');
   elements.choices.replaceChildren(node('p', 'Loading approved folder choices…'));
+  // Escape belongs to the chooser even before its asynchronous choices arrive.
+  document.getElementById('personalAssistantFolderChooserCancel')?.focus();
   try {
     const view = folderChooserView(await jsonRequest(`${ENDPOINT}/choices`));
     if (generation !== chooserGeneration) return;
@@ -309,7 +311,12 @@ async function open() {
       button.type = 'button';
       button.addEventListener('click', async () => {
         closeChooser();
+        const selectedGeneration = chooserGeneration;
         await controller.select(choice.mode, choice.chip);
+        // Disabling Add during selection can move focus to body. Restore it
+        // only if the user has not moved elsewhere or left this conversation.
+        if (selectedGeneration === chooserGeneration && document.activeElement === document.body)
+          elements.add.focus();
       });
       elements.choices.append(button);
     }
@@ -322,8 +329,7 @@ async function open() {
 }
 
 function reset(id = '', saved = {}) {
-  if (elements) elements.chooser.hidden = true;
-  chooserGeneration++;
+  closeChooser({ restoreFocus: false });
   lastEventKey = undefined;
   controller?.reset(id, saved);
 }
@@ -458,11 +464,11 @@ function init() {
 
 const api = {
   open,
+  close: () => closeChooser({ restoreFocus: false }),
   reset,
   hydrate: (id, saved) => {
     // Resume has already rendered canonical events; keep their deduplication key.
-    chooserGeneration++;
-    if (elements) elements.chooser.hidden = true;
+    closeChooser({ restoreFocus: false });
     controller?.reset(id, saved);
   },
   renderEvent,

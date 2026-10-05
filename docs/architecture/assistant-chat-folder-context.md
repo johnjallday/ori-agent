@@ -113,7 +113,10 @@ is never reconstructed by parsing prose.
 One Add folder chooser in the composer on every personal-drawer page; one chip
 and local preview. Cancel keeps text and prior context. Each async request
 captures conversation/draft identity, revision and UI generation; late responses
-cannot replace a new conversation or choice. No path is stored in the browser.
+cannot replace a new conversation or choice. While choices load, Cancel already
+owns keyboard focus so Escape closes only the chooser. Closing the drawer or
+resetting context invalidates late choice loads; selection restores Add folder
+focus only when the user has not moved elsewhere. No path is stored in the browser.
 
 Send displays any attachment-only default request (`Explore this folder`) and
 carries only opaque references. The validated personal-folder route bypasses
@@ -226,4 +229,7 @@ available sandbox prerequisites. Local evidence is under
 `tasks/evidence/assistant-chat-folder-context/` (`folder-chat/`, `folder-setup/`
 and `folder-first/`). Live vendor-model and native-picker checks remain NOT RUN;
 conditional music-provider browser suites also require their own sandbox
-configuration. The checklist records actual validation separately from design.
+configuration. Final delivery evidence is in `final/README.md` under that local
+archive. Full CI, same-environment README capture, controlled-provider browser
+captures and scoped accessibility checks are distinct from those unrun live
+integrations. The checklist records actual validation separately from design.

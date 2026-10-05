@@ -178,9 +178,9 @@ func TestPAFPanelRendersHomeAsOneViewWithTheComposerLast(t *testing.T) {
 		`id="personalAssistantFolder"`, `id="personalAssistantFolderRequest"`,
 		`id="personalAssistantFolderChooser"`, `id="personalAssistantFolderScene"`,
 		`id="personalAssistantFolderOffer"`,
-		// The one suggestion, directly above the composer.
-		`id="personalAssistantPanelStatus"`, `id="personalAssistantChips"`,
-		`id="personalAssistantFolderChip"`, `id="personalAssistantForm"`,
+		// Status precedes the composer; the attachment controls belong inside it.
+		`id="personalAssistantPanelStatus"`, `id="personalAssistantForm"`,
+		`id="personalAssistantChips"`, `id="personalAssistantFolderChip"`,
 		`id="personalAssistantInput"`, `id="personalAssistantSend"`,
 	}
 	last := -1
@@ -251,8 +251,8 @@ func TestHomeCockpitHasNoTodayOrWorkingAgreementGridSibling(t *testing.T) {
 
 // On every other page the drawer is the same one view without Home's Today:
 // the header (with its check-in line and More menu), the conversation, the
-// chip, and the composer. It has no Needs you cards, brief row or progress
-// row, and no folder flow of its own: the chip goes to Home's.
+// composer with Add folder, and the same canonical review mount. It has no
+// Home Needs you cards, brief row or progress row and needs no navigation.
 func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
@@ -269,9 +269,7 @@ func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 	for _, absent := range []string{
 		`id="personalAssistantToday"`, `id="personalAssistantNeedsYou"`,
 		`id="personalAssistantBriefRow"`, `id="personalAssistantProgressRow"`,
-		`id="personalAssistantSummary"`, `id="personalAssistantFolder"`,
-		`id="personalAssistantFolderOffer"`,
-		`id="homeDailyBrief"`,
+		`id="personalAssistantSummary"`, `id="homeDailyBrief"`,
 	} {
 		if strings.Contains(html, absent) {
 			t.Errorf("non-Home assistant panel unexpectedly contains %s", absent)
@@ -283,7 +281,10 @@ func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 		// How much needs the user, in one line that goes to Home.
 		`id="personalAssistantNeedsLine"`,
 		`id="personalAssistantThread"`, `id="personalAssistantActivityMount"`,
+		`id="personalAssistantFolder"`, `id="personalAssistantFolderOffer"`,
+		`id="personalAssistantContextChooser"`, `id="personalAssistantFolderPreview"`,
 		`id="personalAssistantFolderChip"`, `id="personalAssistantForm"`,
+		`src="/js/modules/dashboard.js"`,
 	} {
 		if got := strings.Count(html, present); got != 1 {
 			t.Errorf("non-Home %s count = %d, want 1", present, got)

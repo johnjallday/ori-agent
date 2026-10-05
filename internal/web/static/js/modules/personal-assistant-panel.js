@@ -393,6 +393,7 @@ function close(options = {}) {
   state.open = false;
   state.draft = state.els.input.value;
   closeMoreMenu();
+  window.PersonalAssistantFolderContext?.close?.();
   state.els.panel.hidden = true;
   state.els.launcher.setAttribute('aria-expanded', 'false');
   const trigger = state.lastTrigger;

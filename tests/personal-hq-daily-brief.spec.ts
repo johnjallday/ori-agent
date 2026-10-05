@@ -102,6 +102,7 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
   async function openBriefStation(page: Page) {
     await page.goto('/');
     await openDrawer(page);
+    await page.locator('#personalAssistantSummaryToggle').click();
     const row = page.locator('#personalAssistantBriefRow');
     await expect(row).toBeVisible();
     await expect(row).toHaveAttribute('href', /\/workspaces\/[^?]+\?station=daily-brief$/);
@@ -261,6 +262,7 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     // Home still prepares today's brief in the background, and the drawer's
     // brief row says how that went.
     await openDrawer(page);
+    await page.locator('#personalAssistantSummaryToggle').click();
     await expect(page.locator('#personalAssistantBriefRow')).toBeVisible();
     await expect(page.locator('#personalAssistantBriefRowStatus')).toContainText('ready since', {
       timeout: 20000
