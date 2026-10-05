@@ -55,18 +55,14 @@ test('unsent text comes back only when the turn was refused or unanswered', () =
   assert.equal(shouldRestoreInput(null), false);
 });
 
-test('each turn says plainly what happened to its history', () => {
+test('saved turns stay quiet while history limitations remain explicit', () => {
   const started = conversationNotice(
     { conversation: { id: 'c', started: true, stored: true } },
     'Nova'
   );
-  assert.match(started, /New conversation saved in Nova’s history in Personal HQ/);
-  assert.match(started, /History is not memory/);
+  assert.equal(started, '');
 
-  assert.equal(
-    conversationNotice({ conversation: { id: 'c', stored: true } }, 'Nova'),
-    'Saved in this conversation.'
-  );
+  assert.equal(conversationNotice({ conversation: { id: 'c', stored: true } }, 'Nova'), '');
   assert.match(
     conversationNotice(
       { conversation: { id: 'c', stored: true, history_truncated: true } },

@@ -219,6 +219,16 @@ test.describe('Assistant drafts — real persistence', () => {
       messageRow(page, conversation.messageIds[0]).locator('[data-message-action="save-draft"]')
     ).toHaveCount(0);
 
+    await expect(korean.locator('[data-message-action="save-draft"]')).toBeHidden();
+    await expect(korean.locator('summary')).toHaveText('Message actions');
+    await expect(page.locator('#homeAssistantThinkingModalLabel')).toBeHidden();
+    await expect(page.locator('.home-assistant-conversation-section-header')).toBeHidden();
+    await expect(page.locator('#personalAssistantConversationNote')).toBeEmpty();
+    expect(
+      await page
+        .locator('#homeAssistantConversation')
+        .evaluate(el => getComputedStyle(el).maxHeight)
+    ).toBe('none');
     // Reload: the same tab keeps the same conversation.
     await page.reload();
     await expect(messageRows(page)).toHaveCount(6);
@@ -234,7 +244,18 @@ test.describe('Assistant drafts — real persistence', () => {
     await continueConversation(page, conversation.id, 6);
     const korean = messageRow(page, conversation.messageIds[5]);
 
+    // Opening the menu writes nothing; Escape closes it before the drawer.
+    const menu = korean.locator('summary');
+    await menu.press('Enter');
+    expect((await draftTickets(request, hq)).length).toBe(before);
+    // Escape has menu precedence even after focus leaves it via keyboard.
+    await page.locator('#personalAssistantInput').focus();
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeFocused();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await expect(korean.locator('[data-message-action="save-draft"]')).toBeHidden();
     // Opening the review writes nothing, and cancelling it writes nothing.
+    await menu.click();
     await korean.locator('[data-message-action="save-draft"]').click();
     const review = page.locator('#personalAssistantDraftReview');
     await expect(review).toBeVisible();
@@ -245,7 +266,9 @@ test.describe('Assistant drafts — real persistence', () => {
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
     expect((await draftTickets(request, hq)).length).toBe(before);
 
+    await expect(menu).toBeFocused();
     // Save it. A double click is one save.
+    await menu.click();
     await korean.locator('[data-message-action="save-draft"]').click();
     await expect(review).toBeVisible();
     await page.locator('#personalAssistantDraftTitle').fill('Birthday greeting for Mina (Korean)');
@@ -321,6 +344,7 @@ test.describe('Assistant drafts — real persistence', () => {
 
     // The update review shows the saved text beside the proposal.
     const shorter = messageRow(page, shorterId);
+    await shorter.locator('summary').click();
     await shorter.locator('[data-message-action="update-draft"]').click();
     const review = page.locator('#personalAssistantDraftReview');
     await expect(review).toBeVisible();
@@ -395,6 +419,8 @@ test.describe('Assistant drafts — real persistence', () => {
     // On a reply the assistant wrote: the review starts empty and saves nothing.
     const greeting = messageRow(page, conversation.messageIds[1]);
     const action = greeting.locator('[data-message-action="remember"]');
+    const menu = greeting.locator('summary');
+    await menu.click();
     await action.click();
     const review = page.locator('#personalAssistantMemoryReview');
     const field = page.locator('#personalAssistantMemoryText');
@@ -412,9 +438,11 @@ test.describe('Assistant drafts — real persistence', () => {
     await page.keyboard.press('Escape');
     await expect(review).toBeHidden();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await expect(action).toBeFocused();
+    await expect(menu).toBeFocused();
+    await expect(action).toBeHidden();
 
     // Over the limit: refused in place, never cut.
+    await menu.click();
     await action.click();
     await field.fill('가'.repeat(167));
     await expect(page.locator('#personalAssistantMemoryLimit')).toHaveText('501 / 500 UTF-8 bytes');
@@ -479,6 +507,7 @@ test.describe('Assistant drafts — real persistence', () => {
     const before = (await approvedFacts(request)).length;
     await openAsk(page);
     await continueConversation(page, conversation.id, 8);
+    await messageRow(page, conversation.messageIds[1]).locator('summary').click();
     await messageRow(page, conversation.messageIds[1])
       .locator('[data-message-action="remember"]')
       .click();
@@ -640,9 +669,10 @@ test.describe('Assistant drafts — mocked replies (panel behavior only)', () =>
     expect(sent[2].conversation?.id).toBe('mock-conversation');
     await expect(messageRows(page)).toHaveCount(6);
     await expect(messageRow(page, 'mock-assistant-3')).toContainText('미나야');
-    await expect(
-      messageRow(page, 'mock-assistant-3').locator('[data-message-action="save-draft"]')
-    ).toBeVisible();
+    const lastReply = messageRow(page, 'mock-assistant-3');
+    await expect(lastReply.locator('[data-message-action="save-draft"]')).toBeHidden();
+    await lastReply.locator('summary').press('Enter');
+    await expect(lastReply.locator('[data-message-action="save-draft"]')).toBeVisible();
   });
 
   test('A8: a failed turn puts the typed text back', async ({ page }) => {

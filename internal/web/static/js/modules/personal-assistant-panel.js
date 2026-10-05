@@ -512,7 +512,8 @@ function submit(event) {
   }
   state.pending = true;
   state.els.send.disabled = true;
-  setStatus(`Sent to ${state.view.name}. Anything consequential still requires confirmation.`);
+  const sentStatus = `Sent to ${state.view.name}.`;
+  setStatus(sentStatus);
   const operation = Promise.resolve(
     window.OriAskRouting.submit(text, {
       routeContext: routeContext(),
@@ -526,8 +527,12 @@ function submit(event) {
   // composer's duplicate-submit guard after delegation has been accepted.
   state.pending = false;
   state.els.send.disabled = false;
-  operation.catch(() =>
-    setStatus('The request could not be routed. Nothing ran without confirmation.')
+  operation.then(
+    () => {
+      // Keep recovery/busy notices produced since Send; only clear our receipt.
+      if (state.els?.status?.textContent === sentStatus) setStatus('');
+    },
+    () => setStatus('The request could not be routed. Nothing ran without confirmation.')
   );
   try {
     document.dispatchEvent(new CustomEvent('personal-assistant:sent'));
@@ -594,7 +599,18 @@ function init() {
     const modalOpen = Boolean(
       event.target?.closest?.('.modal') || document.querySelector?.('.modal.show')
     );
-    if (assistantPanelShouldCloseOnKey(event.key, state.open, modalOpen)) close();
+    if (assistantPanelShouldCloseOnKey(event.key, state.open, modalOpen)) {
+      // Tab may have moved outside an open message disclosure. Escape still
+      // dismisses that surface first, rather than closing the entire drawer.
+      const menu = state.els.panel.querySelector('.personal-assistant-message__menu[open]');
+      if (menu) {
+        event.preventDefault();
+        menu.open = false;
+        menu.querySelector('summary')?.focus();
+        return;
+      }
+      close();
+    }
   });
   window.addEventListener('personal-assistant:status', event => {
     if (event.detail?.personalAssistant) applyPersonalAssistant(event.detail.personalAssistant);

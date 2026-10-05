@@ -51,8 +51,7 @@ export function shouldRestoreInput(data) {
 }
 
 /** One line telling the user what happened to this turn's history. */
-export function conversationNotice(data, assistantName) {
-  const name = String(assistantName || '').trim() || 'Your assistant';
+export function conversationNotice(data) {
   const reply = data?.conversation;
   if (!reply) return '';
   if (reply.error)
@@ -62,13 +61,10 @@ export function conversationNotice(data, assistantName) {
   if (!reply.stored) {
     return 'This reply could not be saved to the conversation history. Copy anything you want to keep.';
   }
-  if (reply.started) {
-    return `New conversation saved in ${name}’s history in Personal HQ. History is not memory.`;
-  }
   if (reply.history_truncated) {
     return 'Saved. Earlier messages are still stored but were left out of this reply.';
   }
-  return 'Saved in this conversation.';
+  return ''; // Routine saved history needs no permanent status line.
 }
 
 /** The label for one conversation in the Continue list. */
@@ -100,7 +96,6 @@ const state = {
   id: '',
   title: '',
   available: false,
-  assistantName: '',
   hydrated: false,
   loading: false,
   els: null
@@ -132,10 +127,6 @@ function setCurrent(id, title) {
 
 function setNote(message) {
   if (state.els?.note) state.els.note.textContent = String(message || '');
-}
-
-function defaultNote() {
-  return 'Messages are kept in this conversation’s history in Personal HQ until you delete it. History is not memory.';
 }
 
 function render() {
@@ -188,7 +179,7 @@ function startNew() {
   leaveSavedDraft();
   closeList();
   setCurrent('', '');
-  setNote('New conversation. Nothing is saved until you send a message.');
+  setNote('');
   document.getElementById('personalAssistantInput')?.focus();
   return true;
 }
@@ -253,7 +244,7 @@ async function resume(id, options = {}) {
     setNote(
       partial
         ? 'Showing the most recent messages of this conversation. Earlier ones are still stored.'
-        : 'Continuing this conversation. ' + defaultNote()
+        : ''
     );
     return true;
   } catch (_) {
@@ -341,7 +332,6 @@ function hydrate() {
 
 function applyStatus(detail) {
   state.available = detail?.view?.available === true;
-  state.assistantName = String(detail?.view?.name || '').trim();
   if (!state.available) closeList();
   render();
   hydrate();
@@ -367,8 +357,8 @@ function applyReply(data, rows = {}) {
     if (reply.assistant_message_id) window.PersonalAssistantDrafts?.replyAdded?.();
   }
   setCurrent(nextId, reply.title);
-  const notice = conversationNotice(data, state.assistantName);
-  setNote(notice || defaultNote());
+  const notice = conversationNotice(data);
+  setNote(notice);
   return { notice, stored: reply.stored === true, restoreInput: shouldRestoreInput(data) };
 }
 
@@ -396,7 +386,7 @@ function init() {
   document.addEventListener('personal-assistant:status', event => applyStatus(event.detail));
   const current = window.PersonalAssistantPanel?._state;
   if (current?.view?.known) applyStatus({ view: current.view });
-  setNote(defaultNote());
+  setNote('');
   render();
 }
 

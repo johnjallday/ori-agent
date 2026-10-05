@@ -139,6 +139,7 @@
           <a href="/profile#personalHQKnowledge">Review remembered facts</a>
           <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" hidden>Optional interview</a>
           <a id="personalAssistantTodayAdvanced" href="/agents">Manage agents</a>
+          <p class="personal-assistant-panel__history-note">Conversations are kept in Personal HQ until you delete them. History is not memory; remembering a fact requires your review.</p>
         </nav>
       </details>
       <button type="button" id="personalAssistantClose" class="personal-assistant-panel__icon"
@@ -162,18 +163,16 @@
       </a>
       {{end}}
 
-      <!-- The conversation this tab is in. A conversation is a session in
-           Personal HQ; this bar only starts a new one or continues an earlier
-           one. Its note keeps history and long-term memory apart. -->
+      <!-- The conversation this tab is in. The status note is reserved for
+           unsaved history, truncation and recovery, not routine idle copy. -->
       <div id="personalAssistantConversationBar" class="personal-assistant-conversation" hidden>
         <div class="personal-assistant-conversation__head">
           <p class="personal-assistant-conversation__current">
-            <span class="personal-assistant-conversation__eyebrow">Conversation</span>
             <span id="personalAssistantConversationTitle" class="personal-assistant-conversation__title">New conversation</span>
           </p>
           <div class="personal-assistant-conversation__actions">
             <button type="button" id="personalAssistantConversationNew"
-                    class="personal-assistant-conversation__button">New conversation</button>
+                    class="personal-assistant-conversation__button" aria-label="New conversation">New</button>
             <button type="button" id="personalAssistantConversationContinue"
                     class="personal-assistant-conversation__button"
                     aria-expanded="false" aria-controls="personalAssistantConversationList">Continue…</button>

@@ -128,12 +128,14 @@ test('the progress row is hidden only when there is no work, nothing done today 
   assert.equal(progressRowVisible({ working: 0, done: 0, meetings: true }), true);
 });
 
-test('the top of the drawer folds when the user starts something, and only then', () => {
+test('ready attention defaults folded and preserves explicit expansion across chat and reopen', () => {
   const rest = { started: false, expanded: false };
   const folded = { started: true, expanded: false };
   const shown = { started: true, expanded: true };
 
-  // Send and "Explore a folder" are the user starting something.
+  // Ready includes an empty or rehydrated drawer, without requiring a send.
+  assert.deepEqual(summaryFoldAfter(rest, { type: 'ready' }), folded);
+  assert.deepEqual(summaryFoldAfter(shown, { type: 'ready' }), shown);
   assert.deepEqual(summaryFoldAfter(rest, { type: 'sent' }), folded);
   assert.deepEqual(summaryFoldAfter(rest, { type: 'folder', by: 'user' }), folded);
   // The assistant speaking first (its first-folder prompt) folds nothing.
@@ -146,14 +148,14 @@ test('the top of the drawer folds when the user starts something, and only then'
   assert.deepEqual(summaryFoldAfter(rest, { type: 'toggle' }), rest);
   // Something under Needs you has to be seen.
   assert.deepEqual(summaryFoldAfter(folded, { type: 'expand' }), shown);
-  assert.deepEqual(summaryFoldAfter(rest, { type: 'expand' }), rest);
-  // A second request folds again after the user had looked.
-  assert.deepEqual(summaryFoldAfter(shown, { type: 'sent' }), folded);
+  assert.deepEqual(summaryFoldAfter(rest, { type: 'expand' }), shown);
+  // Sending or opening another flow must not close something explicitly shown.
+  assert.deepEqual(summaryFoldAfter(shown, { type: 'sent' }), shown);
+  assert.deepEqual(summaryFoldAfter(shown, { type: 'folder', by: 'user' }), shown);
 
-  // Reopening with no conversation going shows everything in full again;
-  // reopening onto one leaves it as it was.
-  assert.deepEqual(summaryFoldAfter(folded, { type: 'opened', conversationActive: false }), rest);
-  assert.deepEqual(summaryFoldAfter(shown, { type: 'opened', conversationActive: false }), rest);
+  // Reopening preserves the choice regardless of conversation hydration timing.
+  assert.deepEqual(summaryFoldAfter(folded, { type: 'opened', conversationActive: false }), folded);
+  assert.deepEqual(summaryFoldAfter(shown, { type: 'opened', conversationActive: false }), shown);
   assert.deepEqual(summaryFoldAfter(folded, { type: 'opened', conversationActive: true }), folded);
   assert.deepEqual(summaryFoldAfter(shown, { type: 'opened', conversationActive: true }), shown);
 

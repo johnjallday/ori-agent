@@ -1391,6 +1391,13 @@
     var els = getHomeAssistantElements();
     if (!els.thinkingModalLabel) return;
 
+    // A completed chat needs no second identity/ready heading. Keep the shared
+    // header for real progress, failures and structured review on every surface.
+    els.thinkingModal.classList.toggle(
+      'is-quiet-chat',
+      els.thinkingModal.dataset.homeAssistantPanelScope === 'personal-assistant' &&
+        !shouldKeepHomeAssistantThinkingModalOpen()
+    );
     var label = getHomeAssistantActivityLabel();
     var summaryState = getHomeAssistantSummaryState();
     var summary = homeAssistantState.routingSummary;
@@ -1974,6 +1981,9 @@
     var els = getHomeAssistantElements();
     var conversation = els.conversation;
     if (!conversation) return null;
+    var scroll = conversation.closest('.personal-assistant-panel__scroll') || conversation;
+    var followLatest =
+      scroll === conversation || scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
 
     if (!conversation.dataset.initialized) {
       conversation.innerHTML = '';
@@ -2005,8 +2015,10 @@
 
     if (structuredText) {
       bubble.style.padding = '0.65rem 0.8rem';
-      bubble.style.maxHeight = '320px';
-      bubble.style.overflow = 'auto';
+      if (!conversation.closest('.personal-assistant-panel')) {
+        bubble.style.maxHeight = '320px';
+        bubble.style.overflow = 'auto';
+      }
 
       var pre = document.createElement('pre');
       pre.style.margin = '0';
@@ -2029,9 +2041,9 @@
     while (conversation.children.length > HOME_ASSISTANT_MESSAGE_LIMIT) {
       conversation.removeChild(conversation.firstChild);
     }
-    conversation.scrollTop = conversation.scrollHeight;
     syncHomeAssistantConversationSection();
     syncHomeAssistantLauncher();
+    if (followLatest) scroll.scrollTop = scroll.scrollHeight;
     try {
       var routeContext = buildHomeRouteContext();
       window.dispatchEvent(
