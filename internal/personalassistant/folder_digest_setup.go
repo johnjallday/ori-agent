@@ -175,6 +175,11 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 	if s.isRunning(offerID) {
 		return s.viewFor(ctx, userID, *offer, binding.Paused), nil
 	}
+	release, guardErr := s.acquireConversationReview(ctx, *offer)
+	if guardErr != nil {
+		return FolderOfferView{}, guardErr
+	}
+	defer release()
 	// A project file the user chooses must be one the server offered. The journey
 	// checks the name against the folder again; this keeps a made-up name from
 	// ever reaching it.

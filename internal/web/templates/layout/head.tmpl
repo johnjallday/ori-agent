@@ -122,8 +122,9 @@
   <link href="/css/setup-wizard.css" rel="stylesheet">
   <link href="/css/interview-wizard.css" rel="stylesheet">
   <link href="/css/blueprint-intake.css" rel="stylesheet">
-  {{if index .Extra "HomeCommandBridge"}}<link href="/css/home-command.css" rel="stylesheet">
-  <link href="/css/home-workspace-cockpit.css" rel="stylesheet">{{end}}
+  <!-- Conversation and canonical folder-card styles travel with the drawer. -->
+  <link href="/css/home-command.css" rel="stylesheet">
+  {{if index .Extra "HomeCommandBridge"}}<link href="/css/home-workspace-cockpit.css" rel="stylesheet">{{end}}
   <link href="/css/settings.css" rel="stylesheet">
   <link href="/css/ui-refresh.css" rel="stylesheet">
   <link href="/css/tag-input.css" rel="stylesheet">
@@ -149,8 +150,13 @@
   -->
   <script defer src="/js/modules/ori-guide-coachmarks.js"></script>
   <script defer src="/js/modules/ori-guide.js"></script>
+  <!-- One shared work controller on every drawer host. Page-local copies would
+       double-register handlers; initialization waits for DOMContentLoaded. -->
+  <script defer src="/js/modules/dashboard.js"></script>
   <script type="module" src="/js/modules/personal-assistant-panel.js"></script>
   <script type="module" src="/js/modules/personal-assistant-conversation.js"></script>
+  <script type="module" src="/js/modules/personal-assistant-folder-context.js"></script>
+  <script type="module" src="/js/modules/personal-assistant-folder-setup.js"></script>
   <script type="module" src="/js/modules/personal-assistant-drafts.js"></script>
   <script type="module" src="/js/modules/personal-assistant-memory.js"></script>
   <script type="module" src="/js/modules/assistant-led-setup.js"></script>

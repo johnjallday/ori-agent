@@ -774,10 +774,15 @@ export function folderProjectModalOptions(offer) {
 }
 
 const state = {
+  reviewSlot: null,
+  reviewGeneration: 0,
+  workspaceName: '',
+  editingName: false,
   digest: null,
   offer: null,
   busy: false,
   scanning: false,
+  contextProgress: null,
   scanFailed: false,
   freshScan: false,
   scanName: '',
@@ -904,6 +909,8 @@ function elements() {
     offer: document.getElementById('personalAssistantFolderOffer'),
     headline: document.getElementById('personalAssistantFolderOfferHeadline'),
     question: document.getElementById('personalAssistantFolderOfferQuestion'),
+    nameLabel: document.getElementById('personalAssistantFolderWorkspaceNameLabel'),
+    workspaceName: document.getElementById('personalAssistantFolderWorkspaceName'),
     reason: document.getElementById('personalAssistantFolderOfferReason'),
     capability: document.getElementById('personalAssistantFolderOfferCapability'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
@@ -1270,12 +1277,14 @@ function renderChooser() {
 function renderScene() {
   const els = elements();
   if (!els?.scene) return;
-  const view = folderSceneView({
-    scanning: state.scanning,
-    failed: state.scanFailed,
-    scanName: state.scanName,
-    offer: state.offer
-  });
+  const view = folderSceneView(
+    state.contextProgress || {
+      scanning: state.scanning,
+      failed: state.scanFailed,
+      scanName: state.scanName,
+      offer: state.offer
+    }
+  );
   els.scene.hidden = !view.visible;
   if (!view.visible) return;
   els.scene.dataset.phase = view.phase;
@@ -1299,15 +1308,49 @@ function renderScene() {
   }
 }
 
+export function conversationFolderOfferView(offer, options = {}) {
+  const view = folderOfferView(offer, options);
+  if (offer?.conversation_id && offer.status === 'closed')
+    return {
+      ...view,
+      question: 'This setup review is closed. It created no workspace.',
+      reason: '',
+      actions: []
+    };
+  if (!offer?.conversation_id || offer.status !== 'pending') return view;
+  const actions = (view.actions || []).filter(
+    action =>
+      action.decision !== 'no' &&
+      action.decision !== 'later' &&
+      (offer.needs_pick ||
+        offer.capability ||
+        offer.create_available ||
+        (!action.modal && !action.create))
+  );
+  if (!offer.needs_pick && !offer.capability && !offer.create_available)
+    view.question =
+      'Workspace setup is unavailable here. You can keep discussing the observed folder without creating one.';
+  if (!offer.needs_pick && !offer.capability && offer.create_available) {
+    for (let i = 0; i < actions.length; i++) {
+      if (actions[i].modal)
+        actions[i] = { id: 'rename', label: 'Adjust name', style: 'outline', rename: true };
+    }
+    const type = offer.blueprint ? offer.blueprint_label || offer.blueprint : 'Blank workspace';
+    view.question += ` Type: ${type}. Confirming creates the workspace, links this selected folder, and seeds its existing read-only first task. Opening the workspace may start that task and read file contents under its workspace permissions. Provider and staffing steps keep their existing gates.`;
+  }
+  actions.push({ id: 'keep-chatting', label: 'Keep chatting', style: 'link', closeReview: true });
+  return { ...view, actions };
+}
+
 function renderOffer(place) {
   const els = elements();
   if (!els?.offer) return;
-  const view = folderOfferView(state.offer, { confirm: state.confirm });
+  const view = conversationFolderOfferView(state.offer, { confirm: state.confirm });
   const receipt = folderReceiptView(state.offer);
   // The one offer card is a reply in the conversation while the flow runs
   // there, and a card in Needs you when it was found waiting on load. It is
   // moved, never copied, so its controls and their handlers stay the same.
-  const home = place === 'needs' && els.needs ? els.needs : els.root;
+  const home = state.reviewSlot || (place === 'needs' && els.needs ? els.needs : els.root);
   if (els.offer.parentElement !== home) home.append(els.offer);
   els.offer.dataset.placement = place;
   els.offer.hidden = !view.visible || place === 'none';
@@ -1332,6 +1375,15 @@ function renderOffer(place) {
     });
   }
   setText(els.question, view.question, false);
+  if (els.nameLabel)
+    els.nameLabel.hidden = !(
+      state.reviewSlot &&
+      state.editingName &&
+      state.offer?.status === 'pending' &&
+      !state.offer?.capability
+    );
+  if (els.workspaceName && document.activeElement !== els.workspaceName)
+    els.workspaceName.value = state.workspaceName;
   setText(els.capability, view.capabilityDetail);
   setText(els.reason, view.reason, false);
   if (els.why) els.why.hidden = !view.reason;
@@ -1418,7 +1470,7 @@ function render() {
     pinned: state.pinned,
     offer: state.offer
   });
-  els.root.hidden = place !== 'thread';
+  els.root.hidden = Boolean(state.reviewSlot) || place !== 'thread';
   if (els.request) els.request.hidden = !(place === 'thread' && state.userAsked);
   window.PersonalAssistantPanel?.setFolderBusy?.(state.available && folderChipBusy(state));
   if (!state.available) {
@@ -1426,8 +1478,9 @@ function render() {
     return;
   }
   renderChooser();
-  renderOffer(place);
+  renderOffer(state.reviewSlot ? 'thread' : place);
   renderScene();
+  if (state.reviewSlot && els.scene) els.scene.hidden = true;
   renderRunModal();
   syncSetupPolling();
 }
@@ -1455,6 +1508,20 @@ function enterThread({ byUser }) {
 // runAction carries out one of the offer's actions, wherever its button was
 // pressed: the panel's card or the mission card (act below).
 function runAction(action) {
+  if (action.closeReview) {
+    void window.PersonalAssistantFolderSetup?.closeReview?.(state.offer);
+    return;
+  }
+  if (action.rename) {
+    state.editingName = true;
+    render();
+    elements()?.workspaceName?.focus();
+    return;
+  }
+  if (action.repick && state.offer?.conversation_id) {
+    void window.PersonalAssistantFolderContext?.open?.();
+    return;
+  }
   if (action.open) {
     openChooser();
     return;
@@ -1497,12 +1564,23 @@ function runAction(action) {
 const SETUP_POLL_MS = 1500;
 let setupPollTimer = null;
 
-// startOneCardSetup is the click on Set up, Try again, or a project-file chip.
-// It sends only the digest of the plan the card showed (and a chosen project
-// file name); the server recomputes the plan, holds the folder itself, and
-// runs the setup in the background while the card polls for progress.
+// Bound setup replies/polls cannot take over a different conversation's card.
+// Existing standalone journeys retain their independent lifetime.
+export function folderReviewResponseCurrent(offer, generation, currentGeneration, currentOffer) {
+  return (
+    !offer?.conversation_id || (generation === currentGeneration && offer.id === currentOffer?.id)
+  );
+}
+
+function reviewResponseGuard(offer) {
+  const generation = state.reviewGeneration;
+  return () => folderReviewResponseCurrent(offer, generation, state.reviewGeneration, state.offer);
+}
+
+// Confirm the displayed plan only; the server rechecks it and runs the setup.
 async function startOneCardSetup(action) {
   const offer = state.offer;
+  const current = reviewResponseGuard(offer);
   if (!offer?.id || state.busy) return;
   if (offer.needs_pick) {
     showOfferFailure({
@@ -1524,6 +1602,7 @@ async function startOneCardSetup(action) {
     const body = { plan_digest: digest };
     if (action?.entry) body.entry_name = action.entry;
     const { ok, payload } = await postOffer(offer.id, 'setup', body);
+    if (!current()) return;
     if (ok) {
       // Show the run in a pop-up so it is plain that the assistant is working.
       openRunModal();
@@ -1538,7 +1617,7 @@ async function startOneCardSetup(action) {
     }
     showOfferFailure(payload);
   } catch (_) {
-    showError('Set up could not be started. Try again.');
+    if (current()) showError('Set up could not be started. Try again.');
   } finally {
     state.busy = false;
     render();
@@ -1559,6 +1638,7 @@ function syncSetupPolling() {
 }
 
 async function pollSetup() {
+  const current = reviewResponseGuard(state.offer);
   const id = state.offer?.id;
   if (!id) return;
   try {
@@ -1569,6 +1649,7 @@ async function pollSetup() {
     });
     if (!response.ok) return;
     const payload = await readJSON(response);
+    if (!current() || state.offer?.id !== id) return;
     // Once the run settles the read returns the resolved offer, which ends the poll.
     state.offer = payload?.folder_digest?.offer || state.offer;
     announceOffer();
@@ -1583,6 +1664,7 @@ async function pollSetup() {
 // digest never creates a placeholder workspace or installs on scan.
 async function startCapabilityJourney() {
   const offer = state.offer;
+  const current = reviewResponseGuard(offer);
   if (!offer?.id || !offer?.capability?.setup_quest_id || state.busy) return;
   state.busy = true;
   showError('');
@@ -1593,6 +1675,7 @@ async function startCapabilityJourney() {
         decision: 'yes',
         choice: 'project'
       });
+      if (!current()) return;
       if (!ok) {
         showOfferFailure(payload);
         return;
@@ -1607,6 +1690,7 @@ async function startCapabilityJourney() {
       return;
     }
     const { openSpecialistSetupJourney } = await import('./setup-journey.js');
+    if (!current()) return;
     const capability = state.offer.capability;
     const selection =
       capability.setup_source === 'plugin'
@@ -1617,11 +1701,12 @@ async function startCapabilityJourney() {
           }
         : { source: 'host', quest_id: capability.setup_quest_id };
     selection.folder_offer_id = state.offer.id;
-    if (!(await openSpecialistSetupJourney(selection))) {
+    if (!(await openSpecialistSetupJourney(selection)) && current()) {
       showError('Could not open setup. Choose Continue setup to try again.');
     }
   } catch (error) {
-    showError(error?.message || 'Could not open setup. Choose Continue setup to try again.');
+    if (current())
+      showError(error?.message || 'Could not open setup. Choose Continue setup to try again.');
   } finally {
     state.busy = false;
     render();
@@ -1645,7 +1730,9 @@ export function portfolioProviderAction(provider = {}) {
 // outcome; landing in its library is navigation, and the library asks for its own
 // initialize, root, and scan reviews before anything is granted or scanned.
 async function startExistingHomeCollection(offer) {
+  const current = reviewResponseGuard(offer);
   const result = await postOffer(offer.id, 'existing-home', {});
+  if (!current()) return;
   if (!result.ok) {
     if (result.payload?.needs_pick) showOfferFailure(result.payload);
     else
@@ -1659,6 +1746,7 @@ async function startExistingHomeCollection(offer) {
 }
 
 async function startPortfolioSetup(offer) {
+  const current = reviewResponseGuard(offer);
   const url = `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(offer.id)}/home-provider`;
   const post = async data => {
     const response = await fetch(url, {
@@ -1673,6 +1761,7 @@ async function startPortfolioSetup(offer) {
     return body.home_provider;
   };
   let provider = await post({});
+  if (!current()) return;
   if (!provider?.plugin_id) throw new Error('The reviewed Home provider is unavailable.');
   if (!provider.ready) {
     const disclosure = provider.disclosure || {};
@@ -1689,12 +1778,14 @@ async function startPortfolioSetup(offer) {
     ].filter(Boolean);
     if (!window.confirm(parts.join('\n'))) return;
     provider = await post({ confirm: true, reviewed_version: provider.version });
+    if (!current()) return;
     if (!provider?.ready) throw new Error('The Home provider could not be enabled.');
   }
   const response = await fetch('/api/workspaces/group-templates', {
     headers: { Accept: 'application/json' }
   });
   const payload = await readJSON(response);
+  if (!current()) return;
   if (!response.ok) throw new Error('The Home setup templates are unavailable.');
   const matches = (payload?.group_templates || []).filter(
     item => item.kind === 'managed_home' && item.provider?.plugin_id === provider.plugin_id
@@ -1703,6 +1794,7 @@ async function startPortfolioSetup(offer) {
   const template = matches[0];
   if (template.home?.state === 'exists' && template.home.workspace_id) {
     const result = await postOffer(offer.id, 'resolve', { home_id: template.home.workspace_id });
+    if (!current()) return;
     if (!result.ok)
       throw new Error('That Home was not created for this offer. Pick another collection.');
     render();
@@ -1721,6 +1813,7 @@ async function startPortfolioSetup(offer) {
     drafts: { group: { name: template.proposed_group_name || 'Music Production Home' } },
     onCreated: async ({ groupId }) => {
       const result = await postOffer(offer.id, 'resolve', { home_id: groupId });
+      if (!current()) return;
       if (!result.ok)
         throw new Error(
           'The Home was built, but its folder offer is still open. Continue setup to reconcile it.'
@@ -1736,6 +1829,7 @@ async function startPortfolioSetup(offer) {
   for (let retry = 0; retry < 40 && picker.stateFor(context)?.status !== 'ready'; retry++) {
     await new Promise(resolve => setTimeout(resolve, 50));
   }
+  if (!current()) return;
   if (manager.workspaceCreatorContext !== context || !picker.select(manager, template.id)) {
     throw new Error('The exact Home template could not be selected. Nothing was created.');
   }
@@ -1796,6 +1890,10 @@ function act(actionId) {
 // Start, or an offer's own "Show another folder". Every one of them starts
 // the same turn in the conversation.
 function openChooser() {
+  if (window.PersonalAssistantFolderContext?.open) {
+    void window.PersonalAssistantFolderContext.open();
+    return;
+  }
   if (!state.available) return;
   enterThread({ byUser: true });
   state.chooserOpen = true;
@@ -1811,10 +1909,16 @@ async function load() {
   state.scanFailed = false;
   state.freshScan = false;
   let revealFirstPrompt = false;
+  const generation = state.reviewGeneration;
+  const endpoint =
+    state.reviewSlot && state.offer?.id
+      ? `${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(state.offer.id)}`
+      : DIGEST_ENDPOINT;
   try {
-    const response = await fetch(DIGEST_ENDPOINT, { headers: { Accept: 'application/json' } });
+    const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`folder digest ${response.status}`);
     const payload = await readJSON(response);
+    if (generation !== state.reviewGeneration) return;
     state.digest = payload?.folder_digest || null;
     state.offer = state.digest?.offer || null;
     state.confirm = '';
@@ -1824,9 +1928,13 @@ async function load() {
       revealFirstPrompt = true;
       // The assistant speaks first: its prompt is the first message in the
       // conversation, with no request from the user above it.
-      enterThread({ byUser: false });
-      state.handOver = true;
-      state.chooserOpen = true;
+      if (window.PersonalAssistantFolderContext?.guide) {
+        window.PersonalAssistantFolderContext.guide();
+      } else {
+        enterThread({ byUser: false });
+        state.handOver = true;
+        state.chooserOpen = true;
+      }
       state.prompting = true;
       // The chooser shows immediately; persisting the receipt cannot delay it.
       void fetch(`${DIGEST_ENDPOINT}/prompted`, { method: 'POST' })
@@ -1920,6 +2028,7 @@ async function scan(body) {
 // postOffer sends one offer action (decide or resolve) and returns the
 // response, updating the shown offer on success.
 async function postOffer(offerId, action, body) {
+  const generation = state.reviewGeneration;
   const response = await fetch(
     `${DIGEST_ENDPOINT}/offers/${encodeURIComponent(offerId)}/${action}`,
     {
@@ -1929,7 +2038,12 @@ async function postOffer(offerId, action, body) {
     }
   );
   const payload = await readJSON(response);
-  if (response.ok && payload?.offer) {
+  if (
+    (response.ok || response.status === 409) &&
+    payload?.offer?.id === offerId &&
+    generation === state.reviewGeneration &&
+    state.offer?.id === offerId
+  ) {
     state.offer = payload.offer;
     state.confirm = '';
     announceOffer();
@@ -1953,6 +2067,8 @@ function showOfferFailure(payload) {
 async function decide(action) {
   const offer = state.offer;
   if (!offer?.id || state.busy) return;
+  const generation = state.reviewGeneration;
+  if (action.create && state.editingName && !elements()?.workspaceName?.reportValidity()) return;
   state.busy = true;
   showError('');
   // A setup takes a few seconds (a workspace, a grant, a scan); the card
@@ -1964,8 +2080,13 @@ async function decide(action) {
   try {
     const body = { decision: action.decision, choice: action.choice || '' };
     // The card's confirmed plan: the assistant sets the workspace up itself.
-    if (action.create === true) body.create = true;
+    if (action.create === true) {
+      body.create = true;
+      if (offer.conversation_id) body.review_digest = offer.review_digest || '';
+      if (offer.conversation_id && state.editingName) body.workspace_name = state.workspaceName;
+    }
     const { ok, payload } = await postOffer(offer.id, 'decide', body);
+    if (generation !== state.reviewGeneration) return;
     if (!ok) {
       showOfferFailure(payload);
       return;
@@ -1982,7 +2103,7 @@ async function decide(action) {
     if (action.walkthrough && (await revealSetupWalkthrough(state.offer))) return;
     if (route && typeof window !== 'undefined') window.location.assign(route);
   } catch (_) {
-    showError('That could not be saved. Try again.');
+    if (generation === state.reviewGeneration) showError('That could not be saved. Try again.');
   } finally {
     state.progress = '';
     state.busy = false;
@@ -2167,11 +2288,55 @@ function init() {
   document.addEventListener('personal-assistant:sent', keepLatestLast);
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
+  els.workspaceName?.addEventListener('input', () => {
+    state.workspaceName = els.workspaceName.value;
+  });
   window.PersonalAssistantFolder = {
     open: openChooser,
     openChooser,
     reload: load,
     current: () => state.offer,
+    showConversationReview: (slot, offer) => {
+      if (!slot?.isConnected || !offer?.conversation_id) return;
+      if (state.offer?.id !== offer.id || state.reviewSlot !== slot) {
+        state.reviewGeneration++;
+        state.workspaceName = offer.subject?.name || '';
+        state.editingName = false;
+        slot.replaceChildren();
+      }
+      state.reviewSlot = slot;
+      state.offer = offer;
+      state.inThread = true;
+      state.userAsked = false;
+      state.chooserOpen = false;
+      state.pinned = '';
+      render();
+    },
+    contextProgress: context => {
+      const mount = document.getElementById('personalAssistantContextProgress');
+      const scene = elements()?.scene;
+      if (!mount || !scene) return;
+      if (scene.parentElement !== mount) mount.append(scene);
+      state.contextProgress = { scanning: context.selecting, scanName: context.scanName };
+      renderScene();
+    },
+    updateConversationReview: offer => {
+      if (state.offer?.id !== offer?.id || !offer?.conversation_id) return;
+      state.offer = offer;
+      render();
+    },
+    parkConversation: () => {
+      if (!state.reviewSlot) return;
+      state.reviewGeneration++;
+      const els = elements();
+      if (els?.offer && els.root) els.root.append(els.offer);
+      state.reviewSlot = null;
+      state.inThread = false;
+      state.userAsked = false;
+      state.pinned = '';
+      closeRunModal();
+      render();
+    },
     act
   };
 }

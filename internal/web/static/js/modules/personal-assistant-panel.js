@@ -236,7 +236,10 @@ function renderChip() {
 }
 
 /** Home's folder flow says when a folder is being chosen or explored. */
-function setFolderBusy(busy) {
+function setFolderBusy(busy, source = 'legacy') {
+  // The old Home offer chooser can remain open for an unrelated setup. Its
+  // visibility is not an in-flight composer selection and must not lock Add.
+  if (source === 'legacy' && window.PersonalAssistantFolderContext) return;
   state.folderBusy = busy === true;
   renderChip();
 }
@@ -246,6 +249,10 @@ function setFolderBusy(busy) {
  * other page has no folder flow of its own, so it goes to Home's.
  */
 function exploreFolder() {
+  if (window.PersonalAssistantFolderContext?.open) {
+    window.PersonalAssistantFolderContext.open();
+    return;
+  }
   const folder = window.PersonalAssistantFolder;
   if (folder && typeof folder.open === 'function') folder.open();
   else window.location.assign(EXPLORE_FOLDER_URL);
@@ -386,6 +393,7 @@ function close(options = {}) {
   state.open = false;
   state.draft = state.els.input.value;
   closeMoreMenu();
+  window.PersonalAssistantFolderContext?.close?.();
   state.els.panel.hidden = true;
   state.els.launcher.setAttribute('aria-expanded', 'false');
   const trigger = state.lastTrigger;
@@ -469,6 +477,7 @@ function restoreDraft(text) {
   const next = restoredDraft(state.els.input.value, text);
   state.draft = next;
   state.els.input.value = next;
+  state.els.input.dispatchEvent(new Event('input', { bubbles: true }));
   return next === String(text || '');
 }
 
@@ -487,10 +496,20 @@ function routeContext() {
 function submit(event) {
   event?.preventDefault();
   moveSharedWorkActivity();
-  const text = String(state.els?.input?.value || '').trim();
+  const text =
+    String(state.els?.input?.value || '').trim() ||
+    (window.PersonalAssistantFolderContext?.hasFolder?.() ? 'Explore this folder' : '');
+  if (window.PersonalAssistantConversation?.isLoading?.()) {
+    setStatus('Wait for the conversation to open before sending. Your draft is kept.');
+    return false;
+  }
   // While a reply is in flight the text stays in the box: sending it now would
   // start a second turn before the first one has a conversation to join.
   const busy = window.OriAskRouting?.getState?.().busy === true;
+  if (window.PersonalAssistantFolderContext?.isPending?.()) {
+    setStatus('Wait for the local folder preview before sending. Your message is kept here.');
+    return false;
+  }
   if (busy && text) {
     setStatus(
       `${state.view.name} is still replying. Your message is kept here; send it when the reply arrives.`
@@ -512,7 +531,8 @@ function submit(event) {
   }
   state.pending = true;
   state.els.send.disabled = true;
-  setStatus(`Sent to ${state.view.name}. Anything consequential still requires confirmation.`);
+  const sentStatus = `Sent to ${state.view.name}.`;
+  setStatus(sentStatus);
   const operation = Promise.resolve(
     window.OriAskRouting.submit(text, {
       routeContext: routeContext(),
@@ -526,8 +546,12 @@ function submit(event) {
   // composer's duplicate-submit guard after delegation has been accepted.
   state.pending = false;
   state.els.send.disabled = false;
-  operation.catch(() =>
-    setStatus('The request could not be routed. Nothing ran without confirmation.')
+  operation.then(
+    () => {
+      // Keep recovery/busy notices produced since Send; only clear our receipt.
+      if (state.els?.status?.textContent === sentStatus) setStatus('');
+    },
+    () => setStatus('The request could not be routed. Nothing ran without confirmation.')
   );
   try {
     document.dispatchEvent(new CustomEvent('personal-assistant:sent'));
@@ -594,7 +618,18 @@ function init() {
     const modalOpen = Boolean(
       event.target?.closest?.('.modal') || document.querySelector?.('.modal.show')
     );
-    if (assistantPanelShouldCloseOnKey(event.key, state.open, modalOpen)) close();
+    if (assistantPanelShouldCloseOnKey(event.key, state.open, modalOpen)) {
+      // Tab may have moved outside an open message disclosure. Escape still
+      // dismisses that surface first, rather than closing the entire drawer.
+      const menu = state.els.panel.querySelector('.personal-assistant-message__menu[open]');
+      if (menu) {
+        event.preventDefault();
+        menu.open = false;
+        menu.querySelector('summary')?.focus();
+        return;
+      }
+      close();
+    }
   });
   window.addEventListener('personal-assistant:status', event => {
     if (event.detail?.personalAssistant) applyPersonalAssistant(event.detail.personalAssistant);

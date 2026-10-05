@@ -48,6 +48,7 @@ async function openMeetings(page: Page) {
   await expect(launcher).toBeVisible();
   if (await page.locator('#personalAssistantPanel').isHidden()) await launcher.click();
   await expect(page.locator('#personalAssistantToday')).toBeVisible();
+  await page.locator('#personalAssistantSummaryToggle').click();
   const progress = page.locator('#personalAssistantProgressRow');
   await expect(progress).toBeVisible();
   if ((await progress.getAttribute('aria-expanded')) !== 'true') await progress.click();

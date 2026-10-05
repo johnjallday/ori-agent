@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -84,7 +85,8 @@ type HomeAssistantAskRequest struct {
 	ConfirmedAction *HomeAction                `json:"confirmed_action,omitempty"`
 	// Conversation asks for the turn to be part of a hired-assistant
 	// conversation. Its ID is opaque; the server derives the owner.
-	Conversation *HomeAssistantConversationRef `json:"conversation,omitempty"`
+	Conversation  *HomeAssistantConversationRef `json:"conversation,omitempty"`
+	FolderContext *HomeAssistantFolderRef       `json:"folder_context,omitempty"`
 	// Draft names the saved draft the conversation is working on, so the turn
 	// sees its current text. It is read, never written, by a turn.
 	Draft *HomeAssistantDraftRef `json:"draft,omitempty"`
@@ -106,7 +108,9 @@ type HomeAssistantAskResponse struct {
 	RequiresConfirmation bool                    `json:"requires_confirmation,omitempty"`
 	Confirmation         *HomeActionConfirmation `json:"confirmation,omitempty"`
 	// Conversation is set only for a hired-assistant conversation turn.
-	Conversation *HomeAssistantConversationState `json:"conversation,omitempty"`
+	Conversation          *HomeAssistantConversationState         `json:"conversation,omitempty"`
+	FolderContext         *PersonalAssistantFolderState           `json:"folder_context,omitempty"`
+	FolderSetupSuggestion *PersonalAssistantFolderSetupSuggestion `json:"folder_setup_suggestion,omitempty"`
 	// ModelUnavailable marks a turn that got no model answer, so the browser
 	// can keep the user's text instead of treating the reply as an answer.
 	ModelUnavailable bool `json:"model_unavailable,omitempty"`
@@ -172,7 +176,10 @@ type HomeAssistantAskHandler struct {
 	PersonalAssistantMemory  PersonalAssistantMemoryWriter
 	// Conversations is the canonical session store behind hired-assistant
 	// conversations; nil keeps every turn stateless.
-	Conversations PersonalAssistantConversationStore
+	Conversations      PersonalAssistantConversationStore
+	FolderObservations PersonalAssistantFolderObservations
+	FolderSetups       PersonalAssistantFolderSetups
+	folderRequests     folderRequestGate
 	// Drafts saves a reviewed conversation draft as one HQ Backlog Ticket; nil
 	// leaves the save action unavailable.
 	Drafts PersonalAssistantDraftSaver
@@ -296,6 +303,29 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return conversationRefusal(refusal, intent, identity)
 	}
 
+	var folderTurn *preparedFolderTurn
+	if req.FolderContext != nil {
+		// Supplied but invalid context never degrades to a generic action or a
+		// context-free model answer. A reference is not mutation confirmation.
+		if conversation == nil || req.ConfirmedAction != nil || (req.Context != nil && req.Context.Origin != "personal_assistant_panel") {
+			return folderTurnRefusal(foldercontext.ErrInvalid, identity, conversation)
+		}
+		target, err := h.folderTarget(conversation.scope, conversation.id, req.FolderContext.DraftID)
+		if err != nil {
+			return folderTurnRefusal(err, identity, conversation)
+		}
+		release, ok := h.folderRequests.enter(target)
+		if !ok {
+			return folderTurnRefusal(personalassistant.ErrFolderScanBusy, identity, conversation)
+		}
+		defer release()
+		folderTurn, err = h.prepareFolderTurn(ctx, conversation, req.FolderContext)
+		if err != nil {
+			return folderTurnRefusal(err, identity, conversation)
+		}
+		intent = homeAssistantConversationIntent.Key
+	}
+
 	// Confirmed mutation path: execute only known action types (FR #24). The
 	// relationship is freshly resolved above so stale/replaced HQ state cannot
 	// execute a previously prepared action.
@@ -330,6 +360,10 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	// literal words of the request, and before any model call.
 	if resp, handled := h.handleDraftSaveRequest(prompt, intent, identity, workContext, conversation); handled {
 		return resp
+	}
+
+	if folderTurn != nil {
+		return h.answerFolderTurn(ctx, prompt, req.Draft, identity, workContext, conversation, folderTurn)
 	}
 
 	// Backlog capture (PRD workspace-backlog FR23-25) is checked as its own

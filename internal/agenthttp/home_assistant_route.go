@@ -33,6 +33,7 @@ type HomeAssistantRouteHandler struct {
 	CalendarOpsPreference    CalendarOpsPreference
 	PersonalAssistantContext PersonalAssistantContextProvider
 	UserID                   string
+	FolderConversation       func(context.Context, *HomeAssistantConversationRef, *HomeAssistantFolderRef, *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error)
 	RuntimeResolver          interface {
 		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 	}
@@ -89,8 +90,10 @@ func (h *HomeAssistantRouteHandler) SetIntakeTraceStore(store HomeAssistantIntak
 }
 
 type HomeAssistantRouteRequest struct {
-	Prompt  string                     `json:"prompt"`
-	Context *HomeAssistantRouteContext `json:"context,omitempty"`
+	Prompt        string                        `json:"prompt"`
+	Context       *HomeAssistantRouteContext    `json:"context,omitempty"`
+	Conversation  *HomeAssistantConversationRef `json:"conversation,omitempty"`
+	FolderContext *HomeAssistantFolderRef       `json:"folder_context,omitempty"`
 }
 
 type HomeAssistantRouteContext struct {
@@ -291,6 +294,19 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if req.FolderContext != nil {
+		if h.FolderConversation == nil {
+			writeFolderError(w, ErrPersonalAssistantFolderConflict)
+			return
+		}
+		resp, err := h.FolderConversation(r.Context(), req.Conversation, req.FolderContext, req.Context)
+		if err != nil {
+			writeFolderError(w, err)
+			return
+		}
+		orihttp.WriteJSON(w, resp)
+		return
+	}
 	resp, err := h.RoutePrompt(r.Context(), req.Prompt, req.Context)
 	if err != nil {
 		if errors.Is(err, errHomeAssistantPromptRequired) {

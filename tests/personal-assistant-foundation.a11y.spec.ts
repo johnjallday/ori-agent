@@ -261,8 +261,11 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       'aria-live',
       'polite'
     );
+    await expect(page.locator('#personalAssistantTodaySections')).toBeHidden();
+    await page.locator('#personalAssistantSummaryToggle').press('Enter');
     await expect(page.locator('#personalAssistantBriefRow')).toBeVisible();
     await expect(page.locator('#personalAssistantProgressRow')).toBeVisible();
+    await page.locator('#personalAssistantInput').focus();
 
     // Icon-only buttons are named.
     await expect(
@@ -368,7 +371,12 @@ test.describe('Personal Assistant Foundation accessibility', () => {
   test('the chip and the summary strip are operable from the keyboard', async ({ page }) => {
     await mockCompletedOnboarding(page);
     await mockAssistantState(page);
-    // The folder read is the server's own; this fixture has no folders to offer.
+    // Browser-only availability fixtures; choosing is not a scan or a send.
+    await page.route('**/api/home-assistant/folder-context/choices', route =>
+      route.fulfill({
+        json: { chips: [{ id: 'documents', label: 'Documents' }], picker_available: false }
+      })
+    );
     await page.route('**/api/personal-assistant/folder-digest', route =>
       route.fulfill({
         status: 200,
@@ -392,25 +400,29 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     // The chip is the control just before the composer, and it has a name.
     const chip = page
       .getByRole('dialog', { name: 'Atlas' })
-      .getByRole('button', { name: 'Explore a folder', exact: true });
+      .getByRole('button', { name: 'Add folder', exact: true });
     await page.keyboard.press('Shift+Tab');
     await expect(chip).toBeFocused();
     await expect(chip).toHaveAttribute('id', 'personalAssistantFolderChip');
     expect(await contrastRatio(page, '#personalAssistantFolderChip')).toBeGreaterThanOrEqual(4.5);
 
-    // Nothing is folded until the user starts something.
+    // Ready attention is folded even before the first message.
     const strip = page.locator('#personalAssistantSummary');
     const toggle = page.locator('#personalAssistantSummaryToggle');
-    await expect(strip).toBeHidden();
+    await expect(strip).toBeVisible();
     await page.keyboard.press('Enter');
 
-    // The request and the assistant's reply are in the conversation, focus is
-    // on the first folder, and the chip waits its turn.
-    await expect(page.locator('#personalAssistantFolderRequest')).toBeVisible();
-    await expect(
-      page.locator('#personalAssistantFolderChips button[data-chip="documents"]')
-    ).toBeFocused();
-    await expect(chip).toBeDisabled();
+    // Opening the local chooser fabricates no user request or model answer.
+    const chooser = page.locator('#personalAssistantContextChooser');
+    const documents = page
+      .locator('#personalAssistantFolderChoices')
+      .getByRole('button', { name: 'Documents', exact: true });
+    await expect(chooser).toBeVisible();
+    await expect(documents).toBeFocused();
+    await expect(chooser).toContainText('Nothing goes to your configured model until Send');
+    await page.keyboard.press('Escape');
+    await expect(chooser).toBeHidden();
+    await expect(chip).toBeFocused();
 
     // The strip is a real disclosure for what it folded.
     await expect(strip).toBeVisible();
@@ -566,6 +578,16 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     await page.locator('#personalAssistantLauncher').click();
     await expect(page.locator('#personalAssistantToday')).toBeVisible();
 
+    // Exercise the real shared renderer with a long, structured reply. This
+    // is a layout fixture, not a model invocation. Only the outer drawer scrolls.
+    await page.evaluate(() => {
+      (window as any).OriAskRouting.appendMessage(
+        'assistant',
+        JSON.stringify({ notes: Array.from({ length: 80 }, (_, i) => `Long observation ${i}`) })
+      );
+    });
+    await expect(page.locator('#homeAssistantThinkingModalLabel')).toBeHidden();
+
     for (const viewport of [
       { width: 1440, height: 900, mode: 'drawer' },
       { width: 1280, height: 600, mode: 'drawer' },
@@ -601,6 +623,11 @@ test.describe('Personal Assistant Foundation accessibility', () => {
           navbarBottom: navbar.bottom,
           internallyScrollable: view.scrollHeight > view.clientHeight,
           viewOverflowY: getComputedStyle(view).overflowY,
+          logOverflowY: getComputedStyle(document.getElementById('homeAssistantConversation')!)
+            .overflowY,
+          bubbleOverflowY: getComputedStyle(
+            document.querySelector('#homeAssistantConversation [data-message-role] > div')!
+          ).overflowY,
           pageWidth: document.documentElement.scrollWidth
         };
       });
@@ -617,6 +644,9 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       // What is above the composer may fit without scrolling; when it grows,
       // scrolling stays inside the drawer rather than on the page.
       expect(['auto', 'scroll']).toContain(layout.viewOverflowY);
+      expect(layout.internallyScrollable).toBe(true);
+      expect(layout.logOverflowY).toBe('visible');
+      expect(layout.bubbleOverflowY).toBe('visible');
       // The composer is always visible at the bottom of the drawer, however
       // much is above it.
       expect(layout.composer.height).toBeGreaterThan(40);

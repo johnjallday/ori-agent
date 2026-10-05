@@ -392,32 +392,22 @@ export function progressRowVisible({ working, done, meetings }) {
   return Number(working) > 0 || Number(done) > 0 || meetings === true;
 }
 
-// The top of the drawer (Needs you, the brief row, the progress row) folds into
-// one line once the user starts a conversation, so the conversation has the
-// room. These three functions are that whole decision.
-//
-// summaryFoldAfter is what one event does to the fold. `started` means the
-// strip is in use; `expanded` means the user asked to see what it summarises.
-//   sent                 the user pressed Send: fold.
-//   folder, by 'user'    the user asked to explore a folder: fold.
-//   folder, by anyone else  the assistant spoke first: nothing folds.
-//   toggle               the strip's Show/Hide control.
-//   expand               something under Needs you has to be seen.
-//   opened               the drawer opened: with no conversation going, the
-//                        top is shown in full again.
+// A ready drawer keeps unrelated attention behind one disclosure, including
+// before Send and after history hydration. Setup prerequisites stay expanded.
+// `started` means the strip is in use; explicit expansion survives sends,
+// refreshes and reopening. Folding hides existing nodes, never answers a card.
 export function summaryFoldAfter(fold, event = {}) {
   const current = { started: fold?.started === true, expanded: fold?.expanded === true };
   switch (event?.type) {
+    case 'ready':
     case 'sent':
-      return { started: true, expanded: false };
+      return { started: true, expanded: current.expanded };
     case 'folder':
-      return event.by === 'user' ? { started: true, expanded: false } : current;
+      return event.by === 'user' ? { started: true, expanded: current.expanded } : current;
     case 'toggle':
       return current.started ? { started: true, expanded: !current.expanded } : current;
     case 'expand':
-      return current.started ? { started: true, expanded: true } : current;
-    case 'opened':
-      return event.conversationActive === true ? current : { started: false, expanded: false };
+      return { started: true, expanded: true };
     default:
       return current;
   }
@@ -787,15 +777,6 @@ function syncNeedsYou(els = elements()) {
   return count;
 }
 
-// Whether the drawer's conversation has anything in it: the folder turn, or
-// the shared activity once a request has been sent.
-function conversationActive() {
-  const folder = document.getElementById('personalAssistantFolder');
-  if (folder && !folder.hidden) return true;
-  const activity = document.querySelector('#personalAssistantActivityMount .ask-ori-activity');
-  return Boolean(activity) && !activity.classList.contains('is-idle');
-}
-
 // The summary strip and what it stands for. Folding only hides the sections:
 // their cards are not redrawn, so anything typed into one is still there.
 function syncSummary(els = elements()) {
@@ -808,7 +789,17 @@ function syncSummary(els = elements()) {
         doneToday: state.progress.doneToday
       })
     : '';
-  const strip = summaryStripView(state.fold, text);
+  // Do not collapse a prerequisite or a form the user is currently editing.
+  const prerequisite = ['needs_hq', 'provisioning_hq', 'repair_needed'].includes(
+    state.relationship?.state
+  );
+  const editing = els.sections.contains(document.activeElement);
+  const fold = prerequisite
+    ? { started: false, expanded: false }
+    : editing
+      ? { ...state.fold, expanded: true }
+      : state.fold;
+  const strip = summaryStripView(fold, text);
   const hidden = !state.sectionsAvailable || strip.sectionsHidden;
   if (els.sections.hidden !== hidden) els.sections.hidden = hidden;
   if (!els.summary) return;
@@ -964,6 +955,9 @@ function renderToday(today) {
   if (els.footer) els.footer.hidden = !sections.footer;
   if (els.unavailable) els.unavailable.textContent = sections.footer;
   state.sectionsAvailable = Boolean(view.active || view.paused || view.partial || view.needsHQ);
+  if (view.active || view.paused || view.partial) {
+    state.fold = summaryFoldAfter(state.fold, { type: 'ready' });
+  }
   renderProgressRow(els, sections);
   renderBriefRow(els);
   syncNeedsYou(els);
@@ -993,7 +987,6 @@ function renderRelationship(personalAssistant, view) {
   state.sectionsAvailable = Boolean(view.available || view.needsHQ);
   // Until Today is read there is no work to summarise and no brief to point at.
   if (els.progressRow) els.progressRow.hidden = true;
-  state.progressOpen = false;
   state.progress = { inProgress: 0, doneToday: 0 };
   syncProgressLists(els);
   renderBriefRow(els);
@@ -1147,9 +1140,6 @@ function init() {
   document.addEventListener('personal-assistant:sent', () => applyFold({ type: 'sent' }));
   document.addEventListener('personal-assistant:folder-started', event => {
     applyFold({ type: 'folder', by: String(event.detail?.by || '') });
-  });
-  document.addEventListener('personal-assistant:opened', () => {
-    applyFold({ type: 'opened', conversationActive: conversationActive() });
   });
   document
     .getElementById('personalAssistantSummaryToggle')

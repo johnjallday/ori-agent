@@ -264,7 +264,9 @@ type folderDecideRequest struct {
 	// Create, with a project yes, has the assistant set the workspace up
 	// itself (the card's confirmed plan) instead of the Create Workspace
 	// modal reporting one.
-	Create bool `json:"create"`
+	Create        bool   `json:"create"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	ReviewDigest  string `json:"review_digest,omitempty"`
 }
 
 // DecideFolderDigest records yes, no, or later for one offer. A project yes
@@ -283,7 +285,7 @@ func (h *Handler) DecideFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req folderDecideRequest
-	if !decodeFolderDigestBody(w, r, &req, "decision", "choice", "request_id", "create") {
+	if !decodeFolderDigestBody(w, r, &req, "decision", "choice", "request_id", "create", "workspace_name", "review_digest") {
 		return
 	}
 	userID, ok := h.currentUserID(w, r)
@@ -291,8 +293,12 @@ func (h *Handler) DecideFolderDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	offer, err := h.folderDigest.Decide(r.Context(), userID, offerID, personalassistant.FolderDecisionInput{
-		Decision: req.Decision, Choice: req.Choice, RequestID: req.RequestID, Create: req.Create,
+		Decision: req.Decision, Choice: req.Choice, RequestID: req.RequestID, Create: req.Create, WorkspaceName: req.WorkspaceName, ReviewDigest: req.ReviewDigest,
 	})
+	if errors.Is(err, personalassistant.ErrFolderPlanChanged) {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "The setup changed. Review the updated plan before confirming.", "offer": offer})
+		return
+	}
 	if err != nil {
 		writeFolderDigestError(w, err)
 		return
@@ -643,7 +649,7 @@ func writeFolderDigestError(w http.ResponseWriter, err error) {
 		orihttp.Conflict(w, "The folder dialog is unavailable here. Pick a folder from the list")
 	case errors.Is(err, personalassistant.ErrFolderOfferDecided):
 		orihttp.Conflict(w, "That offer was already answered")
-	case errors.Is(err, personalassistant.ErrFolderPathLost):
+	case errors.Is(err, personalassistant.ErrFolderPathLost), errors.Is(err, personalassistant.ErrFolderSelection):
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Ori no longer has that folder open. Pick it again", "needs_pick": true})
 	case errors.Is(err, personalassistant.ErrNeedsHQ):
 		orihttp.Conflict(w, "Build Personal HQ before showing a folder")

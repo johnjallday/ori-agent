@@ -133,11 +133,12 @@ type FolderPortfolioEvidence struct {
 
 // FolderOffer is one question about one folder and its answer.
 type FolderOffer struct {
-	ID         string            `json:"id"`
-	Status     FolderOfferStatus `json:"status"`
-	Chip       string            `json:"chip,omitempty"`
-	FolderKey  string            `json:"folder_key"`
-	FolderName string            `json:"folder_name"`
+	ConversationReview *FolderConversationReview `json:"conversation_review,omitempty"`
+	ID                 string                    `json:"id"`
+	Status             FolderOfferStatus         `json:"status"`
+	Chip               string                    `json:"chip,omitempty"`
+	FolderKey          string                    `json:"folder_key"`
+	FolderName         string                    `json:"folder_name"`
 	// RootIdentity is an opaque device/inode witness from the original scan;
 	// it is not a filesystem path or a durable discovery authorization.
 	RootIdentity string    `json:"root_identity,omitempty"`
@@ -330,6 +331,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 		case FolderOfferLater, FolderOfferAwaitingOutcome, FolderOfferResolved, FolderOfferDeclined, FolderOfferClosed:
 		default:
 			return fmt.Errorf("%w: offer status", errFolderDigestInvalid)
+		}
+		if err := validateConversationReview(offer.ConversationReview); err != nil {
+			return err
 		}
 		if offer.CapabilitySuppressed && offer.CapabilityRevived {
 			return fmt.Errorf("%w: capability offer", errFolderDigestInvalid)

@@ -13,6 +13,8 @@ import {
   reviewTextValid
 } from './personal-hq-fact.js';
 
+import { messageActions, messageReviewTrigger } from './personal-assistant-message-actions.js';
+
 const KNOWLEDGE_API = '/api/personal-assistant/knowledge';
 const FACTS_HREF = '/profile#personalHQKnowledge';
 const REQUEST_TIMEOUT_MS = 30000;
@@ -255,7 +257,7 @@ function open(review = {}, options = {}) {
   state.open = true;
   state.retry = null;
   state.openedVersion = state.knownVersion;
-  state.trigger = options.trigger || document.activeElement;
+  state.trigger = messageReviewTrigger(options.trigger || document.activeElement);
   const source = String(review.source || '').trim();
   els.source.hidden = !source;
   els.source.textContent = source
@@ -388,12 +390,8 @@ function decorate(row) {
   if (!row?.dataset?.messageId) return null;
   const bubble = row.firstElementChild;
   if (!bubble) return null;
-  let actions = bubble.querySelector('.personal-assistant-message__actions');
-  if (!actions) {
-    actions = document.createElement('div');
-    actions.className = 'personal-assistant-message__actions';
-    bubble.append(actions);
-  }
+  const actions = messageActions(row);
+  if (!actions) return null;
   if (actions.querySelector('[data-message-action="remember"]')) return actions;
   // The message text, read before the actions were added beneath it.
   const text = String(bubble.firstChild?.textContent || '').trim();

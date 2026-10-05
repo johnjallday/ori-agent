@@ -293,9 +293,13 @@ func (c folderWorkspaceCreator) CreateProjectWorkspace(ctx context.Context, req 
 		}
 		workspaceID, created = id, true
 	}
+	folderName := req.FolderName
+	if folderName == "" {
+		folderName = req.Name
+	}
 	link, err := c.linker.LinkFolder(ctx, personalassistant.FolderLinkRequest{
 		UserID: req.UserID, WorkspaceID: workspaceID, OfferID: req.OfferID,
-		Name: req.Name, Path: req.Path, Shape: req.Shape,
+		Name: folderName, Path: req.Path, Shape: req.Shape,
 	})
 	if err != nil {
 		return personalassistant.FolderCreateResult{}, err

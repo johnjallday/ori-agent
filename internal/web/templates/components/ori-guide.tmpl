@@ -139,6 +139,7 @@
           <a href="/profile#personalHQKnowledge">Review remembered facts</a>
           <a id="personalAssistantTodayInterview" href="/profile#personalHQInterview" hidden>Optional interview</a>
           <a id="personalAssistantTodayAdvanced" href="/agents">Manage agents</a>
+          <p class="personal-assistant-panel__history-note">Conversations are kept in Personal HQ until you delete them. History is not memory; remembering a fact requires your review.</p>
         </nav>
       </details>
       <button type="button" id="personalAssistantClose" class="personal-assistant-panel__icon"
@@ -162,18 +163,16 @@
       </a>
       {{end}}
 
-      <!-- The conversation this tab is in. A conversation is a session in
-           Personal HQ; this bar only starts a new one or continues an earlier
-           one. Its note keeps history and long-term memory apart. -->
+      <!-- The conversation this tab is in. The status note is reserved for
+           unsaved history, truncation and recovery, not routine idle copy. -->
       <div id="personalAssistantConversationBar" class="personal-assistant-conversation" hidden>
         <div class="personal-assistant-conversation__head">
           <p class="personal-assistant-conversation__current">
-            <span class="personal-assistant-conversation__eyebrow">Conversation</span>
             <span id="personalAssistantConversationTitle" class="personal-assistant-conversation__title">New conversation</span>
           </p>
           <div class="personal-assistant-conversation__actions">
             <button type="button" id="personalAssistantConversationNew"
-                    class="personal-assistant-conversation__button">New conversation</button>
+                    class="personal-assistant-conversation__button" aria-label="New conversation">New</button>
             <button type="button" id="personalAssistantConversationContinue"
                     class="personal-assistant-conversation__button"
                     aria-expanded="false" aria-controls="personalAssistantConversationList">Continue…</button>
@@ -272,22 +271,53 @@
            of the two was used last is kept nearest the composer. -->
       <div id="personalAssistantThread" class="personal-assistant-panel__thread">
         <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
-        {{if eq .CurrentPage "index"}}
         {{template "personal-assistant-folder.tmpl" .}}
-        {{end}}
       </div>
+      <section id="personalAssistantContextChooser" class="personal-assistant-folder-context" aria-labelledby="personalAssistantFolderChooserTitle" hidden>
+        <h3 id="personalAssistantFolderChooserTitle">Add folder context</h3>
+        <p>Ori takes a bounded local look at names, kinds, counts and project markers. File contents are not read. Nothing goes to your configured model until Send.</p>
+        <div id="personalAssistantFolderChoices" class="personal-assistant-panel__chips"></div>
+        <button type="button" id="personalAssistantFolderChooserCancel" class="personal-assistant-conversation__button">Cancel</button>
+      </section>
+      <div id="personalAssistantContextProgress"></div>
+      <section id="personalAssistantFolderPreview" class="personal-assistant-folder-context" aria-label="Local folder preview" hidden>
+        <p class="personal-assistant-folder-context__eyebrow">Local preview · not sent</p>
+        <p>File contents have not been read.</p>
+        <p id="personalAssistantFolderSummary"></p>
+        <p id="personalAssistantFolderProjects"></p>
+        <details>
+          <summary>Coverage and what Send shares</summary>
+          <p id="personalAssistantFolderCoverage"></p>
+          <p>Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.</p>
+        </details>
+        <p>Send your question, or send “Explore this folder” to discuss this snapshot. No workspace is created.</p>
+      </section>
+      <section id="personalAssistantFolderSetupChoices" class="personal-assistant-folder-context" aria-label="Choose what to set up" hidden>
+        <label for="personalAssistantFolderSetupCandidate">Which observed folder should the workspace use?</label>
+        <select id="personalAssistantFolderSetupCandidate" class="form-select form-select-sm" required></select>
+        <p class="personal-assistant-folder-context__note">This saves a setup review in this conversation. It sends nothing to a model and creates nothing until you confirm.</p>
+        <button type="button" id="personalAssistantFolderSetupReview" class="btn btn-sm btn-outline-secondary">Review selection</button>
+        <button type="button" id="personalAssistantFolderSetupCancel" class="btn btn-sm btn-link">Keep chatting</button>
+      </section>
+      <p id="personalAssistantFolderHistorical" class="personal-assistant-folder-context__note" hidden></p>
+      <p id="personalAssistantContextStatus" class="personal-assistant-folder-context__note" role="status" aria-live="polite"></p>
     </div>
 
-    <!-- The composer is the last thing in the drawer and never scrolls away.
-         One suggestion sits directly above it. -->
+    <!-- The composer stays pinned; Add folder is part of this form on every page. -->
     <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
-    <div id="personalAssistantChips" class="personal-assistant-panel__chips" hidden>
-      <button type="button" id="personalAssistantFolderChip" class="personal-assistant-panel__chip">
-        <i class="bi bi-folder2-open" aria-hidden="true"></i>
-        <span>Explore a folder</span>
-      </button>
-    </div>
     <form id="personalAssistantForm" class="personal-assistant-panel__form">
+      <div id="personalAssistantChips" class="personal-assistant-panel__chips personal-assistant-panel__attachments" hidden>
+        <button type="button" id="personalAssistantFolderChip" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantContextChooser">
+          <i class="bi bi-folder2-open" aria-hidden="true"></i>
+          <span>Add folder</span>
+        </button>
+        <span id="personalAssistantActiveFolder" class="personal-assistant-folder-context__chip" hidden>
+          <span id="personalAssistantActiveFolderName"></span>
+          <button type="button" id="personalAssistantRemoveFolder" aria-label="Remove folder context">×</button>
+        </span>
+        <button type="button" id="personalAssistantReviewFolderSetup" class="btn btn-sm btn-link" aria-label="Review workspace setup" aria-controls="personalAssistantFolderSetupChoices" aria-expanded="false" hidden>Review setup</button>
+        <span id="personalAssistantFolderSendHint" class="personal-assistant-folder-context__note" hidden>Empty Send: “Explore this folder”</span>
+      </div>
       <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
       <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="2"
                 maxlength="2000" autocomplete="off"

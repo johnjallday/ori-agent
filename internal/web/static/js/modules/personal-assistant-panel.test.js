@@ -186,19 +186,21 @@ test('the needs-you line is rendered on every page but Home, and links to Home',
   assert.equal(NEEDS_YOU_URL, '/?panel=today');
 });
 
-test('the chip sits directly above the composer, on every page', () => {
+test('Add folder sits inside the composer, on every page', () => {
   const drawer = readFileSync(
     new URL('../../../templates/components/ori-guide.tmpl', import.meta.url),
     'utf8'
   );
   const chips = drawer.indexOf('id="personalAssistantChips"');
   const form = drawer.indexOf('id="personalAssistantForm"');
-  assert.ok(chips > 0 && chips < form);
-  // Nothing else is between them, and it is outside the scrolling region.
+  assert.ok(chips > form && form > 0);
+  assert.ok(chips < drawer.indexOf('id="personalAssistantInput"'));
+  // The attachment row remains outside the scrolling region.
   assert.ok(drawer.indexOf('id="personalAssistantPanelStatus"') < chips);
   assert.ok(drawer.indexOf('id="personalAssistantThread"') < chips);
   assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 1);
-  assert.match(drawer, /id="personalAssistantFolderChip"[\s\S]{0,200}Explore a folder/);
+  assert.match(drawer, /id="personalAssistantFolderChip"[\s\S]{0,350}Add folder/);
+  assert.match(drawer, /id="personalAssistantRemoveFolder" aria-label="Remove folder context"/);
   // Not inside a part of the drawer that only some pages render: the last
   // page condition before it has already ended.
   const before = drawer.slice(0, chips);

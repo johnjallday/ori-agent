@@ -220,6 +220,9 @@ func (h *hybridStore) ListSessions(ctx context.Context, filter *SessionFilter, o
 
 // AddMessage appends a message to a session.
 func (h *hybridStore) AddMessage(ctx context.Context, sessionID string, message *Message) error {
+	// Typed folder evidence has a dedicated internal CAS writer. In particular,
+	// never leave a client-supplied field in cache that SQLite did not persist.
+	message.FolderContext = nil
 	// Generate ID if not set
 	if message.ID == "" {
 		message.ID = uuid.New().String()

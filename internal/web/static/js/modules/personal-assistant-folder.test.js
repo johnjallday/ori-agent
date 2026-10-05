@@ -640,7 +640,7 @@ test('"Explore a folder" is disabled while a folder is being chosen or explored'
   assert.equal(folderChipBusy(), false);
 });
 
-test('the folder turn is rendered once, in the conversation, with the chooser first', () => {
+test('the folder turn and work controller mount once on every drawer host', () => {
   const read = name =>
     readFileSync(new URL(`../../../templates/components/${name}`, import.meta.url), 'utf8');
   const turn = read('personal-assistant-folder.tmpl');
@@ -649,8 +649,19 @@ test('the folder turn is rendered once, in the conversation, with the chooser fi
   assert.doesNotMatch(today, /personalAssistantFolder/);
   assert.match(
     drawer,
-    /id="personalAssistantThread"[\s\S]*\{\{if eq \.CurrentPage "index"\}\}\s*\{\{template "personal-assistant-folder\.tmpl" \.\}\}/
+    /id="personalAssistantThread"[^>]*>\s*<div[^>]*personalAssistantActivityMount[^>]*><\/div>\s*\{\{template "personal-assistant-folder\.tmpl" \.\}\}/
   );
+  const head = read('../layout/head.tmpl');
+  assert.equal((head.match(/src="\/js\/modules\/dashboard.js"/g) || []).length, 1);
+  for (const page of [
+    '../layout/base.tmpl',
+    '../pages/workspaces.tmpl',
+    '../pages/workspace-detail.tmpl',
+    '../pages/workspace-task.tmpl',
+    '../pages/workspace-canvas.tmpl'
+  ]) {
+    assert.doesNotMatch(read(page), /src="\/js\/modules\/dashboard.js"/, page);
+  }
   for (const id of [
     'personalAssistantFolder',
     'personalAssistantFolderRequest',

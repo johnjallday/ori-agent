@@ -154,9 +154,13 @@ test('Mission 02: Start opens the folder chooser in the assistant panel', async 
   // The assistant drawer opens with the chooser unfolded; the quest parameter
   // is scrubbed so a reload does not open it again.
   await expect(page.locator('#personalAssistantToday')).toBeVisible({ timeout: 15000 });
-  const chooser = page.locator('#personalAssistantFolderChooser');
+  const chooser = page.locator('#personalAssistantContextChooser');
   await expect(chooser).toBeVisible({ timeout: 15000 });
-  await expect(chooser.locator('#personalAssistantFolderTitle')).toContainText('Which folder');
+  await expect(chooser.locator('#personalAssistantFolderChooserTitle')).toContainText(
+    'Add folder context'
+  );
+  await expect(page.locator('#personalAssistantFolderRequest')).toBeHidden();
+  await expect(page.locator('#homeAssistantConversation [data-message-role]')).toHaveCount(0);
   // This fresh sandbox has no Downloads/Documents/Desktop and disables native
   // desktop opening; the chooser remains usable once a chip is seeded.
   await expect(page).not.toHaveURL(/quest=/);

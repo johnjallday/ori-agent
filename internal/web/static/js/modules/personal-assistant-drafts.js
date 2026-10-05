@@ -11,6 +11,8 @@
 //   that changed since is never overwritten; its current text is shown for a
 //   fresh review instead.
 
+import { messageActions, messageReviewTrigger } from './personal-assistant-message-actions.js';
+
 const DRAFTS_ENDPOINT = '/api/home-assistant/drafts';
 const REVIEW_ENDPOINT = `${DRAFTS_ENDPOINT}/review`;
 const SAVE_ENDPOINT = `${DRAFTS_ENDPOINT}/save`;
@@ -359,7 +361,7 @@ function present(mode, review, options) {
   state.review = review;
   state.saving = false;
   state.blocked = false;
-  state.trigger = options.trigger || document.activeElement;
+  state.trigger = messageReviewTrigger(options.trigger || document.activeElement);
   els.title.value = String(review.title || '');
   els.body.value = String(review.body || '');
   els.title.readOnly = false;
@@ -603,14 +605,8 @@ function actionButton(actions, name, label, onClick) {
  */
 function decorate(row) {
   if (!row?.dataset?.messageId || row.dataset.messageRole !== 'assistant') return null;
-  const bubble = row.firstElementChild;
-  if (!bubble) return null;
-  let actions = bubble.querySelector('.personal-assistant-message__actions');
-  if (!actions) {
-    actions = document.createElement('div');
-    actions.className = 'personal-assistant-message__actions';
-    bubble.append(actions);
-  }
+  const actions = messageActions(row);
+  if (!actions) return null;
   actionButton(actions, 'save-draft', SAVE_ACTION_LABEL, button => {
     void requestReview(row.dataset.conversationId, row.dataset.messageId, button);
   });
