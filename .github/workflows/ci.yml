@@ -31,9 +31,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
-      - name: Install zsh for sourced-shell contract tests
+      - name: Install shell contract dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y zsh
+        run: sudo apt-get update && sudo apt-get install -y zsh ripgrep
+      - name: Install documentation-check dependency (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: brew install ripgrep
       - name: Offline wrappers and project adapters (no companion clone)
         run: make test-devtools
 
