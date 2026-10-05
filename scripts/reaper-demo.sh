@@ -204,6 +204,17 @@ if [[ -n "$music_source" ]]; then
 	music_tree="$(git -C "$music_root" rev-parse HEAD^{tree})"
 fi
 
+# Candidate build helpers rewrite manifests and create artifacts. Execute them
+# only inside an export, never in the separately owned source checkout (even
+# when the helper promises to restore its manifest on exit).
+build_root="$(mktemp -d "${TMPDIR:-/tmp}/ori-reaper-build.XXXXXX")"
+trap 'rm -rf -- "$build_root"' EXIT
+trap 'exit 130' HUP INT TERM
+git -C "$plugin_root" archive "$reaper_revision" | tar -x -C "$build_root"
+wrapper="$build_root/scripts/with-local-artifact.sh"
+verify="$build_root/scripts/verify-artifact.sh"
+plugin_artifact="$build_root/artifacts/reaper-plugin-darwin-arm64"
+
 refresh_artifact() {
 	"$verify"
 	install -m 0755 "$plugin_artifact" "$root_artifact"
@@ -245,14 +256,15 @@ cleanup() {
 	else
 		rm -rf -- "$sandbox"
 	fi
+	rm -rf -- "$build_root"
 	exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-# Build deterministic service bytes while the helper restores any temporary
-# source-manifest change before the server starts. Export the committed tree,
-# then make only the staged manifest point at those bundled local bytes.
+# Build deterministic service bytes in the disposable export. Export the
+# original committed tree for installation, then make only that staged manifest
+# point at the verified bundled local bytes.
 "$wrapper" true
 refresh_artifact
 reaper_archive="$sandbox/evidence/reaper-plugin.tar"
