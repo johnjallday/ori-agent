@@ -31,6 +31,7 @@ import {
   PREVIEW_TEXT,
   SECTIONS,
   SECTION_READY,
+  folderKindOf,
   itemKey,
   sectionInfo,
   sectionOfKind
@@ -163,6 +164,7 @@ const KIND_NOUNS = {
   note: 'Note',
   ticket: 'Ticket',
   file: 'File',
+  output: 'Output',
   agent: 'Agent'
 };
 
@@ -197,7 +199,8 @@ export function paneCrumbs(tab, flattened) {
   const section = sectionInfo(sectionOfKind(tab.kind));
   if (section) crumbs.push(section.label);
   if (tab.kind === 'memory') return crumbs;
-  if (tab.kind === 'file') {
+  // A file, under files/ or outputs/, is reached through its folders.
+  if (folderKindOf(tab.kind)) {
     const folders = String((tab.meta && tab.meta.path) || '')
       .split('/')
       .filter(Boolean)
@@ -315,14 +318,15 @@ export function nextRunLabel(workspaceId, scheduleIndex, locale) {
  * The sections of a workspace or group as overview links, with counts.
  *
  * A count that has not loaded reads "—", never "0". A group lists only the
- * sections that hold something, as its tree does (FR16, FR39, FR40).
+ * sections that hold something, as its tree does, and so does a workspace for
+ * a section shown only when it is not empty (FR9, FR16, FR39, FR40).
  */
 export function sectionLinks(workspaceId, sections, { hideEmpty = false } = {}) {
   const links = [];
   SECTIONS.forEach(info => {
     const state = (sections && sections[info.id]) || null;
     const ready = !!state && state.status === SECTION_READY;
-    if (hideEmpty && !(ready && state.count > 0)) return;
+    if ((hideEmpty || info.optional) && !(ready && state.count > 0)) return;
     links.push({
       label: info.label,
       icon: rowIconName({ kind: 'section', section: info.id }),
@@ -344,6 +348,20 @@ function fillOverviewTags(view, tab, context) {
   view.tagsEditable = true;
   const active = context.activeTags instanceof Set ? context.activeTags : new Set();
   view.activeTags = view.tags.filter(tag => active.has(tag));
+}
+
+// A loaded file preview as the pane's body (FR34): Markdown rendered, other
+// text as it is, an image inline, anything else "No preview".
+function previewBody(tab, value) {
+  if (value.tooLarge) return { type: 'none', text: 'This file is too large to preview here.' };
+  if (value.kind === PREVIEW_MARKDOWN) {
+    return { type: 'markdown', markdown: value.text, empty: 'This file is empty.' };
+  }
+  if (value.kind === PREVIEW_TEXT) {
+    return { type: 'text', text: value.text, empty: 'This file is empty.' };
+  }
+  if (value.kind === PREVIEW_IMAGE) return { type: 'image', src: value.url, alt: tab.label };
+  return { type: 'none', text: 'No preview' };
 }
 
 const VIEW_FILLERS = {
@@ -403,18 +421,15 @@ const VIEW_FILLERS = {
     ];
     view.fields = [{ label: 'Path', value: `files/${path}` }];
     if (path === 'BACKLOG.md') view.lead = 'Ori keeps this file in step with the backlog.';
-    if (!value) return;
-    if (value.tooLarge) {
-      view.body = { type: 'none', text: 'This file is too large to preview here.' };
-    } else if (value.kind === PREVIEW_MARKDOWN) {
-      view.body = { type: 'markdown', markdown: value.text, empty: 'This file is empty.' };
-    } else if (value.kind === PREVIEW_TEXT) {
-      view.body = { type: 'text', text: value.text, empty: 'This file is empty.' };
-    } else if (value.kind === PREVIEW_IMAGE) {
-      view.body = { type: 'image', src: value.url, alt: tab.label };
-    } else {
-      view.body = { type: 'none', text: 'No preview' };
-    }
+    if (value) view.body = previewBody(tab, value);
+  },
+
+  // FR35, read-only: a file a task run saved under outputs/. The Files
+  // preview, without "Open" and "Reveal in Finder" (decision D15); the folder
+  // as a whole is shown from the Outputs section's menu.
+  output(view, { tab, value }) {
+    view.fields = [{ label: 'Path', value: `outputs/${String(tab.meta.path || '')}` }];
+    if (value) view.body = previewBody(tab, value);
   },
 
   // FR37, read-only: the entries as a list.

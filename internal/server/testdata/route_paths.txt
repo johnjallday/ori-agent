@@ -429,6 +429,10 @@
 /api/workspaces/x/files/reveal
 /api/workspaces/x/files/x
 /api/workspaces/x/files/x/y
+# --- outputs: listing + one file, read-only (Home file tree) ---
+/api/workspaces/x/outputs/tree
+/api/workspaces/x/outputs/x
+/api/workspaces/x/outputs/x/y
 # --- directories + agents (G2e) ---
 /api/workspaces/x/directories
 /api/workspaces/x/directories/x

@@ -3,25 +3,28 @@
 // PRD: tasks/prd-home-file-tree.md, sections 4.B, 4.C and 7 ("Data sources").
 //
 // The Tree view on Home expands a workspace or a group into sections: Notes,
-// Backlog, Files, Memory and Agents. Each section comes from its own endpoint,
-// and each endpoint answers in its own format. This module is the only place
-// that knows those formats. It fetches a section and turns the answer into
-// rows of ONE common shape, so the tree renderer never reads a response:
+// Backlog, Files, Outputs, Memory and Agents. Each section comes from its own
+// endpoint, and each endpoint answers in its own format. This module is the
+// only place that knows those formats. It fetches a section and turns the
+// answer into rows of ONE common shape, so the tree renderer never reads a
+// response:
 //
 //   { id, kind, label, meta, children, workspaceId }
 //
 //   id          unique key for the row; it is also the key of the row's tab
-//   kind        'note' | 'ticket' | 'file' | 'folder' | 'agent' | 'more'
+//   kind        'note' | 'ticket' | 'file' | 'folder' | 'output' |
+//               'outputFolder' | 'agent' | 'more'
 //   label       the text the row shows
 //   meta        facts the row or the pane needs (a ticket's state, a file's path)
 //   children    child rows; only a folder has any
 //   workspaceId the workspace or group the row belongs to
 //
 // A group is a workspace of kind `group`, and every endpoint here accepts a
-// group's id exactly as it accepts a workspace's (checked in task 1.1).
+// group's id exactly as it accepts a workspace's (checked in task 1.1 of each
+// release).
 //
-// Release 2 (Outputs, Linked folders, Chats) adds entries to SECTIONS and
-// LOADERS; the renderer does not change.
+// A new section is an entry in SECTIONS and LOADERS and a shaper; the renderer
+// does not change.
 //
 // Everything except the fetch itself is a pure function, so
 // home-tree-sources.test.js runs under plain Node with `fetch` stubbed.
@@ -29,6 +32,7 @@
 export const SECTION_NOTES = 'notes';
 export const SECTION_BACKLOG = 'backlog';
 export const SECTION_FILES = 'files';
+export const SECTION_OUTPUTS = 'outputs';
 export const SECTION_MEMORY = 'memory';
 export const SECTION_AGENTS = 'agents';
 
@@ -37,12 +41,21 @@ export const SECTION_AGENTS = 'agents';
  *
  * `expandable: false` marks a section that is a single row you open rather
  * than a list you expand (Memory). `empty` is the dimmed line a workspace
- * shows when the section holds nothing (FR13).
+ * shows when the section holds nothing (FR13). `optional` marks a section
+ * FR9 shows "only when not empty": a workspace hides it while it holds
+ * nothing, the way a group hides every empty section.
  */
 export const SECTIONS = [
   { id: SECTION_NOTES, label: 'Notes', empty: 'No notes yet', expandable: true },
   { id: SECTION_BACKLOG, label: 'Backlog', empty: 'No tickets yet', expandable: true },
   { id: SECTION_FILES, label: 'Files', empty: 'No files yet', expandable: true },
+  {
+    id: SECTION_OUTPUTS,
+    label: 'Outputs',
+    empty: 'No outputs yet',
+    expandable: true,
+    optional: true
+  },
   { id: SECTION_MEMORY, label: 'Memory', empty: '', expandable: false },
   { id: SECTION_AGENTS, label: 'Agents', empty: 'No agents yet', expandable: true }
 ];
@@ -69,6 +82,10 @@ const KEY_PREFIX = {
   ticket: 't',
   file: 'f',
   folder: 'd',
+  // A file and a folder under outputs/. They have prefixes of their own so an
+  // output never shares a key with a file of the same path under files/.
+  output: 'o',
+  outputFolder: 'od',
   memory: 'm',
   agent: 'a',
   more: 'more',
@@ -121,9 +138,29 @@ export function sectionOfKind(kind) {
   if (kind === 'note') return SECTION_NOTES;
   if (kind === 'ticket') return SECTION_BACKLOG;
   if (kind === 'file' || kind === 'folder') return SECTION_FILES;
+  if (kind === 'output' || kind === 'outputFolder') return SECTION_OUTPUTS;
   if (kind === 'memory') return SECTION_MEMORY;
   if (kind === 'agent') return SECTION_AGENTS;
   return '';
+}
+
+// Each kind of file row and the kind of folder it sits in. Files, outputs and
+// (in time) linked folders are the same nested listing under different kinds.
+const FOLDER_KIND_OF = {
+  file: 'folder',
+  folder: 'folder',
+  output: 'outputFolder',
+  outputFolder: 'outputFolder'
+};
+
+/** Whether a row is a folder you expand, in whichever section it lives. */
+export function isFolderKind(kind) {
+  return !!FOLDER_KIND_OF[kind] && FOLDER_KIND_OF[kind] === kind;
+}
+
+/** The folder kind a file or folder row's parents have; '' for other rows. */
+export function folderKindOf(kind) {
+  return FOLDER_KIND_OF[kind] || '';
 }
 
 // ---------------------------------------------------------------------------
@@ -250,21 +287,24 @@ export function isHiddenPath(relativePath) {
 /** The number of files under a list of file/folder rows, counting sub-folders. */
 export function countFiles(rows) {
   return (Array.isArray(rows) ? rows : []).reduce(
-    (sum, entry) => sum + (entry.kind === 'folder' ? countFiles(entry.children) : 1),
+    (sum, entry) => sum + (isFolderKind(entry.kind) ? countFiles(entry.children) : 1),
     0
   );
 }
 
 /**
- * `GET /api/workspaces/{id}/files/tree` → nested folder and file rows.
+ * A flat file listing → nested folder and file rows of one kind.
  *
- * The endpoint returns a FLAT list: each entry carries its `relative_path`
+ * The listings here are FLAT: each entry carries its `relative_path`
  * (`docs/plan.md`) and `is_dir`. A folder may be listed on its own or only
  * implied by a file's path, so every ancestor of every entry is created on
  * demand. Folders sort before files, each by name (FR10, FR12).
+ *
+ * `fileKind` is the kind of the file rows ('file', 'output'); their folders
+ * get the matching folder kind.
  */
-export function filesToRows(workspaceId, payload) {
-  const entries = Array.isArray(payload && payload.files) ? payload.files : [];
+function nestFileRows(workspaceId, entries, fileKind) {
+  const folderKind = FOLDER_KIND_OF[fileKind];
   const top = [];
   const folders = new Map();
 
@@ -272,14 +312,14 @@ export function filesToRows(workspaceId, payload) {
     if (path === '') return null;
     if (folders.has(path)) return folders.get(path);
     const cut = path.lastIndexOf('/');
-    const folder = row(workspaceId, 'folder', path, path.slice(cut + 1), { path, fileCount: 0 });
+    const folder = row(workspaceId, folderKind, path, path.slice(cut + 1), { path, fileCount: 0 });
     folders.set(path, folder);
     const parent = folderFor(cut < 0 ? '' : path.slice(0, cut));
     (parent ? parent.children : top).push(folder);
     return folder;
   };
 
-  entries.forEach(entry => {
+  (Array.isArray(entries) ? entries : []).forEach(entry => {
     if (!entry) return;
     const path = String(entry.relative_path || '').replace(/^\/+|\/+$/g, '');
     if (isHiddenPath(path)) return;
@@ -290,7 +330,7 @@ export function filesToRows(workspaceId, payload) {
     const cut = path.lastIndexOf('/');
     const parent = folderFor(cut < 0 ? '' : path.slice(0, cut));
     (parent ? parent.children : top).push(
-      row(workspaceId, 'file', path, text(entry.name) || path.slice(cut + 1), {
+      row(workspaceId, fileKind, path, text(entry.name) || path.slice(cut + 1), {
         path,
         url: text(entry.url),
         size: Number.isFinite(Number(entry.size)) ? Number(entry.size) : null
@@ -300,11 +340,11 @@ export function filesToRows(workspaceId, payload) {
 
   const finish = rows => {
     rows.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
+      if (a.kind !== b.kind) return a.kind === folderKind ? -1 : 1;
       return byName(a, b);
     });
     rows.forEach(entry => {
-      if (entry.kind !== 'folder') return;
+      if (entry.kind !== folderKind) return;
       finish(entry.children);
       entry.meta.fileCount = countFiles(entry.children);
     });
@@ -313,6 +353,22 @@ export function filesToRows(workspaceId, payload) {
 
   const rows = finish(top);
   return { rows, count: countFiles(rows) };
+}
+
+/** `GET /api/workspaces/{id}/files/tree` → nested folder and file rows. */
+export function filesToRows(workspaceId, payload) {
+  return nestFileRows(workspaceId, payload && payload.files, 'file');
+}
+
+/**
+ * `GET /api/workspaces/{id}/outputs/tree` → nested folder and file rows.
+ *
+ * The answer has the Files listing's shape, rooted at the workspace's
+ * `outputs/` folder (what task runs saved). The rows are the Files rows under
+ * kinds of their own, `output` and `outputFolder`.
+ */
+export function outputsToRows(workspaceId, payload) {
+  return nestFileRows(workspaceId, payload && payload.files, 'output');
 }
 
 /**
@@ -358,6 +414,10 @@ export function agentsToRows(workspaceId, payload) {
 // The 100-row cap (FR14)
 // ---------------------------------------------------------------------------
 
+// The sections whose rows are files nested in folders. Their items are the
+// files, however deep, not the rows at the top.
+const NESTED_SECTIONS = new Set([SECTION_FILES, SECTION_OUTPUTS]);
+
 /**
  * Keep the first `limit` files of a nested file list, in the order the tree
  * shows them. Folders are kept only as far as they are needed to reach a kept
@@ -367,7 +427,7 @@ function capFileRows(rows, budget) {
   const kept = [];
   for (const entry of rows) {
     if (budget.left <= 0) break;
-    if (entry.kind !== 'folder') {
+    if (!isFolderKind(entry.kind)) {
       kept.push(entry);
       budget.left -= 1;
       continue;
@@ -392,7 +452,7 @@ export function capSection(workspaceId, sectionId, shaped, limit = SECTION_ROW_L
   // A section that is one row (Memory) has no list to cut short.
   const info = sectionInfo(sectionId);
   if (info && !info.expandable) return result;
-  const nested = sectionId === SECTION_FILES;
+  const nested = NESTED_SECTIONS.has(sectionId);
   const held = nested ? countFiles(result.rows) : result.rows.length;
   const count = Math.max(Number(result.count) || 0, held);
   result.count = count;
@@ -422,6 +482,10 @@ const LOADERS = {
   [SECTION_NOTES]: { url: id => `/api/workspaces/${enc(id)}/notes`, shape: notesToRows },
   [SECTION_BACKLOG]: { url: id => `/api/workspaces/${enc(id)}/tickets`, shape: ticketsToRows },
   [SECTION_FILES]: { url: id => `/api/workspaces/${enc(id)}/files/tree`, shape: filesToRows },
+  [SECTION_OUTPUTS]: {
+    url: id => `/api/workspaces/${enc(id)}/outputs/tree`,
+    shape: outputsToRows
+  },
   [SECTION_MEMORY]: { url: id => `/api/workspaces/${enc(id)}/memory`, shape: memoryToRows },
   [SECTION_AGENTS]: { url: id => `/api/workspaces/${enc(id)}/agents`, shape: agentsToRows }
 };
@@ -679,23 +743,31 @@ export function filePreviewKind(path) {
  * from the listing so that a name with a space, `#` or `?` is always encoded.
  */
 export function workspaceFileURL(workspaceId, path) {
-  const segments = String(path || '')
+  return `/api/workspaces/${enc(workspaceId)}/files/${encodedPath(path)}`;
+}
+
+function encodedPath(path) {
+  return String(path || '')
     .split('/')
     .filter(Boolean)
-    .map(enc);
-  return `/api/workspaces/${enc(workspaceId)}/files/${segments.join('/')}`;
+    .map(enc)
+    .join('/');
+}
+
+/** The address one of a workspace's outputs is read from. */
+export function workspaceOutputURL(workspaceId, path) {
+  return `/api/workspaces/${enc(workspaceId)}/outputs/${encodedPath(path)}`;
 }
 
 /**
- * What the file tab needs to draw a preview.
+ * What a file tab needs to draw a preview of the file at `url`.
  *
  * Only Markdown and other text are fetched; an image is shown straight from
  * its address and anything else has nothing to fetch. `tooLarge` is set
  * instead of fetching a text file over the preview limit.
  */
-export async function loadFilePreview(workspaceId, path, { size = null, fetchImpl } = {}) {
+async function loadPreviewFrom(url, path, { size = null, fetchImpl } = {}) {
   const kind = filePreviewKind(path);
-  const url = workspaceFileURL(workspaceId, path);
   const preview = { kind, url, text: '', tooLarge: false };
   if (kind !== PREVIEW_MARKDOWN && kind !== PREVIEW_TEXT) return preview;
   if (Number.isFinite(size) && size > FILE_PREVIEW_LIMIT) {
@@ -708,6 +780,31 @@ export async function loadFilePreview(workspaceId, path, { size = null, fetchImp
   const body = await response.text();
   if (body.length > FILE_PREVIEW_LIMIT) return { ...preview, tooLarge: true };
   return { ...preview, text: body };
+}
+
+/** The preview of a file under `files/` (FR34). */
+export function loadFilePreview(workspaceId, path, options = {}) {
+  return loadPreviewFrom(workspaceFileURL(workspaceId, path), path, options);
+}
+
+/** The preview of a file under `outputs/`: the Files rules, another address (FR35). */
+export function loadOutputPreview(workspaceId, path, options = {}) {
+  return loadPreviewFrom(workspaceOutputURL(workspaceId, path), path, options);
+}
+
+/**
+ * Show a workspace's outputs folder in the file manager
+ * (`POST …/output-dir/open`). Like opening a file, it acts on the machine the
+ * server runs on. The server creates the folder if it is not there yet.
+ */
+export async function showOutputsFolder(workspaceId, { fetchImpl } = {}) {
+  const response = await resolveFetch(fetchImpl)(
+    `/api/workspaces/${enc(workspaceId)}/output-dir/open`,
+    { method: 'POST', headers: { Accept: 'application/json' } }
+  );
+  if (!response.ok) {
+    throw await responseError(response);
+  }
 }
 
 /**

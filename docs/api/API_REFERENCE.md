@@ -25,6 +25,7 @@ http://localhost:8765/api
 - [Workspace Build Sessions API](#workspace-build-sessions-api)
 - [Personal Assistant Folder Digest API](#personal-assistant-folder-digest-api)
 - [Home Library: Open a Song and the Shared Assistant](#home-library-open-a-song-and-the-shared-assistant)
+- [Workspace Outputs API](#workspace-outputs-api)
 - [Scheduler Nodes API](#scheduler-nodes-api)
 - [Workspace Map Activity API](#workspace-map-activity-api)
 - [Custom Workflows API](#custom-workflows-api)
@@ -1802,6 +1803,41 @@ Body identical to add. `index` is the structured-entry index from GET. Returns t
 **Endpoint:** `DELETE /api/workspaces/{workspaceID}/memory/entries/{index}`
 
 Removes one entry by index and returns the updated document. `404` when the index is out of range.
+
+## Workspace Outputs API
+
+Task runs save their results under the workspace's own `outputs/` folder. These two endpoints read that folder; neither writes anything, and neither creates the folder. Both accept a group's id as they accept a workspace's. Home's file tree uses them for its **Outputs** section. To open the folder in the file manager, use the existing `POST /api/workspaces/{workspaceID}/output-dir/open`.
+
+### List Outputs
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/outputs/tree`
+
+```json
+{
+  "files": [
+    { "id": "folder:reports", "source": "workspace_output", "name": "reports", "relative_path": "reports", "size": 96, "is_dir": true, "mod_time": "2026-10-05T08:00:00+09:00" },
+    { "id": "file:reports/weekly.md", "source": "workspace_output", "name": "weekly.md", "relative_path": "reports/weekly.md", "url": "/api/workspaces/{workspaceID}/outputs/reports/weekly.md", "size": 1280, "is_dir": false, "mod_time": "2026-10-05T08:00:00+09:00" }
+  ],
+  "workspace": "{workspaceID}"
+}
+```
+
+`files` is one flat list of every folder and file, sorted by `relative_path`, in the shape `GET /api/workspaces/{workspaceID}/files/tree` answers with. Symbolic links are left out, and so is anything whose path has a part starting with `.`. A workspace with no `outputs/` folder, or an empty one, answers `200` with `"files": []`. `404` if the workspace doesn't exist.
+
+### Read One Output
+
+**Endpoint:** `GET /api/workspaces/{workspaceID}/outputs/{relativePath...}`
+
+Answers with the file's bytes. `relativePath` is the listing's `relative_path` with each part URL-encoded (the listing's `url` is already built that way).
+
+| Status | When |
+|---|---|
+| `400` | The path is empty, absolute, or has a `..` part anywhere (encoded or not), or a symbolic link carries it outside `outputs/`. |
+| `404` | The workspace, the `outputs/` folder or the file doesn't exist; the path is a folder; or a part of it starts with `.` (a hidden file answers exactly as a missing one). |
+
+Every answer carries `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`. The `Content-Type` comes from the file's extension, except that nothing a browser would run keeps its type: HTML, XML, JavaScript and every other `text/*` type are sent as `text/plain; charset=utf-8`. An SVG keeps `image/svg+xml` so an `<img>` can draw it; the policy stops its scripts if it is opened directly. An unknown extension is `application/octet-stream`.
+
+A file named `tree` at the top of `outputs/` is listed but cannot be read: that address is the listing.
 
 ## Scheduler Nodes API
 

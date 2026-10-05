@@ -21,12 +21,19 @@
  *   finish Group 6: the filter box, what is remembered across a reload, the
  *          one-column layout, the reload on coming back, roles and contrast.
  *
+ * Release 2 (tasks/tasks-home-file-tree-r2.md) adds a stage for each new
+ * section. They leave the seeded sandbox as they found it:
+ *   outputs  What task runs saved: the Outputs section, its folders, each
+ *            preview, "Show outputs folder", and the tab after a reload. The
+ *            seed must have been given the sandbox directory. Give it here too
+ *            and the stage also deletes and adds an output on disk.
+ *
  * Exits non-zero when a check fails, a console error appears, or a request
  * fails, so a page that renders but is quietly broken does not pass.
  */
 import { chromium } from 'playwright';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 
 const [baseUrl, outDirArg, stage = 'tree', theme = 'light', sandbox = ''] = process.argv.slice(2);
 if (!baseUrl || !outDirArg) {
@@ -40,7 +47,14 @@ mkdirSync(outDir, { recursive: true });
 
 // The requests that fetch a workspace's contents. Home in Map view, and a Tree
 // with nothing expanded, must make none of them (FR17).
-const CONTENT_REQUEST = /\/api\/workspaces\/[^/]+\/(notes|tickets|files\/tree|memory|agents)(\?|$)/;
+const CONTENT_REQUEST =
+  /\/api\/workspaces\/[^/]+\/(notes|tickets|files\/tree|outputs\/tree|memory|agents)(\?|$)/;
+// How many of them one expanded workspace or group makes: one for each section.
+const SECTION_REQUESTS = 6;
+// The sections of the seeded Studio Notes workspace, as the tree lists them. A
+// workspace with no outputs shows the same list without Outputs.
+const STUDIO_SECTIONS = 'Notes,Backlog,Files,Outputs,Memory,Agents';
+const PLAIN_SECTIONS = 'Notes,Backlog,Files,Memory,Agents';
 
 const problems = [];
 const failures = [];
@@ -113,6 +127,22 @@ async function applyTheme() {
   }, theme);
 }
 
+// The names of the section rows directly under a workspace or group, in the
+// order the tree shows them (Memory is a row of its own kind).
+function sectionNames(ownerId) {
+  return page
+    .locator(
+      '#cockpitTreeNav [data-tree-row]:is([data-tree-kind="section"],[data-tree-kind="memory"])'
+    )
+    .evaluateAll(
+      (els, parent) =>
+        els
+          .filter(el => el.getAttribute('data-parent-id') === parent)
+          .map(el => el.querySelector('.cockpit-tree-name').textContent),
+      ownerId
+    );
+}
+
 async function stageTree() {
   // --- Map view: no contents are fetched ---------------------------------
   await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
@@ -178,8 +208,9 @@ async function stageTree() {
       .evaluateAll(els => els.map(el => el.getAttribute('data-tree-row')))
   ).sort();
   check(
-    afterTree.length === 5 * groupRowIds.length && fetchedIds.join(',') === groupRowIds.join(','),
-    `opening Tree fetches 5 sections for each expanded group and nothing for a collapsed workspace (${afterTree.length} requests, ${groupRowIds.length} group(s))`
+    afterTree.length === SECTION_REQUESTS * groupRowIds.length &&
+      fetchedIds.join(',') === groupRowIds.join(','),
+    `opening Tree fetches ${SECTION_REQUESTS} sections for each expanded group and nothing for a collapsed workspace (${afterTree.length} requests, ${groupRowIds.length} group(s))`
   );
   check(
     (await rowByKind('section', 'Notes').count()) === 1,
@@ -202,24 +233,16 @@ async function stageTree() {
   await rowByKind('note', 'Weekly review').waitFor();
   const elapsed = Date.now() - started;
   await settle(300);
-  check(contentRequests().length - before === 5, 'expanding a workspace fetches its 5 sections');
+  check(
+    contentRequests().length - before === SECTION_REQUESTS,
+    `expanding a workspace fetches its ${SECTION_REQUESTS} sections`
+  );
   check(elapsed < 1000, `contents appear quickly (${elapsed}ms)`);
   check((await page.locator('.cockpit-pane-tab').count()) === 0, 'the caret opens no tab');
-  const sections = await page
-    .locator(
-      '#cockpitTreeNav [data-tree-row][data-parent-id]:is([data-tree-kind="section"],[data-tree-kind="memory"])'
-    )
-    .evaluateAll(
-      (els, parent) =>
-        els
-          .filter(el => el.getAttribute('data-parent-id') === parent)
-          .map(el => el.querySelector('.cockpit-tree-name').textContent),
-      await rowByKind('workspace', 'Studio Notes').getAttribute('data-tree-row')
-    );
-  check(
-    sections.join(',') === 'Notes,Backlog,Files,Memory,Agents',
-    `sections in order (${sections.join(',')})`
+  const sections = await sectionNames(
+    await rowByKind('workspace', 'Studio Notes').getAttribute('data-tree-row')
   );
+  check(sections.join(',') === STUDIO_SECTIONS, `sections in order (${sections.join(',')})`);
   await shot('2-workspace-expanded');
 
   // --- Open a folder to depth ---------------------------------------------
@@ -590,7 +613,7 @@ async function stagePane() {
   check(text.includes('#music') && text.includes('#home'), 'overview: shows the tags');
   const links = await page.locator('.cockpit-pane-link').allInnerTexts();
   check(
-    links.map(entry => entry.split('\n')[0]).join(',') === 'Notes,Backlog,Files,Memory,Agents',
+    links.map(entry => entry.split('\n')[0]).join(',') === STUDIO_SECTIONS,
     `overview: lists the sections with counts (${links.map(entry => entry.replace(/\s+/g, ' ')).join(' | ')})`
   );
   for (const label of ['Open workspace', 'Move…', 'Delete']) {
@@ -2022,7 +2045,9 @@ async function runFinishStage({ stamp, names, ids }) {
   const mapRequests = requests.slice(beforeMap);
   const treeOnly = mapRequests.filter(
     entry =>
-      /\/api\/workspaces\/[^/]+\/(tickets|files\/tree|memory|agents)$/.test(entry.split(' ')[1]) ||
+      /\/api\/workspaces\/[^/]+\/(tickets|files\/tree|outputs\/tree|memory|agents)$/.test(
+        entry.split(' ')[1]
+      ) ||
       /\/api\/notes\/[^/]+$/.test(entry.split(' ')[1]) ||
       /\/api\/workspaces\/[^/]+\/tickets\/[^/]+$/.test(entry.split(' ')[1])
   );
@@ -2384,6 +2409,451 @@ async function runFinishStage({ stamp, names, ids }) {
   await shot('f7-overview');
 }
 
+// ===========================================================================
+// Release 2
+// ===========================================================================
+
+// The folder on disk where a workspace keeps its outputs, as the server reports
+// it — or '' when no sandbox directory was given, or the folder is not inside
+// it. Nothing is ever written or removed outside the sandbox.
+async function outputsFolderOnDisk(workspaceId) {
+  if (!sandbox) return '';
+  const answer = await page.request.get(`${baseUrl}/api/workspaces/${workspaceId}/output-dir`);
+  const reported = (await answer.json()).output_dir || '';
+  const root = realpathSync(sandbox);
+  const folder = realpathSync(reported);
+  if (!`${folder}${sep}`.startsWith(`${root}${sep}`)) {
+    console.log(`skip the on-disk checks: ${reported} is not inside ${sandbox}`);
+    return '';
+  }
+  return folder;
+}
+
+// Release 2, group 1: what task runs saved, in the tree and in the pane.
+async function stageOutputs() {
+  const stamp = Date.now().toString(36);
+  const nav = page.locator('#cockpitTreeNav');
+  const menu = page.locator('[data-tree-menu]');
+  const live = () => page.locator('#cockpitRailLive').innerText();
+  const byId = id => nav.locator(`[data-tree-row="${id}"]`);
+  const tabLabels = () => page.locator('.cockpit-pane-tab-label').allInnerTexts();
+  const stored = () =>
+    page.evaluate(() => JSON.parse(window.localStorage.getItem('ori.home.fileTree.v1') || 'null'));
+  const menuLabels = async () =>
+    (await menu.locator('[role="menuitem"]').allInnerTexts()).join(',');
+  const childNames = parentId =>
+    nav
+      .locator('[data-tree-row]')
+      .evaluateAll(
+        (els, parent) =>
+          els
+            .filter(el => el.getAttribute('data-parent-id') === parent)
+            .map(el => el.querySelector('.cockpit-tree-name')?.textContent || ''),
+        parentId
+      );
+  const outputRequests = () => requests.filter(entry => /\/outputs\//.test(entry.split(' ')[1]));
+  const paneButtons = () =>
+    page.locator('#cockpitTreePane .cockpit-pane-article :is(a.modern-btn, button.modern-btn)');
+  const crumbs = async () =>
+    (await page.locator('.cockpit-pane-crumbs').innerText()).replace(/\s*\/\s*/g, ' / ').trim();
+
+  // --- Map view asks for no outputs (FR17) ----------------------------------
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#cockpitMap').waitFor({ state: 'visible' });
+  await settle(1500);
+  check(outputRequests().length === 0, 'Map view asks for no outputs');
+
+  await page.locator('#cockpitViewTree').click();
+  await nav.locator('[data-tree-row]').first().waitFor();
+  await applyTheme();
+  await settle(600);
+  const studioId = await rowByKind('workspace', 'Studio Notes').getAttribute('data-tree-row');
+  const nightId = await rowByKind('workspace', 'Night Drive').getAttribute('data-tree-row');
+  const section = `${studioId}/s/outputs`;
+  const output = path => byId(`${studioId}/o/${path}`);
+  const folder = path => byId(`${studioId}/od/${path}`);
+
+  // --- A workspace with no outputs has no Outputs row (FR9) -----------------
+  await expand('workspace', 'Night Drive');
+  await rowByKind('note', 'Lyrics draft').waitFor();
+  await settle(400);
+  const nightSections = await sectionNames(nightId);
+  check(
+    requests.includes(`GET /api/workspaces/${nightId}/outputs/tree`) &&
+      nightSections.join(',') === PLAIN_SECTIONS,
+    `a workspace with no outputs is asked for them and shows no Outputs row (${nightSections.join(',')})`
+  );
+  await rowByKind('workspace', 'Night Drive').locator('[data-tree-toggle]').click();
+
+  // --- A workspace with outputs: the row, its place and its count -----------
+  await expand('workspace', 'Studio Notes');
+  await byId(section).waitFor();
+  const studioSections = await sectionNames(studioId);
+  check(
+    studioSections.join(',') === STUDIO_SECTIONS,
+    `Outputs sits between Files and Memory (${studioSections.join(',')})`
+  );
+  check(
+    (await byId(section).locator('.cockpit-tree-count').innerText()) === '5',
+    'the Outputs row counts its 5 files, including those inside folders (FR10)'
+  );
+  const top = await childNames(section);
+  check(
+    top.join(',') === 'runs,cover-art.png,mix-v1.wav,weekly-report.md',
+    `folders come first, then files by name (${top.join(',')})`
+  );
+  check(
+    (await folder('runs').getAttribute('aria-expanded')) === 'false',
+    'a folder in Outputs starts closed'
+  );
+  await byId(section).scrollIntoViewIfNeeded();
+  await shot('o1-outputs-section');
+
+  // --- Folders open to any depth, and open no tab (FR12, FR24) --------------
+  await folder('runs').click();
+  await folder('runs/2026-10-04').click();
+  await output('runs/2026-10-04/summary.md').waitFor();
+  check(
+    (await childNames(`${studioId}/od/runs`)).join(',') === '2026-10-04,tempo-check.csv' &&
+      (await page.locator('.cockpit-pane-tab').count()) === 0,
+    'a folder opens to the folder inside it, and opening folders opens no tab'
+  );
+
+  // --- Each kind of preview (FR35) ------------------------------------------
+  await output('weekly-report.md').click();
+  await page
+    .locator('.cockpit-pane-article[data-pane-kind="output"] .cockpit-pane-markdown h1')
+    .waitFor();
+  let text = await article().innerText();
+  check(
+    (await crumbs()) === 'Studio Notes / Outputs / weekly-report.md',
+    `the breadcrumb reads Studio Notes / Outputs / weekly-report.md (${await crumbs()})`
+  );
+  check(
+    (await page.locator('.cockpit-pane-sub').innerText()).includes('Output in Studio Notes'),
+    'the pane says "Output in Studio Notes"'
+  );
+  check(text.includes('outputs/weekly-report.md'), 'it shows the path under outputs/');
+  check(
+    (await page.locator('.cockpit-pane-markdown h2').count()) === 2,
+    'a Markdown output is rendered'
+  );
+  check(
+    (await paneButtons().count()) === 0 && !/Reveal in Finder|Open in default app/.test(text),
+    'an output has no Open and no Reveal in Finder button (D15)'
+  );
+  check(
+    (await output('weekly-report.md').getAttribute('aria-selected')) === 'true',
+    "the open output's row is highlighted"
+  );
+  check(new URL(page.url()).pathname === '/', 'no page navigation');
+  await shot('o2-markdown-output');
+
+  await output('runs/tempo-check.csv').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="output"] .cockpit-pane-pre').waitFor();
+  check(
+    (await page.locator('.cockpit-pane-pre').innerText()).includes('Harbor Lights,104,0.4'),
+    'a CSV output is shown as plain text'
+  );
+  check(
+    (await crumbs()) === 'Studio Notes / Outputs / runs / tempo-check.csv',
+    'the breadcrumb of an output in a folder includes the folder'
+  );
+
+  // Enter opens an output and moves focus to the pane's title (FR72).
+  await output('runs/2026-10-04/summary.md').focus();
+  await page.keyboard.press('Enter');
+  await page.locator('.cockpit-pane-markdown h1', { hasText: 'Run summary' }).waitFor();
+  check(
+    (await crumbs()) === 'Studio Notes / Outputs / runs / 2026-10-04 / summary.md' &&
+      (await page.evaluate(() => !!document.activeElement?.hasAttribute('data-pane-title'))),
+    'Enter on an output two folders down opens it and moves focus to the pane title'
+  );
+
+  await output('cover-art.png').click();
+  await page
+    .locator('.cockpit-pane-article[data-pane-kind="output"] .cockpit-pane-image')
+    .waitFor();
+  await expectEventually(
+    () =>
+      page
+        .locator('.cockpit-pane-image')
+        .evaluate(image => image.complete && image.naturalWidth === 120),
+    'an image output is shown inline'
+  );
+  check(
+    (await page.locator('.cockpit-pane-image').getAttribute('src')) ===
+      `/api/workspaces/${studioId}/outputs/cover-art.png`,
+    'the image comes from the outputs address'
+  );
+  await shot('o3-image-output');
+
+  await output('mix-v1.wav').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="output"] .cockpit-pane-note').waitFor();
+  check((await article().innerText()).includes('No preview'), 'any other output says "No preview"');
+  await shot('o4-no-preview');
+
+  const reads = outputRequests().filter(entry => !entry.endsWith('/outputs/tree'));
+  check(
+    reads.includes(`GET /api/workspaces/${studioId}/outputs/weekly-report.md`) &&
+      reads.includes(`GET /api/workspaces/${studioId}/outputs/runs/tempo-check.csv`) &&
+      !reads.some(entry => entry.endsWith('.wav')) &&
+      !requests.some(entry => /\/files\/(weekly-report|runs\/)/.test(entry)),
+    'text is read from the outputs address; a file with no preview is never fetched'
+  );
+
+  // --- Menus (FR55) ---------------------------------------------------------
+  await output('weekly-report.md').click({ button: 'right' });
+  await menu.waitFor();
+  check(
+    (await menuLabels()) === 'Open',
+    `an output's menu holds only Open (${await menuLabels()})`
+  );
+  await page.keyboard.press('Escape');
+  await folder('runs').hover();
+  check(
+    (await folder('runs').locator('[data-tree-menu-for]').count()) === 0,
+    'a folder in Outputs has no menu'
+  );
+  await byId(section).hover();
+  await byId(section).locator('[data-tree-menu-for]').click();
+  await menu.waitFor();
+  check(
+    (await menuLabels()) === 'Show outputs folder',
+    `the Outputs row's menu holds Show outputs folder (${await menuLabels()})`
+  );
+  await shot('o5-outputs-menu');
+  const shown = page.waitForResponse(
+    response =>
+      response.request().method() === 'POST' &&
+      response.url().endsWith(`/api/workspaces/${studioId}/output-dir/open`)
+  );
+  await menu.getByRole('menuitem', { name: 'Show outputs folder' }).click();
+  check((await shown).ok(), '"Show outputs folder" posts to the workspace');
+  await expectEventually(
+    async () =>
+      (await live()).includes('Showing the outputs folder of Studio Notes in the file manager.'),
+    '…and says so in the live region'
+  );
+
+  // The same from the keyboard, with the server refusing: the reason is said.
+  EXPECTED_FAILURES.push(/\/output-dir\/open$/);
+  await page.route(
+    '**/output-dir/open',
+    route =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          message: 'Failed to open output directory: desktop opening is unavailable'
+        })
+      }),
+    { times: 1 }
+  );
+  await byId(section).focus();
+  await page.keyboard.press('Shift+F10');
+  await menu.waitFor();
+  await page.keyboard.press('Enter');
+  await expectEventually(
+    async () =>
+      (await live()).includes(
+        "Couldn't show the outputs folder of Studio Notes: Failed to open output directory: desktop opening is unavailable"
+      ),
+    'a refused "Show outputs folder" is announced with the server\'s reason'
+  );
+
+  // --- The overview lists Outputs with its count (FR39) ---------------------
+  await rowByKind('workspace', 'Studio Notes').locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  await settle(400);
+  const links = (await page.locator('.cockpit-pane-link').allInnerTexts()).map(entry =>
+    entry.replace(/\s+/g, ' ').trim()
+  );
+  check(
+    links.includes('Outputs 5') &&
+      links.map(entry => entry.split(' ')[0]).join(',') === STUDIO_SECTIONS,
+    `the overview lists Outputs with its count (${links.join(' | ')})`
+  );
+  await byId(section).locator('[data-tree-toggle]').click();
+  await page.locator('.cockpit-pane-link', { hasText: 'Outputs' }).click();
+  await settle(300);
+  check(
+    await page.evaluate(
+      key =>
+        document.activeElement?.getAttribute('data-tree-row') === key &&
+        document.activeElement.getAttribute('aria-expanded') === 'true',
+      section
+    ),
+    'its link opens the Outputs section in the tree and focuses it'
+  );
+  await rowByKind('workspace', 'Night Drive').locator('.cockpit-tree-name').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
+  await page.waitForFunction(() =>
+    document.querySelector('.cockpit-pane-tab.is-active')?.textContent.includes('Night Drive')
+  );
+  await rowByKind('note', 'Lyrics draft').waitFor();
+  await settle(400);
+  const nightLinks = (await page.locator('.cockpit-pane-link').allInnerTexts()).map(
+    entry => entry.split('\n')[0]
+  );
+  check(
+    nightLinks.join(',') === PLAIN_SECTIONS,
+    `a workspace with no outputs lists no Outputs in its overview (${nightLinks.join(',')})`
+  );
+  await rowByKind('workspace', 'Night Drive').locator('[data-tree-toggle]').click();
+
+  // --- The filter finds outputs by name (FR65, FR66) ------------------------
+  await folder('runs').locator('[data-tree-toggle]').click();
+  const filter = nav.locator('[data-tree-filter]');
+  await filter.fill('summary');
+  await output('runs/2026-10-04/summary.md').waitFor();
+  check(
+    (await folder('runs').getAttribute('aria-expanded')) === 'true' &&
+      (await output('weekly-report.md').count()) === 0,
+    'the filter finds an output two folders down, opens the way to it, and hides the rest'
+  );
+  await filter.fill('');
+  await output('weekly-report.md').waitFor();
+  check(
+    (await folder('runs').getAttribute('aria-expanded')) === 'false',
+    'with the filter cleared the folder is closed again, as it was left'
+  );
+
+  // --- Remembered across a reload (FR68, FR70) ------------------------------
+  await folder('runs').locator('[data-tree-toggle]').click();
+  await output('runs/tempo-check.csv').click();
+  await output('weekly-report.md').click();
+  await page.locator('.cockpit-pane-markdown h1', { hasText: 'Weekly report' }).waitFor();
+  const reportKey = `${studioId}/o/weekly-report.md`;
+  await expectEventually(async () => {
+    const saved = await stored();
+    return (
+      !!saved &&
+      saved.activeKey === reportKey &&
+      saved.tabs.some(tab => tab.key === reportKey && tab.kind === 'output') &&
+      saved.expanded.includes(`${studioId}/od/runs`)
+    );
+  }, 'the output tab and the open Outputs folder are stored in the browser');
+  const labelsBefore = await tabLabels();
+
+  const beforeMap = outputRequests().length;
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#cockpitMap').waitFor({ state: 'visible' });
+  await settle(1500);
+  check(
+    outputRequests().length === beforeMap,
+    'in Map view the remembered output tab asks for nothing'
+  );
+  await openTree();
+  await page.locator('.cockpit-pane-markdown h1', { hasText: 'Weekly report' }).waitFor();
+  check(
+    (await tabLabels()).join('|') === labelsBefore.join('|') &&
+      (await activeTab().innerText()).includes('weekly-report.md'),
+    `after a reload the same tabs are back, the output active (${(await tabLabels()).length})`
+  );
+  check(
+    (await output('weekly-report.md').getAttribute('aria-selected')) === 'true' &&
+      (await folder('runs').getAttribute('aria-expanded')) === 'true',
+    'its row is highlighted and the folder is open, as they were left'
+  );
+  await shot('o6-restored');
+
+  // --- An output added and removed on disk (FR21, FR69) ---------------------
+  const disk = await outputsFolderOnDisk(studioId);
+  if (!disk) {
+    console.log('skip the on-disk checks: no sandbox directory was given');
+  } else {
+    const scratch = `scratch-${stamp}.md`;
+    const scratchPath = join(disk, scratch);
+    try {
+      // A task run saves a file while Home is in another window. Coming back
+      // within 30 seconds reloads nothing; after that the file appears.
+      writeFileSync(scratchPath, '# Scratch\n\nWritten while Home was open.\n');
+      const listings = () =>
+        requests.filter(entry => entry === `GET /api/workspaces/${studioId}/outputs/tree`).length;
+      const before = listings();
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await settle(600);
+      check(
+        listings() === before && (await output(scratch).count()) === 0,
+        'coming back within 30 seconds reloads no outputs'
+      );
+      await page.evaluate(() => {
+        const real = Date.now.bind(Date);
+        Date.now = () => real() + 31000;
+      });
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await output(scratch).waitFor();
+      check(
+        listings() === before + 1 &&
+          (await byId(section).locator('.cockpit-tree-count').innerText()) === '6',
+        'after 30 seconds, coming back reloads Outputs once: the new file appears and the count is 6'
+      );
+
+      // Open it, reload so its tab is only remembered, then delete the file.
+      await output(scratch).click();
+      await page.locator('.cockpit-pane-markdown h1', { hasText: 'Scratch' }).waitFor();
+      await expectEventually(
+        async () => (await stored())?.activeKey === `${studioId}/o/${scratch}`,
+        'the new output opens and its tab is stored'
+      );
+      rmSync(scratchPath);
+      EXPECTED_FAILURES.push(new RegExp(`/outputs/${scratch.replace('.', '\\.')}$`));
+      await openTree();
+      await expectEventually(
+        async () => !(await tabLabels()).some(label => label.includes(scratch)),
+        'after a reload, the tab of an output deleted meanwhile is gone'
+      );
+      await settle(500);
+      check(
+        (await tabLabels()).join('|') === labelsBefore.join('|') &&
+          (await page.locator('.cockpit-pane-failed, [data-pane-retry]').count()) === 0 &&
+          !/couldn.t load/i.test(await live()),
+        'silently: the other tabs remain and nothing is reported as failed'
+      );
+      check(
+        (await output(scratch).count()) === 0 &&
+          (await byId(section).locator('.cockpit-tree-count').innerText()) === '5',
+        'and the tree lists the 5 outputs that are left'
+      );
+    } finally {
+      rmSync(scratchPath, { force: true });
+    }
+  }
+
+  // --- Contrast of what this section adds (FR75) ----------------------------
+  await output('mix-v1.wav').click();
+  await page.locator('.cockpit-pane-article[data-pane-kind="output"] .cockpit-pane-note').waitFor();
+  const attr = id => `[data-tree-row="${id}"]`;
+  (
+    await measureContrast([
+      ['the Outputs row', `#cockpitTreeNav ${attr(section)} .cockpit-tree-name`],
+      ['the Outputs count', `#cockpitTreeNav ${attr(section)} .cockpit-tree-count`],
+      [
+        'an output row',
+        `#cockpitTreeNav ${attr(`${studioId}/o/weekly-report.md`)} .cockpit-tree-name`
+      ],
+      [
+        'the open output row',
+        `#cockpitTreeNav ${attr(`${studioId}/o/mix-v1.wav`)} .cockpit-tree-name`
+      ],
+      ['a folder in Outputs', `#cockpitTreeNav ${attr(`${studioId}/od/runs`)} .cockpit-tree-name`],
+      ['the output path', '#cockpitTreePane .cockpit-pane-fields dd'],
+      ['the "Path" label', '#cockpitTreePane .cockpit-pane-fields dt'],
+      ['"No preview"', '#cockpitTreePane .cockpit-pane-article > .cockpit-pane-note'],
+      ['the "Output in …" line', '#cockpitTreePane .cockpit-pane-sub'],
+      ['the breadcrumb', '#cockpitTreePane .cockpit-pane-crumbs']
+    ])
+  ).forEach(entry => {
+    check(
+      entry.count > 0 && entry.ratio >= 4.5,
+      `contrast ${entry.count ? entry.ratio.toFixed(2) : 'n/a'}:1 for ${entry.name}` +
+        (entry.count ? ` (${entry.color} on ${entry.background})` : ' (none on screen)')
+    );
+  });
+  await shot('o7-outputs-final');
+}
+
 // The lowest contrast ratio among the elements each selector matches: the
 // text colour against whatever is painted behind it, with translucent layers
 // blended in. Where a gradient is behind the text (Home's workspace area is
@@ -2508,6 +2978,7 @@ const stages = {
   create: stageCreate,
   manage: stageManage,
   finish: stageFinish,
+  outputs: stageOutputs,
   'map-requests': stageMapRequests
 };
 try {

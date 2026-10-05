@@ -17,6 +17,7 @@ import {
   MENU_OPEN_IN_WORKSPACE,
   MENU_OPEN_PAGE,
   MENU_REFRESH,
+  MENU_SHOW_OUTPUTS,
   MENU_UPLOAD,
   menuItemsFor,
   menuPosition,
@@ -96,12 +97,37 @@ test('a file offers Open, Open in default app and Reveal in Finder (FR55)', () =
   );
 });
 
+test('the Outputs section offers "Show outputs folder", and nothing to create (FR55, D15)', () => {
+  assert.deepEqual(labels({ kind: 'section', section: 'outputs' }), ['Show outputs folder']);
+  assert.deepEqual(
+    menuItemsFor({ kind: 'section', section: 'outputs' }).map(entry => entry.action),
+    [MENU_SHOW_OUTPUTS]
+  );
+  assert.equal(rowHasMenu({ kind: 'section', section: 'outputs' }), true);
+});
+
+test('an output file offers Open only: no default app, no Reveal, no workspace page (FR55)', () => {
+  assert.deepEqual(labels({ kind: 'output' }), ['Open']);
+  const actions = menuItemsFor({ kind: 'output' }).map(entry => entry.action);
+  assert.deepEqual(actions, [MENU_OPEN]);
+  [MENU_FILE_OPEN, MENU_FILE_REVEAL, MENU_OPEN_IN_WORKSPACE, MENU_UPLOAD].forEach(action =>
+    assert.equal(actions.includes(action), false, action)
+  );
+});
+
+test('a folder in Outputs has no menu: nothing is uploaded into outputs/', () => {
+  assert.deepEqual(menuItemsFor({ kind: 'outputFolder' }), []);
+  assert.equal(rowHasMenu({ kind: 'outputFolder' }), false);
+});
+
 test('content rows cannot be moved or deleted from the tree (non-goal)', () => {
-  ['note', 'ticket', 'agent', 'file', 'folder', 'memory'].forEach(kind => {
-    const actions = menuItemsFor({ kind, section: 'files' }).map(entry => entry.action);
-    assert.equal(actions.includes(MENU_MOVE), false, kind);
-    assert.equal(actions.includes(MENU_DELETE), false, kind);
-  });
+  ['note', 'ticket', 'agent', 'file', 'folder', 'output', 'outputFolder', 'memory'].forEach(
+    kind => {
+      const actions = menuItemsFor({ kind, section: 'files' }).map(entry => entry.action);
+      assert.equal(actions.includes(MENU_MOVE), false, kind);
+      assert.equal(actions.includes(MENU_DELETE), false, kind);
+    }
+  );
 });
 
 test('each section offers the one thing that can be created in it (FR55)', () => {

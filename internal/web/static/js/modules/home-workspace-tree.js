@@ -37,6 +37,8 @@ import {
   SECTION_FAILED,
   SECTION_LOADING,
   SECTION_READY,
+  folderKindOf,
+  isFolderKind,
   itemKey,
   parseItemKey,
   sectionInfo,
@@ -123,12 +125,14 @@ export function revealTargets(key, flattened) {
   if (info && info.expandable && parsed.kind !== 'section') {
     targets.push({ kind: 'section', id: sectionKey(parsed.workspaceId, sectionId) });
   }
-  if (parsed.kind === 'file' || parsed.kind === 'folder') {
+  // A file, in Files or in Outputs, sits under the folders of its own section.
+  const folderKind = folderKindOf(parsed.kind);
+  if (folderKind) {
     const folders = parsed.itemId.split('/').slice(0, -1);
     folders.forEach((_, index) => {
       targets.push({
-        kind: 'folder',
-        id: itemKey(parsed.workspaceId, 'folder', folders.slice(0, index + 1).join('/'))
+        kind: folderKind,
+        id: itemKey(parsed.workspaceId, folderKind, folders.slice(0, index + 1).join('/'))
       });
     });
   }
@@ -160,9 +164,9 @@ function sectionState(contents, workspaceId, sectionId) {
 // it, with everything inside it: finding "Night Drive" and then opening it
 // must show its notes, not an empty list.
 //
-// Only names are matched, and only of things the user made: groups,
-// workspaces, notes, tickets, files, folders and agents. Section headings and
-// the "Loading…" lines never match.
+// Only names are matched, and only of things the user or a task run made:
+// groups, workspaces, notes, tickets, files, outputs, folders and agents.
+// Section headings and the "Loading…" lines never match.
 
 /** The filter box's text as it is compared: trimmed, case ignored. */
 export function normalizeFilter(text) {
@@ -171,7 +175,15 @@ export function normalizeFilter(text) {
     .toLowerCase();
 }
 
-const FILTERED_CONTENT_KINDS = new Set(['note', 'ticket', 'file', 'folder', 'agent']);
+const FILTERED_CONTENT_KINDS = new Set([
+  'note',
+  'ticket',
+  'file',
+  'folder',
+  'output',
+  'outputFolder',
+  'agent'
+]);
 
 function nameMatches(name, filter) {
   return String(name || '')
@@ -204,7 +216,7 @@ export function hasUnsearchedContents(nodes, contents) {
 // children when the folder is open. With a filter on, null for a row that
 // neither matches nor holds a match.
 function contentItem(source, ctx) {
-  const expandable = source.kind === 'folder';
+  const expandable = isFolderKind(source.kind);
   if (ctx.filter) {
     if (!FILTERED_CONTENT_KINDS.has(source.kind)) return null;
     if (nameMatches(source.label, ctx.filter)) return contentItem(source, unfiltered(ctx));
@@ -242,7 +254,15 @@ function contentItem(source, ctx) {
   if (expandable && expanded) {
     item.children = source.children.length
       ? source.children.map(child => contentItem(child, ctx))
-      : [placeholderItem(source.workspaceId, 'empty', 'files', 'Empty folder', source.id)];
+      : [
+          placeholderItem(
+            source.workspaceId,
+            'empty',
+            sectionOfKind(source.kind),
+            'Empty folder',
+            source.id
+          )
+        ];
   }
   return item;
 }
@@ -265,9 +285,11 @@ function placeholderItem(workspaceId, kind, sectionId, name, scope = '') {
 /**
  * The section items of one workspace or group, in FR9's order.
  *
- * A workspace always shows every section. A group shows only the sections that
- * hold something, and only once their data has arrived; a section that failed
- * to load still shows, so it can be retried (FR13, FR16, FR19).
+ * A workspace always shows its sections, except the ones FR9 marks "only when
+ * not empty" (`optional`: Outputs). A group shows only the sections that hold
+ * something. A hidden section appears once its data has arrived and it is not
+ * empty; one that failed to load still shows, so it can be retried (FR9, FR13,
+ * FR16, FR19).
  */
 function sectionItems(node, isGroup, ctx) {
   const items = [];
@@ -306,7 +328,7 @@ function sectionItems(node, isGroup, ctx) {
       return;
     }
 
-    if (isGroup && !drafting) {
+    if ((isGroup || info.optional) && !drafting) {
       if (state.status === SECTION_LOADING) return;
       if (state.status === SECTION_READY && !(state.count > 0)) return;
     }
@@ -959,7 +981,7 @@ export function resolveTreeKey(key, currentId, rows) {
 export function rowActivation(row) {
   const kind = row && row.kind;
   if (isWorkspaceRowKind(kind)) return 'open';
-  if (kind === 'section' || kind === 'folder') return 'toggle';
+  if (kind === 'section' || isFolderKind(kind)) return 'toggle';
   if (kind === 'failed') return 'retry';
   if (kind === 'more') return 'visit';
   // The naming row is an input; clicking it must not open or toggle anything.

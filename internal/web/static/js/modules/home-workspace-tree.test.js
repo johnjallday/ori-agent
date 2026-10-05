@@ -45,6 +45,7 @@ import {
   filesToRows,
   memoryToRows,
   notesToRows,
+  outputsToRows,
   ticketsToRows
 } from './home-tree-sources.js';
 
@@ -291,6 +292,147 @@ test('folders start closed and open to any depth (FR12)', () => {
   assert.equal(open.find(r => r.id === 'w4/f/stems/lead.wav').depth, 3);
 });
 
+// --- Outputs: shown only when not empty (FR9) ---
+
+const someOutputs = id =>
+  ready(
+    outputsToRows(id, {
+      files: [
+        { relative_path: 'summary.md' },
+        { relative_path: 'runs/2026-10-04/report.md' },
+        { relative_path: 'runs/chart.png' },
+        { relative_path: 'drafts', is_dir: true }
+      ]
+    })
+  );
+const noOutputs = id => ready(outputsToRows(id, { files: [] }));
+
+test('Outputs sits between Files and Memory, with the number of files it holds (FR9, FR10)', () => {
+  const rows = expandedRows({
+    expanded: ['w4'],
+    contents: { w4: contentsFor('w4', { outputs: someOutputs('w4') }) }
+  });
+  assert.deepEqual(
+    under(rows, 'w4').map(r => `${r.kind}:${r.name}`),
+    [
+      'section:Notes',
+      'section:Backlog',
+      'section:Files',
+      'section:Outputs',
+      'memory:Memory',
+      'section:Agents'
+    ]
+  );
+  const outputs = rows.find(r => r.id === 'w4/s/outputs');
+  assert.equal(outputs.count, 3); // counts inside runs/ and runs/2026-10-04/
+  assert.equal(outputs.expanded, true);
+  assert.deepEqual(
+    under(rows, 'w4/s/outputs').map(r => `${r.kind}:${r.name}`),
+    ['outputFolder:drafts', 'outputFolder:runs', 'output:summary.md']
+  );
+});
+
+test('a workspace hides Outputs while it loads and when there are none (FR9)', () => {
+  const five = ['Notes', 'Backlog', 'Files', 'Memory', 'Agents'];
+  [loading(), noOutputs('w4')].forEach(outputs => {
+    const rows = expandedRows({
+      expanded: ['w4'],
+      contents: { w4: contentsFor('w4', { outputs }) }
+    });
+    assert.deepEqual(
+      under(rows, 'w4').map(r => r.name),
+      five
+    );
+  });
+  // The other sections of a workspace are still always shown, empty or not.
+  const empty = expandedRows({
+    expanded: ['w4'],
+    contents: { w4: { sections: { ...emptyContents().sections, outputs: noOutputs('w4') } } }
+  });
+  assert.deepEqual(
+    under(empty, 'w4').map(r => r.name),
+    five
+  );
+});
+
+test('Outputs that failed to load still shows, with a retry (FR19)', () => {
+  const rows = expandedRows({
+    expanded: ['w4'],
+    contents: { w4: contentsFor('w4', { outputs: failed('Failed to list outputs') }) }
+  });
+  assert.equal(
+    under(rows, 'w4').some(r => r.id === 'w4/s/outputs'),
+    true
+  );
+  const [line] = under(rows, 'w4/s/outputs');
+  assert.equal(line.kind, 'failed');
+  assert.equal(line.name, "Couldn't load Outputs");
+  assert.equal(line.section, 'outputs');
+  assert.equal(rowActivation(line), 'retry');
+});
+
+test('folders in Outputs start closed, open to any depth, and say when they are empty (FR12)', () => {
+  const contents = { w4: contentsFor('w4', { outputs: someOutputs('w4') }) };
+  const closed = expandedRows({ expanded: ['w4'], contents });
+  assert.equal(closed.find(r => r.id === 'w4/od/runs').expanded, false);
+  assert.equal(under(closed, 'w4/od/runs').length, 0);
+  assert.equal(rowActivation(closed.find(r => r.id === 'w4/od/runs')), 'toggle');
+  assert.equal(rowActivation(closed.find(r => r.id === 'w4/o/summary.md')), 'open');
+
+  const open = expandedRows({
+    expanded: ['w4', 'w4/od/runs', 'w4/od/runs/2026-10-04', 'w4/od/drafts'],
+    contents
+  });
+  assert.deepEqual(
+    under(open, 'w4/od/runs').map(r => `${r.kind}:${r.name}`),
+    ['outputFolder:2026-10-04', 'output:chart.png']
+  );
+  assert.equal(open.find(r => r.id === 'w4/o/runs/2026-10-04/report.md').depth, 4);
+  const [line] = under(open, 'w4/od/drafts');
+  assert.equal(`${line.kind}:${line.name}`, 'empty:Empty folder');
+  assert.equal(line.section, 'outputs');
+});
+
+test('a folder under Outputs and one of the same path under Files open separately', () => {
+  const rows = expandedRows({
+    expanded: ['w4', 'w4/od/stems'],
+    contents: {
+      w4: contentsFor('w4', {
+        outputs: ready(outputsToRows('w4', { files: [{ relative_path: 'stems/mix.wav' }] }))
+      })
+    }
+  });
+  assert.equal(rows.find(r => r.id === 'w4/od/stems').expanded, true);
+  assert.equal(rows.find(r => r.id === 'w4/d/stems').expanded, false);
+});
+
+test('a group shows its own Outputs when it has some, and hides it when it has none (FR16)', () => {
+  const withOutputs = expandedRows({
+    contents: { g1: contentsFor('g1', { outputs: someOutputs('g1') }) }
+  });
+  assert.deepEqual(
+    under(withOutputs, 'g1').map(r => r.id),
+    [
+      'w1',
+      'w2',
+      'g2',
+      'g1/s/notes',
+      'g1/s/backlog',
+      'g1/s/files',
+      'g1/s/outputs',
+      'g1/m',
+      'g1/s/agents'
+    ]
+  );
+  const without = expandedRows({
+    contents: { g1: contentsFor('g1', { outputs: noOutputs('g1') }) }
+  });
+  assert.equal(
+    under(without, 'g1').some(r => r.id === 'g1/s/outputs'),
+    false
+  );
+});
+
 test('a workspace expanded before its contents arrive shows every section as loading (FR18)', () => {
   const rows = expandedRows({ expanded: ['w4'] });
   assert.deepEqual(
@@ -475,6 +617,13 @@ test('revealTargets lists what must be open for a row to be on screen (FR28)', (
     { kind: 'section', id: 'w4/s/files' },
     { kind: 'folder', id: 'w4/d/stems' },
     { kind: 'folder', id: 'w4/d/stems/takes' }
+  ]);
+  // An output needs the Outputs section and its own folders, not Files' ones.
+  assert.deepEqual(revealTargets('w4/o/runs/2026-10-04/report.md', flat()), [
+    { kind: 'workspace', id: 'w4' },
+    { kind: 'section', id: 'w4/s/outputs' },
+    { kind: 'outputFolder', id: 'w4/od/runs' },
+    { kind: 'outputFolder', id: 'w4/od/runs/2026-10-04' }
   ]);
   // Memory is not inside a section; a ticket is inside Backlog.
   assert.deepEqual(revealTargets('w4/m', flat()), [{ kind: 'workspace', id: 'w4' }]);
@@ -1339,6 +1488,33 @@ test('the filter finds loaded notes, tickets, files and agents by name (FR65)', 
     rows.map(r => r.depth),
     [0, 1, 2]
   );
+});
+
+test('the filter finds output files and their folders by name, opening the way to them', () => {
+  const contents = { w4: contentsFor('w4', { outputs: someOutputs('w4') }) };
+  // A file two folders down: both closed folders are shown open.
+  const rows = filteredRows('report', { contents });
+  assert.deepEqual(ids(rows), [
+    'w4',
+    'w4/s/outputs',
+    'w4/od/runs',
+    'w4/od/runs/2026-10-04',
+    'w4/o/runs/2026-10-04/report.md'
+  ]);
+  assert.ok(rows.slice(0, 4).every(r => r.expanded === true && r.forced === true));
+  // A folder that matches by its own name is kept as the user has it: closed.
+  const folder = filteredRows('runs', { contents });
+  assert.deepEqual(ids(folder), ['w4', 'w4/s/outputs', 'w4/od/runs']);
+  assert.equal(folder[2].expanded, false);
+  // The section's own name is not a match.
+  assert.deepEqual(ids(filteredRows('outputs', { contents })), []);
+});
+
+test('the filter does not find outputs that have not loaded, or that failed to', () => {
+  [loading(), failed('nope')].forEach(outputs => {
+    const contents = { w4: contentsFor('w4', { outputs }) };
+    assert.deepEqual(ids(filteredRows('report', { contents })), []);
+  });
 });
 
 test('a file inside a closed folder is found, with the folder shown open (FR66)', () => {

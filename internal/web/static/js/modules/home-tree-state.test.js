@@ -400,6 +400,73 @@ test('a restored agent that left the workspace is gone', () => {
   ]);
 });
 
+// --- Outputs ---------------------------------------------------------------
+
+const outputTab = {
+  key: 'ws1/o/runs/report.md',
+  kind: 'output',
+  workspaceId: 'ws1',
+  label: 'report.md',
+  meta: { path: 'runs/report.md', size: 512 }
+};
+
+test('an output tab and its open folders are remembered and put back (FR68)', () => {
+  const state = homeState({
+    expandedRows: new Set(['ws1', 'ws1/od/runs']),
+    treeTabs: [noteTab, outputTab],
+    activeTabKey: outputTab.key
+  });
+  const back = parseTreeState(JSON.stringify(snapshotTreeState(state)));
+  assert.deepEqual(back.tabs[1], outputTab);
+  assert.equal(back.activeKey, outputTab.key);
+  assert.deepEqual(back.expanded, ['ws1', 'ws1/od/runs']);
+  const home = {};
+  applyTreeState(home, back);
+  assert.deepEqual(home.treeTabs[1], { ...outputTab, restored: true });
+  assert.equal(home.expandedRows.has('ws1/od/runs'), true);
+});
+
+test('a restored output that is not in the complete Outputs list is gone (FR69)', () => {
+  const open = [restored(outputTab), restored(fileTab)];
+  const inFolder = readySection([
+    {
+      id: 'ws1/od/runs',
+      kind: 'outputFolder',
+      children: [{ id: outputTab.key, kind: 'output' }]
+    }
+  ]);
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'outputs', inFolder), []);
+  // Deleted from disk: the folder is still there, the file is not.
+  const emptied = readySection([{ id: 'ws1/od/runs', kind: 'outputFolder', children: [] }]);
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'outputs', emptied), [outputTab.key]);
+  // No outputs left at all.
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'outputs', readySection([])), [outputTab.key]);
+});
+
+test('an output is proved gone only by the Outputs list, and only a whole one', () => {
+  const open = [restored(outputTab)];
+  // The Files list says nothing about an output, even one of the same path.
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'files', readySection([])), []);
+  // Cut at the row limit, still loading, or failed: no evidence.
+  const capped = readySection([{ id: 'ws1/more/outputs', kind: 'more' }]);
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'outputs', capped), []);
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'outputs', { status: 'loading', rows: [] }), []);
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'outputs', { status: 'failed', rows: [] }), []);
+  // Opened in this visit: never dropped behind the user's back.
+  assert.deepEqual(vanishedTabKeys([outputTab], 'ws1', 'outputs', readySection([])), []);
+});
+
+test('remembered output rows of a workspace that is gone are dropped', () => {
+  assert.deepEqual(
+    dropMissingRows(['ws1/od/runs', 'ws2/od/runs', 'ws2/s/outputs'], new Set(['ws2'])),
+    ['ws2/od/runs', 'ws2/s/outputs']
+  );
+  assert.deepEqual(dropMissingTabs([outputTab, overviewTab], outputTab.key, new Set(['ws2'])), {
+    tabs: [overviewTab],
+    activeKey: overviewTab.key
+  });
+});
+
 test('only a list that is whole can prove something is gone', () => {
   const open = [restored(noteTab)];
   // Cut at the row limit: the note may be one of the rows not shown.

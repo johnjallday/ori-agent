@@ -18,9 +18,12 @@ import {
   notesToRows,
   ticketsToRows,
   filesToRows,
+  outputsToRows,
   memoryToRows,
   agentsToRows,
   countFiles,
+  isFolderKind,
+  folderKindOf,
   isHiddenPath,
   capSection,
   loadSection,
@@ -35,9 +38,12 @@ import {
   loadTicket,
   loadMemory,
   loadFilePreview,
+  loadOutputPreview,
   filePreviewKind,
   workspaceFileURL,
+  workspaceOutputURL,
   openWorkspaceFile,
+  showOutputsFolder,
   ticketStateLabel,
   ticketSourceLabel,
   FILE_PREVIEW_LIMIT,
@@ -108,6 +114,8 @@ test('sectionOfKind says which section holds a row', () => {
   assert.equal(sectionOfKind('ticket'), 'backlog');
   assert.equal(sectionOfKind('file'), 'files');
   assert.equal(sectionOfKind('folder'), 'files');
+  assert.equal(sectionOfKind('output'), 'outputs');
+  assert.equal(sectionOfKind('outputFolder'), 'outputs');
   assert.equal(sectionOfKind('memory'), 'memory');
   assert.equal(sectionOfKind('agent'), 'agents');
   assert.equal(sectionOfKind('workspace'), '');
@@ -122,6 +130,7 @@ test('every loader returns rows of the one common shape', () => {
     notesToRows('ws1', { notes: [{ id: 'n1', name: 'Plan' }] }).rows,
     ticketsToRows('ws1', { tickets: [{ id: 't1', title: 'Ship', state: 'ready' }] }).rows,
     filesToRows('ws1', { files: [{ relative_path: 'docs/a.md', name: 'a.md' }] }).rows,
+    outputsToRows('ws1', { files: [{ relative_path: 'runs/a.md', name: 'a.md' }] }).rows,
     agentsToRows('ws1', { agents: [{ name: 'Scout', role: 'researcher', model: 'm' }] }).rows
   ];
   samples.forEach(rows => {
@@ -263,6 +272,80 @@ test('hidden and internal files never become rows (FR15)', () => {
   assert.equal(count, 1);
 });
 
+// --- Outputs: the Files listing under kinds of its own (FR9, FR10, FR12) ---
+
+test('outputs become nested rows of their own kinds, folders first, counted inside sub-folders', () => {
+  const { rows, count } = outputsToRows('ws1', {
+    files: [
+      { relative_path: 'summary.md', name: 'summary.md', size: 12 },
+      { relative_path: 'runs', name: 'runs', is_dir: true },
+      { relative_path: 'runs/2026-10-04/report.md', name: 'report.md' },
+      { relative_path: 'runs/chart.png', name: 'chart.png' },
+      { relative_path: 'empty', name: 'empty', is_dir: true }
+    ]
+  });
+  assert.deepEqual(
+    rows.map(r => `${r.kind}:${r.label}`),
+    ['outputFolder:empty', 'outputFolder:runs', 'output:summary.md']
+  );
+  const runs = rows[1];
+  assert.deepEqual(
+    runs.children.map(r => `${r.kind}:${r.label}`),
+    ['outputFolder:2026-10-04', 'output:chart.png']
+  );
+  assert.equal(runs.id, 'ws1/od/runs');
+  assert.equal(runs.children[0].children[0].id, 'ws1/o/runs/2026-10-04/report.md');
+  assert.equal(runs.meta.fileCount, 2);
+  assert.equal(rows[0].meta.fileCount, 0);
+  assert.deepEqual(rows[2].meta, { path: 'summary.md', url: '', size: 12 });
+  assert.equal(count, 3);
+});
+
+test('an output never shares a key with a file of the same path under files/', () => {
+  const listing = { files: [{ relative_path: 'docs/report.md' }] };
+  const file = filesToRows('ws1', listing).rows[0];
+  const output = outputsToRows('ws1', listing).rows[0];
+  assert.notEqual(file.id, output.id);
+  assert.notEqual(file.children[0].id, output.children[0].id);
+  assert.deepEqual(parseItemKey(output.children[0].id), {
+    workspaceId: 'ws1',
+    kind: 'output',
+    itemId: 'docs/report.md'
+  });
+  assert.deepEqual(parseItemKey(output.id), {
+    workspaceId: 'ws1',
+    kind: 'outputFolder',
+    itemId: 'docs'
+  });
+});
+
+test('hidden files are left out of outputs too, and a malformed answer is no outputs', () => {
+  const { rows, count } = outputsToRows('ws1', {
+    files: [
+      { relative_path: '.ori/state.json' },
+      { relative_path: 'runs/.DS_Store' },
+      { relative_path: 'runs/keep.md' }
+    ]
+  });
+  assert.equal(count, 1);
+  assert.equal(rows[0].children.length, 1);
+  [null, undefined, {}, { files: 'nope' }].forEach(payload =>
+    assert.deepEqual(outputsToRows('ws1', payload), { rows: [], count: 0 })
+  );
+});
+
+test('a folder row is told from a file row in every section that has folders', () => {
+  assert.equal(isFolderKind('folder'), true);
+  assert.equal(isFolderKind('outputFolder'), true);
+  ['file', 'output', 'note', 'section', 'workspace', undefined].forEach(kind =>
+    assert.equal(isFolderKind(kind), false, String(kind))
+  );
+  assert.equal(folderKindOf('file'), 'folder');
+  assert.equal(folderKindOf('output'), 'outputFolder');
+  assert.equal(folderKindOf('outputFolder'), 'outputFolder');
+  assert.equal(folderKindOf('note'), '');
+});
+
 test('memory has no rows; its entries feed the pane and its count the badge', () => {
   const shaped = memoryToRows('ws1', {
     entries: [{ index: 0, type: 'decision', date: '2026-10-01', text: 'Ship on Fridays.' }],
@@ -387,6 +470,29 @@ test('the files cap counts files, not folders, and keeps the folders that lead t
   assert.equal(more.label, 'Open workspace to see all 160');
 });
 
+test('outputs are capped the way files are: 100 files, then "Open workspace to see all N"', () => {
+  const files = [];
+  for (let i = 0; i < 70; i += 1)
+    files.push({ relative_path: `runs/r${String(i).padStart(3, '0')}` });
+  for (let i = 0; i < 70; i += 1)
+    files.push({ relative_path: `t${String(i).padStart(3, '0')}.md` });
+  const capped = capSection('ws1', 'outputs', outputsToRows('ws1', { files }));
+  assert.equal(capped.count, 140);
+  const more = capped.rows[capped.rows.length - 1];
+  assert.equal(more.kind, 'more');
+  assert.equal(more.label, 'Open workspace to see all 140');
+  assert.equal(more.id, 'ws1/more/outputs');
+  // The folder's 70 files, then the first 30 at the top.
+  assert.equal(capped.rows[0].children.length, 70);
+  assert.equal(countFiles(capped.rows.slice(0, -1)), SECTION_ROW_LIMIT);
+  // At the limit nothing is cut and nothing is added.
+  const whole = capSection('ws1', 'outputs', outputsToRows('ws1', { files: files.slice(0, 100) }));
+  assert.equal(
+    whole.rows.some(r => r.kind === 'more'),
+    false
+  );
+});
+
 test('memory is never capped: it is one row, not a list', () => {
   const entries = Array.from({ length: 150 }, (_, i) => ({ text: `Entry ${i}` }));
   const capped = capSection('ws1', 'memory', memoryToRows('ws1', { entries }));
@@ -402,6 +508,7 @@ const ROUTES = {
   '/api/workspaces/ws1/notes': { notes: [{ id: 'n1', name: 'Plan' }] },
   '/api/workspaces/ws1/tickets': { tickets: [{ id: 't1', title: 'Ship', state: 'ready' }] },
   '/api/workspaces/ws1/files/tree': { files: [{ relative_path: 'BACKLOG.md' }] },
+  '/api/workspaces/ws1/outputs/tree': { files: [{ relative_path: 'report.md' }] },
   '/api/workspaces/ws1/memory': { entries: [] },
   '/api/workspaces/ws1/agents': { agents: [{ name: 'Scout' }] }
 };
@@ -418,7 +525,7 @@ test('loadSection encodes the workspace id and rejects an unknown section', asyn
   const fetchImpl = stubFetch({ '/api/workspaces/a%2Fb/agents': { agents: [] } });
   await loadSection('a/b', 'agents', { fetchImpl });
   assert.deepEqual(fetchImpl.calls, ['/api/workspaces/a%2Fb/agents']);
-  await assert.rejects(() => loadSection('ws1', 'outputs', { fetchImpl }), /unknown section/);
+  await assert.rejects(() => loadSection('ws1', 'spaceship', { fetchImpl }), /unknown section/);
 });
 
 test('loadSections loads every section in parallel and reports each one twice', async () => {
@@ -429,7 +536,7 @@ test('loadSections loads every section in parallel and reports each one twice', 
     { fetchImpl, onSection: (id, state) => seen.push(`${id}:${state.status}`) }
   );
   assert.deepEqual([...fetchImpl.calls].sort(), Object.keys(ROUTES).sort());
-  // All five are reported as loading before any of them answers.
+  // Every one is reported as loading before any of them answers.
   assert.deepEqual(
     seen.slice(0, SECTION_IDS.length),
     SECTION_IDS.map(id => `${id}:${SECTION_LOADING}`)
@@ -441,6 +548,29 @@ test('loadSections loads every section in parallel and reports each one twice', 
   assert.deepEqual(Object.keys(states).sort(), [...SECTION_IDS].sort());
   assert.equal(states.notes.count, 1);
   assert.equal(states.memory.count, 0);
+});
+
+test('the Outputs section loads from the outputs listing', async () => {
+  const fetchImpl = stubFetch(ROUTES);
+  const outputs = await loadSection('ws1', 'outputs', { fetchImpl });
+  assert.deepEqual(fetchImpl.calls, ['/api/workspaces/ws1/outputs/tree']);
+  assert.equal(outputs.rows[0].kind, 'output');
+  assert.equal(outputs.rows[0].id, 'ws1/o/report.md');
+  assert.equal(outputs.count, 1);
+});
+
+test('outputs that fail to load are a failed section with the server reason (FR19)', async () => {
+  const fetchImpl = stubFetch({
+    ...ROUTES,
+    '/api/workspaces/ws1/outputs/tree': { status: 500, body: { message: 'Failed to list outputs' } }
+  });
+  const states = await loadSections({ id: 'ws1' }, { fetchImpl });
+  assert.equal(states.outputs.status, SECTION_FAILED);
+  assert.equal(states.outputs.error, 'Failed to list outputs');
+  assert.equal(states.outputs.count, null);
+  ['notes', 'backlog', 'files', 'memory', 'agents'].forEach(id =>
+    assert.equal(states[id].status, SECTION_READY, id)
+  );
 });
 
 test('one failing section never blocks the others, and carries the server reason (FR19)', async () => {
@@ -479,10 +609,10 @@ test('a slow section does not hold back a fast one', async () => {
       }
     }
   );
-  // Let the four fast sections answer while Notes is still waiting.
+  // Let the fast sections answer while Notes is still waiting.
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(ready.includes('notes'), false);
-  assert.equal(ready.length, 4);
+  assert.equal(ready.length, SECTION_IDS.length - 1);
   release();
   await done;
   assert.equal(ready.includes('notes'), true);
@@ -710,6 +840,80 @@ test('a failed load carries its HTTP status, so "gone" can be told from "failed"
   await assert.rejects(
     () => loadNote('n1', { fetchImpl }),
     error => error.status === 404 && error.message === 'HTTP 404'
+  );
+});
+
+// --- Outputs: the same preview from another address (FR35) ---
+
+test('an output address encodes each segment and never points into files/', () => {
+  assert.equal(
+    workspaceOutputURL('ws 1', 'runs/Q3 #1/what?.md'),
+    '/api/workspaces/ws%201/outputs/runs/Q3%20%231/what%3F.md'
+  );
+  assert.notEqual(workspaceOutputURL('ws1', 'a.md'), workspaceFileURL('ws1', 'a.md'));
+});
+
+test('an output is previewed by the Files rules, read from the outputs address', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/outputs/runs/report.md': '# Report\n',
+    '/api/workspaces/ws1/outputs/data.csv': 'a,b\n1,2\n',
+    // The same paths under files/ hold something else, and must not be read.
+    '/api/workspaces/ws1/files/runs/report.md': '# Not this one\n'
+  });
+  assert.deepEqual(await loadOutputPreview('ws1', 'runs/report.md', { fetchImpl }), {
+    kind: 'markdown',
+    url: '/api/workspaces/ws1/outputs/runs/report.md',
+    text: '# Report\n',
+    tooLarge: false
+  });
+  assert.equal((await loadOutputPreview('ws1', 'data.csv', { fetchImpl })).kind, 'text');
+  assert.deepEqual(fetchImpl.calls, [
+    '/api/workspaces/ws1/outputs/runs/report.md',
+    '/api/workspaces/ws1/outputs/data.csv'
+  ]);
+});
+
+test('an output image or unknown file is not fetched, and a large one is not either', async () => {
+  const fetchImpl = stubFetch({});
+  assert.deepEqual(await loadOutputPreview('ws1', 'runs/chart.png', { fetchImpl }), {
+    kind: 'image',
+    url: '/api/workspaces/ws1/outputs/runs/chart.png',
+    text: '',
+    tooLarge: false
+  });
+  assert.equal((await loadOutputPreview('ws1', 'mix.wav', { fetchImpl })).kind, 'none');
+  const huge = await loadOutputPreview('ws1', 'run.log', {
+    size: FILE_PREVIEW_LIMIT + 1,
+    fetchImpl
+  });
+  assert.equal(huge.tooLarge, true);
+  assert.deepEqual(fetchImpl.calls, []);
+});
+
+test('an output that is gone fails with status 404, so its remembered tab can be dropped', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws1/outputs/gone.md': { status: 404, body: { message: 'File not found' } }
+  });
+  await assert.rejects(
+    () => loadOutputPreview('ws1', 'gone.md', { fetchImpl }),
+    error => error.status === 404 && error.message === 'File not found'
+  );
+});
+
+test('"Show outputs folder" posts to the workspace and reports a refusal', async () => {
+  const fetchImpl = stubFetch({
+    '/api/workspaces/ws%201/output-dir/open': { output_dir: '/x/outputs', workspace_id: 'ws 1' },
+    '/api/workspaces/ws2/output-dir/open': {
+      status: 500,
+      body: { message: 'Failed to open output directory: desktop opening is unavailable' }
+    }
+  });
+  await showOutputsFolder('ws 1', { fetchImpl });
+  assert.deepEqual(fetchImpl.calls, ['/api/workspaces/ws%201/output-dir/open']);
+  assert.equal(fetchImpl.requests[0].options.method, 'POST');
+  await assert.rejects(
+    () => showOutputsFolder('ws2', { fetchImpl }),
+    /desktop opening is unavailable/
   );
 });
 

@@ -1667,6 +1667,7 @@ import {
   loadFilePreview,
   loadMemory,
   loadNote,
+  loadOutputPreview,
   loadSections,
   loadTicket,
   openWorkspaceFile,
@@ -1674,6 +1675,7 @@ import {
   sectionInfo,
   sectionKey,
   shouldReloadOnReturn,
+  showOutputsFolder,
   uploadFile
 } from './home-tree-sources.js';
 import {
@@ -1683,6 +1685,7 @@ import {
   MENU_NEW_TICKET,
   MENU_OPEN_IN_WORKSPACE,
   MENU_REFRESH,
+  MENU_SHOW_OUTPUTS,
   MENU_UPLOAD
 } from './home-tree-menu.js';
 import {
@@ -2522,6 +2525,7 @@ import {
     note: tab => loadNote(tab.meta.noteId),
     ticket: tab => loadTicket(tab.workspaceId, tab.meta.ticketId),
     file: tab => loadFilePreview(tab.workspaceId, tab.meta.path, { size: tab.meta.size }),
+    output: tab => loadOutputPreview(tab.workspaceId, tab.meta.path, { size: tab.meta.size }),
     memory: tab => loadMemory(tab.workspaceId)
   };
 
@@ -2694,6 +2698,8 @@ import {
     } else if (action === MENU_REFRESH) void refreshTreeRow(workspaceId);
     else if (action === MENU_FILE_OPEN || action === MENU_FILE_REVEAL) {
       void openFileFromPane(tabFromRow(row), action === MENU_FILE_REVEAL);
+    } else if (action === MENU_SHOW_OUTPUTS) {
+      void showOutputsFolderOf(workspaceId);
     } else if (action === MENU_OPEN_IN_WORKSPACE) {
       // The item's own place on the workspace page is the link its pane view
       // leads with: the full note, the ticket in Tickets, the agent's page.
@@ -2813,6 +2819,22 @@ import {
       const message = `Couldn't ${reveal ? 'reveal' : 'open'} ${tab.label}: ${reason}`;
       announce(message);
       if (window.Toast) window.Toast.error(message);
+    }
+  }
+
+  /**
+   * "Show outputs folder", from the Outputs section's menu: the folder opens
+   * in the file manager. Said either way, since nothing on Home changes (D15).
+   */
+  async function showOutputsFolderOf(workspaceId) {
+    try {
+      await showOutputsFolder(workspaceId);
+      announce(`Showing the outputs folder of ${workspaceLabel(workspaceId)} in the file manager.`);
+    } catch (err) {
+      const reason = err && err.message ? String(err.message) : 'Request failed';
+      reportTreeFailure(
+        `Couldn't show the outputs folder of ${workspaceLabel(workspaceId)}: ${reason}`
+      );
     }
   }
 

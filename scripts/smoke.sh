@@ -3413,22 +3413,30 @@ smoke_baseline_export() {
 # --- Home file tree (tasks/prd-home-file-tree.md) ---------------------------
 #
 # The Tree view on Home expands a workspace or a group into its notes, tickets,
-# files, memory and agents. These stages talk to an isolated demo server:
+# files, outputs, memory and agents. These stages talk to an isolated demo
+# server:
 #
 #   filetree <base-url> endpoints   create a workspace and a group, then call
 #                                   every Release 1 endpoint with each id and
 #                                   print the status and the start of the body.
 #                                   It answers PRD section 9: do the endpoints
 #                                   accept a group's id?
-#   filetree <base-url> seed        fill a NEW sandbox with demo contents (see
-#                                   filetree_seed) and print the ids
+#   filetree <base-url> endpoints-r2
+#                                   the same question for what Release 2 reads:
+#                                   linked folders, chats and the outputs folder
+#   filetree <base-url> seed [sandbox-dir]
+#                                   fill a NEW sandbox with demo contents (see
+#                                   filetree_seed) and print the ids. Give the
+#                                   sandbox directory and it also writes output
+#                                   files into it, which no API can do
 #   filetree <base-url> wait        block until the server answers
 #   filetree <base-url> demo <stage> [light|dark] [sandbox-dir]
 #                                   drive the tree in a headless browser, check
 #                                   it, and take screenshots. Stages: tree,
 #                                   pane, note (give the sandbox directory and
 #                                   it also reads the note's file on disk),
-#                                   create, manage, finish
+#                                   outputs (needs a seed that was given the
+#                                   sandbox directory), create, manage, finish
 #   filetree <base-url> demo-all [sandbox-dir]
 #                                   every stage in both themes, one PASS/FAIL
 #                                   line each
@@ -3506,16 +3514,75 @@ filetree_endpoints() {
   rm -f "$upload"
 }
 
+# filetree_json_field prints one field of a JSON object read from stdin:
+# `filetree_json_field directory id` prints .directory.id (empty if absent).
+filetree_json_field() {
+  python3 -c 'import sys,json
+value = json.load(sys.stdin)
+for key in sys.argv[1:]:
+    value = value.get(key) if isinstance(value, dict) else None
+print(value or "")' "$@"
+}
+
+# filetree_endpoints_r2 asks the same question of the endpoints Release 2
+# reads (linked folders, chats, "Show outputs folder"): does each accept a
+# group's id the way it accepts a workspace's? It links one temporary folder
+# to a new workspace and a new group, starts a chat in each, and prints the
+# status and the start of every body. The linked folder is removed afterwards;
+# the workspace and group stay in the sandbox.
+filetree_endpoints_r2() {
+  local stamp ws group tmp linked label id dir chat
+  stamp="$(date +%H%M%S)"
+  ws=$(filetree_create "{\"name\":\"Tree Probe R2 $stamp\"}")
+  group=$(filetree_create_group "Tree Probe R2 Group $stamp")
+  tmp="${TMPDIR:-/tmp}"
+  linked="${tmp%/}/filetree-probe-linked-$stamp"
+  mkdir -p "$linked/sub"
+  echo "# Probe $stamp" >"$linked/readme.md"
+  echo "nested $stamp" >"$linked/sub/nested.txt"
+
+  for label in workspace group; do
+    id="$ws"
+    [[ "$label" == group ]] && id="$group"
+    echo "--- $label $id ---"
+    dir=$(curl -s -X POST "$BASE_URL/api/workspaces/$id/directories" \
+      -H 'Content-Type: application/json' \
+      -d "{\"name\":\"Probe folder\",\"path\":\"$linked\"}" | filetree_json_field directory id)
+    echo "linked folder id: ${dir:-<none: the link was refused>}"
+    filetree_probe GET "$BASE_URL/api/workspaces/$id/directories"
+    filetree_probe GET "$BASE_URL/api/workspaces/$id/directories/$dir/files"
+    filetree_probe GET "$BASE_URL/api/workspaces/$id/directories/$dir/files/readme.md"
+    filetree_probe GET "$BASE_URL/api/workspaces/$id/directories/$dir/files/sub/nested.txt"
+
+    chat=$(curl -s -X POST "$BASE_URL/api/sessions" -H 'Content-Type: application/json' \
+      -d "{\"title\":\"Probe chat\",\"folder_id\":\"$id\"}" | filetree_json_field session id)
+    echo "chat id: ${chat:-<none: the chat was refused>}"
+    filetree_probe POST "$BASE_URL/api/sessions/$chat/messages" '{"role":"user","content":"Probe question"}'
+    filetree_probe POST "$BASE_URL/api/sessions/$chat/messages" '{"role":"assistant","content":"Probe answer"}'
+    filetree_probe GET "$BASE_URL/api/sessions?folder_id=$id"
+    filetree_probe GET "$BASE_URL/api/sessions/$chat/messages"
+
+    filetree_probe POST "$BASE_URL/api/workspaces/$id/output-dir/open"
+  done
+  rm -rf "$linked"
+}
+
 # filetree_seed fills a fresh sandbox with what the tree is for: a workspace
 # with notes, tickets in several states, nested files of each preview kind and
 # memory; a group holding two workspaces plus a note and a file of its own; an
 # empty workspace; and one with 105 notes (the 100-row cap). Idempotent only in
 # the sense that it is meant for a new sandbox — run it once.
+#
+# Outputs cannot be made through the API: nothing uploads into outputs/. Given
+# the sandbox directory as a fourth argument, the seed also writes a few output
+# files into Studio Notes' outputs/ folder on disk. It asks the server where
+# that folder is and refuses to write anywhere outside the sandbox.
 filetree_seed() {
-  python3 - "$BASE_URL" <<'PY'
-import json, struct, sys, urllib.error, urllib.request, uuid, zlib
+  python3 - "$BASE_URL" "${4:-}" <<'PY'
+import json, os, struct, sys, urllib.error, urllib.request, uuid, zlib
 
 base = sys.argv[1].rstrip("/")
+sandbox = sys.argv[2] if len(sys.argv) > 2 else ""
 
 
 def call(method, path, body=None, headers=None):
@@ -3589,6 +3656,18 @@ def upload(ws, filename, content, folder=""):
          {"Content-Type": f"multipart/form-data; boundary={boundary}"})
 
 
+def output(ws, relative, content):
+    """Write one file under the workspace's outputs/ folder, inside the sandbox."""
+    reported = must("GET", f"/api/workspaces/{ws}/output-dir")["output_dir"]
+    folder, root = os.path.realpath(reported), os.path.realpath(sandbox)
+    if os.path.commonpath([folder, root]) != root:
+        sys.exit(f"FAIL: {reported} is not inside the sandbox {sandbox}; nothing was written there")
+    path = os.path.join(folder, *relative.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(content)
+
+
 def png(width=96, height=64, rgb=(63, 107, 69)):
     def chunk(tag, data):
         raw = tag + data
@@ -3639,6 +3718,22 @@ for text, kind in (("The daily brief goes out at 08:00.", "fact"),
                            {"text": text, "type": kind})
     if status >= 400:
         print(f"note: memory entry not added: {status} {payload}")
+# What task runs saved: one of each preview kind, and two levels of folders.
+# Night Drive, Harbor Lights and Empty Shelf are left with no outputs.
+if sandbox:
+    output(studio, "weekly-report.md",
+           b"# Weekly report\n\nWritten by the Friday review run.\n\n## Finished\n\n"
+           b"- Renew the domain\n\n## Still open\n\n- Reply to the mastering engineer\n"
+           b"- Book studio time for vocals\n")
+    output(studio, "cover-art.png", png(120, 80, (176, 96, 48)))
+    output(studio, "mix-v1.wav", b"RIFF" + b"\x00" * 64)
+    output(studio, "runs/2026-10-04/summary.md",
+           b"# Run summary\n\nThree tickets read, one reply drafted.\n")
+    output(studio, "runs/tempo-check.csv",
+           b"song,bpm,drift\nNight Drive,92,0.0\nHarbor Lights,104,0.4\n")
+else:
+    print("note: no sandbox directory was given, so no outputs were written "
+          "(filetree <base-url> seed <sandbox-dir>)")
 
 music = group("Music")
 note(music, "Release plan", "# Release plan\n\nNight Drive first, Harbor Lights in the spring.\n",
@@ -3683,7 +3778,7 @@ filetree_demo_all() {
   smoke_show_wait
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
   out="${TMPDIR:-/tmp}/filetree-demo"
-  for stage in tree pane note create manage finish; do
+  for stage in tree pane note outputs create manage finish; do
     for theme in light dark; do
       if log=$(node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "$out" "$stage" "$theme" "$sandbox" 2>&1); then
         echo "PASS $stage ($theme): $(printf '%s\n' "$log" | grep -c '^ok ') checks"
@@ -3701,11 +3796,12 @@ filetree_demo_all() {
 smoke_filetree() {
   case "${3:-}" in
   endpoints) filetree_endpoints ;;
-  seed) filetree_seed ;;
+  endpoints-r2) filetree_endpoints_r2 ;;
+  seed) filetree_seed "$@" ;;
   wait) smoke_show_wait ;;
   demo) filetree_demo "$@" ;;
   demo-all) filetree_demo_all "$@" ;;
-  *) fail "usage: $0 filetree <base-url> {endpoints|seed|wait|demo <stage> [light|dark] [sandbox]|demo-all [sandbox]}" ;;
+  *) fail "usage: $0 filetree <base-url> {endpoints|endpoints-r2|seed [sandbox]|wait|demo <stage> [light|dark] [sandbox]|demo-all [sandbox]}" ;;
   esac
 }
 
@@ -3847,7 +3943,7 @@ prettier-head) smoke_prettier_head "$@" ;;
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
-  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | seed | wait | demo <tree|pane|note|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
+  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
   echo "  $0 prettier-head <file>...               # was each file Prettier-clean at HEAD? (only then is --write on the whole file safe)" >&2
   exit 2
   ;;

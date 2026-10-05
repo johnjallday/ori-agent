@@ -26,7 +26,16 @@ export const MAX_STORED_TABS = 40;
 export const MAX_STORED_ROWS = 2000;
 
 // The kinds of row that open in a tab.
-const TAB_KINDS = new Set(['note', 'ticket', 'file', 'memory', 'agent', 'workspace', 'group']);
+const TAB_KINDS = new Set([
+  'note',
+  'ticket',
+  'file',
+  'output',
+  'memory',
+  'agent',
+  'workspace',
+  'group'
+]);
 
 function isText(value) {
   return typeof value === 'string' && value !== '';
@@ -213,12 +222,18 @@ function hasMoreRow(rows) {
 // The sections whose list is everything the workspace has. Backlog is not one
 // of them: it lists open, top-level tickets, so a ticket missing from it may
 // simply be finished.
-const COMPLETE_LIST_KINDS = { note: 'notes', file: 'files', agent: 'agents' };
+const COMPLETE_LIST_KINDS = {
+  note: 'notes',
+  file: 'files',
+  output: 'outputs',
+  agent: 'agents'
+};
 
 /**
  * The restored tabs a loaded section proves are gone (FR69).
  *
- * A note, file or agent that is not in its workspace's list no longer exists
+ * A note, file, output or agent that is not in its workspace's list no longer
+ * exists
  * — provided the list is whole, which it is not once it has been cut at the
  * row limit. Only tabs still marked `restored` are considered: one opened in
  * this visit is never closed behind the user's back.
