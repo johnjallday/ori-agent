@@ -1,9 +1,15 @@
 # Ori development-tool extraction contract
 
 **Status: pre-cutover design, not an installed capability.** Ori still contains
-and runs its original tooling. The companion is not prepared. Do not delete the
-embedded implementation or run setup to try this design. This document fixes the
+and runs its original tooling. The authorized local companion now exists and
+its independent Go/shell/race/static/cross-build gates and disposable Git
+lifecycle pass. Paired Ori-adapter and installed-runtime validation are incomplete. Do not delete the embedded
+implementation or run setup to try this candidate. This document fixes the
 boundary for `extract-devflow-tooling`; candidate validation must precede cutover.
+
+Independent CLI milestone: companion `ca5b6b3c4f743c0c79a163fdcd096a83c8831c02`
+(`make build test test-race check cross` passed). This is not a runtime cutover
+pin; the adapter/installed-caller gates below still apply.
 
 The approved destination is the separate, local-only `ori-devtools` repository at
 `/Users/jjdev/Projects/ori/devtools`. No remote, publication, installer run, or
@@ -39,8 +45,10 @@ is unchanged. Away's `com.ori.wt-away-tick` owner is distinct from
 1. A **set** `ORI_DEVTOOLS_HOME` selects exactly that trusted local checkout.
    Empty, relative, control-character-containing, missing, or malformed values
    are errors, not requests to try another installation.
-2. With the variable absent, use only the approved stable path above. Do not
-   search sibling folders, `PATH`, installed plugins, or user shell startup files.
+2. With the variable absent, Ori wrappers and restored `wt` functions use only
+   the approved stable path above. Directly invoking a companion script by path
+   explicitly selects that script's own checkout; a conflicting override fails.
+   Do not search sibling folders, `PATH`, installed plugins, or user shell startup files.
 3. Before executing candidate code, check a small, inert, versioned contract
    file (`devtools-contract`, exact content `ori-devtools-v1` plus newline), the
    required entrypoint and module/assets. This is a compatibility assertion,
@@ -90,6 +98,10 @@ Avoid cached target/source globals surviving a switch between worktrees.
   so an ignored old binary cannot masquerade as the candidate. An explicit
   `HERDR_DEVFLOW_BINARY` may select a paired prebuilt only after its companion
   contract/revision evidence is verified; forced-source mode overrides it.
+- `make build` in the companion stamps the helper's `build-info` with a SHA-256
+  digest of the Go files, module files, and contract marker. The launcher checks
+  that against the selected source before executing an explicit prebuilt. This
+  is local compatibility evidence, not authentication of an untrusted binary.
 - Without candidate/source forcing, a prebuilt from the selected tool may be
   used only with matching build provenance. Otherwise build selected source,
   not an unrelated install. An explicitly selected binary that fails is an
@@ -113,7 +125,7 @@ installed copies. Do not rewrite Ori history. Unlisted application files stay.
 | `scripts/lib/devflow-common.sh`, `scripts/lib/devops-explore.sh`, `scripts/lib/devops-explore-launch.sh`, `scripts/lib/devops-explore-evidence.py`, `scripts/devops-prompts/` | Move complete workflow libraries/assets |
 | `tools/herdr-devflow/` (all commands, internal packages/tests/testdata, manifest, plugin, launchd templates) | Move complete tree; independent module with no Ori import/replace/symlink |
 | `scripts/away-dispatch.sh`, `scripts/away-tick.sh`, `scripts/away/` | Move implementation/templates/installers; keep legacy tick/dispatcher/support entrypoint shims in Ori. Installed privileged artifacts are not moved or edited. |
-| `scripts/devops-cli.test.sh`, `scripts/devops-explore.test.py`, `scripts/herdr-devflow.test.sh`, `scripts/wt-config.test.sh`, `scripts/wt-herd.test.sh`, `scripts/wt-done-archive.test.sh`, `scripts/wt-done-repl.test.sh`, `scripts/away-dispatch.test.sh` | Move tool behavior coverage; split product-specific RC/provisioning/pre-PR assertions into retained adapter tests, not deleted coverage |
+| `scripts/devops-cli.test.sh`, `scripts/devops-explore.test.py`, `scripts/herdr-devflow.test.sh`, `scripts/wt-config.test.sh`, `scripts/wt-herd.test.sh`, `scripts/wt-done-archive.test.sh`, `scripts/wt-done-repl.test.sh`, `scripts/away-dispatch.test.sh` | Move tool behavior coverage; split product-specific RC/provisioning/pre-PR assertions into retained adapter tests, not deleted coverage. RC assertions now also run independently in Ori's `scripts/devops-release-candidate.test.sh` |
 | `scripts/wt-demo-codex.test.sh` | Retain Ori demo-isolation behavior coverage; companion adds forwarding-only tests |
 | `scripts/lib/devops-release-candidate.sh`, release/installer/report/smoke scripts and tests, `docs/RELEASE_CHECKLIST.md`, `docs/RC_TEST_PROTOCOL.md` | Retain product mechanics. Expose narrow target-side RC invocation; companion retains menu/read-only release views. RC library currently relies on menu globals/functions: adapt deliberately, not by copying its implementation. |
 | `scripts/demo-server.sh`, `scripts/build-folder-picker.sh`, `scripts/ci-local.sh`, `scripts/smoke.sh`, all other app build/test/CI/README-capture/release tooling | Retain in Ori |

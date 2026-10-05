@@ -213,6 +213,7 @@ test-herdr-devflow: test-herdr-devflow-cross ## Run focused Ori-to-Herdr bridge 
 	@$(TEST_RUNNER) zsh scripts/wt-demo-codex.test.sh
 	@$(TEST_RUNNER) zsh scripts/wt-done-repl.test.sh
 	@$(TEST_RUNNER) bash scripts/devops-cli.test.sh
+	@$(TEST_RUNNER) bash scripts/devops-release-candidate.test.sh
 	@$(TEST_RUNNER) zsh scripts/check-backlog-docs.sh
 
 test-integration: ## Run integration tests (needs OPENAI_API_KEY; sets the provider opt-in)
