@@ -872,8 +872,19 @@ func TestApprovedOriTaskListIsImmediatelyActionableByWtHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render approved Ori task list: %v", err)
 	}
+	// Before extraction, pin the existing producer/consumer test to the exact
+	// fixture the independent tool will carry. The companion replaces the
+	// renderer import with that fixture; it must not copy application code.
+	fixturePath := filepath.Join("..", "..", "..", "..", "internal", "workspaceplan", "testdata", "devtools-approved-tasks.md")
+	fixture, err := os.ReadFile(fixturePath) // #nosec G304 -- fixed repository producer fixture, no user input
+	if err != nil {
+		t.Fatalf("read approved task fixture: %v", err)
+	}
+	if string(contents) != string(fixture) {
+		t.Fatal("approved renderer and devtools fixture differ")
+	}
 	path := filepath.Join(t.TempDir(), "tasks-bridge.md")
-	if err := os.WriteFile(path, contents, 0600); err != nil {
+	if err := os.WriteFile(path, fixture, 0600); err != nil {
 		t.Fatalf("write approved Ori task list: %v", err)
 	}
 	if got := nextIncompleteTask(path); got != "1.1 Wire the approved path — _unassigned_" {
