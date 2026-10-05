@@ -234,6 +234,10 @@ test('the subline says what the item is and where', () => {
   assert.equal(paneSubline(tab('k', { kind: 'ticket' }), night, null), 'Ticket in Night Drive');
   assert.equal(paneSubline(tab('k', { kind: 'file' }), night, null), 'File in Night Drive');
   assert.equal(paneSubline(tab('k', { kind: 'output' }), night, null), 'Output in Night Drive');
+  assert.equal(
+    paneSubline(tab('k', { kind: 'linkedFile' }), night, null),
+    'Linked file in Night Drive'
+  );
   assert.equal(paneSubline(tab('k', { kind: 'agent' }), night, null), 'Agent in Night Drive');
   assert.equal(paneSubline(tab('k', { kind: 'memory' }), night, null), 'Memory for Night Drive');
 });
@@ -1021,6 +1025,91 @@ test('an output named BACKLOG.md is just a file: only the one under files/ is ke
 });
 
 // ---------------------------------------------------------------------------
+// Linked-folder file (FR35, decision D15)
+// ---------------------------------------------------------------------------
+
+const linkedTab = (path, extra = {}) =>
+  tab(`ws1/lf/d1/${path}`, {
+    kind: 'linkedFile',
+    label: path.split('/').pop(),
+    meta: { path, dirId: 'd1', dirName: 'drum-kits', ...extra }
+  });
+
+test('a linked file says what it is, shows its folder in the breadcrumb and path, and has no buttons', () => {
+  const view = paneView(linkedTab('kits/808/readme.md'), { flattened: FLAT });
+  assert.equal(view.sub, 'Linked file in Night Drive');
+  assert.deepEqual(view.crumbs, [
+    'Music',
+    'Night Drive',
+    'Linked folders',
+    'drum-kits',
+    'kits',
+    '808',
+    'readme.md'
+  ]);
+  assert.deepEqual(view.fields, [{ label: 'Path', value: 'drum-kits/kits/808/readme.md' }]);
+  assert.deepEqual(view.actions, []);
+  const html = renderPaneHTML(
+    paneView(linkedTab('readme.md'), {
+      flattened: FLAT,
+      item: ready({ kind: 'markdown', text: '# Kits' })
+    })
+  );
+  assert.doesNotMatch(html, /data-pane-action="file-open"|data-pane-action="file-reveal"/);
+  assert.doesNotMatch(html, /Reveal in Finder/);
+});
+
+test('a linked file at the top of its folder, and one whose folder name was lost', () => {
+  assert.deepEqual(paneCrumbs(linkedTab('readme.md'), FLAT), [
+    'Music',
+    'Night Drive',
+    'Linked folders',
+    'drum-kits',
+    'readme.md'
+  ]);
+  const nameless = linkedTab('readme.md', { dirName: '' });
+  assert.deepEqual(paneCrumbs(nameless, FLAT).slice(2), [
+    'Linked folders',
+    'Linked folder',
+    'readme.md'
+  ]);
+  assert.deepEqual(paneView(nameless, { flattened: FLAT }).fields, [
+    { label: 'Path', value: 'Linked folder/readme.md' }
+  ]);
+});
+
+test('a linked file is previewed by the same rules as a file', () => {
+  [
+    ['a.md', { kind: 'markdown', text: '# Hi' }],
+    ['a.csv', { kind: 'text', text: 'a,b' }],
+    ['cover.png', { kind: 'image', url: '/api/workspaces/ws1/directories/d1/files/cover.png' }],
+    ['logo.svg', { kind: 'none' }],
+    ['dump.json', { kind: 'text', tooLarge: true }]
+  ].forEach(([path, value]) => {
+    const context = { flattened: FLAT, item: ready(value) };
+    assert.deepEqual(
+      paneView(linkedTab(path), context).body,
+      paneView(fileTab(path), context).body,
+      path
+    );
+  });
+});
+
+test('a linked .html file is drawn as escaped text: nothing in it becomes markup', () => {
+  const page = '<h1>Kit list</h1><script>alert(1)</script><img src=x onerror=alert(2)>';
+  const html = renderPaneHTML(
+    paneView(linkedTab('site/index.html'), {
+      flattened: FLAT,
+      item: ready({ kind: 'text', text: page })
+    })
+  );
+  assert.match(html, /<pre class="cockpit-pane-pre">&lt;h1&gt;Kit list&lt;\/h1&gt;&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>|<h1>Kit list|<img src=x/);
+  // And its address is never the target of a link or a frame.
+  assert.doesNotMatch(html, /<iframe|<a [^>]*directories\/d1\/files/);
+});
+
+// ---------------------------------------------------------------------------
 // Memory and agent (FR37, FR38)
 // ---------------------------------------------------------------------------
 
@@ -1200,6 +1289,36 @@ test('an overview lists Outputs with its count only while the tree shows it (FR9
   assert.deepEqual(
     labels(withOutputs, { hideEmpty: true }).map(([label]) => label),
     ['Notes', 'Outputs', 'Memory']
+  );
+});
+
+test('an overview lists Linked folders with the number of folders, after Outputs', () => {
+  const sections = {
+    ...SECTIONS_LOADED,
+    outputs: { status: 'ready', count: 4, rows: [] },
+    linked: { status: 'ready', count: 2, rows: [] }
+  };
+  const links = sectionLinks('ws1', sections);
+  assert.deepEqual(
+    links.map(link => [link.label, link.meta]),
+    [
+      ['Notes', '2'],
+      ['Backlog', '0'],
+      ['Files', '—'],
+      ['Outputs', '4'],
+      ['Linked folders', '2'],
+      ['Memory', '3'],
+      ['Agents', '—']
+    ]
+  );
+  const linked = links.find(link => link.label === 'Linked folders');
+  assert.equal(linked.action, 'reveal-section');
+  assert.equal(linked.target, 'linked');
+  // A workspace that links to nothing has no such line.
+  const none = { ...SECTIONS_LOADED, linked: { status: 'ready', count: 0, rows: [] } };
+  assert.equal(
+    sectionLinks('ws1', none).some(link => link.label === 'Linked folders'),
+    false
   );
 });
 

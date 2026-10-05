@@ -165,6 +165,7 @@ const KIND_NOUNS = {
   ticket: 'Ticket',
   file: 'File',
   output: 'Output',
+  linkedFile: 'Linked file',
   agent: 'Agent'
 };
 
@@ -188,6 +189,12 @@ export function paneSubline(tab, workspace, parent) {
   return `${KIND_NOUNS[tab.kind] || 'Item'} in ${where}`;
 }
 
+// What the linked folder a file sits in is called. A tab keeps the name it
+// was opened with; one that lost it still has something to show.
+function linkedFolderName(tab) {
+  return String((tab.meta && tab.meta.dirName) || '') || 'Linked folder';
+}
+
 /**
  * The breadcrumb, outermost first: groups, the workspace, the section, any
  * folders, then the item (FR31). A workspace or group tab stops at itself.
@@ -199,7 +206,9 @@ export function paneCrumbs(tab, flattened) {
   const section = sectionInfo(sectionOfKind(tab.kind));
   if (section) crumbs.push(section.label);
   if (tab.kind === 'memory') return crumbs;
-  // A file, under files/ or outputs/, is reached through its folders.
+  // A file is reached through its folders: under files/ or outputs/, or —
+  // inside a linked folder — under that folder's own name first.
+  if (tab.kind === 'linkedFile') crumbs.push(linkedFolderName(tab));
   if (folderKindOf(tab.kind)) {
     const folders = String((tab.meta && tab.meta.path) || '')
       .split('/')
@@ -429,6 +438,17 @@ const VIEW_FILLERS = {
   // as a whole is shown from the Outputs section's menu.
   output(view, { tab, value }) {
     view.fields = [{ label: 'Path', value: `outputs/${String(tab.meta.path || '')}` }];
+    if (value) view.body = previewBody(tab, value);
+  },
+
+  // FR35, read-only: a file inside a folder the workspace links to. The
+  // output-file view: the same preview, no "Open" or "Reveal in Finder" (D15).
+  // Its text is fetched and shown as text — the file is never opened as a
+  // page, which matters for an .html file in someone's own folder.
+  linkedFile(view, { tab, value }) {
+    view.fields = [
+      { label: 'Path', value: `${linkedFolderName(tab)}/${String(tab.meta.path || '')}` }
+    ];
     if (value) view.body = previewBody(tab, value);
   },
 

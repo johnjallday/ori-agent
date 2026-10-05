@@ -33,6 +33,7 @@ export const SECTION_NOTES = 'notes';
 export const SECTION_BACKLOG = 'backlog';
 export const SECTION_FILES = 'files';
 export const SECTION_OUTPUTS = 'outputs';
+export const SECTION_LINKED = 'linked';
 export const SECTION_MEMORY = 'memory';
 export const SECTION_AGENTS = 'agents';
 
@@ -53,6 +54,13 @@ export const SECTIONS = [
     id: SECTION_OUTPUTS,
     label: 'Outputs',
     empty: 'No outputs yet',
+    expandable: true,
+    optional: true
+  },
+  {
+    id: SECTION_LINKED,
+    label: 'Linked folders',
+    empty: 'No linked folders',
     expandable: true,
     optional: true
   },
@@ -86,6 +94,12 @@ const KEY_PREFIX = {
   // output never shares a key with a file of the same path under files/.
   output: 'o',
   outputFolder: 'od',
+  // A folder outside the workspace that it links to, and the folders and
+  // files inside one. Their item id starts with the linked folder's own id:
+  // `ws1/lf/<directory id>/docs/plan.md`.
+  linked: 'l',
+  linkedFolder: 'ld',
+  linkedFile: 'lf',
   memory: 'm',
   agent: 'a',
   more: 'more',
@@ -139,18 +153,23 @@ export function sectionOfKind(kind) {
   if (kind === 'ticket') return SECTION_BACKLOG;
   if (kind === 'file' || kind === 'folder') return SECTION_FILES;
   if (kind === 'output' || kind === 'outputFolder') return SECTION_OUTPUTS;
+  if (kind === 'linked' || kind === 'linkedFolder' || kind === 'linkedFile') return SECTION_LINKED;
   if (kind === 'memory') return SECTION_MEMORY;
   if (kind === 'agent') return SECTION_AGENTS;
   return '';
 }
 
 // Each kind of file row and the kind of folder it sits in. Files, outputs and
-// (in time) linked folders are the same nested listing under different kinds.
+// the contents of a linked folder are the same nested listing under different
+// kinds. (A linked folder's own row, `linked`, is not one of these: it is a
+// row of its section, and its contents load when it is opened.)
 const FOLDER_KIND_OF = {
   file: 'folder',
   folder: 'folder',
   output: 'outputFolder',
-  outputFolder: 'outputFolder'
+  outputFolder: 'outputFolder',
+  linkedFile: 'linkedFolder',
+  linkedFolder: 'linkedFolder'
 };
 
 /** Whether a row is a folder you expand, in whichever section it lives. */
@@ -300,11 +319,14 @@ export function countFiles(rows) {
  * implied by a file's path, so every ancestor of every entry is created on
  * demand. Folders sort before files, each by name (FR10, FR12).
  *
- * `fileKind` is the kind of the file rows ('file', 'output'); their folders
- * get the matching folder kind.
+ * `fileKind` is the kind of the file rows ('file', 'output', 'linkedFile');
+ * their folders get the matching folder kind. `scope` goes in front of every
+ * row's path in its key, and `extra` into every row's `meta`: a linked
+ * folder's rows carry its directory id in both.
  */
-function nestFileRows(workspaceId, entries, fileKind) {
+function nestFileRows(workspaceId, entries, fileKind, { scope = '', extra = {} } = {}) {
   const folderKind = FOLDER_KIND_OF[fileKind];
+  const idOf = path => (scope ? `${scope}/${path}` : path);
   const top = [];
   const folders = new Map();
 
@@ -312,7 +334,11 @@ function nestFileRows(workspaceId, entries, fileKind) {
     if (path === '') return null;
     if (folders.has(path)) return folders.get(path);
     const cut = path.lastIndexOf('/');
-    const folder = row(workspaceId, folderKind, path, path.slice(cut + 1), { path, fileCount: 0 });
+    const folder = row(workspaceId, folderKind, idOf(path), path.slice(cut + 1), {
+      ...extra,
+      path,
+      fileCount: 0
+    });
     folders.set(path, folder);
     const parent = folderFor(cut < 0 ? '' : path.slice(0, cut));
     (parent ? parent.children : top).push(folder);
@@ -330,7 +356,8 @@ function nestFileRows(workspaceId, entries, fileKind) {
     const cut = path.lastIndexOf('/');
     const parent = folderFor(cut < 0 ? '' : path.slice(0, cut));
     (parent ? parent.children : top).push(
-      row(workspaceId, fileKind, path, text(entry.name) || path.slice(cut + 1), {
+      row(workspaceId, fileKind, idOf(path), text(entry.name) || path.slice(cut + 1), {
+        ...extra,
         path,
         url: text(entry.url),
         size: Number.isFinite(Number(entry.size)) ? Number(entry.size) : null
@@ -369,6 +396,75 @@ export function filesToRows(workspaceId, payload) {
  */
 export function outputsToRows(workspaceId, payload) {
   return nestFileRows(workspaceId, payload && payload.files, 'output');
+}
+
+// --- Linked folders -------------------------------------------------------
+
+// A path as it is compared: forward slashes, no slash at the end.
+function comparablePath(path) {
+  return String(path || '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+}
+
+/** Whether `path` is `folder` itself or somewhere inside it. */
+export function isInsideFolder(path, folder) {
+  const inner = comparablePath(path);
+  const outer = comparablePath(folder);
+  if (!inner || !outer) return false;
+  return inner === outer || inner.startsWith(`${outer}/`);
+}
+
+/**
+ * The workspace's own folder, worked out from where it keeps its outputs
+ * (`GET …/output-dir` answers `<workspace folder>/outputs`). '' when the
+ * answer does not have that shape.
+ */
+export function ownFolderOf(payload) {
+  const outputs = comparablePath(payload && payload.output_dir);
+  const cut = outputs.lastIndexOf('/');
+  return cut > 0 ? outputs.slice(0, cut) : '';
+}
+
+/**
+ * `GET /api/workspaces/{id}/directories` → one row per folder the workspace
+ * links to, by name.
+ *
+ * Every workspace is created with a directory reference to its OWN folder (a
+ * group: to its own `files/`). That is not an outside folder, and shown here
+ * it would repeat Notes, Files and Outputs, so any reference at or inside
+ * `ownFolder` is left out. A linked folder's files are NOT part of this: they
+ * load when its row is opened (`loadLinkedFolder`), so the section's count is
+ * the number of folders.
+ */
+export function linkedToRows(workspaceId, payload, ownFolder = '') {
+  const directories = Array.isArray(payload && payload.directories) ? payload.directories : [];
+  const rows = directories
+    .filter(dir => dir && dir.id && !isInsideFolder(dir.path, ownFolder))
+    .map(dir => {
+      const path = text(dir.path);
+      const name = text(dir.name) || comparablePath(path).split('/').pop() || 'Folder';
+      return row(workspaceId, 'linked', String(dir.id), name, { dirId: String(dir.id), path });
+    })
+    .sort(byName);
+  return { rows, count: rows.length };
+}
+
+/**
+ * `GET …/directories/{dirId}/files` → the nested rows inside one linked
+ * folder.
+ *
+ * The answer is the whole folder in one flat list, with nothing hidden, so
+ * what Files hides is hidden here: dot-files and dot-folders (`.git`),
+ * `workspace.json` and lock files. A folder in it that is itself a registered
+ * workspace is an ordinary folder here. `dirName` is the linked folder's
+ * name, kept on each row for the pane's breadcrumb.
+ */
+export function linkedFilesToRows(workspaceId, dirId, payload, dirName = '') {
+  return nestFileRows(workspaceId, payload && payload.files, 'linkedFile', {
+    scope: String(dirId),
+    extra: { dirId: String(dirId), dirName: text(dirName) }
+  });
 }
 
 /**
@@ -462,14 +558,35 @@ export function capSection(workspaceId, sectionId, shaped, limit = SECTION_ROW_L
   if (held > limit) {
     rows = nested ? capFileRows(rows, { left: limit }) : rows.slice(0, limit);
   }
-  result.rows = [
-    ...rows,
-    row(workspaceId, 'more', sectionId, `Open workspace to see all ${count}`, {
-      section: sectionId,
-      total: count
-    })
-  ];
+  result.rows = [...rows, moreRow(workspaceId, sectionId, sectionId, count)];
   return result;
+}
+
+// The row that ends a list cut short. `scope` makes its key: the section's id,
+// or `linked/<directory id>` for the files of one linked folder.
+function moreRow(workspaceId, scope, sectionId, count) {
+  return row(workspaceId, 'more', scope, `Open workspace to see all ${count}`, {
+    section: sectionId,
+    total: count
+  });
+}
+
+/**
+ * Apply the row cap to the files of ONE linked folder: the first `limit`
+ * files, then "Open workspace to see all N". The workspace page has the full
+ * explorer for a linked folder.
+ */
+export function capLinkedFolder(workspaceId, dirId, shaped, limit = SECTION_ROW_LIMIT) {
+  const held = countFiles(shaped.rows);
+  if (held <= limit) return { ...shaped, count: held };
+  return {
+    ...shaped,
+    count: held,
+    rows: [
+      ...capFileRows(shaped.rows, { left: limit }),
+      moreRow(workspaceId, `${SECTION_LINKED}/${dirId}`, SECTION_LINKED, held)
+    ]
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -478,6 +595,8 @@ export function capSection(workspaceId, sectionId, shaped, limit = SECTION_ROW_L
 
 const enc = encodeURIComponent;
 
+// A section is loaded from one address and shaped (`url` + `shape`), or — when
+// it needs more than one answer — by a `load` function of its own.
 const LOADERS = {
   [SECTION_NOTES]: { url: id => `/api/workspaces/${enc(id)}/notes`, shape: notesToRows },
   [SECTION_BACKLOG]: { url: id => `/api/workspaces/${enc(id)}/tickets`, shape: ticketsToRows },
@@ -485,6 +604,18 @@ const LOADERS = {
   [SECTION_OUTPUTS]: {
     url: id => `/api/workspaces/${enc(id)}/outputs/tree`,
     shape: outputsToRows
+  },
+  // The linked folders, and where the workspace's own folder is so that the
+  // reference to it can be left out. Both are small answers; neither lists a
+  // file.
+  [SECTION_LINKED]: {
+    load: async (id, fetchImpl) => {
+      const [directories, outputDir] = await Promise.all([
+        getJSON(`/api/workspaces/${enc(id)}/directories`, fetchImpl),
+        getJSON(`/api/workspaces/${enc(id)}/output-dir`, fetchImpl)
+      ]);
+      return linkedToRows(id, directories, ownFolderOf(outputDir));
+    }
   },
   [SECTION_MEMORY]: { url: id => `/api/workspaces/${enc(id)}/memory`, shape: memoryToRows },
   [SECTION_AGENTS]: { url: id => `/api/workspaces/${enc(id)}/agents`, shape: agentsToRows }
@@ -535,14 +666,25 @@ function resolveFetch(fetchImpl) {
 export async function loadSection(workspaceId, sectionId, { fetchImpl } = {}) {
   const loader = LOADERS[sectionId];
   if (!loader) throw new Error(`home-tree-sources: unknown section "${sectionId}"`);
-  const response = await resolveFetch(fetchImpl)(loader.url(workspaceId), {
-    headers: { Accept: 'application/json' }
-  });
-  if (!response.ok) {
-    throw await responseError(response);
-  }
-  const payload = await response.json();
-  return capSection(workspaceId, sectionId, loader.shape(workspaceId, payload));
+  const shaped = loader.load
+    ? await loader.load(workspaceId, fetchImpl)
+    : loader.shape(workspaceId, await getJSON(loader.url(workspaceId), fetchImpl));
+  return capSection(workspaceId, sectionId, shaped);
+}
+
+/**
+ * Fetch the files of ONE linked folder and return its capped, nested rows.
+ *
+ * This is the request that walks the whole outside folder, so it is made only
+ * for a folder whose row has been opened — never when a workspace is
+ * expanded, and never by the filter.
+ */
+export async function loadLinkedFolder(workspaceId, dirId, { name = '', fetchImpl } = {}) {
+  const payload = await getJSON(
+    `/api/workspaces/${enc(workspaceId)}/directories/${enc(dirId)}/files`,
+    fetchImpl
+  );
+  return capLinkedFolder(workspaceId, dirId, linkedFilesToRows(workspaceId, dirId, payload, name));
 }
 
 /**
@@ -766,8 +908,8 @@ export function workspaceOutputURL(workspaceId, path) {
  * its address and anything else has nothing to fetch. `tooLarge` is set
  * instead of fetching a text file over the preview limit.
  */
-async function loadPreviewFrom(url, path, { size = null, fetchImpl } = {}) {
-  const kind = filePreviewKind(path);
+async function loadPreviewFrom(url, path, { size = null, fetchImpl, kind: givenKind } = {}) {
+  const kind = givenKind || filePreviewKind(path);
   const preview = { kind, url, text: '', tooLarge: false };
   if (kind !== PREVIEW_MARKDOWN && kind !== PREVIEW_TEXT) return preview;
   if (Number.isFinite(size) && size > FILE_PREVIEW_LIMIT) {
@@ -790,6 +932,36 @@ export function loadFilePreview(workspaceId, path, options = {}) {
 /** The preview of a file under `outputs/`: the Files rules, another address (FR35). */
 export function loadOutputPreview(workspaceId, path, options = {}) {
   return loadPreviewFrom(workspaceOutputURL(workspaceId, path), path, options);
+}
+
+/** The address a file inside a linked folder is read from. */
+export function linkedFileURL(workspaceId, dirId, path) {
+  return `/api/workspaces/${enc(workspaceId)}/directories/${enc(dirId)}/files/${encodedPath(path)}`;
+}
+
+/**
+ * How a file inside a linked folder is previewed: the Files rules, except
+ * that an SVG has no preview. The linked-folder endpoint serves every image
+ * as plain bytes; a browser still draws a PNG or a JPEG from those, but it
+ * draws an SVG only when it is served as one.
+ */
+export function linkedPreviewKind(path) {
+  const kind = filePreviewKind(path);
+  return kind === PREVIEW_IMAGE && /\.svg$/i.test(String(path || '')) ? PREVIEW_NONE : kind;
+}
+
+/**
+ * The preview of a file inside a linked folder (FR35).
+ *
+ * The file is only ever fetched as text and shown as text, or drawn by an
+ * `<img>`. Its address must never be navigated to or put in a frame: that
+ * endpoint serves an `.html` file as a page.
+ */
+export function loadLinkedPreview(workspaceId, dirId, path, options = {}) {
+  return loadPreviewFrom(linkedFileURL(workspaceId, dirId, path), path, {
+    ...options,
+    kind: linkedPreviewKind(path)
+  });
 }
 
 /**

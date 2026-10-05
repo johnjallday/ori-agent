@@ -1665,6 +1665,8 @@ import {
   createNote,
   createTicket,
   loadFilePreview,
+  loadLinkedFolder,
+  loadLinkedPreview,
   loadMemory,
   loadNote,
   loadOutputPreview,
@@ -1712,6 +1714,7 @@ import {
   isGoneError,
   readTreeState,
   snapshotTreeState,
+  vanishedLinkedTabKeys,
   vanishedTabKeys,
   writeTreeState
 } from './home-tree-state.js';
@@ -2140,7 +2143,10 @@ import {
     treeHandle = mountTree(els.treeNav, state, {
       onOpenItem: (row, options) => openTreeItem(row, options),
       onOpen: id => openItem(id),
-      onRetry: (workspaceId, sectionId) => void loadTreeContents(workspaceId, [sectionId]),
+      onRetry: (workspaceId, sectionId, dirId) =>
+        void (dirId
+          ? loadLinkedFolderRows(workspaceId, dirId)
+          : loadTreeContents(workspaceId, [sectionId])),
       onMenuAction: (action, row) => handleTreeMenuAction(action, row),
       onDraftCommit: draft => void commitTreeDraft(draft),
       onRerender: () => mountTreeView(),
@@ -2200,10 +2206,73 @@ import {
     treeHandle.rows.forEach(row => {
       // A row the filter is showing open was not opened by the user: the
       // filter searches what is loaded and never loads anything itself.
-      if (!isWorkspaceRowKind(row.kind) || !row.expanded || row.forced) return;
-      if (state.treeContents[row.id]) return;
+      if (!row.expanded || row.forced) return;
+      // A linked folder's files are fetched when its own row is opened, and
+      // only then: that request walks the whole outside folder.
+      if (row.kind === 'linked') {
+        if (!linkedFolderState(row.workspaceId, row.meta.dirId)) {
+          void loadLinkedFolderRows(row.workspaceId, row.meta.dirId);
+        }
+        return;
+      }
+      if (!isWorkspaceRowKind(row.kind) || state.treeContents[row.id]) return;
       void loadTreeContents(row.id);
     });
+  }
+
+  // ---- Linked folders: each one's files, fetched when its row is opened ----
+
+  function linkedFolderState(workspaceId, dirId) {
+    const entry = state.treeContents[workspaceId];
+    return (entry && entry.linked && entry.linked[dirId]) || null;
+  }
+
+  // The linked folders of a workspace whose rows are open on screen, the
+  // filter's own openings left out.
+  function openLinkedFolders(workspaceId) {
+    if (!treeHandle) return [];
+    return treeHandle.rows
+      .filter(
+        row =>
+          row.kind === 'linked' && row.workspaceId === workspaceId && row.expanded && !row.forced
+      )
+      .map(row => row.meta.dirId);
+  }
+
+  /**
+   * Load the files of one linked folder and redraw. Like a section, a reload
+   * keeps the rows it has until the new ones arrive, and a failure is
+   * announced and shows its own Retry.
+   */
+  async function loadLinkedFolderRows(workspaceId, dirId) {
+    const entry =
+      state.treeContents[workspaceId] || (state.treeContents[workspaceId] = { sections: {} });
+    const linked = entry.linked || (entry.linked = {});
+    const had = linked[dirId];
+    if (had && had.status === SECTION_LOADING) return;
+    const listed = entry.sections.linked;
+    const folderRow =
+      listed && listed.rows ? listed.rows.find(row => row.meta && row.meta.dirId === dirId) : null;
+    const name = folderRow ? folderRow.label : '';
+    if (!(had && had.status === SECTION_READY)) {
+      linked[dirId] = { status: SECTION_LOADING, rows: [], count: null, error: '' };
+      queueTreeRender();
+    }
+    try {
+      const result = await loadLinkedFolder(workspaceId, dirId, { name });
+      linked[dirId] = { ...result, status: SECTION_READY, error: '' };
+      // A remembered tab for a file that is no longer in the folder is
+      // dropped without a word (FR69).
+      vanishedLinkedTabKeys(state.treeTabs, workspaceId, {
+        dirId,
+        folder: linked[dirId]
+      }).forEach(dropRestoredTab);
+    } catch (err) {
+      const message = err && err.message ? String(err.message) : 'Request failed';
+      linked[dirId] = { status: SECTION_FAILED, rows: [], count: null, error: message };
+      announce(`Couldn't load ${name || 'the linked folder'} for ${workspaceLabel(workspaceId)}.`);
+    }
+    queueTreeRender();
   }
 
   let treeRenderQueued = false;
@@ -2254,6 +2323,12 @@ import {
           vanishedTabKeys(state.treeTabs, workspaceId, sectionId, sectionState).forEach(
             dropRestoredTab
           );
+          // …and so is one for a file in a folder that is no longer linked.
+          if (sectionId === 'linked') {
+            vanishedLinkedTabKeys(state.treeTabs, workspaceId, { section: sectionState }).forEach(
+              dropRestoredTab
+            );
+          }
           queueTreeRender();
         }
       }
@@ -2348,8 +2423,17 @@ import {
     // Every expanded workspace and group whose contents are loaded. A row the
     // filter is showing open is not one the user expanded.
     treeHandle.rows.forEach(row => {
-      if (!isWorkspaceRowKind(row.kind) || !row.expanded || row.forced) return;
-      if (state.treeContents[row.id]) void loadTreeContents(row.id);
+      if (!row.expanded || row.forced) return;
+      // A linked folder is reloaded only while its own row is open.
+      if (row.kind === 'linked') {
+        if (linkedFolderState(row.workspaceId, row.meta.dirId)) {
+          void loadLinkedFolderRows(row.workspaceId, row.meta.dirId);
+        }
+        return;
+      }
+      if (isWorkspaceRowKind(row.kind) && state.treeContents[row.id]) {
+        void loadTreeContents(row.id);
+      }
     });
     // The open item too — unless it is a note with words not yet saved, which
     // a fresh copy from the server must not replace.
@@ -2526,6 +2610,8 @@ import {
     ticket: tab => loadTicket(tab.workspaceId, tab.meta.ticketId),
     file: tab => loadFilePreview(tab.workspaceId, tab.meta.path, { size: tab.meta.size }),
     output: tab => loadOutputPreview(tab.workspaceId, tab.meta.path, { size: tab.meta.size }),
+    linkedFile: tab =>
+      loadLinkedPreview(tab.workspaceId, tab.meta.dirId, tab.meta.path, { size: tab.meta.size }),
     memory: tab => loadMemory(tab.workspaceId)
   };
 
@@ -2804,9 +2890,14 @@ import {
     await openTreeTab(tabFromRow(uploaded));
   }
 
-  /** Refresh: reload every section of a workspace or group (FR21). */
+  /**
+   * Refresh: reload every section of a workspace or group, and the linked
+   * folders whose rows are open (FR21).
+   */
   async function refreshTreeRow(workspaceId) {
+    const open = openLinkedFolders(workspaceId);
     await loadTreeContents(workspaceId);
+    await Promise.all(open.map(dirId => loadLinkedFolderRows(workspaceId, dirId)));
     announce(`Refreshed ${workspaceLabel(workspaceId)}.`);
   }
 

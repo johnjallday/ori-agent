@@ -27,18 +27,28 @@
  *            preview, "Show outputs folder", and the tab after a reload. The
  *            seed must have been given the sandbox directory. Give it here too
  *            and the stage also deletes and adds an output on disk.
+ *   linked   Folders outside the workspace that it links to: no file is asked
+ *            for until a folder's row is opened, then its files, each preview,
+ *            a failed load and its Retry, and the tab after a reload. Needs
+ *            the same seed; with the sandbox directory it also changes the
+ *            folder on disk.
  *
  * Exits non-zero when a check fails, a console error appears, or a request
  * fails, so a page that renders but is quietly broken does not pass.
  */
-import { chromium } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
 import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
-const [baseUrl, outDirArg, stage = 'tree', theme = 'light', sandbox = ''] = process.argv.slice(2);
-if (!baseUrl || !outDirArg) {
+const [baseUrl, outDirArg, stage = 'tree', theme = 'light', sandbox = '', engineName = 'chromium'] =
+  process.argv.slice(2);
+// The engine is Chromium unless a sixth argument names another. The desktop
+// app draws Home with WebKit, so a check that depends on the browser (does it
+// draw an image served as plain bytes?) is worth running there too.
+const engine = { chromium, firefox, webkit }[engineName];
+if (!baseUrl || !outDirArg || !engine) {
   console.error(
-    'usage: node scripts/demo-home-file-tree.mjs <baseUrl> <outDir> <stage> [light|dark]'
+    'usage: node scripts/demo-home-file-tree.mjs <baseUrl> <outDir> <stage> [light|dark] [sandbox] [chromium|firefox|webkit]'
   );
   process.exit(2);
 }
@@ -48,12 +58,14 @@ mkdirSync(outDir, { recursive: true });
 // The requests that fetch a workspace's contents. Home in Map view, and a Tree
 // with nothing expanded, must make none of them (FR17).
 const CONTENT_REQUEST =
-  /\/api\/workspaces\/[^/]+\/(notes|tickets|files\/tree|outputs\/tree|memory|agents)(\?|$)/;
-// How many of them one expanded workspace or group makes: one for each section.
-const SECTION_REQUESTS = 6;
+  /\/api\/workspaces\/[^/]+\/(notes|tickets|files\/tree|outputs\/tree|directories|output-dir|memory|agents)(\?|$)/;
+// How many of them one expanded workspace or group makes: one for each section,
+// and a second for Linked folders (the folders, and where the workspace's own
+// folder is). None of them lists the files of a linked folder.
+const SECTION_REQUESTS = 8;
 // The sections of the seeded Studio Notes workspace, as the tree lists them. A
-// workspace with no outputs shows the same list without Outputs.
-const STUDIO_SECTIONS = 'Notes,Backlog,Files,Outputs,Memory,Agents';
+// workspace with no outputs and no linked folder shows the plain list.
+const STUDIO_SECTIONS = 'Notes,Backlog,Files,Outputs,Linked folders,Memory,Agents';
 const PLAIN_SECTIONS = 'Notes,Backlog,Files,Memory,Agents';
 
 const problems = [];
@@ -63,7 +75,7 @@ const check = (ok, message) => {
   if (!ok) failures.push(message);
 };
 
-const browser = await chromium.launch();
+const browser = await engine.launch();
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   colorScheme: theme === 'dark' ? 'dark' : 'light'
@@ -210,7 +222,7 @@ async function stageTree() {
   check(
     afterTree.length === SECTION_REQUESTS * groupRowIds.length &&
       fetchedIds.join(',') === groupRowIds.join(','),
-    `opening Tree fetches ${SECTION_REQUESTS} sections for each expanded group and nothing for a collapsed workspace (${afterTree.length} requests, ${groupRowIds.length} group(s))`
+    `opening Tree makes the ${SECTION_REQUESTS} section requests of each expanded group and none for a collapsed workspace (${afterTree.length} requests, ${groupRowIds.length} group(s))`
   );
   check(
     (await rowByKind('section', 'Notes').count()) === 1,
@@ -235,7 +247,7 @@ async function stageTree() {
   await settle(300);
   check(
     contentRequests().length - before === SECTION_REQUESTS,
-    `expanding a workspace fetches its ${SECTION_REQUESTS} sections`
+    `expanding a workspace makes the ${SECTION_REQUESTS} requests of its sections, and no more`
   );
   check(elapsed < 1000, `contents appear quickly (${elapsed}ms)`);
   check((await page.locator('.cockpit-pane-tab').count()) === 0, 'the caret opens no tab');
@@ -2045,7 +2057,7 @@ async function runFinishStage({ stamp, names, ids }) {
   const mapRequests = requests.slice(beforeMap);
   const treeOnly = mapRequests.filter(
     entry =>
-      /\/api\/workspaces\/[^/]+\/(tickets|files\/tree|outputs\/tree|memory|agents)$/.test(
+      /\/api\/workspaces\/[^/]+\/(tickets|files\/tree|outputs\/tree|directories|output-dir|memory|agents)$/.test(
         entry.split(' ')[1]
       ) ||
       /\/api\/notes\/[^/]+$/.test(entry.split(' ')[1]) ||
@@ -2488,10 +2500,10 @@ async function stageOutputs() {
   // --- A workspace with outputs: the row, its place and its count -----------
   await expand('workspace', 'Studio Notes');
   await byId(section).waitFor();
-  const studioSections = await sectionNames(studioId);
-  check(
-    studioSections.join(',') === STUDIO_SECTIONS,
-    `Outputs sits between Files and Memory (${studioSections.join(',')})`
+  // The optional sections arrive one by one, each when its own answer does.
+  await expectEventually(
+    async () => (await sectionNames(studioId)).join(',') === STUDIO_SECTIONS,
+    `Outputs comes right after Files (${STUDIO_SECTIONS})`
   );
   check(
     (await byId(section).locator('.cockpit-tree-count').innerText()) === '5',
@@ -2671,7 +2683,7 @@ async function stageOutputs() {
   );
   check(
     links.includes('Outputs 5') &&
-      links.map(entry => entry.split(' ')[0]).join(',') === STUDIO_SECTIONS,
+      links.map(entry => entry.replace(/\s+\S+$/, '')).join(',') === STUDIO_SECTIONS,
     `the overview lists Outputs with its count (${links.join(' | ')})`
   );
   await byId(section).locator('[data-tree-toggle]').click();
@@ -2854,6 +2866,487 @@ async function stageOutputs() {
   await shot('o7-outputs-final');
 }
 
+// Release 2, group 2: folders outside the workspace that it links to.
+async function stageLinked() {
+  const stamp = Date.now().toString(36);
+  const nav = page.locator('#cockpitTreeNav');
+  const menu = page.locator('[data-tree-menu]');
+  const live = () => page.locator('#cockpitRailLive').innerText();
+  const byId = id => nav.locator(`[data-tree-row="${id}"]`);
+  const tabLabels = () => page.locator('.cockpit-pane-tab-label').allInnerTexts();
+  const stored = () =>
+    page.evaluate(() => JSON.parse(window.localStorage.getItem('ori.home.fileTree.v1') || 'null'));
+  const menuLabels = async () =>
+    (await menu.locator('[role="menuitem"]').allInnerTexts()).join(',');
+  const childNames = parentId =>
+    nav
+      .locator('[data-tree-row]')
+      .evaluateAll(
+        (els, parent) =>
+          els
+            .filter(el => el.getAttribute('data-parent-id') === parent)
+            .map(el => el.querySelector('.cockpit-tree-name')?.textContent || ''),
+        parentId
+      );
+  const crumbs = async () =>
+    (await page.locator('.cockpit-pane-crumbs').innerText()).replace(/\s*\/\s*/g, ' / ').trim();
+  const paneButtons = () =>
+    page.locator('#cockpitTreePane .cockpit-pane-article :is(a.modern-btn, button.modern-btn)');
+  const linkedRequests = () =>
+    requests.filter(entry => /\/directories(\/|$)/.test(entry.split(' ')[1]));
+
+  // --- Map view asks nothing about linked folders (FR17) --------------------
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#cockpitMap').waitFor({ state: 'visible' });
+  await settle(1500);
+  check(linkedRequests().length === 0, 'Map view asks nothing about linked folders');
+
+  await page.locator('#cockpitViewTree').click();
+  await nav.locator('[data-tree-row]').first().waitFor();
+  await applyTheme();
+  await settle(600);
+  const studioId = await rowByKind('workspace', 'Studio Notes').getAttribute('data-tree-row');
+  const nightId = await rowByKind('workspace', 'Night Drive').getAttribute('data-tree-row');
+  const section = `${studioId}/s/linked`;
+
+  // --- A workspace that links to nothing has no Linked folders row ----------
+  // Every workspace carries a reference to its own folder. That is not an
+  // outside folder, so it must not make the section appear.
+  await expand('workspace', 'Night Drive');
+  await rowByKind('note', 'Lyrics draft').waitFor();
+  await settle(500);
+  const own = await (
+    await page.request.get(`${baseUrl}/api/workspaces/${nightId}/directories`)
+  ).json();
+  const nightSections = await sectionNames(nightId);
+  check(
+    own.count === 1 && nightSections.join(',') === PLAIN_SECTIONS,
+    `a workspace whose only reference is to its own folder shows no Linked folders row (${own.count} reference, ${nightSections.join(',')})`
+  );
+  await rowByKind('workspace', 'Night Drive').locator('[data-tree-toggle]').click();
+
+  // --- The row, its count, and no file request ------------------------------
+  await expand('workspace', 'Studio Notes');
+  await byId(section).waitFor();
+  await expectEventually(
+    async () => (await sectionNames(studioId)).join(',') === STUDIO_SECTIONS,
+    `Linked folders sits after Outputs and before Memory (${STUDIO_SECTIONS})`
+  );
+  check(
+    (await byId(section).locator('.cockpit-tree-count').innerText()) === '1',
+    'the Linked folders row counts folders: 1 (the departure from FR10)'
+  );
+  const folderRow = rowByKind('linked', 'Reference tracks');
+  const folderKey = await folderRow.getAttribute('data-tree-row');
+  const dirId = folderKey.split('/l/')[1];
+  const file = path => byId(`${studioId}/lf/${dirId}/${path}`);
+  const sub = path => byId(`${studioId}/ld/${dirId}/${path}`);
+  const fileListings = () =>
+    requests.filter(entry => entry === `GET /api/workspaces/${studioId}/directories/${dirId}/files`)
+      .length;
+  check(
+    (await childNames(section)).join(',') === 'Reference tracks' &&
+      (await folderRow.getAttribute('aria-expanded')) === 'false' &&
+      (await folderRow.locator('.cockpit-tree-count').count()) === 0,
+    'the linked folder is one closed row with no count yet'
+  );
+  check(
+    fileListings() === 0,
+    `expanding the workspace asks for no file of the linked folder (${fileListings()} listing requests)`
+  );
+  // Neither does the filter, even with text that only a file inside matches.
+  const filter = nav.locator('[data-tree-filter]');
+  await filter.fill('tracklist');
+  await settle(500);
+  check(
+    fileListings() === 0 && (await nav.locator('[data-tree-row]').count()) === 0,
+    'the filter does not load the folder to search it: nothing matches, nothing is asked for'
+  );
+  await filter.fill('reference');
+  await folderRow.waitFor();
+  await settle(300);
+  check(
+    fileListings() === 0 && (await folderRow.getAttribute('aria-expanded')) === 'false',
+    'the filter finds the linked folder by its name, and still asks for no file'
+  );
+  await filter.fill('');
+  await byId(section).scrollIntoViewIfNeeded();
+  await shot('l1-linked-closed');
+
+  // --- Opening the row loads its files, once --------------------------------
+  await folderRow.click();
+  await file('readme.md').waitFor();
+  check(fileListings() === 1, 'opening the row asks for its files exactly once');
+  check(
+    (await page.locator('.cockpit-pane-tab').count()) === 0,
+    'opening a linked folder opens no tab'
+  );
+  const names = await childNames(folderKey);
+  check(
+    names.join(',') === 'site,stems,cover.png,logo.svg,readme.md,tracklist.csv',
+    `its folders, then its files by name, with .git and .DS_Store hidden (${names.join(',')})`
+  );
+  check(
+    (await folderRow.locator('.cockpit-tree-count').innerText()) === '6',
+    'the folder row now shows its own 6 files'
+  );
+  await sub('stems').click();
+  await sub('stems/drums').click();
+  await file('stems/drums/kick.wav').waitFor();
+  check(
+    (await childNames(`${studioId}/ld/${dirId}/stems`)).join(',') === 'drums' &&
+      fileListings() === 1,
+    'a folder inside it opens to any depth, hides its dot-file, and asks for nothing more'
+  );
+  await shot('l2-linked-open');
+
+  // --- Each kind of preview (FR35) ------------------------------------------
+  const linkedArticle = '.cockpit-pane-article[data-pane-kind="linkedFile"]';
+  await file('readme.md').click();
+  await page.locator(`${linkedArticle} .cockpit-pane-markdown h1`).waitFor();
+  check(
+    (await crumbs()) === 'Studio Notes / Linked folders / Reference tracks / readme.md',
+    `the breadcrumb reads Studio Notes / Linked folders / Reference tracks / readme.md (${await crumbs()})`
+  );
+  check(
+    (await page.locator('.cockpit-pane-sub').innerText()).includes('Linked file in Studio Notes'),
+    'the pane says "Linked file in Studio Notes"'
+  );
+  check(
+    (await article().innerText()).includes('Reference tracks/readme.md') &&
+      (await page.locator('.cockpit-pane-markdown h2').count()) === 1,
+    'it shows the path inside the linked folder, and the Markdown is rendered'
+  );
+  check(
+    (await paneButtons().count()) === 0 &&
+      !/Reveal in Finder|Open in default app/.test(await article().innerText()),
+    'a linked file has no Open and no Reveal in Finder button (D15)'
+  );
+  await shot('l3-linked-markdown');
+
+  await file('tracklist.csv').click();
+  await page.locator(`${linkedArticle} .cockpit-pane-pre`).waitFor();
+  check(
+    (await page.locator('.cockpit-pane-pre').innerText()).includes('Harbor Lights,Low Tide,104'),
+    'a CSV in a linked folder is shown as plain text'
+  );
+
+  // A page in someone's own folder: read as text, shown as text, never run.
+  await sub('site').click();
+  await file('site/index.html').click();
+  await page.locator(`${linkedArticle} .cockpit-pane-pre`).waitFor();
+  const pre = await page.locator('.cockpit-pane-pre').innerText();
+  check(
+    pre.includes('<h1>Reference tracks</h1>') && pre.includes('<script>'),
+    'an .html file is shown as its text'
+  );
+  check(
+    (await page.evaluate(() => window.__linkedPageRan)) === undefined &&
+      (await page.locator('#cockpitTreePane iframe').count()) === 0 &&
+      (await page.locator(`${linkedArticle} h1`).count()) === 0 &&
+      new URL(page.url()).pathname === '/',
+    'its script did not run, nothing was framed, and the page did not navigate'
+  );
+  check(
+    (await crumbs()) === 'Studio Notes / Linked folders / Reference tracks / site / index.html',
+    'the breadcrumb of a file in a sub-folder includes the sub-folder'
+  );
+  await shot('l4-linked-html-as-text');
+
+  // The endpoint serves an image as plain bytes. This is the check that the
+  // browser draws it all the same; if it ever does not, a linked image must
+  // read "No preview" instead (task 2.4).
+  await file('cover.png').click();
+  await page.locator(`${linkedArticle} .cockpit-pane-image`).waitFor();
+  await expectEventually(
+    () =>
+      page
+        .locator('.cockpit-pane-image')
+        .evaluate(image => image.complete && image.naturalWidth === 140),
+    'an image in a linked folder is shown inline, though served as application/octet-stream'
+  );
+  await shot('l5-linked-image');
+  await file('logo.svg').click();
+  await page.locator(`${linkedArticle} .cockpit-pane-note`).waitFor();
+  check(
+    (await article().innerText()).includes('No preview') &&
+      (await page.locator('.cockpit-pane-image').count()) === 0,
+    'an SVG there reads "No preview": plain bytes cannot be drawn as an SVG'
+  );
+  await file('stems/drums/kick.wav').focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() =>
+    document.querySelector('.cockpit-pane-tab.is-active')?.textContent.includes('kick.wav')
+  );
+  check(
+    (await article().innerText()).includes('No preview') &&
+      (await page.evaluate(() => !!document.activeElement?.hasAttribute('data-pane-title'))),
+    'Enter on a file two folders down opens it ("No preview") and moves focus to the title'
+  );
+  const reads = requests.filter(entry =>
+    entry.startsWith(`GET /api/workspaces/${studioId}/directories/${dirId}/files/`)
+  );
+  check(
+    reads.some(entry => entry.endsWith('/files/readme.md')) &&
+      reads.some(entry => entry.endsWith('/files/site/index.html')) &&
+      !reads.some(entry => /\.(svg|wav)$/.test(entry)),
+    'text is fetched from the linked folder; an SVG and a file with no preview are never fetched'
+  );
+
+  // --- Menus (FR55) ---------------------------------------------------------
+  await file('readme.md').click({ button: 'right' });
+  await menu.waitFor();
+  check(
+    (await menuLabels()) === 'Open',
+    `a linked file's menu holds only Open (${await menuLabels()})`
+  );
+  await page.keyboard.press('Escape');
+  await folderRow.hover();
+  await sub('stems').hover();
+  check(
+    (await folderRow.locator('[data-tree-menu-for]').count()) === 0 &&
+      (await sub('stems').locator('[data-tree-menu-for]').count()) === 0 &&
+      (await byId(section).locator('[data-tree-menu-for]').count()) === 0,
+    'a linked folder, a folder inside it and the section row have no menu'
+  );
+
+  // --- The workspace's Refresh reloads the folders that are open (2.5) ------
+  const beforeRefresh = fileListings();
+  await rowByKind('workspace', 'Studio Notes').click({ button: 'right' });
+  await menu.waitFor();
+  await menu.getByRole('menuitem', { name: 'Refresh' }).click();
+  await expectEventually(
+    async () => (await live()).includes('Refreshed Studio Notes'),
+    'Refresh on the workspace is announced'
+  );
+  check(
+    fileListings() === beforeRefresh + 1,
+    'Refresh reloads the linked folder that is open, once'
+  );
+
+  // --- A folder that fails to load says so, and Retry loads it (FR19) -------
+  EXPECTED_FAILURES.push(new RegExp(`/directories/${dirId}/files$`));
+  await page.route(
+    `**/directories/${dirId}/files`,
+    route =>
+      route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Failed to list files: no such file or directory' })
+      }),
+    { times: 1 }
+  );
+  await openTree();
+  await expand('workspace', 'Studio Notes');
+  const failedLine = nav.locator(`[data-tree-kind="failed"][data-parent-id="${folderKey}"]`);
+  await failedLine.waitFor();
+  check(
+    (await failedLine.innerText()).includes("Couldn't load Reference tracks") &&
+      (await failedLine
+        .locator('[data-tree-retry-folder]')
+        .getAttribute('data-tree-retry-folder')) === dirId,
+    'a linked folder that cannot be listed says "Couldn\'t load Reference tracks", with Retry'
+  );
+  await expectEventually(
+    async () => (await live()).includes("Couldn't load Reference tracks for Studio Notes."),
+    '…and it is announced'
+  );
+  check(
+    (await byId(`${studioId}/s/notes`).count()) === 1 &&
+      (await byId(`${studioId}/s/outputs`).count()) === 1,
+    'the rest of the workspace is unaffected'
+  );
+  await shot('l6-linked-failed');
+  await failedLine.locator('[data-tree-retry]').click();
+  await file('readme.md').waitFor();
+  check((await failedLine.count()) === 0, 'Retry loads the folder and the failure line goes');
+
+  // --- The overview lists Linked folders (FR39) -----------------------------
+  await rowByKind('workspace', 'Studio Notes').locator('.cockpit-tree-name').click();
+  await page.waitForFunction(() =>
+    document.querySelector('.cockpit-pane-tab.is-active')?.textContent.includes('Studio Notes')
+  );
+  await settle(400);
+  const links = (await page.locator('.cockpit-pane-link').allInnerTexts()).map(entry =>
+    entry.replace(/\s+/g, ' ').trim()
+  );
+  check(
+    links.includes('Linked folders 1'),
+    `the overview lists Linked folders with the number of folders (${links.join(' | ')})`
+  );
+  await byId(section).locator('[data-tree-toggle]').click();
+  await page.locator('.cockpit-pane-link', { hasText: 'Linked folders' }).click();
+  await settle(300);
+  check(
+    await page.evaluate(
+      key =>
+        document.activeElement?.getAttribute('data-tree-row') === key &&
+        document.activeElement.getAttribute('aria-expanded') === 'true',
+      section
+    ),
+    'its link opens the Linked folders section in the tree and focuses it'
+  );
+
+  // --- The filter finds files in a folder that has been loaded --------------
+  await sub('stems').waitFor();
+  const beforeFilter = fileListings();
+  await filter.fill('tracklist');
+  await file('tracklist.csv').waitFor();
+  check(
+    fileListings() === beforeFilter && (await file('readme.md').count()) === 0,
+    'the filter finds a file in the loaded folder, hides the rest, and asks for nothing'
+  );
+  await filter.fill('');
+  await file('readme.md').waitFor();
+
+  // --- Remembered across a reload (FR68, FR70) ------------------------------
+  await file('tracklist.csv').click();
+  await file('readme.md').click();
+  await page.locator(`${linkedArticle} .cockpit-pane-markdown h1`).waitFor();
+  const readmeKey = `${studioId}/lf/${dirId}/readme.md`;
+  await expectEventually(async () => {
+    const saved = await stored();
+    return (
+      !!saved &&
+      saved.activeKey === readmeKey &&
+      saved.tabs.some(tab => tab.key === readmeKey && tab.kind === 'linkedFile') &&
+      saved.expanded.includes(folderKey)
+    );
+  }, 'the linked-file tab and the open linked folder are stored in the browser');
+  const labelsBefore = await tabLabels();
+
+  const beforeMap = linkedRequests().length;
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#cockpitMap').waitFor({ state: 'visible' });
+  await settle(1500);
+  check(
+    linkedRequests().length === beforeMap,
+    'in Map view the remembered linked file and open folder ask for nothing'
+  );
+  const beforeReload = fileListings();
+  await openTree();
+  await page.locator(`${linkedArticle} .cockpit-pane-markdown h1`).waitFor();
+  await file('readme.md').waitFor();
+  check(
+    (await tabLabels()).join('|') === labelsBefore.join('|') &&
+      (await activeTab().innerText()).includes('readme.md'),
+    `after a reload the same tabs are back, the linked file active (${(await tabLabels()).length})`
+  );
+  check(
+    (await file('readme.md').getAttribute('aria-selected')) === 'true' &&
+      (await folderRow.getAttribute('aria-expanded')) === 'true' &&
+      fileListings() === beforeReload + 1,
+    'its row is highlighted, and the folder is open again and was asked for once'
+  );
+  await shot('l7-linked-restored');
+
+  // --- The folder changes on disk (FR21, FR69) ------------------------------
+  const disk = sandbox ? join(realpathSync(sandbox), 'linked-folders', 'reference-tracks') : '';
+  if (!disk) {
+    console.log('skip the on-disk checks: no sandbox directory was given');
+  } else {
+    const scratch = `scratch-${stamp}.md`;
+    const scratchPath = join(disk, scratch);
+    try {
+      writeFileSync(scratchPath, '# Scratch\n\nAdded while Home was open.\n');
+      const before = fileListings();
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await settle(600);
+      check(
+        fileListings() === before && (await file(scratch).count()) === 0,
+        'coming back within 30 seconds does not reload the linked folder'
+      );
+      await page.evaluate(() => {
+        const real = Date.now.bind(Date);
+        Date.now = () => real() + 31000;
+      });
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await file(scratch).waitFor();
+      check(
+        fileListings() === before + 1 &&
+          (await folderRow.locator('.cockpit-tree-count').innerText()) === '7',
+        'after 30 seconds, coming back reloads the open folder once: the new file appears, count 7'
+      );
+
+      await file(scratch).click();
+      await page.locator('.cockpit-pane-markdown h1', { hasText: 'Scratch' }).waitFor();
+      await expectEventually(
+        async () => (await stored())?.activeKey === `${studioId}/lf/${dirId}/${scratch}`,
+        'the new file opens and its tab is stored'
+      );
+      rmSync(scratchPath);
+      EXPECTED_FAILURES.push(new RegExp(`/files/${scratch.replace('.', '\\.')}$`));
+      await openTree();
+      await expectEventually(
+        async () => !(await tabLabels()).some(label => label.includes(scratch)),
+        'after a reload, the tab of a linked file deleted meanwhile is gone'
+      );
+      await settle(500);
+      check(
+        (await tabLabels()).join('|') === labelsBefore.join('|') &&
+          (await page.locator('.cockpit-pane-failed, [data-pane-retry]').count()) === 0 &&
+          !/couldn.t load/i.test(await live()),
+        'silently: the other tabs remain and nothing is reported as failed'
+      );
+      check(
+        (await folderRow.locator('.cockpit-tree-count').innerText()) === '6',
+        'and the folder is back to its 6 files'
+      );
+    } finally {
+      rmSync(scratchPath, { force: true });
+    }
+  }
+
+  // A closed linked folder is not reloaded on coming back.
+  await folderRow.locator('[data-tree-toggle]').click();
+  const beforeClosed = fileListings();
+  await page.evaluate(() => {
+    const real = Date.now.bind(Date);
+    Date.now = () => real() + 62000;
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await settle(800);
+  check(
+    fileListings() === beforeClosed,
+    'coming back does not reload a linked folder whose row is closed'
+  );
+  await folderRow.locator('[data-tree-toggle]').click();
+  await file('readme.md').waitFor();
+
+  // --- Contrast of what this section adds (FR75) ----------------------------
+  await file('logo.svg').click();
+  await page.locator(`${linkedArticle} .cockpit-pane-note`).waitFor();
+  const attr = id => `[data-tree-row="${id}"]`;
+  (
+    await measureContrast([
+      ['the Linked folders row', `#cockpitTreeNav ${attr(section)} .cockpit-tree-name`],
+      ['the Linked folders count', `#cockpitTreeNav ${attr(section)} .cockpit-tree-count`],
+      ['a linked folder row', `#cockpitTreeNav ${attr(folderKey)} .cockpit-tree-name`],
+      ["a linked folder's file count", `#cockpitTreeNav ${attr(folderKey)} .cockpit-tree-count`],
+      [
+        'a folder inside it',
+        `#cockpitTreeNav ${attr(`${studioId}/ld/${dirId}/stems`)} .cockpit-tree-name`
+      ],
+      ['a linked file row', `#cockpitTreeNav ${attr(readmeKey)} .cockpit-tree-name`],
+      [
+        'the open linked file row',
+        `#cockpitTreeNav ${attr(`${studioId}/lf/${dirId}/logo.svg`)} .cockpit-tree-name`
+      ],
+      ['the linked file path', '#cockpitTreePane .cockpit-pane-fields dd'],
+      ['"No preview"', '#cockpitTreePane .cockpit-pane-article > .cockpit-pane-note'],
+      ['the "Linked file in …" line', '#cockpitTreePane .cockpit-pane-sub'],
+      ['the breadcrumb', '#cockpitTreePane .cockpit-pane-crumbs']
+    ])
+  ).forEach(entry => {
+    check(
+      entry.count > 0 && entry.ratio >= 4.5,
+      `contrast ${entry.count ? entry.ratio.toFixed(2) : 'n/a'}:1 for ${entry.name}` +
+        (entry.count ? ` (${entry.color} on ${entry.background})` : ' (none on screen)')
+    );
+  });
+  await shot('l8-linked-final');
+}
+
 // The lowest contrast ratio among the elements each selector matches: the
 // text colour against whatever is painted behind it, with translucent layers
 // blended in. Where a gradient is behind the text (Home's workspace area is
@@ -2979,6 +3472,7 @@ const stages = {
   manage: stageManage,
   finish: stageFinish,
   outputs: stageOutputs,
+  linked: stageLinked,
   'map-requests': stageMapRequests
 };
 try {

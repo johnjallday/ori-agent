@@ -3424,6 +3424,9 @@ smoke_baseline_export() {
 #   filetree <base-url> endpoints-r2
 #                                   the same question for what Release 2 reads:
 #                                   linked folders, chats and the outputs folder
+#   filetree <base-url> linked-timing [count]
+#                                   time the listing of a linked folder of
+#                                   COUNT files (default 3000)
 #   filetree <base-url> seed [sandbox-dir]
 #                                   fill a NEW sandbox with demo contents (see
 #                                   filetree_seed) and print the ids. Give the
@@ -3435,8 +3438,9 @@ smoke_baseline_export() {
 #                                   it, and take screenshots. Stages: tree,
 #                                   pane, note (give the sandbox directory and
 #                                   it also reads the note's file on disk),
-#                                   outputs (needs a seed that was given the
-#                                   sandbox directory), create, manage, finish
+#                                   outputs and linked (both need a seed that
+#                                   was given the sandbox directory), create,
+#                                   manage, finish
 #   filetree <base-url> demo-all [sandbox-dir]
 #                                   every stage in both themes, one PASS/FAIL
 #                                   line each
@@ -3567,6 +3571,37 @@ filetree_endpoints_r2() {
   rm -rf "$linked"
 }
 
+# filetree_linked_timing answers "how slow is a big linked folder?". The
+# listing endpoint walks the whole outside folder and answers with every file
+# and folder in one list, with no limit. This makes a folder of COUNT small
+# files (default 3000, twenty to a sub-folder), links it to a new workspace,
+# times the listing three times, then unlinks the folder and removes it.
+filetree_linked_timing() {
+  local count="${4:-3000}" stamp ws tmp linked dir i run
+  [[ "$count" =~ ^[0-9]+$ ]] || fail "the file count must be a number: $count"
+  stamp="$(date +%H%M%S)"
+  ws=$(filetree_create "{\"name\":\"Linked Timing $stamp\"}")
+  tmp="${TMPDIR:-/tmp}"
+  linked="${tmp%/}/filetree-linked-timing-$stamp"
+  mkdir -p "$linked"
+  for ((i = 0; i < count; i++)); do
+    if ((i % 20 == 0)); then mkdir -p "$linked/batch-$((i / 20))"; fi
+    echo "file $i" >"$linked/batch-$((i / 20))/file-$i.txt"
+  done
+  dir=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/directories" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"Timing folder\",\"path\":\"$linked\"}" | filetree_json_field directory id)
+  [[ -n "$dir" ]] || fail "could not link $linked"
+  echo "$count files in $((count / 20)) folders, linked as $dir"
+  for run in 1 2 3; do
+    curl -s -o /dev/null -w "listing $run: %{time_total}s, %{size_download} bytes, HTTP %{http_code}\n" \
+      "$BASE_URL/api/workspaces/$ws/directories/$dir/files"
+  done
+  curl -s -o /dev/null -X DELETE "$BASE_URL/api/workspaces/$ws/directories/$dir"
+  rm -rf "$linked"
+  curl -s -o /dev/null -X DELETE "$BASE_URL/api/workspaces/$ws?confirm=true"
+}
+
 # filetree_seed fills a fresh sandbox with what the tree is for: a workspace
 # with notes, tickets in several states, nested files of each preview kind and
 # memory; a group holding two workspaces plus a note and a file of its own; an
@@ -3576,7 +3611,9 @@ filetree_endpoints_r2() {
 # Outputs cannot be made through the API: nothing uploads into outputs/. Given
 # the sandbox directory as a fourth argument, the seed also writes a few output
 # files into Studio Notes' outputs/ folder on disk. It asks the server where
-# that folder is and refuses to write anywhere outside the sandbox.
+# that folder is and refuses to write anywhere outside the sandbox. With the
+# sandbox directory it also makes <sandbox>/linked-folders/reference-tracks and
+# links Studio Notes to it; no other workspace links to anything.
 filetree_seed() {
   python3 - "$BASE_URL" "${4:-}" <<'PY'
 import json, os, struct, sys, urllib.error, urllib.request, uuid, zlib
@@ -3668,6 +3705,18 @@ def output(ws, relative, content):
         handle.write(content)
 
 
+def linked_folder(ws, name, relative, files):
+    """Make a folder in the sandbox, outside every workspace, and link ws to it."""
+    folder = os.path.join(os.path.realpath(sandbox), "linked-folders", relative)
+    for path, content in files.items():
+        full = os.path.join(folder, *path.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as handle:
+            handle.write(content)
+    created = must("POST", f"/api/workspaces/{ws}/directories", {"name": name, "path": folder})
+    return created["directory"]["id"]
+
+
 def png(width=96, height=64, rgb=(63, 107, 69)):
     def chunk(tag, data):
         raw = tag + data
@@ -3731,9 +3780,27 @@ if sandbox:
            b"# Run summary\n\nThree tickets read, one reply drafted.\n")
     output(studio, "runs/tempo-check.csv",
            b"song,bpm,drift\nNight Drive,92,0.0\nHarbor Lights,104,0.4\n")
+    # One folder outside the workspace, linked to it: six files the tree
+    # shows, in two levels of folders, and three it must hide. The page is
+    # there to prove it is shown as text and never run.
+    linked = linked_folder(studio, "Reference tracks", "reference-tracks", {
+        "readme.md": b"# Reference tracks\n\nOne track per song, to check a mix against.\n\n"
+                     b"## How to use\n\n- Match loudness first.\n- Compare in mono.\n",
+        "tracklist.csv": b"song,reference,bpm\nNight Drive,Blue Hour,92\nHarbor Lights,Low Tide,104\n",
+        "cover.png": png(140, 90, (52, 96, 148)),
+        "logo.svg": b'<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
+                    b'<rect width="40" height="40" fill="#346094"/></svg>\n',
+        "site/index.html": b"<h1>Reference tracks</h1>\n"
+                           b"<script>window.__linkedPageRan = true;</script>\n",
+        "stems/drums/kick.wav": b"RIFF" + b"\x00" * 64,
+        ".git/config": b"[core]\n\tbare = false\n",
+        ".DS_Store": b"\x00\x00\x00\x01Bud1",
+        "stems/.hidden-take": b"x",
+    })
 else:
-    print("note: no sandbox directory was given, so no outputs were written "
-          "(filetree <base-url> seed <sandbox-dir>)")
+    linked = ""
+    print("note: no sandbox directory was given, so no outputs were written and no folder "
+          "was linked (filetree <base-url> seed <sandbox-dir>)")
 
 music = group("Music")
 note(music, "Release plan", "# Release plan\n\nNight Drive first, Harbor Lights in the spring.\n",
@@ -3756,17 +3823,17 @@ for i in range(105):
     note(archive, f"Clipping {i + 1:03d}", f"Clipping number {i + 1}.\n")
 
 print(json.dumps({"studio": studio, "music": music, "night": night, "harbor": harbor,
-                  "empty": empty, "archive": archive}, indent=2))
+                  "empty": empty, "archive": archive, "linked_folder": linked}, indent=2))
 PY
 }
 
 # filetree_demo waits for the server and runs one stage of the browser demo
 # (scripts/demo-home-file-tree.mjs). Screenshots land in $TMPDIR/filetree-demo.
 filetree_demo() {
-  local stage="${4:-tree}" theme="${5:-light}" sandbox="${6:-}" root
+  local stage="${4:-tree}" theme="${5:-light}" sandbox="${6:-}" engine="${7:-chromium}" root
   smoke_show_wait
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
-  node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "${TMPDIR:-/tmp}/filetree-demo" "$stage" "$theme" "$sandbox"
+  node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "${TMPDIR:-/tmp}/filetree-demo" "$stage" "$theme" "$sandbox" "$engine"
 }
 
 # filetree_demo_all runs every stage of the browser demo in both themes and
@@ -3778,7 +3845,7 @@ filetree_demo_all() {
   smoke_show_wait
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
   out="${TMPDIR:-/tmp}/filetree-demo"
-  for stage in tree pane note outputs create manage finish; do
+  for stage in tree pane note outputs linked create manage finish; do
     for theme in light dark; do
       if log=$(node "$root/scripts/demo-home-file-tree.mjs" "$BASE_URL" "$out" "$stage" "$theme" "$sandbox" 2>&1); then
         echo "PASS $stage ($theme): $(printf '%s\n' "$log" | grep -c '^ok ') checks"
@@ -3797,6 +3864,7 @@ smoke_filetree() {
   case "${3:-}" in
   endpoints) filetree_endpoints ;;
   endpoints-r2) filetree_endpoints_r2 ;;
+  linked-timing) filetree_linked_timing "$@" ;;
   seed) filetree_seed "$@" ;;
   wait) smoke_show_wait ;;
   demo) filetree_demo "$@" ;;
@@ -3943,7 +4011,7 @@ prettier-head) smoke_prettier_head "$@" ;;
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
-  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
+  echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|linked|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
   echo "  $0 prettier-head <file>...               # was each file Prettier-clean at HEAD? (only then is --write on the whole file safe)" >&2
   exit 2
   ;;

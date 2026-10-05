@@ -31,6 +31,7 @@ const TAB_KINDS = new Set([
   'ticket',
   'file',
   'output',
+  'linkedFile',
   'memory',
   'agent',
   'workspace',
@@ -250,6 +251,44 @@ export function vanishedTabKeys(tabs, workspaceId, sectionId, section) {
         COMPLETE_LIST_KINDS[tab.kind] === sectionId &&
         !present.has(tab.key)
     )
+    .map(tab => tab.key);
+}
+
+// The linked folder a remembered file tab belongs to. Its key says so
+// (`ws1/lf/<directory id>/docs/plan.md`), so a tab stored without its `meta`
+// is still placed.
+function linkedFolderOfTab(tab) {
+  const parsed = parseItemKey(tab.key);
+  return parsed && parsed.kind === 'linkedFile' ? parsed.itemId.split('/')[0] : '';
+}
+
+/**
+ * The restored linked-file tabs that a loaded linked folder, or the loaded
+ * list of linked folders, proves are gone (FR69).
+ *
+ * Pass `dirId` and that folder's own loaded files (`folder`): a file tab of
+ * that folder that is not among them is gone. Pass no `dirId` and the loaded
+ * Linked folders section: a file tab whose folder is no longer linked is
+ * gone. Either list proves something only when it is whole — ready, and not
+ * cut at the row limit.
+ */
+export function vanishedLinkedTabKeys(tabs, workspaceId, { dirId = '', folder, section } = {}) {
+  const list = dirId ? folder : section;
+  if (!list || list.status !== 'ready' || hasMoreRow(list.rows)) return [];
+  const present = collectIds(list.rows, new Set());
+  const linkedIds = new Set(
+    (Array.isArray(list.rows) ? list.rows : []).map(row =>
+      String((row.meta && row.meta.dirId) || '')
+    )
+  );
+  return (Array.isArray(tabs) ? tabs : [])
+    .filter(tab => {
+      if (!tab || tab.restored !== true || tab.kind !== 'linkedFile') return false;
+      if (tab.workspaceId !== workspaceId) return false;
+      const owner = linkedFolderOfTab(tab);
+      if (!owner) return false;
+      return dirId ? owner === dirId && !present.has(tab.key) : !linkedIds.has(owner);
+    })
     .map(tab => tab.key);
 }
 

@@ -19,6 +19,11 @@ const PATHS = {
   file: 'M4 1.8h5.5l3 3v9.4H4zM9.5 1.8v3h3',
   // A tray with an arrow dropping into it: what task runs have saved.
   outputs: 'M2.5 9.5v3.5h11V9.5M8 2.5v7M5.4 7 8 9.6 10.6 7',
+  // Two links of a chain: folders that live outside the workspace.
+  linkedFolders:
+    'M6.9 9.1a2.4 2.4 0 0 0 3.4 0l2-2a2.4 2.4 0 0 0-3.4-3.4l-.8.8M9.1 6.9a2.4 2.4 0 0 0-3.4 0l-2 2a2.4 2.4 0 0 0 3.4 3.4l.8-.8',
+  // A folder with an arrow leaving it: one outside folder.
+  linked: 'M1.5 4.5h4.2l1.6 1.7h7.2v6.8h-13zM6.2 9.6h3.6M8.4 8.2l1.4 1.4-1.4 1.4',
   ticket: 'M3 3h10v10H3z',
   ticketDone: 'M3 3h10v10H3zM5.6 8.2l1.8 1.8 3.2-3.8',
   close: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
@@ -39,15 +44,18 @@ const SECTION_ICONS = {
   backlog: 'backlog',
   files: 'folder',
   outputs: 'outputs',
+  linked: 'linkedFolders',
   memory: 'memory',
   agents: 'agent'
 };
 
-// A row kind drawn with another kind's icon: an output is a file, and the
-// folder it sits in is a folder.
+// A row kind drawn with another kind's icon: an output or a file in a linked
+// folder is a file, and the folder it sits in is a folder.
 const KIND_ICONS = {
   output: 'file',
-  outputFolder: 'folder'
+  outputFolder: 'folder',
+  linkedFile: 'file',
+  linkedFolder: 'folder'
 };
 
 /** The icon name for a tree row. */

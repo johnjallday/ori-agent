@@ -43,6 +43,8 @@ import {
   agentsToRows,
   capSection,
   filesToRows,
+  linkedFilesToRows,
+  linkedToRows,
   memoryToRows,
   notesToRows,
   outputsToRows,
@@ -433,6 +435,179 @@ test('a group shows its own Outputs when it has some, and hides it when it has n
   );
 });
 
+// --- Linked folders: each one loads when its own row is opened (FR9, 2.2) ---
+
+const linkedSection = id =>
+  ready(
+    linkedToRows(
+      id,
+      {
+        directories: [
+          { id: 'd2', name: 'Reference tracks', path: '/Users/me/Music/Reference tracks' },
+          { id: 'd1', name: 'drum-kits', path: '/Volumes/Samples/drum-kits' }
+        ]
+      },
+      ''
+    )
+  );
+const kitFiles = id =>
+  ready(
+    linkedFilesToRows(
+      id,
+      'd1',
+      {
+        files: [
+          { relative_path: 'readme.md' },
+          { relative_path: 'kits/808/kick.wav' },
+          { relative_path: 'kits/notes.txt' },
+          { relative_path: 'unsorted', is_dir: true }
+        ]
+      },
+      'drum-kits'
+    )
+  );
+
+// A workspace's loaded sections plus the files of the linked folders that have
+// been opened: `{ sections, linked: { [directoryId]: state } }`.
+function linkedContents(id, folders = {}, overrides = {}) {
+  return { ...contentsFor(id, { linked: linkedSection(id), ...overrides }), linked: folders };
+}
+
+test('Linked folders sits after Outputs and counts folders, not files (FR9, departure 2.2)', () => {
+  const rows = expandedRows({
+    expanded: ['w4'],
+    contents: { w4: linkedContents('w4', {}, { outputs: someOutputs('w4') }) }
+  });
+  assert.deepEqual(
+    under(rows, 'w4').map(r => r.name),
+    ['Notes', 'Backlog', 'Files', 'Outputs', 'Linked folders', 'Memory', 'Agents']
+  );
+  assert.equal(rows.find(r => r.id === 'w4/s/linked').count, 2);
+  assert.deepEqual(
+    under(rows, 'w4/s/linked').map(r => `${r.kind}:${r.name}`),
+    ['linked:drum-kits', 'linked:Reference tracks']
+  );
+});
+
+test('a workspace that links to nothing has no Linked folders row; a failed one still shows', () => {
+  const none = ready(linkedToRows('w4', { directories: [] }, ''));
+  [loading(), none].forEach(linked => {
+    const rows = expandedRows({
+      expanded: ['w4'],
+      contents: { w4: contentsFor('w4', { linked }) }
+    });
+    assert.equal(
+      rows.some(r => r.id === 'w4/s/linked'),
+      false
+    );
+  });
+  const rows = expandedRows({
+    expanded: ['w4'],
+    contents: { w4: contentsFor('w4', { linked: failed('Workspace store is locked') }) }
+  });
+  assert.equal(under(rows, 'w4/s/linked')[0].name, "Couldn't load Linked folders");
+});
+
+test('a linked folder starts closed, with no files and no count: nothing has been asked for', () => {
+  const rows = expandedRows({ expanded: ['w4'], contents: { w4: linkedContents('w4') } });
+  const kits = rows.find(r => r.id === 'w4/l/d1');
+  assert.equal(kits.expandable, true);
+  assert.equal(kits.expanded, false);
+  assert.equal(kits.count, null);
+  assert.equal(under(rows, 'w4/l/d1').length, 0);
+  assert.equal(rowActivation(kits), 'toggle');
+});
+
+test('an opened linked folder shows "Loading…" until its own files arrive', () => {
+  [{}, { d1: loading() }].forEach(folders => {
+    const rows = expandedRows({
+      expanded: ['w4', 'w4/l/d1'],
+      contents: { w4: linkedContents('w4', folders) }
+    });
+    assert.deepEqual(
+      under(rows, 'w4/l/d1').map(r => `${r.kind}:${r.name}`),
+      ['loading:Loading…']
+    );
+    assert.equal(rows.find(r => r.id === 'w4/l/d1').count, null);
+    // The other linked folder is untouched.
+    assert.equal(under(rows, 'w4/l/d2').length, 0);
+  });
+});
+
+test('a loaded linked folder shows its files nested, and its own file count', () => {
+  const contents = { w4: linkedContents('w4', { d1: kitFiles('w4') }) };
+  const rows = expandedRows({ expanded: ['w4', 'w4/l/d1'], contents });
+  assert.equal(rows.find(r => r.id === 'w4/l/d1').count, 3);
+  assert.deepEqual(
+    under(rows, 'w4/l/d1').map(r => `${r.kind}:${r.name}`),
+    ['linkedFolder:kits', 'linkedFolder:unsorted', 'linkedFile:readme.md']
+  );
+  assert.equal(rows.find(r => r.id === 'w4/ld/d1/kits').expanded, false);
+  assert.equal(rowActivation(rows.find(r => r.id === 'w4/ld/d1/kits')), 'toggle');
+  assert.equal(rowActivation(rows.find(r => r.id === 'w4/lf/d1/readme.md')), 'open');
+
+  const deep = expandedRows({
+    expanded: ['w4', 'w4/l/d1', 'w4/ld/d1/kits', 'w4/ld/d1/kits/808', 'w4/ld/d1/unsorted'],
+    contents
+  });
+  assert.equal(deep.find(r => r.id === 'w4/lf/d1/kits/808/kick.wav').depth, 5);
+  assert.deepEqual(
+    under(deep, 'w4/ld/d1/unsorted').map(r => `${r.kind}:${r.name}`),
+    ['empty:Empty folder']
+  );
+  // Closed again, the count it has learned stays beside its name.
+  const closed = expandedRows({ expanded: ['w4'], contents });
+  assert.equal(closed.find(r => r.id === 'w4/l/d1').count, 3);
+  assert.equal(under(closed, 'w4/l/d1').length, 0);
+});
+
+test('a linked folder with nothing in it says "Empty folder"', () => {
+  const empty = ready(linkedFilesToRows('w4', 'd1', { files: [] }, 'drum-kits'));
+  const rows = expandedRows({
+    expanded: ['w4', 'w4/l/d1'],
+    contents: { w4: linkedContents('w4', { d1: empty }) }
+  });
+  assert.deepEqual(
+    under(rows, 'w4/l/d1').map(r => `${r.kind}:${r.name}`),
+    ['empty:Empty folder']
+  );
+  assert.equal(rows.find(r => r.id === 'w4/l/d1').count, 0);
+});
+
+test('a linked folder that failed to load says so and retries that folder alone (FR19)', () => {
+  const options = {
+    expanded: ['w4', 'w4/l/d1'],
+    contents: { w4: linkedContents('w4', { d1: failed('no such file or directory') }) }
+  };
+  const [line] = under(expandedRows(options), 'w4/l/d1');
+  assert.equal(line.kind, 'failed');
+  assert.equal(line.name, "Couldn't load drum-kits");
+  assert.equal(line.section, 'linked');
+  assert.equal(line.dirId, 'd1');
+  assert.equal(rowActivation(line), 'retry');
+  const out = contentHTML(options);
+  assert.match(
+    out,
+    /data-tree-retry="w4" data-tree-retry-section="linked" data-tree-retry-folder="d1"[^>]*>Retry</
+  );
+  // A failed section's Retry names no folder.
+  const sectionOut = contentHTML({
+    expanded: ['w4'],
+    contents: { w4: contentsFor('w4', { linked: failed('locked') }) }
+  });
+  assert.match(sectionOut, /data-tree-retry-section="linked" tabindex="-1">Retry</);
+});
+
+test('a linked folder row shows its file count once known, and none before', () => {
+  const loaded = contentHTML({
+    expanded: ['w4'],
+    contents: { w4: linkedContents('w4', { d1: kitFiles('w4') }) }
+  });
+  assert.match(rowMarkup(loaded, 'w4/l/d1'), /<span class="cockpit-tree-count">3<\/span>/);
+  assert.doesNotMatch(rowMarkup(loaded, 'w4/l/d2'), /cockpit-tree-count/);
+  assert.match(rowMarkup(loaded, 'w4/l/d1'), /aria-expanded="false"/);
+});
+
 test('a workspace expanded before its contents arrive shows every section as loading (FR18)', () => {
   const rows = expandedRows({ expanded: ['w4'] });
   assert.deepEqual(
@@ -625,6 +800,21 @@ test('revealTargets lists what must be open for a row to be on screen (FR28)', (
     { kind: 'outputFolder', id: 'w4/od/runs' },
     { kind: 'outputFolder', id: 'w4/od/runs/2026-10-04' }
   ]);
+  // A file in a linked folder needs that folder's own row open, then the
+  // folders inside it.
+  assert.deepEqual(revealTargets('w4/lf/d1/kits/808/kick.wav', flat()), [
+    { kind: 'workspace', id: 'w4' },
+    { kind: 'section', id: 'w4/s/linked' },
+    { kind: 'linked', id: 'w4/l/d1' },
+    { kind: 'linkedFolder', id: 'w4/ld/d1/kits' },
+    { kind: 'linkedFolder', id: 'w4/ld/d1/kits/808' }
+  ]);
+  assert.deepEqual(revealTargets('w4/lf/d1/readme.md', flat()).slice(1), [
+    { kind: 'section', id: 'w4/s/linked' },
+    { kind: 'linked', id: 'w4/l/d1' }
+  ]);
+  // The linked folder's own row needs only its section.
+  assert.deepEqual(revealTargets('w4/l/d1', flat()).pop(), { kind: 'section', id: 'w4/s/linked' });
   // Memory is not inside a section; a ticket is inside Backlog.
   assert.deepEqual(revealTargets('w4/m', flat()), [{ kind: 'workspace', id: 'w4' }]);
   assert.deepEqual(revealTargets('w4/t/t1', flat()).pop(), { kind: 'section', id: 'w4/s/backlog' });
@@ -1514,6 +1704,40 @@ test('the filter does not find outputs that have not loaded, or that failed to',
   [loading(), failed('nope')].forEach(outputs => {
     const contents = { w4: contentsFor('w4', { outputs }) };
     assert.deepEqual(ids(filteredRows('report', { contents })), []);
+  });
+});
+
+test('the filter finds a linked folder by its name, and leaves it as the user has it', () => {
+  const contents = { w4: linkedContents('w4') };
+  const rows = filteredRows('drum', { contents });
+  assert.deepEqual(ids(rows), ['w4', 'w4/s/linked', 'w4/l/d1']);
+  // Closed, and not forced open: so nothing will be loaded for it.
+  assert.equal(rows[2].expanded, false);
+  assert.equal(rows[2].forced, undefined);
+});
+
+test('the filter finds files in a linked folder that has been loaded, and opens the way', () => {
+  const contents = { w4: linkedContents('w4', { d1: kitFiles('w4') }) };
+  const rows = filteredRows('kick', { contents });
+  assert.deepEqual(ids(rows), [
+    'w4',
+    'w4/s/linked',
+    'w4/l/d1',
+    'w4/ld/d1/kits',
+    'w4/ld/d1/kits/808',
+    'w4/lf/d1/kits/808/kick.wav'
+  ]);
+  assert.ok(rows.slice(0, 5).every(r => r.expanded === true && r.forced === true));
+});
+
+test('the filter never searches, and never opens, a linked folder that has not been loaded', () => {
+  // Not opened yet, still loading, or failed: its files are unknown.
+  [{}, { d1: loading() }, { d1: failed('nope') }].forEach(folders => {
+    const contents = { w4: linkedContents('w4', folders) };
+    assert.deepEqual(ids(filteredRows('kick', { contents })), []);
+    // …even when the row itself is open: no row is forced open by the filter.
+    const open = filteredRows('kick', { expanded: ['w4', 'w4/l/d1'], contents });
+    assert.deepEqual(ids(open), []);
   });
 });
 

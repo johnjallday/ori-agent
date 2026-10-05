@@ -53,10 +53,13 @@ const DIVIDER = { divider: true };
  *   note, ticket,
  *   agent              Open, Open in workspace
  *   file under files/  Open, Open in default app, Reveal in Finder
- *   output file        Open
+ *   output file,
+ *   linked-folder file Open
  *
  * A folder in Outputs has no menu: nothing is uploaded into outputs/, and
- * one output file is not opened or revealed on its own (decision D15).
+ * one output file is not opened or revealed on its own (decision D15). A
+ * linked folder and the folders inside it have none either; the workspace's
+ * Refresh reloads the linked folders that are open.
  */
 export function menuItemsFor(row) {
   const kind = row && row.kind;
@@ -92,7 +95,7 @@ export function menuItemsFor(row) {
       item(MENU_FILE_REVEAL, 'Reveal in Finder')
     ];
   }
-  if (kind === 'output') return [item(MENU_OPEN, 'Open')];
+  if (kind === 'output' || kind === 'linkedFile') return [item(MENU_OPEN, 'Open')];
   return [];
 }
 

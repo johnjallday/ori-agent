@@ -120,14 +120,41 @@ test('a folder in Outputs has no menu: nothing is uploaded into outputs/', () =>
   assert.equal(rowHasMenu({ kind: 'outputFolder' }), false);
 });
 
-test('content rows cannot be moved or deleted from the tree (non-goal)', () => {
-  ['note', 'ticket', 'agent', 'file', 'folder', 'output', 'outputFolder', 'memory'].forEach(
-    kind => {
-      const actions = menuItemsFor({ kind, section: 'files' }).map(entry => entry.action);
-      assert.equal(actions.includes(MENU_MOVE), false, kind);
-      assert.equal(actions.includes(MENU_DELETE), false, kind);
+test('a file in a linked folder offers Open only (FR55)', () => {
+  assert.deepEqual(labels({ kind: 'linkedFile' }), ['Open']);
+  assert.deepEqual(
+    menuItemsFor({ kind: 'linkedFile' }).map(entry => entry.action),
+    [MENU_OPEN]
+  );
+});
+
+test('a linked folder, the folders inside it and its section have no menu', () => {
+  [{ kind: 'linked' }, { kind: 'linkedFolder' }, { kind: 'section', section: 'linked' }].forEach(
+    row => {
+      assert.deepEqual(menuItemsFor(row), [], row.kind);
+      assert.equal(rowHasMenu(row), false);
     }
   );
+});
+
+test('content rows cannot be moved or deleted from the tree (non-goal)', () => {
+  [
+    'note',
+    'ticket',
+    'agent',
+    'file',
+    'folder',
+    'output',
+    'outputFolder',
+    'linked',
+    'linkedFolder',
+    'linkedFile',
+    'memory'
+  ].forEach(kind => {
+    const actions = menuItemsFor({ kind, section: 'files' }).map(entry => entry.action);
+    assert.equal(actions.includes(MENU_MOVE), false, kind);
+    assert.equal(actions.includes(MENU_DELETE), false, kind);
+  });
 });
 
 test('each section offers the one thing that can be created in it (FR55)', () => {

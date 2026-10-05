@@ -17,6 +17,7 @@ import {
   parseTreeState,
   readTreeState,
   snapshotTreeState,
+  vanishedLinkedTabKeys,
   vanishedTabKeys,
   writeTreeState
 } from './home-tree-state.js';
@@ -465,6 +466,97 @@ test('remembered output rows of a workspace that is gone are dropped', () => {
     tabs: [overviewTab],
     activeKey: overviewTab.key
   });
+});
+
+// --- Linked folders ---------------------------------------------------------
+
+const linkedTab = {
+  key: 'ws1/lf/d1/kits/kick.wav',
+  kind: 'linkedFile',
+  workspaceId: 'ws1',
+  label: 'kick.wav',
+  meta: { path: 'kits/kick.wav', dirId: 'd1', dirName: 'drum-kits', size: 900 }
+};
+const linkedFolders = ids =>
+  readySection(ids.map(id => ({ id: `ws1/l/${id}`, kind: 'linked', meta: { dirId: id } })));
+
+test('a linked-file tab and its open folder rows are remembered and put back (FR68)', () => {
+  const state = homeState({
+    expandedRows: new Set(['ws1', 'ws1/l/d1', 'ws1/ld/d1/kits']),
+    treeTabs: [linkedTab],
+    activeTabKey: linkedTab.key
+  });
+  const back = parseTreeState(JSON.stringify(snapshotTreeState(state)));
+  // What the loader needs comes back: the folder's id and name, the path, the size.
+  assert.deepEqual(back.tabs, [linkedTab]);
+  assert.equal(back.activeKey, linkedTab.key);
+  assert.deepEqual(back.expanded, ['ws1', 'ws1/l/d1', 'ws1/ld/d1/kits']);
+  const home = {};
+  applyTreeState(home, back);
+  assert.equal(home.treeTabs[0].restored, true);
+  assert.equal(home.expandedRows.has('ws1/l/d1'), true);
+});
+
+test('a restored linked file that is not in its folder any more is gone (FR69)', () => {
+  const open = [restored(linkedTab), restored(fileTab)];
+  const present = readySection([
+    {
+      id: 'ws1/ld/d1/kits',
+      kind: 'linkedFolder',
+      children: [{ id: linkedTab.key, kind: 'linkedFile' }]
+    }
+  ]);
+  assert.deepEqual(vanishedLinkedTabKeys(open, 'ws1', { dirId: 'd1', folder: present }), []);
+  const emptied = readySection([{ id: 'ws1/ld/d1/kits', kind: 'linkedFolder', children: [] }]);
+  assert.deepEqual(vanishedLinkedTabKeys(open, 'ws1', { dirId: 'd1', folder: emptied }), [
+    linkedTab.key
+  ]);
+  // Another linked folder's files say nothing about this one's.
+  assert.deepEqual(vanishedLinkedTabKeys(open, 'ws1', { dirId: 'd2', folder: emptied }), []);
+  assert.deepEqual(vanishedLinkedTabKeys(open, 'ws2', { dirId: 'd1', folder: emptied }), []);
+});
+
+test('a restored linked file whose folder was unlinked is gone', () => {
+  const open = [restored(linkedTab)];
+  assert.deepEqual(
+    vanishedLinkedTabKeys(open, 'ws1', { section: linkedFolders(['d1', 'd2']) }),
+    []
+  );
+  assert.deepEqual(vanishedLinkedTabKeys(open, 'ws1', { section: linkedFolders(['d2']) }), [
+    linkedTab.key
+  ]);
+  assert.deepEqual(vanishedLinkedTabKeys(open, 'ws1', { section: linkedFolders([]) }), [
+    linkedTab.key
+  ]);
+  // The tab's key names its folder, so one stored without `meta` is still placed.
+  const bare = [{ ...restored(linkedTab), meta: {} }];
+  assert.deepEqual(vanishedLinkedTabKeys(bare, 'ws1', { section: linkedFolders(['d2']) }), [
+    linkedTab.key
+  ]);
+});
+
+test('a linked file is proved gone only by a whole list, and never one opened in this visit', () => {
+  const open = [restored(linkedTab)];
+  const capped = readySection([{ id: 'ws1/more/linked/d1', kind: 'more' }]);
+  assert.deepEqual(vanishedLinkedTabKeys(open, 'ws1', { dirId: 'd1', folder: capped }), []);
+  [{ status: 'loading', rows: [] }, { status: 'failed', rows: [] }, null, undefined].forEach(
+    list => {
+      assert.deepEqual(vanishedLinkedTabKeys(open, 'ws1', { dirId: 'd1', folder: list }), []);
+      assert.deepEqual(vanishedLinkedTabKeys(open, 'ws1', { section: list }), []);
+    }
+  );
+  assert.deepEqual(
+    vanishedLinkedTabKeys([linkedTab], 'ws1', { dirId: 'd1', folder: readySection([]) }),
+    []
+  );
+  // The lists of other sections say nothing about a linked file.
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'files', readySection([])), []);
+  assert.deepEqual(vanishedTabKeys(open, 'ws1', 'linked', readySection([])), []);
+  // And a file tab under files/ is never dropped by a linked folder's list.
+  assert.deepEqual(
+    vanishedLinkedTabKeys([restored(fileTab)], 'ws1', { dirId: 'd1', folder: readySection([]) }),
+    []
+  );
 });
 
 test('only a list that is whole can prove something is gone', () => {
