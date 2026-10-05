@@ -101,64 +101,21 @@ func observedReviewCandidate(held heldFolderObservation, id string) (folderdiges
 // caller must append the returned ID to the canonical conversation before its
 // controls can authorize anything. A failed append can close this pending offer.
 func (s *FolderObservationService) Review(ctx context.Context, source foldercontext.Target, conversationID, observationID, candidateID string) (FolderOfferView, error) {
+	if conversationID == "" {
+		return FolderOfferView{}, ErrFolderSelection
+	}
 	held, _, err := s.resolve(ctx, source, observationID)
 	if err != nil {
 		return FolderOfferView{}, err
 	}
-	candidate, ok := observedReviewCandidate(held, candidateID)
-	if !ok || conversationID == "" {
-		return FolderOfferView{}, ErrFolderSelection
-	}
-	canonical, err := s.digest.deps.ValidateRoot(candidate.Path)
-	identity, identityErr := portfolioDirectoryIdentity(candidate.Path)
-	if err != nil || canonical != candidate.Path || identityErr != nil {
-		return FolderOfferView{}, ErrFolderPathLost
-	}
-	d := s.digest
-	now := d.now()
 	target := source
 	target.ConversationID, target.DraftID = conversationID, ""
-	offer := FolderOffer{
-		ID: d.deps.NewID(), Status: FolderOfferPending,
-		FolderKey: FolderKey(held.root), FolderName: held.result.Name, RootIdentity: held.identity,
-		Verdict: string(folderdigest.KindProject), Reason: folderdigest.DescribeCandidate(candidate, now),
-		Partial: held.result.Partial, ScannedAt: held.observation.ScannedAt, CreatedAt: now,
-		Subject:            folderCandidateRecord(candidate, FolderChoiceProject, folderdigest.DescribeCandidate(candidate, now)),
-		ProjectsCount:      1,
-		ConversationReview: &FolderConversationReview{Target: target, ObservationID: observationID, CandidateID: candidateID, CandidateIdentity: identity},
-	}
-	doc, err := d.store.Read(ctx, source.UserID)
+	offer, err := s.prepareReviewOffer(ctx, held, target, candidateID)
 	if err != nil {
 		return FolderOfferView{}, err
 	}
-	if doc.Tombstoned(offer.Subject.Key) {
-		return FolderOfferView{}, ErrFolderOfferDecided
-	}
-	// A collection is offered only when the user explicitly chose the root,
-	// using the same observed signal and canonical Home availability as before.
-	verdict := folderdigest.Exclude(held.result, now, func(c folderdigest.Candidate) bool { return doc.Tombstoned(FolderKey(c.Path)) })
-	if candidate.IsRoot && verdict.Portfolio != nil && d.deps.HomeExists != nil {
-		row, found := folderdigest.CapabilityForShape(verdict.Portfolio.Shape)
-		if found && row.Offer != nil && row.Offer.HomeProviderKey != "" {
-			exists, homeErr := d.deps.HomeExists(ctx, source.UserID, row.Offer.HomeProviderKey)
-			if homeErr != nil {
-				return FolderOfferView{}, homeErr
-			}
-			if !exists || d.existingHomeReadable(ctx, source.UserID, row.Offer.HomeProviderKey) {
-				offer = buildPortfolioOffer(offer, verdict, row.Offer.HomeProviderKey)
-				offer.Portfolio.ExistingHome = exists
-				offer.Portfolio.IntegrationKey, offer.Portfolio.IntegrationProjects = folderdigest.IntegrationProjects(held.result, verdict.Portfolio.Shape, now)
-			}
-		}
-	}
-	domain, _ := folderOfferDomainClass(offer)
-	legacyDeclined := false
-	if domain != "" && doc.DeclineFor(domain) == nil && d.deps.LegacyDeclined != nil {
-		legacyDeclined, err = d.deps.LegacyDeclined(ctx, source.UserID, domain)
-		if err != nil {
-			return FolderOfferView{}, err
-		}
-	}
+	d := s.digest
+	offer.ID = d.deps.NewID()
 	var result FolderOffer
 	_, err = d.store.Mutate(ctx, source.UserID, func(doc *FolderDigestDocument) error {
 		// Reuse a review/result for this exact conversation and candidate. A fresh
@@ -169,7 +126,7 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 				continue
 			}
 			if prior.FolderKey == offer.FolderKey && prior.Subject.Key == offer.Subject.Key &&
-				prior.RootIdentity == offer.RootIdentity && prior.ConversationReview.CandidateIdentity == identity &&
+				prior.RootIdentity == offer.RootIdentity && prior.ConversationReview.CandidateIdentity == offer.ConversationReview.CandidateIdentity &&
 				((prior.Status == FolderOfferPending && prior.ConversationReview.ObservationID == observationID && prior.ConversationReview.CandidateID == candidateID) || prior.Status == FolderOfferAwaitingOutcome || prior.Status == FolderOfferResolved) {
 				prior.ConversationReview = offer.ConversationReview
 				result = *prior
@@ -180,11 +137,11 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 			if pending.ConversationReview == nil || pending.ConversationReview.Target != target {
 				return ErrFolderReviewPending
 			}
-			// The same conversation explicitly reviewed a replacement. No decline,
-			// tombstone, memory learning or unrelated offer is produced by retirement.
+			// Retirement is not a decline, tombstone or memory preference.
 			pending.Status = FolderOfferClosed
 		}
-		offer.CapabilitySuppressed = legacyDeclined || doc.DeclineFor(domain) != nil
+		domain, _ := folderOfferDomainClass(offer)
+		offer.CapabilitySuppressed = offer.CapabilitySuppressed || doc.DeclineFor(domain) != nil
 		doc.Offers = append(doc.Offers, offer)
 		pruneFolderDigest(doc)
 		result = offer
@@ -194,6 +151,108 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 		return FolderOfferView{}, err
 	}
 	return d.viewFor(ctx, source.UserID, result, held.binding.Paused), nil
+}
+
+// prepareReviewOffer is shared by explicit Review and read-only suggestions.
+// It validates the observed candidate but neither allocates nor stores an offer.
+func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held heldFolderObservation, target foldercontext.Target, candidateID string) (FolderOffer, error) {
+	candidate, ok := observedReviewCandidate(held, candidateID)
+	if !ok {
+		return FolderOffer{}, ErrFolderSelection
+	}
+	canonical, err := s.digest.deps.ValidateRoot(candidate.Path)
+	identity, identityErr := portfolioDirectoryIdentity(candidate.Path)
+	if err != nil || canonical != candidate.Path || identityErr != nil {
+		return FolderOffer{}, ErrFolderPathLost
+	}
+	d := s.digest
+	now := d.now()
+	offer := FolderOffer{
+		Status:    FolderOfferPending,
+		FolderKey: FolderKey(held.root), FolderName: held.result.Name, RootIdentity: held.identity,
+		Verdict: string(folderdigest.KindProject), Reason: folderdigest.DescribeCandidate(candidate, now),
+		Partial: held.result.Partial, ScannedAt: held.observation.ScannedAt, CreatedAt: now,
+		Subject:            folderCandidateRecord(candidate, FolderChoiceProject, folderdigest.DescribeCandidate(candidate, now)),
+		ProjectsCount:      1,
+		ConversationReview: &FolderConversationReview{Target: target, ObservationID: held.observation.ID, CandidateID: candidateID, CandidateIdentity: identity},
+	}
+	doc, err := d.store.Read(ctx, target.UserID)
+	if err != nil {
+		return FolderOffer{}, err
+	}
+	if doc.Tombstoned(offer.Subject.Key) {
+		return FolderOffer{}, ErrFolderOfferDecided
+	}
+	// Only the root option can describe a collection. Review still requires
+	// the user to choose it explicitly, with the same canonical Home checks.
+	verdict := folderdigest.Exclude(held.result, now, func(c folderdigest.Candidate) bool { return doc.Tombstoned(FolderKey(c.Path)) })
+	if candidate.IsRoot && verdict.Portfolio != nil && d.deps.HomeExists != nil {
+		row, found := folderdigest.CapabilityForShape(verdict.Portfolio.Shape)
+		if found && row.Offer != nil && row.Offer.HomeProviderKey != "" {
+			exists, homeErr := d.deps.HomeExists(ctx, target.UserID, row.Offer.HomeProviderKey)
+			if homeErr != nil {
+				return FolderOffer{}, homeErr
+			}
+			if !exists || d.existingHomeReadable(ctx, target.UserID, row.Offer.HomeProviderKey) {
+				offer = buildPortfolioOffer(offer, verdict, row.Offer.HomeProviderKey)
+				offer.Portfolio.ExistingHome = exists
+				offer.Portfolio.IntegrationKey, offer.Portfolio.IntegrationProjects = folderdigest.IntegrationProjects(held.result, verdict.Portfolio.Shape, now)
+			}
+		}
+	}
+	domain, _ := folderOfferDomainClass(offer)
+	legacyDeclined := false
+	if domain != "" && doc.DeclineFor(domain) == nil && d.deps.LegacyDeclined != nil {
+		legacyDeclined, err = d.deps.LegacyDeclined(ctx, target.UserID, domain)
+		if err != nil {
+			return FolderOffer{}, err
+		}
+	}
+	offer.CapabilitySuppressed = legacyDeclined || doc.DeclineFor(domain) != nil
+	return offer, nil
+}
+
+// FolderReviewOption is a path-free description, never a plan or execution grant.
+type FolderReviewOption struct {
+	CandidateID   string `json:"candidate_id"`
+	WorkspaceType string `json:"workspace_type"`
+}
+
+// ReviewOptions reads the same candidate and setup availability as Review. It
+// does not scan, create an offer, advance a journey, or disturb pending work.
+func (s *FolderObservationService) ReviewOptions(ctx context.Context, target foldercontext.Target, observationID string) []FolderReviewOption {
+	held, _, err := s.resolve(ctx, target, observationID)
+	if err != nil {
+		return nil
+	}
+	doc, err := s.digest.store.Read(ctx, target.UserID)
+	if err != nil || doc.Pending() != nil {
+		return nil
+	}
+	var options []FolderReviewOption
+	for _, project := range held.observation.Projects {
+		offer, err := s.prepareReviewOffer(ctx, held, target, project.ID)
+		if err != nil || offer.CapabilitySuppressed {
+			continue
+		}
+		// Describe without a canonical review/root grant: that grant can only
+		// exist after the user's later Review click is successfully persisted.
+		view := s.digest.describeOffer(ctx, offer, held.binding.Paused)
+		s.digest.attachSetupPlan(ctx, target.UserID, offer, &view)
+		kind := "Blank workspace"
+		if view.Capability != nil {
+			if view.Plan == nil {
+				continue
+			}
+			kind = view.Capability.Workspace
+		} else if !view.CreateAvailable {
+			continue
+		} else if view.BlueprintLabel != "" {
+			kind = view.BlueprintLabel + " workspace"
+		}
+		options = append(options, FolderReviewOption{CandidateID: project.ID, WorkspaceType: kind})
+	}
+	return options
 }
 
 // CloseReview closes only an unconfirmed review owned by this conversation.

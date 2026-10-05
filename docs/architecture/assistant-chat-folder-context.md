@@ -127,6 +127,24 @@ status. A provider cannot invent trusted setup buttons.
 
 ### Optional setup handoff
 
+After Send, the folder conversation prompt explores the observed structure and
+recommends a fitting next step, rather than waiting for a setup phrase. A read-only
+`ReviewOptions` projection reuses candidate preparation and capability/plan
+availability from the existing setup service. It does not rescan, allocate an
+offer, or execute a journey. Names and supported workspace types reach the model
+as bounded escaped data without candidate IDs or paths. Unavailable, declined,
+historical, or pending-review cases have no suggested action.
+
+A successfully saved metadata turn can return `folder_setup_suggestion`, bound to
+its conversation, revision, observation and canonical assistant-message ID. The
+reply shows **Review suggested setup**, opening the existing candidate selector;
+multiple scopes start unselected. The suggestion is not persisted authority:
+reload projects it only for the latest locally authored atomic folder turn and
+rechecks availability. Imported prose, unsaved/model-failure replies, content
+refusals, replacement/detach, closed reviews and old answers cannot revive it.
+Clicking still uses the existing explicit review endpoint and confirmation gates.
+The composer review entry remains available for direct/no-model review.
+
 Only explicit Review workspace setup mints a canonical digest offer. The handoff
 checks current conversation revision, selection owner/expiry/directory identity,
 and explicit candidate (never silently the first of several; the whole root is

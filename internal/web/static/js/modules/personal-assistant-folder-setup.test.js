@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setupCandidates, currentReview } from './personal-assistant-folder-setup.js';
+import {
+  setupCandidates,
+  currentReview,
+  currentSuggestion
+} from './personal-assistant-folder-setup.js';
 import {
   conversationFolderOfferView,
   folderReviewResponseCurrent
@@ -37,6 +41,40 @@ test('only the current conversation and exact canonical offer get live controls'
   assert.equal(currentReview({ conversationId: 'chat-b', offerId: 'offer-a' }, offer), false);
   assert.equal(currentReview({ conversationId: 'chat-a', offerId: 'old' }, offer), false);
   assert.equal(currentReview({}, null), false);
+});
+
+test('suggested review binds exact saved reply, revision, observation and disclosed choices', () => {
+  const state = {
+    conversationId: 'chat-a',
+    revision: 'revision-a',
+    observation: { id: 'observation-a', projects: [{ id: 'root' }, { id: 'child' }] }
+  };
+  const suggestion = {
+    conversation_id: 'chat-a',
+    revision: 'revision-a',
+    observation_id: 'observation-a',
+    message_id: 'reply-a',
+    options: [{ candidate_id: 'root', workspace_type: 'Blank workspace' }]
+  };
+  assert.equal(currentSuggestion(state, suggestion), true);
+  for (const change of [
+    { conversationId: 'chat-b' },
+    { revision: 'new-revision' },
+    { observation: null },
+    { preview: true },
+    { authority: 'lost' },
+    { offerId: 'active-review' }
+  ])
+    assert.equal(currentSuggestion({ ...state, ...change }, suggestion), false);
+  for (const change of [
+    { message_id: '' },
+    { options: [] },
+    { options: [{ candidate_id: 'invented' }] },
+    { observation_id: 'old' }
+  ])
+    assert.equal(currentSuggestion(state, { ...suggestion, ...change }), false);
+  assert.equal(currentSuggestion(state, null), false);
+  assert.equal(currentSuggestion(null, suggestion), false);
 });
 
 test('bound review preserves canonical Create and memory disclosure; Keep chatting is not No', () => {

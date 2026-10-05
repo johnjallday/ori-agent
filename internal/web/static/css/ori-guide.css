@@ -1571,6 +1571,19 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   font-weight: 600;
 }
 
+/* The optional setup handoff sits below the reply, never beside its bubble. */
+.personal-assistant-panel .personal-assistant-message__setup {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  margin: 10px 0 4px;
+  white-space: normal;
+}
+
+.personal-assistant-panel .personal-assistant-message__setup p {
+  margin: 0;
+}
+
 /* Remember… is secondary: it reads as a quieter action than saving a draft. */
 .personal-assistant-message__action--secondary {
   border-style: dashed;

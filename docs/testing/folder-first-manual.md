@@ -49,6 +49,17 @@ Automated browser checks from fresh sandboxes:
 ./scripts/e2e-fresh.sh tests/personal-assistant-foundation.spec.ts tests/personal-assistant-foundation.a11y.spec.ts tests/personal-hq-daily-brief.spec.ts tests/starter-missions.spec.ts tests/folder-first-scene.spec.ts tests/domain-specialist-onboarding.spec.ts -- --workers=1
 ```
 
+With a configured model, Send **Explore this folder** after the local preview.
+Expect a metadata-grounded discussion and a suggested next step, not invented
+file contents or a claim that setup already ran. When current setup is available,
+**Review suggested setup** appears below the saved reply. Click it, choose the
+whole folder or a project explicitly when multiple scopes are offered, and review
+the existing card. Escape from scope selection returns focus to the reply action.
+Neither Send, conversational “yes”, reload nor opening the selector creates a
+workspace. Reload keeps at most one current suggested action; replacing/removing
+the attachment removes it. Historical/unavailable context, an unrelated pending
+review, content refusals and failed/unsaved answers have no new suggested action.
+
 For the no-model canonical review journey, run:
 
 ```bash

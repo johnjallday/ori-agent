@@ -273,7 +273,8 @@ async function resume(id, options = {}) {
     );
     window.PersonalAssistantFolderSetup?.hydrate?.(
       conversation.id,
-      result.body.folder_reviews || {}
+      result.body.folder_reviews || {},
+      result.body.folder_setup_suggestion || null
     );
     setNote(
       partial
@@ -403,6 +404,8 @@ function applyReply(data, rows = {}) {
     );
     window.PersonalAssistantFolderContext?.accepted?.(nextId, data.folder_context);
   }
+  if (reply.stored)
+    window.PersonalAssistantFolderSetup?.applySuggestion?.(data.folder_setup_suggestion || null);
   const notice = conversationNotice(data);
   setNote(notice);
   return { notice, stored: reply.stored === true, restoreInput: shouldRestoreInput(data) };

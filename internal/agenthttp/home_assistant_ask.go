@@ -108,8 +108,9 @@ type HomeAssistantAskResponse struct {
 	RequiresConfirmation bool                    `json:"requires_confirmation,omitempty"`
 	Confirmation         *HomeActionConfirmation `json:"confirmation,omitempty"`
 	// Conversation is set only for a hired-assistant conversation turn.
-	Conversation  *HomeAssistantConversationState `json:"conversation,omitempty"`
-	FolderContext *PersonalAssistantFolderState   `json:"folder_context,omitempty"`
+	Conversation          *HomeAssistantConversationState         `json:"conversation,omitempty"`
+	FolderContext         *PersonalAssistantFolderState           `json:"folder_context,omitempty"`
+	FolderSetupSuggestion *PersonalAssistantFolderSetupSuggestion `json:"folder_setup_suggestion,omitempty"`
 	// ModelUnavailable marks a turn that got no model answer, so the browser
 	// can keep the user's text instead of treating the reply as an answer.
 	ModelUnavailable bool `json:"model_unavailable,omitempty"`

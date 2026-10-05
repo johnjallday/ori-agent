@@ -59,6 +59,8 @@ type Fixture = {
   messages: Record<string, any>[];
   revision: string;
   observation: ReturnType<typeof observed> | null;
+  multi: boolean;
+  reviewable?: string[];
 };
 
 async function installFixture(page: Page): Promise<Fixture> {
@@ -68,8 +70,35 @@ async function installFixture(page: Page): Promise<Fixture> {
     scan: 'success',
     messages: [],
     revision: '',
-    observation: null
+    observation: null,
+    multi: false
   };
+  const observationFor = (folder: string) => ({
+    ...observed(folder),
+    ...(fixture.multi
+      ? {
+          projects: [
+            { id: 'candidate-0', name: folder, files: 3, root: true },
+            { id: 'candidate-1', name: 'Project A', files: 1 }
+          ]
+        }
+      : {})
+  });
+  const suggestion = () =>
+    fixture.observation
+      ? {
+          conversation_id: 'folder-chat-fixture',
+          revision: fixture.revision,
+          observation_id: fixture.observation.id,
+          message_id: fixture.messages.at(-1)?.id,
+          options: fixture.observation.projects
+            .filter(project => !fixture.reviewable || fixture.reviewable.includes(project.id))
+            .map(project => ({
+              candidate_id: project.id,
+              workspace_type: 'Blank workspace'
+            }))
+        }
+      : null;
   await page.route('**/api/home-assistant/folder-context/choices', route =>
     route.fulfill({
       json: {
@@ -89,7 +118,7 @@ async function installFixture(page: Page): Promise<Fixture> {
         status: 409,
         json: { message: 'Fixture access denied. Previous folder unchanged.' }
       });
-    const observation = observed(body.chip === 'desktop' ? 'Desktop' : 'Documents');
+    const observation = observationFor(body.chip === 'desktop' ? 'Desktop' : 'Documents');
     const reply = () => route.fulfill({ json: { observation, revision: fixture.revision } });
     if (fixture.scan === 'delay') {
       fixture.releaseScan = reply;
@@ -126,7 +155,9 @@ async function installFixture(page: Page): Promise<Fixture> {
       });
     const number = fixture.messages.length;
     const observation = body.folder_context
-      ? observed(body.folder_context.selection_id.endsWith('Desktop') ? 'Desktop' : 'Documents')
+      ? observationFor(
+          body.folder_context.selection_id.endsWith('Desktop') ? 'Desktop' : 'Documents'
+        )
       : null;
     const revision = `event-${number}`;
     if (observation)
@@ -157,7 +188,9 @@ async function installFixture(page: Page): Promise<Fixture> {
           user_message_id: `u-${number}`,
           assistant_message_id: `a-${number}`
         },
-        ...(observation ? { folder_context: { revision, observation } } : {})
+        ...(observation
+          ? { folder_context: { revision, observation }, folder_setup_suggestion: suggestion() }
+          : {})
       }
     });
   });
@@ -167,7 +200,8 @@ async function installFixture(page: Page): Promise<Fixture> {
         conversation: { id: 'folder-chat-fixture', title: 'Folder discussion' },
         messages: fixture.messages,
         saved: [],
-        folder_context: { revision: fixture.revision, observation: fixture.observation }
+        folder_context: { revision: fixture.revision, observation: fixture.observation },
+        folder_setup_suggestion: suggestion()
       }
     })
   );
@@ -331,6 +365,79 @@ for (const path of ['/', '/settings']) {
     await expect(page.locator('#personalAssistantInput')).toHaveValue('Keep this draft');
   });
 }
+
+test('browser fixture: suggested setup follows the reply, restores on reload and requires explicit scope', async ({
+  page,
+  request
+}) => {
+  await ensureAssistant(request);
+  const fixture = await installFixture(page);
+  fixture.multi = true;
+  // Even if only the whole-folder setup is available, do not silently choose
+  // it when the observation contains multiple scopes.
+  fixture.reviewable = ['candidate-0'];
+  const reviews: Record<string, any>[] = [];
+  await page.route('**/api/home-assistant/folder-context/review', route => {
+    reviews.push(route.request().postDataJSON());
+    return route.fulfill({
+      status: 409,
+      json: { message: 'Fixture: selection expired. Pick again.' }
+    });
+  });
+  await open(page, '/settings');
+  await choose(page);
+  const handoff = page.locator('#homeAssistantConversation [data-folder-setup-suggestion]');
+  await expect(handoff).toHaveCount(0);
+  await say(page, 'Explore this folder');
+  await expect(handoff).toHaveCount(1);
+  await say(page, 'I want to organize the whole collection');
+  await expect(handoff).toHaveCount(1);
+  await expect(page.locator('[data-message-id="a-0"] [data-folder-setup-suggestion]')).toHaveCount(
+    0
+  );
+  await page.reload();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(handoff).toHaveCount(1);
+  await page.locator('#personalAssistantInput').fill('Keep this draft');
+  const button = handoff.getByRole('button', { name: 'Review suggested setup' });
+  expect(
+    await button.evaluate(element => {
+      const row = element.closest('[data-message-id]');
+      const bubble = row?.firstElementChild;
+      const text = bubble?.firstChild;
+      if (!text || !bubble?.contains(element)) return false;
+      const range = document.createRange();
+      range.selectNode(text);
+      return (
+        element.getBoundingClientRect().top >= range.getBoundingClientRect().bottom &&
+        element.getBoundingClientRect().height >= 44
+      );
+    })
+  ).toBe(true);
+  await button.focus();
+  await page.keyboard.press('Enter');
+  const candidate = page.locator('#personalAssistantFolderSetupCandidate');
+  await expect(candidate).toBeFocused();
+  await expect(candidate).toHaveValue('');
+  expect(reviews).toHaveLength(0);
+  await page.keyboard.press('Escape');
+  await expect(button).toBeFocused();
+  await button.click();
+  await candidate.selectOption('candidate-0');
+  await page.locator('#personalAssistantFolderSetupReview').click();
+  await expect.poll(() => reviews.length).toBe(1);
+  expect(reviews[0]).toMatchObject({
+    conversation_id: 'folder-chat-fixture',
+    revision: fixture.revision,
+    selection_id: 'selection-Documents',
+    candidate_id: 'candidate-0'
+  });
+  await expect(page.locator('#personalAssistantContextStatus')).toContainText('selection expired');
+  await expect(page.locator('#personalAssistantInput')).toHaveValue('Keep this draft');
+  expect(fixture.requests.filter(request => request.stage === 'ask')).toHaveLength(2);
+  await choose(page, 'Desktop');
+  await expect(handoff).toHaveCount(0);
+});
 
 test('browser fixture: non-Home cancel/error/replacement retains drafts and late scan cannot follow New', async ({
   page

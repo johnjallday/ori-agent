@@ -20,12 +20,87 @@ let current;
 let reviews = {};
 let owner = '';
 let candidateObservation = '';
+let suggestion = null;
+let choiceTrigger = null;
+
+export function currentSuggestion(state, value) {
+  return Boolean(
+    value?.message_id &&
+    value?.revision &&
+    value.conversation_id === state?.conversationId &&
+    value.revision === state.revision &&
+    value.observation_id === state.observation?.id &&
+    !state.preview &&
+    !state.authority &&
+    !state.offerId &&
+    value.options?.length &&
+    value.options.every(option =>
+      state.observation.projects?.some(project => project.id === option.candidate_id)
+    )
+  );
+}
+
+function renderSuggestion() {
+  const existing = document.querySelector('[data-folder-setup-suggestion]');
+  if (!currentSuggestion(current, suggestion)) {
+    existing?.remove();
+    return;
+  }
+  const row = Array.from(
+    document.querySelectorAll('#homeAssistantConversation [data-message-id]')
+  ).find(
+    row =>
+      row.dataset.messageId === suggestion.message_id &&
+      row.dataset.conversationId === suggestion.conversation_id &&
+      row.dataset.messageRole === 'assistant'
+  );
+  if (!row) {
+    existing?.remove();
+    return;
+  }
+  const bubble = row.firstElementChild;
+  if (!bubble) return;
+  if (existing?.parentElement === bubble) {
+    existing.querySelector('button').disabled = Boolean(current.pending);
+    return;
+  }
+  existing?.remove();
+  const handoff = document.createElement('div');
+  handoff.dataset.folderSetupSuggestion = suggestion.message_id;
+  handoff.className = 'personal-assistant-message__setup';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'personal-assistant-message__action';
+  button.textContent = 'Review suggested setup';
+  button.disabled = Boolean(current.pending);
+  button.setAttribute('aria-controls', 'personalAssistantFolderSetupChoices');
+  button.setAttribute('aria-expanded', 'false');
+  const value = suggestion;
+  button.addEventListener('click', () => {
+    if (!currentSuggestion(current, value)) return;
+    openChoices(value.options, button);
+  });
+  const note = document.createElement('p');
+  note.className = 'personal-assistant-folder-context__note';
+  note.textContent =
+    'Optional — choose the scope and review the effects. Setup requires your confirmation.';
+  handoff.append(button, note);
+  bubble.insertBefore(handoff, bubble.querySelector('.personal-assistant-message__actions'));
+}
+
+function applySuggestion(value) {
+  document.querySelector('[data-folder-setup-suggestion]')?.remove();
+  suggestion = currentSuggestion(current, value) ? value : null;
+  renderSuggestion();
+}
 
 function closeChoices() {
   if (!elements) return;
   elements.choices.hidden = true;
   elements.open.setAttribute('aria-expanded', 'false');
-  elements.open.focus();
+  choiceTrigger?.setAttribute('aria-expanded', 'false');
+  (choiceTrigger?.isConnected ? choiceTrigger : elements.open).focus();
+  choiceTrigger = null;
 }
 
 async function review(candidateId, close = false, offerId) {
@@ -52,22 +127,25 @@ async function review(candidateId, close = false, offerId) {
   }
 }
 
-function openChoices() {
-  const candidates = setupCandidates(current?.observation);
+function openChoices(options, trigger = elements.open) {
+  const candidates = setupCandidates(current?.observation).filter(
+    candidate =>
+      !Array.isArray(options) || options.some(option => option.candidate_id === candidate.id)
+  );
   if (!candidates.length || current?.pending || current?.authority) return;
-  if (candidates.length === 1) {
+  choiceTrigger = trigger;
+  if (candidates.length === 1 && setupCandidates(current.observation).length === 1) {
     void review(candidates[0].id);
     return;
   }
-  if (candidateObservation !== current.observation.id) {
-    elements.candidate.replaceChildren(new Option('Choose a folder…', ''));
-    candidates.forEach(candidate =>
-      elements.candidate.add(new Option(candidate.label, candidate.id))
-    );
-    candidateObservation = current.observation.id;
-  }
+  elements.candidate.replaceChildren(new Option('Choose a folder…', ''));
+  candidates.forEach(candidate =>
+    elements.candidate.add(new Option(candidate.label, candidate.id))
+  );
+  candidateObservation = current.observation.id;
   elements.choices.hidden = false;
   elements.open.setAttribute('aria-expanded', 'true');
+  trigger.setAttribute('aria-expanded', 'true');
   elements.candidate.focus();
 }
 
@@ -148,10 +226,12 @@ function contextChanged(state) {
     elements.choices.hidden = true;
     elements.open.setAttribute('aria-expanded', 'false');
   }
+  if (!currentSuggestion(current, suggestion)) suggestion = null;
+  renderSuggestion();
   renderReferences();
 }
 
-function hydrate(id, savedReviews = {}) {
+function hydrate(id, savedReviews = {}, savedSuggestion = null) {
   if (id !== window.PersonalAssistantConversation?.currentId?.()) return;
   owner = id;
   reviews = savedReviews;
@@ -159,6 +239,7 @@ function hydrate(id, savedReviews = {}) {
   if (reviews[displayed?.id])
     window.PersonalAssistantFolder.updateConversationReview(reviews[displayed.id]);
   contextChanged(window.PersonalAssistantFolderContext.current());
+  applySuggestion(savedSuggestion);
 }
 
 function init() {
@@ -194,6 +275,7 @@ function init() {
 if (typeof window !== 'undefined')
   window.PersonalAssistantFolderSetup = {
     contextChanged,
+    applySuggestion,
     hydrate,
     park,
     closeReview: async offer => {

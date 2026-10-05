@@ -11,6 +11,7 @@ import (
 )
 
 type PersonalAssistantFolderSetups interface {
+	ReviewOptions(context.Context, foldercontext.Target, string) []personalassistant.FolderReviewOption
 	Review(context.Context, foldercontext.Target, string, string, string) (personalassistant.FolderOfferView, error)
 	CloseReview(context.Context, foldercontext.Target, string) error
 	ReadReview(context.Context, foldercontext.Target, string) (*personalassistant.FolderOfferView, error)

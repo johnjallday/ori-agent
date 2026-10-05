@@ -2022,6 +2022,16 @@ func isProjectCapabilityOffer(offer FolderOffer) bool {
 }
 
 func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, paused bool) FolderOfferView {
+	v := s.describeOffer(ctx, offer, paused)
+	if offer.Status == FolderOfferPending || offer.Status == FolderOfferAwaitingOutcome {
+		_, ok := s.rootPath(offer)
+		v.NeedsPick = !ok
+	}
+	return v
+}
+
+// describeOffer projects capabilities without resolving execution authority.
+func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOffer, paused bool) FolderOfferView {
 	v := FolderOfferView{
 		ID: offer.ID, Status: offer.Status, Verdict: offer.Verdict, Reason: offer.Reason, Partial: offer.Partial,
 		Folder: offer.FolderName, Chip: offer.Chip,
@@ -2034,10 +2044,6 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 	}
 	if offer.ConversationReview != nil {
 		v.ConversationID = offer.ConversationReview.Target.ConversationID
-	}
-	if offer.Status == FolderOfferPending || offer.Status == FolderOfferAwaitingOutcome {
-		_, ok := s.rootPath(offer)
-		v.NeedsPick = !ok
 	}
 	v.Remember = folderOfferRemembers(offer, paused)
 	switch folderdigest.Kind(offer.Verdict) {
