@@ -18,6 +18,7 @@
 #               -short -race over scripts/list-unit-packages.sh (not make test,
 #               which also runs suites CI does not gate on); --quick runs make
 #               test-unit (the same packages without -race) instead
+#   devtools    make test-devtools (fake-tool wrappers and Ori-owned adapters)
 #   test-js     make test-js (npm run test:modules), as CI's Frontend Lint
 #   lint-js     npm run lint, as CI's Frontend Lint
 #   format-js   npm run format:check, as CI's Frontend Lint
@@ -177,7 +178,7 @@ ci_local_main() {
   local -a plan
   plan=("gofmt" "vet" "wails-modes" "lint-new")
   if (( quick )); then plan+=("test-unit"); else plan+=("unit-tests"); fi
-  plan+=("test-js" "lint-js" "format-js" "character-assets")
+  plan+=("devtools" "test-js" "lint-js" "format-js" "character-assets")
   if (( ! quick )); then plan+=("gosec-new"); fi
   if (( run_readme )); then plan+=("readme"); fi
 
@@ -299,6 +300,9 @@ ci_local_run_gate() {
       ;;
     test-unit)
       make test-unit
+      ;;
+    devtools)
+      make test-devtools
       ;;
     test-js)
       make test-js

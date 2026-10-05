@@ -1,15 +1,18 @@
 # Ori development-tool extraction contract
 
-**Status: pre-cutover design, not an installed capability.** Ori still contains
-and runs its original tooling. The authorized local companion now exists and
-its independent Go/shell/race/static/cross-build gates and disposable Git
-lifecycle pass. Paired Ori-adapter and installed-runtime validation are incomplete. Do not delete the embedded
-implementation or run setup to try this candidate. This document fixes the
-boundary for `extract-devflow-tooling`; candidate validation must precede cutover.
+**Status: staged source cutover, not an installed capability.** Ori's three
+entrypoints now delegate to the selected companion. Original helper sources and
+an immutable legacy-script fixture remain until the final compatibility gate.
+Independent companion gates, fake-only Ori adapter checks and the paired Git
+lifecycle pass. Installed-runtime validation is still incomplete: do not run
+setup or delete the remaining embedded sources to try this candidate.
 
 Independent CLI milestone: companion `ca5b6b3c4f743c0c79a163fdcd096a83c8831c02`
 (`make build test test-race check cross` passed). This is not a runtime cutover
 pin; the adapter/installed-caller gates below still apply.
+Wrapper/adapter milestone: companion `9d78c085996666ee0a32a8805a00eecfad46c548`,
+validated with the paired fixture lifecycle and same-shell candidate rollback.
+Live/runtime compatibility remains pending group 4.
 
 The approved destination is the separate, local-only `ori-devtools` repository at
 `/Users/jjdev/Projects/ori/devtools`. No remote, publication, installer run, or
@@ -174,6 +177,30 @@ no bulk edits, rebases, or runtime resets.
   isolation and GitHub environment review. A toolbox Makefile/release script
   is never a substitute for target mechanics.
 
+### Project adapter API (v1)
+
+The companion invokes the target's `scripts/devtools-project.sh` with zsh and
+separate argv: `v1 provision <dev-path> <permission-mode>`, `v1 demo [port]`, or
+`v1 pre-pr`. Ori validates the target and same-repository provisioning source;
+its library owns permissions/secrets, picker/npm, demo environment/cleanup, and
+target `make ci-local`. No configuration/model defaults move to the companion.
+Provisioning supports the documented `acceptEdits`/`bypassPermissions` modes and
+refuses malformed modes rather than interpolating them into JSON.
+
+Creating work against a base without the adapter refuses before Git creation.
+A migrated checkout missing its adapter also refuses pre-PR checks. An older
+checkout without the selector may still run its existing `scripts/ci-local.sh`
+through `make ci-local`; no gate at all refuses unless `--skip-checks` was
+explicit. Missing demo/RC adapters refuse rather than load old workflow code.
+
+`make test-devtools` tests wrappers/project mechanics with fake tools and invented
+secrets, independently of the companion. It runs in `ci-local` and the CI
+adapter job. `scripts/devtools-integration.test.sh --ori /absolute/ori --devtools
+/absolute/tools` stages exact adapters/wrappers into temporary Git repositories
+without embedded helpers. It checks artifacts and the lifecycle with fake outward
+effects; `--fixtures-only` limits it to the renderer/parser contract. Neither
+command installs tools or touches live state.
+
 ## Artifact fixture and compatibility matrix
 
 Ori owns `internal/workspaceplan/testdata/devtools-approved-tasks.md`, rendered
@@ -203,9 +230,10 @@ cross-repository gate failure requiring review, not automatic fixture overwrite.
 | Existing feature/planner/schedule/overnight state | Same common-dir identity and schema; unknown/corrupt data fails closed; no reset, duplicate agent, or namespace migration |
 
 New-tool rows are **requirements, not verified support** until paired tests pass.
-This handoff prohibits creating/removing Git worktrees; group-1 fixtures therefore
-use inert Git metadata or fake Git argv, not `git worktree add/remove`. Real linked
-checkout tests and lifecycle tests require the appropriate later authorization.
+Group-1 fixtures used inert Git metadata under the original no-worktree rule.
+The user subsequently authorized linked worktrees only inside disposable test
+repositories. The lifecycle gates exercise these; existing user worktrees remain
+untouched. Live agents, GitHub writes and platform operations remain untested.
 
 ## Recovery and cutover gate
 

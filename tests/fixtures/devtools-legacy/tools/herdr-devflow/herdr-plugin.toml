@@ -1,0 +1,53 @@
+id = "ori.devflow"
+name = "Ori Devflow"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+description = "Connect Ori worktree devflow to existing Herdr workspaces and agents."
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["sh", "plugin.sh", "startup"]
+
+[[actions]]
+id = "setup"
+title = "Set up Ori Devflow"
+contexts = ["workspace"]
+command = ["sh", "plugin.sh", "setup"]
+
+[[actions]]
+id = "refresh"
+title = "Refresh Ori Devflow status"
+contexts = ["workspace"]
+command = ["sh", "plugin.sh", "refresh"]
+
+[[actions]]
+id = "open-board"
+title = "Open Ori Devflow board"
+contexts = ["workspace"]
+command = ["sh", "plugin.sh", "board"]
+
+[[events]]
+on = "worktree.opened"
+command = ["sh", "plugin.sh", "refresh"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["sh", "plugin.sh", "refresh"]
+
+[[events]]
+on = "pane.created"
+command = ["sh", "plugin.sh", "refresh"]
+
+[[events]]
+on = "pane.closed"
+command = ["sh", "plugin.sh", "refresh"]
+
+[[events]]
+on = "workspace.updated"
+command = ["sh", "plugin.sh", "refresh"]
+
+[[panes]]
+id = "board"
+title = "Ori Devflow"
+placement = "split"
+command = ["sh", "plugin.sh", "board"]

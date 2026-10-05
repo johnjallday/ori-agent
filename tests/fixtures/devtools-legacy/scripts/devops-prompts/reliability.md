@@ -1,0 +1,1 @@
+Inspect recent changes and critical execution paths for weak error handling, missing regression coverage, or failures that would be hard to diagnose. Recommend three narrowly scoped reliability improvements. Focus on concrete risks, not generic cleanup or the existing lint baseline. Cite paths and explain the observable failure each improvement would prevent.

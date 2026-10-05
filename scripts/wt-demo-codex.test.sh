@@ -11,7 +11,7 @@ set -euo pipefail
 exec < /dev/null
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-source "$repo_root/scripts/wt.sh"
+source "$repo_root/scripts/lib/devtools-project.zsh"
 
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/ori-wt-demo-codex.XXXXXX")"
 trap 'rm -rf -- "$fixture"' EXIT

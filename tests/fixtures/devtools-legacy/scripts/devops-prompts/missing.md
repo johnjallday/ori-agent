@@ -1,0 +1,1 @@
+Based on Ori's current capabilities and existing Issues, identify three underserved user needs—not just additional features. For each, describe the user, the job they are trying to complete, the current gap, and the cheapest way to validate whether solving it matters. Label speculative demand and avoid duplicating an existing feature or proposal.

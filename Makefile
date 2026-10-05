@@ -178,7 +178,14 @@ test: ## Run all tests (unit + integration; excludes node_modules)
 	$(TEST_RUNNER) $(GOTEST) -v $$(go list ./... | grep -v '/node_modules/')
 	@echo "$(GREEN)✓ All tests passed$(NC)"
 
-.PHONY: test-release
+.PHONY: test-release test-devtools
+# Application-owned contracts: fake tools only, never fetch/install a companion.
+test-devtools: ## Test workflow wrappers and Ori project adapters offline
+	@python3 scripts/devtools-wrappers.test.py
+	@python3 scripts/devtools-project.test.py
+	@zsh scripts/wt-demo-codex.test.sh
+	@bash scripts/devops-release-candidate.test.sh
+
 test-release: ## Test RC lifecycle and installer probes offline (temporary Git remotes only)
 	@python3 scripts/release-candidate.test.py
 	@python3 scripts/rc-test-report.test.py

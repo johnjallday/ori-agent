@@ -1,0 +1,1 @@
+Look for work close to delivering value but still unfinished: active branches, open PRs, implementation checklists, and unresolved decisions. What could the user unblock or finish before starting something new? Distinguish the user's next action from work another agent or owner may already be handling; do not assume an active branch is abandoned.

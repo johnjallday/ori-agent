@@ -21,6 +21,22 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/main' }}
 
 jobs:
+  devtools-contract:
+    name: Ori workflow adapter contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install zsh for sourced-shell contract tests
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      - name: Offline wrappers and project adapters (no companion clone)
+        run: make test-devtools
+
   release-contract:
     name: Release lifecycle contract
     runs-on: ubuntu-latest
