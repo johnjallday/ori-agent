@@ -172,7 +172,9 @@ type HomeAssistantAskHandler struct {
 	PersonalAssistantMemory  PersonalAssistantMemoryWriter
 	// Conversations is the canonical session store behind hired-assistant
 	// conversations; nil keeps every turn stateless.
-	Conversations PersonalAssistantConversationStore
+	Conversations      PersonalAssistantConversationStore
+	FolderObservations PersonalAssistantFolderObservations
+	folderRequests     folderRequestGate
 	// Drafts saves a reviewed conversation draft as one HQ Backlog Ticket; nil
 	// leaves the save action unavailable.
 	Drafts PersonalAssistantDraftSaver

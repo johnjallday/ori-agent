@@ -1,0 +1,146 @@
+# Assistant conversation folder context
+
+## Findings (task 2.1, inspected at `3ea4d340`)
+
+- `personalassistant.FolderDigestService.scanSelectedRoot` both scans and writes
+  the HQ offer sidecar, postponing a pending offer. It is **not** an attachment
+  API. Its picker, known-chip resolution, root validator and metadata scanner
+  can be reused without invoking this method.
+- `folderdigest.Scan` reads directory entries and `Lstat` only. Defaults are
+  depth 3, 5,000 entries and three seconds. It skips links and tooling/OS
+  directories. Depth and unreadable subdirectories are coverage limitations
+  even when the entry/time budget did not trip. Candidate names are root and
+  immediate subfolders; this is not a complete tree or document inventory.
+- Picked paths in the existing digest are process-local; chip paths can be
+  reconstructed by the old offer path. Conversation selections must **not**
+  reconstruct either kind after restart. The existing portfolio continuation's
+  canonical-path plus directory-identity witness supplies the relevant pattern.
+- Conversations are Sessions under Personal HQ, owned by the relationship's
+  hired profile; Messages are the transcript. Ask creates a session only when
+  storing an answered first turn. Session deletion cascades to Messages; shallow
+  HQ deletion instead moves its Sessions to root (`ON DELETE SET NULL`). The
+  hybrid store caches messages, and continuity imports mark historical rows.
+- The route endpoint can choose a specialist before Ask sees a conversation.
+  Ask separately intercepts generic create requests before its model path.
+  Both boundaries therefore need an explicit, validated contextual path;
+  adding text in the browser is not sufficient.
+- The drawer and conversation module load from `layout/head.tmpl`; the existing
+  folder card loads in the Home layout. A new composer controller must load
+  alongside the drawer, not rely on Home's Today/card DOM.
+- Generic setup uses digest Decide -> Creator/Linker -> persisted outcome.
+  Specialized setup uses the reviewed plan digest, request receipt, journey and
+  separate provider/root/staffing gates. Neither model prose nor a saved card
+  is confirmation. An unrelated pending offer must remain untouched on attach.
+
+## Chosen contract (implementation target)
+
+### Local observations and authority
+
+`FolderObservationService` reuses a digest service's trusted dependencies, but
+never writes its sidecar while observing. Inputs are a known chip or native
+folder picker mode, an opaque conversation/draft identity and expected revision.
+Unknown request fields and HTTP paths/facts are refused. The handler resolves
+user/HQ/profile and checks the canonical conversation before selection, then
+rechecks after asynchronous work.
+
+A selection stores in memory only: random observation ID, relationship binding,
+conversation/draft target, canonical root, directory identity, bounded scan
+result and expiry. At most 16 live selections per owner and 128 globally;
+expiry is 30 minutes, with opportunistic pruning on access. Failed/cancelled
+replacement leaves the previous choice intact. No model, workspace, memory,
+provider, directory grant or permanent decline is produced by selection.
+
+The path-free snapshot contains version 1, observation ID, root display name,
+scan time, file/entry counts, at most 8 kind counts and 8 project/subfolder
+summaries (observed counts and known marker labels only). Names are limited to
+96 Unicode characters/384 UTF-8 bytes; the encoded snapshot is at most 8 KiB.
+Counts never exceed the 5,000-entry scan budget. Coverage always states depth,
+entry/time limits, skipped links and omissions; partial does not mean complete
+otherwise. File bytes, absolute/relative paths, arbitrary filenames and directory
+identity witnesses are excluded. Names are untrusted data, not instructions.
+
+A saved snapshot is discussable, not a filesystem grant. Current authority is
+checked independently. Lost (restart), expired and changed selections retain
+their dated snapshot; no automatic rescan occurs. A new explicit pick is needed
+for inspection or setup. Provider transmission occurs only on Send.
+
+### Canonical persistence and concurrency
+
+Use one narrowly typed optional `folder_context_json` column on canonical
+Messages (migration 76), with Go `Message.FolderContext` excluded from ordinary
+JSON input/output. Only a dedicated internal append operation writes that
+column; normal AddMessage and continuity import cannot author it. Context rows
+use the system role and are never replayed as system instructions. Assistant
+reads project them as typed dated events in chronological order, not editable
+chat replies or memory/backlog candidates.
+
+The last locally authored context event's message ID is the opaque revision.
+Each contextual turn atomically appends its event, user text and answer after
+comparing the expected revision and canonical session owner. Detach appends an
+empty event through the same compare-and-swap seam. A valid local replacement
+also retires an already saved binding through an empty event, returning the new
+revision: old reviews become stale immediately, while the replacement's new
+metadata remains staged until Send. Cancellation/failure preserves the previous
+binding. Old events remain history.
+The SQLite transaction is authoritative, not the LRU; the hybrid adapter
+invalidates cached sessions after writes and reads context state from SQLite.
+Deleting a session uses the existing message cascade. Migration 76 additionally
+clears typed context when a session's workspace/profile changes, including
+shallow HQ deletion; ordinary chat remains. Renaming also drops the binding and
+requires re-picking rather than carrying authority to a newly named owner.
+Failed first-turn storage discards the newly created session. No new
+transcript/sidecar exists.
+
+Before the first accepted turn, selection remains staged in server memory and
+the tab. A draft identity cannot be silently reused for another conversation.
+First-turn storage associates its selection with the created conversation only
+after success. Model/save failure retains input and staged selection. A lost
+response is not retried automatically; resume canonical history to reconcile.
+Requests against an existing conversation compare its revision **before** a
+model/consequence, then again on persistence. Same-conversation folder requests
+are serialized in-process; stale tabs receive a visible conflict.
+
+Continuity and generic session JSON retain ordinary chat, not active bindings or
+folder events in this first version. Imported prose is existing untrusted
+history. No import/reset/read path recreates a live selection. Omitted folder
+fields keep legacy text-only behavior; a supplied invalid reference fails
+closed. Existing history limits remain 40 messages / 24,000 characters with
+6,000 characters per message; folder snapshot adds at most 8 KiB per turn and
+is never reconstructed by parsing prose.
+
+### UI and routing
+
+One Add folder chooser in the composer on every personal-drawer page; one chip
+and local preview. Cancel keeps text and prior context. Each async request
+captures conversation/draft identity, revision and UI generation; late responses
+cannot replace a new conversation or choice. No path is stored in the browser.
+
+Send displays any attachment-only default request (`Explore this folder`) and
+carries only opaque references. The validated personal-folder route bypasses
+specialist/generic-create detection, not intentional workspace routing. Reviewed
+memory/backlog actions retain their own gates. Prompt context is escaped,
+delimited reference data with explicit contents/coverage limits and historical
+status. A provider cannot invent trusted setup buttons.
+
+### Optional setup handoff
+
+Only explicit Review workspace setup mints a canonical digest offer. The handoff
+checks current conversation revision, selection owner/expiry/directory identity,
+and explicit candidate (never silently the first of several). Candidate paths
+come from the held scan, not HTTP. It refuses an unrelated pending offer rather
+than postponing it; retries reuse the same linked offer. Attachment-bound offers
+carry a server-owned conversation/revision link, checked again at every existing
+confirmation entry point; detach/replacement makes unconfirmed reviews stale.
+Completed outcomes are not undone. The existing creator, reviewed plan digest,
+receipt and provider-specific gates remain the sole execution path. Canonical
+outcome references are read back in the owning conversation; hydration executes
+nothing.
+
+## Dependencies and evidence limits
+
+Host-only: no plugin manifest, blueprint, release or pin changes are required.
+Existing provider availability is checked rather than invented. Generic folder
+fixtures prove the base path; provider/native-picker smokes require separately
+available sandbox prerequisites. This document records the settled design, not
+completion of its implementation or live validation; the task checklist tracks
+those independently.

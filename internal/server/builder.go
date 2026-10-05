@@ -679,6 +679,9 @@ func (b *ServerBuilder) createDomainFacades() {
 	// dropped the agent's saved tile.
 	b.server.Storage.AgentMapPositions = b.agentMapStore
 	b.server.Storage.PersonalAssistantKnowledge = b.personalAssistantKnowledge
+	if b.personalAssistantFolderDigest != nil {
+		b.server.Storage.PersonalAssistantFolderObservations = personalassistant.NewFolderObservationService(b.personalAssistantFolderDigest)
+	}
 	if b.projectStaffing != nil {
 		b.server.Storage.AgentEditCarrier = carriedEdits{service: b.projectStaffing}
 	}

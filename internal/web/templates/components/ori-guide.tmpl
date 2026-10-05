@@ -275,18 +275,40 @@
         {{template "personal-assistant-folder.tmpl" .}}
         {{end}}
       </div>
+      <section id="personalAssistantContextChooser" class="personal-assistant-folder-context" aria-labelledby="personalAssistantFolderChooserTitle" hidden>
+        <h3 id="personalAssistantFolderChooserTitle">Add folder context</h3>
+        <p>Ori takes a bounded local look at names, kinds, counts and project markers. File contents are not read. Nothing goes to your configured model until Send.</p>
+        <div id="personalAssistantFolderChoices" class="personal-assistant-panel__chips"></div>
+        <button type="button" id="personalAssistantFolderChooserCancel" class="personal-assistant-conversation__button">Cancel</button>
+      </section>
+      <section id="personalAssistantFolderPreview" class="personal-assistant-folder-context" aria-label="Local folder preview" hidden>
+        <p class="personal-assistant-folder-context__eyebrow">Local preview · not sent</p>
+        <p id="personalAssistantFolderSummary"></p>
+        <p id="personalAssistantFolderProjects"></p>
+        <details>
+          <summary>Coverage and what Send shares</summary>
+          <p id="personalAssistantFolderCoverage"></p>
+          <p>File contents have not been read. Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.</p>
+        </details>
+        <p>Send your question, or send “Explore this folder” to discuss this snapshot. No workspace is created.</p>
+      </section>
+      <p id="personalAssistantFolderHistorical" class="personal-assistant-folder-context__note" hidden></p>
+      <p id="personalAssistantContextStatus" class="personal-assistant-folder-context__note" role="status" aria-live="polite"></p>
     </div>
 
-    <!-- The composer is the last thing in the drawer and never scrolls away.
-         One suggestion sits directly above it. -->
+    <!-- The composer stays pinned; Add folder is part of this form on every page. -->
     <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
-    <div id="personalAssistantChips" class="personal-assistant-panel__chips" hidden>
-      <button type="button" id="personalAssistantFolderChip" class="personal-assistant-panel__chip">
-        <i class="bi bi-folder2-open" aria-hidden="true"></i>
-        <span>Explore a folder</span>
-      </button>
-    </div>
     <form id="personalAssistantForm" class="personal-assistant-panel__form">
+      <div id="personalAssistantChips" class="personal-assistant-panel__chips personal-assistant-panel__attachments" hidden>
+        <button type="button" id="personalAssistantFolderChip" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantContextChooser">
+          <i class="bi bi-folder2-open" aria-hidden="true"></i>
+          <span>Add folder</span>
+        </button>
+        <span id="personalAssistantActiveFolder" class="personal-assistant-folder-context__chip" hidden>
+          <span id="personalAssistantActiveFolderName"></span>
+          <button type="button" id="personalAssistantRemoveFolder" aria-label="Remove folder context">×</button>
+        </span>
+      </div>
       <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
       <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="2"
                 maxlength="2000" autocomplete="off"

@@ -1,0 +1,322 @@
+// One local folder preview per personal conversation. No paths, observations or
+// authority are recovered from browser storage. Only Send shares a reference.
+import { folderChooserView } from './personal-assistant-folder-chooser.js';
+
+const ENDPOINT = '/api/home-assistant/folder-context';
+export const FOLDER_DISCLOSURE =
+  'File contents have not been read. Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.';
+
+export function observationSummary(observation) {
+  if (!observation) return '';
+  const kinds = (observation.kinds || []).map(kind => `${kind.count} ${kind.name}`).join(' · ');
+  const partial = observation.coverage?.partial ? 'Partial look' : 'Bounded look';
+  return `${partial}: ${observation.files || 0} files observed${kinds ? ` · ${kinds}` : ''}.`;
+}
+
+export function coverageSummary(observation) {
+  const coverage = observation?.coverage || {};
+  const date = new Date(observation?.scanned_at || '');
+  const when = Number.isNaN(date.getTime()) ? 'Unknown scan time' : date.toLocaleString();
+  const omissions = (coverage.projects_omitted || 0) + (coverage.kinds_omitted || 0);
+  return `${when}. Up to ${coverage.max_depth || 3} levels, ${coverage.max_entries || 5000} entries and ${coverage.budget_seconds || 3} seconds. Hidden/tooling folders, links and unreadable entries may be skipped; this is not a complete tree.${omissions ? ` ${omissions} additional summaries omitted.` : ''}`;
+}
+
+/** Pure state machine with injected I/O: stale picker/network results cannot
+ * cross a conversation switch, removal or replacement. */
+export function createFolderContextController({
+  post,
+  changed = () => {},
+  uuid,
+  currentId,
+  isBusy = () => false
+}) {
+  const state = {
+    conversationId: currentId(),
+    draftId: uuid(),
+    revision: '',
+    observation: null,
+    accepted: null,
+    authority: '',
+    preview: false,
+    pending: false,
+    generation: 0,
+    notice: ''
+  };
+  const target = () => ({
+    ...(state.conversationId
+      ? { conversation_id: state.conversationId }
+      : { draft_id: state.draftId }),
+    revision: state.revision
+  });
+  const notify = message => {
+    state.notice = message;
+    changed(state);
+  };
+  function reset(id = '', saved = {}) {
+    state.generation++;
+    Object.assign(state, {
+      conversationId: id,
+      draftId: uuid(),
+      revision: saved.revision || '',
+      observation: saved.observation || null,
+      accepted: saved.observation || null,
+      authority: saved.authority || '',
+      preview: false,
+      pending: false,
+      notice: ''
+    });
+    changed(state);
+  }
+  async function select(mode, chip = '') {
+    if (isBusy()) {
+      notify('Wait for the current reply before changing its folder.');
+      return false;
+    }
+    const generation = ++state.generation;
+    const owner = state.conversationId;
+    state.pending = true;
+    notify('Looking at folder metadata locally… No file contents are read.');
+    try {
+      const result = await post(`${ENDPOINT}/select`, {
+        ...target(),
+        mode,
+        ...(chip ? { chip } : {})
+      });
+      if (generation !== state.generation || owner !== currentId()) return false;
+      if (result.cancelled || !result.observation) {
+        notify('Selection cancelled. Your draft and previous folder are unchanged.');
+        return false;
+      }
+      state.observation = result.observation;
+      if (typeof result.revision === 'string' && result.revision !== state.revision) {
+        state.revision = result.revision;
+        state.accepted = null; // server retired the previous binding/reviews
+      }
+      state.authority = '';
+      state.preview = true;
+      notify('Local preview only — not sent to the model yet.');
+      return true;
+    } catch (error) {
+      if (generation === state.generation && owner === currentId())
+        notify(
+          error.message ||
+            'The folder could not be inspected. Try Add folder again; your draft is unchanged.'
+        );
+      return false;
+    } finally {
+      if (generation === state.generation) {
+        state.pending = false;
+        changed(state);
+      }
+    }
+  }
+  async function remove() {
+    if (isBusy()) {
+      notify('Wait for the current reply before removing its folder.');
+      return false;
+    }
+    const generation = ++state.generation;
+    const owner = state.conversationId;
+    state.pending = true;
+    try {
+      // Detaching a purely local preview requires no write. If this conversation
+      // has an accepted binding, detach it even when a replacement is previewed.
+      if (state.accepted && owner) {
+        const result = await post(`${ENDPOINT}/detach`, {
+          conversation_id: owner,
+          revision: state.revision
+        });
+        if (generation !== state.generation || owner !== currentId()) return false;
+        state.revision = result.revision;
+      }
+      state.observation = null;
+      state.accepted = null;
+      state.preview = false;
+      state.authority = '';
+      notify(
+        'Folder removed from future context. Earlier discussion remains history; completed setup is unchanged.'
+      );
+      return true;
+    } catch (error) {
+      if (generation === state.generation && owner === currentId())
+        notify(
+          error.message ||
+            'Could not remove the saved folder. Reopen the conversation and try again.'
+        );
+      return false;
+    } finally {
+      if (generation === state.generation) {
+        state.pending = false;
+        changed(state);
+      }
+    }
+  }
+  function request() {
+    if (!state.observation || state.pending || state.conversationId !== currentId()) return null;
+    return {
+      selection_id: state.observation.id,
+      revision: state.revision,
+      ...(state.conversationId ? {} : { draft_id: state.draftId }),
+      ...(state.authority ? { historical: true } : {})
+    };
+  }
+  function accepted(id, saved) {
+    if (!saved) return;
+    reset(id, saved);
+  }
+  return { state, select, remove, reset, request, accepted, notify };
+}
+
+async function jsonRequest(url, body) {
+  const response = await fetch(url, {
+    method: body ? 'POST' : 'GET',
+    headers: {
+      Accept: 'application/json',
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
+    ...(body ? { body: JSON.stringify(body) } : {})
+  });
+  const data = await response.json();
+  if (!response.ok)
+    throw new Error(
+      data.message || 'The folder controls are unavailable. Your draft is unchanged.'
+    );
+  return data;
+}
+
+let controller;
+let elements;
+let chooserGeneration = 0;
+const node = (tag, text, className = '') => {
+  const element = document.createElement(tag);
+  element.textContent = text;
+  element.className = className;
+  return element;
+};
+
+function render(state) {
+  if (!elements) return;
+  elements.active.hidden = !state.observation;
+  elements.name.textContent = state.observation?.folder || '';
+  elements.remove.disabled = state.pending;
+  elements.preview.hidden = !state.observation || !state.preview;
+  if (state.observation) {
+    elements.summary.textContent = observationSummary(state.observation);
+    elements.coverage.textContent = coverageSummary(state.observation);
+    elements.projects.textContent = (state.observation.projects || [])
+      .map(
+        project =>
+          `${project.name}${project.marker ? ` (${project.marker})` : ''}: ${project.files} observed files`
+      )
+      .join(' · ');
+  }
+  elements.history.hidden = !state.authority;
+  elements.history.textContent = state.authority
+    ? `Discussing saved observations only (${state.authority}). Pick again for fresh inspection or setup. File contents have not been read.`
+    : '';
+  elements.status.textContent = state.notice;
+  window.PersonalAssistantPanel?.setFolderBusy?.(state.pending);
+  window.PersonalAssistantConversation?.refresh?.();
+}
+
+function closeChooser() {
+  chooserGeneration++;
+  if (!elements) return;
+  elements.chooser.hidden = true;
+  elements.add.setAttribute('aria-expanded', 'false');
+  elements.add.focus();
+}
+
+async function open() {
+  if (!elements || !controller || controller.state.pending) return;
+  if (window.OriAskRouting?.getState?.().busy) {
+    controller.notify('Wait for the current reply before adding a folder.');
+    return;
+  }
+  const generation = ++chooserGeneration;
+  elements.chooser.hidden = false;
+  elements.add.setAttribute('aria-expanded', 'true');
+  elements.choices.replaceChildren(node('p', 'Loading approved folder choices…'));
+  try {
+    const view = folderChooserView(await jsonRequest(`${ENDPOINT}/choices`));
+    if (generation !== chooserGeneration) return;
+    const choices = view.chips.map(chip => ({ label: chip.label, mode: 'chip', chip: chip.id }));
+    if (view.pickerVisible) choices.push({ label: view.pickerLabel, mode: 'picker' });
+    elements.choices.replaceChildren();
+    for (const choice of choices) {
+      const button = node('button', choice.label, 'personal-assistant-panel__chip');
+      button.type = 'button';
+      button.addEventListener('click', async () => {
+        closeChooser();
+        await controller.select(choice.mode, choice.chip);
+      });
+      elements.choices.append(button);
+    }
+    if (view.note) elements.choices.append(node('p', view.note));
+    elements.choices.querySelector('button')?.focus();
+  } catch (error) {
+    if (generation === chooserGeneration)
+      elements.choices.replaceChildren(node('p', error.message));
+  }
+}
+
+function reset(id = '', saved = {}) {
+  if (elements) elements.chooser.hidden = true;
+  chooserGeneration++;
+  controller?.reset(id, saved);
+}
+
+function init() {
+  const add = document.getElementById('personalAssistantFolderChip');
+  if (!add || controller) return;
+  elements = {
+    add,
+    chooser: document.getElementById('personalAssistantContextChooser'),
+    choices: document.getElementById('personalAssistantFolderChoices'),
+    active: document.getElementById('personalAssistantActiveFolder'),
+    name: document.getElementById('personalAssistantActiveFolderName'),
+    remove: document.getElementById('personalAssistantRemoveFolder'),
+    preview: document.getElementById('personalAssistantFolderPreview'),
+    summary: document.getElementById('personalAssistantFolderSummary'),
+    projects: document.getElementById('personalAssistantFolderProjects'),
+    coverage: document.getElementById('personalAssistantFolderCoverage'),
+    history: document.getElementById('personalAssistantFolderHistorical'),
+    status: document.getElementById('personalAssistantContextStatus')
+  };
+  controller = createFolderContextController({
+    post: jsonRequest,
+    changed: render,
+    uuid: () => crypto.randomUUID(),
+    currentId: () => window.PersonalAssistantConversation?.currentId?.() || '',
+    isBusy: () => window.OriAskRouting?.getState?.().busy === true
+  });
+  elements.remove.addEventListener('click', async () => {
+    if (await controller.remove()) elements.add.focus();
+  });
+  document
+    .getElementById('personalAssistantFolderChooserCancel')
+    .addEventListener('click', closeChooser);
+  elements.chooser.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeChooser();
+  });
+  render(controller.state);
+}
+
+const api = {
+  open,
+  reset,
+  hydrate: reset,
+  request: () => controller?.request() || null,
+  accepted: (id, saved) => controller?.accepted(id, saved),
+  isPending: () => controller?.state.pending === true,
+  hasFolder: () => Boolean(controller?.state.observation),
+  _controller: () => controller
+};
+if (typeof window !== 'undefined') window.PersonalAssistantFolderContext = api;
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+}

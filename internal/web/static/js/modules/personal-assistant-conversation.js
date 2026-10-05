@@ -134,7 +134,11 @@ function render() {
   if (!els) return;
   els.bar.hidden = !state.available;
   els.title.textContent = state.id ? state.title || 'Conversation' : 'New conversation';
-  els.fresh.disabled = !state.id && !hasRenderedMessages();
+  els.fresh.disabled =
+    !state.id &&
+    !hasRenderedMessages() &&
+    !window.PersonalAssistantFolderContext?.hasFolder?.() &&
+    !window.PersonalAssistantFolderContext?.isPending?.();
 }
 
 function hasRenderedMessages() {
@@ -179,6 +183,7 @@ function startNew() {
   leaveSavedDraft();
   closeList();
   setCurrent('', '');
+  window.PersonalAssistantFolderContext?.reset?.();
   setNote('');
   document.getElementById('personalAssistantInput')?.focus();
   return true;
@@ -241,6 +246,10 @@ async function resume(id, options = {}) {
     }
     closeList();
     setCurrent(conversation.id, conversation.title);
+    window.PersonalAssistantFolderContext?.hydrate?.(
+      conversation.id,
+      result.body.folder_context || {}
+    );
     setNote(
       partial
         ? 'Showing the most recent messages of this conversation. Earlier ones are still stored.'
@@ -399,6 +408,7 @@ const api = {
   // Lets a message action report a refusal in the conversation bar.
   notify: setNote,
   currentId: () => state.id,
+  refresh: render,
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantConversation = api;

@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -55,7 +56,8 @@ type PersonalAssistantConversationMessage struct {
 	CreatedAt time.Time
 	// Imported marks a message copied in from another install. It is history,
 	// never a turn the assistant itself took here.
-	Imported bool
+	Imported      bool
+	FolderContext *foldercontext.Event
 }
 
 // PersonalAssistantConversationStore is the canonical session store, narrowed.

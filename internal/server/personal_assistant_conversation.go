@@ -62,14 +62,7 @@ func (a personalAssistantConversationAdapter) Messages(ctx context.Context, id s
 	if err != nil {
 		return nil, err
 	}
-	out := make([]agenthttp.PersonalAssistantConversationMessage, 0, len(messages))
-	for _, message := range messages {
-		out = append(out, agenthttp.PersonalAssistantConversationMessage{
-			ID: message.ID, Role: string(message.Role), Content: message.Content,
-			CreatedAt: message.CreatedAt, Imported: message.Imported,
-		})
-	}
-	return out, nil
+	return folderConversationMessages(messages), nil
 }
 
 func (a personalAssistantConversationAdapter) Append(ctx context.Context, id, role, content string) (agenthttp.PersonalAssistantConversationMessage, error) {

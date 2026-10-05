@@ -246,6 +246,10 @@ function setFolderBusy(busy) {
  * other page has no folder flow of its own, so it goes to Home's.
  */
 function exploreFolder() {
+  if (window.PersonalAssistantFolderContext?.open) {
+    window.PersonalAssistantFolderContext.open();
+    return;
+  }
   const folder = window.PersonalAssistantFolder;
   if (folder && typeof folder.open === 'function') folder.open();
   else window.location.assign(EXPLORE_FOLDER_URL);
@@ -491,6 +495,10 @@ function submit(event) {
   // While a reply is in flight the text stays in the box: sending it now would
   // start a second turn before the first one has a conversation to join.
   const busy = window.OriAskRouting?.getState?.().busy === true;
+  if (window.PersonalAssistantFolderContext?.isPending?.()) {
+    setStatus('Wait for the local folder preview before sending. Your message is kept here.');
+    return false;
+  }
   if (busy && text) {
     setStatus(
       `${state.view.name} is still replying. Your message is kept here; send it when the reply arrives.`

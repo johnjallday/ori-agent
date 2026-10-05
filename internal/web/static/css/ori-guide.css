@@ -845,7 +845,83 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   color: var(--pa-accent-text);
 }
 
-/* One suggestion, directly above the composer. */
+/* One attachment row inside the pinned composer. */
+.personal-assistant-panel__attachments {
+  grid-column: 1 / -1;
+}
+
+.personal-assistant-panel .personal-assistant-folder-context {
+  padding: 12px 0 12px 14px;
+  border-left: 2px solid var(--ori-accent);
+  color: var(--ori-ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-folder-context h3 {
+  font-size: 15px;
+}
+
+.personal-assistant-folder-context p {
+  margin: 6px 0;
+}
+
+.personal-assistant-folder-context summary {
+  cursor: pointer;
+  min-height: 36px;
+  align-content: center;
+}
+
+.personal-assistant-folder-context__eyebrow,
+.personal-assistant-folder-context__note {
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+}
+
+.personal-assistant-folder-context__note:empty {
+  display: none;
+}
+
+.personal-assistant-folder-context__chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  gap: 8px;
+  align-items: center;
+  padding-left: 10px;
+  background: var(--ori-paper);
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.personal-assistant-folder-context__chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personal-assistant-folder-context__chip button {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--ori-ink);
+  font-size: 20px;
+}
+
+.personal-assistant-panel .personal-assistant-folder-context[hidden],
+.personal-assistant-folder-context__chip[hidden] {
+  display: none;
+}
+
+.personal-assistant-panel__attachments > button {
+  min-height: 40px;
+}
+
+/* Reused compact choice buttons. */
 .personal-assistant-panel__chips {
   display: flex;
   flex: none;

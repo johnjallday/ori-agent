@@ -26,6 +26,8 @@ package session
 
 import (
 	"encoding/json"
+
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"strings"
 	"time"
 
@@ -136,6 +138,10 @@ type Message struct {
 	// It is not user-authored data or a portable permission. In particular an
 	// imported system-role message is never a fresh system instruction.
 	Imported bool `json:"-"`
+
+	// FolderContext is host-authored metadata evidence. Ordinary HTTP message
+	// input, session JSON and continuity exports cannot carry this field.
+	FolderContext *foldercontext.Event `json:"-"`
 }
 
 // WorkspaceStatus represents the current state of a workspace.
