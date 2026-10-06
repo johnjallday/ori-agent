@@ -62,8 +62,8 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 	wantTiers := map[string]int{
 		MeetAssistantQuestID: 1,
 		BuildHQQuestID:       1, ShowFolderQuestID: 1, FolderFirstLookQuestID: 1,
-		ConnectSourceQuestID: 1, FirstBriefQuestID: 1,
-		"t1-first-message": 2, "t1-personalize": 2, "t2-create-note": 2, "t2-run-task": 2,
+		ConnectSourceQuestID: 2, FirstBriefQuestID: 2,
+		"t1-first-message": 3, "t1-personalize": 3, "t2-create-note": 3, "t2-run-task": 3,
 		"t3-second-agent": 3, "t3-delegate": 3, "t3-agent-task-done": 3,
 		"t4-enable-skill": 4, "t4-connect-mcp": 4, "t4-tool-task": 4,
 		"t5-create-trigger": 5, "t5-unattended-run": 5,
@@ -104,8 +104,8 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 		// The static action is the no-folder fallback; Resolve replaces it once
 		// a folder workspace has a first look.
 		{FolderFirstLookQuestID, "See what your assistant found", ShowFolderActionURL, "Show a folder", true, ShowFolderQuestID},
-		{ConnectSourceQuestID, "Plan my first day", PlanFirstDayActionURL, "Start", true, MeetAssistantQuestID},
-		{FirstBriefQuestID, "Read your first Daily Brief", FirstBriefFallbackURL, "Open Daily Brief", true, MeetAssistantQuestID},
+		{ConnectSourceQuestID, "Plan my first day", PlanFirstDayActionURL, "Start", true, ""},
+		{FirstBriefQuestID, "Read your first Daily Brief", FirstBriefFallbackURL, "Open Daily Brief", true, ""},
 	}
 	for i, want := range wantMissions {
 		q := graph.Quests[i]
@@ -159,7 +159,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 			t.Fatalf("cohort tier %d = %q, want %q", i+1, graph.TierNames[i+1], name)
 		}
 	}
-	if graph.TotalTiers != 1 {
+	if graph.TotalTiers != 2 {
 		t.Fatalf("cohort total tiers = %d", graph.TotalTiers)
 	}
 	// Renaming the cohort's tiers must not leak into the built-in names.
@@ -187,7 +187,7 @@ func TestPersonalAssistantGraph_RetiredQuestsKeepHistoryWithoutMissionsOrRewards
 	if !e.HasCompleted("t1-first-message") {
 		t.Fatal("a retired quest stopped recording real events")
 	}
-	if after := e.Status(); after.CompletedCount != before.CompletedCount || after.TotalCount != 5 || after.TotalTiers != 1 || after.NextQuest.ID != MeetAssistantQuestID {
+	if after := e.Status(); after.CompletedCount != before.CompletedCount || after.TotalCount != 5 || after.TotalTiers != 2 || after.NextQuest.ID != MeetAssistantQuestID {
 		t.Fatalf("retired completion changed the mission board: %+v", after)
 	}
 	if err := e.Reset(); err != nil {
@@ -201,23 +201,122 @@ func TestPersonalAssistantGraph_RetiredQuestsKeepHistoryWithoutMissionsOrRewards
 func TestStatus_UsesTheGraphsTierNames(t *testing.T) {
 	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
 	st := e.Status()
-	if len(st.Tiers) != 1 || st.Tiers[0].Name != "Starter" {
+	if len(st.Tiers) != 2 || st.Tiers[0].Name != "Starter" || st.Tiers[1].Name != "Daily loop" {
 		t.Fatalf("visible tiers = %+v", st.Tiers)
 	}
-	if st.TotalTiers != 1 || st.CurrentTier != 1 {
+	if st.TotalTiers != 2 || st.CurrentTier != 1 {
 		t.Fatalf("total/current = %d/%d", st.TotalTiers, st.CurrentTier)
 	}
+	names := func(tier TierView) string {
+		ids := []string{}
+		for _, q := range tier.Quests {
+			ids = append(ids, q.ID)
+		}
+		return strings.Join(ids, ",")
+	}
+	if got := names(st.Tiers[0]); got != strings.Join([]string{MeetAssistantQuestID, ShowFolderQuestID, FolderFirstLookQuestID}, ",") {
+		t.Fatalf("Starter holds %s", got)
+	}
+	if got := names(st.Tiers[1]); got != ConnectSourceQuestID+","+FirstBriefQuestID {
+		t.Fatalf("Daily loop holds %s", got)
+	}
 
-	// Resolving every mission completes the only visible tier. Completing the
-	// retired HQ objective does not affect its status or the meter.
-	for _, id := range []string{MeetAssistantQuestID, BuildHQQuestID, ShowFolderQuestID, FolderFirstLookQuestID, ConnectSourceQuestID} {
-		e.Complete(id)
+	// Tier 2 opens only when every Starter mission is resolved, and a skip counts
+	// as resolved (FR3).
+	e.Complete(MeetAssistantQuestID)
+	e.Complete(ShowFolderQuestID)
+	if st := e.Status(); st.CurrentTier != 1 {
+		t.Fatalf("current tier = %d with the first look still open", st.CurrentTier)
+	}
+	if err := e.Skip(FolderFirstLookQuestID); err != nil {
+		t.Fatal(err)
+	}
+	if st := e.Status(); st.CurrentTier != 2 || st.AllComplete {
+		t.Fatalf("Starter resolved: current %d, all complete %t", st.CurrentTier, st.AllComplete)
+	}
+
+	// Resolving the Daily loop completes the board. Completing the retired HQ
+	// objective does not affect its status or the meter.
+	e.Complete(BuildHQQuestID)
+	e.Complete(ConnectSourceQuestID)
+	if err := e.Skip(FirstBriefQuestID); err != nil {
+		t.Fatal(err)
+	}
+	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 5 {
+		t.Fatalf("status after five missions = %+v", st)
+	}
+}
+
+// Deferring Show a folder must not strand the missions after it: See what your
+// assistant found stays locked (nothing to look at) but no longer holds Starter,
+// so the Daily loop opens. Resuming the folder opens the look again.
+func TestSkippedGateDoesNotStrandTheTier(t *testing.T) {
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+	e.Complete(MeetAssistantQuestID)
+	if err := e.Skip(ShowFolderQuestID); err != nil {
+		t.Fatal(err)
+	}
+	st := e.Status()
+	if st.CurrentTier != 2 {
+		t.Fatalf("current tier = %d, want the Daily loop open", st.CurrentTier)
+	}
+	look := questView(e, FolderFirstLookQuestID)
+	if look == nil || !look.Locked || look.Status == StatusCompleted {
+		t.Fatalf("the look must stay locked: %+v", look)
+	}
+	if view := questView(e, ConnectSourceQuestID); view == nil || view.Locked {
+		t.Fatalf("Daily loop did not open: %+v", view)
+	}
+	if err := e.Skip(ConnectSourceQuestID); err != nil {
+		t.Fatal(err)
 	}
 	if err := e.Skip(FirstBriefQuestID); err != nil {
 		t.Fatal(err)
 	}
-	if st := e.Status(); st.CurrentTier != 1 || !st.AllComplete || st.TotalCount != 5 {
-		t.Fatalf("status after five missions = %+v", st)
+	if !e.Status().AllComplete {
+		t.Fatal("a waived mission kept the board from completing")
+	}
+	// Doing the folder later completes it for real and unlocks the look.
+	e.Complete(BuildHQQuestID)
+	e.Complete(ShowFolderQuestID)
+	if view := questView(e, FolderFirstLookQuestID); view == nil || view.Locked {
+		t.Fatalf("showing the folder did not open the look: %+v", view)
+	}
+	if e.Status().AllComplete {
+		t.Fatal("the look counted as resolved once it could be done")
+	}
+}
+
+// Daily loop missions wait for Starter with the tier's own name (FR5), and open
+// once every Starter mission is resolved.
+func TestDailyLoop_WaitsForStarter(t *testing.T) {
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+	e.Complete(MeetAssistantQuestID)
+	for _, id := range []string{ConnectSourceQuestID, FirstBriefQuestID} {
+		view := questView(e, id)
+		if view == nil || !view.Locked || view.LockedReason != "Starter first" || view.Status != StatusLocked {
+			t.Fatalf("%s before Starter is done: %+v", id, view)
+		}
+		if view.LockedAction != nil {
+			t.Fatalf("a tier lock names a fix: %+v", view)
+		}
+	}
+	// The next quest never points at a locked one.
+	if next := e.Status().NextQuest; next != nil && next.Locked {
+		t.Fatalf("next quest = %+v", next)
+	}
+	// Work done early still counts: the lock is presentation only.
+	if !e.Complete(FirstBriefQuestID) {
+		t.Fatal("a tier-locked mission refused a real completion")
+	}
+
+	e.Complete(ShowFolderQuestID)
+	if err := e.Skip(FolderFirstLookQuestID); err != nil {
+		t.Fatal(err)
+	}
+	view := questView(e, ConnectSourceQuestID)
+	if view == nil || view.Locked || view.Status != StatusAvailable {
+		t.Fatalf("Daily loop did not open: %+v", view)
 	}
 }
 
@@ -552,7 +651,15 @@ func TestResolveFirstBrief_AsksForAModelOnlyWhenNoneIsConfigured(t *testing.T) {
 	if why := brief().Why; why != firstBriefWhy {
 		t.Fatalf("locked Mission 05 why = %q", why)
 	}
+	// Still locked once only the hire is done: the Daily loop waits for Starter.
 	e.Complete(MeetAssistantQuestID)
+	if why := brief().Why; why != firstBriefWhy {
+		t.Fatalf("Mission 05 advised while Starter was open: %q", why)
+	}
+	e.Complete(ShowFolderQuestID)
+	if err := e.Skip(FolderFirstLookQuestID); err != nil {
+		t.Fatal(err)
+	}
 	if why := brief().Why; why != firstBriefWhy+" Add a model in Settings to generate one." {
 		t.Fatalf("open Mission 05 why = %q", why)
 	}
@@ -795,8 +902,8 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 		MeetAssistantQuestID + ":false:",
 		ShowFolderQuestID + ":true:Build your HQ first",
 		FolderFirstLookQuestID + ":true:Show your assistant a folder first",
-		ConnectSourceQuestID + ":true:Meet your assistant first",
-		FirstBriefQuestID + ":true:Meet your assistant first",
+		ConnectSourceQuestID + ":true:Starter first",
+		FirstBriefQuestID + ":true:Starter first",
 	}
 	if got := missionLocks(e); strings.Join(got, " ") != strings.Join(wantLocked, " ") {
 		t.Fatalf("before the hire = %v, want %v", got, wantLocked)
@@ -813,16 +920,18 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 	if !e.Complete(MeetAssistantQuestID) {
 		t.Fatal("Complete(Meet your assistant) was not newly recorded")
 	}
-	// The hire opens every mission that waited on it. The folder missions wait
-	// on the HQ and then on the folder, so they stay locked.
+	// The hire opens only itself: the folder missions wait on the HQ and then on
+	// the folder, and the Daily loop waits for Starter.
 	for _, m := range e.Status().Missions {
-		wantLock := m.ID == ShowFolderQuestID || m.ID == FolderFirstLookQuestID
+		wantLock := m.ID != MeetAssistantQuestID
 		if m.Locked != wantLock {
 			t.Fatalf("mission %s locked = %t after the hire: %+v", m.ID, m.Locked, m)
 		}
 	}
-	if next := e.Status().NextQuest; next == nil || next.ID != ConnectSourceQuestID {
-		t.Fatalf("next quest after the hire = %+v, want the first unlocked mission", next)
+	// Nothing is actionable from the quest list yet: the card shows Show a
+	// folder locked, with its fix, instead.
+	if next := e.Status().NextQuest; next != nil {
+		t.Fatalf("next quest after the hire = %+v, want none while everything waits", next)
 	}
 }
 
@@ -841,9 +950,13 @@ func TestShowFolder_LockedUntilTheHQIsBuilt(t *testing.T) {
 		t.Fatalf("the lock names no fix: %+v", view.LockedAction)
 	}
 
-	// Not now skips the HQ quest. Only a completion unlocks.
+	// Not now skips the HQ quest. Only a completion unlocks, and Starter stays
+	// open: a deferred HQ is not a resolved folder mission.
 	if err := e.Skip(BuildHQQuestID); err != nil {
 		t.Fatal(err)
+	}
+	if st := e.Status(); st.CurrentTier != 1 {
+		t.Fatalf("a deferred HQ opened the Daily loop: tier %d", st.CurrentTier)
 	}
 	if view := questView(e, ShowFolderQuestID); view == nil || !view.Locked || view.LockedAction == nil {
 		t.Fatalf("a deferred HQ opened the folder mission: %+v", view)
@@ -861,7 +974,7 @@ func TestShowFolder_LockedUntilTheHQIsBuilt(t *testing.T) {
 		t.Fatalf("an unrelated mission carries a lock action: %+v", other)
 	}
 	plain := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
-	if other := questView(plain, ConnectSourceQuestID); other == nil || other.LockedReason != "Meet your assistant first" {
+	if other := questView(plain, ConnectSourceQuestID); other == nil || other.LockedReason != "Starter first" {
 		t.Fatalf("the default lock sentence changed: %+v", other)
 	}
 }
@@ -1068,7 +1181,9 @@ func TestMeetAssistant_IsRequiredAndHoldsTheStarterTier(t *testing.T) {
 		t.Fatalf("current tier = %d, want 1 until the assistant is hired", got)
 	}
 	e.Complete(MeetAssistantQuestID)
-	if st := e.Status(); st.CurrentTier != 1 || !st.AllComplete || st.TotalCount != 5 {
+	// Everything else was skipped, so the hire resolves Starter, opens the Daily
+	// loop (also skipped), and completes the board.
+	if st := e.Status(); st.CurrentTier != 2 || !st.AllComplete || st.TotalCount != 5 {
 		t.Fatalf("status after the hire = %+v", st)
 	}
 }

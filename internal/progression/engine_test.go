@@ -53,7 +53,7 @@ func TestPersonalAssistantQuests_PlanFirstDayIsABranchNotAQuest(t *testing.T) {
 		t.Fatal("the cohort graph still contains the retired first-day quest")
 	}
 	connect := questView(paf, ConnectSourceQuestID)
-	if connect == nil || connect.Tier != 1 || !connect.Optional || connect.ActionURL != PlanFirstDayActionURL {
+	if connect == nil || connect.Tier != 2 || !connect.Optional || connect.ActionURL != PlanFirstDayActionURL {
 		t.Fatalf("unexpected Connect one source mission: %+v", connect)
 	}
 	if paf.Status().TotalCount != 5 {

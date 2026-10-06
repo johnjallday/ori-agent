@@ -307,9 +307,10 @@ func PersonalAssistantQuests() []Quest { return PersonalAssistantGraph().Quests 
 
 // PersonalAssistantGraph returns the personal-assistant cohort's graph.
 //
-// Tier 1, "Starter", presents five missions: Meet your assistant, Show your
-// assistant a folder, See what your assistant found, Connect one source, Read
-// your first Daily Brief. Every other quest is retired from presentation, but
+// Two tiers present five missions. "Starter" is the folder story: Meet your
+// assistant, Show your assistant a folder, See what your assistant found.
+// "Daily loop" follows once Starter is resolved: Connect one source, Read your
+// first Daily Brief. Every other quest is retired from presentation, but
 // still detects and records real actions and backfill, preserving existing
 // installs' history.
 //
@@ -393,8 +394,9 @@ func PersonalAssistantGraph() Graph {
 			Resolve:   resolveFolderFirstLook,
 		},
 		{
-			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
-			LockedUntil: MeetAssistantQuestID,
+			// The Daily loop tier: it opens once every Starter mission is
+			// resolved, which is also what waiting for the hire means.
+			ID: ConnectSourceQuestID, Tier: 2, Featured: true, Order: 4, Optional: true,
 			// The static copy is the plan branch, the fallback for every focus.
 			Title:       "Plan my first day",
 			Why:         "Give your assistant today's priorities and commitments so it can prepare a useful Daily Brief.",
@@ -411,10 +413,9 @@ func PersonalAssistantGraph() Graph {
 			Resolve: resolveConnectSource,
 		},
 		{
-			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 5, Optional: true,
-			LockedUntil: MeetAssistantQuestID,
-			Title:       "Read your first Daily Brief",
-			Why:         firstBriefWhy,
+			ID: FirstBriefQuestID, Tier: 2, Featured: true, Order: 5, Optional: true,
+			Title: "Read your first Daily Brief",
+			Why:   firstBriefWhy,
 			// The static link is the fallback for a user with no Personal HQ:
 			// the assistant drawer, where building one starts. With an HQ,
 			// Resolve points the button at the Daily Brief station.
@@ -425,10 +426,12 @@ func PersonalAssistantGraph() Graph {
 			Satisfied: func(s Snapshot) bool { return s.HasBriefRevision },
 			Resolve:   resolveFirstBrief,
 		},
-		retier("t1-first-message", 2),
-		retier("t1-personalize", 2),
-		retier("t2-create-note", 2),
-		retier("t2-run-task", 2),
+		// Retired objectives sit on tier 3 or later, so they never affect which
+		// of the two visible tiers is current.
+		retier("t1-first-message", 3),
+		retier("t1-personalize", 3),
+		retier("t2-create-note", 3),
+		retier("t2-run-task", 3),
 	}
 	for _, q := range BuiltinQuests() {
 		if q.Tier >= 3 {
@@ -440,7 +443,7 @@ func PersonalAssistantGraph() Graph {
 	names := builtinTierNames()
 	names[1] = "Starter"
 	names[2] = "Daily loop"
-	return Graph{Quests: quests, TierNames: names, TotalTiers: 1}
+	return Graph{Quests: quests, TierNames: names, TotalTiers: 2}
 }
 
 // folderFirstLookWhy is Mission 03's static why line.

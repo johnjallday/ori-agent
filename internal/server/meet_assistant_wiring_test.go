@@ -74,6 +74,12 @@ func TestMeetAssistant_RealBuilderCompletesTheMissionFromTheHireOnce(t *testing.
 				t.Fatalf("Show a folder must wait on the HQ: %+v", mission)
 			}
 			continue
+		case progression.ConnectSourceQuestID, progression.FirstBriefQuestID:
+			// The Daily loop waits for Starter, not for the hire.
+			if !mission.Locked || mission.LockedReason != "Starter first" {
+				t.Fatalf("the Daily loop must wait for Starter: %+v", mission)
+			}
+			continue
 		}
 		if mission.Locked {
 			t.Fatalf("mission %s is still locked after the hire", mission.ID)

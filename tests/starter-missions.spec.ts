@@ -1,8 +1,11 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 
 /**
- * Starter missions, the golden path (tasks/prd-starter-missions.md, with
- * Mission 02 replaced by tasks/prd-show-me-a-folder.md).
+ * The mission board, golden path (tasks/prd-starter-missions.md, reshaped by
+ * tasks/prd-mission-quest-folder-refocus.md).
+ *
+ * Starter = Meet your assistant, Show your assistant a folder, See what your
+ * assistant found. Daily loop = Connect one source, Read your first Daily Brief.
  *
  * Run against a FRESH isolated sandbox, serially:
  *   ./scripts/smoke.sh serve 8947 starter-e2e      (in another terminal)
@@ -13,16 +16,20 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
  * than passing on stale state.
  *
  * What only a browser proves, and so what is here:
- *   - The Quests card follows the server's missions, and Mission 02's Start
- *     opens the assistant drawer with the folder chooser in its conversation
- *     and the quest parameter scrubbed.
- *   - Deferring Mission 02 moves the card on to Mission 03.
- *   - The first-day plan completes Mission 03.
+ *   - Mission 02 is Locked behind the HQ (also after Not now), with one action,
+ *     Build My HQ, that opens the HQ card in the drawer.
+ *   - A built HQ opens it; Start opens the one-card chooser (not the chat
+ *     chooser) and scrubs the quest parameter.
+ *   - The Daily loop is listed locked beneath Starter, and opens once Starter is
+ *     resolved.
+ *   - The first-day plan completes Connect one source; the brief completes
+ *     Read your first Daily Brief.
  * Mission 01 (Meet your assistant) is the hire, made here through the API;
- * tests/personal-assistant-foundation.spec.ts drives it in the browser. The
- * rest of Mission 02 — a scan, an offer, a workspace linked to the folder or a
- * tidy — needs folders under the server's own HOME, which
- * `scripts/smoke.sh showfolder` seeds and drives.
+ * tests/personal-assistant-foundation.spec.ts drives it in the browser. The rest
+ * of Mission 02 and Mission 03 (a scan, an offer, a workspace, the first look)
+ * need folders under the server's own HOME and a model, which
+ * `scripts/smoke.sh showfolder` seeds and drives and
+ * tests/one-card-folder-setup.spec.ts covers.
  */
 
 test.describe.configure({ mode: 'serial' });
@@ -80,9 +87,13 @@ async function expectNoHorizontalScroll(page: Page) {
   expect(width.page).toBeLessThanOrEqual(width.viewport + 1);
 }
 
-// Mission 01 completes from the hire; HQ's Map quest is retired from the
-// board, so the card opens on Mission 02.
-test('a fresh hire with HQ sees Mission 02 on the card', async ({ page, request }) => {
+// Mission 01 completes from the hire. Show a folder needs the HQ: with none
+// built the card says Locked and offers Build My HQ, never the chooser, and
+// pressing it opens the drawer on the HQ card, even after Not now (FR21, FR22).
+test('a fresh hire sees Mission 02 locked behind the HQ, and Build My HQ opens its card', async ({
+  page,
+  request
+}) => {
   const errors = watchErrors(page);
   await request.post('/api/onboarding/skip');
 
@@ -92,7 +103,6 @@ test('a fresh hire with HQ sees Mission 02 on the card', async ({ page, request 
     assistant?.state !== 'needs_hire',
     'this spec needs a fresh sandbox: the assistant is already hired'
   );
-
   const hire = await request.post('/api/personal-assistant/hire', {
     data: {
       request_id: `e2e-hire-${Date.now()}`,
@@ -103,6 +113,45 @@ test('a fresh hire with HQ sees Mission 02 on the card', async ({ page, request 
     }
   });
   expect(hire.ok(), await hire.text()).toBeTruthy();
+
+  // Not now on the HQ card defers it. The folder mission stays locked.
+  await page.goto('/?panel=today');
+  await expect(page.locator('#personalAssistantHQCard')).toBeVisible({ timeout: 20000 });
+  await page.locator('#personalAssistantHQNotNow').click();
+
+  const card = await openQuests(page);
+  await expect(card.locator('[data-role="first-mission-title"]')).toHaveText(
+    'Show your assistant a folder'
+  );
+  await expect(card.locator('[data-role="first-mission-status"]')).toHaveText('Locked');
+  await expect(card.locator('[data-role="first-mission-skip"]')).toBeHidden();
+  const fix = card.locator('[data-role="first-mission-action"]');
+  await expect(fix).toContainText('Build My HQ');
+  // Locked, so Starter is still the current tier and the Daily loop waits.
+  await expect(page.locator('[data-role="tier-name"]')).toHaveText('Missions · Starter');
+  await expect(page.locator('[data-role="progress-label"]')).toBeHidden();
+
+  await fix.click();
+  await expect(page.locator('#personalAssistantHQCard')).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('#personalAssistantHQHeadline')).toContainText('home base');
+  // Never the folder chooser while locked, and no raw 409.
+  await expect(page.locator('#personalAssistantFolderChooser')).toBeHidden();
+  expect(await missionStatus(request, 'pa-show-folder')).toBe('available');
+
+  await page.setViewportSize({ width: 400, height: 860 });
+  await expectNoHorizontalScroll(page);
+  expect(errors).toEqual([]);
+});
+
+test('a built HQ opens Mission 02 and lists the Daily loop locked beneath Starter', async ({
+  page,
+  request
+}) => {
+  test.skip(
+    (await missionStatus(request, 'pa-meet-assistant')) !== 'completed',
+    'needs the hire from the earlier test'
+  );
+  const errors = watchErrors(page);
   const hired = (await (await request.get('/api/personal-assistant')).json()).personal_assistant;
   const hq = await request.post('/api/personal-assistant/hq', {
     data: {
@@ -115,9 +164,6 @@ test('a fresh hire with HQ sees Mission 02 on the card', async ({ page, request 
 
   const card = await openQuests(page);
   await expect(card.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 02');
-  await expect(card.locator('[data-role="first-mission-title"]')).toHaveText(
-    'Show your assistant a folder'
-  );
   await expect(card.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
   await expect(card.locator('[data-role="first-mission-action"]')).toHaveAttribute(
     'href',
@@ -125,17 +171,33 @@ test('a fresh hire with HQ sees Mission 02 on the card', async ({ page, request 
   );
   // No offer yet, so the card carries no inline question.
   await expect(card.locator('[data-role="first-mission-offer"]')).toBeHidden();
-  // The card's mission is the only Starter mission not repeated beneath it:
-  // The other three missions remain beneath the current card; retired HQ
-  // never appears on the board and the lone tier navigation is hidden.
+
+  // The header and the compact button say the tier's name, never "Tier 1 of 2".
+  await expect(page.locator('[data-role="tier-name"]')).toHaveText('Missions · Starter');
+  await expect(page.locator('#cockpitQuestsToggle')).toContainText('Missions · 1/3');
+  await expect(page.locator('#questLog')).not.toContainText(/Tier \d/);
+
+  // Beneath the card: the other Starter missions (the hire, done, and the look,
+  // locked), then the Daily loop, locked.
   const rows = page.locator('[data-role="quests"] .quest-item');
-  await expect(rows).toHaveCount(3);
-  await expect(page.locator('[data-role="progress-label"]')).toBeHidden();
+  await expect(rows).toHaveCount(4);
+  await expect(rows.filter({ hasText: 'Meet your assistant' })).toHaveClass(/quest-item-done/);
+  await expect(page.locator('[data-role="quests"] .quest-list-heading')).toHaveText('Daily loop');
+  await expect(rows.filter({ hasText: 'See what your assistant found' })).toContainText(
+    'Show your assistant a folder first'
+  );
+  for (const title of ['Plan my first day', 'Read your first Daily Brief']) {
+    const row = rows.filter({ hasText: title });
+    await expect(row).toContainText('Starter first');
+    await expect(row).toHaveClass(/quest-item-locked/);
+    // A locked row offers no link and no Skip.
+    await expect(row.locator('a, button')).toHaveCount(0);
+  }
   await expect(rows.filter({ hasText: 'Build My HQ' })).toHaveCount(0);
-  await expect(page.locator('[data-role="quests"] .quest-item-locked')).toHaveCount(0);
-  await expect(rows.filter({ hasText: 'Show your assistant a folder' })).toHaveCount(0);
-  await expect(rows.filter({ hasText: 'Tidy your Downloads' })).toHaveCount(0);
-  await expect(rows.filter({ hasText: 'Start a project workspace' })).toHaveCount(0);
+  // The card's mission is not repeated beneath it.
+  await expect(
+    rows.locator('.quest-title', { hasText: /^Show your assistant a folder$/ })
+  ).toHaveCount(0);
 
   await page.setViewportSize({ width: 400, height: 860 });
   await expect(card).toBeVisible();
@@ -143,26 +205,28 @@ test('a fresh hire with HQ sees Mission 02 on the card', async ({ page, request 
   expect(errors).toEqual([]);
 });
 
-test('Mission 02: Start opens the folder chooser in the assistant panel', async ({
+test('Mission 02: Start opens the one-card chooser in the assistant panel', async ({
   page,
   request
 }) => {
+  test.skip(
+    (await missionStatus(request, 'pa-show-folder')) !== 'available',
+    'needs the HQ from the earlier test'
+  );
   const errors = watchErrors(page);
   const card = await openQuests(page);
   await card.locator('[data-role="first-mission-action"]').click();
 
-  // The assistant drawer opens with the chooser unfolded; the quest parameter
-  // is scrubbed so a reload does not open it again.
+  // The drawer opens on the assistant's own chooser (chips and picker, then a
+  // read-only scan and the verdict card), not the chat chooser; the quest
+  // parameter is scrubbed so a reload does not open it again.
   await expect(page.locator('#personalAssistantToday')).toBeVisible({ timeout: 15000 });
-  const chooser = page.locator('#personalAssistantContextChooser');
+  const chooser = page.locator('#personalAssistantFolderChooser');
   await expect(chooser).toBeVisible({ timeout: 15000 });
-  await expect(chooser.locator('#personalAssistantFolderChooserTitle')).toContainText(
-    'Add folder context'
+  await expect(chooser.locator('#personalAssistantFolderTitle')).toContainText(
+    /Which folder should I explore\?|explore a folder/i
   );
-  await expect(page.locator('#personalAssistantFolderRequest')).toBeHidden();
-  await expect(page.locator('#homeAssistantConversation [data-message-role]')).toHaveCount(0);
-  // This fresh sandbox has no Downloads/Documents/Desktop and disables native
-  // desktop opening; the chooser remains usable once a chip is seeded.
+  await expect(page.locator('#personalAssistantContextChooser')).toBeHidden();
   await expect(page).not.toHaveURL(/quest=/);
   // Opening the chooser is not doing the mission.
   expect(await missionStatus(request, 'pa-show-folder')).toBe('available');
@@ -173,7 +237,11 @@ test('Mission 02: Start opens the folder chooser in the assistant panel', async 
   expect(errors).toEqual([]);
 });
 
-test('deferring Mission 02 moves the card on to Mission 03', async ({ page, request }) => {
+test('deferring Mission 02 opens the Daily loop on Mission 04', async ({ page, request }) => {
+  test.skip(
+    (await missionStatus(request, 'pa-show-folder')) !== 'available',
+    'needs the HQ from the earlier test'
+  );
   const errors = watchErrors(page);
   const skipped = await request.post('/api/progression/skip', {
     data: { quest_id: 'pa-show-folder' }
@@ -181,16 +249,22 @@ test('deferring Mission 02 moves the card on to Mission 03', async ({ page, requ
   expect(skipped.ok(), await skipped.text()).toBeTruthy();
 
   const card = await openQuests(page);
-  await expect(card.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 03');
+  await expect(card.locator('[data-role="first-mission-kicker"]')).toHaveText('Mission 04');
+  await expect(page.locator('[data-role="tier-name"]')).toHaveText('Missions · Daily loop');
+  const rows = page.locator('[data-role="quests"] .quest-item');
   await expect(
-    page.locator('[data-role="quests"] .quest-item').filter({
-      hasText: 'Show your assistant a folder'
+    rows.filter({
+      has: page.locator('.quest-title', { hasText: /^Show your assistant a folder$/ })
     })
   ).toContainText('Skipped');
+  // The first look cannot start without a folder, but it no longer holds Starter.
+  await expect(rows.filter({ hasText: 'See what your assistant found' })).toHaveClass(
+    /quest-item-locked/
+  );
   expect(errors).toEqual([]);
 });
 
-test('Mission 03, plan branch: the first-day plan completes it', async ({ page, request }) => {
+test('Mission 04, plan branch: the first-day plan completes it', async ({ page, request }) => {
   test.skip(
     !['completed', 'skipped'].includes(await missionStatus(request, 'pa-show-folder')),
     'needs Mission 02 resolved by the earlier test'
@@ -228,13 +302,13 @@ test('Mission 03, plan branch: the first-day plan completes it', async ({ page, 
 // The brief is read in the Daily Brief station in My HQ. Opening Home, which
 // loads the assistant's Today, does not count as reading it; the station's
 // panel showing the brief does.
-test('Mission 04: Open Daily Brief goes to the station, and the panel showing a brief completes it', async ({
+test('Mission 05: Open Daily Brief goes to the station, and the panel showing a brief completes it', async ({
   page,
   request
 }) => {
   test.skip(
     (await missionStatus(request, 'pa-connect-source')) !== 'completed',
-    'needs Mission 03 completed by the earlier test'
+    'needs Mission 04 completed by the earlier test'
   );
   const errors = watchErrors(page);
 

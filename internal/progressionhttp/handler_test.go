@@ -92,7 +92,7 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 			t.Fatalf("missions[%d].locked = %v", i, mission["locked"])
 		}
 		// See what your assistant found waits on the folder, not on the hire.
-		wantReason := "Meet your assistant first"
+		wantReason := "Starter first"
 		switch mission["id"] {
 		case progression.ShowFolderQuestID:
 			wantReason = "Build your HQ first"

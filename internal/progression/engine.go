@@ -443,10 +443,30 @@ func (e *Engine) resolvedLocked(questID string) bool {
 	return skipped
 }
 
+// waivedLocked reports whether an unresolved quest waits on a gate the user
+// skipped. It stays locked (it cannot be started), but it cannot hold its tier
+// either: deferring the gate must not strand the missions after it. Resuming
+// the gate completes it and opens the quest. Caller must hold the lock.
+func (e *Engine) waivedLocked(q Quest) bool {
+	if q.LockedUntil == "" || e.resolvedLocked(q.ID) {
+		return false
+	}
+	// Only a mission the user can see and defer waives its dependents. The
+	// retired HQ quest is not one: Not now on the HQ card keeps the folder
+	// mission locked, with its fix, in the Starter tier.
+	gate, ok := e.questByID(q.LockedUntil)
+	if !ok || gate.Retired {
+		return false
+	}
+	_, gateSkipped := e.state.SkippedQuests[q.LockedUntil]
+	_, gateDone := e.state.CompletedQuests[q.LockedUntil]
+	return gateSkipped && !gateDone
+}
+
 // currentTierLocked returns the lowest tier that is not fully resolved
 // (completed or, for optional quests, skipped), or the graph's tier count when
 // everything is done. A skipped optional quest never keeps a later tier
-// locked. Caller must hold the lock.
+// locked, and neither does a quest waiting on one. Caller must hold the lock.
 func (e *Engine) currentTierLocked() int {
 	lastVisibleTier := 0
 	for tier := 1; tier <= e.totalTiers; tier++ {
@@ -455,7 +475,7 @@ func (e *Engine) currentTierLocked() int {
 				continue
 			}
 			lastVisibleTier = tier
-			if !e.resolvedLocked(q.ID) {
+			if !e.resolvedLocked(q.ID) && !e.waivedLocked(q) {
 				return tier
 			}
 		}
@@ -482,6 +502,7 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 		completedAt, done := e.state.CompletedQuests[q.ID]
 		skippedAt, skipped := e.state.SkippedQuests[q.ID]
 		resolved := done || skipped
+		waived := e.waivedLocked(q)
 
 		status := StatusLocked
 		switch {
@@ -495,6 +516,9 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 		case q.Tier <= current:
 			status = StatusAvailable
 		}
+		if waived {
+			resolvedCount++
+		}
 
 		qv := QuestView{
 			ID: q.ID, Tier: q.Tier, Title: q.Title, Why: q.Why, Status: status,
@@ -503,6 +527,11 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 		}
 		if !resolved {
 			qv.Locked, qv.LockedReason = e.lockLocked(q)
+			// A mission in a tier that is not current yet waits for the tier
+			// before it: "Starter first". A quest's own gate says it better.
+			if !qv.Locked && status == StatusLocked && q.Featured {
+				qv.Locked, qv.LockedReason = true, e.tierNames[current]+" first"
+			}
 			if qv.Locked && q.LockedAction != nil {
 				qv.LockedAction = &LockedActionView{Kind: q.LockedAction.Kind, Label: q.LockedAction.Label}
 			}
@@ -536,7 +565,7 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 			byTier[q.Tier] = tv
 			order = append(order, q.Tier)
 		}
-		if !resolved {
+		if !resolved && !waived {
 			tv.Complete = false
 		}
 		tv.Quests = append(tv.Quests, qv)

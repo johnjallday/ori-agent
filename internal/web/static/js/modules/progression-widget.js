@@ -86,11 +86,56 @@ export function compactSummaryView(status) {
     tier: status.current_tier,
     resolved,
     total,
-    text:
-      status.total_tiers === 1
-        ? `Missions · ${resolved}/${total}`
-        : `Tier ${status.current_tier} · ${resolved}/${total}`
+    text: missionMode(status)
+      ? `Missions · ${resolved}/${total}`
+      : `Tier ${status.current_tier} · ${resolved}/${total}`
   };
+}
+
+// missionMode says the board is a mission board, whatever its tiers are called:
+// the server sends featured missions. Tiers there are named sections, never
+// numbered ones ("Tier 1 of 2" never appears).
+export function missionMode(status) {
+  return (
+    status?.total_tiers === 1 || (Array.isArray(status?.missions) && status.missions.length > 0)
+  );
+}
+
+// missionHeaderText is the flyout header: "Missions · Starter" for the current
+// tier's name, "Missions" when it has none, and "Missions complete" at the end.
+export function missionHeaderText(status) {
+  if (status?.all_complete) return 'Missions complete';
+  const name = String(currentTier(status || {})?.name || '').trim();
+  return name ? `Missions · ${name}` : 'Missions';
+}
+
+// missionGroups splits the missions the list shows into sections: the current
+// tier's other missions first, then each later tier under its own name, so the
+// user sees what comes next without being able to start it (the server marks
+// those rows locked). The mission the card shows is never repeated.
+export function missionGroups(status, shownMissionID) {
+  const missions = (status?.missions || []).filter(
+    quest => !shownMissionID || quest.id !== shownMissionID
+  );
+  const current = Number(status?.current_tier) || 1;
+  const names = {};
+  (status?.tiers || []).forEach(tier => {
+    names[tier.tier] = String(tier.name || '').trim();
+  });
+  const groups = [];
+  const tiers = [...new Set(missions.map(quest => Number(quest.tier) || current))].sort(
+    (a, b) => a - b
+  );
+  for (const tier of tiers) {
+    // Tiers behind the current one hold only resolved missions: they stay in the
+    // first section, with no heading, as the single-tier list always showed them.
+    const upcoming = tier > current;
+    groups.push({
+      heading: upcoming ? names[tier] || '' : '',
+      rows: missions.filter(quest => (Number(quest.tier) || current) === tier)
+    });
+  }
+  return groups.filter(group => group.rows.length);
 }
 
 // missionKicker names a mission by its server-supplied order ("Mission 02").
@@ -121,13 +166,21 @@ export function firstMissionView(status) {
   // unless the server names the one button that opens its lock: then the card
   // shows it locked, with that button, rather than hiding why it cannot start.
   const showable = mission => !isResolved(mission) && (!mission.locked || !!mission.locked_action);
-  const quest = missions.find(showable) || missions[missions.length - 1];
+  const quest =
+    missions.find(showable) ||
+    // Nothing can be pressed: rest on the first one still open (shown locked,
+    // with its reason) or, with all resolved, on the last.
+    missions.find(mission => !isResolved(mission)) ||
+    missions[missions.length - 1];
 
   const completed = quest.status === 'completed';
   const skipped = quest.status === 'skipped';
-  const locked = !completed && !skipped && quest.locked === true && !!quest.locked_action;
-  const inProgress = !completed && !skipped && !locked && !!quest.in_progress;
-  const actionURL = locked ? '/?panel=today' : quest.action_url || '';
+  // Held back by the server. With a named fix the card offers it; without one
+  // (the card only rests here when nothing else can be pressed) it just says why.
+  const held = !completed && !skipped && quest.locked === true;
+  const locked = held && !!quest.locked_action;
+  const inProgress = !completed && !skipped && !held && !!quest.in_progress;
+  const actionURL = locked ? '/?panel=today' : held ? '' : quest.action_url || '';
 
   return {
     visible: true,
@@ -148,12 +201,14 @@ export function firstMissionView(status) {
     why:
       locked && quest.locked_action.kind === 'hq_card'
         ? 'Your assistant keeps what it learns about your folders in its HQ. Build it first.'
-        : quest.why || '',
+        : held && !locked
+          ? [quest.why, quest.locked_reason].filter(Boolean).join(' ')
+          : quest.why || '',
     statusLabel: completed
       ? 'Complete'
       : skipped
         ? 'Saved for later'
-        : locked
+        : held
           ? 'Locked'
           : inProgress
             ? 'In progress'
@@ -168,7 +223,7 @@ export function firstMissionView(status) {
     inPlace: !completed && !skipped && actionURL.indexOf(FIRST_LOOK_ACTION_URL) === 0,
     showAction: !completed && !!actionURL,
     // A locked card offers one action only: no Skip.
-    showSkip: !!quest.optional && !completed && !skipped && !locked
+    showSkip: !!quest.optional && !completed && !skipped && !held
   };
 }
 
@@ -418,10 +473,26 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
   function announceChanges(status) {
     const diff = diffAnnouncements(status, knownCompleted, knownTierComplete);
     diff.newCompletions.forEach(q => toast(q.title, 'Quest complete'));
-    diff.newTierCompletions.forEach(t => toast(`Tier complete: ${t.name}`, 'Tier complete'));
+    diff.newTierCompletions.forEach(t =>
+      toast(t.name ? `${t.name} complete` : 'Tier complete', t.name ? 'Missions' : 'Tier complete')
+    );
 
     knownCompleted = diff.completedNow;
     knownTierComplete = diff.nextKnownTierComplete;
+  }
+
+  // A later tier's missions follow under its own name, as locked rows.
+  function renderMissionGroups(list, groups) {
+    groups.forEach(group => {
+      if (group.heading) {
+        const heading = document.createElement('li');
+        heading.className = 'quest-list-heading';
+        heading.setAttribute('role', 'presentation');
+        heading.textContent = group.heading;
+        list.appendChild(heading);
+      }
+      group.rows.forEach(q => list.appendChild(renderQuestRow(q, { onSkip: skipQuest })));
+    });
   }
 
   function setMeter(bar, resolved, total) {
@@ -659,7 +730,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     // for id stability, never shown.
     if (restore) restore.hidden = true;
 
-    const oneTier = status.total_tiers === 1;
+    const oneTier = missionMode(status);
     el('progress-label').hidden = oneTier;
     const list = el('quests');
     list.setAttribute('aria-label', oneTier ? 'Missions' : 'Quests');
@@ -668,16 +739,13 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     // All quests complete: compact congratulatory state.
     if (status.all_complete) {
       renderFirstMission(status);
-      el('tier-name').textContent = oneTier ? 'Missions complete' : 'All quests complete';
+      el('tier-name').textContent = oneTier ? missionHeaderText(status) : 'All quests complete';
       el('tier-insignia').textContent = '✓';
       el('progress-label').textContent = oneTier ? '' : 'Tier complete';
       el('progress-count').textContent = `${status.total_count}/${status.total_count}`;
       setMeter(el('progress-bar'), status.total_count, status.total_count);
       list.replaceChildren();
-      if (oneTier)
-        missionRows(status).forEach(q =>
-          list.appendChild(renderQuestRow(q, { onSkip: skipQuest }))
-        );
+      if (oneTier) renderMissionGroups(list, missionGroups(status, ''));
       el('why').textContent = "You've mastered the basics — Ori is all yours.";
       widget.hidden = false;
       return;
@@ -692,7 +760,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     renderFirstMission(status);
     const shownMission = firstMissionView(status);
 
-    el('tier-name').textContent = oneTier ? 'Missions' : current.name;
+    el('tier-name').textContent = oneTier ? missionHeaderText(status) : current.name;
     el('tier-insignia').textContent = oneTier ? '✓' : tierInsignia(status.current_tier);
     el('progress-label').textContent = oneTier
       ? ''
@@ -703,10 +771,12 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     setMeter(el('progress-bar'), resolved, total);
 
     list.replaceChildren();
-    const rows = oneTier
-      ? missionRows(status, shownMission.visible ? shownMission.questID : '')
-      : tierQuestRows(current, shownMission.visible ? shownMission.questID : '');
-    rows.forEach(q => list.appendChild(renderQuestRow(q, { onSkip: skipQuest })));
+    const shownID = shownMission.visible ? shownMission.questID : '';
+    if (oneTier) renderMissionGroups(list, missionGroups(status, shownID));
+    else
+      tierQuestRows(current, shownID).forEach(q =>
+        list.appendChild(renderQuestRow(q, { onSkip: skipQuest }))
+      );
 
     // The card already states why its mission matters; never say it twice.
     const why = el('why');
