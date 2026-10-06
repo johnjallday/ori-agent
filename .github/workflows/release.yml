@@ -122,7 +122,7 @@ jobs:
       - name: Build macOS binaries
         run: |
           # Build both server and menubar binaries in a single goreleaser run
-          goreleaser build --clean --skip=before --timeout 90m --id=server-macos --id=menubar
+          goreleaser build --clean --skip=before --timeout 90m --parallelism 1 --id=server-macos --id=menubar
 
       - name: Create macOS DMG installers
         env:

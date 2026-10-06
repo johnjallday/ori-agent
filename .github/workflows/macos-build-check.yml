@@ -77,7 +77,7 @@ jobs:
         env:
           GORELEASER_CURRENT_TAG: v0.0.0-build-check
           GOTOOLCHAIN: local
-        run: goreleaser build --clean --skip=before --snapshot --timeout 90m --id=server-macos --id=menubar
+        run: goreleaser build --clean --skip=before --snapshot --timeout 90m --parallelism 1 --id=server-macos --id=menubar
 
       - name: Build monitor log
         if: always()
