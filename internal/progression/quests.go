@@ -220,10 +220,28 @@ type Quest struct {
 	// Complete, and Backfill still run, so a user who somehow does the work
 	// early still gets credit.
 	LockedUntil string
+	// LockedReason, when set, replaces the "<gate title> first" sentence shown
+	// while the quest is locked, for a gate whose own title does not read well
+	// (a retired quest's).
+	LockedReason string
+	// LockedAction, when set, is the one thing the user can press to open the
+	// lock. The widget shows it instead of the quest's own action.
+	LockedAction *LockedAction
 	// Resolve, when set, fills the card's title, why, and action from per-user
 	// state at status time. See MissionContext.
 	Resolve func(MissionContext) MissionPresentation
 }
+
+// LockedAction names what opens a lock: Kind is a stable word the browser maps
+// to behaviour ("hq_card" opens the assistant drawer on its Home base card),
+// Label is the button text.
+type LockedAction struct {
+	Kind  string
+	Label string
+}
+
+// LockedActionHQCard is the Kind that opens the Home base card.
+const LockedActionHQCard = "hq_card"
 
 // builtinTierNames maps a built-in tier number to its display name. It is
 // built per call so no graph can mutate another's names.
@@ -333,11 +351,17 @@ func PersonalAssistantGraph() Graph {
 		buildHQ,
 		{
 			ID: ShowFolderQuestID, Tier: 1, Featured: true, Order: 2, Optional: true,
-			LockedUntil: MeetAssistantQuestID,
-			Title:       "Show your assistant a folder",
-			Why:         "Point Ori at a folder and it will tell you what it can do with it.",
-			ActionURL:   ShowFolderActionURL,
-			ActionLabel: "Start",
+			// Every folder path needs the user's HQ (the assistant keeps what it
+			// learns there), and only a real build opens the lock: deferring the
+			// HQ card with Not now leaves it. Building the HQ needs the hire, so
+			// this also covers waiting for Meet your assistant.
+			LockedUntil:  BuildHQQuestID,
+			LockedReason: "Build your HQ first",
+			LockedAction: &LockedAction{Kind: LockedActionHQCard, Label: "Build My HQ"},
+			Title:        "Show your assistant a folder",
+			Why:          "Point Ori at a folder and it will tell you what it can do with it.",
+			ActionURL:    ShowFolderActionURL,
+			ActionLabel:  "Start",
 			// Live, a workspace created from the assistant's offer is observed
 			// here (FR42); the folder attaching and a tidy complete it from
 			// server hooks, as does the File Janitor wizard reaching ready.

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
 func stageReviewFolder(t *testing.T, f *draftServerFixture) map[string]any {
@@ -81,6 +82,13 @@ func TestAssistantFolderSetup_RealGenericCreatorWithoutModelAndCanonicalReceipt(
 	}
 	if len(f.builder.workspaceFileStore.CachedWorkspaces()) != before+1 || len(provider.requests) != 0 {
 		t.Fatal("wrong workspace count or model used")
+	}
+	// FR27: a workspace made from the chat flow's review resolves through the same
+	// digest service as the one-card flow, so it is seeded with the same first
+	// look, waiting for its click, and no model ran to get it there.
+	look := personalassistant.FindFolderFirstTask(workspace)
+	if look == nil || personalassistant.FolderFirstTaskStateOf(look) != personalassistant.FolderFirstTaskSeeded {
+		t.Fatalf("the chat flow's workspace has no seeded first look: %+v", workspace.Tasks)
 	}
 	if status, replay := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/offers/"+offer+"/decide", confirmation); status != http.StatusOK || replay["offer"].(map[string]any)["outcome"].(map[string]any)["workspace_id"] != workspaceID {
 		t.Fatalf("replay: %d %v", status, replay)

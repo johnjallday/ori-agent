@@ -1510,6 +1510,22 @@ test('Set up sends only the plan digest and a chosen file name, and polls only w
   assert.doesNotMatch(source, /folder_card_stub/);
 });
 
+test('Home entry points open the one-card chooser, or the HQ card before an HQ exists', () => {
+  const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  const body = source.slice(
+    source.indexOf('function openChooser()'),
+    source.indexOf('async function load()')
+  );
+  // The mission's Start, "Show me a folder" and the first-folder prompt no longer
+  // delegate to the chat-context chooser (the composer chip still does, itself).
+  assert.doesNotMatch(body, /PersonalAssistantFolderContext\??\.(open|guide)/);
+  assert.match(body, /openHQCard\(\)/);
+  assert.doesNotMatch(
+    source.slice(source.indexOf('async function load()'), source.indexOf('async function scan(')),
+    /PersonalAssistantFolderContext/
+  );
+});
+
 test('the module never sends a folder path to the server', () => {
   const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /\bpath\s*:/);

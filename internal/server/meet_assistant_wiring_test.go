@@ -62,9 +62,16 @@ func TestMeetAssistant_RealBuilderCompletesTheMissionFromTheHireOnce(t *testing.
 	// The hire opens every mission that waited on it. See what your assistant
 	// found waits on a folder being shown instead, so it alone stays locked.
 	for _, mission := range engine.Status().Missions {
-		if mission.ID == progression.FolderFirstLookQuestID {
+		switch mission.ID {
+		case progression.FolderFirstLookQuestID:
 			if !mission.Locked || mission.LockedReason != "Show your assistant a folder first" {
 				t.Fatalf("the first look must wait on the folder: %+v", mission)
+			}
+			continue
+		case progression.ShowFolderQuestID:
+			// Showing a folder needs the HQ, which the hire does not build.
+			if !mission.Locked || mission.LockedReason != "Build your HQ first" {
+				t.Fatalf("Show a folder must wait on the HQ: %+v", mission)
 			}
 			continue
 		}

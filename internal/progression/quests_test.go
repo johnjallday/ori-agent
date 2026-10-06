@@ -100,7 +100,7 @@ func TestPersonalAssistantGraph_Shape(t *testing.T) {
 		lockedUntil           string
 	}{
 		{MeetAssistantQuestID, "Meet your assistant", MeetAssistantActionURL, "Start", false, ""},
-		{ShowFolderQuestID, "Show your assistant a folder", ShowFolderActionURL, "Start", true, MeetAssistantQuestID},
+		{ShowFolderQuestID, "Show your assistant a folder", ShowFolderActionURL, "Start", true, BuildHQQuestID},
 		// The static action is the no-folder fallback; Resolve replaces it once
 		// a folder workspace has a first look.
 		{FolderFirstLookQuestID, "See what your assistant found", ShowFolderActionURL, "Show a folder", true, ShowFolderQuestID},
@@ -793,7 +793,7 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 	}
 	wantLocked := []string{
 		MeetAssistantQuestID + ":false:",
-		ShowFolderQuestID + ":true:Meet your assistant first",
+		ShowFolderQuestID + ":true:Build your HQ first",
 		FolderFirstLookQuestID + ":true:Show your assistant a folder first",
 		ConnectSourceQuestID + ":true:Meet your assistant first",
 		FirstBriefQuestID + ":true:Meet your assistant first",
@@ -813,16 +813,56 @@ func TestPersonalAssistantGraph_LaterMissionsLockUntilTheHire(t *testing.T) {
 	if !e.Complete(MeetAssistantQuestID) {
 		t.Fatal("Complete(Meet your assistant) was not newly recorded")
 	}
-	// The hire opens every mission that waited on it. See what your assistant
-	// found waits on the folder instead, so it alone stays locked.
+	// The hire opens every mission that waited on it. The folder missions wait
+	// on the HQ and then on the folder, so they stay locked.
 	for _, m := range e.Status().Missions {
-		wantLock := m.ID == FolderFirstLookQuestID
+		wantLock := m.ID == ShowFolderQuestID || m.ID == FolderFirstLookQuestID
 		if m.Locked != wantLock {
 			t.Fatalf("mission %s locked = %t after the hire: %+v", m.ID, m.Locked, m)
 		}
 	}
-	if next := e.Status().NextQuest; next == nil || next.ID != ShowFolderQuestID {
-		t.Fatalf("next quest after the hire = %+v, want Show a folder", next)
+	if next := e.Status().NextQuest; next == nil || next.ID != ConnectSourceQuestID {
+		t.Fatalf("next quest after the hire = %+v, want the first unlocked mission", next)
+	}
+}
+
+// Show your assistant a folder waits on a real HQ (FR21, FR22). Not now on the
+// HQ card skips the retired HQ quest and so keeps the lock; building opens it;
+// and the lock names its one fix.
+func TestShowFolder_LockedUntilTheHQIsBuilt(t *testing.T) {
+	e := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+	e.Complete(MeetAssistantQuestID)
+
+	view := questView(e, ShowFolderQuestID)
+	if view == nil || !view.Locked || view.LockedReason != "Build your HQ first" {
+		t.Fatalf("before the HQ: %+v", view)
+	}
+	if view.LockedAction == nil || view.LockedAction.Kind != "hq_card" || view.LockedAction.Label != "Build My HQ" {
+		t.Fatalf("the lock names no fix: %+v", view.LockedAction)
+	}
+
+	// Not now skips the HQ quest. Only a completion unlocks.
+	if err := e.Skip(BuildHQQuestID); err != nil {
+		t.Fatal(err)
+	}
+	if view := questView(e, ShowFolderQuestID); view == nil || !view.Locked || view.LockedAction == nil {
+		t.Fatalf("a deferred HQ opened the folder mission: %+v", view)
+	}
+
+	e.Complete(BuildHQQuestID)
+	view = questView(e, ShowFolderQuestID)
+	if view == nil || view.Locked || view.LockedReason != "" || view.LockedAction != nil {
+		t.Fatalf("a built HQ did not open the folder mission: %+v", view)
+	}
+
+	// The lock is gone once the mission resolves, and a quest with no override
+	// keeps the plain sentence.
+	if other := questView(e, ConnectSourceQuestID); other == nil || other.LockedAction != nil {
+		t.Fatalf("an unrelated mission carries a lock action: %+v", other)
+	}
+	plain := New(&fakeStore{}, WithGraph(PersonalAssistantGraph()))
+	if other := questView(plain, ConnectSourceQuestID); other == nil || other.LockedReason != "Meet your assistant first" {
+		t.Fatalf("the default lock sentence changed: %+v", other)
 	}
 }
 
@@ -996,7 +1036,9 @@ func TestPersonalAssistantGraph_LockedMissionsStillComplete(t *testing.T) {
 			t.Fatalf("resolved mission %s is shown locked", m.ID)
 		}
 	}
-	if view := questView(e, ShowFolderQuestID); view == nil || !view.Locked {
+	// The HQ was built above, so Show a folder is open; the first look still
+	// waits on the folder.
+	if view := questView(e, FolderFirstLookQuestID); view == nil || !view.Locked {
 		t.Fatalf("the still-open mission lost its lock: %+v", view)
 	}
 

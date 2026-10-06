@@ -138,6 +138,14 @@ type QuestView struct {
 	// locking itself. Unrelated to StatusLocked, which is about tiers.
 	Locked       bool   `json:"locked,omitempty"`
 	LockedReason string `json:"locked_reason,omitempty"`
+	// LockedAction is the one button that opens the lock, when there is one.
+	LockedAction *LockedActionView `json:"locked_action,omitempty"`
+}
+
+// LockedActionView is a lock's fix as the browser sees it.
+type LockedActionView struct {
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
 }
 
 // TierView groups a tier's quests for the API.

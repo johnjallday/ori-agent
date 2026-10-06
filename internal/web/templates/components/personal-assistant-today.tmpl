@@ -34,14 +34,16 @@
     <span id="personalAssistantHQEyebrow" class="personal-assistant-today__eyebrow"></span>
     <p id="personalAssistantHQHeadline" class="pa-specialist-offer__headline"></p>
     <div id="personalAssistantHQPlan">
-      <label for="personalAssistantHQName">HQ name</label>
-      <input id="personalAssistantHQName" class="modern-input w-100" value="My HQ" maxlength="100">
+      <!-- The directory leads: it is the one thing the user must confirm. The
+           brief time is the last field. -->
       <label for="personalAssistantHQRoot">Workspace directory</label>
       <div class="pa-hq-card__root">
         <input id="personalAssistantHQRoot" class="modern-input w-100" readonly>
         <button type="button" id="personalAssistantHQChange" class="btn btn-sm btn-outline-secondary">Change</button>
       </div>
       <small id="personalAssistantHQRootStatus" aria-live="polite"></small>
+      <label for="personalAssistantHQName">HQ name</label>
+      <input id="personalAssistantHQName" class="modern-input w-100" value="My HQ" maxlength="100">
       <label for="personalAssistantHQTime">Daily Brief time (weekdays)</label>
       <input id="personalAssistantHQTime" type="time" class="modern-input" value="08:00">
       <p id="personalAssistantHQScope">All workspaces, including future ones.</p>

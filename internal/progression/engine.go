@@ -503,6 +503,9 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 		}
 		if !resolved {
 			qv.Locked, qv.LockedReason = e.lockLocked(q)
+			if qv.Locked && q.LockedAction != nil {
+				qv.LockedAction = &LockedActionView{Kind: q.LockedAction.Kind, Label: q.LockedAction.Label}
+			}
 		}
 		if q.Resolve != nil {
 			// A locked mission cannot be acted on yet, so advice about acting
@@ -584,6 +587,9 @@ func (e *Engine) lockLocked(q Quest) (bool, string) {
 	}
 	if _, done := e.state.CompletedQuests[gate.ID]; done {
 		return false, ""
+	}
+	if reason := strings.TrimSpace(q.LockedReason); reason != "" {
+		return true, reason
 	}
 	return true, gate.Title + " first"
 }

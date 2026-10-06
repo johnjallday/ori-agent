@@ -42,6 +42,14 @@ export function hqCardView(relationship, rootState, plan = {}) {
   };
 }
 
+// The headline while the HQ is unbuilt: the HQ is explained in folder terms
+// first, since every folder the assistant is shown is remembered there, and the
+// Daily Brief is where it lands second.
+export function hqHeadline(name) {
+  const who = String(name || '').trim() || 'Your assistant';
+  return `${who} is hired. Give me a home base: My HQ is where I keep what I learn about the folders you show me, and where your Daily Brief lands.`;
+}
+
 export function hqReceiptRows(status, plan, directory) {
   const workspace = status?.workspace;
   if (!status?.valid || !workspace) return [];
@@ -114,7 +122,7 @@ function render() {
     ? `${view.name}’s Personal HQ is ready.`
     : view.collapsed
       ? 'Build My HQ'
-      : `${view.name} is hired. Let me set up my Personal HQ, where I prepare your Daily Brief and track follow-ups.`;
+      : hqHeadline(view.name);
   el('Plan').hidden = view.collapsed || view.receipt || view.paused;
   el('Receipt').hidden = !view.receipt;
   if (view.receipt) renderReceipt(plan.receipt);
@@ -371,6 +379,15 @@ const api = {
   show: () => {
     plan.collapsed = false;
     render();
+  },
+  // expand re-opens the card the user deferred with Not now and brings it into
+  // view: the locked folder mission's one action. It never builds anything.
+  expand: () => {
+    plan.collapsed = false;
+    render();
+    const card = el('Card');
+    if (card && !card.hidden) card.scrollIntoView?.({ block: 'nearest' });
+    return Boolean(card) && !card.hidden;
   },
   _state: state
 };

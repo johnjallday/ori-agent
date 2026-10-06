@@ -2245,16 +2245,31 @@ function act(actionId) {
   return true;
 }
 
+// openHQCard opens the drawer on the card that builds the HQ, expanded even when
+// the user deferred it with Not now. It builds nothing.
+function openHQCard() {
+  const panel = window.PersonalAssistantPanel;
+  if (!panel || typeof panel.open !== 'function') return false;
+  if (!panel.open(document.getElementById('personalAssistantLauncher'))) return false;
+  window.PersonalAssistantToday?.expand?.();
+  return window.PersonalAssistantHQCard?.expand?.() === true;
+}
+
 // openChooser is the user asking to explore a folder: the chip above the
 // composer, Home's toolbar button, the `folder=show` link, the mission's
 // Start, or an offer's own "Show another folder". Every one of them starts
 // the same turn in the conversation.
+//
+// It is the one-card flow, with the chips and the picker, then a read-only scan,
+// then the verdict card with Set up. The composer's "Add folder" chip is the chat
+// flow and calls PersonalAssistantFolderContext itself. Every folder starts at
+// the HQ, so until one is built this opens its card instead of a chooser that
+// the server would refuse (FR24, FR25).
 function openChooser() {
-  if (window.PersonalAssistantFolderContext?.open) {
-    void window.PersonalAssistantFolderContext.open();
+  if (!state.available) {
+    openHQCard();
     return;
   }
-  if (!state.available) return;
   enterThread({ byUser: true });
   state.chooserOpen = true;
   state.scanFailed = false;
@@ -2289,13 +2304,9 @@ async function load() {
       revealFirstPrompt = true;
       // The assistant speaks first: its prompt is the first message in the
       // conversation, with no request from the user above it.
-      if (window.PersonalAssistantFolderContext?.guide) {
-        window.PersonalAssistantFolderContext.guide();
-      } else {
-        enterThread({ byUser: false });
-        state.handOver = true;
-        state.chooserOpen = true;
-      }
+      enterThread({ byUser: false });
+      state.handOver = true;
+      state.chooserOpen = true;
       state.prompting = true;
       // The chooser shows immediately; persisting the receipt cannot delay it.
       void fetch(`${DIGEST_ENDPOINT}/prompted`, { method: 'POST' })

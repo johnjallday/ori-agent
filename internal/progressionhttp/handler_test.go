@@ -93,7 +93,14 @@ func TestGetStatus_IncludesResolvedMissions(t *testing.T) {
 		}
 		// See what your assistant found waits on the folder, not on the hire.
 		wantReason := "Meet your assistant first"
-		if mission["id"] == progression.FolderFirstLookQuestID {
+		switch mission["id"] {
+		case progression.ShowFolderQuestID:
+			wantReason = "Build your HQ first"
+			action, _ := mission["locked_action"].(map[string]any)
+			if action["kind"] != "hq_card" || action["label"] != "Build My HQ" {
+				t.Fatalf("locked_action = %v", mission["locked_action"])
+			}
+		case progression.FolderFirstLookQuestID:
 			wantReason = "Show your assistant a folder first"
 		}
 		if i > 0 && mission["locked_reason"] != wantReason {

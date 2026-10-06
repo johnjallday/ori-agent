@@ -117,12 +117,17 @@ export function firstMissionView(status) {
   if (!missions.length || status?.all_complete) return { visible: false };
 
   const isResolved = mission => mission.status === 'completed' || mission.status === 'skipped';
-  const quest = missions.find(mission => !isResolved(mission)) || missions[missions.length - 1];
+  // A mission waiting on another has nothing to press, so the card passes it by,
+  // unless the server names the one button that opens its lock: then the card
+  // shows it locked, with that button, rather than hiding why it cannot start.
+  const showable = mission => !isResolved(mission) && (!mission.locked || !!mission.locked_action);
+  const quest = missions.find(showable) || missions[missions.length - 1];
 
   const completed = quest.status === 'completed';
   const skipped = quest.status === 'skipped';
-  const inProgress = !completed && !skipped && !!quest.in_progress;
-  const actionURL = quest.action_url || '';
+  const locked = !completed && !skipped && quest.locked === true && !!quest.locked_action;
+  const inProgress = !completed && !skipped && !locked && !!quest.in_progress;
+  const actionURL = locked ? '/?panel=today' : quest.action_url || '';
 
   return {
     visible: true,
@@ -131,21 +136,39 @@ export function firstMissionView(status) {
     completed,
     skipped,
     inProgress,
+    locked,
+    // What opens the lock, as the server names it: {kind, label}.
+    lockedAction: locked
+      ? {
+          kind: String(quest.locked_action.kind || ''),
+          label: String(quest.locked_action.label || '').trim() || 'Open'
+        }
+      : null,
     title: quest.title,
-    why: quest.why || '',
+    why:
+      locked && quest.locked_action.kind === 'hq_card'
+        ? 'Your assistant keeps what it learns about your folders in its HQ. Build it first.'
+        : quest.why || '',
     statusLabel: completed
       ? 'Complete'
       : skipped
         ? 'Saved for later'
-        : inProgress
-          ? 'In progress'
-          : 'Ready',
-    actionLabel: skipped ? 'Resume quest' : quest.action_label || 'Start',
+        : locked
+          ? 'Locked'
+          : inProgress
+            ? 'In progress'
+            : 'Ready',
+    actionLabel: locked
+      ? String(quest.locked_action.label || '').trim() || 'Open'
+      : skipped
+        ? 'Resume quest'
+        : quest.action_label || 'Start',
     actionURL,
     // An action the card performs itself, with no page change.
     inPlace: !completed && !skipped && actionURL.indexOf(FIRST_LOOK_ACTION_URL) === 0,
     showAction: !completed && !!actionURL,
-    showSkip: !!quest.optional && !completed && !skipped
+    // A locked card offers one action only: no Skip.
+    showSkip: !!quest.optional && !completed && !skipped && !locked
   };
 }
 
@@ -480,17 +503,24 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
       action.href = view.actionURL;
       // Start first look acts in place: tokens are spent on this click, and the
       // card follows the run through the folder module's announcements.
-      action.onclick = view.inPlace
+      action.onclick = view.locked
         ? event => {
             event.preventDefault();
-            const folder = window.PersonalAssistantFolder;
-            if (folder && typeof folder.startFirstLook === 'function') {
-              void folder.startFirstLook().then(() => lastStatus && renderFirstMission(lastStatus));
-            } else {
-              window.location.assign('/?panel=today');
-            }
+            openLockedAction(view.lockedAction);
           }
-        : null;
+        : view.inPlace
+          ? event => {
+              event.preventDefault();
+              const folder = window.PersonalAssistantFolder;
+              if (folder && typeof folder.startFirstLook === 'function') {
+                void folder
+                  .startFirstLook()
+                  .then(() => lastStatus && renderFirstMission(lastStatus));
+              } else {
+                window.location.assign('/?panel=today');
+              }
+            }
+          : null;
     }
     if (actionLabel) actionLabel.textContent = view.actionLabel;
     if (skip) {
@@ -513,6 +543,21 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     if (folderOffer !== undefined) return folderOffer;
     const api = window.PersonalAssistantFolder;
     return api && typeof api.current === 'function' ? api.current() || null : null;
+  }
+
+  // openLockedAction runs the one button that opens a lock. "hq_card" opens the
+  // assistant drawer and expands its Home base card, including one deferred with
+  // Not now. The widget decides nothing about locking: it only carries the fix.
+  function openLockedAction(action) {
+    if (!action || action.kind !== 'hq_card') return;
+    const panel = window.PersonalAssistantPanel;
+    if (!panel || typeof panel.open !== 'function') {
+      window.location.assign('/?panel=today');
+      return;
+    }
+    if (!panel.open(document.getElementById('personalAssistantLauncher'))) return;
+    window.PersonalAssistantToday?.expand?.();
+    window.PersonalAssistantHQCard?.expand?.();
   }
 
   // openFolderChooser opens the assistant drawer and its chooser: the same two

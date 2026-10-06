@@ -233,9 +233,58 @@ test('firstMissionView: Ready shows the first unresolved mission with its own ac
     actionLabel: 'Start',
     actionURL: '/mission-2',
     inPlace: false,
+    locked: false,
+    lockedAction: null,
     showAction: true,
     showSkip: true
   });
+});
+
+const hqLock = { kind: 'hq_card', label: 'Build My HQ' };
+
+test('firstMissionView: a locked mission with a fix shows Locked and only that fix', () => {
+  const view = firstMissionView({
+    missions: [
+      quest({ id: 'm1', order: 1, status: 'completed' }),
+      quest({
+        id: 'm2',
+        order: 2,
+        status: 'available',
+        optional: true,
+        locked: true,
+        locked_reason: 'Build your HQ first',
+        locked_action: hqLock,
+        action_url: '/?quest=show-folder'
+      }),
+      quest({ id: 'm3', order: 3, status: 'available', optional: true })
+    ]
+  });
+  assert.equal(view.questID, 'm2');
+  assert.equal(view.locked, true);
+  assert.equal(view.statusLabel, 'Locked');
+  assert.deepEqual(view.lockedAction, hqLock);
+  assert.equal(view.actionLabel, 'Build My HQ');
+  // Never the chooser while locked; and no Skip.
+  assert.equal(view.actionURL, '/?panel=today');
+  assert.equal(view.showAction, true);
+  assert.equal(view.showSkip, false);
+  assert.equal(view.inProgress, false);
+  assert.match(view.why, /HQ/);
+});
+
+test('firstMissionView: a locked mission with no fix is passed by, and unlocks the card', () => {
+  const missions = [
+    quest({ id: 'm1', order: 1, status: 'completed' }),
+    quest({ id: 'm2', order: 2, status: 'available', locked: true, locked_reason: 'Wait' }),
+    quest({ id: 'm3', order: 3, status: 'available' })
+  ];
+  assert.equal(firstMissionView({ missions }).questID, 'm3');
+  // Once the lock is gone the same mission is an ordinary Ready card.
+  missions[1] = quest({ id: 'm2', order: 2, status: 'available', action_url: '/go' });
+  const open = firstMissionView({ missions });
+  assert.equal(open.questID, 'm2');
+  assert.equal(open.locked, false);
+  assert.equal(open.statusLabel, 'Ready');
 });
 
 test('firstMissionView: the first-look action runs in place, and only while open', () => {
