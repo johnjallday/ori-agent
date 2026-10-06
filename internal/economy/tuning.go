@@ -51,14 +51,14 @@ const (
 
 // CraftPerStarterQuest is what one onboarding quest pays.
 //
-// Only the four visible starter missions pay Craft. Retired quests still
+// Only the five visible starter missions pay Craft. Retired quests still
 // record the user's actions, but no longer mint rewards from hidden objectives.
-// Four missions at 7 each cover a first Farm's 25 Craft cost.
+// Five missions at 7 each pay 35, which covers a first Farm's 25 Craft cost.
 const CraftPerStarterQuest int64 = 7
 
 // starterQuests are the onboarding quests that pay Craft, by quest id.
 //
-// A brand-new install earns nothing from first-run backfill; the four
+// A brand-new install earns nothing from first-run backfill; the five
 // user-visible missions now cover a first Farm without rewarding any of the
 // retired built-in quests. Meet your assistant is the first visible reward.
 //
@@ -66,10 +66,11 @@ const CraftPerStarterQuest int64 = 7
 // this map does not name simply pays nothing, so a renamed or retired quest
 // degrades to silence rather than to a crash.
 var starterQuests = map[string]int64{
-	"pa-meet-assistant": CraftPerStarterQuest,
-	"pa-show-folder":    CraftPerStarterQuest,
-	"pa-connect-source": CraftPerStarterQuest,
-	"pa-first-brief":    CraftPerStarterQuest,
+	"pa-meet-assistant":    CraftPerStarterQuest,
+	"pa-show-folder":       CraftPerStarterQuest,
+	"pa-folder-first-look": CraftPerStarterQuest,
+	"pa-connect-source":    CraftPerStarterQuest,
+	"pa-first-brief":       CraftPerStarterQuest,
 }
 
 // StarterQuestCraft reports what completing a quest pays, and whether it pays at

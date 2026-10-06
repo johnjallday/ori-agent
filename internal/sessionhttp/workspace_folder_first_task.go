@@ -8,6 +8,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -22,18 +23,17 @@ import (
 // start this task. The condition here is the right one for a first look at the
 // folder: the wizard, if there is one, has finished.
 const (
-	folderFirstTaskTemplateID = "folder-digest"
+	folderFirstTaskTemplateID = personalassistant.FolderFirstTaskTemplateID
 	// taskContextFolderFirstTaskConsumedAt is stamped, once, in the same store
 	// update that decides to start the task. A failed start keeps it: the task
 	// stays pending and manually startable, and is never retried automatically.
-	taskContextFolderFirstTaskConsumedAt = "folder_first_task_autostart_consumed_at"
+	taskContextFolderFirstTaskConsumedAt = personalassistant.FolderFirstTaskConsumedKey
 )
 
 // isFolderFirstTask reports whether a task is the starter task a shown folder's
 // workspace was seeded with.
 func isFolderFirstTask(task *agentworkspace.Task) bool {
-	return task != nil && task.Context[taskContextTemplateID] == folderFirstTaskTemplateID &&
-		task.Context[taskContextTemplateStarterTask] == true
+	return personalassistant.IsFolderFirstTask(task)
 }
 
 // canonicalWorkspace reads the workspace's canonical record, which carries the

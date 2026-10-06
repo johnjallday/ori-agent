@@ -94,16 +94,13 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 				Kind: "folder", Name: ref.Name, Detail: "linked as primary",
 			})
 		}
-	} else if locator, err := workspace.GetProjectEntryLocator(ws.SharedData); err == nil && locator != nil &&
-		locator.Kind == workspace.ProjectEntryDirectoryReference {
+	} else if name, _ := linkedFolderName(ws); name != "" {
 		// A project the setup journey connected is linked through its project
 		// entry rather than a primary directory. The row names the folder, never
 		// its path.
-		if ref, err := ws.GetDirectoryReference(locator.DirectoryReferenceID); err == nil && ref != nil && strings.TrimSpace(ref.Name) != "" {
-			rows = append(rows, personalassistant.FolderReceiptRow{
-				Kind: "folder", Name: ref.Name, Detail: "linked where it is",
-			})
-		}
+		rows = append(rows, personalassistant.FolderReceiptRow{
+			Kind: "folder", Name: name, Detail: "linked where it is",
+		})
 	}
 	if provenance := ws.GetTemplateProvenance(); provenance != nil && provenance.TemplateID != "" {
 		rows = append(rows, personalassistant.FolderReceiptRow{

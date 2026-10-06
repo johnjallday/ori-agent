@@ -501,11 +501,13 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 			ActionURL: q.ActionURL, ActionLabel: q.ActionLabel, Optional: q.Optional,
 			Featured: q.Featured, Order: q.Order,
 		}
-		if q.Resolve != nil {
-			applyPresentation(&qv, q.Resolve(mission), resolved)
-		}
 		if !resolved {
 			qv.Locked, qv.LockedReason = e.lockLocked(q)
+		}
+		if q.Resolve != nil {
+			// A locked mission cannot be acted on yet, so advice about acting
+			// on it (the hint, "in progress") waits with it.
+			applyPresentation(&qv, q.Resolve(mission), resolved || qv.Locked)
 		}
 		if e.rewards != nil {
 			if amount, ok := e.rewards(q.ID); ok {
@@ -588,16 +590,17 @@ func (e *Engine) lockLocked(q Quest) (bool, string) {
 
 // applyPresentation overlays a mission's resolved copy onto its view. Empty
 // strings keep the static value. InProgress and Hint apply only while the quest
-// is unresolved: a completed or skipped mission is never "in progress", and
-// advice about finishing it no longer applies.
-func applyPresentation(qv *QuestView, p MissionPresentation, resolved bool) {
+// is open, meaning neither resolved nor locked: a completed or skipped mission
+// is never "in progress", advice about finishing it no longer applies, and a
+// mission waiting on another has nothing to act on yet.
+func applyPresentation(qv *QuestView, p MissionPresentation, closed bool) {
 	if p.Title != "" {
 		qv.Title = p.Title
 	}
 	if p.Why != "" {
 		qv.Why = p.Why
 	}
-	if hint := strings.TrimSpace(p.Hint); hint != "" && !resolved {
+	if hint := strings.TrimSpace(p.Hint); hint != "" && !closed {
 		qv.Why = strings.TrimSpace(qv.Why + " " + hint)
 	}
 	if p.ActionURL != "" {
@@ -606,5 +609,5 @@ func applyPresentation(qv *QuestView, p MissionPresentation, resolved bool) {
 	if p.ActionLabel != "" {
 		qv.ActionLabel = p.ActionLabel
 	}
-	qv.InProgress = p.InProgress && !resolved
+	qv.InProgress = p.InProgress && !closed
 }

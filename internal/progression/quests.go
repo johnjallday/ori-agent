@@ -33,11 +33,17 @@ const (
 	// longer in the graph, but persisted completions still carry the ID and
 	// grandfather the new mission.
 	TidyDownloadsQuestID = "pa-tidy-downloads"
-	// ShowFolderQuestID is Mission 03: the user showed the assistant a folder
+	// ShowFolderQuestID is Mission 02: the user showed the assistant a folder
 	// and accepted what it offered — a workspace linked to the folder, or a
 	// tidy through File Janitor. It completes from the server-observed
 	// outcome, never from a browser claim.
 	ShowFolderQuestID = "pa-show-folder"
+	// FolderFirstLookQuestID is Mission 03: the assistant took its one
+	// read-only first look at a folder the user showed it and reported back.
+	// It completes when that task finishes with a result, observed on the
+	// server, never from a browser claim. This is the mission that pays for
+	// the folder story, so it pays on what the agent did, not on the setup.
+	FolderFirstLookQuestID = "pa-folder-first-look"
 	// ConnectSourceQuestID is Mission 04: one source connected, chosen from the
 	// hire's focus areas.
 	ConnectSourceQuestID = "pa-connect-source"
@@ -59,6 +65,11 @@ const TidyDownloadsActionURL = "/?quest=tidy-downloads"
 
 // ShowFolderActionURL opens Home with the assistant's folder chooser.
 const ShowFolderActionURL = "/?quest=show-folder"
+
+// FolderFirstLookActionURL is Mission 03's in-place action: on Home the Quests
+// card starts (or retries) the first look without a page change, and a plain
+// navigation to it opens the assistant drawer on the folder's receipt.
+const FolderFirstLookActionURL = "/?quest=folder-first-look"
 
 // PlanFirstDayActionURL opens the existing first-assignment flow, the plan
 // branch of Mission 04.
@@ -84,12 +95,57 @@ type MissionContext struct {
 	// when there is no Personal HQ. The server passes it in so this package
 	// does not need to know how a workspace route is built.
 	DailyBriefURL string
+	// FolderFirstTask is the first look of the folder workspace the user most
+	// recently set up from the assistant's offer. The zero value means there is
+	// none.
+	FolderFirstTask MissionFirstTask
 }
 
 // MissionWorkspace identifies a workspace a mission points at.
 type MissionWorkspace struct {
 	Slug        string
 	WizardReady bool
+}
+
+// MissionFirstTaskState is where a folder's first look stands.
+type MissionFirstTaskState string
+
+const (
+	// MissionFirstTaskNone means there is no folder workspace with a first
+	// look. The empty string means the same.
+	MissionFirstTaskNone MissionFirstTaskState = "none"
+	// MissionFirstTaskSeeded means the task waits for its one start.
+	MissionFirstTaskSeeded MissionFirstTaskState = "seeded"
+	// MissionFirstTaskRunning means the agent is looking now.
+	MissionFirstTaskRunning MissionFirstTaskState = "running"
+	// MissionFirstTaskWaiting means the look paused to ask the user something.
+	MissionFirstTaskWaiting MissionFirstTaskState = "waiting"
+	// MissionFirstTaskFinished means a look finished with a result.
+	MissionFirstTaskFinished MissionFirstTaskState = "finished"
+	// MissionFirstTaskFailed means the last attempt left no result.
+	MissionFirstTaskFailed MissionFirstTaskState = "failed"
+)
+
+// MissionFirstTask is what Mission 03 resolves its card from. Every route is
+// built by the server from the workspace's slug.
+type MissionFirstTask struct {
+	WorkspaceName  string
+	WorkspaceRoute string
+	// FolderName is the base name of the linked folder, never a path.
+	FolderName string
+	State      MissionFirstTaskState
+	// CanStart is true when a click would start the seeded task now. Blocked
+	// is the one sentence that says why a seeded task cannot start, or what a
+	// waiting one needs.
+	CanStart bool
+	Blocked  string
+	// BlockedURL and BlockedLabel point at the fix when it is not in the
+	// workspace (a missing model is fixed in Settings). Empty opens the
+	// workspace.
+	BlockedURL   string
+	BlockedLabel string
+	// TicketRoute opens the first look's full report.
+	TicketRoute string
 }
 
 // MissionPresentation is what a mission's Resolve returns. An empty string
@@ -233,14 +289,15 @@ func PersonalAssistantQuests() []Quest { return PersonalAssistantGraph().Quests 
 
 // PersonalAssistantGraph returns the personal-assistant cohort's graph.
 //
-// Tier 1, "Starter", presents four missions: Meet your assistant, Show your
-// assistant a folder, Connect one source, Read your first Daily Brief. Every
-// other quest is retired from presentation, but still detects and records real
-// actions and backfill, preserving existing installs' history.
+// Tier 1, "Starter", presents five missions: Meet your assistant, Show your
+// assistant a folder, See what your assistant found, Connect one source, Read
+// your first Daily Brief. Every other quest is retired from presentation, but
+// still detects and records real actions and backfill, preserving existing
+// installs' history.
 //
 // Two built-in quests are dropped from this graph only. Plan my first day is
 // now one branch of Connect one source, and Create your first workspace is
-// what Mission 03 does. Their persisted completions stay harmlessly in place.
+// what Mission 02 does. Their persisted completions stay harmlessly in place.
 // BuiltinGraph is unchanged for any non-cohort caller.
 func PersonalAssistantGraph() Graph {
 	builtin := map[string]Quest{}
@@ -294,7 +351,25 @@ func PersonalAssistantGraph() Graph {
 			},
 		},
 		{
-			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
+			ID: FolderFirstLookQuestID, Tier: 1, Featured: true, Order: 3, Optional: true,
+			// Waits on the folder itself: there is nothing to look at before
+			// one is shown. A skipped Show a folder keeps it locked.
+			LockedUntil: ShowFolderQuestID,
+			Title:       "See what your assistant found",
+			Why:         folderFirstLookWhy,
+			// The static action is the fallback for a user with no folder
+			// workspace yet (a tidy completes Show a folder without one):
+			// showing a project folder is what seeds a first look.
+			ActionURL:   ShowFolderActionURL,
+			ActionLabel: "Show a folder",
+			// No Match: the task-completed event does not say which task
+			// finished, so the server checks the task and completes it.
+			// Installs that already ran a first look are grandfathered.
+			Satisfied: func(s Snapshot) bool { return s.FolderFirstTaskFinished },
+			Resolve:   resolveFolderFirstLook,
+		},
+		{
+			ID: ConnectSourceQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
 			LockedUntil: MeetAssistantQuestID,
 			// The static copy is the plan branch, the fallback for every focus.
 			Title:       "Plan my first day",
@@ -312,7 +387,7 @@ func PersonalAssistantGraph() Graph {
 			Resolve: resolveConnectSource,
 		},
 		{
-			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 4, Optional: true,
+			ID: FirstBriefQuestID, Tier: 1, Featured: true, Order: 5, Optional: true,
 			LockedUntil: MeetAssistantQuestID,
 			Title:       "Read your first Daily Brief",
 			Why:         firstBriefWhy,
@@ -342,6 +417,69 @@ func PersonalAssistantGraph() Graph {
 	names[1] = "Starter"
 	names[2] = "Daily loop"
 	return Graph{Quests: quests, TierNames: names, TotalTiers: 1}
+}
+
+// folderFirstLookWhy is Mission 03's static why line.
+const folderFirstLookWhy = "Your assistant takes one read-only look at the folder and reports back. This is where you see what it can do."
+
+// resolveFolderFirstLook presents Mission 03 from where the first look of the
+// user's latest folder workspace stands. It never starts anything: Start first
+// look is a click, because that is when model tokens are spent.
+func resolveFolderFirstLook(ctx MissionContext) MissionPresentation {
+	task := ctx.FolderFirstTask
+	name := strings.TrimSpace(task.WorkspaceName)
+	route := strings.TrimSpace(task.WorkspaceRoute)
+	if name == "" || route == "" {
+		// No folder workspace to point at. The quest's static copy offers the
+		// chooser, since a project folder is what seeds a first look.
+		return MissionPresentation{Hint: "Show it a project folder to start."}
+	}
+	open := MissionPresentation{ActionURL: route, ActionLabel: "Open " + name}
+	switch task.State {
+	case MissionFirstTaskSeeded:
+		if task.CanStart {
+			return MissionPresentation{
+				ActionURL:   FolderFirstLookActionURL,
+				ActionLabel: "Start first look",
+				Hint:        "Spends model tokens for one read-only look at the folder.",
+			}
+		}
+		open.Why = strings.TrimSpace(task.Blocked)
+		if url := strings.TrimSpace(task.BlockedURL); url != "" {
+			open.ActionURL = url
+			open.ActionLabel = strings.TrimSpace(task.BlockedLabel)
+		}
+		return open
+	case MissionFirstTaskWaiting:
+		// The agent asked something mid-look. The question is answered in the
+		// workspace, so that is where the card sends the user.
+		open.Why = strings.TrimSpace(task.Blocked)
+		return open
+	case MissionFirstTaskRunning:
+		folder := strings.TrimSpace(task.FolderName)
+		if folder == "" {
+			folder = name
+		}
+		open.Why = "Working on " + folder + "…"
+		open.InProgress = true
+		return open
+	case MissionFirstTaskFailed:
+		return MissionPresentation{
+			Why:         "The first look did not finish. Try again.",
+			ActionURL:   FolderFirstLookActionURL,
+			ActionLabel: "Try again",
+		}
+	case MissionFirstTaskFinished:
+		// Reached only while the mission is open with a finished look behind
+		// it (after Reset Getting Started). Another folder is what completes
+		// it again.
+		return MissionPresentation{
+			Why:         "Your assistant already looked at " + name + ". Show it another folder to see what it finds there.",
+			ActionLabel: "Show another folder",
+		}
+	default:
+		return MissionPresentation{Hint: "Show it a project folder to start."}
+	}
 }
 
 // firstBriefWhy is Mission 05's static why line.

@@ -29,6 +29,8 @@
  *            then requests a brief and checks Mission 04 completes on Today.
  *   states   The card at rest: every mission deferred reads Saved for later with
  *            Resume, then a served brief turns Mission 04 Complete.
+ *   board    The Quests card as the sandbox stands, at 1280px and 400px. It
+ *            drives nothing; pass --name=<prefix> to name the screenshots.
  *
  * Every stage prints the missions it observed and any console errors or failed
  * requests, so a quietly broken page does not pass as a clean demo.
@@ -544,8 +546,27 @@ async function statesStage() {
   await page.close();
 }
 
+// boardStage photographs the Quests card as the sandbox stands, at desktop and
+// phone width. It changes nothing: the missions are whatever the server says.
+async function boardStage() {
+  const name = flag('name') || 'board';
+  for (const [width, height] of [
+    [1280, 800],
+    [400, 860]
+  ]) {
+    const page = await newPage(width, height);
+    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+    await missions(page);
+    await openQuests(page);
+    await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+    await shot(page, `${name}-${width}`);
+    await page.close();
+  }
+}
+
 try {
   if (stage === 'card') await cardStage();
+  else if (stage === 'board') await boardStage();
   else if (stage === 'states') await statesStage();
   else if (stage === 'folder') await folderStage();
   else if (stage === 'email') await emailStage();
