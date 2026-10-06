@@ -32,6 +32,8 @@ updates:
       - dependency-type: "direct"
       - dependency-type: "indirect"
     # Ignore specific dependencies if needed
-    # ignore:
-    #   - dependency-name: "github.com/example/package"
-    #     versions: ["1.x"]
+    ignore:
+      # v1.60.x is the prime suspect for the v0.0.119-rc.1 macOS DMG build
+      # hang (goreleaser 1h timeout). Remove once the cause is confirmed.
+      - dependency-name: "modernc.org/sqlite"
+        update-types: ["version-update:semver-minor"]
