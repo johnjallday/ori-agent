@@ -28,7 +28,7 @@ require (
 	golang.org/x/text v0.42.0
 	google.golang.org/api v0.300.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.60.1
+	modernc.org/sqlite v1.59.0
 )
 
 require (
