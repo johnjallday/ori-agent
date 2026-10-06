@@ -384,7 +384,7 @@ func (h *Handler) staffOpenedSong(ctx context.Context, home *workspace.Workspace
 }
 
 // seedOpenedSongTask gives the song the same first read-only task a folder's
-// project gets; it starts on the first open of the workspace. Seeding skips a
+// project gets; the user starts it with Start first look. Seeding skips a
 // workspace that already has it, so a retry adds nothing.
 func (h *Handler) seedOpenedSongTask(songID, format string) bool {
 	shape := folderdigest.Shape("")

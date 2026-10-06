@@ -108,6 +108,10 @@ export function missionKicker(order) {
 // the card rests on the last one. If that last one was only deferred, the card
 // keeps its Resume action, because the checklist beneath never repeats the
 // mission on the card and it would otherwise be unreachable.
+// FIRST_LOOK_ACTION_URL is the prefix of the server-supplied action that runs in
+// place (Start first look, Try again) instead of navigating.
+export const FIRST_LOOK_ACTION_URL = '/?quest=folder-first-look';
+
 export function firstMissionView(status) {
   const missions = Array.isArray(status?.missions) ? status.missions : [];
   if (!missions.length || status?.all_complete) return { visible: false };
@@ -138,6 +142,8 @@ export function firstMissionView(status) {
           : 'Ready',
     actionLabel: skipped ? 'Resume quest' : quest.action_label || 'Start',
     actionURL,
+    // An action the card performs itself, with no page change.
+    inPlace: !completed && !skipped && actionURL.indexOf(FIRST_LOOK_ACTION_URL) === 0,
     showAction: !completed && !!actionURL,
     showSkip: !!quest.optional && !completed && !skipped
   };
@@ -472,6 +478,19 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     if (action) {
       action.hidden = !view.showAction;
       action.href = view.actionURL;
+      // Start first look acts in place: tokens are spent on this click, and the
+      // card follows the run through the folder module's announcements.
+      action.onclick = view.inPlace
+        ? event => {
+            event.preventDefault();
+            const folder = window.PersonalAssistantFolder;
+            if (folder && typeof folder.startFirstLook === 'function') {
+              void folder.startFirstLook().then(() => lastStatus && renderFirstMission(lastStatus));
+            } else {
+              window.location.assign('/?panel=today');
+            }
+          }
+        : null;
     }
     if (actionLabel) actionLabel.textContent = view.actionLabel;
     if (skip) {

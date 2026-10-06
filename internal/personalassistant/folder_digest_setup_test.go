@@ -363,7 +363,7 @@ func (f *fakeFirstTaskSeeder) SeedFirstTask(_ context.Context, req FolderFirstTa
 	if f.err != nil {
 		return FolderReceiptRow{}, f.err
 	}
-	return FolderReceiptRow{Kind: "task", Name: "Summarize the session", Detail: "Starts when you open it"}, nil
+	return FolderReceiptRow{Kind: "task", Name: "Summarize the session", Detail: "Starts when you press Start first look"}, nil
 }
 
 func (f *fakeFirstTaskSeeder) callCount() int {
@@ -383,7 +383,7 @@ func TestFolderSetup_AVerifiedProjectGetsItsFirstTaskOnTheReceipt(t *testing.T) 
 	waitFor(t, "the offer to resolve", func() bool { return f.stored(t).Status == FolderOfferResolved })
 	stored := f.stored(t)
 	rows := stored.Outcome.Receipt
-	if len(rows) != 1 || rows[0].Kind != "task" || rows[0].Detail != "Starts when you open it" {
+	if len(rows) != 1 || rows[0].Kind != "task" || rows[0].Detail != "Starts when you press Start first look" {
 		t.Fatalf("receipt = %+v", rows)
 	}
 	if seeder.callCount() != 1 || seeder.calls[0].WorkspaceID != "quest-project" || seeder.calls[0].UserID != "local" {

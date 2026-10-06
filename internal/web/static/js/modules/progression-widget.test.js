@@ -232,9 +232,37 @@ test('firstMissionView: Ready shows the first unresolved mission with its own ac
     statusLabel: 'Ready',
     actionLabel: 'Start',
     actionURL: '/mission-2',
+    inPlace: false,
     showAction: true,
     showSkip: true
   });
+});
+
+test('firstMissionView: the first-look action runs in place, and only while open', () => {
+  const open = firstMissionView({
+    missions: [
+      quest({
+        id: 'm',
+        order: 3,
+        status: 'available',
+        action_url: '/?quest=folder-first-look',
+        action_label: 'Start first look'
+      })
+    ]
+  });
+  assert.equal(open.inPlace, true);
+  assert.equal(open.actionLabel, 'Start first look');
+  const done = firstMissionView({
+    missions: [
+      quest({ id: 'm', order: 3, status: 'completed', action_url: '/?quest=folder-first-look' })
+    ],
+    all_complete: false
+  });
+  assert.equal(done.inPlace, false);
+  const nav = firstMissionView({
+    missions: [quest({ id: 'm', order: 1, status: 'available', action_url: '/x' })]
+  });
+  assert.equal(nav.inPlace, false);
 });
 
 test('firstMissionView: In progress comes from the server, with its resolved action', () => {

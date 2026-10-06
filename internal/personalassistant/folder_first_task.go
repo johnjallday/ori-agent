@@ -19,6 +19,10 @@ const (
 	// click-to-start was spent. A start that then failed keeps the marker and
 	// leaves the task pending, to be run again by hand.
 	FolderFirstTaskConsumedKey = "folder_first_task_autostart_consumed_at"
+	// FolderFirstTaskStartFailedKey marks, in the task's context, a spent start
+	// that the executor refused. Without it a refused start would read as
+	// "starting" until the grace ran out.
+	FolderFirstTaskStartFailedKey = "folder_first_task_start_failed_at"
 
 	folderFirstTaskContextTemplateID = "template_id"
 	folderFirstTaskContextStarter    = "template_starter_task"
@@ -86,6 +90,9 @@ type FolderFirstTaskView struct {
 	// sentence; both are empty when there is nothing to explain.
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
+	// Detail is what the receipt's task row says now. The receipt stored on an
+	// offer is from the moment of setup, so the card shows this instead.
+	Detail string `json:"detail,omitempty"`
 }
 
 // IsFolderFirstTask reports whether a task is the first look a shown folder's
@@ -115,15 +122,26 @@ func FolderFirstTaskFinishedWithResult(task *workspace.Task) bool {
 	return FolderFirstTaskStateOf(task) == FolderFirstTaskFinished
 }
 
-// FolderFirstTaskStateOf reads a first look's state from the task record.
+// folderFirstTaskStartGrace is how long a spent start may sit on a task that
+// has not begun before it reads as a start that failed. A start is handed to
+// the executor and returns at once; the task turns In Progress a moment later.
+const folderFirstTaskStartGrace = 30 * time.Second
+
+// FolderFirstTaskStateOf reads a first look's state from the task record, as of
+// now.
+func FolderFirstTaskStateOf(task *workspace.Task) FolderFirstTaskState {
+	return FolderFirstTaskStateAt(task, time.Now())
+}
+
+// FolderFirstTaskStateAt reads a first look's state from the task record.
 //
 // A successful run leaves the ticket in Review (or Done once accepted) with a
 // result. A failed or timed-out run leaves it In Progress with an error, which
 // is "failed" here, not "running"; so does a run that paused to ask the user
 // something, which is "waiting". A task still waiting whose one start was
-// already spent is a start that failed. A cancelled task reads as none: the
-// user put it away.
-func FolderFirstTaskStateOf(task *workspace.Task) FolderFirstTaskState {
+// spent is starting for a moment and, past that, a start that failed. A
+// cancelled task reads as none: the user put it away.
+func FolderFirstTaskStateAt(task *workspace.Task, now time.Time) FolderFirstTaskState {
 	if !IsFolderFirstTask(task) {
 		return FolderFirstTaskNone
 	}
@@ -144,11 +162,66 @@ func FolderFirstTaskStateOf(task *workspace.Task) FolderFirstTaskState {
 	case workspace.TicketStateCancelled:
 		return FolderFirstTaskNone
 	default:
-		if _, consumed := task.Context[FolderFirstTaskConsumedKey]; consumed {
+		spent, consumed := task.Context[FolderFirstTaskConsumedKey]
+		if !consumed {
+			return FolderFirstTaskSeeded
+		}
+		if _, refused := task.Context[FolderFirstTaskStartFailedKey]; refused {
 			return FolderFirstTaskFailed
 		}
-		return FolderFirstTaskSeeded
+		// The marker is the time the start was spent. One that cannot be read
+		// is treated as old.
+		stamp, _ := spent.(string)
+		if at, err := time.Parse(time.RFC3339, stamp); err == nil && !at.After(now) && now.Sub(at) < folderFirstTaskStartGrace {
+			return FolderFirstTaskRunning
+		}
+		return FolderFirstTaskFailed
 	}
+}
+
+// FolderFirstTaskRowDetail is what the receipt's task row says about a first
+// look (FR14). result is the look's result, for a finished one.
+func FolderFirstTaskRowDetail(state FolderFirstTaskState, canStart bool, result string) string {
+	switch state {
+	case FolderFirstTaskSeeded:
+		if canStart {
+			return "Starts when you press Start first look"
+		}
+		return "Ready to start"
+	case FolderFirstTaskRunning:
+		return "Running…"
+	case FolderFirstTaskWaiting:
+		return "Waiting for your answer"
+	case FolderFirstTaskFinished:
+		if line := folderFirstTaskFirstLine(result); line != "" {
+			return "Done · " + line
+		}
+		return "Done"
+	case FolderFirstTaskFailed:
+		return "Did not finish"
+	default:
+		return ""
+	}
+}
+
+// folderFirstTaskRowLineMax bounds the result line shown on the receipt row.
+const folderFirstTaskRowLineMax = 120
+
+// folderFirstTaskFirstLine is the first line of a result that says something,
+// without Markdown heading or list marks, trimmed for a row.
+func folderFirstTaskFirstLine(result string) string {
+	for _, line := range strings.Split(result, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#*-> "))
+		if line == "" {
+			continue
+		}
+		runes := []rune(strings.Join(strings.Fields(line), " "))
+		if len(runes) <= folderFirstTaskRowLineMax {
+			return string(runes)
+		}
+		return strings.TrimRight(string(runes[:folderFirstTaskRowLineMax-1]), " ") + "…"
+	}
+	return ""
 }
 
 // FolderFirstTaskFailureReason says which kind of failure a failed first look

@@ -146,6 +146,7 @@ func (b *ServerBuilder) folderFirstTaskView(ctx context.Context, workspaceID str
 		view.CanStart = false
 		view.Reason = personalassistant.FolderFirstTaskReasonNoModel
 		view.Message = personalassistant.FolderFirstTaskMessage(view.Reason, view.WorkspaceName)
+		view.Detail = personalassistant.FolderFirstTaskRowDetail(view.State, false, "")
 	}
 	return view, true
 }

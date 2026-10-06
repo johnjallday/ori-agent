@@ -54,6 +54,9 @@ func TestFolderFirstTaskView_FollowsTheTaskThroughItsLife(t *testing.T) {
 	if view.Agent == "" || view.StartedAt != nil || view.FinishedAt != nil || view.ResultExcerpt != "" {
 		t.Fatalf("seeded view carries run data: %+v", view)
 	}
+	if view.Detail != "Starts when you press Start first look" {
+		t.Fatalf("seeded row detail = %q", view.Detail)
+	}
 	// Browser routes are built from the folder slug, never the internal id.
 	if view.WorkspaceRoute != "/workspaces/thesis-draft" || view.TicketRoute != "/workspaces/thesis-draft?ticket="+task.ID {
 		t.Fatalf("routes = %q %q", view.WorkspaceRoute, view.TicketRoute)
@@ -128,15 +131,25 @@ func TestFolderFirstTaskView_SaysWhyAStartOrARunDidNotHappen(t *testing.T) {
 		t.Fatalf("endpoint and view disagree on the wizard workspace: %v", got)
 	}
 
-	// The one start was spent and the run never began: a start that failed.
+	// The click was just spent: the run is handed to the executor and the task
+	// turns In Progress a moment later. Until then it reads as running, never
+	// as a failure.
 	stalled := firstLookWorkspace(t, handler, `{"name":"Stalled","template_id":"starter-template"}`)
 	editFirstLook(t, handler, stalled, func(task *agentworkspace.Task) {
 		task.Context[taskContextFolderFirstTaskConsumedAt] = time.Now().UTC().Format(time.RFC3339)
 	})
 	view, ok = handler.FolderFirstTaskView(ctx, stalled)
+	if !ok || view.State != personalassistant.FolderFirstTaskRunning || view.CanStart || view.Message != "" || view.Detail != "Running…" {
+		t.Fatalf("starting view = %+v ok=%t", view, ok)
+	}
+	// Minutes later the run never began: a start that failed.
+	editFirstLook(t, handler, stalled, func(task *agentworkspace.Task) {
+		task.Context[taskContextFolderFirstTaskConsumedAt] = time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339)
+	})
+	view, ok = handler.FolderFirstTaskView(ctx, stalled)
 	if !ok || view.State != personalassistant.FolderFirstTaskFailed || view.CanStart ||
 		view.Reason != personalassistant.FolderFirstTaskReasonStartFailed ||
-		view.Message != "The first look could not start. Try again." {
+		view.Message != "The first look could not start. Try again." || view.Detail != "Did not finish" {
 		t.Fatalf("stalled view = %+v ok=%t", view, ok)
 	}
 

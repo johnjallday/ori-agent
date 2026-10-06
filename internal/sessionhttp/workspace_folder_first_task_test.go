@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -109,6 +111,14 @@ func TestFolderFirstTaskIsNeverRetriedAfterAFailedStart(t *testing.T) {
 
 	if first := postFolderFirstTaskStart(t, handler, wsID); first["started"] != false || first["reason"] != "start_failed" {
 		t.Fatalf("first open: %v", first)
+	}
+	// The refusal is known at once: Home reads "could not start", not a look
+	// that is still starting.
+	view, ok := handler.FolderFirstTaskView(context.Background(), wsID)
+	if !ok || view.State != personalassistant.FolderFirstTaskFailed ||
+		view.Reason != personalassistant.FolderFirstTaskReasonStartFailed ||
+		view.Message != "The first look could not start. Try again." {
+		t.Fatalf("view after a refused start = %+v ok=%t", view, ok)
 	}
 	if second := postFolderFirstTaskStart(t, handler, wsID); second["reason"] != "already_consumed" {
 		t.Fatalf("a failed start must not retry: %v", second)
@@ -249,7 +259,8 @@ func TestFolderFirstTaskHoldsBackOnlyWhileTheSetupWizardIsAboutToOpen(t *testing
 	}
 }
 
-// The receipt promises "starts when you open it" only when that is true.
+// The receipt promises a start on the click only when that is true, and says
+// where the look stands once it has been asked for (FR14).
 func TestFolderFirstTaskReceiptPromisesOnlyWhatWillHappen(t *testing.T) {
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
@@ -274,12 +285,21 @@ func TestFolderFirstTaskReceiptPromisesOnlyWhatWillHappen(t *testing.T) {
 	_, resp := postCreateWorkspace(t, handler, `{"name":"Assigned","template_id":"starter-template"}`)
 	assigned := resp["folder"].(map[string]any)["id"].(string)
 	seedFolderFirstTask(t, handler, assigned)
-	if got := taskDetail(assigned); got != "Starts when you open it" {
+	if got := taskDetail(assigned); got != "Starts when you press Start first look" {
 		t.Fatalf("an assigned task with no wizard = %q", got)
 	}
+	// The click was spent and the run is starting: no second start is promised.
 	postFolderFirstTaskStart(t, handler, assigned)
-	if got := taskDetail(assigned); got != "Ready to start" {
-		t.Fatalf("a task already consumed must not promise another start: %q", got)
+	if got := taskDetail(assigned); got != "Running…" {
+		t.Fatalf("a task just started = %q", got)
+	}
+	// The run finished: the row quotes the first line of what the agent said.
+	editFirstLook(t, handler, assigned, func(task *agentworkspace.Task) {
+		task.Status, task.TicketState = agentworkspace.TaskStatusCompleted, agentworkspace.TicketStateReview
+		task.Result = "Three drafts.\n\nThe newest is chapter four."
+	})
+	if got := taskDetail(assigned); got != "Done · Three drafts." {
+		t.Fatalf("a finished task = %q", got)
 	}
 
 	_, resp = postCreateWorkspace(t, handler, `{"name":"Nobody","template_id":"optout-template","create_template_agents":false}`)

@@ -296,6 +296,22 @@ body.home-command-page .home-command-bridge * {
   }
 }
 
+/* What the agent found on its first look: a quoted line under the receipt. */
+.pa-folder__first-look {
+  margin: 0 0 0.75rem;
+  padding: 8px 10px;
+  border-left: 3px solid var(--hc-signal);
+  border-radius: 0 7px 7px 0;
+  background: var(--hc-panel);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.pa-folder__first-look[hidden] {
+  display: none;
+}
+
 /* The one-card setup's plan: one row per consequence, with a state glyph that
    is also said in words for assistive tech (never colour alone). */
 .pa-folder__plan {

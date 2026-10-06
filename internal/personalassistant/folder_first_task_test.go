@@ -3,6 +3,7 @@ package personalassistant
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -68,6 +69,7 @@ func TestFindFolderFirstTask_ReturnsTheWorkspacesOwnTask(t *testing.T) {
 // the ticket to Review with a result, while a failure leaves it In Progress
 // with an error. The first look's state has to read both.
 func TestFolderFirstTaskStateOf(t *testing.T) {
+	now := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
 	inProgress := func(task *workspace.Task) {
 		task.Status, task.TicketState = workspace.TaskStatusInProgress, workspace.TicketStateInProgress
 	}
@@ -102,8 +104,26 @@ func TestFolderFirstTaskStateOf(t *testing.T) {
 		{"run timed out", firstLookTask(func(task *workspace.Task) {
 			task.Status, task.TicketState = workspace.TaskStatusTimeout, workspace.TicketStateInProgress
 		}), FolderFirstTaskFailed, FolderFirstTaskReasonRunFailed},
+		// A start is handed to the executor and returns at once, so for a
+		// moment the task is spent but not yet In Progress: that is starting,
+		// not a failure. Past the grace it is a start that never happened.
+		{"the one start was just spent", firstLookTask(func(task *workspace.Task) {
+			task.Context[FolderFirstTaskConsumedKey] = now.Add(-2 * time.Second).Format(time.RFC3339)
+		}), FolderFirstTaskRunning, ""},
 		{"the one start was spent and nothing ran", firstLookTask(func(task *workspace.Task) {
-			task.Context[FolderFirstTaskConsumedKey] = "2026-10-06T00:00:00Z"
+			task.Context[FolderFirstTaskConsumedKey] = now.Add(-2 * time.Minute).Format(time.RFC3339)
+		}), FolderFirstTaskFailed, FolderFirstTaskReasonStartFailed},
+		// The executor refused the start: that is known at once, not after the
+		// grace.
+		{"the one start was just spent and refused", firstLookTask(func(task *workspace.Task) {
+			task.Context[FolderFirstTaskConsumedKey] = now.Add(-2 * time.Second).Format(time.RFC3339)
+			task.Context[FolderFirstTaskStartFailedKey] = now.Add(-time.Second).Format(time.RFC3339)
+		}), FolderFirstTaskFailed, FolderFirstTaskReasonStartFailed},
+		{"a spent mark that cannot be read", firstLookTask(func(task *workspace.Task) {
+			task.Context[FolderFirstTaskConsumedKey] = true
+		}), FolderFirstTaskFailed, FolderFirstTaskReasonStartFailed},
+		{"a spent mark dated in the future", firstLookTask(func(task *workspace.Task) {
+			task.Context[FolderFirstTaskConsumedKey] = now.Add(time.Hour).Format(time.RFC3339)
 		}), FolderFirstTaskFailed, FolderFirstTaskReasonStartFailed},
 		{"cancelled by the user", firstLookTask(func(task *workspace.Task) {
 			task.Status, task.TicketState = workspace.TaskStatusCancelled, workspace.TicketStateCancelled
@@ -115,7 +135,7 @@ func TestFolderFirstTaskStateOf(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := FolderFirstTaskStateOf(tc.task)
+			got := FolderFirstTaskStateAt(tc.task, now)
 			if got != tc.want {
 				t.Fatalf("state = %q, want %q", got, tc.want)
 			}
@@ -131,6 +151,39 @@ func TestFolderFirstTaskStateOf(t *testing.T) {
 	}
 	if FolderFirstTaskStateOf(nil) != FolderFirstTaskNone {
 		t.Fatal("a nil task has a state")
+	}
+}
+
+// The receipt's task row says where the look stands, in the user's words (FR14).
+func TestFolderFirstTaskRowDetail(t *testing.T) {
+	cases := []struct {
+		name     string
+		state    FolderFirstTaskState
+		canStart bool
+		result   string
+		want     string
+	}{
+		{"seeded and startable", FolderFirstTaskSeeded, true, "", "Starts when you press Start first look"},
+		{"seeded but held back", FolderFirstTaskSeeded, false, "", "Ready to start"},
+		{"running", FolderFirstTaskRunning, false, "", "Running…"},
+		{"waiting on the user", FolderFirstTaskWaiting, false, "", "Waiting for your answer"},
+		{"finished", FolderFirstTaskFinished, false, "Three drafts.\n\nThe newest is chapter four.", "Done · Three drafts."},
+		{"finished with a Markdown heading first", FolderFirstTaskFinished, false, "\n## Summary\n- Three drafts.", "Done · Summary"},
+		{"finished with nothing to quote", FolderFirstTaskFinished, false, " \n", "Done"},
+		{"failed", FolderFirstTaskFailed, false, "", "Did not finish"},
+		{"no look", FolderFirstTaskNone, false, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FolderFirstTaskRowDetail(tc.state, tc.canStart, tc.result); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// A long first line is cut for the row and still fits a receipt row.
+	long := FolderFirstTaskRowDetail(FolderFirstTaskFinished, false, strings.Repeat("résumé ", 60))
+	if !strings.HasPrefix(long, "Done · résumé") || !strings.HasSuffix(long, "…") || utf8.RuneCountInString(long) > 130 {
+		t.Fatalf("long row detail = %q (%d runes)", long, utf8.RuneCountInString(long))
 	}
 }
 

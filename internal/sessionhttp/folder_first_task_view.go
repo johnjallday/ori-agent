@@ -68,6 +68,7 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 		view.Reason = personalassistant.FolderFirstTaskFailureReason(task)
 	}
 	view.Message = personalassistant.FolderFirstTaskMessage(view.Reason, ws.Name)
+	view.Detail = personalassistant.FolderFirstTaskRowDetail(state, view.CanStart, task.Result)
 	return view, true
 }
 

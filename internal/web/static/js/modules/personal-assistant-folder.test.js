@@ -14,6 +14,10 @@ import {
   folderOfferView,
   folderOutcomeNote,
   folderReceiptView,
+  folderFirstLookOpen,
+  folderFirstLookView,
+  firstLookStartMessage,
+  FIRST_LOOK_HINT,
   folderProjectModalOptions,
   portfolioLibraryURL,
   portfolioProviderAction,
@@ -1511,4 +1515,140 @@ test('the module never sends a folder path to the server', () => {
   assert.doesNotMatch(source, /\bpath\s*:/);
   assert.match(source, /JSON\.stringify\(body\)/);
   assert.match(source, /request_id: requestId\(\)/);
+});
+
+// A set-up folder's first look on its Home receipt (FR13-FR18).
+const lookOffer = look => ({
+  id: 'o1',
+  status: 'resolved',
+  subject: { name: 'Thesis' },
+  outcome: {
+    kind: 'project',
+    route: '/workspaces/thesis',
+    receipt: [
+      { kind: 'workspace', name: 'Thesis', route: '/workspaces/thesis' },
+      {
+        kind: 'task',
+        name: 'Summarize the draft',
+        detail: 'Starts when you press Start first look'
+      }
+    ]
+  },
+  first_task: look
+});
+const seeded = { state: 'seeded', can_start: true, workspace_name: 'Thesis' };
+
+test('a seeded first look leads with Start first look and keeps the workspace secondary', () => {
+  const view = folderFirstLookView(seeded, {
+    openLabel: 'Open Thesis',
+    route: '/workspaces/thesis'
+  });
+  assert.equal(view.actions[0].label, 'Start first look');
+  assert.equal(view.actions[0].style, 'primary');
+  assert.equal(view.actions[0].start, true);
+  assert.deepEqual(view.actions[1], {
+    id: 'open',
+    label: 'Open Thesis',
+    style: 'outline',
+    href: '/workspaces/thesis'
+  });
+  assert.equal(view.hint, FIRST_LOOK_HINT);
+  assert.equal(folderFirstLookView(seeded, { busy: true }).actions[0].label, 'Starting…');
+});
+
+test('a first look that cannot start says why and drops the button', () => {
+  const blocked = {
+    state: 'seeded',
+    can_start: false,
+    reason: 'setup_wizard_opening',
+    workspace_name: 'Thesis'
+  };
+  const view = folderFirstLookView(blocked, {
+    openLabel: 'Open Thesis',
+    route: '/workspaces/thesis'
+  });
+  assert.equal(view.message, 'Open Thesis to finish its setup first.');
+  assert.deepEqual(
+    view.actions.map(a => a.id),
+    ['open']
+  );
+  assert.equal(view.actions[0].style, 'primary');
+  const model = folderFirstLookView({ state: 'seeded', can_start: false, reason: 'no_model' }, {});
+  assert.equal(model.message, 'Add a model in Settings to run the first look.');
+  assert.equal(model.actions[0].href, '/settings#system-model');
+});
+
+test('every refusal has its sentence, and an already-going start has none', () => {
+  assert.equal(
+    firstLookStartMessage('unassigned', 'Thesis'),
+    'The first task has no agent yet. Open Thesis to assign one.'
+  );
+  assert.equal(
+    firstLookStartMessage('local_activation_required', 'Thesis'),
+    'Open Thesis and activate it on this computer.'
+  );
+  assert.equal(
+    firstLookStartMessage('start_failed', 'Thesis'),
+    'The first look could not start. Try again.'
+  );
+  assert.equal(firstLookStartMessage('already_consumed', 'Thesis'), '');
+  assert.equal(firstLookStartMessage('not_pending', 'Thesis'), '');
+});
+
+test('a running, waiting, failed and finished look each read as the server says', () => {
+  const ctx = { openLabel: 'Open Thesis', route: '/workspaces/thesis' };
+  assert.equal(folderFirstLookView({ state: 'running' }, ctx).status, 'Running…');
+  assert.equal(
+    folderFirstLookView({ state: 'waiting', message: 'Open Thesis to continue.' }, ctx).message,
+    'Open Thesis to continue.'
+  );
+  const failed = folderFirstLookView({ state: 'failed', task_id: 't' }, ctx);
+  assert.equal(failed.actions[0].label, 'Try again');
+  assert.equal(failed.actions[0].retry, true);
+  const done = folderFirstLookView(
+    {
+      state: 'finished',
+      result_excerpt: 'Three drafts.',
+      ticket_route: '/workspaces/thesis?ticket=t-1'
+    },
+    ctx
+  );
+  assert.equal(done.excerpt, 'Three drafts.');
+  assert.equal(done.actions[0].label, 'Open the full report');
+  assert.equal(done.actions[0].href, '/workspaces/thesis?ticket=t-1');
+  // Only a ticket in a workspace is ever linked.
+  const odd = folderFirstLookView({ state: 'finished', ticket_route: '//evil.example' }, ctx);
+  assert.deepEqual(
+    odd.actions.map(a => a.id),
+    ['open']
+  );
+  assert.equal(folderFirstLookView({ state: 'bogus' }, ctx).visible, false);
+  assert.equal(folderFirstLookView(null, ctx).visible, false);
+});
+
+test('the receipt carries the live first look and its row detail', () => {
+  const receipt = folderReceiptView(lookOffer({ ...seeded, detail: 'Running…', state: 'running' }));
+  assert.equal(receipt.firstLook.status, 'Running…');
+  assert.equal(receipt.rows.find(r => r.kind === 'task').detail, 'Running…');
+  assert.equal(folderReceiptView(lookOffer(undefined)).firstLook, undefined);
+});
+
+test('an open first look is pinned in Needs you, so a reload keeps it', () => {
+  for (const state of ['seeded', 'running', 'waiting', 'failed', 'finished']) {
+    assert.equal(
+      folderPinnedOffer({ inThread: false, pinned: '', offer: lookOffer({ state }) }),
+      'o1',
+      state
+    );
+  }
+  assert.equal(
+    folderPinnedOffer({ inThread: false, pinned: '', offer: lookOffer(undefined) }),
+    '',
+    'a resolved offer with no first look is not news'
+  );
+  assert.equal(folderFirstLookOpen(lookOffer({ state: 'running' })), true);
+  assert.equal(
+    folderFirstLookOpen({ ...lookOffer({ state: 'running' }), status: 'pending' }),
+    false
+  );
 });

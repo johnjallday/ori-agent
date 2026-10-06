@@ -265,7 +265,7 @@ type FolderFirstTaskRequest struct {
 
 // FolderFirstTaskSeeder adds that task, once: a replay finds the task already
 // there and adds none. It returns the receipt row that describes the task as it
-// now stands, including whether it will start by itself on the first open.
+// now stands, including whether one click on Start first look would start it.
 type FolderFirstTaskSeeder interface {
 	SeedFirstTask(ctx context.Context, req FolderFirstTaskRequest) (FolderReceiptRow, error)
 }
@@ -1895,8 +1895,8 @@ func (s *FolderDigestService) blueprintForSubject(subject FolderCandidateRecord)
 }
 
 // FolderFirstTask is the suggested first task for a workspace created from a
-// folder of the given shape (FR30). It is a task the user runs; the
-// assistant never starts it on its own.
+// folder of the given shape (FR30). It is a task the user runs, with Start
+// first look; the assistant never starts it on its own.
 func FolderFirstTask(shape folderdigest.Shape) (description, details string) {
 	switch shape {
 	case folderdigest.ShapeCode:
