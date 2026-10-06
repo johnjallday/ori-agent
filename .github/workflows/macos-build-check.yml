@@ -1,0 +1,83 @@
+name: macOS Build Check
+
+# Runs the same macOS binary build as the Release workflow's "Build macOS DMG"
+# job, without a tag, a draft release or any publishing. Use it to test a
+# dependency bump (or any branch) before it can break a release:
+#
+#   gh workflow run macos-build-check.yml --ref <branch>
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - go.mod
+      - go.sum
+      - .goreleaser.yaml
+      - cmd/menubar/**
+      - cmd/server/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-build-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build macOS binaries
+    runs-on: macos-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build folder picker app
+        run: ./scripts/build-folder-picker.sh
+
+      - name: Reset Wails-generated file changes
+        run: git checkout -- cmd/folder-picker/frontend/wailsjs/runtime/ cmd/folder-picker/frontend/wailsjs/go/ go.mod go.sum 2>/dev/null || true
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          install-only: true
+
+      - name: Runner info
+        run: |
+          go version
+          sysctl -n hw.ncpu hw.memsize
+          vm_stat | head -5
+
+      # A hung build prints nothing for an hour. Log the busiest compiler
+      # processes and memory pressure every 3 minutes so a stall shows which
+      # package it is on.
+      - name: Start build monitor
+        run: |
+          nohup bash -c 'while true; do
+            date -u +%H:%M:%S
+            ps -axo pid,etime,rss,command | grep -E "[c]ompile|[c]go|[c]lang" | sort -k3 -nr | head -5 | cut -c1-220
+            vm_stat | grep -E "Pages (free|active|wired)|Swap"
+            sleep 180
+          done' > "$RUNNER_TEMP/build-monitor.log" 2>&1 &
+
+      - name: Build macOS binaries
+        env:
+          GORELEASER_CURRENT_TAG: v0.0.0-build-check
+          GOTOOLCHAIN: local
+        run: goreleaser build --clean --skip=before --snapshot --timeout 90m --id=server-macos --id=menubar
+
+      - name: Build monitor log
+        if: always()
+        run: cat "$RUNNER_TEMP/build-monitor.log" || true
