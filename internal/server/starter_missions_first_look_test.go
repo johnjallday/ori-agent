@@ -37,9 +37,9 @@ func (s *starterStore) addTask(ws *workspace.Workspace, task workspace.Task) *wo
 }
 
 // seededFirstLook is a first look waiting for its start.
-func seededFirstLook(id string) workspace.Task {
+func seededFirstLook() workspace.Task {
 	return workspace.Task{
-		ID: id, Description: "Tell me what is in this folder", To: "Researcher",
+		ID: "first-look", Description: "Tell me what is in this folder", To: "Researcher",
 		Status: workspace.TaskStatusAssigned, TicketState: workspace.TicketStateReady,
 		Context: firstLookContext(),
 	}
@@ -47,8 +47,8 @@ func seededFirstLook(id string) workspace.Task {
 
 // finishedFirstLook is a first look whose run succeeded: in Review, with a
 // result.
-func finishedFirstLook(id, result string) workspace.Task {
-	task := seededFirstLook(id)
+func finishedFirstLook(result string) workspace.Task {
+	task := seededFirstLook()
 	done := time.Now().UTC()
 	task.Status, task.TicketState = workspace.TaskStatusCompleted, workspace.TicketStateReview
 	task.Result, task.CompletedAt = result, &done
@@ -66,7 +66,7 @@ func taskCompleted(workspaceID, taskID string, data map[string]any) workspace.Ev
 // nothing else that happens to finish (FR9).
 func TestFolderFirstTaskFinished(t *testing.T) {
 	s := newStarterStore(t)
-	folder := s.addTask(s.add("ws-thesis", "Thesis", "writing-project", "", nil), seededFirstLook("first-look"))
+	folder := s.addTask(s.add("ws-thesis", "Thesis", "writing-project", "", nil), seededFirstLook())
 	folder = s.addTask(folder, workspace.Task{
 		ID: "other", Description: "Draft chapter two", To: "Researcher", Status: workspace.TaskStatusAssigned,
 	})
@@ -76,9 +76,9 @@ func TestFolderFirstTaskFinished(t *testing.T) {
 		Context: map[string]any{"template_id": "reaper-song", "template_starter_task": true},
 	})
 	// A finished look whose event carries no result: the stored one counts.
-	stored := s.addTask(s.add("ws-notes", "Notes", "", "", nil), finishedFirstLook("first-look", "Forty notes, six this week."))
+	stored := s.addTask(s.add("ws-notes", "Notes", "", "", nil), finishedFirstLook("Forty notes, six this week."))
 	// A run that finished with nothing to read.
-	empty := s.addTask(s.add("ws-empty", "Empty", "", "", nil), seededFirstLook("first-look"))
+	empty := s.addTask(s.add("ws-empty", "Empty", "", "", nil), seededFirstLook())
 
 	cases := []struct {
 		name string
@@ -113,7 +113,7 @@ func TestFolderFirstTaskFinished(t *testing.T) {
 
 func TestCompleteProgressionWiring_FirstLookCompletesTheMissionOnce(t *testing.T) {
 	s := newStarterStore(t)
-	folder := s.addTask(s.add("ws-thesis", "Thesis", "writing-project", "", nil), seededFirstLook("first-look"))
+	folder := s.addTask(s.add("ws-thesis", "Thesis", "writing-project", "", nil), seededFirstLook())
 	folder = s.addTask(folder, workspace.Task{
 		ID: "other", Description: "Draft chapter two", To: "Researcher", Status: workspace.TaskStatusAssigned,
 	})
@@ -143,7 +143,7 @@ func TestCompleteProgressionWiring_FirstLookCompletesTheMissionOnce(t *testing.T
 	}
 
 	// The agent finishes its look. The run records the result, then publishes.
-	finished := finishedFirstLook("first-look", "Three drafts.")
+	finished := finishedFirstLook("Three drafts.")
 	for i := range folder.Tasks {
 		if folder.Tasks[i].ID == "first-look" {
 			finished.WorkspaceID, finished.CreatedAt = folder.ID, folder.Tasks[i].CreatedAt
@@ -178,15 +178,15 @@ func TestAnyFolderFirstTaskFinished(t *testing.T) {
 	}
 
 	s := newStarterStore(t)
-	s.addTask(s.add("ws-seeded", "Seeded", "", "", nil), seededFirstLook("first-look"))
+	s.addTask(s.add("ws-seeded", "Seeded", "", "", nil), seededFirstLook())
 	// A blueprint's own task finishing is not evidence.
 	s.addTask(s.add("ws-album", "Album", "reaper-song", "", nil), workspace.Task{
 		ID: "setup", Status: workspace.TaskStatusCompleted, TicketState: workspace.TicketStateDone, Result: "Done.",
 		Context: map[string]any{"template_id": "reaper-song", "template_starter_task": true},
 	})
 	// Someone else's workspace, and a trashed one, never count.
-	s.addTask(s.add("ws-foreign", "Theirs", "", "another-user", nil), finishedFirstLook("first-look", "Theirs."))
-	trashed := s.addTask(s.add("ws-trashed", "Old", "", "", nil), finishedFirstLook("first-look", "Old."))
+	s.addTask(s.add("ws-foreign", "Theirs", "", "another-user", nil), finishedFirstLook("Theirs."))
+	trashed := s.addTask(s.add("ws-trashed", "Old", "", "", nil), finishedFirstLook("Old."))
 	trashed.Status = workspace.StatusTrashed
 	if err := s.store.Save(trashed); err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestAnyFolderFirstTaskFinished(t *testing.T) {
 		t.Fatal("found a finished first look where none counts")
 	}
 
-	s.addTask(s.add("ws-thesis", "Thesis", "writing-project", "", nil), finishedFirstLook("first-look", "Three drafts."))
+	s.addTask(s.add("ws-thesis", "Thesis", "writing-project", "", nil), finishedFirstLook("Three drafts."))
 	if !anyFolderFirstTaskFinished(s.store) {
 		t.Fatal("a finished first look in an active workspace was not found")
 	}
@@ -209,8 +209,8 @@ func TestCompleteProgressionWiring_FolderFirstLookReconcile(t *testing.T) {
 		task workspace.Task
 		want bool
 	}{
-		{"a first look that already finished", finishedFirstLook("first-look", "Three drafts."), true},
-		{"a first look still waiting", seededFirstLook("first-look"), false},
+		{"a first look that already finished", finishedFirstLook("Three drafts."), true},
+		{"a first look still waiting", seededFirstLook(), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -94,7 +94,7 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 				Kind: "folder", Name: ref.Name, Detail: "linked as primary",
 			})
 		}
-	} else if name, _ := linkedFolderName(ws); name != "" {
+	} else if name := linkedFolderName(ws); name != "" {
 		// A project the setup journey connected is linked through its project
 		// entry rather than a primary directory. The row names the folder, never
 		// its path.

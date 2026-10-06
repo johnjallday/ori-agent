@@ -1445,6 +1445,26 @@ Ends an open build without creating anything (Start over, or Discard from Today)
 }
 ```
 
+`first_task` and `first_look` carry where a folder's first look stands. `first_task` is on a **resolved project offer** whose workspace has a first task, in the plain read and in the `?offer_id=` read; `first_look` is on the plain read only, for the most recent folder workspace that still has one, whichever offer is shown. Both are read live and never stored on the offer, and with nothing to say they are absent. Shape:
+
+```json
+{
+  "state": "seeded | running | waiting | finished | failed",
+  "offer_id": "…", "task_id": "…", "workspace_id": "…",
+  "workspace_name": "Thesis", "workspace_route": "/workspaces/thesis", "folder_name": "thesis-draft",
+  "description": "Summarize the current draft…", "agent": "Writing Coach",
+  "started_at": "…", "finished_at": "…",
+  "result_excerpt": "one line, at most 280 characters",
+  "ticket_route": "/workspaces/thesis?ticket=<task id>",
+  "can_start": true,
+  "reason": "setup_wizard_opening | unassigned | no_model | local_activation_required | needs_input | start_failed | run_failed",
+  "message": "one plain sentence for the reason",
+  "detail": "what the receipt's task row says now"
+}
+```
+
+`can_start` is true only for a `seeded` look that `POST …/folder-first-task/start` would start now (`no_model` is added when no model is configured). Routes are built from the folder slug, never an internal id, and no field carries a filesystem path. While a look runs, the Home card re-reads `?offer_id=` only while the drawer is open.
+
 `offer` is the one current offer (pending, or a decided one whose outcome is still being shown) or `null`. `chips` names the folders under the user's home that exist (none in a sandboxed home). `picker_available` is false where the native dialog cannot run — outside macOS, or under `ORI_NO_DESKTOP_OPEN` as every sandboxed demo server runs. `picker_note` explains what can still be chosen: it is empty only when there are chips and a dialog; otherwise it names the missing folders, the switched-off or unsupported dialog, or both.
 
 ### Scan a Folder
@@ -1497,7 +1517,7 @@ After the Create Workspace modal (opened pre-filled, sent with `entry_point: "fo
 { "request_id": "…", "plan_digest": "<64 hex>", "entry_name": "optional picked project file" }
 ```
 
-A pending project offer whose shape needs a reviewed integration carries `plan` (`lines`: label, detail, `state`, and a `digest`) and `setup` (the run: `status`, `stop_reason`, `lines`). The digest of the plan is the user's consent: it covers every line except its state. The server runs the plan itself (plugin installs, Home, workspace, folder link, File-only mode, agents, first task) and answers `200` with the offer (the run continues on the server; poll the offer). Allowed fields are exactly the three above; there is no path field, and the intent behind the plan is pinned on the server. `409` with `"plan_changed": true` and the fresh offer when the plan moved since the card was drawn; `409` while another run holds the offer; `404` unknown offer. A run that cannot finish stops with a `stop_reason` (for example `needs_model`, `needs_pick`, `install_failed`) and keeps what it finished; sending the same digest again continues from there. A finished run makes the offer `resolved` with a receipt (`outcome.workspace_id`, `outcome.route`). The first read-only task starts when the workspace is first opened (`POST /api/workspaces/{id}/folder-first-task/start`, once).
+A pending project offer whose shape needs a reviewed integration carries `plan` (`lines`: label, detail, `state`, and a `digest`) and `setup` (the run: `status`, `stop_reason`, `lines`). The digest of the plan is the user's consent: it covers every line except its state. The server runs the plan itself (plugin installs, Home, workspace, folder link, File-only mode, agents, first task) and answers `200` with the offer (the run continues on the server; poll the offer). Allowed fields are exactly the three above; there is no path field, and the intent behind the plan is pinned on the server. `409` with `"plan_changed": true` and the fresh offer when the plan moved since the card was drawn; `409` while another run holds the offer; `404` unknown offer. A run that cannot finish stops with a `stop_reason` (for example `needs_model`, `needs_pick`, `install_failed`) and keeps what it finished; sending the same digest again continues from there. A finished run makes the offer `resolved` with a receipt (`outcome.workspace_id`, `outcome.route`). The first read-only task (the "first look") starts only when the user presses **Start first look**, on Home's receipt or mission card or on the workspace page's banner (`POST /api/workspaces/{id}/folder-first-task/start`, once); opening a workspace never starts it. See `first_task` and `first_look` under Get Folder Digest.
 
 An offer the user sent to the step-by-step journey (**Adjust…**, so `awaiting_outcome` with no run yet) still carries `plan`, and the setup action accepts it the same way, so the one-click path is not lost.
 

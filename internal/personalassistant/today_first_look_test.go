@@ -11,16 +11,13 @@ import (
 
 // todayWithFirstLook builds Today over one set-up folder workspace whose first
 // look is task, and returns what Today says.
-func todayWithFirstLook(t *testing.T, now time.Time, task workspace.Task, ws func(*workspace.Workspace)) *TodayProjection {
+func todayWithFirstLook(t *testing.T, now time.Time, task workspace.Task) *TodayProjection {
 	t.Helper()
 	store, _ := newTodayWorkspace(t, now)
 	folder := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Thesis"})
 	folder.ID, folder.FolderSlug = "project-1", "thesis"
 	task.WorkspaceID = folder.ID
 	folder.Tasks = append(folder.Tasks, task)
-	if ws != nil {
-		ws(folder)
-	}
 	if err := store.Save(folder); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +70,7 @@ func TestToday_FirstLookRunningIsWorkingOn(t *testing.T) {
 	for _, status := range []workspace.TaskStatus{workspace.TaskStatusInProgress, workspace.TaskStatusWaitingForChoice} {
 		got := todayWithFirstLook(t, now, firstLook(func(task *workspace.Task) {
 			task.Status, task.TicketState = status, workspace.TicketStateInProgress
-		}), nil)
+		}))
 		line := findKind(got.WorkingOn.Items, "folder_first_look")
 		if line == nil || line.Title != "First look at thesis-draft" || line.Route != "/workspaces/thesis" || line.Attribution != "Writing Coach" {
 			t.Fatalf("%s: working on = %+v", status, got.WorkingOn.Items)
@@ -93,7 +90,7 @@ func TestToday_FirstLookFinishedIsADoneResult(t *testing.T) {
 		task.Status, task.TicketState = workspace.TaskStatusCompleted, workspace.TicketStateReview
 		task.CompletedAt = &done
 		task.Result = "Three drafts.\n\n" + strings.Repeat("The newest is chapter four. ", 30)
-	}), nil)
+	}))
 
 	if findKind(got.WorkingOn.Items, "folder_first_look") != nil {
 		t.Fatalf("a finished look is still under Working on: %+v", got.WorkingOn.Items)
@@ -142,7 +139,7 @@ func TestToday_FirstLookResultExpiresAfterSevenDays(t *testing.T) {
 		got := todayWithFirstLook(t, now, firstLook(func(task *workspace.Task) {
 			task.Status, task.TicketState = workspace.TaskStatusCompleted, workspace.TicketStateDone
 			task.CompletedAt, task.Result = &finished, "Three drafts."
-		}), nil)
+		}))
 		listed := findKind(got.Done.Items, "folder_result") != nil
 		if listed != (age < 7*24*time.Hour) {
 			t.Fatalf("%s old: listed = %t", name, listed)
@@ -167,7 +164,7 @@ func TestToday_FirstLookThatIsNotNewsIsNotListed(t *testing.T) {
 		},
 	}
 	for name, change := range cases {
-		got := todayWithFirstLook(t, now, firstLook(change), nil)
+		got := todayWithFirstLook(t, now, firstLook(change))
 		if findKind(got.WorkingOn.Items, "folder_first_look") != nil || findKind(got.Done.Items, "folder_result") != nil {
 			t.Fatalf("%s: working=%v done=%v", name, todayKinds(got.WorkingOn.Items), todayKinds(got.Done.Items))
 		}
@@ -185,7 +182,7 @@ func TestToday_OnlyTheFolderFirstLookIsListed(t *testing.T) {
 	got := todayWithFirstLook(t, now, firstLook(func(task *workspace.Task) {
 		task.Context["template_id"] = "writing-project"
 		task.Status, task.TicketState, task.CompletedAt, task.Result = workspace.TaskStatusCompleted, workspace.TicketStateReview, &done, "Done."
-	}), nil)
+	}))
 	if findKind(got.Done.Items, "folder_result") != nil || findKind(got.WorkingOn.Items, "folder_first_look") != nil {
 		t.Fatalf("a blueprint task was listed as a first look: %v / %v", todayKinds(got.WorkingOn.Items), todayKinds(got.Done.Items))
 	}

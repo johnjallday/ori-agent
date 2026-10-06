@@ -42,7 +42,7 @@ func (h *Handler) FolderFirstTaskView(ctx context.Context, workspaceID string) (
 	route := "/workspaces/" + url.PathEscape(slug)
 	ticket := url.Values{}
 	ticket.Set("ticket", task.ID)
-	folder, _ := linkedFolderName(ws)
+	folder := linkedFolderName(ws)
 	view := personalassistant.FolderFirstTaskView{
 		State: state, TaskID: task.ID, WorkspaceID: ws.ID, WorkspaceName: ws.Name,
 		WorkspaceRoute: route, TicketRoute: route + "?" + ticket.Encode(),
@@ -92,25 +92,24 @@ func (h *Handler) folderFirstTaskBlockedReason(ctx context.Context, ws *agentwor
 }
 
 // linkedFolderName is the base name of the folder a workspace was set up for,
-// never its path. primary is true when the folder is the workspace's primary
-// project directory, false when it is linked through the project entry the
-// setup journey connected.
-func linkedFolderName(ws *agentworkspace.Workspace) (name string, primary bool) {
+// never its path. It reads the primary project directory, else the project
+// entry the setup journey connected.
+func linkedFolderName(ws *agentworkspace.Workspace) string {
 	if ws == nil {
-		return "", false
+		return ""
 	}
 	if id, _ := ws.SharedData[projecttemplates.PrimaryDirectoryIDKey].(string); strings.TrimSpace(id) != "" {
 		if ref, err := ws.GetDirectoryReference(id); err == nil && ref != nil {
-			return strings.TrimSpace(ref.Name), true
+			return strings.TrimSpace(ref.Name)
 		}
-		return "", true
+		return ""
 	}
 	locator, err := agentworkspace.GetProjectEntryLocator(ws.SharedData)
 	if err != nil || locator == nil || locator.Kind != agentworkspace.ProjectEntryDirectoryReference {
-		return "", false
+		return ""
 	}
 	if ref, err := ws.GetDirectoryReference(locator.DirectoryReferenceID); err == nil && ref != nil {
-		return strings.TrimSpace(ref.Name), false
+		return strings.TrimSpace(ref.Name)
 	}
-	return "", false
+	return ""
 }
