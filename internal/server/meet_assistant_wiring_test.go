@@ -59,7 +59,28 @@ func TestMeetAssistant_RealBuilderCompletesTheMissionFromTheHireOnce(t *testing.
 	if got := craftBalance(t, builder) - before; got != economy.CraftPerStarterQuest {
 		t.Fatalf("the hire paid %d Craft, want %d", got, economy.CraftPerStarterQuest)
 	}
+	// The hire opens every mission that waited on it. See what your assistant
+	// found waits on a folder being shown instead, so it alone stays locked.
 	for _, mission := range engine.Status().Missions {
+		switch mission.ID {
+		case progression.FolderFirstLookQuestID:
+			if !mission.Locked || mission.LockedReason != "Show your assistant a folder first" {
+				t.Fatalf("the first look must wait on the folder: %+v", mission)
+			}
+			continue
+		case progression.ShowFolderQuestID:
+			// Showing a folder needs the HQ, which the hire does not build.
+			if !mission.Locked || mission.LockedReason != "Build your HQ first" {
+				t.Fatalf("Show a folder must wait on the HQ: %+v", mission)
+			}
+			continue
+		case progression.ConnectSourceQuestID, progression.FirstBriefQuestID:
+			// The Daily loop waits for Starter, not for the hire.
+			if !mission.Locked || mission.LockedReason != "Starter first" {
+				t.Fatalf("the Daily loop must wait for Starter: %+v", mission)
+			}
+			continue
+		}
 		if mission.Locked {
 			t.Fatalf("mission %s is still locked after the hire", mission.ID)
 		}

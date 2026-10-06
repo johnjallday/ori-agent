@@ -265,7 +265,7 @@ type FolderFirstTaskRequest struct {
 
 // FolderFirstTaskSeeder adds that task, once: a replay finds the task already
 // there and adds none. It returns the receipt row that describes the task as it
-// now stands, including whether it will start by itself on the first open.
+// now stands, including whether one click on Start first look would start it.
 type FolderFirstTaskSeeder interface {
 	SeedFirstTask(ctx context.Context, req FolderFirstTaskRequest) (FolderReceiptRow, error)
 }
@@ -317,6 +317,9 @@ type FolderDigestDeps struct {
 	// a project connected through the journey (the card's Set up or Adjust…) ends
 	// with the same first task a generic project gets. Nil seeds none.
 	FirstTask FolderFirstTaskSeeder
+	// FirstTaskView reads where a workspace's first look stands, from the
+	// canonical workspace record. Nil leaves offers without a first_task block.
+	FirstTaskView func(ctx context.Context, workspaceID string) (FolderFirstTaskView, bool)
 	// OnResolved runs after a project outcome completes: the dossier
 	// producer learns from the offer and reports whether the fact was saved
 	// (FR35–FR39). Best-effort; its answer is recorded on the outcome.
@@ -526,6 +529,10 @@ type FolderDigestView struct {
 	PickerNote          string           `json:"picker_note,omitempty"`
 	Paused              bool             `json:"paused"`
 	PromptFirstFolder   bool             `json:"prompt_first_folder"`
+	// FirstLook is the first look of the most recent folder workspace, whichever
+	// offer is shown. The mission card starts it from here. Absent when no
+	// folder workspace has one, and on a read for one named offer.
+	FirstLook *FolderFirstTaskView `json:"first_look,omitempty"`
 }
 
 // FolderOfferView is an offer as the browser sees it: names and counts,
@@ -573,6 +580,9 @@ type FolderOfferView struct {
 	// capability offer. Setup is the run once Set up was pressed.
 	Plan  *FolderSetupPlan `json:"plan,omitempty"`
 	Setup *FolderSetupView `json:"setup,omitempty"`
+	// FirstTask is where the folder's first look stands, on a resolved project
+	// offer whose workspace has one. It is read live, never stored on the offer.
+	FirstTask *FolderFirstTaskView `json:"first_task,omitempty"`
 }
 
 // FolderCapabilityView is the optional explanation on the existing digest
@@ -632,7 +642,9 @@ func (s *FolderDigestService) now() time.Time { return s.deps.Now() }
 
 // Current returns the pending or confirmed-in-progress offer with the chooser's
 // chips. A confirmed journey survives page/server restarts; only when neither
-// exists do we resurface a due "later" or the next queued candidate.
+// exists do we resurface a due "later" or the next queued candidate. With no
+// question to ask at all, a recently set up folder whose first look still needs
+// the user (or has just finished) is shown again as its receipt.
 func (s *FolderDigestService) Current(ctx context.Context, userID string) (FolderDigestView, error) {
 	return s.current(ctx, userID, "")
 }
@@ -684,6 +696,15 @@ func (s *FolderDigestService) current(ctx context.Context, userID, offerID strin
 		pending = recentProjectHomeNavigation(doc, s.now())
 	}
 	view := s.chooserView(binding)
+	// The latest folder's first look is named whichever offer is shown, so the
+	// mission card can start it. With nothing else waiting, a look that still
+	// needs the user (or just finished) brings its folder's receipt back.
+	if lookOffer, look, ok := s.latestFirstLook(ctx, doc); ok {
+		view.FirstLook = &look
+		if pending == nil && firstLookNeedsHome(*lookOffer, look, s.now()) {
+			pending = lookOffer
+		}
+	}
 	view.PromptFirstFolder = !binding.Paused && doc.FirstPromptShownAt == nil &&
 		s.deps.MissionUnresolved != nil && s.deps.MissionUnresolved("pa-show-folder")
 	if pending != nil {
@@ -1874,8 +1895,8 @@ func (s *FolderDigestService) blueprintForSubject(subject FolderCandidateRecord)
 }
 
 // FolderFirstTask is the suggested first task for a workspace created from a
-// folder of the given shape (FR30). It is a task the user runs; the
-// assistant never starts it on its own.
+// folder of the given shape (FR30). It is a task the user runs, with Start
+// first look; the assistant never starts it on its own.
 func FolderFirstTask(shape folderdigest.Shape) (description, details string) {
 	switch shape {
 	case folderdigest.ShapeCode:
@@ -2026,6 +2047,9 @@ func (s *FolderDigestService) view(ctx context.Context, offer FolderOffer, pause
 	if offer.Status == FolderOfferPending || offer.Status == FolderOfferAwaitingOutcome {
 		_, ok := s.rootPath(offer)
 		v.NeedsPick = !ok
+	}
+	if first, ok := s.firstTaskView(ctx, offer); ok {
+		v.FirstTask = &first
 	}
 	return v
 }

@@ -1,34 +1,44 @@
 /*
- * Drives the starter missions (tasks/prd-starter-missions.md) against a
- * running, isolated demo server and saves screenshots. It uses real UI and
- * real endpoints. The shortcuts are skipping first-run onboarding and hiring
- * plus building HQ through the assistant API, all of which the demo sandbox
- * owns.
+ * Drives the mission board (tasks/prd-starter-missions.md, reshaped by
+ * tasks/prd-mission-quest-folder-refocus.md) against a running, isolated demo
+ * server and saves screenshots. It uses real UI and real endpoints. The
+ * shortcuts are skipping first-run onboarding and hiring plus building HQ
+ * through the assistant API, all of which the demo sandbox owns.
+ *
+ * The board: Starter = 01 Meet your assistant, 02 Show your assistant a folder,
+ * 03 See what your assistant found. Daily loop = 04 Connect one source, 05 Read
+ * your first Daily Brief.
  *
  *   node scripts/demo-starter-missions.mjs <baseUrl> <outDir> <stage> \
  *     [--focus=a,b] [--sandbox=<server sandbox dir>] [--width=1280]
  *
  * Stages:
- *   card     Mission 01 on the card after a hire, then Mission 03 (Show your
+ *   card     Mission 01 on the card after a hire, then Mission 02 (Show your
  *            assistant a folder) with the other missions beneath it once HQ is
- *            built. 1280px and 400px.
- *   folder   Mission 03's start: Start on the card opens the assistant panel
- *            on Today with the folder chooser unfolded and the quest parameter
- *            scrubbed, and the mission stays open. The rest of the mission — a
- *            scan, the offer, a workspace or a tidy — is driven by
+ *            built, the Daily loop listed locked. 1280px and 400px.
+ *   folder   Mission 02's start: Start on the card opens the assistant panel
+ *            on Today with the one-card folder chooser unfolded and the quest
+ *            parameter scrubbed, and the mission stays open. The rest of the
+ *            mission (a scan, the card, Set up, Start first look and the
+ *            result, which is Mission 03) is driven by
  *            `scripts/smoke.sh showfolder`, which seeds folders under the
- *            server's HOME.
- *   email    Mission 03 for a --focus=help_with_email hire: Set up email opens
- *            the guided setup, and closing it mid-way reads In progress.
- *   plan     Mission 03 for a --focus=plan_my_day hire: the first-day plan
- *            completes it and Mission 04 takes the card; then the Calendar
+ *            server's HOME, and needs a model.
+ *   email    Mission 04 for a --focus=help_with_email hire (Show a folder
+ *            deferred so the Daily loop opens): Set up email opens the guided
+ *            setup, and closing it mid-way reads In progress.
+ *   plan     Mission 04 for a --focus=plan_my_day hire: the first-day plan
+ *            completes it and Mission 05 takes the card; then the Calendar
  *            capability card opens the creator on Calendar Ops.
  *   results  Today Results after File Janitor files files: continue a tidy
  *            sandbox with --workspace=<slug> --folder=<its folder>. Scans,
  *            approves, confirms, reads the Today line, follows it to History,
- *            then requests a brief and checks Mission 04 completes on Today.
+ *            then requests a brief and checks Mission 05 completes on Today.
  *   states   The card at rest: every mission deferred reads Saved for later with
- *            Resume, then a served brief turns Mission 04 Complete.
+ *            Resume, then a served brief turns Mission 05 Complete.
+ *   gate     A fresh hire, Not now on the HQ card, then Mission 02: Locked with
+ *            Build My HQ, which opens the HQ card and never the chooser.
+ *   board    The Quests card as the sandbox stands, at 1280px and 400px. It
+ *            drives nothing; pass --name=<prefix> to name the screenshots.
  *
  * Every stage prints the missions it observed and any console errors or failed
  * requests, so a quietly broken page does not pass as a clean demo.
@@ -191,12 +201,11 @@ async function cardStage() {
     if (relationship.state === 'needs_hq') {
       await missions(page);
       const before = await openQuests(page);
-      expect(before.kicker === 'Mission 01', 'Mission 01 is on the card before HQ exists');
-      expect(
-        before.action.includes('/?quest=build-hq'),
-        'Mission 01 routes to the guided HQ walkthrough'
-      );
-      await shot(page, `g1-mission01-${width}`);
+      // The hire completed Mission 01. Mission 02 waits on the HQ, and says so.
+      expect(before.kicker === 'Mission 02', 'Mission 02 is on the card before HQ exists');
+      expect(before.status === 'Locked', 'it is Locked until the HQ is built');
+      expect(before.action.startsWith('Build My HQ'), 'its one action is Build My HQ');
+      await shot(page, `g1-mission02-locked-${width}`);
       await buildHQ(page);
     }
     const status = await missions(page);
@@ -205,12 +214,18 @@ async function cardStage() {
       'Tidy your Downloads is no longer a mission'
     );
     const after = await openQuests(page);
-    expect(after.kicker === 'Mission 03', 'Mission 03 is on the card once HQ is designated');
+    expect(after.kicker === 'Mission 02', 'Mission 02 is on the card once HQ is designated');
     expect(
       after.title === 'Show your assistant a folder',
-      'Mission 03 reads Show your assistant a folder'
+      'Mission 02 reads Show your assistant a folder'
     );
-    expect(after.rows.length === 4, 'four Starter rows sit beneath the card');
+    expect(after.status === 'Ready', 'and it is Ready, not locked behind the HQ any more');
+    // The hire (done), the look (locked), then the Daily loop's two (locked).
+    expect(after.rows.length === 4, 'four rows sit beneath the card');
+    expect(
+      after.rows.filter(r => /STARTER FIRST/i.test(r)).length === 2,
+      'the Daily loop is listed locked beneath Starter'
+    );
     expect(
       !after.rows.some(r => r.includes('Show your assistant a folder')),
       'the card mission is not repeated'
@@ -322,15 +337,15 @@ async function resultsStage() {
   );
   await shot(page, `g4-history-${width}`);
 
-  // Mission 04: before any brief, the card asks for a model when none is set.
+  // Mission 05: before any brief, the card asks for a model when none is set.
   const before = await missions(page);
   const brief = (before.missions || []).find(m => m.id === 'pa-first-brief');
-  console.log(`Mission 04 before a brief: ${brief?.status} "${brief?.why}"`);
+  console.log(`Mission 05 before a brief: ${brief?.status} "${brief?.why}"`);
   if (brief?.status !== 'completed') {
     const card = await openQuests(page);
-    if (card.kicker === 'Mission 04') {
+    if (card.kicker === 'Mission 05') {
       await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
-      await shot(page, `g4-mission04-no-brief-${width}`);
+      await shot(page, `g4-mission05-no-brief-${width}`);
     }
     const refresh = await api(page, 'POST', '/api/personal-hq/brief/refresh');
     console.log(`brief refresh: HTTP ${refresh.status}`);
@@ -341,15 +356,15 @@ async function resultsStage() {
       revision = current.json?.revision?.id || current.json?.id || '';
     }
     console.log(`brief revision: ${revision || '(none)'}`);
-    // Today serves the brief; that first view completes Mission 04.
+    // Today serves the brief; that first view completes Mission 05.
     await api(page, 'GET', '/api/personal-assistant/today');
     const after = await missions(page);
     const done = (after.missions || []).find(m => m.id === 'pa-first-brief');
-    expect(done?.status === 'completed', 'Today served with a brief completed Mission 04');
+    expect(done?.status === 'completed', 'Today served with a brief completed Mission 05');
     const final = await openQuests(page);
     await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
     console.log(`final card: ${final.kicker} ${final.status}`);
-    await shot(page, `g4-mission04-after-brief-${width}`);
+    await shot(page, `g4-mission05-after-brief-${width}`);
   }
   await page.close();
 }
@@ -365,7 +380,7 @@ async function folderStage() {
 
   // Start on the card.
   const card = await openQuests(page);
-  expect(card.kicker === 'Mission 03', 'Mission 03 is on the card');
+  expect(card.kicker === 'Mission 02', 'Mission 02 is on the card');
   expect(card.action.includes('/?quest=show-folder'), 'Start opens the folder chooser');
   await Promise.all([
     page.waitForURL(url => url.search === '' || !url.search.includes('quest='), {
@@ -387,7 +402,44 @@ async function folderStage() {
   // Opening the chooser is not doing the mission.
   const status = await missions(page);
   const folder = (status.missions || []).find(m => m.id === 'pa-show-folder');
-  expect(folder?.status === 'available', 'Mission 03 stays open until an offer is accepted');
+  expect(folder?.status === 'available', 'Mission 02 stays open until an offer is accepted');
+  await page.close();
+}
+
+// gateStage walks the dead end the refocus removes: a hire, Not now on the HQ
+// card, then Mission 02. The card must say Locked with one action, Build My HQ,
+// which opens the HQ card (expanded), never the folder chooser.
+async function gateStage() {
+  const width = stageWidth;
+  const page = await newPage(width, width < 600 ? 860 : 800);
+  await page.goto(`${baseUrl}/?panel=today`, { waitUntil: 'domcontentloaded' });
+  await api(page, 'POST', '/api/onboarding/skip');
+  await hire(page);
+  await page.goto(`${baseUrl}/?panel=today`, { waitUntil: 'domcontentloaded' });
+  const hqCard = page.locator('#personalAssistantHQCard');
+  await hqCard.waitFor({ state: 'visible', timeout: 20000 });
+  expect(
+    ((await hqCard.innerText()) || '').includes('Give me a home base'),
+    'the HQ card explains the home base in folder terms'
+  );
+  await shot(page, `g4-hq-card-${width}`);
+  await page.locator('#personalAssistantHQNotNow').click();
+  await page.waitForTimeout(1200);
+
+  const card = await openQuests(page);
+  expect(card.kicker === 'Mission 02', 'Mission 02 is on the card');
+  expect(card.status === 'Locked', 'it reads Locked while the HQ is deferred');
+  expect(card.action.startsWith('Build My HQ'), 'its one action is Build My HQ');
+  await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+  await shot(page, `g4-locked-card-${width}`);
+
+  await page.locator('[data-role="first-mission-action"]').click();
+  await hqCard.waitFor({ state: 'visible', timeout: 15000 });
+  expect(
+    !(await page.locator('#personalAssistantFolderChooser').isVisible()),
+    'pressing it opens the HQ card, not the folder chooser'
+  );
+  await shot(page, `g4-after-build-my-hq-${width}`);
   await page.close();
 }
 
@@ -411,7 +463,7 @@ async function missionThreeOnCard(width) {
 async function emailStage() {
   const page = await missionThreeOnCard(stageWidth);
   const card = await openQuests(page);
-  expect(card.kicker === 'Mission 03', 'Mission 03 is on the card');
+  expect(card.kicker === 'Mission 04', 'Mission 04 is on the card');
   expect(card.title === 'Set up email', 'a help-with-email hire is offered Set up email');
   expect(
     card.action === 'Start /?setup=quest&source=host&quest=email_ops_setup',
@@ -443,7 +495,7 @@ async function emailStage() {
 async function planStage() {
   const page = await missionThreeOnCard(stageWidth);
   const card = await openQuests(page);
-  expect(card.kicker === 'Mission 03', 'Mission 03 is on the card');
+  expect(card.kicker === 'Mission 04', 'Mission 04 is on the card');
   expect(card.title === 'Plan my first day', 'a plan-my-day hire is offered Plan my first day');
   await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
   await shot(page, `g3-plan-ready-${stageWidth}`);
@@ -473,12 +525,12 @@ async function planStage() {
 
   const status = await missions(page);
   const connect = (status.missions || []).find(m => m.id === 'pa-connect-source');
-  expect(connect?.status === 'completed', 'applying the first-day plan completed Mission 03');
+  expect(connect?.status === 'completed', 'applying the first-day plan completed Mission 05');
   const after = await openQuests(page);
-  expect(after.kicker === 'Mission 04', 'Mission 04 is on the card afterwards');
+  expect(after.kicker === 'Mission 05', 'Mission 05 is on the card afterwards');
   expect(
     after.rows.some(row => row.includes('✓') && row.includes('Plan my first day')),
-    'Mission 03 shows ✓ beneath the card'
+    'Mission 04 shows ✓ beneath the card'
   );
   await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
   await shot(page, `g3-plan-mission04-${stageWidth}`);
@@ -520,7 +572,7 @@ async function statesStage() {
     console.log(`deferred ${id}: HTTP ${skipped.status}`);
   }
   const saved = await openQuests(page);
-  expect(saved.kicker === 'Mission 04', 'with every mission resolved the card rests on Mission 04');
+  expect(saved.kicker === 'Mission 05', 'with every mission resolved the card rests on Mission 05');
   expect(saved.status === 'Saved for later', 'a deferred last mission reads Saved for later');
   expect(saved.action.startsWith('Resume quest'), 'and stays resumable from the card');
   await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
@@ -544,8 +596,28 @@ async function statesStage() {
   await page.close();
 }
 
+// boardStage photographs the Quests card as the sandbox stands, at desktop and
+// phone width. It changes nothing: the missions are whatever the server says.
+async function boardStage() {
+  const name = flag('name') || 'board';
+  for (const [width, height] of [
+    [1280, 800],
+    [400, 860]
+  ]) {
+    const page = await newPage(width, height);
+    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+    await missions(page);
+    await openQuests(page);
+    await page.locator('[data-role="first-mission"]').scrollIntoViewIfNeeded();
+    await shot(page, `${name}-${width}`);
+    await page.close();
+  }
+}
+
 try {
   if (stage === 'card') await cardStage();
+  else if (stage === 'board') await boardStage();
+  else if (stage === 'gate') await gateStage();
   else if (stage === 'states') await statesStage();
   else if (stage === 'folder') await folderStage();
   else if (stage === 'email') await emailStage();

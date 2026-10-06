@@ -68,12 +68,16 @@ export function folderPlacement({ available, inThread, pinned, offer } = {}) {
 }
 
 // folderPinnedOffer is the offer to keep in Needs you after a digest read: one
-// that is waiting, or the one already placed there (the user may be part-way
-// through acting on it). Nothing is pinned while the flow is in the conversation.
+// that is waiting, a set-up folder whose first look is still news (its click, a
+// run, an answer, another try, or a result that just came in), or the one
+// already placed there (the user may be part-way through acting on it). Nothing
+// is pinned while the flow is in the conversation.
 export function folderPinnedOffer({ inThread, pinned, offer } = {}) {
   const id = String(offer?.id || '');
   if (inThread === true || !id) return '';
-  return folderOfferWaiting(offer) || id === String(pinned || '') ? id : '';
+  return folderOfferWaiting(offer) || folderFirstLookOpen(offer) || id === String(pinned || '')
+    ? id
+    : '';
 }
 
 // folderChipBusy: "Explore a folder" cannot be asked for again while a folder
@@ -658,7 +662,9 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirm 
 
 // A receipt is read only from the resolved server outcome; the workspace name
 // and route are never reconstructed from the folder name or blueprint plan.
-export function folderReceiptView(offer) {
+// options.busy and options.message are a first-look click of ours in flight and
+// what it was told; they only change the first look's part of the view.
+export function folderReceiptView(offer, options = {}) {
   if (offer?.status === 'resolved' && offer?.outcome?.kind === 'home')
     return homeReceiptView(offer);
   if (offer?.status !== 'resolved' || offer?.outcome?.kind !== 'project') return { visible: false };
@@ -681,17 +687,169 @@ export function folderReceiptView(offer) {
     )
   )
     return { visible: false };
+  const openLabel = `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`;
+  // The stored receipt is from the moment of setup. Where the first look stands
+  // now is read live, so its row and the card's buttons follow it.
+  const firstLook = folderFirstLookView(offer?.first_task, {
+    openLabel,
+    route,
+    busy: options.busy,
+    message: options.message
+  });
+  const liveDetail = firstLook.visible ? String(offer.first_task.detail || '').trim() : '';
   return {
     visible: true,
     rows: rows.map(row => ({
       kind: String(row.kind || ''),
       name: String(row.name || ''),
-      detail: String(row.detail || '')
+      detail: row.kind === 'task' && liveDetail ? liveDetail : String(row.detail || '')
     })),
     route,
     homeRoute: verifiedHomeRoute,
-    openLabel: `Open ${String(workspace?.name || offer?.subject?.name || 'workspace').trim()}`
+    openLabel,
+    ...(firstLook.visible ? { firstLook } : {})
   };
+}
+
+// The states a folder's first look can be in, as the server reports them.
+const FIRST_LOOK_STATES = ['seeded', 'running', 'waiting', 'finished', 'failed'];
+// The full report is the task's ticket in its workspace, and nothing else.
+const FIRST_LOOK_REPORT = /^\/workspaces\/[a-z0-9][a-z0-9-]*\?ticket=[A-Za-z0-9_-]+$/;
+const FIRST_LOOK_NOT_STARTED = 'The first look could not start. Try again.';
+
+// What Start first look costs, said beside the button before it is pressed.
+export const FIRST_LOOK_HINT = 'Spends model tokens for one read-only look at the folder.';
+
+// folderFirstLookOpen reports whether a set-up folder's first look still has
+// something to show on Home: it is waiting for its click, running, waiting on
+// the user, did not finish, or has a result. The server only sends the block
+// while that is so.
+export function folderFirstLookOpen(offer) {
+  return (
+    String(offer?.status || '') === 'resolved' &&
+    Boolean(offer?.id) &&
+    FIRST_LOOK_STATES.includes(String(offer?.first_task?.state || ''))
+  );
+}
+
+// firstLookStartMessage is the sentence for a start the server refused (FR15).
+// The codes are the start endpoint's own. One that only means "it is already
+// going" has no sentence: the card is refreshed instead.
+export function firstLookStartMessage(reason, workspaceName) {
+  const name = String(workspaceName || '').trim() || 'the workspace';
+  switch (String(reason || '').trim()) {
+    case 'setup_wizard_opening':
+      return `Open ${name} to finish its setup first.`;
+    case 'unassigned':
+      return `The first task has no agent yet. Open ${name} to assign one.`;
+    case 'no_model':
+      return 'Add a model in Settings to run the first look.';
+    case 'local_activation_required':
+      return `Open ${name} and activate it on this computer.`;
+    case 'already_consumed':
+    case 'not_pending':
+      return '';
+    default:
+      return FIRST_LOOK_NOT_STARTED;
+  }
+}
+
+// folderFirstLookView is the render decision for a folder's first look on its
+// receipt (FR13, FR15, FR18): one primary action, the workspace as the other,
+// and one line of status. Nothing is inferred: the state, whether a click would
+// start it, the sentence, the excerpt and the report link all come from the
+// server. `busy` is a click of ours that is still in flight; `message` is what
+// that click was told.
+export function folderFirstLookView(look, options = {}) {
+  const state = String(look?.state || '');
+  if (!look || typeof look !== 'object' || !FIRST_LOOK_STATES.includes(state)) {
+    return { visible: false };
+  }
+  const openLabel = String(options.openLabel || '').trim() || 'Open workspace';
+  const local = value => {
+    const target = String(value || '').trim();
+    return target.startsWith('/') && !target.startsWith('//') ? target : '';
+  };
+  const route = local(options.route) || local(look.workspace_route);
+  const open = style => (route ? [{ id: 'open', label: openLabel, style, href: route }] : []);
+  const busy = options.busy === true;
+  const said = String(options.message || '').trim() || String(look.message || '').trim();
+  const base = {
+    visible: true,
+    state,
+    status: '',
+    message: '',
+    hint: '',
+    excerpt: '',
+    actions: []
+  };
+
+  switch (state) {
+    case 'seeded': {
+      if (look.can_start === true) {
+        return {
+          ...base,
+          message: String(options.message || '').trim(),
+          hint: FIRST_LOOK_HINT,
+          actions: [
+            {
+              id: 'start-first-look',
+              label: busy ? 'Starting…' : 'Start first look',
+              style: 'primary',
+              start: true,
+              busy
+            },
+            ...open('outline')
+          ]
+        };
+      }
+      // It cannot start yet. The fix is in the workspace, except for a missing
+      // model, which is fixed in Settings.
+      const fix =
+        look.reason === 'no_model'
+          ? [{ id: 'model', label: 'Open Settings', style: 'primary', href: MODEL_SETTINGS_URL }]
+          : [];
+      return {
+        ...base,
+        message: said || firstLookStartMessage(look.reason, look.workspace_name),
+        actions: [...fix, ...open(fix.length ? 'outline' : 'primary')]
+      };
+    }
+    case 'running':
+      return { ...base, status: 'Running…', actions: open('primary') };
+    case 'waiting':
+      return {
+        ...base,
+        message: said || 'The first look is waiting for your answer.',
+        actions: open('primary')
+      };
+    case 'finished': {
+      const report = String(look.ticket_route || '').trim();
+      const link = FIRST_LOOK_REPORT.test(report)
+        ? [{ id: 'report', label: 'Open the full report', style: 'primary', href: report }]
+        : [];
+      return {
+        ...base,
+        excerpt: String(look.result_excerpt || '').trim(),
+        actions: [...link, ...open(link.length ? 'outline' : 'primary')]
+      };
+    }
+    default:
+      return {
+        ...base,
+        message: said || 'The first look did not finish. Try again.',
+        actions: [
+          {
+            id: 'retry-first-look',
+            label: busy ? 'Starting…' : 'Try again',
+            style: 'primary',
+            retry: true,
+            busy
+          },
+          ...open('outline')
+        ]
+      };
+  }
 }
 
 // homeReceiptView is a one-card collection setup's receipt: the Home, the
@@ -802,16 +960,28 @@ const state = {
   confirm: '',
   // What the assistant is doing right now, shown under the card while a
   // setup runs.
-  progress: ''
+  progress: '',
+  // A Start first look (or Try again) click that is still in flight, and what
+  // the last one was told when it did not start.
+  firstLookBusy: false,
+  firstLookMessage: ''
 };
 
 // announceOffer tells the mission card (progression-widget.js) what the
-// chooser shows, so the two render the same offer in the same state.
+// chooser shows, so the two render the same offer in the same state. It also
+// carries the first look being followed, which may belong to another folder
+// than the offer on the card.
 function announceOffer() {
   if (typeof document === 'undefined') return;
   document.dispatchEvent(
     new CustomEvent('personal-assistant:folder-offer', {
-      detail: { offer: state.offer, confirm: state.confirm }
+      detail: {
+        offer: state.offer,
+        confirm: state.confirm,
+        firstLook: currentFirstLook(),
+        firstLookBusy: state.firstLookBusy,
+        firstLookMessage: state.firstLookMessage
+      }
     })
   );
 }
@@ -915,6 +1085,7 @@ function elements() {
     capability: document.getElementById('personalAssistantFolderOfferCapability'),
     why: document.querySelector('#personalAssistantFolderOffer .pa-folder__why'),
     receipt: document.getElementById('personalAssistantFolderReceipt'),
+    result: document.getElementById('personalAssistantFolderFirstLookResult'),
     plan: document.getElementById('personalAssistantFolderPlan'),
     actions: document.getElementById('personalAssistantFolderOfferActions'),
     offerNote: document.getElementById('personalAssistantFolderOfferNote'),
@@ -1336,7 +1507,7 @@ export function conversationFolderOfferView(offer, options = {}) {
         actions[i] = { id: 'rename', label: 'Adjust name', style: 'outline', rename: true };
     }
     const type = offer.blueprint ? offer.blueprint_label || offer.blueprint : 'Blank workspace';
-    view.question += ` Type: ${type}. Confirming creates the workspace, links this selected folder, and seeds its existing read-only first task. Opening the workspace may start that task and read file contents under its workspace permissions. Provider and staffing steps keep their existing gates.`;
+    view.question += ` Type: ${type}. Confirming creates the workspace, links this selected folder, and seeds its existing read-only first task. That task starts only when you press Start first look; it then reads file contents under its workspace permissions. Provider and staffing steps keep their existing gates.`;
   }
   actions.push({ id: 'keep-chatting', label: 'Keep chatting', style: 'link', closeReview: true });
   return { ...view, actions };
@@ -1346,7 +1517,11 @@ function renderOffer(place) {
   const els = elements();
   if (!els?.offer) return;
   const view = conversationFolderOfferView(state.offer, { confirm: state.confirm });
-  const receipt = folderReceiptView(state.offer);
+  const receipt = folderReceiptView(state.offer, {
+    busy: state.firstLookBusy,
+    message: state.firstLookMessage
+  });
+  const firstLook = receipt.firstLook || { visible: false };
   // The one offer card is a reply in the conversation while the flow runs
   // there, and a card in Needs you when it was found waiting on load. It is
   // moved, never copied, so its controls and their handlers stay the same.
@@ -1391,6 +1566,8 @@ function renderOffer(place) {
     els.receipt.hidden = !receipt.visible;
     renderReceiptRows(els.receipt, receipt.visible ? receipt.rows : []);
   }
+  // What the agent found, once its first look has finished.
+  setText(els.result, firstLook.visible ? firstLook.excerpt : '');
   if (els.plan) {
     const lines = view.setup?.lines || view.plan?.lines || [];
     renderSetupLines(els.plan, lines);
@@ -1403,8 +1580,27 @@ function renderOffer(place) {
       view.decided &&
       !receipt.route &&
       !receipt.homeRoute &&
+      !(firstLook.visible && firstLook.actions.length) &&
       (!view.resume || !(view.actions || []).length);
-    if (receipt.route) {
+    if (firstLook.visible) {
+      // The first look's own actions: its one primary (Start first look, Try
+      // again, or the report) and the workspace as the other.
+      firstLook.actions.forEach(action => {
+        const style = action.style === 'primary' ? 'btn-primary' : 'btn-outline-secondary';
+        const control = document.createElement(action.href ? 'a' : 'button');
+        control.className = `btn btn-sm ${style}`;
+        control.dataset.folderAction = action.id;
+        control.textContent = action.label;
+        if (action.href) {
+          control.href = action.href;
+        } else {
+          control.type = 'button';
+          control.disabled = action.busy === true;
+          control.addEventListener('click', () => void startFirstLook());
+        }
+        els.actions.append(control);
+      });
+    } else if (receipt.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-primary';
       open.href = receipt.route;
@@ -1439,8 +1635,14 @@ function renderOffer(place) {
   if (els.offerNote) {
     // A one-card run says what it is doing; a stopped one already said what it
     // needs in the question, so the outcome note would only repeat it.
+    // The first look speaks on the same line: that it is running, why it cannot
+    // start, or what its click will cost.
+    const lookNote = firstLook.visible
+      ? firstLook.status || firstLook.message || firstLook.hint
+      : '';
     const note =
       state.progress ||
+      lookNote ||
       (view.setup
         ? view.setup.statusLine
         : view.decided && !receipt.visible
@@ -1625,16 +1827,174 @@ async function startOneCardSetup(action) {
 }
 
 // syncSetupPolling polls the existing digest read while a run is going, and
-// only then. A page that loads onto a running setup resumes it the same way;
+// only then: a one-card setup, or a folder's first look while the drawer that
+// shows it is open. A page that loads onto either resumes it the same way;
 // nothing polls otherwise, so an idle page makes no extra request.
 function syncSetupPolling() {
-  const running = state.offer?.setup?.status === 'running';
+  const running = state.offer?.setup?.status === 'running' || firstLookPolling();
   if (running && !setupPollTimer) {
-    setupPollTimer = setInterval(() => void pollSetup(), SETUP_POLL_MS);
+    setupPollTimer = setInterval(() => void pollTick(), SETUP_POLL_MS);
   } else if (!running && setupPollTimer) {
     clearInterval(setupPollTimer);
     setupPollTimer = null;
   }
+}
+
+// A first look takes a minute or more, so it is read on every other tick.
+let firstLookTick = 0;
+
+async function pollTick() {
+  if (state.offer?.setup?.status === 'running') return pollSetup();
+  if (!firstLookPolling()) {
+    // The look settled or the drawer closed: stop asking.
+    syncSetupPolling();
+    return undefined;
+  }
+  firstLookTick = (firstLookTick + 1) % 2;
+  if (firstLookTick !== 0) return undefined;
+  return refreshFirstLook(currentFirstLook()?.offer_id);
+}
+
+function drawerOpen() {
+  const panel = document.getElementById('personalAssistantPanel');
+  return Boolean(panel) && !panel.hidden;
+}
+
+// The look is followed only while it runs and only while the drawer is open
+// (FR17). The mission card keeps its own slower read of the board.
+function firstLookPolling() {
+  return currentFirstLook()?.state === 'running' && drawerOpen();
+}
+
+// currentFirstLook is the first look this page follows: the one on the card
+// when the card is a set-up folder, else the latest one the digest names.
+function currentFirstLook() {
+  if (folderFirstLookOpen(state.offer)) return state.offer.first_task;
+  const look = state.digest?.first_look;
+  return look && FIRST_LOOK_STATES.includes(String(look.state || '')) ? look : null;
+}
+
+// applyFirstLook records where a look stands, on the card it belongs to and as
+// the digest's latest. A null look means the server has nothing to show for
+// that offer any more.
+function applyFirstLook(offerID, look) {
+  const id = String(offerID || '');
+  if (!id) return;
+  if (state.offer?.id === id && state.offer.status === 'resolved') {
+    const next = { ...state.offer };
+    if (look) next.first_task = look;
+    else delete next.first_task;
+    state.offer = next;
+  }
+  if (state.digest && (!state.digest.first_look || state.digest.first_look.offer_id === id)) {
+    state.digest = { ...state.digest, first_look: look || undefined };
+  }
+}
+
+// What changes on Home when a look moves: the mission card reads the board
+// again, and Today lists the look under Working on or its result under Done.
+function firstLookMoved() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new Event('ori:progression-refresh'));
+  } catch (_) {
+    // The mission card has its own poll.
+  }
+  void window.PersonalAssistantToday?.refresh?.();
+}
+
+// refreshFirstLook reads one set-up folder's offer and takes the server's word
+// for where its first look stands.
+async function refreshFirstLook(offerID) {
+  const id = String(offerID || '');
+  if (!id) return;
+  const before = currentFirstLook()?.state;
+  try {
+    const response = await fetch(`${DIGEST_ENDPOINT}?offer_id=${encodeURIComponent(id)}`, {
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) return;
+    const payload = await readJSON(response);
+    const offer = payload?.folder_digest?.offer;
+    if (!offer || offer.id !== id) return;
+    if (state.offer?.id === id && offer.status === 'resolved') state.offer = offer;
+    applyFirstLook(id, offer.first_task || null);
+  } catch (_) {
+    // The next tick, or the next open, reads it again.
+    return;
+  }
+  const after = currentFirstLook()?.state;
+  if (after !== 'seeded') state.firstLookMessage = '';
+  render();
+  announceOffer();
+  if (before !== after) firstLookMoved();
+}
+
+// startFirstLook is the one click that spends model tokens on a folder's first
+// look. The receipt's button and the mission card's both land here. A look that
+// did not finish is run again through the ordinary manual task run, so the
+// one-time start is never asked for twice (FR11). It resolves to what happened,
+// for a caller that has its own card to update.
+async function startFirstLook() {
+  const look = currentFirstLook();
+  const idle = { started: false, message: '' };
+  if (!look || state.firstLookBusy) return idle;
+  const retry = look.state === 'failed';
+  if (!retry && !(look.state === 'seeded' && look.can_start === true)) return idle;
+  const workspaceID = String(look.workspace_id || '').trim();
+  const taskID = String(look.task_id || '').trim();
+  if (!workspaceID || (retry && !taskID)) return idle;
+
+  state.firstLookBusy = true;
+  state.firstLookMessage = '';
+  render();
+  announceOffer();
+  let started = false;
+  let reason = 'start_failed';
+  try {
+    const request = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+    const response = retry
+      ? await fetch('/api/orchestration/tasks/execute', {
+          ...request,
+          body: JSON.stringify({ task_id: taskID })
+        })
+      : await fetch(`/api/workspaces/${encodeURIComponent(workspaceID)}/folder-first-task/start`, {
+          ...request,
+          body: '{}'
+        });
+    const payload = await readJSON(response);
+    if (retry) started = response.ok && payload?.success !== false;
+    else if (response.ok) {
+      started = payload?.started === true;
+      reason = String(payload?.reason || 'start_failed');
+    }
+  } catch (_) {
+    started = false;
+  }
+  if (started) {
+    // The run is handed to the executor. Say so now; the read below confirms it.
+    applyFirstLook(look.offer_id, {
+      ...look,
+      state: 'running',
+      can_start: false,
+      reason: '',
+      message: '',
+      detail: 'Running…'
+    });
+  } else {
+    state.firstLookMessage = retry
+      ? FIRST_LOOK_NOT_STARTED
+      : firstLookStartMessage(reason, look.workspace_name);
+  }
+  state.firstLookBusy = false;
+  const message = state.firstLookMessage;
+  render();
+  announceOffer();
+  if (started) firstLookMoved();
+  // The server's reading replaces ours. A refused start may mean the look is
+  // already running, or finished, somewhere else: the card then shows that.
+  await refreshFirstLook(look.offer_id);
+  return { started, message };
 }
 
 async function pollSetup() {
@@ -1885,16 +2245,31 @@ function act(actionId) {
   return true;
 }
 
+// openHQCard opens the drawer on the card that builds the HQ, expanded even when
+// the user deferred it with Not now. It builds nothing.
+function openHQCard() {
+  const panel = window.PersonalAssistantPanel;
+  if (!panel || typeof panel.open !== 'function') return false;
+  if (!panel.open(document.getElementById('personalAssistantLauncher'))) return false;
+  window.PersonalAssistantToday?.expand?.();
+  return window.PersonalAssistantHQCard?.expand?.() === true;
+}
+
 // openChooser is the user asking to explore a folder: the chip above the
 // composer, Home's toolbar button, the `folder=show` link, the mission's
 // Start, or an offer's own "Show another folder". Every one of them starts
 // the same turn in the conversation.
+//
+// It is the one-card flow, with the chips and the picker, then a read-only scan,
+// then the verdict card with Set up. The composer's "Add folder" chip is the chat
+// flow and calls PersonalAssistantFolderContext itself. Every folder starts at
+// the HQ, so until one is built this opens its card instead of a chooser that
+// the server would refuse (FR24, FR25).
 function openChooser() {
-  if (window.PersonalAssistantFolderContext?.open) {
-    void window.PersonalAssistantFolderContext.open();
+  if (!state.available) {
+    openHQCard();
     return;
   }
-  if (!state.available) return;
   enterThread({ byUser: true });
   state.chooserOpen = true;
   state.scanFailed = false;
@@ -1922,19 +2297,16 @@ async function load() {
     state.digest = payload?.folder_digest || null;
     state.offer = state.digest?.offer || null;
     state.confirm = '';
+    state.firstLookMessage = '';
     state.pinned = folderPinnedOffer(state);
     const prompt = firstFolderPromptView(state.digest, state.available);
     if (prompt.expand && !state.prompting) {
       revealFirstPrompt = true;
       // The assistant speaks first: its prompt is the first message in the
       // conversation, with no request from the user above it.
-      if (window.PersonalAssistantFolderContext?.guide) {
-        window.PersonalAssistantFolderContext.guide();
-      } else {
-        enterThread({ byUser: false });
-        state.handOver = true;
-        state.chooserOpen = true;
-      }
+      enterThread({ byUser: false });
+      state.handOver = true;
+      state.chooserOpen = true;
       state.prompting = true;
       // The chooser shows immediately; persisting the receipt cannot delay it.
       void fetch(`${DIGEST_ENDPOINT}/prompted`, { method: 'POST' })
@@ -2286,6 +2658,12 @@ function init() {
     void onSetupProjectReady(String(event.detail?.run_id || ''));
   });
   document.addEventListener('personal-assistant:sent', keepLatestLast);
+  // The first look is followed only while the drawer is open. Opening it reads
+  // the look once, which also resumes the poll when it is still running.
+  document.addEventListener('personal-assistant:opened', () => {
+    const look = currentFirstLook();
+    if (look?.state === 'running') void refreshFirstLook(look.offer_id);
+  });
   const panelState = window.PersonalAssistantPanel?._state;
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   els.workspaceName?.addEventListener('input', () => {
@@ -2296,6 +2674,10 @@ function init() {
     openChooser,
     reload: load,
     current: () => state.offer,
+    // The mission card's in-place action: start (or retry) the latest folder's
+    // first look, and read where it stands.
+    startFirstLook,
+    firstLook: currentFirstLook,
     showConversationReview: (slot, offer) => {
       if (!slot?.isConnected || !offer?.conversation_id) return;
       if (state.offer?.id !== offer.id || state.reviewSlot !== slot) {

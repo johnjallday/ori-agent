@@ -8,12 +8,14 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // The folder the user showed the assistant gets one read-only first task when
-// its workspace is set up. This file starts it, once, the first time the
-// workspace is opened, so no model tokens are spent until the user looks.
+// its workspace is set up. This file starts it, once, when the user presses
+// Start first look (on Home's receipt or mission card, or on the workspace
+// page's banner), so no model tokens are spent until the user asks.
 //
 // It is deliberately separate from the template setup task's auto-start: that
 // trigger belongs to a blueprint's own `setup: true` help task and is silenced
@@ -22,18 +24,17 @@ import (
 // start this task. The condition here is the right one for a first look at the
 // folder: the wizard, if there is one, has finished.
 const (
-	folderFirstTaskTemplateID = "folder-digest"
+	folderFirstTaskTemplateID = personalassistant.FolderFirstTaskTemplateID
 	// taskContextFolderFirstTaskConsumedAt is stamped, once, in the same store
 	// update that decides to start the task. A failed start keeps it: the task
 	// stays pending and manually startable, and is never retried automatically.
-	taskContextFolderFirstTaskConsumedAt = "folder_first_task_autostart_consumed_at"
+	taskContextFolderFirstTaskConsumedAt = personalassistant.FolderFirstTaskConsumedKey
 )
 
 // isFolderFirstTask reports whether a task is the starter task a shown folder's
 // workspace was seeded with.
 func isFolderFirstTask(task *agentworkspace.Task) bool {
-	return task != nil && task.Context[taskContextTemplateID] == folderFirstTaskTemplateID &&
-		task.Context[taskContextTemplateStarterTask] == true
+	return personalassistant.IsFolderFirstTask(task)
 }
 
 // canonicalWorkspace reads the workspace's canonical record, which carries the
@@ -78,11 +79,11 @@ func (h *Handler) setupWizardOpening(workspaceID string) bool {
 	return !progress.WasMigrated() && !progress.HasBeenOpened() && !progress.IsDismissed()
 }
 
-// folderFirstTaskAutoStarts says whether the first task will start by itself the
-// next time the workspace is opened. The receipt only promises that when it is
-// true: the task has an agent, has not been started or consumed, and no setup
-// dialog is still open.
-func (h *Handler) folderFirstTaskAutoStarts(ws *agentworkspace.Workspace) bool {
+// folderFirstTaskStartsOnClick says whether Start first look would start the
+// first task now. The receipt only promises that when it is true: the task has
+// an agent, has not been started or consumed, and no setup dialog is still to
+// open.
+func (h *Handler) folderFirstTaskStartsOnClick(ws *agentworkspace.Workspace) bool {
 	if ws == nil {
 		return false
 	}
@@ -106,11 +107,11 @@ func (h *Handler) folderFirstTaskAutoStarts(ws *agentworkspace.Workspace) bool {
 var errFolderFirstTaskNoChange = errors.New("no folder first task to start")
 
 // handleFolderFirstTaskStart serves POST /api/workspaces/{id}/folder-first-task/start,
-// the first-open trigger for a shown folder's first task. Inside one store update
-// it finds the unconsumed task and stamps the marker, then starts the task
+// the Start first look click for a shown folder's first task. Inside one store
+// update it finds the unconsumed task and stamps the marker, then starts the task
 // through the same manual-execution path as pressing Start on it. It is
-// idempotent across reloads and tabs. A task with no agent, or a setup wizard
-// still open, is left seeded and unconsumed so a later open starts it.
+// idempotent across clicks and tabs. A task with no agent, or a setup wizard
+// still open, is left seeded and unconsumed so a later click starts it.
 func (h *Handler) handleFolderFirstTaskStart(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	if r.Method != http.MethodPost {
 		_ = orihttp.RespondMethodNotAllowed(w)
@@ -178,14 +179,35 @@ func (h *Handler) handleFolderFirstTaskStart(w http.ResponseWriter, r *http.Requ
 	// consumed-but-failed, never retried automatically.
 	if h.templateSetupStarter == nil {
 		logger.Warn("Folder first task consumed but no starter is wired", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
+		h.markFolderFirstTaskStartFailed(store, workspaceID, taskID)
 		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "execution_unavailable", "task_id": taskID})
 		return
 	}
 	if err := h.templateSetupStarter(workspaceID, taskID); err != nil {
 		logger.Warn("Folder first task failed to start", logger.Fields{"workspace_id": workspaceID, "task_id": taskID, "error": err})
+		h.markFolderFirstTaskStartFailed(store, workspaceID, taskID)
 		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "start_failed", "task_id": taskID})
 		return
 	}
-	logger.Info("Folder first task started on first open", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
+	logger.Info("Folder first task started", logger.Fields{"workspace_id": workspaceID, "task_id": taskID})
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": true, "task_id": taskID})
+}
+
+// markFolderFirstTaskStartFailed records that the spent start never began, so
+// the look reads as "did not start" at once rather than as starting. It changes
+// nothing about retries: the task stays pending and is run again by hand. A
+// write that fails only costs that promptness, so it is logged and ignored.
+func (h *Handler) markFolderFirstTaskStartFailed(store agentworkspace.Store, workspaceID, taskID string) {
+	err := store.Update(workspaceID, func(ws *agentworkspace.Workspace) error {
+		for i := range ws.Tasks {
+			if ws.Tasks[i].ID == taskID && isFolderFirstTask(&ws.Tasks[i]) {
+				ws.Tasks[i].Context[personalassistant.FolderFirstTaskStartFailedKey] = time.Now().UTC().Format(time.RFC3339)
+				return nil
+			}
+		}
+		return errFolderFirstTaskNoChange
+	})
+	if err != nil && !errors.Is(err, errFolderFirstTaskNoChange) {
+		logger.Warn("Folder first task start failure was not recorded", logger.Fields{"workspace_id": workspaceID, "task_id": taskID, "error": err})
+	}
 }

@@ -103,7 +103,9 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Links " + facts.WorkspaceName + " where it is", Detail: "Nothing is moved or copied."},
 		mode,
 		agents,
-		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanTask, Name: "Queues a first read-only task for when you open it"},
+		// Nothing starts it: the user does, with Start first look, which is when
+		// model tokens are spent.
+		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanTask, Name: "Queues a first read-only task for you to start"},
 	)
 	plan := personalassistant.NewFolderSetupPlan(lines)
 	plan.Intent = intent

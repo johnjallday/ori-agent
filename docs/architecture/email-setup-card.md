@@ -6,7 +6,7 @@ builds ship no Google OAuth client, and most mail providers accept an app
 password over IMAP.
 
 Every surface that offers email setup links to `/?setup=email`: the Home email
-capability card, the connect-a-source starter mission, a task blocked on email,
+capability card, the connect-a-source mission (Mission 04, in the Daily loop), a task blocked on email,
 and the Email Ops workspace's connect button and Setup Wizard step.
 `email-setup.js` loads on every page and opens the card for that URL, or for any
 click on a link to it, without leaving the page.

@@ -258,7 +258,7 @@ and no tool/skill/MCP/Vault/filesystem change.
 After completion, the client opens the assistant drawer on the HQ confirm card
 (under Needs you). HQ Build is
 retired from the mission board but its completion event remains persisted.
-Plan my first day is a branch of Mission 03, and `?quest=plan-first-day`
+Plan my first day is a branch of Mission 04, and `?quest=plan-first-day`
 still does not open while `needs_hq`.
 
 Confirming the card's Build or the Map's alternate Build My HQ form is the HQ
@@ -422,30 +422,78 @@ is maintained.
 
 ## Starter missions
 
-Source: `tasks/prd-starter-missions.md` and
-`tasks/prd-meet-your-assistant-mission.md`. The personal-assistant graph
-(`progression.PersonalAssistantGraph`) opens with a Tier 1 named **Starter**:
-four featured missions. Mission 01 hires the assistant and is the only required
-one. Missions 02 to 04 are optional, each ends with Ori visibly doing something,
-and each carries `LockedUntil: pa-meet-assistant`: until Mission 01 is complete
-the status view marks them `locked`, with `locked_reason` "Meet your assistant
-first", and the widget renders them with a lock and no Start, Skip, or Resume.
+Source: `tasks/prd-starter-missions.md`,
+`tasks/prd-meet-your-assistant-mission.md` and
+`tasks/prd-mission-quest-folder-refocus.md`. The personal-assistant graph
+(`progression.PersonalAssistantGraph`) has two named tiers, never numbered in
+the UI ("Missions · Starter", "Missions · Daily loop"). **Starter** is the folder
+story: Mission 01 hires the assistant (the only required mission), Mission 02
+shows it a folder, Mission 03 is what it found. **Daily loop** is Missions 04
+and 05, listed locked ("Starter first") beneath Starter and open once every
+Starter mission is resolved, completed or skipped. All five are featured, the
+others are optional, and each ends with Ori visibly doing something.
+
 Locking is presentation only: `Match`, `Complete`, and backfill still run for a
-locked quest. Build My HQ (`t2-build-hq`), the older Tier 2 steps, and the built-in
-Tier 3–6 steps are presentation-retired, not deleted. Their IDs still match
-and their completions survive backfill and Reset, but none appears in tiers,
-mission counts or the next mission, and none pays Craft. The four visible
-missions each pay 7 Craft, enough for the first Farm. `t1-plan-first-day`
-and `t2-create-workspace` are not in this graph; their persisted completions
-stay in place, and a `t1-plan-first-day` completion counts as evidence for
-Mission 03.
+locked quest. The status view marks a locked mission `locked` with a
+`locked_reason`, and the widget renders it with a lock and no Start, Skip, or
+Resume. A lock comes from a quest's `LockedUntil` (with an optional
+`LockedReason` override and `LockedAction`, the one button that opens it) or
+from its tier not being current yet. A visible gate that was **skipped** waives
+its dependents for tier completion only: they stay locked, but they cannot hold
+Starter, so deferring Mission 02 does not strand Mission 03 or the Daily loop.
+The retired HQ quest does not waive (below).
+
+Build My HQ (`t2-build-hq`), the older tier steps, and the built-in Tier 3–6
+steps are presentation-retired, not deleted. Their IDs still match and their
+completions survive backfill and Reset, but none appears in tiers, mission
+counts or the next mission, and none pays Craft. The five visible missions each
+pay 7 Craft (35 in total, enough for the first Farm). `t1-plan-first-day` and
+`t2-create-workspace` are not in this graph; their persisted completions stay in
+place, and a `t1-plan-first-day` completion counts as evidence for Mission 04.
 
 | Order | ID | Card | Completes when |
 | --- | --- | --- | --- |
 | 01 | `pa-meet-assistant` | Meet your assistant, `/?quest=meet-assistant` | the request that makes a hire durable (`HireResult.NewlyHired`), or a repair that leaves the relationship hired; never a replay |
-| 02 | `pa-show-folder` | Show your assistant a folder, `/?quest=show-folder`; while an offer is pending, the offer itself renders on the card with its own buttons | the folder offer's outcome — a workspace linked to the shown folder or a tidy prepared for it (`FolderDigestService.SetOnOutcome`), a `workspace.created` whose `entry_point` is `folder_digest`, or a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaching ready |
-| 03 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
-| 04 | `pa-first-brief` | Read your first Daily Brief, **Open Daily Brief** → `/workspaces/<hq-slug>?station=daily-brief` (`/?panel=today` while no Personal HQ slug is known); while open and with no model configured, adds "Add a model in Settings to generate one." | the Daily Brief panel in My HQ first shows a brief for a hired assistant (`POST /api/personal-hq/brief/seen`, sent by the panel). Home preparing the brief in the background, or Today being read, does not complete it |
+| 02 | `pa-show-folder` | Show your assistant a folder, `/?quest=show-folder`, which opens the one-card chooser; while an offer is pending, the offer itself renders on the card with its own buttons. **Locked until the HQ is built** ("Build your HQ first", action **Build My HQ**) | the folder offer's outcome — a workspace linked to the shown folder or a tidy prepared for it (`FolderDigestService.SetOnOutcome`), a `workspace.created` whose `entry_point` is `folder_digest`, or a `file-janitor` (or retired `downloads-janitor`) workspace's setup wizard first reaching ready |
+| 03 | `pa-folder-first-look` | See what your assistant found; locked until Mission 02 is **completed**. Its card follows the latest folder workspace's first look (below) | a folder first task finishing with a non-empty result, observed from `task.completed` (`folderFirstTaskFinished`), wherever it was started |
+| 04 | `pa-connect-source` | resolved from the hire's focus areas (below) | any branch's signal, not only the one offered |
+| 05 | `pa-first-brief` | Read your first Daily Brief, **Open Daily Brief** → `/workspaces/<hq-slug>?station=daily-brief` (`/?panel=today` while no Personal HQ slug is known); while open and with no model configured, adds "Add a model in Settings to generate one." | the Daily Brief panel in My HQ first shows a brief for a hired assistant (`POST /api/personal-hq/brief/seen`, sent by the panel). Home preparing the brief in the background, or Today being read, does not complete it |
+
+### The HQ gate
+
+Every folder path needs the user's HQ (the assistant keeps what it learns about
+folders there), so Mission 02 has `LockedUntil: t2-build-hq`. Only a real
+build or designation completes that quest: **Not now** on the HQ card skips it
+and so keeps Mission 02 locked, and the card does not move on. A locked
+featured card shows status **Locked**, hides Skip, and offers one action from
+`locked_action` (`{kind: "hq_card", label: "Build My HQ"}`), which opens the
+drawer and expands the HQ card, including one collapsed by Not now
+(`PersonalAssistantHQCard.expand`). It never links to the chooser. Home's
+**Explore a folder**, the `?folder=show` links and the first-folder prompt do
+the same while the relationship still needs an HQ; the server's 409 ("Build
+Personal HQ before showing a folder") remains the backstop.
+
+### The first look
+
+A folder set up as a project is seeded with one read-only first task
+(`template_id: folder-digest`, `template_starter_task: true`). Nothing starts
+it but a click on **Start first look**, so model tokens are spent only on that
+click: on the Home receipt (`personal-assistant-folder.js`), on the mission card
+(an in-place action, `/?quest=folder-first-look`), or on the workspace page's
+banner. Each posts `POST /api/workspaces/{id}/folder-first-task/start`; a retry
+after a failure uses the ordinary manual run. One reader,
+`personalassistant.FolderFirstTaskStateAt`, says where a look stands
+(`seeded`, `running`, `waiting`, `finished`, `failed`), and the receipt row, the
+digest's `first_task`/`first_look`, the mission card and Today all use it. A
+spent start reads as running for 30 seconds and then as a start that failed; a
+start the executor refused is marked at once. The receipt stays pinned in Needs
+you while a look is open or has just finished (an hour), so a reload keeps
+**Running…**. Today lists "First look at <folder>" under Working on while it
+runs and a `folder_result` under Done for seven days after it finishes.
+
+Mission 03 completes only from the server. Installs that already ran a first
+look are grandfathered once, silently and without Craft, under
+`folder-first-look-v1`.
 
 Mission 01's completion is `personalassistanthttp.Handler.SetOnHired`, bound in
 `completeProgressionWiring`. Its evidence (`Snapshot.AssistantHired`) is the
@@ -463,7 +511,7 @@ around the Agents nav entry at "Step 1 of 6 · Click Agents"
 (`meet-assistant-home-prompt.js`). The navbar wraps rather than collapses, so
 the Agents entry can be lit at every width.
 
-Mission 03 branches, in priority order when several focus areas match:
+Mission 04 branches, in priority order when several focus areas match:
 
 | Branch | Focus area | Card | Completion signal |
 | --- | --- | --- | --- |
@@ -508,7 +556,8 @@ How the card works:
   completed nor skipped and lists the others beneath it. It holds no quest IDs.
 - Every completion is observed on the server. The browser never claims one.
 - Mission 02's start (`show-folder-quest.js`) opens the assistant drawer,
-  starts the folder flow in its conversation and scrubs `?quest=show-folder`
+  starts the one-card folder flow in its conversation (the composer's **Add
+  folder** chip keeps the chat flow) and scrubs `?quest=show-folder`
   without a history entry. It makes no request of its own and never completes
   anything. A pending offer also renders on the mission card
   (`progression-widget.js`, matched on the action URL

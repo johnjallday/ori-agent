@@ -78,6 +78,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		}
 	}
 	seen := map[string]bool{hq.ID: true}
+	var folderResults []TodayItem
 	for _, offer := range all {
 		if offer.Outcome == nil || offer.Outcome.Kind != FolderChoiceProject || offer.Outcome.WorkspaceID == "" || seen[offer.Outcome.WorkspaceID] {
 			continue
@@ -103,8 +104,17 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 		if !last.IsZero() {
 			detail += " · Last result " + last.UTC().Format("Jan 2")
 		}
+		route := "/workspaces/" + url.PathEscape(ws.FolderSlug)
+		// The first look while it runs, and its result once it has finished.
+		if item, ok := firstLookTodayItem(offer, ws, route, now); ok {
+			if item.Kind == "folder_result" {
+				folderResults = append(folderResults, item)
+			} else {
+				working = append(working, item)
+			}
+		}
 		working = append(working, TodayItem{ID: ws.ID, Kind: "folder_workspace", Title: ws.Name,
-			Detail: detail, Route: "/workspaces/" + url.PathEscape(ws.FolderSlug)})
+			Detail: detail, Route: route})
 	}
 	for _, row := range janitorRows {
 		if item, ok := janitorTodayItem(row, now); ok {
@@ -151,7 +161,9 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 			needs = append(needs, item)
 		}
 	}
-	done := append([]TodayItem(nil), out.Results.Items...)
+	// What the agent found comes first: it is the news, the setup receipt is not.
+	sort.SliceStable(folderResults, func(i, j int) bool { return folderResults[i].SourceAt.After(folderResults[j].SourceAt) })
+	done := append(folderResults, out.Results.Items...)
 	if hq.CreatedAt.After(now.Add(-todayFolderReceiptWindow)) && !hq.CreatedAt.After(now) {
 		done = append([]TodayItem{{ID: "hq-receipt-" + hq.ID, Kind: "hq_setup",
 			Title: "Set up " + hq.Name, Detail: hqBriefSchedule(relationship), Route: hqRoute,
@@ -188,6 +200,40 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 			out.UnavailableSources = appendSource(out.UnavailableSources, src.name)
 		}
 	}
+}
+
+// firstLookTodayItem is the folder's first look as Today shows it: "First look
+// at <folder>" under Working on while the agent is at it (or waiting for the
+// user's answer), and a folder_result under Done for seven days once it has
+// finished. The detail is the server's own one-line excerpt; the route opens
+// the task's ticket. A look that did not start or finish is not news here: the
+// Home card carries its Try again.
+func firstLookTodayItem(offer FolderOffer, ws *workspace.Workspace, route string, now time.Time) (TodayItem, bool) {
+	task := FindFolderFirstTask(ws)
+	if task == nil {
+		return TodayItem{}, false
+	}
+	folder := strings.TrimSpace(offer.Subject.Name)
+	if folder == "" {
+		folder = ws.Name
+	}
+	switch FolderFirstTaskStateAt(task, now) {
+	case FolderFirstTaskRunning, FolderFirstTaskWaiting:
+		return TodayItem{ID: "first-look-" + task.ID, Kind: "folder_first_look",
+			Title: truncateRunes("First look at "+folder, 200), Attribution: truncateRunes(strings.TrimSpace(task.To), 100),
+			Route: route, Ref: dailybrief.SourceRef{WorkspaceID: ws.ID, EntityType: "task", EntityID: task.ID}}, true
+	case FolderFirstTaskFinished:
+		at := taskSourceTime(*task)
+		if at.After(now) || now.Sub(at) > todayFolderReceiptWindow {
+			return TodayItem{}, false
+		}
+		return TodayItem{ID: task.ID, Kind: "folder_result", Title: truncateRunes(task.Description, 200),
+			Detail: FolderFirstTaskExcerpt(task.Result), State: string(task.CanonicalState()),
+			Attribution: truncateRunes(strings.TrimSpace(task.To), 100),
+			Route:       recordTodayRoute(route, "ticket", task.ID), SourceAt: at,
+			Ref: dailybrief.SourceRef{WorkspaceID: ws.ID, EntityType: "task", EntityID: task.ID, Timestamp: at}}, true
+	}
+	return TodayItem{}, false
 }
 
 func appendSource(sources []string, name string) []string {

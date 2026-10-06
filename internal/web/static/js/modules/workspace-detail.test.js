@@ -1707,18 +1707,35 @@ test('a settings render leaves a collapsed configuration card collapsed', () => 
   assert.equal(page.elements.configPanel.classList.contains('is-collapsed'), true);
 });
 
-// The folder's first task starts on the first open. The page asks the server and
-// does only what it is told: it opens no dialog and starts nothing itself.
-function firstTaskPage(response) {
+// The folder's first look starts on a click, never on opening the page: that is
+// when model tokens are spent. The page shows the banner with its button, asks
+// the server on the click, and does only what it is told.
+function firstTaskPage(response, { task } = {}) {
   const calls = { fetch: [], loadTasks: 0, monitor: [], toast: [], banner: [], resumed: 0 };
+  const seeded = task || {
+    id: 't-1',
+    to: 'Atlas',
+    status: 'assigned',
+    context: { template_id: 'folder-digest', template_starter_task: true }
+  };
   const page = {
     workspaceId: 'ws 1',
-    tasks: [{ id: 't-1', to: 'Atlas' }],
+    tasks: [{ id: 't-0', to: 'Atlas', status: 'assigned', context: {} }, seeded],
+    findFolderFirstTask: WorkspaceDetailPage.prototype.findFolderFirstTask,
+    isFirstTaskWaitingToStart: WorkspaceDetailPage.prototype.isFirstTaskWaitingToStart,
+    getTaskExecutionState: item => item.status,
     loadTasks: async () => {
       calls.loadTasks++;
     },
     startExecutionMonitor: id => calls.monitor.push(id),
-    updateFirstTaskBanner: task => calls.banner.push(task?.id),
+    updateFirstTaskBanner(item) {
+      calls.banner.push({
+        id: item?.id,
+        seeded: this.firstTaskSeeded === true,
+        starting: this.firstTaskStarting === true,
+        message: this.firstTaskStartMessage || ''
+      });
+    },
     resumeFirstTaskBanner: () => {
       calls.resumed++;
     }
@@ -1729,12 +1746,62 @@ function firstTaskPage(response) {
     return { ok: response.ok !== false, json: async () => response.body };
   };
   global.window.Toast = { info: message => calls.toast.push(message) };
+  global.document = { getElementById: () => null };
   return { page, calls };
 }
 
-test('the folder first task start posts to its own endpoint and follows the task', async () => {
+test('opening the workspace starts nothing: a seeded first look shows its button', () => {
+  const { page, calls } = firstTaskPage({ body: {} });
+  WorkspaceDetailPage.prototype.showFolderFirstTaskBanner.call(page);
+
+  assert.deepEqual(calls.fetch, [], 'opening the page must not spend the one start');
+  assert.equal(page.firstTaskBannerId, 't-1');
+  assert.equal(page.firstTaskSeeded, true);
+  assert.deepEqual(calls.banner, [{ id: 't-1', seeded: true, starting: false, message: '' }]);
+  assert.deepEqual(calls.monitor, []);
+  assert.equal(calls.resumed, 0);
+});
+
+test('a first look that was already started is followed, not offered again', () => {
+  const started = {
+    id: 't-1',
+    to: 'Atlas',
+    status: 'in_progress',
+    context: {
+      template_id: 'folder-digest',
+      template_starter_task: true,
+      folder_first_task_autostart_consumed_at: '2026-10-06T00:00:00Z'
+    }
+  };
+  const { page, calls } = firstTaskPage({ body: {} }, { task: started });
+  WorkspaceDetailPage.prototype.showFolderFirstTaskBanner.call(page);
+  assert.deepEqual(calls.fetch, []);
+  assert.equal(calls.resumed, 1);
+  assert.notEqual(page.firstTaskSeeded, true);
+
+  // A finished or cancelled look has no banner to show on open.
+  for (const status of ['completed', 'cancelled', 'failed']) {
+    const done = firstTaskPage(
+      { body: {} },
+      { task: { ...started, status, context: { ...started.context } } }
+    );
+    delete done.page.tasks[1].context.folder_first_task_autostart_consumed_at;
+    WorkspaceDetailPage.prototype.showFolderFirstTaskBanner.call(done.page);
+    assert.equal(done.page.firstTaskBannerId, undefined, status);
+    assert.deepEqual(done.calls.banner, [], status);
+  }
+
+  // A workspace with no first look shows nothing.
+  const none = firstTaskPage({ body: {} });
+  none.page.tasks = [{ id: 't-0', context: {} }];
+  WorkspaceDetailPage.prototype.showFolderFirstTaskBanner.call(none.page);
+  assert.equal(none.page.firstTaskBannerId, undefined);
+});
+
+test('Start first look posts to its own endpoint and follows the task', async () => {
   const { page, calls } = firstTaskPage({ body: { started: true, task_id: 't-1' } });
-  await WorkspaceDetailPage.prototype.maybeStartFolderFirstTask.call(page);
+  WorkspaceDetailPage.prototype.showFolderFirstTaskBanner.call(page);
+  await WorkspaceDetailPage.prototype.startFolderFirstTask.call(page);
 
   assert.deepEqual(calls.fetch, [
     { url: '/api/workspaces/ws%201/folder-first-task/start', method: 'POST' }
@@ -1742,9 +1809,24 @@ test('the folder first task start posts to its own endpoint and follows the task
   assert.equal(calls.loadTasks, 1);
   assert.deepEqual(calls.monitor, ['t-1']);
   assert.equal(calls.toast.length, 1);
-  // The banner says the agent is working, and follows this task to its end.
+  // The banner showed the click landing, then follows this task to its end.
   assert.equal(page.firstTaskBannerId, 't-1');
-  assert.deepEqual(calls.banner, ['t-1']);
+  assert.equal(page.firstTaskSeeded, false);
+  assert.equal(page.firstTaskStarting, false);
+  assert.deepEqual(
+    calls.banner.map(entry => `${entry.seeded}:${entry.starting}`),
+    ['true:false', 'true:true', 'false:false']
+  );
+});
+
+test('a second click while the first is in flight starts nothing', async () => {
+  const { page, calls } = firstTaskPage({ body: { started: true, task_id: 't-1' } });
+  WorkspaceDetailPage.prototype.showFolderFirstTaskBanner.call(page);
+  await Promise.all([
+    WorkspaceDetailPage.prototype.startFolderFirstTask.call(page),
+    WorkspaceDetailPage.prototype.startFolderFirstTask.call(page)
+  ]);
+  assert.equal(calls.fetch.length, 1);
 });
 
 test('a first task that is still running keeps its banner after a reload', () => {
@@ -1779,31 +1861,64 @@ test('a first task that is still running keeps its banner after a reload', () =>
   assert.deepEqual(calls.banner, ['t-9']);
 });
 
-test('the folder first task start does nothing when the server did not start it', async () => {
-  for (const body of [
-    { started: false, reason: 'already_consumed' },
-    { started: false, reason: 'setup_wizard_opening' },
-    { started: false, reason: 'unassigned' },
-    { started: true }
-  ]) {
+test('a refused start says why on the banner and leaves the button', async () => {
+  const cases = [
+    [
+      { started: false, reason: 'setup_wizard_opening' },
+      'Finish this workspace’s setup first, then start the first look.'
+    ],
+    [
+      { started: false, reason: 'unassigned' },
+      'The first task has no agent yet. Assign one, then start the first look.'
+    ],
+    [
+      { started: false, reason: 'local_activation_required' },
+      'Activate this workspace on this computer to run the first look.'
+    ],
+    [{ started: false, reason: 'start_failed' }, 'The first look could not start. Try again.'],
+    [{ started: true }, 'The first look could not start. Try again.']
+  ];
+  for (const [body, sentence] of cases) {
     const { page, calls } = firstTaskPage({ body });
-    await WorkspaceDetailPage.prototype.maybeStartFolderFirstTask.call(page);
+    WorkspaceDetailPage.prototype.showFolderFirstTaskBanner.call(page);
+    await WorkspaceDetailPage.prototype.startFolderFirstTask.call(page);
     assert.equal(calls.loadTasks, 0, JSON.stringify(body));
     assert.deepEqual(calls.monitor, [], JSON.stringify(body));
     assert.deepEqual(calls.toast, [], JSON.stringify(body));
+    assert.equal(page.firstTaskStartMessage, sentence, JSON.stringify(body));
+    assert.equal(page.firstTaskSeeded, true, JSON.stringify(body));
+    assert.equal(calls.banner.at(-1).message, sentence);
+    assert.equal(calls.banner.at(-1).starting, false);
   }
 });
 
-test('the folder first task start swallows a failed request', async () => {
+test('a look that was started somewhere else is followed from here', async () => {
+  for (const reason of ['already_consumed', 'not_pending']) {
+    const { page, calls } = firstTaskPage({ body: { started: false, reason } });
+    WorkspaceDetailPage.prototype.showFolderFirstTaskBanner.call(page);
+    await WorkspaceDetailPage.prototype.startFolderFirstTask.call(page);
+    assert.equal(calls.loadTasks, 1, reason);
+    assert.equal(calls.resumed, 1, reason);
+    assert.equal(page.firstTaskSeeded, false, reason);
+    assert.equal(page.firstTaskStartMessage, '', reason);
+    assert.deepEqual(calls.toast, [], reason);
+  }
+});
+
+test('a failed start request says so and can be tried again', async () => {
   for (const response of [new Error('offline'), { ok: false, body: {} }]) {
     const { page, calls } = firstTaskPage(response);
+    WorkspaceDetailPage.prototype.showFolderFirstTaskBanner.call(page);
     const warn = console.warn;
     console.warn = () => {};
     try {
-      await WorkspaceDetailPage.prototype.maybeStartFolderFirstTask.call(page);
+      await WorkspaceDetailPage.prototype.startFolderFirstTask.call(page);
     } finally {
       console.warn = warn;
     }
     assert.deepEqual(calls.monitor, []);
+    assert.equal(page.firstTaskStartMessage, 'The first look could not start. Try again.');
+    assert.equal(page.firstTaskStarting, false);
+    assert.equal(page.firstTaskSeeded, true);
   }
 });

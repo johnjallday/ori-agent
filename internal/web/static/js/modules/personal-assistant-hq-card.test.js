@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hqCardView, hqReceiptRows } from './personal-assistant-hq-card.js';
+import { hqCardView, hqHeadline, hqReceiptRows } from './personal-assistant-hq-card.js';
+
+test('the HQ headline explains the home base in folder terms', () => {
+  assert.equal(
+    hqHeadline('Atlas'),
+    'Atlas is hired. Give me a home base: My HQ is where I keep what I learn about the folders you show me, and where your Daily Brief lands.'
+  );
+  assert.match(hqHeadline(''), /^Your assistant is hired\./);
+});
 
 const assistant = state => ({ state, display_name: '<Atlas>' });
 const root = { workspace_root: '/workspaces', confirmed: true };
