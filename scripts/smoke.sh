@@ -3392,9 +3392,16 @@ smoke_library_notifications() {
 # repo: ORI_MUSIC_PLUGIN_SOURCE must be a clean Music Project Management
 # checkout whose Home declares home_profile. The suite supplies its own fixture
 # applications, so the result does not depend on what this Mac has installed.
+# With ORI_REAPER_PLUGIN_SOURCE set to a clean REAPER plugin checkout that
+# offers the facts operation, the same run also drives the templates review,
+# read and Forget against fixture template folders in the sandbox.
 smoke_home_profile() {
   local port="" log status sandbox candidate
+  local -a reaper=()
   [[ $# -eq 1 ]] || fail "usage: $0 home-profile"
+  if [[ -n "${ORI_REAPER_PLUGIN_SOURCE:-}" ]]; then
+    reaper=(--reaper-source "$ORI_REAPER_PLUGIN_SOURCE")
+  fi
   [[ -n "${ORI_MUSIC_PLUGIN_SOURCE:-}" ]] ||
     fail "set ORI_MUSIC_PLUGIN_SOURCE to a clean Music Project Management checkout that declares home_profile"
   for candidate in $(seq 8941 8969); do
@@ -3407,7 +3414,7 @@ smoke_home_profile() {
   log="${TMPDIR:-/tmp}/home-profile-$port.log"
   status=FAIL
   if ./scripts/music-home-demo.sh test --suite home-profile \
-    --source "$ORI_MUSIC_PLUGIN_SOURCE" --port "$port" --keep >"$log" 2>&1; then
+    --source "$ORI_MUSIC_PLUGIN_SOURCE" ${reaper[@]+"${reaper[@]}"} --port "$port" --keep >"$log" 2>&1; then
     status=PASS
   fi
   sandbox=$(grep -o 'SANDBOX=.*' "$log" | head -1 | cut -d= -f2- || true)
@@ -4070,7 +4077,7 @@ prettier-head) smoke_prettier_head "$@" ;;
   echo "  $0 janitor-upgrade-seed <base-url> <sandbox>    # seed a downloads-janitor workspace on the OLD binary" >&2
   echo "  $0 janitor-upgrade-verify <base-url> <sandbox>  # verify it survived the rename on the NEW binary" >&2
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
-  echo "  $0 home-profile                          # Home profile card: browser acceptance on a free port with fixture applications (needs ORI_MUSIC_PLUGIN_SOURCE declaring home_profile)" >&2
+  echo "  $0 home-profile                          # Home profile card: browser acceptance on a free port with fixture applications (needs ORI_MUSIC_PLUGIN_SOURCE declaring home_profile; ORI_REAPER_PLUGIN_SOURCE adds the templates read)" >&2
   echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|linked|chats|groups|narrow|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
   echo "  $0 prettier-head <file>...               # was each file Prettier-clean at HEAD? (only then is --write on the whole file safe)" >&2
   exit 2

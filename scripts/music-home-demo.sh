@@ -24,7 +24,8 @@ Commands:
 Options:
   --source DIR      Clean Music Project Management candidate worktree.
   --reaper-source DIR  Optional clean REAPER candidate, exported and built only in the
-                       disposable sandbox for the paired portfolio-reviewed test.
+                       disposable sandbox for the paired portfolio-reviewed test, or
+                       for the home-profile suite, where it lists fixture templates.
   --upgrade-source DIR Clean newer Music candidate for the package-upgrade suite. It
                        is exported beside the installed one and swapped in by the
                        browser test; it is never installed directly.
@@ -44,7 +45,9 @@ Options:
                     package-upgrade (reviewed Home package upgrade from --source
                     to --upgrade-source; test only), or home-profile (the Home
                     profile card of a candidate that declares home_profile,
-                    with fixture applications; test only).
+                    with fixture applications; test only; with --reaper-source
+                    also the templates review, read and Forget against fixture
+                    template folders).
   --provider MODE   local (default) or reviewed (the two reviewed suites only).
   --open            Open the manual demo in the default browser (macOS).
   -h, --help        Show this help.
@@ -157,8 +160,12 @@ reviewed_suite=0
 if [[ "$test_suite" == "portfolio-reviewed" || "$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" ]]; then
 	reviewed_suite=1
 fi
-if [[ -n "$reaper_source" ]] && { [[ "$mode" != "test" || "$provider_mode" != "reviewed" ]] || ((reviewed_suite == 0)) || [[ "$test_suite" == "onboarding" ]]; }; then
-	fail "--reaper-source needs test --suite portfolio-reviewed|manager-notifications --provider reviewed (the onboarding suite installs REAPER through the reviewed quest and takes no export)"
+if [[ -n "$reaper_source" && "$test_suite" == "home-profile" ]]; then
+	# The profile suite installs the local Music candidate and, beside it, this
+	# REAPER export: its facts operation is what lists the fixture templates.
+	[[ "$mode" == "test" && "$provider_mode" == "local" ]] || fail "--reaper-source with --suite home-profile needs test --provider local"
+elif [[ -n "$reaper_source" ]] && { [[ "$mode" != "test" || "$provider_mode" != "reviewed" ]] || ((reviewed_suite == 0)) || [[ "$test_suite" == "onboarding" ]]; }; then
+	fail "--reaper-source needs test --suite portfolio-reviewed|manager-notifications --provider reviewed, or --suite home-profile (the onboarding suite installs REAPER through the reviewed quest and takes no export)"
 fi
 [[ "$port" =~ ^[0-9]+$ ]] || fail "port must be numeric"
 ((port >= 1 && port <= 65535)) || fail "port must be between 1 and 65535"
@@ -255,6 +262,34 @@ if [[ "$test_suite" == "home-profile" ]]; then
 	profile_fixtures=1
 	mkdir -p "$sandbox/fixture-apps/REAPER.app" "$sandbox/Applications/Logic Pro.app"
 	server_env=("ORI_APPLICATIONS_DIR=$sandbox/fixture-apps")
+	if [[ -n "$reaper_source" ]]; then
+		# What the staged plugin's facts operation reads, all under the sandbox
+		# HOME: an application bundle with version metadata (the plugin looks in
+		# the real /Applications first, so on a Mac that has the application the
+		# version shown is that one's), and the per-user resource folder with two
+		# project templates and one track template. A backup file, a subfolder
+		# and a stray text file must not be listed.
+		reaper_bundle="$sandbox/Applications/REAPER.app/Contents"
+		reaper_resource="$sandbox/Library/Application Support/REAPER"
+		mkdir -p "$reaper_bundle" "$reaper_resource/ProjectTemplates/Archive" "$reaper_resource/TrackTemplates"
+		cat >"$reaper_bundle/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>REAPER</string>
+	<key>CFBundleShortVersionString</key>
+	<string>7.28.0_fixture</string>
+</dict>
+</plist>
+PLIST
+		for template in "ProjectTemplates/Band Session.RPP" "ProjectTemplates/Vocal Comp.RPP" \
+			"TrackTemplates/Drum Bus.RTrackTemplate" "ProjectTemplates/Band Session.RPP-bak" \
+			"ProjectTemplates/Archive/Old Session.RPP" "ProjectTemplates/notes.txt"; do
+			printf '<REAPER_PROJECT\n>\n' >"$reaper_resource/$template"
+		done
+	fi
 fi
 
 cleanup() {

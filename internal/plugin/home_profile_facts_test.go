@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -253,5 +256,80 @@ func TestHomeProfileFactsIsUnavailableWithoutAUsableDeclaration(t *testing.T) {
 	}
 	if len(process.calls) != 0 {
 		t.Fatalf("an unavailable plugin was called: %+v", process.calls)
+	}
+}
+
+// TestLocalProjectPluginFactsOperationFitsTheHostContract is opt-in: it reads
+// a project plugin candidate's own manifest (the same checkout the project
+// entry test uses) and checks its facts operation against what this host
+// sends and accepts. A candidate from before the operation existed is skipped.
+func TestLocalProjectPluginFactsOperationFitsTheHostContract(t *testing.T) {
+	root := os.Getenv("ORI_REAPER_PLUGIN_PATH")
+	if root == "" {
+		t.Skip("ORI_REAPER_PLUGIN_PATH is not set")
+	}
+	data, err := os.ReadFile(filepath.Join(root, OriManifestDir, OriManifestFile)) // #nosec G304 -- explicit coordinated local-plugin test root
+	if err != nil {
+		t.Fatal(err)
+	}
+	contribution, err := ParseSurfaceContribution(data)
+	if err != nil {
+		t.Fatalf("parse the candidate's contribution: %v", err)
+	}
+	ref := contribution.HomeProfileFacts
+	if ref == nil {
+		t.Skip("the candidate declares no facts operation")
+	}
+	if !HostSupportsFeatures(contribution.RequiresHostFeatures) || !slices.Contains(contribution.RequiresHostFeatures, HostFeatureHomeProfileV1) {
+		t.Fatalf("host features = %v", contribution.RequiresHostFeatures)
+	}
+	var declared *ContributedOperation
+	for s := range contribution.Services {
+		if contribution.Services[s].ID != ref.ServiceID {
+			continue
+		}
+		for o := range contribution.Services[s].Operations {
+			if contribution.Services[s].Operations[o].ID == ref.Operation {
+				declared = &contribution.Services[s].Operations[o]
+			}
+		}
+	}
+	if declared == nil || declared.Policy != string(workspacesurface.PolicyReadOnly) || len(declared.Scopes) != 0 {
+		t.Fatalf("facts operation = %+v", declared)
+	}
+	operation := runtimeOperation(*declared)
+	// Exactly the two inputs this host ever sends.
+	for _, input := range []string{`{"include_templates":false}`, `{"include_templates":true}`} {
+		if err := workspacesurface.ValidateOperationInput(operation, json.RawMessage(input)); err != nil {
+			t.Errorf("the candidate refuses the host's input %s: %v", input, err)
+		}
+	}
+	if err := workspacesurface.ValidateOperationInput(operation, json.RawMessage(`{"include_templates":true,"folder":"/Users/me"}`)); err == nil {
+		t.Error("the candidate's input schema accepts a key the host never sends")
+	}
+	// Every shape the host's own decoder understands: not installed, version
+	// only, and a full templates list.
+	for name, output := range map[string]string{
+		"not installed": `{"app":"REAPER","installed":false,"templates_available":false,"truncated":false}`,
+		"version only":  `{"app":"REAPER","installed":true,"version":"7.28","templates_available":true,"truncated":false}`,
+		"templates":     factsOutput,
+	} {
+		if err := workspacesurface.ValidateOperationOutput(operation, json.RawMessage(output)); err != nil {
+			t.Errorf("%s: the candidate's output schema refuses an answer the host accepts: %v", name, err)
+		}
+	}
+	// And nothing the host's decoder would refuse: a path-bearing key, or more
+	// templates than the host stores.
+	if err := workspacesurface.ValidateOperationOutput(operation,
+		json.RawMessage(`{"app":"REAPER","installed":true,"templates_available":true,"truncated":false,"resource_path":"/Users/me/Library"}`)); err == nil {
+		t.Error("the candidate's output schema is open to keys the host does not know")
+	}
+	many := strings.TrimSuffix(strings.Repeat(`{"name":"A","kind":"project","file":"A.RPP"},`, 65), ",")
+	if err := workspacesurface.ValidateOperationOutput(operation,
+		json.RawMessage(`{"app":"REAPER","installed":true,"templates_available":true,"truncated":true,"templates":[`+many+`]}`)); err == nil {
+		t.Error("the candidate's output schema allows more templates than the host stores")
+	}
+	if operation.MaxOutputBytes < 1 || operation.MaxOutputBytes > 65536 {
+		t.Errorf("max_output_bytes = %d", operation.MaxOutputBytes)
 	}
 }

@@ -10,14 +10,21 @@ import { mkdirSync } from 'node:fs';
 // REAPER.app in ORI_APPLICATIONS_DIR and a Logic Pro.app under the sandbox
 // HOME, so the two-DAW path does not depend on what this Mac has installed.
 //
-// Not covered here, because they need companion releases that this suite's
-// sandbox does not stage: listing templates (a REAPER plugin with
-// `profile.read`), the one-card setup line and last screen, and the 0.1.1 to
-// 0.2.0 Home upgrade.
+// With `--reaper-source <candidate>` the sandbox also stages a REAPER plugin
+// that offers `profile.read`, an application bundle with version metadata and
+// a resource folder holding two project templates and one track template (plus
+// files that are not templates), all under the sandbox HOME. The templates
+// tests then drive the real operation through Ori's service runtime. Without
+// it the templates row is checked in its "plugin missing" state only.
+//
+// Not covered here: the one-card setup line and last screen. The 0.1.1 to
+// 0.2.0 Home upgrade is `--suite package-upgrade`.
 const ENABLED =
   process.env.ORI_MUSIC_HOME_ACCEPTANCE === '1' && process.env.ORI_HOME_PROFILE_FIXTURES === '1';
 const SHOTS = process.env.ORI_MUSIC_HOME_EVIDENCE_DIR || 'test-results/home-profile';
 const HEADERS = { 'X-Requested-With': 'XMLHttpRequest' };
+const REAPER_PATH = process.env.ORI_REAPER_PLUGIN_PATH || '';
+const SANDBOX = process.env.ORI_MUSIC_HOME_SANDBOX || '';
 let homeID = '';
 let homeSlug = '';
 
@@ -53,6 +60,17 @@ test('a new Home shows the declared card and detects nothing on load', async ({
   request
 }) => {
   await request.post('/api/onboarding/skip', { headers: HEADERS });
+  if (REAPER_PATH) {
+    // The clean REAPER export, installed through the real plugin API. Nothing
+    // about a Home's profile is read by installing it.
+    await json(
+      await request.post('/api/plugins/install', {
+        headers: HEADERS,
+        data: { source: REAPER_PATH, confirm: true }
+      })
+    );
+    await json(await request.post('/api/plugins/reaper-plugin/enable', { headers: HEADERS }));
+  }
   const templates = (await json(await request.get('/api/workspaces/group-templates')))
     .group_templates;
   const music = templates.filter(
@@ -122,6 +140,17 @@ test('Detect lists both DAWs as hints and one pick fills the main DAW', async ({
   await expect(panel).toContainText('Not chosen. REAPER and Logic Pro were found. Pick one.');
   let card = await profile(request);
   expect(card.profile.main_app).toBeUndefined();
+  if (REAPER_PATH) {
+    // Detect asked the staged plugin for the version only: REAPER's row shows
+    // a release number, and no template was named or stored.
+    expect(card.facts_operation).toBe(true);
+    expect(card.profile.apps[0]).toMatchObject({ id: 'reaper' });
+    expect(card.profile.apps[0].version).toMatch(/^\d+\.\d+$/);
+    await expect(reaper.locator('.home-profile-app-version')).toHaveText(
+      card.profile.apps[0].version
+    );
+    expect(card.profile.templates).toBeUndefined();
+  }
   await evidence(page, '02-two-daws-detected');
 
   await page.locator('#homeProfileMainApp').selectOption({ label: 'REAPER' });
@@ -186,7 +215,108 @@ test('new-song defaults are bounded, saved and shown as the owner’s', async ({
   await evidence(page, '04-defaults');
 });
 
+test('templates are listed only after the owner reviews, and Forget takes them back', async ({
+  page,
+  request
+}) => {
+  test.skip(REAPER_PATH === '', 'needs --reaper-source: a project plugin that offers profile.read');
+  const panel = await openCard(page);
+  const status = page.locator('#homeProfileStatus');
+  const row = panel.locator('section[data-kind="templates"]');
+  const notRead = 'Not read. Review to let Ori list the templates folder of REAPER.';
+
+  // Nothing was read by installing the plugin, creating the Home, detecting or
+  // loading this page.
+  let card = await profile(request);
+  expect(card.templates).toMatchObject({ state: 'not_read', app_name: 'REAPER' });
+  expect(card.templates.consented ?? false).toBe(false);
+  expect(card.profile.templates).toBeUndefined();
+  await expect(row).toContainText(notRead);
+  await expect(row.getByRole('button')).toHaveText(['Review']);
+
+  // The review names the application and the two folders, and reads nothing.
+  await row.getByRole('button', { name: 'Review' }).click();
+  const dialog = page.locator('dialog.home-profile-dialog');
+  await expect(dialog.getByRole('heading', { level: 2 })).toHaveText('Read REAPER templates?');
+  await expect(dialog.locator('li')).toHaveText(['ProjectTemplates', 'TrackTemplates']);
+  await expect(dialog).toContainText(
+    'Ori will list the names of the files in ProjectTemplates and TrackTemplates inside your REAPER settings folder. It opens no template and changes nothing.'
+  );
+  await dialog.getByRole('button', { name: 'Not now' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(status).toHaveText('Nothing was read.');
+  expect((await profile(request)).profile.templates).toBeUndefined();
+
+  // Only the dialog's own button reads.
+  await row.getByRole('button', { name: 'Review' }).click();
+  await dialog.getByRole('button', { name: 'Read templates' }).click();
+  await expect(status).toHaveText('Listed 3 templates.');
+  await expect(row).toContainText('2 project templates and 1 track template, read');
+  await expect(row.locator('.home-profile-templates')).toHaveText([
+    'Project Band Session, Vocal Comp',
+    'Track Drum Bus'
+  ]);
+  await expect(row.getByRole('button')).toHaveText(['Read again', 'Forget']);
+  card = await profile(request);
+  expect(card.templates).toMatchObject({ state: 'listed', consented: true });
+  const stored = card.profile.templates;
+  expect(stored.consent).toMatchObject({ source: 'home_review' });
+  expect(stored.consent.revoked_at).toBeUndefined();
+  expect(stored.app_id).toBe('reaper');
+  // Names only: the backup file, the subfolder's template and the text file
+  // are not templates, and nothing stored is or contains a path.
+  expect(
+    stored.items.map((item: { kind: string; file: string }) => `${item.kind}:${item.file}`)
+  ).toEqual([
+    'project:Band Session.RPP',
+    'project:Vocal Comp.RPP',
+    'track:Drum Bus.RTrackTemplate'
+  ]);
+  expect(stored.truncated ?? false).toBe(false);
+  const serialized = JSON.stringify(stored);
+  expect(serialized).not.toContain('/');
+  if (SANDBOX) expect(serialized).not.toContain(SANDBOX);
+  await evidence(page, '06-templates-listed');
+
+  // Reading again under the consent already given asks nothing new.
+  await row.getByRole('button', { name: 'Read again' }).click();
+  await expect(status).toHaveText('Listed 3 templates.');
+  await expect(dialog).toHaveCount(0);
+  const again = (await profile(request)).profile.templates;
+  expect(again.consent.granted_at).toBe(stored.consent.granted_at);
+
+  // Forget clears the names and takes the agreement back in one step.
+  await row.getByRole('button', { name: 'Forget' }).click();
+  await expect(status).toHaveText('Forgotten. Nothing is read until you review it again.');
+  await expect(row).toContainText(notRead);
+  await expect(row.locator('.home-profile-templates')).toHaveCount(0);
+  await expect(row.getByRole('button')).toHaveText(['Review']);
+  card = await profile(request);
+  expect(card.templates).toMatchObject({ state: 'not_read' });
+  expect(card.templates.consented ?? false).toBe(false);
+  expect(card.profile.templates.items).toBeUndefined();
+  expect(card.profile.templates.consent.revoked_at).toBeTruthy();
+  await evidence(page, '07-templates-forgotten');
+
+  // A review that no longer describes the Home reads nothing: after a new
+  // consent, the review obtained before it is refused.
+  const post = (suffix: string, data: Record<string, unknown>) =>
+    request.post(profileURL(suffix), { data, headers: HEADERS });
+  const review = await json(await post('/templates/review', { request_id: `r-${Date.now()}` }));
+  await json(
+    await post('/templates/commit', { request_id: `c1-${Date.now()}`, review_id: review.review_id })
+  );
+  const stale = await post('/templates/commit', {
+    request_id: `c2-${Date.now()}`,
+    review_id: review.review_id
+  });
+  expect(stale.status()).toBe(409);
+  expect((await stale.json()).code).toBe('home_profile_changed');
+  expect((await profile(request)).profile.templates.items).toHaveLength(3);
+});
+
 test('templates are never read on load and say what is missing', async ({ page, request }) => {
+  test.skip(REAPER_PATH !== '', 'a project plugin is staged; see the templates test above');
   const panel = await openCard(page);
   const row = panel.locator('section[data-kind="templates"]');
   const card = await profile(request);

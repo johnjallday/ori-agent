@@ -97,6 +97,11 @@ read-only operation, only after the owner agreed.
   `TrackTemplates/*.RTrackTemplate` under the same REAPER resource folder the
   plugin already resolves for `reaper.ini`: names and bare file names only, at
   most 64, then `truncated: true`. It opens no template and changes nothing.
+  The version is the release number from the application bundle's own metadata
+  (`7.28`). The resource folder is the per-user one, or the folder beside the
+  bundle when a `reaper.ini` there makes the installation portable. Files in
+  subfolders of a templates folder are not listed, and no symbolic link is
+  followed.
 - **How Ori finds it.** The plugin names the operation at the top level of its
   manifest, `"home_profile_facts": { "service_id": "reaper-service",
   "operation": "profile.read" }`, and requires host feature `home_profile_v1`.
@@ -119,6 +124,13 @@ read-only operation, only after the owner agreed.
 - **Reviewed floor stays 0.9.0.** A Home whose installed REAPER plugin has no
   such operation works otherwise unchanged and shows "Update the REAPER plugin
   to read templates." in the templates row.
+- **Checking a candidate.** `ORI_REAPER_PLUGIN_PATH=<plugin checkout> go test
+  ./internal/plugin/ -run TestLocalProjectPluginFactsOperationFitsTheHostContract`
+  checks the candidate's declared operation against what Ori sends and accepts.
+  `ORI_MUSIC_PLUGIN_SOURCE=<music checkout> ORI_REAPER_PLUGIN_SOURCE=<plugin
+  checkout> ./scripts/smoke.sh home-profile` installs both in a disposable
+  sandbox with fixture template folders and drives Review, Read templates, Read
+  again and Forget in a browser through the real service.
 - **Not in this release.** Starting a song from a chosen template, reading
   inside a template, and Logic or Ableton templates.
 
