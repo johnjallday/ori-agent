@@ -110,9 +110,13 @@ func applyDetection(profile *workspace.HomeProfile, found []folderdigest.Install
 			seen := now
 			row.Name, row.Detected, row.DetectedAt = name, true, &seen
 		} else {
+			// A templates read (even one that found nothing) names its
+			// application, so that row stays for as long as the read does.
+			templates := profile.Templates
 			referenced := row.ConfirmedAt != nil || row.Hidden ||
 				(mainKept && profile.MainApp.ID == row.ID) ||
-				(profile.Templates != nil && profile.Templates.AppID == row.ID && len(profile.Templates.Items) > 0)
+				(templates != nil && templates.AppID == row.ID &&
+					(len(templates.Items) > 0 || templates.ReadAt != nil || templates.Truncated))
 			if !referenced {
 				continue
 			}

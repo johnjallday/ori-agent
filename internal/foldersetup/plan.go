@@ -60,8 +60,14 @@ type ProfileFacts struct {
 	// declared label of the main-application row ("Main DAW").
 	Title     string
 	MainLabel string
-	// Apps are the display names of the applications found.
+	// Apps are the display names of the applications the profile would show:
+	// found on this computer, and not ones the Home's owner said are not theirs.
 	Apps []string
+	// Main is the application the profile would name as the main one when
+	// that is not simply the only one found: the Home's library decides it, or
+	// the owner already chose it (MainKept, which a setup never replaces).
+	Main     string
+	MainKept bool
 	// TemplatesApp is the found application whose templates folder a Set up
 	// that creates the Home would list; "" when none can be listed.
 	TemplatesApp string
@@ -82,24 +88,37 @@ func profileLine(facts *ProfileFacts, createsHome bool) (personalassistant.Folde
 	}
 	templates := strings.TrimSpace(facts.TemplatesApp)
 	reads := createsHome && templates != ""
+	// The main application is the one the profile would name: the owner's own
+	// choice, the library's, or simply the only one found.
+	mainApp := strings.TrimSpace(facts.Main)
+	if mainApp == "" && len(facts.Apps) == 1 {
+		mainApp = facts.Apps[0]
+	}
+	alone := len(facts.Apps) == 0 || (len(facts.Apps) == 1 && facts.Apps[0] == mainApp)
 	var detail string
-	switch len(facts.Apps) {
-	case 0:
-		detail, reads = "No "+main+" was found on this Mac. You can tell the Home later.", false
-	case 1:
-		detail = facts.Apps[0] + " is your " + main + "."
-		if reads {
-			detail += " Reads your " + templates + " templates folder so new projects can start from them. Nothing is changed."
-		} else {
-			detail += " Nothing is read."
+	switch {
+	case mainApp == "" && len(facts.Apps) == 0:
+		return personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanProfile, Name: title,
+			Detail: "No " + main + " was found on this Mac. You can tell the Home later."}, false
+	case mainApp != "":
+		verb := " is your "
+		if facts.MainKept {
+			verb = " stays your "
+		}
+		detail = mainApp + verb + main + "."
+		if !alone {
+			detail = "Found " + joinAnd(facts.Apps) + ". " + detail
 		}
 	default:
 		detail = "Found " + joinAnd(facts.Apps) + ". Pick your " + main + " on the Home after setup."
-		if reads {
-			detail += " Reads your " + templates + " templates folder; nothing is changed."
-		} else {
-			detail += " Nothing is read."
-		}
+	}
+	switch {
+	case !reads:
+		detail += " Nothing is read."
+	case mainApp != "" && alone:
+		detail += " Reads your " + templates + " templates folder so new projects can start from them. Nothing is changed."
+	default:
+		detail += " Reads your " + templates + " templates folder; nothing is changed."
 	}
 	return personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanProfile, Name: title, Detail: detail}, reads
 }

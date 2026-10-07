@@ -28,14 +28,53 @@ type fixture struct {
 	formats  map[string]int
 	writable bool
 	declared bool
-	now      time.Time
-	requests int
+	// installedAs is the name the package is installed under; "" keeps the
+	// fixture's own.
+	installedAs string
+	now         time.Time
+	requests    int
 	// The application whose templates can be listed (none when AppID is ""),
 	// what its plugin answers, and each call made to it.
 	templatesApp TemplatesApp
 	factsRaw     string
 	factsErr     error
 	factsCalls   []bool
+	// duringFacts runs while the plugin is answering, once: whatever another
+	// card or tab did in the meantime.
+	duringFacts func()
+	// held counts the store updates in progress. Every host lookup checks it:
+	// they ask the plugin manager, which must never be waited on while the
+	// workspace store is held.
+	held int
+	// beforeUpdate runs once, after a write settled which package the Home
+	// belongs to and before the store is asked to update it.
+	beforeUpdate func()
+}
+
+// heldStore marks the time an update holds the workspace store.
+type heldStore struct {
+	*workspace.InMemoryStore
+	held   *int
+	before *func()
+}
+
+func (s heldStore) Update(id string, change func(*workspace.Workspace) error) error {
+	if before := *s.before; before != nil {
+		*s.before = nil
+		before()
+	}
+	return s.InMemoryStore.Update(id, func(home *workspace.Workspace) error {
+		*s.held++
+		defer func() { *s.held-- }()
+		return change(home)
+	})
+}
+
+// outside fails the test when a host lookup runs inside a store update.
+func (f *fixture) outside(lookup string) {
+	if f.held > 0 {
+		f.t.Errorf("%s was asked for while the workspace store was held", lookup)
+	}
 }
 
 var (
@@ -70,19 +109,42 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f.service = New(Dependencies{
-		Workspaces: f.store,
+		Workspaces: heldStore{InMemoryStore: f.store, held: &f.held, before: &f.beforeUpdate},
 		Declared: func(*workspace.Workspace) (Declared, bool) {
-			return declaredFixture(), f.declared
+			f.outside("the declaration")
+			declared := declaredFixture()
+			if f.installedAs != "" {
+				declared.PluginID = f.installedAs
+			}
+			return declared, f.declared
 		},
-		Writable:       func(*workspace.Workspace) bool { return f.writable },
-		InstalledApps:  func() []folderdigest.InstalledApp { return f.apps },
-		LibraryFormats: func(*workspace.Workspace) map[string]int { return f.formats },
+		Writable: func(*workspace.Workspace) bool {
+			f.outside("the provider's availability")
+			return f.writable
+		},
+		InstalledApps: func() []folderdigest.InstalledApp {
+			f.outside("the installed applications")
+			return f.apps
+		},
+		LibraryFormats: func(*workspace.Workspace) map[string]int {
+			f.outside("the library")
+			return f.formats
+		},
 		TimeSignatures: func(*workspace.Workspace) []Option {
+			f.outside("the time signatures")
 			return []Option{{Value: "4 4", Label: "4/4"}, {Value: "3 4", Label: "3/4"}}
 		},
-		TemplatesApp: func(*workspace.Workspace) (TemplatesApp, bool) { return f.templatesApp, f.templatesApp.AppID != "" },
+		TemplatesApp: func(*workspace.Workspace) (TemplatesApp, bool) {
+			f.outside("the templates application")
+			return f.templatesApp, f.templatesApp.AppID != ""
+		},
 		ReadFacts: func(_ context.Context, _ *workspace.Workspace, includeTemplates bool) (json.RawMessage, error) {
+			f.outside("the plugin's facts")
 			f.factsCalls = append(f.factsCalls, includeTemplates)
+			if during := f.duringFacts; during != nil {
+				f.duringFacts = nil
+				during()
+			}
 			if f.factsErr != nil {
 				return nil, f.factsErr
 			}
@@ -585,6 +647,53 @@ func TestProfileWritesLeaveTheHomeStateRevisionAlone(t *testing.T) {
 	// must not cancel them.
 	if before.GetAssistantProgramState().StateRevision != after.GetAssistantProgramState().StateRevision {
 		t.Fatal("a profile write moved the Home's state revision")
+	}
+}
+
+// A write settles which package declares the card before it holds the store.
+// A Home that was tied to another package (or lost its package) in between is
+// refused as changed instead of being written under the earlier answer.
+func TestAWriteIsRefusedWhenTheHomesPackageChangedUnderIt(t *testing.T) {
+	f := newFixture(t)
+	f.apps = []folderdigest.InstalledApp{appReaper}
+	f.beforeUpdate = func() {
+		if err := f.store.Update(testHome, func(home *workspace.Workspace) error {
+			state := home.GetAssistantProgramState()
+			state.PluginAvailable = false
+			home.SetAssistantProgramState(state)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.service.Detect(context.Background(), testOwner, testHome, f.requestID()); !errors.Is(err, ErrChanged) {
+		t.Fatalf("err = %v, want changed", err)
+	}
+	if view, _ := f.service.Read(testOwner, testHome); view.Profile != nil {
+		t.Fatalf("a profile was written: %+v", view.Profile)
+	}
+	// The next try settles against the Home as it is now.
+	if view := f.detect(); view.Profile == nil || len(view.Profile.Apps) != 1 {
+		t.Fatalf("view = %+v", view)
+	}
+}
+
+// A package's installed name keeps its own case and may contain dots. Neither
+// may make every save of its Home's profile fail.
+func TestAProfileIsSavedWhateverTheInstalledPackageNameLooksLike(t *testing.T) {
+	for installed, want := range map[string]string{
+		"Music-Project-Management": "music-project-management",
+		"com.example.music-homes":  "com.example.music-homes",
+	} {
+		f := newFixture(t)
+		f.installedAs, f.apps = installed, []folderdigest.InstalledApp{appReaper}
+		view, err := f.service.Detect(context.Background(), testOwner, testHome, f.requestID())
+		if err != nil {
+			t.Fatalf("%s: detect: %v", installed, err)
+		}
+		if view.Profile == nil || view.Profile.DeclaredBy.PluginID != want {
+			t.Fatalf("%s: declared_by = %+v", installed, view.Profile)
+		}
 	}
 }
 

@@ -95,6 +95,48 @@ test('saved defaults fill the row and say they are the owner’s', () => {
   assert.equal(partial.sampleRate.value, '');
 });
 
+test('defaults the owner typed and did not save are shown instead of the stored ones', () => {
+  const saved = {
+    available: true,
+    choices: CHOICES,
+    profile: {
+      defaults: {
+        tempo_bpm: 120,
+        time_signature: '4 4',
+        source: 'owner',
+        confirmed_at: '2026-10-08T12:00:00Z'
+      }
+    }
+  };
+  const draft = { tempo: '96', timeSignature: '3 4', sampleRate: '48000', bitDepth: '' };
+  const view = defaultsView(saved, { ...DATE, draft });
+  assert.deepEqual(
+    [view.tempo.value, view.timeSignature.value, view.sampleRate.value, view.bitDepth.value],
+    ['96', '3 4', '48000', '']
+  );
+  assert.equal(view.unsaved, true);
+  // The note keeps saying what is stored, not what is typed.
+  assert.equal(view.note, '120 BPM, 4/4. Set by you Oct 8, 2026.');
+  // Typing that is not a valid tempo is kept as typed; Save is what refuses it.
+  assert.equal(defaultsView(saved, { draft: { ...draft, tempo: '9x' } }).tempo.value, '9x');
+  // Clearing a field is a draft too.
+  const cleared = defaultsView(saved, {
+    draft: { tempo: '', timeSignature: '', sampleRate: '', bitDepth: '' }
+  });
+  assert.deepEqual([cleared.tempo.value, cleared.timeSignature.value], ['', '']);
+  assert.equal(cleared.unsaved, true);
+  // A drafted choice that is no longer offered falls back to the stored one.
+  const gone = defaultsView(saved, { draft: { ...draft, timeSignature: '7 8', bitDepth: '20' } });
+  assert.deepEqual([gone.timeSignature.value, gone.bitDepth.value], ['4 4', '']);
+  // A draft equal to what is stored is nothing unsaved; so is no draft.
+  const same = { tempo: '120', timeSignature: '4 4', sampleRate: '', bitDepth: '' };
+  assert.equal(defaultsView(saved, { draft: same }).unsaved, false);
+  assert.equal(defaultsView(saved).unsaved, false);
+  // A read-only Home shows what is stored, whatever was typed before.
+  const locked = defaultsView({ ...saved, read_only: true }, { draft });
+  assert.deepEqual([locked.tempo.value, locked.unsaved], ['120', false]);
+});
+
 test('a time signature cannot be chosen while there are no choices, and a read-only Home disables the row', () => {
   const none = defaultsView({ available: true, choices: { ...CHOICES, time_signatures: [] } });
   assert.equal(none.timeSignature.disabled, true);
@@ -513,7 +555,64 @@ test('a profile that changed somewhere else is re-read, never overwritten', asyn
   assert.equal(panel.busy, false);
 });
 
-function templatesCard(state, stored = undefined, extra = {}) {
+// withDefaultsFields stands in for the defaults row on screen while work runs.
+async function withDefaultsFields(fields, work) {
+  const previous = globalThis.document;
+  globalThis.document = {
+    getElementById: id =>
+      Object.prototype.hasOwnProperty.call(fields, id) ? { value: fields[id] } : null
+  };
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
+}
+
+test('unsaved defaults outlive every redraw except a Save that went through', async () => {
+  const typed = {
+    homeProfileTempo: '96',
+    homeProfileTimeSignature: '3 4',
+    homeProfileSampleRate: '',
+    homeProfileBitDepth: '24'
+  };
+  const draft = { tempo: '96', timeSignature: '3 4', sampleRate: '', bitDepth: '24' };
+  const { panel } = panelWith([
+    { status: 200, body: card(profile({ revision: 4 })) },
+    { status: 400, body: { message: 'Invalid profile request' } },
+    { status: 409, body: { code: 'home_profile_changed', message: 'changed' } },
+    { status: 200, body: card(profile({ revision: 6 })) },
+    { status: 200, body: card(profile({ revision: 7 })) }
+  ]);
+  panel.view = card(profile({ revision: 3 }));
+  await withDefaultsFields(typed, async () => {
+    // Another row's action redraws the card.
+    await panel.run('Saving…', 'confirm', () => panel.fields({ confirm_apps: ['reaper'] }));
+    assert.deepEqual(panel.defaultsDraft, draft);
+    // A Save the server refused.
+    await panel.run('Saving…', 'defaults', () => panel.fields({ defaults: {} }));
+    assert.deepEqual(panel.defaultsDraft, draft);
+    // A Save that met a profile changed somewhere else (re-read, then redrawn).
+    await panel.run('Saving…', 'defaults', () => panel.fields({ defaults: {} }));
+    assert.deepEqual(panel.defaultsDraft, draft);
+    assert.equal(panel.view.revision, 6);
+    // The Save that went through: the row shows what is stored from now on.
+    await panel.run('Saving…', 'defaults', () => panel.fields({ defaults: {} }));
+    assert.equal(panel.defaultsDraft, null);
+  });
+  // A card without the defaults row has nothing to keep.
+  const bare = panelWith([{ status: 200, body: card(profile({ revision: 2 })) }]);
+  bare.panel.view = card(profile({ revision: 1 }));
+  await withDefaultsFields({}, () =>
+    bare.panel.run('Saving…', 'detect', () => bare.panel.post('/detect'))
+  );
+  assert.equal(bare.panel.defaultsDraft, null);
+});
+
+// A row that was read is always under a consent; any other state says so
+// through `row` when the record still holds one.
+function templatesCard(state, stored = undefined, extra = {}, row = {}) {
   return {
     available: true,
     read_only: false,
@@ -521,7 +620,9 @@ function templatesCard(state, stored = undefined, extra = {}) {
       state,
       app_id: 'reaper',
       app_name: 'REAPER',
-      folders: ['ProjectTemplates', 'TrackTemplates']
+      folders: ['ProjectTemplates', 'TrackTemplates'],
+      consented: ['listed', 'empty', 'problem'].includes(state),
+      ...row
     },
     profile: stored ? { templates: stored } : {},
     ...extra
@@ -614,14 +715,64 @@ test('templates name the application for every state that cannot be read', () =>
   }
 });
 
+test('a stored list stays visible and forgettable when nothing can be read', () => {
+  const stored = {
+    read_at: '2026-10-07T10:00:00Z',
+    items: [
+      { name: 'Band Session', kind: 'project', file: 'Band Session.RPP' },
+      { name: 'Drum Bus', kind: 'track', file: 'Drum Bus.RTrackTemplate' }
+    ]
+  };
+  const kept = ' The 2 templates read Oct 7, 2026 stay listed until you forget them.';
+  for (const [state, note] of [
+    ['other_app', 'Templates are read for REAPER only for now.'],
+    ['plugin_missing', 'Install the REAPER plugin to read templates.'],
+    ['update_plugin', 'Update the REAPER plugin to read templates.'],
+    ['unsupported', 'Templates cannot be listed for this Home yet.']
+  ]) {
+    const view = templatesView(templatesCard(state, stored, {}, { consented: true }), DATE);
+    assert.equal(view.note, note + kept, state);
+    assert.deepEqual([view.project, view.track], [['Band Session'], ['Drum Bus']], state);
+    assert.deepEqual(
+      [view.canReview, view.canReadAgain, view.canForget],
+      [false, false, true],
+      state
+    );
+    // A read-only Home still shows them, with nothing to press.
+    const locked = templatesView(
+      templatesCard(state, stored, { read_only: true }, { consented: true }),
+      DATE
+    );
+    assert.deepEqual([locked.project, locked.canForget], [['Band Session'], false], state);
+  }
+  // A consent with nothing listed under it (a setup card whose plugin was too
+  // old) can still be taken back.
+  const agreed = templatesView(
+    templatesCard('update_plugin', { problem: 'operation_unavailable' }, {}, { consented: true })
+  );
+  assert.equal(
+    agreed.note,
+    'Update the REAPER plugin to read templates. Forget takes back your agreement to read them.'
+  );
+  assert.equal(agreed.canForget, true);
+  // Names left on a record without a consent in force are never shown.
+  const stale = templatesView(templatesCard('other_app', stored), DATE);
+  assert.deepEqual([stale.project, stale.track, stale.canForget], [[], [], false]);
+});
+
 test('a failed read says what happened and how to retry', () => {
   const failed = templatesView(templatesCard('problem', { problem: 'read_failed' }));
   assert.equal(failed.note, 'The last read failed, so nothing is listed. Read again to retry.');
   assert.equal(failed.canReadAgain, true);
   assert.equal(failed.canForget, true);
+  // The setup card's read met a plugin that could not list templates; this
+  // state is only reached once it can.
   const old = templatesView(templatesCard('problem', { problem: 'operation_unavailable' }));
-  assert.equal(old.note, 'Update the REAPER plugin to read templates.');
-  assert.equal(old.canReadAgain, false);
+  assert.equal(
+    old.note,
+    'Nothing is listed yet: the REAPER plugin could not list templates when this was set up. It can now. Read again to list them.'
+  );
+  assert.equal(old.canReadAgain, true);
   assert.equal(old.canForget, true);
 });
 

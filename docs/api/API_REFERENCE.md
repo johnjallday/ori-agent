@@ -1732,7 +1732,7 @@ Detects nothing and reads no folder. Takes no query string.
     "defaults": { "tempo_bpm": 120, "time_signature": "4 4", "sample_rate_hz": 48000, "bit_depth": 24, "source": "owner", "confirmed_at": "…" }
   },
   "choices": { "min_tempo": 40, "max_tempo": 240, "time_signatures": [{ "value": "4 4", "label": "4/4" }], "sample_rates": [44100, 48000, 88200, 96000, 176400, 192000], "bit_depths": [16, 24, 32] },
-  "templates": { "state": "listed", "app_id": "reaper", "app_name": "REAPER", "folders": ["ProjectTemplates", "TrackTemplates"] },
+  "templates": { "state": "listed", "app_id": "reaper", "app_name": "REAPER", "folders": ["ProjectTemplates", "TrackTemplates"], "consented": true },
   "facts_operation": true
 }
 ```
@@ -1742,6 +1742,7 @@ Detects nothing and reads no folder. Takes no query string.
 - `profile` is `null` and `revision` is `0` before anything was detected or saved. Request receipts are never returned.
 - Every value says where it came from: `source: "detected"` is a hint until `confirmed_at` is set; `source: "owner"` is the owner's instruction. `main_app.reason` is `only_app` or `library_majority` on a detected value. A hidden application has `hidden: true` and is never shown to agents.
 - `templates.state` is one of `detect_first`, `other_app`, `plugin_missing`, `update_plugin`, `not_read`, `listed`, `empty`, `problem` (with `problem: read_failed | operation_unavailable`) or `unsupported`. `items` holds at most 64 names with a bare file name each, never a path; `truncated: true` means the folders hold more.
+- `templates.consented` is `true` while the record holds an agreement that was not taken back, whatever the state. A list read earlier stays on the record (and in the agents' context) when no new read can happen (`other_app`, `plugin_missing`, `update_plugin`, `unsupported`); the card shows it and offers Forget in every one of those states. `problem` with `operation_unavailable` is reached only once the plugin can list templates again: it is a setup card's read that met a plugin too old to list them, and Read again retries it under the same consent.
 - `time_signatures` are the options of the `time_signature` input on the blueprint the Home's projects are created from; empty when that plugin is not installed.
 
 **Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/detect`
@@ -1762,7 +1763,7 @@ Every part but `request_id` and `if_revision` is optional; what is absent is lef
 
 **Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/templates/commit`
 
-`{ "request_id": "…", "review_id": "…" }` — records the consent (`source: home_review`; an active consent is kept) and calls the facts operation once with `include_templates: true`. Answers with the card. `409 home_profile_changed` when the review no longer describes the Home (for example after Forget); `409 plugin_operation_unavailable` when there is no operation, and nothing is recorded. A read that fails after the owner agreed keeps the consent and answers `200` with `templates.state: "problem"`.
+`{ "request_id": "…", "review_id": "…" }` — records the consent (`source: home_review`; an active consent is kept) and calls the facts operation once with `include_templates: true`. Answers with the card. `409 home_profile_changed` when the review no longer describes the Home (for example after Forget). That is checked before the read and again on the record being written, so a Forget, another consent or a main-application change that lands while the plugin is answering wins and nothing from that read is stored. `409 plugin_operation_unavailable` when there is no operation, and nothing is recorded. A read that fails after the owner agreed keeps the consent and answers `200` with `templates.state: "problem"`.
 
 **Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/templates/forget`
 

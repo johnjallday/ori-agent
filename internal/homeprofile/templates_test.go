@@ -305,6 +305,150 @@ func TestAFailedReadKeepsTheConsentAndSaysWhatHappened(t *testing.T) {
 	}
 }
 
+// The plugin's answer can take seconds. Whatever the owner did on another card
+// in that time wins: a read never brings back a consent that was just taken
+// back, and never lists templates for an application that stopped being this
+// Home's while the folders were read.
+func TestTemplatesCommitNeverUndoesWhatLandedWhileItWasReading(t *testing.T) {
+	t.Run("forget", func(t *testing.T) {
+		f, _ := templatesFixture(t)
+		if _, err := f.commit(f.review().ReviewID); err != nil {
+			t.Fatal(err)
+		}
+		review := f.review()
+		f.duringFacts = func() {
+			f.now = f.now.Add(time.Minute)
+			if _, err := f.service.TemplatesForget(testOwner, testHome, f.requestID()); err != nil {
+				t.Fatalf("forget during the read: %v", err)
+			}
+		}
+		if _, err := f.commit(review.ReviewID); !errors.Is(err, ErrChanged) {
+			t.Fatalf("a read-again that raced a Forget: %v, want changed", err)
+		}
+		view, _ := f.service.Read(testOwner, testHome)
+		templates := view.Profile.Templates
+		if templates.Consent.Active() || templates.Consent.RevokedAt == nil || len(templates.Items) != 0 || templates.ReadAt != nil {
+			t.Fatalf("the Forget was undone: %+v", templates)
+		}
+		if view.Templates.State != TemplatesNotRead || view.Templates.Consented {
+			t.Fatalf("row = %+v", view.Templates)
+		}
+	})
+	t.Run("another first consent", func(t *testing.T) {
+		f, _ := templatesFixture(t)
+		review, first := f.review(), f.now
+		f.duringFacts = func() {
+			if _, err := f.commit(review.ReviewID); err != nil {
+				t.Fatalf("the other card's read: %v", err)
+			}
+			f.now = f.now.Add(time.Minute)
+		}
+		if _, err := f.commit(review.ReviewID); !errors.Is(err, ErrChanged) {
+			t.Fatalf("a second read of the same review: %v, want changed", err)
+		}
+		view, _ := f.service.Read(testOwner, testHome)
+		if templates := view.Profile.Templates; !templates.Consent.GrantedAt.Equal(first) || !templates.ReadAt.Equal(first) {
+			t.Fatalf("the first card's consent and read were replaced: %+v", templates)
+		}
+	})
+	t.Run("another main application", func(t *testing.T) {
+		f := newFixture(t)
+		f.apps, f.templatesApp, f.factsRaw = []folderdigest.InstalledApp{appReaper, appLogic}, reaperTemplates, threeTemplates
+		view := f.detect()
+		review := f.review()
+		f.duringFacts = func() { f.mustFields(view, FieldsInput{MainApp: ptr("logic-pro")}) }
+		if _, err := f.commit(review.ReviewID); !errors.Is(err, ErrChanged) {
+			t.Fatalf("a read that raced a main application change: %v, want changed", err)
+		}
+		if current, _ := f.service.Read(testOwner, testHome); current.Profile.Templates != nil {
+			t.Fatalf("templates were recorded for another main application: %+v", current.Profile.Templates)
+		}
+	})
+}
+
+// Whatever keeps a new read from happening (the plugin is gone or too old, the
+// owner works mainly in another application), a list that is stored stays the
+// owner's to see and to forget: the row always says an agreement is in force.
+func TestAStoredTemplatesListStaysForgettableWhenNothingCanBeRead(t *testing.T) {
+	tests := map[string]struct {
+		change func(f *fixture)
+		state  string
+	}{
+		"plugin removed": {func(f *fixture) {
+			f.templatesApp.PluginInstalled, f.templatesApp.OperationAvailable = false, false
+		}, TemplatesPluginMissing},
+		"plugin too old": {func(f *fixture) {
+			f.templatesApp.OperationAvailable = false
+		}, TemplatesUpdatePlugin},
+		"package names no application": {func(f *fixture) {
+			f.templatesApp = TemplatesApp{}
+		}, TemplatesUnsupported},
+		"another main application": {func(f *fixture) {
+			f.apps = []folderdigest.InstalledApp{appReaper, appLogic}
+			f.mustFields(f.detect(), FieldsInput{MainApp: ptr("logic-pro")})
+		}, TemplatesOtherApp},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			f, _ := templatesFixture(t)
+			if _, err := f.commit(f.review().ReviewID); err != nil {
+				t.Fatal(err)
+			}
+			tc.change(f)
+			view, _ := f.service.Read(testOwner, testHome)
+			if view.Templates.State != tc.state || !view.Templates.Consented || len(view.Profile.Templates.Items) != 3 {
+				t.Fatalf("row = %+v items = %d", view.Templates, len(view.Profile.Templates.Items))
+			}
+			view, err := f.service.TemplatesForget(testOwner, testHome, f.requestID())
+			if err != nil {
+				t.Fatalf("forget: %v", err)
+			}
+			if view.Templates.State != tc.state || view.Templates.Consented || len(view.Profile.Templates.Items) != 0 {
+				t.Fatalf("after forget: row = %+v templates = %+v", view.Templates, view.Profile.Templates)
+			}
+		})
+	}
+}
+
+// An application whose templates were read (even when none were found) and
+// that is later uninstalled keeps its row, so the record stays valid and the
+// next detection still saves.
+func TestDetectAfterTheTemplatesApplicationIsGoneKeepsAValidRecord(t *testing.T) {
+	for name, raw := range map[string]string{
+		"templates listed": threeTemplates,
+		"none found":       `{"app":"REAPER","installed":true,"templates_available":false,"truncated":false}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, _ := templatesFixture(t)
+			f.factsRaw = raw
+			if _, err := f.commit(f.review().ReviewID); err != nil {
+				t.Fatal(err)
+			}
+			f.apps = []folderdigest.InstalledApp{appLogic}
+			f.now = f.now.Add(time.Hour)
+			view, err := f.service.Detect(context.Background(), testOwner, testHome, f.requestID())
+			if err != nil {
+				t.Fatalf("detect after the application was removed: %v", err)
+			}
+			reaper, listed := view.Profile.App("reaper")
+			if !listed || reaper.Detected {
+				t.Fatalf("the templates application's row = %+v listed = %v", reaper, listed)
+			}
+			if view.Profile.Templates.ReadAt == nil || view.Profile.Templates.AppID != "reaper" {
+				t.Fatalf("templates = %+v", view.Profile.Templates)
+			}
+			// Forgetting the read releases the row on the next detection.
+			if _, err := f.service.TemplatesForget(testOwner, testHome, f.requestID()); err != nil {
+				t.Fatal(err)
+			}
+			view = f.detect()
+			if _, listed := view.Profile.App("reaper"); listed {
+				t.Fatalf("a row nothing refers to was kept: %+v", view.Profile.Apps)
+			}
+		})
+	}
+}
+
 func TestNotMineOnTheTemplatesApplicationForgetsItsTemplates(t *testing.T) {
 	f, _ := templatesFixture(t)
 	view, err := f.commit(f.review().ReviewID)
@@ -366,6 +510,21 @@ func TestDecodeFactsBoundsEverythingThePluginSays(t *testing.T) {
 	facts, err = decodeFacts(json.RawMessage(odd), reaperTemplates)
 	if err != nil || len(facts.Templates) != 1 || facts.Templates[0].File != "Good.RPP" || !facts.Truncated || facts.Version != "" {
 		t.Fatalf("facts = %+v err = %v", facts, err)
+	}
+	// A file time that could not be saved with the Home (an offset pushes it
+	// out of the storable years) or that is no file time at all is dropped;
+	// the template itself is kept.
+	dated := `{"app":"REAPER","installed":true,"templates_available":true,"truncated":false,"templates":[
+	  {"name":"Before","kind":"project","file":"Before.RPP","modified_at":"0000-01-01T00:00:00+14:00"},
+	  {"name":"After","kind":"project","file":"After.RPP","modified_at":"9999-12-31T23:59:59-14:00"},
+	  {"name":"Fine","kind":"project","file":"Fine.RPP","modified_at":"2026-10-01T10:00:00+02:00"}]}`
+	facts, err = decodeFacts(json.RawMessage(dated), reaperTemplates)
+	if err != nil || len(facts.Templates) != 3 || facts.Templates[0].ModifiedAt != nil || facts.Templates[1].ModifiedAt != nil ||
+		facts.Templates[2].ModifiedAt == nil || facts.Truncated {
+		t.Fatalf("dated facts = %+v err = %v", facts, err)
+	}
+	if _, err := json.Marshal(facts.Templates); err != nil {
+		t.Fatalf("the kept templates cannot be saved: %v", err)
 	}
 	// An application that is not installed lists nothing, whatever it says.
 	gone := `{"app":"REAPER","installed":false,"version":"7.28","templates_available":false,"truncated":false,"templates":[{"name":"A","kind":"project","file":"A.RPP"}]}`

@@ -62,6 +62,42 @@ func TestPortfolioPlanProfileLineFollowsTheLibraryLine(t *testing.T) {
 	}
 }
 
+// A Home that already has a profile is described as the run will leave it: the
+// owner's own main application stays, an application the owner hid is not
+// named (the host leaves it out of Apps), and a main application the library
+// decides is named instead of asking for a pick.
+func TestProfileLineRespectsWhatAnExistingHomeAlreadyKnows(t *testing.T) {
+	tests := map[string]struct {
+		profile ProfileFacts
+		detail  string
+	}{
+		"the owner's choice among several": {ProfileFacts{Apps: []string{"REAPER", "Logic Pro"}, Main: "Logic Pro", MainKept: true},
+			"Found REAPER and Logic Pro. Logic Pro stays your main DAW. Nothing is read."},
+		"the owner's choice is the only one found": {ProfileFacts{Apps: []string{"Logic Pro"}, Main: "Logic Pro", MainKept: true},
+			"Logic Pro stays your main DAW. Nothing is read."},
+		"the owner's choice is no longer installed": {ProfileFacts{Apps: []string{"REAPER"}, Main: "Logic Pro", MainKept: true},
+			"Found REAPER. Logic Pro stays your main DAW. Nothing is read."},
+		"the owner's choice, nothing found now": {ProfileFacts{Main: "Logic Pro", MainKept: true},
+			"Logic Pro stays your main DAW. Nothing is read."},
+		"the library decides among several": {ProfileFacts{Apps: []string{"REAPER", "Logic Pro"}, Main: "REAPER"},
+			"Found REAPER and Logic Pro. REAPER is your main DAW. Nothing is read."},
+		"one left after the owner hid the other": {ProfileFacts{Apps: []string{"Logic Pro"}, Main: "Logic Pro"},
+			"Logic Pro is your main DAW. Nothing is read."},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			profile := tc.profile
+			profile.Title, profile.MainLabel, profile.TemplatesApp = "Your studio", "Main DAW", "REAPER"
+			facts := portfolioFacts()
+			facts.Profile, facts.HomeExists = &profile, true
+			plan := BuildPortfolioPlan(facts)
+			if got := line(plan, personalassistant.FolderPlanProfile); got.Detail != tc.detail || plan.Intent.GrantsTemplates {
+				t.Fatalf("line = %q grants = %v\nwant   %q", got.Detail, plan.Intent.GrantsTemplates, tc.detail)
+			}
+		})
+	}
+}
+
 // A Home whose installed package declares no profile gets no line and no step.
 func TestPlansWithoutADeclaredProfileAreUnchanged(t *testing.T) {
 	portfolio := BuildPortfolioPlan(portfolioFacts())

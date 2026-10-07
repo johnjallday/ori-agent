@@ -184,6 +184,8 @@ type run struct {
 	settled bool
 	// profiled is true once this pass ran the Home's profile step.
 	profiled bool
+	// homeCreated is true only when this pass itself created the Home.
+	homeCreated bool
 }
 
 // Run drives the journey to the end or to the first thing that needs the user.
@@ -333,11 +335,14 @@ func (s *run) drive(ctx context.Context) error {
 }
 
 // fillProfile runs the Home's profile step once the journey's receipts name
-// the Home, when the plan showed that line. The plan promises a templates read
-// only when it creates the Home, so GrantsTemplates carries that card's
-// consent. Like the collection run's step, it never stops the run: a profile
-// that could not be saved leaves its line failed and the owner fills it on the
-// Home. Only a cancelled run ends here.
+// the Home, when the plan showed that line. The card's templates consent is
+// carried only when this very pass created the Home: a Home that already
+// existed when the run reached it (made another way, or by an earlier pass
+// this one cannot vouch for) never gains a consent from a card, whatever the
+// plan promised. Its owner reviews the read on the Home instead. Like the
+// collection run's step, it never stops the run: a profile that could not be
+// saved leaves its line failed and the owner fills it on the Home. Only a
+// cancelled run ends here.
 func (s *run) fillProfile(ctx context.Context, journey *setupjourney.JourneyProjection) error {
 	intent := s.cfg.Plan.Intent
 	homeID := strings.TrimSpace(journey.Receipts.HomeWorkspaceID)
@@ -349,7 +354,7 @@ func (s *run) fillProfile(ctx context.Context, journey *setupjourney.JourneyProj
 	if err := s.record(ctx, personalassistant.FolderSetupRunning, "", nil); err != nil {
 		return err
 	}
-	if err := s.Profile.Setup(ctx, homeID, intent.GrantsTemplates); err != nil {
+	if err := s.Profile.Setup(ctx, homeID, intent.GrantsTemplates && s.homeCreated); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -617,6 +622,7 @@ func (s *run) createHome(ctx context.Context, journey *setupjourney.JourneyProje
 	if err := s.commit(ctx, journey, review, input); err != nil {
 		return err
 	}
+	s.homeCreated = true
 	s.setKind(personalassistant.FolderPlanHome, personalassistant.FolderLineDone)
 	return nil
 }

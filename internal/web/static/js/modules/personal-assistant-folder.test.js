@@ -238,6 +238,28 @@ test('the last screen says one quiet line about the Home profile, with a Review 
   assert.equal(running.profile, undefined);
 });
 
+test('a step that did not finish still says so on the last screen', () => {
+  // The Home's profile step may fail without stopping the run. The run is
+  // over and the Home is ready, but that line is not turned into "done".
+  const offer = homeRunOffer();
+  offer.setup.lines = runLines(['done', 'failed', 'done']);
+  const view = setupModalView(offer);
+  assert.equal(view.phase, 'done');
+  assert.equal(view.title, 'Music Production Home is ready');
+  assert.deepEqual(
+    view.lines.map(line => line.state),
+    ['done', 'failed', 'done']
+  );
+  assert.equal(view.count, '2 of 3 steps finished');
+  // A run where every step finished reads as before.
+  const clean = setupModalView(homeRunOffer());
+  assert.deepEqual(
+    clean.lines.map(line => line.state),
+    ['done', 'done', 'done']
+  );
+  assert.equal(clean.count, '3 of 3 steps finished');
+});
+
 test('the Home receipt names the Home by the workspace ID in the outcome', () => {
   assert.equal(folderReceiptView(homeRunOffer()).homeID, 'home-1');
   // Never parsed out of a route.

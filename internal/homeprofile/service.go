@@ -119,6 +119,9 @@ func (s *Service) declared(home *workspace.Workspace) (Declared, bool) {
 		return Declared{}, false
 	}
 	declared, ok := s.deps.Declared(home)
+	// A package is installed under a name whose case is its own; the record
+	// names it by the canonical id, as every other plugin reference does.
+	declared.PluginID = strings.ToLower(strings.TrimSpace(declared.PluginID))
 	if !ok || declared.PluginID == "" || declared.Version == "" || len(declared.Profile.Fields) == 0 {
 		return Declared{}, false
 	}
@@ -157,6 +160,29 @@ func declaredBy(declared Declared) workspace.HomeProfileDeclaredBy {
 		Title: declared.Profile.Title, Labels: labels}
 }
 
+// providerTie is everything on a Home that decides which package declares its
+// profile and whether that package takes changes. Two reads of a Home with
+// the same tie resolve the same declaration.
+func providerTie(home *workspace.Workspace) string {
+	state := home.GetAssistantProgramState()
+	if state == nil {
+		return ""
+	}
+	owner := state.HomeProvider
+	if owner == nil && state.GroupTemplate != nil {
+		owner = state.GroupTemplate.ProgramHomeOwner
+	}
+	raw, err := json.Marshal(struct {
+		Key       workspace.AssistantProgramKey
+		Owner     *workspace.AssistantProgramHomeOwner
+		Available bool
+	}{state.Key.Normalize(), owner, state.PluginAvailable})
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
 func validRequestID(id string) bool {
 	return id != "" && len(id) <= maxRequestID && strings.TrimSpace(id) == id && !strings.ContainsAny(id, "\r\n\x00")
 }
@@ -184,20 +210,31 @@ func (s *Service) write(ownerID, homeID, requestID, action string, ifRevision *i
 	}
 	// A workspace that is not this owner's Home is refused before the store is
 	// asked to update it, so a missing one is "not found", not a save failure.
-	if _, err := s.lookup(ownerID, homeID); err != nil {
+	before, err := s.lookup(ownerID, homeID)
+	if err != nil {
 		return View{}, err
 	}
+	// The package and whether it takes changes are settled here, never inside
+	// the store callback: both ask the plugin manager, whose own operations
+	// read workspaces, so waiting on it while the store is held could leave
+	// the two waiting on each other. The callback only checks that the Home is
+	// still tied to the same package.
+	declared, isDeclared := s.declared(before)
+	writable := s.writable(before)
+	tie := providerTie(before)
 	replayed := false
-	err := s.deps.Workspaces.Update(homeID, func(home *workspace.Workspace) error {
+	err = s.deps.Workspaces.Update(homeID, func(home *workspace.Workspace) error {
 		state, ok := ownedHome(ownerID, home)
 		if !ok || home.ID != homeID {
 			return ErrNotFound
 		}
-		declared, ok := s.declared(home)
-		if !ok {
+		if providerTie(home) != tie {
+			return fmt.Errorf("%w: the Home's package changed", ErrChanged)
+		}
+		if !isDeclared {
 			return ErrNotDeclared
 		}
-		if !s.writable(home) {
+		if !writable {
 			return ErrReadOnly
 		}
 		profile := state.GetHomeProfile()

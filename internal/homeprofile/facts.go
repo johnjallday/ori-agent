@@ -102,9 +102,13 @@ func decodeFacts(raw json.RawMessage, app TemplatesApp) (Facts, error) {
 		}
 		seen[key] = true
 		template := workspace.HomeProfileTemplate{Name: name, Kind: kind, File: file}
-		if modified, err := time.Parse(time.RFC3339, item.ModifiedAt); err == nil && !modified.IsZero() {
-			modified = modified.UTC()
-			template.ModifiedAt = &modified
+		// A time is kept only when it is a plausible file time. One far outside
+		// that (an offset can push a year out of the range a record can be
+		// saved with) is dropped rather than left to fail the Home's write.
+		if modified, err := time.Parse(time.RFC3339, item.ModifiedAt); err == nil {
+			if modified = modified.UTC(); modified.Year() >= 1970 && modified.Year() <= 9998 {
+				template.ModifiedAt = &modified
+			}
 		}
 		facts.Templates = append(facts.Templates, template)
 	}

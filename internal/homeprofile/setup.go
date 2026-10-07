@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -20,6 +21,49 @@ type SetupInput struct {
 	// profile line told the owner one application's templates folder is read.
 	// Pressing Set up was the consent, exactly as it is for song details.
 	GrantTemplates bool
+}
+
+// SetupPreview is what a setup card may say about a Home's profile before the
+// owner presses anything.
+type SetupPreview struct {
+	// Apps are the applications the profile would show, by name: found now and
+	// not hidden by the owner.
+	Apps []string
+	// Main is the application the profile would name as the main one, or ""
+	// when the owner would be asked to pick. MainKept says it is already the
+	// owner's own choice, which a setup never replaces.
+	Main     string
+	MainKept bool
+}
+
+// SetupPreview works out what Setup would leave on a Home from the
+// applications found and the Home's stored record, with the very rules Setup
+// applies, so a card's sentence cannot promise something the run does not do.
+// home is nil for a Home the setup would create. It writes nothing.
+func (s *Service) SetupPreview(home *workspace.Workspace, found []folderdigest.InstalledApp) SetupPreview {
+	profile := &workspace.HomeProfile{SchemaVersion: workspace.HomeProfileSchemaVersion}
+	var formats map[string]int
+	if home != nil {
+		if stored := home.GetAssistantProgramState().GetHomeProfile(); stored != nil {
+			profile = stored
+		}
+		formats = s.libraryFormats(home)
+	}
+	kept := mainAppIsOwners(profile.MainApp)
+	applyDetection(profile, found, s.now())
+	applyMainAppRule(profile, formats)
+	var preview SetupPreview
+	for _, app := range profile.VisibleApps() {
+		if app.Detected {
+			preview.Apps = append(preview.Apps, app.Name)
+		}
+	}
+	if main := profile.MainApp; main != nil {
+		if app, listed := profile.App(main.ID); listed {
+			preview.Main, preview.MainKept = app.Name, kept
+		}
+	}
+	return preview
 }
 
 // Setup fills a Home's profile from a setup card the owner pressed: it looks

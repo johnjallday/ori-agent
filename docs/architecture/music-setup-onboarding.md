@@ -261,7 +261,9 @@ only when the root's recorded last scan differs from the one before the review.
   studio"): after the library line on a collection's plan, with the Home's lines
   on a single song's plan. Building a plan looks for installed applications
   (`Lstat` of the tool table's bundle names in `/Applications` and
-  `~/Applications`; nothing inside a bundle is read). The detail is one of:
+  `~/Applications`; nothing inside a bundle is read). A card on screen is
+  planned again on every poll, so one look serves the plans of the next 15
+  seconds, like the rest of a plan's facts. The detail is one of:
   - one found, and its templates can be listed: "REAPER is your main DAW. Reads
     your REAPER templates folder so new projects can start from them. Nothing is
     changed."
@@ -274,7 +276,11 @@ only when the root's recorded last scan differs from the one before the review.
   "main DAW" is the declared label of the main row, lower-cased. The templates
   sentence appears only when the plan creates the Home: pressing **Set up** is
   then the consent, as it is for song details. A plan for an existing Home ends
-  "Nothing is read." The line's text is part of the plan digest, so a card
+  "Nothing is read." and is worded from what that Home already knows, with the
+  very rules the run applies (`homeprofile.SetupPreview`): an application its
+  owner said is not theirs is not named, a main application its owner chose
+  "stays your main DAW", and one the Home's library decides is named instead of
+  asking for a pick. The line's text is part of the plan digest, so a card
   showing older text is refused as `plan_changed`. No new control.
 - **First-ever setup:** when the same card installs the Home provider, nothing
   is installed at plan time, so the plan has no profile line and the run does no
@@ -282,13 +288,19 @@ only when the root's recorded last scan differs from the one before the review.
 - **The run step:** after the Home exists and before the listing
   (`foldersetup.Profile`): look for applications, propose the main one (the only
   one found; with several, the one whose project format has strictly the most
-  library entries; otherwise none), and, only for a Home this plan created,
+  library entries; otherwise none), and, only for a Home this run created,
   record `templates.consent {source: folder_offer}` and call the project
-  plugin's facts operation once. A plugin without the operation, or a read that
-  fails, never stops the run: the profile keeps the applications and the
-  templates row says what happened. A card never turns a consent back on, and a
+  plugin's facts operation once. "Created" is what the run itself did, not what
+  the plan said: a single song's run carries the consent only in the pass that
+  created the Home, and a collection's run only for the Home it made after Set
+  up was pressed. A Home that was already there never gains a consent from a
+  card, even from a plan that promised a read. A plugin without the operation,
+  or a read that fails, never stops the run: the profile keeps the applications
+  and the templates row says what happened (and offers Read again once the
+  plugin can list templates). A card never turns a consent back on, and a
   resumed run replays the step instead of looking and reading again. A profile
-  that could not be saved leaves its line failed and the run continues.
+  that could not be saved leaves its line failed and the run continues; the
+  last screen keeps that line as "Did not finish" and does not count it.
 - **The last screen:** the receipt gains a `profile` row, and "Pick a song to
   start with" (S4a) or the plain receipt screen shows one quiet line under the
   status, "Your studio: REAPER · 4 templates" or "Your studio: REAPER and Logic

@@ -195,7 +195,13 @@ function defaultsSummary(defaults, signatures) {
 // defaultsView is what a new project starts from: four optional parts, each
 // "Not set" until the owner sets it. Choices come from the server; a part with
 // no choices cannot be set.
-export function defaultsView(view, { locale, timeZone } = {}) {
+//
+// draft is what the owner has typed and not saved ({tempo, timeSignature,
+// sampleRate, bitDepth}, as the fields hold them). The fields then show the
+// draft instead of the stored values, so a redraw of the card never throws
+// away typing; the note keeps saying what is stored. A drafted choice that is
+// no longer offered falls back to the stored one.
+export function defaultsView(view, { locale, timeZone, draft = null } = {}) {
   const readOnly = Boolean(view?.read_only);
   const choices = view?.choices || {};
   const defaults = view?.profile?.defaults || null;
@@ -207,36 +213,50 @@ export function defaultsView(view, { locale, timeZone } = {}) {
   );
   const unset = { value: '', label: 'Not set' };
   const summary = defaultsSummary(defaults, signatures);
+  const typed = !readOnly && draft && typeof draft === 'object' ? draft : null;
+  const text = (key, stored) => (typed && typed[key] !== undefined ? String(typed[key]) : stored);
+  const pick = (key, stored, options) => {
+    const value = text(key, stored);
+    return options.some(option => option.value === value) ? value : stored;
+  };
+  const signatureOptions = [unset, ...signatures];
+  const rateOptions = [
+    unset,
+    ...(choices.sample_rates || []).map(hz => ({ value: String(hz), label: sampleRateLabel(hz) }))
+  ];
+  const depthOptions = [
+    unset,
+    ...(choices.bit_depths || []).map(bits => ({ value: String(bits), label: `${bits}-bit` }))
+  ];
+  const stored = {
+    tempo: defaults?.tempo_bpm ? String(defaults.tempo_bpm) : '',
+    timeSignature: String(defaults?.time_signature || ''),
+    sampleRate: defaults?.sample_rate_hz ? String(defaults.sample_rate_hz) : '',
+    bitDepth: defaults?.bit_depth ? String(defaults.bit_depth) : ''
+  };
+  const shown = {
+    tempo: text('tempo', stored.tempo),
+    timeSignature: pick('timeSignature', stored.timeSignature, signatureOptions),
+    sampleRate: pick('sampleRate', stored.sampleRate, rateOptions),
+    bitDepth: pick('bitDepth', stored.bitDepth, depthOptions)
+  };
   return {
     disabled: readOnly,
+    // True while a field shows something other than what is stored.
+    unsaved: Object.keys(stored).some(key => shown[key] !== stored[key]),
     tempo: {
-      value: defaults?.tempo_bpm ? String(defaults.tempo_bpm) : '',
+      value: shown.tempo,
       min: Number(choices.min_tempo) || 40,
       max: Number(choices.max_tempo) || 240,
       placeholder: 'Not set'
     },
     timeSignature: {
-      value: String(defaults?.time_signature || ''),
-      options: [unset, ...signatures],
+      value: shown.timeSignature,
+      options: signatureOptions,
       disabled: readOnly || signatures.length === 0
     },
-    sampleRate: {
-      value: defaults?.sample_rate_hz ? String(defaults.sample_rate_hz) : '',
-      options: [
-        unset,
-        ...(choices.sample_rates || []).map(hz => ({
-          value: String(hz),
-          label: sampleRateLabel(hz)
-        }))
-      ]
-    },
-    bitDepth: {
-      value: defaults?.bit_depth ? String(defaults.bit_depth) : '',
-      options: [
-        unset,
-        ...(choices.bit_depths || []).map(bits => ({ value: String(bits), label: `${bits}-bit` }))
-      ]
-    },
+    sampleRate: { value: shown.sampleRate, options: rateOptions },
+    bitDepth: { value: shown.bitDepth, options: depthOptions },
     summary: summary || 'Not set',
     note: summary
       ? `${summary}. Set by you ${profileDate(defaults.confirmed_at, locale, timeZone)}.`
@@ -273,25 +293,41 @@ function countOf(count, noun) {
 
 // templatesView words the templates row. Nothing is read from disk until the
 // owner reviews it; the row always says what would happen next, for which
-// application, and never lists a name without an active consent.
+// application, and never lists a name without an active consent. While a
+// consent is in force, whatever is stored is shown and can be forgotten, even
+// when no new read can happen (the plugin is gone, another application is the
+// main one).
 export function templatesView(view, { locale, timeZone } = {}) {
   const row = view?.templates || {};
   const stored = view?.profile?.templates || {};
   const readOnly = Boolean(view?.read_only);
   const app = String(row.app_name || '');
   const folders = (Array.isArray(row.folders) ? row.folders : []).map(String);
+  const consented = Boolean(row.consented);
+  const items = consented && Array.isArray(stored.items) ? stored.items : [];
+  const project = items
+    .filter(item => item?.kind === 'project')
+    .map(item => String(item.name || ''));
+  const track = items.filter(item => item?.kind === 'track').map(item => String(item.name || ''));
   const base = {
     state: String(row.state || ''),
     appName: app,
     folders,
-    project: [],
-    track: [],
+    project,
+    track,
     canReview: false,
     canReadAgain: false,
-    canForget: false,
+    canForget: consented && !readOnly,
     disabled: readOnly
   };
   const act = { canReadAgain: !readOnly, canForget: !readOnly };
+  // What a row that cannot read right now adds about what it still holds.
+  let kept = '';
+  if (items.length) {
+    kept = ` The ${countOf(items.length, 'template')} read ${profileDate(stored.read_at, locale, timeZone)} stay listed until you forget them.`;
+  } else if (consented) {
+    kept = ' Forget takes back your agreement to read them.';
+  }
   switch (base.state) {
     case 'detect_first':
       return {
@@ -299,11 +335,11 @@ export function templatesView(view, { locale, timeZone } = {}) {
         note: 'Not read. Detect first; templates are listed for an application found on this Mac.'
       };
     case 'other_app':
-      return { ...base, note: `Templates are read for ${app} only for now.` };
+      return { ...base, note: `Templates are read for ${app} only for now.${kept}` };
     case 'plugin_missing':
-      return { ...base, note: `Install the ${app} plugin to read templates.` };
+      return { ...base, note: `Install the ${app} plugin to read templates.${kept}` };
     case 'update_plugin':
-      return { ...base, note: `Update the ${app} plugin to read templates.` };
+      return { ...base, note: `Update the ${app} plugin to read templates.${kept}` };
     case 'not_read':
       return {
         ...base,
@@ -311,19 +347,10 @@ export function templatesView(view, { locale, timeZone } = {}) {
         canReview: !readOnly
       };
     case 'listed': {
-      const items = Array.isArray(stored.items) ? stored.items : [];
-      const project = items
-        .filter(item => item?.kind === 'project')
-        .map(item => String(item.name || ''));
-      const track = items
-        .filter(item => item?.kind === 'track')
-        .map(item => String(item.name || ''));
       const more = stored.truncated ? ' The folders hold more than are listed here.' : '';
       return {
         ...base,
         ...act,
-        project,
-        track,
         note: `${countOf(project.length, 'project template')} and ${countOf(track.length, 'track template')}, read ${profileDate(stored.read_at, locale, timeZone)}.${more}`
       };
     }
@@ -334,18 +361,21 @@ export function templatesView(view, { locale, timeZone } = {}) {
         note: `No templates were found in ${joinNames(folders) || 'its templates folders'}, read ${profileDate(stored.read_at, locale, timeZone)}.`
       };
     case 'problem':
-      return stored.problem === 'operation_unavailable' || row.problem === 'operation_unavailable'
-        ? { ...base, canForget: !readOnly, note: `Update the ${app} plugin to read templates.` }
-        : {
-            ...base,
-            ...act,
-            note: 'The last read failed, so nothing is listed. Read again to retry.'
-          };
+      // A plugin that still cannot list templates reads as update_plugin, so
+      // this state always has something to retry.
+      return {
+        ...base,
+        ...act,
+        note:
+          stored.problem === 'operation_unavailable' || row.problem === 'operation_unavailable'
+            ? `Nothing is listed yet: the ${app} plugin could not list templates when this was set up. It can now. Read again to list them.`
+            : 'The last read failed, so nothing is listed. Read again to retry.'
+      };
     default:
       return {
         ...base,
         state: 'unsupported',
-        note: 'Templates cannot be listed for this Home yet.'
+        note: `Templates cannot be listed for this Home yet.${kept}`
       };
   }
 }
@@ -419,6 +449,23 @@ export class HomeProfilePanel {
     this.fetchImpl = (...args) => fetchImpl(...args);
     this.view = null;
     this.busy = false;
+    // What the owner typed into the defaults row and has not saved. Every
+    // action redraws the whole card; this is what keeps that typing.
+    this.defaultsDraft = null;
+  }
+
+  // keepDefaultsDraft remembers the defaults row as it stands on screen, before
+  // a redraw replaces it.
+  keepDefaultsDraft() {
+    const read = id => globalThis.document?.getElementById(id)?.value;
+    const tempo = read('homeProfileTempo');
+    if (tempo === undefined) return;
+    this.defaultsDraft = {
+      tempo,
+      timeSignature: read('homeProfileTimeSignature') ?? '',
+      sampleRate: read('homeProfileSampleRate') ?? '',
+      bitDepth: read('homeProfileBitDepth') ?? ''
+    };
   }
 
   get panel() {
@@ -573,7 +620,7 @@ export class HomeProfilePanel {
   }
 
   renderDefaults(section) {
-    const view = defaultsView(this.view);
+    const view = defaultsView(this.view, { draft: this.defaultsDraft });
     const off = this.busy || view.disabled;
     const grid = element('div', 'home-profile-defaults');
     const field = (labelText, control) => {
@@ -700,15 +747,18 @@ export class HomeProfilePanel {
 
   // One owner action: disable the card, post, show the new card, say what
   // happened. A profile that changed somewhere else is re-read, never
-  // overwritten.
+  // overwritten. Defaults the owner typed and did not save outlive the
+  // redraws; only a Save that went through replaces them with what is stored.
   async run(message, action, work) {
     if (this.busy || this.view?.read_only) return;
     this.busy = true;
     this.panel?.setAttribute('aria-busy', 'true');
+    this.keepDefaultsDraft();
     this.render();
     this.status(message);
     try {
       this.view = await work();
+      if (action === 'defaults') this.defaultsDraft = null;
       this.status(profileStatus(action, this.view));
     } catch (error) {
       if (error.code === 'home_profile_changed' || error.code === 'home_read_only') {

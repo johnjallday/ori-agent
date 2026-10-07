@@ -10676,7 +10676,13 @@ const sessionManager = {
     draft.homeDefaults = next;
     draft.homeDefaultsNote = Object.keys(next).length ? String(defaults?.note || '').trim() : '';
     this.renderBlueprintInputs();
-    if (changed) this.renderBlueprintInputsReceipt();
+    // A value that changed is treated like the person editing the field: a
+    // placement review already obtained no longer describes this workspace,
+    // and the review step shows the values as they are now.
+    if (changed) {
+      this.invalidateGroupRequirementReview();
+      this.refreshWorkspaceReview();
+    }
   },
 
   // The line under one field: its range or format, then, while the field

@@ -182,7 +182,7 @@ func (h *folderSetupHost) portfolioPlan(ctx context.Context, req personalassista
 	if facts.FolderName == "" {
 		return personalassistant.FolderSetupPlan{}, errSetupUnavailable
 	}
-	facts.Profile = h.profileFacts(target.provider, target.row.Offer.IntegrationKey)
+	facts.Profile = h.profileFacts(target.provider, target.row.Offer.IntegrationKey, home)
 	return foldersetup.BuildPortfolioPlan(facts), nil
 }
 

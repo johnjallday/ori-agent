@@ -72,6 +72,10 @@ var ErrHomeProfileInvalid = errors.New("home profile is invalid")
 
 var homeProfileIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
+// homeProfilePluginIDPattern accepts every id a package may be installed
+// under, which unlike an application id or an action may contain dots.
+var homeProfilePluginIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
 // HomeProfile is the stored record.
 type HomeProfile struct {
 	SchemaVersion int `json:"schema_version"`
@@ -357,7 +361,7 @@ func (p *HomeProfile) Validate() error {
 	if p.SchemaVersion != HomeProfileSchemaVersion || p.Revision < 1 {
 		return invalidHomeProfile("schema_version or revision")
 	}
-	if !homeProfileIDPattern.MatchString(p.DeclaredBy.PluginID) || !homeProfileLine(p.DeclaredBy.Version, 64, false) ||
+	if !homeProfilePluginIDPattern.MatchString(p.DeclaredBy.PluginID) || !homeProfileLine(p.DeclaredBy.Version, 64, false) ||
 		!homeProfileLine(p.DeclaredBy.Title, 60, true) || len(p.DeclaredBy.Labels) > 4 {
 		return invalidHomeProfile("declared_by")
 	}

@@ -51,6 +51,10 @@ type TemplatesState struct {
 	AppName string   `json:"app_name,omitempty"`
 	Folders []string `json:"folders,omitempty"`
 	Problem string   `json:"problem,omitempty"`
+	// Consented says the record holds an agreement that was not taken back,
+	// whatever the state is. The card then shows what is stored and offers
+	// Forget, even when nothing can be read right now.
+	Consented bool `json:"consented,omitempty"`
 }
 
 // TemplatesReview is what the consent dialog shows before anything is read.
@@ -65,11 +69,12 @@ type TemplatesReview struct {
 // templatesState decides the row from the saved record and the installed
 // plugins. It runs nothing.
 func (s *Service) templatesState(home *workspace.Workspace, profile *workspace.HomeProfile) TemplatesState {
+	consented := profile != nil && profile.Templates != nil && profile.Templates.Consent.Active()
 	app, ok := s.templatesApp(home)
 	if !ok {
-		return TemplatesState{State: TemplatesUnsupported}
+		return TemplatesState{State: TemplatesUnsupported, Consented: consented}
 	}
-	state := TemplatesState{AppID: app.AppID, AppName: app.AppName, Folders: append([]string(nil), app.Folders...)}
+	state := TemplatesState{AppID: app.AppID, AppName: app.AppName, Folders: append([]string(nil), app.Folders...), Consented: consented}
 	if profile == nil || profile.DetectedAt == nil {
 		state.State = TemplatesDetectFirst
 		return state
@@ -216,8 +221,16 @@ func (s *Service) TemplatesCommit(ctx context.Context, ownerID, homeID, requestI
 		return View{}, ErrOperationUnavailable
 	}
 	return s.write(ownerID, homeID, requestID, actionTemplatesCommit, nil,
-		func(_ *workspace.Workspace, profile *workspace.HomeProfile, now time.Time) error {
-			if row, listed := profile.App(app.AppID); !listed || row.Hidden {
+		func(current *workspace.Workspace, profile *workspace.HomeProfile, now time.Time) error {
+			// The read took a while, and the owner agreed to what the review
+			// showed. The record being written must still be the one it
+			// described: a Forget (or another consent) that landed meanwhile
+			// wins, and so does an application that is no longer this Home's.
+			if reviewID != templatesReviewID(current.ID, app, profile) {
+				return fmt.Errorf("%w: the templates consent changed while the folders were read", ErrChanged)
+			}
+			if row, listed := profile.App(app.AppID); !listed || row.Hidden ||
+				(profile.MainApp != nil && profile.MainApp.ID != app.AppID) {
 				return ErrChanged
 			}
 			grantTemplatesConsent(profile, workspace.HomeProfileTemplatesHomeReview, "", now)

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/url"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
@@ -21,11 +22,26 @@ import (
 // it. Applications are named through the host's tool table and the package's
 // own labels; nothing here names one.
 
+// profileApps looks for installed applications for a plan's profile line. A
+// plan is one of the moments a detection may run, but a card that is on screen
+// is planned again on every poll, so one look serves the plans of the next few
+// seconds, like the rest of a plan's facts.
+func (h *folderSetupHost) profileApps() []folderdigest.InstalledApp {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.appsAt.IsZero() || time.Since(h.appsAt) > planFactsTTL {
+		h.apps, h.appsAt = h.builder.sessionHandler.HomeProfileInstalledApps(), time.Now()
+	}
+	return append([]folderdigest.InstalledApp(nil), h.apps...)
+}
+
 // profileFacts returns what a plan's profile line is built from, or nil when
 // the Home provider's installed package declares no profile (the plan then has
-// no such line and the run no such step). It looks for installed applications:
-// a plan is one of the moments a detection may run.
-func (h *folderSetupHost) profileFacts(provider reviewedintegration.HomeProvider, integrationKey string) *foldersetup.ProfileFacts {
+// no such line and the run no such step). home is the owner's existing Home,
+// nil when the setup would create one: what it already knows (an application
+// its owner hid, a main application its owner chose) shapes the line exactly
+// as it shapes the run.
+func (h *folderSetupHost) profileFacts(provider reviewedintegration.HomeProvider, integrationKey string, home *workspace.Workspace) *foldersetup.ProfileFacts {
 	b := h.builder
 	if b == nil || b.pluginHandler == nil || b.sessionHandler == nil {
 		return nil
@@ -51,12 +67,13 @@ func (h *folderSetupHost) profileFacts(provider reviewedintegration.HomeProvider
 		return nil
 	}
 	facts := &foldersetup.ProfileFacts{Title: declared.Title, MainLabel: declared.Label(projecttemplates.HomeProfileKindMainApp)}
-	found := b.sessionHandler.HomeProfileInstalledApps()
+	found := h.profileApps()
 	foundIDs := make(map[string]bool, len(found))
 	for _, app := range found {
 		foundIDs[app.ToolID] = true
-		facts.Apps = append(facts.Apps, app.Name)
 	}
+	preview := b.sessionHandler.HomeProfiles().SetupPreview(home, found)
+	facts.Apps, facts.Main, facts.MainKept = preview.Apps, preview.Main, preview.MainKept
 	if declared.Declares(projecttemplates.HomeProfileKindTemplates) {
 		if tool, ok := folderdigest.TemplatesToolForIntegration(integrationKey); ok && foundIDs[tool.ToolID] {
 			facts.TemplatesApp = tool.ToolName

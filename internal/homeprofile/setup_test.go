@@ -47,6 +47,86 @@ func TestSetupThatCreatedTheHomeFillsTheProfileWithTemplates(t *testing.T) {
 	}
 }
 
+// A setup card's sentence is worded from the preview, so the preview must say
+// exactly what the run then leaves on the Home: every case is checked against
+// a real Setup of the same Home.
+func TestSetupPreviewSaysWhatSetupLeaves(t *testing.T) {
+	both := []folderdigest.InstalledApp{appReaper, appLogic}
+	tests := map[string]struct {
+		prepare func(f *fixture)
+		found   []folderdigest.InstalledApp
+		want    SetupPreview
+	}{
+		"a Home with no record, one found": {nil, []folderdigest.InstalledApp{appLogic},
+			SetupPreview{Apps: []string{"Logic Pro"}, Main: "Logic Pro"}},
+		"a Home with no record, several found": {nil, both,
+			SetupPreview{Apps: []string{"REAPER", "Logic Pro"}}},
+		"nothing found": {nil, nil, SetupPreview{}},
+		"the library decides": {func(f *fixture) { f.formats = map[string]int{"reaper": 4, "logic": 1} }, both,
+			SetupPreview{Apps: []string{"REAPER", "Logic Pro"}, Main: "REAPER"}},
+		"the owner's choice stays": {func(f *fixture) {
+			f.apps = both
+			f.mustFields(f.detect(), FieldsInput{MainApp: ptr("logic-pro")})
+		}, both, SetupPreview{Apps: []string{"REAPER", "Logic Pro"}, Main: "Logic Pro", MainKept: true}},
+		"the owner's choice stays when it is gone": {func(f *fixture) {
+			f.apps = both
+			f.mustFields(f.detect(), FieldsInput{MainApp: ptr("logic-pro")})
+		}, []folderdigest.InstalledApp{appReaper}, SetupPreview{Apps: []string{"REAPER"}, Main: "Logic Pro", MainKept: true}},
+		"an application the owner hid is not named": {func(f *fixture) {
+			f.apps = both
+			f.mustFields(f.detect(), FieldsInput{HideApps: []string{"reaper"}})
+		}, both, SetupPreview{Apps: []string{"Logic Pro"}, Main: "Logic Pro"}},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			if tc.prepare != nil {
+				tc.prepare(f)
+			}
+			home, err := f.store.Get(testHome)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, _ := f.service.Read(testOwner, testHome)
+			got := f.service.SetupPreview(home, tc.found)
+			if len(got.Apps) != len(tc.want.Apps) || got.Main != tc.want.Main || got.MainKept != tc.want.MainKept {
+				t.Fatalf("preview = %+v, want %+v", got, tc.want)
+			}
+			for i := range got.Apps {
+				if got.Apps[i] != tc.want.Apps[i] {
+					t.Fatalf("preview apps = %v, want %v", got.Apps, tc.want.Apps)
+				}
+			}
+			// A preview writes nothing.
+			if after, _ := f.service.Read(testOwner, testHome); after.Revision != before.Revision {
+				t.Fatalf("the preview wrote the profile: revision %d -> %d", before.Revision, after.Revision)
+			}
+			// The run leaves the same thing.
+			f.apps = tc.found
+			view := f.setup(SetupInput{OfferID: "offer-1"})
+			var shown []string
+			for _, app := range view.Profile.VisibleApps() {
+				if app.Detected {
+					shown = append(shown, app.Name)
+				}
+			}
+			main := ""
+			if view.Profile.MainApp != nil {
+				app, _ := view.Profile.App(view.Profile.MainApp.ID)
+				main = app.Name
+			}
+			if len(shown) != len(got.Apps) || main != got.Main {
+				t.Fatalf("setup left apps %v main %q; the preview said %+v", shown, main, got)
+			}
+		})
+	}
+	// A Home the setup would create has no record to consult.
+	f := newFixture(t)
+	if got := f.service.SetupPreview(nil, []folderdigest.InstalledApp{appReaper}); len(got.Apps) != 1 || got.Main != "REAPER" || got.MainKept {
+		t.Fatalf("preview for a new Home = %+v", got)
+	}
+}
+
 func TestSetupOnAnExistingHomeNeverGrantsTheTemplatesConsent(t *testing.T) {
 	f := newFixture(t)
 	f.apps, f.templatesApp, f.factsRaw = []folderdigest.InstalledApp{appReaper}, reaperTemplates, threeTemplates
@@ -107,8 +187,22 @@ func TestSetupToleratesAMissingOrFailingOperation(t *testing.T) {
 			if templates == nil || !templates.Consent.Active() || templates.Problem != tc.problem || len(templates.Items) != 0 {
 				t.Fatalf("templates = %+v", templates)
 			}
-			if view.Templates.State != tc.state {
-				t.Fatalf("row = %+v, want %s", view.Templates, tc.state)
+			if view.Templates.State != tc.state || !view.Templates.Consented {
+				t.Fatalf("row = %+v, want %s under the card's consent", view.Templates, tc.state)
+			}
+			// Once the plugin can list templates, the row offers the read the
+			// card agreed to: same consent, no second agreement.
+			f.templatesApp, f.factsErr, f.factsRaw = reaperTemplates, nil, threeTemplates
+			if view, _ = f.service.Read(testOwner, testHome); view.Templates.State != TemplatesProblem || view.Templates.Problem != tc.problem {
+				t.Fatalf("row once the operation exists = %+v", view.Templates)
+			}
+			view, err := f.commit(f.review().ReviewID)
+			if err != nil {
+				t.Fatalf("read again: %v", err)
+			}
+			if consent := view.Profile.Templates.Consent; view.Templates.State != TemplatesListed ||
+				consent.Source != workspace.HomeProfileTemplatesFolderOffer || consent.OfferID != "offer-1" {
+				t.Fatalf("row = %+v consent = %+v", view.Templates, consent)
 			}
 		})
 	}

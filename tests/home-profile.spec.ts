@@ -14,7 +14,8 @@ import { mkdirSync } from 'node:fs';
 // sandbox does not stage: listing templates (a REAPER plugin with
 // `profile.read`), the one-card setup line and last screen, and the 0.1.1 to
 // 0.2.0 Home upgrade.
-const ENABLED = process.env.ORI_MUSIC_HOME_ACCEPTANCE === '1' && process.env.ORI_HOME_PROFILE_FIXTURES === '1';
+const ENABLED =
+  process.env.ORI_MUSIC_HOME_ACCEPTANCE === '1' && process.env.ORI_HOME_PROFILE_FIXTURES === '1';
 const SHOTS = process.env.ORI_MUSIC_HOME_EVIDENCE_DIR || 'test-results/home-profile';
 const HEADERS = { 'X-Requested-With': 'XMLHttpRequest' };
 let homeID = '';
@@ -47,20 +48,35 @@ async function evidence(page: Page, name: string) {
   await page.locator('#homeProfilePanel').screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
-test('a new Home shows the declared card and detects nothing on load', async ({ page, request }) => {
+test('a new Home shows the declared card and detects nothing on load', async ({
+  page,
+  request
+}) => {
   await request.post('/api/onboarding/skip', { headers: HEADERS });
-  const templates = (await json(await request.get('/api/workspaces/group-templates'))).group_templates;
+  const templates = (await json(await request.get('/api/workspaces/group-templates')))
+    .group_templates;
   const music = templates.filter(
-    (entry: { provider?: { plugin_id: string } }) => entry.provider?.plugin_id === 'music-project-management'
+    (entry: { provider?: { plugin_id: string } }) =>
+      entry.provider?.plugin_id === 'music-project-management'
   );
   expect(music, JSON.stringify(templates)).toHaveLength(1);
-  const body = { group_template_id: music[0].id, revision: music[0].revision, name: 'Music Production Home' };
+  const body = {
+    group_template_id: music[0].id,
+    revision: music[0].revision,
+    name: 'Music Production Home'
+  };
   const review = (
-    await json(await request.post('/api/workspaces/group-templates/review', { data: body, headers: HEADERS }))
+    await json(
+      await request.post('/api/workspaces/group-templates/review', { data: body, headers: HEADERS })
+    )
   ).group_template_review;
   const created = await json(
     await request.post('/api/workspaces/group-templates/commit', {
-      data: { ...body, group_review_token: review.review_token, idempotency_key: `home-profile-${Date.now()}` },
+      data: {
+        ...body,
+        group_review_token: review.review_token,
+        idempotency_key: `home-profile-${Date.now()}`
+      },
       headers: HEADERS
     })
   );
@@ -90,7 +106,10 @@ test('a new Home shows the declared card and detects nothing on load', async ({ 
   await evidence(page, '01-empty-card');
 });
 
-test('Detect lists both DAWs as hints and one pick fills the main DAW', async ({ page, request }) => {
+test('Detect lists both DAWs as hints and one pick fills the main DAW', async ({
+  page,
+  request
+}) => {
   const panel = await openCard(page);
   const status = page.locator('#homeProfileStatus');
   await page.locator('#homeProfileDetect').click();
@@ -129,7 +148,10 @@ test('Detect lists both DAWs as hints and one pick fills the main DAW', async ({
   await page.locator('#homeProfileDetect').click();
   await expect(status).toHaveText('Found REAPER and Logic Pro.');
   await expect(reaper.locator('.home-profile-badge')).toHaveText('Confirmed');
-  expect((await profile(request)).profile.main_app).toMatchObject({ id: 'reaper', source: 'owner' });
+  expect((await profile(request)).profile.main_app).toMatchObject({
+    id: 'reaper',
+    source: 'owner'
+  });
 });
 
 test('new-song defaults are bounded, saved and shown as the owner’s', async ({ page, request }) => {
@@ -144,6 +166,14 @@ test('new-song defaults are bounded, saved and shown as the owner’s', async ({
   await page.locator('#homeProfileTempo').fill('96');
   await page.locator('#homeProfileSampleRate').selectOption({ label: '48 kHz' });
   await page.locator('#homeProfileBitDepth').selectOption({ label: '24-bit' });
+  // Another row's action redraws the whole card; what was typed here and not
+  // saved yet is still in the fields afterwards, and still not stored.
+  await page.locator('#homeProfileDetect').click();
+  await expect(status).toHaveText('Found REAPER and Logic Pro.');
+  await expect(page.locator('#homeProfileTempo')).toHaveValue('96');
+  await expect(page.locator('#homeProfileSampleRate')).toHaveValue('48000');
+  await expect(page.locator('#homeProfileBitDepth')).toHaveValue('24');
+  expect((await profile(request)).profile.defaults).toBeUndefined();
   await row.getByRole('button', { name: 'Save' }).click();
   await expect(status).toHaveText('Defaults saved.');
   await expect(row).toContainText('96 BPM, 48 kHz, 24-bit. Set by you');
@@ -174,7 +204,9 @@ test('templates are never read on load and say what is missing', async ({ page, 
   expect((await refused.json()).code).toBe('plugin_operation_unavailable');
 });
 
-test('the routes are the owner’s Home only and refuse stale or invalid saves', async ({ request }) => {
+test('the routes are the owner’s Home only and refuse stale or invalid saves', async ({
+  request
+}) => {
   const card = await profile(request);
   const stale = await request.post(profileURL('/fields'), {
     data: { request_id: `stale-${Date.now()}`, if_revision: 0, main_app: 'logic-pro' },
@@ -191,21 +223,29 @@ test('the routes are the owner’s Home only and refuse stale or invalid saves',
     const response = await request.post(profileURL('/fields'), { data: body, headers: HEADERS });
     expect(response.status(), JSON.stringify(body)).toBe(400);
   }
-  expect((await request.get('/api/workspaces/not-a-home/assistant-program/profile')).status()).toBe(404);
+  expect((await request.get('/api/workspaces/not-a-home/assistant-program/profile')).status()).toBe(
+    404
+  );
   expect((await profile(request)).revision).toBe(card.revision);
 
   // A repeated request_id replays instead of writing again.
   const requestID = `replay-${Date.now()}`;
   const body = { request_id: requestID, if_revision: card.revision, confirm_apps: ['logic-pro'] };
-  const first = await json(await request.post(profileURL('/fields'), { data: body, headers: HEADERS }));
-  const again = await json(await request.post(profileURL('/fields'), { data: body, headers: HEADERS }));
+  const first = await json(
+    await request.post(profileURL('/fields'), { data: body, headers: HEADERS })
+  );
+  const again = await json(
+    await request.post(profileURL('/fields'), { data: body, headers: HEADERS })
+  );
   expect(first.replayed).toBeUndefined();
   expect(again.replayed).toBe(true);
   expect(again.revision).toBe(first.revision);
 });
 
 test('a read-only Home shows every value and disables every control', async ({ page, request }) => {
-  const disable = await request.post('/api/plugins/music-project-management/disable', { headers: HEADERS });
+  const disable = await request.post('/api/plugins/music-project-management/disable', {
+    headers: HEADERS
+  });
   expect(disable.ok(), await disable.text()).toBeTruthy();
   try {
     const card = await profile(request);
@@ -227,7 +267,9 @@ test('a read-only Home shows every value and disables every control', async ({ p
     expect((await refused.json()).code).toBe('home_read_only');
     await evidence(page, '05-read-only');
   } finally {
-    const enable = await request.post('/api/plugins/music-project-management/enable', { headers: HEADERS });
+    const enable = await request.post('/api/plugins/music-project-management/enable', {
+      headers: HEADERS
+    });
     expect(enable.ok(), await enable.text()).toBeTruthy();
   }
   expect((await profile(request)).read_only).toBe(false);

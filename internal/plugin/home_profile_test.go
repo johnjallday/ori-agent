@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // homeProfileContributionJSON is the Music candidate fixture with the profile
@@ -100,6 +102,63 @@ func TestHomeProfileContributionIsRefusedByAnOlderHost(t *testing.T) {
 	var contributionErr *ContributionError
 	if !errors.As(err, &contributionErr) || contributionErr.Code != CodeHostFeatureUnsupported {
 		t.Fatalf("err = %v, want host_feature_unsupported", err)
+	}
+}
+
+// The card's words come from the installed declaration a Home is pinned to,
+// byte for byte, even while the package is switched off. They never come from
+// another release or another package of the same name.
+func TestPinnedHomeDeclarationReturnsExactlyThePinnedRelease(t *testing.T) {
+	contribution, err := ParseSurfaceContribution(homeProfileContributionJSON(t, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := contribution.AssistantProgramHomes[0]
+	installed := InstalledPlugin{Name: "music-project-management", Version: "0.2.0", Enabled: true,
+		ContentGeneration: 3, ComponentFingerprint: strings.Repeat("a", 64), WorkspaceSurfaces: contribution}
+	pin := workspace.AssistantProgramHomeOwner{
+		PluginID: installed.Name, PluginVersion: installed.Version, ProgramID: home.ID,
+		HomeSchemaVersion: home.SchemaVersion, HomeVersion: home.Version,
+		DeclarationDigest: projecttemplates.AssistantProgramHomeDigest(home),
+		PluginGeneration:  installed.EvidenceGeneration(), ComponentFingerprint: installed.ComponentFingerprint,
+	}
+	owner, declared, ok := PinnedHomeDeclaration([]InstalledPlugin{installed}, &pin)
+	if !ok || owner.Version != "0.2.0" || declared.HomeProfile == nil || declared.HomeProfile.Title != "Your studio" {
+		t.Fatalf("pinned declaration = %+v ok = %v", declared.HomeProfile, ok)
+	}
+	// The copy is detached from the installed record.
+	declared.HomeProfile.Fields[0].Label = "changed"
+	if contribution.AssistantProgramHomes[0].HomeProfile.Fields[0].Label == "changed" {
+		t.Fatal("the returned declaration shares the installed one's fields")
+	}
+	// A disabled package still shows its words (the Home is read-only, not blank).
+	disabled := installed
+	disabled.Enabled = false
+	if _, _, ok := PinnedHomeDeclaration([]InstalledPlugin{disabled}, &pin); !ok {
+		t.Fatal("a disabled package lost the Home's card")
+	}
+	if IndependentHomeProviderEvidenceAvailable([]InstalledPlugin{disabled}, &pin) {
+		t.Fatal("a disabled package counts as available evidence")
+	}
+
+	other := pin
+	other.DeclarationDigest = strings.Repeat("0", 64)
+	newer := installed
+	newer.Version = "0.3.0"
+	for name, tc := range map[string]struct {
+		installed []InstalledPlugin
+		pin       *workspace.AssistantProgramHomeOwner
+	}{
+		"another declaration": {[]InstalledPlugin{installed}, &other},
+		"another release":     {[]InstalledPlugin{newer}, &pin},
+		"not installed":       {nil, &pin},
+		"no pin":              {[]InstalledPlugin{installed}, nil},
+		"two matching copies": {[]InstalledPlugin{installed, installed}, &pin},
+		"MCP-only plugin":     {[]InstalledPlugin{{Name: installed.Name, Version: installed.Version, Enabled: true}}, &pin},
+	} {
+		if _, _, ok := PinnedHomeDeclaration(tc.installed, tc.pin); ok {
+			t.Errorf("%s resolved a declaration", name)
+		}
 	}
 }
 

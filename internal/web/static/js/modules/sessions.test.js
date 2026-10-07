@@ -4316,9 +4316,31 @@ test('the chosen values live in one draft, never read back out of the DOM (FR 43
   assert.deepEqual(plain(manager.blueprintInputsPayload()), { tempo: 96, time_signature: '3 4' });
 });
 
+test('Home defaults that change a field drop the placement review, like an edit does', () => {
+  const { manager } = blueprintInputsManager();
+  manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  const calls = [];
+  manager.invalidateGroupRequirementReview = () => calls.push('invalidate');
+  manager.refreshWorkspaceReview = () => calls.push('review');
+  const studio = { values: { tempo: '96' }, note: 'From your studio defaults' };
+
+  manager.applyHomeInputDefaults(studio);
+  assert.deepEqual(calls, ['invalidate', 'review']);
+  // The same defaults again change nothing, so nothing is dropped.
+  manager.applyHomeInputDefaults(studio);
+  assert.deepEqual(calls, ['invalidate', 'review']);
+  // The destination lost its defaults: the field goes back, which is a change.
+  manager.applyHomeInputDefaults(null);
+  assert.deepEqual(calls, ['invalidate', 'review', 'invalidate', 'review']);
+  // A field the person set is left alone, so there is nothing to drop.
+  manager.setBlueprintInputValue('tempo', '140');
+  calls.length = 0;
+  manager.applyHomeInputDefaults(studio);
+  assert.deepEqual(calls, []);
+});
+
 test('the destination Home’s own defaults prefill untouched fields and say where they came from', () => {
   const { manager, elements } = blueprintInputsManager();
-  manager.renderBlueprintInputsReceipt = () => {};
   manager.handleWorkspaceTemplateSelected(inputsTemplate);
   const hint = id => elements[`workspaceBlueprintInput-${id}-hint`];
   assert.equal(hint('time_signature').hidden, true, 'a select has no hint of its own');
@@ -4350,7 +4372,6 @@ test('the destination Home’s own defaults prefill untouched fields and say whe
 
 test('without Home defaults the blueprint’s own defaults stay, and come back when the destination changes', () => {
   const { manager, elements } = blueprintInputsManager();
-  manager.renderBlueprintInputsReceipt = () => {};
   manager.handleWorkspaceTemplateSelected(inputsTemplate);
   const hint = id => elements[`workspaceBlueprintInput-${id}-hint`];
 

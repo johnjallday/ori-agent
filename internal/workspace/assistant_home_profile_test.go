@@ -179,6 +179,12 @@ func TestHomeProfileEmptyRecordIsValid(t *testing.T) {
 	if err := profile.Validate(); err != nil {
 		t.Fatalf("empty profile: %v", err)
 	}
+	// A package id may contain dots; an application id may not.
+	profile.DeclaredBy.PluginID = "com.example.music-homes"
+	if err := profile.Validate(); err != nil {
+		t.Fatalf("a dotted package id: %v", err)
+	}
+	profile.DeclaredBy.PluginID = "music-project-management"
 	// A consent on its own (granted, nothing read yet) and a recorded problem
 	// are both storable.
 	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)

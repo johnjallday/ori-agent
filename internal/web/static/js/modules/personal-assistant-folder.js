@@ -344,6 +344,14 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
   const steps = run.lines.length;
   const finished = run.lines.filter(line => line.state === 'done').length;
   if (receipt.visible) {
+    // The run is over, so every line it reached is done, except a step that
+    // was allowed to fail without stopping it (the Home's profile): that one
+    // keeps saying it did not finish, and is not counted.
+    const settled = run.lines.map(line => ({
+      ...line,
+      state: line.state === 'failed' ? 'failed' : line.state ? 'done' : ''
+    }));
+    const unfinished = settled.filter(line => line.state === 'failed').length;
     const done = {
       visible: true,
       phase: 'done',
@@ -352,9 +360,9 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
       status: receipt.home
         ? 'Here is what I set up. Open a project from the library when you want to work on it.'
         : 'Here is what I set up. The first task starts when you open the workspace.',
-      count: steps ? `${steps} of ${steps} steps finished` : '',
+      count: steps ? `${steps - unfinished} of ${steps} steps finished` : '',
       percent: 100,
-      lines: run.lines.map(line => ({ ...line, state: line.state ? 'done' : '' })),
+      lines: settled,
       profile: receipt.profile || null,
       receiptRows: receipt.rows,
       route: receipt.route,

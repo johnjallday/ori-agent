@@ -52,7 +52,7 @@ func TestFolderProfileStepIsUnavailableWithoutTheHandlerAndPlansNothingWithoutAB
 		t.Fatalf("err = %v, want setup unavailable", err)
 	}
 	host := &folderSetupHost{}
-	if facts := host.profileFacts(reviewedintegration.HomeProviders()[0], "ori_reaper"); facts != nil {
+	if facts := host.profileFacts(reviewedintegration.HomeProviders()[0], "ori_reaper", nil); facts != nil {
 		t.Fatalf("a host without plugins produced a profile line: %+v", facts)
 	}
 }
