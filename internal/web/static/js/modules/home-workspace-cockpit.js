@@ -3779,6 +3779,9 @@ import {
       workspace_id: workspaceId,
       workspace_slug: workspaceSlug,
       workspace_name: workspaceName,
+      // Groups remain non-execution targets in legacy Ask routing, but are
+      // valid browsing subjects for the read-only Personal Assistant panel.
+      selection_workspace_id: selected ? selected.id : '',
       origin: 'ask_ori'
     };
 

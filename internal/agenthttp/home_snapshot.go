@@ -38,6 +38,7 @@ const (
 // this app are agent/folder scoped, so workspace attribution is omitted (FR #5
 // "when available").
 type HomeSessionSummary struct {
+	WorkspaceID  string
 	ID           string
 	Title        string
 	AgentName    string

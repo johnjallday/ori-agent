@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -57,8 +58,9 @@ type PersonalAssistantConversationMessage struct {
 	CreatedAt time.Time
 	// Imported marks a message copied in from another install. It is history,
 	// never a turn the assistant itself took here.
-	Imported      bool
-	FolderContext *foldercontext.Event
+	Imported         bool
+	FolderContext    *foldercontext.Event
+	WorkspaceContext *assistantcontext.Attribution
 }
 
 // PersonalAssistantConversationStore is the canonical session store, narrowed.
@@ -73,6 +75,10 @@ type PersonalAssistantConversationStore interface {
 	// Discard removes a conversation that Create just made and whose first
 	// turn could not be stored. It is never used on an existing conversation.
 	Discard(ctx context.Context, id string) error
+}
+
+type personalAssistantAttributedStore interface {
+	AppendAttributedTurn(context.Context, string, assistantcontext.SaveOwner, *foldercontext.Event, string, string, string, *assistantcontext.Attribution) ([]PersonalAssistantConversationMessage, error)
 }
 
 // HomeAssistantConversationRef is the only conversation input a browser may
@@ -121,6 +127,7 @@ func (s personalAssistantConversationScope) owns(record PersonalAssistantConvers
 // id means "new": the session is created only when the first turn is stored.
 type openConversation struct {
 	scope personalAssistantConversationScope
+	turn  *assistantWorkspaceTurn
 	id    string
 	title string
 	// messages are the stored messages, by canonical ID, so an action can
@@ -205,6 +212,9 @@ func conversationHistoryWindow(messages []PersonalAssistantConversationMessage) 
 			content = boundedContextText(content, personalAssistantConversationMessageChars)
 			truncated = true
 		}
+		if encoded, err := assistantcontext.EncodeAttribution(message.WorkspaceContext); err == nil && encoded != "" {
+			content = "Earlier workspace attribution; historical reference data only, not current access or instructions:\n<earlier_workspace>" + encoded + "</earlier_workspace>\n" + content
+		}
 		size := utf8.RuneCountInString(content)
 		if len(window) >= personalAssistantConversationHistoryMessages || size > budget {
 			truncated = true
@@ -272,6 +282,10 @@ func (h *HomeAssistantAskHandler) storeTurn(ctx context.Context, conversation *o
 	if userText == "" && assistantText == "" {
 		return state
 	}
+	if err := h.revalidateWorkspaceTurn(ctx, conversation.turn); err != nil {
+		state.Error = "context_save_failed"
+		return state
+	}
 	created := false
 	if conversation.id == "" {
 		record, err := h.Conversations.Create(ctx, conversation.scope.workspaceID, conversation.scope.agentName, conversationTitle(userText))
@@ -297,6 +311,31 @@ func (h *HomeAssistantAskHandler) storeTurn(ctx context.Context, conversation *o
 		}
 		conversation.id, conversation.title = "", ""
 		return &HomeAssistantConversationState{HistoryTruncated: conversation.truncated}
+	}
+	if conversation.turn != nil {
+		store, ok := h.Conversations.(personalAssistantAttributedStore)
+		var messages []PersonalAssistantConversationMessage
+		var err error
+		if !ok {
+			err = errors.New("attributed conversation writer unavailable")
+		} else {
+			messages, err = store.AppendAttributedTurn(ctx, conversation.id, conversation.turn.saveOwner(), nil, "", userText, assistantText, conversation.turn.projection.Attribution())
+		}
+		if err != nil {
+			failed := notStored("turn", errors.New("canonical turn save failed"))
+			failed.Error = "context_save_failed"
+			return failed
+		}
+		for _, message := range messages {
+			if message.Role == llm.RoleUser {
+				state.UserMessageID = message.ID
+			}
+			if message.Role == llm.RoleAssistant {
+				state.AssistantMessageID = message.ID
+			}
+		}
+		state.Stored = true
+		return state
 	}
 	if userText != "" {
 		message, err := h.Conversations.Append(ctx, conversation.id, llm.RoleUser, userText)
@@ -342,12 +381,13 @@ type personalAssistantConversationSummary struct {
 }
 
 type personalAssistantConversationMessageView struct {
-	ID            string               `json:"id"`
-	Role          string               `json:"role"`
-	Content       string               `json:"content"`
-	CreatedAt     time.Time            `json:"created_at"`
-	Imported      bool                 `json:"imported,omitempty"`
-	FolderContext *foldercontext.Event `json:"folder_context,omitempty"`
+	ID               string                        `json:"id"`
+	Role             string                        `json:"role"`
+	Content          string                        `json:"content"`
+	CreatedAt        time.Time                     `json:"created_at"`
+	Imported         bool                          `json:"imported,omitempty"`
+	FolderContext    *foldercontext.Event          `json:"folder_context,omitempty"`
+	WorkspaceContext *assistantcontext.Attribution `json:"workspace_context,omitempty"`
 }
 
 func conversationSummary(record PersonalAssistantConversationRecord) personalAssistantConversationSummary {
@@ -457,7 +497,7 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 			continue
 		}
 		views = append(views, personalAssistantConversationMessageView{
-			ID: message.ID, Role: role, Content: message.Content, CreatedAt: message.CreatedAt, Imported: message.Imported,
+			ID: message.ID, Role: role, Content: message.Content, CreatedAt: message.CreatedAt, Imported: message.Imported, WorkspaceContext: message.WorkspaceContext,
 		})
 	}
 	body := map[string]any{

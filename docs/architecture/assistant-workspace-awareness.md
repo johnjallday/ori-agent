@@ -1,6 +1,6 @@
 # Personal Assistant workspace awareness: investigation contract
 
-**Status: findings and proposed implementation contract, not shipped behavior.**
+**Status: findings plus in-progress host implementation; not shipped behavior.**
 The full feature includes context-following conversations, setup continuity,
 notes/tasks, and permitted files. A context badge alone is not the delivery.
 Implementation proceeds in that order with one writer. This document records
@@ -9,9 +9,10 @@ in `tasks/findings-assistant-workspace-awareness.md` and its evidence directory.
 
 ## Characterized baseline
 
-`TestAssistantWorkspaceContext_BaselinePendingReviewMissingFromModel` exercises
-production Route/Ask, relationship, file/session stores, metadata observation,
-and review. It creates a generic group with Album-1, a second project, and an
+The original `TestAssistantWorkspaceContext_BaselinePendingReviewMissingFromModel`
+characterized production Route/Ask, relationship, file/session stores, metadata
+observation, and review. Its current successor is
+`TestAssistantWorkspaceContext_CurrentWorkspaceWithPendingReview`. It creates a generic group with Album-1, a second project, and an
 unlinked Album-5 folder. Only the configured model is an inspecting stand-in.
 
 - A live pending review is in canonical conversation hydration, with a digest.
@@ -23,9 +24,9 @@ unlinked Album-5 folder. Only the configured model is an inspecting stand-in.
 - No creation/confirmation runs on Send or hydration. Model input has no native
   execution workspace, directory, MCP server or execution scope.
 
-The baseline assertions intentionally describe the bug. Replace their absence
-assertions with validated projections when implementing groups 2/3; do not keep
-an absence assertion as desired product behavior.
+Group 2 has replaced the current-workspace absence assertion with the validated
+projection. The pending-review summary remains unimplemented in group 3: the
+empty new-options list is still not a canonical review summary.
 
 The real-host browser fixture in
 `tests/personal-assistant-workspace-awareness.spec.ts` captures Route/Ask payloads
@@ -46,12 +47,55 @@ but paper-colored text has a transparent background: `--hc-signal` is absent.
 reproduces faded styling, not a disabled/expired permission gate; the original
 uncaptured screenshot is not asserted to have the identical condition.
 
-The same standalone `workspace-assistant.tmpl` omits shared DX utilities. Its
-`API` global is undefined, so Send fails locally before Route/Ask. A real-host
-browser test captures that failure and confirms the review remains pending and
-source bytes/workspace count unchanged. Fix this page dependency in group 2,
-and shared drawer primary tokens in group 3. No model, confirmation, project
-runtime or live REAPER runs in this specialized baseline.
+The original standalone `workspace-assistant.tmpl` omitted shared DX utilities,
+so Send failed locally before Route/Ask. Group 2 now loads that dependency exactly
+once. The exact-candidate browser reaches real Route/Ask with canonical ID/slug
+references and the review/source/workspace state unchanged. Shared drawer primary
+tokens remain a group-3 fix. No vendor model, confirmation, project runtime or
+live REAPER runs in this specialized check.
+
+## Current group-2 implementation
+
+- `assistantcontext` supplies data-only overview and bounded turn-attribution
+  DTOs. `POST /api/home-assistant/context` refreshes canonical metadata without
+  loading profile/memory, scanning a directory, calling a model or storing a turn.
+- Route validates panel references; Ask independently freezes canonical location
+  and subject IDs at acceptance. Ordinary project questions remain hired-assistant
+  conversations; explicit specialist/execution intents retain their existing
+  gates. Workspace browsing never sets native CLI execution fields.
+- Per-turn panel registries recheck user/relationship and pinned workspace ownership
+  before each read. The existing home metadata tools receive owner/subject-filtered
+  stores; separate discovery includes groups and preserves labeled project/group
+  totals. Full notes/tasks/files and validated evidence citations are still pending.
+- Provider capability controls tool advertisement. Snapshot-only paths keep the
+  validated overview and explain the lack of brokered readers; no provider switch
+  or native-MCP workaround is used.
+- Migration 77 adds optional `messages.turn_context_json`. The canonical atomic
+  writer saves user/answer attribution with optional folder observation, checks
+  session owner, relationship version and workspace ownership inside the same
+  transaction, and retains the existing folder-revision CAS/cache invalidation.
+  Generic message/JSON/continuity inputs cannot author this field. Hydrated context
+  is historical data, never new authority; missing old attribution remains unknown.
+- The drawer's live context line refreshes on opening and navigation. Per-reply
+  labels use accepted server attribution, not the current page. Tab-local draft
+  and drawer-open state survive full navigation; attachment/review identities
+  remain independently canonical.
+
+Real-host browser evidence covers A→B before Send, in-page back/forward,
+navigation during a held real Ask response, draft retention, reopening and
+app-wide clearing. The complete group-2 demo additionally uses `wt demo` and the
+production Ollama adapter against a loopback-only deterministic provider. It
+holds actual generation at the provider while navigation changes A→B, then
+reloads canonical saved user/answer attribution, the same pending review and
+unsent draft. Legacy rows remain `Earlier workspace unknown`. App Home group
+selection is a browsing reference without changing legacy execution targets.
+Run `python3 scripts/assistant-workspace-demo.py --port 8954`; fixture-only tests
+are `python3 scripts/assistant-workspace-demo.test.py`. Both child server and
+sandbox are cleaned; vendor credentials and Codex home are not passed through.
+The server/provider fixture separately verifies current pinned reads and
+revocation during generation. These are deterministic host/adapter checks,
+not configured-vendor-model proof. Review projection/placement and substantive
+source readers remain the following groups' work.
 
 ## Four separate scopes and the read principal
 
@@ -121,8 +165,7 @@ adapter checks, **not real vendor responses**.
   opt-in**, even without MCP servers. Keep WorkspaceID, WorkspaceDir, MCPServers
   and ExecutionScope empty on this panel. Display/attribution IDs belong in the
   separate context DTO. Do not change providers, dual gates or models as a fix.
-- `runModel` currently sends home tools even when SupportsTools is false; group
-  2/4 must make advertisement capability-aware while preserving the empty
+- `runModel` now makes advertisement capability-aware while preserving empty
   native-execution fields. Keep four tool rounds and final tool-free synthesis.
 
 Configured-model checks require a separately selected authorized sandbox model;
@@ -161,7 +204,7 @@ and Session adapters. Do not import HTTP handlers into chat/workspace packages.
   Historical references are labels/evidence, not grants to fetch current bodies.
 
 Add optional bounded `turn_context_json` to **canonical Messages** via the
-numbered database migration mechanism (currently migration 76 is latest). Keep
+numbered database migration mechanism (implemented by migration 77). Keep
 Go Message metadata out of generic JSON input. A dedicated internal append seam
 must atomically store user/answer attribution after owner/revision validation;
 extend existing folder-turn transaction rather than adding an independent write.
@@ -185,7 +228,9 @@ Retain PRD defaults: 12,000 Unicode characters for overview, five previews per
 category, 64,000 aggregate evidence characters including overview, 40,000 per
 file chunk, existing parser byte limits, 500 directory entries/three levels,
 four tool rounds. Enforce before provider input, across all calls in a round.
-Any truncation/continuation carries precise coverage. A directory listing's
+Any truncation/continuation carries precise coverage. The initial metadata
+registry bounds previews and tool-result accumulation; the complete cross-reader
+ledger including all initial snapshot evidence remains a group-4 requirement. A directory listing's
 readability check currently sniffs file bytes; do not copy it into panel-open or
 greeting discovery and claim no content was read.
 
@@ -196,6 +241,14 @@ projects, selected project containing 100 tasks); measure 200 samples, report
 p50/p95 separately from model, parser and tool work. New overview fixtures add
 representative note/file counts without content reads. No broad performance
 refactor or budget revision is authorized by an unmeasured assumption.
+
+The current non-race warm fixture (same 100 tasks, 200 samples, one warm-up
+excluded) measured canonical project+parent p50 **178.625 µs**, p95 **321.333 µs**;
+full bounded resolver/projection p50 **616.292 µs**, p95 **964.209 µs**. This is
+local context preparation only, excluding provider, profile/memory, deeper reads
+and parse latency. Concurrent race-instrumented checks are not this performance
+comparison. The provisional 250 ms p95 target is met for this fixture; later
+reader/large-workspace measurements are still required.
 
 ## Companion finding
 

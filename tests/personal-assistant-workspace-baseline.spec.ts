@@ -3,9 +3,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 // Exact installed-candidate baseline, not release verification or a live model.
-// Run against reaper-demo.sh serve with explicit clean sources, then invoke
-// this spec with its acceptance/sandbox/revision environment. Do not substitute
-// this fixture for the paired-guidance suite's separate restart fixture.
+// Run via reaper-demo.sh test --suite awareness with explicit clean sources.
+// This fixture does not substitute for paired-guidance restart acceptance.
 test('compatible baseline: Music Home, Album-1 and pending Album-5 review', async ({
   page,
   request
@@ -136,18 +135,18 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
   await page.locator('#personalAssistantInput').fill('Add this to my workspace');
   await page.locator('#personalAssistantSend').click();
   await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
-  // Characterize the specialized page failure, not the intended contract:
-  // this standalone template omits scripts-dx-utils.tmpl, including API.
-  const apiType = await page.evaluate(() => typeof (window as any).API);
-  expect(apiType).toBe('undefined');
-  expect(payloads).toEqual([]);
-  await expect(page.locator('#personalAssistantConversationNote')).toContainText(
-    'folder context could not be validated'
-  );
+  // API is a classic-script global lexical binding, not window.API. The
+  // original missing page dependency is fixed; now both real host hops run.
+  const apiType = await page.evaluate('typeof API');
+  expect(apiType).toBe('object');
+  expect(payloads.map(value => value.path)).toEqual([
+    '/api/home-assistant/route',
+    '/api/home-assistant/ask'
+  ]);
   await expect(card).toBeVisible();
   expect(controls[0].disabled).toBe(false);
   expect(controls[0].signalToken).toBe('');
-  await page.screenshot({ path: join(evidence, 'compatible-send-failure.png') });
+  await page.screenshot({ path: join(evidence, 'compatible-send-reaches-host.png') });
   const after = await (
     await request.get(`/api/home-assistant/conversations/${current.conversationId}`)
   ).json();
@@ -167,7 +166,7 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
         originalFadedControl:
           'Faded primary styling reproduced on compatible Home; button is enabled, not a busy/disabled gate',
         pageAPI: apiType,
-        sendOutcome: 'Fails locally before Route/Ask: specialized template omits API dependency',
+        sendOutcome: 'Real Route/Ask reached; no configured model, review remains pending',
         hierarchy: {
           home: home.name,
           child: 'Album-1 fixture',

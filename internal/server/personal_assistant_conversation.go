@@ -5,6 +5,8 @@ import (
 	"errors"
 
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/session"
 )
 
@@ -76,6 +78,21 @@ func (a personalAssistantConversationAdapter) Append(ctx context.Context, id, ro
 	return agenthttp.PersonalAssistantConversationMessage{
 		ID: message.ID, Role: role, Content: content, CreatedAt: message.CreatedAt,
 	}, nil
+}
+
+func (a personalAssistantConversationAdapter) AppendAttributedTurn(ctx context.Context, id string, owner assistantcontext.SaveOwner, event *foldercontext.Event, revision, user, answer string, attribution *assistantcontext.Attribution) ([]agenthttp.PersonalAssistantConversationMessage, error) {
+	store, ok := a.store.(session.AssistantTurnStore)
+	if !ok {
+		return nil, errors.New("canonical attributed turn writer unavailable")
+	}
+	messages, err := store.AppendAttributedTurn(ctx, id, owner, event, revision, user, answer, attribution)
+	if errors.Is(err, session.ErrFolderContextConflict) {
+		return nil, agenthttp.ErrPersonalAssistantFolderConflict
+	}
+	if errors.Is(err, session.ErrSessionNotFound) {
+		return nil, agenthttp.ErrPersonalAssistantConversationNotFound
+	}
+	return folderConversationMessages(messages), err
 }
 
 // Discard deletes a session that Create just made and whose first turn could

@@ -32,7 +32,7 @@ Options:
   --music-source DIR    Clean Music Project Management candidate worktree.
   --install-order MODE  music-first, reaper-first, or reaper-only. Providing a
                         music source defaults to music-first.
-  --suite NAME          legacy (default) or guidance (paired candidate test only).
+  --suite NAME          legacy (default), guidance, or awareness (drawer baseline).
   --restart-before-staffing  For guidance: restart after the unstaffed child,
                              then staff/associate and restart once more.
   --port PORT           Server port (default: 8931).
@@ -97,7 +97,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--suite)
-		[[ $# -ge 2 ]] || fail "--suite needs legacy or guidance"
+		[[ $# -ge 2 ]] || fail "--suite needs legacy, guidance or awareness"
 		test_suite="$2"
 		shift 2
 		;;
@@ -158,9 +158,9 @@ fi
 if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
 fi
-[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" ]] || fail "--suite needs legacy or guidance"
-if [[ "$test_suite" == "guidance" && ( "$mode" != "test" || -z "$music_source" || "$install_order" == "reaper-only" ) ]]; then
-	fail "guidance suite requires test with --music-source and a paired installation order"
+[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" || "$test_suite" == "awareness" ]] || fail "--suite needs legacy, guidance or awareness"
+if [[ "$test_suite" != "legacy" && ( "$mode" != "test" || -z "$music_source" || "$install_order" == "reaper-only" ) ]]; then
+	fail "$test_suite suite requires test with --music-source and a paired installation order"
 fi
 if [[ "$restart_before_staffing" == "1" && "$test_suite" != "guidance" ]]; then
 	fail "--restart-before-staffing requires the guidance test suite"
@@ -451,6 +451,8 @@ if [[ "$mode" == "test" ]]; then
 		playwright_file="tests/music-project-management-home.spec.ts"
 		if [[ "$test_suite" == "guidance" ]]; then
 			playwright_file="tests/music-home-paired-guidance.spec.ts"
+		elif [[ "$test_suite" == "awareness" ]]; then
+			playwright_file="tests/personal-assistant-workspace-baseline.spec.ts"
 		fi
 		env PLAYWRIGHT_BASE_URL="$base_url" \
 			ORI_MUSIC_REAPER_ACCEPTANCE=1 \
@@ -500,7 +502,9 @@ if [[ "$mode" == "test" ]]; then
 			--project=chromium --workers=1 --grep 'only a distinct reviewed child staffing action'
 		test_status=$?
 	fi
-	if ((test_status == 0)) && [[ -n "$install_order" ]]; then
+	# The drawer baseline owns a different fixture and does not substitute for
+	# legacy/paired-guidance completed-project and restart acceptance.
+	if ((test_status == 0)) && [[ -n "$install_order" && "$test_suite" != "awareness" ]]; then
 		printf 'Restarting Ori against the same isolated candidate state...\n'
 		kill "$server_pid"
 		wait "$server_pid" 2>/dev/null || true

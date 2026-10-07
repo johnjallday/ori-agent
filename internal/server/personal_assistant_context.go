@@ -24,7 +24,9 @@ type personalAssistantContextAdapter struct {
 	}
 }
 
-func (a personalAssistantContextAdapter) ResolvePersonalAssistantContext(ctx context.Context, userID string) (*agenthttp.PersonalAssistantWorkContext, error) {
+// ResolvePersonalAssistantRelationship loads no profile, memory or source body.
+// Metadata-only drawer context refreshes must not use the full model context.
+func (a personalAssistantContextAdapter) ResolvePersonalAssistantRelationship(ctx context.Context, userID string) (*agenthttp.PersonalAssistantWorkContext, error) {
 	if a.relationship == nil {
 		return nil, errors.New("personal assistant relationship service is unavailable")
 	}
@@ -60,6 +62,14 @@ func (a personalAssistantContextAdapter) ResolvePersonalAssistantContext(ctx con
 		out.Sources["working_agreement"] = agenthttp.PersonalAssistantContextSource{Status: "available"}
 	}
 
+	return out, nil
+}
+
+func (a personalAssistantContextAdapter) ResolvePersonalAssistantContext(ctx context.Context, userID string) (*agenthttp.PersonalAssistantWorkContext, error) {
+	out, err := a.ResolvePersonalAssistantRelationship(ctx, userID)
+	if err != nil || out == nil || !out.ReadyForWork() {
+		return out, err
+	}
 	a.loadProfile(ctx, userID, out)
 	a.loadMemory(ctx, userID, out)
 	return out, nil

@@ -6,9 +6,29 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { collectWorkspaceContext } from './personal-assistant-workspace-context.js';
 
 const guideSrc = readFileSync(new URL('./ori-guide.js', import.meta.url), 'utf8');
 const coachSrc = readFileSync(new URL('./ori-guide-coachmarks.js', import.meta.url), 'utf8');
+
+test('versioned panel context includes Home groups without changing legacy execution targets', () => {
+  const { guide, sandbox } = load();
+  sandbox.window.PersonalAssistantWorkspaceContext = { collect: collectWorkspaceContext };
+  sandbox.window.oriHomeRouteContext = { workspace_id: '', selection_workspace_id: 'group-id' };
+  guide.setContext({ workspaceId: '' });
+  assert.equal(guide._collectContext().selection_workspace_id, 'group-id');
+  sandbox.window.location.pathname = '/workspaces/album/canvas';
+  assert.equal(guide._collectContext().selection_workspace_id, '');
+  assert.equal(guide._collectContext().workspace_slug, 'album');
+  sandbox.window.location.pathname = '/';
+  sandbox.window.oriHomeRouteContext.selection_workspace_id = '';
+  guide.setContext({ workspaceId: 'stale-project' });
+  assert.equal(
+    guide._collectContext().workspace_id,
+    '',
+    'explicitly cleared selection stays empty'
+  );
+});
 
 // Minimal DOM good enough to exercise the controller's logic. Only what the
 // module actually touches is modelled; anything it reaches for that is missing

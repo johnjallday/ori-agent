@@ -56,6 +56,7 @@ test('baseline: canonical review survives chat; Set up is enabled until busy', a
   });
   await page.goto('/');
   await page.locator('#personalAssistantLauncher').click();
+  await expect(page.locator('#personalAssistantWorkspaceContext')).toHaveText('Context · App-wide');
   await page.locator('#personalAssistantFolderChip').click();
   await page
     .locator('#personalAssistantFolderChoices')
@@ -138,4 +139,91 @@ test('baseline: canonical review survives chat; Set up is enabled until busy', a
   );
   await writeFile(join(evidenceDir, 'browser-baseline.json'), evidence, { mode: 0o600 });
   await testInfo.attach('baseline.json', { body: evidence, contentType: 'application/json' });
+});
+
+// Real host display/Route/Ask with a held response, not a configured-model
+// behavior claim. Successful persisted turns are tested at the provider/store
+// boundary in personal_assistant_workspace_turn_test.go.
+test('navigation follows the next page while a delayed reply keeps its original context and draft', async ({
+  page,
+  request
+}, testInfo) => {
+  test.skip(
+    !process.env.ORI_WORKSPACE_AWARENESS_SANDBOX,
+    'Requires the isolated e2e-fresh awareness sandbox'
+  );
+  const current = (await (await request.get('/api/personal-assistant')).json()).personal_assistant;
+  expect(current.state).toBe('active');
+  for (const name of ['Navigation project A', 'Navigation project B']) {
+    const created = await request.post('/api/workspaces', { data: { name } });
+    expect(created.ok(), await created.text()).toBeTruthy();
+  }
+  const rows = (await (await request.get('/api/workspaces')).json()).folders;
+  const a = rows.find((row: any) => row.name === 'Navigation project A');
+  const b = rows.find((row: any) => row.name === 'Navigation project B');
+  await page.goto(`/workspaces/${a.folder_slug}/canvas`);
+  await page.locator('#personalAssistantLauncher').click();
+  const label = page.locator('#personalAssistantWorkspaceContext');
+  await expect(label).toHaveText('Context · Project: Navigation project A');
+  await page.locator('#personalAssistantInput').fill('Draft kept across navigation');
+  await page.goto(`/workspaces/${b.folder_slug}/canvas`);
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  await expect(label).toHaveText('Context · Project: Navigation project B');
+  await expect(page.locator('#personalAssistantInput')).toHaveValue('Draft kept across navigation');
+
+  // In-page back/forward exercises stale body data versus the live route. The
+  // server canonical slug, not the old body ID or a stale map selection, wins.
+  await page.evaluate(slug => {
+    history.pushState({}, '', `/workspaces/${slug}/canvas`);
+    dispatchEvent(new PopStateEvent('popstate'));
+  }, a.folder_slug);
+  await expect(label).toHaveText('Context · Project: Navigation project A');
+  await page.goBack();
+  await expect(label).toHaveText('Context · Project: Navigation project B');
+  await page.goForward();
+  await expect(label).toHaveText('Context · Project: Navigation project A');
+
+  let release: (() => Promise<void>) | undefined;
+  let accepted: any;
+  await page.route('**/api/home-assistant/ask', async route => {
+    accepted = route.request().postDataJSON();
+    const response = await route.fetch(); // The real host validates/finalizes A.
+    release = () => route.fulfill({ response });
+  });
+  await page.locator('#personalAssistantInput').fill('Hello');
+  await page.locator('#personalAssistantSend').click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  expect(accepted.context.context_version).toBe(1);
+  expect(accepted.context.workspace_slug).toBe(a.folder_slug);
+  expect(accepted.context.workspace_id).not.toBe(a.folder_slug);
+  await page.locator('#personalAssistantInput').fill('New draft for B');
+  await page.evaluate(slug => {
+    history.pushState({}, '', `/workspaces/${slug}/canvas`);
+    dispatchEvent(new PopStateEvent('popstate'));
+  }, b.folder_slug);
+  await expect(label).toHaveText('Context · Project: Navigation project B');
+  await release!();
+  await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+  await expect(page.locator('#personalAssistantInput')).toHaveValue('New draft for B');
+  await expect(page.locator('.personal-assistant-message__context').last()).toHaveText(
+    'Project: Navigation project A'
+  );
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(label).toHaveText('Context · Project: Navigation project B');
+  await expect(page.locator('#personalAssistantInput')).toHaveValue('New draft for B');
+  await testInfo.attach('navigation-context.png', {
+    body: await page.locator('#personalAssistantPanel').screenshot({
+      path: join(
+        process.cwd(),
+        'tasks',
+        'evidence-assistant-workspace-awareness',
+        'navigation-current-and-original-context.png'
+      )
+    }),
+    contentType: 'image/png'
+  });
+  await page.goto('/settings');
+  await expect(label).toHaveText('Context · App-wide');
+  await expect(page.locator('#personalAssistantInput')).toHaveValue('New draft for B');
 });

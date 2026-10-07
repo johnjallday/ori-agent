@@ -7922,6 +7922,23 @@
   function normalizeHomeRouteContext(routeContext) {
     var fallback = buildHomeRouteContext();
     if (!routeContext || typeof routeContext !== 'object') return fallback;
+    if (routeContext.context_version === 1) {
+      // Explicit empties clear stale defaults. Never refill a panel's app-wide
+      // context with the Home selection or turn a page slug into an ID.
+      return {
+        context_version: 1,
+        surface: String(routeContext.surface || 'app'),
+        page_path: String(routeContext.page_path || '/'),
+        workspace_id: String(routeContext.workspace_id || ''),
+        workspace_slug: String(routeContext.workspace_slug || ''),
+        selection_workspace_id: String(routeContext.selection_workspace_id || ''),
+        subject_workspace_id: String(routeContext.subject_workspace_id || ''),
+        task_id: String(routeContext.task_id || ''),
+        session_id: String(routeContext.session_id || ''),
+        origin: String(routeContext.origin || 'ask_ori'),
+        required_capabilities: normalizeRouteCapabilities(routeContext.required_capabilities)
+      };
+    }
 
     var pagePath = String(routeContext.page_path || fallback.page_path || '/').trim() || '/';
     var sessionId = routeContext.session_id;
@@ -13183,6 +13200,47 @@
     ]);
   }
 
+  // Panel conversations validate routing before any legacy workspace-manager
+  // or local creation shortcut. Non-inline specialist work retains its existing
+  // reviewed handoff; ordinary workspace questions stay in the HQ conversation.
+  async function runPersonalPanelTurn(text, routeContext) {
+    if (routeContext.origin !== 'personal_assistant_panel') return false;
+    var conversations = window.PersonalAssistantConversation;
+    var conversationRef = conversations && conversations.request(routeContext);
+    setHomeAssistantBusy(true, 'Checking workspace context…');
+    try {
+      var route = await API.post('/api/home-assistant/route', {
+        prompt: text,
+        context: routeContext,
+        conversation: conversationRef
+      });
+      if (!route) throw new Error('Panel routing unavailable');
+      if (
+        route.route_mode !== 'home_inline' ||
+        !['assistant_conversation', 'app_introspection', 'app_navigation'].includes(route.intent)
+      )
+        return false;
+      clearHomeAssistantPlanning();
+      clearHomeAssistantInlineReply();
+      homeAssistantState.awaitingCreateConfirmation = false;
+      homeAssistantState.pendingPrompt = text;
+      appendHomeAssistantMessage('user', text);
+      await runHomeAssistantInline(text, routeContext, route.intent, {
+        conversationRef: conversationRef
+      });
+      return true;
+    } catch (_) {
+      var notice =
+        'The workspace context could not be validated. Nothing was sent to the model; your draft is kept. Refresh the context or ask from an app-wide page.';
+      appendHomeAssistantMessage('assistant', notice);
+      conversations && conversations.notify(notice);
+      restorePersonalAssistantDraft(text);
+      return true;
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
   async function handleHomeAssistantPrompt(prompt, options) {
     var text = String(prompt || '').trim();
     if (!text) return;
@@ -13195,6 +13253,7 @@
       await runPersonalFolderTurn(text, folderRouteContext, folderRef);
       return;
     }
+    if (await runPersonalPanelTurn(text, folderRouteContext)) return;
     clearHomeAssistantPlanning();
     clearHomeAssistantInlineReply();
     setHomeAssistantMode('new_task');

@@ -674,6 +674,23 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 }
 
 /* When the next check-in is, under the assistant's name. */
+.personal-assistant-panel__context {
+  flex: none;
+  margin: 0;
+  padding: 10px 16px 0;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-message__context {
+  margin: 6px 0 0;
+  color: var(--pa-ink-dim);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .personal-assistant-panel__checkin {
   overflow: hidden;
   margin: 2px 0 0;

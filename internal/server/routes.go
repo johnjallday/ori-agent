@@ -333,7 +333,9 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	// list and open those conversations; both validate the relationship first.
 	homeAssistantAskHandler := s.newHomeAssistantAskHandler()
 	homeAssistantRouteHandler.FolderConversation = homeAssistantAskHandler.FolderConversationRoute
+	homeAssistantRouteHandler.PanelContext = homeAssistantAskHandler.ResolvePanelRouteContext
 	mux.HandleFunc("/api/home-assistant/ask", homeAssistantAskHandler.AskHandler)
+	mux.HandleFunc("POST /api/home-assistant/context", homeAssistantAskHandler.WorkspaceContextHandler)
 	mux.HandleFunc("GET /api/home-assistant/conversations", homeAssistantAskHandler.ConversationsHandler)
 	mux.HandleFunc("GET /api/home-assistant/conversations/{id}", homeAssistantAskHandler.ConversationHandler)
 	mux.HandleFunc("GET /api/home-assistant/folder-context/choices", homeAssistantAskHandler.FolderChoicesHandler)

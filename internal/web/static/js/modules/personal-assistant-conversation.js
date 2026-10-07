@@ -5,6 +5,8 @@
 // send — an opaque conversation ID — and keeps it per tab, so two tabs never
 // share a thread by accident.
 
+import { renderTurnWorkspace } from './personal-assistant-workspace-context.js';
+
 const LIST_ENDPOINT = '/api/home-assistant/conversations';
 const STORAGE_KEY = 'ori.personalAssistant.conversation';
 const PANEL_ORIGIN = 'personal_assistant_panel';
@@ -21,6 +23,8 @@ export const CONVERSATION_ERRORS = {
     'This conversation’s folder context changed. Reopen it before sending; your draft is kept.',
   folder_context_unavailable:
     'That folder selection is unavailable. Reopen this conversation to discuss its saved observations, or pick again. Your draft is kept.',
+  context_save_failed:
+    'This reply was not saved with its workspace context. Your draft is kept; reopen the conversation before retrying.',
   folder_context_save_failed:
     'This reply was not saved with its folder context. Your draft and intended folder are kept; check the conversation before retrying.'
 };
@@ -45,6 +49,7 @@ export function nextConversationId(currentId, reply) {
   if (!reply) return String(currentId || '');
   if (
     reply.error === 'conversation_unavailable' ||
+    reply.error === 'context_save_failed' ||
     String(reply.error || '').startsWith('folder_context_')
   )
     return String(currentId || '');
@@ -250,6 +255,7 @@ async function resume(id, options = {}) {
         continue;
       }
       const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
+      renderTurnWorkspace(row, message.workspace_context, { historical: true });
       attachMessage(row, conversation.id, message.id);
     }
     // The panel keeps a bounded number of rows, so a long conversation shows
@@ -383,6 +389,10 @@ function request(routeContext) {
  * with their canonical message IDs and returns what the controller should do.
  */
 function applyReply(data, rows = {}) {
+  if (data?.workspace_context) {
+    renderTurnWorkspace(rows.userRow, data.workspace_context);
+    renderTurnWorkspace(rows.assistantRow, data.workspace_context);
+  }
   const reply = data?.conversation;
   if (!reply) return { notice: '', stored: false, restoreInput: shouldRestoreInput(data) };
   const nextId = nextConversationId(state.id, reply);

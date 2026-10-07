@@ -89,7 +89,15 @@ func (h *HomeAssistantAskHandler) FolderConversationRoute(ctx context.Context, c
 	if _, err := h.prepareFolderTurn(ctx, conversation, ref); err != nil {
 		return nil, err
 	}
-	return assistantConversationRoute(workContext), nil
+	scope := h.bindWorkspaceTurn(ctx, "", routeContext, workContext)
+	if scope != nil && h.revalidateWorkspaceTurn(ctx, scope) != nil {
+		return nil, errAssistantWorkspaceScopeChanged
+	}
+	response := assistantConversationRoute(workContext)
+	if scope != nil {
+		response.WorkspaceContext = scope.projection.Attribution()
+	}
+	return response, nil
 }
 
 func folderObservationPrompt(turn *preparedFolderTurn) (string, error) {
@@ -176,6 +184,11 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 		state.Error = "folder_context_save_failed"
 		return HomeAssistantAskResponse{Response: answer, Intent: homeAssistantConversationIntent.Key, Identity: identity, Conversation: state}
 	}
+	if err := h.revalidateWorkspaceTurn(ctx, conversation.turn); err != nil {
+		state := unstoredConversation(conversation)
+		state.Error = "context_save_failed"
+		return HomeAssistantAskResponse{Response: answer, Intent: homeAssistantConversationIntent.Key, Identity: identity, Conversation: state}
+	}
 	state, folderState := h.storeFolderTurn(ctx, conversation, turn, prompt, answer)
 	response := HomeAssistantAskResponse{Response: answer, Intent: homeAssistantConversationIntent.Key, Identity: identity, Conversation: state, FolderContext: folderState, DraftContext: draftContext}
 	if state.Stored && !asksForFolderContents(prompt) {
@@ -204,8 +217,18 @@ func (h *HomeAssistantAskHandler) storeFolderTurn(ctx context.Context, conversat
 		conversation.id, conversation.title = record.ID, record.Title
 		state.ID, state.Title, state.Started, created = record.ID, record.Title, true, true
 	}
-	rows, err := h.folderStore().AppendFolderTurn(ctx, conversation.id, conversation.scope.workspaceID, conversation.scope.agentName, turn.ref.Revision,
-		foldercontext.Event{Version: 1, Observation: turn.observation, OfferID: turn.offerID}, prompt, answer)
+	event := foldercontext.Event{Version: 1, Observation: turn.observation, OfferID: turn.offerID}
+	var rows []PersonalAssistantConversationMessage
+	var err error
+	if conversation.turn != nil {
+		if store, ok := h.Conversations.(personalAssistantAttributedStore); ok {
+			rows, err = store.AppendAttributedTurn(ctx, conversation.id, conversation.turn.saveOwner(), &event, turn.ref.Revision, prompt, answer, conversation.turn.projection.Attribution())
+		} else {
+			err = errors.New("canonical attributed turn writer unavailable")
+		}
+	} else {
+		rows, err = h.folderStore().AppendFolderTurn(ctx, conversation.id, conversation.scope.workspaceID, conversation.scope.agentName, turn.ref.Revision, event, prompt, answer)
+	}
 	if err != nil {
 		if created {
 			if discardErr := h.Conversations.Discard(ctx, conversation.id); discardErr == nil {

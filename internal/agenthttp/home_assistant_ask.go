@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -100,13 +101,14 @@ type HomeAssistantIdentity struct {
 }
 
 type HomeAssistantAskResponse struct {
-	Response             string                  `json:"response"`
-	Intent               string                  `json:"intent"`
-	Identity             *HomeAssistantIdentity  `json:"identity,omitempty"`
-	SnapshotMeta         *HomeSnapshotMeta       `json:"snapshot_meta,omitempty"`
-	Actions              []HomeAction            `json:"actions,omitempty"`
-	RequiresConfirmation bool                    `json:"requires_confirmation,omitempty"`
-	Confirmation         *HomeActionConfirmation `json:"confirmation,omitempty"`
+	WorkspaceContext     *assistantcontext.Attribution `json:"workspace_context,omitempty"`
+	Response             string                        `json:"response"`
+	Intent               string                        `json:"intent"`
+	Identity             *HomeAssistantIdentity        `json:"identity,omitempty"`
+	SnapshotMeta         *HomeSnapshotMeta             `json:"snapshot_meta,omitempty"`
+	Actions              []HomeAction                  `json:"actions,omitempty"`
+	RequiresConfirmation bool                          `json:"requires_confirmation,omitempty"`
+	Confirmation         *HomeActionConfirmation       `json:"confirmation,omitempty"`
 	// Conversation is set only for a hired-assistant conversation turn.
 	Conversation          *HomeAssistantConversationState         `json:"conversation,omitempty"`
 	FolderContext         *PersonalAssistantFolderState           `json:"folder_context,omitempty"`
@@ -174,6 +176,10 @@ type HomeAssistantAskHandler struct {
 	Trace                    homeAskTraceEmitter
 	PersonalAssistantContext PersonalAssistantContextProvider
 	PersonalAssistantMemory  PersonalAssistantMemoryWriter
+	WorkspaceContext         *AssistantWorkspaceResolver
+	CurrentUser              interface {
+		CurrentUserID(context.Context) (string, error)
+	}
 	// Conversations is the canonical session store behind hired-assistant
 	// conversations; nil keeps every turn stateless.
 	Conversations      PersonalAssistantConversationStore
@@ -269,7 +275,7 @@ func (h *HomeAssistantAskHandler) AskHandler(w http.ResponseWriter, r *http.Requ
 
 // Ask runs the harness and always returns a renderable response (errors are
 // surfaced as helpful text + next-step actions rather than HTTP failures).
-func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskRequest) HomeAssistantAskResponse {
+func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskRequest) (response HomeAssistantAskResponse) {
 	prompt := strings.TrimSpace(req.Prompt)
 	intent := strings.TrimSpace(req.Intent)
 	if intent == "" {
@@ -301,6 +307,35 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	conversation, refusal := h.openConversation(ctx, req.Conversation, workContext)
 	if refusal != "" {
 		return conversationRefusal(refusal, intent, identity)
+	}
+
+	refs := req.Context
+	if req.Conversation != nil && refs != nil {
+		if refs.Origin == "" {
+			copy := *refs
+			copy.Origin = "personal_assistant_panel"
+			refs = &copy
+		} else if refs.Origin != "personal_assistant_panel" {
+			return conversationRefusal(PersonalAssistantConversationOutOfScope, intent, identity)
+		}
+	}
+	if refs == nil && req.Conversation != nil {
+		refs = &HomeAssistantRouteContext{Origin: "personal_assistant_panel"}
+	}
+	scope := h.bindWorkspaceTurn(ctx, prompt, refs, workContext)
+	if scope != nil {
+		defer func() { response.WorkspaceContext = scope.projection.Attribution() }()
+		if scope.projection.Status != assistantcontext.Available {
+			message := "That workspace context could not be resolved. Nothing was sent or changed; refresh the context or ask from an app-wide page. Your draft is kept."
+			if scope.projection.Reason == "subject_ambiguous" {
+				message = "More than one workspace matches that reference. Which workspace do you mean? Nothing was sent or changed; your draft is kept."
+			}
+			return HomeAssistantAskResponse{Response: message, Intent: intent, Identity: identity, Conversation: unstoredConversation(conversation), ModelUnavailable: true}
+		}
+		ctx = context.WithValue(ctx, workspaceTurnContextKey{}, scope)
+		if conversation != nil {
+			conversation.turn = scope
+		}
 	}
 
 	var folderTurn *preparedFolderTurn
@@ -397,7 +432,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		}
 	}
 
-	promptSources := personalAssistantPromptSources(h.Sources, workContext)
+	promptSources := h.scopedPanelSources(ctx, personalAssistantPromptSources(h.Sources, workContext), scope)
 	var history []llm.Message
 	if conversation != nil {
 		history = conversation.history
@@ -433,6 +468,9 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 
 	window := NormalizeHomeDateWindow(req.DateWindow, DefaultHomeDateWindowForPrompt(prompt))
 	snapshot := BuildHomeSnapshot(ctx, promptSources, window)
+	if scope != nil {
+		snapshot = boundedPanelSnapshot(snapshot)
+	}
 	snapshot = sanitizePersonalAssistantSnapshot(snapshot, workContext)
 
 	answer, err := h.generateAnswer(ctx, prompt, intent, snapshot, promptSources, workContext, history)
@@ -490,9 +528,9 @@ func (h *HomeAssistantAskHandler) resolvePersonalAssistantContext(ctx context.Co
 	if h == nil || h.PersonalAssistantContext == nil {
 		return nil, nil
 	}
-	userID := strings.TrimSpace(h.UserID)
-	if userID == "" {
-		userID = "local"
+	userID, err := h.currentAssistantUser(ctx)
+	if err != nil {
+		return nil, err
 	}
 	resolved, err := h.PersonalAssistantContext.ResolvePersonalAssistantContext(ctx, userID)
 	if err != nil {
@@ -542,15 +580,28 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if err != nil {
 		return "", err
 	}
-	registry := newHomeToolRegistry(turn.sources)
+	scope := workspaceTurnFromContext(ctx)
+	var registry modelToolRegistry = newHomeToolRegistry(turn.sources)
+	if scope != nil {
+		registry = &panelToolRegistry{handler: h, turn: scope, home: newHomeToolRegistry(h.scopedPanelSources(ctx, turn.sources, scope)), used: len([]rune(workspaceTurnPrompt(scope)))}
+	}
 
 	conversation := make([]llm.Message, 0, len(turn.history)+2)
 	conversation = append(conversation, llm.NewSystemMessage(turn.system))
 	conversation = append(conversation, turn.history...)
-	conversation = append(conversation, llm.NewUserMessage(turn.user))
-	tools := registry.Definitions()
+	conversation = append(conversation, llm.NewUserMessage(turn.user+workspaceTurnPrompt(scope)))
+	var tools []llm.Tool
+	if provider.Capabilities().SupportsTools {
+		tools = registry.Definitions()
+	}
+	if len(tools) == 0 && scope != nil {
+		conversation[0].Content += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
+	}
 
 	for round := 0; round < homeMaxToolRounds; round++ {
+		if err := h.revalidateWorkspaceTurn(ctx, scope); err != nil {
+			return "", err
+		}
 		resp, chatErr := provider.Chat(ctx, llm.ChatRequest{
 			Model:       model,
 			Messages:    conversation,
@@ -567,6 +618,9 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 			return resp.Content, nil
 		}
 
+		if len(tools) == 0 {
+			return "", errors.New("provider returned unavailable tool calls")
+		}
 		calls := make([]llm.ToolCall, len(resp.ToolCalls))
 		copy(calls, resp.ToolCalls)
 		for i := range calls {
@@ -584,6 +638,9 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		}
 	}
 	// Tool budget exhausted: make one final tool-free attempt for a summary.
+	if err := h.revalidateWorkspaceTurn(ctx, scope); err != nil {
+		return "", err
+	}
 	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, Messages: conversation, Temperature: turn.temperature})
 	if chatErr != nil {
 		return "", chatErr

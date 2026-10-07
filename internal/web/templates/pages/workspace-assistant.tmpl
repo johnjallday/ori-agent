@@ -279,6 +279,9 @@
     </form>
   </dialog>
 
+  <!-- This standalone page hosts the shared assistant drawer too. Its work
+       dispatcher requires the same DX API utilities as other workspace pages. -->
+  {{template "scripts-dx-utils.tmpl" .}}
   <script type="module">
     import { AssistantProgramPage } from '/js/modules/assistant-program.js';
     import { SampleLibraryPanel } from '/js/modules/sample-library.js';

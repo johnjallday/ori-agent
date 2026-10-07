@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -147,6 +148,20 @@ func TestAssistantWorkspaceContext_WarmCanonicalReadBaseline(t *testing.T) {
 	}
 	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
 	t.Logf("warm canonical project+parent reads (100 tasks, 200 samples): p50=%s p95=%s; excludes context projection, notes/files and provider", durations[99], durations[189])
+	resolver := &agenthttp.AssistantWorkspaceResolver{Source: f.builder.workspaceStore}
+	durations = durations[:0]
+	for i := 0; i < 201; i++ {
+		start := time.Now()
+		projection := resolver.Resolve(context.Background(), "local", "Hello", &agenthttp.HomeAssistantRouteContext{WorkspaceID: f.project.ID})
+		if projection.Overview == nil || len(projection.Overview.Tasks) != 5 {
+			t.Fatal("overview omitted bounded task previews", projection.Reason)
+		}
+		if i > 0 {
+			durations = append(durations, time.Since(start))
+		}
+	}
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	t.Logf("warm bounded workspace overview (same 100 tasks, 200 samples): p50=%s p95=%s; includes resolver/projection, excludes provider and deeper reads", durations[99], durations[189])
 }
 
 func assertNoPanelExecutionAuthority(t *testing.T, request llm.ChatRequest) {
@@ -154,7 +169,7 @@ func assertNoPanelExecutionAuthority(t *testing.T, request llm.ChatRequest) {
 	if request.WorkspaceID != "" || request.WorkspaceDir != "" || request.ExecutionScope != nil || len(request.MCPServers) != 0 {
 		t.Fatal("panel context became CLI execution authority")
 	}
-	allowed := map[string]bool{"home_workspaces": true, "home_tasks": true, "home_sessions": true, "home_opportunities": true, "home_usage": true, "home_agents": true}
+	allowed := map[string]bool{"home_workspaces": true, "home_tasks": true, "home_sessions": true, "home_opportunities": true, "home_usage": true, "home_agents": true, "assistant_workspace_discovery": true}
 	for _, tool := range request.Tools {
 		if !allowed[tool.Name] {
 			t.Fatalf("unexpected panel tool %q", tool.Name)
@@ -162,10 +177,10 @@ func assertNoPanelExecutionAuthority(t *testing.T, request llm.ChatRequest) {
 	}
 }
 
-// Characterization, not desired final behavior: the pending canonical card is
-// real, but the model sees [] for new options and no current workspace. Groups
-// 2/3 must replace these absence assertions with the validated projections.
-func TestAssistantWorkspaceContext_BaselinePendingReviewMissingFromModel(t *testing.T) {
+// Group 2 projects current workspace facts while preserving the independently
+// attached observation and pending review. Group 3 still needs the canonical
+// review summary: the empty new-options list is not that summary.
+func TestAssistantWorkspaceContext_CurrentWorkspaceWithPendingReview(t *testing.T) {
 	f := newWorkspaceAwarenessFixture(t)
 	before := len(f.builder.workspaceFileStore.CachedWorkspaces())
 	request := f.turn("Add this to my workspace", f.home)
@@ -195,7 +210,12 @@ func TestAssistantWorkspaceContext_BaselinePendingReviewMissingFromModel(t *test
 	if !strings.Contains(user, "<folder_setup_options>[]</folder_setup_options>") || !strings.Contains(user, "empty means no suggested review") {
 		t.Fatal("baseline changed: update characterization with the new review projection")
 	}
-	for _, absent := range []string{f.home.Name, f.home.ID, f.offerID, f.sentinel, f.source} {
+	for _, present := range []string{f.home.Name, f.home.ID, "workspace_turn"} {
+		if !strings.Contains(input, present) {
+			t.Fatalf("missing validated workspace fact %q", present)
+		}
+	}
+	for _, absent := range []string{f.offerID, f.sentinel, f.source} {
 		if strings.Contains(input, absent) {
 			t.Fatalf("unexpected baseline model input %q", absent)
 		}

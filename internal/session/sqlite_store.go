@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 )
@@ -280,7 +281,7 @@ func (s *SQLiteStore) AddMessage(ctx context.Context, sessionID string, message 
 // GetMessages retrieves all messages for a session.
 func (s *SQLiteStore) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, session_id, role, content, model, tokens_used, created_at, continuity_source_sequence, folder_context_json
+		SELECT id, session_id, role, content, model, tokens_used, created_at, continuity_source_sequence, folder_context_json, turn_context_json
 		FROM messages
 		WHERE session_id = ?
 		ORDER BY created_at ASC, COALESCE(continuity_source_sequence, rowid) ASC, rowid ASC
@@ -295,15 +296,18 @@ func (s *SQLiteStore) GetMessages(ctx context.Context, sessionID string) ([]Mess
 		var msg Message
 		var model sql.NullString
 		var sourceSequence sql.NullInt64
-		var folderJSON sql.NullString
+		var folderJSON, turnJSON sql.NullString
 
 		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content,
-			&model, &msg.TokensUsed, &msg.CreatedAt, &sourceSequence, &folderJSON); err != nil {
+			&model, &msg.TokensUsed, &msg.CreatedAt, &sourceSequence, &folderJSON, &turnJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %w", err)
 		}
 
 		msg.Model = model.String
 		msg.Imported = sourceSequence.Valid
+		// Imports/copied legacy records cannot restore attribution as a grant.
+		// Any locally retained context is always hydrated as historical data.
+		msg.WorkspaceContext = assistantcontext.DecodeAttribution(turnJSON.String)
 		if folderJSON.Valid && !msg.Imported {
 			var event foldercontext.Event
 			if len(folderJSON.String) > foldercontext.MaxBytes+256 || json.Unmarshal([]byte(folderJSON.String), &event) != nil || event.Validate() != nil {

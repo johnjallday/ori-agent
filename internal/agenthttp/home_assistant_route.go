@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -33,6 +34,7 @@ type HomeAssistantRouteHandler struct {
 	CalendarOpsPreference    CalendarOpsPreference
 	PersonalAssistantContext PersonalAssistantContextProvider
 	UserID                   string
+	PanelContext             func(context.Context, string, *HomeAssistantRouteContext) (*assistantcontext.Attribution, error)
 	FolderConversation       func(context.Context, *HomeAssistantConversationRef, *HomeAssistantFolderRef, *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error)
 	RuntimeResolver          interface {
 		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
@@ -97,15 +99,20 @@ type HomeAssistantRouteRequest struct {
 }
 
 type HomeAssistantRouteContext struct {
-	Surface     string `json:"surface,omitempty"`
-	PagePath    string `json:"page_path,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	TaskID      string `json:"task_id,omitempty"`
-	SessionID   string `json:"session_id,omitempty"`
-	Origin      string `json:"origin,omitempty"`
+	ContextVersion       int    `json:"context_version,omitempty"`
+	WorkspaceSlug        string `json:"workspace_slug,omitempty"`
+	SelectionWorkspaceID string `json:"selection_workspace_id,omitempty"`
+	SubjectWorkspaceID   string `json:"subject_workspace_id,omitempty"`
+	Surface              string `json:"surface,omitempty"`
+	PagePath             string `json:"page_path,omitempty"`
+	WorkspaceID          string `json:"workspace_id,omitempty"`
+	TaskID               string `json:"task_id,omitempty"`
+	SessionID            string `json:"session_id,omitempty"`
+	Origin               string `json:"origin,omitempty"`
 }
 
 type HomeAssistantRouteResponse struct {
+	WorkspaceContext       *assistantcontext.Attribution     `json:"workspace_context,omitempty"`
 	Intent                 string                            `json:"intent"`
 	PersonalAssistantState string                            `json:"personal_assistant_state,omitempty"`
 	AssistantName          string                            `json:"assistant_name,omitempty"`
@@ -319,7 +326,27 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	orihttp.WriteJSON(w, resp)
 }
 
-func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt string, context *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error) {
+func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt string, routeRef *HomeAssistantRouteContext) (response *HomeAssistantRouteResponse, routeErr error) {
+	context := routeRef
+	if context != nil && context.Origin == "personal_assistant_panel" && h.PanelContext != nil {
+		projection, err := h.PanelContext(ctx, prompt, context)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if response != nil {
+				response.WorkspaceContext = projection
+			}
+		}()
+		// Routing hints may use the verified ID, never the slug or a project
+		// agent principal. Ask independently validates the references again.
+		copy := *context
+		copy.WorkspaceID = ""
+		if projection != nil && projection.Subject != nil {
+			copy.WorkspaceID = projection.Subject.ID
+		}
+		context = &copy
+	}
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return nil, errHomeAssistantPromptRequired
@@ -351,6 +378,17 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 
 	routeContext := normalizeHomeAssistantRouteContext(context)
 	intent := h.classifyHomeIntent(prompt)
+	// A workspace is browsing context, not a better agent owner for a hired
+	// panel conversation. Keep explicit specialist/execution intents on their
+	// existing gates; answer ordinary project questions in this conversation.
+	if context != nil && context.Origin == "personal_assistant_panel" && workContext != nil && workContext.ReadyForWork() {
+		if intent.Key == homeAssistantAppIntrospectionIntent.Key || intent.Key == homeAssistantAppNavigationIntent.Key {
+			return &HomeAssistantRouteResponse{Intent: intent.Key, IntentLabel: intent.Label, RouteMode: homeAssistantRouteModeInline, TargetSurface: "current", ContextMode: homeAssistantContextDirect, HandoffPolicy: homeAssistantHandoffAssistant, PersonalAssistantState: workContext.State}, nil
+		}
+		if isAssistantDraftSaveRequest(prompt) || isAssistantMemoryRequest(prompt) || (intent.Key == homeAssistantDefaultIntent.Key && !shouldRecommendWorkspace(prompt, intent) && !panelExplicitExecution(prompt)) {
+			return assistantConversationRoute(workContext), nil
+		}
+	}
 	intentVariant := detectHomeAssistantIntentVariant(prompt, intent, routeContext)
 	workspaceRecommended := shouldRecommendWorkspace(prompt, intent)
 	routeMode, targetSurface := determineRouteModeAndTargetSurface(intent, intentVariant, routeContext, workspaceRecommended)
@@ -379,6 +417,9 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		match = h.systemAssistantFallback(intent)
 	}
 
+	if context != nil && context.Origin == "personal_assistant_panel" && workContext != nil && workContext.ReadyForWork() && isCompositionRequest(prompt) && (match == nil || isAssistantOwnAgent(match.Name, workContext)) {
+		return assistantConversationRoute(workContext), nil
+	}
 	if routesToAssistantConversation(workContext, prompt, intent, routeContext, workspaceRecommended, match) {
 		return assistantConversationRoute(workContext), nil
 	}

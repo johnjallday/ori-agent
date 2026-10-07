@@ -1,3 +1,26 @@
+import {
+  collectWorkspaceContext,
+  workspaceContextLabel
+} from './personal-assistant-workspace-context.js';
+
+const PANEL_DRAFT_KEY = 'ori.personalAssistant.panelDraft';
+const PANEL_OPEN_KEY = 'ori.personalAssistant.panelOpen';
+
+function tabValue(key) {
+  try {
+    return window.sessionStorage.getItem(key) || '';
+  } catch (_) {
+    return '';
+  }
+}
+function saveTabValue(key, value) {
+  try {
+    window.sessionStorage.setItem(key, String(value || ''));
+  } catch (_) {
+    /* Storage may be disabled. */
+  }
+}
+
 const STATUS_ENDPOINT = '/api/personal-assistant';
 const TODAY_ENDPOINT = '/api/personal-assistant/today';
 const HANDOFF_LIMIT = 400;
@@ -170,6 +193,7 @@ const state = {
   pending: false,
   open: false,
   draft: '',
+  workspaceSequence: 0,
   lastTrigger: null,
   // True while Home's folder flow is waiting for a folder or exploring one.
   folderBusy: false,
@@ -392,6 +416,8 @@ function close(options = {}) {
   if (!state.open || !state.els) return;
   state.open = false;
   state.draft = state.els.input.value;
+  saveTabValue(PANEL_OPEN_KEY, '');
+  saveTabValue(PANEL_DRAFT_KEY, state.draft);
   closeMoreMenu();
   window.PersonalAssistantFolderContext?.close?.();
   state.els.panel.hidden = true;
@@ -424,6 +450,7 @@ function open(trigger, options = {}) {
   moveSharedWorkActivity();
   syncPanelViewport();
   state.open = true;
+  saveTabValue(PANEL_OPEN_KEY, '1');
   state.lastTrigger = trigger || document.activeElement;
   state.els.panel.hidden = false;
   state.els.launcher.setAttribute('aria-expanded', 'true');
@@ -432,6 +459,7 @@ function open(trigger, options = {}) {
   // Rename/pause/repair changes are server-owned. Refresh on every open rather
   // than trusting the hire-time name or local storage.
   void refresh();
+  void refreshWorkspaceContext();
   void readTodayForThisPage();
   try {
     document.dispatchEvent(new CustomEvent('personal-assistant:opened'));
@@ -481,16 +509,37 @@ function restoreDraft(text) {
   return next === String(text || '');
 }
 
+async function refreshWorkspaceContext() {
+  if (!state.els?.workspaceContext || !state.open) return;
+  const sequence = ++state.workspaceSequence;
+  state.els.workspaceContext.textContent = 'Checking workspace context…';
+  try {
+    const response = await fetch('/api/home-assistant/context', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context: routeContext() })
+    });
+    if (!response.ok) throw new Error('Context unavailable');
+    const data = await response.json();
+    if (sequence !== state.workspaceSequence) return;
+    state.els.workspaceContext.textContent = 'Context · ' + workspaceContextLabel(data);
+  } catch (_) {
+    if (sequence === state.workspaceSequence)
+      state.els.workspaceContext.textContent =
+        'Workspace context unavailable · refresh or choose an app-wide page';
+  }
+}
+
 function routeContext() {
   if (window.OriGuide?._collectContext) {
     const context = window.OriGuide._collectContext();
     return { ...context, origin: 'personal_assistant_panel' };
   }
-  return {
-    surface: window.location.pathname === '/' ? 'home' : 'app',
-    page_path: window.location.pathname,
-    origin: 'personal_assistant_panel'
-  };
+  return collectWorkspaceContext({
+    pathname: window.location.pathname,
+    workspaceId: document.body?.dataset?.workspaceId,
+    workspaceSlug: document.body?.dataset?.workspaceSlug
+  });
 }
 
 function submit(event) {
@@ -541,6 +590,7 @@ function submit(event) {
   );
   state.draft = '';
   state.els.input.value = '';
+  saveTabValue(PANEL_DRAFT_KEY, '');
   // Planning can intentionally remain pending while the user reviews a choice;
   // the existing work controller owns that lifecycle. Release only this
   // composer's duplicate-submit guard after delegation has been accepted.
@@ -580,6 +630,7 @@ function init() {
     input: document.getElementById('personalAssistantInput'),
     send: document.getElementById('personalAssistantSend'),
     status: document.getElementById('personalAssistantPanelStatus'),
+    workspaceContext: document.getElementById('personalAssistantWorkspaceContext'),
     chips: document.getElementById('personalAssistantChips'),
     folderChip: document.getElementById('personalAssistantFolderChip'),
     activityMount: document.getElementById('personalAssistantActivityMount'),
@@ -599,6 +650,18 @@ function init() {
   launcher.addEventListener('click', () => (state.open ? close() : open(launcher)));
   state.els.close?.addEventListener('click', close);
   state.els.form?.addEventListener('submit', submit);
+  state.draft = tabValue(PANEL_DRAFT_KEY);
+  if (state.draft) state.els.input.value = state.draft;
+  state.els.input?.addEventListener('input', () => {
+    state.draft = state.els.input.value;
+    saveTabValue(PANEL_DRAFT_KEY, state.draft);
+  });
+  document.addEventListener('ori-guide:context', () => void refreshWorkspaceContext());
+  window.addEventListener('popstate', () => void refreshWorkspaceContext());
+  window.addEventListener('beforeunload', () => {
+    saveTabValue(PANEL_DRAFT_KEY, state.els.input.value);
+    saveTabValue(PANEL_OPEN_KEY, state.open ? '1' : '');
+  });
   state.els.folderChip?.addEventListener('click', exploreFolder);
 
   const more = state.els.more;
@@ -644,7 +707,7 @@ function init() {
     Boolean(state.els.todayBanner) &&
     new URLSearchParams(window.location.search).get('panel') === 'today';
   void refresh().then(() => {
-    if (!requestedOpen || !open(launcher)) return;
+    if (!(requestedOpen || tabValue(PANEL_OPEN_KEY) === '1') || !open(launcher)) return;
     const url = new URL(window.location.href);
     url.searchParams.delete('panel');
     window.history.replaceState(null, '', url.pathname + url.search + url.hash);
@@ -661,6 +724,7 @@ const api = {
   applyPersonalAssistant,
   setToday,
   setFolderBusy,
+  refreshWorkspaceContext,
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantPanel = api;
