@@ -62,6 +62,11 @@ const (
 	// bundled skill/source-review contract for plugin blueprints.
 	HostFeatureBlueprintIntakeV1         = "blueprint_intake_v1"
 	HostFeatureIndependentProgramHomesV1 = "independent_program_homes_v1"
+	// HostFeatureHomeProfileV1 gates a Home declaration's `home_profile` section
+	// and a project plugin's `home_profile_facts` operation. An older host
+	// decodes either key strictly and rejects the whole package, so a release
+	// that uses one declares this feature and is refused before install.
+	HostFeatureHomeProfileV1 = "home_profile_v1"
 )
 
 // hostFeatures is what this build advertises. It is the one list: a second copy
@@ -77,6 +82,7 @@ var hostFeatures = []string{
 	HostFeatureBlueprintInputsV1,
 	HostFeatureBlueprintIntakeV1,
 	HostFeatureIndependentProgramHomesV1,
+	HostFeatureHomeProfileV1,
 }
 
 // HostFeatures returns the features this build advertises, newest last.
@@ -420,6 +426,14 @@ func (c *SurfaceContribution) ValidateForHost(protocolVersion int, hostFeatures 
 		}
 		if _, declared := seenHostFeatures[HostFeatureIndependentProgramHomesV1]; !declared {
 			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "assistant_program_homes requires independent_program_homes_v1", nil)
+		}
+	}
+	for index := range c.AssistantProgramHomes {
+		if c.AssistantProgramHomes[index].HomeProfile == nil {
+			continue
+		}
+		if _, declared := seenHostFeatures[HostFeatureHomeProfileV1]; !declared {
+			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "home_profile requires home_profile_v1", nil)
 		}
 	}
 	if err := validateSetupQuests(c); err != nil {

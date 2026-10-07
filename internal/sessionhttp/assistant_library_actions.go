@@ -16,32 +16,38 @@ const maxLibraryActionBytes = 32 << 10
 // Strictly reject unknown, duplicate and trailing JSON, including duplicate
 // keys inside a nested patch. The request never contains filesystem paths.
 func decodeLibraryAction(w http.ResponseWriter, r *http.Request, target any) bool {
+	return decodeStrictAction(w, r, target, "Invalid library request")
+}
+
+// decodeStrictAction is the same strict decode for any owner action on a Home;
+// message is the one answer every malformed body gets.
+func decodeStrictAction(w http.ResponseWriter, r *http.Request, target any, message string) bool {
 	if r.Body == nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid library request")
+		_ = orihttp.RespondBadRequest(w, message)
 		return false
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxLibraryActionBytes+1))
 	if err != nil || len(body) > maxLibraryActionBytes || len(body) == 0 {
-		_ = orihttp.RespondBadRequest(w, "Invalid library request")
+		_ = orihttp.RespondBadRequest(w, message)
 		return false
 	}
 	tokens := json.NewDecoder(bytes.NewReader(body))
 	if err := uniqueLibraryJSON(tokens); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid library request")
+		_ = orihttp.RespondBadRequest(w, message)
 		return false
 	}
 	if _, err := tokens.Token(); !errors.Is(err, io.EOF) {
-		_ = orihttp.RespondBadRequest(w, "Invalid library request")
+		_ = orihttp.RespondBadRequest(w, message)
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid library request")
+		_ = orihttp.RespondBadRequest(w, message)
 		return false
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		_ = orihttp.RespondBadRequest(w, "Invalid library request")
+		_ = orihttp.RespondBadRequest(w, message)
 		return false
 	}
 	return true

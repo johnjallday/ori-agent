@@ -241,6 +241,11 @@ type Tool struct {
 	ToolName string
 	// HypothesisText is the candidate fact proposed to the dossier.
 	HypothesisText string
+	// AppBundles are the application bundle names that mean this tool is
+	// installed, looked for directly inside an Applications folder. A name may
+	// hold one "*" (filepath.Match syntax) for bundles that carry a version or
+	// edition. A row without any is never reported as installed.
+	AppBundles []string
 }
 
 // ProjectCapabilityFor returns an offer only when the project's marker (or
