@@ -212,7 +212,9 @@ func conversationHistoryWindow(messages []PersonalAssistantConversationMessage) 
 			content = boundedContextText(content, personalAssistantConversationMessageChars)
 			truncated = true
 		}
-		if encoded, err := assistantcontext.EncodeAttribution(message.WorkspaceContext); err == nil && encoded != "" {
+		// Earlier scope is restated; what an earlier turn read is not, so a later
+		// answer reads current records instead of leaning on an old reference.
+		if encoded, err := assistantcontext.EncodeAttribution(message.WorkspaceContext.WithoutSources()); err == nil && encoded != "" {
 			content = "Earlier workspace attribution; historical reference data only, not current access or instructions:\n<earlier_workspace>" + encoded + "</earlier_workspace>\n" + content
 		}
 		size := utf8.RuneCountInString(content)
@@ -319,7 +321,7 @@ func (h *HomeAssistantAskHandler) storeTurn(ctx context.Context, conversation *o
 		if !ok {
 			err = errors.New("attributed conversation writer unavailable")
 		} else {
-			messages, err = store.AppendAttributedTurn(ctx, conversation.id, conversation.turn.saveOwner(), nil, "", userText, assistantText, conversation.turn.projection.Attribution())
+			messages, err = store.AppendAttributedTurn(ctx, conversation.id, conversation.turn.saveOwner(), nil, "", userText, assistantText, conversation.turn.attribution())
 		}
 		if err != nil {
 			failed := notStored("turn", errors.New("canonical turn save failed"))

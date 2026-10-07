@@ -181,7 +181,10 @@ type HomeAssistantAskHandler struct {
 	PersonalAssistantContext PersonalAssistantContextProvider
 	PersonalAssistantMemory  PersonalAssistantMemoryWriter
 	WorkspaceContext         *AssistantWorkspaceResolver
-	CurrentUser              interface {
+	// Notes is the canonical note store narrowed to two reads, for the panel's
+	// brokered readers. Nil leaves note reading unsupported, and says so.
+	Notes       AssistantNoteReader
+	CurrentUser interface {
 		CurrentUserID(context.Context) (string, error)
 	}
 	// Conversations is the canonical session store behind hired-assistant
@@ -328,7 +331,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	}
 	scope := h.bindWorkspaceTurn(ctx, prompt, refs, workContext)
 	if scope != nil {
-		defer func() { response.WorkspaceContext = scope.projection.Attribution() }()
+		defer func() { response.WorkspaceContext = scope.attribution() }()
 		if scope.projection.Status != assistantcontext.Available {
 			message := "That workspace context could not be resolved. Nothing was sent or changed; refresh the context or ask from an app-wide page. Your draft is kept."
 			if scope.projection.Reason == "subject_ambiguous" {
@@ -596,17 +599,29 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	scope := workspaceTurnFromContext(ctx)
 	var registry modelToolRegistry = newHomeToolRegistry(turn.sources)
 	if scope != nil {
-		registry = &panelToolRegistry{handler: h, turn: scope, home: newHomeToolRegistry(h.scopedPanelSources(ctx, turn.sources, scope)), used: len([]rune(workspaceTurnPrompt(scope) + reviewContextPrompt(ctx)))}
+		registry = &panelToolRegistry{handler: h, turn: scope, home: newHomeToolRegistry(h.scopedPanelSources(ctx, turn.sources, scope)), ledger: scope.ledger}
+	}
+	// A reader is offered only on a path that can run it; the prompt then says
+	// exactly which readers exist, so no path claims a read it cannot make.
+	var tools []llm.Tool
+	if provider.Capabilities().SupportsTools {
+		tools = registry.Definitions()
+	}
+	readers := false
+	for _, tool := range tools {
+		readers = readers || isReader(tool.Name)
+	}
+	overview := workspaceTurnPrompt(scope, readers) + reviewContextPrompt(ctx)
+	if scope != nil {
+		// The overview is workspace evidence too. It is charged before any
+		// reader runs, so the turn's budget covers everything Ori supplied.
+		scope.ledger.charge(evidenceSize(overview))
 	}
 
 	conversation := make([]llm.Message, 0, len(turn.history)+2)
 	conversation = append(conversation, llm.NewSystemMessage(turn.system))
 	conversation = append(conversation, turn.history...)
-	conversation = append(conversation, llm.NewUserMessage(turn.user+workspaceTurnPrompt(scope)+reviewContextPrompt(ctx)))
-	var tools []llm.Tool
-	if provider.Capabilities().SupportsTools {
-		tools = registry.Definitions()
-	}
+	conversation = append(conversation, llm.NewUserMessage(turn.user+overview))
 	if len(tools) == 0 && scope != nil {
 		conversation[0].Content += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
 	}
@@ -628,7 +643,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 			if strings.TrimSpace(resp.Content) == "" {
 				return "I couldn't find anything to report for that.", nil
 			}
-			return resp.Content, nil
+			return scope.finishAnswer(resp.Content), nil
 		}
 
 		if len(tools) == 0 {
@@ -661,7 +676,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if strings.TrimSpace(resp.Content) == "" {
 		return "I gathered some data but couldn't compose a final summary. Try narrowing the question.", nil
 	}
-	return resp.Content, nil
+	return scope.finishAnswer(resp.Content), nil
 }
 
 func (h *HomeAssistantAskHandler) resolveProvider() (llm.Provider, string, error) {

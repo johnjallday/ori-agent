@@ -23,13 +23,15 @@ type panelToolRegistry struct {
 	handler *HomeAssistantAskHandler
 	turn    *assistantWorkspaceTurn
 	home    *homeToolRegistry
-	used    int
+	// ledger is the turn's one evidence budget and source record, shared by
+	// every tool call in every round.
+	ledger *evidenceLedger
 }
 
 func (r *panelToolRegistry) Definitions() []llm.Tool {
 	tools := r.home.Definitions()
 	tools = append(tools, llm.Tool{Name: "assistant_workspace_discovery", Description: "Discover owned project and Home/group metadata with separate project/group totals. No content reads or permission grants.", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}})
-	return tools
+	return append(tools, r.readerDefinitions()...)
 }
 
 func (r *panelToolRegistry) Execute(ctx context.Context, name, arguments string) (string, error) {
@@ -52,6 +54,22 @@ func (r *panelToolRegistry) Execute(ctx context.Context, name, arguments string)
 		if err != nil || !workspaceReadable(ws, r.turn.userID) {
 			return "", errors.New("workspace unavailable")
 		}
+	}
+	if isReader(name) {
+		// Readers bound, filter and charge their own output: a note body is
+		// longer than a metadata field and is recorded as a source.
+		data, err := r.executeReader(ctx, name, args)
+		if err != nil {
+			return "", errors.New("source unavailable")
+		}
+		encoded, err := homeToolJSON(data)
+		if err != nil {
+			return "", errors.New("source unavailable")
+		}
+		if data["content_read"] != true && !r.ledger.charge(evidenceSize(encoded)) {
+			return `{"status":"partial","reason":"evidence_budget_exhausted","content_read":false}`, nil
+		}
+		return encoded, nil
 	}
 	args["limit"] = assistantcontext.PreviewLimit
 	var result string
@@ -80,11 +98,9 @@ func (r *panelToolRegistry) Execute(ctx context.Context, name, arguments string)
 	if err != nil {
 		return "", errors.New("source unavailable")
 	}
-	size := utf8.RuneCountInString(result)
-	if r.used+size > assistantcontext.EvidenceLimit {
+	if !r.ledger.charge(utf8.RuneCountInString(result)) {
 		return `{"status":"partial","reason":"evidence_budget_exhausted","content_read":false}`, nil
 	}
-	r.used += size
 	return result, nil
 }
 

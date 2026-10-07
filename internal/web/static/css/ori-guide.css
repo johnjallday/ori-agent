@@ -695,6 +695,45 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   overflow-wrap: anywhere;
 }
 
+/* What a reply read: a compact disclosure under the answer, closed by default. */
+.personal-assistant-message__sources {
+  margin: 6px 0 0;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-message__sources summary {
+  cursor: pointer;
+  color: var(--pa-accent-text);
+  font-weight: 600;
+}
+
+.personal-assistant-message__sources summary:focus-visible,
+.personal-assistant-message__sources a:focus-visible {
+  outline: 2px solid var(--pa-accent-text);
+  outline-offset: 2px;
+}
+
+.personal-assistant-message__sources ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.personal-assistant-message__sources p {
+  margin: 4px 0 0;
+}
+
+.personal-assistant-message__sources a {
+  color: var(--pa-accent-text);
+  text-decoration: underline;
+}
+
+.personal-assistant-message__source-key {
+  font-variant-numeric: tabular-nums;
+}
+
 .personal-assistant-panel__checkin {
   overflow: hidden;
   margin: 2px 0 0;

@@ -28,7 +28,10 @@ type AssistantWorkspaceSource interface {
 
 type AssistantWorkspaceResolver struct {
 	Source AssistantWorkspaceSource
-	Now    func() time.Time
+	// Notes lists note titles for the overview. Titles and times only: the
+	// overview never carries a note's content. Nil reports notes unsupported.
+	Notes AssistantNoteReader
+	Now   func() time.Time
 }
 
 var workspaceReferenceToken = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
@@ -220,7 +223,7 @@ func (r *AssistantWorkspaceResolver) Resolve(ctx context.Context, userID, prompt
 		// without mutating browser references or adopting another workspace.
 		parsed, _ := url.Parse(refs.PagePath)
 		parts := strings.Split(strings.TrimPrefix(parsed.EscapedPath(), "/workspaces/"), "/")
-		if len(parts) > 2 && parts[1] == "tasks" {
+		if len(parts) > 2 && taskPageSegment(parts[1]) {
 			selectedTask, _ = url.PathUnescape(parts[2])
 		}
 	}
@@ -231,6 +234,10 @@ func (r *AssistantWorkspaceResolver) Resolve(ctx context.Context, userID, prompt
 	out.Overview = &overview
 	return out
 }
+
+// taskPageSegment recognizes a task page. The app's page is
+// /workspaces/<slug>/task/<id>; the plural is accepted for older references.
+func taskPageSegment(segment string) bool { return segment == "task" || segment == "tasks" }
 
 func (r *AssistantWorkspaceResolver) location(refs *HomeAssistantRouteContext, userID string) (*workspace.Workspace, string) {
 	var pageSlug, pageTask string
@@ -246,7 +253,7 @@ func (r *AssistantWorkspaceResolver) location(refs *HomeAssistantRouteContext, u
 			if err != nil || !workspaceReferenceToken.MatchString(pageSlug) {
 				return nil, "page_reference_invalid"
 			}
-			if len(parts) > 2 && parts[1] == "tasks" {
+			if len(parts) > 2 && taskPageSegment(parts[1]) {
 				pageTask, err = url.PathUnescape(parts[2])
 				if err != nil || !workspaceReferenceToken.MatchString(pageTask) {
 					return nil, "task_reference_invalid"
@@ -426,8 +433,29 @@ func (r *AssistantWorkspaceResolver) overview(ctx context.Context, ws *workspace
 		out.Sources["tasks"] = assistantcontext.SourceStatus{Status: assistantcontext.Empty}
 	}
 	out.Sources["notes"] = assistantcontext.SourceStatus{Status: assistantcontext.Unsupported, Reason: "reader_not_connected"}
+	if r.Notes != nil {
+		// A failed listing is unavailable, never an empty workspace.
+		out.Sources["notes"] = assistantcontext.SourceStatus{Status: assistantcontext.Unavailable, Reason: "listing_failed"}
+		if listed, err := r.Notes.Notes(ctx, ws.ID); err == nil {
+			status := assistantcontext.SourceStatus{Status: assistantcontext.Empty}
+			sort.SliceStable(listed, func(i, j int) bool { return listed[i].UpdatedAt.After(listed[j].UpdatedAt) })
+			for _, note := range listed {
+				if note.WorkspaceID != ws.ID || !workspaceReferenceToken.MatchString(note.ID) {
+					continue
+				}
+				status.Status = assistantcontext.Available
+				status.Count++
+				if len(out.Notes) < assistantcontext.PreviewLimit {
+					out.Notes = append(out.Notes, assistantcontext.NotePreview{ID: note.ID, Title: workspaceContextText(note.Name, 160), UpdatedAt: note.UpdatedAt})
+				} else {
+					out.Truncated = true
+				}
+			}
+			out.Sources["notes"] = status
+		}
+	}
 	out.Sources["files"] = assistantcontext.SourceStatus{Status: assistantcontext.Unsupported, Reason: "reader_not_connected"}
-	out.Sources["knowledge"] = assistantcontext.SourceStatus{Status: assistantcontext.Unsupported, Reason: "eligible_reader_required"}
+	out.Sources["knowledge"] = assistantcontext.SourceStatus{Status: assistantcontext.Unsupported, Reason: "workspace_memory_has_no_eligible_reader"}
 	boundWorkspaceOverview(&out)
 	return out, ""
 }
@@ -446,6 +474,8 @@ func boundWorkspaceOverview(out *assistantcontext.Overview) {
 			out.Description = ""
 		case out.Goal != "":
 			out.Goal = ""
+		case len(out.Notes) > 0:
+			out.Notes = out.Notes[:len(out.Notes)-1]
 		case len(out.Tasks) > 0:
 			out.Tasks = out.Tasks[:len(out.Tasks)-1]
 		case len(out.Children) > 0:

@@ -32,10 +32,12 @@ export function collectWorkspaceContext({
     // A route token is a slug, never an ID. Drop a stale page publication when
     // pushState/back-forward points at a different workspace.
     if (String(workspaceSlug) === out.workspace_slug) out.workspace_id = String(workspaceId || '');
+    // The app's task page is /workspaces/<slug>/task/<id>; the plural is kept
+    // for older references.
     out.surface =
       match[2] === 'canvas'
         ? 'workspace_canvas'
-        : match[2] === 'tasks' && match[3]
+        : ['task', 'tasks'].includes(match[2]) && match[3]
           ? 'workspace_task'
           : 'workspace_detail';
     if (out.surface === 'workspace_task') {
@@ -85,9 +87,105 @@ export function renderTurnWorkspace(row, attribution, { historical = false } = {
   return true;
 }
 
+const SOURCE_KINDS = { note: 'Note', task: 'Task' };
+// Only an in-app page of a workspace is linked. The server writes these; a
+// model cannot, and nothing else is turned into a link.
+const SOURCE_HREF = /^\/workspaces\/[A-Za-z0-9][A-Za-z0-9._:-]*\/(?:notes|task)\/[^/?#\s]+$/;
+
+function sourceCoverage(source) {
+  if (source.coverage === 'full') return 'read in full';
+  const total = Number(source.total) || 0;
+  const end = Number(source.end) || 0;
+  if (source.kind === 'note' && total > 0 && end > 0)
+    return `part read (characters ${(Number(source.start) || 0) + 1}–${end} of ${total})`;
+  return 'part read';
+}
+
+/** The sources Ori actually delivered to the model for one reply. A reply that
+ * pointed at some of them lists those as used; otherwise they are listed as
+ * read. A saved reply's sources are what it read then, not a fresh read. */
+export function turnSourcesView(
+  attribution,
+  { historical = false, formatTime = value => new Date(value).toLocaleString() } = {}
+) {
+  const all = (Array.isArray(attribution?.sources) ? attribution.sources : []).filter(
+    source => source && typeof source === 'object' && source.key && source.label
+  );
+  if (!all.length) return { visible: false, summary: '', note: '', rows: [] };
+  const cited = all.filter(source => source.cited === true);
+  const shown = cited.length ? cited : all;
+  const when = value => {
+    const date = new Date(value || '');
+    return Number.isNaN(date.getTime()) || date.getFullYear() < 2000 ? '' : formatTime(value);
+  };
+  return {
+    visible: true,
+    summary: `${cited.length ? 'Sources used' : 'Sources read'} (${shown.length})`,
+    note: historical
+      ? 'What this reply read at the time. It is not a fresh read of these sources.'
+      : cited.length
+        ? ''
+        : 'The reply read these sources but did not point at a specific one.',
+    rows: shown.map(source => {
+      const updated = when(source.updated_at);
+      const read = when(source.read_at);
+      return {
+        key: String(source.key),
+        title: `${SOURCE_KINDS[source.kind] || 'Source'}: ${String(source.label)}`,
+        href: SOURCE_HREF.test(String(source.href || '')) ? String(source.href) : '',
+        detail: [
+          String(source.workspace || '').trim(),
+          sourceCoverage(source),
+          updated ? `updated ${updated}` : '',
+          read ? `read ${read}` : ''
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      };
+    })
+  };
+}
+
+export function renderTurnSources(row, attribution, options = {}) {
+  if (!row?.ownerDocument || !row.querySelector) return false;
+  const bubble = row.firstElementChild || row;
+  bubble.querySelector?.('.personal-assistant-message__sources')?.remove();
+  const view = turnSourcesView(attribution, options);
+  if (!view.visible) return false;
+  const doc = row.ownerDocument;
+  const details = doc.createElement('details');
+  details.className = 'personal-assistant-message__sources';
+  const summary = doc.createElement('summary');
+  summary.textContent = view.summary;
+  const list = doc.createElement('ul');
+  for (const source of view.rows) {
+    const item = doc.createElement('li');
+    const key = doc.createElement('span');
+    key.className = 'personal-assistant-message__source-key';
+    key.textContent = `[${source.key}]`;
+    const title = doc.createElement(source.href ? 'a' : 'span');
+    if (source.href) title.href = source.href;
+    title.textContent = source.title;
+    item.append(key, ' ', title);
+    if (source.detail) item.append(` · ${source.detail}`);
+    list.append(item);
+  }
+  details.append(summary, list);
+  if (view.note) {
+    const note = doc.createElement('p');
+    note.textContent = view.note;
+    details.append(note);
+  }
+  const actions = bubble.querySelector?.('.personal-assistant-message__actions');
+  if (actions) bubble.insertBefore(details, actions);
+  else bubble.append(details);
+  return true;
+}
+
 if (typeof window !== 'undefined')
   window.PersonalAssistantWorkspaceContext = {
     collect: collectWorkspaceContext,
     label: workspaceContextLabel,
-    renderTurn: renderTurnWorkspace
+    renderTurn: renderTurnWorkspace,
+    renderSources: renderTurnSources
   };

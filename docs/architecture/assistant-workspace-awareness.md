@@ -1,8 +1,9 @@
 # Personal Assistant workspace awareness: investigation contract
 
 **Status: findings plus in-progress host implementation; not shipped behavior.**
-Context-following conversations (group 2) and setup continuity/placement
-(group 3) are implemented; notes/tasks and permitted files are not yet.
+Context-following conversations (group 2), setup continuity/placement (group 3)
+and grounded notes/tasks with checked sources (group 4) are implemented;
+permitted files are not yet.
 The full feature includes context-following conversations, setup continuity,
 notes/tasks, and permitted files. A context badge alone is not the delivery.
 Implementation proceeds in that order with one writer. This document records
@@ -72,7 +73,8 @@ live REAPER runs in this specialized check.
 - Per-turn panel registries recheck user/relationship and pinned workspace ownership
   before each read. The existing home metadata tools receive owner/subject-filtered
   stores; separate discovery includes groups and preserves labeled project/group
-  totals. Full notes/tasks/files and validated evidence citations are still pending.
+  totals. Notes, task details and validated citations arrive in group 4 (below);
+  file contents are still pending.
 - Provider capability controls tool advertisement. Snapshot-only paths keep the
   validated overview and explain the lack of brokered readers; no provider switch
   or native-MCP workaround is used.
@@ -244,6 +246,89 @@ project pointed at from a new conversation, and a named workspace carried into
 Review from another page. It uses the loopback deterministic provider, so it
 shows host and drawer behavior, not vendor-model behavior.
 
+## Group-4 grounded notes and tasks
+
+**Readers.** The panel's model gets four brokered, read-only tools for the
+turn's pinned workspace, and only on a provider path that can run Ori's tools:
+
+| Tool | Returns | Recorded as a source |
+| --- | --- | --- |
+| `assistant_workspace_notes` | Note titles, IDs and update times (up to 50) | No: a title is not content |
+| `assistant_workspace_note` | One note's current content, in parts | Yes |
+| `assistant_workspace_tasks` | Task titles with recorded state, assignee, update time | No |
+| `assistant_workspace_task` | One task's description, state, assignee, result, error, parent/subtasks | Yes |
+
+They read the canonical stores through narrow interfaces: `AssistantNoteReader`
+has two reads over the session note store (the same rows the Notes page shows)
+and no create, update, delete, tag or search; tasks come from the workspace
+store the resolver already uses. The workspace chat's `Tools()` bundle and its
+auto-save prompt are not imported. The model can name a record, never a
+workspace: every call re-checks the user, the relationship and both pinned
+workspaces, then checks the record belongs to the pinned workspace. A note in
+another workspace is reported exactly like one that does not exist, so an ID
+cannot probe. Two notes with the same title are returned as a choice, never
+guessed. A failed listing or read is `unavailable`, never `empty`.
+
+The overview now lists up to five note titles and a note count (metadata only,
+`content_read: false`); a note's content is delivered only by a read. Reviewed
+memory still reaches the assistant only through its existing eligible reader for
+Personal HQ. Another workspace's memory file has no eligible reader and is
+reported as `workspace_memory_has_no_eligible_reader`; it is not read in its
+place.
+
+**Evidence ledger.** One ledger per accepted turn (`evidenceLedger`) holds the
+aggregate budget and the list of delivered sources. The overview and review
+context are charged first, then every tool result in every round, against
+64,000 characters. Content is charged at its **delivered** size: JSON escaping
+can make hostile text several times longer, and that growth is not free. A note
+is read in parts of at most 40,000 characters, cut on character boundaries, with
+`start`/`end`/`total` and `next_offset`; a part requested after the note changed
+is refused instead of being joined to the earlier part. Two separate parts are
+two records, so a range never claims text that was not read. When the budget is
+spent the reader says so and nothing more is delivered. Secret-like lines are
+replaced before delivery; the rest of the text stays in order.
+
+**Citations.** A content read returns a server-issued key (`S1`, `S2`, …). The
+model is asked to cite `[S1]` next to the statement it supports. After the
+answer, each marker is checked against that turn's ledger; a marker for anything
+not read in this turn is removed from the text. URLs and paths in prose are
+never treated as citations. The response carries the validated source list in
+`workspace_context.sources`: kind, workspace, record ID, label, content version,
+update and read times, coverage and range, a server-authored in-app link
+(`/workspaces/<slug>/notes/<id>` or `/workspaces/<slug>/task/<id>`), and whether
+the reply pointed at it.
+
+**Saved with the turn, as references.** The same list is stored in the turn's
+`turn_context_json` (at most 12 sources, inside the existing 8,000-character
+bound; references are dropped from the end rather than cut). No source body is
+stored. A reloaded reply shows what it read then, labeled as history. A later
+turn reads the records again and gets new versions; the earlier turn's sources
+are not rewritten. When history is replayed to the model, an earlier turn's
+scope is restated but its source references are not, so a later answer reads
+current records instead of leaning on an old reference.
+
+**Drawer.** Each reply with sources gets a native `details` disclosure,
+"Sources used (n)" when the reply pointed at sources and "Sources read (n)" when
+it read some but pointed at none. Labels are text nodes; only in-app workspace
+pages become links.
+
+**Selected task.** The app's task page is `/workspaces/<slug>/task/<id>`. The
+collector and resolver recognized only `/tasks/`, so a task page never selected
+its task; both forms are accepted now.
+
+The model instructions for this path tell it to read before advising on a
+substantive workspace question, to read nothing for a greeting or a general
+request, to separate recorded facts from its own suggestions, to say when
+sources disagree, and to treat everything a reader returns as data. On a path
+that cannot run readers the prompt says so and no reader is advertised.
+
+Acceptance on plain `wt demo` is
+`python3 scripts/assistant-workspace-demo.py --sources`
+(`tests/personal-assistant-workspace-sources.spec.ts`). The loopback provider
+there is a deterministic stand-in for a tool-using model: it picks readers from
+the user's words and repeats only what a reader returned, so it proves host
+reads, citation checks and persistence, not what a vendor model would choose.
+
 Setup-plan software previews now call the existing canonical integration reader
 directly. `setupjourney.Service.Read` creates/reconciles inert run rows, so it is
 not used for observational preview. Actual confirmed runs retain the original
@@ -380,9 +465,9 @@ Retain PRD defaults: 12,000 Unicode characters for overview, five previews per
 category, 64,000 aggregate evidence characters including overview, 40,000 per
 file chunk, existing parser byte limits, 500 directory entries/three levels,
 four tool rounds. Enforce before provider input, across all calls in a round.
-Any truncation/continuation carries precise coverage. The initial metadata
-registry bounds previews and tool-result accumulation; the complete cross-reader
-ledger including all initial snapshot evidence remains a group-4 requirement. A directory listing's
+Any truncation/continuation carries precise coverage. The per-turn evidence
+ledger (group 4) charges the initial overview, every metadata result and every
+content read against the one aggregate budget. A directory listing's
 readability check currently sniffs file bytes; do not copy it into panel-open or
 greeting discovery and claim no content was read.
 

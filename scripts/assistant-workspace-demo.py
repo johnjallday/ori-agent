@@ -25,17 +25,92 @@ ROOT = Path(__file__).resolve().parent.parent
 MODEL = "ori-workspace-fixture"
 
 
-def workspace_projection(messages):
-    """Only the current final user message can identify this fixture turn."""
-    if not messages or messages[-1].get("role") != "user":
+def current_turn(messages):
+    """The current user message and the reader results Ori returned after it.
+
+    History never identifies the turn: the request must end with the user's
+    message or with a tool result that followed it.
+    """
+    if not messages or messages[-1].get("role") not in ("user", "tool"):
         raise ValueError("fixture requires the current user turn")
-    match = re.search(r"<workspace_turn>(.*?)</workspace_turn>", messages[-1]["content"], re.S)
+    index = max(i for i, message in enumerate(messages) if message.get("role") == "user")
+    following = messages[index + 1:]
+    if any(message.get("role") not in ("assistant", "tool") for message in following):
+        raise ValueError("fixture requires one current turn")
+    return messages[index], [m.get("content", "") for m in following if m.get("role") == "tool"]
+
+
+def workspace_projection(messages):
+    """Only the current user message can identify this fixture turn."""
+    user, _results = current_turn(messages)
+    match = re.search(r"<workspace_turn>(.*?)</workspace_turn>", user["content"], re.S)
     if not match:
         raise ValueError("fixture requires the production workspace projection")
     projection = json.loads(match.group(1))
     if projection.get("status") != "available":
         raise ValueError("fixture scope unavailable")
     return projection
+
+
+def reader_step(prompt, results, tools_offered):
+    """A deterministic stand-in for a tool-using model, for the sources demo.
+
+    It decides only from the user's own words and from what Ori's readers
+    returned in this turn. It holds no workspace data, so anything it says about
+    a note or a task came through a real reader. Returns a tool call, an answer,
+    or None when the request is not one of the demo's reading requests.
+    """
+    words = prompt.lower()
+
+    def parsed(text):
+        try:
+            value = json.loads(text)
+            return value if isinstance(value, dict) else {}
+        except ValueError:
+            return {}
+
+    def call(name, **arguments):
+        return {"tool": name, "arguments": arguments}
+
+    have = [parsed(text) for text in results]
+    if "missing plan" in words:
+        if not have and tools_offered:
+            return call("assistant_workspace_note", title="Missing plan")
+        reason = have[0].get("reason", "unavailable") if have else "readers unavailable"
+        return {"answer": "I could not read a note titled Missing plan (" + str(reason) + "). "
+                          "Nothing was read, so I am not saying this workspace has no such plan."}
+    if "release note" not in words:
+        return None
+    notes = next((r for r in have if "notes" in r), None)
+    note = next((r for r in have if r.get("content_read") and "note_id" in r), None)
+    tasks = next((r for r in have if "tasks" in r), None)
+    task = next((r for r in have if r.get("content_read") and "task_id" in r), None)
+    reasons = [str(r.get("reason", "")) for r in have]
+    if tools_offered:
+        if not have:
+            return call("assistant_workspace_notes")
+        if notes and not note and not any(r.startswith(("note_", "several_", "evidence_")) for r in reasons):
+            listed = next((n for n in notes.get("notes", []) if "release" in str(n.get("title", "")).lower()), None)
+            if listed:
+                return call("assistant_workspace_note", note_id=listed["note_id"])
+        if tasks is None and "workspace_unavailable" not in reasons:
+            return call("assistant_workspace_tasks")
+        if tasks and not task and not any(r.startswith("task_") for r in reasons):
+            open_task = next((t for t in tasks.get("tasks", []) if t.get("state") not in ("done", "cancelled")), None)
+            if open_task:
+                return call("assistant_workspace_task", task_id=open_task["task_id"])
+    parts = []
+    if note:
+        parts.append("Recorded in your note “" + note["title"] + "”: " +
+                     note["content"].split(".")[0].strip() + ". " + note["cite_as"])
+    else:
+        parts.append("I could not read a release note here, so I am not relying on one.")
+    if task:
+        parts.append("Recorded: the task “" + task["title"] + "” is " + task["state_label"] + " " + task["cite_as"] + ".")
+        parts.append("My suggestion, not a recorded fact: work on “" + task["title"] + "” next.")
+    # A marker for something that was never read; Ori must remove it.
+    parts.append("Not read this turn: [S9].")
+    return {"answer": " ".join(parts)}
 
 
 def provider_handler(state_dir):
@@ -68,7 +143,18 @@ def provider_handler(state_dir):
                 request = json.loads(self.rfile.read(size))
                 projection = workspace_projection(request.get("messages", []))
                 subject = projection.get("subject") or {}
-                if "Hold this workspace reply" in request["messages"][-1]["content"]:
+                user, results = current_turn(request["messages"])
+                # Only the user's own words choose a demo; the overview Ori
+                # appends (which lists note titles) never does.
+                step = reader_step(user["content"].split("\n\n##", 1)[0], results, bool(request.get("tools")))
+                if step:
+                    message = {"role": "assistant", "content": step.get("answer", "")}
+                    if "tool" in step:
+                        message["tool_calls"] = [{"function": {"name": step["tool"], "arguments": step["arguments"]}}]
+                    self.reply(200, {"model": MODEL, "message": message, "done": True,
+                                     "prompt_eval_count": 1, "eval_count": 1})
+                    return
+                if "Hold this workspace reply" in user["content"]:
                     # Metadata only; do not retain source bodies or model input.
                     accepted = {"subject_id": subject.get("id"), "subject_name": subject.get("name")}
                     (state_dir / "accepted.json").write_text(json.dumps(accepted))
@@ -122,9 +208,13 @@ def main():
     parser.add_argument("--portfolio", action="store_true", help="Confirm a collection and library in a declared new Home")
     parser.add_argument("--placement", action="store_true",
                         help="wt demo: named review, blocked refresh, confirmed setup and project-local choice")
+    parser.add_argument("--sources", action="store_true",
+                        help="wt demo: note and task readers, checked sources, changed records and a missing note")
     args = parser.parse_args()
-    if args.placement and (args.reaper_source or args.music_source or args.new_home or args.portfolio):
-        parser.error("--placement runs on plain wt demo, without companion candidates")
+    if args.placement and args.sources:
+        parser.error("choose one wt demo: --placement or --sources")
+    if (args.placement or args.sources) and (args.reaper_source or args.music_source or args.new_home or args.portfolio):
+        parser.error("--placement and --sources run on plain wt demo, without companion candidates")
     if bool(args.reaper_source) != bool(args.music_source):
         parser.error("candidate setup needs both exact companion sources")
     if (args.new_home or args.portfolio) and not args.reaper_source:
@@ -159,9 +249,12 @@ def main():
         log = evidence / ("group3-portfolio-candidate.log" if args.portfolio else
                           "group3-new-home-candidate.log" if args.new_home else
                           "group3-confirmed-candidate.log" if candidate else
-                          "group3-wt-demo-placement.log" if args.placement else "group2-wt-demo.log")
+                          "group3-wt-demo-placement.log" if args.placement else
+                          "group4-wt-demo-sources.log" if args.sources else "group2-wt-demo.log")
         spec, sandbox_env = (("tests/personal-assistant-workspace-placement.spec.ts", "ORI_WORKSPACE_PLACEMENT_SANDBOX")
                              if args.placement else
+                             ("tests/personal-assistant-workspace-sources.spec.ts", "ORI_WORKSPACE_SOURCES_SANDBOX")
+                             if args.sources else
                              ("tests/personal-assistant-workspace-history.spec.ts", "ORI_WORKSPACE_HISTORY_SANDBOX"))
         process = None
         sandbox = None

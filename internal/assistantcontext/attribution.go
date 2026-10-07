@@ -34,6 +34,8 @@ type Attribution struct {
 	SelectedTaskID  string        `json:"selected_task_id,omitempty"`
 	ReadAt          time.Time     `json:"read_at"`
 	Historical      bool          `json:"historical,omitempty"`
+	// Sources are the sources whose content that turn delivered to the model.
+	Sources []SourceRef `json:"sources,omitempty"`
 }
 
 func (t Turn) Attribution() *Attribution {
@@ -53,11 +55,36 @@ func EncodeAttribution(value *Attribution) (string, error) {
 	if value.Version != Version {
 		return "", errors.New("invalid turn attribution version")
 	}
-	data, err := json.Marshal(value)
-	if err != nil || utf8.RuneCount(data) > AttributionLimit {
-		return "", errors.New("invalid turn attribution size")
+	// Scope always fits. Source references are dropped from the end, never cut
+	// mid-record, so what is saved stays valid and says less rather than more.
+	bounded := *value
+	if len(bounded.Sources) > SourceLimit {
+		bounded.Sources = bounded.Sources[:SourceLimit]
 	}
-	return string(data), nil
+	for {
+		data, err := json.Marshal(bounded)
+		if err != nil {
+			return "", errors.New("invalid turn attribution")
+		}
+		if utf8.RuneCount(data) <= AttributionLimit {
+			return string(data), nil
+		}
+		if len(bounded.Sources) == 0 {
+			return "", errors.New("invalid turn attribution size")
+		}
+		bounded.Sources = bounded.Sources[:len(bounded.Sources)-1]
+	}
+}
+
+// WithoutSources is the scope alone, for places that restate where an earlier
+// turn was asked but must not restate what it read.
+func (a *Attribution) WithoutSources() *Attribution {
+	if a == nil || len(a.Sources) == 0 {
+		return a
+	}
+	scope := *a
+	scope.Sources = nil
+	return &scope
 }
 func DecodeAttribution(data string) *Attribution {
 	if data == "" || utf8.RuneCountInString(data) > AttributionLimit {

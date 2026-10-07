@@ -225,7 +225,7 @@ func (h *HomeAssistantAskHandler) storeFolderTurn(ctx context.Context, conversat
 	var err error
 	if conversation.turn != nil {
 		if store, ok := h.Conversations.(personalAssistantAttributedStore); ok {
-			rows, err = store.AppendAttributedTurn(ctx, conversation.id, conversation.turn.saveOwner(), &event, turn.ref.Revision, prompt, answer, conversation.turn.projection.Attribution())
+			rows, err = store.AppendAttributedTurn(ctx, conversation.id, conversation.turn.saveOwner(), &event, turn.ref.Revision, prompt, answer, conversation.turn.attribution())
 		} else {
 			err = errors.New("canonical attributed turn writer unavailable")
 		}

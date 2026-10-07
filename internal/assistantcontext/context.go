@@ -48,6 +48,13 @@ type TaskPreview struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// NotePreview is a note's identity only. A title is not the note's content.
+type NotePreview struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type AgentPreview struct {
 	Name   string `json:"name"`
 	Role   string `json:"role,omitempty"`
@@ -72,6 +79,7 @@ type Overview struct {
 	Children     []WorkspaceRef          `json:"children,omitempty"`
 	Agents       []AgentPreview          `json:"agents,omitempty"`
 	Tasks        []TaskPreview           `json:"tasks,omitempty"`
+	Notes        []NotePreview           `json:"notes,omitempty"`
 	SelectedTask *TaskPreview            `json:"selected_task,omitempty"`
 	Sources      map[string]SourceStatus `json:"sources"`
 	Truncated    bool                    `json:"truncated"`

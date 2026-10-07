@@ -382,6 +382,11 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 	handler.WorkspaceContext = &agenthttp.AssistantWorkspaceResolver{Source: sources.Workspaces}
 	if s.Storage != nil {
 		handler.CurrentUser = s.Storage.UserProvider
+		// Notes are read through the canonical session store, narrowed to reads.
+		if s.Storage.SessionStore != nil {
+			notes := personalAssistantNoteAdapter{store: s.Storage.SessionStore}
+			handler.Notes, handler.WorkspaceContext.Notes = notes, notes
+		}
 	}
 	handler.SetTraceEmitter(agenthttp.NewLoggingHomeAskTraceEmitter())
 	// A request to create a workspace is offered as a build with the

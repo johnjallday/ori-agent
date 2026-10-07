@@ -5,7 +5,7 @@
 // send — an opaque conversation ID — and keeps it per tab, so two tabs never
 // share a thread by accident.
 
-import { renderTurnWorkspace } from './personal-assistant-workspace-context.js';
+import { renderTurnWorkspace, renderTurnSources } from './personal-assistant-workspace-context.js';
 
 const LIST_ENDPOINT = '/api/home-assistant/conversations';
 const STORAGE_KEY = 'ori.personalAssistant.conversation';
@@ -256,6 +256,9 @@ async function resume(id, options = {}) {
       }
       const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
       renderTurnWorkspace(row, message.workspace_context, { historical: true });
+      // A saved reply lists what it read then; reloading reads nothing again.
+      if (message.role === 'assistant')
+        renderTurnSources(row, message.workspace_context, { historical: true });
       attachMessage(row, conversation.id, message.id);
     }
     // The panel keeps a bounded number of rows, so a long conversation shows
@@ -394,6 +397,7 @@ function applyReply(data, rows = {}) {
   if (data?.workspace_context) {
     renderTurnWorkspace(rows.userRow, data.workspace_context);
     renderTurnWorkspace(rows.assistantRow, data.workspace_context);
+    renderTurnSources(rows.assistantRow, data.workspace_context);
   }
   const reply = data?.conversation;
   if (!reply) return { notice: '', stored: false, restoreInput: shouldRestoreInput(data) };

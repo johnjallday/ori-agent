@@ -24,7 +24,7 @@ func TestPanelWorkspaceTools_PinnedFreshOwnedAndRevocable(t *testing.T) {
 		t.Fatal(err)
 	}
 	sources := h.scopedPanelSources(ctx, HomeSnapshotSources{Workspaces: store}, turn)
-	registry := &panelToolRegistry{handler: h, turn: turn, home: newHomeToolRegistry(sources)}
+	registry := &panelToolRegistry{handler: h, turn: turn, home: newHomeToolRegistry(sources), ledger: turn.ledger}
 	data, err := registry.Execute(ctx, "home_tasks", `{"workspace_id":"`+alpha.ID+`"}`)
 	if err != nil || !strings.Contains(data, "Current owned fact") || strings.Contains(data, "FOREIGN_TASK_SENTINEL") {
 		t.Fatalf("owned read: %s %v", data, err)
@@ -36,7 +36,9 @@ func TestPanelWorkspaceTools_PinnedFreshOwnedAndRevocable(t *testing.T) {
 	if err != nil || !strings.Contains(data, home.Name) || turn.projection.Subject.ID != alpha.ID {
 		t.Fatal("discovery omitted group or changed subject", data, err)
 	}
-	registry.used = assistantcontext.EvidenceLimit
+	if !turn.ledger.charge(turn.ledger.remaining()) || turn.ledger.remaining() != 0 || assistantcontext.EvidenceLimit != 64000 {
+		t.Fatal("fixture could not exhaust the turn's evidence budget")
+	}
 	data, err = registry.Execute(ctx, "home_tasks", `{}`)
 	if err != nil || !strings.Contains(data, "evidence_budget_exhausted") {
 		t.Fatal("aggregate budget", data, err)

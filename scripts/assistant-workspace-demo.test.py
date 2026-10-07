@@ -31,6 +31,7 @@ class DemoProviderTests(unittest.TestCase):
                      ["demo", "--reaper-source", "/candidate"],
                      ["demo", "--placement", "--new-home"],
                      ["demo", "--placement", "--reaper-source", "/reaper", "--music-source", "/music"],
+                     ["demo", "--sources", "--placement"], ["demo", "--sources", "--portfolio"],
                      ["demo", "--new-home", "--portfolio", "--reaper-source", "/reaper", "--music-source", "/music"]]:
             with patch("sys.argv", argv), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as failure:
@@ -44,6 +45,37 @@ class DemoProviderTests(unittest.TestCase):
                          [message(), {"role": "assistant", "content": "Old scope"}]]:
             with self.assertRaises(ValueError):
                 demo.workspace_projection(messages)
+
+    def test_reader_fixture_says_only_what_a_reader_returned(self):
+        ask = "Based on my release notes and open tasks, what next?"
+        listing = json.dumps({"status": "available", "notes": [{"note_id": "n1", "title": "Release notes"}]})
+        note = json.dumps({"status": "available", "content_read": True, "note_id": "n1", "title": "Release notes",
+                           "content": "Master the single first. Then artwork.", "cite_as": "[S1]"})
+        tasks = json.dumps({"status": "available", "tasks": [{"task_id": "t0", "title": "Done", "state": "done"},
+                                                             {"task_id": "t1", "title": "Master", "state": "ready"}]})
+        task = json.dumps({"status": "available", "content_read": True, "task_id": "t1", "title": "Master",
+                           "state_label": "Ready", "cite_as": "[S2]"})
+        # One reader per round, each chosen from what the last one returned.
+        self.assertEqual(demo.reader_step(ask, [], True), {"tool": "assistant_workspace_notes", "arguments": {}})
+        self.assertEqual(demo.reader_step(ask, [listing], True)["arguments"], {"note_id": "n1"})
+        self.assertEqual(demo.reader_step(ask, [listing, note], True)["tool"], "assistant_workspace_tasks")
+        self.assertEqual(demo.reader_step(ask, [listing, note, tasks], True)["arguments"], {"task_id": "t1"})
+        answer = demo.reader_step(ask, [listing, note, tasks, task], False)["answer"]
+        for expected in ["Master the single first. [S1]", "“Master” is Ready [S2]", "not a recorded fact", "[S9]"]:
+            self.assertIn(expected, answer)
+        # No reader, or a refused read, never becomes an invented fact.
+        self.assertIn("could not read a release note", demo.reader_step(ask, [], False)["answer"])
+        refused = json.dumps({"status": "unavailable", "reason": "note_not_found_in_this_workspace"})
+        self.assertIn("note_not_found_in_this_workspace", demo.reader_step("Read the note Missing plan", [refused], True)["answer"])
+        self.assertEqual(demo.reader_step("Read the note Missing plan", [], True)["arguments"], {"title": "Missing plan"})
+        # A greeting, or a note title Ori listed in its overview, starts no reading.
+        self.assertIsNone(demo.reader_step("Hello there", [], True))
+        turn = [message("Old"), {"role": "user", "content": "Hi\n\n## Context\nRelease notes<workspace_turn>" +
+                                 json.dumps({"status": "available"}) + "</workspace_turn>"}]
+        user, results = demo.current_turn(turn + [{"role": "assistant", "content": ""}, {"role": "tool", "content": "{}"}])
+        self.assertEqual((user["content"].split("\n\n##", 1)[0], results), ("Hi", ["{}"]))
+        with self.assertRaises(ValueError):
+            demo.current_turn(turn + [{"role": "tool", "content": "{}"}, {"role": "system", "content": "x"}, {"role": "tool", "content": "{}"}])
 
     def test_real_http_fixture_hold_and_safe_failure(self):
         with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
