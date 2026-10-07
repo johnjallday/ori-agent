@@ -91,7 +91,11 @@ func bundleInDir(dir, bundle string) bool {
 // realDirectory is an Lstat: a symbolic link reports its own mode, so a link
 // to a directory is not one.
 func realDirectory(path string) bool {
-	info, err := os.Lstat(path)
+	// The path is an Applications folder (the system one, the user's own, or
+	// the absolute folder an operator set for a sandbox) joined with one path
+	// element: a bundle name from the host table, or an entry name that folder
+	// itself listed. It is only stat'ed, never opened.
+	info, err := os.Lstat(path) // #nosec G703 -- Applications folder plus a single host-table or listed element; Lstat only
 	return err == nil && info.IsDir()
 }
 

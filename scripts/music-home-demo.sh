@@ -40,9 +40,11 @@ Options:
                     suggestions on the published release; test only),
                     onboarding (the guided collection -> catalog -> reviewed
                     REAPER install -> song -> staffing journey on published
-                    releases; test only, no --reaper-source), or
+                    releases; test only, no --reaper-source),
                     package-upgrade (reviewed Home package upgrade from --source
-                    to --upgrade-source; test only).
+                    to --upgrade-source; test only), or home-profile (the Home
+                    profile card of a candidate that declares home_profile,
+                    with fixture applications; test only).
   --provider MODE   local (default) or reviewed (the two reviewed suites only).
   --open            Open the manual demo in the default browser (macOS).
   -h, --help        Show this help.
@@ -166,8 +168,9 @@ if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
 fi
 [[ "$test_suite" == "home" || "$test_suite" == "portfolio" || "$test_suite" == "portfolio-reviewed" ||
-	"$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" || "$test_suite" == "package-upgrade" ]] || \
-	fail "--suite needs home, portfolio, portfolio-reviewed, manager-notifications, onboarding or package-upgrade"
+	"$test_suite" == "manager-notifications" || "$test_suite" == "onboarding" || "$test_suite" == "package-upgrade" ||
+	"$test_suite" == "home-profile" ]] || \
+	fail "--suite needs home, portfolio, portfolio-reviewed, manager-notifications, onboarding, package-upgrade or home-profile"
 if { [[ "$test_suite" == "package-upgrade" ]] && [[ -z "$upgrade_source" ]]; } ||
 	{ [[ "$test_suite" != "package-upgrade" ]] && [[ -n "$upgrade_source" ]]; }; then
 	fail "--suite package-upgrade and --upgrade-source go together"
@@ -241,6 +244,18 @@ fi
 server_log="$sandbox/ori.log"
 server_pid=""
 test_pid=""
+
+# The home-profile suite must not depend on which applications this Mac has.
+# ORI_APPLICATIONS_DIR replaces /Applications for the sandboxed server, and the
+# per-user Applications folder already follows the sandbox HOME, so two empty
+# fixture bundles give exactly two "installed" DAWs.
+server_env=()
+profile_fixtures=0
+if [[ "$test_suite" == "home-profile" ]]; then
+	profile_fixtures=1
+	mkdir -p "$sandbox/fixture-apps/REAPER.app" "$sandbox/Applications/Logic Pro.app"
+	server_env=("ORI_APPLICATIONS_DIR=$sandbox/fixture-apps")
+fi
 
 cleanup() {
 	status=$?
@@ -329,7 +344,7 @@ go build -o bin/ori-agent ./cmd/server
 (
 	cd "$sandbox"
 	exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1 \
-		"$repo_root/bin/ori-agent"
+		${server_env[@]+"${server_env[@]}"} "$repo_root/bin/ori-agent"
 ) >"$server_log" 2>&1 &
 server_pid=$!
 
@@ -421,11 +436,14 @@ if [[ "$mode" == "test" ]]; then
 		playwright_file="tests/music-setup-onboarding.spec.ts"
 	elif [[ "$test_suite" == "package-upgrade" ]]; then
 		playwright_file="tests/music-home-package-upgrade.spec.ts"
+	elif [[ "$test_suite" == "home-profile" ]]; then
+		playwright_file="tests/home-profile.spec.ts"
 	fi
 	run_music_acceptance() {
 		env PLAYWRIGHT_BASE_URL="$base_url" \
 			ORI_MUSIC_HOME_SANDBOX="$sandbox" \
 			ORI_MUSIC_HOME_ACCEPTANCE=1 \
+			ORI_HOME_PROFILE_FIXTURES="$profile_fixtures" \
 			ORI_MUSIC_PROVIDER_MODE="$provider_mode" \
 			ORI_MUSIC_RESTART_TEST="$restart_check" \
 			ORI_REAPER_PLUGIN_PATH="$bundled_reaper" \
@@ -472,7 +490,7 @@ if [[ "$mode" == "test" ]]; then
 				(
 					cd "$sandbox" || exit 1
 					exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1 \
-						"$repo_root/bin/ori-agent"
+						${server_env[@]+"${server_env[@]}"} "$repo_root/bin/ori-agent"
 				) >>"$server_log" 2>&1 &
 				server_pid=$!
 				restarted=0
