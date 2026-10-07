@@ -1427,6 +1427,42 @@
 .home-profile-hidden .modern-btn {
   margin-left: 0.2rem;
 }
+.home-profile-templates {
+  margin: 0.4rem 0 0;
+  color: var(--assistant-ink);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.home-profile-templates-kind {
+  color: var(--assistant-amber-deep);
+  font: 500 0.68rem/1 var(--font-mono, "JetBrains Mono", monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.home-profile-row[data-kind="templates"] .home-profile-actions {
+  margin-top: 0.6rem;
+}
+.home-profile-row[data-kind="templates"] .home-profile-templates-note {
+  margin-top: 0;
+}
+.home-profile-dialog {
+  width: min(32rem, calc(100vw - 2rem));
+  padding: clamp(1.25rem, 4vw, 2rem);
+}
+.home-profile-dialog p {
+  color: var(--assistant-muted);
+  line-height: 1.55;
+}
+.home-profile-dialog h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1.25rem;
+}
+.home-profile-dialog-folders {
+  margin: 0.6rem 0 1rem;
+  padding-left: 1.2rem;
+  font: 500 0.85rem/1.6 var(--font-mono, "JetBrains Mono", monospace);
+}
 .home-profile-defaults {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));

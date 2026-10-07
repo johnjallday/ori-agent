@@ -2,6 +2,7 @@ package homeprofile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -29,6 +30,12 @@ type fixture struct {
 	declared bool
 	now      time.Time
 	requests int
+	// The application whose templates can be listed (none when AppID is ""),
+	// what its plugin answers, and each call made to it.
+	templatesApp TemplatesApp
+	factsRaw     string
+	factsErr     error
+	factsCalls   []bool
 }
 
 var (
@@ -72,6 +79,14 @@ func newFixture(t *testing.T) *fixture {
 		LibraryFormats: func(*workspace.Workspace) map[string]int { return f.formats },
 		TimeSignatures: func(*workspace.Workspace) []Option {
 			return []Option{{Value: "4 4", Label: "4/4"}, {Value: "3 4", Label: "3/4"}}
+		},
+		TemplatesApp: func(*workspace.Workspace) (TemplatesApp, bool) { return f.templatesApp, f.templatesApp.AppID != "" },
+		ReadFacts: func(_ context.Context, _ *workspace.Workspace, includeTemplates bool) (json.RawMessage, error) {
+			f.factsCalls = append(f.factsCalls, includeTemplates)
+			if f.factsErr != nil {
+				return nil, f.factsErr
+			}
+			return json.RawMessage(f.factsRaw), nil
 		},
 		Now: func() time.Time { return f.now },
 	})

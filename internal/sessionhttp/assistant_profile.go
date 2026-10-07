@@ -1,6 +1,8 @@
 package sessionhttp
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -35,7 +38,81 @@ func (h *Handler) HomeProfiles() *homeprofile.Service {
 		InstalledApps:  h.homeProfileInstalledApps,
 		LibraryFormats: h.homeProfileLibraryFormats,
 		TimeSignatures: h.homeProfileTimeSignatures,
+		TemplatesApp:   h.homeProfileTemplatesApp,
+		ReadFacts:      h.homeProfileReadFacts,
 	})
+}
+
+// SetHomeProfileFacts supplies the call to an installed project plugin's
+// declared facts operation.
+func (h *Handler) SetHomeProfileFacts(call func(context.Context, plugin.InstalledPlugin, json.RawMessage) (json.RawMessage, error)) {
+	if h != nil {
+		h.homeProfileFacts = call
+	}
+}
+
+// homeProfileFactsPlugin finds the application whose templates this Home can
+// list and the project plugin behind it. The Home's declaration names the
+// project plugins it accepts; the reviewed registry says which integration
+// each one is; the host's tool table says which application that integration
+// works with and what its template folders are called. installed is the zero
+// value when that plugin is not installed and enabled.
+func (h *Handler) homeProfileFactsPlugin(home *workspace.Workspace) (folderdigest.Tool, plugin.InstalledPlugin, bool) {
+	_, declaration, ok := h.homeProfilePinned(home)
+	if !ok {
+		return folderdigest.Tool{}, plugin.InstalledPlugin{}, false
+	}
+	installed, err := h.installedPluginLister.List()
+	if err != nil {
+		installed = nil
+	}
+	for _, allowed := range declaration.AllowedProjectAttachments {
+		entry, reviewed := reviewedintegration.ForPlugin(allowed.ProviderPluginID)
+		if !reviewed {
+			continue
+		}
+		tool, found := folderdigest.TemplatesToolForIntegration(entry.Key)
+		if !found {
+			continue
+		}
+		for _, candidate := range installed {
+			if candidate.Enabled && strings.EqualFold(candidate.Name, allowed.ProviderPluginID) {
+				return tool, candidate, true
+			}
+		}
+		return tool, plugin.InstalledPlugin{}, true
+	}
+	return folderdigest.Tool{}, plugin.InstalledPlugin{}, false
+}
+
+func (h *Handler) homeProfileTemplatesApp(home *workspace.Workspace) (homeprofile.TemplatesApp, bool) {
+	tool, installed, ok := h.homeProfileFactsPlugin(home)
+	if !ok {
+		return homeprofile.TemplatesApp{}, false
+	}
+	return homeprofile.TemplatesApp{
+		AppID: tool.ToolID, AppName: tool.ToolName, Folders: append([]string(nil), tool.TemplateFolders...),
+		PluginInstalled:    installed.Name != "",
+		OperationAvailable: h.homeProfileFacts != nil && plugin.DeclaresHomeProfileFacts(installed),
+	}, true
+}
+
+// homeProfileReadFacts calls the facts operation once. Its one input says
+// whether template names are wanted; nothing about the Home is sent.
+func (h *Handler) homeProfileReadFacts(ctx context.Context, home *workspace.Workspace, includeTemplates bool) (json.RawMessage, error) {
+	_, installed, ok := h.homeProfileFactsPlugin(home)
+	if !ok || h.homeProfileFacts == nil || !plugin.DeclaresHomeProfileFacts(installed) {
+		return nil, homeprofile.ErrOperationUnavailable
+	}
+	input, err := json.Marshal(map[string]bool{"include_templates": includeTemplates})
+	if err != nil {
+		return nil, err
+	}
+	output, err := h.homeProfileFacts(ctx, installed, input)
+	if errors.Is(err, plugin.ErrHomeProfileFactsUnavailable) {
+		return nil, homeprofile.ErrOperationUnavailable
+	}
+	return output, err
 }
 
 // SetHomeProfileAppDetector replaces how installed applications are looked
@@ -173,6 +250,9 @@ func respondHomeProfileError(w http.ResponseWriter, err error) {
 	case errors.Is(err, homeprofile.ErrReadOnly):
 		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("home_read_only",
 			"Saved values are readable; the Home provider is unavailable for changes."))
+	case errors.Is(err, homeprofile.ErrOperationUnavailable):
+		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("plugin_operation_unavailable",
+			"The installed project plugin cannot list templates. Update it, then try again."))
 	case errors.Is(err, homeprofile.ErrInvalid):
 		_ = orihttp.RespondBadRequest(w, "Invalid profile request")
 	default:

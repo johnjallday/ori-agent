@@ -128,6 +128,11 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 			b.workspaceSurfaceHandler.InvalidateOwner(pluginID, generation)
 		})
 		b.pluginHandler.Manager().SetSurfaceLifecycle(lifecycle)
+		// A Home profile reads facts about a project plugin's own application
+		// through that plugin's one declared read-only operation.
+		if b.sessionHandler != nil {
+			b.sessionHandler.SetHomeProfileFacts(lifecycle.HomeProfileFacts)
+		}
 		installed, err := b.pluginHandler.Manager().List()
 		if err != nil {
 			logger.Warn("Workspace Surface plugins could not be listed during restore", logger.Fields{"error": err.Error()})

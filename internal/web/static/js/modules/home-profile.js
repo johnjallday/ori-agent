@@ -267,6 +267,89 @@ export function defaultsInput(fields = {}, choices = {}) {
   return { input };
 }
 
+function countOf(count, noun) {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+// templatesView words the templates row. Nothing is read from disk until the
+// owner reviews it; the row always says what would happen next, for which
+// application, and never lists a name without an active consent.
+export function templatesView(view, { locale, timeZone } = {}) {
+  const row = view?.templates || {};
+  const stored = view?.profile?.templates || {};
+  const readOnly = Boolean(view?.read_only);
+  const app = String(row.app_name || '');
+  const folders = (Array.isArray(row.folders) ? row.folders : []).map(String);
+  const base = {
+    state: String(row.state || ''),
+    appName: app,
+    folders,
+    project: [],
+    track: [],
+    canReview: false,
+    canReadAgain: false,
+    canForget: false,
+    disabled: readOnly
+  };
+  const act = { canReadAgain: !readOnly, canForget: !readOnly };
+  switch (base.state) {
+    case 'detect_first':
+      return {
+        ...base,
+        note: 'Not read. Detect first; templates are listed for an application found on this Mac.'
+      };
+    case 'other_app':
+      return { ...base, note: `Templates are read for ${app} only for now.` };
+    case 'plugin_missing':
+      return { ...base, note: `Install the ${app} plugin to read templates.` };
+    case 'update_plugin':
+      return { ...base, note: `Update the ${app} plugin to read templates.` };
+    case 'not_read':
+      return {
+        ...base,
+        note: `Not read. Review to let Ori list the templates folder of ${app}.`,
+        canReview: !readOnly
+      };
+    case 'listed': {
+      const items = Array.isArray(stored.items) ? stored.items : [];
+      const project = items
+        .filter(item => item?.kind === 'project')
+        .map(item => String(item.name || ''));
+      const track = items
+        .filter(item => item?.kind === 'track')
+        .map(item => String(item.name || ''));
+      const more = stored.truncated ? ' The folders hold more than are listed here.' : '';
+      return {
+        ...base,
+        ...act,
+        project,
+        track,
+        note: `${countOf(project.length, 'project template')} and ${countOf(track.length, 'track template')}, read ${profileDate(stored.read_at, locale, timeZone)}.${more}`
+      };
+    }
+    case 'empty':
+      return {
+        ...base,
+        ...act,
+        note: `No templates were found in ${joinNames(folders) || 'its templates folders'}, read ${profileDate(stored.read_at, locale, timeZone)}.`
+      };
+    case 'problem':
+      return stored.problem === 'operation_unavailable' || row.problem === 'operation_unavailable'
+        ? { ...base, canForget: !readOnly, note: `Update the ${app} plugin to read templates.` }
+        : {
+            ...base,
+            ...act,
+            note: 'The last read failed, so nothing is listed. Read again to retry.'
+          };
+    default:
+      return {
+        ...base,
+        state: 'unsupported',
+        note: 'Templates cannot be listed for this Home yet.'
+      };
+  }
+}
+
 // What the status line says after an action finished.
 export function profileStatus(action, view) {
   switch (action) {
@@ -284,6 +367,16 @@ export function profileStatus(action, view) {
       return view?.profile?.main_app ? 'Saved.' : 'Cleared.';
     case 'defaults':
       return view?.profile?.defaults ? 'Defaults saved.' : 'Defaults cleared.';
+    case 'templates': {
+      const row = templatesView(view);
+      if (row.state === 'listed')
+        return `Listed ${countOf(row.project.length + row.track.length, 'template')}.`;
+      if (row.state === 'empty') return 'No templates were found.';
+      // Still "not read" after a review means the dialog was dismissed.
+      return row.state === 'not_read' ? 'Nothing was read.' : row.note;
+    }
+    case 'forget':
+      return 'Forgotten. Nothing is read until you review it again.';
     default:
       return 'Saved.';
   }
@@ -409,8 +502,74 @@ export class HomeProfilePanel {
     if (row.kind === 'apps') this.renderApps(section);
     else if (row.kind === 'main_app') this.renderMainApp(section, heading.id);
     else if (row.kind === 'defaults') this.renderDefaults(section);
+    else if (row.kind === 'templates') this.renderTemplates(section);
     else return null;
     return section;
+  }
+
+  renderTemplates(section) {
+    const view = templatesView(this.view);
+    section.dataset.state = view.state;
+    section.append(element('p', 'home-profile-note home-profile-templates-note', view.note));
+    for (const [label, names] of [
+      ['Project', view.project],
+      ['Track', view.track]
+    ]) {
+      if (!names.length) continue;
+      const line = element('p', 'home-profile-templates');
+      line.append(element('span', 'home-profile-templates-kind', label), ' ', names.join(', '));
+      section.append(line);
+    }
+    const off = this.busy || view.disabled;
+    const actions = element('div', 'home-profile-actions');
+    if (view.canReview) actions.append(button('Review', 'review-templates', '', off));
+    if (view.canReadAgain) actions.append(button('Read again', 'read-templates', '', off));
+    if (view.canForget) actions.append(button('Forget', 'forget-templates', '', off));
+    if (actions.childElementCount) section.append(actions);
+  }
+
+  // The consent dialog: the application, the folders, one sentence, and one
+  // button that reads. Closing it any other way reads nothing.
+  confirmTemplatesRead(review) {
+    return new Promise(resolve => {
+      const dialog = element('dialog', 'assistant-program-hire-dialog home-profile-dialog');
+      dialog.setAttribute('aria-labelledby', 'homeProfileTemplatesDialogTitle');
+      const title = element('h2', '', `Read ${review.app_name} templates?`);
+      title.id = 'homeProfileTemplatesDialogTitle';
+      const folders = element('ul', 'home-profile-dialog-folders');
+      for (const folder of review.folders || []) folders.append(element('li', '', folder));
+      const actions = element('div', 'assistant-program-dialog-actions');
+      const cancel = element('button', 'modern-btn modern-btn-secondary', 'Not now');
+      cancel.type = 'button';
+      const confirm = element('button', 'modern-btn modern-btn-primary', 'Read templates');
+      confirm.type = 'button';
+      actions.append(cancel, confirm);
+      dialog.append(title, element('p', '', review.sentence), folders, actions);
+      let agreed = false;
+      cancel.addEventListener('click', () => dialog.close());
+      confirm.addEventListener('click', () => {
+        agreed = true;
+        dialog.close();
+      });
+      dialog.addEventListener('close', () => {
+        dialog.remove();
+        resolve(agreed);
+      });
+      document.body.append(dialog);
+      dialog.showModal();
+    });
+  }
+
+  // Review asks the server what a read would cover and shows it; only the
+  // dialog's own button commits. Reading again under a consent already given
+  // needs no second dialog.
+  async readTemplates({ confirm }) {
+    await this.run('Checking what would be read…', 'templates', async () => {
+      const review = await this.post('/templates/review');
+      if (confirm && !(await this.confirmTemplatesRead(review))) return this.view;
+      this.status('Listing templates…');
+      return this.post('/templates/commit', { review_id: review.review_id });
+    });
   }
 
   renderDefaults(section) {
@@ -599,6 +758,15 @@ export class HomeProfilePanel {
         break;
       case 'save-defaults':
         await this.saveDefaults();
+        break;
+      case 'review-templates':
+        await this.readTemplates({ confirm: true });
+        break;
+      case 'read-templates':
+        await this.readTemplates({ confirm: false });
+        break;
+      case 'forget-templates':
+        await this.run('Forgetting…', 'forget', () => this.post('/templates/forget'));
         break;
       default:
     }

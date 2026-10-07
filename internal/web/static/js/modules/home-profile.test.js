@@ -13,7 +13,8 @@ import {
   profileDate,
   profileStatus,
   profileView,
-  sampleRateLabel
+  sampleRateLabel,
+  templatesView
 } from './home-profile.js';
 
 const DATE = { locale: 'en-US', timeZone: 'UTC' };
@@ -508,6 +509,229 @@ test('a profile that changed somewhere else is re-read, never overwritten', asyn
   assert.equal(
     panel.lastStatus,
     'This profile changed somewhere else, so nothing was saved. It has been refreshed.'
+  );
+  assert.equal(panel.busy, false);
+});
+
+function templatesCard(state, stored = undefined, extra = {}) {
+  return {
+    available: true,
+    read_only: false,
+    templates: {
+      state,
+      app_id: 'reaper',
+      app_name: 'REAPER',
+      folders: ['ProjectTemplates', 'TrackTemplates']
+    },
+    profile: stored ? { templates: stored } : {},
+    ...extra
+  };
+}
+
+test('templates say Not read until the owner reviews, and never list a name before', () => {
+  const view = templatesView(templatesCard('not_read'), DATE);
+  assert.equal(view.note, 'Not read. Review to let Ori list the templates folder of REAPER.');
+  assert.equal(view.canReview, true);
+  assert.equal(view.canReadAgain, false);
+  assert.equal(view.canForget, false);
+  assert.deepEqual([view.project, view.track], [[], []]);
+  // A consent the owner took back reads the same way, whatever is left stored.
+  const revoked = templatesView(
+    templatesCard('not_read', {
+      consent: { granted_at: '2026-10-07T09:00:00Z', revoked_at: '2026-10-08T09:00:00Z' }
+    }),
+    DATE
+  );
+  assert.equal(revoked.canReview, true);
+  assert.deepEqual(revoked.project, []);
+});
+
+test('listed templates show counts, the read date and the names by kind', () => {
+  const stored = {
+    read_at: '2026-10-07T10:00:00Z',
+    items: [
+      { name: 'Band Session', kind: 'project', file: 'Band Session.RPP' },
+      { name: 'Vocal Comp', kind: 'project', file: 'Vocal Comp.RPP' },
+      { name: 'Drum Bus', kind: 'track', file: 'Drum Bus.RTrackTemplate' }
+    ]
+  };
+  const view = templatesView(templatesCard('listed', stored), DATE);
+  assert.equal(view.note, '2 project templates and 1 track template, read Oct 7, 2026.');
+  assert.deepEqual(view.project, ['Band Session', 'Vocal Comp']);
+  assert.deepEqual(view.track, ['Drum Bus']);
+  assert.equal(view.canReview, false);
+  assert.equal(view.canReadAgain, true);
+  assert.equal(view.canForget, true);
+  // File names never reach the card copy.
+  assert.equal(JSON.stringify(view).includes('.RPP'), false);
+  const more = templatesView(templatesCard('listed', { ...stored, truncated: true }), DATE);
+  assert.equal(
+    more.note,
+    '2 project templates and 1 track template, read Oct 7, 2026. The folders hold more than are listed here.'
+  );
+  const none = templatesView(templatesCard('empty', { read_at: '2026-10-07T10:00:00Z' }), DATE);
+  assert.equal(
+    none.note,
+    'No templates were found in ProjectTemplates and TrackTemplates, read Oct 7, 2026.'
+  );
+  assert.equal(none.canReadAgain, true);
+});
+
+test('templates name the application for every state that cannot be read', () => {
+  assert.equal(
+    templatesView(templatesCard('other_app')).note,
+    'Templates are read for REAPER only for now.'
+  );
+  assert.equal(
+    templatesView(templatesCard('update_plugin')).note,
+    'Update the REAPER plugin to read templates.'
+  );
+  assert.equal(
+    templatesView(templatesCard('plugin_missing')).note,
+    'Install the REAPER plugin to read templates.'
+  );
+  assert.equal(
+    templatesView(templatesCard('detect_first')).note,
+    'Not read. Detect first; templates are listed for an application found on this Mac.'
+  );
+  assert.equal(
+    templatesView({ available: true }).note,
+    'Templates cannot be listed for this Home yet.'
+  );
+  for (const state of [
+    'other_app',
+    'update_plugin',
+    'plugin_missing',
+    'detect_first',
+    'unsupported'
+  ]) {
+    const view = templatesView(templatesCard(state));
+    assert.deepEqual(
+      [view.canReview, view.canReadAgain, view.canForget],
+      [false, false, false],
+      state
+    );
+  }
+});
+
+test('a failed read says what happened and how to retry', () => {
+  const failed = templatesView(templatesCard('problem', { problem: 'read_failed' }));
+  assert.equal(failed.note, 'The last read failed, so nothing is listed. Read again to retry.');
+  assert.equal(failed.canReadAgain, true);
+  assert.equal(failed.canForget, true);
+  const old = templatesView(templatesCard('problem', { problem: 'operation_unavailable' }));
+  assert.equal(old.note, 'Update the REAPER plugin to read templates.');
+  assert.equal(old.canReadAgain, false);
+  assert.equal(old.canForget, true);
+});
+
+test('a read-only Home shows the templates and disables every templates control', () => {
+  const stored = {
+    read_at: '2026-10-07T10:00:00Z',
+    items: [{ name: 'Band Session', kind: 'project', file: 'Band Session.RPP' }]
+  };
+  const listed = templatesView(templatesCard('listed', stored, { read_only: true }), DATE);
+  assert.deepEqual(listed.project, ['Band Session']);
+  assert.deepEqual(
+    [listed.canReview, listed.canReadAgain, listed.canForget, listed.disabled],
+    [false, false, false, true]
+  );
+  assert.equal(
+    templatesView(templatesCard('not_read', undefined, { read_only: true })).canReview,
+    false
+  );
+});
+
+test('the templates status line says what a read or a Forget did', () => {
+  const stored = {
+    read_at: '2026-10-07T10:00:00Z',
+    items: [
+      { name: 'A', kind: 'project', file: 'A.RPP' },
+      { name: 'B', kind: 'track', file: 'B.RTrackTemplate' }
+    ]
+  };
+  assert.equal(profileStatus('templates', templatesCard('listed', stored)), 'Listed 2 templates.');
+  assert.equal(
+    profileStatus('templates', templatesCard('empty', { read_at: '2026-10-07T10:00:00Z' })),
+    'No templates were found.'
+  );
+  assert.equal(profileStatus('templates', templatesCard('not_read')), 'Nothing was read.');
+  assert.equal(
+    profileStatus('templates', templatesCard('problem', { problem: 'read_failed' })),
+    'The last read failed, so nothing is listed. Read again to retry.'
+  );
+  assert.equal(
+    profileStatus('forget', templatesCard('not_read')),
+    'Forgotten. Nothing is read until you review it again.'
+  );
+});
+
+test('Review reads nothing until the dialog’s own button is pressed', async () => {
+  const review = {
+    review_id: 'r1',
+    app_name: 'REAPER',
+    folders: ['ProjectTemplates'],
+    sentence: 'S'
+  };
+  const listed = templatesCard('listed', {
+    read_at: '2026-10-07T10:00:00Z',
+    items: [{ name: 'A', kind: 'project' }]
+  });
+  // Dismissed: one review request, no commit.
+  const dismissed = panelWith([{ status: 200, body: review }]);
+  dismissed.panel.view = templatesCard('not_read');
+  dismissed.panel.confirmTemplatesRead = async () => false;
+  await dismissed.panel.readTemplates({ confirm: true });
+  assert.deepEqual(
+    dismissed.requests.map(request => request.url.split('/profile')[1]),
+    ['/templates/review']
+  );
+  assert.equal(dismissed.panel.lastStatus, 'Nothing was read.');
+  // Agreed: the commit names the review it was shown.
+  const agreed = panelWith([
+    { status: 200, body: review },
+    { status: 200, body: listed }
+  ]);
+  agreed.panel.view = templatesCard('not_read');
+  let shown = null;
+  agreed.panel.confirmTemplatesRead = async value => {
+    shown = value;
+    return true;
+  };
+  await agreed.panel.readTemplates({ confirm: true });
+  assert.deepEqual(shown, review);
+  assert.equal(agreed.requests[1].url.endsWith('/profile/templates/commit'), true);
+  assert.equal(agreed.requests[1].body.review_id, 'r1');
+  assert.equal(agreed.panel.lastStatus, 'Listed 1 template.');
+  // Read again, under a consent already given, shows no second dialog.
+  const again = panelWith([
+    { status: 200, body: review },
+    { status: 200, body: listed }
+  ]);
+  again.panel.view = listed;
+  again.panel.confirmTemplatesRead = async () => {
+    throw new Error('the dialog must not open');
+  };
+  await again.panel.readTemplates({ confirm: false });
+  assert.equal(again.requests.length, 2);
+});
+
+test('a plugin that cannot list templates is said plainly and the card is not left busy', async () => {
+  const { panel, requests } = panelWith([
+    {
+      status: 409,
+      body: {
+        code: 'plugin_operation_unavailable',
+        message: 'The installed project plugin cannot list templates. Update it, then try again.'
+      }
+    }
+  ]);
+  panel.view = templatesCard('not_read');
+  await panel.readTemplates({ confirm: true });
+  assert.equal(requests.length, 1);
+  assert.equal(
+    panel.lastStatus,
+    'The installed project plugin cannot list templates. Update it, then try again.'
   );
   assert.equal(panel.busy, false);
 });
