@@ -11,6 +11,9 @@ function withEntryDocument(callback) {
       if (selector === '[data-assistant-program-entry]') {
         return inserted.find(item => Object.hasOwn(item.dataset, 'assistantProgramEntry')) || null;
       }
+      if (selector === '[data-home-profile-entry]') {
+        return inserted.find(item => Object.hasOwn(item.dataset, 'homeProfileEntry')) || null;
+      }
       if (selector === 'a[href$="/plans"]') return null;
       return null;
     },
@@ -99,6 +102,49 @@ test('an activation-only legacy program gets the generic optional-home fallback'
     await entry.init();
     assert.equal(inserted[0].textContent, 'Team Home');
     assert.equal(inserted[0].attributes['aria-label'], 'Open Team Home');
+  });
+});
+
+test('a Home whose package declares a profile card gets a link straight to it', async () => {
+  const program = extra => ({
+    available: true,
+    is_station: true,
+    hired: true,
+    stage_label: 'Helper',
+    level: 1,
+    declaration: { station_name: 'Music Production Home' },
+    ...extra
+  });
+  const entryFor = body =>
+    new AssistantProgramEntry({
+      workspaceId: 'home-uuid',
+      workspaceSlug: 'music-home',
+      fetchImpl: async () => ({ ok: true, json: async () => body })
+    });
+
+  await withEntryDocument(async inserted => {
+    const entry = entryFor(program({ home_profile_title: 'Your studio' }));
+    await entry.init();
+    assert.equal(inserted.length, 2);
+    assert.equal(inserted[0].textContent, 'Music Production Home · Helper L1');
+    // Named by the package's own title, and it lands on the card itself.
+    assert.equal(inserted[1].textContent, 'Your studio');
+    assert.equal(inserted[1].href, '/workspaces/music-home/assistant#homeProfilePanel');
+    assert.equal(inserted[1].attributes['aria-label'], 'Open Your studio on Music Production Home');
+    // The page re-renders its switch often; the links are added once.
+    entry.render();
+    entry.render();
+    assert.equal(inserted.length, 2);
+  });
+  // No declared card, no link.
+  await withEntryDocument(async inserted => {
+    await entryFor(program({})).init();
+    assert.equal(inserted.length, 1);
+  });
+  // A linked project has no card of its own, whatever the answer carries.
+  await withEntryDocument(async inserted => {
+    await entryFor(program({ is_station: false, home_profile_title: 'Your studio' })).init();
+    assert.equal(inserted.length, 1);
   });
 });
 

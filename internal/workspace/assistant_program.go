@@ -319,9 +319,13 @@ type AssistantProgramState struct {
 	// SongDetailsConsent lets each scan read tempo, length and track count from
 	// the Home's project files. Granted only by a folder card that created
 	// the Home; a Home without it never opens a project file.
-	SongDetailsConsent *SongDetailsConsent     `json:"song_details_consent,omitempty"`
-	Topology           AssistantTopologyState  `json:"topology,omitempty"`
-	Migration          AssistantMigrationState `json:"migration,omitempty"`
+	SongDetailsConsent *SongDetailsConsent `json:"song_details_consent,omitempty"`
+	// HomeProfile is what the Home knows about where its owner works, under the
+	// rows its package declares. Written only from the owner's card or a setup
+	// card the owner pressed; never by an agent.
+	HomeProfile *HomeProfile            `json:"home_profile,omitempty"`
+	Topology    AssistantTopologyState  `json:"topology,omitempty"`
+	Migration   AssistantMigrationState `json:"migration,omitempty"`
 	// GroupTemplate is inert creation provenance written only in the first
 	// Save of a Home created through a reviewed Group Template selection.
 	GroupTemplate *AssistantGroupTemplateProvenance `json:"group_template,omitempty"`
@@ -364,6 +368,7 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 	clone.ProjectLibraryInactiveRoots = append([]string(nil), source.ProjectLibraryInactiveRoots...)
 	clone.ProjectStaffingConsent = source.ProjectStaffingConsent.Clone()
 	clone.SongDetailsConsent = source.SongDetailsConsent.Clone()
+	clone.HomeProfile = source.HomeProfile.Clone()
 	for i := range clone.ProjectLibraryInitReviews {
 		if source.ProjectLibraryInitReviews[i].ConsumedAt != nil {
 			value := *source.ProjectLibraryInitReviews[i].ConsumedAt
@@ -531,6 +536,11 @@ func RenderAssistantProgramPromptSection(current, station *Workspace) string {
 	fmt.Fprintf(&builder, "- Stage: %q (level %d, accepted completions %d)\n", state.StageID, state.Level, state.AcceptedCompletions)
 	fmt.Fprintf(&builder, "- Contribution available: %t\n", state.PluginAvailable)
 	builder.WriteString("- Project mutation must use the ordinary task, confirmation, capability, readiness, filesystem, and runtime gates.\n")
+	// The Home's profile reaches the Home's own agents and every linked
+	// project's: both resolve to this station.
+	if profile := RenderHomeProfilePromptLines(state.GetHomeProfile()); len(profile) > 0 {
+		builder.WriteString("\n" + strings.Join(profile, "\n") + "\n")
+	}
 	return builder.String()
 }
 

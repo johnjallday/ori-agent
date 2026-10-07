@@ -25,6 +25,10 @@ const (
 	FolderPlanLibrary   = "library"
 	FolderPlanSongs     = "songs"
 	FolderPlanAssistant = "assistant"
+	// The Home's profile: which applications are on this computer, and whether
+	// one of their templates folders is listed. Present only when the Home's
+	// installed package declares a profile.
+	FolderPlanProfile = "profile"
 )
 
 // States of one plan line while a run is in progress.
@@ -108,6 +112,12 @@ type FolderSetupIntent struct {
 	// promised to record that consent on the Home the plan creates.
 	ReadsSongDetails  bool `json:"reads_song_details,omitempty"`
 	GrantsSongDetails bool `json:"grants_song_details,omitempty"`
+	// SetsProfile says the plan showed the Home's profile line, so the run
+	// looks for installed applications; GrantsTemplates says that line also
+	// told the user one application's templates folder is read, which only a
+	// plan that creates the Home may say.
+	SetsProfile     bool `json:"sets_profile,omitempty"`
+	GrantsTemplates bool `json:"grants_templates,omitempty"`
 }
 
 // FolderSetupPlan is everything one press of Set up will do. The browser sends

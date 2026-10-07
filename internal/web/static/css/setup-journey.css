@@ -648,6 +648,19 @@
   font-size: 0.95rem;
 }
 
+/* One quiet line about the Home's profile on the done screen. */
+.folder-run__profile {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--run-dim);
+  font-size: 0.85rem;
+}
+
+.folder-run__profile a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .folder-run__steps {
   display: grid;
   gap: 0.4rem;

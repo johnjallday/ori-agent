@@ -250,6 +250,89 @@ only when the root's recorded last scan differs from the one before the review.
   the top of "From your {Manager}" with where it came from, or one line on why
   there is none (for example no model).
 
+### S4c. Home profile: the card's line, the run step and the last screen
+
+- **Owner:** `AssistantProgramState.home_profile` (`internal/homeprofile`), under
+  the `home_profile` section the Home's installed package declares
+  (`independent-program-homes.md` §3.2). Host code names applications only
+  through the tool table and words rows only with the package's labels.
+- **The card's line:** when the Home provider's *installed* package declares a
+  profile, the one-card plan gains one line named by the declared title ("Your
+  studio"): after the library line on a collection's plan, with the Home's lines
+  on a single song's plan. Building a plan looks for installed applications
+  (`Lstat` of the tool table's bundle names in `/Applications` and
+  `~/Applications`; nothing inside a bundle is read). A card on screen is
+  planned again on every poll, so one look serves the plans of the next 15
+  seconds, like the rest of a plan's facts. The detail is one of:
+  - one found, and its templates can be listed: "REAPER is your main DAW. Reads
+    your REAPER templates folder so new projects can start from them. Nothing is
+    changed."
+  - one found, nothing to list: "Logic Pro is your main DAW. Nothing is read."
+  - several found: "Found REAPER and Logic Pro. Pick your main DAW on the Home
+    after setup. Reads your REAPER templates folder; nothing is changed."
+  - none found: "No main DAW was found on this Mac. You can tell the Home
+    later."
+
+  "main DAW" is the declared label of the main row, lower-cased. The templates
+  sentence appears only when the plan creates the Home: pressing **Set up** is
+  then the consent, as it is for song details. A plan for an existing Home ends
+  "Nothing is read." and is worded from what that Home already knows, with the
+  very rules the run applies (`homeprofile.SetupPreview`): an application its
+  owner said is not theirs is not named, a main application its owner chose
+  "stays your main DAW", and one the Home's library decides is named instead of
+  asking for a pick. The line's text is part of the plan digest, so a card
+  showing older text is refused as `plan_changed`. No new control.
+- **First-ever setup:** when the same card installs the Home provider, nothing
+  is installed at plan time, so the plan has no profile line and the run does no
+  profile step. The new Home's card then shows **Detect** and "Not read".
+- **The run step:** after the Home exists and before the listing
+  (`foldersetup.Profile`): look for applications, propose the main one (the only
+  one found; with several, the one whose project format has strictly the most
+  library entries; otherwise none), and, only for a Home this run created,
+  record `templates.consent {source: folder_offer}` and call the project
+  plugin's facts operation once. "Created" is what the run itself did, not what
+  the plan said: a single song's run carries the consent only in the pass that
+  created the Home, and a collection's run only for the Home it made after Set
+  up was pressed. A Home that was already there never gains a consent from a
+  card, even from a plan that promised a read. A plugin without the operation,
+  or a read that fails, never stops the run: the profile keeps the applications
+  and the templates row says what happened (and offers Read again once the
+  plugin can list templates). A card never turns a consent back on, and a
+  resumed run replays the step instead of looking and reading again. A profile
+  that could not be saved leaves its line failed and the run continues; the
+  last screen keeps that line as "Did not finish" and does not count it.
+- **The last screen:** the receipt gains a `profile` row, and "Pick a song to
+  start with" (S4a) or the plain receipt screen shows one quiet line under the
+  status, "Your studio: REAPER · 4 templates" or "Your studio: REAPER and Logic
+  Pro · pick your main DAW", with a **Review** link to the Home's profile card
+  (`#homeProfilePanel`). It blocks nothing.
+- **Finding the card:** it is panel 05 on the Home's own page
+  (`/workspaces/<home>/assistant`), below four other panels. The Home's
+  workspace page therefore shows a second link beside the Home's, named by the
+  declared title ("Your studio"), that opens that page at the card
+  (`#homeProfilePanel`); the card scrolls into view and its heading takes focus
+  once it has drawn. The finished setup's **Review** link lands the same way. A
+  linked song's page has no such link: the card belongs to the Home.
+- **The Home card ("05 / PROFILE"):** rows in declared order. Applications show
+  **Detected** (dashed) or **Confirmed** (filled) with **Confirm** and **Not
+  mine**; a hidden application is listed apart with **Show again** and never
+  reaches an agent. The main row is a pick among found applications and says
+  where its value came from. Templates are "Not read" until the owner presses
+  **Review**, sees the application and its two folder names, and presses **Read
+  templates**; then the names by kind with **Read again** and **Forget** (which
+  clears the list and withdraws the consent in one write). A project plugin
+  without the operation shows "Update the REAPER plugin to read templates."; an
+  application other than the one whose templates can be listed shows "Templates
+  are read for REAPER only for now." Defaults are four optional parts, each "Not
+  set" until saved. A read-only Home shows every value and disables every
+  control. **Detect again** reruns the look and asks the plugin for the
+  application's version only.
+- **New song:** a blueprint's Session settings show the Home's saved tempo and
+  time signature instead of the blueprint's own defaults, with "From your
+  studio defaults" under each field the person has not changed. The values
+  arrive on the placement plan's Home (`input_defaults`) after the server
+  checked each one against the blueprint's own input declaration.
+
 ### S5. Catalog-only (unsupported format, or no compatible provider)
 
 - **Owner:** the catalog entry (`projectlibrary` query) and the provider-eligibility

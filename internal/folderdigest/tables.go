@@ -80,9 +80,12 @@ var capabilityRows = []CapabilityRow{
 			{Name: "*.als", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Ableton Live set", ProjectFormat: "ableton"},
 		},
 		Tools: []Tool{
-			{Match: ToolByExtension, Value: ".rpp", ToolID: "reaper", ToolName: "REAPER", HypothesisText: "REAPER may be one of the tools you use."},
-			{Match: ToolByExtension, Value: ".logicx", ToolID: "logic-pro", ToolName: "Logic Pro", HypothesisText: "Logic Pro may be one of the tools you use."},
-			{Match: ToolByExtension, Value: ".als", ToolID: "ableton-live", ToolName: "Ableton Live", HypothesisText: "Ableton Live may be one of the tools you use."},
+			{Match: ToolByExtension, Value: ".rpp", ToolID: "reaper", ToolName: "REAPER", HypothesisText: "REAPER may be one of the tools you use.",
+				AppBundles: []string{"REAPER.app", "REAPER64.app"}, TemplateFolders: []string{"ProjectTemplates", "TrackTemplates"}},
+			{Match: ToolByExtension, Value: ".logicx", ToolID: "logic-pro", ToolName: "Logic Pro", HypothesisText: "Logic Pro may be one of the tools you use.",
+				AppBundles: []string{"Logic Pro.app", "Logic Pro X.app"}},
+			{Match: ToolByExtension, Value: ".als", ToolID: "ableton-live", ToolName: "Ableton Live", HypothesisText: "Ableton Live may be one of the tools you use.",
+				AppBundles: []string{"Ableton Live*.app"}},
 		},
 		Blueprint: ShapeBlueprint{Shape: ShapeAudio, BlueprintID: "reaper-song", Label: "REAPER song"},
 		Offer: &CapabilityOffer{
@@ -186,6 +189,8 @@ func cloneCapability(row CapabilityRow) CapabilityRow {
 	row.Tools = append([]Tool(nil), row.Tools...)
 	for i := range row.Tools {
 		row.Tools[i].AppNames = append([]string(nil), row.Tools[i].AppNames...)
+		row.Tools[i].AppBundles = append([]string(nil), row.Tools[i].AppBundles...)
+		row.Tools[i].TemplateFolders = append([]string(nil), row.Tools[i].TemplateFolders...)
 	}
 	if row.Offer != nil {
 		offer := *row.Offer

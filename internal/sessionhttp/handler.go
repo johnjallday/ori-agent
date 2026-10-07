@@ -3,6 +3,7 @@ package sessionhttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -52,6 +54,12 @@ type Handler struct {
 	assistantReviewedStaffer      func(context.Context, string, string, string, string) error
 	homePackageUpgrades           HomePackageUpgrades
 	pluginUpdateSnapshot          func() plugin.UpdateSnapshot
+	// homeProfileApps looks for installed applications when the owner asks the
+	// Home profile card to detect. Nil uses the computer's Applications folders.
+	homeProfileApps func() []folderdigest.InstalledApp
+	// homeProfileFacts calls an installed project plugin's declared facts
+	// operation. Nil means no plugin facts can be read.
+	homeProfileFacts func(context.Context, plugin.InstalledPlugin, json.RawMessage) (json.RawMessage, error)
 	// assistantRoleStaffer commits exactly the roles the user filled on an
 	// assistant-program blueprint. Separate from assistantReviewedStaffer,
 	// which staffs every required role: under the vacancy model a role the user

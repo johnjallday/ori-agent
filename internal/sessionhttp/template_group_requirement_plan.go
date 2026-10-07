@@ -40,6 +40,10 @@ type templateGroupRequirementHomePlan struct {
 	Name         string `json:"name,omitempty"`
 	FolderSlug   string `json:"folder_slug,omitempty"`
 	ProposedName string `json:"proposed_name,omitempty"`
+	// InputDefaults are the existing Home's own new-project defaults for the
+	// inputs this blueprint declares. The dialog shows them instead of the
+	// blueprint's until the person changes a field.
+	InputDefaults *templateHomeInputDefaults `json:"input_defaults,omitempty"`
 }
 
 type templateGroupRequirementRequiredRolesPlan struct {
@@ -258,6 +262,7 @@ func (h *Handler) buildTemplateGroupRequirementPlan(
 	}
 	plan.Home = &templateGroupRequirementHomePlan{
 		Exists: true, WorkspaceID: home.ID, Name: home.Name, FolderSlug: home.FolderSlug,
+		InputDefaults: homeProfileInputDefaults(template, home, ownerUserID),
 	}
 	plan.RequiredHomeRoles = h.verifiedRequiredHomeRoles(effective, evaluation.ProgramKey, home)
 	if plan.RequiredHomeRoles.Verification == templateGroupRoleVerificationVerified &&

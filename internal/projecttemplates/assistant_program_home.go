@@ -34,6 +34,10 @@ type AssistantProgramHome struct {
 	Stages                         []workspace.AssistantProgramStageSpec      `json:"stages"`
 	Reflection                     workspace.AssistantReflectionConfig        `json:"reflection"`
 	AllowedProjectAttachments      []AssistantProgramAllowedProjectAttachment `json:"allowed_project_attachments,omitempty"`
+	// HomeProfile is the Home's optional profile card. A manifest that declares
+	// it must require the home_profile_v1 host feature. It stays out of the
+	// durable declaration: readers take it from the installed package.
+	HomeProfile *HomeProfileDeclaration `json:"home_profile,omitempty"`
 }
 
 // AssistantProgramHomeRole deliberately has no scope field: its component
@@ -72,6 +76,7 @@ func CloneAssistantProgramHome(source AssistantProgramHome) AssistantProgramHome
 	}
 	clone.Stages = append([]workspace.AssistantProgramStageSpec(nil), source.Stages...)
 	clone.AllowedProjectAttachments = append([]AssistantProgramAllowedProjectAttachment(nil), source.AllowedProjectAttachments...)
+	clone.HomeProfile = source.HomeProfile.Clone()
 	return clone
 }
 
@@ -149,7 +154,7 @@ func NormalizeAssistantProgramHome(home *AssistantProgramHome) error {
 		}
 		seen[key] = struct{}{}
 	}
-	return nil
+	return normalizeHomeProfileDeclaration(home.HomeProfile)
 }
 
 func strictAssistantIDs(values []string, maximum int) bool {
