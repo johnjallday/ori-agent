@@ -1700,9 +1700,79 @@ Makes the project's workspace (or uses the one it already has), records File-onl
 
 `PATCH /api/agents/{name}` that changes the model, provider, reasoning effort, temperature, max tokens or system prompt is carried into every project copy the consent tracks for that agent, except a copy changed in its own project. The response then includes `carried: { updated: [{id, name}], customised: [{id, name}] }`. `GET /api/agents/{name}/detail` adds `workspace_count` and `workspaces`, and leaves copies that are still in step out of `origin.customised_in`. A chat answered by a workspace's own copy never writes that copy back to the user's agent.
 
+## Home Profile API
+
+What a Home knows about where its owner works, under the rows the Home's installed package declares in `home_profile` (contract: `docs/architecture/independent-program-homes.md` §3.2; states: `docs/architecture/music-setup-onboarding.md` S4c). Every route is for the authenticated owner of that exact Home: a linked project, another person's Home or any other workspace is `404`. Request bodies are strict JSON (an unknown or duplicate key is `400`) and carry a `request_id`; repeating one replays the earlier result (`replayed: true`) instead of writing again. Nothing here is an agent tool.
+
+**Endpoint:** `GET /api/workspaces/{homeID}/assistant-program/profile`
+
+Detects nothing and reads no folder. Takes no query string.
+
+```json
+{
+  "available": true,
+  "read_only": false,
+  "title": "Your studio",
+  "intro": "What Ori knows about where you make music. Detected values are hints until you confirm them.",
+  "fields": [{ "id": "apps", "kind": "apps", "label": "DAWs on this Mac" }],
+  "revision": 3,
+  "profile": {
+    "schema_version": 1,
+    "revision": 3,
+    "declared_by": { "plugin_id": "music-project-management", "version": "0.2.0", "title": "Your studio", "labels": { "main_app": "Main DAW" } },
+    "detected_at": "…",
+    "apps": [{ "id": "reaper", "name": "REAPER", "detected": true, "detected_at": "…", "version": "7.28", "confirmed_at": "…" }],
+    "main_app": { "id": "reaper", "source": "detected", "reason": "only_app", "confirmed_at": "…" },
+    "templates": {
+      "consent": { "granted_at": "…", "source": "home_review" },
+      "read_at": "…",
+      "app_id": "reaper",
+      "items": [{ "name": "Band Session", "kind": "project", "file": "Band Session.RPP", "modified_at": "…" }]
+    },
+    "defaults": { "tempo_bpm": 120, "time_signature": "4 4", "sample_rate_hz": 48000, "bit_depth": 24, "source": "owner", "confirmed_at": "…" }
+  },
+  "choices": { "min_tempo": 40, "max_tempo": 240, "time_signatures": [{ "value": "4 4", "label": "4/4" }], "sample_rates": [44100, 48000, 88200, 96000, 176400, 192000], "bit_depths": [16, 24, 32] },
+  "templates": { "state": "listed", "app_id": "reaper", "app_name": "REAPER", "folders": ["ProjectTemplates", "TrackTemplates"] },
+  "facts_operation": true
+}
+```
+
+- `available: false` (and nothing else) for an owner's Home whose installed package declares no profile.
+- `read_only: true` when the Home's provider is unavailable for changes: values stay readable and every write below is `409 home_read_only`.
+- `profile` is `null` and `revision` is `0` before anything was detected or saved. Request receipts are never returned.
+- Every value says where it came from: `source: "detected"` is a hint until `confirmed_at` is set; `source: "owner"` is the owner's instruction. `main_app.reason` is `only_app` or `library_majority` on a detected value. A hidden application has `hidden: true` and is never shown to agents.
+- `templates.state` is one of `detect_first`, `other_app`, `plugin_missing`, `update_plugin`, `not_read`, `listed`, `empty`, `problem` (with `problem: read_failed | operation_unavailable`) or `unsupported`. `items` holds at most 64 names with a bare file name each, never a path; `truncated: true` means the folders hold more.
+- `time_signatures` are the options of the `time_signature` input on the blueprint the Home's projects are created from; empty when that plugin is not installed.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/detect`
+
+`{ "request_id": "…" }` — looks for installed applications (bundle names from the host tool table in `/Applications` and `~/Applications`; no symlink is followed and nothing inside a bundle is read) and asks the project plugin's facts operation for the application's version only. Records what it finds as hints, keeps everything the owner confirmed, hid or chose, and proposes a main application when the owner has not said: the only one found, or with several the one whose project format has strictly the most entries in the Home's library, otherwise none. Answers with the card.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/fields`
+
+```json
+{ "request_id": "…", "if_revision": 3, "main_app": "reaper", "confirm_apps": ["reaper"], "hide_apps": ["logic-pro"], "show_apps": [], "defaults": { "tempo_bpm": 96, "time_signature": "3 4" } }
+```
+
+Every part but `request_id` and `if_revision` is optional; what is absent is left as it is. `main_app` equal to the proposed one confirms it; another id replaces it with `source: owner`; `""` clears it. `confirm_apps` marks a found application as the owner's, `hide_apps` is "Not mine" (it also clears a main application or templates list that was that application's), `show_apps` brings a hidden one back as a hint. `defaults` replaces the whole set: a part left out is no longer set, and `{}` clears them. `409 home_profile_changed` on a stale `if_revision`; `400` for an application that was not detected, an id named twice, a tempo outside 40 to 240, a time signature that is not one of the choices, or a sample rate or bit depth outside the fixed lists.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/templates/review`
+
+`{ "request_id": "…" }` — reads nothing and stores nothing. Answers `{ review_id, app_id, app_name, folders, sentence }` for the consent dialog. `409 plugin_operation_unavailable` when no installed project plugin offers a facts operation; `400` when templates cannot be read for this Home's applications (nothing detected yet, or the application is not found, hidden or not the main one).
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/templates/commit`
+
+`{ "request_id": "…", "review_id": "…" }` — records the consent (`source: home_review`; an active consent is kept) and calls the facts operation once with `include_templates: true`. Answers with the card. `409 home_profile_changed` when the review no longer describes the Home (for example after Forget); `409 plugin_operation_unavailable` when there is no operation, and nothing is recorded. A read that fails after the owner agreed keeps the consent and answers `200` with `templates.state: "problem"`.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/templates/forget`
+
+`{ "request_id": "…" }` — clears the list and sets `consent.revoked_at` in one write. A later read needs a new review.
+
+**Related.** `POST /api/workspaces/template-agent-plan` adds `group_requirement.home.input_defaults: { values: { tempo, time_signature }, note }` when the destination Home has saved defaults the selected blueprint's own inputs accept; the Create dialog shows them in fields the person has not changed. The Home's agents receive the profile in their context block, and its primary Manager has the read-only tool `home_profile_read`.
+
 ## Home Package Upgrade API
 
-Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Only guidance may change: Home role prompts and packaged skill text. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
+Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Two kinds of change are accepted: guidance (Home role prompts and packaged skill text), and a release that adds a `home_profile` card to a Home that has none (the review then lists it under `additions`). The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
 
 | Code | Meaning |
 | --- | --- |

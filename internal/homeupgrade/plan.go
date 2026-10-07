@@ -144,28 +144,18 @@ func guidanceOnlyPrograms(installed plugin.InstalledPlugin, target Target) ([]Pl
 	if !slices.Equal(nextSkills, installedSkills) {
 		return nil, ErrNotGuidanceOnly
 	}
-	withoutHomes := func(contribution plugin.SurfaceContribution) ([]byte, error) {
-		contribution.Name, contribution.Version, contribution.AssistantProgramHomes = "", "", nil
-		return json.Marshal(contribution)
-	}
-	current, err := withoutHomes(*installed.WorkspaceSurfaces)
-	if err != nil {
-		return nil, ErrNotGuidanceOnly
-	}
-	candidate, err := withoutHomes(*next.WorkspaceSurfaces)
-	if err != nil || !bytes.Equal(current, candidate) {
-		return nil, ErrNotGuidanceOnly
-	}
 	currentHomes, nextHomes := installed.WorkspaceSurfaces.AssistantProgramHomes, next.WorkspaceSurfaces.AssistantProgramHomes
 	if len(currentHomes) != len(nextHomes) {
 		return nil, ErrNotGuidanceOnly
 	}
 	programs := make([]PlanProgram, 0, len(currentHomes))
+	addsProfile := false
 	for index := range currentHomes {
-		changes, err := projecttemplates.GuidanceOnlyHomeChange(currentHomes[index], nextHomes[index])
+		change, err := projecttemplates.AcceptedHomeChange(currentHomes[index], nextHomes[index])
 		if err != nil {
 			return nil, ErrNotGuidanceOnly
 		}
+		addsProfile = addsProfile || change.AddsHomeProfile
 		home := currentHomes[index]
 		programs = append(programs, PlanProgram{
 			ProgramID: home.ID,
@@ -176,8 +166,31 @@ func guidanceOnlyPrograms(installed plugin.InstalledPlugin, target Target) ([]Pl
 				PluginGeneration:  installed.EvidenceGeneration(), ComponentFingerprint: installed.ComponentFingerprint,
 			},
 			ToDeclarationDigest: projecttemplates.AssistantProgramHomeDigest(nextHomes[index]),
-			RolePrompts:         changes,
+			RolePrompts:         change.RolePrompts,
+			AddsHomeProfile:     change.AddsHomeProfile, HomeProfileTitle: change.HomeProfileTitle,
 		})
+	}
+	// Everything outside the Home declarations must be byte-identical, with one
+	// exception that belongs to the additive profile class: a release that adds
+	// a profile card must also start requiring the host feature that gates it.
+	// That one feature is set aside, and only when a card was actually added
+	// and the installed release did not already require it.
+	withoutHomes := func(contribution plugin.SurfaceContribution, setAsideProfileFeature bool) ([]byte, error) {
+		contribution.Name, contribution.Version, contribution.AssistantProgramHomes = "", "", nil
+		if setAsideProfileFeature {
+			contribution.RequiresHostFeatures = slices.DeleteFunc(slices.Clone(contribution.RequiresHostFeatures),
+				func(feature string) bool { return feature == plugin.HostFeatureHomeProfileV1 })
+		}
+		return json.Marshal(contribution)
+	}
+	current, err := withoutHomes(*installed.WorkspaceSurfaces, false)
+	if err != nil {
+		return nil, ErrNotGuidanceOnly
+	}
+	setAside := addsProfile && !slices.Contains(installed.WorkspaceSurfaces.RequiresHostFeatures, plugin.HostFeatureHomeProfileV1)
+	candidate, err := withoutHomes(*next.WorkspaceSurfaces, setAside)
+	if err != nil || !bytes.Equal(current, candidate) {
+		return nil, ErrNotGuidanceOnly
 	}
 	return programs, nil
 }

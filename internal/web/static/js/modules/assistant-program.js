@@ -85,6 +85,15 @@ export function providerUpgradeCard(upgrade, result = null) {
 // requestedUpgradeReview reports whether the page was opened to review the
 // Home's package upgrade (the Plugins page sends the owner here with
 // ?upgrade=review when it refuses to replace a package this Home uses).
+// providerUpgradeAdditions lists what a newer release adds to a Home besides
+// guidance (for example a profile card), as plain sentences from the server.
+export function providerUpgradeAdditions(review) {
+  return (Array.isArray(review?.additions) ? review.additions : [])
+    .map(line => String(line || '').trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
 export function requestedUpgradeReview(search = '') {
   return new URLSearchParams(String(search || '')).get('upgrade') === 'review';
 }
@@ -692,6 +701,10 @@ export class AssistantProgramPage {
       note.textContent = 'Role prompts are unchanged; only packaged skill text changes.';
       section('Guidance changes', note);
     }
+
+    // What the newer release adds besides guidance, in the server's words.
+    const additions = providerUpgradeAdditions(review);
+    if (additions.length) section('What this release adds', list(additions));
 
     const homes = (Array.isArray(review.homes) ? review.homes : []).map(home => {
       const projects = Array.isArray(home.projects) ? home.projects : [];

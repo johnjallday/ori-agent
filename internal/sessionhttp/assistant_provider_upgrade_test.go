@@ -105,6 +105,26 @@ func TestAssistantProviderUpgradeHTTP(t *testing.T) {
 	if strings.Contains(rr.Body.String(), station.ID) {
 		t.Fatalf("review disclosed workspace IDs: %s", rr.Body.String())
 	}
+	// A guidance-only release adds nothing; one that adds a profile card says
+	// so in one sentence, with the card's own title.
+	if len(review.Additions) != 0 || strings.Contains(rr.Body.String(), "additions") {
+		t.Fatalf("a guidance-only review listed additions: %s", rr.Body.String())
+	}
+	fake.review.Plan.Programs[0].AddsHomeProfile, fake.review.Plan.Programs[0].HomeProfileTitle = true, "Your studio"
+	rr = providerUpgradeRequest(t, handler.ReviewAssistantProviderUpgrade, http.MethodPost, station.ID, "/review", "{}")
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &review) != nil || len(review.Additions) != 1 ||
+		review.Additions[0] != "Adds a Your studio card to this Home. Nothing is detected or read until you open it." {
+		t.Fatalf("additive review = %d %s", rr.Code, rr.Body.String())
+	}
+	fake.review.Plan.Programs[0].AddsHomeProfile, fake.review.Plan.Programs[0].HomeProfileTitle = false, ""
+	for title, want := range map[string]string{
+		"":         "Adds a profile card to this Home. Nothing is detected or read until you open it.",
+		"Our room": "Adds an Our room card to this Home. Nothing is detected or read until you open it.",
+	} {
+		if got := providerUpgradeProfileAddition(title); got != want {
+			t.Fatalf("addition(%q) = %q", title, got)
+		}
+	}
 	if rr := providerUpgradeRequest(t, handler.ReviewAssistantProviderUpgrade, http.MethodPost, station.ID, "/review", `{"extra":1}`); rr.Code != http.StatusBadRequest {
 		t.Fatalf("unknown review field accepted: %d", rr.Code)
 	}

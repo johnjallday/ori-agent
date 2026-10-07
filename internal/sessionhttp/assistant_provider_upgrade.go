@@ -71,6 +71,24 @@ type providerUpgradeReviewView struct {
 	TrashedHomes int                       `json:"trashed_homes,omitempty"`
 	Skills       []string                  `json:"skills"`
 	Warnings     []string                  `json:"warnings,omitempty"`
+	// Additions are what the newer release adds to each Home besides guidance,
+	// one plain sentence each.
+	Additions []string `json:"additions,omitempty"`
+}
+
+// providerUpgradeProfileAddition is the review's line for a release that adds
+// a profile card: the card's own title, and that the upgrade itself looks for
+// and reads nothing.
+func providerUpgradeProfileAddition(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "Adds a profile card to this Home. Nothing is detected or read until you open it."
+	}
+	article := "a"
+	if strings.ContainsRune("AEIOUaeiou", rune(title[0])) {
+		article = "an"
+	}
+	return "Adds " + article + " " + title + " card to this Home. Nothing is detected or read until you open it."
 }
 
 type providerUpgradeCommitRequest struct {
@@ -169,6 +187,9 @@ func (h *Handler) ReviewAssistantProviderUpgrade(w http.ResponseWriter, r *http.
 	for _, program := range plan.Programs {
 		for _, change := range program.RolePrompts {
 			view.Roles = append(view.Roles, providerUpgradeRoleView{RoleID: change.RoleID, Label: change.Label, Old: change.Old, New: change.New})
+		}
+		if program.AddsHomeProfile {
+			view.Additions = append(view.Additions, providerUpgradeProfileAddition(program.HomeProfileTitle))
 		}
 	}
 	for _, home := range plan.Homes {

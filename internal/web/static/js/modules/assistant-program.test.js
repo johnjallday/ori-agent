@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   AssistantProgramPage,
   assistantProviderUnavailableMessage,
+  providerUpgradeAdditions,
   providerUpgradeAgentLine,
   providerUpgradeCard,
   requestedUpgradeReview
@@ -173,6 +174,19 @@ test('package upgrade result counts updated and kept agents', () => {
 });
 
 test('the Plugins page hand-off opens the upgrade review only when asked', () => {
+  // What a release adds besides guidance comes from the server as sentences.
+  assert.deepEqual(providerUpgradeAdditions({}), []);
+  assert.deepEqual(providerUpgradeAdditions({ additions: 'x' }), []);
+  assert.deepEqual(
+    providerUpgradeAdditions({
+      additions: [
+        'Adds a Your studio card to this Home. Nothing is detected or read until you open it.',
+        ' ',
+        null
+      ]
+    }),
+    ['Adds a Your studio card to this Home. Nothing is detected or read until you open it.']
+  );
   assert.equal(requestedUpgradeReview('?upgrade=review'), true);
   assert.equal(requestedUpgradeReview('?folder_offer_id=x&upgrade=review'), true);
   assert.equal(requestedUpgradeReview('?upgrade=commit'), false);
