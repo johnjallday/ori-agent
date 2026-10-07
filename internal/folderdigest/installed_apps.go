@@ -103,10 +103,31 @@ func InstallableTools() []Tool {
 		if len(tool.AppBundles) > 0 {
 			tool.AppNames = append([]string(nil), tool.AppNames...)
 			tool.AppBundles = append([]string(nil), tool.AppBundles...)
+			tool.TemplateFolders = append([]string(nil), tool.TemplateFolders...)
 			tools = append(tools, tool)
 		}
 	}
 	return tools
+}
+
+// TemplatesToolForIntegration returns the application whose templates the
+// reviewed integration with this key can list: the installable tool row that
+// declares template folders and whose project format that integration
+// supports. Everything comes from the one host table; nothing here names an
+// application.
+func TemplatesToolForIntegration(integrationKey string) (Tool, bool) {
+	if integrationKey == "" {
+		return Tool{}, false
+	}
+	for _, tool := range InstallableTools() {
+		if len(tool.TemplateFolders) == 0 {
+			continue
+		}
+		if key, ok := IntegrationKeyForProjectFormat(ProjectFormatForTool(tool.ToolID)); ok && key == integrationKey {
+			return tool, true
+		}
+	}
+	return Tool{}, false
 }
 
 // ProjectFormatForTool returns the catalog project format whose files a tool

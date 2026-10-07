@@ -1,6 +1,7 @@
 package homeprofile
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -84,7 +85,7 @@ func (f *fixture) requestID() string {
 
 func (f *fixture) detect() View {
 	f.t.Helper()
-	view, err := f.service.Detect(testOwner, testHome, f.requestID())
+	view, err := f.service.Detect(context.Background(), testOwner, testHome, f.requestID())
 	if err != nil {
 		f.t.Fatalf("detect: %v", err)
 	}
@@ -159,7 +160,7 @@ func TestReadIsOwnerOnlyAndHomeOnly(t *testing.T) {
 		if _, err := f.service.Read(testOwner, ws.ID); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("%s: %v", ws.ID, err)
 		}
-		if _, err := f.service.Detect(testOwner, ws.ID, "request-x"); !errors.Is(err, ErrNotFound) {
+		if _, err := f.service.Detect(context.Background(), testOwner, ws.ID, "request-x"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("detect on %s: %v", ws.ID, err)
 		}
 	}
@@ -182,7 +183,7 @@ func TestAHomeWhosePackageDeclaresNoProfileIsUnavailable(t *testing.T) {
 	if err != nil || view.Available || view.Profile != nil || view.Fields != nil {
 		t.Fatalf("view = %+v err = %v", view, err)
 	}
-	if _, err := f.service.Detect(testOwner, testHome, "request-1"); !errors.Is(err, ErrNotDeclared) {
+	if _, err := f.service.Detect(context.Background(), testOwner, testHome, "request-1"); !errors.Is(err, ErrNotDeclared) {
 		t.Fatalf("detect: %v", err)
 	}
 	if _, err := f.service.SetFields(testOwner, testHome, FieldsInput{RequestID: "request-2", MainApp: ptr("reaper")}); !errors.Is(err, ErrNotDeclared) {
@@ -198,8 +199,11 @@ func TestDetectOneApplicationProposesItAsMain(t *testing.T) {
 	if profile == nil || view.Revision != 1 || profile.Revision != 1 || profile.Requests != nil {
 		t.Fatalf("view = %+v", view)
 	}
-	if profile.DeclaredBy != (workspace.HomeProfileDeclaredBy{PluginID: "music-project-management", Version: "0.2.0", Title: "Your studio"}) {
-		t.Fatalf("declared_by = %+v", profile.DeclaredBy)
+	declared := profile.DeclaredBy
+	if declared.PluginID != "music-project-management" || declared.Version != "0.2.0" || declared.Title != "Your studio" ||
+		len(declared.Labels) != 4 || declared.Label(workspace.HomeProfileKindMainApp, "") != "Main DAW" ||
+		declared.Label("hardware", "fallback") != "fallback" {
+		t.Fatalf("declared_by = %+v", declared)
 	}
 	if len(profile.Apps) != 1 || !profile.Apps[0].Detected || profile.Apps[0].ConfirmedAt != nil || !profile.Apps[0].DetectedAt.Equal(f.now) {
 		t.Fatalf("apps = %+v", profile.Apps)
@@ -456,13 +460,13 @@ func TestFieldsCanCreateTheRecord(t *testing.T) {
 func TestARepeatedRequestIDReplays(t *testing.T) {
 	f := newFixture(t)
 	f.apps = []folderdigest.InstalledApp{appReaper, appLogic}
-	first, err := f.service.Detect(testOwner, testHome, "detect-1")
+	first, err := f.service.Detect(context.Background(), testOwner, testHome, "detect-1")
 	if err != nil || first.Replayed {
 		t.Fatalf("first: %+v %v", first, err)
 	}
 	// The same click arriving twice does not detect again.
 	f.now, f.apps = f.now.Add(time.Hour), nil
-	again, err := f.service.Detect(testOwner, testHome, "detect-1")
+	again, err := f.service.Detect(context.Background(), testOwner, testHome, "detect-1")
 	if err != nil || !again.Replayed || again.Revision != 1 || len(again.Profile.Apps) != 2 {
 		t.Fatalf("replay: %+v %v", again, err)
 	}
@@ -476,11 +480,11 @@ func TestARepeatedRequestIDReplays(t *testing.T) {
 		t.Fatalf("replayed save: %+v %v", replayed, err)
 	}
 	// One request_id is one action.
-	if _, err := f.service.Detect(testOwner, testHome, "save-1"); !errors.Is(err, ErrInvalid) {
+	if _, err := f.service.Detect(context.Background(), testOwner, testHome, "save-1"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("request_id reused for another action: %v", err)
 	}
 	for _, bad := range []string{"", " padded ", "two\nlines", string(make([]byte, 121))} {
-		if _, err := f.service.Detect(testOwner, testHome, bad); !errors.Is(err, ErrInvalid) {
+		if _, err := f.service.Detect(context.Background(), testOwner, testHome, bad); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("request_id %q: %v", bad, err)
 		}
 	}
@@ -512,7 +516,7 @@ func TestAReadOnlyHomeShowsValuesAndRefusesEveryWrite(t *testing.T) {
 	if err != nil || !read.ReadOnly || read.Profile == nil || read.Profile.MainApp == nil {
 		t.Fatalf("read-only read = %+v %v", read, err)
 	}
-	if _, err := f.service.Detect(testOwner, testHome, f.requestID()); !errors.Is(err, ErrReadOnly) {
+	if _, err := f.service.Detect(context.Background(), testOwner, testHome, f.requestID()); !errors.Is(err, ErrReadOnly) {
 		t.Fatalf("detect: %v", err)
 	}
 	if _, err := f.fields(view, FieldsInput{MainApp: ptr("reaper")}); !errors.Is(err, ErrReadOnly) {

@@ -246,6 +246,10 @@ type Tool struct {
 	// hold one "*" (filepath.Match syntax) for bundles that carry a version or
 	// edition. A row without any is never reported as installed.
 	AppBundles []string
+	// TemplateFolders names the folders, inside the application's own settings
+	// folder, that hold its templates. It is display data for a consent
+	// review: host code never opens them, the application's plugin lists them.
+	TemplateFolders []string
 }
 
 // ProjectCapabilityFor returns an offer only when the project's marker (or

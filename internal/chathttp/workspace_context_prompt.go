@@ -575,6 +575,12 @@ func buildAssistantProgramSnapshotLines(current *workspace.Workspace, store work
 			))
 		}
 	}
+	// The Home's profile, under its package's own title. A linked project's
+	// agents get the same lines: the station above is their Home.
+	if profile := workspace.RenderHomeProfilePromptLines(state.GetHomeProfile()); len(profile) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, profile...)
+	}
 	return lines
 }
 

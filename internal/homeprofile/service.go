@@ -9,6 +9,8 @@
 package homeprofile
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -72,7 +74,14 @@ type Dependencies struct {
 	// TimeSignatures are the values a new project's time signature may take:
 	// the option list of the blueprint the Home's projects are created from.
 	TimeSignatures func(home *workspace.Workspace) []Option
-	Now            func() time.Time
+	// TemplatesApp resolves the one application whose templates this Home can
+	// list. It runs nothing.
+	TemplatesApp func(home *workspace.Workspace) (TemplatesApp, bool)
+	// ReadFacts calls the facts operation of the project plugin behind that
+	// application once and returns its checked output. It is only ever called
+	// from an owner action, never from a read.
+	ReadFacts func(ctx context.Context, home *workspace.Workspace, includeTemplates bool) (json.RawMessage, error)
+	Now       func() time.Time
 }
 
 // Service reads and writes Home profiles.
@@ -138,6 +147,16 @@ func (s *Service) Read(ownerID, homeID string) (View, error) {
 	return s.view(home, home.GetAssistantProgramState()), nil
 }
 
+// declaredBy snapshots the release and the words a record is written under.
+func declaredBy(declared Declared) workspace.HomeProfileDeclaredBy {
+	labels := make(map[string]string, len(declared.Profile.Fields))
+	for _, field := range declared.Profile.Fields {
+		labels[field.Kind] = field.Label
+	}
+	return workspace.HomeProfileDeclaredBy{PluginID: declared.PluginID, Version: declared.Version,
+		Title: declared.Profile.Title, Labels: labels}
+}
+
 func validRequestID(id string) bool {
 	return id != "" && len(id) <= maxRequestID && strings.TrimSpace(id) == id && !strings.ContainsAny(id, "\r\n\x00")
 }
@@ -199,7 +218,7 @@ func (s *Service) write(ownerID, homeID, requestID, action string, ifRevision *i
 			return err
 		}
 		profile.Revision++
-		profile.DeclaredBy = workspace.HomeProfileDeclaredBy{PluginID: declared.PluginID, Version: declared.Version, Title: declared.Profile.Title}
+		profile.DeclaredBy = declaredBy(declared)
 		profile.Requests = append(profile.Requests, workspace.HomeProfileRequest{ID: requestID, Action: action, Revision: profile.Revision, RecordedAt: now})
 		if extra := len(profile.Requests) - workspace.HomeProfileMaxRequests; extra > 0 {
 			profile.Requests = append([]workspace.HomeProfileRequest(nil), profile.Requests[extra:]...)

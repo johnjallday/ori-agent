@@ -4316,6 +4316,90 @@ test('the chosen values live in one draft, never read back out of the DOM (FR 43
   assert.deepEqual(plain(manager.blueprintInputsPayload()), { tempo: 96, time_signature: '3 4' });
 });
 
+test('the destination Home’s own defaults prefill untouched fields and say where they came from', () => {
+  const { manager, elements } = blueprintInputsManager();
+  manager.renderBlueprintInputsReceipt = () => {};
+  manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  const hint = id => elements[`workspaceBlueprintInput-${id}-hint`];
+  assert.equal(hint('time_signature').hidden, true, 'a select has no hint of its own');
+
+  manager.applyHomeInputDefaults({
+    values: { tempo: '96', time_signature: '3 4' },
+    note: 'From your studio defaults'
+  });
+  assert.equal(inputControl(elements, 'tempo').value, '96');
+  assert.equal(inputControl(elements, 'time_signature').value, '3 4');
+  assert.equal(hint('tempo').textContent, '40–240 · From your studio defaults');
+  assert.equal(hint('time_signature').textContent, 'From your studio defaults');
+  assert.equal(hint('time_signature').hidden, false);
+  assert.deepEqual(plain(manager.blueprintInputsPayload()), { tempo: 96, time_signature: '3 4' });
+
+  // The person can still change a field; the note then leaves that field only.
+  manager.setBlueprintInputValue('tempo', '140');
+  assert.equal(hint('tempo').textContent, '40–240');
+  assert.equal(hint('time_signature').textContent, 'From your studio defaults');
+
+  // A later plan never replaces what the person typed.
+  manager.applyHomeInputDefaults({
+    values: { tempo: '100', time_signature: '6 8' },
+    note: 'From your studio defaults'
+  });
+  assert.equal(manager.blueprintInputsDraft.values.tempo, '140');
+  assert.equal(manager.blueprintInputsDraft.values.time_signature, '6 8');
+});
+
+test('without Home defaults the blueprint’s own defaults stay, and come back when the destination changes', () => {
+  const { manager, elements } = blueprintInputsManager();
+  manager.renderBlueprintInputsReceipt = () => {};
+  manager.handleWorkspaceTemplateSelected(inputsTemplate);
+  const hint = id => elements[`workspaceBlueprintInput-${id}-hint`];
+
+  manager.applyHomeInputDefaults(null);
+  assert.deepEqual(plain(manager.blueprintInputsDraft.values), {
+    tempo: '120',
+    time_signature: '4 4'
+  });
+  assert.equal(hint('tempo').textContent, '40–240');
+
+  // Only one part was set on the Home: the other keeps the blueprint's value.
+  manager.applyHomeInputDefaults({ values: { tempo: '92' }, note: 'From your studio defaults' });
+  assert.deepEqual(plain(manager.blueprintInputsDraft.values), {
+    tempo: '92',
+    time_signature: '4 4'
+  });
+  assert.equal(hint('time_signature').hidden, true);
+
+  // A value the blueprint would refuse is ignored rather than shown as an error.
+  manager.applyHomeInputDefaults({
+    values: { tempo: '900', time_signature: '13 8' },
+    note: 'From your studio defaults'
+  });
+  assert.deepEqual(plain(manager.blueprintInputsDraft.values), {
+    tempo: '120',
+    time_signature: '4 4'
+  });
+  assert.ok(
+    Object.values(plain(manager.blueprintInputsDraft.errors)).every(message => !message),
+    'no field is left with an error'
+  );
+  assert.equal(hint('tempo').textContent, '40–240');
+
+  // The destination no longer has defaults: untouched fields go back.
+  manager.applyHomeInputDefaults({ values: { tempo: '92' }, note: 'From your studio defaults' });
+  manager.applyHomeInputDefaults(null);
+  assert.deepEqual(plain(manager.blueprintInputsDraft.values), {
+    tempo: '120',
+    time_signature: '4 4'
+  });
+  assert.equal(manager.blueprintInputsDraft.homeDefaultsNote, '');
+
+  // A new blueprint selection starts clean.
+  manager.applyHomeInputDefaults({ values: { tempo: '92' }, note: 'From your studio defaults' });
+  manager.handleWorkspaceTemplateSelected({ ...inputsTemplate, id: 'other-blueprint' });
+  assert.equal(manager.blueprintInputsDraft.values.tempo, '120');
+  assert.deepEqual(plain(manager.blueprintInputsDraft.homeDefaults), {});
+});
+
 test('an out-of-range value blocks leaving Details and says so on the field (FR 43)', () => {
   const { manager, elements, focused } = blueprintInputsManager();
   manager.handleWorkspaceTemplateSelected(inputsTemplate);

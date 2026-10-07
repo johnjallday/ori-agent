@@ -165,13 +165,17 @@ func ValidateContributionIdentity(contribution *SurfaceContribution, identities 
 }
 
 type SurfaceContribution struct {
-	SchemaVersion         int                                     `json:"schema_version"`
-	Name                  string                                  `json:"name"`
-	Version               string                                  `json:"version"`
-	Protocol              ProtocolRange                           `json:"protocol"`
-	RequiresHostFeatures  []string                                `json:"requires_host_features,omitempty"`
-	Capabilities          []ContributedCapability                 `json:"capabilities,omitempty"`
-	Services              []ContributedService                    `json:"services,omitempty"`
+	SchemaVersion        int                     `json:"schema_version"`
+	Name                 string                  `json:"name"`
+	Version              string                  `json:"version"`
+	Protocol             ProtocolRange           `json:"protocol"`
+	RequiresHostFeatures []string                `json:"requires_host_features,omitempty"`
+	Capabilities         []ContributedCapability `json:"capabilities,omitempty"`
+	Services             []ContributedService    `json:"services,omitempty"`
+	// HomeProfileFacts names the one read-only operation that reports facts
+	// about this plugin's own application for a Home profile. A manifest that
+	// declares it must require the home_profile_v1 host feature.
+	HomeProfileFacts      *HomeProfileFactsRef                    `json:"home_profile_facts,omitempty"`
 	Blueprints            []ContributedBlueprint                  `json:"blueprints,omitempty"`
 	AssistantProgramHomes []projecttemplates.AssistantProgramHome `json:"assistant_program_homes,omitempty"`
 	SetupQuests           []SetupQuest                            `json:"setup_quests,omitempty"`
@@ -436,6 +440,11 @@ func (c *SurfaceContribution) ValidateForHost(protocolVersion int, hostFeatures 
 			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "home_profile requires home_profile_v1", nil)
 		}
 	}
+	if c.HomeProfileFacts != nil {
+		if _, declared := seenHostFeatures[HostFeatureHomeProfileV1]; !declared {
+			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "home_profile_facts requires home_profile_v1", nil)
+		}
+	}
 	if err := validateSetupQuests(c); err != nil {
 		return contributionError(CodeContributionInvalid, "manifest", "setup_quests", "setup quest declarations are invalid", err)
 	}
@@ -478,6 +487,9 @@ func validateContributionComponents(c *SurfaceContribution) error {
 		if err := validateService(service); err != nil {
 			return err
 		}
+	}
+	if err := validateHomeProfileFacts(c.HomeProfileFacts, services); err != nil {
+		return err
 	}
 
 	capabilities := make(map[string]struct{}, len(c.Capabilities))

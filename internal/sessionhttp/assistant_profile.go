@@ -216,7 +216,7 @@ func (h *Handler) DetectAssistantProfile(w http.ResponseWriter, r *http.Request)
 	if !decodeStrictAction(w, r, &request, "Invalid profile request") {
 		return
 	}
-	view, err := h.HomeProfiles().Detect(owner, homeID, request.RequestID)
+	view, err := h.HomeProfiles().Detect(r.Context(), owner, homeID, request.RequestID)
 	if err != nil {
 		respondHomeProfileError(w, err)
 		return

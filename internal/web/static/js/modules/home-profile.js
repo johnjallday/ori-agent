@@ -175,6 +175,98 @@ export function mainAppView(view, { locale, timeZone } = {}) {
   };
 }
 
+// "44.1 kHz", "48 kHz".
+export function sampleRateLabel(hz) {
+  return `${Number(hz) / 1000} kHz`;
+}
+
+function defaultsSummary(defaults, signatures) {
+  const parts = [];
+  if (defaults?.tempo_bpm) parts.push(`${defaults.tempo_bpm} BPM`);
+  if (defaults?.time_signature) {
+    const known = signatures.find(option => option.value === defaults.time_signature);
+    parts.push(known?.label || String(defaults.time_signature).split(/\s+/).join('/'));
+  }
+  if (defaults?.sample_rate_hz) parts.push(sampleRateLabel(defaults.sample_rate_hz));
+  if (defaults?.bit_depth) parts.push(`${defaults.bit_depth}-bit`);
+  return parts.join(', ');
+}
+
+// defaultsView is what a new project starts from: four optional parts, each
+// "Not set" until the owner sets it. Choices come from the server; a part with
+// no choices cannot be set.
+export function defaultsView(view, { locale, timeZone } = {}) {
+  const readOnly = Boolean(view?.read_only);
+  const choices = view?.choices || {};
+  const defaults = view?.profile?.defaults || null;
+  const signatures = (Array.isArray(choices.time_signatures) ? choices.time_signatures : []).map(
+    option => ({
+      value: String(option?.value || ''),
+      label: String(option?.label || option?.value || '')
+    })
+  );
+  const unset = { value: '', label: 'Not set' };
+  const summary = defaultsSummary(defaults, signatures);
+  return {
+    disabled: readOnly,
+    tempo: {
+      value: defaults?.tempo_bpm ? String(defaults.tempo_bpm) : '',
+      min: Number(choices.min_tempo) || 40,
+      max: Number(choices.max_tempo) || 240,
+      placeholder: 'Not set'
+    },
+    timeSignature: {
+      value: String(defaults?.time_signature || ''),
+      options: [unset, ...signatures],
+      disabled: readOnly || signatures.length === 0
+    },
+    sampleRate: {
+      value: defaults?.sample_rate_hz ? String(defaults.sample_rate_hz) : '',
+      options: [
+        unset,
+        ...(choices.sample_rates || []).map(hz => ({
+          value: String(hz),
+          label: sampleRateLabel(hz)
+        }))
+      ]
+    },
+    bitDepth: {
+      value: defaults?.bit_depth ? String(defaults.bit_depth) : '',
+      options: [
+        unset,
+        ...(choices.bit_depths || []).map(bits => ({ value: String(bits), label: `${bits}-bit` }))
+      ]
+    },
+    summary: summary || 'Not set',
+    note: summary
+      ? `${summary}. Set by you ${profileDate(defaults.confirmed_at, locale, timeZone)}.`
+      : 'Not set. A new project starts from its own defaults until you save some here.'
+  };
+}
+
+// defaultsInput turns the row's four fields into the save body, or says what
+// is wrong. An empty field means "not set"; saving all four empty clears them.
+export function defaultsInput(fields = {}, choices = {}) {
+  const input = {};
+  const tempoText = String(fields.tempo ?? '').trim();
+  if (tempoText !== '') {
+    const tempo = Number(tempoText);
+    const min = Number(choices.min_tempo) || 40;
+    const max = Number(choices.max_tempo) || 240;
+    if (!Number.isInteger(tempo) || tempo < min || tempo > max) {
+      return { error: `Tempo is a whole number from ${min} to ${max} BPM.` };
+    }
+    input.tempo_bpm = tempo;
+  }
+  const signature = String(fields.timeSignature ?? '').trim();
+  if (signature) input.time_signature = signature;
+  const rate = Number(fields.sampleRate || 0);
+  if (rate) input.sample_rate_hz = rate;
+  const depth = Number(fields.bitDepth || 0);
+  if (depth) input.bit_depth = depth;
+  return { input };
+}
+
 // What the status line says after an action finished.
 export function profileStatus(action, view) {
   switch (action) {
@@ -190,6 +282,8 @@ export function profileStatus(action, view) {
       return 'Shown again as a hint.';
     case 'main_app':
       return view?.profile?.main_app ? 'Saved.' : 'Cleared.';
+    case 'defaults':
+      return view?.profile?.defaults ? 'Defaults saved.' : 'Defaults cleared.';
     default:
       return 'Saved.';
   }
@@ -314,8 +408,74 @@ export class HomeProfilePanel {
     section.append(heading);
     if (row.kind === 'apps') this.renderApps(section);
     else if (row.kind === 'main_app') this.renderMainApp(section, heading.id);
+    else if (row.kind === 'defaults') this.renderDefaults(section);
     else return null;
     return section;
+  }
+
+  renderDefaults(section) {
+    const view = defaultsView(this.view);
+    const off = this.busy || view.disabled;
+    const grid = element('div', 'home-profile-defaults');
+    const field = (labelText, control) => {
+      const label = element('label', 'home-profile-field');
+      label.append(element('span', '', labelText), control);
+      grid.append(label);
+    };
+    const tempo = element('input', 'form-control');
+    tempo.id = 'homeProfileTempo';
+    tempo.type = 'number';
+    tempo.inputMode = 'numeric';
+    tempo.min = String(view.tempo.min);
+    tempo.max = String(view.tempo.max);
+    tempo.step = '1';
+    tempo.placeholder = view.tempo.placeholder;
+    tempo.value = view.tempo.value;
+    tempo.disabled = off;
+    field('Tempo (BPM)', tempo);
+    const choice = (id, part, disabled = off) => {
+      const select = element('select', 'form-select');
+      select.id = id;
+      for (const option of part.options) {
+        const node = element('option', '', option.label);
+        node.value = option.value;
+        select.append(node);
+      }
+      select.value = part.value;
+      select.disabled = disabled;
+      return select;
+    };
+    field(
+      'Time signature',
+      choice(
+        'homeProfileTimeSignature',
+        view.timeSignature,
+        this.busy || view.timeSignature.disabled
+      )
+    );
+    field('Sample rate', choice('homeProfileSampleRate', view.sampleRate));
+    field('Bit depth', choice('homeProfileBitDepth', view.bitDepth));
+    const actions = element('div', 'home-profile-actions');
+    actions.append(button('Save', 'save-defaults', '', off));
+    section.append(grid, actions, element('p', 'home-profile-note', view.note));
+  }
+
+  async saveDefaults() {
+    const read = id => globalThis.document?.getElementById(id)?.value ?? '';
+    const { input, error } = defaultsInput(
+      {
+        tempo: read('homeProfileTempo'),
+        timeSignature: read('homeProfileTimeSignature'),
+        sampleRate: read('homeProfileSampleRate'),
+        bitDepth: read('homeProfileBitDepth')
+      },
+      this.view?.choices || {}
+    );
+    if (error) {
+      this.status(error);
+      return;
+    }
+    await this.run('Saving…', 'defaults', () => this.fields({ defaults: input }));
   }
 
   renderApps(section) {
@@ -436,6 +596,9 @@ export class HomeProfilePanel {
         break;
       case 'confirm-main':
         await this.run('Saving…', 'confirm', () => this.fields({ main_app: id }));
+        break;
+      case 'save-defaults':
+        await this.saveDefaults();
         break;
       default:
     }

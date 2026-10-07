@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 const (
@@ -21,10 +23,10 @@ const (
 // one stores, detects and renders; a package only chooses which to show, in
 // what order and under which words.
 const (
-	HomeProfileKindApps      = "apps"
-	HomeProfileKindMainApp   = "main_app"
-	HomeProfileKindTemplates = "templates"
-	HomeProfileKindDefaults  = "defaults"
+	HomeProfileKindApps      = workspace.HomeProfileKindApps
+	HomeProfileKindMainApp   = workspace.HomeProfileKindMainApp
+	HomeProfileKindTemplates = workspace.HomeProfileKindTemplates
+	HomeProfileKindDefaults  = workspace.HomeProfileKindDefaults
 )
 
 // HomeProfileDeclaration is the optional closed `home_profile` section of a

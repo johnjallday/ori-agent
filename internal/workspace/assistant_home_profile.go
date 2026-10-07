@@ -91,13 +91,34 @@ type HomeProfile struct {
 	Requests []HomeProfileRequest `json:"requests,omitempty"`
 }
 
+// The kinds of row a profile card can have. The package chooses which to show
+// and what to call them; the host owns what each one stores.
+const (
+	HomeProfileKindApps      = "apps"
+	HomeProfileKindMainApp   = "main_app"
+	HomeProfileKindTemplates = "templates"
+	HomeProfileKindDefaults  = "defaults"
+)
+
 // HomeProfileDeclaredBy names the package release whose declaration the record
-// was last written under, and the title it gave the card, so a reader that has
-// only the Home (an agent's context block) can head the section.
+// was last written under, with the title and row labels it gave the card, so a
+// reader that has only the Home (an agent's context block) can use the
+// package's words instead of the host's.
 type HomeProfileDeclaredBy struct {
 	PluginID string `json:"plugin_id"`
 	Version  string `json:"version"`
 	Title    string `json:"title,omitempty"`
+	// Labels maps a row kind to its declared label.
+	Labels map[string]string `json:"labels,omitempty"`
+}
+
+// Label returns the declared label of a row kind, or fallback when the record
+// was written without one.
+func (d HomeProfileDeclaredBy) Label(kind, fallback string) string {
+	if label := strings.TrimSpace(d.Labels[kind]); label != "" {
+		return label
+	}
+	return fallback
 }
 
 // HomeProfileApp is one application found on this computer. ID and Name come
@@ -179,6 +200,12 @@ func (p *HomeProfile) Clone() *HomeProfile {
 		return nil
 	}
 	clone := *p
+	if p.DeclaredBy.Labels != nil {
+		clone.DeclaredBy.Labels = make(map[string]string, len(p.DeclaredBy.Labels))
+		for kind, label := range p.DeclaredBy.Labels {
+			clone.DeclaredBy.Labels[kind] = label
+		}
+	}
 	clone.DetectedAt = cloneTime(p.DetectedAt)
 	clone.Apps = make([]HomeProfileApp, len(p.Apps))
 	for i, app := range p.Apps {
@@ -331,8 +358,18 @@ func (p *HomeProfile) Validate() error {
 		return invalidHomeProfile("schema_version or revision")
 	}
 	if !homeProfileIDPattern.MatchString(p.DeclaredBy.PluginID) || !homeProfileLine(p.DeclaredBy.Version, 64, false) ||
-		!homeProfileLine(p.DeclaredBy.Title, 60, true) {
+		!homeProfileLine(p.DeclaredBy.Title, 60, true) || len(p.DeclaredBy.Labels) > 4 {
 		return invalidHomeProfile("declared_by")
+	}
+	for kind, label := range p.DeclaredBy.Labels {
+		switch kind {
+		case HomeProfileKindApps, HomeProfileKindMainApp, HomeProfileKindTemplates, HomeProfileKindDefaults:
+		default:
+			return invalidHomeProfile("declared_by label kind")
+		}
+		if !homeProfileLine(label, 40, false) {
+			return invalidHomeProfile("declared_by label")
+		}
 	}
 	if len(p.Apps) > HomeProfileMaxApps {
 		return invalidHomeProfile("too many apps")

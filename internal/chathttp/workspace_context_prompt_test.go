@@ -200,6 +200,73 @@ func TestBuildWorkspaceSnapshotPrompt_IncludesTrustedAssistantProjectAndStage(t 
 	}
 }
 
+// The Home's profile reaches the Home's own agents and each linked song's.
+func TestBuildWorkspaceSnapshotPrompt_IncludesTheHomeProfileForHomeAndLinkedProject(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	project := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Neon Song"})
+	project.SetTemplateProvenance(&workspace.TemplateProvenance{
+		PluginOwner: &workspace.PluginTemplateOwner{PluginID: "reaper-plugin", BlueprintID: "reaper-song", BlueprintVersion: 3},
+		AssistantProgram: &workspace.AssistantProgramDeclaration{
+			SchemaVersion: 1, ID: "music-producer-assistant", StationName: "Producer Home",
+			Roles:  []workspace.AssistantProgramRoleSpec{{ID: "producer", Label: "Producer", Primary: true, SystemPrompt: "Safe"}},
+			Stages: []workspace.AssistantProgramStageSpec{{ID: "helper", Label: "Helper"}},
+		},
+	})
+	if err := wsStore.Save(project); err != nil {
+		t.Fatal(err)
+	}
+	station, _, err := workspace.NewAssistantProgramStore(wsStore).EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompts := func() (home, song string) {
+		home = buildWorkspaceSnapshotPrompt(context.Background(), normalizedChatRouteContext{Surface: "workspace_chat", WorkspaceID: station.ID}, wsStore, nil)
+		song = buildWorkspaceSnapshotPrompt(context.Background(), normalizedChatRouteContext{Surface: "workspace_chat", WorkspaceID: project.ID}, wsStore, nil)
+		return home, song
+	}
+	// No profile yet: no section.
+	if home, song := prompts(); strings.Contains(home, "Your studio") || strings.Contains(song, "Your studio") {
+		t.Fatalf("a Home without a profile rendered one:\n%s\n%s", home, song)
+	}
+
+	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	if err := wsStore.Update(station.ID, func(current *workspace.Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.HomeProfile = &workspace.HomeProfile{
+			SchemaVersion: workspace.HomeProfileSchemaVersion, Revision: 2, DetectedAt: &at,
+			DeclaredBy: workspace.HomeProfileDeclaredBy{PluginID: "music-project-management", Version: "0.2.0", Title: "Your studio",
+				Labels: map[string]string{workspace.HomeProfileKindMainApp: "Main DAW", workspace.HomeProfileKindDefaults: "New-song defaults"}},
+			Apps: []workspace.HomeProfileApp{
+				{ID: "reaper", Name: "REAPER", Detected: true, DetectedAt: &at, ConfirmedAt: &at},
+				{ID: "logic-pro", Name: "Logic Pro", Detected: true, DetectedAt: &at},
+				{ID: "ableton-live", Name: "Ableton Live", Detected: true, DetectedAt: &at, Hidden: true},
+			},
+			MainApp:  &workspace.HomeProfileMainApp{ID: "reaper", Source: workspace.HomeProfileSourceOwner, ConfirmedAt: &at},
+			Defaults: &workspace.HomeProfileDefaults{TempoBPM: 96, TimeSignature: "3 4", Source: workspace.HomeProfileSourceOwner, ConfirmedAt: &at},
+		}
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	home, song := prompts()
+	for name, prompt := range map[string]string{"home": home, "song": song} {
+		for _, want := range []string{
+			"## Assistant Program Context",
+			"\n## Your studio\n- Main DAW: REAPER (chosen by the owner)\n- Also found: Logic Pro (detected, not confirmed)\n",
+			"- New-song defaults: 96 BPM, 3/4 (set by the owner)",
+			`Do not ask the owner for "Main DAW" when it is confirmed.`,
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("%s prompt missing %q:\n%s", name, want, prompt)
+			}
+		}
+		if strings.Contains(prompt, "Ableton Live") {
+			t.Fatalf("%s prompt names an app the owner hid:\n%s", name, prompt)
+		}
+	}
+}
+
 func TestBuildRuntimeSystemPrompt_IncludesUserProfile(t *testing.T) {
 	wsStore := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Alpha Workspace", Agents: []string{"Ori"}})

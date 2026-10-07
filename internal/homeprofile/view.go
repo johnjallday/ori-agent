@@ -25,6 +25,12 @@ type View struct {
 	Profile *workspace.HomeProfile `json:"profile"`
 	// Choices are the values the defaults row may take.
 	Choices *Choices `json:"choices,omitempty"`
+	// Templates is the templates row's state: which application it is for and
+	// what the owner can do next. The list itself is in Profile.
+	Templates *TemplatesState `json:"templates,omitempty"`
+	// FactsOperation says whether an installed project plugin offers a facts
+	// operation for this Home.
+	FactsOperation bool `json:"facts_operation"`
 	// Replayed is true when this response repeats an earlier request_id.
 	Replayed bool `json:"replayed,omitempty"`
 }
@@ -48,7 +54,15 @@ func (s *Service) view(home *workspace.Workspace, state *workspace.AssistantProg
 		Title: declared.Profile.Title, Intro: declared.Profile.Intro,
 		Fields: append([]projecttemplates.HomeProfileField(nil), declared.Profile.Fields...),
 	}
-	if profile := state.GetHomeProfile(); profile != nil {
+	profile := state.GetHomeProfile()
+	if app, ok := s.templatesApp(home); ok {
+		view.FactsOperation = app.OperationAvailable
+	}
+	if declared.Profile.Declares(projecttemplates.HomeProfileKindTemplates) {
+		templates := s.templatesState(home, profile)
+		view.Templates = &templates
+	}
+	if profile != nil {
 		view.Revision = profile.Revision
 		profile.Requests = nil
 		view.Profile = profile

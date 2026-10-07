@@ -4937,6 +4937,7 @@ const sessionManager = {
         return;
       }
       this.templateAgentPlan = data;
+      this.applyHomeInputDefaults(data.group_requirement?.home?.input_defaults || null);
       if (draft && api) api.setPlanReady(draft, blueprintKey, data);
       await this.ensureEditAgentModelOptions();
       if (requestId !== this.templateAgentPlanRequestId) return;
@@ -10626,11 +10627,89 @@ const sessionManager = {
       declaration: inputs,
       values,
       errors: {},
+      // Fields the person (or an assistant build) set. The destination Home's
+      // own defaults never replace one of these.
+      touched: {},
+      // The destination Home's defaults currently shown, by field, and the
+      // one-line note that says where they came from.
+      homeDefaults: {},
+      homeDefaultsNote: '',
       // Bumped on every reset, so fields rendered for an earlier blueprint
       // cannot write into this one.
       generation: (this.blueprintInputsDraft?.generation || 0) + 1
     };
     this.renderBlueprintInputs();
+  },
+
+  // The destination Home's own new-project defaults replace the blueprint's
+  // declared ones for every field nobody has changed. `defaults` comes from
+  // the placement plan, where the server already checked each value against
+  // this blueprint's declaration; a value that no longer fits is ignored here
+  // too. A plan without defaults (another destination, or a Home that has
+  // none) puts the untouched fields back on the blueprint's own defaults.
+  applyHomeInputDefaults(defaults) {
+    const draft = this.blueprintInputsDraft;
+    if (!draft?.values || !draft.declaration) return;
+    const offered = defaults?.values && typeof defaults.values === 'object' ? defaults.values : {};
+    const shown = draft.homeDefaults || {};
+    const next = {};
+    let changed = false;
+    for (const field of draft.declaration.fields || []) {
+      const id = String(field?.id || '');
+      if (!id || draft.touched?.[id]) continue;
+      const declared = this.blueprintInputDefaultText(field);
+      let value = typeof offered[id] === 'string' ? offered[id] : '';
+      if (value !== '') {
+        const before = draft.values[id];
+        draft.values[id] = value;
+        if (this.blueprintInputProblem(id)) value = '';
+        draft.values[id] = before;
+      }
+      const target = value !== '' ? value : id in shown ? declared : draft.values[id];
+      if (value !== '') next[id] = value;
+      if (draft.values[id] !== target) {
+        draft.values[id] = target;
+        draft.errors[id] = this.blueprintInputProblem(id);
+        changed = true;
+      }
+    }
+    draft.homeDefaults = next;
+    draft.homeDefaultsNote = Object.keys(next).length ? String(defaults?.note || '').trim() : '';
+    this.renderBlueprintInputs();
+    if (changed) this.renderBlueprintInputsReceipt();
+  },
+
+  // The line under one field: its range or format, then, while the field
+  // still shows the destination Home's default, where that value came from.
+  blueprintInputHintText(field) {
+    let hint = '';
+    if (field?.type === 'url') hint = 'HTTP or HTTPS link';
+    else if (field?.type === 'text') hint = 'One line, up to 200 characters';
+    else if (
+      field?.type !== 'select' &&
+      Number.isFinite(field?.min) &&
+      Number.isFinite(field?.max)
+    ) {
+      hint = `${field.min}–${field.max}`;
+    }
+    const draft = this.blueprintInputsDraft;
+    const id = String(field?.id || '');
+    const fromHome =
+      draft?.homeDefaultsNote &&
+      draft.homeDefaults &&
+      id in draft.homeDefaults &&
+      draft.values?.[id] === draft.homeDefaults[id];
+    if (!fromHome) return hint;
+    return hint ? `${hint} · ${draft.homeDefaultsNote}` : draft.homeDefaultsNote;
+  },
+
+  renderBlueprintInputHint(field) {
+    const id = String(field?.id || '');
+    const hint = document.getElementById(`${this.blueprintInputControlID(id)}-hint`);
+    if (!hint) return;
+    const text = this.blueprintInputHintText(field);
+    hint.textContent = text;
+    hint.hidden = !text;
   },
 
   // A declared default as the text the field shows. Numbers arrive as JSON
@@ -10691,6 +10770,7 @@ const sessionManager = {
       const id = String(field?.id || '');
       const control = document.getElementById(this.blueprintInputControlID(id));
       if (control && control.value !== draft.values[id]) control.value = draft.values[id] ?? '';
+      this.renderBlueprintInputHint(field);
       this.renderBlueprintInputError(id, draft.errors[id] || '');
     }
   },
@@ -10718,7 +10798,7 @@ const sessionManager = {
     const row = document.createElement('div');
     row.className = 'workspace-blueprint-input-row';
     let control;
-    let hintText = '';
+    const hintText = this.blueprintInputHintText(field);
     if (field?.type === 'select') {
       control = document.createElement('select');
       for (const option of Array.isArray(field.options) ? field.options : []) {
@@ -10733,19 +10813,14 @@ const sessionManager = {
         control.type = 'url';
         control.maxLength = 2000;
         control.placeholder = 'https://example.com';
-        hintText = 'HTTP or HTTPS link';
       } else if (field?.type === 'text') {
         control.type = 'text';
         control.maxLength = 200;
-        hintText = 'One line, up to 200 characters';
       } else {
         control.type = 'number';
         if (Number.isFinite(field?.min)) control.min = String(field.min);
         if (Number.isFinite(field?.max)) control.max = String(field.max);
         if (Number.isFinite(field?.step)) control.step = String(field.step);
-        if (Number.isFinite(field?.min) && Number.isFinite(field?.max)) {
-          hintText = `${field.min}–${field.max}`;
-        }
       }
     }
     control.id = controlID;
@@ -10784,7 +10859,11 @@ const sessionManager = {
     const draft = this.blueprintInputsDraft;
     if (!draft?.values || !(id in draft.values)) return;
     draft.values[id] = String(value ?? '');
+    if (draft.touched) draft.touched[id] = true;
     draft.errors[id] = this.blueprintInputProblem(id);
+    this.renderBlueprintInputHint(
+      (draft.declaration?.fields || []).find(field => String(field?.id || '') === id)
+    );
     this.renderBlueprintInputError(id, draft.errors[id]);
     this.invalidateGroupRequirementReview();
     this.refreshWorkspaceReview();

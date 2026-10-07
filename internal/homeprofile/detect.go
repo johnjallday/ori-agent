@@ -1,6 +1,8 @@
 package homeprofile
 
 import (
+	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -13,20 +15,44 @@ import (
 // It runs only because the owner pressed Detect: never on a read. Rows the
 // owner confirmed or hid survive; a main application the owner chose or
 // confirmed is never replaced.
-func (s *Service) Detect(ownerID, homeID, requestID string) (View, error) {
-	// Both lookups happen before the Home write: the library read may wait on
-	// another write, and neither belongs inside a store callback.
-	found := s.installedApps()
-	var formats map[string]int
-	if home, err := s.lookup(ownerID, homeID); err == nil {
-		formats = s.libraryFormats(home)
+func (s *Service) Detect(ctx context.Context, ownerID, homeID, requestID string) (View, error) {
+	if !validRequestID(requestID) {
+		return View{}, fmt.Errorf("%w: request_id", ErrInvalid)
 	}
+	home, err := s.lookup(ownerID, homeID)
+	if err != nil {
+		return View{}, err
+	}
+	// Nothing is looked for when the answer is already decided: a repeated
+	// request_id, a Home whose package declares no profile, a read-only Home.
+	// The write path gives each of those its own answer.
+	_, handled := home.GetAssistantProgramState().GetHomeProfile().Request(requestID)
+	if _, declared := s.declared(home); handled || !declared || !s.writable(home) {
+		return s.write(ownerID, homeID, requestID, actionDetect, nil, func(*workspace.Workspace, *workspace.HomeProfile, time.Time) error {
+			return errUnchanged
+		})
+	}
+	// Every lookup happens before the Home write: the library read may wait
+	// on another write and the version comes from a plugin process, and
+	// neither belongs inside a store callback.
+	found := s.installedApps()
+	formats := s.libraryFormats(home)
+	versionApp, version := s.readVersion(ctx, home, foundIDs(found))
 	return s.write(ownerID, homeID, requestID, actionDetect, nil,
 		func(_ *workspace.Workspace, profile *workspace.HomeProfile, now time.Time) error {
 			applyDetection(profile, found, now)
 			applyMainAppRule(profile, formats)
+			applyVersion(profile, versionApp, version)
 			return nil
 		})
+}
+
+func foundIDs(found []folderdigest.InstalledApp) map[string]bool {
+	ids := make(map[string]bool, len(found))
+	for _, app := range found {
+		ids[app.ToolID] = true
+	}
+	return ids
 }
 
 func (s *Service) installedApps() []folderdigest.InstalledApp {

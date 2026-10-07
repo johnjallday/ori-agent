@@ -5,15 +5,126 @@ import {
   READ_ONLY_NOTE,
   appRowView,
   appsView,
+  defaultsInput,
+  defaultsView,
   detectView,
   joinNames,
   mainAppView,
   profileDate,
   profileStatus,
-  profileView
+  profileView,
+  sampleRateLabel
 } from './home-profile.js';
 
 const DATE = { locale: 'en-US', timeZone: 'UTC' };
+
+const CHOICES = {
+  min_tempo: 40,
+  max_tempo: 240,
+  time_signatures: [
+    { value: '4 4', label: '4/4' },
+    { value: '3 4', label: '3/4' }
+  ],
+  sample_rates: [44100, 48000, 96000],
+  bit_depths: [16, 24, 32]
+};
+
+test('new-project defaults show Not set until the owner saves some', () => {
+  const view = defaultsView({ available: true, choices: CHOICES, profile: null }, DATE);
+  assert.equal(view.summary, 'Not set');
+  assert.equal(
+    view.note,
+    'Not set. A new project starts from its own defaults until you save some here.'
+  );
+  assert.equal(view.disabled, false);
+  assert.deepEqual(view.tempo, { value: '', min: 40, max: 240, placeholder: 'Not set' });
+  assert.deepEqual(view.timeSignature.options, [
+    { value: '', label: 'Not set' },
+    { value: '4 4', label: '4/4' },
+    { value: '3 4', label: '3/4' }
+  ]);
+  assert.deepEqual(
+    view.sampleRate.options.map(option => option.label),
+    ['Not set', '44.1 kHz', '48 kHz', '96 kHz']
+  );
+  assert.deepEqual(
+    view.bitDepth.options.map(option => option.label),
+    ['Not set', '16-bit', '24-bit', '32-bit']
+  );
+  assert.equal(sampleRateLabel(88200), '88.2 kHz');
+});
+
+test('saved defaults fill the row and say they are the owner’s', () => {
+  const view = defaultsView(
+    {
+      available: true,
+      choices: CHOICES,
+      profile: {
+        defaults: {
+          tempo_bpm: 120,
+          time_signature: '4 4',
+          sample_rate_hz: 48000,
+          bit_depth: 24,
+          source: 'owner',
+          confirmed_at: '2026-10-08T12:00:00Z'
+        }
+      }
+    },
+    DATE
+  );
+  assert.equal(view.tempo.value, '120');
+  assert.equal(view.timeSignature.value, '4 4');
+  assert.equal(view.sampleRate.value, '48000');
+  assert.equal(view.bitDepth.value, '24');
+  assert.equal(view.summary, '120 BPM, 4/4, 48 kHz, 24-bit');
+  assert.equal(view.note, '120 BPM, 4/4, 48 kHz, 24-bit. Set by you Oct 8, 2026.');
+  // A part that was never set stays Not set beside the ones that were.
+  const partial = defaultsView(
+    {
+      available: true,
+      choices: CHOICES,
+      profile: {
+        defaults: { tempo_bpm: 92, source: 'owner', confirmed_at: '2026-10-08T12:00:00Z' }
+      }
+    },
+    DATE
+  );
+  assert.equal(partial.summary, '92 BPM');
+  assert.equal(partial.timeSignature.value, '');
+  assert.equal(partial.sampleRate.value, '');
+});
+
+test('a time signature cannot be chosen while there are no choices, and a read-only Home disables the row', () => {
+  const none = defaultsView({ available: true, choices: { ...CHOICES, time_signatures: [] } });
+  assert.equal(none.timeSignature.disabled, true);
+  assert.deepEqual(none.timeSignature.options, [{ value: '', label: 'Not set' }]);
+  const readOnly = defaultsView({ available: true, read_only: true, choices: CHOICES });
+  assert.equal(readOnly.disabled, true);
+  assert.equal(readOnly.timeSignature.disabled, true);
+});
+
+test('defaultsInput sends only the parts that are set and refuses a tempo out of bounds', () => {
+  assert.deepEqual(
+    defaultsInput(
+      { tempo: ' 96 ', timeSignature: '3 4', sampleRate: '48000', bitDepth: '24' },
+      CHOICES
+    ),
+    { input: { tempo_bpm: 96, time_signature: '3 4', sample_rate_hz: 48000, bit_depth: 24 } }
+  );
+  // Everything empty is a valid save: it clears the defaults.
+  assert.deepEqual(
+    defaultsInput({ tempo: '', timeSignature: '', sampleRate: '', bitDepth: '' }, CHOICES),
+    {
+      input: {}
+    }
+  );
+  assert.deepEqual(defaultsInput({ tempo: '120' }, CHOICES), { input: { tempo_bpm: 120 } });
+  for (const tempo of ['39', '241', '92.5', 'fast']) {
+    assert.deepEqual(defaultsInput({ tempo }, CHOICES), {
+      error: 'Tempo is a whole number from 40 to 240 BPM.'
+    });
+  }
+});
 
 const FIELDS = [
   { id: 'apps', kind: 'apps', label: 'DAWs on this Mac' },

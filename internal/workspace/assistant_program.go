@@ -536,6 +536,11 @@ func RenderAssistantProgramPromptSection(current, station *Workspace) string {
 	fmt.Fprintf(&builder, "- Stage: %q (level %d, accepted completions %d)\n", state.StageID, state.Level, state.AcceptedCompletions)
 	fmt.Fprintf(&builder, "- Contribution available: %t\n", state.PluginAvailable)
 	builder.WriteString("- Project mutation must use the ordinary task, confirmation, capability, readiness, filesystem, and runtime gates.\n")
+	// The Home's profile reaches the Home's own agents and every linked
+	// project's: both resolve to this station.
+	if profile := RenderHomeProfilePromptLines(state.GetHomeProfile()); len(profile) > 0 {
+		builder.WriteString("\n" + strings.Join(profile, "\n") + "\n")
+	}
 	return builder.String()
 }
 
