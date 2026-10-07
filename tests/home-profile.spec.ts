@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 
 // Acceptance for the Home profile card ("Your studio") against a staged Music
 // Project Management candidate that declares `home_profile`. Run only through
@@ -122,6 +123,29 @@ test('a new Home shows the declared card and detects nothing on load', async ({
   // Opening the page looked for nothing.
   expect((await profile(request)).profile).toBeNull();
   await evidence(page, '01-empty-card');
+});
+
+test('the Home’s workspace page links straight to the card', async ({ page, request }) => {
+  const card = await profile(request);
+  // The card lives on the Home's own page, below four other panels. From the
+  // workspace page there is a link named by the package's title that lands on
+  // it, so nobody has to know the address.
+  await page.goto(`/workspaces/${homeSlug}`);
+  const link = page.locator('.ws-cmd-view-switch [data-home-profile-entry]');
+  await expect(link).toHaveText(card.title);
+  await expect(link).toHaveCount(1);
+  mkdirSync(SHOTS, { recursive: true });
+  await page.screenshot({ path: `${SHOTS}/00-workspace-page-link.png` });
+  await link.click();
+  await page.waitForURL(
+    url => url.pathname === `/workspaces/${homeSlug}/assistant` && url.hash === '#homeProfilePanel'
+  );
+  const panel = page.locator('#homeProfilePanel');
+  await expect(panel).toBeVisible();
+  await expect(page.locator('#homeProfileTitle')).toBeInViewport();
+  await expect(page.locator('#homeProfileTitle')).toBeFocused();
+  // Arriving looked for nothing either.
+  expect((await profile(request)).profile).toBeNull();
 });
 
 test('Detect lists both DAWs as hints and one pick fills the main DAW', async ({
@@ -300,6 +324,33 @@ test('templates are listed only after the owner reviews, and Forget takes them b
   expect(card.profile.templates.items).toBeUndefined();
   expect(card.profile.templates.consent.revoked_at).toBeTruthy();
   await evidence(page, '07-templates-forgotten');
+
+  // An application that has no templates folders at all (it never saved a
+  // template) is said as that, not as folders in which nothing was found.
+  if (SANDBOX) {
+    const resource = join(SANDBOX, 'Library', 'Application Support', 'REAPER');
+    renameSync(resource, `${resource}.away`);
+    try {
+      await row.getByRole('button', { name: 'Review' }).click();
+      await dialog.getByRole('button', { name: 'Read templates' }).click();
+      await expect(row).toContainText('REAPER has no templates folders yet, read');
+      await expect(row).toContainText('Save a template in REAPER, then press Read again.');
+      await expect(row).not.toContainText('No templates were found');
+      await expect(row.getByRole('button')).toHaveText(['Read again', 'Forget']);
+      expect((await profile(request)).profile.templates).toMatchObject({
+        empty_reason: 'no_folders'
+      });
+      await evidence(page, '08-no-templates-folders');
+    } finally {
+      renameSync(`${resource}.away`, resource);
+    }
+    // Once the folders exist, Read again lists them and the reason is gone.
+    await row.getByRole('button', { name: 'Read again' }).click();
+    await expect(status).toHaveText('Listed 3 templates.');
+    expect((await profile(request)).profile.templates.empty_reason).toBeUndefined();
+    await row.getByRole('button', { name: 'Forget' }).click();
+    await expect(status).toHaveText('Forgotten. Nothing is read until you review it again.');
+  }
 
   // A review that no longer describes the Home reads nothing: after a new
   // consent, the review obtained before it is refused.

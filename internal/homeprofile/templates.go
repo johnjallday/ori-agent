@@ -272,7 +272,7 @@ func applyTemplatesRead(profile *workspace.HomeProfile, app TemplatesApp, facts 
 	at := now
 	templates.AppID = app.AppID
 	templates.Items, templates.ReadAt, templates.Truncated = nil, nil, false
-	templates.Problem, templates.ProblemAt = "", nil
+	templates.Problem, templates.ProblemAt, templates.EmptyReason = "", nil, ""
 	switch {
 	case errors.Is(readErr, ErrOperationUnavailable):
 		templates.Problem, templates.ProblemAt = workspace.HomeProfileTemplatesUnavailable, &at
@@ -282,6 +282,17 @@ func applyTemplatesRead(profile *workspace.HomeProfile, app TemplatesApp, facts 
 		templates.Items, templates.ReadAt, templates.Truncated = facts.Templates, &at, facts.Truncated
 		if facts.Installed {
 			applyVersion(profile, app.AppID, facts.Version)
+		}
+		// Nothing listed is said plainly when the plugin told why: it did not
+		// find the application where it looks, or the application has no
+		// templates folders at all. Empty folders need no reason.
+		if len(templates.Items) == 0 && !templates.Truncated {
+			switch {
+			case !facts.Installed:
+				templates.EmptyReason = workspace.HomeProfileTemplatesAppNotFound
+			case !facts.TemplatesAvailable:
+				templates.EmptyReason = workspace.HomeProfileTemplatesNoFolders
+			}
 		}
 	}
 }

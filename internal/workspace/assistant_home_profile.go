@@ -51,6 +51,13 @@ const (
 	HomeProfileTemplatesUnavailable = "operation_unavailable"
 	HomeProfileTemplatesFailed      = "read_failed"
 
+	// HomeProfileTemplatesNoFolders and HomeProfileTemplatesAppNotFound say why
+	// a read that worked listed nothing, when that is not simply "the folders
+	// are empty": the application has no templates folders at all, or the
+	// project plugin did not find the application where it looks.
+	HomeProfileTemplatesNoFolders   = "no_folders"
+	HomeProfileTemplatesAppNotFound = "app_not_found"
+
 	HomeProfileMaxApps      = 16
 	HomeProfileMaxTemplates = 64
 	HomeProfileMaxRequests  = 16
@@ -172,8 +179,11 @@ type HomeProfileTemplates struct {
 	ReadAt  *time.Time                   `json:"read_at,omitempty"`
 	AppID   string                       `json:"app_id,omitempty"`
 	Items   []HomeProfileTemplate        `json:"items,omitempty"`
-	// Truncated means the folders hold more than HomeProfileMaxTemplates.
+	// Truncated means the list is not everything the folders hold.
 	Truncated bool `json:"truncated,omitempty"`
+	// EmptyReason is set only on a read that listed nothing for a reason other
+	// than empty folders.
+	EmptyReason string `json:"empty_reason,omitempty"`
 	// Problem and ProblemAt record a read that listed nothing.
 	Problem   string     `json:"problem,omitempty"`
 	ProblemAt *time.Time `json:"problem_at,omitempty"`
@@ -472,6 +482,16 @@ func (t *HomeProfileTemplates) validate(apps map[string]HomeProfileApp) error {
 			(item.Kind != HomeProfileTemplateProject && item.Kind != HomeProfileTemplateTrack) {
 			return invalidHomeProfile("template item")
 		}
+	}
+	switch t.EmptyReason {
+	case "":
+	case HomeProfileTemplatesNoFolders, HomeProfileTemplatesAppNotFound:
+		// A reason for listing nothing belongs to a read that listed nothing.
+		if len(t.Items) > 0 || t.ReadAt == nil || t.Truncated {
+			return invalidHomeProfile("templates empty_reason on a read that is not empty")
+		}
+	default:
+		return invalidHomeProfile("templates empty_reason")
 	}
 	switch t.Problem {
 	case "":

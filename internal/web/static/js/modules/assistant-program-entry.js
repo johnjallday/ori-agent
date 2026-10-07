@@ -43,22 +43,43 @@ export class AssistantProgramEntry {
   render() {
     if (!this.visible) return;
     const switcher = document.querySelector('.ws-cmd-view-switch');
-    if (!switcher || switcher.querySelector('[data-assistant-program-entry]')) return;
+    if (!switcher) return;
     const plans = switcher.querySelector('a[href$="/plans"]');
+    const homeName = String(this.program?.declaration?.station_name || '').trim() || 'Team Home';
+    if (!switcher.querySelector('[data-assistant-program-entry]')) {
+      const link = document.createElement('a');
+      link.className = 'ws-cmd-view-btn ws-cmd-view-link';
+      link.dataset.assistantProgramEntry = '';
+      link.href = workspacePageURL(this.workspaceSlug, ['assistant']);
+      link.textContent = this.program?.hired
+        ? `${homeName} · ${this.program.stage_label || 'Active'} L${this.program.level || 1}`
+        : homeName;
+      link.setAttribute(
+        'aria-label',
+        this.program?.hired
+          ? `Open ${homeName}, ${this.program.stage_label || 'active'}, level ${this.program.level || 1}`
+          : `Open ${homeName}`
+      );
+      switcher.insertBefore(link, plans || null);
+    }
+    this.renderProfileLink(switcher, plans, homeName);
+  }
+
+  // A Home whose package declares a profile card gets a second link, named by
+  // the package's own title, that lands on that card. The card sits below four
+  // other panels on the Home's page, so the Home's link alone does not show
+  // that it exists. A linked project has no card of its own and gets no link.
+  renderProfileLink(switcher, plans, homeName) {
+    const title = this.program?.is_station
+      ? String(this.program?.home_profile_title || '').trim()
+      : '';
+    if (!title || switcher.querySelector('[data-home-profile-entry]')) return;
     const link = document.createElement('a');
     link.className = 'ws-cmd-view-btn ws-cmd-view-link';
-    link.dataset.assistantProgramEntry = '';
-    link.href = workspacePageURL(this.workspaceSlug, ['assistant']);
-    const homeName = String(this.program?.declaration?.station_name || '').trim() || 'Team Home';
-    link.textContent = this.program?.hired
-      ? `${homeName} · ${this.program.stage_label || 'Active'} L${this.program.level || 1}`
-      : homeName;
-    link.setAttribute(
-      'aria-label',
-      this.program?.hired
-        ? `Open ${homeName}, ${this.program.stage_label || 'active'}, level ${this.program.level || 1}`
-        : `Open ${homeName}`
-    );
+    link.dataset.homeProfileEntry = '';
+    link.href = `${workspacePageURL(this.workspaceSlug, ['assistant'])}#homeProfilePanel`;
+    link.textContent = title;
+    link.setAttribute('aria-label', `Open ${title} on ${homeName}`);
     switcher.insertBefore(link, plans || null);
   }
 

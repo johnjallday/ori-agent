@@ -1324,6 +1324,8 @@
 .home-profile-panel {
   grid-column: 1 / -1;
   min-width: 0;
+  /* A link to the card lands below the page's sticky header, not under it. */
+  scroll-margin-top: 96px;
 }
 .home-profile-panel button:disabled,
 .home-profile-panel select:disabled {

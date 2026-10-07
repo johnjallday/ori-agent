@@ -305,6 +305,55 @@ func TestAFailedReadKeepsTheConsentAndSaysWhatHappened(t *testing.T) {
 	}
 }
 
+// A read that listed nothing says why when the plugin told: the application
+// has no templates folders at all, or the plugin did not find the application
+// where it looks. Folders that are simply empty need no reason, and neither
+// does a list that is incomplete.
+func TestAnEmptyTemplatesReadSaysWhyNothingWasListed(t *testing.T) {
+	answer := func(installed, available, truncated bool) string {
+		return fmt.Sprintf(`{"app":"REAPER","installed":%t,"templates_available":%t,"truncated":%t}`, installed, available, truncated)
+	}
+	for name, tc := range map[string]struct {
+		raw    string
+		reason string
+	}{
+		"no templates folders":       {answer(true, false, false), workspace.HomeProfileTemplatesNoFolders},
+		"the plugin found no app":    {answer(false, false, false), workspace.HomeProfileTemplatesAppNotFound},
+		"empty folders":              {answer(true, true, false), ""},
+		"folders it could not list":  {answer(true, true, true), ""},
+		"no app, whatever it claims": {answer(false, true, false), workspace.HomeProfileTemplatesAppNotFound},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, _ := templatesFixture(t)
+			f.factsRaw = tc.raw
+			view, err := f.commit(f.review().ReviewID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			templates := view.Profile.Templates
+			if templates.EmptyReason != tc.reason || templates.ReadAt == nil || len(templates.Items) != 0 || view.Templates.State != TemplatesEmpty {
+				t.Fatalf("templates = %+v row = %+v, want reason %q", templates, view.Templates, tc.reason)
+			}
+			// The next read that lists something says nothing of it any more.
+			f.factsRaw = threeTemplates
+			f.now = f.now.Add(time.Minute)
+			if view, err = f.commit(f.review().ReviewID); err != nil || view.Profile.Templates.EmptyReason != "" || len(view.Profile.Templates.Items) != 3 {
+				t.Fatalf("after a read with templates: %+v %v", view.Profile.Templates, err)
+			}
+		})
+	}
+	// Forget takes the reason with the read.
+	f, _ := templatesFixture(t)
+	f.factsRaw = answer(true, false, false)
+	if _, err := f.commit(f.review().ReviewID); err != nil {
+		t.Fatal(err)
+	}
+	view, err := f.service.TemplatesForget(testOwner, testHome, f.requestID())
+	if err != nil || view.Profile.Templates.EmptyReason != "" || view.Profile.Templates.ReadAt != nil {
+		t.Fatalf("after forget: %+v %v", view.Profile.Templates, err)
+	}
+}
+
 // The plugin's answer can take seconds. Whatever the owner did on another card
 // in that time wins: a read never brings back a consent that was just taken
 // back, and never lists templates for an application that stopped being this

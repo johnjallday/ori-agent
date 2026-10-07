@@ -290,6 +290,48 @@ func TestAssistantProfileHTTPHomeWithoutADeclaredProfile(t *testing.T) {
 	}
 }
 
+// The Home's summary names its profile card, so the Home's workspace page can
+// link to it by the package's own title. A linked project's summary and a Home
+// whose package declares no card name none.
+func TestAssistantProgramSummaryNamesTheHomesProfileCard(t *testing.T) {
+	summarize := func(f *homeProfileHTTP, linked bool) assistantProgramSummary {
+		t.Helper()
+		home, err := f.store.Get(f.home.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var project *workspace.Workspace
+		if linked {
+			if project, err = f.store.Get(f.project.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		summary, err := f.handler.buildAssistantProgramSummary(home, project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return summary
+	}
+	with := homeProfileHTTPFixture(t, true)
+	if got := summarize(with, false); got.HomeProfileTitle != "Your studio" || !got.IsStation {
+		t.Fatalf("Home summary title = %q station = %v", got.HomeProfileTitle, got.IsStation)
+	}
+	if got := summarize(with, true); got.HomeProfileTitle != "" || got.IsStation {
+		t.Fatalf("linked project summary title = %q station = %v", got.HomeProfileTitle, got.IsStation)
+	}
+	if got := summarize(homeProfileHTTPFixture(t, false), false); got.HomeProfileTitle != "" {
+		t.Fatalf("a Home without a declared card names one: %q", got.HomeProfileTitle)
+	}
+	// The title is only a name: the summary's JSON carries no profile value.
+	encoded, err := json.Marshal(summarize(with, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"home_profile_title":"Your studio"`) || strings.Contains(string(encoded), `"home_profile":`) {
+		t.Fatalf("summary JSON = %s", encoded)
+	}
+}
+
 func TestAssistantProfileHTTPReadOnlyHome(t *testing.T) {
 	f := homeProfileHTTPFixture(t, true)
 	h := f.handler

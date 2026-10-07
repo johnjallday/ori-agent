@@ -555,6 +555,44 @@ test('a profile that changed somewhere else is re-read, never overwritten', asyn
   assert.equal(panel.busy, false);
 });
 
+test('arriving by a link to the card lands on it once, and only when it is shown', () => {
+  const previous = { document: globalThis.document, location: globalThis.location };
+  const arrive = ({ hash, hidden = false }) => {
+    const calls = [];
+    const heading = {
+      setAttribute: (name, value) => calls.push(`attr:${name}=${value}`),
+      focus: options => calls.push(`focus:${options?.preventScroll}`)
+    };
+    const panel = { hidden, scrollIntoView: options => calls.push(`scroll:${options?.block}`) };
+    globalThis.document = {
+      getElementById: id =>
+        id === 'homeProfilePanel' ? panel : id === 'homeProfileTitle' ? heading : null
+    };
+    globalThis.location = { hash };
+    const card = new HomeProfilePanel({ workspaceId: 'home-1', program: { is_station: true } });
+    card.focusArrival();
+    card.focusArrival();
+    return calls;
+  };
+  try {
+    // The card is scrolled to and its heading takes focus, once.
+    assert.deepEqual(arrive({ hash: '#homeProfilePanel' }), [
+      'scroll:start',
+      'attr:tabindex=-1',
+      'focus:true'
+    ]);
+    // Another address, or a Home without the card, moves nothing.
+    assert.deepEqual(arrive({ hash: '#projectLibraryPanel' }), []);
+    assert.deepEqual(arrive({ hash: '' }), []);
+    assert.deepEqual(arrive({ hash: '#homeProfilePanel', hidden: true }), []);
+  } finally {
+    if (previous.document === undefined) delete globalThis.document;
+    else globalThis.document = previous.document;
+    if (previous.location === undefined) delete globalThis.location;
+    else globalThis.location = previous.location;
+  }
+});
+
 test('refresh reads the card again without an action, and keeps it on a failed read', async () => {
   const { panel, requests } = panelWith([
     { status: 200, body: card(profile({ revision: 1 })) },
@@ -713,6 +751,36 @@ test('listed templates show counts, the read date and the names by kind', () => 
     'Nothing could be listed from ProjectTemplates and TrackTemplates, read Oct 7, 2026. They may hold templates Ori cannot list, for example in subfolders.'
   );
   assert.equal(unlisted.canReadAgain, true);
+  // And a read that found no folders at all, or no application, says that
+  // instead of naming folders it never saw.
+  const noFolders = templatesView(
+    templatesCard('empty', { read_at: '2026-10-07T10:00:00Z', empty_reason: 'no_folders' }),
+    DATE
+  );
+  assert.equal(
+    noFolders.note,
+    'REAPER has no templates folders yet, read Oct 7, 2026. Save a template in REAPER, then press Read again.'
+  );
+  assert.deepEqual([noFolders.canReadAgain, noFolders.canForget], [true, true]);
+  const noApp = templatesView(
+    templatesCard('empty', { read_at: '2026-10-07T10:00:00Z', empty_reason: 'app_not_found' }),
+    DATE
+  );
+  assert.equal(
+    noApp.note,
+    'The REAPER plugin did not find REAPER on this Mac, read Oct 7, 2026, so no templates were listed.'
+  );
+  // The words are the server's application name, never one of the host's own.
+  assert.equal(
+    templatesView(
+      {
+        ...templatesCard('empty', { read_at: '2026-10-07T10:00:00Z', empty_reason: 'no_folders' }),
+        templates: { state: 'empty', app_name: 'Logic Pro', folders: ['Project Templates'] }
+      },
+      DATE
+    ).note,
+    'Logic Pro has no templates folders yet, read Oct 7, 2026. Save a template in Logic Pro, then press Read again.'
+  );
 });
 
 test('templates name the application for every state that cannot be read', () => {
@@ -842,6 +910,21 @@ test('the templates status line says what a read or a Forget did', () => {
   assert.equal(
     profileStatus('templates', templatesCard('empty', { read_at: '2026-10-07T10:00:00Z' })),
     'No templates were found.'
+  );
+  // Nothing listed for another reason is not announced as "none were found".
+  assert.match(
+    profileStatus(
+      'templates',
+      templatesCard('empty', { read_at: '2026-10-07T10:00:00Z', empty_reason: 'no_folders' })
+    ),
+    /^REAPER has no templates folders yet, read /
+  );
+  assert.match(
+    profileStatus(
+      'templates',
+      templatesCard('empty', { read_at: '2026-10-07T10:00:00Z', truncated: true })
+    ),
+    /^Nothing could be listed from /
   );
   assert.equal(profileStatus('templates', templatesCard('not_read')), 'Nothing was read.');
   assert.equal(

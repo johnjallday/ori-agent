@@ -122,6 +122,8 @@ func TestHomeProfileValidationRejections(t *testing.T) {
 		"template subfolder":        func(p *HomeProfile) { p.Templates.Items[0].File = "Sub/Band.RPP" },
 		"template name":             func(p *HomeProfile) { p.Templates.Items[0].Name = "Band\nSession" },
 		"unknown templates problem": func(p *HomeProfile) { p.Templates.Problem = "exploded" },
+		"unknown empty reason":      func(p *HomeProfile) { p.Templates.EmptyReason = "elsewhere" },
+		"empty reason with items":   func(p *HomeProfile) { p.Templates.EmptyReason = HomeProfileTemplatesNoFolders },
 		"problem without a time":    func(p *HomeProfile) { p.Templates.Problem = HomeProfileTemplatesFailed },
 		"empty defaults": func(p *HomeProfile) {
 			*p.Defaults = HomeProfileDefaults{Source: HomeProfileSourceOwner, ConfirmedAt: p.Defaults.ConfirmedAt}
@@ -194,6 +196,21 @@ func TestHomeProfileEmptyRecordIsValid(t *testing.T) {
 	}
 	if err := profile.Validate(); err != nil {
 		t.Fatalf("consent with a recorded problem: %v", err)
+	}
+	// A read that listed nothing may say why; a reason without a read may not.
+	profile.Apps = []HomeProfileApp{{ID: "reaper", Name: "REAPER", Detected: true, DetectedAt: &at}}
+	for _, reason := range []string{HomeProfileTemplatesNoFolders, HomeProfileTemplatesAppNotFound} {
+		profile.Templates = &HomeProfileTemplates{
+			Consent: &HomeProfileTemplatesConsent{GrantedAt: at, Source: HomeProfileTemplatesHomeReview},
+			AppID:   "reaper", ReadAt: &at, EmptyReason: reason,
+		}
+		if err := profile.Validate(); err != nil {
+			t.Fatalf("an empty read with reason %s: %v", reason, err)
+		}
+		profile.Templates.ReadAt = nil
+		if err := profile.Validate(); !errors.Is(err, ErrHomeProfileInvalid) {
+			t.Fatalf("reason %s without a read: %v", reason, err)
+		}
 	}
 }
 

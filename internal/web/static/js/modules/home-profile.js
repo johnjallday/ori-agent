@@ -361,14 +361,18 @@ export function templatesView(view, { locale, timeZone } = {}) {
     case 'empty': {
       const where = joinNames(folders) || 'its templates folders';
       const when = profileDate(stored.read_at, locale, timeZone);
-      return {
-        ...base,
-        ...act,
-        // Nothing listed is not the same as nothing there.
-        note: stored.truncated
-          ? `Nothing could be listed from ${where}, read ${when}. They may hold templates Ori cannot list, for example in subfolders.`
-          : `No templates were found in ${where}, read ${when}.`
-      };
+      // Nothing listed is not one thing. The row says which: the application
+      // was not where its plugin looks, it has no templates folders yet, the
+      // folders hold something Ori cannot list, or they are simply empty.
+      let note = `No templates were found in ${where}, read ${when}.`;
+      if (stored.empty_reason === 'app_not_found') {
+        note = `The ${app} plugin did not find ${app} on this Mac, read ${when}, so no templates were listed.`;
+      } else if (stored.empty_reason === 'no_folders') {
+        note = `${app} has no templates folders yet, read ${when}. Save a template in ${app}, then press Read again.`;
+      } else if (stored.truncated) {
+        note = `Nothing could be listed from ${where}, read ${when}. They may hold templates Ori cannot list, for example in subfolders.`;
+      }
+      return { ...base, ...act, note };
     }
     case 'problem':
       // A plugin that still cannot list templates reads as update_plugin, so
@@ -411,7 +415,12 @@ export function profileStatus(action, view) {
       const row = templatesView(view);
       if (row.state === 'listed')
         return `Listed ${countOf(row.project.length + row.track.length, 'template')}.`;
-      if (row.state === 'empty') return 'No templates were found.';
+      if (row.state === 'empty') {
+        // Folders that are simply empty get the short line; any other reason
+        // for listing nothing is said as the row says it.
+        const stored = view?.profile?.templates || {};
+        return stored.empty_reason || stored.truncated ? row.note : 'No templates were found.';
+      }
       // Still "not read" after a review means the dialog was dismissed.
       return row.state === 'not_read' ? 'Nothing was read.' : row.note;
     }
@@ -526,6 +535,24 @@ export class HomeProfilePanel {
       this.view = null;
     }
     this.render();
+    this.focusArrival();
+  }
+
+  // A link to the card (the Home's workspace page, a finished setup's Review)
+  // lands on the card once it has drawn. The card sits below four panels and
+  // is shown late, so the browser's own early scroll to the address finds
+  // nothing there. Only the first draw counts: a later redraw never takes the
+  // reader's place back.
+  focusArrival() {
+    if (this.arrivalHandled) return;
+    this.arrivalHandled = true;
+    const panel = this.panel;
+    if (globalThis.location?.hash !== '#homeProfilePanel' || !panel || panel.hidden) return;
+    const heading = globalThis.document?.getElementById('homeProfileTitle');
+    panel.scrollIntoView?.({ block: 'start' });
+    if (!heading) return;
+    heading.setAttribute('tabindex', '-1');
+    heading.focus?.({ preventScroll: true });
   }
 
   // refresh reads the card again and redraws it. A failed read keeps what is

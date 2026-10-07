@@ -236,9 +236,10 @@ func forgetTemplates(profile *workspace.HomeProfile, now time.Time) bool {
 	if templates == nil {
 		return false
 	}
-	changed := len(templates.Items) > 0 || templates.ReadAt != nil || templates.Truncated || templates.Problem != ""
+	changed := len(templates.Items) > 0 || templates.ReadAt != nil || templates.Truncated || templates.Problem != "" ||
+		templates.EmptyReason != ""
 	templates.Items, templates.ReadAt, templates.Truncated = nil, nil, false
-	templates.Problem, templates.ProblemAt = "", nil
+	templates.Problem, templates.ProblemAt, templates.EmptyReason = "", nil, ""
 	if consent := templates.Consent; consent != nil && consent.RevokedAt == nil {
 		revoked := now
 		if revoked.Before(consent.GrantedAt) {

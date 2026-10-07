@@ -306,6 +306,13 @@ only when the root's recorded last scan differs from the one before the review.
   status, "Your studio: REAPER · 4 templates" or "Your studio: REAPER and Logic
   Pro · pick your main DAW", with a **Review** link to the Home's profile card
   (`#homeProfilePanel`). It blocks nothing.
+- **Finding the card:** it is panel 05 on the Home's own page
+  (`/workspaces/<home>/assistant`), below four other panels. The Home's
+  workspace page therefore shows a second link beside the Home's, named by the
+  declared title ("Your studio"), that opens that page at the card
+  (`#homeProfilePanel`); the card scrolls into view and its heading takes focus
+  once it has drawn. The finished setup's **Review** link lands the same way. A
+  linked song's page has no such link: the card belongs to the Home.
 - **The Home card ("05 / PROFILE"):** rows in declared order. Applications show
   **Detected** (dashed) or **Confirmed** (filled) with **Confirm** and **Not
   mine**; a hidden application is listed apart with **Show again** and never
