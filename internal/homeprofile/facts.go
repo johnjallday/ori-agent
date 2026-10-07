@@ -115,9 +115,25 @@ func decodeFacts(raw json.RawMessage, app TemplatesApp) (Facts, error) {
 	return facts, nil
 }
 
+// plainLine accepts one line of plain, visible text within limit characters.
+// Besides control characters it refuses what could make a name read
+// differently from what it is: line and paragraph separators and the marks
+// that reorder text. A value with nothing visible in it is refused too. The
+// plugin is asked to send none of these; the host does not take its word.
 func plainLine(value string, limit int) bool {
-	return value != "" && utf8.ValidString(value) && utf8.RuneCountInString(value) <= limit &&
-		!strings.ContainsFunc(value, unicode.IsControl)
+	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > limit {
+		return false
+	}
+	visible := false
+	for _, r := range value {
+		switch {
+		case unicode.IsControl(r), unicode.Is(unicode.Zl, r), unicode.Is(unicode.Zp, r), unicode.Is(unicode.Bidi_Control, r):
+			return false
+		case unicode.IsGraphic(r) && !unicode.IsSpace(r) && !unicode.Is(unicode.Cf, r):
+			visible = true
+		}
+	}
+	return visible
 }
 
 func (s *Service) templatesApp(home *workspace.Workspace) (TemplatesApp, bool) {

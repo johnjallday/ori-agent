@@ -272,7 +272,10 @@ test('templates are listed only after the owner reviews, and Forget takes them b
     'project:Vocal Comp.RPP',
     'track:Drum Bus.RTrackTemplate'
   ]);
-  expect(stored.truncated ?? false).toBe(false);
+  // The fixture keeps one template in a subfolder. Its name is not listed, and
+  // the list says it is not everything rather than passing over it in silence.
+  expect(stored.truncated).toBe(true);
+  await expect(row).toContainText('The folders may hold more than are listed here.');
   const serialized = JSON.stringify(stored);
   expect(serialized).not.toContain('/');
   if (SANDBOX) expect(serialized).not.toContain(SANDBOX);

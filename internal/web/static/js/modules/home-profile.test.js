@@ -694,7 +694,7 @@ test('listed templates show counts, the read date and the names by kind', () => 
   const more = templatesView(templatesCard('listed', { ...stored, truncated: true }), DATE);
   assert.equal(
     more.note,
-    '2 project templates and 1 track template, read Oct 7, 2026. The folders hold more than are listed here.'
+    '2 project templates and 1 track template, read Oct 7, 2026. The folders may hold more than are listed here.'
   );
   const none = templatesView(templatesCard('empty', { read_at: '2026-10-07T10:00:00Z' }), DATE);
   assert.equal(
@@ -702,6 +702,17 @@ test('listed templates show counts, the read date and the names by kind', () => 
     'No templates were found in ProjectTemplates and TrackTemplates, read Oct 7, 2026.'
   );
   assert.equal(none.canReadAgain, true);
+  // Nothing listed from folders that are not known to be empty (templates in
+  // subfolders, a folder that could not be read) is not "none were found".
+  const unlisted = templatesView(
+    templatesCard('empty', { read_at: '2026-10-07T10:00:00Z', truncated: true }),
+    DATE
+  );
+  assert.equal(
+    unlisted.note,
+    'Nothing could be listed from ProjectTemplates and TrackTemplates, read Oct 7, 2026. They may hold templates Ori cannot list, for example in subfolders.'
+  );
+  assert.equal(unlisted.canReadAgain, true);
 });
 
 test('templates name the application for every state that cannot be read', () => {

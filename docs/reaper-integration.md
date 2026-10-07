@@ -99,9 +99,12 @@ read-only operation, only after the owner agreed.
   most 64, then `truncated: true`. It opens no template and changes nothing.
   The version is the release number from the application bundle's own metadata
   (`7.28`). The resource folder is the per-user one, or the folder beside the
-  bundle when a `reaper.ini` there makes the installation portable. Files in
-  subfolders of a templates folder are not listed, and no symbolic link is
-  followed.
+  bundle when a `reaper.ini` there makes the installation portable. No symbolic
+  link is followed. `truncated` also covers what the read does not name: a
+  templates folder's subfolders (their contents are not listed), a template
+  that is a link, a name that is not one plain visible line, and a folder that
+  could not be read. The plugin cuts the list to its declared 32 KiB answer
+  itself, so Ori never has to refuse an answer whole for its size.
 - **How Ori finds it.** The plugin names the operation at the top level of its
   manifest, `"home_profile_facts": { "service_id": "reaper-service",
   "operation": "profile.read" }`, and requires host feature `home_profile_v1`.
@@ -113,8 +116,9 @@ read-only operation, only after the owner agreed.
   root or scope). Ori applies the operation's declared timeout, output byte
   limit and output schema, then bounds every value again: an answer for another
   application, more than 64 templates or an unknown key is refused; an item with
-  a path-like file name, an unknown kind or a multi-line name is dropped and the
-  list marked incomplete. Only names, kinds, bare file names and modified times
+  a path-like file name, an unknown kind, a multi-line name or a name that would
+  not read as what it is (text-reordering marks, nothing visible) is dropped and
+  the list marked incomplete. Only names, kinds, bare file names and modified times
   are stored. Never an absolute path.
 - **Consent.** Templates are listed only after the owner agreed: by pressing
   **Set up** on a card whose profile line said so and that created the Home, or

@@ -511,6 +511,25 @@ func TestDecodeFactsBoundsEverythingThePluginSays(t *testing.T) {
 	if err != nil || len(facts.Templates) != 1 || facts.Templates[0].File != "Good.RPP" || !facts.Truncated || facts.Version != "" {
 		t.Fatalf("facts = %+v err = %v", facts, err)
 	}
+	// A name that would not read as what it is (text reordered, a second line,
+	// nothing visible) is dropped like any other unusable item; names in
+	// scripts that need joining marks are ordinary names.
+	// The marks are put in as code points: written raw in a source file they
+	// would be invisible to a reader.
+	disguised := strings.NewReplacer(
+		"REORDER", string(rune(0x202e)), "LINEBREAK", string(rune(0x2028)),
+		"ZEROWIDTH", string(rune(0x200b)), "JOINER", string(rune(0x200c)),
+	).Replace(`{"app":"REAPER","installed":true,"templates_available":true,"truncated":false,"templates":[
+	  {"name":"MixREORDERPPR.exe","kind":"project","file":"Reordered.RPP"},
+	  {"name":"TwoLINEBREAKlines","kind":"project","file":"Lines.RPP"},
+	  {"name":"ZEROWIDTH","kind":"project","file":"Invisible.RPP"},
+	  {"name":"میJOINERخواهم","kind":"project","file":"Persian.RPP"},
+	  {"name":"밴드 세션","kind":"track","file":"밴드 세션.RTrackTemplate"}]}`)
+	facts, err = decodeFacts(json.RawMessage(disguised), reaperTemplates)
+	if err != nil || len(facts.Templates) != 2 || facts.Templates[0].File != "Persian.RPP" ||
+		facts.Templates[1].Kind != workspace.HomeProfileTemplateTrack || !facts.Truncated {
+		t.Fatalf("disguised names: facts = %+v err = %v", facts, err)
+	}
 	// A file time that could not be saved with the Home (an offset pushes it
 	// out of the storable years) or that is no file time at all is dropped;
 	// the template itself is kept.

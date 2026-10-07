@@ -349,19 +349,27 @@ export function templatesView(view, { locale, timeZone } = {}) {
         canReview: !readOnly
       };
     case 'listed': {
-      const more = stored.truncated ? ' The folders hold more than are listed here.' : '';
+      // An incomplete list is not always a longer one: the plugin also says
+      // so for templates in subfolders and for a folder it could not read.
+      const more = stored.truncated ? ' The folders may hold more than are listed here.' : '';
       return {
         ...base,
         ...act,
         note: `${countOf(project.length, 'project template')} and ${countOf(track.length, 'track template')}, read ${profileDate(stored.read_at, locale, timeZone)}.${more}`
       };
     }
-    case 'empty':
+    case 'empty': {
+      const where = joinNames(folders) || 'its templates folders';
+      const when = profileDate(stored.read_at, locale, timeZone);
       return {
         ...base,
         ...act,
-        note: `No templates were found in ${joinNames(folders) || 'its templates folders'}, read ${profileDate(stored.read_at, locale, timeZone)}.`
+        // Nothing listed is not the same as nothing there.
+        note: stored.truncated
+          ? `Nothing could be listed from ${where}, read ${when}. They may hold templates Ori cannot list, for example in subfolders.`
+          : `No templates were found in ${where}, read ${when}.`
       };
+    }
     case 'problem':
       // A plugin that still cannot list templates reads as update_plugin, so
       // this state always has something to retry.
