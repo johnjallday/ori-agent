@@ -23,6 +23,20 @@ def message(name="A", status="available"):
 
 
 class DemoProviderTests(unittest.TestCase):
+    def test_candidate_acceptance_requires_an_explicit_exact_source_pair(self):
+        from unittest.mock import patch
+        import contextlib
+        import io
+        for argv in [["demo", "--new-home"], ["demo", "--portfolio"],
+                     ["demo", "--reaper-source", "/candidate"],
+                     ["demo", "--placement", "--new-home"],
+                     ["demo", "--placement", "--reaper-source", "/reaper", "--music-source", "/music"],
+                     ["demo", "--new-home", "--portfolio", "--reaper-source", "/reaper", "--music-source", "/music"]]:
+            with patch("sys.argv", argv), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as failure:
+                    demo.main()
+                self.assertEqual(failure.exception.code, 2)
+
     def test_current_user_projection_not_history(self):
         projection = demo.workspace_projection([message("Old"), message("Current")])
         self.assertEqual(projection["subject"]["name"], "Current")

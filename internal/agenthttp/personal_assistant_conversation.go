@@ -474,6 +474,7 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 		writeConversationError(w, http.StatusConflict, PersonalAssistantConversationOutOfScope, "That conversation does not belong to your assistant's Personal HQ.")
 		return
 	}
+	reviewConversation := &openConversation{scope: scope, id: record.ID, messages: messages}
 	folderState := folderStateFromMessages(messages)
 	if folderState.Observation != nil {
 		folderState.Authority = personalassistant.FolderContinuationLost
@@ -505,7 +506,13 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 	}
 	if target, targetErr := h.folderTarget(scope, record.ID, ""); targetErr == nil {
 		body["folder_reviews"] = h.folderReviewViews(r.Context(), target, messages)
-		if suggestion := h.folderSetupSuggestion(r.Context(), target, &folderState, folderSuggestionMessage(messages, folderState.Revision)); suggestion != nil {
+		review := h.prepareReviewContext(r.Context(), reviewConversation, nil)
+		body["folder_review_context"] = review
+		if elsewhere := review.elsewhereRef(); elsewhere != nil {
+			body["folder_review_elsewhere"] = elsewhere
+		}
+		suggestion := h.folderSetupSuggestion(r.Context(), target, &folderState, folderSuggestionMessage(messages, folderState.Revision), folderSuggestionPrompt(messages, folderState.Revision))
+		if suggestion = h.bindSuggestionSubject(r.Context(), suggestion, folderSuggestionAttribution(messages, folderState.Revision)); suggestion != nil {
 			body["folder_setup_suggestion"] = suggestion
 		}
 	}

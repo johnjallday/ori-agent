@@ -1,6 +1,8 @@
 # Personal Assistant workspace awareness: investigation contract
 
 **Status: findings plus in-progress host implementation; not shipped behavior.**
+Context-following conversations (group 2) and setup continuity/placement
+(group 3) are implemented; notes/tasks and permitted files are not yet.
 The full feature includes context-following conversations, setup continuity,
 notes/tasks, and permitted files. A context badge alone is not the delivery.
 Implementation proceeds in that order with one writer. This document records
@@ -24,17 +26,19 @@ unlinked Album-5 folder. Only the configured model is an inspecting stand-in.
 - No creation/confirmation runs on Send or hydration. Model input has no native
   execution workspace, directory, MCP server or execution scope.
 
-Group 2 has replaced the current-workspace absence assertion with the validated
-projection. The pending-review summary remains unimplemented in group 3: the
-empty new-options list is still not a canonical review summary.
+Group 2 replaced the current-workspace absence assertion with the validated
+projection. Group 3 supplies a separate bounded canonical review projection:
+empty NEW options no longer mean no existing review. It also binds the exact
+named destination, resolves placement, and gives the drawer the same review
+status the model receives (see below).
 
 The real-host browser fixture in
 `tests/personal-assistant-workspace-awareness.spec.ts` captures Route/Ask payloads
 and the pending card without a model. Set up is initially **enabled**; holding a
 confirmation response makes it disabled/faded, then it re-enables. This proves
 one busy-state path, **not** the original screenshot's cause or specialized
-REAPER setup. The busy text uses the observation root (Documents) rather than
-selected project (Album-5); correct that mismatch with the review presentation.
+REAPER setup. The busy text originally used the observation root (Documents)
+rather than selected project (Album-5); group 3 now names the reviewed subject.
 
 `tests/personal-assistant-workspace-baseline.spec.ts` separately stages the exact
 compatible Music 0.1.1 and REAPER 0.9.0 candidates in disposable HOME/data. The
@@ -50,8 +54,10 @@ uncaptured screenshot is not asserted to have the identical condition.
 The original standalone `workspace-assistant.tmpl` omitted shared DX utilities,
 so Send failed locally before Route/Ask. Group 2 now loads that dependency exactly
 once. The exact-candidate browser reaches real Route/Ask with canonical ID/slug
-references and the review/source/workspace state unchanged. Shared drawer primary
-tokens remain a group-3 fix. No vendor model, confirmation, project runtime or
+references and the review/source/workspace state unchanged. Group 3 supplies the
+missing drawer-local signal tokens; the exact-candidate regression confirms an
+enabled primary button with a non-transparent background. Before/fixed evidence
+is preserved separately. No vendor model, confirmation, project runtime or
 live REAPER runs in this specialized check.
 
 ## Current group-2 implementation
@@ -96,6 +102,152 @@ The server/provider fixture separately verifies current pinned reads and
 revocation during generation. These are deterministic host/adapter checks,
 not configured-vendor-model proof. Review projection/placement and substantive
 source readers remain the following groups' work.
+
+## Group-3 review projection, placement and reuse
+
+Every conversation model path receives the latest local canonical review, even
+without a live folder reference on that request. Imported prose/events cannot
+select one. Detached/retired references remain discussable but carry no control
+labels; foreign/missing/failed reads are state unavailable, not no proposal.
+The projection distinguishes pending confirmation, running, stopped/choice,
+completed with a receipt, closed and declined. It excludes IDs, digests, paths,
+URLs and internal error text, escapes reference data and bounds serialized JSON
+to 8,000 Unicode characters. Hydration supplies the same summary status alongside
+the existing canonical card.
+
+**One status vocabulary for the model and the drawer.** The Ask response and
+hydration both return that projection as `folder_review_context`, so the drawer
+shows one sentence (`#personalAssistantFolderReviewStatus`, a polite live
+region) built from the facts the model was given for that turn. The closed list
+of statuses is `internal/agenthttp/testdata/review_status_vocabulary.json`. A Go
+test asserts the projection produces exactly that list; a JS test asserts the
+drawer has a distinct sentence for each and treats an unknown status as "could
+not be read", never as "no review". The sentence names the reviewed destination
+only when it is disclosed, and says why a control is blocked (stop reason,
+changed or unreadable destination, folder access needed again). When the card
+later reports a different state, the earlier sentence is dropped so the two
+never disagree.
+
+A review pending in another conversation is `pending_elsewhere`, distinct from
+unsupported setup. This also holds for a conversation that is not saved yet,
+which previously read as "state unavailable". The model gets the subject and the
+label *Open existing conversation*; only the drawer gets the owning conversation
+ID (`folder_review_elsewhere`), which opens that conversation and cannot review,
+confirm or resume anything.
+
+Existing reviewed Homes now have a separate metadata-only destination reader,
+independent of software/model prerequisites. An explicit Review pins the canonical
+Home ID/name/kind/parent/owner, record/program revisions, typed provider evidence
+and a declaration/compatibility hash in the canonical offer. Read/hydration never
+updates that witness. Model context receives only its safe name/kind/status, not
+IDs, owner identity, hashes or confirmation digests. The same named relationship
+is visible on the card even if a one-click plan is unavailable.
+
+Plan digests bind the destination witness as well as disclosed effects; generic
+review digests also bind it. Fresh confirmation and resumed-run guards reject
+changed IDs, names, parent, owner, provider or declaration. Resume ignores record
+revision bumps caused by the run's own progress, not material witness changes.
+The project runner checks the prepared Home ID/name and project review's parent
+name, and freshly validates the material destination before each owner
+review/commit. Canonical failures do not fall back to a stale file-store Home.
+Destination changes/unavailability retain the old disclosure and remove setup
+controls; an explicit pending Review refreshes the witness. Re-picking a confirmed
+or completed subject preserves the original witness instead of retargeting it.
+
+Versioned explicit Review now resolves placement from canonical browsing references.
+A supported group proposes a separate child; a project first offers supporting
+folder versus separate project. Selecting an operation only prepares its review.
+A mismatched managed Home produces a targeted named decision, never adoption or
+reparenting. Existing exact-candidate refresh follows its persisted operation and
+destination even after navigation. Another conversation's verified review produces
+an Open existing conversation handoff rather than a duplicate offer.
+
+Supporting-folder confirmation adds only a purpose-empty directory reference,
+under a pinned project witness and canonical review lease. It does not replace the
+primary directory/entry, blueprint, mode, roster, tasks or source bytes. Operation
+and destination participate in reuse and digest identity. Generic group creation
+uses the ordinary creation pipeline's parent reference; canonical outcomes retain
+a verified resulting-parent witness and receipt. Completed projections prefer that
+receipt over an earlier new-Home promise.
+
+New-Home disclosure reads the same trusted managed catalog as the group reviewer
+without minting a token. Missing/ambiguous declarations remain unavailable, not an
+invented name. New consent binds typed provider/declaration evidence and the exact
+proposed name. Project creation checks that name and records the created parent ID
+from the canonical journey; portfolio creation records its own committed ID.
+Resume never adopts a Home merely because its name or creation time matches. The
+portfolio runner freshly fences Home, staffing, library, consent and receipt
+operations, including each review-to-commit boundary. A creation that loses its
+parent progress receipt fails closed rather than silently adopting an unreceipted
+Home. Fresh exact-candidate browser acceptance now proves project and portfolio
+new-Home creation plus same-offer completed recovery (`--new-home` / `--portfolio`
+on the demo runner). A legacy refresh previously dropped the saved contextual
+operation and prepared a duplicate pending offer; exact-candidate refresh now
+preserves its guarded operation/destination even without navigation references.
+That compatibility path does not authorize a new destination or supporting grant.
+
+The exact-candidate browser now explicitly confirms Album-5 as a separate Music
+Home child and a supporting source in Album-1, verifying canonical parent/receipts,
+retained draft, unchanged original project and source bytes. Screenshots are
+`compatible-confirmed-project.png` and `compatible-confirmed-supporting-folder.png`.
+The owned loopback provider supplies model configuration only; this is local
+candidate/File-only evidence, not vendor-model, live REAPER or release proof.
+A process-local `ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE` recognizes only the exact
+enabled normalized candidate with valid typed Home metadata. Ordinary local
+installs retain release refusal; preview cannot install/enable an arbitrary source
+or mark it release-verified. Demo plans label the development copy explicitly.
+Natural-language continuation can return a canonical card-focus handoff bound to
+its saved reply/revision/observation/conversation/offer. It is absent for unrelated
+chat and cannot execute Review/Confirm/Resume. New proposals retain non-executing
+choice controls. Browser acceptance verifies focus with unchanged pending state,
+workspaces, sources and historical attribution.
+
+**A named workspace carries into Review.** When the user names one workspace in
+the accepted turn ("add this to Music Home" while Album-1 is on screen), the
+turn's subject is that workspace. A NEW suggestion now carries it as
+`subject: {workspace_id, name, kind}`, and the drawer sends it back as
+`context.subject_workspace_id` when the user opens Review, so placement is
+resolved for the named workspace and not for the page. It is a reference only:
+the server reads the workspace again when it builds the suggestion and again in
+Review. Saved attribution records `subject_explicit`, so a reload restores the
+same suggestion; if the named workspace can no longer be read, the suggestion is
+withdrawn and Review refuses, instead of falling back to the page. A subject
+that merely followed the page is never presented as named. Refreshing an
+existing pinned review still follows its saved operation and destination.
+
+**A folder that is already a project is pointed at, not set up twice.** Before
+Review allocates an offer for "create a project", `CompletedProject` looks for
+this relationship's completed project outcome for the exact folder: same
+canonical folder key **and** same directory identity. A namesake, or a different
+folder that replaced it at the same path, does not match. The host then confirms
+through the canonical store that the project is still active, owned by the user
+and still holds the folder as a user-visible linked directory (`ProjectLinked`);
+a trashed project or an unproven outcome is not reuse. The response is
+`folder_existing_project` (project name and its in-app page), with no offer,
+conversation or workspace created. A supporting-folder link is a different
+operation and is not blocked. The same conversation's own outcome for the same
+operation and destination is still reused in place with its receipt.
+
+A blocked review card says only why it is blocked and how to refresh it; it no
+longer appends the "Confirming creates…" description of a confirmation that is
+not available. Pausing the assistant changes the relationship the folder was
+picked under: a confirmation prepared earlier is refused, the card stops
+promising to remember the project, and the review asks for the folder again.
+
+Group-3 acceptance on plain `wt demo` is
+`python3 scripts/assistant-workspace-demo.py --placement`
+(`tests/personal-assistant-workspace-placement.spec.ts`): named group review,
+the same review reused on a second "add this", navigation without retargeting,
+a renamed destination blocking and then refreshing the same offer, one explicit
+confirmation with its receipt, Album-1's supporting-folder choice, the completed
+project pointed at from a new conversation, and a named workspace carried into
+Review from another page. It uses the loopback deterministic provider, so it
+shows host and drawer behavior, not vendor-model behavior.
+
+Setup-plan software previews now call the existing canonical integration reader
+directly. `setupjourney.Service.Read` creates/reconciles inert run rows, so it is
+not used for observational preview. Actual confirmed runs retain the original
+journey, review lease, digest and idempotency gates.
 
 ## Four separate scopes and the read principal
 

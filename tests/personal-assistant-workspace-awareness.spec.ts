@@ -115,6 +115,9 @@ test('baseline: canonical review survives chat; Set up is enabled until busy', a
   });
   await setup.click();
   await expect(setup).toBeDisabled();
+  await expect(page.locator('#personalAssistantFolderOfferNote')).toHaveText(
+    'Setting up the workspace for Album-5 fixture…'
+  );
   await testInfo.attach('busy-control.png', {
     body: await card.screenshot({ path: join(evidenceDir, 'baseline-busy-control.png') }),
     contentType: 'image/png'

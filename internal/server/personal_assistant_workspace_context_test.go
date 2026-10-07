@@ -177,9 +177,8 @@ func assertNoPanelExecutionAuthority(t *testing.T, request llm.ChatRequest) {
 	}
 }
 
-// Group 2 projects current workspace facts while preserving the independently
-// attached observation and pending review. Group 3 still needs the canonical
-// review summary: the empty new-options list is not that summary.
+// Current workspace and the independently attached observation/review are
+// separate canonical facts. No new options does not mean no existing review.
 func TestAssistantWorkspaceContext_CurrentWorkspaceWithPendingReview(t *testing.T) {
 	f := newWorkspaceAwarenessFixture(t)
 	before := len(f.builder.workspaceFileStore.CachedWorkspaces())
@@ -207,8 +206,9 @@ func TestAssistantWorkspaceContext_CurrentWorkspaceWithPendingReview(t *testing.
 	t.Logf("fixture actual provider messages (metadata only): %s", mustJSON(t, call.Messages))
 	input := mustJSON(t, call.Messages)
 	user := call.Messages[len(call.Messages)-1].Content
-	if !strings.Contains(user, "<folder_setup_options>[]</folder_setup_options>") || !strings.Contains(user, "empty means no suggested review") {
-		t.Fatal("baseline changed: update characterization with the new review projection")
+	if !strings.Contains(user, "<folder_setup_options>[]</folder_setup_options>") || !strings.Contains(user, "empty means no new suggestion") ||
+		!strings.Contains(user, "<folder_review_context>") || !strings.Contains(user, `"status":"awaiting_confirmation"`) || !strings.Contains(user, `"subject":"Album-5 fixture"`) {
+		t.Fatal("missing canonical existing-review projection")
 	}
 	for _, present := range []string{f.home.Name, f.home.ID, "workspace_turn"} {
 		if !strings.Contains(input, present) {
@@ -223,8 +223,9 @@ func TestAssistantWorkspaceContext_CurrentWorkspaceWithPendingReview(t *testing.
 	if !strings.Contains(user, "File contents have not been read") || !strings.Contains(user, "Album-5 fixture") {
 		t.Fatal("missing metadata-only folder evidence")
 	}
-	if reply["folder_context"].(map[string]any)["offer_id"] != f.offerID || reply["folder_setup_suggestion"] != nil {
-		t.Fatal("Ask replaced the existing review")
+	handoff, ok := reply["folder_setup_suggestion"].(map[string]any)
+	if reply["folder_context"].(map[string]any)["offer_id"] != f.offerID || !ok || handoff["offer_id"] != f.offerID || handoff["options"] != nil {
+		t.Fatal("Ask replaced the existing review rather than focusing its canonical card")
 	}
 	saved, err := f.builder.sessionStore.GetSession(context.Background(), f.conversationID)
 	if err != nil || saved.FolderID != f.hqID {

@@ -1,0 +1,18 @@
+{
+  "comment": "Every setup-review status Ori gives the model. The drawer must have a sentence for each (personal-assistant-folder-setup.test.js), and the Go projection may produce no other (personal_assistant_review_vocabulary_test.go).",
+  "statuses": [
+    "no_proposal",
+    "awaiting_confirmation",
+    "awaiting_outcome",
+    "setup_running",
+    "setup_stopped",
+    "reselection_needed",
+    "setup_unavailable",
+    "completed",
+    "closed",
+    "declined",
+    "postponed",
+    "pending_elsewhere",
+    "state_unavailable"
+  ]
+}

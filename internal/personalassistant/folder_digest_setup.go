@@ -37,6 +37,10 @@ func (s *FolderDigestService) attachSetupRun(offer FolderOffer, v *FolderOfferVi
 		PlanDigest: run.PlanDigest, Status: run.Status, StopReason: run.StopReason, EntryCandidates: append([]string(nil), run.EntryCandidates...),
 		Lines: append([]FolderPlanLine(nil), run.Lines...),
 	}
+	if run.Intent.Destination != nil {
+		destination := *run.Intent.Destination
+		view.Destination = &destination
+	}
 	if run.Status == FolderSetupRunning && !s.isRunning(offer.ID) {
 		view.Status, view.StopReason = FolderSetupStopped, FolderStopInterrupted
 		for i := range view.Lines {
@@ -65,6 +69,13 @@ func (s *FolderDigestService) attachSetupPlan(ctx context.Context, userID string
 	}
 	plan, err := s.deps.Setup.Plan(ctx, s.setupRequest(ctx, userID, offer))
 	if err != nil || len(plan.Lines) == 0 {
+		v.SetupUnavailableReason = "setup_unavailable"
+		if reason, ok := err.(interface{ SetupPreviewReason() string }); ok {
+			switch reason.SetupPreviewReason() {
+			case "integration_unavailable", "home_provider_unavailable", "destination_unavailable":
+				v.SetupUnavailableReason = reason.SetupPreviewReason()
+			}
+		}
 		return
 	}
 	plan = plan.Stamped()
@@ -209,7 +220,7 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 			return FolderOfferView{}, planErr
 		}
 		plan = fresh.Stamped()
-		if plan.Digest != input.PlanDigest {
+		if plan.Digest == "" || plan.Digest != input.PlanDigest {
 			return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderPlanChanged
 		}
 	} else {
@@ -218,7 +229,15 @@ func (s *FolderDigestService) StartSetup(ctx context.Context, userID, offerID st
 		}
 		plan = FolderSetupPlan{
 			Lines: append([]FolderPlanLine(nil), offer.Setup.Lines...), Digest: offer.Setup.PlanDigest,
-			Intent: offer.Setup.Intent,
+			Intent: offer.Setup.Intent, Destination: offer.Setup.Intent.Destination,
+		}
+		if plan.Destination != nil {
+			guard, ok := s.deps.Setup.(FolderSetupDestinationGuard)
+			request := s.setupRequest(ctx, userID, *offer)
+			request.Plan = plan
+			if !ok || guard.ValidateSetupDestination(ctx, request) != nil {
+				return s.viewFor(ctx, userID, *offer, binding.Paused), ErrFolderPlanChanged
+			}
 		}
 	}
 
@@ -291,7 +310,11 @@ func (s *FolderDigestService) runSetup(parent context.Context, userID string, of
 	})
 	if err != nil {
 		logger.Warn("One-card folder setup ended unexpectedly", logger.Fields{"offer_id": offer.ID, "error": err.Error()})
-		_ = s.recordSetup(context.WithoutCancel(ctx), userID, offer.ID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: FolderStopFailed, keepLines: true})
+		reason := FolderStopFailed
+		if errors.Is(err, ErrFolderPlanChanged) {
+			reason = FolderStopPlanChanged
+		}
+		_ = s.recordSetup(context.WithoutCancel(ctx), userID, offer.ID, FolderSetupUpdate{Status: FolderSetupStopped, StopReason: reason, keepLines: true})
 		return
 	}
 	s.settleSetup(context.WithoutCancel(ctx), userID, offer.ID)

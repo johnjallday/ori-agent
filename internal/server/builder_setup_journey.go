@@ -148,6 +148,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			b.pluginHandler.Manager(), b.integrationReleases, os.Getenv("ORI_REVIEWED_INTEGRATION_DEV_SOURCE"),
 		)
 		readers[specialist.SetupStepIntegrationInstall] = integrationAdapter
+		b.reviewedIntegrationReader = integrationAdapter
 		if connectionStore, ok := b.workspaceStore.(interface {
 			workspace.Store
 			GetFolderPath(string) (string, error)

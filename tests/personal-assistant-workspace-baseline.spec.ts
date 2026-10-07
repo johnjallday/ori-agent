@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
-// Exact installed-candidate baseline, not release verification or a live model.
+// Exact installed-candidate baseline regression, not release verification or a live model.
 // Run via reaper-demo.sh test --suite awareness with explicit clean sources.
 // This fixture does not substitute for paired-guidance restart acceptance.
 test('compatible baseline: Music Home, Album-1 and pending Album-5 review', async ({
@@ -15,6 +15,7 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
     'Requires exact candidates staged in disposable HOME by reaper-demo.sh'
   );
   expect(basename(sandbox!)).toMatch(/^ori-reaper-demo\./);
+  if (process.env.ORI_WORKSPACE_SETUP_ACCEPTANCE === '1') test.setTimeout(180_000);
   const evidence = join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   await request.post('/api/onboarding/skip');
@@ -110,7 +111,7 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
   await page.locator('#personalAssistantFolderSetupCandidate').selectOption(candidate!);
   await page.getByRole('button', { name: 'Review selection', exact: true }).click();
   const card = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
-  await expect(card).toBeVisible();
+  await expect(card).toBeVisible({ timeout: 60_000 });
   const current = await page.evaluate(() =>
     (window as any).PersonalAssistantFolderContext.current()
   );
@@ -120,6 +121,18 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
   const offer = before.folder_reviews[current.offerId];
   expect(offer.status).toBe('pending');
   expect(offer.subject.name).toBe('Album-5 fixture');
+  expect(offer.destination).toMatchObject({
+    status: 'existing',
+    workspace_id: homeID,
+    name: 'Music Home fixture',
+    kind: 'home'
+  });
+  expect(before.folder_review_context).toMatchObject({
+    status: 'awaiting_confirmation',
+    destination_name: 'Music Home fixture',
+    destination_kind: 'home'
+  });
+  await expect(card).toContainText('Destination: Home “Music Home fixture” · separate project.');
   const controls = await card.locator('button').evaluateAll(buttons =>
     buttons.map(button => ({
       label: button.textContent,
@@ -131,7 +144,7 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
       classes: button.className
     }))
   );
-  await card.screenshot({ path: join(evidence, 'compatible-review-control.png') });
+  await card.screenshot({ path: join(evidence, 'compatible-review-control-fixed.png') });
   await page.locator('#personalAssistantInput').fill('Add this to my workspace');
   await page.locator('#personalAssistantSend').click();
   await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
@@ -145,8 +158,9 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
   ]);
   await expect(card).toBeVisible();
   expect(controls[0].disabled).toBe(false);
-  expect(controls[0].signalToken).toBe('');
-  await page.screenshot({ path: join(evidence, 'compatible-send-reaches-host.png') });
+  expect(controls[0].signalToken.trim()).not.toBe('');
+  expect(controls[0].background).not.toBe('rgba(0, 0, 0, 0)');
+  await page.screenshot({ path: join(evidence, 'compatible-send-reaches-host-fixed.png') });
   const after = await (
     await request.get(`/api/home-assistant/conversations/${current.conversationId}`)
   ).json();
@@ -155,8 +169,214 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
     workspaces.length
   );
   expect(await readFile(source, 'utf8')).toBe(sourceText);
+
+  const child = workspaces.find((row: any) => row.name === 'Album-1 fixture');
+  await page.goto(`/workspaces/${child.folder_slug}/assistant`);
+  if (!(await page.locator('#personalAssistantPanel').isVisible()))
+    await page.locator('#personalAssistantLauncher').click();
+  await expect(page.locator('#personalAssistantWorkspaceContext')).toContainText('Album-1 fixture');
+  await expect(card).toContainText('Destination: Home “Music Home fixture” · separate project.');
+  const navigated = await (
+    await request.get(`/api/home-assistant/conversations/${current.conversationId}`)
+  ).json();
+  expect(navigated.folder_reviews[current.offerId].destination.workspace_id).toBe(homeID);
+
+  // Rename only this disposable Home. Reading must retain the old witness and
+  // block confirmation; an explicit Review then refreshes the material digest.
+  const renamed = await request.put(`/api/workspaces/${homeID}`, {
+    data: { name: 'Renamed Music Home fixture' }
+  });
+  expect(renamed.ok(), await renamed.text()).toBeTruthy();
+  await page.evaluate(
+    (id: string) => (window as any).PersonalAssistantConversation.resume(id),
+    current.conversationId
+  );
+  await expect(card).toContainText('The reviewed destination has changed.');
+  await expect(card).toContainText('Review workspace setup');
+  await expect(card.locator('#personalAssistantFolderOfferActions button')).toHaveText([
+    'Keep chatting'
+  ]);
+  await card.screenshot({ path: join(evidence, 'compatible-destination-changed.png') });
+  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  await page.locator('#personalAssistantFolderSetupCandidate').selectOption(candidate!);
+  await page.getByRole('button', { name: 'Review selection', exact: true }).click();
+  await expect(card).toContainText(
+    'Destination: Home “Renamed Music Home fixture” · separate project.'
+  );
+  const refreshed = await (
+    await request.get(`/api/home-assistant/conversations/${current.conversationId}`)
+  ).json();
+  expect(refreshed.folder_context.offer_id).toBe(current.offerId);
+  expect(refreshed.folder_reviews[current.offerId].destination.workspace_id).toBe(homeID);
+  expect(refreshed.folder_reviews[current.offerId].status).toBe('pending');
+  expect((await (await request.get('/api/workspaces')).json()).folders).toHaveLength(
+    workspaces.length
+  );
+  expect(await readFile(source, 'utf8')).toBe(sourceText);
+  await card.screenshot({ path: join(evidence, 'compatible-destination-refreshed.png') });
+  if (process.env.ORI_WORKSPACE_SETUP_ACCEPTANCE === '1') {
+    expect(
+      (
+        await request.post('/api/settings/system-model', {
+          data: { provider: 'ollama', model: 'ori-workspace-fixture' }
+        })
+      ).ok()
+    ).toBeTruthy();
+    const currentReview = await request.post('/api/home-assistant/folder-context/review', {
+      data: {
+        conversation_id: current.conversationId,
+        revision: refreshed.folder_context.revision,
+        selection_id: current.observation.id,
+        candidate_id: candidate,
+        context: {
+          context_version: 1,
+          origin: 'personal_assistant_panel',
+          surface: 'workspace_detail',
+          workspace_id: child.id,
+          workspace_slug: child.folder_slug,
+          page_path: `/workspaces/${child.folder_slug}/assistant`
+        }
+      }
+    });
+    expect(currentReview.ok(), await currentReview.text()).toBeTruthy();
+    const preparedHistory = await (
+      await request.get(`/api/home-assistant/conversations/${current.conversationId}`)
+    ).json();
+    const ready = preparedHistory.folder_reviews[current.offerId];
+    const candidatePlugins = (await (await request.get('/api/plugins')).json()).plugins.map(
+      (plugin: any) => ({
+        name: plugin.name,
+        version: plugin.version,
+        format: plugin.format,
+        generation: plugin.generation,
+        fingerprint: plugin.component_fingerprint
+      })
+    );
+    await writeFile(
+      join(evidence, 'compatible-confirmed-preparation.json'),
+      JSON.stringify(
+        {
+          subject: ready.subject,
+          destination: ready.destination,
+          plan: ready.plan,
+          capability: ready.capability,
+          status: ready.status,
+          setupUnavailableReason: ready.setup_unavailable_reason,
+          plugins: candidatePlugins,
+          boundary:
+            'Exact candidate preparation with loopback deterministic provider; no vendor model or live REAPER'
+        },
+        null,
+        2
+      ),
+      { mode: 0o600 }
+    );
+    expect(
+      ready.plan,
+      'Exact installed candidate must provide a witnessed one-click plan'
+    ).toBeTruthy();
+    await page.evaluate(
+      (id: string) => (window as any).PersonalAssistantConversation.resume(id),
+      current.conversationId
+    );
+    await card.getByRole('button', { name: 'Set up', exact: true }).click();
+    await expect
+      .poll(
+        async () => {
+          const saved = await (
+            await request.get(`/api/home-assistant/conversations/${current.conversationId}`)
+          ).json();
+          return saved.folder_review_context?.status;
+        },
+        { timeout: 120_000 }
+      )
+      .toBe('completed');
+    const completed = await (
+      await request.get(`/api/home-assistant/conversations/${current.conversationId}`)
+    ).json();
+    const result = completed.folder_reviews[current.offerId];
+    expect(result.outcome.parent).toMatchObject({
+      status: 'existing',
+      workspace_id: homeID,
+      name: 'Renamed Music Home fixture'
+    });
+    expect(result.outcome.workspace_id).not.toBe(child.id);
+    const finalWorkspaces = (await (await request.get('/api/workspaces')).json()).folders;
+    expect(
+      finalWorkspaces.find((row: any) => row.id === result.outcome.workspace_id).parent_id
+    ).toBe(homeID);
+    expect(finalWorkspaces.find((row: any) => row.id === child.id).name).toBe(child.name);
+    expect(await readFile(source, 'utf8')).toBe(sourceText);
+    await page.screenshot({ path: join(evidence, 'compatible-confirmed-project.png') });
+
+    const supportingRoot = join(sandbox!, 'Documents', 'Supporting references fixture');
+    await mkdir(supportingRoot, { recursive: true, mode: 0o750 });
+    const supportingBytes = 'Supporting-folder fixture: source must remain unchanged.';
+    await writeFile(join(supportingRoot, 'references.md'), supportingBytes, { mode: 0o600 });
+    const originalChild = await (await request.get(`/api/workspaces/${child.id}`)).json();
+    await page.locator('#personalAssistantFolderChip').click();
+    await page
+      .locator('#personalAssistantFolderChoices')
+      .getByRole('button', { name: 'Documents', exact: true })
+      .click();
+    await expect(page.locator('#personalAssistantFolderChip')).toBeEnabled();
+    await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+    const supportingCandidate = await page
+      .locator('#personalAssistantFolderSetupCandidate option')
+      .filter({ hasText: 'Supporting references fixture' })
+      .getAttribute('value');
+    expect(supportingCandidate).toBeTruthy();
+    await page.locator('#personalAssistantFolderSetupCandidate').selectOption(supportingCandidate!);
+    await page.getByRole('button', { name: 'Review selection', exact: true }).click();
+    const placement = page.getByRole('region', { name: 'Choose folder placement' });
+    await expect(placement).toContainText('supporting source');
+    expect((await (await request.get('/api/workspaces')).json()).folders).toHaveLength(
+      finalWorkspaces.length
+    );
+    await placement
+      .getByRole('button', { name: 'Review supporting folder in Album-1 fixture', exact: true })
+      .click();
+    await expect(card).toContainText(
+      'primary project entry, blueprint, mode, agents and tasks stay unchanged'
+    );
+    await card.getByRole('button', { name: 'Link supporting folder', exact: true }).click();
+    await expect(card).toContainText('Linked Supporting references fixture as a supporting source');
+    const linkedChild = await (await request.get(`/api/workspaces/${child.id}`)).json();
+    expect(linkedChild.shared_data).toEqual(originalChild.shared_data);
+    expect(linkedChild.agent_instances).toEqual(originalChild.agent_instances);
+    expect(linkedChild.tasks).toEqual(originalChild.tasks);
+    expect(linkedChild.parent_id).toBe(originalChild.parent_id);
+    expect((await (await request.get('/api/workspaces')).json()).folders).toHaveLength(
+      finalWorkspaces.length
+    );
+    expect(await readFile(join(supportingRoot, 'references.md'), 'utf8')).toBe(supportingBytes);
+    await expect(page.locator('#personalAssistantInput')).toHaveValue('Add this to my workspace');
+    await page.screenshot({ path: join(evidence, 'compatible-confirmed-supporting-folder.png') });
+    await writeFile(
+      join(evidence, 'compatible-confirmed-project.json'),
+      JSON.stringify(
+        {
+          boundary:
+            'Explicit drawer confirmation with exact local candidates and deterministic loopback provider; no task opened, vendor model or live REAPER',
+          reaperRevision: process.env.ORI_REAPER_PLUGIN_REVISION,
+          musicRevision: process.env.ORI_MUSIC_PLUGIN_REVISION,
+          status: completed.folder_review_context.status,
+          receipt: result.outcome.receipt,
+          resultingParent: {
+            id: result.outcome.parent.workspace_id,
+            name: result.outcome.parent.name
+          },
+          sourceUnchanged: true,
+          originalProjectUnchanged: true
+        },
+        null,
+        2
+      ),
+      { mode: 0o600 }
+    );
+  }
   await writeFile(
-    join(evidence, 'compatible-baseline.json'),
+    join(evidence, 'compatible-baseline-fixed.json'),
     JSON.stringify(
       {
         evidence:
@@ -164,7 +384,7 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
         reaperRevision: process.env.ORI_REAPER_PLUGIN_REVISION,
         musicRevision: process.env.ORI_MUSIC_PLUGIN_REVISION,
         originalFadedControl:
-          'Faded primary styling reproduced on compatible Home; button is enabled, not a busy/disabled gate',
+          'Previously reproduced enabled-but-faded styling is fixed: drawer supplies its own signal token; original uncaptured screenshot remains distinct',
         pageAPI: apiType,
         sendOutcome: 'Real Route/Ask reached; no configured model, review remains pending',
         hierarchy: {
@@ -174,7 +394,13 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
         },
         payloads,
         controls,
-        review: { status: offer.status, subject: offer.subject.name, needsPick: offer.needs_pick }
+        review: {
+          status: offer.status,
+          subject: offer.subject.name,
+          needsPick: offer.needs_pick,
+          destination: { name: offer.destination.name, kind: offer.destination.kind },
+          placementEvidence: 'Canonical existing Home disclosure; no confirmed setup acceptance'
+        }
       },
       null,
       2

@@ -91,9 +91,10 @@ type FolderSetupIntent struct {
 	// Placement is "grouped" (inside a Home) or "standalone"; CreatesHome says
 	// the plan promised to create that Home first. HomeTemplate is the exact
 	// template the Home is created from.
-	Placement    string `json:"placement,omitempty"`
-	CreatesHome  bool   `json:"creates_home,omitempty"`
-	HomeTemplate string `json:"home_template,omitempty"`
+	Placement    string                  `json:"placement,omitempty"`
+	CreatesHome  bool                    `json:"creates_home,omitempty"`
+	HomeTemplate string                  `json:"home_template,omitempty"`
+	Destination  *FolderSetupDestination `json:"destination,omitempty"`
 	// A portfolio plan: Portfolio marks it; StaffsHome promised to add the Home's
 	// required roles; GrantsConsent promised the standing consent for the
 	// projects' shared assistant (the plan's assistant line).
@@ -114,8 +115,9 @@ type FolderSetupIntent struct {
 // Digest back with the click and the server recomputes the plan: a mismatch
 // means the card on screen is stale and the click is refused.
 type FolderSetupPlan struct {
-	Lines  []FolderPlanLine `json:"lines"`
-	Digest string           `json:"digest"`
+	Lines       []FolderPlanLine        `json:"lines"`
+	Digest      string                  `json:"digest"`
+	Destination *FolderSetupDestination `json:"destination,omitempty"`
 	// Intent is the machine-readable promise behind the lines; server only.
 	Intent FolderSetupIntent `json:"-"`
 }
@@ -141,12 +143,18 @@ func NewFolderSetupPlan(lines []FolderPlanLine) FolderSetupPlan {
 	return FolderSetupPlan{Lines: copied, Digest: FolderPlanDigest(copied)}
 }
 
-// Stamped returns the plan with its digest recomputed from its lines and its
-// lines copied, keeping the intent. A host's plan is never trusted to carry a
+// Stamped returns the plan with its digest recomputed from its lines and any
+// destination witness. It copies the lines/witness, keeping the intent. A host's plan is never trusted to carry a
 // digest it computed itself.
 func (p FolderSetupPlan) Stamped() FolderSetupPlan {
 	stamped := NewFolderSetupPlan(p.Lines)
 	stamped.Intent = p.Intent
+	if p.Destination != nil {
+		destination := *p.Destination
+		stamped.Destination = &destination
+		stamped.Intent.Destination = &destination
+		stamped.Digest = DestinationPlanDigest(stamped.Lines, &destination)
+	}
 	return stamped
 }
 
@@ -192,6 +200,18 @@ type FolderSetupRunner interface {
 	Run(ctx context.Context, req FolderSetupRequest) error
 }
 
+// FolderSetupDestinationReader resolves destination metadata independently of
+// software/model prerequisites, without initializing a setup journey.
+type FolderSetupDestinationReader interface {
+	ReadSetupDestination(context.Context, FolderSetupRequest) (*FolderSetupDestination, error)
+}
+
+// FolderSetupDestinationGuard revalidates a persisted witness on resume,
+// without regenerating the consented remaining-step plan or doing setup work.
+type FolderSetupDestinationGuard interface {
+	ValidateSetupDestination(context.Context, FolderSetupRequest) error
+}
+
 // FolderSetupInput is the click on Set up: the plan digest the card showed, the
 // idempotency key, and the project file when the user chose one.
 type FolderSetupInput struct {
@@ -203,11 +223,12 @@ type FolderSetupInput struct {
 // FolderSetupView is a run as the browser sees it.
 type FolderSetupView struct {
 	// PlanDigest is the plan the run was confirmed on; a resume sends it back.
-	PlanDigest      string           `json:"plan_digest"`
-	Status          string           `json:"status"`
-	StopReason      string           `json:"stop_reason,omitempty"`
-	Lines           []FolderPlanLine `json:"lines"`
-	EntryCandidates []string         `json:"entry_candidates,omitempty"`
+	PlanDigest      string                  `json:"plan_digest"`
+	Status          string                  `json:"status"`
+	StopReason      string                  `json:"stop_reason,omitempty"`
+	Lines           []FolderPlanLine        `json:"lines"`
+	EntryCandidates []string                `json:"entry_candidates,omitempty"`
+	Destination     *FolderSetupDestination `json:"destination,omitempty"`
 }
 
 const (
@@ -235,6 +256,11 @@ func validateFolderSetupRun(run FolderSetupRun) error {
 		}
 	}
 	intent := run.Intent
+	if intent.Destination != nil {
+		if err := intent.Destination.Validate(); err != nil {
+			return err
+		}
+	}
 	for _, text := range []string{intent.Integration, intent.IntegrationPlugin, intent.IntegrationVersion,
 		intent.Provider, intent.ProviderPlugin, intent.ProviderVersion, intent.Placement, intent.HomeTemplate} {
 		if len(text) > 160 || strings.ContainsAny(text, "/\\\x00\r\n") {

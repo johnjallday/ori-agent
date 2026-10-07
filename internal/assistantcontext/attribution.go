@@ -22,19 +22,22 @@ type SaveOwner struct {
 // Attribution retains references/versions only, never an overview or source
 // body. Its historical representation is display data, not a read/action grant.
 type Attribution struct {
-	Version        int           `json:"version"`
-	Status         Availability  `json:"status"`
-	Reason         string        `json:"reason,omitempty"`
-	Location       *WorkspaceRef `json:"location,omitempty"`
-	Subject        *WorkspaceRef `json:"subject,omitempty"`
-	Parent         *WorkspaceRef `json:"parent,omitempty"`
-	SelectedTaskID string        `json:"selected_task_id,omitempty"`
-	ReadAt         time.Time     `json:"read_at"`
-	Historical     bool          `json:"historical,omitempty"`
+	Version  int           `json:"version"`
+	Status   Availability  `json:"status"`
+	Reason   string        `json:"reason,omitempty"`
+	Location *WorkspaceRef `json:"location,omitempty"`
+	Subject  *WorkspaceRef `json:"subject,omitempty"`
+	// SubjectExplicit records that the user named the subject in that turn; it
+	// did not merely follow the page. Like every field here it is history.
+	SubjectExplicit bool          `json:"subject_explicit,omitempty"`
+	Parent          *WorkspaceRef `json:"parent,omitempty"`
+	SelectedTaskID  string        `json:"selected_task_id,omitempty"`
+	ReadAt          time.Time     `json:"read_at"`
+	Historical      bool          `json:"historical,omitempty"`
 }
 
 func (t Turn) Attribution() *Attribution {
-	out := &Attribution{Version: t.Version, Status: t.Status, Reason: t.Reason, Location: t.Location, Subject: t.Subject, ReadAt: t.ReadAt}
+	out := &Attribution{Version: t.Version, Status: t.Status, Reason: t.Reason, Location: t.Location, Subject: t.Subject, SubjectExplicit: t.SubjectExplicit && t.Subject != nil, ReadAt: t.ReadAt}
 	if t.Overview != nil {
 		out.Parent = t.Overview.Parent
 		if t.Overview.SelectedTask != nil {

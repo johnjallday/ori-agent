@@ -157,6 +157,8 @@ type PortfolioRunner struct {
 	Folder   string
 	Progress Progress
 	NewKey   func() string
+	// Fresh material fencing before every owner read and commit.
+	ValidateDestination func(context.Context, string) error
 }
 
 // PortfolioConfig is what the user confirmed and what an earlier pass recorded.
@@ -286,6 +288,9 @@ func (s *portfolioRun) drive(ctx context.Context) error {
 	if err := s.share(ctx); err != nil {
 		return err
 	}
+	if err := s.guard(ctx); err != nil {
+		return err
+	}
 	rows, err := s.runner.Receipts.Receipt(ctx, s.homeID, PortfolioReceiptFacts{
 		HomeCreated: s.homeCreated || (s.cfg.Plan.Intent.CreatesHome && s.cfg.HomeID != ""), AddedAgents: s.added, Listed: listed,
 		Shared: s.cfg.Plan.Intent.SharedProjects,
@@ -297,11 +302,26 @@ func (s *portfolioRun) drive(ctx context.Context) error {
 	return nil
 }
 
+func (s *portfolioRun) guard(ctx context.Context) error {
+	if expected := s.cfg.Plan.Destination; expected != nil && expected.Status == "existing" && s.homeID != "" && s.homeID != expected.WorkspaceID {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home ID differs from the review"}
+	}
+	if s.runner.ValidateDestination != nil {
+		if err := s.runner.ValidateDestination(ctx, s.homeID); err != nil {
+			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home destination is no longer available"}
+		}
+	}
+	return nil
+}
+
 // home finds the Home the run built earlier, or builds it through the reviewed
 // Home template exactly as the plan said: a Home is created only when the plan
 // promised one, and an existing Home is used only when the plan said so (or it
 // is this run's own, made after Set up was pressed).
 func (s *portfolioRun) home(ctx context.Context) error {
+	if err := s.guard(ctx); err != nil {
+		return err
+	}
 	intent := s.cfg.Plan.Intent
 	if s.homeID != "" {
 		s.done(personalassistant.FolderPlanHome)
@@ -315,6 +335,9 @@ func (s *portfolioRun) home(ctx context.Context) error {
 		return failed("could not read the Home: " + err.Error())
 	}
 	if exists {
+		if expected := s.cfg.Plan.Destination; expected != nil && (expected.Status == "new" || found.ID != expected.WorkspaceID) {
+			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "an unreceipted or different Home exists"}
+		}
 		ours := !found.CreatedAt.IsZero() && !s.cfg.AcceptedAfter.IsZero() && !found.CreatedAt.Before(s.cfg.AcceptedAfter)
 		if intent.CreatesHome && !ours {
 			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "a Home already exists; the plan said one would be created"}
@@ -326,12 +349,18 @@ func (s *portfolioRun) home(ctx context.Context) error {
 	if !intent.CreatesHome {
 		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home the plan joins is gone"}
 	}
+	if err := s.guard(ctx); err != nil {
+		return err
+	}
 	review, err := s.runner.Homes.Review(ctx)
 	if err != nil {
 		return failed("the Home review failed: " + err.Error())
 	}
-	if review.Token == "" || review.Reuse || (intent.HomeTemplate != "" && review.TemplateID != intent.HomeTemplate) {
+	if review.Token == "" || review.Reuse || (intent.HomeTemplate != "" && review.TemplateID != intent.HomeTemplate) || (s.cfg.Plan.Destination != nil && review.Name != s.cfg.Plan.Destination.Name) {
 		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home review differs from the plan"}
+	}
+	if err := s.guard(ctx); err != nil {
+		return err
 	}
 	homeID, err := s.runner.Homes.Commit(ctx, review, s.key())
 	if err != nil || homeID == "" {
@@ -345,6 +374,9 @@ func (s *portfolioRun) home(ctx context.Context) error {
 // staffHome adds the Home's required agents the plan promised. A Home that has
 // them already, or a plan that did not promise any, adds nobody.
 func (s *portfolioRun) staffHome(ctx context.Context) error {
+	if err := s.guard(ctx); err != nil {
+		return err
+	}
 	if !s.cfg.Plan.Intent.StaffsHome {
 		s.done(personalassistant.FolderPlanAgents)
 		return nil
@@ -368,6 +400,9 @@ func (s *portfolioRun) staffHome(ctx context.Context) error {
 		if role.RoleID == "" || role.Name == "" {
 			return failed("a required Home role has no agent name")
 		}
+		if err := s.guard(ctx); err != nil {
+			return err
+		}
 		if err := s.runner.Staffing.Staff(ctx, s.homeID, role); err != nil {
 			return failed("could not add " + role.Name + ": " + err.Error())
 		}
@@ -390,9 +425,15 @@ func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 		if !s.cfg.Plan.Intent.CreatesHome {
 			return ScanOutcome{}, &stop{reason: personalassistant.FolderStopPlanChanged, detail: "song details are granted only on a Home the plan creates"}
 		}
+		if err := s.guard(ctx); err != nil {
+			return ScanOutcome{}, err
+		}
 		if err := s.runner.SongDetails.Grant(ctx, s.homeID); err != nil {
 			return ScanOutcome{}, failed("the song-details consent was not recorded: " + err.Error())
 		}
+	}
+	if err := s.guard(ctx); err != nil {
+		return ScanOutcome{}, err
 	}
 	current, err := lib.State(ctx, s.homeID)
 	if err != nil {
@@ -406,6 +447,9 @@ func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 		return ScanOutcome{}, err
 	}
 	if !current.Initialized {
+		if err := s.guard(ctx); err != nil {
+			return ScanOutcome{}, err
+		}
 		review, err := lib.ReviewInitialize(ctx, s.homeID)
 		if err != nil {
 			return ScanOutcome{}, failed("the library review failed: " + err.Error())
@@ -414,12 +458,18 @@ func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 		if review.Token == "" || (s.cfg.Plan.Intent.CreatesHome && review.Linked != 0) {
 			return ScanOutcome{}, &stop{reason: personalassistant.FolderStopPlanChanged, detail: "turning the library on would carry in projects the plan did not mention"}
 		}
+		if err := s.guard(ctx); err != nil {
+			return ScanOutcome{}, err
+		}
 		if err := lib.CommitInitialize(ctx, s.homeID, review, s.key()); err != nil {
 			return ScanOutcome{}, failed("the library was not turned on: " + err.Error())
 		}
 	}
 	rootID := current.RootID
 	if rootID == "" {
+		if err := s.guard(ctx); err != nil {
+			return ScanOutcome{}, err
+		}
 		review, err := lib.ReviewConnect(ctx, s.homeID)
 		if errors.Is(err, ErrNeedsPick) {
 			return ScanOutcome{}, err
@@ -431,10 +481,16 @@ func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 			filepath.Clean(review.Folder) != filepath.Clean(s.runner.Folder) {
 			return ScanOutcome{}, &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the folder review names another folder"}
 		}
+		if err := s.guard(ctx); err != nil {
+			return ScanOutcome{}, err
+		}
 		rootID, err = lib.CommitConnect(ctx, s.homeID, review, s.key())
 		if err != nil || rootID == "" {
 			return ScanOutcome{}, failed("the folder was not connected")
 		}
+	}
+	if err := s.guard(ctx); err != nil {
+		return ScanOutcome{}, err
 	}
 	review, err := lib.ReviewScan(ctx, s.homeID, rootID)
 	if err != nil {
@@ -445,6 +501,9 @@ func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 	}
 	if review.ReadsSongDetails && !s.cfg.Plan.Intent.ReadsSongDetails {
 		return ScanOutcome{}, &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the listing review reads song details the plan did not mention"}
+	}
+	if err := s.guard(ctx); err != nil {
+		return ScanOutcome{}, err
 	}
 	listed, err := lib.CommitScan(ctx, s.homeID, rootID, review, s.key())
 	if err != nil {
@@ -457,6 +516,9 @@ func (s *portfolioRun) library(ctx context.Context) (ScanOutcome, error) {
 // share records the standing consent the plan's assistant line asked for. A Home
 // whose consent is already on records nothing.
 func (s *portfolioRun) share(ctx context.Context) error {
+	if err := s.guard(ctx); err != nil {
+		return err
+	}
 	if !s.cfg.Plan.Intent.GrantsConsent {
 		return nil
 	}
@@ -468,6 +530,9 @@ func (s *portfolioRun) share(ctx context.Context) error {
 		return nil
 	}
 	if err := s.working(ctx, personalassistant.FolderPlanAssistant); err != nil {
+		return err
+	}
+	if err := s.guard(ctx); err != nil {
 		return err
 	}
 	if err := s.runner.Sharing.Grant(ctx, s.homeID); err != nil {

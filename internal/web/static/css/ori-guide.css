@@ -644,6 +644,10 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
      surface, where the lighter one passes. */
   --pa-accent-text: var(--ori-accent-strong);
   --pa-ink-dim: color-mix(in srgb, var(--ori-ink) 72%, var(--ori-surface));
+  /* The shared setup card also lives off Home. Its primary action must not
+     depend on tokens defined only on body.home-command-page. */
+  --hc-signal: var(--cozy-moss, #3f6b45);
+  --hc-signal-deep: color-mix(in srgb, var(--hc-signal) 88%, var(--cozy-paper, #fff));
 
   gap: 12px;
 }
@@ -1599,6 +1603,15 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 
 .personal-assistant-panel .personal-assistant-message__setup p {
   margin: 0;
+}
+
+/* A handoff's quiet choice reads like the review card's "Keep chatting", not a
+   Bootstrap link. */
+.personal-assistant-panel .personal-assistant-message__setup .btn-link,
+.personal-assistant-panel #personalAssistantFolderReviewStatus .btn-link {
+  padding: 0;
+  color: var(--pa-ink-dim);
+  text-decoration: underline;
 }
 
 /* Remember… is secondary: it reads as a quieter action than saving a draft. */

@@ -63,6 +63,7 @@ type FolderHomeProviderPreview struct {
 	InstalledVersion string `json:"installed_version,omitempty"`
 	Source           string `json:"source,omitempty"`
 	Disclosure       any    `json:"disclosure,omitempty"`
+	DevelopmentCopy  bool   `json:"development_copy,omitempty"`
 }
 
 type FolderHomeProviderSetup interface {

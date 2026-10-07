@@ -116,7 +116,21 @@ def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8954)
+    parser.add_argument("--reaper-source")
+    parser.add_argument("--music-source")
+    parser.add_argument("--new-home", action="store_true", help="Confirm a declared new Home with exact staged candidates")
+    parser.add_argument("--portfolio", action="store_true", help="Confirm a collection and library in a declared new Home")
+    parser.add_argument("--placement", action="store_true",
+                        help="wt demo: named review, blocked refresh, confirmed setup and project-local choice")
     args = parser.parse_args()
+    if args.placement and (args.reaper_source or args.music_source or args.new_home or args.portfolio):
+        parser.error("--placement runs on plain wt demo, without companion candidates")
+    if bool(args.reaper_source) != bool(args.music_source):
+        parser.error("candidate setup needs both exact companion sources")
+    if (args.new_home or args.portfolio) and not args.reaper_source:
+        parser.error("new-Home/portfolio acceptance needs both exact companion sources")
+    if args.new_home and args.portfolio:
+        parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
     evidence = ROOT / "tasks/evidence-assistant-workspace-awareness"
@@ -132,24 +146,45 @@ def main():
                    "CODEX_HOME", "AGENT_STORE_PATH", "ORI_KEEP_DEMO_SANDBOX", "ORI_DEMO_OPEN"}}
         env.update(ORI_DEMO_NO_CODEX="1", ORI_DEMO_OPEN="0",
                    OLLAMA_BASE_URL=f"http://127.0.0.1:{provider.server_port}")
-        log = evidence / "group2-wt-demo.log"
+        candidate = bool(args.reaper_source)
+        if candidate:
+            env.update(ORI_WORKSPACE_SETUP_ACCEPTANCE="1", ORI_WORKSPACE_PROVIDER_FIXTURE=str(state))
+        env.pop("ORI_WORKSPACE_COLLECTION_ACCEPTANCE", None)
+        if args.new_home or args.portfolio:
+            env["ORI_WORKSPACE_NEW_HOME_ACCEPTANCE"] = "1"
+            if args.portfolio:
+                env["ORI_WORKSPACE_COLLECTION_ACCEPTANCE"] = "1"
+        else:
+            env.pop("ORI_WORKSPACE_NEW_HOME_ACCEPTANCE", None)
+        log = evidence / ("group3-portfolio-candidate.log" if args.portfolio else
+                          "group3-new-home-candidate.log" if args.new_home else
+                          "group3-confirmed-candidate.log" if candidate else
+                          "group3-wt-demo-placement.log" if args.placement else "group2-wt-demo.log")
+        spec, sandbox_env = (("tests/personal-assistant-workspace-placement.spec.ts", "ORI_WORKSPACE_PLACEMENT_SANDBOX")
+                             if args.placement else
+                             ("tests/personal-assistant-workspace-history.spec.ts", "ORI_WORKSPACE_HISTORY_SANDBOX"))
         process = None
         sandbox = None
         try:
             with log.open("w") as output:
+                command = ([str(ROOT / "scripts/reaper-demo.sh"), "test", "--suite", "awareness",
+                            "--reaper-source", args.reaper_source, "--music-source", args.music_source,
+                            "--port", str(args.port)] if candidate else
+                           ["zsh", "-c", 'trap "" INT; source "$1"; wt demo "$2"', "--",
+                            str(ROOT / "scripts/wt.sh"), str(args.port)])
                 process = subprocess.Popen(
-                    ["zsh", "-c", 'trap "" INT; source "$1"; wt demo "$2"', "--",
-                     str(ROOT / "scripts/wt.sh"), str(args.port)],
+                    command,
                     cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
+                if candidate:
+                    return process.wait()
                 sandbox = wait_for_demo(process, log, args.port)
                 env.update(PLAYWRIGHT_BASE_URL=f"http://127.0.0.1:{args.port}",
-                           ORI_WORKSPACE_HISTORY_SANDBOX=str(sandbox),
                            ORI_WORKSPACE_PROVIDER_FIXTURE=str(state))
+                env[sandbox_env] = str(sandbox)
                 result = subprocess.run(
-                    ["npx", "playwright", "test", "tests/personal-assistant-workspace-history.spec.ts",
-                     "--workers=1"], cwd=ROOT, env=env, check=False,
+                    ["npx", "playwright", "test", spec, "--workers=1"], cwd=ROOT, env=env, check=False,
                 )
                 return result.returncode
         finally:

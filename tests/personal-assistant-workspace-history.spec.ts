@@ -122,7 +122,8 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
     'Draft kept through group and project navigation'
   );
 
-  // Canonical review created while looking at A; no model or approval needed.
+  // Inside A, choose a separate project review explicitly. This choice is
+  // non-executing; it does not approve creation or link a supporting folder.
   await page.locator('#personalAssistantFolderChip').click();
   await page
     .locator('#personalAssistantFolderChoices')
@@ -133,6 +134,14 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
     .locator('#personalAssistantFolderSetupCandidate')
     .selectOption({ label: 'Album-5 history fixture' });
   await page.getByRole('button', { name: 'Review selection', exact: true }).click();
+  const placement = page.getByRole('region', { name: 'Choose folder placement' });
+  await expect(placement).toContainText('supporting source');
+  await placement
+    .getByRole('button', {
+      name: 'Review a separate project in Music portfolio history fixture',
+      exact: true
+    })
+    .click();
   const card = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
   await expect(card).toBeVisible();
   const current = await page.evaluate(() =>
@@ -159,10 +168,22 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
   };
   const first = await send('Tell me about this workspace');
   expect(first.workspace_context.subject.id).toBe(b.id);
+  expect(first.folder_setup_suggestion).toBeUndefined();
   expect(first.conversation.id).toBe(current.conversationId);
   await expect(page.locator('.personal-assistant-message__context').last()).toHaveText(
     'Project: Second project history fixture'
   );
+  expect((await (await request.get(historyURL)).json()).folder_reviews[current.offerId]).toEqual(
+    before.folder_reviews[current.offerId]
+  );
+
+  // A natural-language continuation returns only a canonical card-focus handoff.
+  const continuation = await send('Continue with the reviewed setup');
+  expect(continuation.folder_setup_suggestion.offer_id).toBe(current.offerId);
+  const focusReview = page.getByRole('button', { name: 'Show existing setup review', exact: true });
+  await expect(focusReview).toBeVisible();
+  await focusReview.click();
+  await expect(card).toBeFocused();
   expect((await (await request.get(historyURL)).json()).folder_reviews[current.offerId]).toEqual(
     before.folder_reviews[current.offerId]
   );
@@ -220,6 +241,8 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
   const saved = await (await request.get(historyURL)).json();
   const turns = saved.messages.filter((row: any) => row.role !== 'folder_context');
   expect(turns.map((row: any) => row.workspace_context.subject.id)).toEqual([
+    b.id,
+    b.id,
     b.id,
     b.id,
     a.id,

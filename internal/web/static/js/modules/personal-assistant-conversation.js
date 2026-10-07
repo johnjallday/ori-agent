@@ -280,7 +280,9 @@ async function resume(id, options = {}) {
     window.PersonalAssistantFolderSetup?.hydrate?.(
       conversation.id,
       result.body.folder_reviews || {},
-      result.body.folder_setup_suggestion || null
+      result.body.folder_setup_suggestion || null,
+      result.body.folder_review_context || null,
+      result.body.folder_review_elsewhere || null
     );
     setNote(
       partial
@@ -416,6 +418,11 @@ function applyReply(data, rows = {}) {
   }
   if (reply.stored)
     window.PersonalAssistantFolderSetup?.applySuggestion?.(data.folder_setup_suggestion || null);
+  // The same canonical review summary the model was given for this turn.
+  window.PersonalAssistantFolderSetup?.applyReviewContext?.(
+    data.folder_review_context || null,
+    data.folder_review_elsewhere || null
+  );
   const notice = conversationNotice(data);
   setNote(notice);
   return { notice, stored: reply.stored === true, restoreInput: shouldRestoreInput(data) };

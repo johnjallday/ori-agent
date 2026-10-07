@@ -113,6 +113,10 @@ type HomeAssistantAskResponse struct {
 	Conversation          *HomeAssistantConversationState         `json:"conversation,omitempty"`
 	FolderContext         *PersonalAssistantFolderState           `json:"folder_context,omitempty"`
 	FolderSetupSuggestion *PersonalAssistantFolderSetupSuggestion `json:"folder_setup_suggestion,omitempty"`
+	// FolderReviewContext is the canonical review summary given to the model for
+	// this turn: description only, with no offer ID, digest or control.
+	FolderReviewContext   *personalAssistantReviewContext `json:"folder_review_context,omitempty"`
+	FolderReviewElsewhere *reviewElsewhere                `json:"folder_review_elsewhere,omitempty"`
 	// ModelUnavailable marks a turn that got no model answer, so the browser
 	// can keep the user's text instead of treating the reply as an answer.
 	ModelUnavailable bool `json:"model_unavailable,omitempty"`
@@ -397,6 +401,15 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return resp
 	}
 
+	// Canonical review metadata accompanies every model path, independently of
+	// new setup options or whether the browser attached a live folder this turn.
+	review := h.prepareReviewContext(ctx, conversation, folderTurn)
+	ctx = context.WithValue(ctx, reviewContextKey{}, review)
+	if review != nil && review.Status != "no_proposal" {
+		// The drawer states the same review facts the model was given this turn.
+		defer func() { response.FolderReviewContext, response.FolderReviewElsewhere = review, review.elsewhereRef() }()
+	}
+
 	if folderTurn != nil {
 		return h.answerFolderTurn(ctx, prompt, req.Draft, identity, workContext, conversation, folderTurn)
 	}
@@ -583,13 +596,13 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	scope := workspaceTurnFromContext(ctx)
 	var registry modelToolRegistry = newHomeToolRegistry(turn.sources)
 	if scope != nil {
-		registry = &panelToolRegistry{handler: h, turn: scope, home: newHomeToolRegistry(h.scopedPanelSources(ctx, turn.sources, scope)), used: len([]rune(workspaceTurnPrompt(scope)))}
+		registry = &panelToolRegistry{handler: h, turn: scope, home: newHomeToolRegistry(h.scopedPanelSources(ctx, turn.sources, scope)), used: len([]rune(workspaceTurnPrompt(scope) + reviewContextPrompt(ctx)))}
 	}
 
 	conversation := make([]llm.Message, 0, len(turn.history)+2)
 	conversation = append(conversation, llm.NewSystemMessage(turn.system))
 	conversation = append(conversation, turn.history...)
-	conversation = append(conversation, llm.NewUserMessage(turn.user+workspaceTurnPrompt(scope)))
+	conversation = append(conversation, llm.NewUserMessage(turn.user+workspaceTurnPrompt(scope)+reviewContextPrompt(ctx)))
 	var tools []llm.Tool
 	if provider.Capabilities().SupportsTools {
 		tools = registry.Definitions()

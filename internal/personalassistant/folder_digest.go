@@ -184,7 +184,9 @@ type FolderCreateRequest struct {
 	// workspace.
 	Blueprint string
 	// RequestID is the click's idempotency key.
-	RequestID string
+	RequestID   string
+	Operation   string
+	Destination *FolderSetupDestination
 }
 
 // FolderCreateResult is the workspace the host set up.
@@ -195,6 +197,7 @@ type FolderCreateResult struct {
 	// HomeRoute is present only when the canonical journey verified the
 	// child's exact reciprocal Home link; it does not associate a catalog entry.
 	HomeRoute string
+	Parent    *FolderSetupDestination
 	// Created is false when a workspace made for this offer already existed
 	// (a retried click) and was reused.
 	Created bool
@@ -295,6 +298,10 @@ type FolderDigestDeps struct {
 	// (workspace ID and route) from canonical state. Nil or an error means the
 	// collection falls back to the plain folder suggestion, never a guess.
 	ExistingHome func(ctx context.Context, userID, providerKey string) (FolderCreateResult, error)
+	// ProjectLinked is an owner-scoped canonical read: the user's active
+	// project still holds this exact folder as a linked directory. Nil, a missing
+	// workspace or an unreadable one reports false, so no reuse is claimed.
+	ProjectLinked func(ctx context.Context, userID, workspaceID, folderPath string) bool
 	// LegacyDeclined reads the pre-folder app-card answer once per domain.
 	LegacyDeclined func(ctx context.Context, userID, domain string) (bool, error)
 	// BlueprintAvailable reports whether a blueprint id is installed, so the
@@ -571,8 +578,14 @@ type FolderOfferView struct {
 	Capability *FolderCapabilityView `json:"capability,omitempty"`
 	// Plan is everything Set up will do, present on a pending single-project
 	// capability offer. Setup is the run once Set up was pressed.
-	Plan  *FolderSetupPlan `json:"plan,omitempty"`
-	Setup *FolderSetupView `json:"setup,omitempty"`
+	Plan                   *FolderSetupPlan        `json:"plan,omitempty"`
+	SetupUnavailableReason string                  `json:"setup_unavailable_reason,omitempty"`
+	Setup                  *FolderSetupView        `json:"setup,omitempty"`
+	Destination            *FolderSetupDestination `json:"destination,omitempty"`
+	DestinationStatus      string                  `json:"destination_status,omitempty"`
+	Operation              string                  `json:"operation,omitempty"`
+	CandidateID            string                  `json:"candidate_id,omitempty"`
+	RequestedDestinationID string                  `json:"-"`
 }
 
 // FolderCapabilityView is the optional explanation on the existing digest
@@ -1193,6 +1206,7 @@ func (s *FolderDigestService) Decide(ctx context.Context, userID, offerID string
 				offer.ResolvedAt = &decided
 				offer.Outcome.WorkspaceID = created.WorkspaceID
 				offer.Outcome.Route = created.Route
+				offer.Outcome.Parent = created.Parent
 				offer.Outcome.Blueprint, _, _ = s.blueprintForOffer(*offer)
 				offer.Outcome.Receipt = append([]FolderReceiptRow(nil), created.Receipt...)
 				resolvedNow = true
@@ -1231,10 +1245,14 @@ func (s *FolderDigestService) runCreate(ctx context.Context, userID string, offe
 	if workspaceName == "" {
 		workspaceName = offer.Subject.Name
 	}
-	result, err := s.deps.Creator.CreateProjectWorkspace(ctx, FolderCreateRequest{
+	request := FolderCreateRequest{
 		UserID: userID, OfferID: offer.ID, Name: workspaceName, FolderName: offer.Subject.Name, Path: path,
 		Shape: folderdigest.Shape(offer.Subject.Shape), Blueprint: blueprint, RequestID: requestID,
-	})
+	}
+	if review := offer.ConversationReview; review != nil {
+		request.Operation, request.Destination = review.Operation, review.Destination
+	}
+	result, err := s.deps.Creator.CreateProjectWorkspace(ctx, request)
 	if err != nil {
 		return FolderCreateResult{}, err
 	}
@@ -1797,7 +1815,7 @@ func (s *FolderDigestService) ResolveJourney(ctx context.Context, userID, offerI
 		item.Status = FolderOfferResolved
 		item.ResolvedAt = &now
 		item.Outcome = &FolderOutcome{Kind: FolderChoiceProject, WorkspaceID: verified.WorkspaceID, Route: verified.Route,
-			HomeRoute: verified.HomeRoute, Blueprint: row.Blueprint.BlueprintID,
+			HomeRoute: verified.HomeRoute, Blueprint: row.Blueprint.BlueprintID, Parent: verified.Parent,
 			Receipt: append([]FolderReceiptRow(nil), verified.Receipt...)}
 		d.Receipts = append(d.Receipts, FolderReceipt{RequestID: input.RequestID, OfferID: offerID, Action: "journey", At: now})
 		pruneFolderDigest(d)
@@ -2044,6 +2062,9 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 	}
 	if offer.ConversationReview != nil {
 		v.ConversationID = offer.ConversationReview.Target.ConversationID
+		v.Operation = offer.ConversationReview.Operation
+		v.CandidateID = offer.ConversationReview.CandidateID
+		v.RequestedDestinationID = offer.ConversationReview.DestinationID
 	}
 	v.Remember = folderOfferRemembers(offer, paused)
 	switch folderdigest.Kind(offer.Verdict) {
@@ -2126,6 +2147,20 @@ func (s *FolderDigestService) describeOffer(ctx context.Context, offer FolderOff
 // pending project offer's Set up would carry out, which can depend on the user.
 func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer FolderOffer, paused bool) FolderOfferView {
 	v := s.view(ctx, offer, paused)
+	if review := offer.ConversationReview; review != nil {
+		v.Operation = review.Operation
+		if review.Destination != nil {
+			copy := *review.Destination
+			v.Destination = &copy
+		}
+		if err := s.checkReviewDestination(ctx, offer); err != nil {
+			v.DestinationStatus = "changed"
+			if errors.Is(err, ErrFolderOutcomeUnavailable) {
+				v.DestinationStatus = "unavailable"
+			}
+			return v
+		}
+	}
 	s.attachSetupPlan(ctx, userID, offer, &v)
 	return v
 }
@@ -2134,7 +2169,7 @@ func (s *FolderDigestService) viewFor(ctx context.Context, userID string, offer 
 // project: not while paused (FR52), and not when the fact text would be
 // refused by the memory validator (FR39).
 func folderOfferRemembers(offer FolderOffer, paused bool) bool {
-	if paused || offer.Portfolio != nil {
+	if paused || offer.Portfolio != nil || (offer.ConversationReview != nil && offer.ConversationReview.Operation == FolderOperationSupport) {
 		return false
 	}
 	switch folderdigest.Kind(offer.Verdict) {

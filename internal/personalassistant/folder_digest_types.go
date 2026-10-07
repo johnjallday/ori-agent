@@ -110,6 +110,8 @@ type FolderOutcome struct {
 	// workspace instead of showing a setup that did not happen.
 	Existing bool               `json:"existing,omitempty"`
 	Receipt  []FolderReceiptRow `json:"receipt,omitempty"`
+	// Parent is a verified resulting-parent receipt, never a read grant.
+	Parent *FolderSetupDestination `json:"parent,omitempty"`
 }
 
 // FolderPortfolioEvidence is the bounded, path-free count seen at scan time.
@@ -351,6 +353,9 @@ func validateFolderDigest(doc FolderDigestDocument) error {
 			return err
 		}
 		if offer.Outcome != nil {
+			if offer.Outcome.Parent != nil && (offer.Outcome.Parent.Status != "existing" || offer.Outcome.Parent.Validate() != nil) {
+				return fmt.Errorf("%w: resulting parent", errFolderDigestInvalid)
+			}
 			if len(offer.Outcome.Receipt) > 32 {
 				return fmt.Errorf("%w: receipt rows", errFolderDigestInvalid)
 			}

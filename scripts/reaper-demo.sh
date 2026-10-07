@@ -321,6 +321,7 @@ start_server() {
 		# satisfy the journey prerequisite. It does not publish or release-verify it.
 		exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1 \
 			ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$bundled_plugin" \
+			ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE="${bundled_music:-}" \
 			"$repo_root/bin/ori-agent"
 	) >>"$server_log" 2>&1 &
 	server_pid=$!
@@ -453,6 +454,9 @@ if [[ "$mode" == "test" ]]; then
 			playwright_file="tests/music-home-paired-guidance.spec.ts"
 		elif [[ "$test_suite" == "awareness" ]]; then
 			playwright_file="tests/personal-assistant-workspace-baseline.spec.ts"
+			if [[ "${ORI_WORKSPACE_NEW_HOME_ACCEPTANCE:-0}" == "1" ]]; then
+				playwright_file="tests/personal-assistant-workspace-new-home.spec.ts"
+			fi
 		fi
 		env PLAYWRIGHT_BASE_URL="$base_url" \
 			ORI_MUSIC_REAPER_ACCEPTANCE=1 \

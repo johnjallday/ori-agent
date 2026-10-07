@@ -43,6 +43,8 @@ type PlanFacts struct {
 	Grouped      bool
 	HomeExists   bool
 	HomeTemplate string
+	HomeName     string
+	Destination  *personalassistant.FolderSetupDestination
 	// SharingOff says the existing Home's shared assistant was switched off;
 	// Set up switches it back on, so the plan says so.
 	SharingOff bool
@@ -70,14 +72,26 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		intent.Placement = "grouped"
 		intent.HomeTemplate = facts.HomeTemplate
 		if facts.HomeExists {
-			workspaceName += " in your Home"
+			if facts.HomeName != "" {
+				workspaceName += " as a separate project in Home “" + facts.HomeName + "”"
+			} else {
+				workspaceName += " in a Home whose name is not yet available"
+			}
 		} else {
 			intent.CreatesHome = true
+			homeLine := "Creates the Home this workspace belongs to"
+			if facts.HomeName != "" {
+				homeLine = "Creates Home “" + facts.HomeName + "”"
+			}
 			lines = append(lines, personalassistant.FolderPlanLine{
-				Kind: personalassistant.FolderPlanHome, Name: "Creates the Home this workspace belongs to",
+				Kind: personalassistant.FolderPlanHome, Name: homeLine,
 				Detail: "Your later projects of this kind join it.",
 			})
-			workspaceName += " in that Home"
+			if facts.HomeName != "" {
+				workspaceName += " as a separate project in new Home “" + facts.HomeName + "”"
+			} else {
+				workspaceName += " in that Home"
+			}
 		}
 	}
 	mode := personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanMode, Name: "Uses File-only mode"}
@@ -87,6 +101,9 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 		// One honest line: nothing here needs the application, and none of it
 		// promises a live connection.
 		mode.Detail = facts.AppName + " itself is not installed here; File-only mode works without it."
+	}
+	if strings.HasPrefix(facts.Integration.Source, "Local development copy") || (facts.Provider != nil && strings.HasPrefix(facts.Provider.Source, "Local development copy")) {
+		mode.Detail += " Local development copy — not release-verified."
 	}
 	agents := personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanAgents, Name: "Adds the agents this blueprint requires"}
 	if facts.Grouped {
@@ -107,7 +124,8 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 	)
 	plan := personalassistant.NewFolderSetupPlan(lines)
 	plan.Intent = intent
-	return plan
+	plan.Destination = facts.Destination
+	return plan.Stamped()
 }
 
 // PortfolioFacts are what a collection's plan is built from, read by the host
@@ -123,6 +141,7 @@ type PortfolioFacts struct {
 	HomeName     string
 	HomeExists   bool
 	HomeTemplate string
+	Destination  *personalassistant.FolderSetupDestination
 	// HomeStaffed says the Home's required roles are already filled.
 	HomeStaffed bool
 	Provider    Plugin
@@ -214,6 +233,9 @@ func BuildPortfolioPlan(facts PortfolioFacts) personalassistant.FolderSetupPlan 
 	if intent.ReadsSongDetails {
 		library = libraryDetailSongDetails(facts.AppName)
 	}
+	if strings.HasPrefix(facts.Provider.Source, "Local development copy") || (facts.Integration != nil && strings.HasPrefix(facts.Integration.Source, "Local development copy")) {
+		library += " Local development copy — not release-verified."
+	}
 	lines = append(lines, personalassistant.FolderPlanLine{
 		Kind:   personalassistant.FolderPlanLibrary,
 		Name:   fmt.Sprintf("Lists the %d %s in %s", facts.Projects, noun, facts.FolderName),
@@ -248,7 +270,8 @@ func BuildPortfolioPlan(facts PortfolioFacts) personalassistant.FolderSetupPlan 
 	}
 	plan := personalassistant.NewFolderSetupPlan(lines)
 	plan.Intent = intent
-	return plan
+	plan.Destination = facts.Destination
+	return plan.Stamped()
 }
 
 // countPhrase is "1 Studio song" or "200 Studio songs" for a blueprint label.

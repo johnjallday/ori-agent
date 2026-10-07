@@ -78,6 +78,8 @@ type Config struct {
 	// RunID is the plugin quest run an earlier attempt of this setup used, so a
 	// resume reads that run (root or child) and never starts another.
 	RunID string
+	// HomeID is this run's canonical resulting-parent receipt.
+	HomeID string
 }
 
 // Result is how a run ended. Cause is the underlying error behind a stop the
@@ -139,6 +141,9 @@ type Runner struct {
 	Shared SharedStaffing
 	// NewKey returns a fresh idempotency key; nil uses random bytes.
 	NewKey func() string
+	// ValidateDestination freshly checks the material witness before each
+	// owner review/commit. It is read-only and never grants another scope.
+	ValidateDestination func(context.Context) error
 }
 
 // stop ends a run on purpose with a reason the card can explain. detail is for
@@ -179,6 +184,7 @@ type run struct {
 	entryName string
 	// settled is true once the shared assistant a create made is recorded.
 	settled bool
+	homeID  string
 }
 
 // Run drives the journey to the end or to the first thing that needs the user.
@@ -186,7 +192,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config) (Result, error) {
 	if r == nil || (r.Journey == nil && r.OpenProject == nil) || r.Selections == nil || r.Progress == nil {
 		return Result{}, errors.New("foldersetup: runner is not wired")
 	}
-	state := &run{Runner: r, cfg: cfg, entryName: cfg.EntryName, runID: cfg.RunID}
+	state := &run{Runner: r, cfg: cfg, entryName: cfg.EntryName, runID: cfg.RunID, homeID: cfg.HomeID}
 	state.lines = append([]personalassistant.FolderPlanLine(nil), cfg.Plan.Lines...)
 	for i := range state.lines {
 		state.lines[i].State = personalassistant.FolderLineWaiting
@@ -238,7 +244,7 @@ func (s *run) finish(ctx context.Context, status, reason string, candidates []st
 func (s *run) record(ctx context.Context, status, reason string, candidates []string) error {
 	return s.Progress.Update(ctx, Update{
 		Lines: append([]personalassistant.FolderPlanLine(nil), s.lines...), Status: status,
-		StopReason: reason, RunID: s.runID, EntryName: s.entryName, EntryCandidates: candidates,
+		StopReason: reason, RunID: s.runID, EntryName: s.entryName, EntryCandidates: candidates, HomeID: s.homeID,
 	})
 }
 
@@ -562,6 +568,9 @@ func (s *run) createHome(ctx context.Context, journey *setupjourney.JourneyProje
 	if !has(step, setupjourney.ActionReviewCreateGroup) {
 		return failed("the project step does not offer to create the required Home")
 	}
+	if destination := s.cfg.Plan.Destination; destination != nil && destination.Status == "new" && prep.Name != destination.Name {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the new Home name differs from the review"}
+	}
 	input, err := json.Marshal(struct {
 		Name string `json:"name"`
 	}{Name: prep.Name})
@@ -581,12 +590,38 @@ func (s *run) createHome(ctx context.Context, journey *setupjourney.JourneyProje
 	if err := s.commit(ctx, journey, review, input); err != nil {
 		return err
 	}
+	if destination := s.cfg.Plan.Destination; destination != nil && destination.Status == "new" {
+		fresh, err := s.journey.Read(ctx, s.runID)
+		if err != nil || fresh == nil {
+			return failed("the created Home receipt is unavailable")
+		}
+		for _, next := range fresh.Steps {
+			if next.Preparation != nil && next.Preparation.Exists && next.Preparation.HomeID != "" && next.Preparation.Name == destination.Name {
+				s.homeID = next.Preparation.HomeID
+			}
+		}
+		if s.homeID == "" {
+			return failed("the created Home receipt is unavailable")
+		}
+		if err := s.record(ctx, personalassistant.FolderSetupRunning, "", nil); err != nil {
+			return err
+		}
+	}
 	s.setKind(personalassistant.FolderPlanHome, personalassistant.FolderLineDone)
 	return nil
 }
 
 func (s *run) connectProject(ctx context.Context, journey *setupjourney.JourneyProjection, step *setupjourney.StepProjection) error {
 	prep := step.Preparation
+	if destination := s.cfg.Plan.Destination; destination != nil && destination.Status == "existing" {
+		if prep == nil || !prep.Exists || prep.HomeID != destination.WorkspaceID || prep.Name != destination.Name {
+			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home destination differs from the reviewed plan"}
+		}
+		s.homeID = prep.HomeID
+	}
+	if destination := s.cfg.Plan.Destination; destination != nil && destination.Status == "new" && prep != nil && prep.Exists && (s.homeID == "" || prep.HomeID != s.homeID || prep.Name != destination.Name) {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the resulting Home differs from this run's receipt"}
+	}
 	if needsHome(step) {
 		return s.createHome(ctx, journey, step)
 	}
@@ -622,6 +657,9 @@ func (s *run) connectProject(ctx context.Context, journey *setupjourney.JourneyP
 		shown.WorkspaceName != s.cfg.WorkspaceName ||
 		(composition != "" && shown.GroupComposition != composition) {
 		return &stop{reason: personalassistant.FolderStopPlanChanged}
+	}
+	if destination := s.cfg.Plan.Destination; destination != nil && (destination.Status == "existing" || destination.Status == "new") && shown.ParentWorkspaceName != destination.Name {
+		return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the project review names a different Home"}
 	}
 	if shown.EntryName == "" {
 		candidates := make([]string, 0, len(shown.EntryCandidates))
@@ -857,6 +895,11 @@ func (s *run) commit(ctx context.Context, journey *setupjourney.JourneyProjectio
 }
 
 func (s *run) reviewOn(ctx context.Context, j Journey, runID string, revision int64, action setupjourney.ActionID, input json.RawMessage) (*setupjourney.ReviewProjection, error) {
+	if s.ValidateDestination != nil {
+		if err := s.ValidateDestination(ctx); err != nil {
+			return nil, &stop{reason: personalassistant.FolderStopPlanChanged}
+		}
+	}
 	result, err := j.Mutate(ctx, runID, action, setupjourney.ActionMutation{
 		IfRevision: revision, IdempotencyKey: s.key(), Input: input,
 	})
@@ -870,6 +913,11 @@ func (s *run) reviewOn(ctx context.Context, j Journey, runID string, revision in
 }
 
 func (s *run) commitOn(ctx context.Context, j Journey, runID string, revision int64, review *setupjourney.ReviewProjection, input json.RawMessage) error {
+	if s.ValidateDestination != nil {
+		if err := s.ValidateDestination(ctx); err != nil {
+			return &stop{reason: personalassistant.FolderStopPlanChanged}
+		}
+	}
 	_, err := j.Mutate(ctx, runID, review.CommitAction, setupjourney.ActionMutation{
 		IfRevision: revision, IdempotencyKey: s.key(), ReviewToken: review.Token, Input: input,
 	})

@@ -89,11 +89,14 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 		return
 	}
 	var req struct {
-		ConversationID string `json:"conversation_id,omitempty"`
-		DraftID        string `json:"draft_id,omitempty"`
-		Revision       string `json:"revision"`
-		SelectionID    string `json:"selection_id"`
-		CandidateID    string `json:"candidate_id"`
+		ConversationID string                     `json:"conversation_id,omitempty"`
+		DraftID        string                     `json:"draft_id,omitempty"`
+		Revision       string                     `json:"revision"`
+		SelectionID    string                     `json:"selection_id"`
+		CandidateID    string                     `json:"candidate_id"`
+		Context        *HomeAssistantRouteContext `json:"context,omitempty"`
+		Operation      string                     `json:"operation,omitempty"`
+		DestinationID  string                     `json:"destination_id,omitempty"`
 	}
 	if !strictFolderBody(w, r, &req) {
 		return
@@ -109,8 +112,13 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 		return
 	}
 	defer release()
-	if _, err := h.folderExpected(r.Context(), target, req.Revision); err != nil {
+	state, err := h.folderExpected(r.Context(), target, req.Revision)
+	if err != nil {
 		writeFolderError(w, err)
+		return
+	}
+	placementContext, placementReady := h.resolveFolderReviewPlacement(w, r, target, req.Context, req.Operation, req.DestinationID, req.SelectionID, req.CandidateID, state.OfferID)
+	if !placementReady {
 		return
 	}
 	observation, err := h.resolveFolderObservation(r.Context(), target, req.SelectionID)
@@ -134,7 +142,7 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 	}
 	savedTarget := target
 	savedTarget.ConversationID, savedTarget.DraftID = id, ""
-	offer, err := h.FolderSetups.Review(r.Context(), target, id, req.SelectionID, req.CandidateID)
+	offer, err := h.FolderSetups.Review(placementContext, target, id, req.SelectionID, req.CandidateID)
 	if err != nil {
 		if created {
 			_ = h.Conversations.Discard(r.Context(), id)
@@ -166,7 +174,7 @@ func (h *HomeAssistantAskHandler) ReviewFolderSetupHandler(w http.ResponseWriter
 		return
 	}
 	h.FolderObservations.BindSaved(target, observation.ID, id)
-	state := PersonalAssistantFolderState{Revision: rows[0].ID, Observation: observation, OfferID: offer.ID}
+	state = PersonalAssistantFolderState{Revision: rows[0].ID, Observation: observation, OfferID: offer.ID}
 	orihttp.WriteJSON(w, map[string]any{
 		"conversation":   HomeAssistantConversationState{ID: id, Stored: true, Started: created},
 		"folder_context": state,

@@ -80,10 +80,20 @@ func (h *folderSetupHost) station(userID string, provider reviewedintegration.Ho
 		return nil, errSetupUnavailable
 	}
 	// Read the canonical record (the file store's copy may lag the primary).
-	if live, err := b.workspaceStore.Get(station.ID); err == nil && live != nil {
-		return live, nil
+	// Failure is unavailable, never a fallback to a stale ownership snapshot.
+	if b.workspaceStore == nil {
+		return nil, errSetupUnavailable
 	}
-	return station, nil
+	live, err := b.workspaceStore.Get(station.ID)
+	if err != nil || live == nil || live.ID != station.ID || live.OwnerUserID != userID || live.Kind != "group" || live.Status == workspace.StatusTrashed || live.Status == workspace.StatusMissing {
+		return nil, errSetupUnavailable
+	}
+	liveState := live.GetAssistantProgramState()
+	if liveState == nil || liveState.HomeProvider == nil || liveState.Key.Normalize() != state.Key.Normalize() ||
+		liveState.HomeProvider.PluginID != provider.PluginID || liveState.HomeProvider.ProgramID != provider.ProgramID {
+		return nil, errSetupUnavailable
+	}
+	return live, nil
 }
 
 // homeStaffed says every required Home role is filled.
@@ -170,6 +180,11 @@ func (h *folderSetupHost) portfolioPlan(ctx context.Context, req personalassista
 		return personalassistant.FolderSetupPlan{}, err
 	}
 	if home != nil {
+		destination, err := folderSetupHomeDestination(home)
+		if err != nil {
+			return personalassistant.FolderSetupPlan{}, err
+		}
+		facts.Destination = destination
 		facts.HomeExists, facts.HomeName, facts.HomeStaffed = true, home.Name, homeStaffed(home)
 		facts.Sharing = h.sharing(home, target.row.Blueprint.BlueprintID)
 		if home.GetAssistantProgramState().GetSongDetailsConsent().Active() {
@@ -178,6 +193,13 @@ func (h *folderSetupHost) portfolioPlan(ctx context.Context, req personalassista
 		if team, ok := h.projectTeam(home); ok && len(team.Roles) == 1 {
 			facts.AssistantName = team.Roles[0].Label
 		}
+	}
+	if home == nil {
+		destination, err := h.ReadSetupDestination(ctx, req)
+		if err != nil || destination == nil {
+			return personalassistant.FolderSetupPlan{}, errSetupUnavailable
+		}
+		facts.Destination, facts.HomeName = destination, destination.Name
 	}
 	if facts.FolderName == "" {
 		return personalassistant.FolderSetupPlan{}, errSetupUnavailable
@@ -193,12 +215,13 @@ func (h *folderSetupHost) portfolioRun(ctx context.Context, req personalassistan
 	}
 	b := h.builder
 	runner := &foldersetup.PortfolioRunner{
-		Homes:    &portfolioHomes{host: h, userID: req.UserID, provider: target.provider},
-		Staffing: portfolioHomeStaffing{builder: b},
-		Library:  portfolioLibrary{builder: b, userID: req.UserID, offerID: req.Offer.ID},
-		Receipts: portfolioReceipts{host: h, folder: strings.TrimSpace(req.Offer.Subject.Name), noun: target.row.Offer.DisplayName, projectLabel: target.row.Blueprint.Label},
-		Folder:   req.Path,
-		Progress: progressFunc(req.Update),
+		ValidateDestination: func(ctx context.Context, homeID string) error { return h.ValidateSetupDestination(ctx, req) },
+		Homes:               &portfolioHomes{host: h, userID: req.UserID, provider: target.provider},
+		Staffing:            portfolioHomeStaffing{builder: b},
+		Library:             portfolioLibrary{builder: b, userID: req.UserID, offerID: req.Offer.ID},
+		Receipts:            portfolioReceipts{host: h, folder: strings.TrimSpace(req.Offer.Subject.Name), noun: target.row.Offer.DisplayName, projectLabel: target.row.Blueprint.Label},
+		Folder:              req.Path,
+		Progress:            progressFunc(req.Update),
 	}
 	if req.Plan.Intent.Provider != "" {
 		runner.Providers = homeProviderInstaller{setup: folderHomeProviderSetup{builder: b}, key: target.provider.Key}

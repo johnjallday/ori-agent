@@ -221,6 +221,35 @@ test('explicit review sends opaque candidate and scope, never contents or a mode
   });
 });
 
+test('review carries a named workspace as a reference while the page stays the location', async t => {
+  globalThis.window = { location: { pathname: '/workspaces/album-1' } };
+  globalThis.document = { body: { dataset: { workspaceId: 'ws-1', workspaceSlug: 'album-1' } } };
+  t.after(() => {
+    delete globalThis.window;
+    delete globalThis.document;
+  });
+  const f = fixture(async url =>
+    url.endsWith('/select') ? { observation: observation('a') } : { folder_placement_choice: {} }
+  );
+  await f.controller.select('chip', 'documents');
+  await f.controller.review('root', false, undefined, { subject_workspace_id: 'ws-home' });
+  const named = f.calls[1].body.context;
+  assert.equal(named.subject_workspace_id, 'ws-home');
+  assert.equal(named.workspace_id, 'ws-1');
+  assert.equal(named.page_path, '/workspaces/album-1');
+  assert.equal(named.origin, 'personal_assistant_panel');
+  // The chosen operation keeps the same named workspace; nothing else names one.
+  await f.controller.review('root', false, undefined, {
+    operation: 'create_project_workspace',
+    destination_id: 'ws-home',
+    subject_workspace_id: 'ws-home'
+  });
+  assert.equal(f.calls[2].body.context.subject_workspace_id, 'ws-home');
+  assert.equal(f.calls[2].body.destination_id, 'ws-home');
+  await f.controller.review('root');
+  assert.equal('subject_workspace_id' in f.calls[3].body.context, false);
+});
+
 test('late review cannot bind a new conversation and historical context cannot request setup', async () => {
   const pending = deferred();
   const f = fixture(() => pending.promise);

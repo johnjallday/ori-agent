@@ -24,6 +24,7 @@ type FolderOfferWorkspaceRequest struct {
 	Name       string
 	TemplateID string
 	OfferID    string
+	ParentID   string
 }
 
 // CreateFolderOfferWorkspace creates the workspace through the ordinary
@@ -41,7 +42,7 @@ func (h *Handler) CreateFolderOfferWorkspace(ctx context.Context, req FolderOffe
 		return "", errors.New("a folder offer workspace needs a name and an offer id")
 	}
 	body, err := json.Marshal(createWorkspaceRequest{
-		Name: name, TemplateID: strings.TrimSpace(req.TemplateID),
+		Name: name, TemplateID: strings.TrimSpace(req.TemplateID), ParentID: req.ParentID,
 		EntryPoint: folderDigestEntryPoint, FolderOfferID: offerID,
 	})
 	if err != nil {
