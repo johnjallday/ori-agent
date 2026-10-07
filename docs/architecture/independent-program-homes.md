@@ -540,9 +540,14 @@ feature without a card, a `home_profile_facts` reference, or any other
 difference is still refused (`home_upgrade_not_guidance_only`). The plan records
 `adds_home_profile` and the card's title per Home declaration, and the review
 says "Adds a <title> card to this Home. Nothing is detected or read until you
-open it." After the upgrade the Home has no profile record: its card shows
-**Detect**, and templates stay "Not read" until the owner reviews them on the
-Home. No setup-card consent exists for a Home that was upgraded.
+open it." Its opening sentence then reads "It adds what is listed below. Nothing
+else changes." (with "It changes Home guidance and" in front when a prompt
+changes too) instead of "Only Home guidance changes." After the upgrade the Home
+has no profile record: its card shows **Detect**, and templates stay "Not read"
+until the owner reviews them on the Home. No setup-card consent exists for a
+Home that was upgraded. The Home page announces a finished upgrade on the
+document (`assistant-program:provider-upgraded`), and the profile card reads
+again, so the new card appears without a reload.
 
 **Review** (reads only, installs nothing). It resolves the same target the
 Plugins page would install — the reviewed release's pinned source, or a local

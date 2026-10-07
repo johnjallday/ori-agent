@@ -1,5 +1,10 @@
 import { workspaceRootURL } from './workspace-routes.js';
 
+// Announced on the document when a Home package upgrade made on this page has
+// finished, so the page's other panels can read what the new release declares
+// without a reload.
+export const PROVIDER_UPGRADED_EVENT = 'assistant-program:provider-upgraded';
+
 export function assistantProviderUnavailableMessage(program = {}, declaration = {}) {
   if (program.home_provider_available === false && program.project_provider_available !== false) {
     return 'The Home provider is unavailable. Home coordination is read-only; project-local data and provider behavior remain separate.';
@@ -92,6 +97,26 @@ export function providerUpgradeAdditions(review) {
     .map(line => String(line || '').trim())
     .filter(Boolean)
     .slice(0, 8);
+}
+
+// providerUpgradeSummary is the review's opening sentence: what moves, and
+// honestly how much changes. "Only Home guidance changes" is true only for a
+// release that adds nothing.
+export function providerUpgradeSummary(review) {
+  const moves = `This Home and its linked projects move from ${text(review?.from_version)} to ${text(review?.to_version)}.`;
+  if (!providerUpgradeAdditions(review).length) return `${moves} Only Home guidance changes.`;
+  const guidance = Array.isArray(review?.roles) && review.roles.length > 0;
+  return guidance
+    ? `${moves} It changes Home guidance and adds what is listed below. Nothing else changes.`
+    : `${moves} It adds what is listed below. Nothing else changes.`;
+}
+
+// providerUpgradeGuidanceNote says why no role prompt is shown. A release
+// that adds something else is not described as a skill text change.
+export function providerUpgradeGuidanceNote(review) {
+  return providerUpgradeAdditions(review).length
+    ? 'Role prompts are unchanged.'
+    : 'Role prompts are unchanged; only packaged skill text changes.';
 }
 
 export function requestedUpgradeReview(search = '') {
@@ -698,7 +723,7 @@ export class AssistantProgramPage {
       );
     } else {
       const note = document.createElement('p');
-      note.textContent = 'Role prompts are unchanged; only packaged skill text changes.';
+      note.textContent = providerUpgradeGuidanceNote(review);
       section('Guidance changes', note);
     }
 
@@ -770,7 +795,7 @@ export class AssistantProgramPage {
       return;
     }
     heading.textContent = `Upgrade ${text(review.plugin_id)} to ${text(review.to_version)}?`;
-    progress.textContent = `This Home and its linked projects move from ${text(review.from_version)} to ${text(review.to_version)}. Only Home guidance changes.`;
+    progress.textContent = providerUpgradeSummary(review);
     dialog.insertBefore(this.providerUpgradeSections(review), error);
     const confirm = document.createElement('button');
     confirm.type = 'button';
@@ -790,6 +815,9 @@ export class AssistantProgramPage {
         close();
         this.announceAction(`Upgraded to ${text(operation.to_version)}.`);
         await this.load();
+        // The new release may declare things other panels on this page show
+        // (the Home's profile card); they read again instead of needing a reload.
+        globalThis.document?.dispatchEvent(new CustomEvent(PROVIDER_UPGRADED_EVENT));
       } catch (commitError) {
         progress.textContent = '';
         error.textContent = commitError.details?.id

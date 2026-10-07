@@ -555,6 +555,32 @@ test('a profile that changed somewhere else is re-read, never overwritten', asyn
   assert.equal(panel.busy, false);
 });
 
+test('refresh reads the card again without an action, and keeps it on a failed read', async () => {
+  const { panel, requests } = panelWith([
+    { status: 200, body: card(profile({ revision: 1 })) },
+    { status: 500, body: { message: 'boom' } }
+  ]);
+  // Before a package upgrade the Home had no card at all.
+  panel.view = { available: false };
+  let drawn = 0;
+  panel.render = () => {
+    drawn += 1;
+  };
+  await panel.refresh();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'GET');
+  assert.equal(panel.view.revision, 1);
+  assert.equal(drawn, 1);
+  // A read that fails leaves the card as it was.
+  await panel.refresh();
+  assert.equal(panel.view.revision, 1);
+  assert.equal(drawn, 1);
+  // It never interrupts an action in progress.
+  panel.busy = true;
+  await panel.refresh();
+  assert.equal(requests.length, 2);
+});
+
 // withDefaultsFields stands in for the defaults row on screen while work runs.
 async function withDefaultsFields(fields, work) {
   const previous = globalThis.document;

@@ -4,6 +4,8 @@
 // Ori found is shown as Detected and stays a hint until the owner confirms it.
 // Nothing here names an application: every name comes from the server.
 
+import { PROVIDER_UPGRADED_EVENT } from './assistant-program.js';
+
 export const READ_ONLY_NOTE =
   'Saved values are readable; the Home provider is unavailable for changes.';
 
@@ -507,10 +509,25 @@ export class HomeProfilePanel {
     if (!panel || !this.workspaceId || this.program?.is_station === false) return;
     panel.addEventListener('click', event => void this.onClick(event));
     panel.addEventListener('change', event => void this.onChange(event));
+    // A package upgrade made on this page can add the card (or change its
+    // words), so the Home page says when one finished.
+    globalThis.document?.addEventListener(PROVIDER_UPGRADED_EVENT, () => void this.refresh());
     try {
       this.view = await this.request();
     } catch (_) {
       this.view = null;
+    }
+    this.render();
+  }
+
+  // refresh reads the card again and redraws it. A failed read keeps what is
+  // shown. It detects nothing and reads no folder, like the first load.
+  async refresh() {
+    if (this.busy) return;
+    try {
+      this.view = await this.request();
+    } catch (_) {
+      return;
     }
     this.render();
   }
