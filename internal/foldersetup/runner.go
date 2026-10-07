@@ -137,6 +137,9 @@ type Runner struct {
 	// Shared fills project roles with the Home's shared assistant. Nil keeps
 	// one agent per project ("<role> · <project>").
 	Shared SharedStaffing
+	// Profile fills the Home's profile when the plan showed that line. Nil
+	// leaves the line waiting for the owner to fill it on the Home.
+	Profile Profile
 	// NewKey returns a fresh idempotency key; nil uses random bytes.
 	NewKey func() string
 }
@@ -179,6 +182,8 @@ type run struct {
 	entryName string
 	// settled is true once the shared assistant a create made is recorded.
 	settled bool
+	// profiled is true once this pass ran the Home's profile step.
+	profiled bool
 }
 
 // Run drives the journey to the end or to the first thing that needs the user.
@@ -298,6 +303,9 @@ func (s *run) drive(ctx context.Context) error {
 		if err := s.settle(ctx, journey); err != nil {
 			return err
 		}
+		if err := s.fillProfile(ctx, journey); err != nil {
+			return err
+		}
 		if journey.Lifecycle == setupjourney.LifecycleReady {
 			return nil
 		}
@@ -322,6 +330,34 @@ func (s *run) drive(ctx context.Context) error {
 		}
 	}
 	return &stop{reason: personalassistant.FolderStopFailed}
+}
+
+// fillProfile runs the Home's profile step once the journey's receipts name
+// the Home, when the plan showed that line. The plan promises a templates read
+// only when it creates the Home, so GrantsTemplates carries that card's
+// consent. Like the collection run's step, it never stops the run: a profile
+// that could not be saved leaves its line failed and the owner fills it on the
+// Home. Only a cancelled run ends here.
+func (s *run) fillProfile(ctx context.Context, journey *setupjourney.JourneyProjection) error {
+	intent := s.cfg.Plan.Intent
+	homeID := strings.TrimSpace(journey.Receipts.HomeWorkspaceID)
+	if s.profiled || !intent.SetsProfile || s.Profile == nil || homeID == "" {
+		return nil
+	}
+	s.profiled = true
+	s.setKind(personalassistant.FolderPlanProfile, personalassistant.FolderLineWorking)
+	if err := s.record(ctx, personalassistant.FolderSetupRunning, "", nil); err != nil {
+		return err
+	}
+	if err := s.Profile.Setup(ctx, homeID, intent.GrantsTemplates); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		s.setKind(personalassistant.FolderPlanProfile, personalassistant.FolderLineFailed)
+		return nil
+	}
+	s.setKind(personalassistant.FolderPlanProfile, personalassistant.FolderLineDone)
+	return nil
 }
 
 // prepare brings the plugins the plan promised into place, then opens the plugin

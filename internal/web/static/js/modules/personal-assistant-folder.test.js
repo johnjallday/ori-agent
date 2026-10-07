@@ -21,6 +21,7 @@ import {
   folderProjectModalOptions,
   portfolioLibraryURL,
   portfolioProviderAction,
+  profileReceiptLine,
   setupModalView
 } from './personal-assistant-folder.js';
 
@@ -179,6 +180,63 @@ const songRows = count =>
     can_open: true,
     last_saved_at: savedDaysAgo(index)
   }));
+
+test('the last screen says one quiet line about the Home profile, with a Review link', () => {
+  const profileRow = (extra = {}) => ({
+    kind: 'profile',
+    name: 'Your studio',
+    detail: 'REAPER · 4 templates',
+    route: '/workspaces/music-home/assistant#homeProfilePanel',
+    ...extra
+  });
+  const withProfile = row =>
+    homeRunOffer({ receipt: [...homeRunOffer().outcome.receipt, ...(row ? [row] : [])] });
+
+  // On "Pick a song to start with" and on the plain receipt screen alike.
+  const songs = setupModalView(withProfile(profileRow()), {
+    songs: songRows(3),
+    total: 12,
+    now: today
+  });
+  assert.equal(songs.title, 'Pick a song to start with');
+  assert.deepEqual(songs.profile, {
+    text: 'Your studio: REAPER · 4 templates',
+    route: '/workspaces/music-home/assistant#homeProfilePanel',
+    linkLabel: 'Review'
+  });
+  const plain = setupModalView(
+    withProfile(profileRow({ detail: 'REAPER and Logic Pro · pick your main DAW' }))
+  );
+  assert.equal(plain.profile.text, 'Your studio: REAPER and Logic Pro · pick your main DAW');
+  // It blocks nothing: the status, the songs and the Open are unchanged.
+  const without = setupModalView(homeRunOffer(), { songs: songRows(3), total: 12, now: today });
+  assert.equal(without.profile, null);
+  assert.equal(songs.status, without.status);
+  assert.equal(songs.route, without.route);
+  assert.deepEqual(songs.songs, without.songs);
+
+  // A route that is not the Home's profile card is never linked.
+  for (const route of [
+    '/agents',
+    'https://example.com/',
+    '/workspaces/music-home/assistant#projectLibraryPanel',
+    ''
+  ]) {
+    assert.equal(profileReceiptLine([profileRow({ route })]).route, '', route);
+  }
+  // No profile row, or one with nothing to say, shows no line.
+  assert.equal(profileReceiptLine([]), null);
+  assert.equal(profileReceiptLine([profileRow({ detail: '' })]), null);
+  assert.equal(profileReceiptLine(null), null);
+  // A run that has not finished shows no line.
+  const running = setupModalView({
+    status: 'awaiting_outcome',
+    subject: { name: 'Songs' },
+    portfolio: { projects: 200 },
+    setup: { status: 'running', lines: runLines(['done', 'working', 'waiting']) }
+  });
+  assert.equal(running.profile, undefined);
+});
 
 test('the Home receipt names the Home by the workspace ID in the outcome', () => {
   assert.equal(folderReceiptView(homeRunOffer()).homeID, 'home-1');

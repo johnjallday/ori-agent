@@ -3,6 +3,8 @@ package foldersetup
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
@@ -46,6 +48,80 @@ type PlanFacts struct {
 	// SharingOff says the existing Home's shared assistant was switched off;
 	// Set up switches it back on, so the plan says so.
 	SharingOff bool
+	// Profile is set when the Home's installed package declares a profile.
+	Profile *ProfileFacts
+}
+
+// ProfileFacts are what a plan's profile line is built from. The host reads
+// them: the package's own words, and the applications found on this computer
+// by name, in the tool table's order. Nothing here is a path.
+type ProfileFacts struct {
+	// Title is the declared card title, the line's name. MainLabel is the
+	// declared label of the main-application row ("Main DAW").
+	Title     string
+	MainLabel string
+	// Apps are the display names of the applications found.
+	Apps []string
+	// TemplatesApp is the found application whose templates folder a Set up
+	// that creates the Home would list; "" when none can be listed.
+	TemplatesApp string
+}
+
+// profileLine words the profile line and says whether it promised a templates
+// read. Only a plan that creates the Home may promise one: pressing Set up is
+// then the consent, exactly as it is for song details. An existing Home never
+// gains that consent from a card.
+func profileLine(facts *ProfileFacts, createsHome bool) (personalassistant.FolderPlanLine, bool) {
+	title := strings.TrimSpace(facts.Title)
+	if title == "" {
+		title = "Home profile"
+	}
+	main := lowerFirst(strings.TrimSpace(facts.MainLabel))
+	if main == "" {
+		main = "main application"
+	}
+	templates := strings.TrimSpace(facts.TemplatesApp)
+	reads := createsHome && templates != ""
+	var detail string
+	switch len(facts.Apps) {
+	case 0:
+		detail, reads = "No "+main+" was found on this Mac. You can tell the Home later.", false
+	case 1:
+		detail = facts.Apps[0] + " is your " + main + "."
+		if reads {
+			detail += " Reads your " + templates + " templates folder so new projects can start from them. Nothing is changed."
+		} else {
+			detail += " Nothing is read."
+		}
+	default:
+		detail = "Found " + joinAnd(facts.Apps) + ". Pick your " + main + " on the Home after setup."
+		if reads {
+			detail += " Reads your " + templates + " templates folder; nothing is changed."
+		} else {
+			detail += " Nothing is read."
+		}
+	}
+	return personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanProfile, Name: title, Detail: detail}, reads
+}
+
+func lowerFirst(text string) string {
+	if text == "" {
+		return ""
+	}
+	first, size := utf8.DecodeRuneInString(text)
+	return string(unicode.ToLower(first)) + text[size:]
+}
+
+// joinAnd is "A", "A and B" or "A, B and C".
+func joinAnd(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	}
 }
 
 // BuildPlan lists every consequence of one press of Set up, in the order the card
@@ -98,6 +174,13 @@ func BuildPlan(facts PlanFacts) personalassistant.FolderSetupPlan {
 			agents.Detail = "Its assistant is shared, and this turns adding it to " + later + " back on."
 		}
 	}
+	// The Home's profile, when its package declares one: it belongs to the
+	// Home, so it sits with the Home's lines, before the workspace's.
+	if facts.Grouped && facts.Profile != nil {
+		line, grants := profileLine(facts.Profile, !facts.HomeExists)
+		lines = append(lines, line)
+		intent.SetsProfile, intent.GrantsTemplates = true, grants
+	}
 	lines = append(lines,
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanWorkspace, Name: workspaceName},
 		personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: "Links " + facts.WorkspaceName + " where it is", Detail: "Nothing is moved or copied."},
@@ -144,6 +227,8 @@ type PortfolioFacts struct {
 	// SongDetails is the existing Home's song-details consent: "" (none), "on"
 	// or "off". A Home the plan creates gets it; an existing Home never does.
 	SongDetails string
+	// Profile is set when the Home's installed package declares a profile.
+	Profile *ProfileFacts
 }
 
 // Sharing states of an existing Home's consent.
@@ -221,6 +306,13 @@ func BuildPortfolioPlan(facts PortfolioFacts) personalassistant.FolderSetupPlan 
 		Name:   fmt.Sprintf("Lists the %d %s in %s", facts.Projects, noun, facts.FolderName),
 		Detail: library,
 	})
+	// The Home's profile, when its package declares one. Its text is part of
+	// the plan digest like every other line.
+	if facts.Profile != nil {
+		line, grants := profileLine(facts.Profile, !facts.HomeExists)
+		lines = append(lines, line)
+		intent.SetsProfile, intent.GrantsTemplates = true, grants
+	}
 	if shared {
 		one := strings.TrimSpace(facts.ProjectLabel)
 		lines = append(lines, personalassistant.FolderPlanLine{

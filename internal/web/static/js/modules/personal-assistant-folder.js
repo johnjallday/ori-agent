@@ -355,6 +355,7 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
       count: steps ? `${steps} of ${steps} steps finished` : '',
       percent: 100,
       lines: run.lines.map(line => ({ ...line, state: line.state ? 'done' : '' })),
+      profile: receipt.profile || null,
       receiptRows: receipt.rows,
       route: receipt.route,
       openLabel: receipt.openLabel,
@@ -856,6 +857,25 @@ export function folderFirstLookView(look, options = {}) {
 // agents it added, the listing and the shared assistant. Open lands on the
 // Home's library (no folder handoff: the run already connected and listed it).
 // A collection resolved step by step carries no rows and shows the old note.
+// profileReceiptLine is the one quiet line a finished Home setup shows about
+// the Home's profile: the package's own title, what the profile holds, and a
+// Review link to its card on the Home. The words and the route are the
+// server's; a route that is not that card is dropped. It blocks nothing.
+export function profileReceiptLine(rows) {
+  const row = (Array.isArray(rows) ? rows : []).find(entry => entry?.kind === 'profile');
+  const name = String(row?.name || '').trim();
+  const detail = String(row?.detail || '').trim();
+  if (!name || !detail) return null;
+  const route = String(row.route || '').trim();
+  return {
+    text: `${name}: ${detail}`,
+    route: /^\/workspaces\/[a-z0-9][a-z0-9-]*\/assistant#homeProfilePanel$/.test(route)
+      ? route
+      : '',
+    linkLabel: 'Review'
+  };
+}
+
 function homeReceiptView(offer) {
   const rows = Array.isArray(offer?.outcome?.receipt) ? offer.outcome.receipt : [];
   const home = rows.find(row => row?.kind === 'home');
@@ -869,6 +889,7 @@ function homeReceiptView(offer) {
     visible: true,
     home: true,
     homeName,
+    profile: profileReceiptLine(rows),
     homeID: homeID.length <= 160 ? homeID : '',
     rows: rows.map(row => ({
       kind: String(row.kind || ''),
@@ -1034,8 +1055,24 @@ const RECEIPT_LABELS = {
   task: ['First task', '✓'],
   home: ['Home', '⌂'],
   library: ['Library', '☰'],
-  assistant: ['Shared assistant', '●']
+  assistant: ['Shared assistant', '●'],
+  profile: ['Profile', '◎']
 };
+
+// renderProfileLine draws the done screen's line about the Home's profile.
+function renderProfileLine(node, line, doc = document) {
+  if (!node) return;
+  node.replaceChildren();
+  node.hidden = !line;
+  if (!line) return;
+  node.append(doc.createTextNode(line.text));
+  if (line.route) {
+    const link = doc.createElement('a');
+    link.href = line.route;
+    link.textContent = line.linkLabel;
+    node.append(doc.createTextNode(' '), link);
+  }
+}
 
 // renderReceiptRows draws the receipt's rows (what Set up made) into a list.
 // Shared by the card and the run pop-up so both say the same thing.
@@ -1174,6 +1211,7 @@ function runModalElements() {
     fill: document.getElementById('folderSetupRunFill'),
     count: document.getElementById('folderSetupRunCount'),
     status: document.getElementById('folderSetupRunStatus'),
+    profile: document.getElementById('folderSetupRunProfile'),
     steps: document.getElementById('folderSetupRunSteps'),
     songs: document.getElementById('folderSetupRunSongs'),
     more: document.getElementById('folderSetupRunMore'),
@@ -1349,6 +1387,7 @@ function renderRunModal() {
   setText(els.title, view.title, false);
   setText(els.count, view.count);
   setText(els.status, (view.songs?.length && runSongs.message) || view.status, false);
+  renderProfileLine(els.profile, done ? view.profile : null);
   els.bar.setAttribute('aria-valuenow', String(view.percent));
   els.fill.style.width = `${view.percent}%`;
   renderSetupLines(els.steps, view.lines);

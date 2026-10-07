@@ -123,6 +123,15 @@ func (h *Handler) SetHomeProfileAppDetector(detect func() []folderdigest.Install
 	}
 }
 
+// HomeProfileInstalledApps looks for installed applications the way the Home
+// profile does, for a setup plan that words its profile line from them.
+func (h *Handler) HomeProfileInstalledApps() []folderdigest.InstalledApp {
+	if h == nil {
+		return nil
+	}
+	return h.homeProfileInstalledApps()
+}
+
 func (h *Handler) homeProfileInstalledApps() []folderdigest.InstalledApp {
 	if h.homeProfileApps != nil {
 		return h.homeProfileApps()

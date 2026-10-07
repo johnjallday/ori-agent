@@ -191,6 +191,10 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 	facts := cached.facts
 	facts.WorkspaceName = strings.TrimSpace(req.Offer.Subject.Name)
 	facts.AppInstalled = req.AppInstalled
+	// Never cached: the line names what is installed on this computer now.
+	if target.provider != nil {
+		facts.Profile = h.profileFacts(*target.provider, target.row.Offer.IntegrationKey)
+	}
 	if facts.WorkspaceName == "" {
 		return foldersetup.PlanFacts{}, errSetupUnavailable
 	}
@@ -283,6 +287,9 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 	}
 	if target.provider != nil && req.Plan.Intent.Provider != "" {
 		runner.Providers = homeProviderInstaller{setup: folderHomeProviderSetup{builder: b}, key: target.provider.Key}
+	}
+	if req.Plan.Intent.SetsProfile {
+		runner.Profile = folderProfileStep{handler: b.sessionHandler, userID: req.UserID, offerID: req.Offer.ID}
 	}
 	if b.projectStaffing != nil {
 		// Set up on the card is the standing consent (D1, D9): the song's Home
