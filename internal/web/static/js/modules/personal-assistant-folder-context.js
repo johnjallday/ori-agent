@@ -3,6 +3,9 @@
 import { folderChooserView } from './personal-assistant-folder-chooser.js';
 import { collectWorkspaceContext } from './personal-assistant-workspace-context.js';
 import {
+  currentFolderDiscussion,
+  folderDiscussionOptions,
+  folderDiscussionText,
   folderPresentation,
   renderFolderSummary
 } from './personal-assistant-folder-presentation.js';
@@ -266,6 +269,122 @@ let controller;
 let elements;
 let chooserGeneration = 0;
 let lastEventKey;
+let discussionBinding = null;
+let discussionTrigger = null;
+let discussionChoiceBinding = null;
+
+function closeDiscussionChooser({ restoreFocus = true } = {}) {
+  if (elements?.discussionChooser) elements.discussionChooser.hidden = true;
+  discussionTrigger?.setAttribute('aria-expanded', 'false');
+  if (restoreFocus && discussionTrigger?.isConnected) discussionTrigger.focus();
+  discussionTrigger = null;
+  discussionChoiceBinding = null;
+}
+
+function discussionRow(value) {
+  if (
+    !currentFolderDiscussion(
+      controller?.state,
+      value,
+      window.PersonalAssistantConversation?.currentId?.()
+    ) ||
+    window.PersonalAssistantConversation?.isLoading?.() ||
+    window.OriAskRouting?.getState?.().busy ||
+    window.PersonalAssistantPanel?._state?.view?.available === false
+  )
+    return null;
+  return (
+    Array.from(document.querySelectorAll('#homeAssistantConversation [data-message-id]')).find(
+      row =>
+        row.dataset.messageId === value.messageId &&
+        row.dataset.conversationId === value.conversationId &&
+        row.dataset.messageRole === 'assistant'
+    ) || null
+  );
+}
+
+function discussionDraft(value, projectId = '') {
+  if (!discussionRow(value)) return false;
+  const text = folderDiscussionText(controller.state.observation, projectId, {
+    historical: Boolean(controller.state.authority) || value.restored === true
+  });
+  return Boolean(text && window.PersonalAssistantPanel?.suggestReply?.(text));
+}
+
+function renderDiscussion() {
+  const existing = document.querySelector('[data-folder-discussion]');
+  const row = discussionRow(discussionBinding);
+  if (!row) {
+    existing?.remove();
+    closeDiscussionChooser({ restoreFocus: false });
+    return;
+  }
+  if (existing?.parentElement === row.firstElementChild) return;
+  existing?.remove();
+  const value = { ...discussionBinding };
+  const strip = node('div', '', 'personal-assistant-folder-discussion');
+  strip.dataset.folderDiscussion = value.messageId;
+  strip.setAttribute('role', 'group');
+  strip.setAttribute('aria-label', 'Folder conversation choices');
+  const children = folderDiscussionOptions(controller.state.observation);
+  const historical = Boolean(controller.state.authority) || value.restored === true;
+  const whole = node(
+    'button',
+    historical
+      ? 'Discuss saved observations'
+      : children.length > 1
+        ? 'Discuss the collection'
+        : 'Discuss this folder',
+    'personal-assistant-conversation__button'
+  );
+  whole.type = 'button';
+  whole.addEventListener('click', () => discussionDraft(value));
+  strip.append(whole);
+  if (children.length) {
+    const choose = node(
+      'button',
+      children.some(
+        child =>
+          controller.state.observation.projects.find(project => project.id === child.id)?.marker
+      )
+        ? 'Choose a project…'
+        : 'Choose a folder…',
+      'personal-assistant-conversation__button'
+    );
+    choose.type = 'button';
+    choose.setAttribute('aria-controls', 'personalAssistantFolderDiscussionChooser');
+    choose.setAttribute('aria-expanded', 'false');
+    choose.addEventListener('click', () => {
+      if (!discussionRow(value)) return;
+      discussionTrigger = choose;
+      discussionChoiceBinding = value;
+      elements.discussionCandidate.replaceChildren(new Option('Choose an observed folder…', ''));
+      for (const candidate of folderDiscussionOptions(controller.state.observation)) {
+        const option = new Option(
+          candidate.label + (candidate.ambiguous ? ' (indistinguishable name)' : ''),
+          candidate.id
+        );
+        option.disabled = candidate.ambiguous;
+        elements.discussionCandidate.add(option);
+      }
+      choose.setAttribute('aria-expanded', 'true');
+      elements.discussionChooser.hidden = false;
+      elements.discussionCandidate.focus();
+    });
+    strip.append(choose);
+  }
+  const bubble = row.firstElementChild;
+  bubble?.insertBefore(
+    strip,
+    bubble.querySelector('.personal-assistant-message__setup, .personal-assistant-message__actions')
+  );
+}
+
+function bindDiscussion(value) {
+  discussionBinding = value ? { ...value, generation: controller?.state.generation } : null;
+  closeDiscussionChooser({ restoreFocus: false });
+  renderDiscussion();
+}
 
 function updateSendHint() {
   if (!elements?.hint) return;
@@ -300,7 +419,9 @@ function render(state) {
         { coverage: { partial: row.dataset.folderPartial === 'true' } },
         {
           historical:
-            Boolean(state.authority) || state.observation?.id !== row.dataset.folderObservationId
+            row.dataset.folderHistorical === 'true' ||
+            Boolean(state.authority) ||
+            state.observation?.id !== row.dataset.folderObservationId
         }
       ).status;
   }
@@ -310,6 +431,7 @@ function render(state) {
   window.PersonalAssistantConversation?.refresh?.();
   window.PersonalAssistantFolder?.contextProgress?.(state);
   window.PersonalAssistantFolderSetup?.contextChanged?.(state);
+  renderDiscussion();
 }
 
 function closeChooser({ restoreFocus = true } = {}) {
@@ -363,6 +485,7 @@ async function open() {
 function reset(id = '', saved = {}) {
   closeChooser({ restoreFocus: false });
   lastEventKey = undefined;
+  bindDiscussion(null);
   controller?.reset(id, saved);
 }
 
@@ -401,6 +524,7 @@ function renderEvent(id, event, beforeRow, { historical = false } = {}) {
     );
   } else if (observation) {
     row.dataset.folderObservationId = observation.id;
+    row.dataset.folderHistorical = String(historical);
     row.dataset.folderPartial = String(observation.coverage?.partial === true);
     renderFolderSummary(row, observation, { historical });
   } else {
@@ -433,7 +557,9 @@ function init() {
     summary: document.getElementById('personalAssistantFolderSummary'),
     history: document.getElementById('personalAssistantFolderHistorical'),
     status: document.getElementById('personalAssistantContextStatus'),
-    hint: document.getElementById('personalAssistantFolderSendHint')
+    hint: document.getElementById('personalAssistantFolderSendHint'),
+    discussionChooser: document.getElementById('personalAssistantFolderDiscussionChooser'),
+    discussionCandidate: document.getElementById('personalAssistantFolderDiscussionCandidate')
   };
   controller = createFolderContextController({
     post: jsonRequest,
@@ -445,7 +571,33 @@ function init() {
       window.PersonalAssistantConversation?.isLoading?.() === true
   });
   document.getElementById('personalAssistantInput')?.addEventListener('input', updateSendHint);
-  document.addEventListener('personal-assistant:sent', updateSendHint);
+  document.addEventListener('personal-assistant:status', renderDiscussion);
+  document.addEventListener('personal-assistant:sent', () => {
+    updateSendHint();
+    bindDiscussion(null);
+  });
+  document
+    .getElementById('personalAssistantFolderDiscussionDraft')
+    ?.addEventListener('click', () => {
+      const value = discussionChoiceBinding;
+      if (!discussionRow(value) || !elements.discussionCandidate.reportValidity()) return;
+      const candidate = elements.discussionCandidate.value;
+      closeDiscussionChooser({ restoreFocus: false });
+      discussionDraft(value, candidate);
+    });
+  document
+    .getElementById('personalAssistantFolderDiscussionCancel')
+    ?.addEventListener('click', () => closeDiscussionChooser());
+  document.addEventListener(
+    'keydown',
+    event => {
+      if (event.key !== 'Escape' || elements.discussionChooser.hidden) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeDiscussionChooser();
+    },
+    true
+  );
   elements.remove.addEventListener('click', async () => {
     const saved = controller.state.accepted;
     if (await controller.remove()) {
@@ -467,7 +619,12 @@ function init() {
 
 const api = {
   open,
-  close: () => closeChooser({ restoreFocus: false }),
+  close: () => {
+    closeChooser({ restoreFocus: false });
+    closeDiscussionChooser({ restoreFocus: false });
+  },
+  bindDiscussion,
+  refreshDiscussion: renderDiscussion,
   reset,
   hydrate: (id, saved) => {
     // Resume has already rendered canonical events; keep their deduplication key.

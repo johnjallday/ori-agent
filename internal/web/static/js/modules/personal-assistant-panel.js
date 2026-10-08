@@ -469,6 +469,75 @@ function open(trigger, options = {}) {
   return true;
 }
 
+export function suggestedReplyDraft({
+  current = '',
+  text = '',
+  maxLength = 2000,
+  available,
+  pending,
+  busy,
+  loading,
+  folderPending
+} = {}) {
+  const draft = String(current);
+  const suggestion = String(text);
+  if (!available)
+    return {
+      draft,
+      accepted: false,
+      notice: 'The assistant is unavailable. Your draft is unchanged.'
+    };
+  if (pending || busy || loading || folderPending)
+    return {
+      draft,
+      accepted: false,
+      notice:
+        'Wait for the current reply, folder selection or conversation to finish. Your draft is unchanged.'
+    };
+  if (draft !== '')
+    return {
+      draft,
+      accepted: false,
+      notice: 'Send or clear your draft before using a suggestion. Your text is unchanged.'
+    };
+  if (!suggestion.trim() || suggestion.length > maxLength)
+    return {
+      draft,
+      accepted: false,
+      notice:
+        'This suggestion does not fit the composer. Write your question directly; nothing was inserted.'
+    };
+  return {
+    draft: suggestion,
+    accepted: true,
+    notice: 'Review, then Send. Nothing has been transmitted.'
+  };
+}
+
+// Unlike prefill(), a contextual shortcut never replaces an existing draft,
+// appends text, opens a second draft, or transmits a message.
+function suggestReply(text) {
+  if (!state.els?.input || !state.open) return false;
+  const result = suggestedReplyDraft({
+    current: state.els.input.value,
+    text,
+    maxLength: state.els.input.maxLength > 0 ? state.els.input.maxLength : 2000,
+    available: state.view.available,
+    pending: state.pending,
+    busy: window.OriAskRouting?.getState?.().busy === true,
+    loading: window.PersonalAssistantConversation?.isLoading?.() === true,
+    folderPending: window.PersonalAssistantFolderContext?.isPending?.() === true
+  });
+  if (result.accepted) {
+    state.draft = result.draft;
+    state.els.input.value = result.draft;
+    state.els.input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  state.els.input.focus();
+  setStatus(result.notice);
+  return result.accepted;
+}
+
 function prefill(text) {
   if (!state.view.available) return false;
   if (!open(state.els?.launcher)) return false;
@@ -724,6 +793,7 @@ const api = {
   open,
   close,
   prefill,
+  suggestReply,
   restoreDraft,
   refresh,
   applyPersonalAssistant,

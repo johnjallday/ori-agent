@@ -196,10 +196,12 @@ function renderSuggestion() {
   handoff.className = 'personal-assistant-message__setup';
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'personal-assistant-message__action';
+  button.className = suggestion.offer_id
+    ? 'personal-assistant-message__action'
+    : 'personal-assistant-message__action personal-assistant-message__setup-secondary';
   button.textContent = suggestion.offer_id
     ? 'Show existing setup review'
-    : 'Review suggested setup';
+    : 'Optional: review setup';
   button.disabled = Boolean(current.pending);
   button.setAttribute(
     'aria-controls',
@@ -226,7 +228,7 @@ function renderSuggestion() {
     ? 'Focuses the existing canonical review only. Setup still requires its reviewed confirmation.'
     : suggestion.subject?.name
       ? `Optional — reviews placement in ${String(suggestion.subject.name)}, the workspace you named. Setup requires your confirmation.`
-      : 'Optional — choose the scope and review the effects. Setup requires your confirmation.';
+      : 'Choose scope and review effects before confirming. Nothing is set up here.';
   handoff.append(button, note);
   bubble.insertBefore(handoff, bubble.querySelector('.personal-assistant-message__actions'));
 }

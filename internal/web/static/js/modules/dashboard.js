@@ -1954,6 +1954,7 @@
 
   function setHomeAssistantBusy(isBusy, busyLabel) {
     homeAssistantState.busy = Boolean(isBusy);
+    window.PersonalAssistantFolderContext?.refreshDiscussion?.();
     var els = getHomeAssistantElements();
     if (els.sendBtn && els.input) {
       if (!els.sendBtn.dataset.defaultLabel) {

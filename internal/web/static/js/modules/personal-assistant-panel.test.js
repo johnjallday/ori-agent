@@ -16,8 +16,53 @@ import {
   personalAssistantPanelView,
   restoreAssistantPanelFocus,
   restoredDraft,
-  safeTodayRoute
+  safeTodayRoute,
+  suggestedReplyDraft
 } from './personal-assistant-panel.js';
+
+test('suggested replies fill only an empty composer and preserve exact existing text', () => {
+  const text = 'Discuss “同じ名前 🎼”';
+  const result = suggestedReplyDraft({ available: true, text });
+  assert.equal(result.accepted, true);
+  assert.equal(result.draft, text);
+  assert.match(result.notice, /Review, then Send/);
+  for (const current of ['My exact draft', '  ', '\n🎼  ']) {
+    const rejected = suggestedReplyDraft({ available: true, text, current });
+    assert.equal(rejected.accepted, false);
+    assert.equal(rejected.draft, current);
+    assert.match(rejected.notice, /Send or clear/);
+  }
+});
+
+test('suggested reply length uses the composer UTF-16 bound without splitting a name', () => {
+  assert.equal(suggestedReplyDraft({ available: true, text: '🎼'.repeat(1000) }).accepted, true);
+  const tooLong = suggestedReplyDraft({ available: true, text: '🎼'.repeat(1001) });
+  assert.equal(tooLong.accepted, false);
+  assert.equal(tooLong.draft, '');
+  assert.equal(
+    suggestedReplyDraft({ available: true, text: 'Question', maxLength: 4 }).accepted,
+    false
+  );
+});
+
+test('suggested replies reject unavailable, busy, pending selection and loading history without draft loss', () => {
+  for (const block of [
+    { available: false },
+    { pending: true },
+    { busy: true },
+    { loading: true },
+    { folderPending: true }
+  ]) {
+    const result = suggestedReplyDraft({
+      available: true,
+      current: 'Keep this',
+      text: 'Suggestion',
+      ...block
+    });
+    assert.equal(result.accepted, false);
+    assert.equal(result.draft, 'Keep this');
+  }
+});
 
 test('personal assistant panel covers unavailable, pre-hire, active, paused, and repair states', () => {
   assert.equal(personalAssistantPanelView(null).known, false);

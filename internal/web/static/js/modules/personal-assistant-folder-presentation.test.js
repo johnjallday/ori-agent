@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  currentFolderDiscussion,
+  folderDiscussionBinding,
+  folderDiscussionOptions,
+  folderDiscussionText,
   folderPresentation,
   renderFolderSummary
 } from './personal-assistant-folder-presentation.js';
@@ -66,6 +70,101 @@ test('unknown date and absent coverage stay conservative, never a live inspectio
   assert.match(view.status, /Bounded look/);
   assert.match(view.details.join(' '), /not a complete tree/);
   assert.equal(folderPresentation(null), null);
+});
+
+test('discussion binding needs the latest local canonical folder answer, not prose/options/review events', () => {
+  const saved = { revision: 'event', observation: fixtures.album };
+  const messages = [
+    {
+      id: 'event',
+      role: 'folder_context',
+      folder_context: { version: 1, observation: fixtures.album }
+    },
+    { id: 'user', role: 'user' },
+    { id: 'answer', role: 'assistant', content: 'A concise answer' }
+  ];
+  const binding = folderDiscussionBinding(messages, 'conversation', saved);
+  assert.equal(binding.messageId, 'answer');
+  for (const rows of [
+    [],
+    messages.slice(0, 1),
+    [...messages, { role: 'folder_context' }],
+    messages.map(row => ({ ...row, imported: true })),
+    messages.map(row => (row.role === 'assistant' ? { ...row, content: '' } : row))
+  ]) {
+    assert.equal(folderDiscussionBinding(rows, 'conversation', saved), null);
+  }
+  assert.equal(
+    folderDiscussionBinding(messages, 'conversation', { ...saved, revision: 'new-event' }),
+    null
+  );
+  assert.equal(
+    folderDiscussionBinding(messages, 'conversation', {
+      ...saved,
+      observation: fixtures.documents
+    }),
+    null
+  );
+  assert.equal(folderDiscussionBinding(undefined, 'conversation', saved), null);
+});
+
+test('discussion activation rechecks owner, saved revision, snapshot, generation and busy selection', () => {
+  const state = { conversationId: 'c', revision: 'e', observation: fixtures.album, generation: 4 };
+  const binding = {
+    conversationId: 'c',
+    revision: 'e',
+    observationId: fixtures.album.id,
+    generation: 4,
+    messageId: 'a'
+  };
+  assert.equal(currentFolderDiscussion(state, binding, 'c'), true);
+  for (const change of [
+    { conversationId: 'other' },
+    { revision: 'new' },
+    { observation: fixtures.documents },
+    { generation: 5 },
+    { preview: fixtures.album },
+    { pending: true },
+    { selecting: true }
+  ]) {
+    assert.equal(currentFolderDiscussion({ ...state, ...change }, binding, 'c'), false);
+  }
+  assert.equal(currentFolderDiscussion(state, binding, 'other'), false);
+  assert.equal(currentFolderDiscussion(state, null, 'c'), false);
+});
+
+test('local chooser uses all typed non-root observations, independent of setup eligibility', () => {
+  const choices = folderDiscussionOptions(fixtures.album);
+  assert.deepEqual(
+    choices.map(row => row.id),
+    fixtures.album.projects.filter(row => !row.root).map(row => row.id)
+  );
+  assert.deepEqual(folderDiscussionOptions(fixtures.rootOnly), []);
+  assert.deepEqual(folderDiscussionOptions(fixtures.empty), []);
+  assert.match(folderDiscussionText(fixtures.album), /whole folder/);
+  assert.match(
+    folderDiscussionText(fixtures.documents, '', { historical: true }),
+    /saved metadata observations/
+  );
+  assert.equal(folderDiscussionText(fixtures.album, fixtures.album.projects[0].id), '');
+  assert.equal(folderDiscussionText(fixtures.album, 'missing'), '');
+});
+
+test('duplicate names require distinguishable literal markers, never silently select by hidden IDs', () => {
+  const project = { id: 'a', name: '<b>同じ名前 🎼</b>', root: false, marker: '*.rpp' };
+  const observation = { folder: 'Literal root', projects: [project, { ...project, id: 'b' }] };
+  assert.equal(
+    folderDiscussionOptions(observation).every(row => row.ambiguous),
+    true
+  );
+  assert.equal(folderDiscussionText(observation, 'a'), '');
+  observation.projects[1].marker = '*.logicx';
+  assert.equal(
+    folderDiscussionOptions(observation).some(row => row.ambiguous),
+    false
+  );
+  assert.ok(folderDiscussionText(observation, 'a').includes(project.name));
+  assert.match(folderDiscussionText(observation, 'b'), /logicx/);
 });
 
 // Minimal text-only document: no HTML parser. Browser specs check actual markup,

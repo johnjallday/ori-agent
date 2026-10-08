@@ -437,7 +437,7 @@ def main():
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
     evidence = (ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
-                ROOT / "tasks/evidence/assistant-folder-response-ux/group-2" if args.folder_response else
+                ROOT / "tasks/evidence/assistant-folder-response-ux/group-3" if args.folder_response else
                 ROOT / "tasks/evidence-assistant-workspace-awareness")
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:

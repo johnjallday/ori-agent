@@ -70,6 +70,83 @@ export function folderPresentation(
   };
 }
 
+// Latest atomic folder turn only. Event-only reviews, detached revisions,
+// imported and legacy prose never manufacture a discussion binding.
+export function folderDiscussionBinding(messages, conversationId, saved) {
+  if (
+    !conversationId ||
+    !saved?.revision ||
+    !saved.observation?.id ||
+    !Array.isArray(messages) ||
+    messages.length < 3
+  )
+    return null;
+  const [event, user, answer] = messages.slice(-3);
+  if (
+    !event ||
+    !user ||
+    !answer ||
+    event.imported ||
+    user.imported ||
+    answer.imported ||
+    event.role !== 'folder_context' ||
+    event.id !== saved.revision ||
+    event.folder_context?.version !== 1 ||
+    event.folder_context.observation?.id !== saved.observation.id ||
+    user.role !== 'user' ||
+    answer.role !== 'assistant' ||
+    !answer.id ||
+    !answer.content?.trim()
+  )
+    return null;
+  return {
+    conversationId,
+    revision: saved.revision,
+    observationId: saved.observation.id,
+    messageId: answer.id
+  };
+}
+
+export function currentFolderDiscussion(state, binding, conversationId) {
+  return Boolean(
+    binding &&
+    state &&
+    !state.preview &&
+    !state.pending &&
+    !state.selecting &&
+    binding.conversationId === conversationId &&
+    state.conversationId === conversationId &&
+    binding.revision === state.revision &&
+    binding.observationId === state.observation?.id &&
+    binding.generation === state.generation &&
+    binding.messageId
+  );
+}
+
+export function folderDiscussionOptions(observation) {
+  const children = (observation?.projects || []).filter(project => !project.root);
+  return children.map(project => ({
+    id: project.id,
+    label: `${String(project.name)}${project.marker ? ` · ${String(project.marker)} marker` : ''}`,
+    ambiguous:
+      children.filter(
+        other =>
+          other.name === project.name && String(other.marker || '') === String(project.marker || '')
+      ).length > 1
+  }));
+}
+
+export function folderDiscussionText(observation, projectId = '', { historical = false } = {}) {
+  if (!observation) return '';
+  const source = historical ? 'saved metadata observations' : 'metadata observations';
+  if (!projectId)
+    return `Let’s discuss the whole folder “${String(observation.folder)}” from its ${source}, without setting anything up.`;
+  const project = (observation.projects || []).find(row => !row.root && row.id === projectId);
+  if (!project || folderDiscussionOptions(observation).find(row => row.id === projectId)?.ambiguous)
+    return '';
+  return `Let’s discuss the observed folder “${String(project.name)}”${project.marker ? ` (marker: “${String(project.marker)}”)` : ''} in “${String(observation.folder)}” from its ${source}, without setting anything up.`;
+}
+
 /** Build semantic rows/disclosures using text nodes only. Shared by local
  * preview and saved canonical events; the caller retains identity/permissions. */
 export function renderFolderSummary(container, observation, options = {}) {

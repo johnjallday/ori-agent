@@ -79,7 +79,8 @@ async function installFixture(page: Page): Promise<Fixture> {
       ? {
           projects: [
             { id: 'candidate-0', name: folder, files: 3, root: true },
-            { id: 'candidate-1', name: 'Project A', files: 1 }
+            { id: 'candidate-1', name: 'Project A', files: 1 },
+            { id: 'candidate-2', name: 'Project B', files: 1 }
           ]
         }
       : {})
@@ -266,8 +267,20 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   const card = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
   await expect(card).toBeVisible();
   await expect(card).toContainText('Chosen');
+  await expect(page.locator('[data-folder-discussion]')).toHaveCount(0);
+  const evidence = process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR;
+  if (evidence) {
+    await mkdir(evidence, { recursive: true, mode: 0o750 });
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, 'real-canonical-optional-review.png') });
+  }
   await card.getByRole('button', { name: 'Keep chatting', exact: true }).click();
   await expect(card).toHaveCount(0);
+  if (evidence)
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, 'real-canonical-review-cancelled.png') });
   expect(posts.some(path => path.endsWith('/decide'))).toBe(false);
   await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
   await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Chosen' });
@@ -417,6 +430,18 @@ test('browser fixture: suggested setup follows the reply, restores on reload and
   await expect(handoff).toHaveCount(0);
   await say(page, 'Explore this folder');
   await expect(handoff).toHaveCount(1);
+  const requestsBefore = fixture.requests.length;
+  const discussion = page.locator('[data-folder-discussion]');
+  await expect(discussion).toHaveCount(1);
+  const chooseDiscussion = discussion.getByRole('button', { name: 'Choose a folder…' });
+  await chooseDiscussion.click();
+  const discussionCandidate = page.locator('#personalAssistantFolderDiscussionCandidate');
+  await expect(discussionCandidate.locator('option')).toHaveCount(3);
+  await expect(discussionCandidate).toContainText('Project A');
+  await expect(discussionCandidate).toContainText('Project B');
+  await page.keyboard.press('Escape');
+  await expect(chooseDiscussion).toBeFocused();
+  expect(fixture.requests.length).toBe(requestsBefore);
   await say(page, 'I want to organize the whole collection');
   await expect(handoff).toHaveCount(1);
   await expect(page.locator('[data-message-id="a-0"] [data-folder-setup-suggestion]')).toHaveCount(
@@ -426,7 +451,7 @@ test('browser fixture: suggested setup follows the reply, restores on reload and
   await reopen(page);
   await expect(handoff).toHaveCount(1);
   await page.locator('#personalAssistantInput').fill('Keep this draft');
-  const button = handoff.getByRole('button', { name: 'Review suggested setup' });
+  const button = handoff.getByRole('button', { name: 'Optional: review setup' });
   expect(
     await button.evaluate(element => {
       const row = element.closest('[data-message-id]');

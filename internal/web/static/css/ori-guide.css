@@ -968,6 +968,28 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   font-size: 12px;
 }
 
+.personal-assistant-folder-discussion {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  white-space: normal;
+}
+
+.personal-assistant-panel .personal-assistant-message__setup-secondary {
+  border-color: transparent;
+  background: transparent;
+  padding-left: 0;
+  color: var(--pa-accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+#personalAssistantFolderDiscussionChooser button,
+#personalAssistantFolderDiscussionChooser select {
+  min-height: 44px;
+}
+
 .personal-assistant-folder-context__eyebrow,
 .personal-assistant-folder-context__note {
   color: var(--pa-ink-dim);

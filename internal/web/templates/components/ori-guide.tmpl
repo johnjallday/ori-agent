@@ -284,6 +284,13 @@
         <div id="personalAssistantFolderSummary"></div>
         <p>Send your question, or send “Explore this folder” to discuss this snapshot. No workspace is created.</p>
       </section>
+      <section id="personalAssistantFolderDiscussionChooser" class="personal-assistant-folder-context" aria-labelledby="personalAssistantFolderDiscussionLabel" hidden>
+        <label id="personalAssistantFolderDiscussionLabel" for="personalAssistantFolderDiscussionCandidate">Which observed folder would you like to discuss?</label>
+        <select id="personalAssistantFolderDiscussionCandidate" class="form-select" required></select>
+        <p class="personal-assistant-folder-context__note">Only prepares an editable question. Does not change the attachment, choose setup or read files. Identical names and markers cannot identify a distinct folder here.</p>
+        <button type="button" id="personalAssistantFolderDiscussionDraft" class="personal-assistant-conversation__button">Draft question</button>
+        <button type="button" id="personalAssistantFolderDiscussionCancel" class="personal-assistant-conversation__button">Cancel</button>
+      </section>
       <section id="personalAssistantFolderSetupChoices" class="personal-assistant-folder-context" aria-label="Choose what to set up" hidden>
         <label for="personalAssistantFolderSetupCandidate">Which observed folder should the workspace use?</label>
         <select id="personalAssistantFolderSetupCandidate" class="form-select form-select-sm" required></select>

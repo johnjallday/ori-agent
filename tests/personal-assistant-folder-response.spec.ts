@@ -20,7 +20,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
   test.setTimeout(120_000);
   expect(basename(sandbox!)).toMatch(/^ori-demo\./);
   expect(basename(provider!)).toMatch(/^ori-awareness-provider\./);
-  const evidence = join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-2');
+  const evidence = join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-3');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   for (const [relative, content] of syntheticFolderFiles) {
     // Put projects directly under the known-folder chip for a multi-row scan.
@@ -131,15 +131,79 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await page
       .locator('#personalAssistantPanel')
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-initial.png`) });
-    const next = page.waitForResponse(response => response.url().endsWith('/home-assistant/ask'));
+    const strip = page.locator('[data-folder-discussion]');
+    await expect(strip).toHaveCount(1);
+    const stripId = await strip.getAttribute('data-folder-discussion');
+    expect(stripId).toBe(reply.conversation.assistant_message_id);
+    const input = page.locator('#personalAssistantInput');
+    const whole = strip.getByRole('button').first();
+    const choose = strip.getByRole('button').nth(1);
+    const candidate = page.locator('#personalAssistantFolderDiscussionCandidate');
+    await input.fill('  Keep this exact 🎼 draft\n');
+    const exactDraft = await input.inputValue();
+    await whole.click();
+    await expect(input).toHaveValue(exactDraft);
+    await expect(input).toBeFocused();
+    await expect(page.locator('#personalAssistantPanelStatus')).toContainText('Send or clear');
     await page
-      .locator('#personalAssistantInput')
-      .fill('Just discuss the organization; do not set anything up.');
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-draft-protected.png`) });
+    const setup = page
+      .locator('[data-folder-setup-suggestion]')
+      .getByRole('button', { name: 'Optional: review setup' });
+    await setup.click();
+    await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeVisible();
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-optional-setup-chooser.png`) });
+    await page.locator('#personalAssistantFolderSetupCancel').click();
+    await expect(input).toHaveValue(exactDraft);
+    await choose.click();
+    await expect(candidate).toBeFocused();
+    await expect(candidate).toHaveValue('');
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-local-project-chooser.png`) });
+    expect(await candidate.locator('option').count()).toBe(
+      observation.projects.filter((item: any) => !item.root).length + 1
+    );
+    await page.keyboard.press('Escape');
+    await expect(choose).toBeFocused();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await expect(input).toHaveValue(exactDraft);
+    expect((await audit()).requests).toBe(firstCounts.requests);
+    await input.fill('');
+    await choose.click();
+    const child = observation.projects.find((item: any) => !item.root);
+    await candidate.selectOption(child.id);
+    await page.locator('#personalAssistantFolderDiscussionDraft').click();
+    await expect(input).toBeFocused();
+    expect(await input.inputValue()).toContain(child.name);
+    expect(await input.inputValue()).toContain('without setting anything up');
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({
+        path: join(evidence, `${chip.toLowerCase()}-editable-discussion-before-send.png`)
+      });
+    expect((await audit()).requests).toBe(firstCounts.requests);
+    expect((await (await request.get('/api/workspaces')).json()).folders.length).toBe(
+      resourcesBefore
+    );
+    const unsent = await (
+      await request.get(`/api/home-assistant/conversations/${reply.conversation.id}`)
+    ).json();
+    expect(unsent.messages.filter((row: any) => row.role === 'assistant')).toHaveLength(1);
+    const next = page.waitForResponse(response => response.url().endsWith('/home-assistant/ask'));
     await page.locator('#personalAssistantSend').click();
     const followup = await (await next).json();
     expect(followup.conversation.stored).toBe(true);
     await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
     await expect(card).toHaveCount(1);
+    await expect(strip).toHaveCount(1);
+    expect(await strip.getAttribute('data-folder-discussion')).toBe(
+      followup.conversation.assistant_message_id
+    );
+    expect(await strip.getAttribute('data-folder-discussion')).not.toBe(stripId);
     await page.locator('#personalAssistantScroll').evaluate(el => {
       el.scrollTop = el.scrollHeight;
     });
@@ -159,6 +223,8 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await expect(
       page.locator('#homeAssistantConversation [data-message-role="assistant"]')
     ).toHaveCount(2);
+    await expect(strip).toHaveCount(1);
+    await expect(strip.getByRole('button').first()).toHaveText('Discuss saved observations');
     expect((await audit()).requests).toBe(beforeReload);
     expect((await audit()).hits).toEqual([]);
     await page.locator('#personalAssistantScroll').evaluate(el => {

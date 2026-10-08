@@ -6,6 +6,7 @@
 // share a thread by accident.
 
 import { renderTurnWorkspace, renderTurnSources } from './personal-assistant-workspace-context.js';
+import { folderDiscussionBinding } from './personal-assistant-folder-presentation.js';
 
 const LIST_ENDPOINT = '/api/home-assistant/conversations';
 const STORAGE_KEY = 'ori.personalAssistant.conversation';
@@ -251,16 +252,11 @@ async function resume(id, options = {}) {
     const messages = result.body.messages || [];
     for (const message of messages) {
       if (message.role === 'folder_context' && message.folder_context) {
-        const saved = result.body.folder_context;
         window.PersonalAssistantFolderContext?.renderEvent?.(
           message.id,
           message.folder_context,
           null,
-          {
-            historical:
-              Boolean(saved?.authority) ||
-              message.folder_context.observation?.id !== saved?.observation?.id
-          }
+          { historical: true }
         );
         continue;
       }
@@ -297,6 +293,14 @@ async function resume(id, options = {}) {
       result.body.folder_review_context || null,
       result.body.folder_review_elsewhere || null
     );
+    const discussion = folderDiscussionBinding(
+      messages,
+      conversation.id,
+      result.body.folder_context
+    );
+    window.PersonalAssistantFolderContext?.bindDiscussion?.(
+      discussion ? { ...discussion, restored: true } : null
+    );
     setNote(
       partial
         ? 'Showing the most recent messages of this conversation. Earlier ones are still stored.'
@@ -308,6 +312,7 @@ async function resume(id, options = {}) {
     return false;
   } finally {
     state.loading = false;
+    window.PersonalAssistantFolderContext?.refreshDiscussion?.();
   }
 }
 
@@ -404,6 +409,7 @@ function request(routeContext) {
  * with their canonical message IDs and returns what the controller should do.
  */
 function applyReply(data, rows = {}) {
+  window.PersonalAssistantFolderContext?.bindDiscussion?.(null);
   if (data?.workspace_context) {
     renderTurnWorkspace(rows.userRow, data.workspace_context);
     renderTurnWorkspace(rows.assistantRow, data.workspace_context);
@@ -445,6 +451,23 @@ function applyReply(data, rows = {}) {
     data.folder_review_context || null,
     data.folder_review_elsewhere || null
   );
+  if (reply.stored && data.folder_context && rows.assistantRow) {
+    window.PersonalAssistantFolderContext?.bindDiscussion?.(
+      folderDiscussionBinding(
+        [
+          {
+            id: data.folder_context.revision,
+            role: 'folder_context',
+            folder_context: { version: 1, observation: data.folder_context.observation }
+          },
+          { id: reply.user_message_id, role: 'user' },
+          { id: reply.assistant_message_id, role: 'assistant', content: data.response }
+        ],
+        nextId,
+        data.folder_context
+      )
+    );
+  }
   const notice = conversationNotice(data);
   setNote(notice);
   return { notice, stored: reply.stored === true, restoreInput: shouldRestoreInput(data) };
