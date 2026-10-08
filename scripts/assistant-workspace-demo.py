@@ -25,6 +25,23 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = "ori-workspace-fixture"
 
+# The runs on plain wt demo, by flag: the spec, the variable that hands it the
+# sandbox path, and the log kept with the evidence. No flag runs DEFAULT_DEMO.
+PLAIN_DEMOS = {
+    "placement": ("tests/personal-assistant-workspace-placement.spec.ts",
+                  "ORI_WORKSPACE_PLACEMENT_SANDBOX", "group3-wt-demo-placement.log"),
+    "sources": ("tests/personal-assistant-workspace-sources.spec.ts",
+                "ORI_WORKSPACE_SOURCES_SANDBOX", "group4-wt-demo-sources.log"),
+    "files": ("tests/personal-assistant-workspace-files.spec.ts",
+              "ORI_WORKSPACE_FILES_SANDBOX", "group5-wt-demo-files.log"),
+    "accessibility": ("tests/personal-assistant-workspace-accessibility.spec.ts",
+                      "ORI_WORKSPACE_ACCESSIBILITY_SANDBOX", "group6-wt-demo-accessibility.log"),
+    "integrated": ("tests/personal-assistant-workspace-integrated.spec.ts",
+                   "ORI_WORKSPACE_INTEGRATED_SANDBOX", "group6-wt-demo-integrated.log"),
+}
+DEFAULT_DEMO = ("tests/personal-assistant-workspace-history.spec.ts",
+                "ORI_WORKSPACE_HISTORY_SANDBOX", "group2-wt-demo.log")
+
 
 def current_turn(messages):
     """The current user message and the reader results Ori returned after it.
@@ -370,9 +387,11 @@ def main():
                         help="wt demo: linked-file and attachment readers, partial reads, an unlinked folder and revoked access")
     parser.add_argument("--accessibility", action="store_true",
                         help="wt demo: keyboard use, context announcements, sources, focus return and narrow layouts")
+    parser.add_argument("--integrated", action="store_true",
+                        help="wt demo: one conversation from setup review through notes, files, a delayed reply, "
+                             "removed access and confirmation")
     args = parser.parse_args()
-    plain = [flag for flag, chosen in (("--placement", args.placement), ("--sources", args.sources), ("--files", args.files),
-                                         ("--accessibility", args.accessibility)) if chosen]
+    plain = ["--" + name for name in PLAIN_DEMOS if getattr(args, name)]
     if len(plain) > 1:
         parser.error("choose one wt demo: " + " or ".join(plain))
     if plain and (args.reaper_source or args.music_source or args.new_home or args.portfolio):
@@ -408,22 +427,10 @@ def main():
                 env["ORI_WORKSPACE_COLLECTION_ACCEPTANCE"] = "1"
         else:
             env.pop("ORI_WORKSPACE_NEW_HOME_ACCEPTANCE", None)
+        spec, sandbox_env, plain_log = PLAIN_DEMOS[plain[0][2:]] if plain else DEFAULT_DEMO
         log = evidence / ("group3-portfolio-candidate.log" if args.portfolio else
                           "group3-new-home-candidate.log" if args.new_home else
-                          "group3-confirmed-candidate.log" if candidate else
-                          "group3-wt-demo-placement.log" if args.placement else
-                          "group4-wt-demo-sources.log" if args.sources else
-                          "group5-wt-demo-files.log" if args.files else
-                          "group6-wt-demo-accessibility.log" if args.accessibility else "group2-wt-demo.log")
-        spec, sandbox_env = (("tests/personal-assistant-workspace-placement.spec.ts", "ORI_WORKSPACE_PLACEMENT_SANDBOX")
-                             if args.placement else
-                             ("tests/personal-assistant-workspace-sources.spec.ts", "ORI_WORKSPACE_SOURCES_SANDBOX")
-                             if args.sources else
-                             ("tests/personal-assistant-workspace-files.spec.ts", "ORI_WORKSPACE_FILES_SANDBOX")
-                             if args.files else
-                             ("tests/personal-assistant-workspace-accessibility.spec.ts", "ORI_WORKSPACE_ACCESSIBILITY_SANDBOX")
-                             if args.accessibility else
-                             ("tests/personal-assistant-workspace-history.spec.ts", "ORI_WORKSPACE_HISTORY_SANDBOX"))
+                          "group3-confirmed-candidate.log" if candidate else plain_log)
         process = None
         sandbox = None
         try:

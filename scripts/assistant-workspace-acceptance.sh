@@ -100,6 +100,7 @@ run placement 8954 "${demo[@]}" --placement
 run sources 8954 "${demo[@]}" --sources
 run files 8954 "${demo[@]}" --files
 run accessibility 8954 "${demo[@]}" --accessibility
+run integrated 8954 "${demo[@]}" --integrated
 run generic-awareness 8952 ./scripts/e2e-fresh.sh --port 8952 \
 	--sandbox-env ORI_WORKSPACE_AWARENESS_SANDBOX \
 	tests/personal-assistant-workspace-awareness.spec.ts -- --workers=1

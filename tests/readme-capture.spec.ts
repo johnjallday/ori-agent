@@ -411,6 +411,23 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    // The open drawer asks which workspace the page is about. The hero is the
+    // app Home with nothing selected, so the real answer is app-wide: an
+    // available context with no subject. The drawer then reads
+    // "Context · App-wide" above the message box.
+    if (url.pathname === '/api/home-assistant/context') {
+      const projects = README_SCENES.workspaces.filter(item => item.kind !== 'group').length;
+      await json(route, {
+        version: 1,
+        status: 'available',
+        subject_explicit: false,
+        read_at: '2026-07-17T14:00:00.000Z',
+        discovery: { status: 'available', count: README_SCENES.workspaces.length },
+        project_count: projects,
+        group_count: README_SCENES.workspaces.length - projects
+      });
+      return;
+    }
     if (url.pathname === '/api/onboarding/specialists') {
       await json(route, { specialists: [] });
       return;
@@ -1158,6 +1175,11 @@ test('captures the Home command bridge and the Personal Assistant drawer', async
     async scenePage => {
       await scenePage.locator('#personalAssistantLauncher').click();
       await expect(scenePage.locator('#personalAssistantToday')).toBeVisible();
+      // The context line settles after its own request; wait for its final text
+      // so both captures photograph the same drawer.
+      await expect(scenePage.locator('#personalAssistantWorkspaceContext')).toHaveText(
+        'Context · App-wide'
+      );
       // Ready chat keeps unrelated attention compact until the user opens it.
       const attention = scenePage.locator('#personalAssistantSummaryToggle');
       await expect(attention).toHaveAttribute('aria-expanded', 'false');

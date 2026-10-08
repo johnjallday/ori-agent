@@ -480,6 +480,17 @@ Keyboard, screen-reader semantics and narrow layouts are checked by
 regions, focus order and layout are asserted in Chromium. No screen reader was
 run.
 
+`python3 scripts/assistant-workspace-demo.py --integrated`
+(`tests/personal-assistant-workspace-integrated.spec.ts`) walks the slices in a
+single conversation in one sandbox: a review prepared on a group's page, a move
+to a project inside it, notes and tasks read and cited while the review stays
+pending and unchanged, a file read while the attached folder stays metadata, a
+reply held during navigation, a linked folder removed, and only then the review
+confirmed. `./scripts/assistant-workspace-acceptance.sh` runs every browser
+acceptance run in order, each in its own sandbox, and reports each one; given
+the two exact companion sources it also runs the three candidate setups and
+checks that both sources are unchanged afterwards.
+
 Known limits, recorded rather than fixed: an entry is excluded by name, so a
 hard link under another name, or a filesystem that treats two spellings as one
 name beyond ASCII case, is not detected; the PDF parser's page loop is the

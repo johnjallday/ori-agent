@@ -34,11 +34,23 @@ class DemoProviderTests(unittest.TestCase):
                      ["demo", "--sources", "--placement"], ["demo", "--sources", "--portfolio"],
                      ["demo", "--files", "--sources"], ["demo", "--files", "--new-home"],
                      ["demo", "--accessibility", "--files"], ["demo", "--accessibility", "--portfolio"],
+                     ["demo", "--integrated", "--sources"],
+                     ["demo", "--integrated", "--reaper-source", "/reaper", "--music-source", "/music"],
                      ["demo", "--new-home", "--portfolio", "--reaper-source", "/reaper", "--music-source", "/music"]]:
             with patch("sys.argv", argv), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as failure:
                     demo.main()
                 self.assertEqual(failure.exception.code, 2)
+
+    def test_every_plain_demo_names_an_existing_spec_and_its_own_sandbox_variable_and_log(self):
+        runs = list(demo.PLAIN_DEMOS.values()) + [demo.DEFAULT_DEMO]
+        for spec, variable, log in runs:
+            self.assertTrue((demo.ROOT / spec).is_file(), spec)
+            self.assertRegex(variable, r"^ORI_WORKSPACE_[A-Z]+_SANDBOX$")
+            self.assertIn(variable, (demo.ROOT / spec).read_text())
+            self.assertTrue(log.endswith(".log"))
+        for column in range(3):
+            self.assertEqual(len({run[column] for run in runs}), len(runs), "two runs share a spec, variable or log")
 
     def test_current_user_projection_not_history(self):
         projection = demo.workspace_projection([message("Old"), message("Current")])
