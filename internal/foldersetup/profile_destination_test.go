@@ -36,35 +36,52 @@ func TestPortfolioDestination_ProfileIsNotWrittenOnceTheDestinationNoLongerStand
 	}
 }
 
-func TestRunDestination_ProfileIsNotWrittenToAHomeOtherThanTheReviewedOne(t *testing.T) {
-	for name, test := range map[string]struct {
-		homeID   string
-		validate func(context.Context) error
-	}{
-		"the review named another Home":         {homeID: "another-home"},
-		"the reviewed Home is no longer usable": {homeID: "home-1", validate: func(context.Context) error { return personalassistant.ErrFolderPlanChanged }},
-	} {
-		t.Run(name, func(t *testing.T) {
-			journey := requiredHome()
-			journey.homeExists, journey.homeStaffed = true, true
-			cfg := profileConfig(false, false)
-			cfg.Plan.Destination = &personalassistant.FolderSetupDestination{Status: "existing", WorkspaceID: test.homeID, Name: "Music Production Home", Kind: "home", OwnerUserID: "local"}
-			runner := &Runner{Journey: journey, Selections: fakeSelections{}, Progress: &recorder{}, Profile: journeyProfile{journey: journey}, ValidateDestination: test.validate}
-			result, err := runner.Run(context.Background(), cfg)
-			if err != nil {
-				t.Fatalf("Run: %v", err)
-			}
-			if calls := strings.Join(journey.calls, ","); result.StopReason != personalassistant.FolderStopPlanChanged || strings.Contains(calls, "profile:") {
-				t.Fatalf("a profile was written to an unreviewed Home: %+v %s", result, calls)
-			}
-		})
+// profileRun drives a single-folder run whose journey names the Home "home-1"
+// ("Music Home"), against the given reviewed destination.
+func profileRun(t *testing.T, journey *fakeJourney, cfg Config, destination *personalassistant.FolderSetupDestination, validate func(context.Context) error) (Result, string) {
+	t.Helper()
+	cfg.Plan.Destination = destination
+	named := destinationJourney{fakeJourney: journey, homeID: "home-1", homeName: "Music Home", reviewName: "Music Home"}
+	runner := &Runner{Journey: named, Selections: fakeSelections{}, Progress: &recorder{}, Profile: journeyProfile{journey: journey}, ValidateDestination: validate}
+	result, err := runner.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-	// The reviewed Home, still standing, is profiled as before.
-	journey := requiredHome()
-	journey.homeExists, journey.homeStaffed = true, true
-	cfg := profileConfig(false, false)
-	cfg.Plan.Destination = &personalassistant.FolderSetupDestination{Status: "existing", WorkspaceID: "home-1", Name: "Music Production Home", Kind: "home", OwnerUserID: "local"}
-	if _, _ = runProfile(t, journey, cfg, nil); !strings.Contains(strings.Join(journey.calls, ","), "profile:home-1:false") {
-		t.Fatalf("the reviewed Home was not profiled: %v", journey.calls)
+	return result, strings.Join(journey.calls, ",")
+}
+
+func TestRunDestination_ProfileIsWrittenOnlyToTheReviewedHome(t *testing.T) {
+	existing := func(id string) *personalassistant.FolderSetupDestination {
+		return &personalassistant.FolderSetupDestination{Status: "existing", WorkspaceID: id, Name: "Music Home", Kind: "home", OwnerUserID: "local"}
+	}
+	promised := &personalassistant.FolderSetupDestination{Status: "new", Name: "Music Home", Kind: "home", OwnerUserID: "local"}
+	joined := func() *fakeJourney {
+		journey := requiredHome()
+		journey.homeExists, journey.homeStaffed = true, true
+		return journey
+	}
+
+	// The review named another Home than the one the journey would profile.
+	if result, calls := profileRun(t, joined(), profileConfig(false, false), existing("another-home"), nil); result.StopReason != personalassistant.FolderStopPlanChanged || strings.Contains(calls, "profile:") {
+		t.Fatalf("a Home other than the reviewed one was profiled: %+v %s", result, calls)
+	}
+	// The reviewed Home is no longer usable when the profile is about to be written.
+	withdrawn := func(context.Context) error { return personalassistant.ErrFolderPlanChanged }
+	if result, calls := profileRun(t, joined(), profileConfig(false, false), existing("home-1"), withdrawn); result.StopReason != personalassistant.FolderStopPlanChanged || strings.Contains(calls, "profile:") {
+		t.Fatalf("a withdrawn destination was profiled: %+v %s", result, calls)
+	}
+	// A plan that promised a new Home meets one that already exists and is not
+	// this run's own: it is not profiled, and nothing is created or connected.
+	if result, calls := profileRun(t, joined(), profileConfig(true, true), promised, nil); result.StopReason != personalassistant.FolderStopPlanChanged || strings.Contains(calls, "profile:") || strings.Contains(calls, "create_group") {
+		t.Fatalf("a Home this run did not create was profiled or adopted: %+v %s", result, calls)
+	}
+
+	// The reviewed Home, still standing, is profiled and the run finishes.
+	if result, calls := profileRun(t, joined(), profileConfig(false, false), existing("home-1"), nil); result.Status != personalassistant.FolderSetupDone || !strings.Contains(calls, "profile:home-1:false") {
+		t.Fatalf("the reviewed Home was not profiled: %+v %s", result, calls)
+	}
+	// A new Home this run created is profiled, with its card's consent.
+	if result, calls := profileRun(t, requiredHome(), profileConfig(true, true), promised, nil); result.Status != personalassistant.FolderSetupDone || !strings.Contains(calls, "create_group,profile:home-1:true") {
+		t.Fatalf("the Home this run created was not profiled: %+v cause=%v %s", result, result.Cause, calls)
 	}
 }

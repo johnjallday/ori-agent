@@ -359,7 +359,13 @@ func (s *run) fillProfile(ctx context.Context, journey *setupjourney.JourneyProj
 	// and the reviewed destination must still stand, as before every other
 	// write of this run.
 	if destination := s.cfg.Plan.Destination; destination != nil {
-		if (destination.Status == "existing" && homeID != destination.WorkspaceID) || (destination.Status == "new" && s.homeID != "" && homeID != s.homeID) {
+		// A new Home is this run's own only once the run holds its receipt.
+		// Until then a Home the journey names was made another way: it is left
+		// alone here, and connecting the project refuses it.
+		if destination.Status == "new" && s.homeID == "" {
+			return nil
+		}
+		if (destination.Status == "existing" && homeID != destination.WorkspaceID) || (destination.Status == "new" && homeID != s.homeID) {
 			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home to profile differs from the reviewed destination"}
 		}
 	}
