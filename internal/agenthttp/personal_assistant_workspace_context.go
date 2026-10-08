@@ -31,6 +31,10 @@ type AssistantWorkspaceResolver struct {
 	// Notes lists note titles for the overview. Titles and times only: the
 	// overview never carries a note's content. Nil reports notes unsupported.
 	Notes AssistantNoteReader
+	// Files reports that the host's file readers are connected, so the overview
+	// may count the workspace's readable file sources instead of saying
+	// unsupported. The resolver itself never touches a file.
+	Files bool
 	Now   func() time.Time
 }
 
@@ -455,6 +459,29 @@ func (r *AssistantWorkspaceResolver) overview(ctx context.Context, ws *workspace
 		}
 	}
 	out.Sources["files"] = assistantcontext.SourceStatus{Status: assistantcontext.Unsupported, Reason: "reader_not_connected"}
+	if r.Files {
+		// Counted from canonical records only: stored attachments, user-visible
+		// linked folders and a project-file locator. No folder is listed and no
+		// file is opened or even looked at to build the overview.
+		files := assistantcontext.SourceStatus{Status: assistantcontext.Empty}
+		for _, attachment := range ws.Attachments {
+			if attachment.DeletedAt == nil && attachment.File != nil && workspace.AttachmentSourcePath(ws.ID, attachment.File) != "" {
+				files.Count++
+			}
+		}
+		for _, ref := range ws.DirectoryReferences {
+			if _, ok := subjectFolder(ws, ref.ID); ok {
+				files.Count++
+			}
+		}
+		if locator, err := workspace.GetProjectEntryLocator(ws.SharedData); err == nil && locator != nil {
+			files.Count++
+		}
+		if files.Count > 0 {
+			files.Status = assistantcontext.Available
+		}
+		out.Sources["files"] = files
+	}
 	out.Sources["knowledge"] = assistantcontext.SourceStatus{Status: assistantcontext.Unsupported, Reason: "workspace_memory_has_no_eligible_reader"}
 	boundWorkspaceOverview(&out)
 	return out, ""

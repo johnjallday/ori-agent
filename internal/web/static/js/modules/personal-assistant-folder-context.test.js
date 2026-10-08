@@ -193,6 +193,29 @@ test('historical snapshot is explicit; busy turn cannot mutate its context', asy
   assert.equal(f.calls.length, 0);
 });
 
+test('a conversation saved by a turn without a folder can take a folder afterwards', async () => {
+  const f = fixture(async () => ({ observation: observation('a'), revision: '' }));
+  // The first plain turn saved the conversation; the controller still holds a draft.
+  f.setId('saved');
+  assert.equal(await f.controller.select('chip', 'documents'), false);
+  assert.equal(f.controller.state.preview, false, 'a draft-targeted result is not shown');
+  assert.equal(f.controller.adopt('saved'), true);
+  assert.equal(await f.controller.select('chip', 'documents'), true);
+  assert.deepEqual(f.calls[1].body, {
+    conversation_id: 'saved',
+    revision: '',
+    mode: 'chip',
+    chip: 'documents'
+  });
+  assert.equal(f.controller.state.preview, true);
+  assert.equal(f.controller.request().selection_id, 'a');
+  assert.equal('draft_id' in f.controller.request(), false);
+  // Adopting never discards a folder already chosen, and is a no-op when current.
+  assert.equal(f.controller.adopt('other'), false);
+  assert.equal(f.controller.state.conversationId, 'saved');
+  assert.equal(f.controller.adopt(''), false);
+});
+
 test('explicit review sends opaque candidate and scope, never contents or a model turn', async () => {
   const f = fixture(async url =>
     url.endsWith('/select')

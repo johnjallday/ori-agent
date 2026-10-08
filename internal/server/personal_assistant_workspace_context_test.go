@@ -172,7 +172,8 @@ func assertNoPanelExecutionAuthority(t *testing.T, request llm.ChatRequest) {
 	// Every panel tool is a read. Nothing here saves a note, changes a task,
 	// writes memory, manages agents or delegates.
 	allowed := map[string]bool{"home_workspaces": true, "home_tasks": true, "home_sessions": true, "home_opportunities": true, "home_usage": true, "home_agents": true, "assistant_workspace_discovery": true,
-		"assistant_workspace_notes": true, "assistant_workspace_note": true, "assistant_workspace_tasks": true, "assistant_workspace_task": true}
+		"assistant_workspace_notes": true, "assistant_workspace_note": true, "assistant_workspace_tasks": true, "assistant_workspace_task": true,
+		"assistant_workspace_files": true, "assistant_workspace_folder": true, "assistant_workspace_file": true}
 	for _, tool := range request.Tools {
 		if !allowed[tool.Name] {
 			t.Fatalf("unexpected panel tool %q", tool.Name)

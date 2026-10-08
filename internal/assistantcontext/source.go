@@ -6,6 +6,10 @@ import "time"
 const (
 	SourceNote = "note"
 	SourceTask = "task"
+	// SourceFile is a file in a folder the workspace links, or its project file.
+	SourceFile = "file"
+	// SourceAttachment is a file the workspace itself stores.
+	SourceAttachment = "attachment"
 )
 
 // Coverage says how much of a source reached the model. A listing or a title
@@ -23,16 +27,19 @@ const SourceLimit = 12
 // The key is issued by the server for that turn. Saved with a turn it is
 // history: what that reply read then, never permission to read it again.
 type SourceRef struct {
-	Key         string    `json:"key"`
-	Kind        string    `json:"kind"`
-	WorkspaceID string    `json:"workspace_id"`
-	Workspace   string    `json:"workspace"`
-	ID          string    `json:"id"`
-	Label       string    `json:"label"`
-	Version     string    `json:"version,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at,omitzero"`
-	ReadAt      time.Time `json:"read_at"`
-	Coverage    string    `json:"coverage"`
+	Key         string `json:"key"`
+	Kind        string `json:"kind"`
+	WorkspaceID string `json:"workspace_id"`
+	Workspace   string `json:"workspace"`
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	// Detail says where a file lives in words: the linked folder's name and the
+	// path inside it. It is never an absolute filesystem path.
+	Detail    string    `json:"detail,omitempty"`
+	Version   string    `json:"version,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	ReadAt    time.Time `json:"read_at"`
+	Coverage  string    `json:"coverage"`
 	// Start, End and Total are character positions of the part that was read.
 	Start int `json:"start,omitempty"`
 	End   int `json:"end,omitempty"`

@@ -183,7 +183,10 @@ type HomeAssistantAskHandler struct {
 	WorkspaceContext         *AssistantWorkspaceResolver
 	// Notes is the canonical note store narrowed to two reads, for the panel's
 	// brokered readers. Nil leaves note reading unsupported, and says so.
-	Notes       AssistantNoteReader
+	Notes AssistantNoteReader
+	// Files resolves the host-owned folders of a workspace's readable files, for
+	// the panel's file readers. Nil leaves file reading unsupported.
+	Files       AssistantFileSource
 	CurrentUser interface {
 		CurrentUserID(context.Context) (string, error)
 	}
@@ -607,11 +610,11 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if provider.Capabilities().SupportsTools {
 		tools = registry.Definitions()
 	}
-	readers := false
+	readers, files := false, false
 	for _, tool := range tools {
-		readers = readers || isReader(tool.Name)
+		readers, files = readers || isReader(tool.Name), files || isFileReader(tool.Name)
 	}
-	overview := workspaceTurnPrompt(scope, readers) + reviewContextPrompt(ctx)
+	overview := workspaceTurnPrompt(scope, readers, files) + reviewContextPrompt(ctx)
 	if scope != nil {
 		// The overview is workspace evidence too. It is charged before any
 		// reader runs, so the turn's budget covers everything Ori supplied.

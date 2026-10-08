@@ -388,6 +388,10 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 			handler.Notes, handler.WorkspaceContext.Notes = notes, notes
 		}
 	}
+	// File roots come from the canonical folder store, never from a request.
+	if s.workspaceFileStore != nil {
+		handler.Files, handler.WorkspaceContext.Files = personalAssistantFileSource{roots: s.workspaceFileStore}, true
+	}
 	handler.SetTraceEmitter(agenthttp.NewLoggingHomeAskTraceEmitter())
 	// A request to create a workspace is offered as a build with the
 	// assistant while it can build (FR41).

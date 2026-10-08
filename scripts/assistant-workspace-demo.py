@@ -113,6 +113,136 @@ def reader_step(prompt, results, tools_offered):
     return {"answer": " ".join(parts)}
 
 
+def file_step(prompt, results, tools_offered):
+    """The same kind of stand-in for the file readers demo.
+
+    It walks listing -> folder -> file exactly as Ori's readers allow, and its
+    answer quotes only text a reader returned. Requests it recognizes: the
+    lyrics file (plus one attachment), the long log (two parts) and the project
+    file. Returns None for anything else.
+    """
+    words = prompt.lower()
+    wants_project, wants_long, wants_lyrics = "project file" in words, "long log" in words, "lyrics" in words
+    if not (wants_project or wants_long or wants_lyrics):
+        return None
+
+    def parsed(text):
+        try:
+            value = json.loads(text)
+            return value if isinstance(value, dict) else {}
+        except ValueError:
+            return {}
+
+    def call(name, **arguments):
+        return {"tool": name, "arguments": arguments}
+
+    have = [parsed(text) for text in results]
+    listing = next((r for r in have if "linked_folders" in r or "attachments" in r), None)
+    folder = next((r for r in have if "entries" in r), None)
+    reads = [r for r in have if r.get("content_read")]
+    refused = [str(r.get("reason")) for r in have if r.get("content_read") is False and r.get("reason")]
+    if tools_offered and not refused:
+        if listing is None:
+            return call("assistant_workspace_files")
+        if wants_project:
+            if listing.get("project_file") and not reads:
+                return call("assistant_workspace_file", project_file=True)
+        else:
+            # A workspace can link several folders (its own folder is one). Only
+            # the one the user named is opened; an unnamed or no-longer-linked
+            # folder is not replaced by a guess at another.
+            named = next((f for f in listing.get("linked_folders") or []
+                          if f.get("name") and str(f["name"]).lower() in words), None)
+            if named and folder is None:
+                return call("assistant_workspace_folder", directory_id=named["directory_id"])
+            wanted = "log" if wants_long else "lyrics"
+            entry = next((e for e in (folder or {}).get("entries", [])
+                          if e.get("kind") == "file" and wanted in str(e.get("path", "")).lower()), None)
+            file_reads = [r for r in reads if str(r.get("where", "")).startswith("Linked folder")]
+            if entry and not file_reads:
+                return call("assistant_workspace_file", directory_id=folder["directory_id"], path=entry["path"])
+            if wants_long and len(file_reads) == 1 and "next_offset" in file_reads[0]:
+                return call("assistant_workspace_file", directory_id=folder["directory_id"], path=entry["path"],
+                            offset=file_reads[0]["next_offset"])
+            attachment = next((a for a in listing.get("attachments", []) if a.get("readable") == "supported"), None)
+            if wants_lyrics and attachment and not any(r.get("where") == "Workspace attachment" for r in reads):
+                return call("assistant_workspace_file", attachment_id=attachment["attachment_id"])
+    parts = []
+    # Parts of one file share its source key: say once what was read of it, and
+    # take coverage from the latest part, which reports the turn so far.
+    by_source = {}
+    for read in reads:
+        by_source.setdefault(read["cite_as"], []).append(read)
+    for key, group in by_source.items():
+        first, latest = group[0], group[-1]
+        line = first["content"].strip().split("\n")[0]
+        part = "From " + first["where"] + ": “" + line + "” " + key
+        if latest.get("coverage") == "partial":
+            part += " (only characters " + str(min(r["start"] for r in group) + 1) + "–" + \
+                    str(max(r["end"] for r in group)) + " of " + str(latest["total"]) + \
+                    " were read, not the whole file)"
+        parts.append(part + ".")
+    if not reads:
+        why = ", ".join(refused) if refused else ("no matching file is readable in this workspace" if listing else "readers unavailable")
+        parts.append("I could not read a file for that (" + why + "). I am not describing a file I did not read.")
+    return {"answer": " ".join(parts)}
+
+
+_audit_lock = threading.Lock()
+
+
+def audit_provider_input(state_dir, text):
+    """Count provider requests and note which watched markers they carried.
+
+    A spec lists markers that must never reach a model (for example the body of
+    a file in a folder that was only attached) in sentinels.json. This records
+    how many requests arrived and the index of any marker found. It never stores
+    a request or a marker's surroundings.
+    """
+    with _audit_lock:
+        audit = state_dir / "provider-audit.json"
+        seen = json.loads(audit.read_text()) if audit.exists() else {"requests": 0, "hits": []}
+        seen["requests"] += 1
+        watched = state_dir / "sentinels.json"
+        if watched.exists():
+            for index, marker in enumerate(json.loads(watched.read_text())):
+                if isinstance(marker, str) and marker and marker in text and index not in seen["hits"]:
+                    seen["hits"].append(index)
+        audit.write_text(json.dumps(seen))
+
+
+def trace_reader_turn(state_dir, results, offered, step):
+    """Append one sanitized line per request that used, or could use, a reader.
+
+    It records which reader the stand-in chose and, for each result Ori
+    returned, only its status, reason, whether content was read and how many
+    rows it listed. No content, title, name or path is written.
+    """
+    if not results and not (step and "tool" in step):
+        return
+    outcomes = []
+    for text in results:
+        try:
+            value = json.loads(text)
+        except ValueError:
+            value = None
+        if not isinstance(value, dict):
+            outcomes.append({"status": "tool_error"})
+            continue
+        outcome = {"status": value.get("status"), "content_read": value.get("content_read")}
+        if value.get("reason"):
+            outcome["reason"] = value["reason"]
+        for rows in ("notes", "tasks", "attachments", "linked_folders", "entries"):
+            if isinstance(value.get(rows), list):
+                outcome[rows] = len(value[rows])
+        outcomes.append(outcome)
+    line = {"readers_offered": offered, "results": outcomes,
+            "chose": step.get("tool", "answer") if step else "plain_reply"}
+    with _audit_lock:
+        with (state_dir / "provider-trace.jsonl").open("a") as trace:
+            trace.write(json.dumps(line) + "\n")
+
+
 def provider_handler(state_dir):
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -140,13 +270,17 @@ def provider_handler(state_dir):
                 size = int(self.headers.get("Content-Length", "0"))
                 if not 0 < size <= 1_000_000:
                     raise ValueError("fixture input bound")
-                request = json.loads(self.rfile.read(size))
+                raw = self.rfile.read(size)
+                audit_provider_input(state_dir, raw.decode("utf-8", "replace"))
+                request = json.loads(raw)
                 projection = workspace_projection(request.get("messages", []))
                 subject = projection.get("subject") or {}
                 user, results = current_turn(request["messages"])
                 # Only the user's own words choose a demo; the overview Ori
                 # appends (which lists note titles) never does.
-                step = reader_step(user["content"].split("\n\n##", 1)[0], results, bool(request.get("tools")))
+                own_words, offered = user["content"].split("\n\n##", 1)[0], bool(request.get("tools"))
+                step = reader_step(own_words, results, offered) or file_step(own_words, results, offered)
+                trace_reader_turn(state_dir, results, offered, step)
                 if step:
                     message = {"role": "assistant", "content": step.get("answer", "")}
                     if "tool" in step:
@@ -210,11 +344,14 @@ def main():
                         help="wt demo: named review, blocked refresh, confirmed setup and project-local choice")
     parser.add_argument("--sources", action="store_true",
                         help="wt demo: note and task readers, checked sources, changed records and a missing note")
+    parser.add_argument("--files", action="store_true",
+                        help="wt demo: linked-file and attachment readers, partial reads, an unlinked folder and revoked access")
     args = parser.parse_args()
-    if args.placement and args.sources:
-        parser.error("choose one wt demo: --placement or --sources")
-    if (args.placement or args.sources) and (args.reaper_source or args.music_source or args.new_home or args.portfolio):
-        parser.error("--placement and --sources run on plain wt demo, without companion candidates")
+    plain = [flag for flag, chosen in (("--placement", args.placement), ("--sources", args.sources), ("--files", args.files)) if chosen]
+    if len(plain) > 1:
+        parser.error("choose one wt demo: " + " or ".join(plain))
+    if plain and (args.reaper_source or args.music_source or args.new_home or args.portfolio):
+        parser.error(plain[0] + " runs on plain wt demo, without companion candidates")
     if bool(args.reaper_source) != bool(args.music_source):
         parser.error("candidate setup needs both exact companion sources")
     if (args.new_home or args.portfolio) and not args.reaper_source:
@@ -250,11 +387,14 @@ def main():
                           "group3-new-home-candidate.log" if args.new_home else
                           "group3-confirmed-candidate.log" if candidate else
                           "group3-wt-demo-placement.log" if args.placement else
-                          "group4-wt-demo-sources.log" if args.sources else "group2-wt-demo.log")
+                          "group4-wt-demo-sources.log" if args.sources else
+                          "group5-wt-demo-files.log" if args.files else "group2-wt-demo.log")
         spec, sandbox_env = (("tests/personal-assistant-workspace-placement.spec.ts", "ORI_WORKSPACE_PLACEMENT_SANDBOX")
                              if args.placement else
                              ("tests/personal-assistant-workspace-sources.spec.ts", "ORI_WORKSPACE_SOURCES_SANDBOX")
                              if args.sources else
+                             ("tests/personal-assistant-workspace-files.spec.ts", "ORI_WORKSPACE_FILES_SANDBOX")
+                             if args.files else
                              ("tests/personal-assistant-workspace-history.spec.ts", "ORI_WORKSPACE_HISTORY_SANDBOX"))
         process = None
         sandbox = None
@@ -294,6 +434,12 @@ def main():
             provider.shutdown()
             provider.server_close()
             thread.join(timeout=5)
+            # Keep the provider's sanitized records beside the run's log: which
+            # readers were chosen and what status each returned, and whether a
+            # watched marker reached the provider. Neither holds content.
+            for record in ("provider-trace.jsonl", "provider-audit.json"):
+                if (state / record).exists():
+                    shutil.copyfile(state / record, evidence / (log.stem + "-" + record))
             # A forced shell termination can skip zsh's always block. Restrict
             # fallback cleanup to this invocation's verified temporary sandbox.
             if sandbox and sandbox.exists():

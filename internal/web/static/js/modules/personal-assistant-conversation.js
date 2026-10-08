@@ -419,6 +419,10 @@ function applyReply(data, rows = {}) {
       rows.userRow
     );
     window.PersonalAssistantFolderContext?.accepted?.(nextId, data.folder_context);
+  } else if (reply.stored) {
+    // A turn without a folder may have just saved this conversation; a folder
+    // added next belongs to it.
+    window.PersonalAssistantFolderContext?.adopt?.(nextId);
   }
   if (reply.stored)
     window.PersonalAssistantFolderSetup?.applySuggestion?.(data.folder_setup_suggestion || null);

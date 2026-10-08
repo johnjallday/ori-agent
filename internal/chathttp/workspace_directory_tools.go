@@ -1,7 +1,6 @@
 package chathttp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -222,27 +221,20 @@ func readDirectoryFileText(fullPath string, size int64) (text, kind string, err 
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read file: %w", err)
 	}
-	if fileparser.SupportsExtension(ext) {
-		parsed, err := fileparser.ParseFile(fullPath, data)
-		if err != nil {
-			return "", "", fmt.Errorf("this file could not be parsed as %s: %w", strings.TrimPrefix(ext, "."), err)
-		}
-		return parsed, "parsed", nil
-	}
-	if !looksLikeText(data) {
+	// The extraction itself is shared with the assistant panel's file reader;
+	// only the wording of a refusal is this tool's own.
+	text, kind, err = fileparser.ExtractText(fullPath, data)
+	switch {
+	case errors.Is(err, fileparser.ErrParseFailed):
+		return "", "", fmt.Errorf("this file could not be parsed as %s: %w", strings.TrimPrefix(ext, "."), err)
+	case err != nil:
 		return "", "", fmt.Errorf("this file is binary and cannot be read as text. Supported: %s", supportedDirectoryKinds())
 	}
-	return string(data), "text", nil
+	return text, kind, nil
 }
 
 // looksLikeText reports whether the first 8 KB of data carry no NUL byte.
-func looksLikeText(data []byte) bool {
-	head := data
-	if len(head) > directoryTextSniffBytes {
-		head = head[:directoryTextSniffBytes]
-	}
-	return bytes.IndexByte(head, 0) == -1
-}
+func looksLikeText(data []byte) bool { return fileparser.LooksLikeText(data) }
 
 // directoryFileReadable is the listing's readable flag: parser-supported
 // extensions, or a text sniff of the file's first 8 KB.

@@ -32,6 +32,7 @@ class DemoProviderTests(unittest.TestCase):
                      ["demo", "--placement", "--new-home"],
                      ["demo", "--placement", "--reaper-source", "/reaper", "--music-source", "/music"],
                      ["demo", "--sources", "--placement"], ["demo", "--sources", "--portfolio"],
+                     ["demo", "--files", "--sources"], ["demo", "--files", "--new-home"],
                      ["demo", "--new-home", "--portfolio", "--reaper-source", "/reaper", "--music-source", "/music"]]:
             with patch("sys.argv", argv), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as failure:
@@ -76,6 +77,59 @@ class DemoProviderTests(unittest.TestCase):
         self.assertEqual((user["content"].split("\n\n##", 1)[0], results), ("Hi", ["{}"]))
         with self.assertRaises(ValueError):
             demo.current_turn(turn + [{"role": "tool", "content": "{}"}, {"role": "system", "content": "x"}, {"role": "tool", "content": "{}"}])
+
+    def test_file_fixture_walks_listing_folder_file_and_quotes_only_what_was_read(self):
+        listing = json.dumps({"status": "available", "attachments": [{"attachment_id": "a1", "name": "mix.wav", "readable": "not_supported"},
+                                                                    {"attachment_id": "a2", "name": "art.md", "readable": "supported"}],
+                              "linked_folders": [{"directory_id": "d0", "name": "Project"}, {"directory_id": "d1", "name": "Assets"},
+                                                 {"directory_id": "d2", "name": "Archive"}], "project_file": {"name": "song.rpp"}})
+        folder = json.dumps({"status": "available", "directory_id": "d1", "entries": [
+            {"path": "lyrics", "kind": "folder"}, {"path": "lyrics/bridge.txt", "kind": "file"}, {"path": "long-log.txt", "kind": "file"}]})
+        read = lambda where, text, key, **extra: json.dumps(dict({"status": "available", "content_read": True, "where": where,
+                                                                  "content": text, "cite_as": key, "coverage": "full"}, **extra))
+        lyrics = read("Linked folder “Assets” · lyrics/bridge.txt", "The bridge is in D minor.\nSecond line.", "[S1]")
+        ask = "Summarize the lyrics file in Assets and the artwork attachment"
+        self.assertEqual(demo.file_step(ask, [], True)["tool"], "assistant_workspace_files")
+        # The folder the user named, not simply the first one linked.
+        self.assertEqual(demo.file_step(ask, [listing], True)["arguments"], {"directory_id": "d1"})
+        # No folder named: none is opened in its place; the attachment is still read.
+        self.assertEqual(demo.file_step("Summarize the lyrics file", [listing], True)["arguments"], {"attachment_id": "a2"})
+        self.assertEqual(demo.file_step(ask, [listing, folder], True)["arguments"], {"directory_id": "d1", "path": "lyrics/bridge.txt"})
+        # The audio attachment is skipped by its listed readability, never opened.
+        self.assertEqual(demo.file_step(ask, [listing, folder, lyrics], True)["arguments"], {"attachment_id": "a2"})
+        art = read("Workspace attachment", "Artwork is due on the 12th.", "[S2]")
+        answer = demo.file_step(ask, [listing, folder, lyrics, art], False)["answer"]
+        self.assertIn("“The bridge is in D minor.” [S1]", answer)
+        self.assertIn("From Workspace attachment: “Artwork is due on the 12th.” [S2]", answer)
+        self.assertNotIn("Second line", answer)
+        # A long file is continued once, and a partial read is said to be partial.
+        part = read("Linked folder “Assets” · long-log.txt", "Log line 1\n", "[S1]", coverage="partial", start=0, end=40000, total=115000, next_offset=40000)
+        long_ask = "Read the long log"
+        self.assertEqual(demo.file_step(long_ask, [listing, folder, part], True)["arguments"],
+                         {"directory_id": "d1", "path": "long-log.txt", "offset": 40000})
+        more = read("Linked folder “Assets” · long-log.txt", "og line 9\n", "[S1]", coverage="partial", start=40000, end=58000, total=115000, next_offset=58000)
+        long_answer = demo.file_step(long_ask, [listing, folder, part, more], False)["answer"]
+        self.assertIn("“Log line 1” [S1] (only characters 1–58000 of 115000 were read, not the whole file)", long_answer)
+        self.assertEqual(long_answer.count("[S1]"), 1)
+        self.assertEqual(demo.file_step("Read the project file", [listing], True)["arguments"], {"project_file": True})
+        # A refusal ends the walk and is reported; nothing is invented.
+        refused = json.dumps({"status": "unavailable", "reason": "folder_not_linked_to_this_workspace", "content_read": False})
+        self.assertIn("folder_not_linked_to_this_workspace", demo.file_step(ask, [listing, refused], True)["answer"])
+        empty = json.dumps({"status": "empty", "attachments": [], "linked_folders": [], "content_read": False})
+        self.assertIn("no matching file is readable in this workspace", demo.file_step(ask, [empty], True)["answer"])
+        self.assertIsNone(demo.file_step("Hello there", [], True))
+
+    def test_provider_audit_counts_requests_and_marker_indexes_without_storing_input(self):
+        with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
+            state = Path(temp)
+            demo.audit_provider_input(state, "an ordinary request")
+            (state / "sentinels.json").write_text(json.dumps(["UNLINKED_BODY", "", "OTHER_BODY"]))
+            demo.audit_provider_input(state, "a request that carries OTHER_BODY in a tool result")
+            demo.audit_provider_input(state, "OTHER_BODY again")
+            saved = (state / "provider-audit.json").read_text()
+            self.assertEqual(json.loads(saved), {"requests": 3, "hits": [2]})
+            self.assertNotIn("tool result", saved)
+            self.assertNotIn("OTHER_BODY", saved)
 
     def test_real_http_fixture_hold_and_safe_failure(self):
         with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:

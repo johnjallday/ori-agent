@@ -177,6 +177,17 @@ export function createFolderContextController({
     if (!saved) return;
     reset(id, saved);
   }
+  // A turn without a folder can be the one that saves the conversation. The
+  // next Add folder must then target that conversation, not the draft it was
+  // before; otherwise its result is discarded as belonging to another thread.
+  function adopt(id) {
+    const next = String(id || '');
+    if (!next || state.conversationId === next || state.observation || state.pending) return false;
+    state.generation++;
+    Object.assign(state, { conversationId: next, revision: '', accepted: null, offerId: '' });
+    changed(state);
+    return true;
+  }
   async function review(candidateId, close = false, offerId = state.offerId, placement = {}) {
     if (
       isBusy() ||
@@ -242,7 +253,7 @@ export function createFolderContextController({
       }
     }
   }
-  return { state, select, remove, reset, request, accepted, review, notify };
+  return { state, select, remove, reset, request, accepted, adopt, review, notify };
 }
 
 async function jsonRequest(url, body) {
@@ -515,6 +526,7 @@ const api = {
   },
   request: () => controller?.request() || null,
   accepted: (id, saved) => controller?.accepted(id, saved),
+  adopt: id => controller?.adopt(id) === true,
   isPending: () => controller?.state.pending === true,
   hasFolder: () => Boolean(controller?.state.observation),
   _controller: () => controller

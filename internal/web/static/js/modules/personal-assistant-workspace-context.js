@@ -87,18 +87,28 @@ export function renderTurnWorkspace(row, attribution, { historical = false } = {
   return true;
 }
 
-const SOURCE_KINDS = { note: 'Note', task: 'Task' };
+const SOURCE_KINDS = { note: 'Note', task: 'Task', file: 'File', attachment: 'Attachment' };
 // Only an in-app page of a workspace is linked. The server writes these; a
-// model cannot, and nothing else is turned into a link.
+// model cannot, and nothing else is turned into a link. A file has no page of
+// its own, so it is named with where it lives instead of being linked.
 const SOURCE_HREF = /^\/workspaces\/[A-Za-z0-9][A-Za-z0-9._:-]*\/(?:notes|task)\/[^/?#\s]+$/;
+// A range is given for text that is read in parts; a task is read as one record.
+const RANGED_KINDS = new Set(['note', 'file', 'attachment']);
 
 function sourceCoverage(source) {
   if (source.coverage === 'full') return 'read in full';
   const total = Number(source.total) || 0;
   const end = Number(source.end) || 0;
-  if (source.kind === 'note' && total > 0 && end > 0)
+  if (RANGED_KINDS.has(source.kind) && total > 0 && end > 0)
     return `part read (characters ${(Number(source.start) || 0) + 1}–${end} of ${total})`;
   return 'part read';
+}
+
+// Where a file lives, in words the server wrote: a linked folder's name and the
+// path inside it. Anything that looks like an absolute path is dropped.
+function sourceWhere(source) {
+  const where = String(source.detail || '').trim();
+  return /^(?:\/|~|[A-Za-z]:\\|file:)/.test(where) ? '' : where;
 }
 
 /** The sources Ori actually delivered to the model for one reply. A reply that
@@ -134,6 +144,7 @@ export function turnSourcesView(
         title: `${SOURCE_KINDS[source.kind] || 'Source'}: ${String(source.label)}`,
         href: SOURCE_HREF.test(String(source.href || '')) ? String(source.href) : '',
         detail: [
+          sourceWhere(source),
           String(source.workspace || '').trim(),
           sourceCoverage(source),
           updated ? `updated ${updated}` : '',

@@ -1,9 +1,9 @@
 # Personal Assistant workspace awareness: investigation contract
 
 **Status: findings plus in-progress host implementation; not shipped behavior.**
-Context-following conversations (group 2), setup continuity/placement (group 3)
-and grounded notes/tasks with checked sources (group 4) are implemented;
-permitted files are not yet.
+Context-following conversations (group 2), setup continuity/placement (group 3),
+grounded notes/tasks with checked sources (group 4) and permitted file reading
+(group 5) are implemented. Final cross-slice validation is group 6.
 The full feature includes context-following conversations, setup continuity,
 notes/tasks, and permitted files. A context badge alone is not the delivery.
 Implementation proceeds in that order with one writer. This document records
@@ -73,8 +73,8 @@ live REAPER runs in this specialized check.
 - Per-turn panel registries recheck user/relationship and pinned workspace ownership
   before each read. The existing home metadata tools receive owner/subject-filtered
   stores; separate discovery includes groups and preserves labeled project/group
-  totals. Notes, task details and validated citations arrive in group 4 (below);
-  file contents are still pending.
+  totals. Notes, task details and validated citations arrive in group 4 and file
+  contents in group 5 (both below).
 - Provider capability controls tool advertisement. Snapshot-only paths keep the
   validated overview and explain the lack of brokered readers; no provider switch
   or native-MCP workaround is used.
@@ -328,6 +328,89 @@ Acceptance on plain `wt demo` is
 there is a deterministic stand-in for a tool-using model: it picks readers from
 the user's words and repeats only what a reader returned, so it proves host
 reads, citation checks and persistence, not what a vendor model would choose.
+
+## Group-5 permitted files and attachments
+
+**What is readable.** Three kinds of file a workspace already holds, and nothing
+else:
+
+| Source | Resolved from | Not readable |
+| --- | --- | --- |
+| Attachment | The attachment record's own stored file under the workspace files folder | An attachment that only remembers where a file once was (`OriginalPath`, a `file://` link): that location is metadata and is never opened |
+| File in a linked folder | A `DirectoryReference` with this workspace's ID and an empty `Purpose` | Folders a capability owns (for example a sample library), another workspace's folders |
+| Project file | The workspace's typed project-entry locator via `ResolveProjectEntry` | Home, library or sibling membership grants nothing; no live control |
+
+A folder attached to the conversation is none of these. Picking it never becomes
+permission to read it: it is not a `DirectoryReference`, so no reader can reach
+it, by ID, by a climbing path or by an absolute path.
+
+**Readers.** `assistant_workspace_files` lists those sources (names and sizes;
+nothing is opened and readability is a hint from the file name only),
+`assistant_workspace_folder` lists names inside one linked folder (500 entries,
+three levels, hidden entries skipped, links listed but not followed), and
+`assistant_workspace_file` reads one file as text. Text extraction is the shared
+`fileparser.ExtractText` (also used by the workspace chat's directory tool):
+PDF, Word, PowerPoint, Excel and the text formats through the existing parser;
+any other file whose start holds no NUL byte as plain text, which is how a
+`.rpp` is read; everything else is unsupported. The parser's 10 MB limit, the
+40,000-character part and the turn's shared 64,000-character budget all apply,
+across notes, tasks and files together. Audio is not decoded, nothing is run,
+and a path written inside a file is delivered as text and never opened.
+
+**The read itself enforces the boundary** (`workspace.ReadContainedFile`).
+Checking a path and then opening it leaves a gap in which a folder on the way
+can be swapped for a link that leaves the approved folder. The reader opens
+through an `os.Root`, so every path component is resolved relative to the
+folder that was actually opened. It then uses only the open file: type and size
+come from the handle (a pipe or device is refused without being opened, and the
+open cannot block), the bytes come from that handle, and the handle and the
+folder are compared again after the read. A file or folder replaced along the
+way is reported as changed; a substitute is never read. A test swaps the target
+and a parent folder for outside links while reading 8,000 times and requires
+that no read ever returns outside content. The folder is resolved from canonical
+state on every call, so unlinking or re-pointing it takes effect on the next
+read, and a later part of a file that changed is refused.
+
+**Left out on purpose.** Hidden entries, and Ori's own records wherever a linked
+folder contains them: `MEMORY.md` (reviewed memory has its own eligible reader),
+`workspace.json`, `agent_settings.json`, `mcp_servers.json` and
+`skills_state.json` (absolute folder locations, agent definitions, tool-server
+settings). They are neither listed nor readable through these readers.
+Secret-like lines are withheld from delivered text.
+
+**Refusals are distinct and carry no path:** `file_not_found`,
+`path_outside_the_approved_folder`, `not_readable_here`, `not_a_regular_file`,
+`file_too_large`, `not_a_supported_document_or_plain_text`,
+`document_could_not_be_parsed`, `file_changed_while_reading`,
+`folder_not_linked_to_this_workspace`, `attachment_has_no_stored_file`. None is
+reported as an empty workspace.
+
+**Sources.** A file source records its kind (`file` or `attachment`), the
+workspace, its name, where it lives in words ("Linked folder “Album assets” ·
+lyrics/bridge.txt", "Workspace attachment", "Project file"), a content hash,
+the file's modified time, the read time and the range read. No absolute path is
+stored or shown, and a file has no link because the app has no page for one.
+
+**Folder turns are authority-aware.** The blanket refusal for "summarize these
+documents" is replaced by a decision. When the pinned workspace has readable
+files of its own and the provider can run readers, the model answers from those
+and is told to attribute the answer to that workspace source; the attached
+folder stays metadata. Otherwise Ori refuses before any model call and names the
+real ways forward (paste the text, or link the folder through a reviewed setup).
+
+**Found and fixed while demoing:** after a first turn without a folder saved a
+conversation, the drawer's folder controller still held a draft target, so
+Add folder in that conversation discarded its own result and showed no preview.
+The controller now adopts the saved conversation.
+
+Acceptance on plain `wt demo` is
+`python3 scripts/assistant-workspace-demo.py --files`
+(`tests/personal-assistant-workspace-files.spec.ts`). The demo provider records
+how many requests it received and whether any carried a watched marker (a file
+in an attached-only folder, a hidden file, a same-named file in another
+workspace) without storing its input; that run shows zero. The exact-candidate
+suite additionally reads the created project's `.rpp` through the
+provider-managed project entry and shows that its Home and its sibling cannot.
 
 Setup-plan software previews now call the existing canonical integration reader
 directly. `setupjourney.Service.Read` creates/reconciles inert run rows, so it is

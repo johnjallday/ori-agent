@@ -31,7 +31,7 @@ type panelToolRegistry struct {
 func (r *panelToolRegistry) Definitions() []llm.Tool {
 	tools := r.home.Definitions()
 	tools = append(tools, llm.Tool{Name: "assistant_workspace_discovery", Description: "Discover owned project and Home/group metadata with separate project/group totals. No content reads or permission grants.", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}})
-	return append(tools, r.readerDefinitions()...)
+	return append(append(tools, r.readerDefinitions()...), r.fileReaderDefinitions()...)
 }
 
 func (r *panelToolRegistry) Execute(ctx context.Context, name, arguments string) (string, error) {
@@ -55,10 +55,16 @@ func (r *panelToolRegistry) Execute(ctx context.Context, name, arguments string)
 			return "", errors.New("workspace unavailable")
 		}
 	}
-	if isReader(name) {
-		// Readers bound, filter and charge their own output: a note body is
-		// longer than a metadata field and is recorded as a source.
-		data, err := r.executeReader(ctx, name, args)
+	if isReader(name) || isFileReader(name) {
+		// Readers bound, filter and charge their own output: a note or file
+		// body is longer than a metadata field and is recorded as a source.
+		var data map[string]any
+		var err error
+		if isFileReader(name) {
+			data, err = r.executeFileReader(name, args)
+		} else {
+			data, err = r.executeReader(ctx, name, args)
+		}
 		if err != nil {
 			return "", errors.New("source unavailable")
 		}

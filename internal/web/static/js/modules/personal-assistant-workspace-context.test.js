@@ -157,6 +157,57 @@ test('sources list what the reply read, how much, and link only in-app pages', (
     assert.equal(turnSourcesView({ sources: [{ ...note, href }] }, stamp).rows[0].href, '', href);
 });
 
+test('a file source says where it lives and how much was read, and is never a path or a link', () => {
+  const file = {
+    key: 'S1',
+    kind: 'file',
+    label: 'bridge.txt',
+    workspace: 'Album-1',
+    detail: 'Linked folder “Album assets” · lyrics/bridge.txt',
+    coverage: 'partial',
+    start: 40000,
+    end: 80000,
+    total: 115000,
+    cited: true,
+    read_at: '2026-01-03T10:00:00Z'
+  };
+  const view = turnSourcesView(
+    {
+      sources: [
+        file,
+        {
+          ...file,
+          key: 'S2',
+          kind: 'attachment',
+          label: 'artwork.md',
+          detail: 'Workspace attachment',
+          coverage: 'full'
+        }
+      ]
+    },
+    stamp
+  );
+  assert.equal(view.rows[0].title, 'File: bridge.txt');
+  assert.equal(
+    view.rows[0].detail,
+    'Linked folder “Album assets” · lyrics/bridge.txt · Album-1 · part read (characters 40001–80000 of 115000) · read 2026-01-03'
+  );
+  assert.equal(view.rows[1].title, 'Attachment: artwork.md');
+  assert.match(view.rows[1].detail, /^Workspace attachment · Album-1 · read in full/);
+  assert.equal(view.rows[0].href, '');
+  // An absolute location is never shown, whatever a saved reference holds.
+  for (const detail of [
+    '/Users/me/Music/Album-1/lyrics/bridge.txt',
+    '~/Music/bridge.txt',
+    'C:\\Users\\me\\bridge.txt',
+    'file:///Users/me/bridge.txt'
+  ]) {
+    const row = turnSourcesView({ sources: [{ ...file, detail, href: detail }] }, stamp).rows[0];
+    assert.equal(row.href, '');
+    assert.doesNotMatch(row.detail, /Users/);
+  }
+});
+
 test('uncited and saved sources are labeled for what they are; no sources shows nothing', () => {
   const read = turnSourcesView({ sources: [{ ...note, cited: false }] }, stamp);
   assert.equal(read.summary, 'Sources read (1)');

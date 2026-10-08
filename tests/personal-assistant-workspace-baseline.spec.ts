@@ -352,6 +352,77 @@ test('compatible baseline: Music Home, Album-1 and pending Album-5 review', asyn
     expect(await readFile(join(supportingRoot, 'references.md'), 'utf8')).toBe(supportingBytes);
     await expect(page.locator('#personalAssistantInput')).toHaveValue('Add this to my workspace');
     await page.screenshot({ path: join(evidence, 'compatible-confirmed-supporting-folder.png') });
+
+    // The project the confirmed setup created has an exact project file, held
+    // by the provider-managed project entry. The hired assistant can read that
+    // one file as text through Ori's file reader: file-only, no live control,
+    // no project agent's credentials. Its Home and its sibling get nothing from it.
+    const created = finalWorkspaces.find((row: any) => row.id === result.outcome.workspace_id);
+    const askProjectFile = async (slug: string) => {
+      await page.goto(`/workspaces/${slug}/assistant`);
+      await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
+      if (!(await page.locator('#personalAssistantPanel').isVisible()))
+        await page.locator('#personalAssistantLauncher').click();
+      await page.locator('#personalAssistantConversationNew').click();
+      await page.locator('#personalAssistantInput').fill('Read the project file');
+      const answered = page.waitForResponse(
+        response => new URL(response.url()).pathname === '/api/home-assistant/ask'
+      );
+      await page.locator('#personalAssistantSend').click();
+      const body = await (await answered).json();
+      await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+      return body;
+    };
+    const projectRead = await askProjectFile(created.folder_slug);
+    expect(projectRead.workspace_context.subject.id).toBe(created.id);
+    expect(projectRead.response).toContain(
+      'From Project file: “<REAPER_PROJECT 0.1 "7.0" 1234” [S1]'
+    );
+    expect(projectRead.workspace_context.sources).toHaveLength(1);
+    expect(projectRead.workspace_context.sources[0]).toMatchObject({
+      kind: 'file',
+      label: 'Album-5.rpp',
+      detail: 'Project file',
+      workspace: created.name,
+      coverage: 'full',
+      cited: true
+    });
+    expect(JSON.stringify(projectRead)).not.toContain(sandbox!);
+    await page.screenshot({ path: join(evidence, 'compatible-project-file-read.png') });
+    // Membership in the Home, or sitting beside the project, is not file access.
+    for (const slug of [
+      finalWorkspaces.find((row: any) => row.id === homeID).folder_slug,
+      child.folder_slug
+    ]) {
+      const none = await askProjectFile(slug);
+      expect(none.response).toContain('I could not read a file for that');
+      expect(none.response).not.toContain('REAPER_PROJECT');
+      expect(none.workspace_context.sources).toBeUndefined();
+    }
+    expect(await readFile(source, 'utf8')).toBe(sourceText);
+    await writeFile(
+      join(evidence, 'compatible-project-file-read.json'),
+      JSON.stringify(
+        {
+          boundary:
+            'Exact local candidates + deterministic loopback provider. The project file was read as text through the host file reader; no vendor model, live REAPER, audio decoding or project-agent credential',
+          reaperRevision: process.env.ORI_REAPER_PLUGIN_REVISION,
+          musicRevision: process.env.ORI_MUSIC_PLUGIN_REVISION,
+          source: projectRead.workspace_context.sources.map((item: any) => ({
+            kind: item.kind,
+            label: item.label,
+            where: item.detail,
+            coverage: item.coverage
+          })),
+          homeAndSiblingReadIt: false,
+          projectFileUnchanged: true,
+          absolutePathsExposed: false
+        },
+        null,
+        2
+      ),
+      { mode: 0o600 }
+    );
     await writeFile(
       join(evidence, 'compatible-confirmed-project.json'),
       JSON.stringify(
