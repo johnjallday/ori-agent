@@ -236,8 +236,14 @@ async function station() {
     'Escape closes the panel and returns focus to the station'
   );
 
-  // Details mode: the Stations rail lists it and opens the same panel.
+  // Details mode: the Stations rail lists it and opens the same panel. The
+  // rail is an accordion, so Stations is opened first unless it already is;
+  // the section to open on arrival is chosen once the page's lists have loaded.
   await page.goto(`${base}/workspaces/${slug}`);
+  const stations = page.locator('[data-cmd-manage-section="stations"]');
+  await stations.waitFor({ state: 'visible' });
+  await page.waitForFunction(() => window.workspaceDetail?.initialListsLoaded === true);
+  if ((await stations.getAttribute('aria-expanded')) === 'false') await stations.click();
   const row = page.locator(`.ws-cmd-panel.is-hq-stations ${brief}`);
   await row.waitFor({ state: 'visible' });
   await applyTheme();

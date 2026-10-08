@@ -240,16 +240,18 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /data-cmd-edit-identity="tags"/);
   assert.match(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
   assert.match(container.innerHTML, /<div class="ws-l">Tools<\/div>/);
-  assert.match(container.innerHTML, />Notes<\/h4>/);
-  assert.match(container.innerHTML, />Schedules<\/h4>/);
-  assert.match(container.innerHTML, />Sessions<\/h4>/);
-  assert.match(container.innerHTML, />Linked Folders<\/h4>/);
-  assert.match(container.innerHTML, />Files<\/h4>/);
-  assert.match(container.innerHTML, />Systems<\/h4>/);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Notes</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-schedules">Schedules</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-sessions">Sessions</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-folders">Linked Folders</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-files">Files</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-systems">Systems</);
   assert.match(container.innerHTML, /data-cmd-primary-section="notes"/);
   assert.match(container.innerHTML, /data-cmd-primary-section="folders"/);
   assert.match(container.innerHTML, /data-cmd-primary-section="files"/);
-  assert.match(container.innerHTML, /data-cmd-primary-section="systems"/);
+  // Systems has nothing to create, so its row is the toggle alone.
+  assert.match(container.innerHTML, /data-cmd-manage-section="systems"/);
+  assert.doesNotMatch(container.innerHTML, /data-cmd-primary-section="systems"/);
   assert.doesNotMatch(container.innerHTML, /No notes yet\./);
   assert.doesNotMatch(container.innerHTML, /No schedules yet\./);
   assert.doesNotMatch(container.innerHTML, /No sessions yet\./);
@@ -258,7 +260,13 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, />Model<\/span>/);
   assert.match(container.innerHTML, /Tasks · 1/);
   assert.match(container.innerHTML, /title="Run"/);
-  assert.match(container.innerHTML, /Manage Notes in Command view/);
+  assert.match(container.innerHTML, /data-cmd-manage-section="notes" aria-expanded="false"/);
+  // The rail element is new on every render, so the "last used with a
+  // pointer" state has to be written into it each time.
+  assert.match(container.innerHTML, /<aside class="ws-cmd-rail">/);
+  commandView.railPointerFocus = true;
+  commandView.render();
+  assert.match(container.innerHTML, /<aside class="ws-cmd-rail is-pointer">/);
   // "Open Tasks" is now the deliberate exception: the summary stat chip's
   // label was unified with Map/Cards (see workspace-hub-ui-ux task 5.2). It
   // reflects the filtered open-task count specifically — the modal title and
@@ -533,7 +541,7 @@ test('agent model modal layers above the Operations Map Unit Sheet', () => {
 test('command rail renders project_path fallback when no directories are loaded', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
-    activeRailSection: '',
+    activeRailSection: 'folders',
     page: {
       notes: [],
       schedules: [],
@@ -576,13 +584,10 @@ test('project-entry actions render only on the Project Folder row with badge and
   });
   try {
     const html = commandView
-      .folderRailItems(
-        [
-          { id: 'dir-project', name: 'Project', path: '/tmp/project' },
-          { id: 'dir-ref', name: 'Reference', path: '/tmp/reference' }
-        ],
-        true
-      )
+      .folderRailItems([
+        { id: 'dir-project', name: 'Project', path: '/tmp/project' },
+        { id: 'dir-ref', name: 'Reference', path: '/tmp/reference' }
+      ])
       .join('');
     assert.match(html, /ws-cmd-project-entry-row/);
     assert.match(html, /data-cmd-project-action="plugin:demo:tidy:project"/);
@@ -597,7 +602,7 @@ test('project-entry actions render only on the Project Folder row with badge and
       disabledReason: 'Live setup is required.'
     };
     const disabled = commandView
-      .folderRailItems([{ id: 'dir-project', name: 'Project', path: '/tmp/project' }], true)
+      .folderRailItems([{ id: 'dir-project', name: 'Project', path: '/tmp/project' }])
       .join('');
     assert.match(disabled, /data-cmd-project-action=.* disabled aria-disabled="true"/);
     assert.match(disabled, /title="Live setup is required\."/);
@@ -610,7 +615,7 @@ test('project-entry actions render only on the Project Folder row with badge and
 test('command rail badges project and reference directory roles', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
-    activeRailSection: '',
+    activeRailSection: 'folders',
     page: {
       notes: [],
       schedules: [],
@@ -770,10 +775,11 @@ test('detachment rail panel renders only for group workspaces with member count'
 
   const html = commandView.renderRail();
 
-  assert.match(html, />Detachment<\/h4>/);
+  assert.match(html, /id="ws-cmd-rail-title-members">Detachment</);
   assert.match(html, /ws-cmd-panel-count">2</);
   assert.match(html, /data-cmd-members-host/);
-  assert.match(html, /data-cmd-primary-section="members"/);
+  assert.match(html, /data-cmd-primary-section="members" aria-label="Add member"/);
+  assert.match(html, /data-cmd-section-verb="members">Add Member</);
 });
 
 test('notes panel exposes tag filter host, multi-select toolbar, and per-note checkboxes when managing', () => {
@@ -791,7 +797,7 @@ test('notes panel exposes tag filter host, multi-select toolbar, and per-note ch
     }
   });
 
-  const html = commandView.renderNotesPanel(commandView.page.notes, true);
+  const html = commandView.renderNotesPanel();
 
   assert.match(html, /data-cmd-note-filter/);
   assert.match(html, /data-cmd-note-action="select-all"/);
@@ -803,7 +809,7 @@ test('notes panel exposes tag filter host, multi-select toolbar, and per-note ch
   assert.doesNotMatch(html, /data-cmd-note-select="n2" checked/);
 });
 
-test('collapsed notes panel stays checkbox-free', () => {
+test('closed notes panel is a row with no body: no notes, checkboxes or bulk tools', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     activeRailSection: '',
@@ -811,7 +817,10 @@ test('collapsed notes panel stays checkbox-free', () => {
     page: { notes: [{ id: 'n1', name: 'Alpha' }] }
   });
 
-  const html = commandView.renderNotesPanel(commandView.page.notes, false);
+  const html = commandView.renderNotesPanel();
+  assert.match(html, /ws-cmd-panel-count">1</);
+  assert.doesNotMatch(html, /ws-cmd-panel-body/);
+  assert.doesNotMatch(html, /Alpha/);
   assert.doesNotMatch(html, /data-cmd-note-select/);
   assert.doesNotMatch(html, /data-cmd-note-action/);
 });
@@ -942,14 +951,14 @@ test('detachment rail panel is absent for non-group workspaces', () => {
   assert.doesNotMatch(html, /Detachment/);
 });
 
-test('empty rail panels collapse to the header but keep primary actions', () => {
+test('closed rail rows keep their "+" and render no body, empty or not', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     activeRailSection: '',
     page: {
       notes: [],
       schedules: [],
-      sessions: [],
+      sessions: [{ id: 'session-1', title: 'Kickoff' }],
       directories: [],
       workspace: {}
     }
@@ -957,15 +966,23 @@ test('empty rail panels collapse to the header but keep primary actions', () => 
 
   const html = commandView.renderRail();
 
-  assert.match(html, /data-cmd-primary-section="notes"/);
-  assert.match(html, /data-cmd-primary-section="schedules"/);
-  assert.match(html, /data-cmd-primary-section="sessions"/);
-  assert.match(html, /data-cmd-primary-section="folders"/);
+  assert.match(html, /data-cmd-primary-section="notes" aria-label="New note" title="New note"/);
+  assert.match(html, /data-cmd-primary-section="schedules" aria-label="New schedule"/);
+  assert.match(html, /data-cmd-primary-section="sessions" aria-label="New session"/);
+  assert.match(html, /data-cmd-primary-section="folders" aria-label="Link folder"/);
+  assert.match(html, /data-cmd-primary-section="files" aria-label="Upload file"/);
+  // No previews and no empty-state text while closed: a body exists only when open.
+  assert.doesNotMatch(html, /ws-cmd-panel-body/);
   assert.doesNotMatch(html, /No notes yet\./);
+  assert.doesNotMatch(html, /Kickoff/);
+  // Empty rows are dimmed, not hidden; a section with content is not.
+  assert.match(html, /<section class="ws-cmd-panel ws-cmd-notes-panel is-empty">/);
+  assert.match(html, /<section class="ws-cmd-panel">.*id="ws-cmd-rail-title-sessions"/);
 
   commandView.activeRailSection = 'notes';
   const managingHtml = commandView.renderRail();
   assert.match(managingHtml, /No notes yet\./);
+  assert.equal((managingHtml.match(/class="ws-cmd-panel-body/g) || []).length, 1);
 });
 
 test('files rail panel lists workspace files and exposes upload, browse, and drop target', () => {
@@ -992,14 +1009,24 @@ test('files rail panel lists workspace files and exposes upload, browse, and dro
 
   const html = commandView.renderRail();
 
-  assert.match(html, />Files<\/h4>/);
+  assert.match(html, /<section class="ws-cmd-panel ws-cmd-files-panel is-managing">/);
+  assert.match(html, /data-cmd-manage-section="files" aria-expanded="true"/);
   assert.match(html, /Launch Plan\.pdf/);
   assert.match(html, /4096 B/);
   assert.match(html, /docs\/Launch Plan\.pdf/);
   assert.match(html, /data-cmd-file-drop/);
   assert.match(html, /Browse workspace files/);
   assert.match(html, /data-cmd-primary-section="files"/);
+  assert.match(html, /data-cmd-section-verb="files">Upload</);
   assert.match(html, /data-cmd-open-section="files" data-cmd-item-id="file-1"/);
+
+  // Closed, none of it is in the DOM: the drop zone and browse live in the body.
+  commandView.activeRailSection = '';
+  const closed = commandView.renderRail();
+  assert.match(closed, /data-cmd-manage-section="files" aria-expanded="false"/);
+  assert.doesNotMatch(closed, /data-cmd-file-drop/);
+  assert.doesNotMatch(closed, /Browse workspace files/);
+  assert.doesNotMatch(closed, /Launch Plan\.pdf/);
 });
 
 test('files rail actions delegate to existing file modal and upload paths', async () => {
@@ -1070,12 +1097,14 @@ test('files drop handler owns Command drop zones without duplicate page fallback
 test('systems rail panel renders Command-native tabs and a shared host', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
+    activeRailSection: 'systems',
     activeSystemTab: 'memory'
   });
 
-  const html = commandView.renderSystemsPanel(true);
+  const html = commandView.renderSystemsPanel();
 
-  assert.match(html, />Systems<\/h4>/);
+  // The wide layout keys off is-managing on this section.
+  assert.match(html, /<section class="ws-cmd-panel ws-cmd-systems-panel is-managing">/);
   // Systems keeps only workspace state/automation now.
   assert.match(html, /data-cmd-system-tab="memory" aria-selected="true"/);
   assert.match(html, /data-cmd-system-tab="triggers"/);
@@ -1382,15 +1411,19 @@ test('rail more toggles command-local management without leaving Command view', 
   assert.equal(commandView.detailedView.hidden, true);
 });
 
-test('rail primary actions use command-view management hooks', () => {
+test('a row "+" opens its section, then runs the section action', () => {
   const railRoot = makeListenerRoot();
   const calls = [];
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
+    activeRailSection: '',
     container: {
       querySelector(selector) {
         return selector === '.ws-cmd-rail' ? railRoot : null;
       }
+    },
+    render() {
+      calls.push('open:' + this.activeRailSection);
     },
     page: {
       showNoteModal() {
@@ -1416,7 +1449,664 @@ test('rail primary actions use command-view management hooks', () => {
     });
   });
 
-  assert.deepEqual(calls, ['new-note', 'open-schedules', 'new-session', 'link-folder']);
+  // Opened first, so what the action adds lands in a body that is on screen.
+  assert.deepEqual(calls, [
+    'open:notes',
+    'new-note',
+    'open:schedules',
+    'open-schedules',
+    'open:sessions',
+    'new-session',
+    'open:folders',
+    'link-folder'
+  ]);
+
+  // Already open: the action runs without a second render.
+  calls.length = 0;
+  railRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-primary-section': 'folders' })
+  });
+  assert.deepEqual(calls, ['link-folder']);
+  assert.equal(commandView.activeRailSection, 'folders');
+});
+
+test('a body verb runs the section action and leaves the open section alone', () => {
+  const railRoot = makeListenerRoot();
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: 'notes',
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-rail' ? railRoot : null;
+      }
+    },
+    render() {
+      calls.push('render');
+    },
+    page: {
+      showNoteModal() {
+        calls.push('new-note');
+      },
+      showFileModal() {
+        calls.push('upload');
+      }
+    }
+  });
+
+  commandView.bindRail();
+
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-section-verb': 'notes' }) });
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-section-verb': 'files' }) });
+
+  assert.deepEqual(calls, ['new-note', 'upload']);
+  assert.equal(commandView.activeRailSection, 'notes');
+});
+
+test('the Backlog "+" goes to the Tickets create form without opening the Backlog row', () => {
+  const railRoot = makeListenerRoot();
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-rail' ? railRoot : null;
+      }
+    },
+    render() {
+      calls.push('render');
+    },
+    openBacklogDrawer(_trigger, options) {
+      calls.push(['capture', options]);
+    }
+  });
+
+  commandView.bindRail();
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-backlog-add': '1' }) });
+
+  assert.deepEqual(calls, [['capture', { openCapture: true }]]);
+  assert.equal(commandView.activeRailSection, '');
+});
+
+test('a pointer in the rail holds the focus ring back until a real key is pressed', () => {
+  const listeners = {};
+  const classes = new Set();
+  const railRoot = {
+    addEventListener(type, listener) {
+      listeners[type] = listener;
+    },
+    classList: {
+      toggle(name, on) {
+        if (on) classes.add(name);
+        else classes.delete(name);
+      }
+    }
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: true,
+    activeRailSection: '',
+    statModalSection: '',
+    identityEditMode: '',
+    container: { querySelector: selector => (selector === '.ws-cmd-rail' ? railRoot : null) },
+    render() {}
+  });
+  commandView.bindRail();
+
+  // Focus is restored by script after a click, and WebKit rings script focus.
+  listeners.pointerdown();
+  assert.equal(commandView.railPointerFocus, true);
+  assert.ok(classes.has('is-pointer'));
+
+  // Modifiers and shortcuts are not keyboard navigation.
+  commandView.handleGlobalKeydown({ key: 'Shift' });
+  commandView.handleGlobalKeydown({ key: 'Meta', metaKey: true });
+  commandView.handleGlobalKeydown({ key: '4', metaKey: true, shiftKey: true });
+  assert.equal(commandView.railPointerFocus, true);
+
+  // A real key anywhere on the page is: the ring must be back for it.
+  commandView.handleGlobalKeydown({ key: 'Tab' });
+  assert.equal(commandView.railPointerFocus, false);
+  assert.ok(!classes.has('is-pointer'));
+});
+
+test('Details replays its entrance fade while arriving, not on later re-renders', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  commandView.viewMode = 'details';
+
+  // The page's data lands in the first moments; those rebuilds are still the entrance.
+  assert.equal(commandView.detailsViewSettled(1000), false);
+  assert.equal(commandView.detailsViewSettled(1200), false);
+  // After that a rebuild (a rail row toggling, a refresh) must not fade the view in again.
+  assert.equal(commandView.detailsViewSettled(1500), true);
+  assert.equal(commandView.detailsViewSettled(60000), true);
+
+  // Map mode keeps its own behaviour and never reports settled.
+  commandView.viewMode = 'map';
+  assert.equal(commandView.detailsViewSettled(61000), false);
+  assert.equal(commandView.detailsViewSettled(90000), false);
+
+  // Coming back to Details is an arrival again.
+  commandView.viewMode = 'details';
+  assert.equal(commandView.detailsViewSettled(90100), false);
+  assert.equal(commandView.detailsViewSettled(90600), true);
+});
+
+test('toggling a rail row puts focus back on the re-rendered toggle', () => {
+  const focused = [];
+  const railRoot = makeListenerRoot();
+  railRoot.querySelector = selector => ({
+    focus() {
+      focused.push(selector);
+    }
+  });
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-rail' ? railRoot : null;
+      }
+    },
+    render() {},
+    page: { showNoteModal() {} }
+  });
+
+  commandView.bindRail();
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-manage-section': 'files' }) });
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-primary-section': 'notes' }) });
+
+  assert.deepEqual(focused, [
+    '[data-cmd-manage-section="files"]',
+    '[data-cmd-primary-section="notes"]'
+  ]);
+});
+
+// ---------- remembered rail section and default ----------
+
+const RAIL_KEY = 'ori:command-rail-section:ws-1';
+
+// Swaps the module-wide localStorage stub for one that keeps what is written.
+function withRailStorage(initial, run) {
+  const original = globalThis.localStorage;
+  const values = new Map(Object.entries(initial || {}));
+  globalThis.localStorage = {
+    getItem: key => (values.has(key) ? values.get(key) : null),
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: key => values.delete(key)
+  };
+  try {
+    return run(values);
+  } finally {
+    globalThis.localStorage = original;
+  }
+}
+
+// A Details-mode view over a plain workspace whose lists have loaded. render()
+// is the part of the real one these tests are about: choosing the section.
+function makeRailView(page, overrides) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: true,
+    viewMode: 'details',
+    activeRailSection: '',
+    railSectionSettled: false,
+    activeSystemTab: 'memory',
+    statModalSection: '',
+    identityEditMode: '',
+    page: {
+      workspaceId: 'ws-1',
+      workspace: {},
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      files: [],
+      backlogItems: [],
+      initialListsLoaded: true,
+      ...page
+    },
+    render() {
+      if (this.viewMode === 'details') this.settleRailSection();
+    },
+    ...overrides
+  });
+  return commandView;
+}
+
+test('presentRailSections lists the rows renderRail draws, in order, with the same counts', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const drawn = html =>
+      [
+        ...html.matchAll(/data-cmd-manage-section="([^"]+)"[\s\S]*?ws-cmd-panel-count">(\d+)</g)
+      ].map(match => ({ key: match[1], count: Number(match[2]) }));
+    const content = {
+      notes: [{ id: 'n1' }, { id: 'n2' }],
+      sessions: [{ id: 's1' }],
+      directories: [{ id: 'd1', path: '/tmp/d1' }],
+      files: [{ id: 'f1' }, { id: 'f2' }, { id: 'f3' }],
+      backlogItems: [{ task: { id: 'b1' } }]
+    };
+
+    const plain = makeRailView(content);
+    assert.deepEqual(plain.presentRailSections(), drawn(plain.renderRail()));
+    assert.deepEqual(
+      plain.presentRailSections().map(section => section.key),
+      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'files', 'systems'],
+      'no Detachment outside a group and no Stations outside the HQ'
+    );
+
+    const group = makeRailView({
+      ...content,
+      workspace: { kind: 'group' },
+      membersPanel: { group: { children: [{ id: 'm1' }, { id: 'm2' }] } }
+    });
+    assert.deepEqual(group.presentRailSections(), drawn(group.renderRail()));
+    assert.deepEqual(
+      group.presentRailSections().map(section => section.key),
+      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'members', 'files', 'systems']
+    );
+
+    const hq = makeRailView({ ...content, workspace: { id: 'hq-1', designation: 'personal_hq' } });
+    assert.deepEqual(hq.presentRailSections(), drawn(hq.renderRail()));
+    assert.deepEqual(
+      hq.presentRailSections().map(section => section.key),
+      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'files', 'systems', 'stations']
+    );
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+// A rail with all nine sections, each holding something: a group that is also
+// the Personal HQ. Not a workspace anyone has, but the one fixture that puts
+// every row and every body under the same assertions.
+const ALL_RAIL_SECTIONS = [
+  'backlog',
+  'notes',
+  'schedules',
+  'sessions',
+  'folders',
+  'members',
+  'files',
+  'systems',
+  'stations'
+];
+
+function makeFullRailView() {
+  return makeRailView({
+    workspace: { id: 'hq-1', kind: 'group', designation: 'personal_hq' },
+    membersPanel: { group: { children: [{ id: 'm1' }] } },
+    backlogItems: [{ task: { id: 'b1', description: 'An idea' } }],
+    backlogSync: { last_synced_at: '2026-10-08T09:00:00Z' },
+    notes: [{ id: 'n1', name: 'A note' }],
+    schedules: [{ id: 'sc1', name: 'A schedule' }],
+    sessions: [{ id: 's1', title: 'A session' }],
+    directories: [{ id: 'd1', name: 'A folder', path: '/tmp/d1' }],
+    files: [{ id: 'f1', title: 'A file' }]
+  });
+}
+
+// Splits renderRail's HTML into its sections, each as a row and (if open) a body.
+function railSections(html) {
+  return html
+    .split('<section ')
+    .slice(1)
+    .map(section => {
+      const bodyAt = section.indexOf('<div class="ws-cmd-panel-body');
+      return {
+        key: section.match(/data-cmd-manage-section="([^"]+)"/)[1],
+        expanded: section.match(/aria-expanded="(true|false)"/)[1] === 'true',
+        row: bodyAt === -1 ? section : section.slice(0, bodyAt),
+        body: bodyAt === -1 ? '' : section.slice(bodyAt)
+      };
+    });
+}
+
+test('the rail draws its nine rows in a fixed order, and closed it has no body at all', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const commandView = makeFullRailView();
+    const html = commandView.renderRail();
+    const sections = railSections(html);
+
+    assert.deepEqual(
+      sections.map(section => section.key),
+      ALL_RAIL_SECTIONS
+    );
+    assert.ok(sections.every(section => !section.expanded && section.body === ''));
+    // Nothing a body holds leaks into the closed rail: no item rows, no empty
+    // or loading text, no sync badge, no drop zone, no tabs, no hosts.
+    for (const leaked of [
+      'ws-cmd-panel-body',
+      'ws-cmd-rail-item',
+      'ws-cmd-rail-empty',
+      'ws-cmd-panel-sync',
+      'data-cmd-file-drop',
+      'data-cmd-system-tab',
+      'data-cmd-system-host',
+      'data-cmd-members-host',
+      'data-cmd-hq-station',
+      'data-cmd-note-filter',
+      'data-cmd-section-verb',
+      'data-cmd-open-tickets'
+    ]) {
+      assert.ok(!html.includes(leaked), `${leaked} must not render while every section is closed`);
+    }
+    // Each row names the body it controls, whether or not that body exists yet.
+    for (const section of sections) {
+      assert.match(section.row, new RegExp(`aria-controls="ws-cmd-rail-body-${section.key}"`));
+    }
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('exactly one rail section is open at a time, and it is the active one', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const commandView = makeFullRailView();
+    for (const key of ALL_RAIL_SECTIONS) {
+      commandView.activeRailSection = key;
+      const sections = railSections(commandView.renderRail());
+      const open = sections.filter(section => section.expanded);
+      assert.deepEqual(
+        open.map(section => section.key),
+        [key]
+      );
+      assert.deepEqual(
+        sections.filter(section => section.body).map(section => section.key),
+        [key],
+        `only ${key} has a body`
+      );
+      // The body is a region named by its row's title.
+      assert.match(
+        open[0].body,
+        new RegExp(
+          `^<div class="ws-cmd-panel-body[^"]*" id="ws-cmd-rail-body-${key}" role="region" aria-labelledby="ws-cmd-rail-title-${key}">`
+        )
+      );
+      assert.match(open[0].row, new RegExp(`id="ws-cmd-rail-title-${key}"`));
+      // is-managing marks the open section; the Systems wide layout keys off it.
+      assert.match(open[0].row, /^class="ws-cmd-panel[^"]* is-managing[^"]*">/);
+    }
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a rail row and its body never share a data-cmd attribute', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const attributes = html => new Set(html.match(/data-cmd-[a-z-]+/g) || []);
+    const commandView = makeFullRailView();
+    for (const key of ALL_RAIL_SECTIONS) {
+      commandView.activeRailSection = key;
+      const open = railSections(commandView.renderRail()).find(section => section.expanded);
+      const row = attributes(open.row);
+      const shared = [...attributes(open.body)].filter(attribute => row.has(attribute));
+      // A locator that matches the row's one button must keep matching one
+      // while the section is open (Playwright strict mode).
+      assert.deepEqual(shared, [], `${key}: row and body both use ${shared.join(', ')}`);
+    }
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('each row has the "+" its section can use, and each body the full verb', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const expected = {
+      backlog: {
+        add: /data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">\+</,
+        verb: /data-cmd-open-tickets="backlog">View in Tickets</
+      },
+      notes: {
+        add: /data-cmd-primary-section="notes" aria-label="New note" title="New note">\+</,
+        verb: /data-cmd-section-verb="notes">New Note</
+      },
+      schedules: {
+        add: /data-cmd-primary-section="schedules" aria-label="New schedule" title="New schedule">\+</,
+        verb: /data-cmd-section-verb="schedules">Open Schedules</
+      },
+      sessions: {
+        add: /data-cmd-primary-section="sessions" aria-label="New session" title="New session">\+</,
+        verb: /data-cmd-section-verb="sessions">New Session</
+      },
+      folders: {
+        add: /data-cmd-primary-section="folders" aria-label="Link folder" title="Link folder">\+</,
+        verb: /data-cmd-section-verb="folders">Link Folder</
+      },
+      members: {
+        add: /data-cmd-primary-section="members" aria-label="Add member" title="Add member">\+</,
+        verb: /data-cmd-section-verb="members">Add Member</
+      },
+      files: {
+        add: /data-cmd-primary-section="files" aria-label="Upload file" title="Upload file">\+</,
+        verb: /data-cmd-section-verb="files">Upload</
+      },
+      // Nothing to create in either, and nothing a verb would do that the
+      // toggle has not already done.
+      systems: { add: null, verb: null },
+      stations: { add: null, verb: null }
+    };
+    const commandView = makeFullRailView();
+    for (const key of ALL_RAIL_SECTIONS) {
+      commandView.activeRailSection = key;
+      const open = railSections(commandView.renderRail()).find(section => section.expanded);
+      const { add, verb } = expected[key];
+      if (add) {
+        assert.match(open.row, add);
+        assert.match(open.body, verb);
+      } else {
+        assert.doesNotMatch(open.row, /ws-cmd-panel-action/);
+        assert.doesNotMatch(open.body, /ws-cmd-panel-toolbar/);
+        assert.match(open.row, /ws-cmd-panel-head is-toggle-only/);
+      }
+    }
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a toggle click remembers the open section for this workspace; closing remembers closed', () => {
+  withRailStorage({}, values => {
+    const railRoot = makeListenerRoot();
+    const commandView = makeRailView(
+      {},
+      { container: { querySelector: selector => (selector === '.ws-cmd-rail' ? railRoot : null) } }
+    );
+    commandView.bindRail();
+
+    railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-manage-section': 'notes' }) });
+    assert.equal(values.get(RAIL_KEY), 'notes');
+    railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-manage-section': 'files' }) });
+    assert.equal(values.get(RAIL_KEY), 'files');
+    railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-manage-section': 'files' }) });
+    assert.equal(values.get(RAIL_KEY), '', 'closing is remembered as closed, not forgotten');
+    assert.equal(values.size, 1);
+  });
+});
+
+test('opening a section on the user’s behalf, and Escape, leave the remembered section alone', () => {
+  withRailStorage({ [RAIL_KEY]: 'files' }, values => {
+    const railRoot = makeListenerRoot();
+    const commandView = makeRailView(
+      { showNoteModal() {} },
+      { container: { querySelector: selector => (selector === '.ws-cmd-rail' ? railRoot : null) } }
+    );
+    commandView.bindRail();
+
+    commandView.openSystemTab('triggers');
+    assert.equal(commandView.activeRailSection, 'systems');
+    railRoot.listener({
+      target: makeAttributeClickTarget({ 'data-cmd-primary-section': 'notes' })
+    });
+    assert.equal(commandView.activeRailSection, 'notes');
+    commandView.runRailPrimaryAction('members');
+    assert.equal(commandView.activeRailSection, 'members');
+    commandView.handleGlobalKeydown({ key: 'Escape' });
+    assert.equal(commandView.activeRailSection, '');
+
+    assert.deepEqual([...values], [[RAIL_KEY, 'files']]);
+  });
+});
+
+test('a remembered section opens at once, without waiting for the lists', () => {
+  withRailStorage({ [RAIL_KEY]: 'files' }, () => {
+    const commandView = makeRailView({ initialListsLoaded: false, notes: [{ id: 'n1' }] });
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, 'files');
+    assert.equal(commandView.railSectionSettled, true);
+  });
+});
+
+test('a remembered "closed" keeps the rail closed over the default', () => {
+  withRailStorage({ [RAIL_KEY]: '' }, () => {
+    const commandView = makeRailView({ notes: [{ id: 'n1' }] });
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, '');
+    assert.equal(commandView.railSectionSettled, true);
+  });
+});
+
+test('with nothing remembered the default waits for the lists and is then chosen once', () => {
+  withRailStorage({}, () => {
+    const commandView = makeRailView({ initialListsLoaded: false, sessions: [{ id: 's1' }] });
+
+    // Sessions has arrived but Notes has not: choosing now would open Sessions
+    // and then switch to Notes a moment later.
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, '');
+    assert.equal(commandView.railSectionSettled, false);
+
+    commandView.page.notes = [{ id: 'n1' }];
+    commandView.page.initialListsLoaded = true;
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, 'notes');
+
+    // Content arriving later (an agent files a backlog idea) does not move it.
+    commandView.page.backlogItems = [{ task: { id: 'b1' } }];
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, 'notes');
+  });
+});
+
+test('a remembered Detachment on a workspace that is not a group falls back to the default', () => {
+  withRailStorage({ [RAIL_KEY]: 'members' }, () => {
+    const commandView = makeRailView({ initialListsLoaded: false, sessions: [{ id: 's1' }] });
+    // The saved section is not one of this rail's rows, so it cannot decide
+    // early; the default needs the lists.
+    commandView.settleRailSection();
+    assert.equal(commandView.railSectionSettled, false);
+
+    commandView.page.initialListsLoaded = true;
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, 'sessions');
+  });
+});
+
+test('a workspace’s own project folder does not make Linked Folders the default', () => {
+  withRailStorage({}, () => {
+    const page = {
+      directories: [{ id: 'dir-project', name: 'Project', path: '/tmp/project' }],
+      getPrimaryDirectoryId: () => 'dir-project',
+      files: [{ id: 'f1' }]
+    };
+    // Every workspace has its own folder; only what the user linked counts.
+    const own = makeRailView(page);
+    own.settleRailSection();
+    assert.equal(own.activeRailSection, 'files');
+
+    const linked = makeRailView({
+      ...page,
+      directories: [...page.directories, { id: 'dir-ref', name: 'Reference', path: '/tmp/ref' }]
+    });
+    linked.settleRailSection();
+    assert.equal(linked.activeRailSection, 'folders');
+    // The row still counts every folder it lists.
+    assert.match(
+      linked.renderRail(),
+      /id="ws-cmd-rail-title-folders">Linked Folders<\/span><span class="ws-cmd-panel-count">2</
+    );
+
+    // The project_path fallback row is the same folder by another route.
+    const fallback = makeRailView({ workspace: { project_path: '/tmp/song' } });
+    fallback.settleRailSection();
+    assert.equal(fallback.activeRailSection, '');
+  });
+});
+
+test('an HQ with no content opens Stations; a workspace with nothing opens nothing', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    withRailStorage({}, () => {
+      const hq = makeRailView({ workspace: { id: 'hq-1', designation: 'personal_hq' } });
+      hq.settleRailSection();
+      assert.equal(hq.activeRailSection, 'stations');
+
+      const plain = makeRailView({});
+      plain.settleRailSection();
+      assert.equal(plain.activeRailSection, '');
+      assert.equal(plain.railSectionSettled, true);
+    });
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('returning to Details from another mode chooses the section again', () => {
+  withRailStorage({ [RAIL_KEY]: 'files' }, () => {
+    const commandView = makeRailView(
+      { notes: [{ id: 'n1' }] },
+      {
+        activeRailSection: 'notes',
+        railSectionSettled: true,
+        persistCommandViewMode() {},
+        restoreSharedSurfaces() {},
+        syncURLState() {}
+      }
+    );
+
+    commandView.setCommandViewMode('map', { focus: false });
+    assert.equal(commandView.activeRailSection, '', 'leaving Details closes the rail');
+
+    commandView.setCommandViewMode('details', { focus: false });
+    assert.equal(
+      commandView.activeRailSection,
+      'files',
+      'the remembered section, not the last one'
+    );
+  });
+});
+
+test('a section opened while the default is pending is kept, and so is an Escape', () => {
+  withRailStorage({}, () => {
+    const commandView = makeRailView({ initialListsLoaded: false, notes: [{ id: 'n1' }] });
+    commandView.render();
+    assert.equal(commandView.railSectionSettled, false);
+
+    // Reached from the Map inventory before the lists have loaded.
+    commandView.openSystemTab('memory');
+    commandView.page.initialListsLoaded = true;
+    commandView.render();
+    assert.equal(commandView.activeRailSection, 'systems');
+
+    // Closing it is a decision too: the default must not open Notes behind it.
+    commandView.railSectionSettled = false;
+    commandView.handleGlobalKeydown({ key: 'Escape' });
+    assert.equal(commandView.activeRailSection, '');
+    assert.equal(commandView.railSectionSettled, true);
+  });
 });
 
 test('rail item actions open existing management flows from Command view', () => {
@@ -4424,6 +5114,7 @@ test('only the designated Personal HQ has a Daily Brief station', () => {
   try {
     const hq = makeHQCommandView({ id: 'hq-1' });
     assert.ok(hq.mapStationRegistry().some(station => station.key === 'daily-brief'));
+    hq.activeRailSection = 'stations';
     assert.match(hq.renderStationsRailPanel(), /data-cmd-hq-station="daily-brief"/);
 
     const plain = makeHQCommandView({ id: 'ws-1', designation: '' });
@@ -5001,14 +5692,25 @@ test('renderStationsRailPanel renders one row per station only for HQ payloads',
       openFollowupCount: 0,
       error: ''
     };
+    // Closed, Stations is a row like any other: a toggle with the count, no
+    // "+" (nothing to create), and no station rows in the DOM.
+    const closed = hq.renderStationsRailPanel();
+    assert.match(closed, /<section class="ws-cmd-panel is-hq-stations">/);
+    assert.match(closed, /data-cmd-manage-section="stations" aria-expanded="false"/);
+    assert.match(closed, /id="ws-cmd-rail-title-stations">Stations</);
+    assert.doesNotMatch(closed, /data-cmd-hq-station/);
+    assert.doesNotMatch(closed, /ws-cmd-panel-action/);
+
+    hq.activeRailSection = 'stations';
     const panel = hq.renderStationsRailPanel();
-    assert.match(panel, /<h4>Stations<\/h4>/);
+    assert.match(panel, /data-cmd-manage-section="stations" aria-expanded="true"/);
     assert.match(panel, /data-cmd-hq-station="watchtower"/);
     assert.match(panel, /data-cmd-hq-station="email"/);
     // State meta reuses the same state fn as the map structure.
     assert.match(panel, /ws-cmd-rail-m">Set up Email Ops</);
-    // The primary action runs the first station's action and reflects its state.
-    assert.match(panel, /ws-cmd-panel-action" data-cmd-hq-station="watchtower">Scanning…</);
+    // One control per station: the old header button that duplicated the
+    // first station's row is gone.
+    assert.equal((panel.match(/data-cmd-hq-station="watchtower"/g) || []).length, 1);
 
     // Non-HQ workspaces render nothing (FR16).
     const plain = Object.create(WorkspaceCommandView.prototype);

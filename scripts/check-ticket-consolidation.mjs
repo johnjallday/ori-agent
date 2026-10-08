@@ -38,6 +38,11 @@ await page.goto(`${base}/workspaces/${studioId}`, { waitUntil: 'domcontentloaded
 await page.waitForTimeout(3500);
 await clearOverlays();
 
+// The rail is an accordion: Backlog's item rows exist only while its section
+// is open, so open it unless it already is.
+const backlogRow = page.locator('[data-cmd-manage-section="backlog"]');
+if ((await backlogRow.getAttribute('aria-expanded')) === 'false') await backlogRow.click();
+
 console.log('→ 6.7: "Open Backlog" must NOT open a second editable backlog surface');
 const opener = page.locator('[data-cmd-open-backlog-drawer]').first();
 console.log('  opener present:', (await opener.count()) > 0);
