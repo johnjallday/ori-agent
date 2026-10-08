@@ -289,6 +289,63 @@ func TestAssistantWorkspaceReaders_DeletedOrMovedNoteIsNotRead(t *testing.T) {
 	}
 }
 
+// On a Home's page, "what do I have" is about that Home. Through the real
+// routes and stores, what the model is given is the Home and its own projects:
+// not a project outside it, and not the app's totals. The workspace listing it
+// may call returns those same projects. Asked from a page outside any
+// workspace, the same question is given the whole app.
+func TestAssistantWorkspaceTurn_AHomeQuestionIsGivenThatHomesProjectsNotTheWholeApp(t *testing.T) {
+	f := newWorkspaceReaderFixture(t)
+	home := placementWorkspace(t, f.draftServerFixture, "Music Production Home fixture", "group", "")
+	placementWorkspace(t, f.draftServerFixture, "Inside Album fixture", "", home.ID)
+	const outside = "Outside Tax paperwork fixture"
+	placementWorkspace(t, f.draftServerFixture, outside, "", "")
+	ask := func(context map[string]any, script ...llm.ChatResponse) []llm.ChatRequest {
+		t.Helper()
+		before := len(f.provider.requests)
+		f.provider.script = append(make([]llm.ChatResponse, before), script...)
+		status, reply := f.call(t, http.MethodPost, "/api/home-assistant/ask", map[string]any{
+			"prompt": "review workspaces what do i have?", "intent": "app_introspection", "context": context, "conversation": map[string]string{},
+		})
+		if status != http.StatusOK {
+			t.Fatalf("ask: %d %v", status, reply)
+		}
+		return f.provider.requests[before:]
+	}
+
+	requests := ask(placementContext(home),
+		readerCall("home_workspaces", nil),
+		llm.ChatResponse{Content: "This Home holds Inside Album fixture.", Model: "sonnet", Provider: "claude_code"})
+	if len(requests) != 2 {
+		t.Fatalf("expected a listing round and an answer, got %d requests", len(requests))
+	}
+	first := requests[0]
+	assertNoPanelExecutionAuthority(t, first)
+	given := mustJSON(t, first.Messages)
+	if !strings.Contains(given, "Inside Album fixture") || strings.Contains(given, outside) || strings.Contains(given, "project_count") ||
+		!strings.Contains(given, "This turn is about the subject workspace") {
+		t.Fatalf("on a Home the model was given the wrong scope: %.1200s", given)
+	}
+	descriptions := map[string]string{}
+	for _, tool := range first.Tools {
+		descriptions[tool.Name] = tool.Description
+	}
+	if !strings.Contains(descriptions["home_workspaces"], "projects in the current Home") || !strings.Contains(descriptions["assistant_workspace_discovery"], "across the whole app") {
+		t.Fatalf("tool wording on a Home: %v", descriptions)
+	}
+	listing := requests[1].Messages[len(requests[1].Messages)-1].Content
+	if !strings.Contains(listing, "Inside Album fixture") || strings.Contains(listing, outside) || !strings.Contains(listing, `"total":1`) {
+		t.Fatalf("the Home's workspace listing: %s", listing)
+	}
+
+	// From a page outside any workspace the same question is about everything.
+	requests = ask(map[string]any{"context_version": 1, "origin": "personal_assistant_panel", "surface": "settings", "page_path": "/settings"},
+		llm.ChatResponse{Content: "Across Ori you have several workspaces.", Model: "sonnet", Provider: "claude_code"})
+	if appWide := mustJSON(t, requests[0].Messages); !strings.Contains(appWide, outside) || strings.Contains(appWide, "This turn is about the subject workspace") {
+		t.Fatalf("an app-wide question lost the rest of the app: %.800s", appWide)
+	}
+}
+
 // A model that keeps asking for readers gets four rounds and then one call with
 // no readers at all. That last call is told the limit was reached, so what was
 // read is not presented as everything; the sources are the reads that happened.

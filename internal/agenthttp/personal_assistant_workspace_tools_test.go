@@ -3,6 +3,7 @@ package agenthttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -49,32 +50,128 @@ func TestPanelWorkspaceTools_PinnedFreshOwnedAndRevocable(t *testing.T) {
 	}
 }
 
-// With a workspace pinned, the app-wide workspace listing can only answer with
-// that one workspace, and with nothing on a Home or group. It is not offered
-// there, so a model is not sent to a listing that contradicts discovery; with
-// no workspace pinned it is offered as before.
-func TestPanelWorkspaceTools_PinnedTurnDoesNotOfferTheAppWideWorkspaceListing(t *testing.T) {
+// What the workspace listing means follows the page. On a Home it is offered as
+// "the projects in this Home"; on a project it could only return that project,
+// which the overview already carries, so it is not offered; with no workspace
+// pinned it is the app-wide listing as before. Discovery says it is for the
+// rest of the app.
+func TestPanelWorkspaceTools_WorkspaceListingFollowsThePinnedWorkspace(t *testing.T) {
 	r, store, home, alpha, _ := workspaceResolverFixture(t)
 	relationship := &workspaceRelationshipSnapshot{work: PersonalAssistantWorkContext{State: "active", StateVersion: 3, HQWorkspaceID: home.ID, ConversationAgent: "Atlas"}}
 	h := &HomeAssistantAskHandler{WorkspaceContext: r, UserID: "local", PersonalAssistantContext: relationship}
 	ctx := context.Background()
-	offered := func(refs *HomeAssistantRouteContext) map[string]bool {
+	offered := func(refs *HomeAssistantRouteContext) map[string]string {
 		turn := h.bindWorkspaceTurn(ctx, "what kind of projects do i have?", refs, &relationship.work)
 		registry := &panelToolRegistry{handler: h, turn: turn, home: newHomeToolRegistry(h.scopedPanelSources(ctx, HomeSnapshotSources{Workspaces: store}, turn)), ledger: turn.ledger}
-		names := map[string]bool{}
+		tools := map[string]string{}
 		for _, tool := range registry.Definitions() {
-			names[tool.Name] = true
+			tools[tool.Name] = tool.Description
 		}
-		return names
+		return tools
 	}
-	for name, id := range map[string]string{"a Home": home.ID, "a project": alpha.ID} {
-		tools := offered(&HomeAssistantRouteContext{WorkspaceID: id, Origin: "personal_assistant_panel"})
-		if tools["home_workspaces"] || !tools["assistant_workspace_discovery"] || !tools["home_tasks"] || !tools[readerTasks] {
-			t.Fatalf("on %s: %v", name, tools)
+	onHome := offered(&HomeAssistantRouteContext{WorkspaceID: home.ID, Origin: "personal_assistant_panel"})
+	if !strings.Contains(onHome["home_workspaces"], "projects in the current Home") || !strings.Contains(onHome["home_workspaces"], "does not list the rest of the app") ||
+		!strings.Contains(onHome["assistant_workspace_discovery"], "across the whole app") || onHome["home_tasks"] == "" || onHome[readerTasks] == "" {
+		t.Fatalf("on a Home: %v", onHome)
+	}
+	onProject := offered(&HomeAssistantRouteContext{WorkspaceID: alpha.ID, Origin: "personal_assistant_panel"})
+	if _, listed := onProject["home_workspaces"]; listed || !strings.Contains(onProject["assistant_workspace_discovery"], "across the whole app") || onProject["home_tasks"] == "" {
+		t.Fatalf("on a project: %v", onProject)
+	}
+	appWide := offered(&HomeAssistantRouteContext{PagePath: "/settings", Origin: "personal_assistant_panel"})
+	if strings.Contains(appWide["home_workspaces"], "current Home") || appWide["home_workspaces"] == "" || strings.Contains(appWide["assistant_workspace_discovery"], "beyond the current workspace") {
+		t.Fatalf("app-wide: %v", appWide)
+	}
+}
+
+type failingSummaries struct{ workspace.Store }
+
+func (failingSummaries) ListActive() ([]*workspace.Workspace, error) {
+	return nil, errors.New("store unavailable at /Users/person/private")
+}
+
+// On a Home's page, "what do I have" is about that Home. Its listings cover the
+// Home and its own projects and nothing else in the app: not a project outside
+// it, another Home's project, or another user's. A project that is moved away
+// stops being listed, and a project that is pinned never reaches its siblings.
+func TestPanelWorkspaceTools_PinnedHomeListsItsOwnProjectsAndNothingElse(t *testing.T) {
+	r, store, home, alpha, beta := workspaceResolverFixture(t)
+	create := func(name, kind, parent, owner string) *workspace.Workspace {
+		t.Helper()
+		ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: name})
+		ws.FolderSlug, ws.Kind, ws.ParentID, ws.OwnerUserID = strings.ToLower(strings.ReplaceAll(name, " ", "-")), kind, parent, owner
+		if err := store.Save(ws); err != nil {
+			t.Fatal(err)
+		}
+		return ws
+	}
+	sibling := create("Album-2", "", home.ID, "local")
+	otherHome := create("Other Home", "group", "", "local")
+	create("Other Home project", "", otherHome.ID, "local")
+	create("Someone elses project", "", home.ID, "another-user")
+	for id, title := range map[string]string{alpha.ID: "ALPHA_TASK master the single", sibling.ID: "SIBLING_TASK book the studio", beta.ID: "OUTSIDE_TASK unrelated"} {
+		if err := store.Update(id, func(ws *workspace.Workspace) error {
+			ws.Tasks = []workspace.Task{{ID: "task-" + ws.FolderSlug, WorkspaceID: ws.ID, Description: title, Status: workspace.TaskStatusPending}}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if tools := offered(&HomeAssistantRouteContext{PagePath: "/settings", Origin: "personal_assistant_panel"}); !tools["home_workspaces"] || !tools["assistant_workspace_discovery"] {
-		t.Fatalf("app-wide: %v", tools)
+	relationship := &workspaceRelationshipSnapshot{work: PersonalAssistantWorkContext{State: "active", StateVersion: 3, HQWorkspaceID: home.ID, ConversationAgent: "Atlas"}}
+	h := &HomeAssistantAskHandler{WorkspaceContext: r, UserID: "local", PersonalAssistantContext: relationship}
+	ctx := context.Background()
+	registryOn := func(id string, source workspace.Store) (*panelToolRegistry, *assistantWorkspaceTurn) {
+		turn := h.bindWorkspaceTurn(ctx, "review workspaces what do i have?", &HomeAssistantRouteContext{WorkspaceID: id, Origin: "personal_assistant_panel"}, &relationship.work)
+		return &panelToolRegistry{handler: h, turn: turn, home: newHomeToolRegistry(h.scopedPanelSources(ctx, HomeSnapshotSources{Workspaces: source}, turn)), ledger: turn.ledger}, turn
+	}
+
+	onHome, turn := registryOn(home.ID, store)
+	listed, err := onHome.Execute(ctx, "home_workspaces", `{}`)
+	if err != nil || !strings.Contains(listed, `"Album-1"`) || !strings.Contains(listed, `"Album-2"`) || !strings.Contains(listed, `"total":2`) || !strings.Contains(listed, `"open_tasks":1`) {
+		t.Fatalf("the Home's projects: %s %v", listed, err)
+	}
+	for _, outside := range []string{"Second Project", "Other Home", "Someone elses"} {
+		if strings.Contains(listed, outside) {
+			t.Fatalf("the Home's listing named %q: %s", outside, listed)
+		}
+	}
+	tasks, err := onHome.Execute(ctx, "home_tasks", `{}`)
+	if err != nil || !strings.Contains(tasks, "ALPHA_TASK") || !strings.Contains(tasks, "SIBLING_TASK") || strings.Contains(tasks, "OUTSIDE_TASK") {
+		t.Fatalf("the Home's task listing: %s %v", tasks, err)
+	}
+	// The turn's facts carry the Home's children, not the app's totals, and say
+	// what a question asked here is about.
+	prompt := workspaceTurnPrompt(turn, true, false)
+	if !strings.Contains(prompt, "This turn is about the subject workspace") || !strings.Contains(prompt, `"children"`) ||
+		strings.Contains(prompt, "project_count") || strings.Contains(prompt, "group_count") || strings.Contains(prompt, "Second Project") {
+		t.Fatalf("a pinned turn carried app-wide totals or lacked its scope: %s", prompt)
+	}
+	// Reading stays on the Home itself: a project's task detail is not read from here.
+	if detail := readerResult(t, onHome, readerTask, map[string]any{"task_id": "task-album-1"}); detail["content_read"] != false || detail["reason"] != "task_not_found_in_this_workspace" {
+		t.Fatalf("a project's task was read from its Home: %v", detail)
+	}
+
+	// A project moved out of the Home is no longer the Home's.
+	if err := store.Update(sibling.ID, func(ws *workspace.Workspace) error { ws.ParentID = otherHome.ID; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := onHome.Execute(ctx, "home_workspaces", `{}`); err != nil || strings.Contains(after, "Album-2") || !strings.Contains(after, `"total":1`) {
+		t.Fatalf("a project moved away was still listed: %s %v", after, err)
+	}
+	// A pinned project is only itself: no sibling, no parent's listing.
+	onProject, _ := registryOn(alpha.ID, store)
+	if own, err := onProject.Execute(ctx, "home_tasks", `{}`); err != nil || !strings.Contains(own, "ALPHA_TASK") || strings.Contains(own, "SIBLING_TASK") {
+		t.Fatalf("a pinned project's listing: %s %v", own, err)
+	}
+	// Projects that could not be listed are not "no projects".
+	broken, _ := registryOn(home.ID, failingSummaries{store})
+	if out, err := broken.Execute(ctx, "home_workspaces", `{}`); err == nil || strings.Contains(err.Error(), "/Users/") {
+		t.Fatalf("a failed listing was reported as %q, %v", out, err)
+	}
+	// With no workspace pinned the listing is the whole app, as before.
+	appTurn := h.bindWorkspaceTurn(ctx, "what do i have?", &HomeAssistantRouteContext{PagePath: "/settings", Origin: "personal_assistant_panel"}, &relationship.work)
+	if app := workspaceTurnPrompt(appTurn, true, false); !strings.Contains(app, "project_count") || strings.Contains(app, "This turn is about the subject workspace") {
+		t.Fatalf("an app-wide turn lost its totals: %s", app)
 	}
 }
 

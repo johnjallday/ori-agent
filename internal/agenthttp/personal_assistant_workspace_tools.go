@@ -32,15 +32,24 @@ type panelToolRegistry struct {
 
 func (r *panelToolRegistry) Definitions() []llm.Tool {
 	tools := r.home.Definitions()
+	discovery := "Discover owned project and Home/group metadata with separate project/group totals. No content reads or permission grants."
 	if r.turn != nil && r.turn.projection.Subject != nil {
-		// With a workspace pinned, the app-wide workspace listing can only return
-		// that one workspace, or nothing at all when it is a Home or group. A
-		// model that asks it "what projects are there" gets an empty answer that
-		// contradicts the discovery below, and each wasted round costs a full
-		// model call. It is not offered; discovery and the overview cover it.
-		tools = slices.DeleteFunc(tools, func(tool llm.Tool) bool { return tool.Name == "home_workspaces" })
+		// With a workspace pinned, the workspace listing is that workspace's
+		// own: for a Home or group, its projects; for a project, only itself,
+		// which the overview already carries, so the tool is not offered there
+		// (a model sent to it gets nothing new and spends a full model call).
+		// Its wording says what it lists here, so "what do I have" asked on a
+		// Home is answered with the Home's projects, not the whole app.
+		home := r.turn.projection.Subject.Kind == "group" || r.turn.projection.Subject.Kind == "home"
+		tools = slices.DeleteFunc(tools, func(tool llm.Tool) bool { return tool.Name == "home_workspaces" && !home })
+		for i := range tools {
+			if tools[i].Name == "home_workspaces" {
+				tools[i].Description = "List the projects in the current Home or group, the workspace this turn is about, with each one's status, agent count and open tasks. It does not list the rest of the app. Read-only."
+			}
+		}
+		discovery = "List projects and Homes/groups across the whole app, beyond the current workspace, with separate totals. Use it only when the user asks about another workspace or about everything they have in Ori: the current workspace, and for a Home its own projects, are already in the overview. No content reads or permission grants."
 	}
-	tools = append(tools, llm.Tool{Name: "assistant_workspace_discovery", Description: "Discover owned project and Home/group metadata with separate project/group totals. No content reads or permission grants.", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}})
+	tools = append(tools, llm.Tool{Name: "assistant_workspace_discovery", Description: discovery, Parameters: map[string]any{"type": "object", "properties": map[string]any{}}})
 	return append(append(tools, r.readerDefinitions()...), r.fileReaderDefinitions()...)
 }
 
@@ -169,16 +178,49 @@ type panelWorkspaceStore struct {
 	ctx     context.Context
 }
 
+// pinnedHome reports whether the turn is about a Home or group. A Home is about
+// its own projects as well as itself, so with one pinned the listings (the
+// workspaces, their agents, their task titles and states) cover the Home and its
+// direct projects. A pinned project covers only itself. Reading a note, a task's
+// detail or a file stays on the pinned workspace in every case.
+func (s panelWorkspaceStore) pinnedHome() bool {
+	subject := s.turn.projection.Subject
+	return subject != nil && (subject.Kind == "group" || subject.Kind == "home")
+}
+
+// childIDs lists the pinned Home's direct projects that belong to this user.
+func (s panelWorkspaceStore) childIDs(parent string) ([]string, error) {
+	listed, err := workspace.ListActiveSummaries(s.Store)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, row := range listed {
+		if row.ParentID == parent && row.ID != parent && normalizedWorkspaceOwner(row.OwnerUserID) == s.turn.userID &&
+			row.Status != workspace.StatusTrashed && row.Status != workspace.StatusMissing {
+			ids = append(ids, row.ID)
+		}
+	}
+	slices.Sort(ids)
+	return ids, nil
+}
+
 func (s panelWorkspaceStore) Get(id string) (*workspace.Workspace, error) {
 	if err := s.handler.revalidateWorkspaceTurn(s.ctx, s.turn); err != nil {
 		return nil, err
 	}
-	if s.turn.projection.Subject != nil && id != s.turn.projection.Subject.ID {
+	subject := s.turn.projection.Subject
+	if subject != nil && id != subject.ID && !s.pinnedHome() {
 		return nil, errors.New("workspace outside accepted scope")
 	}
 	ws, err := s.Store.Get(id)
 	if err != nil || !workspaceReadable(ws, s.turn.userID) {
 		return nil, errors.New("workspace unavailable")
+	}
+	// Read fresh: a project is the pinned Home's only while it is still its
+	// direct child. A sibling Home's project, or one moved away, is not.
+	if subject != nil && id != subject.ID && ws.ParentID != subject.ID {
+		return nil, errors.New("workspace outside accepted scope")
 	}
 	// Construct metadata only; do not copy the Workspace mutex or retain file,
 	// runtime, toolbox or MCP configuration in this read-only projection.
@@ -199,8 +241,17 @@ func (s panelWorkspaceStore) List() ([]string, error) {
 	if err := s.handler.revalidateWorkspaceTurn(s.ctx, s.turn); err != nil {
 		return nil, err
 	}
-	if s.turn.projection.Subject != nil {
-		return []string{s.turn.projection.Subject.ID}, nil
+	if subject := s.turn.projection.Subject; subject != nil {
+		ids := []string{subject.ID}
+		if s.pinnedHome() {
+			children, err := s.childIDs(subject.ID)
+			if err != nil {
+				// A Home whose projects could not be listed is not a Home without any.
+				return nil, errors.New("workspace listing unavailable")
+			}
+			ids = append(ids, children...)
+		}
+		return ids, nil
 	}
 	ids, err := s.Store.List()
 	if err != nil {
@@ -243,6 +294,9 @@ func (s panelWorkspaceStore) ListActiveSummaries() ([]workspace.WorkspaceSummary
 type panelSessionsReader struct {
 	delegate   homeRecentSessionsReader
 	workspaces workspace.Store
+	// only, when set, is the pinned workspace: its own conversations are listed,
+	// not those of a Home's projects.
+	only string
 }
 
 func (r panelSessionsReader) RecentSessions(ctx context.Context, limit int) ([]HomeSessionSummary, error) {
@@ -255,6 +309,9 @@ func (r panelSessionsReader) RecentSessions(ctx context.Context, limit int) ([]H
 		if row.WorkspaceID == "" {
 			continue
 		} // Legacy root sessions have no verified workspace owner.
+		if r.only != "" && row.WorkspaceID != r.only {
+			continue
+		}
 		if _, err := r.workspaces.Get(row.WorkspaceID); err != nil {
 			continue
 		}
@@ -306,7 +363,11 @@ func (h *HomeAssistantAskHandler) scopedPanelSources(ctx context.Context, source
 		sources.Workspaces = panelWorkspaceStore{Store: sources.Workspaces, handler: h, turn: turn, ctx: ctx}
 	}
 	if sources.Sessions != nil && sources.Workspaces != nil {
-		sources.Sessions = panelSessionsReader{delegate: sources.Sessions, workspaces: sources.Workspaces}
+		reader := panelSessionsReader{delegate: sources.Sessions, workspaces: sources.Workspaces}
+		if subject := turn.projection.Subject; subject != nil {
+			reader.only = subject.ID
+		}
+		sources.Sessions = reader
 	} else {
 		sources.Sessions = nil
 	}

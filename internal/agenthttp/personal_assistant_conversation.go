@@ -511,7 +511,7 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 	}
 	if target, targetErr := h.folderTarget(scope, record.ID, ""); targetErr == nil {
 		body["folder_reviews"] = h.folderReviewViews(r.Context(), target, messages)
-		review := h.prepareReviewContext(r.Context(), reviewConversation, nil)
+		review := h.prepareReviewContext(r.Context(), reviewConversation, nil).forDrawer()
 		body["folder_review_context"] = review
 		if elsewhere := review.elsewhereRef(); elsewhere != nil {
 			body["folder_review_elsewhere"] = elsewhere

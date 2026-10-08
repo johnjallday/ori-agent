@@ -411,9 +411,9 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	// new setup options or whether the browser attached a live folder this turn.
 	review := h.prepareReviewContext(ctx, conversation, folderTurn)
 	ctx = context.WithValue(ctx, reviewContextKey{}, review)
-	if review != nil && review.Status != "no_proposal" {
+	if shown := review.forDrawer(); shown != nil && shown.Status != "no_proposal" {
 		// The drawer states the same review facts the model was given this turn.
-		defer func() { response.FolderReviewContext, response.FolderReviewElsewhere = review, review.elsewhereRef() }()
+		defer func() { response.FolderReviewContext, response.FolderReviewElsewhere = shown, shown.elsewhereRef() }()
 	}
 
 	if folderTurn != nil {
@@ -582,6 +582,11 @@ func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, in
 	})
 }
 
+// plainTextReplies tells the model how its reply is shown. The assistant's
+// reply is displayed as written, so Markdown markup reaches the user as literal
+// asterisks and pound signs.
+const plainTextReplies = "\nYour reply is shown to the user exactly as written, as plain text. Do not use Markdown markup: no ** or __ for emphasis, no # headings, no tables, no backticks. Write short paragraphs, and when a list helps, put each item on its own line starting with \"- \"."
+
 // modelTurn is one prepared request to the system model: the system prompt,
 // the bounded history of the current conversation (if any), and this turn.
 type modelTurn struct {
@@ -624,7 +629,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	}
 
 	conversation := make([]llm.Message, 0, len(turn.history)+2)
-	conversation = append(conversation, llm.NewSystemMessage(turn.system))
+	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies))
 	conversation = append(conversation, turn.history...)
 	conversation = append(conversation, llm.NewUserMessage(turn.user+overview))
 	if len(tools) == 0 && scope != nil {

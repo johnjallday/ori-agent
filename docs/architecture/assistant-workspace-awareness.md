@@ -508,6 +508,34 @@ round and made it report that two listings disagreed.
 `python3 scripts/assistant-workspace-demo.py --slow-reply` holds a reply for
 longer than 30 seconds and checks that it still arrives.
 
+**A question asked on a workspace's page is about that workspace.** The same
+real-model run answered "what do I have?" on a Home with every workspace in the
+app, and reported that a "snapshot of 0 workspaces" conflicted with it. Three
+things made that happen, and each is changed:
+
+- A pinned Home or group now covers itself *and its own direct projects* for
+  listings: the workspace listing, the snapshot, and task titles and states.
+  Before, those were pinned to the Home alone, and a Home is a container the
+  listings skip, so they came back empty. A project outside the Home, another
+  Home's project and another user's project are not listed, a project moved
+  away stops being listed on the next call, and a failed listing is an error,
+  not "no projects". A pinned project still covers only itself. Reading a note,
+  a task's detail or a file stays on the pinned workspace in every case, and so
+  do conversation listings.
+- The turn's facts no longer carry the app-wide roster or its totals when a
+  workspace is pinned, and they say what a question asked here is about.
+  Discovery is described as "across the whole app, beyond the current
+  workspace", for when the user asks for that; the workspace listing is
+  described as "the projects in the current Home" there and is not offered on a
+  project, where it could only return that project.
+- The assistant is told its reply is shown as plain text, so it does not write
+  Markdown markup that reaches the user as literal asterisks.
+
+A conversation that has no setup review of its own also no longer shows "The
+setup review could not be read right now" under a reply when all that failed was
+the lookup of reviews in *other* conversations. The model is still told that
+state is unavailable.
+
 Known limits, recorded rather than fixed: an entry is excluded by name, so a
 hard link under another name, or a filesystem that treats two spellings as one
 name beyond ASCII case, is not detected; the PDF parser's page loop is the

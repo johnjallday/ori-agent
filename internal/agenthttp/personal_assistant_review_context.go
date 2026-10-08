@@ -30,6 +30,23 @@ type personalAssistantReviewContext struct {
 	// elsewhere is the owning conversation of a review pending elsewhere. It is
 	// for the drawer's "Open existing conversation" only, never for the model.
 	elsewhere string
+	// unreferenced is set when this conversation has no review of its own and
+	// the state only says that reviews in other conversations could not be
+	// looked up.
+	unreferenced bool
+}
+
+// forDrawer is the review state the drawer states under a conversation. A
+// conversation with no review of its own shows no review line when all that is
+// known is that other conversations' reviews could not be looked up: under a
+// reply about something else that line reads as a fault in the reply. The
+// model is still given the unavailable state, and says so when asked about
+// setup.
+func (c *personalAssistantReviewContext) forDrawer() *personalAssistantReviewContext {
+	if c == nil || !c.unreferenced || c.Status != "state_unavailable" {
+		return c
+	}
+	return &personalAssistantReviewContext{Version: c.Version, Status: "no_proposal"}
 }
 
 // reviewElsewhere is the drawer's navigation reference for a review that is
@@ -81,7 +98,7 @@ func (h *HomeAssistantAskHandler) prepareReviewContext(ctx context.Context, conv
 			PendingElsewhere(context.Context, foldercontext.Target) (*personalassistant.FolderOfferView, error)
 		}); ok {
 			if _, err := h.currentAssistantUser(ctx); err != nil {
-				result.Status = "state_unavailable"
+				result.Status, result.unreferenced = "state_unavailable", true
 				return result
 			}
 			target, err := h.folderTarget(conversation.scope, conversation.id, "")
@@ -91,12 +108,12 @@ func (h *HomeAssistantAskHandler) prepareReviewContext(ctx context.Context, conv
 				target, err = h.folderTarget(conversation.scope, "", uuid.NewString())
 			}
 			if err != nil {
-				result.Status = "state_unavailable"
+				result.Status, result.unreferenced = "state_unavailable", true
 				return result
 			}
 			view, err := reader.PendingElsewhere(ctx, target)
 			if err != nil {
-				result.Status = "state_unavailable"
+				result.Status, result.unreferenced = "state_unavailable", true
 				return result
 			}
 			if view != nil {

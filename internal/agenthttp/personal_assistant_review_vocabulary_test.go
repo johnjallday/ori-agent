@@ -15,10 +15,44 @@ import (
 type reviewElsewhereReader struct {
 	reviewContextReader
 	pending *personalassistant.FolderOfferView
+	err     error
 }
 
 func (s *reviewElsewhereReader) PendingElsewhere(context.Context, foldercontext.Target) (*personalassistant.FolderOfferView, error) {
-	return s.pending, nil
+	return s.pending, s.err
+}
+
+// A conversation that has no review of its own shows no review line when all
+// that is known is that reviews in other conversations could not be looked up.
+// Under a reply about something else that line read as a fault in the reply.
+// The model is still told the state is unavailable, so it does not say "there
+// is no setup" when asked. A conversation that has its own review still says
+// when that review cannot be read.
+func TestReviewContext_FailedLookupElsewhereIsNotAnnouncedUnderAnUnrelatedReply(t *testing.T) {
+	elsewhere := &reviewElsewhereReader{err: foldercontext.ErrInvalid}
+	h := &HomeAssistantAskHandler{UserID: "local", FolderSetups: elsewhere}
+	for _, id := range []string{"", "conversation"} {
+		got := h.prepareReviewContext(context.Background(), &openConversation{id: id, scope: personalAssistantConversationScope{workspaceID: "hq", agentName: "atlas"}}, nil)
+		if got.Status != "state_unavailable" || !strings.Contains(string(reviewContextJSON(got)), `"status":"state_unavailable"`) {
+			t.Fatalf("conversation %q: the model was not told the state is unavailable: %+v", id, got)
+		}
+		if shown := got.forDrawer(); shown == nil || shown.Status != "no_proposal" || shown.elsewhereRef() != nil {
+			t.Fatalf("conversation %q: the drawer was given %+v", id, shown)
+		}
+	}
+	// This conversation's own review that cannot be read is still stated.
+	own := &personalAssistantReviewContext{Version: 1, Status: "state_unavailable"}
+	if shown := own.forDrawer(); shown != own {
+		t.Fatalf("a conversation's own unreadable review was hidden: %+v", shown)
+	}
+	found := &personalAssistantReviewContext{Version: 1, Status: "pending_elsewhere", elsewhere: "other"}
+	if shown := found.forDrawer(); shown != found || shown.elsewhereRef() == nil {
+		t.Fatalf("a review found elsewhere was hidden: %+v", shown)
+	}
+	var none *personalAssistantReviewContext
+	if none.forDrawer() != nil {
+		t.Fatal("no conversation, no review line")
+	}
 }
 
 // The drawer has one sentence per status in this list. A status the projection
