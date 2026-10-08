@@ -163,6 +163,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-memory.js',
       'internal/web/static/js/modules/personal-assistant-message-actions.js',
       'internal/web/static/js/modules/personal-assistant-folder-context.js',
+      'internal/web/static/js/modules/personal-assistant-folder-presentation.js',
       'internal/web/static/js/modules/personal-assistant-folder-setup.js',
       'internal/web/static/js/modules/personal-hq-fact.js',
       'internal/web/static/js/modules/personal-assistant-continuity.js',

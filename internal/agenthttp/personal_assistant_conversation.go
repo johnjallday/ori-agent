@@ -132,9 +132,10 @@ type openConversation struct {
 	title string
 	// messages are the stored messages, by canonical ID, so an action can
 	// name the exact message it means.
-	messages  []PersonalAssistantConversationMessage
-	history   []llm.Message
-	truncated bool
+	messages          []PersonalAssistantConversationMessage
+	history           []llm.Message
+	historyMessageIDs map[string]bool // canonical rows actually included in the provider window
+	truncated         bool
 }
 
 // SetConversationStore wires the canonical session store for assistant
@@ -186,7 +187,7 @@ func (h *HomeAssistantAskHandler) openConversation(ctx context.Context, ref *Hom
 	conversation.id = record.ID
 	conversation.title = record.Title
 	conversation.messages = messages
-	conversation.history, conversation.truncated = conversationHistoryWindow(messages)
+	conversation.history, conversation.truncated, conversation.historyMessageIDs = conversationHistoryWindowWithIDs(messages)
 	return conversation, ""
 }
 
@@ -195,7 +196,13 @@ func (h *HomeAssistantAskHandler) openConversation(ctx context.Context, ref *Hom
 // message is never replayed, and an imported message is quoted as history
 // instead of being replayed as a turn.
 func conversationHistoryWindow(messages []PersonalAssistantConversationMessage) ([]llm.Message, bool) {
+	window, truncated, _ := conversationHistoryWindowWithIDs(messages)
+	return window, truncated
+}
+
+func conversationHistoryWindowWithIDs(messages []PersonalAssistantConversationMessage) ([]llm.Message, bool, map[string]bool) {
 	window := make([]llm.Message, 0, personalAssistantConversationHistoryMessages)
+	ids := make([]string, 0, personalAssistantConversationHistoryMessages)
 	budget := personalAssistantConversationHistoryChars
 	truncated := false
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -226,6 +233,7 @@ func conversationHistoryWindow(messages []PersonalAssistantConversationMessage) 
 			break
 		}
 		budget -= size
+		ids = append(ids, message.ID)
 		switch {
 		case message.Imported:
 			window = append(window, llm.NewUserMessage(importedHistoryMessage(role, content)))
@@ -237,14 +245,22 @@ func conversationHistoryWindow(messages []PersonalAssistantConversationMessage) 
 	}
 	for left, right := 0, len(window)-1; left < right; left, right = left+1, right-1 {
 		window[left], window[right] = window[right], window[left]
+		ids[left], ids[right] = ids[right], ids[left]
 	}
 	// A window cut mid-exchange can open on a reply. Start on a user turn so
 	// every provider sees a well-formed conversation.
 	for len(window) > 0 && window[0].Role != llm.RoleUser {
 		window = window[1:]
+		ids = ids[1:]
 		truncated = true
 	}
-	return window, truncated
+	included := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			included[id] = true
+		}
+	}
+	return window, truncated, included
 }
 
 // importedHistoryMessage quotes a message that came from an imported history.

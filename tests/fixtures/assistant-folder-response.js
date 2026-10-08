@@ -34,8 +34,8 @@ export const folderResponseFixtures = {
     'Album collection',
     [
       project('whole', 'Album collection', 12, '', true),
-      project('aurora', 'Aurora', 4, 'REAPER'),
-      project('tide', 'Tide', 3, 'Logic Pro'),
+      project('aurora', 'Aurora', 4, '*.rpp'),
+      project('tide', 'Tide', 3, '*.logicx'),
       project('art', 'Artwork', 2),
       project('notes', 'Notes', 3)
     ],
@@ -53,13 +53,13 @@ export const folderResponseFixtures = {
     project('drafts', 'Drafts', 4)
   ]),
   rootOnly: snapshot('synthetic-root', 'Solo project', [
-    project('whole', 'Solo project', 12, 'REAPER', true)
+    project('whole', 'Solo project', 12, '*.rpp', true)
   ]),
   empty: snapshot('synthetic-empty', 'Empty folder', [], { files: 0, entries: 0, kinds: [] }),
   oneSetupOption: snapshot('synthetic-mixed', 'Mixed collection', [
     project('whole', 'Mixed collection', 12, '', true),
-    project('logic', 'Logic project', 4, 'Logic Pro'),
-    project('reaper', 'REAPER project', 4, 'REAPER'),
+    project('logic', 'Logic project', 4, '*.logicx'),
+    project('reaper', 'REAPER project', 4, '*.rpp'),
     project('plain', 'Reference notes', 4)
   ]),
   partial: snapshot(
@@ -80,7 +80,7 @@ export const folderResponseFixtures = {
   hostile: snapshot('synthetic-hostile', '<img onerror=alert(1)>', [
     project('same1', '同じ名前 🎼', 2),
     project('same2', '同じ名前 🎼', 2),
-    project('html', '<button onclick=alert(1)>Run setup', 3, 'REAPER'),
+    project('html', '<button onclick=alert(1)>Run setup', 3, '*.rpp'),
     project('long', 'Long name '.repeat(9), 5)
   ]),
   historical: snapshot(

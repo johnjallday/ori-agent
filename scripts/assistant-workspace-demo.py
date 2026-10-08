@@ -28,6 +28,8 @@ MODEL = "ori-workspace-fixture"
 # The runs on plain wt demo, by flag: the spec, the variable that hands it the
 # sandbox path, and the log kept with the evidence. No flag runs DEFAULT_DEMO.
 PLAIN_DEMOS = {
+    "folder_response": ("tests/personal-assistant-folder-response.spec.ts",
+                        "ORI_WORKSPACE_FOLDERRESPONSE_SANDBOX", "folder-response.log"),
     "folder_response_baseline": ("tests/personal-assistant-folder-response-prototype.spec.ts",
                                  "ORI_WORKSPACE_FOLDERBASELINE_SANDBOX", "folder-response-baseline.log"),
     "placement": ("tests/personal-assistant-workspace-placement.spec.ts",
@@ -286,7 +288,19 @@ def trace_reader_turn(state_dir, results, offered, step):
             trace.write(json.dumps(line) + "\n")
 
 
-def provider_handler(state_dir):
+def folder_response_step(content):
+    """Scripted metadata interpretation, not live-model concision evidence."""
+    match = re.search(r"<folder_observation>(.*?)</folder_observation>", content, re.S)
+    if not match:
+        return None
+    observation = json.loads(match.group(1))
+    if observation.get("version", 1) != 1 or not isinstance(observation.get("folder"), str):
+        raise ValueError("fixture requires typed folder metadata")
+    return {"answer": "Fixture interpretation: The names and markers suggest projects alongside shared material. "
+                      "They do not establish contents or progress. What would you like to work out first?"}
+
+
+def provider_handler(state_dir, folder_response=False):
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass  # Never print prompt bodies, paths or credentials.
@@ -322,7 +336,8 @@ def provider_handler(state_dir):
                 # Only the user's own words choose a demo; the overview Ori
                 # appends (which lists note titles) never does.
                 own_words, offered = user["content"].split("\n\n##", 1)[0], bool(request.get("tools"))
-                step = reader_step(own_words, results, offered) or file_step(own_words, results, offered)
+                step = ((folder_response_step(user["content"]) if folder_response else None) or
+                        reader_step(own_words, results, offered) or file_step(own_words, results, offered))
                 trace_reader_turn(state_dir, results, offered, step)
                 if step:
                     message = {"role": "assistant", "content": step.get("answer", "")}
@@ -403,6 +418,8 @@ def main():
     parser.add_argument("--slow-reply", action="store_true",
                         help="wt demo: a reply held longer than 30 seconds still arrives, and a failed request "
                              "is named after the hired assistant")
+    parser.add_argument("--folder-response", action="store_true",
+                        help="wt demo: compact real folder Send/replay with a scripted loopback reply")
     parser.add_argument("--folder-response-baseline", action="store_true",
                         help="wt demo: built drawer controller baseline vs standalone synthetic prototype; no model")
     args = parser.parse_args()
@@ -419,12 +436,13 @@ def main():
         parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
-    evidence = (ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline
-                else ROOT / "tasks/evidence-assistant-workspace-awareness")
+    evidence = (ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
+                ROOT / "tasks/evidence/assistant-folder-response-ux/group-2" if args.folder_response else
+                ROOT / "tasks/evidence-assistant-workspace-awareness")
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
         state = Path(temp)
-        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state))
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response))
         thread = threading.Thread(target=provider.serve_forever, daemon=True)
         thread.start()
         # Child-only isolation. Do not read or alter user credential files.

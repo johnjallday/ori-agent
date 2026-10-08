@@ -251,7 +251,17 @@ async function resume(id, options = {}) {
     const messages = result.body.messages || [];
     for (const message of messages) {
       if (message.role === 'folder_context' && message.folder_context) {
-        window.PersonalAssistantFolderContext?.renderEvent?.(message.id, message.folder_context);
+        const saved = result.body.folder_context;
+        window.PersonalAssistantFolderContext?.renderEvent?.(
+          message.id,
+          message.folder_context,
+          null,
+          {
+            historical:
+              Boolean(saved?.authority) ||
+              message.folder_context.observation?.id !== saved?.observation?.id
+          }
+        );
         continue;
       }
       const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
@@ -416,7 +426,11 @@ function applyReply(data, rows = {}) {
         observation: data.folder_context.observation,
         offer_id: data.folder_context.offer_id
       },
-      rows.userRow
+      rows.userRow,
+      {
+        historical:
+          Boolean(data.folder_context.authority) || data.folder_context.historical === true
+      }
     );
     window.PersonalAssistantFolderContext?.accepted?.(nextId, data.folder_context);
   } else if (reply.stored) {

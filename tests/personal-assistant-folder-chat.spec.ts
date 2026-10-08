@@ -538,7 +538,7 @@ for (const theme of ['light', 'dark']) {
     await expect(chip).toBeFocused();
     expect(fixture.requests).toHaveLength(0);
     await expect(page.locator('#personalAssistantFolderPreview')).toContainText(
-      'File contents have not been read'
+      'Attached folder: contents not read.'
     );
     await page.locator('#personalAssistantRemoveFolder').press('Enter');
     await expect(chip).toBeFocused();

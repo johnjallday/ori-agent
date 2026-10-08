@@ -2,26 +2,15 @@
 // authority are recovered from browser storage. Only Send shares a reference.
 import { folderChooserView } from './personal-assistant-folder-chooser.js';
 import { collectWorkspaceContext } from './personal-assistant-workspace-context.js';
+import {
+  folderPresentation,
+  renderFolderSummary
+} from './personal-assistant-folder-presentation.js';
+export { observationSummary, coverageSummary } from './personal-assistant-folder-presentation.js';
 
 const ENDPOINT = '/api/home-assistant/folder-context';
 export const FOLDER_DISCLOSURE =
   'File contents have not been read. Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.';
-
-export function observationSummary(observation) {
-  if (!observation) return '';
-  const kinds = (observation.kinds || []).map(kind => `${kind.count} ${kind.name}`).join(' · ');
-  const partial = observation.coverage?.partial ? 'Partial look' : 'Bounded look';
-  const files = observation.files || 0;
-  return `${partial}: ${files} ${files === 1 ? 'file' : 'files'} observed${kinds ? ` · ${kinds}` : ''}.`;
-}
-
-export function coverageSummary(observation) {
-  const coverage = observation?.coverage || {};
-  const date = new Date(observation?.scanned_at || '');
-  const when = Number.isNaN(date.getTime()) ? 'Unknown scan time' : date.toLocaleString();
-  const omissions = (coverage.projects_omitted || 0) + (coverage.kinds_omitted || 0);
-  return `${when}. Up to ${coverage.max_depth || 3} levels, ${coverage.max_entries || 5000} entries and ${coverage.budget_seconds || 3} seconds. Hidden/tooling folders, links and unreadable entries may be skipped; this is not a complete tree.${omissions ? ` ${omissions} additional summaries omitted.` : ''}`;
-}
 
 /** Pure state machine with injected I/O: stale picker/network results cannot
  * cross a conversation switch, removal or replacement. */
@@ -298,19 +287,23 @@ function render(state) {
   elements.remove.disabled = state.pending;
   elements.preview.hidden = !state.observation || !state.preview;
   if (state.observation) {
-    elements.summary.textContent = observationSummary(state.observation);
-    elements.coverage.textContent = coverageSummary(state.observation);
-    elements.projects.textContent = (state.observation.projects || [])
-      .map(
-        project =>
-          `${project.name}${project.marker ? ` (${project.marker})` : ''}: ${project.files} observed files`
-      )
-      .join(' · ');
+    renderFolderSummary(elements.summary, state.observation, { local: true });
   }
   elements.history.hidden = !state.authority;
   elements.history.textContent = state.authority
     ? `Discussing saved observations only (${state.authority}). Pick again for fresh inspection or setup. File contents have not been read.`
     : '';
+  for (const row of document.querySelectorAll('[data-folder-observation-id]')) {
+    const status = row.querySelector('.personal-assistant-folder-context__status');
+    if (status)
+      status.textContent = folderPresentation(
+        { coverage: { partial: row.dataset.folderPartial === 'true' } },
+        {
+          historical:
+            Boolean(state.authority) || state.observation?.id !== row.dataset.folderObservationId
+        }
+      ).status;
+  }
   elements.status.textContent = state.notice;
   updateSendHint();
   window.PersonalAssistantPanel?.setFolderBusy?.(state.pending, 'context');
@@ -375,7 +368,7 @@ function reset(id = '', saved = {}) {
 
 // Only the server's typed event channel reaches here. Ordinary model prose
 // never becomes a card or an executable setup control.
-function renderEvent(id, event, beforeRow) {
+function renderEvent(id, event, beforeRow, { historical = false } = {}) {
   if (!id || !event) return null;
   const observation = event.observation;
   const key = `${observation?.id || 'removed'}:${event.offer_id || ''}`;
@@ -408,35 +401,8 @@ function renderEvent(id, event, beforeRow) {
     );
   } else if (observation) {
     row.dataset.folderObservationId = observation.id;
-    row.append(
-      node(
-        'p',
-        `${observation.folder} · saved observations`,
-        'personal-assistant-folder-context__eyebrow'
-      )
-    );
-    row.append(node('p', observationSummary(observation)));
-    row.append(
-      node(
-        'p',
-        'File contents have not been read. These are dated observations, not permission to inspect again.'
-      )
-    );
-    const detail = node('details', '');
-    detail.append(node('summary', 'Observed projects and coverage'));
-    detail.append(
-      node(
-        'p',
-        (observation.projects || [])
-          .map(
-            project =>
-              `${project.name}${project.marker ? ` (${project.marker})` : ''}: ${project.files} observed files`
-          )
-          .join(' · ')
-      )
-    );
-    detail.append(node('p', coverageSummary(observation)));
-    row.append(detail);
+    row.dataset.folderPartial = String(observation.coverage?.partial === true);
+    renderFolderSummary(row, observation, { historical });
   } else {
     row.append(
       node(
@@ -465,8 +431,6 @@ function init() {
     remove: document.getElementById('personalAssistantRemoveFolder'),
     preview: document.getElementById('personalAssistantFolderPreview'),
     summary: document.getElementById('personalAssistantFolderSummary'),
-    projects: document.getElementById('personalAssistantFolderProjects'),
-    coverage: document.getElementById('personalAssistantFolderCoverage'),
     history: document.getElementById('personalAssistantFolderHistorical'),
     status: document.getElementById('personalAssistantContextStatus'),
     hint: document.getElementById('personalAssistantFolderSendHint')
