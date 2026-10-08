@@ -644,6 +644,10 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
      surface, where the lighter one passes. */
   --pa-accent-text: var(--ori-accent-strong);
   --pa-ink-dim: color-mix(in srgb, var(--ori-ink) 72%, var(--ori-surface));
+  /* The shared setup card also lives off Home. Its primary action must not
+     depend on tokens defined only on body.home-command-page. */
+  --hc-signal: var(--cozy-moss, #3f6b45);
+  --hc-signal-deep: color-mix(in srgb, var(--hc-signal) 88%, var(--cozy-paper, #fff));
 
   gap: 12px;
 }
@@ -674,6 +678,62 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 }
 
 /* When the next check-in is, under the assistant's name. */
+.personal-assistant-panel__context {
+  flex: none;
+  margin: 0;
+  padding: 10px 16px 0;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-message__context {
+  margin: 6px 0 0;
+  color: var(--pa-ink-dim);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* What a reply read: a compact disclosure under the answer, closed by default. */
+.personal-assistant-message__sources {
+  margin: 6px 0 0;
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.personal-assistant-message__sources summary {
+  cursor: pointer;
+  color: var(--pa-accent-text);
+  font-weight: 600;
+}
+
+.personal-assistant-message__sources summary:focus-visible,
+.personal-assistant-message__sources a:focus-visible {
+  outline: 2px solid var(--pa-accent-text);
+  outline-offset: 2px;
+}
+
+.personal-assistant-message__sources ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.personal-assistant-message__sources p {
+  margin: 4px 0 0;
+}
+
+.personal-assistant-message__sources a {
+  color: var(--pa-accent-text);
+  text-decoration: underline;
+}
+
+.personal-assistant-message__source-key {
+  font-variant-numeric: tabular-nums;
+}
+
 .personal-assistant-panel__checkin {
   overflow: hidden;
   margin: 2px 0 0;
@@ -1582,6 +1642,15 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 
 .personal-assistant-panel .personal-assistant-message__setup p {
   margin: 0;
+}
+
+/* A handoff's quiet choice reads like the review card's "Keep chatting", not a
+   Bootstrap link. */
+.personal-assistant-panel .personal-assistant-message__setup .btn-link,
+.personal-assistant-panel #personalAssistantFolderReviewStatus .btn-link {
+  padding: 0;
+  color: var(--pa-ink-dim);
+  text-decoration: underline;
 }
 
 /* Remember… is secondary: it reads as a quieter action than saving a draft. */

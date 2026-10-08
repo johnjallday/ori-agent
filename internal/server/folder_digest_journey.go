@@ -210,12 +210,25 @@ func (v folderJourneyVerifier) VerifiedProject(ctx context.Context, userID, runI
 	}
 	result := personalassistant.FolderCreateResult{WorkspaceID: id, Route: "/workspaces/" + row.FolderSlug,
 		HomeRoute: v.verifiedProjectHomeRoute(ctx, userID, project)}
+	if result.HomeRoute != "" {
+		parent, err := b.workspaceStore.Get(project.ParentID)
+		if err != nil {
+			return refuse("the resulting Home receipt is unavailable")
+		}
+		result.Parent, err = folderSetupHomeDestination(parent)
+		if err != nil {
+			return refuse("the resulting Home receipt is unavailable")
+		}
+	}
 	// The receipt is what the card shows once the setup is proved. It is a
 	// best-effort read: without it the card falls back to its plain outcome note.
 	if b.sessionHandler != nil {
 		if rows, receiptErr := b.sessionHandler.FolderOfferWorkspaceReceipt(id, true); receiptErr == nil {
 			result.Receipt = rows
 		}
+	}
+	if result.Parent != nil {
+		result.Receipt = append(result.Receipt, personalassistant.FolderReceiptRow{Kind: "home", Name: result.Parent.Name, Detail: "verified parent; this project is a separate child", Route: result.HomeRoute})
 	}
 	return result, nil
 }

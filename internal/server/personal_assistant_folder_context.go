@@ -14,7 +14,7 @@ func folderConversationMessages(messages []session.Message) []agenthttp.Personal
 	for _, message := range messages {
 		out = append(out, agenthttp.PersonalAssistantConversationMessage{
 			ID: message.ID, Role: string(message.Role), Content: message.Content,
-			CreatedAt: message.CreatedAt, Imported: message.Imported, FolderContext: message.FolderContext,
+			CreatedAt: message.CreatedAt, Imported: message.Imported, FolderContext: message.FolderContext, WorkspaceContext: message.WorkspaceContext,
 		})
 	}
 	return out

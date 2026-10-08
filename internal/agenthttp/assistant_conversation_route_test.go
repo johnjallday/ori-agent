@@ -118,9 +118,9 @@ func TestRoute_ConversationLeavesOtherRoutesAlone(t *testing.T) {
 			context: homePanelRouteContext(), intent: "utility_direct", routeMode: "utility_direct",
 		},
 		{
-			name: "explicit project context", prompt: "Write a short birthday greeting for my friend Mina.",
+			name: "project browsing does not relocate ordinary composition", prompt: "Write a short birthday greeting for my friend Mina.",
 			context: &HomeAssistantRouteContext{Surface: "home", PagePath: "/", WorkspaceID: "ws-project", Origin: "personal_assistant_panel"},
-			intent:  "general_task", routeMode: "workspace_task",
+			intent:  "assistant_conversation", routeMode: homeAssistantRouteModeInline,
 		},
 		{
 			name: "workspace creation", prompt: "create a workspace called Launch",

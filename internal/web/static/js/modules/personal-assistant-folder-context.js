@@ -1,6 +1,7 @@
 // One local folder preview per personal conversation. No paths, observations or
 // authority are recovered from browser storage. Only Send shares a reference.
 import { folderChooserView } from './personal-assistant-folder-chooser.js';
+import { collectWorkspaceContext } from './personal-assistant-workspace-context.js';
 
 const ENDPOINT = '/api/home-assistant/folder-context';
 export const FOLDER_DISCLOSURE =
@@ -176,7 +177,18 @@ export function createFolderContextController({
     if (!saved) return;
     reset(id, saved);
   }
-  async function review(candidateId, close = false, offerId = state.offerId) {
+  // A turn without a folder can be the one that saves the conversation. The
+  // next Add folder must then target that conversation, not the draft it was
+  // before; otherwise its result is discarded as belonging to another thread.
+  function adopt(id) {
+    const next = String(id || '');
+    if (!next || state.conversationId === next || state.observation || state.pending) return false;
+    state.generation++;
+    Object.assign(state, { conversationId: next, revision: '', accepted: null, offerId: '' });
+    changed(state);
+    return true;
+  }
+  async function review(candidateId, close = false, offerId = state.offerId, placement = {}) {
     if (
       isBusy() ||
       state.pending ||
@@ -196,7 +208,34 @@ export function createFolderContextController({
         ...target(),
         ...(close
           ? { offer_id: offerId }
-          : { selection_id: state.observation.id, candidate_id: candidateId })
+          : {
+              selection_id: state.observation.id,
+              candidate_id: candidateId,
+              ...(typeof window !== 'undefined'
+                ? {
+                    context: {
+                      ...(window.OriGuide?._collectContext
+                        ? {
+                            ...window.OriGuide._collectContext(),
+                            origin: 'personal_assistant_panel'
+                          }
+                        : collectWorkspaceContext({
+                            pathname: window.location?.pathname,
+                            workspaceId: document.body?.dataset?.workspaceId,
+                            workspaceSlug: document.body?.dataset?.workspaceSlug
+                          })),
+                      // The workspace the user named for this suggestion. The host
+                      // resolves it again; the page stays the location.
+                      ...(placement.subject_workspace_id
+                        ? { subject_workspace_id: String(placement.subject_workspace_id) }
+                        : {})
+                    }
+                  }
+                : {}),
+              ...(placement.operation
+                ? { operation: placement.operation, destination_id: placement.destination_id || '' }
+                : {})
+            })
       });
       if (generation !== state.generation || currentId() !== owner) return null;
       return result;
@@ -214,7 +253,7 @@ export function createFolderContextController({
       }
     }
   }
-  return { state, select, remove, reset, request, accepted, review, notify };
+  return { state, select, remove, reset, request, accepted, adopt, review, notify };
 }
 
 async function jsonRequest(url, body) {
@@ -478,7 +517,8 @@ const api = {
         'Add a folder to discuss its structure, or review a workspace setup. Nothing happens automatically.'
       );
   },
-  review: (candidateId, close = false, offerId) => controller?.review(candidateId, close, offerId),
+  review: (candidateId, close = false, offerId, placement) =>
+    controller?.review(candidateId, close, offerId, placement),
   current: () => controller?.state,
   notify: message => controller?.notify(message),
   resetEvents: () => {
@@ -486,6 +526,7 @@ const api = {
   },
   request: () => controller?.request() || null,
   accepted: (id, saved) => controller?.accepted(id, saved),
+  adopt: id => controller?.adopt(id) === true,
   isPending: () => controller?.state.pending === true,
   hasFolder: () => Boolean(controller?.state.observation),
   _controller: () => controller

@@ -32,7 +32,7 @@ Options:
   --music-source DIR    Clean Music Project Management candidate worktree.
   --install-order MODE  music-first, reaper-first, or reaper-only. Providing a
                         music source defaults to music-first.
-  --suite NAME          legacy (default) or guidance (paired candidate test only).
+  --suite NAME          legacy (default), guidance, or awareness (drawer baseline).
   --restart-before-staffing  For guidance: restart after the unstaffed child,
                              then staff/associate and restart once more.
   --port PORT           Server port (default: 8931).
@@ -97,7 +97,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--suite)
-		[[ $# -ge 2 ]] || fail "--suite needs legacy or guidance"
+		[[ $# -ge 2 ]] || fail "--suite needs legacy, guidance or awareness"
 		test_suite="$2"
 		shift 2
 		;;
@@ -158,9 +158,9 @@ fi
 if [[ "$mode" != "test" && ${#playwright_args[@]} -gt 0 ]]; then
 	fail "Playwright arguments are only valid with the test command"
 fi
-[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" ]] || fail "--suite needs legacy or guidance"
-if [[ "$test_suite" == "guidance" && ( "$mode" != "test" || -z "$music_source" || "$install_order" == "reaper-only" ) ]]; then
-	fail "guidance suite requires test with --music-source and a paired installation order"
+[[ "$test_suite" == "legacy" || "$test_suite" == "guidance" || "$test_suite" == "awareness" ]] || fail "--suite needs legacy, guidance or awareness"
+if [[ "$test_suite" != "legacy" && ( "$mode" != "test" || -z "$music_source" || "$install_order" == "reaper-only" ) ]]; then
+	fail "$test_suite suite requires test with --music-source and a paired installation order"
 fi
 if [[ "$restart_before_staffing" == "1" && "$test_suite" != "guidance" ]]; then
 	fail "--restart-before-staffing requires the guidance test suite"
@@ -204,6 +204,17 @@ if [[ -n "$music_source" ]]; then
 	music_tree="$(git -C "$music_root" rev-parse HEAD^{tree})"
 fi
 
+# Candidate build helpers rewrite manifests and create artifacts. Execute them
+# only inside an export, never in the separately owned source checkout (even
+# when the helper promises to restore its manifest on exit).
+build_root="$(mktemp -d "${TMPDIR:-/tmp}/ori-reaper-build.XXXXXX")"
+trap 'rm -rf -- "$build_root"' EXIT
+trap 'exit 130' HUP INT TERM
+git -C "$plugin_root" archive "$reaper_revision" | tar -x -C "$build_root"
+wrapper="$build_root/scripts/with-local-artifact.sh"
+verify="$build_root/scripts/verify-artifact.sh"
+plugin_artifact="$build_root/artifacts/reaper-plugin-darwin-arm64"
+
 refresh_artifact() {
 	"$verify"
 	install -m 0755 "$plugin_artifact" "$root_artifact"
@@ -245,14 +256,15 @@ cleanup() {
 	else
 		rm -rf -- "$sandbox"
 	fi
+	rm -rf -- "$build_root"
 	exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-# Build deterministic service bytes while the helper restores any temporary
-# source-manifest change before the server starts. Export the committed tree,
-# then make only the staged manifest point at those bundled local bytes.
+# Build deterministic service bytes in the disposable export. Export the
+# original committed tree for installation, then make only that staged manifest
+# point at the verified bundled local bytes.
 "$wrapper" true
 refresh_artifact
 reaper_archive="$sandbox/evidence/reaper-plugin.tar"
@@ -309,6 +321,7 @@ start_server() {
 		# satisfy the journey prerequisite. It does not publish or release-verify it.
 		exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN=1 \
 			ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$bundled_plugin" \
+			ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE="${bundled_music:-}" \
 			"$repo_root/bin/ori-agent"
 	) >>"$server_log" 2>&1 &
 	server_pid=$!
@@ -439,6 +452,11 @@ if [[ "$mode" == "test" ]]; then
 		playwright_file="tests/music-project-management-home.spec.ts"
 		if [[ "$test_suite" == "guidance" ]]; then
 			playwright_file="tests/music-home-paired-guidance.spec.ts"
+		elif [[ "$test_suite" == "awareness" ]]; then
+			playwright_file="tests/personal-assistant-workspace-baseline.spec.ts"
+			if [[ "${ORI_WORKSPACE_NEW_HOME_ACCEPTANCE:-0}" == "1" ]]; then
+				playwright_file="tests/personal-assistant-workspace-new-home.spec.ts"
+			fi
 		fi
 		env PLAYWRIGHT_BASE_URL="$base_url" \
 			ORI_MUSIC_REAPER_ACCEPTANCE=1 \
@@ -488,7 +506,9 @@ if [[ "$mode" == "test" ]]; then
 			--project=chromium --workers=1 --grep 'only a distinct reviewed child staffing action'
 		test_status=$?
 	fi
-	if ((test_status == 0)) && [[ -n "$install_order" ]]; then
+	# The drawer baseline owns a different fixture and does not substitute for
+	# legacy/paired-guidance completed-project and restart acceptance.
+	if ((test_status == 0)) && [[ -n "$install_order" && "$test_suite" != "awareness" ]]; then
 		printf 'Restarting Ori against the same isolated candidate state...\n'
 		kill "$server_pid"
 		wait "$server_pid" 2>/dev/null || true

@@ -15,13 +15,18 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
-	"github.com/johnjallday/ori-agent/internal/specialist"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // errSetupUnavailable keeps a card on the step-by-step journey when the
 // one-card path cannot be planned or run honestly.
 var errSetupUnavailable = errors.New("one-card folder setup is unavailable")
+
+type folderSetupPreviewError string
+
+func (e folderSetupPreviewError) Error() string              { return string(e) }
+func (e folderSetupPreviewError) Unwrap() error              { return errSetupUnavailable }
+func (e folderSetupPreviewError) SetupPreviewReason() string { return string(e) }
 
 // planFactsTTL keeps a card's plan stable while it is read repeatedly, and keeps
 // reading a plugin's release from becoming a request per poll.
@@ -58,7 +63,7 @@ type setupTarget struct {
 
 func (h *folderSetupHost) target(offer personalassistant.FolderOffer) (setupTarget, error) {
 	b := h.builder
-	if b == nil || b.setupJourneyService == nil {
+	if b == nil {
 		return setupTarget{}, errSetupUnavailable
 	}
 	row, ok := folderdigest.ProjectCapabilityFor(folderdigest.Shape(offer.Subject.Shape), offer.Subject.MarkerName, offer.Subject.DominantExtension)
@@ -83,38 +88,35 @@ func (h *folderSetupHost) target(offer personalassistant.FolderOffer) (setupTarg
 	return target, nil
 }
 
-// integrationFacts reads where the reviewed integration stands from the host's
-// install quest, the same read the install journey's own screen is built from.
+// integrationFacts uses the same canonical prerequisite reader as the install
+// journey, but never its Read API: Read creates/reconciles inert journey rows.
+// Opening a card or supplying review context must remain observational.
 func (h *folderSetupHost) integrationFacts(ctx context.Context, userID string, entry reviewedintegration.Entry) (foldersetup.Plugin, error) {
-	scoped, err := h.builder.setupJourneyService.ForHostQuest(ctx, userID, entry.InstallQuestID())
-	if err != nil {
+	if h.builder == nil || h.builder.reviewedIntegrationReader == nil {
 		return foldersetup.Plugin{}, errSetupUnavailable
 	}
-	journey, err := scoped.Read(ctx, userID, "")
-	if err != nil {
+	read, err := h.builder.reviewedIntegrationReader.Read(ctx, setupjourney.ReadScope{
+		OwnerUserID: userID, IntegrationKey: entry.Key, ExpectedBlueprintID: entry.ExpectedBlueprintID,
+		ExpectedAssistantProgramID: entry.ExpectedProgramID,
+	})
+	if err != nil || read.Integration == nil {
 		return foldersetup.Plugin{}, errSetupUnavailable
 	}
-	var step *setupjourney.StepProjection
-	for i := range journey.Steps {
-		if journey.Steps[i].Kind == specialist.SetupStepIntegrationInstall {
-			step = &journey.Steps[i]
-		}
-	}
-	if step == nil || step.Integration == nil {
-		return foldersetup.Plugin{}, errSetupUnavailable
-	}
-	shown := step.Integration
+	shown := read.Integration
 	plugin := foldersetup.Plugin{Name: entry.DisplayName, PluginID: entry.PluginID, Source: entry.SourceLabel}
+	if shown.DevelopmentCopy {
+		plugin.Source = "Local development copy — not release-verified"
+	}
 	hasAction := func(id setupjourney.ActionID) bool {
-		for _, action := range step.Actions {
-			if action.ID == id {
+		for _, action := range read.AvailableActions {
+			if action == id {
 				return true
 			}
 		}
 		return false
 	}
 	switch {
-	case step.Status == setupjourney.StepComplete:
+	case read.Complete:
 		plugin.State, plugin.Version, plugin.InstalledVersion = personalassistant.FolderInstallReady, shown.InstalledVersion, shown.InstalledVersion
 	case hasAction(setupjourney.ActionReviewInstall):
 		plugin.State, plugin.Version = personalassistant.FolderInstallInstall, shown.ExpectedVersion
@@ -140,6 +142,9 @@ func (h *folderSetupHost) providerFacts(ctx context.Context, provider reviewedin
 	plugin := foldersetup.Plugin{
 		Name: provider.DisplayName, PluginID: provider.PluginID, Version: preview.Version, Source: provider.SourceLabel,
 	}
+	if preview.DevelopmentCopy {
+		plugin.Source = "Local development copy — not release-verified"
+	}
 	switch {
 	case preview.Ready:
 		plugin.State = personalassistant.FolderInstallReady
@@ -162,27 +167,15 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 		facts := foldersetup.PlanFacts{AppName: target.entry.DisplayName, BlueprintLabel: target.row.Blueprint.Label}
 		integration, err := h.integrationFacts(ctx, req.UserID, target.entry)
 		if err != nil {
-			return foldersetup.PlanFacts{}, err
+			return foldersetup.PlanFacts{}, folderSetupPreviewError("integration_unavailable")
 		}
 		facts.Integration = integration
 		if target.provider != nil {
 			provider, err := h.providerFacts(ctx, *target.provider)
 			if err != nil {
-				return foldersetup.PlanFacts{}, err
+				return foldersetup.PlanFacts{}, folderSetupPreviewError("home_provider_unavailable")
 			}
 			facts.Provider = &provider
-			// A blueprint whose Home comes from a reviewed provider joins that
-			// Home. The run re-checks this against the journey's own group policy
-			// and stops if they disagree, so the assumption cannot cost the user.
-			exists, err := reviewedHomeExists(h.builder, req.UserID, target.provider.Key)
-			if err != nil {
-				return foldersetup.PlanFacts{}, errSetupUnavailable
-			}
-			facts.Grouped, facts.HomeExists = true, exists
-			if exists {
-				facts.SharingOff = reviewedHomeSharingOff(h.builder, req.UserID, target.provider.Key)
-			}
-			facts.HomeTemplate = "plugin:" + target.entry.PluginID + ":" + target.entry.ExpectedBlueprintID
 		}
 		cached = cachedPlanFacts{at: time.Now(), facts: facts}
 		h.mu.Lock()
@@ -193,6 +186,30 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 		h.mu.Unlock()
 	}
 	facts := cached.facts
+	facts.Destination = &personalassistant.FolderSetupDestination{Status: "standalone"}
+	if target.provider != nil {
+		// Software preview caching is never a destination/ownership lease.
+		home, err := h.station(req.UserID, *target.provider)
+		if err != nil {
+			return foldersetup.PlanFacts{}, err
+		}
+		facts.Grouped = true
+		facts.HomeTemplate = "plugin:" + target.entry.PluginID + ":" + target.entry.ExpectedBlueprintID
+		if home != nil {
+			destination, err := folderSetupHomeDestination(home)
+			if err != nil {
+				return foldersetup.PlanFacts{}, err
+			}
+			facts.HomeExists, facts.HomeName, facts.Destination = true, home.Name, destination
+			facts.SharingOff = reviewedHomeSharingOff(h.builder, req.UserID, target.provider.Key)
+		} else {
+			destination, err := h.ReadSetupDestination(ctx, req)
+			if err != nil || destination == nil {
+				return foldersetup.PlanFacts{}, errSetupUnavailable
+			}
+			facts.Destination, facts.HomeName = destination, destination.Name
+		}
+	}
 	facts.WorkspaceName = strings.TrimSpace(req.Offer.Subject.Name)
 	facts.AppInstalled = req.AppInstalled
 	// Worded per plan from the owner's Home as it is now: what that Home
@@ -262,6 +279,12 @@ func (h *folderSetupHost) Plan(ctx context.Context, req personalassistant.Folder
 // quest to the end or to the first stop. Progress is reported through req.Update;
 // only an unexpected error is returned.
 func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderSetupRequest) error {
+	if h == nil || h.builder == nil || h.builder.setupJourneyService == nil {
+		return errSetupUnavailable
+	}
+	if err := h.ValidateSetupDestination(ctx, req); err != nil {
+		return err
+	}
 	if req.Offer.Portfolio != nil {
 		return h.portfolioRun(ctx, req)
 	}
@@ -272,8 +295,9 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 	defer h.forget(req.UserID, target.entry)
 	b := h.builder
 	runner := &foldersetup.Runner{
-		Selections: folderSelections{builder: b, path: req.Path},
-		Progress:   progressFunc(req.Update),
+		ValidateDestination: func(ctx context.Context) error { return h.ValidateSetupDestination(ctx, req) },
+		Selections:          folderSelections{builder: b, path: req.Path},
+		Progress:            progressFunc(req.Update),
 		OpenProject: func(ctx context.Context) (foldersetup.Journey, error) {
 			// The plugin's own quest exists only once the plugin does: one quest,
 			// exactly, or the run cannot be finished.
@@ -312,7 +336,7 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 		Plan: req.Plan, WorkspaceName: strings.TrimSpace(req.Offer.Subject.Name), EntryName: req.EntryName,
 	}
 	if req.Offer.Setup != nil {
-		config.RunID = req.Offer.Setup.RunID
+		config.RunID, config.HomeID = req.Offer.Setup.RunID, req.Offer.Setup.HomeID
 	}
 	result, err := runner.Run(ctx, config)
 	if result.Cause != nil {

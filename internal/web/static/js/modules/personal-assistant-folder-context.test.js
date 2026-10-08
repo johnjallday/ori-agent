@@ -193,6 +193,29 @@ test('historical snapshot is explicit; busy turn cannot mutate its context', asy
   assert.equal(f.calls.length, 0);
 });
 
+test('a conversation saved by a turn without a folder can take a folder afterwards', async () => {
+  const f = fixture(async () => ({ observation: observation('a'), revision: '' }));
+  // The first plain turn saved the conversation; the controller still holds a draft.
+  f.setId('saved');
+  assert.equal(await f.controller.select('chip', 'documents'), false);
+  assert.equal(f.controller.state.preview, false, 'a draft-targeted result is not shown');
+  assert.equal(f.controller.adopt('saved'), true);
+  assert.equal(await f.controller.select('chip', 'documents'), true);
+  assert.deepEqual(f.calls[1].body, {
+    conversation_id: 'saved',
+    revision: '',
+    mode: 'chip',
+    chip: 'documents'
+  });
+  assert.equal(f.controller.state.preview, true);
+  assert.equal(f.controller.request().selection_id, 'a');
+  assert.equal('draft_id' in f.controller.request(), false);
+  // Adopting never discards a folder already chosen, and is a no-op when current.
+  assert.equal(f.controller.adopt('other'), false);
+  assert.equal(f.controller.state.conversationId, 'saved');
+  assert.equal(f.controller.adopt(''), false);
+});
+
 test('explicit review sends opaque candidate and scope, never contents or a model turn', async () => {
   const f = fixture(async url =>
     url.endsWith('/select')
@@ -219,6 +242,35 @@ test('explicit review sends opaque candidate and scope, never contents or a mode
     revision: 'r1',
     offer_id: 'offer'
   });
+});
+
+test('review carries a named workspace as a reference while the page stays the location', async t => {
+  globalThis.window = { location: { pathname: '/workspaces/album-1' } };
+  globalThis.document = { body: { dataset: { workspaceId: 'ws-1', workspaceSlug: 'album-1' } } };
+  t.after(() => {
+    delete globalThis.window;
+    delete globalThis.document;
+  });
+  const f = fixture(async url =>
+    url.endsWith('/select') ? { observation: observation('a') } : { folder_placement_choice: {} }
+  );
+  await f.controller.select('chip', 'documents');
+  await f.controller.review('root', false, undefined, { subject_workspace_id: 'ws-home' });
+  const named = f.calls[1].body.context;
+  assert.equal(named.subject_workspace_id, 'ws-home');
+  assert.equal(named.workspace_id, 'ws-1');
+  assert.equal(named.page_path, '/workspaces/album-1');
+  assert.equal(named.origin, 'personal_assistant_panel');
+  // The chosen operation keeps the same named workspace; nothing else names one.
+  await f.controller.review('root', false, undefined, {
+    operation: 'create_project_workspace',
+    destination_id: 'ws-home',
+    subject_workspace_id: 'ws-home'
+  });
+  assert.equal(f.calls[2].body.context.subject_workspace_id, 'ws-home');
+  assert.equal(f.calls[2].body.destination_id, 'ws-home');
+  await f.controller.review('root');
+  assert.equal('subject_workspace_id' in f.calls[3].body.context, false);
 });
 
 test('late review cannot bind a new conversation and historical context cannot request setup', async () => {

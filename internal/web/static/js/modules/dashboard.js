@@ -414,6 +414,9 @@
     automationMode: 'semi_auto',
     workspacePromptMode: 'task',
     personalAssistantDisplayName: '',
+    // True while the request in hand is a turn in the hired assistant's own
+    // conversation, so its label is that assistant and not the page's agent.
+    hiredAssistantTurn: false,
     workspaceEntryAgentName: '',
     workspaceEntryWorkspaceId: '',
     // The most recently rendered user message, so its row can be marked with
@@ -1378,6 +1381,12 @@
 
   function getHomeAssistantActivityLabel() {
     var els = getHomeAssistantElements();
+    // A turn in the hired assistant's conversation is answered by that
+    // assistant, whichever workspace page is open. The page's own agent is
+    // named only for work that is actually sent to it.
+    if (homeAssistantState.hiredAssistantTurn && homeAssistantState.personalAssistantDisplayName) {
+      return homeAssistantState.personalAssistantDisplayName;
+    }
     var label = els.identityName ? String(els.identityName.textContent || '').trim() : '';
     if (label) return label;
     if (homeAssistantState.personalAssistantDisplayName) {
@@ -7922,6 +7931,23 @@
   function normalizeHomeRouteContext(routeContext) {
     var fallback = buildHomeRouteContext();
     if (!routeContext || typeof routeContext !== 'object') return fallback;
+    if (routeContext.context_version === 1) {
+      // Explicit empties clear stale defaults. Never refill a panel's app-wide
+      // context with the Home selection or turn a page slug into an ID.
+      return {
+        context_version: 1,
+        surface: String(routeContext.surface || 'app'),
+        page_path: String(routeContext.page_path || '/'),
+        workspace_id: String(routeContext.workspace_id || ''),
+        workspace_slug: String(routeContext.workspace_slug || ''),
+        selection_workspace_id: String(routeContext.selection_workspace_id || ''),
+        subject_workspace_id: String(routeContext.subject_workspace_id || ''),
+        task_id: String(routeContext.task_id || ''),
+        session_id: String(routeContext.session_id || ''),
+        origin: String(routeContext.origin || 'ask_ori'),
+        required_capabilities: normalizeRouteCapabilities(routeContext.required_capabilities)
+      };
+    }
 
     var pagePath = String(routeContext.page_path || fallback.page_path || '/').trim() || '/';
     var sessionId = routeContext.session_id;
@@ -10345,6 +10371,11 @@
         ? conversations.request(normalizedContext)
         : null);
     var userRow = confirmedAction ? null : homeAssistantState.lastUserRow;
+    // With a conversation reference this is a turn in the hired assistant's
+    // own conversation; its progress and any failure carry that assistant's
+    // name, not the name of an agent that belongs to the page.
+    homeAssistantState.hiredAssistantTurn = Boolean(conversationRef);
+    if (isConversation) summaryLabel = getHomeAssistantActivityLabel();
 
     setHomeAssistantBusy(true, confirmedAction ? 'Applying…' : 'Thinking…');
     renderHomeAssistantActions([]);
@@ -10379,7 +10410,12 @@
         }
       }
 
-      var data = await API.post('/api/home-assistant/ask', payload);
+      // One reply can be several model calls. Wait for it as long as the
+      // drawer says it will, not the request helper's general 30 seconds.
+      var askContext = window.PersonalAssistantWorkspaceContext || {};
+      var data = await API.post('/api/home-assistant/ask', payload, {
+        timeout: askContext.askTimeoutMs || HOME_ASSISTANT_WORKSPACE_INLINE_TIMEOUT_MS
+      });
       if (conversationRef && conversations.currentId() !== String(conversationRef.id || '')) {
         conversations.notify(
           'That reply belongs to the earlier conversation. Reopen it to see its saved history.'
@@ -10473,8 +10509,18 @@
       renderHomeAssistantActions(buttons);
     } catch (error) {
       dashLog.debug('Home inline ask failed', { error: (error && error.message) || error });
-      appendHomeAssistantMessage('assistant', 'I could not answer that right now. Please retry.');
-      setHomeAssistantRoutingSummary(summaryLabel + ' Failed', 'Could not complete the request.');
+      // Say which kind of failure it was: the wait ran out, Ori could not be
+      // reached, or the request was refused.
+      var failureContext = window.PersonalAssistantWorkspaceContext;
+      var failure =
+        failureContext && typeof failureContext.askFailure === 'function'
+          ? failureContext.askFailure(error)
+          : {
+              message: 'I could not answer that right now. Please retry.',
+              summary: 'Could not complete the request.'
+            };
+      appendHomeAssistantMessage('assistant', failure.message);
+      setHomeAssistantRoutingSummary(summaryLabel + ' Failed', failure.summary);
       if (conversationRef && !confirmedAction) {
         restorePersonalAssistantDraft(text);
       }
@@ -13183,6 +13229,47 @@
     ]);
   }
 
+  // Panel conversations validate routing before any legacy workspace-manager
+  // or local creation shortcut. Non-inline specialist work retains its existing
+  // reviewed handoff; ordinary workspace questions stay in the HQ conversation.
+  async function runPersonalPanelTurn(text, routeContext) {
+    if (routeContext.origin !== 'personal_assistant_panel') return false;
+    var conversations = window.PersonalAssistantConversation;
+    var conversationRef = conversations && conversations.request(routeContext);
+    setHomeAssistantBusy(true, 'Checking workspace context…');
+    try {
+      var route = await API.post('/api/home-assistant/route', {
+        prompt: text,
+        context: routeContext,
+        conversation: conversationRef
+      });
+      if (!route) throw new Error('Panel routing unavailable');
+      if (
+        route.route_mode !== 'home_inline' ||
+        !['assistant_conversation', 'app_introspection', 'app_navigation'].includes(route.intent)
+      )
+        return false;
+      clearHomeAssistantPlanning();
+      clearHomeAssistantInlineReply();
+      homeAssistantState.awaitingCreateConfirmation = false;
+      homeAssistantState.pendingPrompt = text;
+      appendHomeAssistantMessage('user', text);
+      await runHomeAssistantInline(text, routeContext, route.intent, {
+        conversationRef: conversationRef
+      });
+      return true;
+    } catch (_) {
+      var notice =
+        'The workspace context could not be validated. Nothing was sent to the model; your draft is kept. Refresh the context or ask from an app-wide page.';
+      appendHomeAssistantMessage('assistant', notice);
+      conversations && conversations.notify(notice);
+      restorePersonalAssistantDraft(text);
+      return true;
+    } finally {
+      setHomeAssistantBusy(false);
+    }
+  }
+
   async function handleHomeAssistantPrompt(prompt, options) {
     var text = String(prompt || '').trim();
     if (!text) return;
@@ -13195,6 +13282,10 @@
       await runPersonalFolderTurn(text, folderRouteContext, folderRef);
       return;
     }
+    if (await runPersonalPanelTurn(text, folderRouteContext)) return;
+    // From here the request is for the page's own agent or a specialist, so
+    // the hired assistant's name no longer labels it.
+    homeAssistantState.hiredAssistantTurn = false;
     clearHomeAssistantPlanning();
     clearHomeAssistantInlineReply();
     setHomeAssistantMode('new_task');

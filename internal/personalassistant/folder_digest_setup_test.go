@@ -16,13 +16,16 @@ import (
 // on hold when set, then reports what finish says (done on run "new-run" by
 // default), exactly as the real runner reports through req.Update.
 type fakeFolderSetup struct {
-	mu      sync.Mutex
-	lines   []FolderPlanLine
-	planErr error
-	runs    int
-	entries []string
-	hold    chan struct{}
-	finish  func() FolderSetupUpdate
+	mu                sync.Mutex
+	lines             []FolderPlanLine
+	planErr           error
+	destination       *FolderSetupDestination
+	destinationErr    error
+	destinationChecks int
+	runs              int
+	entries           []string
+	hold              chan struct{}
+	finish            func() FolderSetupUpdate
 }
 
 func (f *fakeFolderSetup) entryNames() []string {
@@ -34,7 +37,32 @@ func (f *fakeFolderSetup) entryNames() []string {
 func (f *fakeFolderSetup) Plan(context.Context, FolderSetupRequest) (FolderSetupPlan, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return NewFolderSetupPlan(f.lines), f.planErr
+	plan := NewFolderSetupPlan(f.lines)
+	plan.Destination = f.destination
+	return plan.Stamped(), f.planErr
+}
+
+func (f *fakeFolderSetup) ReadSetupDestination(_ context.Context, req FolderSetupRequest) (*FolderSetupDestination, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.destinationErr != nil {
+		return nil, f.destinationErr
+	}
+	if f.destination == nil {
+		return nil, nil
+	}
+	copy := *f.destination
+	return &copy, nil
+}
+
+func (f *fakeFolderSetup) ValidateSetupDestination(_ context.Context, req FolderSetupRequest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.destinationChecks++
+	if req.Plan.Destination == nil {
+		return errors.New("missing pinned destination")
+	}
+	return f.destinationErr
 }
 
 func (f *fakeFolderSetup) setLines(lines []FolderPlanLine) {

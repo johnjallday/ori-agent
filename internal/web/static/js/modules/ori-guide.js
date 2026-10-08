@@ -270,6 +270,18 @@
   function collectContext() {
     var route = currentRoute();
     var derived = contextFromRoute(route);
+    if (window.PersonalAssistantWorkspaceContext?.collect) {
+      return window.PersonalAssistantWorkspaceContext.collect({
+        pathname: route,
+        workspaceId: document.body?.dataset?.workspaceId || '',
+        workspaceSlug: document.body?.dataset?.workspaceSlug || '',
+        selectionWorkspaceId:
+          window.oriHomeRouteContext?.selection_workspace_id ?? pageContext.workspaceId,
+        taskId: pageContext.taskId,
+        sessionId: pageContext.sessionId,
+        origin: 'ask_ori_panel'
+      });
+    }
     return {
       surface: derived.surface,
       page_path: route,

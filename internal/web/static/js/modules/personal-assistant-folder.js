@@ -166,6 +166,8 @@ function projectConfirmView(offer, base, subject, remember, { back = false } = {
     ? `Set up ${subject} as a ${label} workspace?`
     : `Set up a workspace for ${subject}?`;
   if (note) question += ` ${note}`;
+  const destination = folderSetupDestinationLabel(offer);
+  if (destination) question += ` ${destination}`;
   if (remember)
     question += ` I will also remember that ${subject} is a project you are working on.`;
   const createAvailable = offer.create_available === true;
@@ -407,6 +409,30 @@ export function setupModalView(offer, { songs = [], total = 0, now = new Date() 
   };
 }
 
+// Display-only canonical disclosure. The browser never sends this name or any
+// witness fields as a destination; confirmation sends the plan digest only.
+export function folderSetupDestinationLabel(offer) {
+  const destination =
+    offer?.status === 'resolved' && offer?.outcome?.parent
+      ? offer.outcome.parent
+      : offer?.setup
+        ? offer.setup.destination || offer.destination
+        : offer?.destination || offer?.plan?.destination;
+  if (!destination) return '';
+  if (destination.status === 'standalone') return 'Separate project without a parent Home.';
+  const name = String(destination.name || '').trim();
+  if (!name || !['existing', 'new'].includes(destination.status)) return '';
+  const operation =
+    offer?.operation === 'link_supporting_folder'
+      ? 'supporting folder'
+      : offer?.portfolio
+        ? 'collection in its library'
+        : 'separate project';
+  const kind =
+    destination.kind === 'project' ? 'Project' : destination.kind === 'group' ? 'Group' : 'Home';
+  return `Destination: ${destination.status === 'new' ? 'new ' : ''}${kind} “${name}” · ${operation}.`;
+}
+
 // A reviewed capability rides the same result card. With a plan from the server
 // the card is the one consent: Set up runs the whole setup on the server and
 // Adjust… opens the step-by-step journey. Without one it opens the existing
@@ -473,6 +499,8 @@ function capabilityConfirmView(offer, base, subject) {
   if (run) question = run.question;
   else if (capability.revived)
     question = `You said no before, but this is a whole collection now. ${question}`;
+  const destination = folderSetupDestinationLabel(offer);
+  if (destination) question += ` ${destination}`;
   return {
     ...base,
     headline,
@@ -545,6 +573,19 @@ export function folderOfferView(offer, options = {}) {
   // A yes needs the folder's path, and a dialog-chosen folder is held in
   // memory only: after a server restart the card asks for the folder again
   // before offering anything a yes would need.
+  if (view.visible && ['changed', 'unavailable'].includes(offer.destination_status)) {
+    const destination = folderSetupDestinationLabel(offer);
+    return {
+      ...view,
+      plan: null,
+      actions: [],
+      question: `${destination ? `${destination} ` : ''}${
+        offer.destination_status === 'changed'
+          ? 'The reviewed destination has changed.'
+          : 'The reviewed destination is unavailable.'
+      } Use Review workspace setup to refresh the review. Your draft is unchanged.`
+    };
+  }
   if (view.visible && view.needsPick && status === 'awaiting_outcome') {
     return {
       ...repickView(view, subject),
@@ -552,6 +593,35 @@ export function folderOfferView(offer, options = {}) {
     };
   }
   if (view.visible && view.needsPick && !view.decided) return repickView(view, subject);
+  if (view.visible && !view.setup && !view.plan && offer.setup_unavailable_reason) {
+    const reasons = {
+      integration_unavailable: 'integration readiness could not be verified',
+      home_provider_unavailable: 'Home-provider readiness could not be verified',
+      destination_unavailable: 'the destination could not be verified',
+      setup_unavailable: 'its prerequisites could not be verified'
+    };
+    view.capabilityDetail = `One-click setup is unavailable: ${reasons[offer.setup_unavailable_reason] || reasons.setup_unavailable}. Step-by-step setup still requires its own review and confirmation.`;
+  }
+  if (view.visible && status === 'pending' && offer.operation === 'link_supporting_folder') {
+    return {
+      ...view,
+      question: `Link ${subject} as a supporting folder? ${folderSetupDestinationLabel(offer)} This grants read access to this folder only. The primary project entry, blueprint, mode, agents and tasks stay unchanged.`,
+      capabilityDetail: '',
+      plan: null,
+      actions: offer.create_available
+        ? [
+            {
+              id: 'setup',
+              label: 'Link supporting folder',
+              style: 'primary',
+              decision: 'yes',
+              choice: 'project',
+              create: true
+            }
+          ]
+        : []
+    };
+  }
   return view;
 }
 
@@ -1548,7 +1618,10 @@ export function conversationFolderOfferView(offer, options = {}) {
   if (!offer.needs_pick && !offer.capability && !offer.create_available)
     view.question =
       'Workspace setup is unavailable here. You can keep discussing the observed folder without creating one.';
-  if (!offer.needs_pick && !offer.capability && offer.create_available) {
+  // A blocked review says only why it is blocked and how to refresh it; it does
+  // not describe a confirmation that is not available.
+  const blocked = ['changed', 'unavailable'].includes(offer.destination_status);
+  if (!offer.needs_pick && !offer.capability && offer.create_available && !blocked) {
     for (let i = 0; i < actions.length; i++) {
       if (actions[i].modal)
         actions[i] = { id: 'rename', label: 'Adjust name', style: 'outline', rename: true };
@@ -2483,6 +2556,15 @@ function showOfferFailure(payload) {
   showError(String(payload?.error || 'That could not be saved. Try again.'));
 }
 
+export function folderDecisionProgress(offer, action) {
+  const subject = String(offer?.subject?.name || offer?.folder || '').trim() || 'the folder';
+  if (action.walkthrough) return `Setting up File Janitor for ${subject}…`;
+  if (action.create && offer?.operation === 'link_supporting_folder')
+    return `Linking ${subject} as a supporting folder in ${offer.destination?.name || 'the reviewed project'}…`;
+  if (action.create) return `Setting up the workspace for ${subject}…`;
+  return '';
+}
+
 async function decide(action) {
   const offer = state.offer;
   if (!offer?.id || state.busy) return;
@@ -2492,9 +2574,7 @@ async function decide(action) {
   showError('');
   // A setup takes a few seconds (a workspace, a grant, a scan); the card
   // says so rather than sitting there disabled.
-  const folder = String(offer.folder || '').trim() || 'the folder';
-  if (action.walkthrough) state.progress = `Setting up File Janitor for ${folder}…`;
-  else if (action.create) state.progress = `Setting up the workspace for ${folder}…`;
+  state.progress = folderDecisionProgress(offer, action);
   render();
   try {
     const body = { decision: action.decision, choice: action.choice || '' };

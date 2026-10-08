@@ -88,13 +88,16 @@ func TestRenderWorkspaceAssistantPassesUnquotedIdentityToModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderTemplate(workspace-assistant) failed: %v", err)
 	}
-	for _, want := range []string{`workspaceId: "ws-1"`, `workspaceSlug: "project-one"`} {
+	for _, want := range []string{`workspaceId: "ws-1"`, `workspaceSlug: "project-one"`, `src="/js/utils/api-client.js"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("rendered assistant page missing %q", want)
 		}
 	}
 	if strings.Contains(html, `workspaceSlug: "\"project-one\""`) {
 		t.Fatal("rendered assistant page passed JSON quotes as part of the workspace slug")
+	}
+	if strings.Count(html, `src="/js/utils/api-client.js"`) != 1 {
+		t.Fatal("shared API must load exactly once on the standalone Home page")
 	}
 }
 

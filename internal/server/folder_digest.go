@@ -41,6 +41,9 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		ExistingHome: func(ctx context.Context, userID, providerKey string) (personalassistant.FolderCreateResult, error) {
 			return reviewedExistingHome(ctx, b, userID, providerKey)
 		},
+		ProjectLinked: func(_ context.Context, userID, workspaceID, folderPath string) bool {
+			return folderProjectLinked(b.workspaceStore, userID, workspaceID, folderPath)
+		},
 		LegacyDeclined: func(ctx context.Context, userID, domain string) (bool, error) {
 			if b.personalAssistantStore == nil || domain != "music_production" {
 				return false, nil
@@ -58,6 +61,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 		},
 		Linker: folderWorkspaceLinker{files: b.workspaceFileStore, sessions: b.sessionStore, tasks: b.sessionHandler},
 		Creator: folderWorkspaceCreator{
+			store:   b.workspaceStore,
 			handler: b.sessionHandler,
 			linker:  folderWorkspaceLinker{files: b.workspaceFileStore, sessions: b.sessionStore, tasks: b.sessionHandler},
 		},
@@ -276,11 +280,27 @@ func (l folderWorkspaceLinker) seedShownFolderTask(ws *workspace.Workspace, req 
 // provenance, allowlist and workspace.created event are exactly the modal's)
 // and then links the folder the way a modal-created workspace is linked.
 type folderWorkspaceCreator struct {
+	store   workspace.Store
 	handler *sessionhttp.Handler
 	linker  folderWorkspaceLinker
 }
 
 func (c folderWorkspaceCreator) CreateProjectWorkspace(ctx context.Context, req personalassistant.FolderCreateRequest) (personalassistant.FolderCreateResult, error) {
+	if req.Operation == personalassistant.FolderOperationSupport {
+		return c.linkSupportingFolder(req)
+	}
+	parentID := ""
+	if req.Destination != nil && req.Destination.Status == "existing" {
+		if c.store == nil || req.Destination.Kind != "group" {
+			return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderWorkspaceRefused
+		}
+		parent, err := c.store.Get(req.Destination.WorkspaceID)
+		actual, readErr := folderSetupWorkspaceDestination(parent, req.UserID)
+		if err != nil || readErr != nil || *actual != *req.Destination {
+			return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderPlanChanged
+		}
+		parentID = parent.ID
+	}
 	if c.handler == nil || c.linker.files == nil {
 		return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderOutcomeUnavailable
 	}
@@ -290,7 +310,7 @@ func (c folderWorkspaceCreator) CreateProjectWorkspace(ctx context.Context, req 
 	workspaceID, created := c.existingForOffer(req.UserID, req.OfferID), false
 	if workspaceID == "" {
 		id, err := c.handler.CreateFolderOfferWorkspace(ctx, sessionhttp.FolderOfferWorkspaceRequest{
-			Name: req.Name, TemplateID: req.Blueprint, OfferID: req.OfferID,
+			Name: req.Name, TemplateID: req.Blueprint, OfferID: req.OfferID, ParentID: parentID,
 		})
 		if err != nil {
 			logger.Warn("Failed to set up the shown folder's workspace", logger.Fields{"offer_id": req.OfferID, "blueprint": req.Blueprint, "error": err})
@@ -313,8 +333,20 @@ func (c folderWorkspaceCreator) CreateProjectWorkspace(ctx context.Context, req 
 	if err != nil {
 		return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderOutcomeUnavailable
 	}
+	var parent *personalassistant.FolderSetupDestination
+	if parentID != "" {
+		fresh, err := c.store.Get(parentID)
+		if err != nil {
+			return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderOutcomeUnavailable
+		}
+		parent, err = folderSetupWorkspaceDestination(fresh, req.UserID)
+		if err != nil {
+			return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderOutcomeUnavailable
+		}
+		receipt = append(receipt, personalassistant.FolderReceiptRow{Kind: "workspace", Name: parent.Name, Detail: "parent group; the new project is a separate child", Route: "/workspaces/" + fresh.FolderSlug})
+	}
 	logger.Info("Set up the shown folder's workspace", logger.Fields{"workspace_id": workspaceID, "blueprint": req.Blueprint, "created": created})
-	return personalassistant.FolderCreateResult{WorkspaceID: workspaceID, Route: link.Route, Created: created, Receipt: receipt}, nil
+	return personalassistant.FolderCreateResult{WorkspaceID: workspaceID, Route: link.Route, Created: created, Receipt: receipt, Parent: parent}, nil
 }
 
 // existingForOffer finds the user's active workspace already created for the

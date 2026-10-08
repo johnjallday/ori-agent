@@ -214,6 +214,15 @@ async function open(page: Page, path = '/') {
   await page.locator('#personalAssistantLauncher').click();
   await expect(page.locator('#personalAssistantFolderChip')).toBeVisible();
 }
+// The drawer's open state now survives a reload or navigation in the same tab,
+// so only open it when it is closed.
+async function reopen(page: Page) {
+  await expect(page.locator('#personalAssistantLauncher')).toBeAttached();
+  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
+  if (!(await page.locator('#personalAssistantPanel').isVisible()))
+    await page.locator('#personalAssistantLauncher').click();
+  await expect(page.locator('#personalAssistantFolderChip')).toBeVisible();
+}
 async function choose(page: Page, name = 'Documents') {
   await page.locator('#personalAssistantFolderChip').click();
   await page
@@ -241,6 +250,9 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   await mkdir(source, { recursive: true, mode: 0o750 });
   const file = join(source, 'fixture-notes.txt');
   await writeFile(file, 'Source stays unchanged.', { mode: 0o600 });
+  // A second folder for the later reviews: Chosen will already be a project.
+  await mkdir(join(sandbox!, 'Documents', 'Later'), { recursive: true, mode: 0o750 });
+  await writeFile(join(sandbox!, 'Documents', 'Later', 'later.txt'), 'Later.', { mode: 0o600 });
   const posts: string[] = [];
   page.on('request', request => {
     if (request.method() === 'POST') posts.push(new URL(request.url()).pathname);
@@ -271,26 +283,41 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   const href = await link.getAttribute('href');
   expect(href).toMatch(/^\/workspaces\//);
   await page.reload();
-  await page.locator('#personalAssistantLauncher').click();
+  await reopen(page);
   await expect(card.getByRole('link', { name: /Open/ }).first()).toHaveAttribute('href', href!);
   await page.locator('#personalAssistantRemoveFolder').click();
   await expect(
     page.locator('#homeAssistantConversation').getByRole('link', { name: /Open/ }).first()
   ).toHaveAttribute('href', href!);
   await page.goto('/settings');
-  await page.locator('#personalAssistantLauncher').click();
+  await reopen(page);
   await expect(
     page.locator('#homeAssistantConversation').getByRole('link', { name: /Open/ }).first()
   ).toHaveAttribute('href', href!);
   await expect(page.locator('script[src="/js/modules/dashboard.js"]')).toHaveCount(1);
   await expect(page.locator('#personalAssistantFolderOffer')).toHaveCount(1);
+  // The folder that just became a project is pointed at from a new conversation,
+  // not reviewed a second time.
+  await page.locator('#personalAssistantConversationNew').click();
+  await choose(page);
+  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Chosen' });
+  await page.getByRole('button', { name: 'Review selection', exact: true }).click();
+  const existing = page.getByRole('region', { name: 'Existing project' });
+  await expect(existing).toContainText(`already set up as the project “${workspaceName}”`);
+  await expect(existing.getByRole('link', { name: `Open ${workspaceName}` })).toHaveAttribute(
+    'href',
+    href!
+  );
+  await expect(card).toHaveCount(0);
+  await existing.getByRole('button', { name: 'Keep chatting', exact: true }).click();
   // An orphaned pending review must fail closed without blocking all future
   // reviews. Closing it edits only its owned sidecar, never the missing Session.
   async function nextReview() {
     await page.locator('#personalAssistantConversationNew').click();
     await choose(page);
     await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
-    await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Chosen' });
+    await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Later' });
     await page.getByRole('button', { name: 'Review selection', exact: true }).click();
     await expect(card).toBeVisible();
   }
@@ -355,7 +382,7 @@ for (const path of ['/', '/settings']) {
       .evaluateAll(rows => rows.map(row => (row as HTMLElement).dataset.messageRole));
     expect(roles).toEqual(['folder_context', 'user', 'assistant', 'user', 'assistant']);
     await page.reload();
-    await page.locator('#personalAssistantLauncher').click();
+    await reopen(page);
     await expect(page.locator('#personalAssistantActiveFolderName')).toHaveText('Documents');
     await expect(page.locator('#homeAssistantConversation [data-folder-event-id]')).toHaveCount(1);
     await expect(page.locator('#homeAssistantConversation [data-message-id]')).toHaveCount(4);
@@ -396,7 +423,7 @@ test('browser fixture: suggested setup follows the reply, restores on reload and
     0
   );
   await page.reload();
-  await page.locator('#personalAssistantLauncher').click();
+  await reopen(page);
   await expect(handoff).toHaveCount(1);
   await page.locator('#personalAssistantInput').fill('Keep this draft');
   const button = handoff.getByRole('button', { name: 'Review suggested setup' });

@@ -223,6 +223,7 @@ func (h *hybridStore) AddMessage(ctx context.Context, sessionID string, message 
 	// Typed folder evidence has a dedicated internal CAS writer. In particular,
 	// never leave a client-supplied field in cache that SQLite did not persist.
 	message.FolderContext = nil
+	message.WorkspaceContext = nil
 	// Generate ID if not set
 	if message.ID == "" {
 		message.ID = uuid.New().String()

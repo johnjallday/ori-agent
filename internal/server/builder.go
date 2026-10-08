@@ -378,8 +378,11 @@ type ServerBuilder struct {
 	// integrationReleases resolves the latest reviewed integration release for
 	// both the guided setup and the Plugins page update check.
 	integrationReleases *integrationrelease.Resolver
-	setupJourneyService *setupjourney.Service
-	setupJourneyHandler *setupjourneyhttp.Handler
+	// Plan previews read the canonical integration prerequisite directly; the
+	// journey Read API can create/reconcile inert runs and is not observational.
+	reviewedIntegrationReader setupjourney.CanonicalReader
+	setupJourneyService       *setupjourney.Service
+	setupJourneyHandler       *setupjourneyhttp.Handler
 	// assistantStaffing is the one staffing seam (review → commit) and
 	// projectStaffing decides how a project's roles share the Home's assistant.
 	assistantStaffing    *setupjourney.AssistantStaffingAdapter

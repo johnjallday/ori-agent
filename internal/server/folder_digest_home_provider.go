@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/personalassistanthttp"
@@ -33,6 +34,18 @@ func (s folderHomeProviderSetup) Preview(ctx context.Context, key string) (perso
 	}
 	result := personalassistanthttp.FolderHomeProviderPreview{
 		PluginID: provider.PluginID,
+	}
+	if source := os.Getenv("ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE"); source != "" {
+		installed, err := b.pluginHandler.Manager().List()
+		if err != nil {
+			return result, personalassistant.ErrFolderOutcomeUnavailable
+		}
+		for _, entry := range installed {
+			if folderHomeDevelopmentReady(entry, *provider, source) {
+				result.Installed, result.Ready, result.DevelopmentCopy, result.Version = true, true, true, entry.Version
+				return result, nil
+			}
+		}
 	}
 	release, ok, err := b.server.reviewedReleases.homeProviderInstall(ctx, *provider)
 	if err != nil || !ok {

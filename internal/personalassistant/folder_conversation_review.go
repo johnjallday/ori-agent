@@ -18,10 +18,14 @@ var ErrFolderReviewPending = errors.New("another folder setup review is pending;
 // canonical conversation and a still-live selection can authorize a new setup.
 // No source path is persisted here or exposed by FolderOfferView.
 type FolderConversationReview struct {
-	Target            foldercontext.Target `json:"target"`
-	ObservationID     string               `json:"observation_id"`
-	CandidateID       string               `json:"candidate_id"`
-	CandidateIdentity string               `json:"candidate_identity"`
+	Target                 foldercontext.Target    `json:"target"`
+	ObservationID          string                  `json:"observation_id"`
+	CandidateID            string                  `json:"candidate_id"`
+	CandidateIdentity      string                  `json:"candidate_identity"`
+	Destination            *FolderSetupDestination `json:"destination,omitempty"`
+	DestinationUnavailable bool                    `json:"destination_unavailable,omitempty"`
+	Operation              string                  `json:"operation,omitempty"`
+	DestinationID          string                  `json:"destination_id,omitempty"`
 }
 
 // ConfigureConversationReviews is wired once at host construction. The guard
@@ -127,7 +131,15 @@ func (s *FolderObservationService) Review(ctx context.Context, source foldercont
 			}
 			if prior.FolderKey == offer.FolderKey && prior.Subject.Key == offer.Subject.Key &&
 				prior.RootIdentity == offer.RootIdentity && prior.ConversationReview.CandidateIdentity == offer.ConversationReview.CandidateIdentity &&
+				prior.ConversationReview.Operation == offer.ConversationReview.Operation && prior.ConversationReview.DestinationID == offer.ConversationReview.DestinationID &&
 				((prior.Status == FolderOfferPending && prior.ConversationReview.ObservationID == observationID && prior.ConversationReview.CandidateID == candidateID) || prior.Status == FolderOfferAwaitingOutcome || prior.Status == FolderOfferResolved) {
+				// Recovering the folder is not consent to retarget an already
+				// confirmed run or completed outcome. An explicit pending Review
+				// may refresh material disclosure, changing its confirmation digest.
+				if prior.Status != FolderOfferPending {
+					offer.ConversationReview.Destination = prior.ConversationReview.Destination
+					offer.ConversationReview.DestinationUnavailable = prior.ConversationReview.DestinationUnavailable
+				}
 				prior.ConversationReview = offer.ConversationReview
 				result = *prior
 				return nil
@@ -176,6 +188,11 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 		ProjectsCount:      1,
 		ConversationReview: &FolderConversationReview{Target: target, ObservationID: held.observation.ID, CandidateID: candidateID, CandidateIdentity: identity},
 	}
+	placement := folderReviewPlacement(ctx)
+	offer.ConversationReview.Operation, offer.ConversationReview.DestinationID = placement.Operation, placement.DestinationID
+	if placement.Operation == FolderOperationSupport {
+		offer.CapabilitySuppressed = true
+	}
 	doc, err := d.store.Read(ctx, target.UserID)
 	if err != nil {
 		return FolderOffer{}, err
@@ -208,7 +225,20 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 			return FolderOffer{}, err
 		}
 	}
-	offer.CapabilitySuppressed = legacyDeclined || doc.DeclineFor(domain) != nil
+	offer.CapabilitySuppressed = offer.CapabilitySuppressed || legacyDeclined || doc.DeclineFor(domain) != nil
+	if reader, ok := d.deps.Setup.(FolderSetupDestinationReader); ok {
+		destination, err := reader.ReadSetupDestination(ctx, d.setupRequest(ctx, target.UserID, offer))
+		if err != nil {
+			offer.ConversationReview.DestinationUnavailable = true
+		} else if destination != nil {
+			if destination.Validate() != nil {
+				offer.ConversationReview.DestinationUnavailable = true
+			} else {
+				copy := *destination
+				offer.ConversationReview.Destination = &copy
+			}
+		}
+	}
 	return offer, nil
 }
 
@@ -296,7 +326,55 @@ func (s *FolderObservationService) ReadReview(ctx context.Context, target folder
 	return &view, nil
 }
 
+func (s *FolderDigestService) checkReviewDestination(ctx context.Context, offer FolderOffer) error {
+	review := offer.ConversationReview
+	if review == nil || (offer.Status != FolderOfferPending && offer.Status != FolderOfferAwaitingOutcome) {
+		return nil
+	}
+	if review.DestinationUnavailable {
+		return ErrFolderOutcomeUnavailable
+	}
+	if review.Destination == nil {
+		return nil
+	} // unbound historical/unsupported placement is not invented
+	if review.Destination.Status == "new" && offer.Setup != nil {
+		if offer.Setup.Intent.Destination == nil || *offer.Setup.Intent.Destination != *review.Destination {
+			return ErrFolderPlanChanged
+		}
+		guard, ok := s.deps.Setup.(FolderSetupDestinationGuard)
+		if !ok {
+			return ErrFolderOutcomeUnavailable
+		}
+		request := s.setupRequest(ctx, review.Target.UserID, offer)
+		request.Plan = FolderSetupPlan{Digest: offer.Setup.PlanDigest, Destination: offer.Setup.Intent.Destination, Intent: offer.Setup.Intent}
+		return guard.ValidateSetupDestination(ctx, request)
+	}
+	reader, ok := s.deps.Setup.(FolderSetupDestinationReader)
+	if !ok {
+		return ErrFolderOutcomeUnavailable
+	}
+	actual, err := reader.ReadSetupDestination(ctx, s.setupRequest(ctx, review.Target.UserID, offer))
+	if err != nil {
+		return ErrFolderOutcomeUnavailable
+	}
+	if actual == nil || actual.Validate() != nil {
+		return ErrFolderPlanChanged
+	}
+	copy := *actual
+	if offer.Setup != nil {
+		// Own progress revisions cannot retarget the material witness.
+		copy.RecordVersion, copy.ProgramRevision = review.Destination.RecordVersion, review.Destination.ProgramRevision
+	}
+	if copy != *review.Destination {
+		return ErrFolderPlanChanged
+	}
+	return nil
+}
+
 func (s *FolderDigestService) acquireConversationReview(ctx context.Context, offer FolderOffer) (func(), error) {
+	if err := s.checkReviewDestination(ctx, offer); err != nil {
+		return nil, ErrFolderPlanChanged
+	}
 	if offer.ConversationReview == nil {
 		return func() {}, nil
 	}
@@ -309,6 +387,10 @@ func (s *FolderDigestService) acquireConversationReview(ctx context.Context, off
 func conversationReviewDigest(offer FolderOffer, view FolderOfferView) string {
 	value := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%t", offer.ID, offer.ConversationReview.ObservationID,
 		offer.Subject.Key, view.Subject.Name, view.Subject.Shape, view.Blueprint, view.Remember)
+	value += "\x00" + offer.ConversationReview.Operation
+	if offer.ConversationReview.Destination != nil {
+		value += "\x00" + DestinationPlanDigest(nil, offer.ConversationReview.Destination)
+	}
 	digest := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(digest[:])
 }
@@ -317,7 +399,16 @@ func validateConversationReview(review *FolderConversationReview) error {
 	if review == nil {
 		return nil
 	}
+	if review.Destination != nil && review.Destination.Validate() != nil {
+		return errFolderDigestInvalid
+	}
 	if !review.Target.Valid() || review.Target.ConversationID == "" || review.Target.DraftID != "" {
+		return errFolderDigestInvalid
+	}
+	if review.Operation != "" && review.Operation != FolderOperationCreate && review.Operation != FolderOperationSupport {
+		return errFolderDigestInvalid
+	}
+	if len(review.DestinationID) > 200 || strings.ContainsAny(review.DestinationID, "/\\\x00\r\n") {
 		return errFolderDigestInvalid
 	}
 	for _, value := range []string{review.Target.UserID, review.Target.WorkspaceID, review.Target.AgentName, review.Target.ConversationID, review.ObservationID, review.CandidateID, review.CandidateIdentity} {

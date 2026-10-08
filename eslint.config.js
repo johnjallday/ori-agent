@@ -157,6 +157,7 @@ export default defineConfig([
       'internal/web/static/js/modules/meet-assistant-home-prompt.js',
       'internal/web/static/js/modules/ori-spotlight.js',
       'internal/web/static/js/modules/personal-assistant-panel.js',
+      'internal/web/static/js/modules/personal-assistant-workspace-context.js',
       'internal/web/static/js/modules/personal-assistant-conversation.js',
       'internal/web/static/js/modules/personal-assistant-drafts.js',
       'internal/web/static/js/modules/personal-assistant-memory.js',

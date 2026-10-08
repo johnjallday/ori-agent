@@ -4,12 +4,74 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
 	"github.com/ledongthuc/pdf"
 )
+
+// MaxExpandedSize bounds how much one document may expand to while it is
+// parsed. MaxFileSize limits the file as stored, but a small archive can hold
+// parts that inflate to gigabytes; nothing past this many bytes is decompressed.
+const MaxExpandedSize int64 = 32 * 1024 * 1024
+
+// ErrExpandedTooLarge is a document whose parts expand past MaxExpandedSize.
+var ErrExpandedTooLarge = errors.New("document expands beyond the size that can be parsed")
+
+// expansionBudget is what is left of MaxExpandedSize for one document, shared
+// by every part of it that is read.
+type expansionBudget struct {
+	remaining int64
+	exceeded  bool
+}
+
+// expandedLimit is MaxExpandedSize; a test lowers it to exercise the limit cheaply.
+var expandedLimit = MaxExpandedSize
+
+func newExpansionBudget() *expansionBudget { return &expansionBudget{remaining: expandedLimit} }
+
+// open opens one part of the archive for reading within the budget. A part that
+// declares more than is left is refused unopened; one that understates its size
+// is stopped when it runs past what is left.
+func (b *expansionBudget) open(file *zip.File) (io.ReadCloser, error) {
+	if b.exceeded || file.UncompressedSize64 > uint64(max(b.remaining, 0)) {
+		b.exceeded = true
+		return nil, ErrExpandedTooLarge
+	}
+	part, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	return &budgetedPart{part: part, budget: b}, nil
+}
+
+type budgetedPart struct {
+	part   io.ReadCloser
+	budget *expansionBudget
+}
+
+func (p *budgetedPart) Read(buffer []byte) (int, error) {
+	if p.budget.remaining <= 0 {
+		// Only real data past the limit is an error; a clean end is not.
+		var probe [1]byte
+		if n, err := p.part.Read(probe[:]); n == 0 {
+			return 0, err
+		}
+		p.budget.exceeded = true
+		return 0, ErrExpandedTooLarge
+	}
+	if int64(len(buffer)) > p.budget.remaining {
+		buffer = buffer[:p.budget.remaining]
+	}
+	n, err := p.part.Read(buffer)
+	p.budget.remaining -= int64(n)
+	return n, err
+}
+
+func (p *budgetedPart) Close() error { return p.part.Close() }
 
 // ParsePDF extracts text content from a PDF file
 func ParsePDF(data []byte) (string, error) {
@@ -151,7 +213,7 @@ func ParseDOCX(data []byte) (string, error) {
 	}
 
 	// Read document.xml
-	rc, err := documentXML.Open()
+	rc, err := newExpansionBudget().open(documentXML)
 	if err != nil {
 		return "", fmt.Errorf("failed to open document.xml: %w", err)
 	}
@@ -207,8 +269,12 @@ func ParsePPTX(data []byte) (string, error) {
 	}
 
 	var text strings.Builder
+	budget := newExpansionBudget()
 	for slideNum, slideFile := range slides {
-		rc, err := slideFile.Open()
+		if budget.exceeded {
+			return "", ErrExpandedTooLarge
+		}
+		rc, err := budget.open(slideFile)
 		if err != nil {
 			text.WriteString(fmt.Sprintf("[Error opening slide %d: %v]\n", slideNum+1, err))
 			continue
@@ -241,6 +307,9 @@ func ParsePPTX(data []byte) (string, error) {
 		}
 		text.WriteString("\n")
 	}
+	if budget.exceeded {
+		return "", ErrExpandedTooLarge
+	}
 
 	return text.String(), nil
 }
@@ -254,10 +323,11 @@ func ParseXLSX(data []byte) (string, error) {
 	}
 
 	// First, load shared strings (text values are often stored here)
+	budget := newExpansionBudget()
 	var sharedStrings []string
 	for _, file := range zipReader.File {
 		if file.Name == "xl/sharedStrings.xml" {
-			rc, err := file.Open()
+			rc, err := budget.open(file)
 			if err != nil {
 				break
 			}
@@ -305,7 +375,10 @@ func ParseXLSX(data []byte) (string, error) {
 
 	var text strings.Builder
 	for sheetNum, sheetFile := range sheets {
-		rc, err := sheetFile.Open()
+		if budget.exceeded {
+			return "", ErrExpandedTooLarge
+		}
+		rc, err := budget.open(sheetFile)
 		if err != nil {
 			text.WriteString(fmt.Sprintf("[Error opening sheet %d: %v]\n", sheetNum+1, err))
 			continue
@@ -345,6 +418,9 @@ func ParseXLSX(data []byte) (string, error) {
 			}
 		}
 		text.WriteString("\n")
+	}
+	if budget.exceeded {
+		return "", ErrExpandedTooLarge
 	}
 
 	return text.String(), nil

@@ -37,6 +37,7 @@ func (a homeRecentSessionsAdapter) RecentSessions(ctx context.Context, limit int
 	out := make([]agenthttp.HomeSessionSummary, 0, len(res.Sessions))
 	for _, s := range res.Sessions {
 		out = append(out, agenthttp.HomeSessionSummary{
+			WorkspaceID:  s.FolderID,
 			ID:           s.ID,
 			Title:        s.Title,
 			AgentName:    s.AgentName,
@@ -378,6 +379,19 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		}
 	}
 	handler := agenthttp.NewHomeAssistantAskHandler(sources, llmFactory, systemModel)
+	handler.WorkspaceContext = &agenthttp.AssistantWorkspaceResolver{Source: sources.Workspaces}
+	if s.Storage != nil {
+		handler.CurrentUser = s.Storage.UserProvider
+		// Notes are read through the canonical session store, narrowed to reads.
+		if s.Storage.SessionStore != nil {
+			notes := personalAssistantNoteAdapter{store: s.Storage.SessionStore}
+			handler.Notes, handler.WorkspaceContext.Notes = notes, notes
+		}
+	}
+	// File roots come from the canonical folder store, never from a request.
+	if s.workspaceFileStore != nil {
+		handler.Files, handler.WorkspaceContext.Files = personalAssistantFileSource{roots: s.workspaceFileStore}, true
+	}
 	handler.SetTraceEmitter(agenthttp.NewLoggingHomeAskTraceEmitter())
 	// A request to create a workspace is offered as a build with the
 	// assistant while it can build (FR41).

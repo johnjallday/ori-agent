@@ -27,6 +27,7 @@ package session
 import (
 	"encoding/json"
 
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"strings"
 	"time"
@@ -142,6 +143,9 @@ type Message struct {
 	// FolderContext is host-authored metadata evidence. Ordinary HTTP message
 	// input, session JSON and continuity exports cannot carry this field.
 	FolderContext *foldercontext.Event `json:"-"`
+	// WorkspaceContext is server-authored attribution, never ordinary input,
+	// portable authorization or a duplicated source body.
+	WorkspaceContext *assistantcontext.Attribution `json:"-"`
 }
 
 // WorkspaceStatus represents the current state of a workspace.

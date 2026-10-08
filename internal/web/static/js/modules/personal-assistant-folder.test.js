@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   folderActionAvailable,
   folderChipBusy,
+  folderDecisionProgress,
   folderChooserView,
   folderOfferWaiting,
   folderPinnedOffer,
@@ -24,6 +25,23 @@ import {
   profileReceiptLine,
   setupModalView
 } from './personal-assistant-folder.js';
+
+test('setup busy text names the reviewed project, not its observation root', () => {
+  const offer = { folder: 'Documents', subject: { name: 'Album-5' } };
+  assert.equal(
+    folderDecisionProgress(offer, { create: true }),
+    'Setting up the workspace for Album-5…'
+  );
+  assert.equal(
+    folderDecisionProgress(offer, { walkthrough: true }),
+    'Setting up File Janitor for Album-5…'
+  );
+  assert.equal(folderDecisionProgress(offer, {}), '');
+  assert.equal(
+    folderDecisionProgress({ folder: 'Documents' }, { create: true }),
+    'Setting up the workspace for Documents…'
+  );
+});
 
 const runLines = states =>
   states.map((state, index) => ({ kind: 'other', name: `Step ${index + 1}`, detail: '', state }));

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -100,17 +101,22 @@ type HomeAssistantIdentity struct {
 }
 
 type HomeAssistantAskResponse struct {
-	Response             string                  `json:"response"`
-	Intent               string                  `json:"intent"`
-	Identity             *HomeAssistantIdentity  `json:"identity,omitempty"`
-	SnapshotMeta         *HomeSnapshotMeta       `json:"snapshot_meta,omitempty"`
-	Actions              []HomeAction            `json:"actions,omitempty"`
-	RequiresConfirmation bool                    `json:"requires_confirmation,omitempty"`
-	Confirmation         *HomeActionConfirmation `json:"confirmation,omitempty"`
+	WorkspaceContext     *assistantcontext.Attribution `json:"workspace_context,omitempty"`
+	Response             string                        `json:"response"`
+	Intent               string                        `json:"intent"`
+	Identity             *HomeAssistantIdentity        `json:"identity,omitempty"`
+	SnapshotMeta         *HomeSnapshotMeta             `json:"snapshot_meta,omitempty"`
+	Actions              []HomeAction                  `json:"actions,omitempty"`
+	RequiresConfirmation bool                          `json:"requires_confirmation,omitempty"`
+	Confirmation         *HomeActionConfirmation       `json:"confirmation,omitempty"`
 	// Conversation is set only for a hired-assistant conversation turn.
 	Conversation          *HomeAssistantConversationState         `json:"conversation,omitempty"`
 	FolderContext         *PersonalAssistantFolderState           `json:"folder_context,omitempty"`
 	FolderSetupSuggestion *PersonalAssistantFolderSetupSuggestion `json:"folder_setup_suggestion,omitempty"`
+	// FolderReviewContext is the canonical review summary given to the model for
+	// this turn: description only, with no offer ID, digest or control.
+	FolderReviewContext   *personalAssistantReviewContext `json:"folder_review_context,omitempty"`
+	FolderReviewElsewhere *reviewElsewhere                `json:"folder_review_elsewhere,omitempty"`
 	// ModelUnavailable marks a turn that got no model answer, so the browser
 	// can keep the user's text instead of treating the reply as an answer.
 	ModelUnavailable bool `json:"model_unavailable,omitempty"`
@@ -174,6 +180,16 @@ type HomeAssistantAskHandler struct {
 	Trace                    homeAskTraceEmitter
 	PersonalAssistantContext PersonalAssistantContextProvider
 	PersonalAssistantMemory  PersonalAssistantMemoryWriter
+	WorkspaceContext         *AssistantWorkspaceResolver
+	// Notes is the canonical note store narrowed to two reads, for the panel's
+	// brokered readers. Nil leaves note reading unsupported, and says so.
+	Notes AssistantNoteReader
+	// Files resolves the host-owned folders of a workspace's readable files, for
+	// the panel's file readers. Nil leaves file reading unsupported.
+	Files       AssistantFileSource
+	CurrentUser interface {
+		CurrentUserID(context.Context) (string, error)
+	}
 	// Conversations is the canonical session store behind hired-assistant
 	// conversations; nil keeps every turn stateless.
 	Conversations      PersonalAssistantConversationStore
@@ -269,7 +285,7 @@ func (h *HomeAssistantAskHandler) AskHandler(w http.ResponseWriter, r *http.Requ
 
 // Ask runs the harness and always returns a renderable response (errors are
 // surfaced as helpful text + next-step actions rather than HTTP failures).
-func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskRequest) HomeAssistantAskResponse {
+func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskRequest) (response HomeAssistantAskResponse) {
 	prompt := strings.TrimSpace(req.Prompt)
 	intent := strings.TrimSpace(req.Intent)
 	if intent == "" {
@@ -301,6 +317,35 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	conversation, refusal := h.openConversation(ctx, req.Conversation, workContext)
 	if refusal != "" {
 		return conversationRefusal(refusal, intent, identity)
+	}
+
+	refs := req.Context
+	if req.Conversation != nil && refs != nil {
+		if refs.Origin == "" {
+			copy := *refs
+			copy.Origin = "personal_assistant_panel"
+			refs = &copy
+		} else if refs.Origin != "personal_assistant_panel" {
+			return conversationRefusal(PersonalAssistantConversationOutOfScope, intent, identity)
+		}
+	}
+	if refs == nil && req.Conversation != nil {
+		refs = &HomeAssistantRouteContext{Origin: "personal_assistant_panel"}
+	}
+	scope := h.bindWorkspaceTurn(ctx, prompt, refs, workContext)
+	if scope != nil {
+		defer func() { response.WorkspaceContext = scope.attribution() }()
+		if scope.projection.Status != assistantcontext.Available {
+			message := "That workspace context could not be resolved. Nothing was sent or changed; refresh the context or ask from an app-wide page. Your draft is kept."
+			if scope.projection.Reason == "subject_ambiguous" {
+				message = "More than one workspace matches that reference. Which workspace do you mean? Nothing was sent or changed; your draft is kept."
+			}
+			return HomeAssistantAskResponse{Response: message, Intent: intent, Identity: identity, Conversation: unstoredConversation(conversation), ModelUnavailable: true}
+		}
+		ctx = context.WithValue(ctx, workspaceTurnContextKey{}, scope)
+		if conversation != nil {
+			conversation.turn = scope
+		}
 	}
 
 	var folderTurn *preparedFolderTurn
@@ -362,6 +407,15 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return resp
 	}
 
+	// Canonical review metadata accompanies every model path, independently of
+	// new setup options or whether the browser attached a live folder this turn.
+	review := h.prepareReviewContext(ctx, conversation, folderTurn)
+	ctx = context.WithValue(ctx, reviewContextKey{}, review)
+	if shown := review.forDrawer(); shown != nil && shown.Status != "no_proposal" {
+		// The drawer states the same review facts the model was given this turn.
+		defer func() { response.FolderReviewContext, response.FolderReviewElsewhere = shown, shown.elsewhereRef() }()
+	}
+
 	if folderTurn != nil {
 		return h.answerFolderTurn(ctx, prompt, req.Draft, identity, workContext, conversation, folderTurn)
 	}
@@ -397,7 +451,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		}
 	}
 
-	promptSources := personalAssistantPromptSources(h.Sources, workContext)
+	promptSources := h.scopedPanelSources(ctx, personalAssistantPromptSources(h.Sources, workContext), scope)
 	var history []llm.Message
 	if conversation != nil {
 		history = conversation.history
@@ -433,6 +487,9 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 
 	window := NormalizeHomeDateWindow(req.DateWindow, DefaultHomeDateWindowForPrompt(prompt))
 	snapshot := BuildHomeSnapshot(ctx, promptSources, window)
+	if scope != nil {
+		snapshot = boundedPanelSnapshot(snapshot)
+	}
 	snapshot = sanitizePersonalAssistantSnapshot(snapshot, workContext)
 
 	answer, err := h.generateAnswer(ctx, prompt, intent, snapshot, promptSources, workContext, history)
@@ -490,9 +547,9 @@ func (h *HomeAssistantAskHandler) resolvePersonalAssistantContext(ctx context.Co
 	if h == nil || h.PersonalAssistantContext == nil {
 		return nil, nil
 	}
-	userID := strings.TrimSpace(h.UserID)
-	if userID == "" {
-		userID = "local"
+	userID, err := h.currentAssistantUser(ctx)
+	if err != nil {
+		return nil, err
 	}
 	resolved, err := h.PersonalAssistantContext.ResolvePersonalAssistantContext(ctx, userID)
 	if err != nil {
@@ -525,6 +582,11 @@ func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, in
 	})
 }
 
+// plainTextReplies tells the model how its reply is shown. The assistant's
+// reply is displayed as written, so Markdown markup reaches the user as literal
+// asterisks and pound signs.
+const plainTextReplies = "\nYour reply is shown to the user exactly as written, as plain text. Do not use Markdown markup: no ** or __ for emphasis, no # headings, no tables, no backticks. Write short paragraphs, and when a list helps, put each item on its own line starting with \"- \"."
+
 // modelTurn is one prepared request to the system model: the system prompt,
 // the bounded history of the current conversation (if any), and this turn.
 type modelTurn struct {
@@ -537,20 +599,47 @@ type modelTurn struct {
 
 // runModel sends one turn to the configured system model with the read-only
 // home tools and returns the final text.
-func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) (string, error) {
+func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) (answer string, err error) {
 	provider, model, err := h.resolveProvider()
 	if err != nil {
 		return "", err
 	}
-	registry := newHomeToolRegistry(turn.sources)
+	scope := workspaceTurnFromContext(ctx)
+	readers, files, overviewChars := false, false, 0
+	defer func() { scope.logDiagnostics(ctx, readers, files, overviewChars, err != nil) }()
+	var registry modelToolRegistry = newHomeToolRegistry(turn.sources)
+	if scope != nil {
+		registry = &panelToolRegistry{handler: h, turn: scope, home: newHomeToolRegistry(h.scopedPanelSources(ctx, turn.sources, scope)), ledger: scope.ledger}
+	}
+	// A reader is offered only on a path that can run it; the prompt then says
+	// exactly which readers exist, so no path claims a read it cannot make.
+	var tools []llm.Tool
+	if provider.Capabilities().SupportsTools {
+		tools = registry.Definitions()
+	}
+	for _, tool := range tools {
+		readers, files = readers || isReader(tool.Name), files || isFileReader(tool.Name)
+	}
+	overview := workspaceTurnPrompt(scope, readers, files) + reviewContextPrompt(ctx)
+	overviewChars = evidenceSize(overview)
+	if scope != nil {
+		// The overview is workspace evidence too. It is charged before any
+		// reader runs, so the turn's budget covers everything Ori supplied.
+		scope.ledger.charge(evidenceSize(overview))
+	}
 
 	conversation := make([]llm.Message, 0, len(turn.history)+2)
-	conversation = append(conversation, llm.NewSystemMessage(turn.system))
+	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies))
 	conversation = append(conversation, turn.history...)
-	conversation = append(conversation, llm.NewUserMessage(turn.user))
-	tools := registry.Definitions()
+	conversation = append(conversation, llm.NewUserMessage(turn.user+overview))
+	if len(tools) == 0 && scope != nil {
+		conversation[0].Content += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
+	}
 
 	for round := 0; round < homeMaxToolRounds; round++ {
+		if err := h.revalidateWorkspaceTurn(ctx, scope); err != nil {
+			return "", err
+		}
 		resp, chatErr := provider.Chat(ctx, llm.ChatRequest{
 			Model:       model,
 			Messages:    conversation,
@@ -564,9 +653,12 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 			if strings.TrimSpace(resp.Content) == "" {
 				return "I couldn't find anything to report for that.", nil
 			}
-			return resp.Content, nil
+			return scope.finishAnswer(resp.Content), nil
 		}
 
+		if len(tools) == 0 {
+			return "", errors.New("provider returned unavailable tool calls")
+		}
 		calls := make([]llm.ToolCall, len(resp.ToolCalls))
 		copy(calls, resp.ToolCalls)
 		for i := range calls {
@@ -584,6 +676,14 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		}
 	}
 	// Tool budget exhausted: make one final tool-free attempt for a summary.
+	if err := h.revalidateWorkspaceTurn(ctx, scope); err != nil {
+		return "", err
+	}
+	if scope != nil {
+		// Readers are gone for the rest of this turn. Say so, or the model may
+		// present what it managed to read as the whole picture.
+		conversation[0].Content += readerRoundsExhausted
+	}
 	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, Messages: conversation, Temperature: turn.temperature})
 	if chatErr != nil {
 		return "", chatErr
@@ -591,7 +691,7 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if strings.TrimSpace(resp.Content) == "" {
 		return "I gathered some data but couldn't compose a final summary. Try narrowing the question.", nil
 	}
-	return resp.Content, nil
+	return scope.finishAnswer(resp.Content), nil
 }
 
 func (h *HomeAssistantAskHandler) resolveProvider() (llm.Provider, string, error) {

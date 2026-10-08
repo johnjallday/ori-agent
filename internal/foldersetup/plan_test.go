@@ -121,12 +121,12 @@ func TestBuildPlanNamesThePlacementAndTheHomeItCreates(t *testing.T) {
 		t.Fatalf("order = %v", kinds)
 	}
 
-	facts.HomeExists = true
+	facts.HomeExists, facts.HomeName = true, "My Music Home"
 	existing := BuildPlan(facts)
 	if line(existing, personalassistant.FolderPlanHome).Kind != "" || existing.Intent.CreatesHome || existing.Intent.Placement != "grouped" {
 		t.Fatalf("existing-Home plan = %+v", existing)
 	}
-	if got := line(existing, personalassistant.FolderPlanWorkspace).Name; got != "Creates a REAPER Song workspace named My Song in your Home" {
+	if got := line(existing, personalassistant.FolderPlanWorkspace).Name; got != "Creates a REAPER Song workspace named My Song as a separate project in Home “My Music Home”" {
 		t.Fatalf("existing-Home workspace line = %q", got)
 	}
 	if creating.Digest == existing.Digest || creating.Digest == standalone.Digest {
