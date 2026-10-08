@@ -223,6 +223,7 @@ async function resume(id, options = {}) {
   const target = String(id || '').trim();
   if (!target || state.loading) return false;
   state.loading = true;
+  window.PersonalAssistantFolderContext?.refreshDiscussion?.();
   const generation = ++state.generation;
   try {
     const result = await readJSON(`${LIST_ENDPOINT}/${encodeURIComponent(target)}`);

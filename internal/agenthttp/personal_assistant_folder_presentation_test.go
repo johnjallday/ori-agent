@@ -11,11 +11,11 @@ func TestAssistantFolderPresentation_RequiresAnsweredCanonicalTurnInProviderWind
 	observation := &foldercontext.Observation{ID: "snapshot"}
 	turn := &preparedFolderTurn{observation: observation}
 	base := []PersonalAssistantConversationMessage{
-		{ID: "event", FolderContext: &foldercontext.Event{Version: 1, Observation: observation}},
+		{ID: "event", Role: "system", FolderContext: &foldercontext.Event{Version: 1, Observation: observation}},
 		{ID: "user", Role: "user", Content: "Explore this folder"},
 		{ID: "answer", Role: "assistant", Content: "A short answer."},
 	}
-	for _, kind := range []string{"answered", "event-only-review", "imported-event", "imported-user", "imported-answer", "different-snapshot", "no-answer", "trimmed-window"} {
+	for _, kind := range []string{"answered", "event-only-review", "imported-event", "imported-user", "imported-answer", "different-snapshot", "wrong-event-role", "unsupported-event", "missing-event-id", "no-answer", "trimmed-window"} {
 		t.Run(kind, func(t *testing.T) {
 			rows := append([]PersonalAssistantConversationMessage(nil), base...)
 			switch kind {
@@ -29,6 +29,12 @@ func TestAssistantFolderPresentation_RequiresAnsweredCanonicalTurnInProviderWind
 				rows[2].Imported = true
 			case "different-snapshot":
 				rows[0].FolderContext = &foldercontext.Event{Version: 1, Observation: &foldercontext.Observation{ID: "other"}}
+			case "wrong-event-role":
+				rows[0].Role = "assistant"
+			case "unsupported-event":
+				rows[0].FolderContext = &foldercontext.Event{Version: 2, Observation: observation}
+			case "missing-event-id":
+				rows[0].ID = ""
 			case "no-answer":
 				rows[2].Content = ""
 			case "trimmed-window":

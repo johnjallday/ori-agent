@@ -420,9 +420,13 @@ def main():
                              "is named after the hired assistant")
     parser.add_argument("--folder-response", action="store_true",
                         help="wt demo: compact real folder Send/replay with a scripted loopback reply")
+    parser.add_argument("--folder-response-evidence-stage", choices=["group-3", "group-4", "final"],
+                        help="Keep folder-response captures in a distinct local evidence stage")
     parser.add_argument("--folder-response-baseline", action="store_true",
                         help="wt demo: built drawer controller baseline vs standalone synthetic prototype; no model")
     args = parser.parse_args()
+    if args.folder_response_evidence_stage and not args.folder_response:
+        parser.error("--folder-response-evidence-stage requires --folder-response")
     plain = ["--" + name.replace("_", "-") for name in PLAIN_DEMOS if getattr(args, name)]
     if len(plain) > 1:
         parser.error("choose one wt demo: " + " or ".join(plain))
@@ -437,7 +441,7 @@ def main():
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
     evidence = (ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
-                ROOT / "tasks/evidence/assistant-folder-response-ux/group-3" if args.folder_response else
+                ROOT / "tasks/evidence/assistant-folder-response-ux" / (args.folder_response_evidence_stage or "group-3") if args.folder_response else
                 ROOT / "tasks/evidence-assistant-workspace-awareness")
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
@@ -451,6 +455,8 @@ def main():
                    "CODEX_HOME", "AGENT_STORE_PATH", "ORI_KEEP_DEMO_SANDBOX", "ORI_DEMO_OPEN"}}
         env.update(ORI_DEMO_NO_CODEX="1", ORI_DEMO_OPEN="0",
                    OLLAMA_BASE_URL=f"http://127.0.0.1:{provider.server_port}")
+        if args.folder_response:
+            env["ORI_FOLDER_RESPONSE_EVIDENCE_DIR"] = str(evidence)
         candidate = bool(args.reaper_source)
         if candidate:
             env.update(ORI_WORKSPACE_SETUP_ACCEPTANCE="1", ORI_WORKSPACE_PROVIDER_FIXTURE=str(state))

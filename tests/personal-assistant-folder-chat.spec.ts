@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
+import { folderResponseFixtures } from './fixtures/assistant-folder-response.js';
 
 // Browser controller/ordering fixtures, not proof of model grounding. Hire/HQ
 // use real host routes. Folder selection/Route/Ask/history below are explicit
@@ -53,7 +54,11 @@ const observed = (folder: string) => ({
 
 type Fixture = {
   requests: Record<string, any>[];
-  mode: 'answer' | 'unavailable' | 'network';
+  mode: 'answer' | 'unavailable' | 'network' | 'unsaved' | 'delay';
+  releaseReply?: () => void;
+  reply?: string;
+  scenario?: any;
+  authority?: string;
   scan: 'success' | 'cancel' | 'error' | 'delay';
   releaseScan?: () => Promise<void>;
   messages: Record<string, any>[];
@@ -75,6 +80,7 @@ async function installFixture(page: Page): Promise<Fixture> {
   };
   const observationFor = (folder: string) => ({
     ...observed(folder),
+    ...(fixture.scenario || {}),
     ...(fixture.multi
       ? {
           projects: [
@@ -142,7 +148,7 @@ async function installFixture(page: Page): Promise<Fixture> {
       }
     });
   });
-  await page.route('**/api/home-assistant/ask', route => {
+  await page.route('**/api/home-assistant/ask', async route => {
     const body = route.request().postDataJSON();
     fixture.requests.push({ stage: 'ask', ...body });
     if (fixture.mode === 'network') return route.abort('failed');
@@ -153,6 +159,21 @@ async function installFixture(page: Page): Promise<Fixture> {
           model_unavailable: true,
           conversation: { id: body.conversation?.id || '', stored: false }
         }
+      });
+    if (fixture.mode === 'unsaved')
+      return route.fulfill({
+        json: {
+          response: 'Fixture reply: not saved.',
+          conversation: {
+            id: body.conversation?.id || '',
+            stored: false,
+            error: 'folder_context_save_failed'
+          }
+        }
+      });
+    if (fixture.mode === 'delay')
+      await new Promise<void>(resolve => {
+        fixture.releaseReply = resolve;
       });
     const number = fixture.messages.length;
     const observation = body.folder_context
@@ -173,6 +194,7 @@ async function installFixture(page: Page): Promise<Fixture> {
         id: `a-${number}`,
         role: 'assistant',
         content:
+          fixture.reply ||
           'Fixture reply: discuss the observed structure and your goal. File contents have not been read.'
       }
     );
@@ -201,7 +223,11 @@ async function installFixture(page: Page): Promise<Fixture> {
         conversation: { id: 'folder-chat-fixture', title: 'Folder discussion' },
         messages: fixture.messages,
         saved: [],
-        folder_context: { revision: fixture.revision, observation: fixture.observation },
+        folder_context: {
+          revision: fixture.revision,
+          observation: fixture.observation,
+          ...(fixture.authority ? { authority: fixture.authority, historical: true } : {})
+        },
         folder_setup_suggestion: suggestion()
       }
     })
@@ -641,3 +667,350 @@ test('browser fixture: model/network failure keeps exact intended folder and nev
   await page.waitForTimeout(150);
   expect(fixture.requests.filter(request => request.stage === 'ask')).toHaveLength(2);
 });
+
+test('browser fixture: current choices survive cancellation but reject stale callbacks, detached/imported and trimmed history', async ({
+  page
+}) => {
+  const fixture = await installFixture(page);
+  await open(page);
+  await choose(page);
+  await say(page, 'Discuss only');
+  const strip = page.locator('[data-folder-discussion]');
+  const input = page.locator('#personalAssistantInput');
+  await expect(strip).toHaveCount(1);
+  await page.evaluate(() => {
+    (window as any).retiredFolderChoice = document.querySelector('[data-folder-discussion] button');
+  });
+  fixture.scan = 'cancel';
+  await choose(page, 'Desktop');
+  await expect(strip).toHaveCount(1);
+  await input.fill('');
+  await page.evaluate(() => (window as any).retiredFolderChoice.click());
+  await expect(input).toHaveValue('');
+  const evidence = join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
+  await mkdir(evidence, { recursive: true, mode: 0o750 });
+  await page
+    .locator('#personalAssistantPanel')
+    .screenshot({ path: join(evidence, 'browser-fixture-retired-callback-rejected.png') });
+  await strip.getByRole('button').first().click();
+  await expect(input).not.toHaveValue('');
+  await input.fill('');
+  fixture.authority = 'lost';
+  const before = fixture.requests.length;
+  await page.reload();
+  await reopen(page);
+  await expect(strip.getByRole('button').first()).toHaveText('Discuss saved observations');
+  await expect(page.locator('[data-folder-event-id]')).toContainText('historical');
+  await expect(page.locator('[data-folder-setup-suggestion]')).toHaveCount(0);
+  await page.locator('[data-folder-event-id]').scrollIntoViewIfNeeded();
+  await page
+    .locator('#personalAssistantPanel')
+    .screenshot({ path: join(evidence, 'browser-fixture-lost-historical-snapshot.png') });
+  await strip.getByRole('button').first().click();
+  expect(fixture.requests.length).toBe(before);
+  await page.locator('#personalAssistantSend').click();
+  await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+  const latest = fixture.requests.filter(row => row.stage === 'ask').at(-1)!;
+  expect(latest.folder_context.historical).toBe(true);
+  expect(latest.folder_context.reference).toBeUndefined();
+  await page.locator('#personalAssistantRemoveFolder').click();
+  await expect(strip).toHaveCount(0);
+  await expect(page.locator('[data-message-role="assistant"]').last()).toContainText(
+    'Fixture reply'
+  );
+  fixture.messages.at(-1)!.imported = true;
+  await page.reload();
+  await reopen(page);
+  await expect(strip).toHaveCount(0);
+  await expect(page.locator('[data-message-role="assistant"]').last()).toContainText(
+    'Fixture reply'
+  );
+  fixture.messages.at(-1)!.imported = false;
+  for (let index = 0; index < 70; index++)
+    fixture.messages.push({
+      id: `legacy-${index}`,
+      role: index % 2 ? 'assistant' : 'user',
+      content: 'Legacy prose remains unchanged.'
+    });
+  await page.reload();
+  await reopen(page);
+  await expect(strip).toHaveCount(0);
+  await expect(page.locator('[data-message-role="assistant"]').last()).toContainText(
+    'Legacy prose remains unchanged.'
+  );
+  await expect(page.locator('#personalAssistantConversationNote')).toContainText('most recent');
+  await input.fill('New draft');
+  await page.locator('#personalAssistantConversationNew').click();
+  await expect(strip).toHaveCount(0);
+  await expect(input).toHaveValue('New draft');
+});
+
+test('browser fixture: failed save and delayed reply preserve intent and newer typing without duplicate Send', async ({
+  page
+}) => {
+  const fixture = await installFixture(page);
+  await open(page);
+  await choose(page);
+  fixture.mode = 'unsaved';
+  await say(page, 'Intended question');
+  await expect(page.locator('#personalAssistantInput')).toHaveValue('Intended question');
+  await expect(page.locator('#personalAssistantFolderPreview')).toBeVisible();
+  await expect(page.locator('[data-folder-discussion]')).toHaveCount(0);
+  fixture.mode = 'answer';
+  await say(page, 'Discuss only');
+  fixture.mode = 'delay';
+  await page.locator('#personalAssistantInput').fill('A delayed question');
+  await page.locator('#personalAssistantSend').click();
+  await expect.poll(() => Boolean(fixture.releaseReply)).toBe(true);
+  await expect(page.locator('[data-folder-discussion]')).toHaveCount(0);
+  const before = fixture.requests.filter(row => row.stage === 'ask').length;
+  await page.locator('#personalAssistantInput').fill('Keep my new 🎼 typing exactly  ');
+  await page.locator('#personalAssistantSend').click();
+  await page.locator('#personalAssistantConversationNew').click();
+  expect(await page.evaluate(() => (window as any).PersonalAssistantConversation.currentId())).toBe(
+    'folder-chat-fixture'
+  );
+  expect(fixture.requests.filter(row => row.stage === 'ask').length).toBe(before);
+  fixture.releaseReply!();
+  await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+  const whole = page.locator('[data-folder-discussion]').getByRole('button').first();
+  await whole.click();
+  await whole.click();
+  await expect(page.locator('#personalAssistantInput')).toHaveValue(
+    'Keep my new 🎼 typing exactly  '
+  );
+  expect(fixture.requests.filter(row => row.stage === 'ask').length).toBe(before);
+});
+
+for (const theme of ['light', 'dark']) {
+  test(`browser fixture: ${theme} bounded/hostile matrix, keyboard choices and accessible reflow`, async ({
+    page
+  }) => {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const fixture = await installFixture(page);
+    fixture.reviewable = [];
+    await open(page, '/settings');
+    const evidence = join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
+    await mkdir(evidence, { recursive: true, mode: 0o750 });
+    const accessibility: any[] = [];
+    const ax = await page.context().newCDPSession(page);
+    for (const scenario of [
+      folderResponseFixtures.rootOnly,
+      folderResponseFixtures.empty,
+      folderResponseFixtures.partial,
+      folderResponseFixtures.hostile
+    ]) {
+      fixture.scenario = scenario;
+      fixture.reply =
+        scenario === folderResponseFixtures.hostile
+          ? 'Full literal prose <b>not HTML</b> 🎼. '.repeat(400).trim()
+          : 'Fixture: names suggest a collection. Contents are not known. What matters to you?';
+      if (await page.evaluate(() => (window as any).PersonalAssistantConversation.currentId()))
+        await page.locator('#personalAssistantConversationNew').click();
+      await choose(page);
+      await say(page, 'Just discuss');
+      const card = page.locator('[data-folder-event-id]');
+      const strip = page.locator('[data-folder-discussion]');
+      await expect(card.getByRole('heading')).toHaveText(scenario.folder);
+      await expect(card).toContainText(/[Bb]ounded look/);
+      await expect(card).toContainText('contents not read');
+      await expect(card.locator('img, b, script')).toHaveCount(0);
+      const tree = await ax.send('Accessibility.getFullAXTree');
+      const group = tree.nodes.find(
+        node => node.role?.value === 'group' && node.name?.value === 'Folder conversation choices'
+      );
+      expect(group).toBeTruthy();
+      const names = (group?.childIds || [])
+        .map(id => tree.nodes.find(node => node.nodeId === id))
+        .filter(node => node?.role?.value === 'button')
+        .map(node => node!.name?.value);
+      expect(names.length).toBeGreaterThan(0);
+      expect(names.every(name => typeof name === 'string' && name.length > 0)).toBe(true);
+      expect(
+        await page
+          .locator('[data-message-role="assistant"]')
+          .last()
+          .evaluate(el => el.firstElementChild?.firstChild?.textContent)
+      ).toBe(fixture.reply);
+      const details = card.getByText('Scan details', { exact: true });
+      await details.focus();
+      await details.press('Enter');
+      await expect(card).toContainText('counts overlap');
+      await details.press('Space');
+      const before = fixture.requests.length;
+      const whole = strip.getByRole('button').first();
+      await whole.focus();
+      expect(
+        await whole.evaluate(el => {
+          const style = getComputedStyle(el);
+          return (
+            (style.outlineStyle !== 'none' && style.outlineWidth !== '0px') ||
+            style.boxShadow !== 'none'
+          );
+        })
+      ).toBe(true);
+      const contrasts = await card.evaluate(el => {
+        const parse = (value: string) => {
+          const numbers = value.match(/[\d.]+/g)!.map(Number);
+          return [numbers[0], numbers[1], numbers[2]]
+            .map(x => (value.startsWith('color(') ? x * 255 : x))
+            .concat(numbers[3] ?? 1);
+        };
+        const luminance = (channels: number[]) =>
+          channels
+            .slice(0, 3)
+            .map(x => x / 255)
+            .map(x => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4))
+            .reduce((sum, x, index) => sum + x * [0.2126, 0.7152, 0.0722][index], 0);
+        return Array.from(el.querySelectorAll('summary')).map(control => {
+          const ancestors: Element[] = [];
+          for (let parent: Element | null = control; parent; parent = parent.parentElement)
+            ancestors.unshift(parent);
+          let bg = [255, 255, 255];
+          for (const parent of ancestors) {
+            const color = parse(getComputedStyle(parent).backgroundColor);
+            bg = bg.map((x, index) => color[index] * color[3] + x * (1 - color[3]));
+          }
+          const foreground = parse(getComputedStyle(control).color);
+          const light = luminance(foreground),
+            dark = luminance(bg);
+          return {
+            label: control.textContent,
+            ratio: (Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05)
+          };
+        });
+      });
+      expect(contrasts.every(sample => sample.ratio >= 4.5)).toBe(true);
+      accessibility.push({
+        snapshot: scenario.id,
+        axButtonNames: names,
+        contrasts,
+        focusVisible: true,
+        reducedMotion: await page.evaluate(
+          () => matchMedia('(prefers-reduced-motion: reduce)').matches
+        )
+      });
+      await whole.press('Enter');
+      await expect(page.locator('#personalAssistantInput')).toBeFocused();
+      const draft = await page.locator('#personalAssistantInput').inputValue();
+      expect(draft).not.toContain(scenario.id);
+      expect(draft).toContain(scenario.folder);
+      await whole.press('Enter');
+      await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);
+      expect(fixture.requests.length).toBe(before);
+      const children = scenario.projects.filter((row: any) => !row.root);
+      await expect(strip.getByRole('button')).toHaveCount(children.length ? 2 : 1);
+      if (children.length) {
+        const chooseDiscussion = strip.getByRole('button').nth(1);
+        await chooseDiscussion.focus();
+        await chooseDiscussion.press('Enter');
+        const select = page.locator('#personalAssistantFolderDiscussionCandidate');
+        await expect(select).toBeFocused();
+        await expect(select).toHaveValue('');
+        await expect(select.locator('option')).toHaveCount(children.length + 1);
+        await expect(
+          page.getByRole('combobox', { name: 'Which observed folder would you like to discuss?' })
+        ).toBeVisible();
+        await page.locator('#personalAssistantFolderDiscussionCancel').press('Enter');
+        await expect(chooseDiscussion).toBeFocused();
+        await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);
+        await chooseDiscussion.press('Enter');
+        await page.keyboard.press('Escape');
+        await expect(chooseDiscussion).toBeFocused();
+        await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+      }
+      await page.locator('#personalAssistantInput').fill('');
+      for (const [width, height, zoom] of [
+        [1440, 900, 1],
+        [390, 844, 1],
+        [780, 1688, 2]
+      ]) {
+        await page.setViewportSize({ width, height });
+        await page.evaluate(value => {
+          document.body.style.zoom = String(value);
+        }, zoom);
+        await whole.focus();
+        await expect
+          .poll(() =>
+            whole.evaluate(el => {
+              const active = el.getBoundingClientRect();
+              const viewport = document
+                .getElementById('personalAssistantScroll')!
+                .getBoundingClientRect();
+              return active.top >= viewport.top && active.bottom <= viewport.bottom;
+            })
+          )
+          .toBe(true);
+        const layout = await page.locator('#personalAssistantPanel').evaluate(panel => {
+          const input = document.getElementById('personalAssistantInput')!.getBoundingClientRect();
+          const active = document.activeElement!.getBoundingClientRect();
+          const bounds = panel.getBoundingClientRect();
+          const nested = Array.from(panel.querySelectorAll('*')).filter(
+            el =>
+              el.id !== 'personalAssistantScroll' &&
+              ['auto', 'scroll'].includes(getComputedStyle(el).overflowY) &&
+              el.scrollHeight > el.clientHeight
+          );
+          return {
+            overflow: panel.scrollWidth > panel.clientWidth + 1,
+            nested: nested.length,
+            inputVisible: input.top >= bounds.top && input.bottom <= bounds.bottom,
+            focusedVisible: active.top >= bounds.top && active.bottom <= bounds.bottom,
+            targets: Array.from(
+              panel.querySelectorAll(
+                '[data-folder-discussion] button, [data-folder-event-id] summary'
+              )
+            ).every(
+              el =>
+                el.getBoundingClientRect().height >= 44 * Number(document.body.style.zoom || 1) - 1
+            )
+          };
+        });
+        expect(layout).toEqual({
+          overflow: false,
+          nested: 0,
+          inputVisible: true,
+          focusedVisible: true,
+          targets: true
+        });
+        await page.locator('#personalAssistantPanel').screenshot({
+          path: join(evidence, `${theme}-${scenario.id}-${width}px-zoom-${zoom}.png`)
+        });
+        if (children.length) {
+          const chooseDiscussion = strip.getByRole('button').nth(1);
+          await whole.press('Tab');
+          await expect(chooseDiscussion).toBeFocused();
+          await chooseDiscussion.press('Enter');
+          await expect(page.locator('#personalAssistantFolderDiscussionCandidate')).toBeFocused();
+          await page
+            .locator('#personalAssistantPanel')
+            .screenshot({
+              path: join(evidence, `${theme}-${scenario.id}-${width}px-local-chooser.png`)
+            });
+          await page.keyboard.press('Escape');
+          await expect(chooseDiscussion).toBeFocused();
+          await expect(page.locator('#personalAssistantInput')).toHaveValue('');
+          expect(fixture.requests.length).toBe(before);
+        }
+      }
+      await page
+        .locator('#personalAssistantPanel')
+        .screenshot({ path: join(evidence, `${theme}-${scenario.id}-reflow.png`) });
+      await page.evaluate(() => {
+        document.body.style.zoom = '1';
+      });
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    await expect(page.locator('#personalAssistantPanelStatus')).toHaveAttribute(
+      'aria-live',
+      'polite'
+    );
+    await writeFile(
+      join(evidence, `${theme}-accessibility.json`),
+      JSON.stringify(accessibility, null, 2),
+      { mode: 0o600 }
+    );
+    await ax.detach();
+  });
+}

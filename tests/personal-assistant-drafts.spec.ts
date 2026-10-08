@@ -481,9 +481,13 @@ test.describe('Assistant drafts — real persistence', () => {
     await page.locator('#personalAssistantMemoryCancel').click();
     expect((await approvedFacts(request)).length).toBe(factsBefore + 1);
 
-    // The existing remembered-facts page edits and forgets it.
+    // Navigation intentionally preserves the drawer. Close it as a user would
+    // before editing Profile, rather than click through the covering dialog.
     page.on('dialog', dialog => void dialog.accept());
     await page.goto('/profile#personalHQKnowledge');
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await page.locator('#personalAssistantClose').click();
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
     const card = page.locator('#personalHQKnowledge .reviewed-knowledge-item', { hasText: FACT });
     await expect(card).toBeVisible({ timeout: 30000 });
     await expect(card).toContainText('You told Ori');

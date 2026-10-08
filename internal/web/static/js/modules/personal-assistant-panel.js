@@ -685,6 +685,35 @@ function submit(event) {
   return true;
 }
 
+export function assistantFocusNeedsScroll(viewport, target) {
+  return Boolean(
+    viewport && target && (target.top < viewport.top || target.bottom > viewport.bottom)
+  );
+}
+
+function revealFocusedControl() {
+  const scroll = document.getElementById('personalAssistantScroll');
+  const active = document.activeElement;
+  if (
+    !state.open ||
+    !active ||
+    !scroll?.contains(active) ||
+    !active.closest(
+      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderDiscussionChooser'
+    )
+  )
+    return;
+  const viewport = scroll.getBoundingClientRect();
+  const target = active.getBoundingClientRect();
+  if (!assistantFocusNeedsScroll(viewport, target)) return;
+  // Move only our scroll container. Native scrollIntoView may leave a few
+  // clipped pixels under the pinned footer, or scroll outer page ancestors.
+  const scale = viewport.height / scroll.offsetHeight || 1;
+  const offset =
+    target.top < viewport.top ? target.top - viewport.top - 1 : target.bottom - viewport.bottom + 1;
+  scroll.scrollTop += offset / scale;
+}
+
 function init() {
   const panel = document.getElementById('personalAssistantPanel');
   const launcher = document.getElementById('personalAssistantLauncher');
@@ -772,6 +801,13 @@ function init() {
     if (event.detail?.personalAssistant) applyPersonalAssistant(event.detail.personalAssistant);
   });
   window.addEventListener('resize', syncPanelViewport);
+  // Resize/reflow can leave an already-focused folder control outside the one
+  // scroll viewport. Recover only this feature's keyboard position; do not
+  // interfere with existing message, saved-draft or memory focus lifecycles.
+  const scroll = document.getElementById('personalAssistantScroll');
+  if (scroll && typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => requestAnimationFrame(revealFocusedControl)).observe(scroll);
+  }
   syncPanelViewport();
   renderHeader();
   // `/?panel=today` opens the drawer on Home. Wait for the server-owned

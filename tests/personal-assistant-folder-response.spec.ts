@@ -20,7 +20,9 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
   test.setTimeout(120_000);
   expect(basename(sandbox!)).toMatch(/^ori-demo\./);
   expect(basename(provider!)).toMatch(/^ori-awareness-provider\./);
-  const evidence = join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-3');
+  const evidence =
+    process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR ||
+    join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-3');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   for (const [relative, content] of syntheticFolderFiles) {
     // Put projects directly under the known-folder chip for a multi-row scan.
@@ -180,11 +182,9 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await expect(input).toBeFocused();
     expect(await input.inputValue()).toContain(child.name);
     expect(await input.inputValue()).toContain('without setting anything up');
-    await page
-      .locator('#personalAssistantPanel')
-      .screenshot({
-        path: join(evidence, `${chip.toLowerCase()}-editable-discussion-before-send.png`)
-      });
+    await page.locator('#personalAssistantPanel').screenshot({
+      path: join(evidence, `${chip.toLowerCase()}-editable-discussion-before-send.png`)
+    });
     expect((await audit()).requests).toBe(firstCounts.requests);
     expect((await (await request.get('/api/workspaces')).json()).folders.length).toBe(
       resourcesBefore

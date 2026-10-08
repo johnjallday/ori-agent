@@ -313,17 +313,34 @@ function discussionDraft(value, projectId = '') {
 
 function renderDiscussion() {
   const existing = document.querySelector('[data-folder-discussion]');
+  // A cancelled selection may restore the same canonical snapshot. Recapture
+  // its new generation, rebuilding the strip; old captured callbacks still fail.
+  if (
+    discussionBinding &&
+    currentFolderDiscussion(
+      controller?.state,
+      { ...discussionBinding, generation: controller?.state.generation },
+      window.PersonalAssistantConversation?.currentId?.()
+    )
+  ) {
+    discussionBinding = { ...discussionBinding, generation: controller.state.generation };
+  }
   const row = discussionRow(discussionBinding);
   if (!row) {
     existing?.remove();
     closeDiscussionChooser({ restoreFocus: false });
     return;
   }
-  if (existing?.parentElement === row.firstElementChild) return;
+  if (
+    existing?.parentElement === row.firstElementChild &&
+    existing.dataset.folderGeneration === String(discussionBinding.generation)
+  )
+    return;
   existing?.remove();
   const value = { ...discussionBinding };
   const strip = node('div', '', 'personal-assistant-folder-discussion');
   strip.dataset.folderDiscussion = value.messageId;
+  strip.dataset.folderGeneration = String(value.generation);
   strip.setAttribute('role', 'group');
   strip.setAttribute('aria-label', 'Folder conversation choices');
   const children = folderDiscussionOptions(controller.state.observation);

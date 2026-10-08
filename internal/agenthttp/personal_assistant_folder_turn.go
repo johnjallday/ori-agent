@@ -141,7 +141,7 @@ func folderReplyPresentation(conversation *openConversation, turn *preparedFolde
 	if conversation != nil && turn != nil && turn.observation != nil {
 		for i := 0; i+2 < len(conversation.messages); i++ {
 			event, user, answer := conversation.messages[i], conversation.messages[i+1], conversation.messages[i+2]
-			if event.Imported || user.Imported || answer.Imported || event.FolderContext == nil || event.FolderContext.Observation == nil ||
+			if event.ID == "" || event.Role != "system" || event.Imported || user.Imported || answer.Imported || event.FolderContext == nil || event.FolderContext.Version != 1 || event.FolderContext.Observation == nil ||
 				event.FolderContext.Observation.ID != turn.observation.ID || user.Role != "user" || answer.Role != "assistant" ||
 				!conversation.historyMessageIDs[user.ID] || !conversation.historyMessageIDs[answer.ID] {
 				continue

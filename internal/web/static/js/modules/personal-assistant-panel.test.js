@@ -6,6 +6,7 @@ import {
   EXPLORE_FOLDER_URL,
   NEEDS_YOU_URL,
   assistantCheckInLine,
+  assistantFocusNeedsScroll,
   assistantChipView,
   assistantMoreLinks,
   assistantNeedsLine,
@@ -19,6 +20,14 @@ import {
   safeTodayRoute,
   suggestedReplyDraft
 } from './personal-assistant-panel.js';
+
+test('only a focused control outside the scroll viewport needs reflow recovery', () => {
+  const viewport = { top: 100, bottom: 500 };
+  assert.equal(assistantFocusNeedsScroll(viewport, { top: 100, bottom: 500 }), false);
+  assert.equal(assistantFocusNeedsScroll(viewport, { top: 99, bottom: 140 }), true);
+  assert.equal(assistantFocusNeedsScroll(viewport, { top: 480, bottom: 524 }), true);
+  assert.equal(assistantFocusNeedsScroll(null, null), false);
+});
 
 test('suggested replies fill only an empty composer and preserve exact existing text', () => {
   const text = 'Discuss “同じ名前 🎼”';
