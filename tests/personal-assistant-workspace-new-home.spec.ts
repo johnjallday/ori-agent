@@ -159,7 +159,13 @@ test('declared new Home: explicit setup persists resulting parent and reload reu
   expect(replay.ok(), await replay.text()).toBeTruthy();
   const recovered = await (await request.get(historyURL)).json();
   expect(recovered.folder_context.offer_id).toBe(current.offerId);
-  expect(recovered.folder_reviews[current.offerId].outcome).toEqual(completed.outcome);
+  // The outcome's memory note is written by a hook that runs just after the
+  // review reports completed, so the first read may precede it. Everything that
+  // says what was set up must be identical; a note already read must not change.
+  const { note: noteBefore, ...outcomeBefore } = completed.outcome;
+  const { note: noteAfter, ...outcomeAfter } = recovered.folder_reviews[current.offerId].outcome;
+  expect(outcomeAfter).toEqual(outcomeBefore);
+  if (noteBefore !== undefined) expect(noteAfter).toBe(noteBefore);
   expect((await (await request.get('/api/workspaces')).json()).folders).toHaveLength(rows.length);
   await page.screenshot({ path: join(evidence, `${evidencePrefix}-completed.png`) });
   await writeFile(
