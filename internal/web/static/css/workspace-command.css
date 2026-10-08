@@ -1646,7 +1646,7 @@
   border-color: var(--ws-keeper-deep);
   background: linear-gradient(180deg, rgba(232, 181, 75, 0.07), transparent 68%);
 }
-.ws-cmd-panel.is-hq-stations .ws-cmd-panel-title h4 {
+.ws-cmd-panel.is-hq-stations .ws-cmd-panel-name {
   color: var(--ws-keeper);
 }
 .ws-cmd-panel.is-hq-stations .ws-cmd-rail-item .ws-cmd-rail-m {
@@ -2841,16 +2841,37 @@ button.ws-cmd-rpg-class-card:focus-visible {
   );
   box-shadow: var(--ws-glow);
 }
+/* The rail is an index: one row per section, at most one open. Closed sections
+   are flat rows that share a border; the open one keeps the card look so it
+   reads as the one thing that is open. */
 .ws-cmd-rail {
+  --ws-rail-row: 42px;
+  /* The fixed launcher sits over this column's bottom-right corner. Two pills
+     stack there on this page (Ori Help above the Personal Assistant), 154px
+     from the viewport floor and 158px on narrow screens, which is taller than
+     the one-pill default. Scoped here; the :root value is other pages'. */
+  --ori-launcher-clearance-y: 168px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  /* The rail is the last thing in its column, so without this its final row
+     or open body ends under the pills with nowhere further to scroll. */
+  padding-bottom: var(--ori-launcher-clearance-y);
 }
 
 /* rail panels */
 .ws-cmd-panel {
+  position: relative;
   border: 1px solid var(--ws-line);
-  background: linear-gradient(180deg, var(--ws-panel), #0f1014);
+  background: var(--ws-panel);
+}
+/* Neighbouring rows overlap by their border, so the list has single rules. */
+.ws-cmd-panel + .ws-cmd-panel {
+  margin-top: -1px;
+}
+.ws-cmd-panel.is-managing {
+  z-index: 1;
+  border-color: var(--ws-line-bright);
+  background: linear-gradient(180deg, #1c1f26, #0f1014);
   clip-path: polygon(
     0 0,
     calc(100% - 12px) 0,
@@ -2861,25 +2882,78 @@ button.ws-cmd-rpg-class-card:focus-visible {
   );
   box-shadow: var(--ws-glow);
 }
-.ws-cmd-panel.is-managing {
-  border-color: var(--ws-line-bright);
-  background: linear-gradient(180deg, #1c1f26, #0f1014);
+.ws-cmd-panel.is-managing:not(:first-child) {
+  margin-top: 8px;
+}
+.ws-cmd-panel.is-managing + .ws-cmd-panel {
+  margin-top: 8px;
 }
 .ws-cmd-panel-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 11px 14px;
+  min-height: var(--ws-rail-row);
+}
+.ws-cmd-panel.is-managing .ws-cmd-panel-head {
   border-bottom: 1px solid var(--ws-line);
 }
 .ws-cmd-panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  /* The row's type lives on the name and count below; reset the heading's. */
+  font: inherit;
+}
+.ws-cmd-panel-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--ws-rail-row);
   display: flex;
   align-items: center;
   gap: 9px;
+  padding: 0 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.ws-cmd-panel-title h4 {
-  margin: 0;
+/* When a row is scrolled back into view after a toggle, stop short of the
+   fixed top bar and of the viewport floor. */
+.ws-cmd-panel-toggle,
+.ws-cmd-panel-head > .ws-cmd-panel-action {
+  scroll-margin: 84px 0 16px;
+}
+/* A row with no "+" keeps its count in the same column as the rows that have one. */
+.ws-cmd-panel-head.is-toggle-only .ws-cmd-panel-toggle {
+  padding-right: 48px;
+}
+.ws-cmd-panel-toggle:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.ws-cmd-panel-toggle:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: -2px;
+}
+.ws-cmd-panel-chevron {
+  flex: 0 0 auto;
+  width: 10px;
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-panel-toggle[aria-expanded="true"] .ws-cmd-panel-chevron {
+  transform: rotate(90deg);
+  color: var(--ws-faction);
+}
+.ws-cmd-panel-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 2px;
@@ -2887,40 +2961,53 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: #e3e6ea;
 }
 .ws-cmd-panel-count {
+  flex: 0 0 auto;
   font-family: var(--ws-font-mono);
   font-size: 10px;
+  color: var(--ws-ink-dim);
+}
+/* An empty section is still a row and still works; it only reads quieter.
+   Dimmed with the ink tokens rather than opacity, so the text keeps a
+   readable contrast in both themes. */
+.ws-cmd-panel.is-empty:not(.is-managing) .ws-cmd-panel-name {
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-panel.is-empty:not(.is-managing) .ws-cmd-panel-count {
   color: var(--ws-ink-faint);
 }
-.ws-cmd-panel-tools {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.ws-cmd-panel-head > .ws-cmd-panel-action {
   flex: 0 0 auto;
-}
-.ws-cmd-panel-more {
-  width: 26px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--ws-line-bright);
-  background: var(--ws-bg-2);
-  color: var(--ws-ink-dim);
-  cursor: pointer;
-  transition: 0.15s;
-}
-.ws-cmd-panel-more:hover {
-  color: var(--ws-faction);
-  border-color: var(--ws-faction-deep);
-}
-.ws-cmd-panel-more:focus-visible {
-  outline: 2px solid var(--ws-faction);
-  outline-offset: 2px;
+  margin-right: 10px;
 }
 .ws-cmd-panel-body {
+  max-height: 60vh;
+  overflow: auto;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+/* Systems and Detachment mount a shared surface whose host scrolls by itself. */
+.ws-cmd-systems-body,
+.ws-cmd-detachment-body {
+  max-height: none;
+  overflow: visible;
+}
+/* The full-verb action stays in view while a long body scrolls under it. */
+.ws-cmd-panel-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -8px -10px 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ws-line);
+  background: var(--ws-panel-2);
+}
+.ws-cmd-detachment-body .ws-cmd-panel-toolbar {
+  position: static;
 }
 .ws-cmd-panel-action {
   min-height: 24px;
@@ -3091,23 +3178,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font-size: 8px;
   font-weight: 800;
   text-align: center;
-}
-.ws-cmd-rail-more {
-  margin-top: 4px;
-  padding: 7px;
-  border: 1px dashed var(--ws-line-bright);
-  background: none;
-  color: var(--ws-ink-dim);
-  cursor: pointer;
-  font-family: var(--ws-font-mono);
-  font-size: 10px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  transition: 0.13s;
-}
-.ws-cmd-rail-more:hover {
-  color: var(--ws-faction);
-  border-color: var(--ws-faction-deep);
 }
 .ws-cmd-rail-item.is-missing .ws-cmd-rail-t {
   color: var(--ws-alert);
@@ -6016,7 +6086,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
 [data-bs-theme="light"] .ws-cmd-title h2,
 [data-bs-theme="light"] .ws-cmd-stat .ws-v,
 [data-bs-theme="light"] .ws-cmd-mission-title,
-[data-bs-theme="light"] .ws-cmd-panel-title h4,
+[data-bs-theme="light"] .ws-cmd-panel-name,
 [data-bs-theme="light"] .ws-cmd-rail-t,
 [data-bs-theme="light"] .ws-cmd-unit-name,
 [data-bs-theme="light"] .ws-cmd-roster-name,
@@ -6345,13 +6415,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
   .ws-cmd-title h2 {
     font-size: 20px;
   }
-  .ws-cmd-panel-head {
-    align-items: flex-start;
-  }
-  .ws-cmd-panel-tools {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
   .ws-cmd-readout .ws-cmd-stat {
     flex: 1 1 calc(50% - 10px);
   }
@@ -6401,6 +6464,20 @@ button.ws-cmd-rpg-class-card:focus-visible {
 @media (prefers-reduced-motion: no-preference) {
   .ws-cmd-topbar {
     animation: ws-cmd-rise 0.35s ease both;
+  }
+  /* Details is rebuilt on every render. Once it has arrived, a rebuild (a rail
+     row toggling, data refreshing) is not an entrance and must not fade the
+     view in again. Map mode keeps its own behaviour. */
+  .ws-cmd.is-settled .ws-cmd-topbar,
+  .ws-cmd.is-settled .ws-cmd-mission,
+  .ws-cmd.is-settled .ws-cmd-garrison,
+  .ws-cmd.is-settled .ws-cmd-rail {
+    animation: none;
+  }
+  /* Hover only. The chevron has no transition: the rail is rebuilt on every
+     render, so an opened row arrives already rotated. */
+  .ws-cmd-panel-toggle {
+    transition: background-color 0.13s ease;
   }
   .ws-cmd-mission,
   .ws-cmd-garrison,
@@ -6782,6 +6859,10 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-panel-sync.is-warning {
   color: var(--ws-input);
   border-color: var(--ws-input);
+}
+/* Inside the rail's Backlog body the badge sits in the body's own padding. */
+.ws-cmd-panel-body .ws-cmd-panel-sync {
+  margin: 8px 4px 4px;
 }
 
 .ws-cmd-backlog-descendants {

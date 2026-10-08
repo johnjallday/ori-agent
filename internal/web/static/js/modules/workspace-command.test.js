@@ -240,16 +240,18 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /data-cmd-edit-identity="tags"/);
   assert.match(container.innerHTML, /<div class="ws-l">Open Tasks<\/div>/);
   assert.match(container.innerHTML, /<div class="ws-l">Tools<\/div>/);
-  assert.match(container.innerHTML, />Notes<\/h4>/);
-  assert.match(container.innerHTML, />Schedules<\/h4>/);
-  assert.match(container.innerHTML, />Sessions<\/h4>/);
-  assert.match(container.innerHTML, />Linked Folders<\/h4>/);
-  assert.match(container.innerHTML, />Files<\/h4>/);
-  assert.match(container.innerHTML, />Systems<\/h4>/);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-notes">Notes</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-schedules">Schedules</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-sessions">Sessions</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-folders">Linked Folders</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-files">Files</);
+  assert.match(container.innerHTML, /id="ws-cmd-rail-title-systems">Systems</);
   assert.match(container.innerHTML, /data-cmd-primary-section="notes"/);
   assert.match(container.innerHTML, /data-cmd-primary-section="folders"/);
   assert.match(container.innerHTML, /data-cmd-primary-section="files"/);
-  assert.match(container.innerHTML, /data-cmd-primary-section="systems"/);
+  // Systems has nothing to create, so its row is the toggle alone.
+  assert.match(container.innerHTML, /data-cmd-manage-section="systems"/);
+  assert.doesNotMatch(container.innerHTML, /data-cmd-primary-section="systems"/);
   assert.doesNotMatch(container.innerHTML, /No notes yet\./);
   assert.doesNotMatch(container.innerHTML, /No schedules yet\./);
   assert.doesNotMatch(container.innerHTML, /No sessions yet\./);
@@ -258,7 +260,7 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, />Model<\/span>/);
   assert.match(container.innerHTML, /Tasks · 1/);
   assert.match(container.innerHTML, /title="Run"/);
-  assert.match(container.innerHTML, /Manage Notes in Command view/);
+  assert.match(container.innerHTML, /data-cmd-manage-section="notes" aria-expanded="false"/);
   // "Open Tasks" is now the deliberate exception: the summary stat chip's
   // label was unified with Map/Cards (see workspace-hub-ui-ux task 5.2). It
   // reflects the filtered open-task count specifically — the modal title and
@@ -533,7 +535,7 @@ test('agent model modal layers above the Operations Map Unit Sheet', () => {
 test('command rail renders project_path fallback when no directories are loaded', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
-    activeRailSection: '',
+    activeRailSection: 'folders',
     page: {
       notes: [],
       schedules: [],
@@ -576,13 +578,10 @@ test('project-entry actions render only on the Project Folder row with badge and
   });
   try {
     const html = commandView
-      .folderRailItems(
-        [
-          { id: 'dir-project', name: 'Project', path: '/tmp/project' },
-          { id: 'dir-ref', name: 'Reference', path: '/tmp/reference' }
-        ],
-        true
-      )
+      .folderRailItems([
+        { id: 'dir-project', name: 'Project', path: '/tmp/project' },
+        { id: 'dir-ref', name: 'Reference', path: '/tmp/reference' }
+      ])
       .join('');
     assert.match(html, /ws-cmd-project-entry-row/);
     assert.match(html, /data-cmd-project-action="plugin:demo:tidy:project"/);
@@ -597,7 +596,7 @@ test('project-entry actions render only on the Project Folder row with badge and
       disabledReason: 'Live setup is required.'
     };
     const disabled = commandView
-      .folderRailItems([{ id: 'dir-project', name: 'Project', path: '/tmp/project' }], true)
+      .folderRailItems([{ id: 'dir-project', name: 'Project', path: '/tmp/project' }])
       .join('');
     assert.match(disabled, /data-cmd-project-action=.* disabled aria-disabled="true"/);
     assert.match(disabled, /title="Live setup is required\."/);
@@ -610,7 +609,7 @@ test('project-entry actions render only on the Project Folder row with badge and
 test('command rail badges project and reference directory roles', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
-    activeRailSection: '',
+    activeRailSection: 'folders',
     page: {
       notes: [],
       schedules: [],
@@ -770,10 +769,11 @@ test('detachment rail panel renders only for group workspaces with member count'
 
   const html = commandView.renderRail();
 
-  assert.match(html, />Detachment<\/h4>/);
+  assert.match(html, /id="ws-cmd-rail-title-members">Detachment</);
   assert.match(html, /ws-cmd-panel-count">2</);
   assert.match(html, /data-cmd-members-host/);
-  assert.match(html, /data-cmd-primary-section="members"/);
+  assert.match(html, /data-cmd-primary-section="members" aria-label="Add member"/);
+  assert.match(html, /data-cmd-section-verb="members">Add Member</);
 });
 
 test('notes panel exposes tag filter host, multi-select toolbar, and per-note checkboxes when managing', () => {
@@ -791,7 +791,7 @@ test('notes panel exposes tag filter host, multi-select toolbar, and per-note ch
     }
   });
 
-  const html = commandView.renderNotesPanel(commandView.page.notes, true);
+  const html = commandView.renderNotesPanel();
 
   assert.match(html, /data-cmd-note-filter/);
   assert.match(html, /data-cmd-note-action="select-all"/);
@@ -803,7 +803,7 @@ test('notes panel exposes tag filter host, multi-select toolbar, and per-note ch
   assert.doesNotMatch(html, /data-cmd-note-select="n2" checked/);
 });
 
-test('collapsed notes panel stays checkbox-free', () => {
+test('closed notes panel is a row with no body: no notes, checkboxes or bulk tools', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     activeRailSection: '',
@@ -811,7 +811,10 @@ test('collapsed notes panel stays checkbox-free', () => {
     page: { notes: [{ id: 'n1', name: 'Alpha' }] }
   });
 
-  const html = commandView.renderNotesPanel(commandView.page.notes, false);
+  const html = commandView.renderNotesPanel();
+  assert.match(html, /ws-cmd-panel-count">1</);
+  assert.doesNotMatch(html, /ws-cmd-panel-body/);
+  assert.doesNotMatch(html, /Alpha/);
   assert.doesNotMatch(html, /data-cmd-note-select/);
   assert.doesNotMatch(html, /data-cmd-note-action/);
 });
@@ -942,14 +945,14 @@ test('detachment rail panel is absent for non-group workspaces', () => {
   assert.doesNotMatch(html, /Detachment/);
 });
 
-test('empty rail panels collapse to the header but keep primary actions', () => {
+test('closed rail rows keep their "+" and render no body, empty or not', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     activeRailSection: '',
     page: {
       notes: [],
       schedules: [],
-      sessions: [],
+      sessions: [{ id: 'session-1', title: 'Kickoff' }],
       directories: [],
       workspace: {}
     }
@@ -957,15 +960,23 @@ test('empty rail panels collapse to the header but keep primary actions', () => 
 
   const html = commandView.renderRail();
 
-  assert.match(html, /data-cmd-primary-section="notes"/);
-  assert.match(html, /data-cmd-primary-section="schedules"/);
-  assert.match(html, /data-cmd-primary-section="sessions"/);
-  assert.match(html, /data-cmd-primary-section="folders"/);
+  assert.match(html, /data-cmd-primary-section="notes" aria-label="New note" title="New note"/);
+  assert.match(html, /data-cmd-primary-section="schedules" aria-label="New schedule"/);
+  assert.match(html, /data-cmd-primary-section="sessions" aria-label="New session"/);
+  assert.match(html, /data-cmd-primary-section="folders" aria-label="Link folder"/);
+  assert.match(html, /data-cmd-primary-section="files" aria-label="Upload file"/);
+  // No previews and no empty-state text while closed: a body exists only when open.
+  assert.doesNotMatch(html, /ws-cmd-panel-body/);
   assert.doesNotMatch(html, /No notes yet\./);
+  assert.doesNotMatch(html, /Kickoff/);
+  // Empty rows are dimmed, not hidden; a section with content is not.
+  assert.match(html, /<section class="ws-cmd-panel ws-cmd-notes-panel is-empty">/);
+  assert.match(html, /<section class="ws-cmd-panel">.*id="ws-cmd-rail-title-sessions"/);
 
   commandView.activeRailSection = 'notes';
   const managingHtml = commandView.renderRail();
   assert.match(managingHtml, /No notes yet\./);
+  assert.equal((managingHtml.match(/class="ws-cmd-panel-body/g) || []).length, 1);
 });
 
 test('files rail panel lists workspace files and exposes upload, browse, and drop target', () => {
@@ -992,14 +1003,24 @@ test('files rail panel lists workspace files and exposes upload, browse, and dro
 
   const html = commandView.renderRail();
 
-  assert.match(html, />Files<\/h4>/);
+  assert.match(html, /<section class="ws-cmd-panel ws-cmd-files-panel is-managing">/);
+  assert.match(html, /data-cmd-manage-section="files" aria-expanded="true"/);
   assert.match(html, /Launch Plan\.pdf/);
   assert.match(html, /4096 B/);
   assert.match(html, /docs\/Launch Plan\.pdf/);
   assert.match(html, /data-cmd-file-drop/);
   assert.match(html, /Browse workspace files/);
   assert.match(html, /data-cmd-primary-section="files"/);
+  assert.match(html, /data-cmd-section-verb="files">Upload</);
   assert.match(html, /data-cmd-open-section="files" data-cmd-item-id="file-1"/);
+
+  // Closed, none of it is in the DOM: the drop zone and browse live in the body.
+  commandView.activeRailSection = '';
+  const closed = commandView.renderRail();
+  assert.match(closed, /data-cmd-manage-section="files" aria-expanded="false"/);
+  assert.doesNotMatch(closed, /data-cmd-file-drop/);
+  assert.doesNotMatch(closed, /Browse workspace files/);
+  assert.doesNotMatch(closed, /Launch Plan\.pdf/);
 });
 
 test('files rail actions delegate to existing file modal and upload paths', async () => {
@@ -1070,12 +1091,14 @@ test('files drop handler owns Command drop zones without duplicate page fallback
 test('systems rail panel renders Command-native tabs and a shared host', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
+    activeRailSection: 'systems',
     activeSystemTab: 'memory'
   });
 
-  const html = commandView.renderSystemsPanel(true);
+  const html = commandView.renderSystemsPanel();
 
-  assert.match(html, />Systems<\/h4>/);
+  // The wide layout keys off is-managing on this section.
+  assert.match(html, /<section class="ws-cmd-panel ws-cmd-systems-panel is-managing">/);
   // Systems keeps only workspace state/automation now.
   assert.match(html, /data-cmd-system-tab="memory" aria-selected="true"/);
   assert.match(html, /data-cmd-system-tab="triggers"/);
@@ -1382,15 +1405,19 @@ test('rail more toggles command-local management without leaving Command view', 
   assert.equal(commandView.detailedView.hidden, true);
 });
 
-test('rail primary actions use command-view management hooks', () => {
+test('a row "+" opens its section, then runs the section action', () => {
   const railRoot = makeListenerRoot();
   const calls = [];
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
+    activeRailSection: '',
     container: {
       querySelector(selector) {
         return selector === '.ws-cmd-rail' ? railRoot : null;
       }
+    },
+    render() {
+      calls.push('open:' + this.activeRailSection);
     },
     page: {
       showNoteModal() {
@@ -1416,7 +1443,114 @@ test('rail primary actions use command-view management hooks', () => {
     });
   });
 
-  assert.deepEqual(calls, ['new-note', 'open-schedules', 'new-session', 'link-folder']);
+  // Opened first, so what the action adds lands in a body that is on screen.
+  assert.deepEqual(calls, [
+    'open:notes',
+    'new-note',
+    'open:schedules',
+    'open-schedules',
+    'open:sessions',
+    'new-session',
+    'open:folders',
+    'link-folder'
+  ]);
+
+  // Already open: the action runs without a second render.
+  calls.length = 0;
+  railRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-primary-section': 'folders' })
+  });
+  assert.deepEqual(calls, ['link-folder']);
+  assert.equal(commandView.activeRailSection, 'folders');
+});
+
+test('a body verb runs the section action and leaves the open section alone', () => {
+  const railRoot = makeListenerRoot();
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: 'notes',
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-rail' ? railRoot : null;
+      }
+    },
+    render() {
+      calls.push('render');
+    },
+    page: {
+      showNoteModal() {
+        calls.push('new-note');
+      },
+      showFileModal() {
+        calls.push('upload');
+      }
+    }
+  });
+
+  commandView.bindRail();
+
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-section-verb': 'notes' }) });
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-section-verb': 'files' }) });
+
+  assert.deepEqual(calls, ['new-note', 'upload']);
+  assert.equal(commandView.activeRailSection, 'notes');
+});
+
+test('the Backlog "+" goes to the Tickets create form without opening the Backlog row', () => {
+  const railRoot = makeListenerRoot();
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-rail' ? railRoot : null;
+      }
+    },
+    render() {
+      calls.push('render');
+    },
+    openBacklogDrawer(_trigger, options) {
+      calls.push(['capture', options]);
+    }
+  });
+
+  commandView.bindRail();
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-backlog-add': '1' }) });
+
+  assert.deepEqual(calls, [['capture', { openCapture: true }]]);
+  assert.equal(commandView.activeRailSection, '');
+});
+
+test('toggling a rail row puts focus back on the re-rendered toggle', () => {
+  const focused = [];
+  const railRoot = makeListenerRoot();
+  railRoot.querySelector = selector => ({
+    focus() {
+      focused.push(selector);
+    }
+  });
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    activeRailSection: '',
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-rail' ? railRoot : null;
+      }
+    },
+    render() {},
+    page: { showNoteModal() {} }
+  });
+
+  commandView.bindRail();
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-manage-section': 'files' }) });
+  railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-primary-section': 'notes' }) });
+
+  assert.deepEqual(focused, [
+    '[data-cmd-manage-section="files"]',
+    '[data-cmd-primary-section="notes"]'
+  ]);
 });
 
 test('rail item actions open existing management flows from Command view', () => {
@@ -4424,6 +4558,7 @@ test('only the designated Personal HQ has a Daily Brief station', () => {
   try {
     const hq = makeHQCommandView({ id: 'hq-1' });
     assert.ok(hq.mapStationRegistry().some(station => station.key === 'daily-brief'));
+    hq.activeRailSection = 'stations';
     assert.match(hq.renderStationsRailPanel(), /data-cmd-hq-station="daily-brief"/);
 
     const plain = makeHQCommandView({ id: 'ws-1', designation: '' });
@@ -5001,14 +5136,25 @@ test('renderStationsRailPanel renders one row per station only for HQ payloads',
       openFollowupCount: 0,
       error: ''
     };
+    // Closed, Stations is a row like any other: a toggle with the count, no
+    // "+" (nothing to create), and no station rows in the DOM.
+    const closed = hq.renderStationsRailPanel();
+    assert.match(closed, /<section class="ws-cmd-panel is-hq-stations">/);
+    assert.match(closed, /data-cmd-manage-section="stations" aria-expanded="false"/);
+    assert.match(closed, /id="ws-cmd-rail-title-stations">Stations</);
+    assert.doesNotMatch(closed, /data-cmd-hq-station/);
+    assert.doesNotMatch(closed, /ws-cmd-panel-action/);
+
+    hq.activeRailSection = 'stations';
     const panel = hq.renderStationsRailPanel();
-    assert.match(panel, /<h4>Stations<\/h4>/);
+    assert.match(panel, /data-cmd-manage-section="stations" aria-expanded="true"/);
     assert.match(panel, /data-cmd-hq-station="watchtower"/);
     assert.match(panel, /data-cmd-hq-station="email"/);
     // State meta reuses the same state fn as the map structure.
     assert.match(panel, /ws-cmd-rail-m">Set up Email Ops</);
-    // The primary action runs the first station's action and reflects its state.
-    assert.match(panel, /ws-cmd-panel-action" data-cmd-hq-station="watchtower">Scanning…</);
+    // One control per station: the old header button that duplicated the
+    // first station's row is gone.
+    assert.equal((panel.match(/data-cmd-hq-station="watchtower"/g) || []).length, 1);
 
     // Non-HQ workspaces render nothing (FR16).
     const plain = Object.create(WorkspaceCommandView.prototype);

@@ -133,6 +133,17 @@ function calendarOpsMeetingTimeLabel(evt) {
 // becomes a drag rather than a click (FR9).
 const STATION_DRAG_THRESHOLD_PX = 5;
 
+// The rail controls whose focus is carried across a re-render, each found
+// again by this one attribute: row toggles, row "+" buttons, body verbs,
+// Systems tabs and station rows.
+const RAIL_FOCUS_ATTRIBUTES = [
+  'data-cmd-manage-section',
+  'data-cmd-primary-section',
+  'data-cmd-section-verb',
+  'data-cmd-system-tab',
+  'data-cmd-hq-station'
+];
+
 export class WorkspaceCommandView {
   /**
    * @param {object} page - the live WorkspaceDetailPage instance (window.workspaceDetail).
@@ -1216,8 +1227,17 @@ export class WorkspaceCommandView {
       return;
     }
     if (!this.activeRailSection) return;
+    const closed = this.activeRailSection;
+    // Escape is page-wide. Only when the keyboard was inside the rail does
+    // focus belong on the row that just closed; otherwise leave it alone.
+    const rail = this.container && this.container.querySelector('.ws-cmd-rail');
+    const focused = typeof document === 'undefined' ? null : document.activeElement;
+    const focusWasInRail = Boolean(
+      rail && focused && typeof rail.contains === 'function' && rail.contains(focused)
+    );
     this.activeRailSection = '';
     this.render();
+    if (focusWasInRail) this.focusRailControl('data-cmd-manage-section', closed);
   }
 
   computeStats() {
@@ -1966,6 +1986,7 @@ export class WorkspaceCommandView {
     if (this._detachmentDragActive) return;
     this.rememberCapabilityInspectorFocus();
     this.rememberLoadoutAddFocus();
+    this.rememberRailFocus();
     this.captureAgentDeckViewState();
     this.captureDailyBriefPanelView();
     if (this.commandTagInput) {
@@ -2011,6 +2032,17 @@ export class WorkspaceCommandView {
             '</aside>' +
             '</div>';
 
+    // The entrance fade belongs to arriving in Details, not to each rebuild of
+    // it. This container is replaced on every render, so without the marker a
+    // rail row toggling (or data refreshing) would fade the whole view in again.
+    if (this.container.classList) {
+      this.container.classList.toggle(
+        'is-settled',
+        this.viewMode === 'details' && this._settledViewMode === 'details'
+      );
+    }
+    this._settledViewMode = this.viewMode;
+
     this.container.innerHTML =
       this.commandBarHTML(ws, name, mode, stats) +
       body +
@@ -2046,6 +2078,7 @@ export class WorkspaceCommandView {
     this.restoreAgentDeckViewState();
     this.restoreCapabilityInspectorFocus();
     this.restoreLoadoutAddFocus();
+    this.restoreRailFocus();
     this.hydrateActiveAgentPrompt();
     // The Workshop host only exists once the Toolbox tab has rendered, so it is
     // mounted here rather than at page load. Idempotent per instance.
@@ -3319,6 +3352,67 @@ export class WorkspaceCommandView {
     if (!section) return;
     this.activeRailSection = this.activeRailSection === section ? '' : section;
     this.render();
+  }
+
+  // render() rebuilds the rail with innerHTML, which drops focus. Put it back
+  // on the control that was just used, re-queried because the node is new.
+  // Unless told otherwise the control is also brought back into view: closing
+  // a tall section above the clicked row can move it off screen. That is done
+  // with scrollIntoView rather than left to focus(), so the row's
+  // scroll-margin keeps it clear of the fixed top bar.
+  focusRailControl(attribute, value, { preventScroll = false } = {}) {
+    const rail = this.container && this.container.querySelector('.ws-cmd-rail');
+    if (!rail || typeof rail.querySelector !== 'function') return null;
+    const quoted = String(value || '').replace(/["\\]/g, '\\$&');
+    const control = rail.querySelector('[' + attribute + '="' + quoted + '"]');
+    if (!control || typeof control.focus !== 'function') return control || null;
+    control.focus({ preventScroll: true });
+    if (!preventScroll && typeof control.scrollIntoView === 'function') {
+      control.scrollIntoView({ block: 'nearest' });
+    }
+    return control;
+  }
+
+  // Which rail control has focus, held as an attribute and value that survive
+  // the rebuild. Not every render() follows a click here: a station's status
+  // arriving or a data refresh rebuilds the rail too, and would otherwise take
+  // a keyboard user's place with it.
+  rememberRailFocus() {
+    this._railFocus = null;
+    if (typeof document === 'undefined') return;
+    const active = document.activeElement;
+    const rail = this.container && this.container.querySelector('.ws-cmd-rail');
+    if (!active || !rail || typeof rail.contains !== 'function' || !rail.contains(active)) return;
+    for (const attribute of RAIL_FOCUS_ATTRIBUTES) {
+      const value = active.getAttribute(attribute);
+      if (value) {
+        this._railFocus = { attribute, value };
+        return;
+      }
+    }
+  }
+
+  // Nothing here was asked to move, so the page must not scroll to it.
+  restoreRailFocus() {
+    const focus = this._railFocus;
+    this._railFocus = null;
+    if (focus) this.focusRailControl(focus.attribute, focus.value, { preventScroll: true });
+  }
+
+  // A row "+" opens its section before acting, so whatever the action adds (a
+  // note, an uploaded file) lands in a body that is on screen. The action is
+  // handed the re-rendered button: a modal that returns focus to its trigger
+  // must not be given a node that render() just detached.
+  runRailRowAction(sectionKey, triggerButton) {
+    const section = String(sectionKey || '').trim();
+    if (!section) return;
+    let trigger = triggerButton;
+    if (this.activeRailSection !== section) {
+      this.activeRailSection = section;
+      this.render();
+      trigger = this.focusRailControl('data-cmd-primary-section', section) || triggerButton;
+    }
+    this.runRailPrimaryAction(section, trigger);
   }
 
   handleNoteAction(action) {
@@ -5419,67 +5513,55 @@ export class WorkspaceCommandView {
   }
 
   renderBacklogPanel() {
-    const page = this.page || {};
-    const items = this.backlogItems();
-    const count = items.length;
-    const preview = items.slice(0, 5);
-    const sync = this.backlogSync();
-    // Distinct loading/error/empty states (FR38): none of these implies
-    // Tasks is empty — they describe the Backlog panel's own fetch state.
-    let body;
-    if (page.backlogLoading && !count) {
-      body = '<div class="ws-cmd-rail-empty">Loading backlog…</div>';
-    } else if (page.backlogLoadFailed) {
-      body =
-        '<div class="ws-cmd-rail-empty is-error">Couldn’t load the backlog. Try again shortly.</div>';
-    } else if (count) {
-      const rows = preview.map(item => {
-        const task = (item && item.task) || item || {};
-        const id = String(task.id || '');
-        const title = String(task.description || 'Untitled idea');
-        return (
-          '<button type="button" class="ws-cmd-rail-item" data-cmd-open-backlog-drawer data-cmd-backlog-select="' +
-          escapeHtml(id) +
-          '"><span class="ws-cmd-rail-t">' +
-          escapeHtml(title) +
-          '</span></button>'
-        );
-      });
-      body =
-        rows.join('') +
-        (count > preview.length
-          ? '<button type="button" class="ws-cmd-rail-more" data-cmd-open-backlog-drawer>+ ' +
-            (count - preview.length) +
-            ' more</button>'
-          : '');
-    } else {
-      body =
-        '<div class="ws-cmd-rail-empty">Nothing saved for later. Add an idea without committing it to an agent.</div>';
-    }
-    return (
-      '<section class="ws-cmd-panel ws-cmd-panel-backlog' +
-      (count ? '' : ' is-empty') +
-      '">' +
-      '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Backlog</h4><span class="ws-cmd-panel-count">' +
-      count +
-      '</span></div>' +
-      '<div class="ws-cmd-panel-tools">' +
-      '<button type="button" class="ws-cmd-panel-action is-icon-only" data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">+</button>' +
+    return this.railPanelHTML({
+      key: 'backlog',
+      title: 'Backlog',
+      count: this.backlogItems().length,
+      className: 'ws-cmd-panel-backlog',
+      // The "+" goes straight to the Tickets create form; it does not open
+      // this row (see bindRail).
+      add: { label: 'Add to Backlog', attr: 'data-cmd-backlog-add' },
       // Shortcut into the canonical destination, filtered to Backlog
       // (tasks/prd-workspace-ticket-management.md FR-65, FR-80, FR-81).
       // This panel is a COUNT and a way in; the Tickets destination is where
       // backlog work is actually managed. Two editable backlog surfaces is
       // how the Backlog and Task views drifted apart in the first place.
-      '<button type="button" class="ws-cmd-panel-action is-icon-only" data-cmd-open-tickets="backlog" aria-label="View backlog in Tickets" title="View backlog in Tickets">◉</button>' +
-      '<button type="button" class="ws-cmd-panel-more" data-cmd-open-backlog-drawer aria-label="Open Backlog" title="Open Backlog">▸</button>' +
-      '</div></div>' +
-      '<div class="ws-cmd-panel-body">' +
-      body +
-      '</div>' +
-      this.backlogSyncBadgeHTML(sync) +
-      '</section>'
-    );
+      verb: { label: 'View in Tickets', attr: 'data-cmd-open-tickets="backlog"' },
+      body: () => this.backlogPanelBodyHTML()
+    });
+  }
+
+  backlogPanelBodyHTML() {
+    const page = this.page || {};
+    const items = this.backlogItems();
+    // Distinct loading/error/empty states (FR38): none of these implies
+    // Tasks is empty — they describe the Backlog panel's own fetch state.
+    let rows;
+    if (page.backlogLoading && !items.length) {
+      rows = '<div class="ws-cmd-rail-empty">Loading backlog…</div>';
+    } else if (page.backlogLoadFailed) {
+      rows =
+        '<div class="ws-cmd-rail-empty is-error">Couldn’t load the backlog. Try again shortly.</div>';
+    } else if (items.length) {
+      rows = items
+        .map(item => {
+          const task = (item && item.task) || item || {};
+          const id = String(task.id || '');
+          const title = String(task.description || 'Untitled idea');
+          return (
+            '<button type="button" class="ws-cmd-rail-item" data-cmd-open-backlog-drawer data-cmd-backlog-select="' +
+            escapeHtml(id) +
+            '"><span class="ws-cmd-rail-t">' +
+            escapeHtml(title) +
+            '</span></button>'
+          );
+        })
+        .join('');
+    } else {
+      rows =
+        '<div class="ws-cmd-rail-empty">Nothing saved for later. Add an idea without committing it to an agent.</div>';
+    }
+    return rows + this.backlogSyncBadgeHTML(this.backlogSync());
   }
 
   backlogSyncBadgeHTML(sync) {
@@ -7581,52 +7663,37 @@ export class WorkspaceCommandView {
 
   // HQ-gated "Stations" rail panel for Details mode (FR14): one row per
   // registry entry (label + live state meta from the same state fn as the map
-  // structure), plus a primary action that runs the first station's action.
-  // Rows and the primary button carry data-cmd-hq-station so the rail click
-  // delegation dispatches through runHQStationAction — the same registry
-  // action() as the map surface. Non-HQ workspaces render nothing (FR16).
+  // structure). Rows carry data-cmd-hq-station so the rail click delegation
+  // dispatches through runHQStationAction — the same registry action() as the
+  // map surface. Non-HQ workspaces render nothing (FR16).
   renderStationsRailPanel() {
     const registry = this.mapStationRegistry();
     if (!registry.length) return '';
-    const first = registry[0];
-    const firstState = (first.state && first.state()) || {};
-    const rows = registry
-      .map(station => {
-        const state = (station.state && station.state()) || {};
-        return (
-          '<button type="button" class="ws-cmd-rail-item" data-cmd-hq-station="' +
-          escapeHtml(station.key) +
-          '" aria-label="' +
-          escapeHtml(station.label) +
-          ' station, ' +
-          escapeHtml(state.description || '') +
-          '"><span class="ws-cmd-rail-t">' +
-          escapeHtml(station.label) +
-          '</span><span class="ws-cmd-rail-m">' +
-          escapeHtml(state.value || '') +
-          '</span></button>'
-        );
-      })
-      .join('');
-    return (
-      '<section class="ws-cmd-panel is-hq-stations">' +
-      '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Stations</h4><span class="ws-cmd-panel-count">' +
-      registry.length +
-      '</span></div>' +
-      '<div class="ws-cmd-panel-tools">' +
-      '<button type="button" class="ws-cmd-panel-action" data-cmd-hq-station="' +
-      escapeHtml(first.key) +
-      '">' +
-      escapeHtml(firstState.value || 'Open') +
-      '</button>' +
-      '</div>' +
-      '</div>' +
-      '<div class="ws-cmd-panel-body">' +
-      rows +
-      '</div>' +
-      '</section>'
-    );
+    return this.railPanelHTML({
+      key: 'stations',
+      title: 'Stations',
+      count: registry.length,
+      className: 'is-hq-stations',
+      body: () =>
+        registry
+          .map(station => {
+            const state = (station.state && station.state()) || {};
+            return (
+              '<button type="button" class="ws-cmd-rail-item" data-cmd-hq-station="' +
+              escapeHtml(station.key) +
+              '" aria-label="' +
+              escapeHtml(station.label) +
+              ' station, ' +
+              escapeHtml(state.description || '') +
+              '"><span class="ws-cmd-rail-t">' +
+              escapeHtml(station.label) +
+              '</span><span class="ws-cmd-rail-m">' +
+              escapeHtml(state.value || '') +
+              '</span></button>'
+            );
+          })
+          .join('')
+    });
   }
 
   // --- Station drag-to-place (group 3) --------------------------------------
@@ -10672,56 +10739,113 @@ export class WorkspaceCommandView {
   }
 
   // ---------- right rail ----------
+  //
+  // The rail is an index: one row per section, and at most one section open
+  // (activeRailSection). A row is a toggle spanning the title, count and
+  // chevron, plus a "+" where the section can create something. The open
+  // section's body sits under its row and starts with the full-verb action.
+  //
+  // A closed section has no body element at all. On narrow screens the rows
+  // and the one body are laid out as grid items of the rail, and a hidden
+  // child would still take a cell there.
 
-  railPanelHTML(sectionKey, title, items, count, emptyText, primaryLabel) {
-    const isManaging = this.activeRailSection === sectionKey;
-    const hasItems = items.length > 0;
-    const shouldShowBody = hasItems || isManaging;
-    const body = hasItems
-      ? items.join('')
-      : '<div class="ws-cmd-rail-empty">' + escapeHtml(emptyText) + '</div>';
+  /**
+   * One rail section in the shared row contract.
+   *
+   * @param {object} spec
+   * @param {string} spec.key - the value of activeRailSection while open
+   * @param {string} spec.title
+   * @param {number} spec.count
+   * @param {string} [spec.className] - the section's own class; CSS and specs select on it
+   * @param {{label: string, attr?: string}} [spec.add] - the row "+"; `attr` replaces
+   *   the default data-cmd-primary-section
+   * @param {{label: string, attr?: string}} [spec.verb] - the body's full-verb action;
+   *   `attr` replaces the default data-cmd-section-verb. Never the row's
+   *   attribute: a locator that matches the row's one button must keep
+   *   matching one.
+   * @param {string} [spec.bodyClassName]
+   * @param {() => string} spec.body - called only while the section is open
+   */
+  railPanelHTML(spec) {
+    const key = escapeHtml(spec.key);
+    const open = this.activeRailSection === spec.key;
+    const count = Number(spec.count) || 0;
+    const titleId = 'ws-cmd-rail-title-' + key;
+    const bodyId = 'ws-cmd-rail-body-' + key;
+    const add = spec.add
+      ? '<button type="button" class="ws-cmd-panel-action is-icon-only" ' +
+        (spec.add.attr || 'data-cmd-primary-section="' + key + '"') +
+        ' aria-label="' +
+        escapeHtml(spec.add.label) +
+        '" title="' +
+        escapeHtml(spec.add.label) +
+        '">+</button>'
+      : '';
+    const verb = spec.verb
+      ? '<div class="ws-cmd-panel-toolbar">' +
+        '<button type="button" class="ws-cmd-panel-action" ' +
+        (spec.verb.attr || 'data-cmd-section-verb="' + key + '"') +
+        '>' +
+        escapeHtml(spec.verb.label) +
+        '</button>' +
+        '</div>'
+      : '';
     return (
       '<section class="ws-cmd-panel' +
-      (isManaging ? ' is-managing' : '') +
-      (!hasItems ? ' is-empty' : '') +
+      (spec.className ? ' ' + spec.className : '') +
+      (open ? ' is-managing' : '') +
+      (count ? '' : ' is-empty') +
       '">' +
-      '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>' +
-      escapeHtml(title) +
-      '</h4><span class="ws-cmd-panel-count">' +
-      count +
-      '</span></div>' +
-      '<div class="ws-cmd-panel-tools">' +
-      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="' +
-      escapeHtml(sectionKey) +
+      '<div class="ws-cmd-panel-head' +
+      (add ? '' : ' is-toggle-only') +
       '">' +
-      escapeHtml(primaryLabel) +
-      '</button>' +
-      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="' +
-      escapeHtml(sectionKey) +
+      // The heading wraps the button, not the other way round: a button's
+      // children lose their roles, and the section names should stay headings.
+      '<h4 class="ws-cmd-panel-title">' +
+      '<button type="button" class="ws-cmd-panel-toggle" data-cmd-manage-section="' +
+      key +
       '" aria-expanded="' +
-      (isManaging ? 'true' : 'false') +
-      '" title="' +
-      (isManaging ? 'Close Command manager' : 'Manage in Command view') +
-      '" aria-label="' +
-      (isManaging ? 'Close ' : 'Manage ') +
-      escapeHtml(title) +
-      ' in Command view">' +
-      (isManaging ? '×' : '▸') +
+      (open ? 'true' : 'false') +
+      '" aria-controls="' +
+      bodyId +
+      '">' +
+      '<span class="ws-cmd-panel-chevron" aria-hidden="true">▸</span>' +
+      '<span class="ws-cmd-panel-name" id="' +
+      titleId +
+      '">' +
+      escapeHtml(spec.title) +
+      '</span>' +
+      '<span class="ws-cmd-panel-count">' +
+      count +
+      '</span>' +
       '</button>' +
+      '</h4>' +
+      add +
       '</div>' +
-      '</div>' +
-      (shouldShowBody ? '<div class="ws-cmd-panel-body">' + body + '</div>' : '') +
+      (open
+        ? '<div class="ws-cmd-panel-body' +
+          (spec.bodyClassName ? ' ' + spec.bodyClassName : '') +
+          '" id="' +
+          bodyId +
+          '" role="region" aria-labelledby="' +
+          titleId +
+          '">' +
+          verb +
+          spec.body() +
+          '</div>'
+        : '') +
       '</section>'
     );
+  }
+
+  railEmptyHTML(text) {
+    return '<div class="ws-cmd-rail-empty">' + escapeHtml(text) + '</div>';
   }
 
   railItems(list, labelOf, opts) {
     const arr = Array.isArray(list) ? list : [];
     const attr = opts || {};
-    const limit = attr.expanded ? arr.length : 5;
-    const shown = arr.slice(0, limit);
-    const items = shown.map(it => {
+    return arr.map(it => {
       const label = escapeHtml(labelOf(it));
       const meta = attr.metaOf ? escapeHtml(attr.metaOf(it)) : '';
       const inner =
@@ -10745,16 +10869,6 @@ export class WorkspaceCommandView {
       }
       return '<div class="ws-cmd-rail-item is-static">' + inner + '</div>';
     });
-    if (arr.length > shown.length) {
-      items.push(
-        '<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="' +
-          escapeHtml(attr.sectionKey || '') +
-          '">+ ' +
-          (arr.length - shown.length) +
-          ' more</button>'
-      );
-    }
-    return items;
   }
 
   getWorkspaceProjectPath() {
@@ -10885,11 +10999,9 @@ export class WorkspaceCommandView {
     if (kind === 'setup' && typeof action.setup === 'function') void action.setup(trigger);
   }
 
-  folderRailItems(rows, expanded) {
+  folderRailItems(rows) {
     const arr = Array.isArray(rows) ? rows : [];
-    const limit = expanded ? arr.length : 5;
-    const shown = arr.slice(0, limit);
-    const items = shown.map(dir => {
+    return arr.map(dir => {
       const id = String(dir.id || '');
       const role = this.folderRole(dir);
       const name = dir.title || dir.name || dir.path || 'Unnamed Directory';
@@ -10923,14 +11035,6 @@ export class WorkspaceCommandView {
         ? '<div class="ws-cmd-project-entry-row">' + folderRow + projectActions + '</div>'
         : folderRow;
     });
-    if (arr.length > shown.length) {
-      items.push(
-        '<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="folders">+ ' +
-          (arr.length - shown.length) +
-          ' more</button>'
-      );
-    }
-    return items;
   }
 
   fileRowData() {
@@ -10969,11 +11073,9 @@ export class WorkspaceCommandView {
     return parts.join(' · ');
   }
 
-  fileRailItems(files, expanded) {
+  fileRailItems(files) {
     const arr = Array.isArray(files) ? files : [];
-    const limit = expanded ? arr.length : 5;
-    const shown = arr.slice(0, limit);
-    const items = shown.map(file => {
+    return arr.map(file => {
       const id = String(file?.id || file?.file_meta?.name || this.fileTitle(file));
       const title = this.fileTitle(file);
       const meta = this.fileMeta(file);
@@ -10991,53 +11093,22 @@ export class WorkspaceCommandView {
         '</button>'
       );
     });
-    if (arr.length > shown.length) {
-      items.push(
-        '<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="files">+ ' +
-          (arr.length - shown.length) +
-          ' more</button>'
-      );
-    }
-    return items;
   }
 
-  renderFilesPanel(files, expanded) {
-    const items = this.fileRailItems(files, expanded);
-    const count = Array.isArray(files) ? files.length : 0;
-    const bodyRows = items.length
-      ? items.join('')
-      : '<div class="ws-cmd-rail-empty">No files yet.</div>';
-    return (
-      '<section class="ws-cmd-panel ws-cmd-files-panel' +
-      (expanded ? ' is-managing' : '') +
-      (count ? '' : ' is-empty') +
-      '">' +
-      '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Files</h4><span class="ws-cmd-panel-count">' +
-      count +
-      '</span></div>' +
-      '<div class="ws-cmd-panel-tools">' +
-      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="files">Upload</button>' +
-      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="files" aria-expanded="' +
-      (expanded ? 'true' : 'false') +
-      '" title="' +
-      (expanded ? 'Close Files manager' : 'Manage Files in Command view') +
-      '" aria-label="' +
-      (expanded ? 'Close Files manager' : 'Manage Files in Command view') +
-      '">' +
-      (expanded ? '×' : '▸') +
-      '</button>' +
-      '</div>' +
-      '</div>' +
-      '<div class="ws-cmd-panel-body">' +
-      (expanded
-        ? '<button type="button" class="ws-cmd-files-drop" data-cmd-file-drop>Drop files here or click Upload</button>' +
-          '<button type="button" class="ws-cmd-files-browse" data-cmd-open-section="files" data-cmd-item-id="__workspace_files__">Browse workspace files</button>'
-        : '') +
-      bodyRows +
-      '</div>' +
-      '</section>'
-    );
+  renderFilesPanel() {
+    const files = this.fileRowData();
+    return this.railPanelHTML({
+      key: 'files',
+      title: 'Files',
+      count: files.length,
+      className: 'ws-cmd-files-panel',
+      add: { label: 'Upload file' },
+      verb: { label: 'Upload' },
+      body: () =>
+        '<button type="button" class="ws-cmd-files-drop" data-cmd-file-drop>Drop files here or click Upload</button>' +
+        '<button type="button" class="ws-cmd-files-browse" data-cmd-open-section="files" data-cmd-item-id="__workspace_files__">Browse workspace files</button>' +
+        (this.fileRailItems(files).join('') || this.railEmptyHTML('No files yet.'))
+    });
   }
 
   systemTabs() {
@@ -11129,46 +11200,33 @@ export class WorkspaceCommandView {
     return this.systemTabs().find(tab => tab.key === normalized) || this.systemTabs()[0];
   }
 
-  renderSystemsPanel(expanded) {
+  // No "+" and no body verb: there is nothing to create, and the old header
+  // "Open" only opened this section, which the row toggle now does.
+  renderSystemsPanel() {
     const tabs = this.systemTabs();
-    const active = this.systemTab(this.activeSystemTab);
-    const tabButtons = tabs
-      .map(
-        tab =>
-          '<button type="button" class="ws-cmd-system-tab' +
-          (tab.key === active.key ? ' is-active' : '') +
-          '" data-cmd-system-tab="' +
-          escapeHtml(tab.key) +
-          '" aria-selected="' +
-          (tab.key === active.key ? 'true' : 'false') +
-          '">' +
-          escapeHtml(tab.label) +
-          '</button>'
-      )
-      .join('');
-    return (
-      '<section class="ws-cmd-panel ws-cmd-systems-panel' +
-      (expanded ? ' is-managing' : '') +
-      '">' +
-      '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Systems</h4><span class="ws-cmd-panel-count">' +
-      tabs.length +
-      '</span></div>' +
-      '<div class="ws-cmd-panel-tools">' +
-      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="systems">Open</button>' +
-      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="systems" aria-expanded="' +
-      (expanded ? 'true' : 'false') +
-      '" title="' +
-      (expanded ? 'Close Systems manager' : 'Manage Systems in Command view') +
-      '" aria-label="' +
-      (expanded ? 'Close Systems manager' : 'Manage Systems in Command view') +
-      '">' +
-      (expanded ? '×' : '▸') +
-      '</button>' +
-      '</div>' +
-      '</div>' +
-      (expanded
-        ? '<div class="ws-cmd-panel-body ws-cmd-systems-body">' +
+    return this.railPanelHTML({
+      key: 'systems',
+      title: 'Systems',
+      count: tabs.length,
+      className: 'ws-cmd-systems-panel',
+      bodyClassName: 'ws-cmd-systems-body',
+      body: () => {
+        const active = this.systemTab(this.activeSystemTab);
+        const tabButtons = tabs
+          .map(
+            tab =>
+              '<button type="button" class="ws-cmd-system-tab' +
+              (tab.key === active.key ? ' is-active' : '') +
+              '" data-cmd-system-tab="' +
+              escapeHtml(tab.key) +
+              '" aria-selected="' +
+              (tab.key === active.key ? 'true' : 'false') +
+              '">' +
+              escapeHtml(tab.label) +
+              '</button>'
+          )
+          .join('');
+        return (
           '<div class="ws-cmd-system-tabs" role="tablist" aria-label="Workspace systems">' +
           tabButtons +
           '</div>' +
@@ -11176,11 +11234,10 @@ export class WorkspaceCommandView {
           '<div class="ws-cmd-rail-empty">Loading ' +
           escapeHtml(active.label) +
           '...</div>' +
-          '</div>' +
           '</div>'
-        : '') +
-      '</section>'
-    );
+        );
+      }
+    });
   }
 
   detachmentMemberCount() {
@@ -11537,40 +11594,21 @@ export class WorkspaceCommandView {
     this._detachmentDragActive = false;
   }
 
-  renderDetachmentPanel(expanded) {
+  renderDetachmentPanel() {
     if (!this.isGroupWorkspace()) return '';
-    const count = this.detachmentMemberCount();
-    return (
-      '<section class="ws-cmd-panel ws-cmd-detachment-panel' +
-      (expanded ? ' is-managing' : '') +
-      (count ? '' : ' is-empty') +
-      '">' +
-      '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Detachment</h4><span class="ws-cmd-panel-count">' +
-      count +
-      '</span></div>' +
-      '<div class="ws-cmd-panel-tools">' +
-      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="members">Add Member</button>' +
-      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="members" aria-expanded="' +
-      (expanded ? 'true' : 'false') +
-      '" title="' +
-      (expanded ? 'Close Detachment manager' : 'Manage members in Command view') +
-      '" aria-label="' +
-      (expanded ? 'Close Detachment manager' : 'Manage members in Command view') +
-      '">' +
-      (expanded ? '×' : '▸') +
-      '</button>' +
-      '</div>' +
-      '</div>' +
-      (expanded
-        ? '<div class="ws-cmd-panel-body ws-cmd-detachment-body">' +
-          '<div class="ws-cmd-members-host" data-cmd-members-host>' +
-          '<div class="ws-cmd-rail-empty">Loading detachment...</div>' +
-          '</div>' +
-          '</div>'
-        : '') +
-      '</section>'
-    );
+    return this.railPanelHTML({
+      key: 'members',
+      title: 'Detachment',
+      count: this.detachmentMemberCount(),
+      className: 'ws-cmd-detachment-panel',
+      add: { label: 'Add member' },
+      verb: { label: 'Add Member' },
+      bodyClassName: 'ws-cmd-detachment-body',
+      body: () =>
+        '<div class="ws-cmd-members-host" data-cmd-members-host>' +
+        '<div class="ws-cmd-rail-empty">Loading detachment...</div>' +
+        '</div>'
+    });
   }
 
   // ---------- notes panel (tag filter + multi-select) ----------
@@ -11597,25 +11635,27 @@ export class WorkspaceCommandView {
     return set && typeof set.has === 'function' ? set.has(String(id)) : false;
   }
 
-  noteRowsHTML(list, expanded, total) {
+  // `total` is the unfiltered count: an empty `list` with notes behind it means
+  // the tag filter hid them all, which reads differently from having none.
+  noteRowsHTML(list, total) {
     const arr = Array.isArray(list) ? list : [];
-    const limit = expanded ? arr.length : 5;
-    const shown = arr.slice(0, limit);
-    const rows = shown.map(note => {
+    if (!arr.length) {
+      return [
+        this.railEmptyHTML(total ? 'No notes match the active tag filter.' : 'No notes yet.')
+      ];
+    }
+    return arr.map(note => {
       const id = String(note.id || '');
       const label = escapeHtml(note.name || note.title || 'Untitled Note');
-      const checkbox = expanded
-        ? '<input type="checkbox" class="ws-cmd-note-check" data-cmd-note-select="' +
-          escapeHtml(id) +
-          '"' +
-          (this.isNoteSelected(id) ? ' checked' : '') +
-          ' aria-label="Select ' +
-          label +
-          '">'
-        : '';
       return (
         '<div class="ws-cmd-rail-item ws-cmd-note-row">' +
-        checkbox +
+        '<input type="checkbox" class="ws-cmd-note-check" data-cmd-note-select="' +
+        escapeHtml(id) +
+        '"' +
+        (this.isNoteSelected(id) ? ' checked' : '') +
+        ' aria-label="Select ' +
+        label +
+        '">' +
         '<button type="button" class="ws-cmd-note-open" data-cmd-open-section="notes" data-cmd-item-id="' +
         escapeHtml(id) +
         '"><span class="ws-cmd-rail-t">' +
@@ -11624,21 +11664,6 @@ export class WorkspaceCommandView {
         '</div>'
       );
     });
-    if (arr.length > shown.length) {
-      rows.push(
-        '<button type="button" class="ws-cmd-rail-more" data-cmd-manage-section="notes">+ ' +
-          (arr.length - shown.length) +
-          ' more</button>'
-      );
-    }
-    if (expanded && !arr.length) {
-      rows.push(
-        '<div class="ws-cmd-rail-empty">' +
-          (total ? 'No notes match the active tag filter.' : 'No notes yet.') +
-          '</div>'
-      );
-    }
-    return rows;
   }
 
   noteMultiSelectToolbarHTML() {
@@ -11654,44 +11679,21 @@ export class WorkspaceCommandView {
     );
   }
 
-  renderNotesPanel(notes, expanded) {
-    const all = Array.isArray(notes) ? notes : [];
-    const visible = this.visibleNotes(all);
-    const count = all.length;
-    const rows = this.noteRowsHTML(visible, expanded, count).join('');
-    const hasBody = expanded || visible.length > 0;
-    const body = expanded
-      ? '<div class="ws-cmd-note-filter" data-cmd-note-filter></div>' +
+  renderNotesPanel() {
+    const page = this.page || {};
+    const all = Array.isArray(page.notes) ? page.notes : [];
+    return this.railPanelHTML({
+      key: 'notes',
+      title: 'Notes',
+      count: all.length,
+      className: 'ws-cmd-notes-panel',
+      add: { label: 'New note' },
+      verb: { label: 'New Note' },
+      body: () =>
+        '<div class="ws-cmd-note-filter" data-cmd-note-filter></div>' +
         this.noteMultiSelectToolbarHTML() +
-        rows
-      : visible.length
-        ? rows
-        : '<div class="ws-cmd-rail-empty">No notes yet.</div>';
-    return (
-      '<section class="ws-cmd-panel ws-cmd-notes-panel' +
-      (expanded ? ' is-managing' : '') +
-      (count ? '' : ' is-empty') +
-      '">' +
-      '<div class="ws-cmd-panel-head">' +
-      '<div class="ws-cmd-panel-title"><h4>Notes</h4><span class="ws-cmd-panel-count">' +
-      count +
-      '</span></div>' +
-      '<div class="ws-cmd-panel-tools">' +
-      '<button type="button" class="ws-cmd-panel-action" data-cmd-primary-section="notes">New Note</button>' +
-      '<button type="button" class="ws-cmd-panel-more" data-cmd-manage-section="notes" aria-expanded="' +
-      (expanded ? 'true' : 'false') +
-      '" title="' +
-      (expanded ? 'Close Notes manager' : 'Manage Notes in Command view') +
-      '" aria-label="' +
-      (expanded ? 'Close Notes manager' : 'Manage Notes in Command view') +
-      '">' +
-      (expanded ? '×' : '▸') +
-      '</button>' +
-      '</div>' +
-      '</div>' +
-      (hasBody ? '<div class="ws-cmd-panel-body">' + body + '</div>' : '') +
-      '</section>'
-    );
+        this.noteRowsHTML(this.visibleNotes(all), all.length).join('')
+    });
   }
 
   ensureNoteFilterBar() {
@@ -11728,75 +11730,70 @@ export class WorkspaceCommandView {
     host.appendChild(bar.element);
   }
 
-  renderRail() {
+  renderSchedulesPanel() {
     const page = this.page || {};
-    const notes = Array.isArray(page.notes) ? page.notes : [];
     const schedules = Array.isArray(page.schedules) ? page.schedules : [];
-    const sessions = Array.isArray(page.sessions) ? page.sessions : [];
-    const dirs = this.folderRowData();
-    const files = this.fileRowData();
-
-    const notesExpanded = this.activeRailSection === 'notes';
-    const schedulesExpanded = this.activeRailSection === 'schedules';
-    const sessionsExpanded = this.activeRailSection === 'sessions';
-    const foldersExpanded = this.activeRailSection === 'folders';
-    const filesExpanded = this.activeRailSection === 'files';
-    const systemsExpanded = this.activeRailSection === 'systems';
-    const detachmentExpanded = this.activeRailSection === 'members';
-
-    const scheduleItems = this.railItems(
-      schedules,
-      s => s.name || s.task_description || 'Unnamed Schedule',
-      {
-        sectionKey: 'schedules',
-        expanded: schedulesExpanded,
-        action: s =>
-          'data-cmd-open-section="schedules" data-cmd-item-id="' +
-          escapeHtml(String(s.id || '')) +
-          '"'
-      }
-    );
-    const sessionItems = this.railItems(sessions, s => s.title || s.name || 'Untitled Session', {
-      sectionKey: 'sessions',
-      expanded: sessionsExpanded,
-      action: s =>
-        'data-cmd-open-section="sessions" data-cmd-item-id="' +
-        escapeHtml(String(s.id || '')) +
-        '"',
-      metaOf: s => s.agent_name || ''
+    return this.railPanelHTML({
+      key: 'schedules',
+      title: 'Schedules',
+      count: schedules.length,
+      add: { label: 'New schedule' },
+      verb: { label: 'Open Schedules' },
+      body: () =>
+        this.railItems(schedules, s => s.name || s.task_description || 'Unnamed Schedule', {
+          action: s =>
+            'data-cmd-open-section="schedules" data-cmd-item-id="' +
+            escapeHtml(String(s.id || '')) +
+            '"'
+        }).join('') || this.railEmptyHTML('No schedules yet.')
     });
-    const folderItems = this.folderRailItems(dirs, foldersExpanded);
+  }
 
+  renderSessionsPanel() {
+    const page = this.page || {};
+    const sessions = Array.isArray(page.sessions) ? page.sessions : [];
+    return this.railPanelHTML({
+      key: 'sessions',
+      title: 'Sessions',
+      count: sessions.length,
+      add: { label: 'New session' },
+      verb: { label: 'New Session' },
+      body: () =>
+        this.railItems(sessions, s => s.title || s.name || 'Untitled Session', {
+          action: s =>
+            'data-cmd-open-section="sessions" data-cmd-item-id="' +
+            escapeHtml(String(s.id || '')) +
+            '"',
+          metaOf: s => s.agent_name || ''
+        }).join('') || this.railEmptyHTML('No sessions yet.')
+    });
+  }
+
+  renderFoldersPanel() {
+    const dirs = this.folderRowData();
+    return this.railPanelHTML({
+      key: 'folders',
+      title: 'Linked Folders',
+      count: dirs.length,
+      add: { label: 'Link folder' },
+      verb: { label: 'Link Folder' },
+      body: () =>
+        this.folderRailItems(dirs).join('') || this.railEmptyHTML('No linked folders yet.')
+    });
+  }
+
+  // Fixed order. Detachment renders only for a group and Stations only where
+  // the workspace has stations; the rest are always rows, empty or not.
+  renderRail() {
     return (
       this.renderBacklogPanel() +
-      this.renderNotesPanel(notes, notesExpanded) +
-      this.railPanelHTML(
-        'schedules',
-        'Schedules',
-        scheduleItems,
-        schedules.length,
-        'No schedules yet.',
-        'Open Schedules'
-      ) +
-      this.railPanelHTML(
-        'sessions',
-        'Sessions',
-        sessionItems,
-        sessions.length,
-        'No sessions yet.',
-        'New Session'
-      ) +
-      this.railPanelHTML(
-        'folders',
-        'Linked Folders',
-        folderItems,
-        dirs.length,
-        'No linked folders yet.',
-        'Link Folder'
-      ) +
-      this.renderDetachmentPanel(detachmentExpanded) +
-      this.renderFilesPanel(files, filesExpanded) +
-      this.renderSystemsPanel(systemsExpanded) +
+      this.renderNotesPanel() +
+      this.renderSchedulesPanel() +
+      this.renderSessionsPanel() +
+      this.renderFoldersPanel() +
+      this.renderDetachmentPanel() +
+      this.renderFilesPanel() +
+      this.renderSystemsPanel() +
       this.renderStationsRailPanel()
     );
   }
@@ -12115,14 +12112,23 @@ export class WorkspaceCommandView {
         this.runRailPrimaryAction('files', fileDrop);
         return;
       }
+      // The open body's full-verb action: same action as the row "+", under
+      // its own attribute so the row's button stays the only match for its.
+      const sectionVerb = event.target.closest('[data-cmd-section-verb]');
+      if (sectionVerb) {
+        this.runRailPrimaryAction(sectionVerb.getAttribute('data-cmd-section-verb'), sectionVerb);
+        return;
+      }
       const primaryBtn = event.target.closest('[data-cmd-primary-section]');
       if (primaryBtn) {
-        this.runRailPrimaryAction(primaryBtn.getAttribute('data-cmd-primary-section'), primaryBtn);
+        this.runRailRowAction(primaryBtn.getAttribute('data-cmd-primary-section'), primaryBtn);
         return;
       }
       const manageBtn = event.target.closest('[data-cmd-manage-section]');
       if (manageBtn) {
-        this.toggleRailManager(manageBtn.getAttribute('data-cmd-manage-section'));
+        const section = manageBtn.getAttribute('data-cmd-manage-section');
+        this.toggleRailManager(section);
+        this.focusRailControl('data-cmd-manage-section', section);
         return;
       }
       const noteAction = event.target.closest('[data-cmd-note-action]');
