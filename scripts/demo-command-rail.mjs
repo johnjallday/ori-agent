@@ -715,7 +715,138 @@ async function rememberStage() {
   check((await openKey()) === 'notes', 'busy: with the key removed, Notes opens again');
 }
 
-const stages = { rail: railStage, remember: rememberStage, measure: measureStage };
+// ---------- narrow ----------
+
+// The tab row as laid out: how many lines the tabs take, whether the one body
+// sits under all of them at full width, and whether the page scrolls sideways.
+async function tabRow() {
+  return page.evaluate(selector => {
+    const root = document.querySelector(selector);
+    const railBox = root.getBoundingClientRect();
+    const tabs = [...root.querySelectorAll('.ws-cmd-panel-head')].map(el =>
+      el.getBoundingClientRect()
+    );
+    const bodies = [...root.querySelectorAll('.ws-cmd-panel-body')].map(el =>
+      el.getBoundingClientRect()
+    );
+    const lines = [...new Set(tabs.map(box => Math.round(box.top)))];
+    const tabsBottom = Math.max(...tabs.map(box => box.bottom));
+    const visible = el => {
+      const box = el.getBoundingClientRect();
+      return box.width > 0 && box.height > 0;
+    };
+    return {
+      lines: lines.length,
+      perLine: lines.map(top => tabs.filter(box => Math.round(box.top) === top).length),
+      tabHeights: [...new Set(tabs.map(box => Math.round(box.height)))],
+      bodies: bodies.length,
+      bodyUnderTabs: bodies.every(box => box.top >= tabsBottom - 1),
+      bodyFullWidth: bodies.every(box => Math.abs(box.width - railBox.width) < 2),
+      plusVisible: [...root.querySelectorAll('.ws-cmd-panel-head > .ws-cmd-panel-action')].filter(
+        visible
+      ).length,
+      sideways: document.documentElement.scrollWidth - window.innerWidth
+    };
+  }, RAIL);
+}
+
+async function narrowStage() {
+  const fx = await fixtures();
+
+  for (const size of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 }
+  ]) {
+    await page.setViewportSize(size);
+    const label = `${size.width}x${size.height}`;
+    for (const [name, ws, creates] of [
+      ['empty', fx.empty, 'notes'],
+      ['busy', fx.busy, 'notes'],
+      ['group', fx.group, 'members'],
+      ['hq', fx.hq, 'files']
+    ]) {
+      console.log(`\n== ${label} ${name}: /workspaces/${ws.folder_slug}`);
+      await openDetails(ws);
+      await listsLoaded();
+      await closeAll();
+      let row = await tabRow();
+      console.log(
+        `     ${row.perLine.reduce((sum, count) => sum + count, 0)} tabs on ${row.lines} lines (${row.perLine.join(' + ')}), heights ${row.tabHeights.join('/')}px`
+      );
+      check(row.lines <= 3, `${label} ${name}: the tab row is at most three lines`);
+      check(row.bodies === 0, `${label} ${name}: closed, there is no body`);
+      check(row.plusVisible === 0, `${label} ${name}: tabs carry no "+"`);
+      check(row.sideways <= 0, `${label} ${name}: the page does not scroll sideways`);
+      await page.locator(RAIL).scrollIntoViewIfNeeded();
+      await shot(`${size.width}-${name}-01-tabs`);
+
+      // Switch through every tab: one body, under the whole row, full width.
+      const keys = (await rail()).rows.map(entry => entry.key);
+      for (const key of keys) {
+        await page.locator(toggle(key)).click();
+        row = await tabRow();
+        check(
+          (await openKey()) === key && row.bodies === 1 && row.bodyUnderTabs && row.bodyFullWidth,
+          `${label} ${name}: ${key} opens under the tab row at full width`
+        );
+        check(row.lines <= 3, `${label} ${name}: still at most three lines with ${key} open`);
+      }
+
+      // With no "+" on a tab, the open body's verb is how something is created.
+      await page.locator(toggle(creates)).click();
+      const verb = page.locator(`${RAIL} [data-cmd-section-verb="${creates}"]`);
+      check(await verb.isVisible(), `${label} ${name}: the ${creates} body has its verb`);
+      await page.locator(toggle(creates)).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(500);
+      await shot(`${size.width}-${name}-02-${creates}-open`);
+
+      // Bottom of the page, open and closed: nothing under the pills.
+      let bottom = await launcherOverlap();
+      check(
+        bottom.covered.length === 0,
+        `${label} ${name}: open, nothing in the rail is under the pills at the bottom`
+      );
+      await shot(`${size.width}-${name}-03-bottom-open`);
+      await closeAll();
+      bottom = await launcherOverlap();
+      check(
+        bottom.covered.length === 0,
+        `${label} ${name}: closed, nothing in the rail is under the pills at the bottom`
+      );
+    }
+  }
+
+  // The same question on the desktop accordion, where the rail is a column.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  for (const [name, ws] of [
+    ['empty', fx.empty],
+    ['hq', fx.hq]
+  ]) {
+    console.log(`\n== 1280x800 ${name}: /workspaces/${ws.folder_slug}`);
+    await openDetails(ws);
+    await listsLoaded();
+    await closeAll();
+    let bottom = await launcherOverlap();
+    check(bottom.covered.length === 0, `1280x800 ${name}: closed, nothing is under the pills`);
+    const keys = (await rail()).rows.map(entry => entry.key);
+    for (const key of keys) {
+      await page.locator(toggle(key)).click();
+      bottom = await launcherOverlap();
+      check(
+        bottom.covered.length === 0,
+        `1280x800 ${name}: ${key} open, nothing is under the pills at the bottom`
+      );
+    }
+    await shot(`1280-${name}-bottom-last-open`);
+  }
+}
+
+const stages = {
+  rail: railStage,
+  remember: rememberStage,
+  narrow: narrowStage,
+  measure: measureStage
+};
 if (!stages[stage]) throw new Error(`unknown stage: ${stage}`);
 
 try {

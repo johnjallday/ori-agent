@@ -6115,6 +6115,11 @@ button.ws-cmd-rpg-class-card:focus-visible {
   background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel-deep));
 }
 
+/* The dark theme's hover is a white veil, which does not show on paper. */
+[data-bs-theme="light"] .ws-cmd-panel-toggle:hover {
+  background: rgba(10, 10, 10, 0.045);
+}
+
 [data-bs-theme="light"] .ws-cmd-unit {
   background: linear-gradient(165deg, var(--ws-panel-2), var(--ws-panel-deep));
 }
@@ -6236,6 +6241,54 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   .ws-cmd-members-host {
     max-height: none;
+  }
+  /* The rail under the main column: its rows become a wrapping row of tabs
+     above one body. Same markup as the desktop accordion. Each section is
+     only a wrapper here (display: contents), so its row and its body are
+     grid items of the rail; `order` places every row first and the one open
+     body, spanning all columns, after them. A closed section has no body
+     element, so nothing empty takes a cell. */
+  .ws-cmd-rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 6px;
+  }
+  .ws-cmd-panel {
+    display: contents;
+  }
+  .ws-cmd-panel-head {
+    order: 0;
+    border: 1px solid var(--ws-line);
+    background: var(--ws-panel);
+  }
+  .ws-cmd-panel.is-managing .ws-cmd-panel-head {
+    border-color: var(--ws-faction);
+    background: var(--ws-panel-2);
+  }
+  .ws-cmd-panel.is-hq-stations:not(.is-managing) .ws-cmd-panel-head {
+    border-color: var(--ws-keeper-deep);
+  }
+  /* A tab is the title and the count. Creating goes through the open body's
+     verb, and the highlight says which tab is open. */
+  .ws-cmd-panel-head > .ws-cmd-panel-action,
+  .ws-cmd-panel-chevron {
+    display: none;
+  }
+  .ws-cmd-panel-toggle,
+  .ws-cmd-panel-head.is-toggle-only .ws-cmd-panel-toggle {
+    padding: 0 10px;
+  }
+  .ws-cmd-panel-body {
+    order: 1;
+    grid-column: 1 / -1;
+    max-height: none;
+    overflow: visible;
+    border: 1px solid var(--ws-line-bright);
+    background: var(--ws-panel);
+  }
+  /* The page scrolls here, not the body, so there is nothing to stick to. */
+  .ws-cmd-panel-toolbar {
+    position: static;
   }
 }
 @media (max-width: 767px) {
@@ -6441,6 +6494,26 @@ button.ws-cmd-rpg-class-card:focus-visible {
      controls are never trapped underneath it (PRD FR5.20). */
   .ws-cmd {
     padding-bottom: 84px;
+  }
+  /* Three tabs to a line on a phone, so nine sections stay within three
+     lines. A long title ("Linked Folders") takes a second line inside its
+     tab rather than being cut. */
+  .ws-cmd-rail {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    /* The container above already reserves 84px at this width. */
+    padding-bottom: calc(var(--ori-launcher-clearance-y) - 84px);
+  }
+  .ws-cmd-panel-toggle,
+  .ws-cmd-panel-head.is-toggle-only .ws-cmd-panel-toggle {
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .ws-cmd-panel-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 10.5px;
+    line-height: 1.2;
+    letter-spacing: 1.2px;
   }
 }
 
