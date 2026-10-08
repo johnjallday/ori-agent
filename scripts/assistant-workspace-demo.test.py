@@ -31,6 +31,8 @@ class DemoProviderTests(unittest.TestCase):
                      ["demo", "--reaper-source", "/candidate"],
                      ["demo", "--placement", "--new-home"],
                      ["demo", "--placement", "--reaper-source", "/reaper", "--music-source", "/music"],
+                     ["demo", "--folder-response-baseline", "--files"],
+                     ["demo", "--folder-response-baseline", "--reaper-source", "/reaper", "--music-source", "/music"],
                      ["demo", "--sources", "--placement"], ["demo", "--sources", "--portfolio"],
                      ["demo", "--files", "--sources"], ["demo", "--files", "--new-home"],
                      ["demo", "--accessibility", "--files"], ["demo", "--accessibility", "--portfolio"],

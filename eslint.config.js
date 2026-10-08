@@ -258,7 +258,11 @@ export default defineConfig([
     }
   },
   {
-    files: ['scripts/demo-folder-first.mjs', 'scripts/demo-assistant-drawer.mjs'],
+    files: [
+      'scripts/demo-folder-first.mjs',
+      'scripts/demo-assistant-drawer.mjs',
+      'tests/fixtures/assistant-folder-response*.js'
+    ],
     languageOptions: { sourceType: 'module', globals: { ...globals.node } }
   },
   {

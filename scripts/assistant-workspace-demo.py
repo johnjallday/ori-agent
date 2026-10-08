@@ -28,6 +28,8 @@ MODEL = "ori-workspace-fixture"
 # The runs on plain wt demo, by flag: the spec, the variable that hands it the
 # sandbox path, and the log kept with the evidence. No flag runs DEFAULT_DEMO.
 PLAIN_DEMOS = {
+    "folder_response_baseline": ("tests/personal-assistant-folder-response-prototype.spec.ts",
+                                 "ORI_WORKSPACE_FOLDERBASELINE_SANDBOX", "folder-response-baseline.log"),
     "placement": ("tests/personal-assistant-workspace-placement.spec.ts",
                   "ORI_WORKSPACE_PLACEMENT_SANDBOX", "group3-wt-demo-placement.log"),
     "sources": ("tests/personal-assistant-workspace-sources.spec.ts",
@@ -401,6 +403,8 @@ def main():
     parser.add_argument("--slow-reply", action="store_true",
                         help="wt demo: a reply held longer than 30 seconds still arrives, and a failed request "
                              "is named after the hired assistant")
+    parser.add_argument("--folder-response-baseline", action="store_true",
+                        help="wt demo: built drawer controller baseline vs standalone synthetic prototype; no model")
     args = parser.parse_args()
     plain = ["--" + name.replace("_", "-") for name in PLAIN_DEMOS if getattr(args, name)]
     if len(plain) > 1:
@@ -415,7 +419,8 @@ def main():
         parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
-    evidence = ROOT / "tasks/evidence-assistant-workspace-awareness"
+    evidence = (ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline
+                else ROOT / "tasks/evidence-assistant-workspace-awareness")
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
         state = Path(temp)
