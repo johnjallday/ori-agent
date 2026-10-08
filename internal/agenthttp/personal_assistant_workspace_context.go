@@ -231,6 +231,11 @@ func (r *AssistantWorkspaceResolver) Resolve(ctx context.Context, userID, prompt
 			selectedTask, _ = url.PathUnescape(parts[2])
 		}
 	}
+	// A selected task belongs to the page it is on. When the user names another
+	// workspace, that task is not part of the subject and is not looked up in it.
+	if location != nil && subject.ID != location.ID {
+		selectedTask = ""
+	}
 	overview, reason := r.overview(ctx, subject, userID, selectedTask, listed, listErr != nil)
 	if reason != "" {
 		return fail(assistantcontext.Unavailable, reason)
@@ -253,6 +258,10 @@ func (r *AssistantWorkspaceResolver) location(refs *HomeAssistantRouteContext, u
 		path := parsed.EscapedPath()
 		if strings.HasPrefix(path, "/workspaces/") {
 			parts := strings.Split(strings.TrimPrefix(path, "/workspaces/"), "/")
+			if parts[0] == "" {
+				// The workspaces list itself, written with a trailing slash.
+				return nil, ""
+			}
 			pageSlug, err = url.PathUnescape(parts[0])
 			if err != nil || !workspaceReferenceToken.MatchString(pageSlug) {
 				return nil, "page_reference_invalid"
@@ -386,6 +395,7 @@ func (r *AssistantWorkspaceResolver) overview(ctx context.Context, ws *workspace
 		out.Sources["children"] = assistantcontext.SourceStatus{Status: assistantcontext.Unavailable, Reason: "listing_failed"}
 	} else {
 		sort.Slice(listed, func(i, j int) bool { return listed[i].ID < listed[j].ID })
+		unread := 0
 		for _, candidate := range listed {
 			if ctx.Err() != nil {
 				return out, "request_cancelled"
@@ -394,7 +404,11 @@ func (r *AssistantWorkspaceResolver) overview(ctx context.Context, ws *workspace
 				continue
 			}
 			child, err := r.Source.Get(candidate.ID)
-			if err != nil || !workspaceReadable(child, userID) || child.ParentID != ws.ID {
+			if err != nil {
+				unread++
+				continue
+			}
+			if !workspaceReadable(child, userID) || child.ParentID != ws.ID {
 				continue
 			}
 			status := out.Sources["children"]
@@ -406,6 +420,16 @@ func (r *AssistantWorkspaceResolver) overview(ctx context.Context, ws *workspace
 			} else {
 				out.Truncated = true
 			}
+		}
+		// A listed child that could not be read is missing from the count. Say
+		// so: a Home whose projects failed to load is not an empty Home.
+		if unread > 0 {
+			status := out.Sources["children"]
+			status.Status, status.Reason = assistantcontext.Partial, "child_unavailable"
+			if status.Count == 0 {
+				status.Status = assistantcontext.Unavailable
+			}
+			out.Sources["children"] = status
 		}
 	}
 	for _, instance := range ws.AgentInstances {

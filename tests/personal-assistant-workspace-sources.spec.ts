@@ -19,6 +19,18 @@ test('wt demo: notes and tasks are read, cited, re-read when they change, and ne
   expect(basename(provider!)).toMatch(/^ori-awareness-provider\./);
   const evidence = join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
+  // Ori reads these note and task bodies; its own log may not carry them.
+  await writeFile(
+    join(provider!, 'log-watch.json'),
+    JSON.stringify([
+      'Master the single before Friday',
+      'Background that makes this note longer than a preview',
+      'Send the stems to mastering.',
+      'finish the artwork first',
+      'FOREIGN_NOTE_BODY_MUST_NOT_BE_READ'
+    ]),
+    { mode: 0o600 }
+  );
 
   await request.post('/api/onboarding/skip');
   for (const [path, data] of [

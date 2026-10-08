@@ -38,7 +38,8 @@ func LooksLikeText(data []byte) bool {
 
 // ExtractText turns one file's bytes into text: ParseFile for the extensions it
 // supports, plain text for anything else whose start holds no NUL byte, and
-// ErrNotText otherwise. It reads only data. It never opens name, follows a path
+// ErrNotText otherwise. A document that would expand past MaxExpandedSize is
+// ErrExpandedTooLarge. It reads only data. It never opens name, follows a path
 // written inside the file, decodes audio or runs anything.
 func ExtractText(name string, data []byte) (text, kind string, err error) {
 	ext := strings.ToLower(filepath.Ext(name))
@@ -47,6 +48,9 @@ func ExtractText(name string, data []byte) (text, kind string, err error) {
 	}
 	if SupportsExtension(ext) {
 		parsed, err := ParseFile(name, data)
+		if errors.Is(err, ErrExpandedTooLarge) {
+			return "", "", ErrExpandedTooLarge
+		}
 		if err != nil {
 			return "", "", ErrParseFailed
 		}

@@ -594,12 +594,14 @@ type modelTurn struct {
 
 // runModel sends one turn to the configured system model with the read-only
 // home tools and returns the final text.
-func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) (string, error) {
+func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) (answer string, err error) {
 	provider, model, err := h.resolveProvider()
 	if err != nil {
 		return "", err
 	}
 	scope := workspaceTurnFromContext(ctx)
+	readers, files, overviewChars := false, false, 0
+	defer func() { scope.logDiagnostics(ctx, readers, files, overviewChars, err != nil) }()
 	var registry modelToolRegistry = newHomeToolRegistry(turn.sources)
 	if scope != nil {
 		registry = &panelToolRegistry{handler: h, turn: scope, home: newHomeToolRegistry(h.scopedPanelSources(ctx, turn.sources, scope)), ledger: scope.ledger}
@@ -610,11 +612,11 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if provider.Capabilities().SupportsTools {
 		tools = registry.Definitions()
 	}
-	readers, files := false, false
 	for _, tool := range tools {
 		readers, files = readers || isReader(tool.Name), files || isFileReader(tool.Name)
 	}
 	overview := workspaceTurnPrompt(scope, readers, files) + reviewContextPrompt(ctx)
+	overviewChars = evidenceSize(overview)
 	if scope != nil {
 		// The overview is workspace evidence too. It is charged before any
 		// reader runs, so the turn's budget covers everything Ori supplied.
@@ -671,6 +673,11 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	// Tool budget exhausted: make one final tool-free attempt for a summary.
 	if err := h.revalidateWorkspaceTurn(ctx, scope); err != nil {
 		return "", err
+	}
+	if scope != nil {
+		// Readers are gone for the rest of this turn. Say so, or the model may
+		// present what it managed to read as the whole picture.
+		conversation[0].Content += readerRoundsExhausted
 	}
 	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, Messages: conversation, Temperature: turn.temperature})
 	if chatErr != nil {

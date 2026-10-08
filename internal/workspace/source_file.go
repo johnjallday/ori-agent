@@ -17,6 +17,7 @@ import (
 var (
 	ErrSourceOutside    = errors.New("source path is outside its approved folder")
 	ErrSourceExcluded   = errors.New("source is not readable here")
+	ErrSourceLinked     = errors.New("source is reached through a link, which is not followed")
 	ErrSourceMissing    = errors.New("source file not found")
 	ErrSourceNotRegular = errors.New("source is not a regular file")
 	ErrSourceTooLarge   = errors.New("source file is too large to read")
@@ -71,17 +72,93 @@ func ContainedRelativePath(raw string) (string, error) {
 	return clean, nil
 }
 
+// isWorkspaceFolder reports whether dir is one of Ori's workspace folders: it
+// holds a workspace record.
+func isWorkspaceFolder(dir *os.Root) bool {
+	info, err := dir.Lstat(WorkspaceConfigFile)
+	return err == nil && !info.IsDir()
+}
+
+// workspaceFolderEntryExcluded reports whether name, directly inside one of
+// Ori's workspace folders, is Ori's own: the workspace's agent snapshots, or the
+// folder that holds its child workspaces.
+func workspaceFolderEntryExcluded(name string) bool {
+	return strings.EqualFold(name, WorkspaceAgentsDir) || strings.EqualFold(name, SubWorkspacesDir)
+}
+
+// openContainedDir opens the directory name directly inside parent without
+// following a link. The entry is inspected first, and the directory that was
+// then opened must be that same entry: a link put in its place in between opens
+// something else and is refused. The returned handle stays on that directory
+// whatever is renamed afterwards.
+//
+// An approved folder can be, or contain, Ori's own workspace folders. Reading
+// one workspace must not reach another's records, so a directory below the
+// approved folder that is itself a workspace folder is not entered, and neither
+// are a workspace folder's agent snapshots or its child workspaces.
+func openContainedDir(parent *os.Root, name string) (*os.Root, error) {
+	if workspaceFolderEntryExcluded(name) && isWorkspaceFolder(parent) {
+		return nil, ErrSourceExcluded
+	}
+	info, err := parent.Lstat(name)
+	if err != nil {
+		return nil, containedOpenError(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, ErrSourceLinked
+	}
+	if !info.IsDir() {
+		return nil, ErrSourceNotRegular
+	}
+	sub, err := parent.OpenRoot(name)
+	if err != nil {
+		return nil, containedOpenError(err)
+	}
+	if opened, err := sub.Stat("."); err != nil || !os.SameFile(info, opened) {
+		_ = sub.Close()
+		return nil, ErrSourceChanged
+	}
+	if isWorkspaceFolder(sub) {
+		_ = sub.Close()
+		return nil, ErrSourceExcluded
+	}
+	return sub, nil
+}
+
+// containedParent walks from folder to the directory that holds rel's last
+// component, one directory at a time and never through a link, and returns that
+// directory with the last component's name. A link inside the folder is not
+// followed either: it could give an excluded entry (a hidden file, one of Ori's
+// records) a name that is not excluded.
+func containedParent(folder *os.Root, rel string) (dir *os.Root, name string, release func(), err error) {
+	parts := strings.Split(rel, "/")
+	dir, release = folder, func() {}
+	for _, part := range parts[:len(parts)-1] {
+		next, err := openContainedDir(dir, part)
+		release()
+		if errors.Is(err, ErrSourceNotRegular) {
+			err = ErrSourceMissing // a file where a folder was named
+		}
+		if err != nil {
+			return nil, "", func() {}, err
+		}
+		dir, release = next, func() { _ = next.Close() }
+	}
+	return dir, parts[len(parts)-1], release, nil
+}
+
 // ReadContainedFile reads one regular file from inside root, an approved folder
 // the caller resolved from canonical state.
 //
 // Checking a path and then opening it leaves a gap in which a folder on the way
 // can be swapped for a link that points elsewhere. This opens through an
-// os.Root instead, so every component is resolved relative to the folder that
-// was actually opened and nothing can lead outside it. The open file is then
-// the only thing consulted: its type and size are read from the handle, the
-// bytes come from that same handle, and the handle and the folder are checked
-// again afterwards. A file or folder replaced along the way is reported as
-// changed; a substitute is never read in its place.
+// os.Root instead, so nothing can lead outside the folder that was actually
+// opened, and it walks to the file one directory handle at a time without
+// following any link, so nothing inside the folder can be reached under another
+// name. The open file is then the only thing consulted: its type and size are
+// read from the handle, the bytes come from that same handle, and the handle
+// and the folder are checked again afterwards. A file or folder replaced along
+// the way is reported as changed; a substitute is never read in its place.
 func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile, error) {
 	rel, err := ContainedRelativePath(relativePath)
 	if err != nil {
@@ -106,11 +183,20 @@ func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile
 	if opened, err := folder.Stat("."); err != nil || !os.SameFile(rootInfo, opened) {
 		return ContainedFile{}, ErrSourceChanged
 	}
-	// Inspect before opening so a pipe or device is refused without being
-	// opened; O_NONBLOCK keeps an open from waiting if one was swapped in after.
-	before, err := folder.Stat(filepath.FromSlash(rel))
+	dir, name, release, err := containedParent(folder, rel)
+	if err != nil {
+		return ContainedFile{}, err
+	}
+	defer release()
+	// Inspect before opening so a link, a pipe or a device is refused without
+	// being opened; O_NONBLOCK keeps an open from waiting if one was swapped in
+	// after. The entry seen here must be the file that is then opened.
+	before, err := dir.Lstat(name)
 	if err != nil {
 		return ContainedFile{}, containedOpenError(err)
+	}
+	if before.Mode()&os.ModeSymlink != 0 {
+		return ContainedFile{}, ErrSourceLinked
 	}
 	if !before.Mode().IsRegular() {
 		return ContainedFile{}, ErrSourceNotRegular
@@ -118,7 +204,7 @@ func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile
 	if before.Size() > maxBytes {
 		return ContainedFile{}, ErrSourceTooLarge
 	}
-	file, err := folder.OpenFile(filepath.FromSlash(rel), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := dir.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return ContainedFile{}, containedOpenError(err)
 	}
@@ -150,7 +236,8 @@ func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile
 // ListContainedEntries lists names inside root below relativePath (empty for the
 // folder itself), with the linked-directory bounds: at most depth levels
 // (capped at DirectoryListMaxDepth) and DirectoryListMaxEntries entries. It
-// walks through an os.Root, lists a symbolic link without following it, and
+// walks through an os.Root one directory handle at a time, lists a symbolic
+// link without following it (a link on the way to relativePath is refused), and
 // skips hidden entries and Ori's own record files. It reads names, sizes and
 // times only; no file is opened.
 func ListContainedEntries(root, relativePath string, depth int) (DirectoryListing, error) {
@@ -184,16 +271,23 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 	if depth <= 0 || depth > DirectoryListMaxDepth {
 		depth = DirectoryListMaxDepth
 	}
-	if info, err := folder.Stat(filepath.FromSlash(start)); err != nil {
-		return DirectoryListing{}, containedOpenError(err)
-	} else if !info.IsDir() {
-		return DirectoryListing{}, ErrSourceNotRegular
+	top := folder
+	if start != "." {
+		parent, name, release, err := containedParent(folder, start)
+		if err != nil {
+			return DirectoryListing{}, err
+		}
+		top, err = openContainedDir(parent, name)
+		release()
+		if err != nil {
+			return DirectoryListing{}, err
+		}
+		defer func() { _ = top.Close() }()
 	}
-	tree := folder.FS()
 	var listing DirectoryListing
-	var walk func(dir string, level int) error
-	walk = func(dir string, level int) error {
-		entries, err := fs.ReadDir(tree, dir)
+	var walk func(current *os.Root, dir string, level int) error
+	walk = func(current *os.Root, dir string, level int) error {
+		entries, err := fs.ReadDir(current.FS(), ".")
 		if err != nil {
 			// An unreadable subfolder is skipped; the starting folder's error surfaces.
 			if level == 1 {
@@ -226,10 +320,25 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 					item.Size = info.Size()
 				}
 			}
+			var sub *os.Root
+			if item.Kind == "folder" {
+				// Opened before it is listed: another workspace's folder, or one of
+				// Ori's own inside a workspace folder, is not named at all.
+				opened, err := openContainedDir(current, name)
+				if errors.Is(err, ErrSourceExcluded) {
+					continue
+				}
+				sub = opened // nil when unreadable or swapped for a link: listed, left unexpanded
+			}
 			listing.Entries = append(listing.Entries, item)
-			if item.Kind == "folder" && level < depth {
-				if err := walk(full, level+1); err != nil {
-					return err
+			if sub != nil {
+				var below error
+				if level < depth {
+					below = walk(sub, full, level+1)
+				}
+				_ = sub.Close()
+				if below != nil {
+					return below
 				}
 				if listing.Truncated {
 					return nil
@@ -238,7 +347,7 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 		}
 		return nil
 	}
-	if err := walk(start, 1); err != nil {
+	if err := walk(top, start, 1); err != nil {
 		return DirectoryListing{}, err
 	}
 	return listing, nil

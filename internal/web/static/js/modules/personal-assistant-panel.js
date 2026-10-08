@@ -579,6 +579,10 @@ function submit(event) {
     window.OriAskRouting.setPersonalAssistantIdentity(state.view.name);
   }
   state.pending = true;
+  // Disabling a focused button drops focus to the page at once, even when it is
+  // enabled again a moment later. Remember it, so Send from the keyboard does
+  // not lose the user's place in the drawer.
+  const sendHadFocus = document.activeElement === state.els.send;
   state.els.send.disabled = true;
   const sentStatus = `Sent to ${state.view.name}.`;
   setStatus(sentStatus);
@@ -596,6 +600,7 @@ function submit(event) {
   // composer's duplicate-submit guard after delegation has been accepted.
   state.pending = false;
   state.els.send.disabled = false;
+  if (sendHadFocus && state.els.panel?.hidden !== true) state.els.send.focus();
   operation.then(
     () => {
       // Keep recovery/busy notices produced since Send; only clear our receipt.

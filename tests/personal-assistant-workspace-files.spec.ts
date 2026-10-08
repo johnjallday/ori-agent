@@ -42,6 +42,17 @@ test('wt demo: linked files and attachments are read with coverage; an attached 
   await writeFile(join(assets, '.env'), hidden, { mode: 0o600 });
   await writeFile(join(otherAssets, 'lyrics', 'bridge.txt'), foreign, { mode: 0o600 });
   await writeFile(join(attachedOnly, 'notes.txt'), unlinked, { mode: 0o600 });
+  // Ori may read these; its log may not carry them, or where the folder lives.
+  await writeFile(
+    join(provider!, 'log-watch.json'),
+    JSON.stringify([
+      'The bridge is in D minor.',
+      'takt of ninety-six',
+      'Artwork is due on the 12th',
+      assets
+    ]),
+    { mode: 0o600 }
+  );
 
   await request.post('/api/onboarding/skip');
   for (const [path, data] of [

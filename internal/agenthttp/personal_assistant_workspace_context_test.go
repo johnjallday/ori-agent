@@ -57,6 +57,7 @@ func TestAssistantWorkspaceResolver_ReferencePrecedence(t *testing.T) {
 		{"Home selection", "hello", HomeAssistantRouteContext{PagePath: "/", SelectionWorkspaceID: home.ID}, home.ID, home.ID, ""},
 		{"unselected app Home", "hello", HomeAssistantRouteContext{PagePath: "/"}, "", "", ""},
 		{"app-wide clears stale page", "hello", HomeAssistantRouteContext{PagePath: "/settings", WorkspaceID: alpha.ID}, "", "", ""},
+		{"workspaces list with a trailing slash", "hello", HomeAssistantRouteContext{PagePath: "/workspaces/", WorkspaceID: alpha.ID}, "", "", ""},
 		{"explicit unique name", "What should I do in Second Project?", HomeAssistantRouteContext{PagePath: "/workspaces/album-1"}, alpha.ID, beta.ID, ""},
 		{"word boundary", "Translate Album-10", HomeAssistantRouteContext{}, "", "", ""},
 		{"explicit subject reference", "hello", HomeAssistantRouteContext{WorkspaceID: alpha.ID, SubjectWorkspaceID: beta.ID}, alpha.ID, beta.ID, ""},
@@ -159,6 +160,74 @@ func TestAssistantWorkspaceResolver_SelectedTaskOwnership(t *testing.T) {
 		if got.Status == assistantcontext.Available || got.Overview != nil {
 			t.Fatal("foreign/conflicting task accepted", got)
 		}
+	}
+	// Another workspace named from a task page. The page's task belongs to the
+	// page: it is not looked up in the named workspace, and the turn resolves.
+	for name, turn := range map[string]struct {
+		prompt string
+		refs   HomeAssistantRouteContext
+	}{
+		"named in the request": {"hello", HomeAssistantRouteContext{PagePath: "/workspaces/album-1/task/task-a", SubjectWorkspaceID: beta.ID}},
+		"named with a task ID": {"hello", HomeAssistantRouteContext{WorkspaceID: alpha.ID, TaskID: "task-a", SubjectWorkspaceID: beta.ID}},
+		"named in the message": {"What should I do in Second Project?", HomeAssistantRouteContext{PagePath: "/workspaces/album-1/task/task-a"}},
+	} {
+		got := r.Resolve(context.Background(), "local", turn.prompt, &turn.refs)
+		if got.Status != assistantcontext.Available || got.Location == nil || got.Location.ID != alpha.ID || got.Subject == nil || got.Subject.ID != beta.ID ||
+			!got.SubjectExplicit || got.Overview == nil || got.Overview.SelectedTask != nil {
+			t.Fatalf("%s: %+v", name, got)
+		}
+	}
+}
+
+// failingChildRead cannot read some workspaces that the listing still names.
+type failingChildRead struct {
+	AssistantWorkspaceSource
+	unreadable map[string]bool
+}
+
+func (f failingChildRead) Get(id string) (*workspace.Workspace, error) {
+	if f.unreadable[id] {
+		return nil, errors.New("store unavailable at /Users/person/private")
+	}
+	return f.AssistantWorkspaceSource.Get(id)
+}
+
+// A project that is listed under a Home but cannot be read right now is missing
+// from the count. The overview says so; it does not call the Home empty.
+func TestAssistantWorkspaceResolver_UnreadChildIsNotAnEmptyHome(t *testing.T) {
+	r, store, home, alpha, _ := workspaceResolverFixture(t)
+	sibling := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Album-2"})
+	sibling.FolderSlug, sibling.ParentID, sibling.OwnerUserID = "album-2", home.ID, "local"
+	if err := store.Save(sibling); err != nil {
+		t.Fatal(err)
+	}
+	for name, test := range map[string]struct {
+		unreadable []string
+		status     assistantcontext.Availability
+		count      int
+	}{
+		"every child unreadable": {[]string{alpha.ID, sibling.ID}, assistantcontext.Unavailable, 0},
+		"one child unreadable":   {[]string{alpha.ID}, assistantcontext.Partial, 1},
+	} {
+		source := failingChildRead{AssistantWorkspaceSource: store, unreadable: map[string]bool{}}
+		for _, id := range test.unreadable {
+			source.unreadable[id] = true
+		}
+		got := (&AssistantWorkspaceResolver{Source: source, Now: r.Now}).Resolve(context.Background(), "local", "hello", &HomeAssistantRouteContext{WorkspaceID: home.ID})
+		if got.Overview == nil {
+			t.Fatalf("%s: the Home itself was lost: %+v", name, got)
+		}
+		children := got.Overview.Sources["children"]
+		if children.Status != test.status || children.Reason != "child_unavailable" || children.Count != test.count || len(got.Overview.Children) != test.count {
+			t.Fatalf("%s: %+v", name, children)
+		}
+		if encoded, _ := json.Marshal(got); strings.Contains(string(encoded), "/Users/") {
+			t.Fatalf("%s: the store's error leaked", name)
+		}
+	}
+	whole := r.Resolve(context.Background(), "local", "hello", &HomeAssistantRouteContext{WorkspaceID: home.ID})
+	if children := whole.Overview.Sources["children"]; children.Status != assistantcontext.Available || children.Count != 2 || children.Reason != "" {
+		t.Fatalf("a readable Home: %+v", children)
 	}
 }
 

@@ -160,6 +160,13 @@ func (r *panelToolRegistry) listFiles(subject *assistantcontext.WorkspaceRef, ws
 	}
 	if _, rel, ok := r.handler.Files.ProjectEntry(ws); ok {
 		result["project_file"] = map[string]any{"name": workspaceContextText(path.Base(rel), 200), "readable": fileReadability(rel)}
+	} else if locator, err := workspace.GetProjectEntryLocator(ws.SharedData); err == nil && locator != nil {
+		// The workspace records a project file that cannot be resolved right now.
+		// That is a file that could not be reached, not a workspace without one.
+		result["project_file"] = map[string]any{"readable": "unavailable"}
+		if stored == 0 && len(folders) == 0 {
+			return readerStatus(assistantcontext.Unavailable, "project_file_unavailable", result)
+		}
 	}
 	if stored == 0 && len(folders) == 0 && result["project_file"] == nil {
 		return readerStatus(assistantcontext.Empty, "", result)
@@ -175,6 +182,8 @@ func fileRefusal(err error) map[string]any {
 		return readerStatus(assistantcontext.Denied, "path_outside_the_approved_folder", nil)
 	case errors.Is(err, workspace.ErrSourceExcluded):
 		return readerStatus(assistantcontext.Denied, "not_readable_here", nil)
+	case errors.Is(err, workspace.ErrSourceLinked):
+		return readerStatus(assistantcontext.Denied, "links_are_not_followed", nil)
 	case errors.Is(err, workspace.ErrSourceMissing):
 		return readerStatus(assistantcontext.Unavailable, "file_not_found", nil)
 	case errors.Is(err, workspace.ErrSourceNotRegular):
@@ -299,6 +308,8 @@ func (r *panelToolRegistry) readFile(subject *assistantcontext.WorkspaceRef, ws 
 	}
 	text, kind, err := fileparser.ExtractText(target.name, file.Data)
 	switch {
+	case errors.Is(err, fileparser.ErrExpandedTooLarge):
+		return readerStatus(assistantcontext.Unsupported, "document_too_large_to_parse", map[string]any{"name": workspaceContextText(target.name, 200)})
 	case errors.Is(err, fileparser.ErrParseFailed):
 		return readerStatus(assistantcontext.Unavailable, "document_could_not_be_parsed", map[string]any{"name": workspaceContextText(target.name, 200)})
 	case err != nil:
@@ -313,24 +324,28 @@ func (r *panelToolRegistry) readFile(subject *assistantcontext.WorkspaceRef, ws 
 	if prior, read := r.ledger.prior(target.kind, subject.ID, target.id); read && offset > 0 && prior.Version != version {
 		return readerStatus(assistantcontext.Partial, "file_changed_since_first_part", map[string]any{"next_step": "The file changed while it was being read. Read it again from the start."})
 	}
-	text, withheld := readerText(strings.ToValidUTF8(text, string(utf8.RuneError)))
-	chunk, start, end, total, size := fitChunk(text, offset, assistantcontext.FileChunkLimit, r.ledger.remaining()-readerOverhead)
-	if (end == start && start < total) || !r.ledger.charge(size+readerOverhead) {
+	const continueFile = "This is part of the file. Continue with next_offset, or say that only this part was read."
+	text = strings.ToValidUTF8(text, string(utf8.RuneError))
+	label := workspaceContextText(target.name, 160)
+	result := map[string]any{
+		"status": assistantcontext.Available, "content_read": true,
+		"workspace": subject.Name, "name": label, "where": target.where, "kind": kind, "updated_at": readerTime(file.ModTime), "note": fileContentNote,
+	}
+	// The whole result is charged, not only the file's text.
+	envelope := contentEnvelope(result, utf8.RuneCountInString(text), continueFile)
+	chunk, start, end, total, size, withheld := fitReaderChunk(text, offset, assistantcontext.FileChunkLimit, r.ledger.remaining()-envelope)
+	if (end == start && start < total) || !r.ledger.charge(size+envelope) {
 		return readerStatus(assistantcontext.Partial, "evidence_budget_exhausted", map[string]any{"next_step": "This turn's reading budget is used up. Answer from what was read and say what was not."})
 	}
-	label := workspaceContextText(target.name, 160)
 	source := r.ledger.record(assistantcontext.SourceRef{
 		Kind: target.kind, WorkspaceID: subject.ID, Workspace: subject.Name, ID: target.id, Label: label, Detail: target.where,
 		Version: version, UpdatedAt: file.ModTime, Start: start, End: end, Total: total,
 	})
-	result := map[string]any{
-		"status": assistantcontext.Available, "content_read": true, "source": source.Key, "cite_as": "[" + source.Key + "]",
-		"workspace": subject.Name, "name": label, "where": target.where, "kind": kind, "updated_at": readerTime(file.ModTime), "read_at": readerTime(source.ReadAt),
-		"coverage": source.Coverage, "start": start, "end": end, "total": total, "note": fileContentNote, "content": chunk,
-	}
+	result["source"], result["cite_as"], result["read_at"] = source.Key, "["+source.Key+"]", readerTime(source.ReadAt)
+	result["coverage"], result["start"], result["end"], result["total"], result["content"] = source.Coverage, start, end, total, chunk
 	if end < total {
 		result["next_offset"] = end
-		result["next_step"] = "This is part of the file. Continue with next_offset, or say that only this part was read."
+		result["next_step"] = continueFile
 	}
 	if withheld > 0 {
 		result["withheld_lines"] = withheld

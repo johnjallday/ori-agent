@@ -9,10 +9,10 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/llm"
-	"github.com/johnjallday/ori-agent/internal/sensitive"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -51,9 +51,7 @@ const (
 	readerTasks = "assistant_workspace_tasks"
 	readerTask  = "assistant_workspace_task"
 
-	readerListLimit = 50
-	// A read keeps this much of the budget for the record's own metadata.
-	readerOverhead     = 600
+	readerListLimit    = 50
 	readerTaskTextCap  = 8000
 	readerTaskErrorCap = 2000
 )
@@ -105,18 +103,8 @@ func readerStatus(status assistantcontext.Availability, reason string, extra map
 // readerText withholds secret-like lines before source text reaches a provider.
 // The line count is unchanged, so the text still reads in order.
 func readerText(text string) (string, int) {
-	if !sensitive.ContainsSecretLikeText(text) {
-		return text, 0
-	}
-	lines := strings.Split(text, "\n")
-	withheld := 0
-	for i, line := range lines {
-		if sensitive.ContainsSecretLikeText(line) {
-			lines[i] = "[withheld by Ori: secret-like text]"
-			withheld++
-		}
-	}
-	return strings.Join(lines, "\n"), withheld
+	kept, _, _, _, withheld := readerChunk(text, 0, utf8.RuneCountInString(text))
+	return kept, withheld
 }
 
 func readerVersion(parts ...string) string {
@@ -263,27 +251,30 @@ func (r *panelToolRegistry) readNote(ctx context.Context, subject *assistantcont
 			"note_id": note.ID, "next_step": "The note changed while it was being read. Read it again from the start.",
 		}), nil
 	}
-	text, withheld := readerText(note.Content)
-	chunk, start, end, total, size := fitChunk(text, offset, assistantcontext.FileChunkLimit, r.ledger.remaining()-readerOverhead)
-	if (end == start && start < total) || !r.ledger.charge(size+readerOverhead) {
+	const continueNote = "This is part of the note. Continue with next_offset, or say that only this part was read."
+	label := workspaceContextText(note.Name, 160)
+	result := map[string]any{
+		"status": assistantcontext.Available, "content_read": true,
+		"workspace": subject.Name, "note_id": note.ID, "title": label, "updated_at": readerTime(note.UpdatedAt),
+	}
+	// The whole result is charged, not only the note's text.
+	envelope := contentEnvelope(result, utf8.RuneCountInString(note.Content), continueNote)
+	chunk, start, end, total, size, withheld := fitReaderChunk(note.Content, offset, assistantcontext.FileChunkLimit, r.ledger.remaining()-envelope)
+	if (end == start && start < total) || !r.ledger.charge(size+envelope) {
 		return readerStatus(assistantcontext.Partial, "evidence_budget_exhausted", map[string]any{
 			"note_id": note.ID, "next_step": "This turn's reading budget is used up. Answer from what was read and say what was not.",
 		}), nil
 	}
-	label := workspaceContextText(note.Name, 160)
 	source := r.ledger.record(assistantcontext.SourceRef{
 		Kind: assistantcontext.SourceNote, WorkspaceID: subject.ID, Workspace: subject.Name, ID: note.ID, Label: label,
 		Version: version, UpdatedAt: note.UpdatedAt, Start: start, End: end, Total: total, Href: readerHref(subject, "notes", note.ID),
 	})
-	result := map[string]any{
-		"status": assistantcontext.Available, "content_read": true, "source": source.Key, "cite_as": "[" + source.Key + "]",
-		"workspace": subject.Name, "note_id": note.ID, "title": label, "updated_at": readerTime(note.UpdatedAt), "read_at": readerTime(source.ReadAt),
-		// Coverage is what this turn has read of the note so far, not this part alone.
-		"coverage": source.Coverage, "start": start, "end": end, "total": total, "content": chunk,
-	}
+	result["source"], result["cite_as"], result["read_at"] = source.Key, "["+source.Key+"]", readerTime(source.ReadAt)
+	// Coverage is what this turn has read of the note so far, not this part alone.
+	result["coverage"], result["start"], result["end"], result["total"], result["content"] = source.Coverage, start, end, total, chunk
 	if end < total {
 		result["next_offset"] = end
-		result["next_step"] = "This is part of the note. Continue with next_offset, or say that only this part was read."
+		result["next_step"] = continueNote
 	}
 	if withheld > 0 {
 		result["withheld_lines"] = withheld
@@ -421,6 +412,9 @@ func (r *panelToolRegistry) readTask(subject *assistantcontext.WorkspaceRef, id 
 		result["withheld_lines"] = withheld
 	}
 	result["note"] = "State, result and error are recorded facts. A priority or next step you suggest is your advice, not recorded state. Reading a task does not start or change it."
+	// Measured with the fields that are filled in once the read is recorded, so
+	// the whole result is charged.
+	result["source"], result["cite_as"], result["coverage"], result["read_at"] = "S999", "[S999]", assistantcontext.CoveragePartial, readerTime(time.Now())
 	encoded, err := homeToolJSON(result)
 	if err != nil {
 		return nil, errors.New("source unavailable")

@@ -104,6 +104,15 @@ func (f *workspaceReaderFixture) lastToolResult(t *testing.T) string {
 	return request.Messages[len(request.Messages)-1].Content
 }
 
+func reloadedConversation(t *testing.T, f *draftServerFixture, id string) map[string]any {
+	t.Helper()
+	status, saved := f.call(t, http.MethodGet, "/api/home-assistant/conversations/"+id, nil)
+	if status != http.StatusOK {
+		t.Fatal(status, saved)
+	}
+	return saved
+}
+
 func replySources(t *testing.T, value any) []map[string]any {
 	t.Helper()
 	context, _ := value.(map[string]any)
@@ -195,6 +204,15 @@ func TestAssistantWorkspaceReaders_RealStoreReadCiteSaveAndReadAgain(t *testing.
 	if !strings.Contains(history, "earlier_workspace") || strings.Contains(history, f.noteID) || strings.Contains(history, readerNoteTail) {
 		t.Fatal("history carried an earlier turn's source references or content")
 	}
+	// Nor its markers: this turn issues S1 and S2 again, for what it reads now,
+	// and an old "[S1]" copied forward would be checked against the new S1.
+	if !strings.Contains(history, "Master the single first") || strings.Contains(history, "[S1]") || strings.Contains(history, "[S2]") {
+		t.Fatal("the earlier answer was replayed with its source markers")
+	}
+	// The saved answer keeps them for the reader.
+	if saved := mustJSON(t, reloadedConversation(t, f.draftServerFixture, id)); !strings.Contains(saved, "Master the single first [S1]") {
+		t.Fatal("the saved answer lost its markers")
+	}
 	_, reloaded := f.call(t, http.MethodGet, "/api/home-assistant/conversations/"+id, nil)
 	rows := reloaded["messages"].([]any)
 	var answers []map[string]any
@@ -268,5 +286,36 @@ func TestAssistantWorkspaceReaders_DeletedOrMovedNoteIsNotRead(t *testing.T) {
 	result := f.lastToolResult(t)
 	if !strings.Contains(result, "note_not_found_in_this_workspace") || strings.Contains(result, readerNoteTail) || len(replySources(t, reply["workspace_context"])) != 0 {
 		t.Fatalf("a note that moved to another workspace was read: %s", result)
+	}
+}
+
+// A model that keeps asking for readers gets four rounds and then one call with
+// no readers at all. That last call is told the limit was reached, so what was
+// read is not presented as everything; the sources are the reads that happened.
+func TestAssistantWorkspaceReaders_RoundLimitEndsReadingAndSaysSo(t *testing.T) {
+	f := newWorkspaceReaderFixture(t)
+	for round := 0; round < 6; round++ {
+		f.provider.script = append(f.provider.script, readerCall("assistant_workspace_tasks", nil))
+	}
+	f.provider.script[1] = readerCall("assistant_workspace_note", map[string]any{"note_id": f.noteID})
+	f.provider.script[4] = llm.ChatResponse{Content: "From the plan: master the single [S1]. I did not get to the rest.", Model: "sonnet", Provider: "claude_code"}
+	reply := f.ask(t, "", "Review everything in this workspace")
+	if len(f.provider.requests) != 5 {
+		t.Fatalf("expected four reader rounds and one final call, got %d requests", len(f.provider.requests))
+	}
+	const limit = "reader limit for this turn has been reached"
+	for index, request := range f.provider.requests[:4] {
+		if len(request.Tools) == 0 || strings.Contains(request.Messages[0].Content, limit) {
+			t.Fatalf("round %d: readers withdrawn or limit announced early", index+1)
+		}
+	}
+	last := f.provider.requests[4]
+	assertNoPanelExecutionAuthority(t, last)
+	if len(last.Tools) != 0 || !strings.Contains(last.Messages[0].Content, limit) {
+		t.Fatalf("the final call still offered readers or did not state the limit: %d tools", len(last.Tools))
+	}
+	sources := replySources(t, reply["workspace_context"])
+	if len(sources) != 1 || sources[0]["kind"] != "note" || !strings.Contains(reply["response"].(string), "[S1]") {
+		t.Fatalf("sources after the limit: %v", sources)
 	}
 }

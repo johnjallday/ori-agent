@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +96,12 @@ func newFileFixture(t *testing.T) *fileFixture {
 	writeFixtureFile(t, filepath.Join(capability, "kick.txt"), []byte("CAPABILITY_FOLDER_BODY"))
 	if err := os.Symlink(filepath.Join(f.outside, "secret.txt"), filepath.Join(f.alphaFolder, "escape.txt")); err != nil {
 		t.Skip("symbolic links are unavailable here")
+	}
+	// Links that stay inside the folder but point at what is excluded from it.
+	for name, target := range map[string]string{"visible-env.txt": ".env", "visible-memory.md": "MEMORY.md"} {
+		if err := os.Symlink(target, filepath.Join(f.alphaFolder, name)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	deleted := time.Unix(1700000300, 0)
 	if err := f.store.Update(f.alpha.ID, func(ws *workspace.Workspace) error {
@@ -227,7 +234,9 @@ func TestFileReaders_RefusalsAreDistinctPathFreeAndReadNothing(t *testing.T) {
 		"missing":                      {map[string]any{"directory_id": f.folderID, "path": "notes/missing.txt"}, "unavailable", "file_not_found"},
 		"climbing path":                {map[string]any{"directory_id": f.folderID, "path": "../outside/secret.txt"}, "denied", "path_outside_the_approved_folder"},
 		"absolute path":                {map[string]any{"directory_id": f.folderID, "path": filepath.Join(f.outside, "secret.txt")}, "denied", "path_outside_the_approved_folder"},
-		"link that leaves":             {map[string]any{"directory_id": f.folderID, "path": "escape.txt"}, "denied", "path_outside_the_approved_folder"},
+		"link that leaves":             {map[string]any{"directory_id": f.folderID, "path": "escape.txt"}, "denied", "links_are_not_followed"},
+		"inside link to a hidden file": {map[string]any{"directory_id": f.folderID, "path": "visible-env.txt"}, "denied", "links_are_not_followed"},
+		"inside link to Ori's record":  {map[string]any{"directory_id": f.folderID, "path": "visible-memory.md"}, "denied", "links_are_not_followed"},
 		"hidden file":                  {map[string]any{"directory_id": f.folderID, "path": ".env"}, "denied", "not_readable_here"},
 		"managed memory":               {map[string]any{"directory_id": f.folderID, "path": "MEMORY.md"}, "denied", "not_readable_here"},
 		"a folder":                     {map[string]any{"directory_id": f.folderID, "path": "linked-dir"}, "unsupported", "not_a_regular_file"},
@@ -324,6 +333,85 @@ func TestFileReaders_PartsShareTheTurnBudgetAndRefuseAChangedFile(t *testing.T) 
 	next := readerResult(t, fresh, readerFile, map[string]any{"directory_id": f.folderID, "path": "log.txt", "offset": start["next_offset"]})
 	if next["reason"] != "file_changed_since_first_part" || next["content_read"] != false {
 		t.Fatalf("a part of a changed file was joined to the earlier part: %v", next)
+	}
+	// Read again from the start, as that refusal says: the new version can then
+	// be continued. The earlier read of the old version does not block it.
+	again := readerResult(t, fresh, readerFile, map[string]any{"directory_id": f.folderID, "path": "log.txt"})
+	if again["content_read"] != true || !strings.HasPrefix(again["content"].(string), "Rewritten. ") {
+		t.Fatalf("re-reading the changed file: %v", again["reason"])
+	}
+	if continued := readerResult(t, fresh, readerFile, map[string]any{"directory_id": f.folderID, "path": "log.txt", "offset": again["next_offset"]}); continued["reason"] == "file_changed_since_first_part" {
+		t.Fatal("a file re-read from the start could not be continued")
+	}
+}
+
+// Everything a read delivers is charged to the turn's budget: the names and
+// labels around the content as well as the content, however they are escaped,
+// and a read past the end of a file is not free.
+func TestFileReaders_ChargeTheWholeResultNotOnlyTheContent(t *testing.T) {
+	f := newFileFixture(t)
+	hostile := strings.Repeat("<&>", 40) + ".txt"
+	writeFixtureFile(t, filepath.Join(f.alphaFolder, "notes", hostile), []byte("A short file with a long, escaped name."))
+	if err := f.store.Update(f.alpha.ID, func(ws *workspace.Workspace) error {
+		for i := range ws.DirectoryReferences {
+			if ws.DirectoryReferences[i].ID == f.folderID {
+				ws.DirectoryReferences[i].Name = strings.Repeat("<&>", 50)
+			}
+		}
+		ws.Tasks = append(ws.Tasks, workspace.Task{ID: "task-long", WorkspaceID: ws.ID, Description: strings.Repeat("<&>", 60), Details: "Short details."})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.notes.notes["note-escaped"] = AssistantNote{ID: "note-escaped", WorkspaceID: f.alpha.ID, Name: strings.Repeat("<&>", 50), Content: "A short note."}
+	registry, turn := f.registry(t)
+	for name, call := range map[string]struct {
+		reader string
+		args   map[string]any
+	}{
+		"file with an escaped name":    {readerFile, map[string]any{"directory_id": f.folderID, "path": "notes/" + hostile}},
+		"a read past the file's end":   {readerFile, map[string]any{"directory_id": f.folderID, "path": "notes/" + hostile, "offset": 5000}},
+		"note with an escaped title":   {readerNote, map[string]any{"note_id": "note-escaped"}},
+		"a read past the note's end":   {readerNote, map[string]any{"note_id": "note-escaped", "offset": 5000}},
+		"task with an escaped title":   {readerTask, map[string]any{"task_id": "task-long"}},
+		"a listing":                    {readerFiles, nil},
+		"a refusal":                    {readerFile, map[string]any{"directory_id": f.folderID, "path": "notes/missing.txt"}},
+		"a folder listing":             {readerFolder, map[string]any{"directory_id": f.folderID, "path": "notes"}},
+		"a second part of the project": {readerFile, map[string]any{"project_file": true}},
+	} {
+		before := turn.ledger.remaining()
+		encoded, _ := json.Marshal(call.args)
+		raw, err := registry.Execute(context.Background(), call.reader, string(encoded))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if delivered, charged := utf8.RuneCountInString(raw), before-turn.ledger.remaining(); charged < delivered {
+			t.Fatalf("%s delivered %d characters and was charged %d", name, delivered, charged)
+		}
+	}
+}
+
+// A workspace that records a project file which cannot be resolved right now
+// has a file that could not be reached, not no files.
+func TestFileReaders_UnresolvedProjectFileIsUnavailableNotEmpty(t *testing.T) {
+	f := newFileFixture(t)
+	if err := f.store.Update(f.alpha.ID, func(ws *workspace.Workspace) error {
+		if ws.SharedData == nil {
+			ws.SharedData = map[string]any{}
+		}
+		ws.Attachments, ws.DirectoryReferences = nil, nil
+		return workspace.SetProjectEntryLocator(ws.SharedData, workspace.ProjectEntryLocator{SchemaVersion: workspace.ProjectEntryLocatorSchemaVersion, Kind: workspace.ProjectEntryManagedWorkspace, RelativePath: "song.rpp"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.handler.Files = fixedFileSource{attachments: map[string]string{}}
+	registry, _ := f.registry(t)
+	listed := readerResult(t, registry, readerFiles, nil)
+	if listed["status"] != "unavailable" || listed["reason"] != "project_file_unavailable" || listed["project_file"].(map[string]any)["readable"] != "unavailable" {
+		t.Fatalf("an unresolved project file was reported as %v: %v", listed["status"], listed)
+	}
+	if read := readerResult(t, registry, readerFile, map[string]any{"project_file": true}); read["content_read"] != false || read["status"] == "empty" {
+		t.Fatalf("reading it: %v", read)
 	}
 }
 
@@ -423,5 +511,43 @@ func TestFileReaders_OverviewCountsSourcesWithoutOpeningAnythingAndPromptsMatchT
 	}
 	if unsupported := f.handler.bindWorkspaceTurn(context.Background(), "hello", f.refs, f.work).projection.Overview.Sources["files"]; unsupported.Status != assistantcontext.Unsupported {
 		t.Fatalf("files without a reader: %+v", unsupported)
+	}
+}
+
+// A long folder listing is shortened to its own limit and says so. It is not
+// refused whole, and it leaves the budget a read needs. With little budget left
+// it shrinks further; with none, it is reported as over budget.
+func TestFileReaders_LongFolderListingIsShortenedAndLeavesBudgetToRead(t *testing.T) {
+	f := newFileFixture(t)
+	for index := range 400 {
+		writeFixtureFile(t, filepath.Join(f.alphaFolder, "takes", fmt.Sprintf("a-take-with-a-long-descriptive-name-%04d.txt", index)), []byte("x"))
+	}
+	registry, turn := f.registry(t)
+	before := turn.ledger.remaining()
+	listing := readerResult(t, registry, readerFolder, map[string]any{"directory_id": f.folderID})
+	raw, _ := json.Marshal(listing)
+	f.noPathsOrSecrets(t, "long listing", string(raw))
+	listed := len(listing["entries"].([]any))
+	if listing["status"] != "partial" || listing["reason"] != "listing_shortened_to_fit_reading_budget" || listing["truncated"] != true ||
+		listing["listed"] != float64(listed) || listed == 0 || listed >= 400 || listing["content_read"] != false || listing["next_step"] == nil {
+		t.Fatalf("long listing: %.600s", raw)
+	}
+	if used := before - turn.ledger.remaining(); used == 0 || used > assistantcontext.ListingLimit {
+		t.Fatalf("a listing used %d characters of the budget, over its %d limit", used, assistantcontext.ListingLimit)
+	}
+	narrower := readerResult(t, registry, readerFolder, map[string]any{"directory_id": f.folderID, "path": "notes"})
+	read := readerResult(t, registry, readerFile, map[string]any{"directory_id": f.folderID, "path": "notes/session.txt"})
+	if narrower["status"] != "available" || read["content_read"] != true || len(turn.ledger.sources) != 1 {
+		t.Fatalf("after a long listing: narrower %v, read %v", narrower["status"], read["status"])
+	}
+
+	turn.ledger.used = assistantcontext.EvidenceLimit - 1500
+	short := readerResult(t, registry, readerFolder, map[string]any{"directory_id": f.folderID})
+	if rows := len(short["entries"].([]any)); short["status"] != "partial" || rows == 0 || rows >= listed || turn.ledger.remaining() < 0 {
+		t.Fatalf("near the end of the budget: %d rows, %v", rows, short["reason"])
+	}
+	turn.ledger.used = assistantcontext.EvidenceLimit - 40
+	if none := readerResult(t, registry, readerFolder, map[string]any{"directory_id": f.folderID}); none["reason"] != "evidence_budget_exhausted" || none["entries"] != nil {
+		t.Fatalf("with no budget left: %v", none)
 	}
 }

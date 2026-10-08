@@ -46,22 +46,33 @@ func TestReadContainedFile_ReadsOnlyRegularFilesInsideTheApprovedFolder(t *testi
 			t.Fatalf("%s: %q %v", rel, got.Data, err)
 		}
 	}
-	// A link that stays inside the folder is followed; one that leaves is refused.
+	// No link is followed: not one that leaves the folder, and not one that stays
+	// inside it, which could give a hidden file or one of Ori's records a name
+	// that is not excluded.
 	if err := os.Symlink("notes.txt", filepath.Join(root, "alias.txt")); err != nil {
 		t.Skip("symbolic links are unavailable here")
 	}
-	if got, err := ReadContainedFile(root, "alias.txt", 1024); err != nil || string(got.Data) != "inside notes" {
-		t.Fatalf("in-folder link: %q %v", got.Data, err)
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o750); err != nil {
+		t.Fatal(err)
 	}
-	for name, target := range map[string]string{"escape.txt": filepath.Join(outside, "secret.txt"), "relative-escape.txt": "../outside/secret.txt", "escape-dir": outside} {
+	if err := os.WriteFile(filepath.Join(root, ".git", "config"), []byte("hidden"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, target := range map[string]string{
+		"escape.txt": filepath.Join(outside, "secret.txt"), "relative-escape.txt": "../outside/secret.txt", "escape-dir": outside,
+		"visible-env.txt": ".env", "visible-memory.md": "MEMORY.md", "sub/up-to-records.json": "../workspace.json", "pub": ".git", "sub-alias": "sub",
+	} {
 		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, rel := range []string{"escape.txt", "relative-escape.txt", "escape-dir/secret.txt"} {
+	for _, rel := range []string{
+		"alias.txt", "escape.txt", "relative-escape.txt", "escape-dir/secret.txt",
+		"visible-env.txt", "visible-memory.md", "sub/up-to-records.json", "pub/config", "sub-alias/deep.md",
+	} {
 		got, err := ReadContainedFile(root, rel, 1024)
-		if !errors.Is(err, ErrSourceOutside) || len(got.Data) != 0 {
-			t.Fatalf("%s left the approved folder: %q %v", rel, got.Data, err)
+		if !errors.Is(err, ErrSourceLinked) || len(got.Data) != 0 {
+			t.Fatalf("%s was read through a link: %q %v", rel, got.Data, err)
 		}
 	}
 	for rel, want := range map[string]error{
@@ -82,6 +93,7 @@ func TestReadContainedFile_ReadsOnlyRegularFilesInsideTheApprovedFolder(t *testi
 		"skills_state.json":                  ErrSourceExcluded,
 		"missing.txt":                        ErrSourceMissing,
 		"sub/missing/deep.md":                ErrSourceMissing,
+		"notes.txt/inside-a-file":            ErrSourceMissing,
 		"sub":                                ErrSourceNotRegular,
 	} {
 		got, err := ReadContainedFile(root, rel, 1024)
@@ -94,6 +106,90 @@ func TestReadContainedFile_ReadsOnlyRegularFilesInsideTheApprovedFolder(t *testi
 	}
 	if _, err := ReadContainedFile(root, "notes.txt", 5); !errors.Is(err, ErrSourceTooLarge) {
 		t.Fatalf("a file over the limit: %v", err)
+	}
+}
+
+// An approved folder can be one of Ori's workspace folders, or hold others. A
+// parent's folder holds its child workspaces; reading the parent must not reach
+// a child's notes or files, the workspace's agent snapshots, or any other
+// workspace's folder found below it. They are neither read nor listed.
+func TestContainedSources_NeverReachAnotherWorkspaceOrOriFolders(t *testing.T) {
+	root, _ := containedFixture(t) // the fixture's root holds a workspace record
+	const private = "ANOTHER_WORKSPACE_MUST_NEVER_BE_READ"
+	for rel, content := range map[string]string{
+		"agents/scout/config.json":                     private,
+		"sub-workspaces/album-2/workspace.json":        `{"id":"child"}`,
+		"sub-workspaces/album-2/notes/plan.md":         private,
+		"sub-workspaces/album-2/files/artwork.md":      private,
+		"archive/old-project/workspace.json":           `{"id":"other"}`,
+		"archive/old-project/notes/plan.md":            private,
+		"archive/readme.txt":                           "an ordinary file beside another workspace",
+		"sub/agents/readme.txt":                        "an ordinary folder that happens to be called agents",
+		"sub/sub-workspaces/readme.txt":                "likewise",
+		"notes/own-note.md":                            "this workspace's own note",
+		"outputs/result.md":                            "this workspace's own output",
+		"Sub-Workspaces-notes/readme.txt":              "a different name",
+		"archive/old-project/sub-workspaces/x/deep.md": private,
+	} {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, rel := range []string{
+		"agents/scout/config.json", "Agents/scout/config.json", "sub-workspaces/album-2/notes/plan.md", "sub-workspaces/album-2/files/artwork.md",
+		"archive/old-project/notes/plan.md", "archive/old-project/sub-workspaces/x/deep.md",
+	} {
+		got, err := ReadContainedFile(root, rel, 1024)
+		if !errors.Is(err, ErrSourceExcluded) || len(got.Data) != 0 {
+			t.Fatalf("%s was read from another workspace or an Ori folder: %q %v", rel, got.Data, err)
+		}
+	}
+	for rel, want := range map[string]string{
+		"archive/readme.txt": "an ordinary file beside another workspace", "sub/agents/readme.txt": "an ordinary folder that happens to be called agents",
+		"sub/sub-workspaces/readme.txt": "likewise", "notes/own-note.md": "this workspace's own note", "outputs/result.md": "this workspace's own output",
+		"Sub-Workspaces-notes/readme.txt": "a different name",
+	} {
+		if got, err := ReadContainedFile(root, rel, 1024); err != nil || string(got.Data) != want {
+			t.Fatalf("%s: %q %v", rel, got.Data, err)
+		}
+	}
+	listing, err := ListContainedEntries(root, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, entry := range listing.Entries {
+		listed[entry.RelativePath] = true
+	}
+	for _, absent := range []string{"agents", "agents/scout", "sub-workspaces", "sub-workspaces/album-2", "archive/old-project", "archive/old-project/notes"} {
+		if listed[absent] {
+			t.Fatalf("%s was listed: %v", absent, listed)
+		}
+	}
+	for _, present := range []string{"archive", "archive/readme.txt", "sub/agents", "sub/agents/readme.txt", "notes/own-note.md", "outputs/result.md"} {
+		if !listed[present] {
+			t.Fatalf("%s is missing from the listing: %v", present, listed)
+		}
+	}
+	for _, start := range []string{"agents", "sub-workspaces", "sub-workspaces/album-2", "archive/old-project", "archive/old-project/notes"} {
+		if _, err := ListContainedEntries(root, start, 1); !errors.Is(err, ErrSourceExcluded) {
+			t.Fatalf("list %s: %v", start, err)
+		}
+	}
+	// A folder that is not a workspace folder keeps its own "agents" directory.
+	plain := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(plain, "agents"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plain, "agents", "roster.txt"), []byte("a user's own file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReadContainedFile(plain, "agents/roster.txt", 1024); err != nil || string(got.Data) != "a user's own file" {
+		t.Fatalf("an ordinary agents folder: %q %v", got.Data, err)
 	}
 }
 
@@ -174,6 +270,77 @@ func TestReadContainedFile_NeverReadsASubstituteDuringReplacement(t *testing.T) 
 	t.Logf("%d of 8000 reads succeeded while the targets were being replaced; none read outside content", reads)
 }
 
+// The same while a file and a folder are swapped for links that stay inside the
+// approved folder but point at what is excluded from it: a hidden file and a
+// hidden folder. No read may return the excluded content under a visible name.
+func TestReadContainedFile_NeverReadsAnExcludedEntryThroughAnInsideLink(t *testing.T) {
+	root, _ := containedFixture(t)
+	const excluded = "EXCLUDED_ENTRY_MUST_NEVER_BE_READ"
+	hidden := filepath.Join(root, ".private")
+	if err := os.Mkdir(hidden, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(root, ".env"), filepath.Join(hidden, "deep.md")} {
+		if err := os.WriteFile(path, []byte(excluded), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(".env", filepath.Join(root, "probe")); err != nil {
+		t.Skip("symbolic links are unavailable here")
+	}
+	_ = os.Remove(filepath.Join(root, "probe"))
+	file, folder := filepath.Join(root, "notes.txt"), filepath.Join(root, "sub")
+	stop := make(chan struct{})
+	var swaps sync.WaitGroup
+	swaps.Add(1)
+	go func() {
+		defer swaps.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.Remove(file)
+			_ = os.RemoveAll(folder)
+			if i%2 == 0 {
+				_ = os.Symlink(".env", file)
+				_ = os.Symlink(".private", folder)
+			} else {
+				_ = os.WriteFile(file, []byte("inside notes"), 0o600)
+				_ = os.Mkdir(folder, 0o750)
+				_ = os.WriteFile(filepath.Join(folder, "deep.md"), []byte("inside deep"), 0o600)
+			}
+		}
+	}()
+	reads := 0
+	for i := 0; i < 4000; i++ {
+		for _, rel := range []string{"notes.txt", "sub/deep.md"} {
+			got, err := ReadContainedFile(root, rel, 1024)
+			if strings.Contains(string(got.Data), excluded) {
+				close(stop)
+				swaps.Wait()
+				t.Fatalf("read %d of %s returned an excluded entry's content (err=%v)", i, rel, err)
+			}
+			if err == nil {
+				reads++
+			}
+		}
+		if listing, err := ListContainedEntries(root, "sub", 1); err == nil {
+			for _, entry := range listing.Entries {
+				if entry.Size == int64(len(excluded)) {
+					close(stop)
+					swaps.Wait()
+					t.Fatalf("listing %d of sub described the hidden folder's file", i)
+				}
+			}
+		}
+	}
+	close(stop)
+	swaps.Wait()
+	t.Logf("%d of 8000 reads succeeded while the targets were being replaced by inside links; none read an excluded entry", reads)
+}
+
 func TestListContainedEntries_NamesOnlyWithinBoundsAndNoFollowedLinks(t *testing.T) {
 	root, outside := containedFixture(t)
 	if err := os.Symlink(outside, filepath.Join(root, "linked-out")); err != nil {
@@ -203,7 +370,14 @@ func TestListContainedEntries_NamesOnlyWithinBoundsAndNoFollowedLinks(t *testing
 			t.Fatalf("%s must not be listed: %v", absent, kinds)
 		}
 	}
-	for rel, want := range map[string]error{"../outside": ErrSourceOutside, "linked-out": ErrSourceOutside, ".git": ErrSourceExcluded, "missing": ErrSourceMissing, "notes.txt": ErrSourceNotRegular} {
+	// A link that stays inside the folder is not a way into a hidden one either.
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".git", filepath.Join(root, "pub")); err != nil {
+		t.Fatal(err)
+	}
+	for rel, want := range map[string]error{"../outside": ErrSourceOutside, "linked-out": ErrSourceLinked, "pub": ErrSourceLinked, "linked-out/x": ErrSourceLinked, ".git": ErrSourceExcluded, "missing": ErrSourceMissing, "notes.txt": ErrSourceNotRegular} {
 		if _, err := ListContainedEntries(root, rel, 1); !errors.Is(err, want) {
 			t.Fatalf("list %q: %v, want %v", rel, err, want)
 		}

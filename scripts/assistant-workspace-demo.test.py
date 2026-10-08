@@ -33,6 +33,7 @@ class DemoProviderTests(unittest.TestCase):
                      ["demo", "--placement", "--reaper-source", "/reaper", "--music-source", "/music"],
                      ["demo", "--sources", "--placement"], ["demo", "--sources", "--portfolio"],
                      ["demo", "--files", "--sources"], ["demo", "--files", "--new-home"],
+                     ["demo", "--accessibility", "--files"], ["demo", "--accessibility", "--portfolio"],
                      ["demo", "--new-home", "--portfolio", "--reaper-source", "/reaper", "--music-source", "/music"]]:
             with patch("sys.argv", argv), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as failure:
@@ -130,6 +131,21 @@ class DemoProviderTests(unittest.TestCase):
             self.assertEqual(json.loads(saved), {"requests": 3, "hits": [2]})
             self.assertNotIn("tool result", saved)
             self.assertNotIn("OTHER_BODY", saved)
+
+    def test_server_log_audit_reports_marker_indexes_and_never_copies_a_line(self):
+        with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
+            state = Path(temp)
+            log = state / "server.log"
+            log.write_text("started\nHome assistant workspace context | reader_calls=2\nfile uploaded | filename=a.md\n")
+            self.assertEqual(demo.audit_server_log(log, state), {"lines": 3, "watched": 0, "diagnostics": 1, "hits": []})
+            (state / "sentinels.json").write_text(json.dumps(["UNLINKED_BODY"]))
+            (state / "log-watch.json").write_text(json.dumps(["READ_BODY", "", "/sandbox/Music/Assets"]))
+            self.assertEqual(demo.audit_server_log(log, state)["hits"], [])
+            with log.open("a") as more:
+                more.write("reader failed | path=/sandbox/Music/Assets/lyrics/a.txt\n")
+            audit = demo.audit_server_log(log, state)
+            self.assertEqual((audit["watched"], audit["hits"]), (3, [2]))
+            self.assertNotIn("Assets", json.dumps(audit))
 
     def test_real_http_fixture_hold_and_safe_failure(self):
         with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:

@@ -14,6 +14,7 @@ import re
 import signal
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -211,6 +212,27 @@ def audit_provider_input(state_dir, text):
         audit.write_text(json.dumps(seen))
 
 
+def audit_server_log(log, state_dir):
+    """Report which watched markers Ori's own log holds, without copying a line.
+
+    Watched markers are the provider's sentinels plus whatever a spec lists in
+    log-watch.json: bodies it had Ori read, and where a linked folder lives.
+    Reading a source is allowed; writing it into a log is not. The count of
+    workspace-context diagnostics lines shows the log was the real server's.
+    """
+    watched = []
+    for name in ("sentinels.json", "log-watch.json"):
+        try:
+            watched += [marker for marker in json.loads((state_dir / name).read_text())
+                        if isinstance(marker, str) and marker]
+        except (OSError, ValueError):
+            pass
+    text = log.read_text(errors="replace")
+    return {"lines": text.count("\n"), "watched": len(watched),
+            "diagnostics": text.count("Home assistant workspace context"),
+            "hits": [index for index, marker in enumerate(watched) if marker in text]}
+
+
 def trace_reader_turn(state_dir, results, offered, step):
     """Append one sanitized line per request that used, or could use, a reader.
 
@@ -346,8 +368,11 @@ def main():
                         help="wt demo: note and task readers, checked sources, changed records and a missing note")
     parser.add_argument("--files", action="store_true",
                         help="wt demo: linked-file and attachment readers, partial reads, an unlinked folder and revoked access")
+    parser.add_argument("--accessibility", action="store_true",
+                        help="wt demo: keyboard use, context announcements, sources, focus return and narrow layouts")
     args = parser.parse_args()
-    plain = [flag for flag, chosen in (("--placement", args.placement), ("--sources", args.sources), ("--files", args.files)) if chosen]
+    plain = [flag for flag, chosen in (("--placement", args.placement), ("--sources", args.sources), ("--files", args.files),
+                                         ("--accessibility", args.accessibility)) if chosen]
     if len(plain) > 1:
         parser.error("choose one wt demo: " + " or ".join(plain))
     if plain and (args.reaper_source or args.music_source or args.new_home or args.portfolio):
@@ -388,13 +413,16 @@ def main():
                           "group3-confirmed-candidate.log" if candidate else
                           "group3-wt-demo-placement.log" if args.placement else
                           "group4-wt-demo-sources.log" if args.sources else
-                          "group5-wt-demo-files.log" if args.files else "group2-wt-demo.log")
+                          "group5-wt-demo-files.log" if args.files else
+                          "group6-wt-demo-accessibility.log" if args.accessibility else "group2-wt-demo.log")
         spec, sandbox_env = (("tests/personal-assistant-workspace-placement.spec.ts", "ORI_WORKSPACE_PLACEMENT_SANDBOX")
                              if args.placement else
                              ("tests/personal-assistant-workspace-sources.spec.ts", "ORI_WORKSPACE_SOURCES_SANDBOX")
                              if args.sources else
                              ("tests/personal-assistant-workspace-files.spec.ts", "ORI_WORKSPACE_FILES_SANDBOX")
                              if args.files else
+                             ("tests/personal-assistant-workspace-accessibility.spec.ts", "ORI_WORKSPACE_ACCESSIBILITY_SANDBOX")
+                             if args.accessibility else
                              ("tests/personal-assistant-workspace-history.spec.ts", "ORI_WORKSPACE_HISTORY_SANDBOX"))
         process = None
         sandbox = None
@@ -419,6 +447,12 @@ def main():
                 result = subprocess.run(
                     ["npx", "playwright", "test", spec, "--workers=1"], cwd=ROOT, env=env, check=False,
                 )
+                output.flush()
+                audit = audit_server_log(log, state)
+                (evidence / (log.stem + "-server-log-audit.json")).write_text(json.dumps(audit))
+                if audit["hits"]:
+                    print("server log holds watched marker(s):", audit["hits"], file=sys.stderr)
+                    return 1
                 return result.returncode
         finally:
             # Release only our hold, then stop only our process group. wt demo's

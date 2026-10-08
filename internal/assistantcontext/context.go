@@ -10,6 +10,9 @@ const (
 	PreviewLimit   = 5
 	EvidenceLimit  = 64000
 	FileChunkLimit = 40000
+	// ListingLimit bounds one listing of notes, tasks, files or folder entries,
+	// so finding a source cannot use up the budget needed to read it.
+	ListingLimit = 16000
 )
 
 type Availability string

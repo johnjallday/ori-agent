@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/assistantcontext"
@@ -60,21 +61,41 @@ func (r *panelToolRegistry) Execute(ctx context.Context, name, arguments string)
 		// body is longer than a metadata field and is recorded as a source.
 		var data map[string]any
 		var err error
+		started := time.Now()
 		if isFileReader(name) {
 			data, err = r.executeFileReader(name, args)
 		} else {
 			data, err = r.executeReader(ctx, name, args)
 		}
 		if err != nil {
+			r.ledger.observe("failed", time.Since(started))
 			return "", errors.New("source unavailable")
 		}
 		encoded, err := homeToolJSON(data)
 		if err != nil {
+			r.ledger.observe("failed", time.Since(started))
 			return "", errors.New("source unavailable")
 		}
-		if data["content_read"] != true && !r.ledger.charge(evidenceSize(encoded)) {
-			return `{"status":"partial","reason":"evidence_budget_exhausted","content_read":false}`, nil
+		if data["content_read"] != true {
+			// A listing is for finding a source, so it may not use up the budget
+			// needed to read one. Too long, it is shortened rather than withheld.
+			limit := min(assistantcontext.ListingLimit, r.ledger.remaining())
+			if evidenceSize(encoded) > limit {
+				shorter, fits := fitListing(data, limit)
+				if !fits || !r.ledger.charge(evidenceSize(shorter)) {
+					r.ledger.observe("over_budget", time.Since(started))
+					return `{"status":"partial","reason":"evidence_budget_exhausted","content_read":false}`, nil
+				}
+				r.ledger.observe(string(assistantcontext.Partial), time.Since(started))
+				return shorter, nil
+			}
+			if !r.ledger.charge(evidenceSize(encoded)) {
+				r.ledger.observe("over_budget", time.Since(started))
+				return `{"status":"partial","reason":"evidence_budget_exhausted","content_read":false}`, nil
+			}
 		}
+		outcome, _ := data["status"].(assistantcontext.Availability)
+		r.ledger.observe(string(outcome), time.Since(started))
 		return encoded, nil
 	}
 	args["limit"] = assistantcontext.PreviewLimit

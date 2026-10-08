@@ -1,9 +1,10 @@
 # Personal Assistant workspace awareness: investigation contract
 
-**Status: findings plus in-progress host implementation; not shipped behavior.**
+**Status: host implementation complete on its feature branch; not merged.**
 Context-following conversations (group 2), setup continuity/placement (group 3),
-grounded notes/tasks with checked sources (group 4) and permitted file reading
-(group 5) are implemented. Final cross-slice validation is group 6.
+grounded notes/tasks with checked sources (group 4), permitted file reading
+(group 5) and final cross-slice validation (group 6) are implemented. Vendor-model
+behavior, live REAPER and release verification were not run.
 The full feature includes context-following conversations, setup continuity,
 notes/tasks, and permitted files. A context badge alone is not the delivery.
 Implementation proceeds in that order with one writer. This document records
@@ -347,27 +348,34 @@ it, by ID, by a climbing path or by an absolute path.
 **Readers.** `assistant_workspace_files` lists those sources (names and sizes;
 nothing is opened and readability is a hint from the file name only),
 `assistant_workspace_folder` lists names inside one linked folder (500 entries,
-three levels, hidden entries skipped, links listed but not followed), and
+three levels, hidden entries skipped, links listed but not followed; a listing
+longer than 16,000 characters is shortened and says so), and
 `assistant_workspace_file` reads one file as text. Text extraction is the shared
 `fileparser.ExtractText` (also used by the workspace chat's directory tool):
 PDF, Word, PowerPoint, Excel and the text formats through the existing parser;
 any other file whose start holds no NUL byte as plain text, which is how a
 `.rpp` is read; everything else is unsupported. The parser's 10 MB limit, the
 40,000-character part and the turn's shared 64,000-character budget all apply,
-across notes, tasks and files together. Audio is not decoded, nothing is run,
+across notes, tasks and files together. A Word, PowerPoint or Excel file is an
+archive, and a small one can expand enormously: the parsers stop at 32 MB of
+expanded content (`fileparser.MaxExpandedSize`) and report the document as too
+large to parse. Audio is not decoded, nothing is run,
 and a path written inside a file is delivered as text and never opened.
 
 **The read itself enforces the boundary** (`workspace.ReadContainedFile`).
 Checking a path and then opening it leaves a gap in which a folder on the way
 can be swapped for a link that leaves the approved folder. The reader opens
-through an `os.Root`, so every path component is resolved relative to the
-folder that was actually opened. It then uses only the open file: type and size
-come from the handle (a pipe or device is refused without being opened, and the
-open cannot block), the bytes come from that handle, and the handle and the
-folder are compared again after the read. A file or folder replaced along the
-way is reported as changed; a substitute is never read. A test swaps the target
-and a parent folder for outside links while reading 8,000 times and requires
-that no read ever returns outside content. The folder is resolved from canonical
+through an `os.Root`, so nothing can lead outside the folder that was actually
+opened, and it walks to the file one directory handle at a time without
+following any link. A link that stays inside the folder is refused too: it could
+give a hidden file or one of Ori's records a name that is not excluded. The
+reader then uses only the open file: type and size come from the handle (a pipe
+or device is refused without being opened, and the open cannot block), the
+bytes come from that handle, and the handle and the folder are compared again
+after the read. A file or folder replaced along the way is reported as changed;
+a substitute is never read. Two tests swap the target and a parent folder for
+links while reading 8,000 times, once to outside the folder and once to a hidden
+file and folder inside it, and require that no read ever returns that content. The folder is resolved from canonical
 state on every call, so unlinking or re-pointing it takes effect on the next
 read, and a later part of a file that changed is refused.
 
@@ -376,14 +384,29 @@ folder contains them: `MEMORY.md` (reviewed memory has its own eligible reader),
 `workspace.json`, `agent_settings.json`, `mcp_servers.json` and
 `skills_state.json` (absolute folder locations, agent definitions, tool-server
 settings). They are neither listed nor readable through these readers.
-Secret-like lines are withheld from delivered text.
+
+**One workspace's readers never reach another workspace.** A workspace's own
+folder can be a linked folder, and a parent's folder holds its children at
+`sub-workspaces/<child>/`. Below the approved folder, any directory that is
+itself a workspace folder (it holds `workspace.json`) is not entered and not
+listed, and inside a workspace folder `agents/` (agent snapshots) and
+`sub-workspaces/` are excluded. Being a Home therefore grants nothing over a
+project's notes or files. An ordinary folder that happens to contain a
+directory called `agents` is unaffected.
+
+**Secrets.** Secret-like lines are withheld from delivered text, and a private
+key is withheld whole, from its first line through its last, wherever a part
+starts. Only the lines a part touches are examined, each as a whole line, so a
+secret cut by a part's edge is withheld on both sides of it and one part of a
+very large file does not cost a scan of all of it.
 
 **Refusals are distinct and carry no path:** `file_not_found`,
-`path_outside_the_approved_folder`, `not_readable_here`, `not_a_regular_file`,
-`file_too_large`, `not_a_supported_document_or_plain_text`,
+`path_outside_the_approved_folder`, `links_are_not_followed`,
+`not_readable_here`, `not_a_regular_file`, `file_too_large`,
+`document_too_large_to_parse`, `not_a_supported_document_or_plain_text`,
 `document_could_not_be_parsed`, `file_changed_while_reading`,
-`folder_not_linked_to_this_workspace`, `attachment_has_no_stored_file`. None is
-reported as an empty workspace.
+`folder_not_linked_to_this_workspace`, `attachment_has_no_stored_file`,
+`project_file_unavailable`. None is reported as an empty workspace.
 
 **Sources.** A file source records its kind (`file` or `attachment`), the
 workspace, its name, where it lives in words ("Linked folder “Album assets” ·
@@ -411,6 +434,56 @@ in an attached-only folder, a hidden file, a same-named file in another
 workspace) without storing its input; that run shows zero. The exact-candidate
 suite additionally reads the created project's `.rpp` through the
 provider-managed project entry and shows that its Home and its sibling cannot.
+
+## Group-6 validation changes
+
+Final validation changed behavior in these places. Each has a test named in the
+acceptance matrix kept with the task list.
+
+- **Budget.** A content read is charged for its whole result (names, labels,
+  times and counters as well as the content), measured as the provider receives
+  it. A listing is limited to 16,000 characters (`assistantcontext.ListingLimit`)
+  and to what is left of the turn's budget; too long, it is shortened and marked
+  partial instead of refused whole, so finding a source cannot use up the budget
+  needed to read it.
+- **Reader rounds.** After the four permitted reader rounds, the one remaining
+  model call is told that the reader limit was reached, to answer only from what
+  was read and to say what was not.
+- **Citations.** An earlier answer is replayed to the model without its `[S#]`
+  markers: keys are issued afresh each turn, so a marker copied forward would
+  name whatever source holds that key now. The saved answer keeps its markers.
+  When more sources were read than a turn lists (12), cited ones are kept first
+  and a marker whose source is not listed is removed.
+- **Continuation.** A continuation is checked against the latest read of a
+  source, so a file that changed and was read again from the start can be
+  continued.
+- **Unavailable is not empty.** A project listed under a Home that cannot be
+  read now makes the Home's project count partial (or unavailable), and a
+  recorded project file that cannot be resolved is reported as unavailable.
+- **Named workspace from a task page.** The page's selected task is not looked
+  up in a different workspace the user names; the turn resolves.
+- **Diagnostics.** Each workspace turn logs one line,
+  `Home assistant workspace context`, with the context status and reason, the
+  canonical location and subject IDs and kinds, whether readers were offered,
+  reader calls by outcome, sources by kind, partial sources, evidence characters
+  used, and preparation and read time in microseconds. It carries no workspace
+  or file name, prompt, source text or filesystem path. The demo runner checks
+  the server's log for the bodies it had Ori read and for the linked folder's
+  location, and fails if either appears.
+- **Keyboard.** Pressing Send from the keyboard no longer drops focus to the
+  page: the button was disabled for an instant during submit, and a browser
+  removes focus from a focused control the moment it is disabled.
+
+Keyboard, screen-reader semantics and narrow layouts are checked by
+`python3 scripts/assistant-workspace-demo.py --accessibility`
+(`tests/personal-assistant-workspace-accessibility.spec.ts`): roles, names, live
+regions, focus order and layout are asserted in Chromium. No screen reader was
+run.
+
+Known limits, recorded rather than fixed: an entry is excluded by name, so a
+hard link under another name, or a filesystem that treats two spellings as one
+name beyond ASCII case, is not detected; the PDF parser's page loop is the
+existing library's.
 
 Setup-plan software previews now call the existing canonical integration reader
 directly. `setupjourney.Service.Read` creates/reconciles inert run rows, so it is
@@ -567,8 +640,34 @@ excluded) measured canonical project+parent p50 **178.625 µs**, p95 **321.333 �
 full bounded resolver/projection p50 **616.292 µs**, p95 **964.209 µs**. This is
 local context preparation only, excluding provider, profile/memory, deeper reads
 and parse latency. Concurrent race-instrumented checks are not this performance
-comparison. The provisional 250 ms p95 target is met for this fixture; later
-reader/large-workspace measurements are still required.
+comparison. The provisional 250 ms p95 target is met for this fixture.
+
+**Large workspace (group 6).** `TestAssistantWorkspaceLatency_LargeWorkspace`
+(run with `ORI_ASSISTANT_LATENCY=1`) measures through the real routes, stores
+and filesystem on a Home of 41 projects whose subject project has 1,000 tasks,
+300 notes (one of about 150,000 characters), 200 attachments, a linked folder of
+2,000 files, a 9 MB text file and a 2,000-paragraph `.docx`. On an Apple M5
+(10 cores, 32 GB, macOS 26.3.1, Go 1.27.1), without the race detector:
+
+| Measured | p50 | p95 |
+| --- | --- | --- |
+| Warm overview, large project (200 samples, HTTP route included) | 5.2 ms | 5.7 ms |
+| Warm overview, Home of 41 projects | 3.3 ms | 3.7 ms |
+| Reader round: task list, task detail, note list, file sources (30 samples each) | 8.1–8.9 ms | 8.8–9.4 ms |
+| Reader round: 40,000-character part of a 150,000-character note | 9.0 ms | 9.5 ms |
+| Reader round: folder listing of 2,000 files (shortened to fit) | 11.9 ms | 12.5 ms |
+| Reader round: 40,000-character part of a 9 MB text file | 22.5 ms | 23.3 ms |
+| Reader round: parsed `.docx` | 13.0 ms | 13.4 ms |
+
+A reader round is the time from the stand-in model asking for a reader to Ori's
+next request, so it includes the access re-check made before every read; model
+time is excluded. The 250 ms p95 target for overview preparation is met with a
+wide margin and is kept. Two changes came out of measuring: a part of a large
+file took about 460 ms because the whole file was scanned for secrets on every
+part (now only the lines the part touches), and a listing of a large folder was
+refused whole as over budget (now shortened). A turn that reads until the budget
+is spent delivered 58,179 characters through readers, had its later reads
+refused as over budget, and reported its one source as partial.
 
 ## Companion finding
 
@@ -589,9 +688,11 @@ companion checkout; fake-only success/failure preservation tests run with
 passes locally without changing the external source. This is not installation
 or published-release verification.
 
-The exact candidates have now been installed/enabled **only in disposable
-baseline state**, with a real Music Home and recognized REAPER review. This does
-not prove the user's installed version, project-entry reading, completed setup,
-real vendor-model behavior, live REAPER or release verification. Tasks 3.5, 5.5
-and 6.3 still require their distinct integration/acceptance cases. No companion
-source edit, real-environment installation, publication or floor change occurred.
+The exact candidates have been installed/enabled **only in disposable state**,
+with a real Music Home and recognized REAPER review. Confirmed setup into an
+existing Home, a declared new Home and a portfolio (task 3.5), and reading the
+created project's `.rpp` through the project-entry reader (task 5.5), ran there
+with a deterministic loopback provider. This does not prove the user's installed
+version, real vendor-model behavior, live REAPER or release verification: those
+were not run. No companion source edit, real-environment installation,
+publication or floor change occurred.

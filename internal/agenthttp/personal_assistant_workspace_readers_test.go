@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -453,6 +454,139 @@ func TestEvidenceLedger_BudgetRangesAndCitations(t *testing.T) {
 	}
 	if plain, none := newEvidenceLedger().cite("No reads [S1]."); plain != "No reads." || none != nil {
 		t.Fatalf("a turn that read nothing kept a citation: %q %+v", plain, none)
+	}
+	// A continuation is checked against the latest read of a source: after the
+	// note changed and was read again from the start, it can be continued.
+	if latest, read := ledger.prior(assistantcontext.SourceNote, "ws", "n"); !read || latest.Version != "v2" {
+		t.Fatalf("prior returned the stale read: %+v", latest)
+	}
+
+	// More sources than the list holds: cited ones are kept ahead of uncited ones,
+	// and a marker is only left in the text when its source is listed with it.
+	many := newEvidenceLedger()
+	for index := range assistantcontext.SourceLimit + 3 {
+		many.record(assistantcontext.SourceRef{Kind: assistantcontext.SourceNote, WorkspaceID: "ws", ID: "n" + strconv.Itoa(index), Version: "v", Total: 10, End: 10})
+	}
+	answer, sources = many.cite("Late ones [S14] [S15]. Out of range [S1000] [S123456789].")
+	keys := map[string]bool{}
+	for _, source := range sources {
+		keys[source.Key] = source.Cited
+	}
+	if answer != "Late ones [S14] [S15]. Out of range." || len(sources) != assistantcontext.SourceLimit || !keys["S14"] || !keys["S15"] || sources[0].Key != "S1" {
+		t.Fatalf("over the limit: %q %v", answer, keys)
+	}
+	all := ""
+	for index := range assistantcontext.SourceLimit + 3 {
+		all += " [S" + strconv.Itoa(index+1) + "]"
+	}
+	answer, sources = many.cite("Everything" + all + ".")
+	if len(sources) != assistantcontext.SourceLimit || strings.Contains(answer, "[S13]") || strings.Contains(answer, "[S15]") || !strings.Contains(answer, "[S12]") {
+		t.Fatalf("a marker was left without its source: %q", answer)
+	}
+	// An earlier answer is replayed to the model without its markers.
+	if got := withoutCitationMarkers("Master first [S1], then artwork [S12]. Kept: [Sx] [1]."); got != "Master first, then artwork. Kept: [Sx] [1]." {
+		t.Fatalf("history markers: %q", got)
+	}
+}
+
+// A part is cut by character position in the source text, and only the lines it
+// touches are checked for secrets. However the text is cut, no piece of a
+// secret-like line is delivered, and text without one comes back unchanged.
+func TestReaderChunk_PartsNeverCarryAPieceOfASecretLine(t *testing.T) {
+	const secret = "sk-abcdefgh12345678"
+	plain := "Tempo is 96 bpm — ça va.\n日本語の行\n\nLast line without a break"
+	for _, limit := range []int{1, 2, 7, 13, 40, 1000} {
+		rebuilt, total := "", utf8.RuneCountInString(plain)
+		for offset := 0; offset < total; offset += limit {
+			chunk, start, end, whole, withheld := readerChunk(plain, offset, limit)
+			if start != offset || end != min(offset+limit, total) || whole != total || withheld != 0 || !utf8.ValidString(chunk) {
+				t.Fatalf("limit %d at %d: %d-%d of %d, withheld %d, %q", limit, offset, start, end, whole, withheld, chunk)
+			}
+			rebuilt += chunk
+		}
+		if rebuilt != plain {
+			t.Fatalf("limit %d: parts do not rebuild the text: %q", limit, rebuilt)
+		}
+	}
+	if chunk, start, end, total, _ := readerChunk(plain, 9999, 10); chunk != "" || start != end || start != total {
+		t.Fatalf("an offset past the end returned %q %d-%d of %d", chunk, start, end, total)
+	}
+
+	text := "Deploy notes\nexport TOKEN=" + secret + " # keep\nAfter the secret, ordinary text.\n"
+	leaks := func(chunk string) bool {
+		for index := 0; index+4 <= len(secret); index++ {
+			if strings.Contains(chunk, secret[index:index+4]) {
+				return true
+			}
+		}
+		return false
+	}
+	total := utf8.RuneCountInString(text)
+	for limit := 1; limit <= total; limit++ {
+		rebuilt, withheld := "", 0
+		for offset := 0; offset < total; offset += limit {
+			chunk, _, _, _, lines := readerChunk(text, offset, limit)
+			if leaks(chunk) || strings.Contains(chunk, "TOKEN") || strings.Contains(chunk, "keep") {
+				t.Fatalf("limit %d at %d delivered part of the secret line: %q", limit, offset, chunk)
+			}
+			rebuilt, withheld = rebuilt+chunk, withheld+lines
+		}
+		if withheld == 0 || !strings.HasPrefix(rebuilt, "Deploy notes\n"+withheldLine) || !strings.HasSuffix(rebuilt, "\nAfter the secret, ordinary text.\n") {
+			t.Fatalf("limit %d: %q", limit, rebuilt)
+		}
+	}
+	// A part that ends before the secret line, or starts after it, is untouched.
+	if chunk, _, _, _, withheld := readerChunk(text, 0, 12); chunk != "Deploy notes" || withheld != 0 {
+		t.Fatalf("a part before the secret line: %q", chunk)
+	}
+
+	// One very long line: the check still reaches a secret just past the edge.
+	long := strings.Repeat("a", 20000) + " " + secret + " " + strings.Repeat("b", 20000)
+	for _, part := range [][2]int{{0, 20005}, {19990, 20}, {20010, 500}} {
+		if chunk, _, _, _, withheld := readerChunk(long, part[0], part[1]); leaks(chunk) || withheld != 1 || chunk != withheldLine {
+			t.Fatalf("long line, part %v: withheld %d, %.80q", part, withheld, chunk)
+		}
+	}
+	if chunk, _, _, _, withheld := readerChunk(long, 0, 1000); withheld != 0 || chunk != strings.Repeat("a", 1000) {
+		t.Fatal("a part far from the secret on a long line was withheld")
+	}
+	// A private key is withheld whole, not only the line that names it, however
+	// the text is cut and wherever a part starts.
+	body := strings.Repeat("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj\n", 26)
+	key := "Deploy notes\n-----BEGIN RSA PRIVATE KEY-----\n" + body + "-----END RSA PRIVATE KEY-----\nAfter the key.\n-----BEGIN CERTIFICATE-----\nPUBLICCERTLINE\n-----END CERTIFICATE-----\n"
+	keyTotal := utf8.RuneCountInString(key)
+	for _, limit := range []int{1, 17, 64, 65, 300, 1000, keyTotal} {
+		rebuilt := ""
+		for offset := 0; offset < keyTotal; offset += limit {
+			chunk, _, _, _, _ := readerChunk(key, offset, limit)
+			if strings.Contains(chunk, "MIIE") || strings.Contains(chunk, "Us8c") || strings.Contains(chunk, "PRIVATE") {
+				t.Fatalf("limit %d at %d delivered part of a private key: %q", limit, offset, chunk)
+			}
+			rebuilt += chunk
+		}
+		// What is not a private key is still delivered, including a certificate.
+		if !strings.HasPrefix(rebuilt, "Deploy notes\n"+withheldLine) || !strings.HasSuffix(rebuilt, "\nAfter the key.\n-----BEGIN CERTIFICATE-----\nPUBLICCERTLINE\n-----END CERTIFICATE-----\n") {
+			t.Fatalf("limit %d: %.200q", limit, rebuilt)
+		}
+	}
+	if whole, withheld := readerText(key); withheld != 28 || strings.Contains(whole, "MIIE") || strings.Count(whole, "\n") != strings.Count(key, "\n") {
+		t.Fatalf("a whole-text read withheld %d lines of a 28-line key", withheld)
+	}
+	// A key with no last line is withheld to the end of what is read; text far
+	// past where a key could reach is delivered again.
+	open := "-----BEGIN PRIVATE KEY-----\n" + body
+	if chunk, _, _, _, _ := readerChunk(open, 500, 200); strings.Contains(chunk, "MIIE") {
+		t.Fatalf("an unterminated key was delivered: %q", chunk)
+	}
+	far := open + strings.Repeat("Ordinary prose well after the key. ", 600)
+	if chunk, _, _, _, withheld := readerChunk(far, utf8.RuneCountInString(far)-100, 100); withheld != 0 || !strings.Contains(chunk, "Ordinary prose") {
+		t.Fatalf("text far after an unterminated key was withheld: %q", chunk)
+	}
+
+	// The budget is counted on the delivered form, which escaping makes longer.
+	fitted, _, _, _, size, _ := fitReaderChunk(strings.Repeat("<>&", 1000), 0, 3000, 600)
+	if encoded, _ := json.Marshal(fitted); size != utf8.RuneCount(encoded) || size > 600 || fitted == "" {
+		t.Fatalf("delivered size %d does not fit or is not what was counted", size)
 	}
 }
 

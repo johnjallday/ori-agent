@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -100,6 +101,121 @@ func TestAssistantFileReaders_RealHostReadsLinkedFileAndAttachmentWithAttributio
 	contents, err := os.ReadFile(filepath.Join(f.folder, "lyrics", "bridge.txt"))
 	if err != nil || string(contents) != linkedFileBody {
 		t.Fatal("reading changed the file", err)
+	}
+}
+
+// One diagnostics line per workspace turn says what was resolved and read in
+// IDs, status words, counts and durations. Nothing logged while the turn runs
+// carries a source body, the prompt, or where a linked folder lives.
+func TestAssistantFileReaders_DiagnosticsCountReadsWithoutBodiesOrPaths(t *testing.T) {
+	f := newFileReaderFixture(t)
+	f.provider.script = []llm.ChatResponse{
+		readerCall("assistant_workspace_file", map[string]any{"directory_id": f.folderID, "path": "lyrics/bridge.txt"}),
+		readerCall("assistant_workspace_file", map[string]any{"directory_id": f.folderID, "path": "../../outside.txt"}),
+		readerCall("assistant_workspace_note", map[string]any{"note_id": f.noteID}),
+		{Content: "The bridge is in D minor [S1].", Model: "sonnet", Provider: "claude_code"},
+	}
+	var captured strings.Builder
+	previous := log.Writer()
+	log.SetOutput(&captured)
+	const prompt = "PROMPT_TEXT_MUST_NOT_BE_LOGGED what key is the bridge in?"
+	f.ask(t, "", prompt)
+	log.SetOutput(previous)
+
+	var line string
+	for _, candidate := range strings.Split(captured.String(), "\n") {
+		if strings.Contains(candidate, "Home assistant workspace context") {
+			line = candidate
+		}
+	}
+	for _, expected := range []string{
+		"scope=home_assistant.workspace_context", "context_status=available", "subject_id=" + f.project.ID,
+		"readers_offered=true", "file_readers_offered=true", "reader_calls=3", "sources_read=2", "sources_partial=0",
+		"available:2", "denied:1", "file:1", "note:1", "evidence_limit=64000", "context_prepare_us=", "read_us=", "turn_failed=false",
+	} {
+		if !strings.Contains(line, expected) {
+			t.Fatalf("diagnostics line is missing %q: %s", expected, line)
+		}
+	}
+	for _, private := range []string{linkedFileBody, readerNoteTail, "PROMPT_TEXT_MUST_NOT_BE_LOGGED", f.folder, "bridge.txt", "outside.txt", f.project.Name} {
+		if strings.Contains(captured.String(), private) {
+			t.Fatalf("the log carries %q", private)
+		}
+	}
+}
+
+// A Home's own folder holds its projects' folders. With that folder linked to
+// the Home, its readers still do not reach a project inside it: being the
+// parent grants nothing over a child's notes or files.
+func TestAssistantFileReaders_ParentFolderDoesNotReachAChildWorkspace(t *testing.T) {
+	f := newFileReaderFixture(t)
+	home := placementWorkspace(t, f.draftServerFixture, "Reader Home fixture", "group", "")
+	child := placementWorkspace(t, f.draftServerFixture, "Reader child fixture", "", home.ID)
+	homeFolder, err := f.builder.workspaceFileStore.GetFolderPath(home.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childFolder, err := f.builder.workspaceFileStore.GetFolderPath(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside, err := filepath.Rel(homeFolder, childFolder)
+	if err != nil || strings.HasPrefix(inside, "..") {
+		t.Fatalf("fixture: the child's folder is expected inside its parent's, got %q", inside)
+	}
+	const childBody = "CHILD_WORKSPACE_BODY_MUST_NOT_BE_READ_THROUGH_THE_PARENT"
+	if err := os.MkdirAll(filepath.Join(childFolder, "notes"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childFolder, "notes", "plan.md"), []byte(childBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(homeFolder, "home-readme.txt"), []byte("HOME_OWN_FILE a file of the Home itself"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	homeFolderID := uuid.NewString()
+	if err := f.builder.workspaceStore.Update(home.ID, func(ws *workspace.Workspace) error {
+		return ws.AddDirectoryReference(workspace.DirectoryReference{ID: homeFolderID, Name: "Home folder", Path: homeFolder})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	home, err = f.builder.workspaceStore.Get(home.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.project = home
+	childPath := filepath.ToSlash(filepath.Join(inside, "notes", "plan.md"))
+	f.provider.script = []llm.ChatResponse{
+		readerCall("assistant_workspace_folder", map[string]any{"directory_id": homeFolderID}),
+		readerCall("assistant_workspace_file", map[string]any{"directory_id": homeFolderID, "path": childPath}),
+		readerCall("assistant_workspace_folder", map[string]any{"directory_id": homeFolderID, "path": filepath.ToSlash(inside)}),
+		readerCall("assistant_workspace_file", map[string]any{"directory_id": homeFolderID, "path": "home-readme.txt"}),
+		{Content: "The Home has its own readme [S1].", Model: "sonnet", Provider: "claude_code"},
+	}
+	reply := f.ask(t, "", "What is in this Home's folder?")
+	results := []string{}
+	for _, message := range f.provider.requests[len(f.provider.requests)-1].Messages {
+		if message.Role == llm.RoleTool {
+			results = append(results, message.Content)
+		}
+	}
+	if len(results) != 4 {
+		t.Fatalf("expected four reader results, got %d", len(results))
+	}
+	if strings.Contains(results[0], filepath.Base(childFolder)) || strings.Contains(results[0], "sub-workspaces") || !strings.Contains(results[0], "home-readme.txt") {
+		t.Fatalf("the Home's listing named a child workspace's folder: %s", results[0])
+	}
+	for index, result := range results[1:3] {
+		if !strings.Contains(result, "not_readable_here") || strings.Contains(result, "plan.md") {
+			t.Fatalf("a child workspace was reached through its parent (call %d): %s", index+2, result)
+		}
+	}
+	if !strings.Contains(results[3], "HOME_OWN_FILE") {
+		t.Fatalf("the Home's own file was not read: %s", results[3])
+	}
+	sources := replySources(t, reply["workspace_context"])
+	if strings.Contains(mustJSON(t, f.provider.requests)+mustJSON(t, reply), childBody) || len(sources) != 1 || sources[0]["label"] != "home-readme.txt" {
+		t.Fatalf("the child's content reached the model or the reply: %v", sources)
 	}
 }
 

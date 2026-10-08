@@ -225,6 +225,8 @@ func readDirectoryFileText(fullPath string, size int64) (text, kind string, err 
 	// only the wording of a refusal is this tool's own.
 	text, kind, err = fileparser.ExtractText(fullPath, data)
 	switch {
+	case errors.Is(err, fileparser.ErrExpandedTooLarge):
+		return "", "", fmt.Errorf("this file is too large to read here: %w", err)
 	case errors.Is(err, fileparser.ErrParseFailed):
 		return "", "", fmt.Errorf("this file could not be parsed as %s: %w", strings.TrimPrefix(ext, "."), err)
 	case err != nil:

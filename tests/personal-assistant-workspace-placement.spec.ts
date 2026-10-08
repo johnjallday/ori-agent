@@ -199,7 +199,14 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
     'The reviewed destination for Album-5 placement fixture has changed. Use Review setup to refresh the review.'
   );
   await shot('placement-blocked-review.png');
-  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  // The reason is announced text, not a faded button alone, and the recovery
+  // it names can be reached and used from the keyboard.
+  await expect(status).toHaveAttribute('role', 'status');
+  await expect(status).toHaveAttribute('aria-live', 'polite');
+  const recover = page.getByRole('button', { name: 'Review workspace setup', exact: true });
+  await recover.focus();
+  await expect(recover).toBeFocused();
+  await page.keyboard.press('Enter');
   await chooseCandidate('Album-5 placement fixture');
   await expect(card).toContainText(
     'Destination: Group “Renamed portfolio placement fixture” · separate project.'
