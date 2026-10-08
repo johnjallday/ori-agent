@@ -55,16 +55,32 @@ summary=""
 
 note() { summary="${summary}$1"$'\n'; }
 
+# port_busy PORT — whether something still listens on PORT. A run that just
+# finished here can take a few seconds to let go of its port, so this waits for
+# that before answering; it never stops whatever holds the port.
+last_port=""
+port_busy() {
+	local tries=1
+	[ "$1" = "$last_port" ] && tries=30
+	while [ "$tries" -gt 0 ]; do
+		lsof -ti ":$1" >/dev/null 2>&1 || return 1
+		tries=$((tries - 1))
+		[ "$tries" -gt 0 ] && sleep 1
+	done
+	return 0
+}
+
 # run NAME PORT COMMAND... — one run, refused when its port is busy.
 run() {
 	local name="$1" port="$2"
 	shift 2
-	if lsof -ti ":$port" >/dev/null 2>&1; then
+	if port_busy "$port"; then
 		note "BLOCKED  $name (port $port is in use)"
 		failed=1
 		return
 	fi
 	echo "== $name"
+	last_port="$port"
 	if "$@" >"$out/$name.log" 2>&1; then
 		# A skipped test is not a pass: say so beside the result.
 		if grep -Eq '[0-9]+ skipped' "$out/$name.log"; then

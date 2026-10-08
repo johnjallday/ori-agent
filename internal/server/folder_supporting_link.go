@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,8 +14,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// folderWorkspaceOwnedBy reports whether ws belongs to userID. A record with no
+// owner belongs to the local user.
+func folderWorkspaceOwnedBy(ws *workspace.Workspace, userID string) bool {
+	return ws.OwnerUserID == userID || (ws.OwnerUserID == "" && userID == "local")
+}
+
 func folderSetupWorkspaceDestination(ws *workspace.Workspace, userID string) (*personalassistant.FolderSetupDestination, error) {
-	if ws == nil || (ws.OwnerUserID != userID && !(ws.OwnerUserID == "" && userID == "local")) || ws.Status == workspace.StatusTrashed || ws.Status == workspace.StatusMissing {
+	if ws == nil || !folderWorkspaceOwnedBy(ws, userID) || ws.Status == workspace.StatusTrashed || ws.Status == workspace.StatusMissing {
 		return nil, errSetupUnavailable
 	}
 	kind := "project"
@@ -51,7 +56,7 @@ func folderProjectLinked(store workspace.Store, userID, workspaceID, folderPath 
 	}
 	ws, err := store.Get(workspaceID)
 	if err != nil || ws == nil || ws.Kind == "group" || ws.GetStatus() != workspace.StatusActive ||
-		(ws.OwnerUserID != userID && !(ws.OwnerUserID == "" && userID == "local")) {
+		!folderWorkspaceOwnedBy(ws, userID) {
 		return false
 	}
 	for _, ref := range ws.DirectoryReferences {
@@ -65,7 +70,7 @@ func folderProjectLinked(store workspace.Store, userID, workspaceID, folderPath 
 // Supporting-folder confirmation adds only a purpose-empty directory reference.
 // It does not set a primary directory, project entry, blueprint, mode, roster,
 // consent, task or source byte. Canonical store Update serializes duplicate clicks.
-func (c folderWorkspaceCreator) linkSupportingFolder(ctx context.Context, req personalassistant.FolderCreateRequest) (personalassistant.FolderCreateResult, error) {
+func (c folderWorkspaceCreator) linkSupportingFolder(req personalassistant.FolderCreateRequest) (personalassistant.FolderCreateResult, error) {
 	if c.store == nil || req.Destination == nil || req.Destination.Kind != "project" {
 		return personalassistant.FolderCreateResult{}, personalassistant.ErrFolderWorkspaceRefused
 	}

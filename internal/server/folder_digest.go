@@ -282,7 +282,7 @@ type folderWorkspaceCreator struct {
 
 func (c folderWorkspaceCreator) CreateProjectWorkspace(ctx context.Context, req personalassistant.FolderCreateRequest) (personalassistant.FolderCreateResult, error) {
 	if req.Operation == personalassistant.FolderOperationSupport {
-		return c.linkSupportingFolder(ctx, req)
+		return c.linkSupportingFolder(req)
 	}
 	parentID := ""
 	if req.Destination != nil && req.Destination.Status == "existing" {

@@ -122,7 +122,7 @@ func validateAssistantSaveOwner(ctx context.Context, tx *sql.Tx, owner assistant
 		if err := tx.QueryRowContext(ctx, `SELECT owner_user_id,status FROM workspaces WHERE id=?`, id).Scan(&user, &status); err != nil {
 			return ErrFolderContextConflict
 		}
-		if (user != owner.UserID && !(user == "" && owner.UserID == "local")) || status == "trashed" || status == "missing" {
+		if (user != owner.UserID && (user != "" || owner.UserID != "local")) || status == "trashed" || status == "missing" {
 			return ErrFolderContextConflict
 		}
 	}

@@ -292,7 +292,7 @@ func (r *AssistantWorkspaceResolver) location(refs *HomeAssistantRouteContext, u
 		}
 		// Legacy Guide collectors put the route token in workspace_id. Accept
 		// only the exact published page slug alias, never arbitrary ID fallback.
-		if (id != "" && id != page.ID && !(refs.ContextVersion == 0 && id == page.FolderSlug)) || (slug != "" && slug != page.FolderSlug) {
+		if (id != "" && id != page.ID && (refs.ContextVersion != 0 || id != page.FolderSlug)) || (slug != "" && slug != page.FolderSlug) {
 			return nil, "workspace_reference_conflict"
 		}
 		if pageTask != "" && refs.TaskID != "" && pageTask != refs.TaskID {
