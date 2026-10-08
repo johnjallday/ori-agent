@@ -1194,6 +1194,7 @@ export class WorkspaceCommandView {
   }
 
   handleGlobalKeydown(event) {
+    this.noteRailKeyboard(event);
     if (!this.active || !event || event.key !== 'Escape') return;
     if (this.statModalSection || this.identityEditMode) return;
     if (this.backlogDrawerOpen) {
@@ -2057,7 +2058,9 @@ export class WorkspaceCommandView {
             this.renderGarrison() +
             '</section>' +
             '</main>' +
-            '<aside class="ws-cmd-rail">' +
+            '<aside class="ws-cmd-rail' +
+            (this.railPointerFocus ? ' is-pointer' : '') +
+            '">' +
             this.renderRail() +
             '</aside>' +
             '</div>';
@@ -3475,6 +3478,27 @@ export class WorkspaceCommandView {
       control.scrollIntoView({ block: 'nearest' });
     }
     return control;
+  }
+
+  // Whether the rail was last used with a pointer. Focus is put back on the
+  // used control after every rebuild, and WebKit draws a focus ring for any
+  // script-set focus, so a mouse click would leave a ring boxed around the row.
+  // The is-pointer class holds the ring back until a key is pressed.
+  setRailPointerFocus(usingPointer) {
+    this.railPointerFocus = Boolean(usingPointer);
+    const rail = this.container && this.container.querySelector('.ws-cmd-rail');
+    if (rail && rail.classList) rail.classList.toggle('is-pointer', this.railPointerFocus);
+  }
+
+  // Any real key press, anywhere on the page, means the keyboard is in use:
+  // the next control it reaches in the rail must show its ring. Modifier keys
+  // and shortcuts are not navigation (a screenshot shortcut would otherwise
+  // bring the ring back just in time to be photographed).
+  noteRailKeyboard(event) {
+    if (!this.railPointerFocus || !event) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (['Shift', 'Meta', 'Control', 'Alt'].includes(event.key)) return;
+    this.setRailPointerFocus(false);
   }
 
   // Which rail control has focus, held as an attribute and value that survive
@@ -12151,6 +12175,7 @@ export class WorkspaceCommandView {
   bindRail() {
     const root = this.container && this.container.querySelector('.ws-cmd-rail');
     if (!root) return;
+    root.addEventListener('pointerdown', () => this.setRailPointerFocus(true));
     root.addEventListener('click', event => {
       // Count shortcuts into the canonical Tickets destination, filtered to
       // one state (FR-65, FR-80, FR-81). Checked before the Backlog handlers

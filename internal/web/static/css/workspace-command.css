@@ -2841,9 +2841,9 @@ button.ws-cmd-rpg-class-card:focus-visible {
   );
   box-shadow: var(--ws-glow);
 }
-/* The rail is an index: one row per section, at most one open. Closed sections
-   are flat rows that share a border; the open one keeps the card look so it
-   reads as the one thing that is open. */
+/* The rail is an index: one row per section, at most one open. Every section
+   is a row in one list, sharing its borders with its neighbours. The open one
+   stays in that list and is marked by a lit spine down its left edge. */
 .ws-cmd-rail {
   --ws-rail-row: 42px;
   /* The fixed launcher sits over this column's bottom-right corner. Two pills
@@ -2868,33 +2868,35 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-panel + .ws-cmd-panel {
   margin-top: -1px;
 }
+/* Open: still a row of the list, with no gap above or below and no frame of
+   its own. Its row and its body share one lifted background, with no rule
+   between them, so they read as one piece. */
 .ws-cmd-panel.is-managing {
   z-index: 1;
   border-color: var(--ws-line-bright);
-  background: linear-gradient(180deg, #1c1f26, #0f1014);
-  clip-path: polygon(
-    0 0,
-    calc(100% - 12px) 0,
-    100% 12px,
-    100% 100%,
-    12px 100%,
-    0 calc(100% - 12px)
-  );
-  box-shadow: var(--ws-glow);
+  background: var(--ws-panel-2);
 }
-.ws-cmd-panel.is-managing:not(:first-child) {
-  margin-top: 8px;
+/* The spine. A pseudo-element laid over the left border, not a wider border
+   (which would nudge the row's text sideways as it opens) and not an inset
+   shadow (which the body's pinned toolbar would paint over). */
+.ws-cmd-panel.is-managing::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: -1px;
+  bottom: -1px;
+  left: -1px;
+  width: 3px;
+  background: var(--ws-faction);
+  pointer-events: none;
 }
-.ws-cmd-panel.is-managing + .ws-cmd-panel {
-  margin-top: 8px;
+.ws-cmd-panel.is-hq-stations.is-managing::before {
+  background: var(--ws-keeper);
 }
 .ws-cmd-panel-head {
   display: flex;
   align-items: center;
   min-height: var(--ws-rail-row);
-}
-.ws-cmd-panel.is-managing .ws-cmd-panel-head {
-  border-bottom: 1px solid var(--ws-line);
 }
 .ws-cmd-panel-title {
   flex: 1 1 auto;
@@ -2935,6 +2937,18 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-panel-toggle:focus-visible {
   outline: 2px solid var(--ws-faction);
   outline-offset: -2px;
+  /* The app-wide button halo would spill onto the rows above and below. */
+  box-shadow: none;
+}
+/* Focus is put back on the used control after every rebuild of the rail, and
+   WebKit draws a ring for any script-set focus, mouse click or not. While the
+   rail was last used with a pointer its buttons and links show neither the
+   ring nor the app-wide halo; the next key press anywhere brings them back.
+   Fields are left alone. */
+.ws-cmd-rail.is-pointer button:focus-visible,
+.ws-cmd-rail.is-pointer a:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 .ws-cmd-panel-chevron {
   flex: 0 0 auto;
@@ -2993,7 +3007,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   max-height: none;
   overflow: visible;
 }
-/* The full-verb action stays in view while a long body scrolls under it. */
+/* The full-verb action stays in view while a long body scrolls under it. Its
+   background is the open section's own, so at rest it is not a band. */
 .ws-cmd-panel-toolbar {
   position: sticky;
   top: 0;
@@ -3001,9 +3016,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: -8px -10px 6px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--ws-line);
+  margin: -8px -10px 2px;
+  padding: 4px 10px 8px;
   background: var(--ws-panel-2);
 }
 .ws-cmd-detachment-body .ws-cmd-panel-toolbar {
@@ -6111,8 +6125,9 @@ button.ws-cmd-rpg-class-card:focus-visible {
   background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
 }
 
+/* Flat, like the dark theme's: the pinned toolbar in the body is this colour. */
 [data-bs-theme="light"] .ws-cmd-panel.is-managing {
-  background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel-deep));
+  background: var(--ws-panel-2);
 }
 
 /* The dark theme's hover is a white veil, which does not show on paper. */
@@ -6256,6 +6271,11 @@ button.ws-cmd-rpg-class-card:focus-visible {
   .ws-cmd-panel {
     display: contents;
   }
+  /* A section has no box of its own here, so there is no edge for the
+     desktop spine to run down; the open tab's outline marks it instead. */
+  .ws-cmd-panel.is-managing::before {
+    content: none;
+  }
   .ws-cmd-panel-head {
     order: 0;
     border: 1px solid var(--ws-line);
@@ -6284,7 +6304,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
     max-height: none;
     overflow: visible;
     border: 1px solid var(--ws-line-bright);
-    background: var(--ws-panel);
+    /* The open tab's colour, and the toolbar's: one lifted surface. */
+    background: var(--ws-panel-2);
   }
   /* The page scrolls here, not the body, so there is nothing to stick to. */
   .ws-cmd-panel-toolbar {

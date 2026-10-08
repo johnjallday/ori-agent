@@ -13,8 +13,9 @@
 // The four fixtures (an empty workspace, one with notes and linked folders, a
 // group, and the Personal HQ) are created on first use and found by name after
 // that, so every stage can run against the same sandbox.
-// theme is "dark" (default) or "light".
-import { chromium } from 'playwright';
+// theme is "dark" (default) or "light". RAIL_DEMO_BROWSER picks the engine:
+// chromium (default), webkit or firefox.
+import { chromium, firefox, webkit } from 'playwright';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -24,7 +25,10 @@ if (!base || !output) {
 }
 mkdirSync(output, { recursive: true });
 
-const browser = await chromium.launch();
+const engineName = process.env.RAIL_DEMO_BROWSER || 'chromium';
+const engine = { chromium, firefox, webkit }[engineName];
+if (!engine) throw new Error(`unknown RAIL_DEMO_BROWSER: ${engineName}`);
+const browser = await engine.launch();
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 await context.addInitScript(value => {
   try {
@@ -661,6 +665,38 @@ async function measureStage() {
     console.log(`\n== ${size.width}x${size.height}`);
     console.log(JSON.stringify(await launcherOverlap(), null, 1));
   }
+
+  // What, if anything, makes the page wider than a phone: the elements whose
+  // right edge is past the viewport, outermost first.
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [name, ws] of [
+    ['empty', fx.empty],
+    ['busy', fx.busy]
+  ]) {
+    await openDetails(ws);
+    await listsLoaded();
+    await closeAll();
+    const wide = await page.evaluate(() => {
+      const limit = window.innerWidth;
+      const past = [...document.querySelectorAll('body *')].filter(
+        el => el.getBoundingClientRect().right > limit + 0.5
+      );
+      return {
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth: limit,
+        elements: past
+          .filter(el => !past.includes(el.parentElement))
+          .slice(0, 8)
+          .map(el => {
+            const box = el.getBoundingClientRect();
+            const label = el.id ? `#${el.id}` : `.${String(el.className).split(' ')[0]}`;
+            return `${el.tagName.toLowerCase()}${label} right=${Math.round(box.right)} width=${Math.round(box.width)}`;
+          })
+      };
+    });
+    console.log(`\n== 390x844 ${name}: sideways`);
+    console.log(JSON.stringify(wide, null, 1));
+  }
 }
 
 // ---------- remember ----------
@@ -806,7 +842,27 @@ async function tabRow() {
       plusVisible: [...root.querySelectorAll('.ws-cmd-panel-head > .ws-cmd-panel-action')].filter(
         visible
       ).length,
-      sideways: document.documentElement.scrollWidth - window.innerWidth
+      // How far anything in the rail reaches past the viewport's right edge.
+      railPast: Math.round(
+        Math.max(
+          railBox.right,
+          ...[...root.querySelectorAll('*')].map(el => el.getBoundingClientRect().right)
+        ) - window.innerWidth
+      ),
+      // The page as a whole, which the rail does not own: other parts of it
+      // (a toast sliding in, the header chip changing its text) can widen it
+      // for a moment. Reported with what did it, not asserted.
+      sideways: document.documentElement.scrollWidth - window.innerWidth,
+      sidewaysBy: (() => {
+        if (document.documentElement.scrollWidth <= window.innerWidth) return [];
+        const past = [...document.querySelectorAll('body *')].filter(
+          el => el.getBoundingClientRect().right > window.innerWidth + 0.5
+        );
+        return past
+          .filter(el => !past.includes(el.parentElement))
+          .slice(0, 5)
+          .map(el => `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : '.' + el.className}`);
+      })()
     };
   }, RAIL);
 }
@@ -837,7 +893,12 @@ async function narrowStage() {
       check(row.lines <= 3, `${label} ${name}: the tab row is at most three lines`);
       check(row.bodies === 0, `${label} ${name}: closed, there is no body`);
       check(row.plusVisible === 0, `${label} ${name}: tabs carry no "+"`);
-      check(row.sideways <= 0, `${label} ${name}: the page does not scroll sideways`);
+      check(row.railPast <= 0, `${label} ${name}: nothing in the rail reaches past the viewport`);
+      if (row.sideways > 0) {
+        console.log(
+          `     note: the page is ${row.sideways}px wider than the viewport right now, from ${row.sidewaysBy.join(', ') || 'an element that has since gone'}`
+        );
+      }
       await page.locator(RAIL).scrollIntoViewIfNeeded();
       await shot(`${size.width}-${name}-01-tabs`);
 
@@ -902,7 +963,87 @@ async function narrowStage() {
   }
 }
 
+// ---------- look ----------
+
+// Close crops of the rail by itself, for judging how an open section sits in
+// the list: opened with the mouse (which must leave no focus ring), then with
+// the keyboard (which must).
+async function lookStage() {
+  const fx = await fixtures();
+  const crop = async name => {
+    const path = join(output, `${stage}-${theme}-${engineName}-${name}.png`);
+    await page.locator(RAIL).screenshot({ path });
+    console.log(path);
+  };
+  const ring = () =>
+    page.evaluate(() => {
+      const active = document.activeElement;
+      return Boolean(active && active.matches(':focus-visible'));
+    });
+  // A ring is an outline or the app-wide focus halo (a box-shadow on buttons).
+  const outlined = () =>
+    page.evaluate(() => {
+      const style = getComputedStyle(document.activeElement);
+      const outline = style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0;
+      return outline || style.boxShadow !== 'none';
+    });
+
+  await openDetails(fx.busy);
+  await listsLoaded();
+  await closeAll();
+  await page.mouse.move(5, 5);
+  await crop('01-closed');
+
+  for (const key of ['files', 'notes', 'folders']) {
+    await page.locator(toggle(key)).click();
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(250);
+    check((await rail()).focused === `toggle:${key}`, `mouse: focus is on the ${key} toggle`);
+    console.log(
+      `     ${engineName}: after a mouse click :focus-visible is ${await ring()}, outline drawn: ${await outlined()}`
+    );
+    check(!(await outlined()), `mouse: opening ${key} leaves no focus ring on its row`);
+    await crop(`02-${key}-open-by-mouse`);
+  }
+
+  // Keyboard next, on the same toggle. It is not reached with Tab here: by
+  // default Safari's Tab skips buttons, so in WebKit that would test a field
+  // somewhere else on the page.
+  await page.keyboard.press('Enter');
+  check((await openKey()) === '', 'keyboard: Enter on the focused toggle closes it');
+  await page.keyboard.press('Enter');
+  check(
+    (await rail()).focused === 'toggle:folders' && (await outlined()),
+    'keyboard: reopened with Enter, the toggle has its focus ring'
+  );
+  await crop('03-folders-open-by-keyboard');
+
+  await openDetails(fx.hq);
+  await listsLoaded();
+  if ((await openKey()) !== 'stations') await page.locator(toggle('stations')).click();
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(400);
+  await crop('04-hq-stations-open');
+  await page.locator(toggle('backlog')).click();
+  await page.mouse.move(5, 5);
+  await crop('05-hq-first-row-open');
+
+  // On a phone a section has no box of its own, so the spine has no edge to
+  // run down and must not be drawn somewhere else instead.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openDetails(fx.busy);
+  await listsLoaded();
+  if ((await openKey()) !== 'notes') await page.locator(toggle('notes')).click();
+  await page.mouse.move(5, 5);
+  const spine = await page.evaluate(
+    () => getComputedStyle(document.querySelector('.ws-cmd-panel.is-managing'), '::before').content
+  );
+  check(spine === 'none', 'narrow: the desktop spine is not drawn');
+  await crop('06-narrow-notes-open');
+}
+
 const stages = {
+  look: lookStage,
   rail: railStage,
   // The last part of `rail` by itself: quick to rerun after a CSS change.
   long: async () => {

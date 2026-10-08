@@ -1533,14 +1533,16 @@ smoke_drawer() {
 # any demo sandbox will do. Stages: rail (desktop rows, "+", verbs, Escape,
 # keyboard), remember (the open section across reloads, per workspace), narrow
 # (the tab row at 390 and 768, and the launcher clearance), measure (where the
-# launcher pills sit against the rail). Theme is dark (default) or light.
+# launcher pills sit against the rail), look (close crops of the rail with a
+# section opened by mouse and by keyboard), long (a forty-row section). Theme
+# is dark (default) or light; browser is chromium (default), webkit or firefox.
 smoke_rail() {
-  local stage="${3:-}" theme="${4:-dark}"
-  [[ -n "$stage" ]] || fail "usage: $0 rail <base-url> <rail|remember|narrow|measure> [dark|light]"
+  local stage="${3:-}" theme="${4:-dark}" browser="${5:-chromium}"
+  [[ -n "$stage" ]] || fail "usage: $0 rail <base-url> <rail|remember|narrow|look|long|measure> [dark|light] [chromium|webkit|firefox]"
   smoke_show_wait
   local root
   root="$(cd "$(dirname "$0")/.." && pwd -P)"
-  node "$root/scripts/demo-command-rail.mjs" "$BASE_URL" "${TMPDIR:-/tmp}/rail-demo" "$stage" "$theme"
+  RAIL_DEMO_BROWSER="$browser" node "$root/scripts/demo-command-rail.mjs" "$BASE_URL" "${TMPDIR:-/tmp}/rail-demo" "$stage" "$theme"
 }
 
 # smoke_show_folder drives "Show me a folder" (tasks/prd-show-me-a-folder.md).

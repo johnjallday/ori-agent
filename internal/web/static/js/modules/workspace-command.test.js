@@ -261,6 +261,12 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /Tasks · 1/);
   assert.match(container.innerHTML, /title="Run"/);
   assert.match(container.innerHTML, /data-cmd-manage-section="notes" aria-expanded="false"/);
+  // The rail element is new on every render, so the "last used with a
+  // pointer" state has to be written into it each time.
+  assert.match(container.innerHTML, /<aside class="ws-cmd-rail">/);
+  commandView.railPointerFocus = true;
+  commandView.render();
+  assert.match(container.innerHTML, /<aside class="ws-cmd-rail is-pointer">/);
   // "Open Tasks" is now the deliberate exception: the summary stat chip's
   // label was unified with Map/Cards (see workspace-hub-ui-ux task 5.2). It
   // reflects the filtered open-task count specifically — the modal title and
@@ -1521,6 +1527,48 @@ test('the Backlog "+" goes to the Tickets create form without opening the Backlo
 
   assert.deepEqual(calls, [['capture', { openCapture: true }]]);
   assert.equal(commandView.activeRailSection, '');
+});
+
+test('a pointer in the rail holds the focus ring back until a real key is pressed', () => {
+  const listeners = {};
+  const classes = new Set();
+  const railRoot = {
+    addEventListener(type, listener) {
+      listeners[type] = listener;
+    },
+    classList: {
+      toggle(name, on) {
+        if (on) classes.add(name);
+        else classes.delete(name);
+      }
+    }
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: true,
+    activeRailSection: '',
+    statModalSection: '',
+    identityEditMode: '',
+    container: { querySelector: selector => (selector === '.ws-cmd-rail' ? railRoot : null) },
+    render() {}
+  });
+  commandView.bindRail();
+
+  // Focus is restored by script after a click, and WebKit rings script focus.
+  listeners.pointerdown();
+  assert.equal(commandView.railPointerFocus, true);
+  assert.ok(classes.has('is-pointer'));
+
+  // Modifiers and shortcuts are not keyboard navigation.
+  commandView.handleGlobalKeydown({ key: 'Shift' });
+  commandView.handleGlobalKeydown({ key: 'Meta', metaKey: true });
+  commandView.handleGlobalKeydown({ key: '4', metaKey: true, shiftKey: true });
+  assert.equal(commandView.railPointerFocus, true);
+
+  // A real key anywhere on the page is: the ring must be back for it.
+  commandView.handleGlobalKeydown({ key: 'Tab' });
+  assert.equal(commandView.railPointerFocus, false);
+  assert.ok(!classes.has('is-pointer'));
 });
 
 test('Details replays its entrance fade while arriving, not on later re-renders', () => {
