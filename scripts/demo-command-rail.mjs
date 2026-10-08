@@ -179,6 +179,23 @@ async function personalHQ() {
   return { ...status.workspace, id: status.workspace_id || status.workspace.id };
 }
 
+// Forty sessions, for the one question a short list cannot answer: what a
+// section taller than the window does.
+async function longWorkspace() {
+  const name = 'Rail Long';
+  const existing = (await workspaces()).find(ws => ws.name === name);
+  if (existing) return existing;
+  const ws = await createWorkspace({ name, blank: true, create_template_agents: false });
+  for (let index = 1; index <= 40; index += 1) {
+    await json(
+      await page.request.post(`${base}/api/sessions`, {
+        data: { folder_id: ws.id, title: `Session ${String(index).padStart(2, '0')}` }
+      })
+    );
+  }
+  return ws;
+}
+
 async function fixtures() {
   await page.request.post(`${base}/api/onboarding/skip`);
   await page.request.post(`${base}/api/settings/workspace-root`, {
@@ -334,6 +351,50 @@ async function railStage() {
   await keyboardOn(fx.busy);
   await groupActions(fx.group);
   await hqActions(fx.hq);
+  await longList(await longWorkspace());
+}
+
+// A section with more rows than fit scrolls inside the rail, lists every row,
+// and keeps its verb in view while it scrolls.
+async function longList(ws) {
+  console.log(`\n== long list: /workspaces/${ws.folder_slug}`);
+  await openDetails(ws);
+  await listsLoaded();
+  if ((await openKey()) !== 'sessions') await page.locator(toggle('sessions')).click();
+  const measure = () =>
+    page.evaluate(selector => {
+      const body = document.querySelector(`${selector} #ws-cmd-rail-body-sessions`);
+      const verb = body.querySelector('[data-cmd-section-verb="sessions"]');
+      const bodyBox = body.getBoundingClientRect();
+      const verbBox = verb.getBoundingClientRect();
+      return {
+        rows: body.querySelectorAll('.ws-cmd-rail-item').length,
+        more: body.textContent.includes(' more'),
+        height: Math.round(bodyBox.height),
+        cap: Math.round(window.innerHeight * 0.6),
+        scrollable: body.scrollHeight - body.clientHeight,
+        scrollTop: Math.round(body.scrollTop),
+        verbInside: verbBox.top >= bodyBox.top - 1 && verbBox.bottom <= bodyBox.bottom + 1
+      };
+    }, RAIL);
+  let state = await measure();
+  check(state.rows === 40 && !state.more, 'all 40 sessions are rows; there is no "+ N more"');
+  check(
+    state.height <= state.cap + 1 && state.scrollable > 0,
+    `the body is capped at 60% of the window (${state.height}px of ${state.cap}px) and scrolls`
+  );
+  await page.evaluate(selector => {
+    const body = document.querySelector(`${selector} #ws-cmd-rail-body-sessions`);
+    body.scrollTop = body.scrollHeight;
+  }, RAIL);
+  await page.waitForTimeout(200);
+  state = await measure();
+  check(
+    state.scrollTop > 0 && state.verbInside,
+    'scrolled to the last row, the New Session verb is still in view'
+  );
+  await page.locator(toggle('sessions')).scrollIntoViewIfNeeded();
+  await shot('long-01-sessions-scrolled');
 }
 
 const openKey = async () => (await rail()).rows.find(row => row.expanded === 'true')?.key || '';
@@ -843,6 +904,11 @@ async function narrowStage() {
 
 const stages = {
   rail: railStage,
+  // The last part of `rail` by itself: quick to rerun after a CSS change.
+  long: async () => {
+    await fixtures();
+    await longList(await longWorkspace());
+  },
   remember: rememberStage,
   narrow: narrowStage,
   measure: measureStage
