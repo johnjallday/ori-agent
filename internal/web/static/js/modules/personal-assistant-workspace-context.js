@@ -193,10 +193,47 @@ export function renderTurnSources(row, attribution, options = {}) {
   return true;
 }
 
+/** How long the drawer waits for one reply. A reply can take several model
+ * calls (up to four rounds of readers, then the answer), and a CLI provider
+ * such as Codex takes ten seconds or more for each. The request helper's
+ * general 30-second limit cut such replies off before they arrived. */
+export const ASK_REPLY_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** What to tell the user when a reply did not arrive. The request helper
+ * reports its own time limit as a cancelled request with no HTTP status; any
+ * other failure without a status never reached Ori. Nothing here claims the
+ * turn was or was not saved: a reply that finished late may have been. */
+export function askFailureView(error, { timeoutMs = ASK_REPLY_TIMEOUT_MS } = {}) {
+  const status = Number(error?.status) || 0;
+  const text = String(error?.message || '');
+  if (status === 0 && /cancel|abort/i.test(text)) {
+    const minutes = Math.max(1, Math.round(timeoutMs / 60000));
+    return {
+      kind: 'timeout',
+      message: `That is taking longer than I wait for a reply (${minutes} ${minutes === 1 ? 'minute' : 'minutes'}), so I stopped waiting. Your message is kept. Send it again, or ask about one thing at a time.`,
+      summary: 'The reply did not arrive in time.'
+    };
+  }
+  if (status === 0)
+    return {
+      kind: 'unreachable',
+      message:
+        'I could not reach Ori to answer that. Check that it is still running, then send your message again. It is kept.',
+      summary: 'Ori could not be reached.'
+    };
+  return {
+    kind: 'error',
+    message: 'I could not answer that right now. Please retry.',
+    summary: 'Could not complete the request.'
+  };
+}
+
 if (typeof window !== 'undefined')
   window.PersonalAssistantWorkspaceContext = {
     collect: collectWorkspaceContext,
     label: workspaceContextLabel,
     renderTurn: renderTurnWorkspace,
-    renderSources: renderTurnSources
+    renderSources: renderTurnSources,
+    askTimeoutMs: ASK_REPLY_TIMEOUT_MS,
+    askFailure: askFailureView
   };

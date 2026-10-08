@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,6 +32,14 @@ type panelToolRegistry struct {
 
 func (r *panelToolRegistry) Definitions() []llm.Tool {
 	tools := r.home.Definitions()
+	if r.turn != nil && r.turn.projection.Subject != nil {
+		// With a workspace pinned, the app-wide workspace listing can only return
+		// that one workspace, or nothing at all when it is a Home or group. A
+		// model that asks it "what projects are there" gets an empty answer that
+		// contradicts the discovery below, and each wasted round costs a full
+		// model call. It is not offered; discovery and the overview cover it.
+		tools = slices.DeleteFunc(tools, func(tool llm.Tool) bool { return tool.Name == "home_workspaces" })
+	}
 	tools = append(tools, llm.Tool{Name: "assistant_workspace_discovery", Description: "Discover owned project and Home/group metadata with separate project/group totals. No content reads or permission grants.", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}})
 	return append(append(tools, r.readerDefinitions()...), r.fileReaderDefinitions()...)
 }

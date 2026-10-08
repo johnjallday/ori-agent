@@ -49,6 +49,35 @@ func TestPanelWorkspaceTools_PinnedFreshOwnedAndRevocable(t *testing.T) {
 	}
 }
 
+// With a workspace pinned, the app-wide workspace listing can only answer with
+// that one workspace, and with nothing on a Home or group. It is not offered
+// there, so a model is not sent to a listing that contradicts discovery; with
+// no workspace pinned it is offered as before.
+func TestPanelWorkspaceTools_PinnedTurnDoesNotOfferTheAppWideWorkspaceListing(t *testing.T) {
+	r, store, home, alpha, _ := workspaceResolverFixture(t)
+	relationship := &workspaceRelationshipSnapshot{work: PersonalAssistantWorkContext{State: "active", StateVersion: 3, HQWorkspaceID: home.ID, ConversationAgent: "Atlas"}}
+	h := &HomeAssistantAskHandler{WorkspaceContext: r, UserID: "local", PersonalAssistantContext: relationship}
+	ctx := context.Background()
+	offered := func(refs *HomeAssistantRouteContext) map[string]bool {
+		turn := h.bindWorkspaceTurn(ctx, "what kind of projects do i have?", refs, &relationship.work)
+		registry := &panelToolRegistry{handler: h, turn: turn, home: newHomeToolRegistry(h.scopedPanelSources(ctx, HomeSnapshotSources{Workspaces: store}, turn)), ledger: turn.ledger}
+		names := map[string]bool{}
+		for _, tool := range registry.Definitions() {
+			names[tool.Name] = true
+		}
+		return names
+	}
+	for name, id := range map[string]string{"a Home": home.ID, "a project": alpha.ID} {
+		tools := offered(&HomeAssistantRouteContext{WorkspaceID: id, Origin: "personal_assistant_panel"})
+		if tools["home_workspaces"] || !tools["assistant_workspace_discovery"] || !tools["home_tasks"] || !tools[readerTasks] {
+			t.Fatalf("on %s: %v", name, tools)
+		}
+	}
+	if tools := offered(&HomeAssistantRouteContext{PagePath: "/settings", Origin: "personal_assistant_panel"}); !tools["home_workspaces"] || !tools["assistant_workspace_discovery"] {
+		t.Fatalf("app-wide: %v", tools)
+	}
+}
+
 type inspectingPanelProvider struct {
 	fakeProvider
 	tools    bool

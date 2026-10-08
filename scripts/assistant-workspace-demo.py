@@ -38,6 +38,8 @@ PLAIN_DEMOS = {
                       "ORI_WORKSPACE_ACCESSIBILITY_SANDBOX", "group6-wt-demo-accessibility.log"),
     "integrated": ("tests/personal-assistant-workspace-integrated.spec.ts",
                    "ORI_WORKSPACE_INTEGRATED_SANDBOX", "group6-wt-demo-integrated.log"),
+    "slow_reply": ("tests/personal-assistant-workspace-slow-reply.spec.ts",
+                   "ORI_WORKSPACE_SLOW_SANDBOX", "group6-wt-demo-slow-reply.log"),
 }
 DEFAULT_DEMO = ("tests/personal-assistant-workspace-history.spec.ts",
                 "ORI_WORKSPACE_HISTORY_SANDBOX", "group2-wt-demo.log")
@@ -327,7 +329,13 @@ def provider_handler(state_dir):
                     self.reply(200, {"model": MODEL, "message": message, "done": True,
                                      "prompt_eval_count": 1, "eval_count": 1})
                     return
-                if "Hold this workspace reply" in user["content"]:
+                # A spec can hold the next plain reply whatever its wording by
+                # leaving a hold-next file, so a real question can be the one held.
+                hold_next = state_dir / "hold-next"
+                held = hold_next.exists()
+                if held:
+                    hold_next.unlink()
+                if held or "Hold this workspace reply" in user["content"]:
                     # Metadata only; do not retain source bodies or model input.
                     accepted = {"subject_id": subject.get("id"), "subject_name": subject.get("name")}
                     (state_dir / "accepted.json").write_text(json.dumps(accepted))
@@ -390,8 +398,11 @@ def main():
     parser.add_argument("--integrated", action="store_true",
                         help="wt demo: one conversation from setup review through notes, files, a delayed reply, "
                              "removed access and confirmation")
+    parser.add_argument("--slow-reply", action="store_true",
+                        help="wt demo: a reply held longer than 30 seconds still arrives, and a failed request "
+                             "is named after the hired assistant")
     args = parser.parse_args()
-    plain = ["--" + name for name in PLAIN_DEMOS if getattr(args, name)]
+    plain = ["--" + name.replace("_", "-") for name in PLAIN_DEMOS if getattr(args, name)]
     if len(plain) > 1:
         parser.error("choose one wt demo: " + " or ".join(plain))
     if plain and (args.reaper_source or args.music_source or args.new_home or args.portfolio):
@@ -427,7 +438,7 @@ def main():
                 env["ORI_WORKSPACE_COLLECTION_ACCEPTANCE"] = "1"
         else:
             env.pop("ORI_WORKSPACE_NEW_HOME_ACCEPTANCE", None)
-        spec, sandbox_env, plain_log = PLAIN_DEMOS[plain[0][2:]] if plain else DEFAULT_DEMO
+        spec, sandbox_env, plain_log = PLAIN_DEMOS[plain[0][2:].replace("-", "_")] if plain else DEFAULT_DEMO
         log = evidence / ("group3-portfolio-candidate.log" if args.portfolio else
                           "group3-new-home-candidate.log" if args.new_home else
                           "group3-confirmed-candidate.log" if candidate else plain_log)

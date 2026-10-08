@@ -5,7 +5,9 @@ import {
   workspaceContextLabel,
   renderTurnWorkspace,
   turnSourcesView,
-  renderTurnSources
+  renderTurnSources,
+  ASK_REPLY_TIMEOUT_MS,
+  askFailureView
 } from './personal-assistant-workspace-context.js';
 
 const page = {
@@ -268,4 +270,41 @@ test('the disclosure is built from text nodes and sits above the message actions
   assert.equal(link.textContent, 'Note: <img src=x onerror=alert(1)>');
   assert.equal(link.innerHTML, undefined, 'a source label is text, never markup');
   assert.equal(renderTurnSources(row, { sources: [] }), false);
+});
+
+test('the drawer waits long enough for a reply that takes several model calls', () => {
+  // Up to four reader rounds and the answer, each a slow CLI call: well past the
+  // request helper's general 30 seconds, which used to cut the reply off.
+  assert.ok(ASK_REPLY_TIMEOUT_MS >= 5 * 30 * 1000, 'five 30-second calls must fit');
+  assert.ok(ASK_REPLY_TIMEOUT_MS <= 10 * 60 * 1000, 'but the wait is not open-ended');
+});
+
+test('a reply that did not arrive says why, in words the user can act on', () => {
+  // The request helper turns its own time limit into this error.
+  const timedOut = askFailureView({ status: 0, message: 'Request was cancelled' });
+  assert.equal(timedOut.kind, 'timeout');
+  assert.match(timedOut.message, /longer than I wait for a reply \(5 minutes\)/);
+  assert.match(timedOut.message, /Your message is kept/);
+  assert.equal(timedOut.summary, 'The reply did not arrive in time.');
+  assert.match(
+    askFailureView({ status: 0, message: 'The operation was aborted.' }, { timeoutMs: 60000 })
+      .message,
+    /\(1 minute\)/
+  );
+  // Ori is not running, or the connection dropped.
+  const unreachable = askFailureView({ status: 0, message: 'Failed to fetch' });
+  assert.equal(unreachable.kind, 'unreachable');
+  assert.match(unreachable.message, /could not reach Ori/);
+  // Ori answered with a refusal or an error.
+  for (const error of [{ status: 500, message: 'boom' }, { status: 409, message: 'x' }, null]) {
+    const failed = askFailureView(error);
+    assert.equal(error ? failed.kind : 'unreachable', failed.kind);
+  }
+  assert.equal(
+    askFailureView({ status: 500 }).message,
+    'I could not answer that right now. Please retry.'
+  );
+  // No failure text claims the turn was, or was not, saved.
+  for (const view of [timedOut, unreachable, askFailureView({ status: 500 })])
+    assert.doesNotMatch(view.message, /saved/i);
 });

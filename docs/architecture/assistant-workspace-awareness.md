@@ -491,6 +491,23 @@ acceptance run in order, each in its own sandbox, and reports each one; given
 the two exact companion sources it also runs the three candidate setups and
 checks that both sources are unchanged afterwards.
 
+**A real model takes longer than the drawer waited.** The first run against a
+real provider (Codex CLI) showed that Ori's own work for a turn is under a
+millisecond while the turn is two or three model calls of about ten seconds
+each: 20 to 28 seconds for a simple question on fixture data, more on real
+data. The browser's request helper gives up on any request after 30 seconds
+unless told otherwise, and the ask call did not say otherwise, so a correct
+answer could be abandoned and shown as a failure. The drawer now waits five
+minutes for a reply (`ASK_REPLY_TIMEOUT_MS`), says which kind of failure
+happened when one does (the wait ran out, Ori could not be reached, or the
+request was refused), and names the hired assistant on the progress and failure
+of its own turn instead of the page's agent. With a workspace pinned, the
+app-wide workspace listing tool is no longer offered: it could only return that
+one workspace, or nothing on a Home or group, which sent the model on a wasted
+round and made it report that two listings disagreed.
+`python3 scripts/assistant-workspace-demo.py --slow-reply` holds a reply for
+longer than 30 seconds and checks that it still arrives.
+
 Known limits, recorded rather than fixed: an entry is excluded by name, so a
 hard link under another name, or a filesystem that treats two spellings as one
 name beyond ASCII case, is not detected; the PDF parser's page loop is the
