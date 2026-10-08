@@ -1553,6 +1553,296 @@ test('toggling a rail row puts focus back on the re-rendered toggle', () => {
   ]);
 });
 
+// ---------- remembered rail section and default ----------
+
+const RAIL_KEY = 'ori:command-rail-section:ws-1';
+
+// Swaps the module-wide localStorage stub for one that keeps what is written.
+function withRailStorage(initial, run) {
+  const original = globalThis.localStorage;
+  const values = new Map(Object.entries(initial || {}));
+  globalThis.localStorage = {
+    getItem: key => (values.has(key) ? values.get(key) : null),
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: key => values.delete(key)
+  };
+  try {
+    return run(values);
+  } finally {
+    globalThis.localStorage = original;
+  }
+}
+
+// A Details-mode view over a plain workspace whose lists have loaded. render()
+// is the part of the real one these tests are about: choosing the section.
+function makeRailView(page, overrides) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: true,
+    viewMode: 'details',
+    activeRailSection: '',
+    railSectionSettled: false,
+    activeSystemTab: 'memory',
+    statModalSection: '',
+    identityEditMode: '',
+    page: {
+      workspaceId: 'ws-1',
+      workspace: {},
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      files: [],
+      backlogItems: [],
+      initialListsLoaded: true,
+      ...page
+    },
+    render() {
+      if (this.viewMode === 'details') this.settleRailSection();
+    },
+    ...overrides
+  });
+  return commandView;
+}
+
+test('presentRailSections lists the rows renderRail draws, in order, with the same counts', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const drawn = html =>
+      [
+        ...html.matchAll(/data-cmd-manage-section="([^"]+)"[\s\S]*?ws-cmd-panel-count">(\d+)</g)
+      ].map(match => ({ key: match[1], count: Number(match[2]) }));
+    const content = {
+      notes: [{ id: 'n1' }, { id: 'n2' }],
+      sessions: [{ id: 's1' }],
+      directories: [{ id: 'd1', path: '/tmp/d1' }],
+      files: [{ id: 'f1' }, { id: 'f2' }, { id: 'f3' }],
+      backlogItems: [{ task: { id: 'b1' } }]
+    };
+
+    const plain = makeRailView(content);
+    assert.deepEqual(plain.presentRailSections(), drawn(plain.renderRail()));
+    assert.deepEqual(
+      plain.presentRailSections().map(section => section.key),
+      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'files', 'systems'],
+      'no Detachment outside a group and no Stations outside the HQ'
+    );
+
+    const group = makeRailView({
+      ...content,
+      workspace: { kind: 'group' },
+      membersPanel: { group: { children: [{ id: 'm1' }, { id: 'm2' }] } }
+    });
+    assert.deepEqual(group.presentRailSections(), drawn(group.renderRail()));
+    assert.deepEqual(
+      group.presentRailSections().map(section => section.key),
+      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'members', 'files', 'systems']
+    );
+
+    const hq = makeRailView({ ...content, workspace: { id: 'hq-1', designation: 'personal_hq' } });
+    assert.deepEqual(hq.presentRailSections(), drawn(hq.renderRail()));
+    assert.deepEqual(
+      hq.presentRailSections().map(section => section.key),
+      ['backlog', 'notes', 'schedules', 'sessions', 'folders', 'files', 'systems', 'stations']
+    );
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a toggle click remembers the open section for this workspace; closing remembers closed', () => {
+  withRailStorage({}, values => {
+    const railRoot = makeListenerRoot();
+    const commandView = makeRailView(
+      {},
+      { container: { querySelector: selector => (selector === '.ws-cmd-rail' ? railRoot : null) } }
+    );
+    commandView.bindRail();
+
+    railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-manage-section': 'notes' }) });
+    assert.equal(values.get(RAIL_KEY), 'notes');
+    railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-manage-section': 'files' }) });
+    assert.equal(values.get(RAIL_KEY), 'files');
+    railRoot.listener({ target: makeAttributeClickTarget({ 'data-cmd-manage-section': 'files' }) });
+    assert.equal(values.get(RAIL_KEY), '', 'closing is remembered as closed, not forgotten');
+    assert.equal(values.size, 1);
+  });
+});
+
+test('opening a section on the user’s behalf, and Escape, leave the remembered section alone', () => {
+  withRailStorage({ [RAIL_KEY]: 'files' }, values => {
+    const railRoot = makeListenerRoot();
+    const commandView = makeRailView(
+      { showNoteModal() {} },
+      { container: { querySelector: selector => (selector === '.ws-cmd-rail' ? railRoot : null) } }
+    );
+    commandView.bindRail();
+
+    commandView.openSystemTab('triggers');
+    assert.equal(commandView.activeRailSection, 'systems');
+    railRoot.listener({
+      target: makeAttributeClickTarget({ 'data-cmd-primary-section': 'notes' })
+    });
+    assert.equal(commandView.activeRailSection, 'notes');
+    commandView.runRailPrimaryAction('members');
+    assert.equal(commandView.activeRailSection, 'members');
+    commandView.handleGlobalKeydown({ key: 'Escape' });
+    assert.equal(commandView.activeRailSection, '');
+
+    assert.deepEqual([...values], [[RAIL_KEY, 'files']]);
+  });
+});
+
+test('a remembered section opens at once, without waiting for the lists', () => {
+  withRailStorage({ [RAIL_KEY]: 'files' }, () => {
+    const commandView = makeRailView({ initialListsLoaded: false, notes: [{ id: 'n1' }] });
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, 'files');
+    assert.equal(commandView.railSectionSettled, true);
+  });
+});
+
+test('a remembered "closed" keeps the rail closed over the default', () => {
+  withRailStorage({ [RAIL_KEY]: '' }, () => {
+    const commandView = makeRailView({ notes: [{ id: 'n1' }] });
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, '');
+    assert.equal(commandView.railSectionSettled, true);
+  });
+});
+
+test('with nothing remembered the default waits for the lists and is then chosen once', () => {
+  withRailStorage({}, () => {
+    const commandView = makeRailView({ initialListsLoaded: false, sessions: [{ id: 's1' }] });
+
+    // Sessions has arrived but Notes has not: choosing now would open Sessions
+    // and then switch to Notes a moment later.
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, '');
+    assert.equal(commandView.railSectionSettled, false);
+
+    commandView.page.notes = [{ id: 'n1' }];
+    commandView.page.initialListsLoaded = true;
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, 'notes');
+
+    // Content arriving later (an agent files a backlog idea) does not move it.
+    commandView.page.backlogItems = [{ task: { id: 'b1' } }];
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, 'notes');
+  });
+});
+
+test('a remembered Detachment on a workspace that is not a group falls back to the default', () => {
+  withRailStorage({ [RAIL_KEY]: 'members' }, () => {
+    const commandView = makeRailView({ initialListsLoaded: false, sessions: [{ id: 's1' }] });
+    // The saved section is not one of this rail's rows, so it cannot decide
+    // early; the default needs the lists.
+    commandView.settleRailSection();
+    assert.equal(commandView.railSectionSettled, false);
+
+    commandView.page.initialListsLoaded = true;
+    commandView.settleRailSection();
+    assert.equal(commandView.activeRailSection, 'sessions');
+  });
+});
+
+test('a workspace’s own project folder does not make Linked Folders the default', () => {
+  withRailStorage({}, () => {
+    const page = {
+      directories: [{ id: 'dir-project', name: 'Project', path: '/tmp/project' }],
+      getPrimaryDirectoryId: () => 'dir-project',
+      files: [{ id: 'f1' }]
+    };
+    // Every workspace has its own folder; only what the user linked counts.
+    const own = makeRailView(page);
+    own.settleRailSection();
+    assert.equal(own.activeRailSection, 'files');
+
+    const linked = makeRailView({
+      ...page,
+      directories: [...page.directories, { id: 'dir-ref', name: 'Reference', path: '/tmp/ref' }]
+    });
+    linked.settleRailSection();
+    assert.equal(linked.activeRailSection, 'folders');
+    // The row still counts every folder it lists.
+    assert.match(
+      linked.renderRail(),
+      /id="ws-cmd-rail-title-folders">Linked Folders<\/span><span class="ws-cmd-panel-count">2</
+    );
+
+    // The project_path fallback row is the same folder by another route.
+    const fallback = makeRailView({ workspace: { project_path: '/tmp/song' } });
+    fallback.settleRailSection();
+    assert.equal(fallback.activeRailSection, '');
+  });
+});
+
+test('an HQ with no content opens Stations; a workspace with nothing opens nothing', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    withRailStorage({}, () => {
+      const hq = makeRailView({ workspace: { id: 'hq-1', designation: 'personal_hq' } });
+      hq.settleRailSection();
+      assert.equal(hq.activeRailSection, 'stations');
+
+      const plain = makeRailView({});
+      plain.settleRailSection();
+      assert.equal(plain.activeRailSection, '');
+      assert.equal(plain.railSectionSettled, true);
+    });
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('returning to Details from another mode chooses the section again', () => {
+  withRailStorage({ [RAIL_KEY]: 'files' }, () => {
+    const commandView = makeRailView(
+      { notes: [{ id: 'n1' }] },
+      {
+        activeRailSection: 'notes',
+        railSectionSettled: true,
+        persistCommandViewMode() {},
+        restoreSharedSurfaces() {},
+        syncURLState() {}
+      }
+    );
+
+    commandView.setCommandViewMode('map', { focus: false });
+    assert.equal(commandView.activeRailSection, '', 'leaving Details closes the rail');
+
+    commandView.setCommandViewMode('details', { focus: false });
+    assert.equal(
+      commandView.activeRailSection,
+      'files',
+      'the remembered section, not the last one'
+    );
+  });
+});
+
+test('a section opened while the default is pending is kept, and so is an Escape', () => {
+  withRailStorage({}, () => {
+    const commandView = makeRailView({ initialListsLoaded: false, notes: [{ id: 'n1' }] });
+    commandView.render();
+    assert.equal(commandView.railSectionSettled, false);
+
+    // Reached from the Map inventory before the lists have loaded.
+    commandView.openSystemTab('memory');
+    commandView.page.initialListsLoaded = true;
+    commandView.render();
+    assert.equal(commandView.activeRailSection, 'systems');
+
+    // Closing it is a decision too: the default must not open Notes behind it.
+    commandView.railSectionSettled = false;
+    commandView.handleGlobalKeydown({ key: 'Escape' });
+    assert.equal(commandView.activeRailSection, '');
+    assert.equal(commandView.railSectionSettled, true);
+  });
+});
+
 test('rail item actions open existing management flows from Command view', () => {
   const railRoot = makeListenerRoot();
   const calls = [];

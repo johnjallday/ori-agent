@@ -602,7 +602,120 @@ async function measureStage() {
   }
 }
 
-const stages = { rail: railStage, measure: measureStage };
+// ---------- remember ----------
+
+const railKey = ws => `ori:command-rail-section:${ws.id}`;
+const remembered = ws => page.evaluate(key => localStorage.getItem(key), railKey(ws));
+
+// Every open section the rail showed while the page loaded, in order. The
+// default is chosen once, so a load never passes through a section it then
+// leaves: the log is at most "nothing, then the one that was chosen".
+async function watchOpenSections() {
+  await page.addInitScript(() => {
+    window.__railOpenLog = [];
+    new MutationObserver(() => {
+      const rail = document.querySelector('#workspaceCommandView .ws-cmd-rail');
+      if (!rail) return;
+      const open = rail.querySelector('[data-cmd-manage-section][aria-expanded="true"]');
+      const key = open ? open.getAttribute('data-cmd-manage-section') : '';
+      const log = window.__railOpenLog;
+      if (log[log.length - 1] !== key) log.push(key);
+      // The document itself: an init script runs before there is an <html>.
+    }).observe(document, { childList: true, subtree: true });
+  });
+}
+
+async function listsLoaded() {
+  await page.locator(RAIL).waitFor({ state: 'visible' });
+  await page.waitForFunction(() => window.workspaceDetail?.initialListsLoaded === true);
+  await applyTheme();
+  await page.waitForTimeout(400);
+}
+
+async function arrive(ws) {
+  await openDetails(ws);
+  await listsLoaded();
+  return page.evaluate(() => window.__railOpenLog.join(' > '));
+}
+
+async function reload() {
+  await page.reload();
+  await listsLoaded();
+  return page.evaluate(() => window.__railOpenLog.join(' > '));
+}
+
+async function rememberStage() {
+  const fx = await fixtures();
+  await watchOpenSections();
+
+  console.log('\n== nothing remembered: the default');
+  let log = await arrive(fx.busy);
+  check((await remembered(fx.busy)) === null, 'busy: a fresh browser remembers nothing');
+  check((await openKey()) === 'notes', 'busy: the first section with content, Notes, is open');
+  check(log === ' > notes', `busy: chosen once while loading (${log || 'nothing'})`);
+  await page.locator(RAIL).scrollIntoViewIfNeeded();
+  await shot('01-default-first-with-content');
+
+  log = await arrive(fx.empty);
+  check(
+    (await openKey()) === '' && log === '',
+    'empty: only its own project folder, so nothing opens'
+  );
+  await shot('02-default-nothing');
+
+  log = await arrive(fx.hq);
+  check((await openKey()) === 'stations', `hq: no content, so Stations is open (${log})`);
+  await page.locator(toggle('stations')).scrollIntoViewIfNeeded();
+  await shot('03-default-hq-stations');
+
+  console.log('\n== remembered, per workspace');
+  await arrive(fx.busy);
+  await page.locator(toggle('files')).click();
+  check((await remembered(fx.busy)) === 'files', 'busy: opening Files remembers "files"');
+  log = await reload();
+  check((await openKey()) === 'files', 'busy: Files is open after a reload');
+  check(log === 'files', `busy: opened at once, not after the lists (${log})`);
+  await page.locator(toggle('files')).scrollIntoViewIfNeeded();
+  await shot('04-reload-files');
+
+  await arrive(fx.empty);
+  check((await openKey()) === '', 'empty: has its own memory, still nothing open');
+  await page.locator(toggle('sessions')).click();
+  await reload();
+  check((await openKey()) === 'sessions', 'empty: Sessions is open after a reload');
+  await arrive(fx.busy);
+  check((await openKey()) === 'files', 'busy: still Files');
+
+  console.log('\n== what does not change the memory');
+  await page.locator(plus('notes')).click();
+  await dismissModal('#noteEditorModal');
+  check((await openKey()) === 'notes', 'busy: the Notes "+" opened Notes');
+  check((await remembered(fx.busy)) === 'files', 'busy: but "files" is still what is remembered');
+  await page.keyboard.press('Escape');
+  check((await openKey()) === '', 'busy: Escape closed it');
+  check((await remembered(fx.busy)) === 'files', 'busy: and "files" is still remembered');
+  await reload();
+  check((await openKey()) === 'files', 'busy: a reload is back on Files');
+
+  console.log('\n== returning to Details');
+  await page.locator(toggle('sessions')).click();
+  await page.locator('[data-cmd-view-mode="tickets"]').click();
+  await page.locator('[data-cmd-view-mode="tickets"][aria-pressed="true"]').waitFor();
+  await page.locator('[data-cmd-view-mode="details"]').click();
+  await page.locator(RAIL).waitFor({ state: 'visible' });
+  check((await openKey()) === 'sessions', 'busy: back from Tickets on the remembered section');
+
+  console.log('\n== closed is remembered too; forgetting falls back to the default');
+  await page.locator(toggle('sessions')).click();
+  check((await remembered(fx.busy)) === '', 'busy: closing remembers "closed"');
+  log = await reload();
+  check((await openKey()) === '' && log === '', 'busy: nothing is open after a reload');
+  await page.evaluate(key => localStorage.removeItem(key), railKey(fx.busy));
+  await reload();
+  check((await openKey()) === 'notes', 'busy: with the key removed, Notes opens again');
+}
+
+const stages = { rail: railStage, remember: rememberStage, measure: measureStage };
 if (!stages[stage]) throw new Error(`unknown stage: ${stage}`);
 
 try {

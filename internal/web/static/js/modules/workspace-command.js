@@ -51,6 +51,7 @@ import {
   buildReturnTarget,
   buildWorkspaceURL
 } from './workspace-url-state.js';
+import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
@@ -169,6 +170,9 @@ export class WorkspaceCommandView {
       this.readCommandViewModePreference()
     );
     this.activeRailSection = '';
+    // Which section to open is chosen when Details is first shown and again
+    // on every return to it from another mode (see settleRailSection).
+    this.railSectionSettled = false;
     // Whether the Tickets view has fetched since it was last entered. Reset on
     // leaving, so re-entry always shows current data without every unrelated
     // re-render re-fetching. See syncTicketsView.
@@ -362,7 +366,9 @@ export class WorkspaceCommandView {
       this.resetCapabilityInspector();
     }
     if (this.loadoutAddOpen) this.resetLoadoutPicker();
+    // Leaving Details closes the rail; coming back chooses its section afresh.
     this.activeRailSection = '';
+    this.railSectionSettled = false;
     if (nextMode === 'details') {
       this.activeMapWindow = '';
       this.mapInventoryOpen = false;
@@ -1236,6 +1242,8 @@ export class WorkspaceCommandView {
       rail && focused && typeof rail.contains === 'function' && rail.contains(focused)
     );
     this.activeRailSection = '';
+    // Closing is a decision: the default must not reopen a section behind it.
+    this.railSectionSettled = true;
     this.render();
     if (focusWasInRail) this.focusRailControl('data-cmd-manage-section', closed);
   }
@@ -2007,6 +2015,7 @@ export class WorkspaceCommandView {
     const name = String(ws.name || 'Workspace');
     const mode = this.opsModeLabel();
     const stats = this.computeStats();
+    if (this.viewMode === 'details') this.settleRailSection();
 
     // Tickets renders NOTHING inside this container. Its surface is real DOM
     // with bound listeners living beside the container, and this container is
@@ -3347,11 +3356,92 @@ export class WorkspaceCommandView {
     }
   }
 
-  toggleRailManager(sectionKey) {
+  // `remember` is set only by a user's click on a row toggle. Opening a
+  // section on the user's behalf (a row "+", openSystemTab, the Detachment
+  // add path) and Escape leave the remembered section as it was.
+  toggleRailManager(sectionKey, { remember = false } = {}) {
     const section = String(sectionKey || '').trim();
     if (!section) return;
     this.activeRailSection = this.activeRailSection === section ? '' : section;
+    this.railSectionSettled = true;
+    if (remember) {
+      writeRailSection(this.railStorage(), this.workspaceId(), this.activeRailSection);
+    }
     this.render();
+  }
+
+  railStorage() {
+    try {
+      return typeof localStorage === 'undefined' ? null : localStorage;
+    } catch (_error) {
+      // A browser that blocks storage throws on the access itself.
+      return null;
+    }
+  }
+
+  // The rows this workspace's rail shows, in order, with their counts: the
+  // same data and the same conditions as renderRail.
+  presentRailSections() {
+    const page = this.page || {};
+    const count = list => (Array.isArray(list) ? list.length : 0);
+    const sections = [
+      { key: 'backlog', count: this.backlogItems().length },
+      { key: 'notes', count: count(page.notes) },
+      { key: 'schedules', count: count(page.schedules) },
+      { key: 'sessions', count: count(page.sessions) },
+      { key: 'folders', count: this.folderRowData().length }
+    ];
+    if (this.isGroupWorkspace()) {
+      sections.push({ key: 'members', count: this.detachmentMemberCount() });
+    }
+    sections.push(
+      { key: 'files', count: this.fileRowData().length },
+      { key: 'systems', count: this.systemTabs().length }
+    );
+    const stations = this.mapStationRegistry().length;
+    if (stations) sections.push({ key: 'stations', count: stations });
+    return sections;
+  }
+
+  // What the default section is chosen from: the rows as drawn, except that a
+  // workspace's own project folder is not something the user linked. Every
+  // workspace has one, so counting it would open Linked Folders on all of
+  // them and leave "Stations on an empty HQ" and "nothing open" unreachable.
+  // The row itself still shows the full count.
+  railDefaultSections() {
+    return this.presentRailSections().map(section =>
+      section.key === 'folders' ? { ...section, count: this.linkedFolderCount() } : section
+    );
+  }
+
+  linkedFolderCount() {
+    return this.folderRowData().filter(dir => this.folderRole(dir).className !== 'is-project')
+      .length;
+  }
+
+  // Chooses the section that is open when Details is shown, once per arrival.
+  //
+  // A remembered section that this workspace has is opened at once. Anything
+  // else depends on the counts, and the page's lists arrive one at a time, so
+  // the choice waits for page.initialListsLoaded rather than being made (and
+  // visibly changed) once per list. A section that is already open, because
+  // something opened it while this was waiting, is left alone.
+  settleRailSection() {
+    if (this.railSectionSettled) return;
+    if (this.activeRailSection) {
+      this.railSectionSettled = true;
+      return;
+    }
+    const sections = this.railDefaultSections();
+    const saved = readRailSection(this.railStorage(), this.workspaceId());
+    const savedDecides = saved === '' || sections.some(section => section.key === saved);
+    if (!savedDecides && !(this.page && this.page.initialListsLoaded)) return;
+    this.activeRailSection = resolveRailSection({
+      saved,
+      sections,
+      isHQ: this.isPersonalHQ()
+    });
+    this.railSectionSettled = true;
   }
 
   // render() rebuilds the rail with innerHTML, which drops focus. Put it back
@@ -12127,7 +12217,7 @@ export class WorkspaceCommandView {
       const manageBtn = event.target.closest('[data-cmd-manage-section]');
       if (manageBtn) {
         const section = manageBtn.getAttribute('data-cmd-manage-section');
-        this.toggleRailManager(section);
+        this.toggleRailManager(section, { remember: true });
         this.focusRailControl('data-cmd-manage-section', section);
         return;
       }
