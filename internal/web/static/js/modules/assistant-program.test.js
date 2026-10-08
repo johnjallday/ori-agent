@@ -4,8 +4,11 @@ import assert from 'node:assert/strict';
 import {
   AssistantProgramPage,
   assistantProviderUnavailableMessage,
+  providerUpgradeAdditions,
   providerUpgradeAgentLine,
   providerUpgradeCard,
+  providerUpgradeGuidanceNote,
+  providerUpgradeSummary,
   requestedUpgradeReview
 } from './assistant-program.js';
 
@@ -172,7 +175,51 @@ test('package upgrade result counts updated and kept agents', () => {
   );
 });
 
+test('the upgrade review says how much changes, and no more', () => {
+  const guidance = { from_version: '0.1.0', to_version: '0.1.1' };
+  assert.equal(
+    providerUpgradeSummary(guidance),
+    'This Home and its linked projects move from 0.1.0 to 0.1.1. Only Home guidance changes.'
+  );
+  assert.equal(
+    providerUpgradeGuidanceNote(guidance),
+    'Role prompts are unchanged; only packaged skill text changes.'
+  );
+  // A release that adds a card is not described as guidance only, nor as a
+  // skill text change.
+  const adds = {
+    from_version: '0.1.1',
+    to_version: '0.2.0',
+    additions: [
+      'Adds a Your studio card to this Home. Nothing is detected or read until you open it.'
+    ]
+  };
+  assert.equal(
+    providerUpgradeSummary(adds),
+    'This Home and its linked projects move from 0.1.1 to 0.2.0. It adds what is listed below. Nothing else changes.'
+  );
+  assert.equal(providerUpgradeGuidanceNote(adds), 'Role prompts are unchanged.');
+  // A release that does both says both.
+  assert.equal(
+    providerUpgradeSummary({ ...adds, roles: [{ role_id: 'portfolio_manager' }] }),
+    'This Home and its linked projects move from 0.1.1 to 0.2.0. It changes Home guidance and adds what is listed below. Nothing else changes.'
+  );
+});
+
 test('the Plugins page hand-off opens the upgrade review only when asked', () => {
+  // What a release adds besides guidance comes from the server as sentences.
+  assert.deepEqual(providerUpgradeAdditions({}), []);
+  assert.deepEqual(providerUpgradeAdditions({ additions: 'x' }), []);
+  assert.deepEqual(
+    providerUpgradeAdditions({
+      additions: [
+        'Adds a Your studio card to this Home. Nothing is detected or read until you open it.',
+        ' ',
+        null
+      ]
+    }),
+    ['Adds a Your studio card to this Home. Nothing is detected or read until you open it.']
+  );
   assert.equal(requestedUpgradeReview('?upgrade=review'), true);
   assert.equal(requestedUpgradeReview('?folder_offer_id=x&upgrade=review'), true);
   assert.equal(requestedUpgradeReview('?upgrade=commit'), false);

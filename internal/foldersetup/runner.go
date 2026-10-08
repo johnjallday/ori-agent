@@ -139,6 +139,9 @@ type Runner struct {
 	// Shared fills project roles with the Home's shared assistant. Nil keeps
 	// one agent per project ("<role> · <project>").
 	Shared SharedStaffing
+	// Profile fills the Home's profile when the plan showed that line. Nil
+	// leaves the line waiting for the owner to fill it on the Home.
+	Profile Profile
 	// NewKey returns a fresh idempotency key; nil uses random bytes.
 	NewKey func() string
 	// ValidateDestination freshly checks the material witness before each
@@ -185,6 +188,10 @@ type run struct {
 	// settled is true once the shared assistant a create made is recorded.
 	settled bool
 	homeID  string
+	// profiled is true once this pass ran the Home's profile step.
+	profiled bool
+	// homeCreated is true only when this pass itself created the Home.
+	homeCreated bool
 }
 
 // Run drives the journey to the end or to the first thing that needs the user.
@@ -304,6 +311,9 @@ func (s *run) drive(ctx context.Context) error {
 		if err := s.settle(ctx, journey); err != nil {
 			return err
 		}
+		if err := s.fillProfile(ctx, journey); err != nil {
+			return err
+		}
 		if journey.Lifecycle == setupjourney.LifecycleReady {
 			return nil
 		}
@@ -328,6 +338,50 @@ func (s *run) drive(ctx context.Context) error {
 		}
 	}
 	return &stop{reason: personalassistant.FolderStopFailed}
+}
+
+// fillProfile runs the Home's profile step once the journey's receipts name
+// the Home, when the plan showed that line. The card's templates consent is
+// carried only when this very pass created the Home: a Home that already
+// existed when the run reached it (made another way, or by an earlier pass
+// this one cannot vouch for) never gains a consent from a card, whatever the
+// plan promised. Its owner reviews the read on the Home instead. Like the
+// collection run's step, it never stops the run: a profile that could not be
+// saved leaves its line failed and the owner fills it on the Home. Only a
+// cancelled run ends here.
+func (s *run) fillProfile(ctx context.Context, journey *setupjourney.JourneyProjection) error {
+	intent := s.cfg.Plan.Intent
+	homeID := strings.TrimSpace(journey.Receipts.HomeWorkspaceID)
+	if s.profiled || !intent.SetsProfile || s.Profile == nil || homeID == "" {
+		return nil
+	}
+	// The profile is written to the Home. It must be the Home the review named,
+	// and the reviewed destination must still stand, as before every other
+	// write of this run.
+	if destination := s.cfg.Plan.Destination; destination != nil {
+		if (destination.Status == "existing" && homeID != destination.WorkspaceID) || (destination.Status == "new" && s.homeID != "" && homeID != s.homeID) {
+			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home to profile differs from the reviewed destination"}
+		}
+	}
+	if s.ValidateDestination != nil {
+		if err := s.ValidateDestination(ctx); err != nil {
+			return &stop{reason: personalassistant.FolderStopPlanChanged}
+		}
+	}
+	s.profiled = true
+	s.setKind(personalassistant.FolderPlanProfile, personalassistant.FolderLineWorking)
+	if err := s.record(ctx, personalassistant.FolderSetupRunning, "", nil); err != nil {
+		return err
+	}
+	if err := s.Profile.Setup(ctx, homeID, intent.GrantsTemplates && s.homeCreated); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		s.setKind(personalassistant.FolderPlanProfile, personalassistant.FolderLineFailed)
+		return nil
+	}
+	s.setKind(personalassistant.FolderPlanProfile, personalassistant.FolderLineDone)
+	return nil
 }
 
 // prepare brings the plugins the plan promised into place, then opens the plugin
@@ -590,6 +644,7 @@ func (s *run) createHome(ctx context.Context, journey *setupjourney.JourneyProje
 	if err := s.commit(ctx, journey, review, input); err != nil {
 		return err
 	}
+	s.homeCreated = true
 	if destination := s.cfg.Plan.Destination; destination != nil && destination.Status == "new" {
 		fresh, err := s.journey.Read(ctx, s.runID)
 		if err != nil || fresh == nil {

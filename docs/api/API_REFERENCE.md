@@ -1445,6 +1445,26 @@ Ends an open build without creating anything (Start over, or Discard from Today)
 }
 ```
 
+`first_task` and `first_look` carry where a folder's first look stands. `first_task` is on a **resolved project offer** whose workspace has a first task, in the plain read and in the `?offer_id=` read; `first_look` is on the plain read only, for the most recent folder workspace that still has one, whichever offer is shown. Both are read live and never stored on the offer, and with nothing to say they are absent. Shape:
+
+```json
+{
+  "state": "seeded | running | waiting | finished | failed",
+  "offer_id": "…", "task_id": "…", "workspace_id": "…",
+  "workspace_name": "Thesis", "workspace_route": "/workspaces/thesis", "folder_name": "thesis-draft",
+  "description": "Summarize the current draft…", "agent": "Writing Coach",
+  "started_at": "…", "finished_at": "…",
+  "result_excerpt": "one line, at most 280 characters",
+  "ticket_route": "/workspaces/thesis?ticket=<task id>",
+  "can_start": true,
+  "reason": "setup_wizard_opening | unassigned | no_model | local_activation_required | needs_input | start_failed | run_failed",
+  "message": "one plain sentence for the reason",
+  "detail": "what the receipt's task row says now"
+}
+```
+
+`can_start` is true only for a `seeded` look that `POST …/folder-first-task/start` would start now (`no_model` is added when no model is configured). Routes are built from the folder slug, never an internal id, and no field carries a filesystem path. While a look runs, the Home card re-reads `?offer_id=` only while the drawer is open.
+
 `offer` is the one current offer (pending, or a decided one whose outcome is still being shown) or `null`. `chips` names the folders under the user's home that exist (none in a sandboxed home). `picker_available` is false where the native dialog cannot run — outside macOS, or under `ORI_NO_DESKTOP_OPEN` as every sandboxed demo server runs. `picker_note` explains what can still be chosen: it is empty only when there are chips and a dialog; otherwise it names the missing folders, the switched-off or unsupported dialog, or both.
 
 ### Scan a Folder
@@ -1497,7 +1517,7 @@ After the Create Workspace modal (opened pre-filled, sent with `entry_point: "fo
 { "request_id": "…", "plan_digest": "<64 hex>", "entry_name": "optional picked project file" }
 ```
 
-A pending project offer whose shape needs a reviewed integration carries `plan` (`lines`: label, detail, `state`, and a `digest`) and `setup` (the run: `status`, `stop_reason`, `lines`). The digest of the plan is the user's consent: it covers every line except its state. The server runs the plan itself (plugin installs, Home, workspace, folder link, File-only mode, agents, first task) and answers `200` with the offer (the run continues on the server; poll the offer). Allowed fields are exactly the three above; there is no path field, and the intent behind the plan is pinned on the server. `409` with `"plan_changed": true` and the fresh offer when the plan moved since the card was drawn; `409` while another run holds the offer; `404` unknown offer. A run that cannot finish stops with a `stop_reason` (for example `needs_model`, `needs_pick`, `install_failed`) and keeps what it finished; sending the same digest again continues from there. A finished run makes the offer `resolved` with a receipt (`outcome.workspace_id`, `outcome.route`). The first read-only task starts when the workspace is first opened (`POST /api/workspaces/{id}/folder-first-task/start`, once).
+A pending project offer whose shape needs a reviewed integration carries `plan` (`lines`: label, detail, `state`, and a `digest`) and `setup` (the run: `status`, `stop_reason`, `lines`). The digest of the plan is the user's consent: it covers every line except its state. The server runs the plan itself (plugin installs, Home, workspace, folder link, File-only mode, agents, first task) and answers `200` with the offer (the run continues on the server; poll the offer). Allowed fields are exactly the three above; there is no path field, and the intent behind the plan is pinned on the server. `409` with `"plan_changed": true` and the fresh offer when the plan moved since the card was drawn; `409` while another run holds the offer; `404` unknown offer. A run that cannot finish stops with a `stop_reason` (for example `needs_model`, `needs_pick`, `install_failed`) and keeps what it finished; sending the same digest again continues from there. A finished run makes the offer `resolved` with a receipt (`outcome.workspace_id`, `outcome.route`). The first read-only task (the "first look") starts only when the user presses **Start first look**, on Home's receipt or mission card or on the workspace page's banner (`POST /api/workspaces/{id}/folder-first-task/start`, once); opening a workspace never starts it. See `first_task` and `first_look` under Get Folder Digest.
 
 An offer the user sent to the step-by-step journey (**Adjust…**, so `awaiting_outcome` with no run yet) still carries `plan`, and the setup action accepts it the same way, so the one-click path is not lost.
 
@@ -1680,9 +1700,82 @@ Makes the project's workspace (or uses the one it already has), records File-onl
 
 `PATCH /api/agents/{name}` that changes the model, provider, reasoning effort, temperature, max tokens or system prompt is carried into every project copy the consent tracks for that agent, except a copy changed in its own project. The response then includes `carried: { updated: [{id, name}], customised: [{id, name}] }`. `GET /api/agents/{name}/detail` adds `workspace_count` and `workspaces`, and leaves copies that are still in step out of `origin.customised_in`. A chat answered by a workspace's own copy never writes that copy back to the user's agent.
 
+## Home Profile API
+
+What a Home knows about where its owner works, under the rows the Home's installed package declares in `home_profile` (contract: `docs/architecture/independent-program-homes.md` §3.2; states: `docs/architecture/music-setup-onboarding.md` S4c). Every route is for the authenticated owner of that exact Home: a linked project, another person's Home or any other workspace is `404`. Request bodies are strict JSON (an unknown or duplicate key is `400`) and carry a `request_id`; repeating one replays the earlier result (`replayed: true`) instead of writing again. Nothing here is an agent tool.
+
+**Endpoint:** `GET /api/workspaces/{homeID}/assistant-program/profile`
+
+Detects nothing and reads no folder. Takes no query string.
+
+```json
+{
+  "available": true,
+  "read_only": false,
+  "title": "Your studio",
+  "intro": "What Ori knows about where you make music. Detected values are hints until you confirm them.",
+  "fields": [{ "id": "apps", "kind": "apps", "label": "DAWs on this Mac" }],
+  "revision": 3,
+  "profile": {
+    "schema_version": 1,
+    "revision": 3,
+    "declared_by": { "plugin_id": "music-project-management", "version": "0.2.0", "title": "Your studio", "labels": { "main_app": "Main DAW" } },
+    "detected_at": "…",
+    "apps": [{ "id": "reaper", "name": "REAPER", "detected": true, "detected_at": "…", "version": "7.28", "confirmed_at": "…" }],
+    "main_app": { "id": "reaper", "source": "detected", "reason": "only_app", "confirmed_at": "…" },
+    "templates": {
+      "consent": { "granted_at": "…", "source": "home_review" },
+      "read_at": "…",
+      "app_id": "reaper",
+      "items": [{ "name": "Band Session", "kind": "project", "file": "Band Session.RPP", "modified_at": "…" }]
+    },
+    "defaults": { "tempo_bpm": 120, "time_signature": "4 4", "sample_rate_hz": 48000, "bit_depth": 24, "source": "owner", "confirmed_at": "…" }
+  },
+  "choices": { "min_tempo": 40, "max_tempo": 240, "time_signatures": [{ "value": "4 4", "label": "4/4" }], "sample_rates": [44100, 48000, 88200, 96000, 176400, 192000], "bit_depths": [16, 24, 32] },
+  "templates": { "state": "listed", "app_id": "reaper", "app_name": "REAPER", "folders": ["ProjectTemplates", "TrackTemplates"], "consented": true },
+  "facts_operation": true
+}
+```
+
+- `available: false` (and nothing else) for an owner's Home whose installed package declares no profile.
+- `read_only: true` when the Home's provider is unavailable for changes: values stay readable and every write below is `409 home_read_only`.
+- `profile` is `null` and `revision` is `0` before anything was detected or saved. Request receipts are never returned.
+- Every value says where it came from: `source: "detected"` is a hint until `confirmed_at` is set; `source: "owner"` is the owner's instruction. `main_app.reason` is `only_app` or `library_majority` on a detected value. A hidden application has `hidden: true` and is never shown to agents.
+- `templates.state` is one of `detect_first`, `other_app`, `plugin_missing`, `update_plugin`, `not_read`, `listed`, `empty`, `problem` (with `problem: read_failed | operation_unavailable`) or `unsupported`. `items` holds at most 64 names with a bare file name each, never a path; `truncated: true` means the list is not everything: the folders hold more, some sit in subfolders, a name could not be shown as one plain visible line, or a folder could not be read. With no items at all, `empty` plus `truncated` reads "Nothing could be listed…" on the card, not "No templates were found".
+- `profile.templates.empty_reason` says why a read that worked listed nothing, when that is not simply empty folders: `no_folders` (the application has no templates folders at all; the card says "<app> has no templates folders yet… Save a template in <app>, then press Read again.") or `app_not_found` (the project plugin did not find the application where it looks). It is cleared by the next read that lists something and by Forget.
+- `GET /api/workspaces/{id}/assistant-program` carries `home_profile_title` on the Home itself when its installed package declares a card. The Home's workspace page uses it for a link, named by that title, to `/workspaces/{slug}/assistant#homeProfilePanel`; arriving there scrolls to the card and focuses its heading.
+- `templates.consented` is `true` while the record holds an agreement that was not taken back, whatever the state. A list read earlier stays on the record (and in the agents' context) when no new read can happen (`other_app`, `plugin_missing`, `update_plugin`, `unsupported`); the card shows it and offers Forget in every one of those states. `problem` with `operation_unavailable` is reached only once the plugin can list templates again: it is a setup card's read that met a plugin too old to list them, and Read again retries it under the same consent.
+- `time_signatures` are the options of the `time_signature` input on the blueprint the Home's projects are created from; empty when that plugin is not installed.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/detect`
+
+`{ "request_id": "…" }` — looks for installed applications (bundle names from the host tool table in `/Applications` and `~/Applications`; no symlink is followed and nothing inside a bundle is read) and asks the project plugin's facts operation for the application's version only. Records what it finds as hints, keeps everything the owner confirmed, hid or chose, and proposes a main application when the owner has not said: the only one found, or with several the one whose project format has strictly the most entries in the Home's library, otherwise none. Answers with the card.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/fields`
+
+```json
+{ "request_id": "…", "if_revision": 3, "main_app": "reaper", "confirm_apps": ["reaper"], "hide_apps": ["logic-pro"], "show_apps": [], "defaults": { "tempo_bpm": 96, "time_signature": "3 4" } }
+```
+
+Every part but `request_id` and `if_revision` is optional; what is absent is left as it is. `main_app` equal to the proposed one confirms it; another id replaces it with `source: owner`; `""` clears it. `confirm_apps` marks a found application as the owner's, `hide_apps` is "Not mine" (it also clears a main application or templates list that was that application's), `show_apps` brings a hidden one back as a hint. `defaults` replaces the whole set: a part left out is no longer set, and `{}` clears them. `409 home_profile_changed` on a stale `if_revision`; `400` for an application that was not detected, an id named twice, a tempo outside 40 to 240, a time signature that is not one of the choices, or a sample rate or bit depth outside the fixed lists.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/templates/review`
+
+`{ "request_id": "…" }` — reads nothing and stores nothing. Answers `{ review_id, app_id, app_name, folders, sentence }` for the consent dialog. `409 plugin_operation_unavailable` when no installed project plugin offers a facts operation; `400` when templates cannot be read for this Home's applications (nothing detected yet, or the application is not found, hidden or not the main one).
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/templates/commit`
+
+`{ "request_id": "…", "review_id": "…" }` — records the consent (`source: home_review`; an active consent is kept) and calls the facts operation once with `include_templates: true`. Answers with the card. `409 home_profile_changed` when the review no longer describes the Home (for example after Forget). That is checked before the read and again on the record being written, so a Forget, another consent or a main-application change that lands while the plugin is answering wins and nothing from that read is stored. `409 plugin_operation_unavailable` when there is no operation, and nothing is recorded. A read that fails after the owner agreed keeps the consent and answers `200` with `templates.state: "problem"`.
+
+**Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/profile/templates/forget`
+
+`{ "request_id": "…" }` — clears the list and sets `consent.revoked_at` in one write. A later read needs a new review.
+
+**Related.** `POST /api/workspaces/template-agent-plan` adds `group_requirement.home.input_defaults: { values: { tempo, time_signature }, note }` when the destination Home has saved defaults the selected blueprint's own inputs accept; the Create dialog shows them in fields the person has not changed. The Home's agents receive the profile in their context block, and its primary Manager has the read-only tool `home_profile_read`.
+
 ## Home Package Upgrade API
 
-Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Only guidance may change: Home role prompts and packaged skill text. The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
+Moves every Home pinned to an installed Home provider package, and the projects linked to those Homes, onto one exact newer release of that package (contract: `docs/architecture/independent-program-homes.md` §6.1). Two kinds of change are accepted: guidance (Home role prompts and packaged skill text), and a release that adds a `home_profile` card to a Home that has none (the review then lists it under `additions`). The target is the release the Plugins page's Update would install — the newest reviewed release for a reviewed install, otherwise the plugin's recorded source. Every route is for the authenticated owner of that exact Home, and the Home must record a package pin: anything else is `404`. Refusals are `409` with a stable `code`:
 
 | Code | Meaning |
 | --- | --- |

@@ -90,6 +90,11 @@ func (f *fakeJourney) Read(_ context.Context, runID string) (*setupjourney.Journ
 	if f.done[specialist.SetupStepProjectConnect] {
 		projection.Receipts.ProjectWorkspaceID = "song-1"
 	}
+	if f.homeRequired && f.homeExists {
+		// The run's receipts name the Home once it is there, created by this
+		// journey or joined.
+		projection.Receipts.HomeWorkspaceID = "home-1"
+	}
 	if runID == "child-1" {
 		projection.RunID, projection.RunKind = "child-1", setupjourney.RunKindChild
 	}

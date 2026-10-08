@@ -121,6 +121,12 @@ type PlanProgram struct {
 	From                workspace.AssistantProgramHomeOwner     `json:"from"`
 	ToDeclarationDigest string                                  `json:"to_declaration_digest"`
 	RolePrompts         []projecttemplates.HomeRolePromptChange `json:"role_prompts"`
+	// AddsHomeProfile says the newer release adds a profile card to this Home
+	// declaration; HomeProfileTitle is the card's declared title. The card is
+	// empty after the upgrade: nothing is detected or read until the owner
+	// opens it.
+	AddsHomeProfile  bool   `json:"adds_home_profile,omitempty"`
+	HomeProfileTitle string `json:"home_profile_title,omitempty"`
 }
 
 // PlanHome is one affected Home.

@@ -194,7 +194,7 @@ test('Set up without a model stops with one plain sentence and a way forward', a
   modelReady = await modelAvailable(request);
 });
 
-test('Try again after a model is set finishes the run on the same card, then Open starts the first task', async ({
+test('Try again after a model is set finishes the run on the same card, then Start first look starts the first task', async ({
   page,
   request
 }) => {
@@ -209,7 +209,7 @@ test('Try again after a model is set finishes the run on the same card, then Ope
   // The song's agent is the Home's one shared assistant, not "<label> · <song>".
   expect(rows).toMatch(/REAPER Assistant[^\n·]*added/);
   expect(rows).toMatch(/First task/);
-  expect(rows).toMatch(/Starts when you open it/);
+  expect(rows).toMatch(/Starts when you press Start first look/);
 
   const startCalls: string[] = [];
   page.on('response', async response => {
@@ -225,28 +225,38 @@ test('Try again after a model is set finishes the run on the same card, then Ope
   await expect(runModal).toBeVisible();
   await expect(runModal.locator('#folderSetupRunEyebrow')).toHaveText('All set');
   await expect(runModal.locator('#folderSetupRunBar')).toHaveAttribute('aria-valuenow', '100');
-  const open = runModal.getByRole('link', { name: /^Open / });
+  // The receipt offers the click that spends tokens, and the workspace beside it.
+  // Nothing has started yet: opening a page never starts the look.
+  const receiptCard = page.locator('#personalAssistantFolderOffer');
+  const start = receiptCard.getByRole('button', { name: 'Start first look' });
+  await expect(start).toBeVisible();
+  expect(startCalls).toEqual([]);
+  const open = receiptCard.getByRole('link', { name: /^Open / });
   await expect(open).toBeVisible();
   const href = await open.getAttribute('href');
   expect(href).toMatch(/^\/workspaces\/[a-z0-9-]+$/);
-  await open.click();
-  await page.waitForURL(`**${href}`);
+
+  await start.click();
   await expect
     .poll(() => startCalls.some(call => call.includes('"started":true')), { timeout: 60_000 })
     .toBe(true);
-  // The task runs in the background: no dialog covers the page, and a banner says
-  // the agent is working on it (then where it ended up).
+  // The card follows the run on Home, with no page change.
+  await expect(receiptCard.locator('#personalAssistantFolderReceipt')).toContainText(
+    /Running…|Done/,
+    {
+      timeout: 60_000
+    }
+  );
+
+  // Opening the workspace never starts it a second time, and shows the banner.
+  const before = startCalls.length;
+  await page.goto(href!);
+  await page.waitForLoadState('load');
   await expect(page.locator('.modal.show')).toHaveCount(0);
   const banner = page.locator('#workspaceFirstTaskBanner');
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText(/first task/);
-  await expect(banner.getByRole('link', { name: /the task$/ })).toBeVisible();
-  // A reload never starts it a second time.
-  const before = startCalls.length;
-  await page.reload();
-  await page.waitForLoadState('load');
-  await expect.poll(() => startCalls.length).toBeGreaterThan(before);
-  expect(startCalls.slice(before).every(call => !call.includes('"started":true'))).toBe(true);
+  await expect(banner).toContainText(/first (task|look)/);
+  expect(startCalls.length).toBe(before);
 });
 
 test('keyboard only: Set up runs from the focused button and the card announces its progress', async ({

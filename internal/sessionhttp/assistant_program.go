@@ -92,6 +92,10 @@ type assistantProgramSummary struct {
 	RoleProfiles             []assistantProgramRoleProfile                   `json:"role_profiles,omitempty"`
 	Projects                 []assistantProgramProject                       `json:"projects,omitempty"`
 	ProviderUpgrade          *providerUpgradeView                            `json:"provider_upgrade,omitempty"`
+	// HomeProfileTitle is the declared title of the Home's profile card, on the
+	// Home itself and only when its installed package declares one, so a page
+	// that is not the Home's own can still point at the card by its name.
+	HomeProfileTitle string `json:"home_profile_title,omitempty"`
 }
 
 type assistantProgramRoleProfile struct {
@@ -230,6 +234,8 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 		if link := project.GetAssistantProjectLink(); link != nil && len(link.ProjectRoles) > 0 {
 			summary.Declaration.Roles = append(summary.Declaration.Roles, link.ProjectRoles...)
 		}
+	} else if declared, ok := h.homeProfileDeclared(station); ok {
+		summary.HomeProfileTitle = declared.Profile.Title
 	}
 	if project != nil && state.HomeProvider != nil && h.installedPluginLister != nil {
 		if link := project.GetAssistantProjectLink(); link != nil && link.ProjectProvider != nil {

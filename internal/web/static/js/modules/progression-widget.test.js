@@ -7,6 +7,9 @@ import {
   resolvedCount,
   tierInsignia,
   compactSummaryView,
+  missionGroups,
+  missionHeaderText,
+  missionMode,
   missionKicker,
   firstMissionView,
   firstMissionOfferView,
@@ -99,6 +102,85 @@ test('one visible tier reports missions without Tier X of Y', () => {
   assert.equal(compactSummaryView(status).text, 'Missions · 1/2');
 });
 
+// The cohort board: Starter then Daily loop, named and never numbered (FR4, FR5).
+function twoTierStatus({ current = 1, resolvedStarter = 0, allComplete = false } = {}) {
+  const starter = ['a', 'b', 'c'].map((id, i) =>
+    quest({
+      id,
+      tier: 1,
+      order: i + 1,
+      title: `Starter ${id}`,
+      status: i < resolvedStarter ? 'completed' : 'available'
+    })
+  );
+  const daily = ['d', 'e'].map((id, i) =>
+    quest({
+      id,
+      tier: 2,
+      order: i + 4,
+      title: `Daily ${id}`,
+      status: 'locked-tier',
+      locked: current === 1,
+      locked_reason: current === 1 ? 'Starter first' : ''
+    })
+  );
+  return {
+    current_tier: current,
+    total_tiers: 2,
+    all_complete: allComplete,
+    tiers: [
+      tier({ tier: 1, name: 'Starter', quests: starter }),
+      tier({ tier: 2, name: 'Daily loop', quests: daily })
+    ],
+    missions: [...starter, ...daily]
+  };
+}
+
+test('two named tiers read as Missions, never as Tier 1 of 2', () => {
+  const status = twoTierStatus({ resolvedStarter: 1 });
+  assert.equal(missionMode(status), true);
+  assert.equal(compactSummaryView(status).text, 'Missions · 1/3');
+  assert.equal(missionHeaderText(status), 'Missions · Starter');
+  const later = twoTierStatus({ current: 2 });
+  assert.equal(missionHeaderText(later), 'Missions · Daily loop');
+  assert.equal(compactSummaryView(later).text, 'Missions · 0/2');
+  assert.equal(missionHeaderText({ ...later, all_complete: true }), 'Missions complete');
+  // A board without tier names keeps the plain header.
+  assert.equal(
+    missionHeaderText({ missions: [quest()], tiers: [tier({ name: '' })], current_tier: 1 }),
+    'Missions'
+  );
+});
+
+test('the list shows the current tier first, then the next tier as locked rows', () => {
+  const groups = missionGroups(twoTierStatus(), 'a');
+  assert.deepEqual(
+    groups.map(group => [group.heading, group.rows.map(row => row.id)]),
+    [
+      ['', ['b', 'c']],
+      ['Daily loop', ['d', 'e']]
+    ]
+  );
+  // Those rows are the server's locked ones: no link, no Skip, with the reason.
+  const row = questRowState(groups[1].rows[0]);
+  assert.equal(row.locked, true);
+  assert.equal(row.lockedReason, 'Starter first');
+  assert.equal(row.showLink, false);
+  assert.equal(row.showSkip, false);
+  // Once Daily loop is current it has no heading: it is the current tier.
+  const open = missionGroups(twoTierStatus({ current: 2, resolvedStarter: 3 }), 'd');
+  assert.deepEqual(
+    open.map(group => [group.heading, group.rows.map(row => row.id)]),
+    [
+      ['', ['a', 'b', 'c']],
+      ['', ['e']]
+    ]
+  );
+  // The card's own mission is never repeated, and a single tier has one section.
+  assert.equal(missionGroups(twoTierStatus(), '').flatMap(g => g.rows).length, 5);
+  assert.deepEqual(missionGroups({ missions: [] }, ''), []);
+});
+
 test('compactSummaryView: partial — some but not all quests resolved', () => {
   const status = {
     current_tier: 2,
@@ -165,13 +247,15 @@ test('compactSummaryView text never resembles the bare-number Updates attention 
   assert.doesNotMatch(view.text, /^\d+$/);
 });
 
-test('compactSummaryView is unaffected by missions: it reads the current tier only', () => {
+test('compactSummaryView counts the current tier only, in mission words when missions exist', () => {
   const status = {
     current_tier: 1,
     missions: starterMissions({}).map(m => ({ ...m, status: 'completed' })),
     tiers: [tier({ tier: 1, quests: [quest({ status: 'available' }), quest({ id: 'q2' })] })]
   };
-  assert.equal(compactSummaryView(status).text, 'Tier 1 · 0/2');
+  const view = compactSummaryView(status);
+  assert.equal(view.text, 'Missions · 0/2');
+  assert.equal(view.total, 2);
 });
 
 // ===========================================================================
@@ -232,9 +316,109 @@ test('firstMissionView: Ready shows the first unresolved mission with its own ac
     statusLabel: 'Ready',
     actionLabel: 'Start',
     actionURL: '/mission-2',
+    inPlace: false,
+    locked: false,
+    lockedAction: null,
     showAction: true,
     showSkip: true
   });
+});
+
+const hqLock = { kind: 'hq_card', label: 'Build My HQ' };
+
+test('firstMissionView: a locked mission with a fix shows Locked and only that fix', () => {
+  const view = firstMissionView({
+    missions: [
+      quest({ id: 'm1', order: 1, status: 'completed' }),
+      quest({
+        id: 'm2',
+        order: 2,
+        status: 'available',
+        optional: true,
+        locked: true,
+        locked_reason: 'Build your HQ first',
+        locked_action: hqLock,
+        action_url: '/?quest=show-folder'
+      }),
+      quest({ id: 'm3', order: 3, status: 'available', optional: true })
+    ]
+  });
+  assert.equal(view.questID, 'm2');
+  assert.equal(view.locked, true);
+  assert.equal(view.statusLabel, 'Locked');
+  assert.deepEqual(view.lockedAction, hqLock);
+  assert.equal(view.actionLabel, 'Build My HQ');
+  // Never the chooser while locked; and no Skip.
+  assert.equal(view.actionURL, '/?panel=today');
+  assert.equal(view.showAction, true);
+  assert.equal(view.showSkip, false);
+  assert.equal(view.inProgress, false);
+  assert.match(view.why, /HQ/);
+});
+
+test('firstMissionView: with nothing pressable the card rests on a locked mission and says why', () => {
+  const view = firstMissionView({
+    missions: [
+      quest({ id: 'm1', order: 1, status: 'completed' }),
+      quest({
+        id: 'm2',
+        order: 2,
+        status: 'available',
+        optional: true,
+        why: 'Look at it.',
+        action_url: '/go',
+        locked: true,
+        locked_reason: 'Starter first'
+      })
+    ]
+  });
+  assert.equal(view.questID, 'm2');
+  assert.equal(view.statusLabel, 'Locked');
+  assert.equal(view.showAction, false);
+  assert.equal(view.showSkip, false);
+  assert.equal(view.why, 'Look at it. Starter first');
+});
+
+test('firstMissionView: a locked mission with no fix is passed by, and unlocks the card', () => {
+  const missions = [
+    quest({ id: 'm1', order: 1, status: 'completed' }),
+    quest({ id: 'm2', order: 2, status: 'available', locked: true, locked_reason: 'Wait' }),
+    quest({ id: 'm3', order: 3, status: 'available' })
+  ];
+  assert.equal(firstMissionView({ missions }).questID, 'm3');
+  // Once the lock is gone the same mission is an ordinary Ready card.
+  missions[1] = quest({ id: 'm2', order: 2, status: 'available', action_url: '/go' });
+  const open = firstMissionView({ missions });
+  assert.equal(open.questID, 'm2');
+  assert.equal(open.locked, false);
+  assert.equal(open.statusLabel, 'Ready');
+});
+
+test('firstMissionView: the first-look action runs in place, and only while open', () => {
+  const open = firstMissionView({
+    missions: [
+      quest({
+        id: 'm',
+        order: 3,
+        status: 'available',
+        action_url: '/?quest=folder-first-look',
+        action_label: 'Start first look'
+      })
+    ]
+  });
+  assert.equal(open.inPlace, true);
+  assert.equal(open.actionLabel, 'Start first look');
+  const done = firstMissionView({
+    missions: [
+      quest({ id: 'm', order: 3, status: 'completed', action_url: '/?quest=folder-first-look' })
+    ],
+    all_complete: false
+  });
+  assert.equal(done.inPlace, false);
+  const nav = firstMissionView({
+    missions: [quest({ id: 'm', order: 1, status: 'available', action_url: '/x' })]
+  });
+  assert.equal(nav.inPlace, false);
 });
 
 test('firstMissionView: In progress comes from the server, with its resolved action', () => {

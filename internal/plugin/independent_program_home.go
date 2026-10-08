@@ -51,6 +51,41 @@ func IndependentProviderEvidenceAvailable(installed []InstalledPlugin, homeOwner
 		independentHomeAllowsProject(*home, *projectOwner) && !independentRoleIDsOverlap(home.AssistantProgram().Roles, project.ProgramRoles())
 }
 
+// PinnedHomeDeclaration returns a detached copy of the installed Home
+// declaration a Home's provider pin names, and the package that carries it.
+// The declaration must be the pinned release's, byte for byte (same digest).
+// Unlike the evidence checks it also answers for a disabled package, so a
+// read-only Home can still show the words it was set up under; it is display
+// evidence only and never makes a Home writable.
+func PinnedHomeDeclaration(installed []InstalledPlugin, owner *workspace.AssistantProgramHomeOwner) (InstalledPlugin, projecttemplates.AssistantProgramHome, bool) {
+	if owner == nil || !owner.Valid() {
+		return InstalledPlugin{}, projecttemplates.AssistantProgramHome{}, false
+	}
+	var matchedPlugin *InstalledPlugin
+	var matchedHome *projecttemplates.AssistantProgramHome
+	for index := range installed {
+		candidate := &installed[index]
+		if candidate.WorkspaceSurfaces == nil || !strings.EqualFold(candidate.Name, owner.PluginID) || candidate.Version != owner.PluginVersion {
+			continue
+		}
+		for homeIndex := range candidate.WorkspaceSurfaces.AssistantProgramHomes {
+			declaration := &candidate.WorkspaceSurfaces.AssistantProgramHomes[homeIndex]
+			if declaration.ID != owner.ProgramID || declaration.SchemaVersion != owner.HomeSchemaVersion || declaration.Version != owner.HomeVersion ||
+				projecttemplates.AssistantProgramHomeDigest(*declaration) != owner.DeclarationDigest {
+				continue
+			}
+			if matchedHome != nil {
+				return InstalledPlugin{}, projecttemplates.AssistantProgramHome{}, false
+			}
+			matchedPlugin, matchedHome = candidate, declaration
+		}
+	}
+	if matchedHome == nil {
+		return InstalledPlugin{}, projecttemplates.AssistantProgramHome{}, false
+	}
+	return *matchedPlugin, projecttemplates.CloneAssistantProgramHome(*matchedHome), true
+}
+
 func matchingIndependentHome(installed []InstalledPlugin, owner *workspace.AssistantProgramHomeOwner) (*InstalledPlugin, *projecttemplates.AssistantProgramHome) {
 	if owner == nil || !owner.Valid() {
 		return nil, nil

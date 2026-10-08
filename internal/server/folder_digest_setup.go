@@ -40,6 +40,10 @@ type folderSetupHost struct {
 
 	mu    sync.Mutex
 	cache map[string]cachedPlanFacts
+	// apps is the last look for installed applications a plan line was worded
+	// from, and when it was made.
+	apps   []folderdigest.InstalledApp
+	appsAt time.Time
 }
 
 type cachedPlanFacts struct {
@@ -208,6 +212,16 @@ func (h *folderSetupHost) facts(ctx context.Context, req personalassistant.Folde
 	}
 	facts.WorkspaceName = strings.TrimSpace(req.Offer.Subject.Name)
 	facts.AppInstalled = req.AppInstalled
+	// Worded per plan from the owner's Home as it is now: what that Home
+	// already knows changes the sentence. A Home that cannot be read is treated
+	// as none; the run decides for itself and never grants more than the plan.
+	if target.provider != nil {
+		var home *workspace.Workspace
+		if facts.HomeExists {
+			home, _ = h.station(req.UserID, *target.provider)
+		}
+		facts.Profile = h.profileFacts(*target.provider, target.row.Offer.IntegrationKey, home)
+	}
 	if facts.WorkspaceName == "" {
 		return foldersetup.PlanFacts{}, errSetupUnavailable
 	}
@@ -307,6 +321,9 @@ func (h *folderSetupHost) Run(ctx context.Context, req personalassistant.FolderS
 	}
 	if target.provider != nil && req.Plan.Intent.Provider != "" {
 		runner.Providers = homeProviderInstaller{setup: folderHomeProviderSetup{builder: b}, key: target.provider.Key}
+	}
+	if req.Plan.Intent.SetsProfile {
+		runner.Profile = folderProfileStep{handler: b.sessionHandler, userID: req.UserID, offerID: req.Offer.ID}
 	}
 	if b.projectStaffing != nil {
 		// Set up on the card is the standing consent (D1, D9): the song's Home

@@ -204,6 +204,7 @@ func (h *folderSetupHost) portfolioPlan(ctx context.Context, req personalassista
 	if facts.FolderName == "" {
 		return personalassistant.FolderSetupPlan{}, errSetupUnavailable
 	}
+	facts.Profile = h.profileFacts(target.provider, target.row.Offer.IntegrationKey, home)
 	return foldersetup.BuildPortfolioPlan(facts), nil
 }
 
@@ -238,6 +239,9 @@ func (h *folderSetupHost) portfolioRun(ctx context.Context, req personalassistan
 	}
 	if req.Plan.Intent.GrantsSongDetails {
 		runner.SongDetails = portfolioSongDetails{store: b.workspaceStore, offerID: req.Offer.ID}
+	}
+	if req.Plan.Intent.SetsProfile {
+		runner.Profile = folderProfileStep{handler: b.sessionHandler, userID: req.UserID, offerID: req.Offer.ID}
 	}
 	config := foldersetup.PortfolioConfig{Plan: req.Plan}
 	if req.Offer.Setup != nil {
@@ -557,6 +561,9 @@ func (r portfolioReceipts) Receipt(_ context.Context, homeID string, facts folde
 				rows = append(rows, row)
 			}
 		}
+	}
+	if row, ok := profileReceiptRow(home); ok {
+		rows = append(rows, row)
 	}
 	return rows, nil
 }

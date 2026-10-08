@@ -95,16 +95,13 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 				Kind: "folder", Name: ref.Name, Detail: "linked as primary",
 			})
 		}
-	} else if locator, err := workspace.GetProjectEntryLocator(ws.SharedData); err == nil && locator != nil &&
-		locator.Kind == workspace.ProjectEntryDirectoryReference {
+	} else if name := linkedFolderName(ws); name != "" {
 		// A project the setup journey connected is linked through its project
 		// entry rather than a primary directory. The row names the folder, never
 		// its path.
-		if ref, err := ws.GetDirectoryReference(locator.DirectoryReferenceID); err == nil && ref != nil && strings.TrimSpace(ref.Name) != "" {
-			rows = append(rows, personalassistant.FolderReceiptRow{
-				Kind: "folder", Name: ref.Name, Detail: "linked where it is",
-			})
-		}
+		rows = append(rows, personalassistant.FolderReceiptRow{
+			Kind: "folder", Name: name, Detail: "linked where it is",
+		})
 	}
 	if provenance := ws.GetTemplateProvenance(); provenance != nil && provenance.TemplateID != "" {
 		rows = append(rows, personalassistant.FolderReceiptRow{
@@ -118,17 +115,15 @@ func (h *Handler) FolderOfferWorkspaceReceipt(workspaceID string, created bool) 
 			}
 		}
 	}
-	for i := range ws.Tasks {
-		if isFolderFirstTask(&ws.Tasks[i]) {
-			// Say only what will really happen: the task starts by itself on the
-			// first open when it has an agent and no setup dialog is still open.
-			detail := "Ready to start"
-			if h.folderFirstTaskAutoStarts(ws) {
-				detail = "Starts when you open it"
-			}
-			rows = append(rows, personalassistant.FolderReceiptRow{Kind: "task", Name: ws.Tasks[i].Description, Detail: detail})
-			break
-		}
+	if task := personalassistant.FindFolderFirstTask(ws); task != nil {
+		// Say only what will really happen: the task starts on one click when it
+		// has an agent and no setup dialog is still to open. Nothing starts it
+		// without that click, so no model tokens are spent until the user asks.
+		rows = append(rows, personalassistant.FolderReceiptRow{
+			Kind: "task", Name: task.Description,
+			Detail: personalassistant.FolderFirstTaskRowDetail(
+				personalassistant.FolderFirstTaskStateOf(task), h.folderFirstTaskStartsOnClick(ws), task.Result),
+		})
 	}
 	return rows, nil
 }

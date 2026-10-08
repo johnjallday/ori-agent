@@ -29,10 +29,13 @@
           "setup_quests_v2",
           "template_group_requirements_v1",
           "blueprint_inputs_v1",
-          "independent_program_homes_v1"
+          "blueprint_intake_v1",
+          "independent_program_homes_v1",
+          "home_profile_v1"
         ]
       }
     },
+    "home_profile_facts": { "$ref": "#/$defs/homeProfileFacts" },
     "setup_quests": {
       "type": "array",
       "maxItems": 8,
@@ -442,7 +445,44 @@
           "type": "array",
           "maxItems": 8,
           "items": { "$ref": "#/$defs/allowedProjectAttachment" }
+        },
+        "home_profile": { "$ref": "#/$defs/homeProfile" }
+      }
+    },
+    "homeProfile": {
+      "description": "The Home's profile card: display words only. Requires the home_profile_v1 host feature. Each kind may be declared once.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "title", "intro", "fields"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "intro": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "label"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+              "kind": { "enum": ["apps", "main_app", "templates", "defaults"] },
+              "label": { "type": "string", "minLength": 1, "maxLength": 40 }
+            }
+          }
         }
+      }
+    },
+    "homeProfileFacts": {
+      "description": "The one read_only service operation that reports facts about this plugin's own application for a Home profile. Requires the home_profile_v1 host feature.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service_id", "operation"],
+      "properties": {
+        "service_id": { "$ref": "#/$defs/id" },
+        "operation": { "$ref": "#/$defs/id" }
       }
     },
     "blueprint": {

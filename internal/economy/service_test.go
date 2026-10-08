@@ -610,9 +610,11 @@ func TestStarterQuestsCoverAFirstFarm(t *testing.T) {
 // The exact onboarding payout is pinned so a change to it is always a decision.
 //
 // Folder-first simplification retires the built-in quests from presentation
-// and payout. Four missions at 7 Craft each total 28, enough for a first Farm.
+// and payout. The mission-quest refocus added See what your assistant found,
+// which pays for the agent's first result: five missions at 7 Craft each total
+// 35, enough for a first Farm.
 func TestStarterQuestTotalIsPinned(t *testing.T) {
-	const want int64 = 28
+	const want int64 = 35
 	if got := StarterQuestTotal(); got != want {
 		t.Fatalf("starter quests pay %d in total, pinned at %d; if this change is "+
 			"deliberate, update the pin and say why here", got, want)

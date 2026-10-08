@@ -81,7 +81,137 @@ func (b *ServerBuilder) starterMissionContext() progression.MissionContext {
 	// Read your first Daily Brief opens the station where the brief is read.
 	mission.DailyBriefURL = b.dailyBriefStationURL(ctx)
 
+	// See what your assistant found resolves from the latest folder workspace's
+	// first look. It is read only while the mission is open: once it is done or
+	// skipped the card no longer shows it.
+	if b.progressionEngine == nil || b.progressionEngine.MissionUnresolved(progression.FolderFirstLookQuestID) {
+		mission.FolderFirstTask = b.missionFirstTask(ctx)
+	}
+
 	return mission
+}
+
+// missionFirstTask is where the first look of the user's most recent folder
+// workspace stands, for Mission 03's card. The folder digest picks the look, so
+// the card and the Home receipt always follow the same one. The zero value
+// means there is nothing to point at.
+func (b *ServerBuilder) missionFirstTask(ctx context.Context) progression.MissionFirstTask {
+	if b.personalAssistantFolderDigest == nil {
+		return progression.MissionFirstTask{}
+	}
+	view, ok, err := b.personalAssistantFolderDigest.LatestFirstLook(ctx, userprofile.LocalUserID)
+	if err != nil || !ok {
+		return progression.MissionFirstTask{}
+	}
+	return missionFirstTaskOf(view)
+}
+
+// missionFirstTaskOf is the mission card's reading of a first look. A look that
+// cannot start, or that paused to ask something, carries the one sentence that
+// says why.
+func missionFirstTaskOf(view personalassistant.FolderFirstTaskView) progression.MissionFirstTask {
+	task := progression.MissionFirstTask{
+		WorkspaceName: view.WorkspaceName, WorkspaceRoute: view.WorkspaceRoute,
+		FolderName: view.FolderName, State: progression.MissionFirstTaskState(view.State),
+		CanStart: view.CanStart, TicketRoute: view.TicketRoute,
+	}
+	switch {
+	case view.State == personalassistant.FolderFirstTaskWaiting:
+		task.Blocked = view.Message
+	case view.State == personalassistant.FolderFirstTaskSeeded && !view.CanStart:
+		task.Blocked = view.Message
+		if view.Reason == personalassistant.FolderFirstTaskReasonNoModel {
+			// A missing model is fixed in Settings, not in the workspace.
+			task.BlockedURL, task.BlockedLabel = systemModelSettingsURL, "Open Settings"
+		}
+	}
+	return task
+}
+
+// systemModelSettingsURL is where the user adds the model a first look needs.
+const systemModelSettingsURL = "/settings#system-model"
+
+// folderFirstTaskView reads where a workspace's first look stands and adds the
+// one fact only the server knows: with no model configured, a start would
+// fail, so the view says so instead of offering the button.
+func (b *ServerBuilder) folderFirstTaskView(ctx context.Context, workspaceID string, modelConfigured bool) (personalassistant.FolderFirstTaskView, bool) {
+	if b == nil || b.sessionHandler == nil {
+		return personalassistant.FolderFirstTaskView{}, false
+	}
+	view, ok := b.sessionHandler.FolderFirstTaskView(ctx, workspaceID)
+	if !ok {
+		return personalassistant.FolderFirstTaskView{}, false
+	}
+	if view.State == personalassistant.FolderFirstTaskSeeded && view.CanStart && !modelConfigured {
+		view.CanStart = false
+		view.Reason = personalassistant.FolderFirstTaskReasonNoModel
+		view.Message = personalassistant.FolderFirstTaskMessage(view.Reason, view.WorkspaceName)
+		view.Detail = personalassistant.FolderFirstTaskRowDetail(view.State, false, "")
+	}
+	return view, true
+}
+
+// assistantModelConfigured reports whether a model is available to the
+// assistant, the same reading Read your first Daily Brief uses.
+func (b *ServerBuilder) assistantModelConfigured(ctx context.Context) bool {
+	if b == nil || b.personalAssistantService == nil {
+		return false
+	}
+	state, err := b.personalAssistantService.Get(ctx, userprofile.LocalUserID)
+	return err == nil && state != nil && state.Availability.Model.Available
+}
+
+// folderFirstTaskFinished reports whether a task.completed event is a folder's
+// first look finishing with a result, which is what See what your assistant
+// found pays for. The event names only the workspace and the task, so the
+// folder store supplies the task's template context. A start from the workspace
+// page counts exactly as a start from Home does: the mission watches the
+// result, not the button.
+func folderFirstTaskFinished(src starterWorkspaceSource, ev workspace.Event) bool {
+	if src == nil || ev.Type != workspace.EventTaskCompleted || strings.TrimSpace(ev.WorkspaceID) == "" {
+		return false
+	}
+	taskID, _ := ev.Data["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		return false
+	}
+	ws, err := src.Get(ev.WorkspaceID)
+	if err != nil || ws == nil {
+		return false
+	}
+	task := personalassistant.FindFolderFirstTask(ws)
+	if task == nil || task.ID != strings.TrimSpace(taskID) {
+		return false
+	}
+	result, _ := ev.Data["result"].(string)
+	if strings.TrimSpace(result) == "" {
+		result = task.Result
+	}
+	return strings.TrimSpace(result) != ""
+}
+
+// anyFolderFirstTaskFinished reports whether any active workspace already holds
+// a finished first look, the grandfathering evidence for Mission 03. Tasks are
+// not in the metadata cache, so each candidate is read from disk; this runs
+// only in the one-time startup passes, never on a poll.
+func anyFolderFirstTaskFinished(src starterWorkspaceSource) bool {
+	if src == nil {
+		return false
+	}
+	for id, lean := range src.CachedWorkspaces() {
+		if lean == nil || lean.GetStatus() != workspace.StatusActive || strings.EqualFold(lean.Kind, "group") ||
+			!ownedBy(lean, userprofile.LocalUserID) {
+			continue
+		}
+		ws, err := src.Get(id)
+		if err != nil || ws == nil || ws.GetStatus() != workspace.StatusActive {
+			continue
+		}
+		if personalassistant.FolderFirstTaskFinishedWithResult(personalassistant.FindFolderFirstTask(ws)) {
+			return true
+		}
+	}
+	return false
 }
 
 // dailyBriefStationURL is the link that opens the Daily Brief station's panel

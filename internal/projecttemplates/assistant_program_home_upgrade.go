@@ -20,6 +20,44 @@ type HomeRolePromptChange struct {
 	New    string `json:"new"`
 }
 
+// HomeUpgradeChange is what an accepted newer release of one Home declaration
+// changes for a Home that already exists.
+type HomeUpgradeChange struct {
+	// RolePrompts are the roles whose system prompt changed, in declaration order.
+	RolePrompts []HomeRolePromptChange
+	// AddsHomeProfile is true when the newer release adds a profile card the
+	// installed one does not have; HomeProfileTitle is that card's title.
+	AddsHomeProfile  bool
+	HomeProfileTitle string
+}
+
+// AcceptedHomeChange compares two releases of one Home declaration and accepts
+// exactly two classes of difference, alone or together:
+//
+//   - guidance only: role prompts changed (GuidanceOnlyHomeChange);
+//   - additive profile: the newer release adds a `home_profile` section and
+//     the installed one has none.
+//
+// Anything else is ErrHomeUpgradeNotGuidanceOnly: a profile section that was
+// changed or removed, or any other difference. An added profile is inert for
+// the Homes it reaches: it only declares a card, and nothing is detected or
+// read until the owner opens it.
+func AcceptedHomeChange(current, next AssistantProgramHome) (HomeUpgradeChange, error) {
+	change := HomeUpgradeChange{}
+	if current.HomeProfile == nil && next.HomeProfile != nil {
+		change.AddsHomeProfile, change.HomeProfileTitle = true, next.HomeProfile.Title
+		// Set the added section aside; everything else must still be
+		// guidance-only.
+		next.HomeProfile = nil
+	}
+	prompts, err := GuidanceOnlyHomeChange(current, next)
+	if err != nil {
+		return HomeUpgradeChange{}, err
+	}
+	change.RolePrompts = prompts
+	return change, nil
+}
+
 // GuidanceOnlyHomeChange compares two releases of one Home declaration. They
 // must be byte-identical once every role's system prompt is set aside; it
 // returns the roles whose prompt changed, in declaration order.

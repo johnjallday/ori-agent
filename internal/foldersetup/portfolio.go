@@ -118,7 +118,16 @@ type SongDetails interface {
 	Grant(ctx context.Context, homeID string) error
 }
 
-// Sharing is the Home's standing consent for the projects' shared assistant.
+// Profile fills the Home's profile once the Home exists: it looks for the
+// applications installed on this computer and, when grantTemplates, records
+// the templates consent this card gave and lists them once. A plugin that
+// cannot list templates is not an error; only a profile that could not be
+// saved is.
+type Profile interface {
+	Setup(ctx context.Context, homeID string, grantTemplates bool) error
+}
+
+// Sharingis the Home's standing consent for the projects' shared assistant.
 type Sharing interface {
 	// State is "" (none), SharingOn or SharingOff.
 	State(ctx context.Context, homeID string) (string, error)
@@ -152,7 +161,9 @@ type PortfolioRunner struct {
 	Sharing  Sharing
 	// SongDetails is required when the plan grants the song-details consent.
 	SongDetails SongDetails
-	Receipts    Receipts
+	// Profile is required when the plan showed the Home's profile line.
+	Profile  Profile
+	Receipts Receipts
 	// Folder is the collection folder's server-held path.
 	Folder   string
 	Progress Progress
@@ -178,7 +189,8 @@ var ErrPortfolioNotWired = errors.New("foldersetup: the portfolio run is not wir
 // Run drives the collection's setup to the end or to the first stop.
 func (p *PortfolioRunner) Run(ctx context.Context, cfg PortfolioConfig) (Result, error) {
 	if p == nil || p.Homes == nil || p.Staffing == nil || p.Library == nil || p.Receipts == nil || p.Progress == nil ||
-		(cfg.Plan.Intent.GrantsConsent && p.Sharing == nil) || (cfg.Plan.Intent.GrantsSongDetails && p.SongDetails == nil) {
+		(cfg.Plan.Intent.GrantsConsent && p.Sharing == nil) || (cfg.Plan.Intent.GrantsSongDetails && p.SongDetails == nil) ||
+		(cfg.Plan.Intent.SetsProfile && p.Profile == nil) {
 		return Result{}, ErrPortfolioNotWired
 	}
 	state := &run{
@@ -281,6 +293,9 @@ func (s *portfolioRun) drive(ctx context.Context) error {
 	if err := s.staffHome(ctx); err != nil {
 		return err
 	}
+	if err := s.profile(ctx); err != nil {
+		return err
+	}
 	listed, err := s.library(ctx)
 	if err != nil {
 		return err
@@ -311,6 +326,37 @@ func (s *portfolioRun) guard(ctx context.Context) error {
 			return &stop{reason: personalassistant.FolderStopPlanChanged, detail: "the Home destination is no longer available"}
 		}
 	}
+	return nil
+}
+
+// profile fills the Home's profile after the Home exists and before the
+// listing, when the plan showed that line. The templates consent is recorded
+// only for a Home this plan created (in this pass or an earlier one). The
+// step never stops the run: a profile that could not be saved leaves its line
+// failed, and the owner fills it on the Home instead. Only a cancelled run, or
+// a Home that is no longer the reviewed destination, ends here.
+func (s *portfolioRun) profile(ctx context.Context) error {
+	intent := s.cfg.Plan.Intent
+	if !intent.SetsProfile {
+		return nil
+	}
+	// The profile is written to the Home, so the reviewed destination is
+	// checked first, as before every other write of this run.
+	if err := s.guard(ctx); err != nil {
+		return err
+	}
+	if err := s.working(ctx, personalassistant.FolderPlanProfile); err != nil {
+		return err
+	}
+	created := s.homeCreated || (intent.CreatesHome && s.cfg.HomeID != "")
+	if err := s.runner.Profile.Setup(ctx, s.homeID, intent.GrantsTemplates && created); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		s.setKind(personalassistant.FolderPlanProfile, personalassistant.FolderLineFailed)
+		return nil
+	}
+	s.done(personalassistant.FolderPlanProfile)
 	return nil
 }
 

@@ -125,9 +125,20 @@
               <div id="assistantProgramLearning" class="assistant-program-learning-empty">No approved learnings yet.</div>
             </section>
 
+            <section id="homeProfilePanel" class="assistant-program-panel home-profile-panel" aria-labelledby="homeProfileTitle" hidden>
+              <div class="assistant-program-panel-head">
+                <div><span class="assistant-program-panel-index">05 / PROFILE</span><h2 id="homeProfileTitle"></h2></div>
+                <button id="homeProfileDetect" class="modern-btn modern-btn-secondary" type="button" data-profile-action="detect" hidden>Detect</button>
+              </div>
+              <p id="homeProfileIntro" class="assistant-program-learning-copy"></p>
+              <p id="homeProfileReadOnly" class="home-profile-readonly" hidden></p>
+              <p id="homeProfileStatus" class="home-profile-status" role="status" aria-live="polite"></p>
+              <div id="homeProfileRows" class="home-profile-rows"></div>
+            </section>
+
             <section id="projectLibraryPanel" class="assistant-program-panel project-library-panel" aria-labelledby="projectLibraryTitle" hidden>
               <div class="assistant-program-panel-head">
-                <div><span class="assistant-program-panel-index">05 / PROJECT LIBRARY</span><h2 id="projectLibraryTitle">The project shelf</h2></div>
+                <div><span class="assistant-program-panel-index">06 / PROJECT LIBRARY</span><h2 id="projectLibraryTitle">The project shelf</h2></div>
                 <button id="projectLibraryAdd" class="modern-btn modern-btn-primary" type="button" hidden>Add folder</button>
               </div>
               <p id="projectLibraryIntro" class="project-library-intro">Discover project names and formats without opening project files, launching a project application or creating workspaces. Each scan is a separate choice; planning a session saves notes only.</p>
@@ -218,7 +229,7 @@
             </section>
 
             <section id="sampleLibraryPanel" class="assistant-program-panel sample-library-panel" aria-labelledby="sampleLibraryTitle" hidden>
-              <div class="assistant-program-panel-head"><div><span class="assistant-program-panel-index">06 / SAMPLE LIBRARY</span><h2 id="sampleLibraryTitle">Sample Library</h2></div><div class="assistant-program-project-actions"><button id="sampleLibraryRemove" class="modern-btn modern-btn-secondary" type="button">Review add-on removal</button><button id="sampleLibraryAddRoot" class="modern-btn modern-btn-primary" type="button">Connect folder</button></div></div>
+              <div class="assistant-program-panel-head"><div><span class="assistant-program-panel-index">07 / SAMPLE LIBRARY</span><h2 id="sampleLibraryTitle">Sample Library</h2></div><div class="assistant-program-project-actions"><button id="sampleLibraryRemove" class="modern-btn modern-btn-secondary" type="button">Review add-on removal</button><button id="sampleLibraryAddRoot" class="modern-btn modern-btn-primary" type="button">Connect folder</button></div></div>
               <p id="sampleLibraryStatus" class="assistant-program-learning-copy" role="status" aria-live="polite" tabindex="-1">Loading catalog…</p>
               <div id="sampleLibraryRoots" class="sample-library-roots" aria-label="Connected sample folders"></div>
               <form id="sampleLibrarySearchForm" class="sample-library-search" role="search"><label for="sampleLibrarySearch">Search the active catalog</label><div><input id="sampleLibrarySearch" class="form-control" maxlength="200" autocomplete="off"><button class="modern-btn modern-btn-secondary" type="submit">Search</button></div></form>
@@ -230,7 +241,7 @@
             <section id="assistantProgramSuggestionsPanel" class="assistant-program-panel assistant-program-suggestions-panel" aria-labelledby="assistantProgramSuggestionsTitle">
               <div class="assistant-program-panel-head">
                 <div>
-                  <span class="assistant-program-panel-index">07 / SUGGESTIONS</span>
+                  <span class="assistant-program-panel-index">08 / SUGGESTIONS</span>
                   <h2 id="assistantProgramSuggestionsTitle">For this project</h2>
                 </div>
                 <button id="assistantProgramSuggest" class="modern-btn modern-btn-secondary" type="button" disabled>Find suggestions</button>
@@ -286,6 +297,7 @@
     import { AssistantProgramPage } from '/js/modules/assistant-program.js';
     import { SampleLibraryPanel } from '/js/modules/sample-library.js';
     import { ProjectLibraryPanel } from '/js/modules/project-library.js';
+    import { HomeProfilePanel } from '/js/modules/home-profile.js';
     const page = new AssistantProgramPage({
       workspaceId: {{.Extra.WorkspaceID}},
       workspaceSlug: {{.Extra.WorkspaceSlug}}
@@ -294,6 +306,7 @@
     void page.init().then(() => {
       void new SampleLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init();
       void new ProjectLibraryPanel({workspaceId: page.workspaceId, program: page.program}).init();
+      void new HomeProfilePanel({workspaceId: page.workspaceId, program: page.program}).init();
     });
   </script>
 </body>

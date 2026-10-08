@@ -57,6 +57,10 @@ type Snapshot struct {
 	// FileJanitorReady is true when a File Janitor workspace's setup wizard has
 	// reached ready (Tidy your Downloads).
 	FileJanitorReady bool
+	// FolderFirstTaskFinished is true when the first look of any folder the
+	// user showed the assistant has already finished with a result, which
+	// grandfathers See what your assistant found.
+	FolderFirstTaskFinished bool
 	// EmailOpsReady is true when the guided email setup has been ready once.
 	EmailOpsReady bool
 	// CalendarReady is true when a Calendar Ops workspace has a ready binding.
@@ -134,6 +138,14 @@ type QuestView struct {
 	// locking itself. Unrelated to StatusLocked, which is about tiers.
 	Locked       bool   `json:"locked,omitempty"`
 	LockedReason string `json:"locked_reason,omitempty"`
+	// LockedAction is the one button that opens the lock, when there is one.
+	LockedAction *LockedActionView `json:"locked_action,omitempty"`
+}
+
+// LockedActionView is a lock's fix as the browser sees it.
+type LockedActionView struct {
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
 }
 
 // TierView groups a tier's quests for the API.

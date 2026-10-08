@@ -17,7 +17,11 @@ import {
   guidanceLines,
   policySummary
 } from './workspace-planning-policy.js';
-import { firstTaskBannerView, renderFirstTaskBanner } from './workspace-first-task-banner.js';
+import {
+  firstTaskBannerView,
+  firstTaskStartMessage,
+  renderFirstTaskBanner
+} from './workspace-first-task-banner.js';
 import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
@@ -494,12 +498,11 @@ export class WorkspaceDetailPage {
       startedSetupTask = await this.maybeStartTemplateSetup();
       if (this._destroyed) return;
     }
-    // A blueprint's own setup task goes first; the folder's first task never
-    // starts alongside it. It is not held back by a Setup Wizard merely existing
-    // (a workspace the setup journey made has one): the server waits for the
-    // wizard to be finished.
+    // A blueprint's own setup task goes first; the folder's first look is not
+    // offered alongside it. Nothing starts the look here: the banner shows its
+    // Start first look button, and model tokens are spent on that click.
     if (!restoredBlockedTask && !startedSetupTask) {
-      await this.maybeStartFolderFirstTask();
+      this.showFolderFirstTaskBanner();
     }
   }
 
@@ -5984,35 +5987,88 @@ export class WorkspaceDetailPage {
     }
   }
 
+  /** The read-only first look a shown folder's workspace was seeded with. */
+  findFolderFirstTask() {
+    return (this.tasks || []).find(
+      item =>
+        item?.context?.template_id === 'folder-digest' &&
+        item.context.template_starter_task === true
+    );
+  }
+
   /**
-   * First-open start for the read-only first task a shown folder's workspace was
-   * given. The server starts it once (its own consumed marker), only when the task
-   * has an agent and no setup dialog is still open, so this is safe on every open.
-   * It never opens a dialog: the task runs in the background and the monitor
-   * follows it.
+   * The banner for the read-only first look a shown folder's workspace was
+   * given. Opening the page never starts it: model tokens are spent on a click,
+   * here or on Home. A look nobody has started shows the banner with its Start
+   * first look button; one already started keeps the banner that follows it.
    */
-  async maybeStartFolderFirstTask() {
+  showFolderFirstTaskBanner() {
+    const task = this.findFolderFirstTask();
+    if (!task) return;
+    if (task.context.folder_first_task_autostart_consumed_at) {
+      this.resumeFirstTaskBanner();
+      return;
+    }
+    if (!this.isFirstTaskWaitingToStart(task)) return;
+    this.firstTaskBannerId = task.id;
+    this.firstTaskSeeded = true;
+    this.updateFirstTaskBanner(task);
+  }
+
+  /** A first look that was seeded and that nobody has started yet. */
+  isFirstTaskWaitingToStart(task) {
+    return (
+      Boolean(task) &&
+      !task.context?.folder_first_task_autostart_consumed_at &&
+      ['pending', 'assigned', 'ready'].includes(this.getTaskExecutionState(task))
+    );
+  }
+
+  /**
+   * Start first look, pressed on the banner. The server starts the task once
+   * (its own consumed marker) and only when it has an agent and no setup dialog
+   * is still to open; a refusal is said on the banner. It never opens a dialog:
+   * the task runs in the background and the monitor follows it.
+   */
+  async startFolderFirstTask() {
+    const task = this.findFolderFirstTask();
+    if (!task || this.firstTaskStarting) return;
+    this.firstTaskStarting = true;
+    this.firstTaskStartMessage = '';
+    this.updateFirstTaskBanner(task);
     try {
       const response = await fetch(
         `/api/workspaces/${encodeURIComponent(this.workspaceId)}/folder-first-task/start`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
       );
-      if (!response.ok) return;
-      const result = await response.json().catch(() => ({}));
+      const result = response.ok ? await response.json().catch(() => ({})) : {};
       if (!result?.started || !result?.task_id) {
-        // Not started now: a reload while it still runs keeps the banner.
-        this.resumeFirstTaskBanner();
+        if (result?.reason === 'already_consumed' || result?.reason === 'not_pending') {
+          // Started somewhere else (Home, another tab): follow it from here.
+          await this.loadTasks();
+          this.firstTaskSeeded = false;
+          this.firstTaskBannerId = undefined;
+          renderFirstTaskBanner(document.getElementById('workspaceFirstTaskBanner'), null);
+          this.resumeFirstTaskBanner();
+          return;
+        }
+        this.firstTaskStartMessage = firstTaskStartMessage(result?.reason);
         return;
       }
+      this.firstTaskSeeded = false;
       await this.loadTasks();
       if (window.Toast) {
         window.Toast.info('Your first task started: a read-only look at the folder.');
       }
       this.firstTaskBannerId = result.task_id;
-      this.updateFirstTaskBanner(this.tasks.find(item => item.id === result.task_id));
       this.startExecutionMonitor(result.task_id);
     } catch (error) {
-      console.warn('Folder first task start check failed:', error);
+      console.warn('Folder first task start failed:', error);
+      this.firstTaskStartMessage = firstTaskStartMessage('');
+    } finally {
+      this.firstTaskStarting = false;
+      const current = (this.tasks || []).find(item => item.id === this.firstTaskBannerId);
+      if (current) this.updateFirstTaskBanner(current);
     }
   }
 
@@ -6060,14 +6116,23 @@ export class WorkspaceDetailPage {
   updateFirstTaskBanner(task) {
     if (this._destroyed || !task || task.id !== this.firstTaskBannerId) return;
     const mount = document.getElementById('workspaceFirstTaskBanner');
+    // Still waiting for its click, unless it was started in the meantime (from
+    // Home, or another tab): then the banner follows it like any started look.
+    const seeded = this.firstTaskSeeded === true && this.isFirstTaskWaitingToStart(task);
+    if (!seeded) this.firstTaskSeeded = false;
     renderFirstTaskBanner(
       mount,
       firstTaskBannerView({
         state: this.getTaskExecutionState(task),
         agentName: task.to,
-        taskTitle: task.title,
-        href: this.buildTaskHref(task.id)
-      })
+        taskTitle: task.title || task.description,
+        href: this.buildTaskHref(task.id),
+        seeded,
+        starting: this.firstTaskStarting === true,
+        message: this.firstTaskStartMessage || ''
+      }),
+      document,
+      { onStart: () => void this.startFolderFirstTask() }
     );
   }
 

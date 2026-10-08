@@ -103,6 +103,10 @@ const meetAssistantReconcileKey = "meet-assistant-v1"
 // assistant a folder (FR43). Never change it: a new key re-runs the pass.
 const showFolderReconcileKey = "show-folder-v1"
 
+// folderFirstLookReconcileKey names the one-time grandfathering pass for See
+// what your assistant found. Never change it: a new key re-runs the pass.
+const folderFirstLookReconcileKey = "folder-first-look-v1"
+
 // completeProgressionWiring installs the progression hooks whose owners are
 // built in initializeDailyBrief, then runs the one-time backfill and the
 // startup reconcile. Call it after that phase. Safe when progression was not
@@ -174,6 +178,18 @@ func (b *ServerBuilder) completeProgressionWiring() {
 			engine.Complete(progression.ShowFolderQuestID)
 		})
 	}
+	// See what your assistant found (Mission 03): the first look of a folder
+	// the user showed the assistant finishing with a result. The event does
+	// not carry the task's template context, so the folder store is read for
+	// it. Whether the look was started from Home or from the workspace page
+	// makes no difference.
+	if b.eventBus != nil {
+		b.eventBus.SubscribeToEventType(workspace.EventTaskCompleted, func(ev workspace.Event) {
+			if folderFirstTaskFinished(b.starterWorkspaces(), ev) {
+				engine.Complete(progression.FolderFirstLookQuestID)
+			}
+		})
+	}
 
 	// Installs whose backfill ran before the starter missions existed get one
 	// silent grandfathering pass for them (PRD FR44): a connected source or an
@@ -203,6 +219,13 @@ func (b *ServerBuilder) completeProgressionWiring() {
 		logger.Warn("Show your assistant a folder reconcile failed", logger.Fields{"error": err})
 	} else if marked > 0 {
 		logger.Info("Show your assistant a folder grandfathered", logger.Fields{"quests": marked})
+	}
+	// Installs where a folder's first look already finished before See what
+	// your assistant found existed see it done, silently and without Craft.
+	if marked, err := engine.ReconcileOnce(folderFirstLookReconcileKey, scanner, progression.FolderFirstLookQuestID); err != nil {
+		logger.Warn("See what your assistant found reconcile failed", logger.Fields{"error": err})
+	} else if marked > 0 {
+		logger.Info("See what your assistant found grandfathered", logger.Fields{"quests": marked})
 	}
 
 	// One-time backfill so established installs are grandfathered silently.
@@ -278,6 +301,9 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 		snap.LegacyTidyCompleted = b.progressionEngine.HasCompleted(progression.TidyDownloadsQuestID)
 	}
 	snap.LinkedProjectWorkspaces = linkedProjectWorkspaces(b.starterWorkspaces(), b.workspaceFolderPath)
+
+	// Mission 03: a folder's first look that already finished with a result.
+	snap.FolderFirstTaskFinished = anyFolderFirstTaskFinished(b.starterWorkspaces())
 
 	// Mission 04: any source already connected, on any branch.
 	snap.EmailOpsReady = b.emailSetupEverReady()

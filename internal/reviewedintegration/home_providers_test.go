@@ -167,6 +167,35 @@ func TestHomeProviderCheckReleaseAcceptsOnlyTheReviewedHome(t *testing.T) {
 	}
 }
 
+// A release that adds a profile card asks for one more host feature. It is
+// still the reviewed Home: the registry's features are a floor, not a list.
+func TestHomeProviderCheckReleaseAcceptsAReleaseThatDeclaresAProfile(t *testing.T) {
+	provider := HomeProviders()[0]
+	const version = "0.2.0"
+	source := provider.ReleaseEntry().PinnedSource(strings.Repeat("a", 40))
+	descriptor := plugin.PluginDescriptor{
+		Name: provider.PluginID, Version: version, SourceLocation: source, SourceFormat: provider.SourceFormat,
+		WorkspaceSurfaces: &plugin.SurfaceContribution{
+			Name: provider.PluginID, Version: version, Protocol: plugin.ProtocolRange{Min: 1, Max: 1},
+			RequiresHostFeatures: []string{plugin.HostFeatureIndependentProgramHomesV1, plugin.HostFeatureHomeProfileV1},
+			AssistantProgramHomes: []projecttemplates.AssistantProgramHome{{
+				ID: provider.ProgramID, SchemaVersion: provider.HomeSchemaVersion, Version: 1,
+				HomeProfile: &projecttemplates.HomeProfileDeclaration{SchemaVersion: 1, Title: "Your studio"},
+			}},
+		},
+	}
+	report := plugin.TrustReport{Name: provider.PluginID, Format: provider.SourceFormat}
+	if got := provider.CheckRelease(version, source, descriptor, report, nil); got != ReleaseLoadable {
+		t.Fatalf("release with a profile = %v, want loadable", got)
+	}
+	// A build without the feature fails the read with host_feature_unsupported
+	// and falls back to an older release instead of rejecting the provider.
+	older := &plugin.ContributionError{Code: plugin.CodeHostFeatureUnsupported}
+	if got := provider.CheckRelease(version, source, plugin.PluginDescriptor{}, plugin.TrustReport{}, older); got != ReleaseNeedsNewerHost {
+		t.Fatalf("older host = %v, want needs newer host", got)
+	}
+}
+
 func assertPanics(t *testing.T, name string, fn func()) {
 	t.Helper()
 	defer func() {

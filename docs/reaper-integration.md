@@ -46,7 +46,7 @@ An existing external project stays where it is. Ori does not move it or write Or
 
 Feeding a folder to the assistant (**Show me a folder**) is the shortest path. When the reviewed releases can be resolved, the card lists every consequence and **Set up** runs it on the server; **Adjust…** opens the step-by-step quests above instead.
 
-- **A REAPER song** (a folder with one `.rpp`): installs what is missing, builds or joins the Music Production Home, makes the song's workspace in File-only mode, adds its REAPER Assistant and queues a first read-only task for when you open it.
+- **A REAPER song** (a folder with one `.rpp`): installs what is missing, builds or joins the Music Production Home, makes the song's workspace in File-only mode, adds its REAPER Assistant and queues a first read-only task for you to start (**Start first look**, on Home or in the workspace).
 - **A portfolio** (a folder of song folders, for example 200 of them): installs both plugins, builds the Home and its Portfolio Manager, starts the Home's library, connects the folder and lists every song — names and project files only. Listing makes **no** song workspace.
 - **Opening a song** from the Home's library (**Open** on its row) makes that song's workspace, records File-only mode, adds the REAPER Assistant and starts its first task. A song folder with two `.rpp` files asks which one first.
 - **One REAPER Assistant per Home.** Pressing Set up is a standing consent: the first song creates "REAPER Assistant" (or the next free name, never someone else's agent of that name) and every later song gets that same agent. The roster shows it once, with its songs. A change to its model or prompt on the Agents page reaches every song it works on, except a song where you changed that song's own copy. The Home's library panel has a switch, "Add my REAPER Assistant to songs I open": off, songs still open (File-only) with no agent. After a plugin update changes the project team, the Home asks once — **Review the updated assistant** — before more songs get it. A song that already has its own agent keeps it.
@@ -80,6 +80,69 @@ The optional **Sample Library** add-on is separate from the optional Sample Libr
 Projects can search the active Home catalog without receiving the source-folder grant. A sample handoff previews and copies only the selected files to one exact linked project destination. Source files remain unchanged.
 
 Revoking a sample folder stops future catalog use and removes its active entries without deleting source files or confirmed project copies. Removing the add-on follows the same preservation rule.
+
+## Templates on the Home profile
+
+Music Production Home can remember which REAPER project and track templates
+exist, so its agents know them and a later release can start a song from one.
+Ori never opens those folders itself: the REAPER plugin lists them, through one
+read-only operation, only after the owner agreed.
+
+- **The operation (REAPER plugin 0.10.0).** `profile.read`, policy `read_only`,
+  timeout class `fast`, input `{ "include_templates": bool }`. Output:
+  `{ app, installed, version?, templates_available, templates?, truncated }`,
+  where each template is `{ name, kind: "project" | "track", file, modified_at? }`.
+  With `include_templates: false` it reports installation and version only.
+  With `true` it lists `ProjectTemplates/*.RPP` and
+  `TrackTemplates/*.RTrackTemplate` under the same REAPER resource folder the
+  plugin already resolves for `reaper.ini`: names and bare file names only, at
+  most 64, then `truncated: true`. It opens no template and changes nothing.
+  The version is the release number from the application bundle's own metadata
+  (`7.28`). The resource folder is the per-user one, or the folder beside the
+  bundle when a `reaper.ini` there makes the installation portable. No symbolic
+  link is followed. `truncated` also covers what the read does not name: a
+  templates folder's subfolders (their contents are not listed), a template
+  that is a link, a name that is not one plain visible line, and a folder that
+  could not be read. The plugin cuts the list to its declared 32 KiB answer
+  itself, so Ori never has to refuse an answer whole for its size.
+- **How Ori finds it.** The plugin names the operation at the top level of its
+  manifest, `"home_profile_facts": { "service_id": "reaper-service",
+  "operation": "profile.read" }`, and requires host feature `home_profile_v1`.
+  Ori accepts the key only when it names a declared `read_only` operation of a
+  declared service. Which application a plugin answers for comes from host
+  tables (the Home's allowed project plugins, the reviewed registry and the tool
+  table's template folder names), not from the plugin's word.
+- **What Ori checks.** The call is machine-level (no workspace, project, data
+  root or scope). Ori applies the operation's declared timeout, output byte
+  limit and output schema, then bounds every value again: an answer for another
+  application, more than 64 templates or an unknown key is refused; an item with
+  a path-like file name, an unknown kind, a multi-line name or a name that would
+  not read as what it is (text-reordering marks, nothing visible) is dropped and
+  the list marked incomplete. Only names, kinds, bare file names and modified times
+  are stored. Never an absolute path.
+- **Consent.** Templates are listed only after the owner agreed: by pressing
+  **Set up** on a card whose profile line said so and that created the Home, or
+  by **Review** then **Read templates** on the Home's profile card. **Forget**
+  clears the list and withdraws the consent in one write. **Detect again** asks
+  the operation for the version only.
+- **Reviewed floor stays 0.9.0.** A Home whose installed REAPER plugin has no
+  such operation works otherwise unchanged and shows "Update the REAPER plugin
+  to read templates." in the templates row.
+- **Checking a candidate.** `ORI_REAPER_PLUGIN_PATH=<plugin checkout> go test
+  ./internal/plugin/ -run TestLocalProjectPluginFactsOperationFitsTheHostContract`
+  checks the candidate's declared operation against what Ori sends and accepts.
+  `ORI_MUSIC_PLUGIN_SOURCE=<music checkout> ORI_REAPER_PLUGIN_SOURCE=<plugin
+  checkout> ./scripts/smoke.sh home-profile` installs both in a disposable
+  sandbox with fixture template folders and drives Review, Read templates, Read
+  again and Forget in a browser through the real service.
+- **Not in this release.** Starting a song from a chosen template, reading
+  inside a template, and Logic or Ableton templates.
+
+The Home also detects which of REAPER, Logic Pro and Ableton Live are installed
+(an `Lstat` of their bundle names in `/Applications` and `~/Applications`;
+nothing inside a bundle is read). Logic and Ableton are detected only: there is
+no integration for them. In a sandbox, `ORI_APPLICATIONS_DIR` replaces
+`/Applications` so a fixture decides what is "installed".
 
 ## Independent lifecycle and no migration
 

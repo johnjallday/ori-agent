@@ -443,10 +443,30 @@ func (e *Engine) resolvedLocked(questID string) bool {
 	return skipped
 }
 
+// waivedLocked reports whether an unresolved quest waits on a gate the user
+// skipped. It stays locked (it cannot be started), but it cannot hold its tier
+// either: deferring the gate must not strand the missions after it. Resuming
+// the gate completes it and opens the quest. Caller must hold the lock.
+func (e *Engine) waivedLocked(q Quest) bool {
+	if q.LockedUntil == "" || e.resolvedLocked(q.ID) {
+		return false
+	}
+	// Only a mission the user can see and defer waives its dependents. The
+	// retired HQ quest is not one: Not now on the HQ card keeps the folder
+	// mission locked, with its fix, in the Starter tier.
+	gate, ok := e.questByID(q.LockedUntil)
+	if !ok || gate.Retired {
+		return false
+	}
+	_, gateSkipped := e.state.SkippedQuests[q.LockedUntil]
+	_, gateDone := e.state.CompletedQuests[q.LockedUntil]
+	return gateSkipped && !gateDone
+}
+
 // currentTierLocked returns the lowest tier that is not fully resolved
 // (completed or, for optional quests, skipped), or the graph's tier count when
 // everything is done. A skipped optional quest never keeps a later tier
-// locked. Caller must hold the lock.
+// locked, and neither does a quest waiting on one. Caller must hold the lock.
 func (e *Engine) currentTierLocked() int {
 	lastVisibleTier := 0
 	for tier := 1; tier <= e.totalTiers; tier++ {
@@ -455,7 +475,7 @@ func (e *Engine) currentTierLocked() int {
 				continue
 			}
 			lastVisibleTier = tier
-			if !e.resolvedLocked(q.ID) {
+			if !e.resolvedLocked(q.ID) && !e.waivedLocked(q) {
 				return tier
 			}
 		}
@@ -482,6 +502,7 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 		completedAt, done := e.state.CompletedQuests[q.ID]
 		skippedAt, skipped := e.state.SkippedQuests[q.ID]
 		resolved := done || skipped
+		waived := e.waivedLocked(q)
 
 		status := StatusLocked
 		switch {
@@ -495,17 +516,30 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 		case q.Tier <= current:
 			status = StatusAvailable
 		}
+		if waived {
+			resolvedCount++
+		}
 
 		qv := QuestView{
 			ID: q.ID, Tier: q.Tier, Title: q.Title, Why: q.Why, Status: status,
 			ActionURL: q.ActionURL, ActionLabel: q.ActionLabel, Optional: q.Optional,
 			Featured: q.Featured, Order: q.Order,
 		}
-		if q.Resolve != nil {
-			applyPresentation(&qv, q.Resolve(mission), resolved)
-		}
 		if !resolved {
 			qv.Locked, qv.LockedReason = e.lockLocked(q)
+			// A mission in a tier that is not current yet waits for the tier
+			// before it: "Starter first". A quest's own gate says it better.
+			if !qv.Locked && status == StatusLocked && q.Featured {
+				qv.Locked, qv.LockedReason = true, e.tierNames[current]+" first"
+			}
+			if qv.Locked && q.LockedAction != nil {
+				qv.LockedAction = &LockedActionView{Kind: q.LockedAction.Kind, Label: q.LockedAction.Label}
+			}
+		}
+		if q.Resolve != nil {
+			// A locked mission cannot be acted on yet, so advice about acting
+			// on it (the hint, "in progress") waits with it.
+			applyPresentation(&qv, q.Resolve(mission), resolved || qv.Locked)
 		}
 		if e.rewards != nil {
 			if amount, ok := e.rewards(q.ID); ok {
@@ -531,7 +565,7 @@ func (e *Engine) statusLocked(mission MissionContext) Status {
 			byTier[q.Tier] = tv
 			order = append(order, q.Tier)
 		}
-		if !resolved {
+		if !resolved && !waived {
 			tv.Complete = false
 		}
 		tv.Quests = append(tv.Quests, qv)
@@ -583,21 +617,25 @@ func (e *Engine) lockLocked(q Quest) (bool, string) {
 	if _, done := e.state.CompletedQuests[gate.ID]; done {
 		return false, ""
 	}
+	if reason := strings.TrimSpace(q.LockedReason); reason != "" {
+		return true, reason
+	}
 	return true, gate.Title + " first"
 }
 
 // applyPresentation overlays a mission's resolved copy onto its view. Empty
 // strings keep the static value. InProgress and Hint apply only while the quest
-// is unresolved: a completed or skipped mission is never "in progress", and
-// advice about finishing it no longer applies.
-func applyPresentation(qv *QuestView, p MissionPresentation, resolved bool) {
+// is open, meaning neither resolved nor locked: a completed or skipped mission
+// is never "in progress", advice about finishing it no longer applies, and a
+// mission waiting on another has nothing to act on yet.
+func applyPresentation(qv *QuestView, p MissionPresentation, closed bool) {
 	if p.Title != "" {
 		qv.Title = p.Title
 	}
 	if p.Why != "" {
 		qv.Why = p.Why
 	}
-	if hint := strings.TrimSpace(p.Hint); hint != "" && !resolved {
+	if hint := strings.TrimSpace(p.Hint); hint != "" && !closed {
 		qv.Why = strings.TrimSpace(qv.Why + " " + hint)
 	}
 	if p.ActionURL != "" {
@@ -606,5 +644,5 @@ func applyPresentation(qv *QuestView, p MissionPresentation, resolved bool) {
 	if p.ActionLabel != "" {
 		qv.ActionLabel = p.ActionLabel
 	}
-	qv.InProgress = p.InProgress && !resolved
+	qv.InProgress = p.InProgress && !closed
 }

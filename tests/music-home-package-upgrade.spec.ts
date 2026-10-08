@@ -32,9 +32,13 @@ async function evidence(page: Page, name: string) {
   await page.screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
-function managerPrompt(root: string): string {
+function homeDeclaration(root: string) {
   const manifest = JSON.parse(readFileSync(join(root, '.ori-plugin', 'plugin.json'), 'utf8'));
-  return manifest.assistant_program_homes[0].roles[0].system_prompt;
+  return manifest.assistant_program_homes[0];
+}
+
+function managerPrompt(root: string): string {
+  return homeDeclaration(root).roles[0].system_prompt;
 }
 
 // A developer replaces the local package with a newer export in place: the
@@ -61,7 +65,14 @@ test('a Home-pinned package upgrades through the Home, not the Plugins page', as
   expect(UPGRADE_VERSION).not.toBe(VERSION);
   const oldPrompt = managerPrompt(PLUGIN_PATH);
   const newPrompt = managerPrompt(UPGRADE_PATH);
-  expect(newPrompt).not.toBe(oldPrompt);
+  // The two accepted kinds of change: new guidance, and a release that adds
+  // the Home's profile card. A pair of candidates may carry either or both.
+  const promptChanged = newPrompt !== oldPrompt;
+  const profileTitle: string = homeDeclaration(PLUGIN_PATH).home_profile
+    ? ''
+    : homeDeclaration(UPGRADE_PATH).home_profile?.title || '';
+  const addsProfile = profileTitle !== '';
+  expect(promptChanged || addsProfile).toBeTruthy();
   await json(await request.post('/api/onboarding/skip'));
 
   // An ordinary staffed Music Home on the installed release.
@@ -95,6 +106,18 @@ test('a Home-pinned package upgrades through the Home, not the Plugins page', as
     installed_version: VERSION,
     available: false
   });
+  const profileURL = `${programURL}/profile`;
+  if (addsProfile) {
+    // The installed release declares no card, so this Home has none.
+    expect(await json(await request.get(profileURL))).toMatchObject({ available: false });
+    // The page asks for the card and, told there is none, leaves it hidden.
+    await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === profileURL),
+      page.goto(`/workspaces/${home.folder_slug}/assistant`)
+    ]);
+    await expect(page.locator('#assistantProgramSuggestionsPanel')).toBeVisible();
+    await expect(page.locator('#homeProfilePanel')).toBeHidden();
+  }
 
   swapInstalledExport();
 
@@ -121,13 +144,32 @@ test('a Home-pinned package upgrades through the Home, not the Plugins page', as
     { timeout: 30_000 }
   );
   await expect(dialog).toContainText(`move from ${VERSION} to ${UPGRADE_VERSION}`);
-  await expect(dialog).toContainText('Music Portfolio Manager');
-  await expect(dialog.locator('pre').first()).toHaveText(oldPrompt);
-  await expect(dialog.locator('pre').nth(1)).toHaveText(newPrompt);
+  if (promptChanged) {
+    await expect(dialog).toContainText('Music Portfolio Manager');
+    await expect(dialog.locator('pre').first()).toHaveText(oldPrompt);
+    await expect(dialog.locator('pre').nth(1)).toHaveText(newPrompt);
+    await expect(dialog).toContainText(
+      `${MANAGER_NAME} (Music Portfolio Manager): gets the new guidance`
+    );
+  } else {
+    await expect(dialog).toContainText('Role prompts are unchanged.');
+    await expect(dialog.locator('pre')).toHaveCount(0);
+    await expect(dialog).not.toContainText('gets the new guidance');
+  }
+  if (addsProfile) {
+    // The review names the card the release adds, and does not call the
+    // upgrade guidance-only.
+    await expect(dialog).toContainText('What this release adds');
+    await expect(dialog).toContainText(
+      `Adds a ${profileTitle} card to this Home. Nothing is detected or read until you open it.`
+    );
+    await expect(dialog).toContainText('adds what is listed below');
+    await expect(dialog).not.toContainText('Only Home guidance changes');
+  } else {
+    await expect(dialog).toContainText('Only Home guidance changes');
+    await expect(dialog).not.toContainText('What this release adds');
+  }
   await expect(dialog).toContainText(`${HOME_NAME}: no linked projects`);
-  await expect(dialog).toContainText(
-    `${MANAGER_NAME} (Music Portfolio Manager): gets the new guidance`
-  );
   await expect(dialog).toContainText('Approved project library folders stay approved.');
   await evidence(page, '02-home-upgrade-review');
   expect(new URL(page.url()).search).toBe('');
@@ -138,9 +180,30 @@ test('a Home-pinned package upgrades through the Home, not the Plugins page', as
   const card = page.locator('#assistantProgramUpgrade');
   await expect(card).toHaveAttribute('data-state', 'succeeded');
   await expect(card).toContainText(`Upgraded to ${UPGRADE_VERSION}`);
-  await expect(card).toContainText('1 staffed agent got the new guidance');
+  if (promptChanged) await expect(card).toContainText('1 staffed agent got the new guidance');
   await expect(page.locator('#assistantProgramDisabled')).toBeHidden();
   await evidence(page, '03-home-upgraded');
+
+  if (addsProfile) {
+    // The upgraded Home has the card, empty: nothing was looked for or read,
+    // and nothing is until the owner presses Detect.
+    const profilePanel = page.locator('#homeProfilePanel');
+    await expect(profilePanel).toBeVisible();
+    await expect(page.locator('#homeProfileTitle')).toHaveText(profileTitle);
+    await expect(page.locator('#homeProfileDetect')).toHaveText('Detect');
+    await expect(profilePanel.locator('li[data-app-id]')).toHaveCount(0);
+    const profile = await json(await request.get(profileURL));
+    expect(profile).toMatchObject({
+      available: true,
+      read_only: false,
+      title: profileTitle,
+      revision: 0
+    });
+    expect(profile.profile ?? null).toBeNull();
+    expect(profile.templates.consented ?? false).toBe(false);
+    await profilePanel.scrollIntoViewIfNeeded();
+    await evidence(page, '04-profile-card-after-upgrade');
+  }
 
   expect(await installedVersion(request)).toBe(UPGRADE_VERSION);
   const program = await json(await request.get(programURL));

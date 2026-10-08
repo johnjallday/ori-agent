@@ -203,6 +203,75 @@ name a Git URL, marketplace source, mutable plugin version, workspace, Home,
 folder, command, or grant. The installed project generation and fingerprints are
 bound separately by Ori when resolving and snapshotting an attachment.
 
+#### Optional `home_profile` section (host feature `home_profile_v1`)
+
+A Home declaration may add one closed, optional section that gives the Home a
+profile card: the small record of where its owner works. The package declares
+which rows the card has and what they are called; Ori stores, detects, renders
+and injects the values (`internal/homeprofile`).
+
+```json
+"home_profile": {
+  "schema_version": 1,
+  "title": "Your studio",
+  "intro": "What Ori knows about where you make music. Detected values are hints until you confirm them.",
+  "fields": [
+    { "id": "apps",      "kind": "apps",      "label": "DAWs on this Mac" },
+    { "id": "main_app",  "kind": "main_app",  "label": "Main DAW" },
+    { "id": "templates", "kind": "templates", "label": "Project templates" },
+    { "id": "defaults",  "kind": "defaults",  "label": "New-song defaults" }
+  ]
+}
+```
+
+- `kind` is one of exactly four host-known kinds: `apps` (applications found
+  on this computer), `main_app` (the one the owner mainly works in),
+  `templates` (one application's listed templates) and `defaults` (what a new
+  project starts from). Any other kind, a kind declared twice, more than four
+  fields, no field, or an unknown key rejects the whole contribution. A package
+  may omit a kind; the card then has no such row. Rows render in declared order.
+- `title` (1 to 60 characters), `intro` (1 to 240) and each `label` (1 to 40)
+  are one line of plain text. Like the rest of the declaration the section is
+  inert: no path, URL, operation, route or command.
+- A manifest whose Home declares the section must list `home_profile_v1` in
+  `requires_host_features`. An Ori build without the feature rejects the
+  package instead of registering it without the card.
+- The section is part of the Home declaration's digest, so a Home's provider
+  pin names one exact card. It is **not** copied into the durable
+  `AssistantProgramDeclaration` a Home stores: readers take the card's words
+  from the installed package the pin names
+  (`plugin.PinnedHomeDeclaration`), the same way `allowed_project_attachments`
+  is read. The stored record snapshots the title and row labels it was last
+  written under (`declared_by`) so an agent's context block can use the
+  package's words from the Home alone.
+- Host code holds no trade words: every sentence about the profile is built
+  from the declared title and labels and from the host tool table's
+  application names (`internal/folderdigest/tables.go`).
+
+The stored record is `AssistantProgramState.home_profile`
+(`workspace.HomeProfile`): `apps`, `main_app`, `templates` (with its consent),
+`defaults`, a `revision` that rises on every write, and bounded `request_id`
+receipts. Every value says where it came from: `source: "detected"` is a hint
+until `confirmed_at` is set; `source: "owner"` is the owner's instruction. The
+state decoder is lenient, so an older build loads a Home that has a profile,
+but it drops the key the next time it writes that Home. Every write comes from
+the owner's card or from a setup card the owner pressed; no agent tool writes a
+profile. Routes are in `docs/api/API_REFERENCE.md`, "Home Profile API".
+
+A project plugin can report facts about its own application for that card
+through one operation it names at the top level of its manifest, gated by the
+same feature:
+
+```json
+"home_profile_facts": { "service_id": "reaper-service", "operation": "profile.read" }
+```
+
+The reference must name a declared service and one of its `read_only`
+operations. Ori calls it through the service runtime as a machine-level call
+(no workspace, project, data root or scope), with the operation's declared
+timeout class, output byte limit and output schema, and then bounds every value
+again. See `docs/reaper-integration.md`, "Templates on the Home profile".
+
 ### 3.3 Separate project-team declaration
 
 A project blueprint gains one optional closed `assistant_project` block:
@@ -458,6 +527,27 @@ roles and their IDs, labels, scope, required/primary flags, capability, skill
 names, stages, reflection, allowed project attachments) must be byte-identical,
 and the release must still contribute nothing but that Home. Anything else is a
 different Home and is refused.
+
+**Second accepted class: additive Home profile.** The newer release may also add
+a `home_profile` section (§3.2) to a Home declaration that has none, alone or
+together with guidance changes (`projecttemplates.AcceptedHomeChange`). With the
+added section set aside, the declaration must still pass the guidance-only
+comparison. Outside the Home declarations the contribution must still be
+byte-identical, with one exception that belongs to this class: the release may
+start requiring `home_profile_v1`, and only when it actually adds a card. A
+profile section that is changed, reduced or removed between two releases, the
+feature without a card, a `home_profile_facts` reference, or any other
+difference is still refused (`home_upgrade_not_guidance_only`). The plan records
+`adds_home_profile` and the card's title per Home declaration, and the review
+says "Adds a <title> card to this Home. Nothing is detected or read until you
+open it." Its opening sentence then reads "It adds what is listed below. Nothing
+else changes." (with "It changes Home guidance and" in front when a prompt
+changes too) instead of "Only Home guidance changes." After the upgrade the Home
+has no profile record: its card shows **Detect**, and templates stay "Not read"
+until the owner reviews them on the Home. No setup-card consent exists for a
+Home that was upgraded. The Home page announces a finished upgrade on the
+document (`assistant-program:provider-upgraded`), and the profile card reads
+again, so the new card appears without a reload.
 
 **Review** (reads only, installs nothing). It resolves the same target the
 Plugins page would install — the reviewed release's pinned source, or a local

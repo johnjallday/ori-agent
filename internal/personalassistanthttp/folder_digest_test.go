@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/plugin"
@@ -37,6 +38,9 @@ type fakeFolderDigest struct {
 	storedReads []string
 	// scanErr, when set, is what every scan returns.
 	scanErr error
+	// firstLook, when set, is the first look the reads carry: digest-wide on the
+	// plain read, and on the offer of a read by id.
+	firstLook *personalassistant.FolderFirstTaskView
 }
 
 func (f *fakeFolderDigest) StoredOffer(_ context.Context, _ string, offerID string) (personalassistant.FolderOffer, error) {
@@ -53,6 +57,7 @@ func (f *fakeFolderDigest) Current(context.Context, string) (personalassistant.F
 		Chips:      []personalassistant.FolderChip{{ID: "downloads", Label: "Downloads"}},
 		PickerNote: "Pick a folder from the list for now.",
 		Paused:     f.paused,
+		FirstLook:  f.firstLook,
 	}, nil
 }
 
@@ -62,8 +67,89 @@ func (f *fakeFolderDigest) CurrentOffer(_ context.Context, _ string, offerID str
 		return personalassistant.FolderDigestView{}, personalassistant.ErrFolderOfferNotFound
 	}
 	return personalassistant.FolderDigestView{
-		Offer: &personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferResolved},
+		Offer: &personalassistant.FolderOfferView{ID: offerID, Status: personalassistant.FolderOfferResolved, FirstTask: f.firstLook},
 	}, nil
+}
+
+// The digest read carries the folder's first look for the Home receipt and the
+// mission card (FR17). The names are the browser's contract: a route built from
+// the workspace slug, a one-line excerpt, and never a filesystem path.
+func TestFolderDigestGet_CarriesTheFirstLook(t *testing.T) {
+	finished := time.Date(2026, 10, 6, 9, 30, 0, 0, time.UTC)
+	started := finished.Add(-40 * time.Second)
+	fake := &fakeFolderDigest{firstLook: &personalassistant.FolderFirstTaskView{
+		State: personalassistant.FolderFirstTaskFinished, OfferID: "offer-1", TaskID: "task-1",
+		WorkspaceID: "ws-1", WorkspaceName: "Thesis", WorkspaceRoute: "/workspaces/thesis", FolderName: "thesis-draft",
+		Description: "Summarize the current draft", Agent: "Writing Coach",
+		StartedAt: &started, FinishedAt: &finished,
+		ResultExcerpt: "Three drafts. The newest is chapter four.", TicketRoute: "/workspaces/thesis?ticket=task-1",
+		Detail: "Done · Three drafts.",
+	}}
+	h := newFolderDigestHandler(fake)
+
+	read := func(target string) map[string]any {
+		t.Helper()
+		w := httptest.NewRecorder()
+		h.GetFolderDigest(w, httptest.NewRequest(http.MethodGet, target, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s => %d %s", target, w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "/Users/") || strings.Contains(w.Body.String(), "/private/") {
+			t.Fatalf("the read leaked a filesystem path: %s", w.Body.String())
+		}
+		var payload struct {
+			Digest map[string]any `json:"folder_digest"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.Digest
+	}
+	want := map[string]any{
+		"state": "finished", "offer_id": "offer-1", "task_id": "task-1", "workspace_id": "ws-1",
+		"workspace_name": "Thesis", "workspace_route": "/workspaces/thesis", "folder_name": "thesis-draft",
+		"description": "Summarize the current draft", "agent": "Writing Coach",
+		"started_at": "2026-10-06T09:29:20Z", "finished_at": "2026-10-06T09:30:00Z",
+		"result_excerpt": "Three drafts. The newest is chapter four.",
+		"ticket_route":   "/workspaces/thesis?ticket=task-1", "can_start": false,
+		"detail": "Done · Three drafts.",
+	}
+	check := func(where string, got any) {
+		t.Helper()
+		block, ok := got.(map[string]any)
+		if !ok {
+			t.Fatalf("%s is missing: %v", where, got)
+		}
+		if len(block) != len(want) {
+			t.Fatalf("%s has %d fields, want %d: %v", where, len(block), len(want), block)
+		}
+		for key, value := range want {
+			if block[key] != value {
+				t.Fatalf("%s.%s = %v, want %v", where, key, block[key], value)
+			}
+		}
+	}
+
+	// The plain read names the latest look, whichever offer is shown.
+	check("first_look", read("/api/personal-assistant/folder-digest")["first_look"])
+	// A read by offer id carries the look on that offer.
+	named := read("/api/personal-assistant/folder-digest?offer_id=offer-1")
+	offer, _ := named["offer"].(map[string]any)
+	check("offer.first_task", offer["first_task"])
+	if _, present := named["first_look"]; present {
+		t.Fatalf("a read by offer id carried first_look: %v", named)
+	}
+
+	// With no look there is no block at all, rather than an empty one.
+	fake.firstLook = nil
+	if _, present := read("/api/personal-assistant/folder-digest")["first_look"]; present {
+		t.Fatal("first_look was sent with nothing to say")
+	}
+	named = read("/api/personal-assistant/folder-digest?offer_id=offer-1")
+	offer, _ = named["offer"].(map[string]any)
+	if _, present := offer["first_task"]; present {
+		t.Fatal("first_task was sent with nothing to say")
+	}
 }
 
 func (f *fakeFolderDigest) MarkFirstPromptShown(ctx context.Context, userID string) (personalassistant.FolderDigestView, error) {

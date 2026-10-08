@@ -5877,26 +5877,65 @@ button.ws-cmd-rpg-class-card:focus-visible {
   background: linear-gradient(180deg, #276d54, #195a41);
 }
 
-/* The Operations Map Unit Sheet intentionally remains a dark tactical surface
-   in light app chrome. Restore its dark-surface ink/accent tokens locally so
-   details, prompts, schemas, switches, and focus rings keep readable contrast. */
+/* The Unit Sheet is a light planning surface like the other map windows. Its
+   base rules hardcode dark fills and near-white headings, so repaint them with
+   the light shell tokens. Like the other windows it sits beside .ws-cmd-opmap,
+   so it needs the light-surface status inks too. */
 [data-bs-theme="light"] .ws-cmd-map-window-inspector {
-  --ws-bg: #0c0d10;
-  --ws-bg-2: #121317;
-  --ws-panel: #16181d;
-  --ws-panel-2: #1a1d23;
-  --ws-line: #3b3f49;
-  --ws-line-bright: #69717e;
-  --ws-ink: #e5e8ec;
-  --ws-ink-dim: #b3b9c2;
-  --ws-ink-faint: #929aa5;
-  --ws-ink-heading: #f4f6f8;
-  --ws-faction: #46d39a;
-  --ws-faction-deep: rgba(70, 211, 154, 0.42);
-  --ws-keeper: #e8b54b;
-  --ws-keeper-deep: rgba(232, 181, 75, 0.38);
-  --ws-idle: #4ec5e6;
-  --ws-alert: #e87863;
+  --ws-waiting: #8a5b18;
+  --ws-input: #a8511d;
+  --ws-done: #3d7728;
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-map-agent-sheet-head,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-sheet-row,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-stat,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-loadout,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-capability-action,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-capability-tool,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-activity-item {
+  background-color: rgba(255, 255, 255, 0.78);
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-status-strip,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-add-btn,
+[data-bs-theme="light"]
+  .ws-cmd-map-window-inspector
+  .ws-cmd-rpg-command:not(.is-primary):not(.is-alert):not(.is-needs-input),
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-row,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-remove {
+  background-color: rgba(255, 255, 255, 0.78);
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-remove:hover:not([disabled]) {
+  background-color: rgba(185, 75, 63, 0.1);
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-command:not(.is-primary):hover,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-row:hover,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-row.is-selected {
+  background-color: rgba(31, 107, 78, 0.07);
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-class-card,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-command-panel {
+  background:
+    linear-gradient(120deg, rgba(31, 107, 78, 0.08), transparent 58%), rgba(255, 255, 255, 0.78);
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector button.ws-cmd-rpg-class-card:hover {
+  background:
+    linear-gradient(120deg, rgba(31, 107, 78, 0.14), transparent 64%), rgba(255, 255, 255, 0.9);
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-map-agent-sheet-head strong,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-class-card strong,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-quest-card strong,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-rpg-command strong {
+  color: var(--ws-ink-heading);
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-add-btn:hover,
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-loadout-add-btn.is-open {
+  color: var(--ws-ink-heading);
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-capability-markdown pre {
+  background: rgba(31, 33, 40, 0.06);
+}
+[data-bs-theme="light"] .ws-cmd-map-window-inspector .ws-cmd-capability-action.is-primary {
+  color: var(--ws-on-accent);
 }
 
 /* Every other Operations Map window (Mission, Tasks, Quest Board, Inventory,
@@ -5908,7 +5947,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
 [data-bs-theme="light"] .ws-cmd-map-window-backdrop {
   background: rgba(31, 33, 40, 0.28);
 }
-[data-bs-theme="light"] .ws-cmd-map-window:not(.ws-cmd-map-window-inspector) {
+[data-bs-theme="light"] .ws-cmd-map-window {
   --ws-waiting: #8a5b18;
   --ws-input: #a8511d;
   --ws-done: #3d7728;
@@ -5921,14 +5960,10 @@ button.ws-cmd-rpg-class-card:focus-visible {
     0 0 0 1px rgba(255, 255, 255, 0.7),
     0 24px 60px -28px rgba(31, 33, 40, 0.55);
 }
-[data-bs-theme="light"]
-  .ws-cmd-map-window:not(.ws-cmd-map-window-inspector)
-  .ws-cmd-map-window-head {
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-window-head {
   background: rgba(255, 255, 255, 0.72);
 }
-[data-bs-theme="light"]
-  .ws-cmd-map-window:not(.ws-cmd-map-window-inspector)
-  .ws-cmd-map-window-close {
+[data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-window-close {
   background: #ffffff;
 }
 [data-bs-theme="light"] .ws-cmd-map-window .ws-cmd-map-zone-head strong,

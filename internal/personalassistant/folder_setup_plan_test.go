@@ -6,7 +6,7 @@ func samplePlanLines() []FolderPlanLine {
 	return []FolderPlanLine{
 		{Kind: FolderPlanIntegration, Name: "Installs the reviewed REAPER integration 0.9.0"},
 		{Kind: FolderPlanWorkspace, Name: "Creates a REAPER Song workspace named My Song"},
-		{Kind: FolderPlanTask, Name: "Queues a first read-only task", Detail: "Starts when you open it"},
+		{Kind: FolderPlanTask, Name: "Queues a first read-only task", Detail: "Starts when you press Start first look"},
 	}
 }
 

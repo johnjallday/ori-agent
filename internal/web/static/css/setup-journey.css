@@ -456,9 +456,11 @@
   }
 }
 
-/* The workspace banner shown while the agent works on its first task. */
+/* The workspace banner for the folder's first task: its Start first look
+   button before the look runs, then where the task stands. */
 .first-task-banner {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.85rem;
   align-items: center;
   margin-bottom: 1rem;
@@ -484,7 +486,8 @@
 
 .first-task-banner__text {
   display: grid;
-  flex: 1;
+  /* Wide enough to read; on a phone the button wraps beneath it. */
+  flex: 1 1 14rem;
   min-width: 0;
   gap: 0.1rem;
   overflow-wrap: anywhere;
@@ -643,6 +646,19 @@
 
 .folder-run__status {
   font-size: 0.95rem;
+}
+
+/* One quiet line about the Home's profile on the done screen. */
+.folder-run__profile {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--run-dim);
+  font-size: 0.85rem;
+}
+
+.folder-run__profile a {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .folder-run__steps {

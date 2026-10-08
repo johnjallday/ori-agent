@@ -83,8 +83,8 @@ func TestEveryRewardedQuestExists(t *testing.T) {
 		if !ok {
 			t.Fatalf("the economy pays for quest %q, which no longer exists", questID)
 		}
-		if quest.Retired || quest.Tier != 1 {
-			t.Fatalf("quest %q is retired or not a starter mission", questID)
+		if quest.Retired || quest.Tier > 2 {
+			t.Fatalf("quest %q is retired or not a visible mission", questID)
 		}
 	}
 }
@@ -111,10 +111,11 @@ func completedByDirectCall(questID string) bool {
 	case "t1-personalize", "t2-build-hq",
 		// Starter missions complete from server hooks: the hire (or its
 		// repair), a folder offer's outcome or the File Janitor wizard reaching
-		// ready, a source connecting, and Today serving a brief.
+		// ready, a folder's first look finishing with a result, a source
+		// connecting, and Today serving a brief.
 		progression.MeetAssistantQuestID,
-		progression.ShowFolderQuestID, progression.ConnectSourceQuestID,
-		progression.FirstBriefQuestID:
+		progression.ShowFolderQuestID, progression.FolderFirstLookQuestID,
+		progression.ConnectSourceQuestID, progression.FirstBriefQuestID:
 		return true
 	default:
 		return false
@@ -130,6 +131,7 @@ func rewardedQuestIDs() []string {
 		"t2-create-workspace", "t2-create-note", "t2-run-task", "t2-build-hq",
 		progression.MeetAssistantQuestID,
 		progression.ShowFolderQuestID, progression.TidyDownloadsQuestID,
+		progression.FolderFirstLookQuestID,
 		progression.ConnectSourceQuestID, progression.FirstBriefQuestID,
 		"t3-second-agent", "t3-delegate", "t4-enable-skill",
 		"t5-create-trigger", "t6-memory",
