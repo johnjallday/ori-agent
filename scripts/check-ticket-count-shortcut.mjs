@@ -50,6 +50,11 @@ await page.goto(`${base}/workspaces/${studioId}`, { waitUntil: 'domcontentloaded
 await page.waitForTimeout(3000);
 await clearOverlays();
 
+// The rail is an accordion: the shortcut is the open Backlog section's "View
+// in Tickets", so open the section unless it already is.
+const backlogRow = page.locator('[data-cmd-manage-section="backlog"]');
+if ((await backlogRow.getAttribute('aria-expanded')) === 'false') await backlogRow.click();
+
 const shortcut = page.locator('[data-cmd-open-tickets="backlog"]').first();
 console.log('  shortcut present:', (await shortcut.count()) > 0);
 if ((await shortcut.count()) > 0) {

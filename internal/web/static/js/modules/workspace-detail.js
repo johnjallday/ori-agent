@@ -206,6 +206,8 @@ export class WorkspaceDetailPage {
     this.selectedNoteIds = new Set();
     this.directories = [];
     this.schedules = [];
+    // True once init() has loaded every list above for the first time.
+    this.initialListsLoaded = false;
     this.children = [];
     // Backlog (uncommitted capture, PRD workspace-backlog): a separate list
     // from this.tasks, which now begins at Ready — Backlog items are never
@@ -460,6 +462,11 @@ export class WorkspaceDetailPage {
       this.loadSchedules()
     ]);
     if (this._destroyed) return;
+    // The Command view picks which rail section to open from these lists'
+    // counts. It waits for this, so the choice is made once with all of them
+    // rather than once as each one arrives.
+    this.initialListsLoaded = true;
+    window.workspaceCommand?.refresh();
     // The harvest popover's two links (FR37, FR42). Both run right after tasks
     // load, because each resolves its task out of the list that was just
     // filled, and before the setup prompts below so a deliberate deep link is

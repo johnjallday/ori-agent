@@ -40,19 +40,34 @@ const items = [
   item('f', 'sixth idea')
 ];
 
-test('renderBacklogPanel shows the local count and up to 5 previews (FR34)', () => {
-  const view = makeView(items);
+test('renderBacklogPanel closed is a row: the local count and the "+", nothing else (FR34)', () => {
+  const view = makeView(items, { backlogSync: { last_synced_at: '2026-10-08T09:00:00Z' } });
   const html = view.renderBacklogPanel();
   assert.match(html, /ws-cmd-panel-count">6</);
-  const previewMatches = html.match(/data-cmd-backlog-select="/g) || [];
-  assert.equal(previewMatches.length, 5, 'no more than 5 previews (FR34)');
-  assert.ok(html.includes('+ 1 more'), 'overflow count shown');
+  assert.match(html, /data-cmd-manage-section="backlog" aria-expanded="false"/);
   assert.match(
     html,
     /data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">\+</,
-    'Add is a compact "+" icon (accessible name still says Add to Backlog), distinct from Open Backlog'
+    'Add is a compact "+" icon (accessible name still says Add to Backlog)'
   );
-  assert.ok(html.includes('Open Backlog'));
+  assert.ok(!html.includes('ws-cmd-panel-body'), 'a closed row has no body');
+  assert.ok(!html.includes('data-cmd-backlog-select='), 'no item previews while closed');
+  assert.ok(!html.includes('ws-cmd-panel-sync'), 'no sync badge while closed');
+  assert.ok(!html.includes('data-cmd-open-tickets'), 'the Tickets shortcut lives in the body');
+});
+
+test('renderBacklogPanel open lists every item with the Tickets shortcut and the sync badge', () => {
+  const view = makeView(items, { backlogSync: { last_synced_at: '2026-10-08T09:00:00Z' } });
+  view.activeRailSection = 'backlog';
+  const html = view.renderBacklogPanel();
+  assert.match(html, /data-cmd-manage-section="backlog" aria-expanded="true"/);
+  const rows = html.match(/data-cmd-backlog-select="/g) || [];
+  assert.equal(rows.length, 6, 'every item is a row; there is no "+ N more"');
+  assert.ok(!html.includes(' more<'));
+  assert.match(html, /data-cmd-open-tickets="backlog">View in Tickets</);
+  assert.match(html, /<div class="ws-cmd-panel-sync" title="">Synced<\/div>/);
+  // The row "+" is the only Add: the body does not repeat it.
+  assert.equal((html.match(/data-cmd-backlog-add/g) || []).length, 1);
 });
 
 test('backlogDrawerHTML header shows a compact "+" Add action, not full "Add to Backlog" text', () => {
@@ -67,20 +82,27 @@ test('backlogDrawerHTML header shows a compact "+" Add action, not full "Add to 
 
 test('renderBacklogPanel shows an inviting empty state without implying Tasks is empty (FR38)', () => {
   const view = makeView([]);
+  // Closed, an empty Backlog is just a dimmed row; the invitation is in the body.
+  const closed = view.renderBacklogPanel();
+  assert.match(closed, /ws-cmd-panel-count">0</);
+  assert.ok(!closed.includes('Nothing saved for later'));
+
+  view.activeRailSection = 'backlog';
   const html = view.renderBacklogPanel();
-  assert.match(html, /ws-cmd-panel-count">0</);
   assert.ok(html.includes('Nothing saved for later'));
   assert.ok(!/no tasks/i.test(html), 'must not imply Tasks is empty');
 });
 
 test('renderBacklogPanel shows a loading state while the initial fetch is in flight (FR38)', () => {
   const view = makeView([], { backlogLoading: true });
+  view.activeRailSection = 'backlog';
   const html = view.renderBacklogPanel();
   assert.match(html, /Loading backlog/);
 });
 
 test('renderBacklogPanel shows a distinct error state on fetch failure, not the empty state (FR38)', () => {
   const view = makeView([], { backlogLoadFailed: true });
+  view.activeRailSection = 'backlog';
   const html = view.renderBacklogPanel();
   assert.match(html, /is-error/);
   assert.ok(
