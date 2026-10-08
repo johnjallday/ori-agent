@@ -108,6 +108,19 @@ test.describe.serial('Daily Brief station in My HQ', () => {
     ]);
 
     await page.goto(`/workspaces/${slug}`);
+    // The rail is an accordion: a station is a row inside the Stations
+    // section, which may or may not be the one that is open on arrival. The
+    // section to open is chosen once the page's lists have loaded, so wait
+    // for that before asking; a click that raced it would close the section.
+    const stations = page.locator('[data-cmd-manage-section="stations"]');
+    await expect(stations).toBeVisible();
+    await page.waitForFunction(
+      () =>
+        (window as unknown as { workspaceDetail?: { initialListsLoaded?: boolean } })
+          .workspaceDetail?.initialListsLoaded === true
+    );
+    if ((await stations.getAttribute('aria-expanded')) === 'false') await stations.click();
+    await expect(stations).toHaveAttribute('aria-expanded', 'true');
     const row = page.locator(`.ws-cmd-panel.is-hq-stations ${STATION}`);
     await expect(row).toBeVisible();
     await expect(row).toContainText('Daily Brief');

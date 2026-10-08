@@ -1651,6 +1651,202 @@ test('presentRailSections lists the rows renderRail draws, in order, with the sa
   }
 });
 
+// A rail with all nine sections, each holding something: a group that is also
+// the Personal HQ. Not a workspace anyone has, but the one fixture that puts
+// every row and every body under the same assertions.
+const ALL_RAIL_SECTIONS = [
+  'backlog',
+  'notes',
+  'schedules',
+  'sessions',
+  'folders',
+  'members',
+  'files',
+  'systems',
+  'stations'
+];
+
+function makeFullRailView() {
+  return makeRailView({
+    workspace: { id: 'hq-1', kind: 'group', designation: 'personal_hq' },
+    membersPanel: { group: { children: [{ id: 'm1' }] } },
+    backlogItems: [{ task: { id: 'b1', description: 'An idea' } }],
+    backlogSync: { last_synced_at: '2026-10-08T09:00:00Z' },
+    notes: [{ id: 'n1', name: 'A note' }],
+    schedules: [{ id: 'sc1', name: 'A schedule' }],
+    sessions: [{ id: 's1', title: 'A session' }],
+    directories: [{ id: 'd1', name: 'A folder', path: '/tmp/d1' }],
+    files: [{ id: 'f1', title: 'A file' }]
+  });
+}
+
+// Splits renderRail's HTML into its sections, each as a row and (if open) a body.
+function railSections(html) {
+  return html
+    .split('<section ')
+    .slice(1)
+    .map(section => {
+      const bodyAt = section.indexOf('<div class="ws-cmd-panel-body');
+      return {
+        key: section.match(/data-cmd-manage-section="([^"]+)"/)[1],
+        expanded: section.match(/aria-expanded="(true|false)"/)[1] === 'true',
+        row: bodyAt === -1 ? section : section.slice(0, bodyAt),
+        body: bodyAt === -1 ? '' : section.slice(bodyAt)
+      };
+    });
+}
+
+test('the rail draws its nine rows in a fixed order, and closed it has no body at all', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const commandView = makeFullRailView();
+    const html = commandView.renderRail();
+    const sections = railSections(html);
+
+    assert.deepEqual(
+      sections.map(section => section.key),
+      ALL_RAIL_SECTIONS
+    );
+    assert.ok(sections.every(section => !section.expanded && section.body === ''));
+    // Nothing a body holds leaks into the closed rail: no item rows, no empty
+    // or loading text, no sync badge, no drop zone, no tabs, no hosts.
+    for (const leaked of [
+      'ws-cmd-panel-body',
+      'ws-cmd-rail-item',
+      'ws-cmd-rail-empty',
+      'ws-cmd-panel-sync',
+      'data-cmd-file-drop',
+      'data-cmd-system-tab',
+      'data-cmd-system-host',
+      'data-cmd-members-host',
+      'data-cmd-hq-station',
+      'data-cmd-note-filter',
+      'data-cmd-section-verb',
+      'data-cmd-open-tickets'
+    ]) {
+      assert.ok(!html.includes(leaked), `${leaked} must not render while every section is closed`);
+    }
+    // Each row names the body it controls, whether or not that body exists yet.
+    for (const section of sections) {
+      assert.match(section.row, new RegExp(`aria-controls="ws-cmd-rail-body-${section.key}"`));
+    }
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('exactly one rail section is open at a time, and it is the active one', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const commandView = makeFullRailView();
+    for (const key of ALL_RAIL_SECTIONS) {
+      commandView.activeRailSection = key;
+      const sections = railSections(commandView.renderRail());
+      const open = sections.filter(section => section.expanded);
+      assert.deepEqual(
+        open.map(section => section.key),
+        [key]
+      );
+      assert.deepEqual(
+        sections.filter(section => section.body).map(section => section.key),
+        [key],
+        `only ${key} has a body`
+      );
+      // The body is a region named by its row's title.
+      assert.match(
+        open[0].body,
+        new RegExp(
+          `^<div class="ws-cmd-panel-body[^"]*" id="ws-cmd-rail-body-${key}" role="region" aria-labelledby="ws-cmd-rail-title-${key}">`
+        )
+      );
+      assert.match(open[0].row, new RegExp(`id="ws-cmd-rail-title-${key}"`));
+      // is-managing marks the open section; the Systems wide layout keys off it.
+      assert.match(open[0].row, /^class="ws-cmd-panel[^"]* is-managing[^"]*">/);
+    }
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a rail row and its body never share a data-cmd attribute', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const attributes = html => new Set(html.match(/data-cmd-[a-z-]+/g) || []);
+    const commandView = makeFullRailView();
+    for (const key of ALL_RAIL_SECTIONS) {
+      commandView.activeRailSection = key;
+      const open = railSections(commandView.renderRail()).find(section => section.expanded);
+      const row = attributes(open.row);
+      const shared = [...attributes(open.body)].filter(attribute => row.has(attribute));
+      // A locator that matches the row's one button must keep matching one
+      // while the section is open (Playwright strict mode).
+      assert.deepEqual(shared, [], `${key}: row and body both use ${shared.join(', ')}`);
+    }
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('each row has the "+" its section can use, and each body the full verb', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const expected = {
+      backlog: {
+        add: /data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">\+</,
+        verb: /data-cmd-open-tickets="backlog">View in Tickets</
+      },
+      notes: {
+        add: /data-cmd-primary-section="notes" aria-label="New note" title="New note">\+</,
+        verb: /data-cmd-section-verb="notes">New Note</
+      },
+      schedules: {
+        add: /data-cmd-primary-section="schedules" aria-label="New schedule" title="New schedule">\+</,
+        verb: /data-cmd-section-verb="schedules">Open Schedules</
+      },
+      sessions: {
+        add: /data-cmd-primary-section="sessions" aria-label="New session" title="New session">\+</,
+        verb: /data-cmd-section-verb="sessions">New Session</
+      },
+      folders: {
+        add: /data-cmd-primary-section="folders" aria-label="Link folder" title="Link folder">\+</,
+        verb: /data-cmd-section-verb="folders">Link Folder</
+      },
+      members: {
+        add: /data-cmd-primary-section="members" aria-label="Add member" title="Add member">\+</,
+        verb: /data-cmd-section-verb="members">Add Member</
+      },
+      files: {
+        add: /data-cmd-primary-section="files" aria-label="Upload file" title="Upload file">\+</,
+        verb: /data-cmd-section-verb="files">Upload</
+      },
+      // Nothing to create in either, and nothing a verb would do that the
+      // toggle has not already done.
+      systems: { add: null, verb: null },
+      stations: { add: null, verb: null }
+    };
+    const commandView = makeFullRailView();
+    for (const key of ALL_RAIL_SECTIONS) {
+      commandView.activeRailSection = key;
+      const open = railSections(commandView.renderRail()).find(section => section.expanded);
+      const { add, verb } = expected[key];
+      if (add) {
+        assert.match(open.row, add);
+        assert.match(open.body, verb);
+      } else {
+        assert.doesNotMatch(open.row, /ws-cmd-panel-action/);
+        assert.doesNotMatch(open.body, /ws-cmd-panel-toolbar/);
+        assert.match(open.row, /ws-cmd-panel-head is-toggle-only/);
+      }
+    }
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('a toggle click remembers the open section for this workspace; closing remembers closed', () => {
   withRailStorage({}, values => {
     const railRoot = makeListenerRoot();
