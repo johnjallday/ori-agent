@@ -134,6 +134,11 @@ function calendarOpsMeetingTimeLabel(evt) {
 // becomes a drag rather than a click (FR9).
 const STATION_DRAG_THRESHOLD_PX = 5;
 
+// How long after arriving in Details a re-render still replays the entrance
+// fade: the longest entrance animation in workspace-command.css (0.4s after a
+// 0.05s delay).
+const DETAILS_ENTRANCE_MS = 450;
+
 // The rail controls whose focus is carried across a re-render, each found
 // again by this one attribute: row toggles, row "+" buttons, body verbs,
 // Systems tabs and station rows.
@@ -1974,6 +1979,22 @@ export class WorkspaceCommandView {
     return '';
   }
 
+  // Whether this render rebuilds a Details view that has already arrived.
+  //
+  // The entrance fade belongs to arriving in Details, not to each rebuild of
+  // it: the container is replaced on every render, so a rail row toggling (or
+  // data refreshing) would otherwise fade the whole view in again. Renders in
+  // the first moments after arriving still count as the entrance, because the
+  // page's data lands then and those rebuilds have always restarted the fade.
+  // Map mode is left as it was and never reports settled.
+  detailsViewSettled(now = Date.now()) {
+    if (this._enteredViewMode !== this.viewMode) {
+      this._enteredViewMode = this.viewMode;
+      this._enteredViewModeAt = now;
+    }
+    return this.viewMode === 'details' && now - this._enteredViewModeAt > DETAILS_ENTRANCE_MS;
+  }
+
   render() {
     const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
     if (surfaceHost && typeof surfaceHost.setMapVisible === 'function') {
@@ -2041,16 +2062,9 @@ export class WorkspaceCommandView {
             '</aside>' +
             '</div>';
 
-    // The entrance fade belongs to arriving in Details, not to each rebuild of
-    // it. This container is replaced on every render, so without the marker a
-    // rail row toggling (or data refreshing) would fade the whole view in again.
     if (this.container.classList) {
-      this.container.classList.toggle(
-        'is-settled',
-        this.viewMode === 'details' && this._settledViewMode === 'details'
-      );
+      this.container.classList.toggle('is-settled', this.detailsViewSettled());
     }
-    this._settledViewMode = this.viewMode;
 
     this.container.innerHTML =
       this.commandBarHTML(ws, name, mode, stats) +

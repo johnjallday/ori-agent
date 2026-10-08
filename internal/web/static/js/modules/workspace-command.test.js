@@ -1523,6 +1523,28 @@ test('the Backlog "+" goes to the Tickets create form without opening the Backlo
   assert.equal(commandView.activeRailSection, '');
 });
 
+test('Details replays its entrance fade while arriving, not on later re-renders', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  commandView.viewMode = 'details';
+
+  // The page's data lands in the first moments; those rebuilds are still the entrance.
+  assert.equal(commandView.detailsViewSettled(1000), false);
+  assert.equal(commandView.detailsViewSettled(1200), false);
+  // After that a rebuild (a rail row toggling, a refresh) must not fade the view in again.
+  assert.equal(commandView.detailsViewSettled(1500), true);
+  assert.equal(commandView.detailsViewSettled(60000), true);
+
+  // Map mode keeps its own behaviour and never reports settled.
+  commandView.viewMode = 'map';
+  assert.equal(commandView.detailsViewSettled(61000), false);
+  assert.equal(commandView.detailsViewSettled(90000), false);
+
+  // Coming back to Details is an arrival again.
+  commandView.viewMode = 'details';
+  assert.equal(commandView.detailsViewSettled(90100), false);
+  assert.equal(commandView.detailsViewSettled(90600), true);
+});
+
 test('toggling a rail row puts focus back on the re-rendered toggle', () => {
   const focused = [];
   const railRoot = makeListenerRoot();
