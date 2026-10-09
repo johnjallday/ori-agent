@@ -178,6 +178,12 @@ test('the summary strip says what it folded, and shows only when there is someth
   );
   assert.equal(summaryStripText({ needs: -1, inProgress: 'x' }), '');
   assert.equal(summaryStripText(), '');
+  assert.equal(summaryStripText({ unavailable: true }), 'Today sources unavailable');
+  assert.equal(
+    summaryStripView({ started: true, expanded: false }, summaryStripText({ unavailable: true }))
+      .sectionsHidden,
+    true
+  );
 
   const text = 'Needs you 2';
   assert.deepEqual(summaryStripView({ started: true, expanded: false }, text), {

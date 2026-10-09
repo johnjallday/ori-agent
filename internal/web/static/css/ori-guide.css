@@ -1116,6 +1116,42 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   max-width: none;
 }
 
+/* Conversation-first viewport: browser anchoring cannot also own this pane. */
+#personalAssistantScroll {
+  overflow-anchor: none;
+}
+
+.personal-assistant-transcript__pending {
+  margin: 8px 0 12px;
+  color: var(--pa-ink-dim);
+  font-size: 13px;
+}
+
+.personal-assistant-transcript__jump {
+  flex: none;
+  align-self: flex-end;
+  min-height: 44px;
+  margin: 0 20px;
+  padding: 6px 14px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: var(--ori-paper);
+  color: var(--pa-accent-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.personal-assistant-transcript__jump:focus-visible {
+  outline: 2px solid var(--ori-accent);
+  outline-offset: 3px;
+}
+
+.personal-assistant-panel .is-personal-turn-status > .ask-ori-activity__head,
+.personal-assistant-panel .is-personal-chat-pending > .ask-ori-activity__head,
+.personal-assistant-panel .is-personal-chat-pending > .home-assistant-routing-summary {
+  display: none;
+}
+
 /* Only quiet personal chat loses the redundant status header. Planning,
    progress, error and confirmation still use the shared activity normally. */
 .personal-assistant-panel .ask-ori-activity.is-quiet-chat > .ask-ori-activity__head,

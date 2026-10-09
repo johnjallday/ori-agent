@@ -12,6 +12,9 @@ const evidence =
 
 async function settled(page: Page) {
   await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+  await page.waitForFunction(
+    () => (window as any).PersonalAssistantTranscript?.isSettled?.() ?? true
+  );
   await page.evaluate(
     () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   );
@@ -45,7 +48,7 @@ async function geometry(page: Page, messageId = '') {
   }, messageId);
 }
 
-test('real host baseline: chronology, passive viewport, delayed reading, Tree + Chat and canonical review', async ({
+test('real host: conversation-first viewport, delayed reading, Tree + Chat and canonical review', async ({
   page,
   request
 }) => {
@@ -113,8 +116,26 @@ test('real host baseline: chronology, passive viewport, delayed reading, Tree + 
   await page.setViewportSize({ width: 1440, height: 900 });
   const observations: unknown[] = [];
   const capture = async (name: string, id = '') => {
+    await page.waitForFunction(
+      () => (window as any).PersonalAssistantTranscript?.isSettled?.() ?? true
+    );
     const measured = await geometry(page, id);
     observations.push({ name, ...measured });
+    if (id && !name.includes('scroll-away')) {
+      expect(measured.rowStartVisible, `${name}: beginning visible without corrective scroll`).toBe(
+        true
+      );
+      if (!name.endsWith('-long'))
+        expect(measured.rowEndVisible, `${name}: complete short response and controls`).toBe(true);
+    }
+    if (name.endsWith('-pending')) {
+      await expect(page.locator('[data-pending-reply]')).toHaveCount(1);
+      await expect(page.locator('[data-pending-reply]')).toBeInViewport();
+      await expect(
+        page.locator('#homeAssistantThinkingModal .ask-ori-activity__head')
+      ).toBeHidden();
+      await expect(page.locator('#homeAssistantRoutingSummary')).toBeHidden();
+    }
     await page.screenshot({ path: join(evidence, `${name}.png`) });
     return measured;
   };
@@ -141,8 +162,20 @@ test('real host baseline: chronology, passive viewport, delayed reading, Tree + 
       await page.locator('#personalAssistantLauncher').click();
     if (await page.locator('#personalAssistantConversationNew').isEnabled())
       await page.locator('#personalAssistantConversationNew').click();
+    if (path === '/') await capture('home-today-error-compact');
     const ordinary = await send('Tell me about this workspace');
     await capture(`${prefix}-ordinary-first`, ordinary.conversation.assistant_message_id);
+    if (path === '/') {
+      await expect(page.locator('#personalAssistantTodayFooter')).toBeHidden();
+      await expect(page.locator('#personalAssistantSummaryText')).toContainText(
+        'Today sources unavailable'
+      );
+      await page.locator('#personalAssistantSummaryToggle').click();
+      await expect(page.locator('#personalAssistantTodayFooter')).toBeVisible();
+      await expect(page.locator('#personalAssistantTodayRetry')).toBeVisible();
+      await page.screenshot({ path: join(evidence, 'home-today-error-expanded.png') });
+      await page.locator('#personalAssistantSummaryToggle').click();
+    }
     const repeated = await send('What should we discuss next?');
     await capture(`${prefix}-ordinary-repeated`, repeated.conversation.assistant_message_id);
     const long = await send('Conversation fixture: long answer. Explain the next steps.');
@@ -204,9 +237,11 @@ test('real host baseline: chronology, passive viewport, delayed reading, Tree + 
     await capture(`${prefix}-pending`);
     // Intentional reading, NOT corrective arrival scrolling. Track an actual
     // connected history row and its viewport offset across the held reply.
-    await page.locator('#personalAssistantScroll').evaluate(el => {
-      el.scrollTop = 80;
-    });
+    await page.locator('#personalAssistantScroll').hover();
+    await page.mouse.wheel(0, -10000);
+    await page.waitForFunction(
+      () => document.getElementById('personalAssistantScroll')!.scrollTop < 100
+    );
     const anchorId = await page.evaluate(() => {
       const pane = document.getElementById('personalAssistantScroll')!.getBoundingClientRect();
       return (
@@ -227,8 +262,19 @@ test('real host baseline: chronology, passive viewport, delayed reading, Tree + 
     expect(after.activeId).toBe(reading.activeId);
     expect(after.treeTop).toBe(reading.treeTop);
     expect(after.pageTop).toBe(reading.pageTop);
+    expect(Math.abs(after.rowOffset! - reading.rowOffset!)).toBeLessThan(3);
+    await expect(page.getByRole('button', { name: 'New reply', exact: true })).toBeVisible();
     observations.push({ name: `${prefix}-reading-anchor`, before: reading, after });
     await capture(`${prefix}-scroll-away-arrival`, arrival.conversation.assistant_message_id);
+    await page.getByRole('button', { name: 'New reply', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await expect(
+      page.locator(`[data-message-id="${arrival.conversation.assistant_message_id}"]`)
+    ).toBeFocused();
+    const revealed = await geometry(page, arrival.conversation.assistant_message_id);
+    expect(revealed.rowStartVisible).toBe(true);
+    expect(revealed.rowEndVisible).toBe(true);
+    await expect(page.getByRole('button', { name: 'New reply', exact: true })).toBeHidden();
 
     const history = (
       await (
@@ -306,10 +352,10 @@ test('real host baseline: chronology, passive viewport, delayed reading, Tree + 
     resourcesBefore
   );
   await writeFile(
-    join(evidence, 'baseline-results.json'),
+    join(evidence, 'viewport-results.json'),
     JSON.stringify(
       {
-        revision: 'af5f4f22',
+        revision: 'feature working tree; see runner log and evidence index',
         level: 'Real Ori host/store + loopback provider; Today failure only is a browser fixture',
         observations,
         provider: await audit(),

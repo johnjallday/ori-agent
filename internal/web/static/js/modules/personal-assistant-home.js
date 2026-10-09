@@ -416,11 +416,12 @@ export function summaryFoldAfter(fold, event = {}) {
 // summaryStripText is the line itself: "Needs you 2 · Brief ready · 2 in
 // progress". A part with nothing to say is left out, and with no parts there
 // is nothing to fold.
-export function summaryStripText({ needs, brief, inProgress, doneToday } = {}) {
+export function summaryStripText({ needs, brief, inProgress, doneToday, unavailable } = {}) {
   const count = value => Math.max(0, Number(value) || 0);
   const parts = [];
   if (count(needs)) parts.push(`Needs you ${count(needs)}`);
   if (brief) parts.push(String(brief));
+  if (unavailable) parts.push('Today sources unavailable');
   if (count(inProgress)) parts.push(`${count(inProgress)} in progress`);
   else if (count(doneToday)) parts.push(`${count(doneToday)} done today`);
   return parts.join(' · ');
@@ -786,7 +787,9 @@ function syncSummary(els = elements()) {
         needs: state.needsCount,
         brief: state.briefStrip,
         inProgress: state.progress.inProgress,
-        doneToday: state.progress.doneToday
+        doneToday: state.progress.doneToday,
+        unavailable:
+          Boolean(state.today?.unavailable_sources?.length) || state.today?.state === 'unavailable'
       })
     : '';
   // Do not collapse a prerequisite or a form the user is currently editing.
@@ -895,6 +898,11 @@ function renderToday(today) {
   if (!els) return;
   state.today = today;
   const view = personalAssistantTodayView(today);
+  // Ready Today summaries/errors belong to the folded attention path, not the
+  // active exchange. Model/hiring/HQ prerequisites retain their visible banner.
+  if (view.active || view.paused || view.partial || view.unavailable)
+    els.sections?.prepend(els.banner);
+  else if (els.summary) els.root.insertBefore(els.banner, els.summary);
   els.root.hidden = false;
   els.root.dataset.state = view.state;
   els.title.textContent = `Today from ${view.displayName}`;
@@ -954,8 +962,10 @@ function renderToday(today) {
   if (els.doneSection) els.doneSection.hidden = !sections.done.length;
   if (els.footer) els.footer.hidden = !sections.footer;
   if (els.unavailable) els.unavailable.textContent = sections.footer;
-  state.sectionsAvailable = Boolean(view.active || view.paused || view.partial || view.needsHQ);
-  if (view.active || view.paused || view.partial) {
+  state.sectionsAvailable = Boolean(
+    view.active || view.paused || view.partial || view.needsHQ || view.unavailable
+  );
+  if (view.active || view.paused || view.partial || view.unavailable) {
     state.fold = summaryFoldAfter(state.fold, { type: 'ready' });
   }
   renderProgressRow(els, sections);
@@ -1050,15 +1060,16 @@ async function loadToday() {
     if (seq !== state.sequence) return;
     const els = elements();
     if (!els) return;
-    els.root.hidden = false;
-    els.root.dataset.state = 'unavailable';
-    els.title.textContent = `Today from ${state.relationship?.display_name || 'your assistant'}`;
+    renderToday({
+      state: 'unavailable',
+      display_name: state.relationship?.display_name,
+      unavailable_sources: ['Today']
+    });
     // Nothing is known, so nothing is listed: an empty drawer here would read
     // as "all clear", and this message is what stands in its place.
     els.banner.textContent =
       'Today is temporarily unavailable. The Workspace Map and the rest of Home remain available; no all-clear is being shown.';
     els.banner.hidden = false;
-    state.sectionsAvailable = false;
     syncSummary(els);
     shareTodayWithDrawer(null);
     renderLauncherCue(els, { state: 'unavailable' });

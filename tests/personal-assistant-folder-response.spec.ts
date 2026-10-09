@@ -246,7 +246,9 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await expect(card.getByRole('heading')).toHaveText(observation.folder);
     const children = observation.projects.filter((row: any) => !row.root);
     await expect(
-      card.locator(':scope > .personal-assistant-folder-context__rows > li')
+      card.locator(
+        '.personal-assistant-folder-context__details > .personal-assistant-folder-context__rows > li'
+      )
     ).toHaveCount(Math.min(3, children.length));
     const details = card.locator('.personal-assistant-folder-context__details');
     expect(await details.getAttribute('open')).toBeNull();
