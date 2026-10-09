@@ -200,7 +200,13 @@ selections do not automatically reopen it. Expanding or checking reads/sends
 nothing; coverage details retain scan time, bounds, omissions and exclusions.
 
 Independent native checkboxes choose up to eight distinguishable discussion
-topics. Checking a folder never checks its descendants. Empty focus means the
+topics. Checking a folder never checks its descendants. **Select all** explicitly
+checks every recorded entry, including collapsed children, when all topics fit
+the existing count/byte/distinguishability bounds. Otherwise the control says
+**Select all · Whole folder** and uses whole-folder discussion, clearing individual
+checks and announcing that result. It never silently selects a subset, invents
+omitted entries or bypasses the host limits. Empty trees disable it; legacy
+summary-only snapshots have no bulk tree action. Empty focus means the
 whole recorded folder, not additional permission. Focus is neither a file-read
 grant, descendant scope nor a privacy filter: the bounded observation remains
 shared on Send. Ambiguous sanitized names are disabled. Expansion and next-turn

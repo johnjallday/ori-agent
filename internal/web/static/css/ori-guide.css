@@ -1939,6 +1939,7 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
 .personal-assistant-folder-focus[hidden],
 .personal-assistant-folder-focus button[hidden],
 #personalAssistantFolderFocusClear[hidden],
+#personalAssistantFolderSelectAll[hidden],
 .personal-assistant-folder-tree__children[hidden],
 #personalAssistantExploreAttachedFolder[hidden] {
   display: none;
@@ -1988,6 +1989,11 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   min-height: 44px;
   padding: 10px 0;
   cursor: pointer;
+}
+
+.personal-assistant-folder-tree__select-all {
+  min-height: 44px;
+  margin-bottom: 10px;
 }
 
 .personal-assistant-folder-tree,

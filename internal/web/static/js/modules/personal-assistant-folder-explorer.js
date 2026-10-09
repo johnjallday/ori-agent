@@ -1,4 +1,8 @@
-import { folderFocusView, folderTreeView } from './personal-assistant-folder-tree.js';
+import {
+  folderFocusView,
+  folderSelectAllFocus,
+  folderTreeView
+} from './personal-assistant-folder-tree.js';
 
 const element = (tag, text = '', className = '') => {
   const node = document.createElement(tag);
@@ -18,7 +22,8 @@ export function initFolderExplorer({ current, setFocus, notify }) {
   const toolbar = get('ExplorerToolbar'),
     launch = get('ExploreAttachedFolder');
   const treeTab = get('ExplorerTreeTab'),
-    chatTab = get('ExplorerChatTab');
+    chatTab = get('ExplorerChatTab'),
+    selectAll = get('FolderSelectAll');
   const expanded = new Set();
   let open = false,
     tab = 'tree',
@@ -121,6 +126,7 @@ export function initFolderExplorer({ current, setFocus, notify }) {
           notify(message);
         } else {
           get('ExplorerNotice').textContent = '';
+          notify('Discussion focus updated for the next message. No message sent.');
         }
       });
       const name = element(
@@ -155,6 +161,13 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     const loading = window.PersonalAssistantConversation?.isLoading?.() === true;
     launch.hidden = !folderTreeView(observation);
     launch.disabled = Boolean(state?.pending || loading);
+    const all = folderSelectAllFocus(observation);
+    selectAll.hidden = launch.hidden;
+    selectAll.disabled = !all || state?.pending || loading;
+    selectAll.textContent = all?.wholeFolder ? 'Select all · Whole folder' : 'Select all';
+    selectAll.title = all?.wholeFolder
+      ? 'Uses whole-folder discussion because all entries cannot fit as distinguishable individual topics. No partial selection.'
+      : 'Select every recorded entry, including entries in collapsed folders, for the next message.';
     get('FolderFocus').hidden = !observation?.tree || (!open && !state.focusIDs.length);
     if (!observation || loading) {
       collapse({ focus: false });
@@ -246,9 +259,25 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     layout();
   });
   chatTab.addEventListener('click', showChat);
+  selectAll.addEventListener('click', () => {
+    if (!selectAll.isConnected || selectAll.disabled) return;
+    const state = current();
+    if (state?.pending || window.PersonalAssistantConversation?.isLoading?.()) return;
+    const all = folderSelectAllFocus(state?.observation);
+    if (!all || !setFocus(all.ids, binding(state))) return;
+    const message = all.wholeFolder
+      ? 'Whole-folder focus selected; individual checks cleared. Nothing read or sent.'
+      : `All ${all.count} recorded entries selected for the next message. Nothing read or sent.`;
+    get('ExplorerNotice').textContent = message;
+    notify(message);
+  });
   get('FolderFocusClear').addEventListener('click', () => {
     const state = current();
-    if (state?.observation && setFocus([], binding(state))) get('Input')?.focus();
+    if (state?.observation && setFocus([], binding(state))) {
+      get('ExplorerNotice').textContent = '';
+      notify('Whole-folder focus selected. No message sent.');
+      get('Input')?.focus();
+    }
   });
   if (typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(() =>

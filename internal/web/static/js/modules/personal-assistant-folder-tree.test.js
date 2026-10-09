@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { folderTreeView, folderFocusView } from './personal-assistant-folder-tree.js';
+import {
+  folderTreeView,
+  folderFocusView,
+  folderSelectAllFocus
+} from './personal-assistant-folder-tree.js';
 import { createFolderContextController } from './personal-assistant-folder-context.js';
 
 const snapshot = () => ({
@@ -111,6 +115,38 @@ test('malformed graphs, duplicate/missing/over-limit topics and indistinguishabl
       null
     );
   }
+});
+
+test('Select all includes collapsed descendants or explicitly uses whole-folder focus, never a subset', () => {
+  assert.deepEqual(folderSelectAllFocus(snapshot()), {
+    ids: ['entry-0', 'entry-1', 'entry-2'],
+    wholeFolder: false,
+    count: 3
+  });
+  for (const count of [8, 9, 64]) {
+    const observation = snapshot();
+    observation.tree.nodes = Array.from({ length: count }, (_, index) => ({
+      id: `entry-${index}`,
+      name: `Topic ${index}`,
+      kind: 'file'
+    }));
+    const all = folderSelectAllFocus(observation);
+    assert.equal(all.wholeFolder, count > 8);
+    assert.equal(all.count, count);
+    assert.equal(all.ids.length, count > 8 ? 0 : count);
+  }
+  const ambiguous = snapshot();
+  ambiguous.tree.nodes[2].name = ambiguous.tree.nodes[0].name;
+  assert.equal(folderSelectAllFocus(ambiguous).wholeFolder, true);
+  const bounded = snapshot();
+  bounded.tree.nodes = Array.from({ length: 8 }, (_, index) => ({
+    id: `entry-${index}`,
+    name: `a${index}${'<'.repeat(92)}z`,
+    kind: 'file'
+  }));
+  assert.deepEqual(folderSelectAllFocus(bounded), { ids: [], wholeFolder: true, count: 8 });
+  assert.equal(folderSelectAllFocus({ tree: { nodes: [] } }), null);
+  assert.equal(folderSelectAllFocus({ projects: [{ name: 'Legacy' }] }), null);
 });
 
 test('checkbox changes are local; Send receives a frozen opaque reference and no metadata or paths', async () => {

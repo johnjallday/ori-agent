@@ -786,6 +786,8 @@ for (const theme of ['light', 'dark']) {
   test(`browser fixture: ${theme} explorer focus, limits, keyboard and snapshot retirement`, async ({
     page
   }) => {
+    const evidence = 'tasks/evidence/assistant-folder-response-ux/select-all';
+    await mkdir(evidence, { recursive: true });
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
     const fixture = await installFixture(page);
     fixture.scenario = {
@@ -824,6 +826,19 @@ for (const theme of ['light', 'dark']) {
     await expect(page.locator('#personalAssistantExplorerNotice')).toContainText('up to 8');
     await expect(input).toHaveValue('  Preserve exact 🎼 text\n');
     expect(fixture.requests).toHaveLength(0);
+    const selectAll = pane.getByRole('button', { name: 'Select all · Whole folder', exact: true });
+    await selectAll.focus();
+    await page.keyboard.press('Space');
+    await expect(pane.locator('input:checked')).toHaveCount(0);
+    await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
+      'Next message · Whole folder'
+    );
+    await expect(page.locator('#personalAssistantExplorerNotice')).toContainText(
+      'individual checks cleared'
+    );
+    await expect(input).toHaveValue('  Preserve exact 🎼 text\n');
+    expect(fixture.requests).toHaveLength(0);
+    for (let index = 0; index < 8; index++) await checks.nth(index).check();
     await page.evaluate(() => {
       (window as any).retiredTreeCheck = document.querySelector('[data-tree-focus="entry-0"]');
     });
@@ -843,6 +858,8 @@ for (const theme of ['light', 'dark']) {
     await expect.poll(() => Boolean(fixture.releaseReply)).toBe(true);
     await checks.first().uncheck();
     await input.fill('  Newer exact text 🎼  ');
+    await selectAll.click();
+    await expect(pane.locator('input:checked')).toHaveCount(0);
     fixture.releaseReply!();
     await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
     await expect(checks.first()).not.toBeChecked();
@@ -856,6 +873,9 @@ for (const theme of ['light', 'dark']) {
     await expect(checks.nth(2)).toBeInViewport({ ratio: 1 });
     await page.keyboard.press('Tab');
     await expect(checks.nth(3)).toBeFocused();
+    // Select all used whole-folder focus above; reselect a topic to exercise
+    // the existing Clear focus action rather than clicking its hidden state.
+    await checks.nth(2).check();
     await page.locator('#personalAssistantFolderFocusClear').click();
     await expect(input).toBeFocused();
     await expect(pane.locator('input:checked')).toHaveCount(0);
@@ -867,6 +887,7 @@ for (const theme of ['light', 'dark']) {
     await choose(page);
     await expect(pane).toContainText('No visible entries recorded');
     await expect(pane.locator('input')).toHaveCount(0);
+    await expect(page.locator('#personalAssistantFolderSelectAll')).toBeDisabled();
     await page.locator('#personalAssistantExplorerBack').click();
     fixture.scenario = {
       tree: {
@@ -881,13 +902,53 @@ for (const theme of ['light', 'dark']) {
     await expect(pane.locator('input').first()).toBeDisabled();
     await expect(pane.locator('input').last()).toBeDisabled();
     await expect(pane).toContainText('indistinguishable name');
+    await expect(selectAll).toBeVisible();
+    await selectAll.click();
+    await expect(pane.locator('input:checked')).toHaveCount(0);
+    await expect(input).toHaveValue('  Newer exact text 🎼  ');
     await page.locator('#personalAssistantExplorerBack').click();
+    fixture.scenario = {
+      // A new scan has a new immutable observation ID, even for the same chip.
+      id: 'selection-small-tree',
+      tree: {
+        omitted: 0,
+        nodes: [
+          { id: 'entry-0', name: 'Project 🎼', kind: 'folder' },
+          { id: 'entry-1', parent_id: 'entry-0', name: 'Hidden child.txt', kind: 'file' },
+          { id: 'entry-2', name: 'Notes.txt', kind: 'file' }
+        ]
+      }
+    };
+    await choose(page, 'Desktop');
+    const smallAll = pane.getByRole('button', { name: 'Select all', exact: true });
+    const beforeAll = fixture.requests.length;
+    await smallAll.focus();
+    await page.keyboard.press('Enter');
+    await expect(pane.locator('input:checked')).toHaveCount(3);
+    await expect(pane.locator('[data-tree-focus="entry-1"]')).toBeHidden();
+    await expect(input).toHaveValue('  Newer exact text 🎼  ');
+    expect(fixture.requests).toHaveLength(beforeAll);
+    await pane.locator('[data-tree-toggle="entry-0"]').click();
+    await expect(pane.locator('[data-tree-focus="entry-1"]')).toBeChecked();
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${theme}-select-all-small-phone.png`) });
+    await pane.locator('[data-tree-focus="entry-1"]').uncheck();
+    await expect(pane.locator('[data-tree-focus="entry-0"]')).toBeChecked();
+    await expect(page.locator('#personalAssistantContextStatus')).toContainText(
+      'Discussion focus updated'
+    );
+    await page.locator('#personalAssistantExplorerBack').click();
+    await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
+      'Next message · 2 topics'
+    );
     fixture.scenario = { tree: null };
     await choose(page);
     await expect(pane).toBeHidden();
     await expect(page.locator('#personalAssistantExploreAttachedFolder')).toBeHidden();
     await page.evaluate(() => (window as any).PersonalAssistantFolderContext.explore());
     await expect(pane).toContainText('Saved folder summaries only');
+    await expect(page.locator('#personalAssistantFolderSelectAll')).toBeHidden();
     await expect(pane.locator('input')).toHaveCount(0);
     await page.locator('#personalAssistantRemoveFolder').click();
     await expect(pane).toBeHidden();

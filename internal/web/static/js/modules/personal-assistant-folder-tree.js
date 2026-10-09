@@ -66,6 +66,16 @@ export function folderFocusView(observation, ids = []) {
   return new TextEncoder().encode(encoded).length <= 4096 ? focus : null;
 }
 
+// Bulk focus never silently picks a subset or bypasses the host's limits.
+// A tree that cannot fit as individual topics uses existing whole-folder focus.
+export function folderSelectAllFocus(observation) {
+  const tree = folderTreeView(observation);
+  if (!tree?.entries.length) return null;
+  const ids = tree.entries.map(entry => entry.id);
+  const wholeFolder = !folderFocusView(observation, ids);
+  return { ids: wholeFolder ? [] : ids, wholeFolder, count: ids.length };
+}
+
 export function renderFolderFocus(row, focus) {
   if (!row?.firstElementChild || !focus || !Array.isArray(focus.topics)) return;
   row.querySelector('[data-folder-turn-focus]')?.remove();

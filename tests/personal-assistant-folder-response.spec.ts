@@ -131,6 +131,31 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     );
     await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
     expect((await audit()).requests).toBe(beforeAttachment);
+    const selectAll = page.locator('#personalAssistantFolderSelectAll');
+    const allFits = observation.tree.nodes.length <= 8;
+    let expectedFocusIDs = [folderNode.id, fileNode.id];
+    await expect(selectAll).toHaveText(allFits ? 'Select all' : 'Select all · Whole folder');
+    await selectAll.focus();
+    await selectAll.press('Enter');
+    await expect(explorer.locator('input:checked')).toHaveCount(
+      allFits ? observation.tree.nodes.length : 0
+    );
+    await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
+    expect((await audit()).requests).toBe(beforeAttachment);
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-select-all.png`) });
+    if (allFits) expectedFocusIDs = observation.tree.nodes.map((node: any) => node.id);
+    else {
+      await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
+        'Next message · Whole folder'
+      );
+      await folderCheck.check();
+      await fileCheck.check();
+    }
+    expect(
+      await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request().focus_ids)
+    ).toEqual(expectedFocusIDs);
     await page
       .locator('#personalAssistantPanel')
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-light-desktop.png`) });
@@ -142,6 +167,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-dark-desktop.png`) });
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(explorer).toBeVisible();
+    await folderCheck.focus();
     await expect(folderCheck).toBeInViewport({ ratio: 1 });
     await expect(page.locator('#personalAssistantInput')).toBeInViewport();
     expect(
@@ -199,7 +225,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     const reply = await (await ask).json();
     expect(reply.conversation.stored).toBe(true);
     expect(reply.folder_context.observation).toEqual(observation);
-    expect(reply.conversation.folder_focus.topics).toHaveLength(2);
+    expect(reply.conversation.folder_focus.topics).toHaveLength(expectedFocusIDs.length);
     expect(reply.conversation.folder_focus.topics[0].names).toEqual([folderNode.name]);
     expect(reply.conversation.folder_focus.topics[1].names).toEqual([
       folderNode.name,
@@ -333,7 +359,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     expect(
       history.messages.filter((row: any) => row.role === 'folder_context')[0].folder_context
         .focus_ids
-    ).toEqual([folderNode.id, fileNode.id]);
+    ).toEqual(expectedFocusIDs);
     const beforeReload = (await audit()).requests;
     await page.reload();
     await expect(card).toHaveCount(1);

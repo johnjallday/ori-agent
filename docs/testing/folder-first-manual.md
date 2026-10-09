@@ -57,6 +57,11 @@ conversation. Desktop shows independently scrolling tree/chat panes; phone
 starts on Tree with Tree/Chat controls and the same pinned composer. Expand a
 recorded folder and independently check it and a child file: neither cascades.
 Names/relationships must match the bounded local scan, never a model guess.
+**Select all** checks all recorded topics, including collapsed children, when
+these fit the eight-topic/byte/distinguishability limits. On larger/ambiguous
+snapshots the label is **Select all · Whole folder**: it clears individual
+checks, announces whole-folder focus and never silently selects only some
+entries. Empty trees disable the control; summary-only history does not get one.
 Open the bounded/partial disclosure for scan time, limits and omitted entries;
 expanding cannot recover omitted/unscanned entries or read file contents.
 
