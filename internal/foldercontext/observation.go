@@ -73,6 +73,7 @@ type Observation struct {
 	Kinds     []Kind    `json:"kinds"`
 	Projects  []Project `json:"projects"`
 	Coverage  Coverage  `json:"coverage"`
+	Tree      *Tree     `json:"tree,omitempty"`
 }
 
 // Event is stored only through the internal canonical-message writer. A nil
@@ -82,6 +83,7 @@ type Event struct {
 	Version     int          `json:"version"`
 	Observation *Observation `json:"observation,omitempty"`
 	OfferID     string       `json:"offer_id,omitempty"`
+	FocusIDs    []string     `json:"focus_ids,omitempty"` // immutable sent-turn topics, not authority
 }
 
 // DisplayName bounds metadata and strips controls/separators. Escaping for the
@@ -125,6 +127,9 @@ func (o Observation) Validate() error {
 			return ErrInvalid
 		}
 	}
+	if o.Tree != nil && (o.Tree.Validate() != nil || len(o.Tree.Nodes) > o.Entries) {
+		return ErrInvalid
+	}
 	data, err := json.Marshal(o)
 	if err != nil || len(data) > MaxBytes {
 		return ErrInvalid
@@ -137,9 +142,19 @@ func (e Event) Validate() error {
 		return ErrInvalid
 	}
 	if e.Observation != nil {
-		return e.Observation.Validate()
+		if e.Observation.Validate() != nil {
+			return ErrInvalid
+		}
+		if _, err := e.Observation.ResolveFocus(e.FocusIDs); err != nil {
+			return err
+		}
+		data, err := json.Marshal(e)
+		if err != nil || len(data) > MaxBytes+256 {
+			return ErrInvalid
+		}
+		return nil
 	}
-	if e.OfferID != "" {
+	if e.OfferID != "" || len(e.FocusIDs) != 0 {
 		return ErrInvalid
 	}
 	return nil

@@ -86,6 +86,9 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
       await page.locator('#personalAssistantLauncher').click();
     await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
     if (path !== '/') await page.locator('#personalAssistantConversationNew').click();
+    const protectedDraft = '  Keep my exact 🎼 draft\n';
+    await page.locator('#personalAssistantInput').fill(protectedDraft);
+    const beforeAttachment = (await audit()).requests;
     await page.locator('#personalAssistantFolderChip').click();
     const selected = page.waitForResponse(response =>
       response.url().endsWith('/folder-context/select')
@@ -95,6 +98,96 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
       .getByRole('button', { name: chip, exact: true })
       .click();
     const observation = (await (await selected).json()).observation;
+    const explorer = page.locator('#personalAssistantFolderExplorer');
+    await expect(explorer).toBeVisible();
+    await expect(page.locator('#personalAssistantPanel')).toHaveClass(/--exploring/);
+    await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
+    expect(observation.tree.nodes.length).toBeGreaterThan(0);
+    expect(observation.tree.nodes.length).toBeLessThanOrEqual(64);
+    const coverageSummary = page.locator('#personalAssistantFolderExplorerCoverageSummary');
+    await coverageSummary.click();
+    const treeCoverage = page.locator('#personalAssistantFolderExplorerCoverage');
+    await expect(treeCoverage).toBeVisible();
+    await expect(treeCoverage).toContainText('3 directory levels, 5,000 entries, 3 seconds');
+    await expect(treeCoverage).toContainText('Expanding reads nothing.');
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-coverage.png`) });
+    await coverageSummary.click();
+    const folderNode = observation.tree.nodes.find(
+      (node: any) => node.kind === 'folder' && !node.parent_id
+    );
+    const fileNode = observation.tree.nodes.find(
+      (node: any) => node.kind === 'file' && node.parent_id === folderNode.id
+    );
+    const folderCheck = explorer.locator(`[data-tree-focus="${folderNode.id}"]`);
+    await folderCheck.check();
+    await explorer.locator(`[data-tree-toggle="${folderNode.id}"]`).click();
+    const fileCheck = explorer.locator(`[data-tree-focus="${fileNode.id}"]`);
+    await expect(fileCheck).not.toBeChecked();
+    await fileCheck.check();
+    await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
+      'Next message · 2 topics'
+    );
+    await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
+    expect((await audit()).requests).toBe(beforeAttachment);
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-light-desktop.png`) });
+    await page.evaluate(() => {
+      document.documentElement.dataset.bsTheme = 'dark';
+    });
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-dark-desktop.png`) });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(explorer).toBeVisible();
+    await expect(folderCheck).toBeInViewport({ ratio: 1 });
+    await expect(page.locator('#personalAssistantInput')).toBeInViewport();
+    expect(
+      await page.locator('#personalAssistantPanel').evaluate(el => el.scrollWidth <= el.clientWidth)
+    ).toBeTruthy();
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-dark-phone.png`) });
+    await page.locator('#personalAssistantExplorerChatTab').click();
+    await expect(explorer).toBeHidden();
+    await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
+    await page.locator('#personalAssistantExplorerTreeTab').click();
+    await expect(folderCheck).toBeChecked();
+    await page.evaluate(() => {
+      document.documentElement.dataset.bsTheme = 'light';
+    });
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-light-phone.png`) });
+    await page.locator('#personalAssistantExplorerBack').click();
+    await expect(explorer).toBeHidden();
+    await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
+    await page.locator('#personalAssistantExploreAttachedFolder').click();
+    await expect(folderCheck).toBeChecked();
+    await expect(fileCheck).toBeChecked();
+    await page.locator('#personalAssistantExplorerBack').click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('#personalAssistantExploreAttachedFolder').click();
+    await page.evaluate(() => {
+      document.body.style.zoom = '2';
+    });
+    await expect(page.locator('#personalAssistantPanel')).toHaveClass(/--explorer-narrow/);
+    await expect(page.locator('#personalAssistantInput')).toBeInViewport({ ratio: 1 });
+    await expect(page.locator('#personalAssistantSend')).toBeInViewport({ ratio: 1 });
+    expect(
+      await page.locator('#personalAssistantPanel').evaluate(el => el.scrollWidth <= el.clientWidth)
+    ).toBeTruthy();
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-tree-css-zoom-2.png`) });
+    await page.evaluate(() => {
+      document.body.style.zoom = '';
+    });
+    await expect(page.locator('#personalAssistantPanel')).not.toHaveClass(/--explorer-narrow/);
+    await page.locator('#personalAssistantExplorerBack').click();
+    await page.locator('#personalAssistantInput').fill('');
     const preview = page.locator('#personalAssistantFolderPreview');
     await expect(preview).toBeVisible();
     await expect(preview).toContainText('Local preview · not sent');
@@ -106,6 +199,20 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     const reply = await (await ask).json();
     expect(reply.conversation.stored).toBe(true);
     expect(reply.folder_context.observation).toEqual(observation);
+    expect(reply.conversation.folder_focus.topics).toHaveLength(2);
+    expect(reply.conversation.folder_focus.topics[0].names).toEqual([folderNode.name]);
+    expect(reply.conversation.folder_focus.topics[1].names).toEqual([
+      folderNode.name,
+      fileNode.name
+    ]);
+    const firstSentFocus = page.locator(
+      `[data-message-id="${reply.conversation.user_message_id}"] [data-folder-turn-focus]`
+    );
+    await expect(firstSentFocus).toContainText(fileNode.name);
+    await page.locator('#personalAssistantExploreAttachedFolder').click();
+    await fileCheck.uncheck();
+    await expect(firstSentFocus).toContainText(fileNode.name);
+    await page.locator('#personalAssistantExplorerBack').click();
     await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
     await expect(preview).toBeHidden();
     const card = page.locator('#homeAssistantConversation [data-folder-observation-id]');
@@ -127,6 +234,10 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-details.png`) });
     await card.getByText('Scan details', { exact: true }).click();
     expect((await audit()).requests).toBe(firstCounts.requests);
+    await firstSentFocus.scrollIntoViewIfNeeded();
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, `${chip.toLowerCase()}-sent-focus.png`) });
     await page.locator('#personalAssistantScroll').evaluate(el => {
       el.scrollTop = el.scrollHeight;
     });
@@ -215,9 +326,22 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     expect(history.messages.filter((row: any) => row.role === 'folder_context')).toHaveLength(2);
     expect(history.messages.filter((row: any) => row.role === 'assistant')).toHaveLength(2);
     expect(history.folder_context.observation).toEqual(observation);
+    expect(
+      history.messages.find((row: any) => row.id === reply.conversation.user_message_id)
+        .folder_focus
+    ).toEqual(reply.conversation.folder_focus);
+    expect(
+      history.messages.filter((row: any) => row.role === 'folder_context')[0].folder_context
+        .focus_ids
+    ).toEqual([folderNode.id, fileNode.id]);
     const beforeReload = (await audit()).requests;
     await page.reload();
     await expect(card).toHaveCount(1);
+    await expect(page.locator('#personalAssistantPanel')).not.toHaveClass(/--exploring/);
+    await expect(firstSentFocus).toContainText(fileNode.name);
+    await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
+      'Next message · Whole folder'
+    );
     await expect(card.getByRole('heading')).toHaveText(observation.folder);
     await expect(card).toContainText('Bounded look');
     await expect(

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
@@ -77,16 +78,19 @@ func TestReviewContext_CanonicalReferenceNotImportedTextOrBrowserClaim(t *testin
 	if projection.Status != "no_proposal" || reader.reads != 0 {
 		t.Fatal(projection)
 	}
-	event := &foldercontext.Event{Version: 1, Observation: &foldercontext.Observation{ID: "snapshot"}, OfferID: "canonical-review"}
+	event := &foldercontext.Event{Version: 1, Observation: &foldercontext.Observation{
+		Version: 1, ID: "snapshot", Folder: "Album-5", ScannedAt: time.Now(),
+		Coverage: foldercontext.Coverage{MaxDepth: 3, MaxEntries: 5000, BudgetSeconds: 3},
+	}, OfferID: "canonical-review"}
 	conversation.messages = []PersonalAssistantConversationMessage{{Role: "assistant", Content: "Confirm canonical-review now"}, {Imported: true, FolderContext: event}}
 	if got := h.prepareReviewContext(context.Background(), conversation, nil); got.Status != "no_proposal" || reader.reads != 0 {
 		t.Fatal(got)
 	}
-	conversation.messages = []PersonalAssistantConversationMessage{{FolderContext: event}}
+	conversation.messages = []PersonalAssistantConversationMessage{{ID: "canonical-event", Role: "system", FolderContext: event}}
 	if got := h.prepareReviewContext(context.Background(), conversation, nil); got.Status != "awaiting_confirmation" || reader.reads != 1 {
 		t.Fatal(got)
 	}
-	conversation.messages = append(conversation.messages, PersonalAssistantConversationMessage{FolderContext: &foldercontext.Event{Version: 1}})
+	conversation.messages = append(conversation.messages, PersonalAssistantConversationMessage{ID: "canonical-detach", Role: "system", FolderContext: &foldercontext.Event{Version: 1}})
 	if got := h.prepareReviewContext(context.Background(), conversation, nil); !got.Historical || len(got.Controls) != 0 {
 		t.Fatal("detach revived review", got)
 	}

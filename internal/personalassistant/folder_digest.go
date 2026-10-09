@@ -283,8 +283,10 @@ type FolderDigestDeps struct {
 	Picker       FolderPicker
 	HomeDir      func() (string, error)
 	Scan         func(root string) (folderdigest.Result, error)
-	Now          func() time.Time
-	NewID        func() string
+	// ScanObservation captures bounded entry relationships in the same scan.
+	ScanObservation func(root string) (folderdigest.Result, error)
+	Now             func() time.Time
+	NewID           func() string
 	// AppInstalled is a silent installed-application lookup, not an offer
 	// trigger. An unknown or unavailable detector reports false.
 	AppInstalled func(ctx context.Context, appName string) bool
@@ -504,6 +506,16 @@ type FolderDigestService struct {
 func NewFolderDigestService(store *FolderDigestStore, deps FolderDigestDeps) *FolderDigestService {
 	if deps.HomeDir == nil {
 		deps.HomeDir = os.UserHomeDir
+	}
+	if deps.ScanObservation == nil {
+		// Preserve injected scanner seams; production opts into the tree only
+		// for explicit conversation attachment, not background digest scans.
+		deps.ScanObservation = deps.Scan
+		if deps.ScanObservation == nil {
+			deps.ScanObservation = func(root string) (folderdigest.Result, error) {
+				return folderdigest.Scan(root, folderdigest.Options{CaptureTree: true})
+			}
+		}
 	}
 	if deps.Scan == nil {
 		deps.Scan = func(root string) (folderdigest.Result, error) {

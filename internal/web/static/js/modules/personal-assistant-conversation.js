@@ -6,6 +6,7 @@
 // share a thread by accident.
 
 import { renderTurnWorkspace, renderTurnSources } from './personal-assistant-workspace-context.js';
+import { renderFolderFocus } from './personal-assistant-folder-tree.js';
 import { folderDiscussionBinding } from './personal-assistant-folder-presentation.js';
 
 const LIST_ENDPOINT = '/api/home-assistant/conversations';
@@ -263,6 +264,8 @@ async function resume(id, options = {}) {
       }
       const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
       renderTurnWorkspace(row, message.workspace_context, { historical: true });
+      if (message.role === 'user' && !message.imported)
+        renderFolderFocus(row, message.folder_focus);
       // A saved reply lists what it read then; reloading reads nothing again.
       if (message.role === 'assistant')
         renderTurnSources(row, message.workspace_context, { historical: true });
@@ -421,6 +424,7 @@ function applyReply(data, rows = {}) {
   const nextId = nextConversationId(state.id, reply);
   if (reply.stored) {
     attachMessage(rows.userRow, nextId, reply.user_message_id);
+    renderFolderFocus(rows.userRow, reply.folder_focus);
     attachMessage(rows.assistantRow, nextId, reply.assistant_message_id);
     if (reply.assistant_message_id) window.PersonalAssistantDrafts?.replyAdded?.();
   }

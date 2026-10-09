@@ -420,7 +420,7 @@ def main():
                              "is named after the hired assistant")
     parser.add_argument("--folder-response", action="store_true",
                         help="wt demo: compact real folder Send/replay with a scripted loopback reply")
-    parser.add_argument("--folder-response-evidence-stage", choices=["group-3", "group-4", "final"],
+    parser.add_argument("--folder-response-evidence-stage", choices=["group-3", "group-4", "final", "explorer"],
                         help="Keep folder-response captures in a distinct local evidence stage")
     parser.add_argument("--folder-response-baseline", action="store_true",
                         help="wt demo: built drawer controller baseline vs standalone synthetic prototype; no model")

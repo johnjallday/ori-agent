@@ -1,5 +1,7 @@
 // One local folder preview per personal conversation. No paths, observations or
 // authority are recovered from browser storage. Only Send shares a reference.
+import { folderFocusView, folderTreeView } from './personal-assistant-folder-tree.js';
+import { initFolderExplorer } from './personal-assistant-folder-explorer.js';
 import { folderChooserView } from './personal-assistant-folder-chooser.js';
 import { collectWorkspaceContext } from './personal-assistant-workspace-context.js';
 import {
@@ -13,7 +15,7 @@ export { observationSummary, coverageSummary } from './personal-assistant-folder
 
 const ENDPOINT = '/api/home-assistant/folder-context';
 export const FOLDER_DISCLOSURE =
-  'File contents have not been read. Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.';
+  'File contents have not been read. Send shares the recorded file/folder and project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.';
 
 /** Pure state machine with injected I/O: stale picker/network results cannot
  * cross a conversation switch, removal or replacement. */
@@ -29,6 +31,7 @@ export function createFolderContextController({
     draftId: uuid(),
     revision: '',
     observation: null,
+    focusIDs: [],
     accepted: null,
     offerId: '',
     authority: '',
@@ -56,6 +59,7 @@ export function createFolderContextController({
       draftId: uuid(),
       revision: saved.revision || '',
       observation: saved.observation || null,
+      focusIDs: [],
       accepted: saved.observation || null,
       offerId: saved.offer_id || '',
       authority: saved.authority || (saved.historical ? state.authority || 'historical' : ''),
@@ -90,6 +94,7 @@ export function createFolderContextController({
         return false;
       }
       state.observation = result.observation;
+      state.focusIDs = [];
       if (typeof result.revision === 'string' && result.revision !== state.revision) {
         state.revision = result.revision;
         state.accepted = null; // server retired the previous binding/reviews
@@ -134,6 +139,7 @@ export function createFolderContextController({
         state.revision = result.revision;
       }
       state.observation = null;
+      state.focusIDs = [];
       state.accepted = null;
       state.offerId = '';
       state.preview = false;
@@ -162,12 +168,38 @@ export function createFolderContextController({
       selection_id: state.observation.id,
       revision: state.revision,
       ...(state.conversationId ? {} : { draft_id: state.draftId }),
-      ...(state.authority ? { historical: true } : {})
+      ...(state.authority ? { historical: true } : {}),
+      ...(state.focusIDs.length ? { focus_ids: [...state.focusIDs] } : {})
     };
+  }
+  function setFocus(ids, binding) {
+    if (
+      !state.observation ||
+      state.pending ||
+      state.conversationId !== currentId() ||
+      (binding &&
+        (binding.observationId !== state.observation.id ||
+          binding.generation !== state.generation ||
+          binding.conversationId !== state.conversationId)) ||
+      !folderFocusView(state.observation, ids)
+    )
+      return false;
+    state.focusIDs = [...ids];
+    changed(state);
+    return true;
   }
   function accepted(id, saved) {
     if (!saved) return;
+    // Checks changed while the model replied apply only to the NEXT turn. Do
+    // not replace them with the already-frozen sent turn's focus.
+    const focusIDs =
+      state.observation?.id === saved.observation?.id &&
+      (!state.conversationId || state.conversationId === id)
+        ? [...state.focusIDs]
+        : [];
     reset(id, saved);
+    state.focusIDs = focusIDs;
+    changed(state);
   }
   // A turn without a folder can be the one that saves the conversation. The
   // next Add folder must then target that conversation, not the draft it was
@@ -245,7 +277,7 @@ export function createFolderContextController({
       }
     }
   }
-  return { state, select, remove, reset, request, accepted, adopt, review, notify };
+  return { state, select, remove, reset, request, setFocus, accepted, adopt, review, notify };
 }
 
 async function jsonRequest(url, body) {
@@ -266,6 +298,7 @@ async function jsonRequest(url, body) {
 }
 
 let controller;
+let explorer;
 let elements;
 let chooserGeneration = 0;
 let lastEventKey;
@@ -308,7 +341,11 @@ function discussionDraft(value, projectId = '') {
   const text = folderDiscussionText(controller.state.observation, projectId, {
     historical: Boolean(controller.state.authority) || value.restored === true
   });
-  return Boolean(text && window.PersonalAssistantPanel?.suggestReply?.(text));
+  const accepted = Boolean(text && window.PersonalAssistantPanel?.suggestReply?.(text));
+  // Legacy draft shortcuts must not conflict with a different checkbox focus.
+  // A rejected suggestion preserves both the exact text AND the next focus.
+  if (accepted) controller.setFocus([]);
+  return accepted;
 }
 
 function renderDiscussion() {
@@ -449,6 +486,7 @@ function render(state) {
   window.PersonalAssistantFolder?.contextProgress?.(state);
   window.PersonalAssistantFolderSetup?.contextChanged?.(state);
   renderDiscussion();
+  explorer?.refresh();
 }
 
 function closeChooser({ restoreFocus = true } = {}) {
@@ -483,7 +521,9 @@ async function open() {
       button.addEventListener('click', async () => {
         closeChooser();
         const selectedGeneration = chooserGeneration;
-        await controller.select(choice.mode, choice.chip);
+        const selected = await controller.select(choice.mode, choice.chip);
+        if (selected && folderTreeView(controller.state.observation))
+          explorer?.explore({ automatic: true });
         // Disabling Add during selection can move focus to body. Restore it
         // only if the user has not moved elsewhere or left this conversation.
         if (selectedGeneration === chooserGeneration && document.activeElement === document.body)
@@ -587,6 +627,12 @@ function init() {
       window.OriAskRouting?.getState?.().busy === true ||
       window.PersonalAssistantConversation?.isLoading?.() === true
   });
+  explorer = initFolderExplorer({
+    current: () => controller.state,
+    setFocus: (ids, binding) =>
+      !window.PersonalAssistantConversation?.isLoading?.() && controller.setFocus(ids, binding),
+    notify: message => controller.notify(message)
+  });
   document.getElementById('personalAssistantInput')?.addEventListener('input', updateSendHint);
   document.addEventListener('personal-assistant:status', renderDiscussion);
   document.addEventListener('personal-assistant:sent', () => {
@@ -641,11 +687,17 @@ const api = {
     closeDiscussionChooser({ restoreFocus: false });
   },
   bindDiscussion,
-  refreshDiscussion: renderDiscussion,
+  refreshDiscussion: () => {
+    renderDiscussion();
+    explorer?.refresh();
+  },
+  explore: () => explorer?.explore() || false,
+  showChat: () => explorer?.showChat(),
   reset,
   hydrate: (id, saved) => {
     // Resume has already rendered canonical events; keep their deduplication key.
     closeChooser({ restoreFocus: false });
+    explorer?.collapse({ focus: false });
     controller?.reset(id, saved);
   },
   renderEvent,

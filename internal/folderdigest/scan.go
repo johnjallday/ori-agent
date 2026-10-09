@@ -10,6 +10,7 @@ package folderdigest
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +57,9 @@ type Options struct {
 	MaxDepth   int
 	MaxEntries int
 	Budget     time.Duration
+	// CaptureTree retains at most 64 observed entries, during this same walk.
+	// It is opt-in for conversation attachments, never a second scan or reader.
+	CaptureTree bool
 	// Now supplies the clock, for tests that exercise the time budget.
 	Now func() time.Time
 }
@@ -120,6 +124,18 @@ func (c Candidate) DistinctExtensions() int { return len(c.Extensions) }
 // LooseKinds is the number of file kinds among the root's loose files.
 func (c Candidate) LooseKinds() int { return len(c.LooseExtensions) }
 
+// MetadataEntry is one actually observed entry. IDs are snapshot-local, not paths.
+type MetadataEntry struct {
+	ID, ParentID, Name, Kind string
+}
+
+type MetadataTree struct {
+	Nodes   []MetadataEntry
+	Omitted int // examined eligible entries excluded from this bounded projection
+}
+
+const MaxTreeNodes = 64
+
 // Result is one scan's outcome.
 type Result struct {
 	// Root is the scanned folder's absolute path; in memory only.
@@ -138,6 +154,8 @@ type Result struct {
 	PartialReason string
 	ScannedAt     time.Time
 	Elapsed       time.Duration
+	// Metadata is process-local until explicitly sanitized for an attachment.
+	Metadata *MetadataTree `json:"-"`
 }
 
 // RootCandidate returns the root's own stats.
@@ -201,8 +219,11 @@ func Scan(root string, opts Options) (Result, error) {
 	}
 
 	s := &scanner{opts: opts, start: opts.Now()}
+	if opts.CaptureTree {
+		s.metadata = &MetadataTree{Nodes: []MetadataEntry{}}
+	}
 	s.root = newAccumulator(root, "", true)
-	if err := s.walk(root, 0, []*accumulator{s.root}, s.root, true); err != nil {
+	if err := s.walk(root, 0, []*accumulator{s.root}, s.root, true, ""); err != nil {
 		return Result{}, err
 	}
 
@@ -215,6 +236,7 @@ func Scan(root string, opts Options) (Result, error) {
 		PartialReason: s.partialReason,
 		ScannedAt:     s.start,
 		Elapsed:       opts.Now().Sub(s.start),
+		Metadata:      s.metadata,
 	}
 	result.Candidates = append(result.Candidates, s.root.finish())
 	for _, sub := range s.subfolders {
@@ -231,6 +253,7 @@ type scanner struct {
 	partialReason string
 	root          *accumulator
 	subfolders    []*accumulator
+	metadata      *MetadataTree
 }
 
 // stopped reports whether a bound has tripped, marking the reason the first
@@ -252,7 +275,7 @@ func (s *scanner) stopped() bool {
 // down, since a marker only counts directly inside a candidate (FR14).
 // fatal says whether a read error fails the scan (root) or skips the
 // directory (everything else).
-func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner *accumulator, fatal bool) error {
+func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner *accumulator, fatal bool, parentID string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if fatal {
@@ -294,6 +317,7 @@ func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner
 			if skippedFolders[name] {
 				continue
 			}
+			id := s.noteEntry(parentID, depth, name, "folder")
 			child := filepath.Join(dir, name)
 			childOwners := owners
 			var childMarkerOwner *accumulator
@@ -304,7 +328,7 @@ func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner
 				childMarkerOwner = sub
 			}
 			if depth+1 <= s.opts.MaxDepth {
-				if err := s.walk(child, depth+1, childOwners, childMarkerOwner, false); err != nil {
+				if err := s.walk(child, depth+1, childOwners, childMarkerOwner, false, id); err != nil {
 					return err
 				}
 			}
@@ -316,6 +340,7 @@ func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner
 		if err != nil || !info.Mode().IsRegular() || isDataless(info) {
 			continue
 		}
+		s.noteEntry(parentID, depth, name, "file")
 		ext := strings.ToLower(filepath.Ext(name))
 		for _, owner := range owners {
 			owner.addFile(ext, info.ModTime())
@@ -325,6 +350,20 @@ func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner
 		}
 	}
 	return nil
+}
+
+func (s *scanner) noteEntry(parentID string, depth int, name, kind string) string {
+	if s.metadata == nil {
+		return ""
+	}
+	// Never manufacture a root relationship for a child whose parent was omitted.
+	if len(s.metadata.Nodes) >= MaxTreeNodes || (depth > 0 && parentID == "") {
+		s.metadata.Omitted++
+		return ""
+	}
+	id := fmt.Sprintf("entry-%d", len(s.metadata.Nodes))
+	s.metadata.Nodes = append(s.metadata.Nodes, MetadataEntry{ID: id, ParentID: parentID, Name: name, Kind: kind})
+	return id
 }
 
 // accumulator gathers one candidate's counts during the walk.

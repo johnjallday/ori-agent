@@ -30,13 +30,13 @@ printf 'Screenshots: %s\nServer log: %s\n' "$shots" "$log"
 BASH
 ```
 
-The browser script drives a **fresh** sandbox, asserts the visible receipts and captures PNGs. Don't call the `hqcard` or `hq` smoke recipe *before* the browser script; they change the initial hire state. The lower-level recipes are useful in a separate sandbox: `./scripts/smoke.sh showfolder http://localhost:8951 hqcard` leaves the setup card pending, `hq` provisions an HQ, and `today` prints the three Today sections and source health. `./scripts/smoke.sh showfolder http://localhost:8951 scan documents` inspects an offer after provisioning. The seed steps change only the sandbox path you give them.
+The browser script drives a **fresh** sandbox, asserts the visible receipts and captures PNGs. Don't call the `hqcard` or `hq` smoke recipe _before_ the browser script; they change the initial hire state. The lower-level recipes are useful in a separate sandbox: `./scripts/smoke.sh showfolder http://localhost:8951 hqcard` leaves the setup card pending, `hq` provisions an HQ, and `today` prints the three Today sections and source health. `./scripts/smoke.sh showfolder http://localhost:8951 scan documents` inspects an offer after provisioning. The seed steps change only the sandbox path you give them.
 
 Inspect screenshots at full size (especially `02c-home-action-opens-hq.png`, `03-hq-receipt.png`, `04b-home-action-opens-chooser.png`, `04d-inline-chooser-dark.png`, `04e-more-menu-dark.png`, `11b-more-menu-phone.png`, `04c-new-workspace-remains.png`, `05-four-missions.png`, `06a-avatar-digests-folder.png`, `08-project-receipt.png`, `09-corpus-receipt.png`, `11-today-phone.png`, and `12-today-degraded.png`). Check these behaviors:
 
-1. Before hiring, the primary Home **Explore a folder** action is hidden; **New Workspace** remains available as the advanced path. After hiring, the Home action opens the *existing* HQ setup card; the `/?quest=build-hq` Map walkthrough is still opt-in.
+1. Before hiring, the primary Home **Explore a folder** action is hidden; **New Workspace** remains available as the advanced path. After hiring, the Home action opens the _existing_ HQ setup card; the `/?quest=build-hq` Map walkthrough is still opt-in.
 2. Confirm the suggested workspace directory before building My HQ. Expand the progress row ("N in progress · M done today"), then the **Setup receipt** in Done, to see the observed workspace, directory, and Daily Brief schedule; the completed HQ card is no longer in Needs you. On a reload, the workspace and schedule are reloaded from the server, but a past directory is not guessed from the current settings. Once active, Home opens the folder chooser. The empty Map and assistant launcher also link to the same chooser.
-3. A ready drawer is one conversation with a pinned composer. Unrelated attention stays behind **Show**; expanding it retains its original cards and forms. **Add folder**, Home's **Explore a folder**, the mission's Start and `folder=show` open the same chooser. They do not fabricate a user message, scan automatically, or send a model request. First-time guidance points to Add folder; reset re-arms that guidance, not a conversation turn. Choose Documents: the existing portrait animation runs during the local request, then stops at a bounded **Local preview · not sent**. Read the coverage/disclosure: only observed names, kinds, counts and markers are available; file contents have not been read. Send is the separate model-sharing action. Cancel or a failed replacement preserves the prior folder and draft. Reduced motion conveys the same status without animation. The visible board still has four missions.
+3. A ready drawer is one conversation with a pinned composer. Unrelated attention stays behind **Show**; expanding it retains its original cards and forms. **Add folder**, Home's **Explore a folder**, the mission's Start and `folder=show` open the same chooser. They do not fabricate a user message, scan automatically, or send a model request. First-time guidance points to Add folder; reset re-arms that guidance, not a conversation turn. Choose Documents: the existing portrait animation runs during the local request, then opens **Tree + Chat** with a bounded **Local snapshot · not sent**. Read the coverage/disclosure: only recorded names/relationships, kinds, counts and markers are available; file contents have not been read. Independent checks set discussion topics, not access or descendants. **Back to chat** preserves the attachment, focus and exact draft, returning to the compact preview. Send is the separate model-sharing action. Cancel or a failed replacement preserves the prior folder and draft. Reduced motion conveys the same status without animation. The visible board still has four missions.
 4. Choose **Review setup**, explicitly select Thesis, then **Review selection**. Review saves a canonical event but creates no workspace and needs no model. The existing card names the candidate/type and proposed effects. **Keep chatting** closes it without a decline or learning; review again to proceed. **Adjust name** changes the workspace name, not the source-folder label. Confirm **Set up**. Blueprint, linked folder, roles, first task and route come from the persisted receipt, not preview guesses. Replay returns the same workspace and does not duplicate starter tasks. Replace the attachment with Desktop and explicitly review the whole-folder corpus candidate; its research blueprint and sources-index task appear when installed. Reload recovers receipts. Removing context does not undo completed setup. After restart/expiry, repick before new setup; saved observations alone are not a filesystem grant.
 5. The drawer shows **Needs you**, then the progress row, which expands **Working on** and **Done** in place, with bounded seven-day results for both created projects. The assistant's name and the short next-check-in line under it stay legible; the header's **More** menu (the "…" button) retains Personal HQ, Working agreement, workspace memory, remembered-facts review, conditional interview, and Manage agents. Open it by keyboard, press Escape to close only the menu, and check the same controls at phone width. On a narrow viewport the labels remain readable and no section disappears. If one source is unavailable, the footer names it with a Retry button; it does not silently claim an empty day. Confirm the old standalone Today sections are not rendered.
 6. Open **New Workspace** from Home after the assistant is active. The modal still works, and its **Import Folder** advanced option remains separate from the assistant's folder intake. Closing the modal does not dismiss the assistant relationship. The Map's empty-state create/import actions still open the same modal; the old map canvas create pad was removed before this feature.
@@ -49,10 +49,49 @@ Automated browser checks from fresh sandboxes:
 ./scripts/e2e-fresh.sh tests/personal-assistant-foundation.spec.ts tests/personal-assistant-foundation.a11y.spec.ts tests/personal-hq-daily-brief.spec.ts tests/starter-missions.spec.ts tests/folder-first-scene.spec.ts tests/domain-specialist-onboarding.spec.ts -- --workers=1
 ```
 
+## Tree + Chat discussion focus
+
+Repeat on Home and Settings using only synthetic files in the disposable HOME.
+Successful new attachment opens the existing drawer's explorer, not a new
+conversation. Desktop shows independently scrolling tree/chat panes; phone
+starts on Tree with Tree/Chat controls and the same pinned composer. Expand a
+recorded folder and independently check it and a child file: neither cascades.
+Names/relationships must match the bounded local scan, never a model guess.
+Open the bounded/partial disclosure for scan time, limits and omitted entries;
+expanding cannot recover omitted/unscanned entries or read file contents.
+
+Enter a Unicode/whitespace draft. Checks, expanding, Tree/Chat and Back to chat
+must retain it exactly. Back to chat also retains attachment and focus; use
+Tree + Chat to reopen locally. Only Send shares the bounded metadata with the
+configured model. Focus is discussion emphasis, not a privacy filter, read
+permission or selection of all descendants. Clear focus means whole-folder
+discussion. At most eight distinguishable topics fit the bounded request; long
+labels may require fewer, and ambiguous sanitized names cannot be checked.
+
+Send, then change checks while the reply is pending. The sent user badge must
+remain immutable; the new checks belong only to the next turn. Reload preserves
+canonical sent badges and prose but clears next-turn checks and stays in ordinary
+chat. Cancel/failed picker preserves the prior focus; successful replacement,
+detach and New clear it. Legacy snapshots have summary-only history, no invented
+tree. Saved canonical trees may be discussed without a rescan; setup/read rights
+still require their separate live authority and review gates.
+
+Controlled host/tree/focus validation (no vendor credentials):
+
+```bash
+ORI_DEMO_NO_CODEX=1 ORI_SKIP_CACHE_PRUNE=1 \
+  python3 scripts/assistant-workspace-demo.py --folder-response \
+  --folder-response-evidence-stage explorer --port 8931
+```
+
+This is host/privacy/persistence/layout evidence, not live-model, native picker,
+native zoom or screen-reader evidence. Existing compact-summary, draft shortcuts
+and explicit setup journeys remain below.
+
 ## Compact folder discussion
 
-With an approved configured model, Send **Explore this folder** after the local
-preview. Expect one factual card: folder heading/date, bounded or partial look,
+With an approved configured model, return **Back to chat** and Send **Explore
+this folder** after the local preview. Expect one factual card: folder heading/date, bounded or partial look,
 **Attached folder: contents not read**, and at most three non-root observed rows.
 Show more reveals only remaining recorded rows, not omitted/unscanned folders.
 Scan details contains precise time, overlap-safe counts and coverage limits.
@@ -76,8 +115,9 @@ eligible current choice strip, with saved-observation wording. Lost/expired sele
 discussion; repick before inspection/new setup. Detach, replacement, New,
 imported/legacy prose, failed/unsaved replies or trimmed-away eligible answers
 must not revive old shortcuts. Long replies scroll normally with the composer
-pinned. Check light/dark, phone and keyboard focus/Escape nesting; no extra scroll
-container or horizontal overflow.
+pinned. Check light/dark, phone and keyboard focus/Escape nesting; no nested
+transcript frame or horizontal overflow. The editable textarea may scroll long
+text; exploration uses a separate tree pane, not a second transcript.
 
 When fresh setup is available, secondary **Optional: review setup** appears
 below the discussion choices. Click it and separately choose the whole folder

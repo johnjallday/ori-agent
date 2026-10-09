@@ -24,10 +24,11 @@ var ErrPersonalAssistantFolderConflict = errors.New("conversation folder revisio
 // HomeAssistantFolderRef contains references only. Observation text and paths
 // are never accepted, even by the legacy permissive Ask JSON decoder.
 type HomeAssistantFolderRef struct {
-	SelectionID string `json:"selection_id,omitempty"`
-	Revision    string `json:"revision,omitempty"`
-	DraftID     string `json:"draft_id,omitempty"`
-	Historical  bool   `json:"historical,omitempty"`
+	SelectionID string   `json:"selection_id,omitempty"`
+	Revision    string   `json:"revision,omitempty"`
+	DraftID     string   `json:"draft_id,omitempty"`
+	Historical  bool     `json:"historical,omitempty"`
+	FocusIDs    []string `json:"focus_ids,omitempty"`
 }
 
 func (ref *HomeAssistantFolderRef) UnmarshalJSON(data []byte) error {
@@ -40,6 +41,14 @@ func (ref *HomeAssistantFolderRef) UnmarshalJSON(data []byte) error {
 	}
 	if len(decoded.SelectionID) > 96 || len(decoded.Revision) > 96 || len(decoded.DraftID) > 96 {
 		return foldercontext.ErrInvalid
+	}
+	if len(decoded.FocusIDs) > foldercontext.MaxFocusNodes {
+		return foldercontext.ErrInvalid
+	}
+	for _, id := range decoded.FocusIDs {
+		if len(id) > 96 {
+			return foldercontext.ErrInvalid
+		}
 	}
 	*ref = HomeAssistantFolderRef(decoded)
 	return nil
@@ -162,7 +171,7 @@ func (h *HomeAssistantAskHandler) resolveFolderObservation(ctx context.Context, 
 func folderStateFromMessages(messages []PersonalAssistantConversationMessage) PersonalAssistantFolderState {
 	state := PersonalAssistantFolderState{}
 	for _, message := range messages {
-		if message.Imported || message.FolderContext == nil {
+		if message.Imported || message.Role != "system" || message.ID == "" || message.FolderContext == nil || message.FolderContext.Validate() != nil {
 			continue
 		}
 		state = PersonalAssistantFolderState{Revision: message.ID, Observation: message.FolderContext.Observation, OfferID: message.FolderContext.OfferID}

@@ -58,6 +58,11 @@ export function folderPresentation(
     details: [
       observationSummary(observation),
       `${plural(count(observation.entries), 'entry', 'entries')} observed.`,
+      ...(observation.tree
+        ? [
+            `${plural(observation.tree.nodes?.length || 0, 'tree entry', 'tree entries')} recorded; ${plural(count(observation.tree.omitted), 'more observed entry', 'more observed entries')} omitted from the tree. Tree + Chat displays only these recorded relationships.`
+          ]
+        : []),
       ...projects.map(
         project =>
           `${project.root ? 'Whole folder' : 'Observed folder'} “${String(project.name)}”: ${plural(count(project.files), 'file')} observed.`
@@ -205,7 +210,7 @@ export function renderFolderSummary(container, observation, options = {}) {
     details.append(
       node(
         'p',
-        'Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.'
+        'Send shares the recorded file/folder and project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.'
       )
     );
   else details.append(node('p', 'These are dated observations, not permission to inspect again.'));

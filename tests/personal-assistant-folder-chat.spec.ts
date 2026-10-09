@@ -783,6 +783,119 @@ test('browser fixture: failed save and delayed reply preserve intent and newer t
 });
 
 for (const theme of ['light', 'dark']) {
+  test(`browser fixture: ${theme} explorer focus, limits, keyboard and snapshot retirement`, async ({
+    page
+  }) => {
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    const fixture = await installFixture(page);
+    fixture.scenario = {
+      tree: {
+        omitted: 14,
+        nodes: Array.from({ length: 10 }, (_, index) => ({
+          id: `entry-${index}`,
+          name: index === 0 ? '<img onerror=alert(1)> 🎼' : `Topic ${index}`,
+          kind: 'file'
+        }))
+      },
+      coverage: {
+        max_depth: 3,
+        max_entries: 5000,
+        budget_seconds: 3,
+        partial: true,
+        partial_reason: 'entries'
+      }
+    };
+    await open(page, '/settings');
+    const input = page.locator('#personalAssistantInput');
+    await input.fill('  Preserve exact 🎼 text\n');
+    await choose(page);
+    const pane = page.locator('#personalAssistantFolderExplorer');
+    await expect(pane).toBeVisible();
+    await expect(pane).toContainText('Partial snapshot · 10 entries · 14 omitted');
+    await expect(pane.locator('img, script')).toHaveCount(0);
+    const checks = pane.locator('input[type="checkbox"]');
+    await checks.first().focus();
+    await page.keyboard.press('Space');
+    await expect(checks.first()).toBeChecked();
+    for (let index = 1; index < 8; index++) await checks.nth(index).check();
+    // This activation is deliberately refused; check() requires success.
+    await checks.nth(8).click();
+    await expect(checks.nth(8)).not.toBeChecked();
+    await expect(page.locator('#personalAssistantExplorerNotice')).toContainText('up to 8');
+    await expect(input).toHaveValue('  Preserve exact 🎼 text\n');
+    expect(fixture.requests).toHaveLength(0);
+    await page.evaluate(() => {
+      (window as any).retiredTreeCheck = document.querySelector('[data-tree-focus="entry-0"]');
+    });
+    fixture.scan = 'cancel';
+    await choose(page, 'Desktop');
+    await expect(checks.first()).toBeChecked();
+    await page.evaluate(() => {
+      const check = (window as any).retiredTreeCheck;
+      check.checked = false;
+      check.dispatchEvent(new Event('change'));
+    });
+    await expect(checks.first()).toBeChecked();
+    fixture.scan = 'success';
+    fixture.mode = 'delay';
+    await input.fill('Discuss selected metadata');
+    await page.locator('#personalAssistantSend').click();
+    await expect.poll(() => Boolean(fixture.releaseReply)).toBe(true);
+    await checks.first().uncheck();
+    await input.fill('  Newer exact text 🎼  ');
+    fixture.releaseReply!();
+    await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+    await expect(checks.first()).not.toBeChecked();
+    await expect(input).toHaveValue('  Newer exact text 🎼  ');
+    expect(
+      fixture.requests.find(row => row.stage === 'ask')!.folder_context.focus_ids
+    ).toHaveLength(8);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#personalAssistantExplorerTreeTab').click();
+    await checks.nth(2).focus();
+    await expect(checks.nth(2)).toBeInViewport({ ratio: 1 });
+    await page.keyboard.press('Tab');
+    await expect(checks.nth(3)).toBeFocused();
+    await page.locator('#personalAssistantFolderFocusClear').click();
+    await expect(input).toBeFocused();
+    await expect(pane.locator('input:checked')).toHaveCount(0);
+    await page.locator('#personalAssistantExplorerBack').click();
+    await page.locator('#personalAssistantConversationNew').click();
+    await expect(pane).toBeHidden();
+    await expect(input).toHaveValue('  Newer exact text 🎼  ');
+    fixture.scenario = { tree: { nodes: [], omitted: 0 } };
+    await choose(page);
+    await expect(pane).toContainText('No visible entries recorded');
+    await expect(pane.locator('input')).toHaveCount(0);
+    await page.locator('#personalAssistantExplorerBack').click();
+    fixture.scenario = {
+      tree: {
+        omitted: 0,
+        nodes: [
+          { id: 'entry-0', name: 'Same name', kind: 'folder' },
+          { id: 'entry-1', name: 'Same name', kind: 'folder' }
+        ]
+      }
+    };
+    await choose(page, 'Desktop');
+    await expect(pane.locator('input').first()).toBeDisabled();
+    await expect(pane.locator('input').last()).toBeDisabled();
+    await expect(pane).toContainText('indistinguishable name');
+    await page.locator('#personalAssistantExplorerBack').click();
+    fixture.scenario = { tree: null };
+    await choose(page);
+    await expect(pane).toBeHidden();
+    await expect(page.locator('#personalAssistantExploreAttachedFolder')).toBeHidden();
+    await page.evaluate(() => (window as any).PersonalAssistantFolderContext.explore());
+    await expect(pane).toContainText('Saved folder summaries only');
+    await expect(pane.locator('input')).toHaveCount(0);
+    await page.locator('#personalAssistantRemoveFolder').click();
+    await expect(pane).toBeHidden();
+    await expect(input).toHaveValue('  Newer exact text 🎼  ');
+  });
+}
+
+for (const theme of ['light', 'dark']) {
   test(`browser fixture: ${theme} bounded/hostile matrix, keyboard choices and accessible reflow`, async ({
     page
   }) => {
@@ -949,6 +1062,10 @@ for (const theme of ['light', 'dark']) {
           const nested = Array.from(panel.querySelectorAll('*')).filter(
             el =>
               el.id !== 'personalAssistantScroll' &&
+              // The pinned editable textarea may scroll long text/placeholder
+              // at reflow. It is not a nested transcript or metadata viewport.
+              el.id !== 'personalAssistantInput' &&
+              el.getClientRects().length > 0 &&
               ['auto', 'scroll'].includes(getComputedStyle(el).overflowY) &&
               el.scrollHeight > el.clientHeight
           );
@@ -967,7 +1084,22 @@ for (const theme of ['light', 'dark']) {
             )
           };
         });
-        expect(layout).toEqual({
+        const scrollDiagnostics = await page.locator('#personalAssistantPanel').evaluate(panel =>
+          Array.from(panel.querySelectorAll('*'))
+            .filter(
+              el =>
+                ['auto', 'scroll'].includes(getComputedStyle(el).overflowY) &&
+                el.scrollHeight > el.clientHeight
+            )
+            .map(el => ({
+              id: el.id,
+              tag: el.tagName,
+              visible: Boolean(el.getClientRects().length),
+              scroll: el.scrollHeight,
+              client: el.clientHeight
+            }))
+        );
+        expect(layout, JSON.stringify(scrollDiagnostics)).toEqual({
           overflow: false,
           nested: 0,
           inputVisible: true,
@@ -983,11 +1115,9 @@ for (const theme of ['light', 'dark']) {
           await expect(chooseDiscussion).toBeFocused();
           await chooseDiscussion.press('Enter');
           await expect(page.locator('#personalAssistantFolderDiscussionCandidate')).toBeFocused();
-          await page
-            .locator('#personalAssistantPanel')
-            .screenshot({
-              path: join(evidence, `${theme}-${scenario.id}-${width}px-local-chooser.png`)
-            });
+          await page.locator('#personalAssistantPanel').screenshot({
+            path: join(evidence, `${theme}-${scenario.id}-${width}px-local-chooser.png`)
+          });
           await page.keyboard.press('Escape');
           await expect(chooseDiscussion).toBeFocused();
           await expect(page.locator('#personalAssistantInput')).toHaveValue('');

@@ -2,6 +2,7 @@ package personalassistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -125,7 +126,7 @@ func (s *FolderObservationService) Observe(ctx context.Context, target foldercon
 	if err != nil {
 		return nil, ErrFolderPathLost
 	}
-	result, err := d.deps.Scan(root)
+	result, err := d.deps.ScanObservation(root)
 	if err != nil {
 		return nil, &FolderRootError{Message: "Ori could not inspect that folder. Check access or choose a different folder. No file contents were read."}
 	}
@@ -153,6 +154,9 @@ func (s *FolderObservationService) Observe(ctx context.Context, target foldercon
 	s.selections[observation.ID] = heldFolderObservation{
 		target: target, binding: binding, root: root, identity: identity, result: result, observation: observation,
 	}
+	observation.Kinds = append([]foldercontext.Kind(nil), observation.Kinds...)
+	observation.Projects = append([]foldercontext.Project(nil), observation.Projects...)
+	observation.Tree = observation.CloneTree()
 	return &observation, nil
 }
 
@@ -176,6 +180,7 @@ func (s *FolderObservationService) Resolve(ctx context.Context, target foldercon
 	// Copy the slices: consumers cannot mutate the server's held evidence.
 	observation.Kinds = append([]foldercontext.Kind(nil), observation.Kinds...)
 	observation.Projects = append([]foldercontext.Project(nil), observation.Projects...)
+	observation.Tree = observation.CloneTree()
 	return &observation, nil
 }
 
@@ -282,7 +287,8 @@ func summarizeFolder(result folderdigest.Result, id string) foldercontext.Observ
 		observation.Coverage.KindsOmitted = len(observation.Kinds) - foldercontext.MaxNames
 		observation.Kinds = observation.Kinds[:foldercontext.MaxNames]
 	}
-	// Root plus immediate subfolders, never an arbitrary file inventory.
+	// Root plus immediate subfolder summaries; a separate optional tree retains
+	// bounded relationships genuinely recorded during this same scan.
 	for index, candidate := range result.Candidates {
 		if len(observation.Projects) >= foldercontext.MaxNames {
 			observation.Coverage.ProjectsOmitted++
@@ -297,6 +303,27 @@ func summarizeFolder(result folderdigest.Result, id string) foldercontext.Observ
 			project.Marker = foldercontext.DisplayName(candidate.Marker.Name)
 		}
 		observation.Projects = append(observation.Projects, project)
+	}
+	if result.Metadata != nil {
+		observation.Tree = &foldercontext.Tree{Nodes: []foldercontext.TreeNode{}, Omitted: result.Metadata.Omitted}
+		for _, entry := range result.Metadata.Nodes {
+			name := foldercontext.DisplayName(entry.Name)
+			if name == "" {
+				name = "Unnamed entry"
+			}
+			observation.Tree.Nodes = append(observation.Tree.Nodes, foldercontext.TreeNode{ID: entry.ID, ParentID: entry.ParentID, Name: name, Kind: entry.Kind})
+		}
+		// Keep a parent-before-child prefix within the existing 8KiB limit;
+		// removing its tail cannot leave an invented/orphan relationship.
+		// Reserve room for escaped per-turn focus in the provider projection.
+		for len(observation.Tree.Nodes) > 0 {
+			encoded, err := json.Marshal(observation)
+			if err == nil && len(encoded) <= foldercontext.MaxBytes-512 {
+				break
+			}
+			observation.Tree.Nodes = observation.Tree.Nodes[:len(observation.Tree.Nodes)-1]
+			observation.Tree.Omitted++
+		}
 	}
 	return observation
 }

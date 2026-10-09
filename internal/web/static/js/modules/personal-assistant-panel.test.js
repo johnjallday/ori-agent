@@ -252,7 +252,10 @@ test('Add folder sits inside the composer, on every page', () => {
   // The attachment row remains outside the scrolling region.
   assert.ok(drawer.indexOf('id="personalAssistantPanelStatus"') < chips);
   assert.ok(drawer.indexOf('id="personalAssistantThread"') < chips);
-  assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 1);
+  assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 2);
+  assert.match(drawer, /id="personalAssistantExploreAttachedFolder"[^>]+hidden>Tree \+ Chat/);
+  assert.equal((drawer.match(/id="personalAssistantInput"/g) || []).length, 1);
+  assert.equal((drawer.match(/id="personalAssistantForm"/g) || []).length, 1);
   assert.match(drawer, /id="personalAssistantFolderChip"[\s\S]{0,350}Add folder/);
   assert.match(drawer, /id="personalAssistantRemoveFolder" aria-label="Remove folder context"/);
   // Not inside a part of the drawer that only some pages render: the last

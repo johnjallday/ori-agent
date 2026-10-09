@@ -206,10 +206,32 @@ function setStatus(message) {
 
 function syncPanelViewport() {
   if (!state.els?.root) return;
+  const panel = state.els.panel;
+  const scale = panel?.offsetWidth
+    ? Math.max(1, Math.round((panel.getBoundingClientRect().width / panel.offsetWidth) * 100) / 100)
+    : 1;
+  state.els.root.style.setProperty('--pa-viewport-width', `${window.innerWidth / scale}px`);
+  state.els.root.style.setProperty('--pa-viewport-height', `${window.innerHeight / scale}px`);
+  panel?.classList.toggle(
+    'personal-assistant-panel--explorer-narrow',
+    window.innerWidth / scale <= 760
+  );
   const navbar = document.querySelector?.('nav.navbar');
   const bottom = navbar?.getBoundingClientRect?.().bottom;
+  const inlineToolbar =
+    window.innerWidth / scale >= 600 && (window.innerHeight - (bottom || 0)) / scale <= 520;
+  panel?.classList.toggle('personal-assistant-panel--inline-toolbar', inlineToolbar);
+  const clear = document.getElementById('personalAssistantFolderFocusClear');
+  const clearMount =
+    inlineToolbar && panel?.classList.contains('personal-assistant-panel--exploring')
+      ? state.els.chips
+      : document.getElementById('personalAssistantFolderFocus');
+  if (clear && clearMount && clear.parentElement !== clearMount) clearMount.append(clear);
   if (Number.isFinite(bottom)) {
-    state.els.root.style.setProperty('--ori-navbar-bottom', `${Math.max(0, Math.ceil(bottom))}px`);
+    state.els.root.style.setProperty(
+      '--ori-navbar-bottom',
+      `${Math.max(0, Math.ceil(bottom / scale))}px`
+    );
   }
 }
 
@@ -808,6 +830,17 @@ function init() {
   if (scroll && typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(() => requestAnimationFrame(revealFocusedControl)).observe(scroll);
   }
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(syncPanelViewport).observe(panel);
+  }
+  // CSS zoom changes rendered geometry without a content-box resize. Native
+  // zoom uses the resize listener; this also covers app/style reflow honestly.
+  if (typeof MutationObserver !== 'undefined') {
+    const observer = new MutationObserver(syncPanelViewport);
+    for (const root of [document.documentElement, document.body]) {
+      if (root) observer.observe(root, { attributes: true, attributeFilter: ['style', 'class'] });
+    }
+  }
   syncPanelViewport();
   renderHeader();
   // `/?panel=today` opens the drawer on Home. Wait for the server-owned
@@ -835,6 +868,7 @@ const api = {
   applyPersonalAssistant,
   setToday,
   setFolderBusy,
+  syncViewport: syncPanelViewport,
   refreshWorkspaceContext,
   _state: state
 };

@@ -173,6 +173,8 @@ test('wt demo: one conversation from setup review through notes, files, a delaye
     .locator('#personalAssistantFolderChoices')
     .getByRole('button', { name: 'Documents', exact: true })
     .click();
+  await expect(page.locator('#personalAssistantFolderExplorer')).toBeVisible();
+  await page.locator('#personalAssistantExplorerBack').click();
   await expect(page.locator('#personalAssistantFolderPreview')).toBeVisible();
   const asked = await send('Add this to my workspace');
   expect(asked.workspace_context.subject.id).toBe(group.id);
