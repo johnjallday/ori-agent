@@ -103,7 +103,35 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     }
   });
   expect(hq.status(), await hq.text()).toBe(201);
-  const resourcesBefore = (await (await request.get('/api/workspaces')).json()).folders.length;
+  // A real group page exercises the same passive viewport contract with a
+  // workspace context and an existing destination, not just app-wide routes.
+  const planResponse = await request.post('/api/workspaces/template-agent-plan', {
+    data: { group_roster: true, group_name: 'Conversation fixture group' }
+  });
+  expect(planResponse.ok(), await planResponse.text()).toBeTruthy();
+  const plan = await planResponse.json();
+  const groupResponse = await request.post('/api/workspaces', {
+    data: {
+      name: 'Conversation fixture group',
+      kind: 'group',
+      group_roster: true,
+      create_template_agents: true,
+      template_agent_review: {
+        version: 1,
+        plan_revision: plan.revision,
+        expectations: plan.agents.map((agent: any, index: number) => ({
+          index,
+          name: agent.name,
+          action: agent.action
+        }))
+      }
+    }
+  });
+  expect(groupResponse.ok(), await groupResponse.text()).toBeTruthy();
+  const workspaces = (await (await request.get('/api/workspaces')).json()).folders;
+  const group = workspaces.find((row: any) => row.name === 'Conversation fixture group');
+  expect(group?.folder_slug).toBeTruthy();
+  const resourcesBefore = workspaces.length;
   // Only Today failure presentation is a browser fixture. Chat/selection/review
   // requests, canonical history and held generation remain the real host path.
   await page.route('**/api/personal-assistant/today', async route => {
@@ -154,7 +182,8 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     JSON.parse(await readFile(join(provider!, 'provider-audit.json'), 'utf8'));
   for (const [path, prefix] of [
     ['/', 'home'],
-    ['/settings', 'settings']
+    ['/settings', 'settings'],
+    [`/workspaces/${group.folder_slug}/canvas`, 'workspace']
   ]) {
     await page.goto(path);
     await page.waitForFunction(() => (window as any).PersonalAssistantPanel?._state.view.available);

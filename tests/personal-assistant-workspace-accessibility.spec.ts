@@ -257,11 +257,11 @@ test('wt demo: the workspace-aware drawer works from the keyboard, announces con
       advice.conversation.id
     );
     await expect(answers.first()).toBeVisible();
+    await page.waitForFunction(() => (window as any).PersonalAssistantTranscript.isSettled());
     const measured = await page.evaluate(() => {
       const box = (id: string) => document.getElementById(id)!.getBoundingClientRect();
       const drawer = document.getElementById('personalAssistantPanel')!;
       const scroll = document.getElementById('personalAssistantScroll')!;
-      scroll.scrollTop = scroll.scrollHeight;
       const panelBox = box('personalAssistantPanel');
       const labelBox = box('personalAssistantWorkspaceContext');
       return {

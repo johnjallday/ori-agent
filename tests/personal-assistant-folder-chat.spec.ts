@@ -900,7 +900,9 @@ test('browser fixture: current choices survive cancellation but reject stale cal
   await input.fill('');
   await page.evaluate(() => (window as any).retiredFolderChoice.click());
   await expect(input).toHaveValue('');
-  const evidence = join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
+  const evidence =
+    process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR ||
+    join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   await page
     .locator('#personalAssistantPanel')
@@ -999,7 +1001,9 @@ for (const theme of ['light', 'dark']) {
   test(`browser fixture: ${theme} explorer focus, limits, keyboard and snapshot retirement`, async ({
     page
   }) => {
-    const evidence = 'tasks/evidence/assistant-folder-response-ux/select-all';
+    const evidence =
+      process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR ||
+      'tasks/evidence/assistant-folder-response-ux/select-all';
     await mkdir(evidence, { recursive: true });
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
     const fixture = await installFixture(page);
@@ -1178,7 +1182,9 @@ for (const theme of ['light', 'dark']) {
     const fixture = await installFixture(page);
     fixture.reviewable = [];
     await open(page, '/settings');
-    const evidence = join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
+    const evidence =
+      process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR ||
+      join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
     await mkdir(evidence, { recursive: true, mode: 0o750 });
     const accessibility: any[] = [];
     const ax = await page.context().newCDPSession(page);
@@ -1311,6 +1317,7 @@ for (const theme of ['light', 'dark']) {
       for (const [width, height, zoom] of [
         [1440, 900, 1],
         [390, 844, 1],
+        [320, 740, 1],
         [780, 1688, 2]
       ]) {
         await page.setViewportSize({ width, height });

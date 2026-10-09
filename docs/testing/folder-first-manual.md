@@ -96,10 +96,11 @@ and explicit setup journeys remain below.
 ## Compact folder discussion
 
 With an approved configured model, return **Back to chat** and Send **Explore
-this folder** after the local preview. Expect one factual card: folder heading/date, bounded or partial look,
-**Attached folder: contents not read**, and at most three non-root observed rows.
-Show more reveals only remaining recorded rows, not omitted/unscanned folders.
-Scan details contains precise time, overlap-safe counts and coverage limits.
+this folder** after the local preview. Expect one compact factual card: folder heading/date, bounded or partial look,
+and **Attached folder: contents not read**. Recorded rows and markers are behind
+**Scan details** by default; its nested Show more reveals only remaining recorded
+rows, not omitted/unscanned folders. Scan details also contains precise time,
+overlap-safe counts and coverage limits.
 The interpretation should be short (normally two or three sentences / about
 80 words for initial discovery), cautious about names/markers, and useful without
 a setup pitch. Specific questions and requests for detail override that default.
@@ -124,13 +125,15 @@ pinned. Check light/dark, phone and keyboard focus/Escape nesting; no nested
 transcript frame or horizontal overflow. The editable textarea may scroll long
 text; exploration uses a separate tree pane, not a second transcript.
 
-When fresh setup is available, secondary **Optional: review setup** appears
-below the discussion choices. Click it and separately choose the whole folder
-or project when multiple scopes are offered. Discussion choices never preselect
-setup. The existing review card explains effects before confirmation; an existing
+When fresh setup is available, a compact host-backed proposal appears below
+the discussion choices. **Choose setup scope** opens the one native chooser
+beside that proposal when multiple scopes are offered. It starts empty and uses
+a **Setting up** heading; discussion choices never preselect setup. A single
+candidate may have an explicit **Review workspace setup** shortcut. The existing review card explains effects before confirmation; an existing
 pending/running/stopped/completed review keeps its actual status/action even when
-there are no new options. Direct composer **Review setup** still works without a
-model. Neither Send, conversational “yes”, reload nor opening either chooser
+there are no new options. Direct composer **Review setup** (or **Review workspace setup**, depending on
+the offered type) still works without a model, using a labelled attached-folder
+handoff at the composer end of the same pane, not a fabricated assistant reply. Neither Send, conversational “yes”, reload nor opening either chooser
 creates a workspace or grants file access. Historical/unavailable context,
 unrelated pending review, content refusals and failed/unsaved answers have no new
 setup suggestion.
@@ -179,3 +182,49 @@ Current response-UX evidence and its post-implementation guide are local under
 `tasks/test-guide-assistant-folder-response-ux.md`. Report live-model/native-picker
 checks as NOT RUN unless separately exercised; do not count skips as passes.
 Keep the demo sandbox only for inspection; remove it when finished. Do not save its local directory paths or state to tracked files.
+
+## Conversation-first acceptance
+
+See [the conversation-first contract](../architecture/assistant-conversation-first.md).
+Use only synthetic folders; this controlled real-host/store journey requires no
+vendor credentials or specialized plugins:
+
+```bash
+ORI_SKIP_CACHE_PRUNE=1 python3 scripts/assistant-workspace-demo.py \
+  --conversation-first --port 8954 \
+  --evidence-dir tasks/evidence/assistant-conversation-first/manual-check
+```
+
+The runner builds and launches `wt demo`, then checks ordinary chat and Tree +
+Chat on Home, Settings and a real workspace-group page. Inspect geometry before
+any corrective scroll or focus: one turn-local pending row; a complete short
+reply and nearby actions; the beginning of a long reply; the pinned composer.
+While a reply waits, intentionally scroll history up and type an exact draft.
+Arrival must keep the visible row offset, keyboard focus, tree and outer page;
+only explicit **New reply** reveals/focuses the accepted answer. Reload reveals
+the newest exchange once; reopen retains intentional reading.
+
+Today source failures remain behind the compact Show disclosure with Retry;
+hiring/model/HQ prerequisites and request failures remain actionable. Local
+folder evidence is folded without hiding contents-not-read, sharing, dated or
+partial-coverage disclosures. Proposal art is decorative: type, proposed versus
+existing state and effects are text. An unknown destination is not standalone;
+a verified supporting link is not a new workspace. Collection/library cues do
+not promise one workspace per observed folder.
+
+Open the native setup chooser, cancel with Escape, and verify local focus return
+and exact draft preservation. Selection alone must make no model/review/create
+request. Explicit Review saves one canonical card; its own confirmation executes.
+During a pending request, newer typing must not be overwritten or lose focus.
+A focused obsolete choice remains explicitly inactive until blur, with no setup
+authority. Verify canonical closed/blocked/completed states and receipt-derived
+links, not name-built routes. The no-model confirmation suite above checks real
+creation/reload and unchanged sources; loopback prose and browser prototypes are
+not live specialized execution evidence.
+
+Repeat with light/dark themes, 390px and 320px layouts, reduced motion and CSS
+200%-equivalent reflow. Native browser zoom, picker interaction and human screen
+reader operation are separate manual checks, NOT RUN unless actually exercised.
+Feature evidence and the post-implementation guide stay ignored/local at
+`tasks/evidence/assistant-conversation-first/final/` and
+`tasks/test-guide-assistant-conversation-first.md`.
