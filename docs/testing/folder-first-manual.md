@@ -49,16 +49,61 @@ Automated browser checks from fresh sandboxes:
 ./scripts/e2e-fresh.sh tests/personal-assistant-foundation.spec.ts tests/personal-assistant-foundation.a11y.spec.ts tests/personal-hq-daily-brief.spec.ts tests/starter-missions.spec.ts tests/folder-first-scene.spec.ts tests/domain-specialist-onboarding.spec.ts -- --workers=1
 ```
 
-With a configured model, Send **Explore this folder** after the local preview.
-Expect a metadata-grounded discussion and a suggested next step, not invented
-file contents or a claim that setup already ran. When current setup is available,
-**Review suggested setup** appears below the saved reply. Click it, choose the
-whole folder or a project explicitly when multiple scopes are offered, and review
-the existing card. Escape from scope selection returns focus to the reply action.
-Neither Send, conversational “yes”, reload nor opening the selector creates a
-workspace. Reload keeps at most one current suggested action; replacing/removing
-the attachment removes it. Historical/unavailable context, an unrelated pending
-review, content refusals and failed/unsaved answers have no new suggested action.
+## Compact folder discussion
+
+With an approved configured model, Send **Explore this folder** after the local
+preview. Expect one factual card: folder heading/date, bounded or partial look,
+**Attached folder: contents not read**, and at most three non-root observed rows.
+Show more reveals only remaining recorded rows, not omitted/unscanned folders.
+Scan details contains precise time, overlap-safe counts and coverage limits.
+The interpretation should be short (normally two or three sentences / about
+80 words for initial discovery), cautious about names/markers, and useful without
+a setup pitch. Specific questions and requests for detail override that default.
+Follow-ups should not restart the inventory. This is model guidance, not a hard
+limit; saved prose is not rewritten.
+
+The current saved answer offers **Discuss the collection/this folder** and,
+when observed children exist, **Choose a project/folder…**. These prepare an
+editable question, not Send, a rescan or setup. Choose explicitly; Cancel/Escape
+returns to the trigger without changing attachment or draft. Try a non-empty
+Unicode/whitespace draft: it must remain exact, gain focus, and say to send or
+clear it first. Identical child names/markers must be disabled rather than
+silently resolved to a target. Other observed children remain discussable even
+if only one has a setup option.
+
+Reload preserves one dated factual card per unchanged snapshot and at most one
+eligible current choice strip, with saved-observation wording. Lost/expired selections permit only canonical historical
+discussion; repick before inspection/new setup. Detach, replacement, New,
+imported/legacy prose, failed/unsaved replies or trimmed-away eligible answers
+must not revive old shortcuts. Long replies scroll normally with the composer
+pinned. Check light/dark, phone and keyboard focus/Escape nesting; no extra scroll
+container or horizontal overflow.
+
+When fresh setup is available, secondary **Optional: review setup** appears
+below the discussion choices. Click it and separately choose the whole folder
+or project when multiple scopes are offered. Discussion choices never preselect
+setup. The existing review card explains effects before confirmation; an existing
+pending/running/stopped/completed review keeps its actual status/action even when
+there are no new options. Direct composer **Review setup** still works without a
+model. Neither Send, conversational “yes”, reload nor opening either chooser
+creates a workspace or grants file access. Historical/unavailable context,
+unrelated pending review, content refusals and failed/unsaved answers have no new
+setup suggestion.
+
+The reproducible controlled-provider journey needs no vendor credentials:
+
+```bash
+python3 scripts/assistant-workspace-demo.py --folder-response --port 8931
+# Preserve prior evidence when running final validation:
+python3 scripts/assistant-workspace-demo.py --folder-response \
+  --folder-response-evidence-stage final --port 8931
+```
+
+It drives real known-folder selection, Send, normal drafted follow-up and
+canonical reload on Home/Settings, with only loopback provider prose scripted.
+Album-like fixtures use Documents; document fixtures use Desktop. It checks
+provider-call counts, unchanged snapshots/resources and unread content sentinels.
+It is host/persistence/privacy/layout evidence, **not live-model quality**.
 
 For the no-model canonical review journey, run:
 
@@ -66,8 +111,26 @@ For the no-model canonical review journey, run:
 ./scripts/e2e-fresh.sh --sandbox-env ORI_FOLDER_CHAT_SANDBOX tests/personal-assistant-folder-chat.spec.ts -- --workers=1
 ```
 
-That file distinguishes real-host setup from browser-fixtured model/controller tests. It also checks Home/Settings hydration, delayed-choice Escape/focus, light/dark phone layouts and 200%-zoom-equivalent reflow (not native OS/browser zoom automation). The final local screenshot/validation index is `tasks/evidence/assistant-chat-folder-context/final/README.md`; the complete manual conversation guide is `tasks/test-guide-assistant-chat-folder-context.md`. The local folder-chat capture uses the production HTTP provider adapter with a deterministic loopback provider, **not a live LLM**. Live vendor-model and native-picker validation are separate checks and remain NOT RUN in that evidence. Conditional music-provider tests require their documented isolated-provider prerequisites; a skipped suite is not integration proof.
+That file distinguishes real-host setup from browser-fixtured model/controller
+tests, including stale callbacks, lost historical authority, failed saves,
+delayed replies, imported/trimmed history, literal long/hostile names and full
+long prose. Chromium accessibility-tree names, native control semantics, focus,
+contrast samples and reflow are checked without a native screen reader. It also
+checks Home/Settings hydration, delayed-choice Escape/focus, light/dark phone
+layouts and 200%-zoom-equivalent reflow (not native OS/browser zoom automation).
+
+Previous folder-context evidence is indexed at
+`tasks/evidence/assistant-chat-folder-context/final/README.md`, with its guide at
+`tasks/test-guide-assistant-chat-folder-context.md`. The controlled folder-chat
+capture uses the production HTTP provider adapter with a deterministic loopback
+provider, **not a live LLM**. Live vendor-model and native-picker checks remain
+separate and NOT RUN in that evidence. Conditional music-provider suites require
+their documented isolated-provider prerequisites; skips are not integration proof.
 
 Compare suspected baseline failures with `./scripts/e2e-fresh.sh --rev origin/dev <spec> -- --workers=1`, recording the revision and exact failure. Do not weaken unrelated assertions or reuse an old baseline claim after `origin/dev` changes. The feature checklist and `tasks/evidence/assistant-chat-folder-context/` hold the actual run logs and screenshots.
 
+Current response-UX evidence and its post-implementation guide are local under
+`tasks/evidence/assistant-folder-response-ux/` and
+`tasks/test-guide-assistant-folder-response-ux.md`. Report live-model/native-picker
+checks as NOT RUN unless separately exercised; do not count skips as passes.
 Keep the demo sandbox only for inspection; remove it when finished. Do not save its local directory paths or state to tracked files.

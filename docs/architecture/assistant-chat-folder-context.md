@@ -125,10 +125,60 @@ memory/backlog actions retain their own gates. Prompt context is escaped,
 delimited reference data with explicit contents/coverage limits and historical
 status. A provider cannot invent trusted setup buttons.
 
+### Compact folder reply and discussion choices
+
+Local preview and canonical events share a text-node-only presentation helper.
+The heading is the folder, followed by a localized snapshot date, bounded/partial
+or saved-historical status, and **Attached folder: contents not read**. That
+statement concerns the attachment, not other separately authorized workspace
+sources on the turn. At most three non-root observed folders/markers appear
+initially; a native disclosure reveals the remaining recorded rows. The root
+is not an independent project total. Omitted summaries have a visible warning;
+Show more cannot recover them. Scan details contains counts, overlap explanation,
+precise time and coverage/marker limits. Replay retains chronological placement
+and unchanged saved prose, with one factual card per unchanged observation.
+
+The folder prompt adds a short interpretation rather than a repeated inventory.
+Initial exploration targets two or three sentences, normally about 80 words or
+less; explicit questions and detail requests take priority. Follow-ups avoid a
+new introduction or repeated setup pitch. A locally authored typed event/user/
+answer triple for the same snapshot qualifies only when both chat rows are in
+the actual bounded provider history. Internal events use the system role with
+version-1 typed context; viewer events serialize as `folder_context`. Transient
+history message IDs establish eligibility, not a browser flag or model prose.
+Text-only callers still get relevant facts. This is guidance, not a response
+schema, renderer truncation or cross-model quality guarantee.
+
+One current strip offers whole-folder discussion and, when there are observed
+children, an explicit local chooser. It binds the successfully saved assistant
+row to its conversation, observation, revision and UI generation, rechecking
+ownership and DOM presence on activation. Imported/legacy or unsaved prose,
+event-only reviews, detached context and trimmed-away answers cannot create it.
+Saved snapshots use saved-observation wording; lost/expired authority uses only
+the existing historical request path. No pick, rescan or setup is revived.
+
+Discussion candidates come from all typed non-root observations, independently
+of setup compatibility. Names and markers remain literal text. Identical
+names/markers cannot identify distinct targets and are disabled rather than
+silently resolved by opaque IDs. The chooser changes neither attachment nor
+persistent scope; it prepares a plain-text question only. A dedicated
+`suggestReply` entry fills an empty composer within its UTF-16 maxlength, never
+cuts a name or overwrites/appends to an existing draft, focuses and announces
+**Review, then Send**. Cancel/Escape returns to the trigger. Only ordinary Send
+transmits references through the existing validated route. Other `prefill`
+callers keep their original semantics.
+
+The drawer retains one scroll viewport and pinned composer. Native headings,
+lists, disclosures/selects, labelled 44px controls and polite statuses preserve
+keyboard order. Reflow recovery scrolls only that viewport for focused folder
+controls, without changing existing saved-draft/memory focus lifecycles.
+
 ### Optional setup handoff
 
-After Send, the folder conversation prompt explores the observed structure and
-recommends a fitting next step, rather than waiting for a setup phrase. A read-only
+New setup options are optional background, not a required recommendation or
+final paragraph. A lone compatible child must not become the preferred scope
+merely because other observed children cannot be set up. Existing review state
+remains separately discoverable even when no new options are available. A read-only
 `ReviewOptions` projection reuses candidate preparation and capability/plan
 availability from the existing setup service. It does not rescan, allocate an
 offer, or execute a journey. Names and supported workspace types reach the model
@@ -137,13 +187,15 @@ historical, or pending-review cases have no suggested action.
 
 A successfully saved metadata turn can return `folder_setup_suggestion`, bound to
 its conversation, revision, observation and canonical assistant-message ID. The
-reply shows **Review suggested setup**, opening the existing candidate selector;
-multiple scopes start unselected. The suggestion is not persisted authority:
-reload projects it only for the latest locally authored atomic folder turn and
-rechecks availability. Imported prose, unsaved/model-failure replies, content
+reply shows secondary **Optional: review setup**, after discussion choices,
+opening the existing candidate selector; multiple scopes start unselected. The
+suggestion is not persisted authority: reload projects it only for the latest
+locally authored atomic folder turn and rechecks availability. Imported prose, unsaved/model-failure replies, content
 refusals, replacement/detach, closed reviews and old answers cannot revive it.
 Clicking still uses the existing explicit review endpoint and confirmation gates.
-The composer review entry remains available for direct/no-model review.
+The composer **Review setup** entry remains available for direct/no-model review.
+An existing review retains its status and **Show existing setup review** action;
+discussion choices never supply its candidate default or confirmation.
 
 Only explicit Review workspace setup mints a canonical digest offer. The handoff
 checks current conversation revision, selection owner/expiry/directory identity,
@@ -251,3 +303,14 @@ configuration. Final delivery evidence is in `final/README.md` under that local
 archive. Full CI, same-environment README capture, controlled-provider browser
 captures and scoped accessibility checks are distinct from those unrun live
 integrations. The checklist records actual validation separately from design.
+
+Folder-response UX evidence is separately indexed under
+`tasks/evidence/assistant-folder-response-ux/`. The maintained real-host scenario
+is `python3 scripts/assistant-workspace-demo.py --folder-response`; it uses the
+actual selection/Route/Ask/provider adapter/atomic history/reload path with
+synthetic unread-content sentinels and scripted loopback prose. Browser fixture
+stress checks cover stale identities, failed/delayed turns, literal names,
+Chromium accessibility semantics, themes and reflow. These do not prove vendor
+model concision, native picker use, native browser zoom or assistive-technology
+behavior. See [folder-first manual testing](../testing/folder-first-manual.md)
+for the separate discussion and explicit setup journeys.
