@@ -168,6 +168,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-folder-tree.js',
       'internal/web/static/js/modules/personal-assistant-folder-explorer.js',
       'internal/web/static/js/modules/personal-assistant-folder-setup.js',
+      'internal/web/static/js/modules/personal-assistant-proposal.js',
       'internal/web/static/js/modules/personal-hq-fact.js',
       'internal/web/static/js/modules/personal-assistant-continuity.js',
       'internal/web/static/js/modules/personal-hq-email-setup.js',

@@ -275,6 +275,30 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     expect(revealed.rowStartVisible).toBe(true);
     expect(revealed.rowEndVisible).toBe(true);
     await expect(page.getByRole('button', { name: 'New reply', exact: true })).toBeHidden();
+    const proposal = page.locator('[data-folder-setup-suggestion]');
+    await expect(proposal.locator('[data-proposal-kind="unknown"]')).toContainText(
+      'No folder selected'
+    );
+    const beforeChoice = await audit();
+    await proposal.getByRole('button', { name: 'Choose setup scope', exact: true }).click();
+    const localChoice = page.locator('#personalAssistantFolderSetupCandidate');
+    await expect(localChoice).toHaveValue('');
+    await localChoice.selectOption(
+      selected.projects.find((project: any) => project.name === 'Albums').id
+    );
+    await expect(page.locator('[data-setup-choice-preview]')).toHaveAttribute(
+      'data-proposal-kind',
+      'workspace'
+    );
+    await expect(page.locator('[data-setup-choice-preview]')).toContainText('Proposed workspace');
+    await capture(`${prefix}-proposal-workspace-selected`);
+    expect((await audit()).requests).toBe(beforeChoice.requests);
+    expect(
+      (await (await request.get('/api/personal-assistant/folder-digest')).json()).folder_digest
+        .offer
+    ).toBeFalsy();
+    await page.locator('#personalAssistantFolderSetupCancel').click();
+    await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);
 
     const history = (
       await (

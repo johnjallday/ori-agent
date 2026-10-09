@@ -20,7 +20,9 @@ test('wt demo: the workspace-aware drawer works from the keyboard, announces con
   );
   test.setTimeout(180_000);
   expect(basename(sandbox!)).toMatch(/^ori-demo\./);
-  const evidence = join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
+  const evidence =
+    process.env.ORI_ASSISTANT_EVIDENCE_DIR ||
+    join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
 
   const assets = join(sandbox!, 'Music', 'Album-1 assets');

@@ -209,6 +209,16 @@ test('hydration reveals newest exchange once; close/reopen preserves intentional
   assert.equal(f.pane.scrollTop, 40);
 });
 
+test('explicit local choice navigation reveals its control beginning without changing focus', () => {
+  const f = fixture([80, 80, 280]);
+  f.owner.revealControl(f.transcript.children[1], true);
+  assert.equal(
+    f.transcript.children[1].getBoundingClientRect().top - f.pane.getBoundingClientRect().top,
+    8
+  );
+  assert.equal(f.doc.activeElement, null);
+});
+
 test('revealing an unread target never hides its focused jump control or steals focus', () => {
   const f = fixture(Array(8).fill(100));
   f.owner.send();

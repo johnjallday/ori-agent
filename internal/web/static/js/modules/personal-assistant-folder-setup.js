@@ -1,12 +1,27 @@
 // Presentation of server-authored canonical review references. Model prose never
 // supplies a control, offer ID, candidate, route, or confirmation here.
 import { folderReceiptView } from './personal-assistant-folder.js';
+import {
+  proposalView,
+  placementProposalView,
+  renderProposal
+} from './personal-assistant-proposal.js';
 
 export function setupCandidates(observation) {
-  return (observation?.projects || []).map(project => ({
-    id: project.id,
-    label: `${project.name}${project.root ? ' (whole folder)' : ''}${project.marker ? ` · ${project.marker}` : ''}`
-  }));
+  const projects = observation?.projects || [];
+  const labels = projects.map(
+    project =>
+      `${project.name}${project.root ? ' (whole folder)' : ''}${project.marker ? ` · ${project.marker}` : ''}`
+  );
+  return projects.map((project, index) => {
+    const text = Array.from(labels[index]);
+    const long = text.length > 180;
+    const duplicate = labels.filter(label => label === labels[index]).length > 1;
+    return {
+      id: project.id,
+      label: `${long ? text.slice(0, 179).join('') + '…' : labels[index]}${long || duplicate ? ` · Choice ${index + 1}` : ''}`
+    };
+  });
 }
 
 export function currentReview(state, offer) {
@@ -20,6 +35,7 @@ let current;
 let reviews = {};
 let owner = '';
 let candidateObservation = '';
+let choiceOptions = [];
 let suggestion = null;
 let choiceTrigger = null;
 let choiceSubject = '';
@@ -194,6 +210,35 @@ function renderSuggestion() {
   const handoff = document.createElement('div');
   handoff.dataset.folderSetupSuggestion = suggestion.message_id;
   handoff.className = 'personal-assistant-message__setup';
+  const options = suggestion.options || [];
+  const project = current.observation?.projects?.find(
+    project => project.id === options[0]?.candidate_id
+  );
+  let view = proposalView(
+    options.length === 1 ? options[0] : {},
+    options.length === 1 ? project : { name: current.observation?.folder, root: true }
+  );
+  if (suggestion.offer_id)
+    view = {
+      ...view,
+      state: 'existing',
+      label: 'Existing setup review',
+      scope: 'Canonical review',
+      subject: proposalView(
+        {},
+        { name: reviews[suggestion.offer_id]?.subject?.name || 'Reviewed folder' }
+      ).subject,
+      description: 'Show the stored review; do not prepare or repeat setup.',
+      destination: ''
+    };
+  else if (options.length > 1)
+    view = {
+      ...view,
+      label: 'Choose setup scope',
+      scope: 'No folder selected',
+      description: `Choose one of ${options.length} compatible folders. Discussion checks do not choose setup scope.`
+    };
+  handoff.append(renderProposal(view, document, window.OriWorkspaceBuildingArt));
   const button = document.createElement('button');
   button.type = 'button';
   button.className = suggestion.offer_id
@@ -201,7 +246,9 @@ function renderSuggestion() {
     : 'personal-assistant-message__action personal-assistant-message__setup-secondary';
   button.textContent = suggestion.offer_id
     ? 'Show existing setup review'
-    : 'Optional: review setup';
+    : options.length > 1
+      ? 'Choose setup scope'
+      : view.action;
   button.disabled = Boolean(current.pending);
   button.setAttribute(
     'aria-controls',
@@ -227,10 +274,30 @@ function renderSuggestion() {
   note.textContent = suggestion.offer_id
     ? 'Focuses the existing canonical review only. Setup still requires its reviewed confirmation.'
     : suggestion.subject?.name
-      ? `Optional — reviews placement in ${String(suggestion.subject.name)}, the workspace you named. Setup requires your confirmation.`
+      ? `Workspace you named: ${String(suggestion.subject.name)}. Placement and operation are rechecked in Review; setup still requires confirmation.`
       : 'Choose scope and review effects before confirming. Nothing is set up here.';
   handoff.append(button, note);
-  bubble.insertBefore(handoff, bubble.querySelector('.personal-assistant-message__actions'));
+  bubble.append(handoff);
+}
+
+function renderChoicePreview() {
+  elements?.choices.querySelector('[data-setup-choice-preview]')?.remove();
+  if (!elements || !elements.candidate.value || current?.observation?.id !== candidateObservation)
+    return;
+  const project = current.observation.projects.find(
+    project => project.id === elements.candidate.value
+  );
+  if (!project) return;
+  const option = choiceOptions.find(option => option.candidate_id === project.id) || {};
+  const preview = renderProposal(
+    proposalView(option, project),
+    document,
+    window.OriWorkspaceBuildingArt
+  );
+  preview.dataset.setupChoicePreview = 'true';
+  elements.candidate.after(preview);
+  // Explicit choice is local navigation, not an incoming reply or new consent.
+  window.PersonalAssistantTranscript?.revealControl?.(elements.candidate, true);
 }
 
 function applySuggestion(value) {
@@ -321,7 +388,23 @@ async function review(candidateId, close = false, offerId, placement) {
     placementNode.setAttribute('aria-label', 'Existing project');
     const message = document.createElement('p');
     message.textContent = existing.message;
-    placementNode.append(message);
+    placementNode.append(
+      renderProposal(
+        {
+          ...proposalView({}, { name: result.folder_existing_project.subject }),
+          kind: 'workspace',
+          art: 'neutral',
+          state: 'existing',
+          label: 'Existing workspace',
+          scope: 'Already set up',
+          description: 'Nothing new has been prepared.',
+          destination: ''
+        },
+        document,
+        window.OriWorkspaceBuildingArt
+      ),
+      message
+    );
     if (existing.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-outline-secondary';
@@ -366,7 +449,13 @@ async function review(candidateId, close = false, offerId, placement) {
             subjectPlacement(placement?.subject_workspace_id, option)
           )
       );
-      placementNode.append(button);
+      const preview = renderProposal(
+        placementProposalView(option, choice.subject),
+        document,
+        window.OriWorkspaceBuildingArt
+      );
+      preview.append(button);
+      placementNode.append(preview);
     }
     const cancel = document.createElement('button');
     cancel.type = 'button';
@@ -418,10 +507,15 @@ function openChoices(options, trigger = elements.open, subjectId = '') {
     elements.candidate.add(new Option(candidate.label, candidate.id))
   );
   candidateObservation = current.observation.id;
+  choiceOptions = Array.isArray(options) ? options : [];
+  renderChoicePreview();
   elements.choices.hidden = false;
   elements.open.setAttribute('aria-expanded', 'true');
   trigger.setAttribute('aria-expanded', 'true');
-  elements.candidate.focus();
+  if (window.PersonalAssistantTranscript) {
+    window.PersonalAssistantTranscript.revealControl(elements.candidate);
+    elements.candidate.focus({ preventScroll: true });
+  } else elements.candidate.focus();
 }
 
 function park(node) {
@@ -467,6 +561,28 @@ function renderReferences() {
       slot.append(close);
     }
     if (receipt.visible) {
+      const kind =
+        offer.outcome?.kind === 'home'
+          ? 'group'
+          : offer.outcome?.kind === 'project'
+            ? 'workspace'
+            : 'unknown';
+      slot.prepend(
+        renderProposal(
+          {
+            ...proposalView({}, { name: offer.subject?.name }),
+            kind,
+            art: kind === 'group' ? 'district' : 'neutral',
+            state: 'completed',
+            label: 'Completed setup',
+            scope: 'Verified receipt',
+            description: 'The receipt below records what actually finished.',
+            destination: ''
+          },
+          document,
+          window.OriWorkspaceBuildingArt
+        )
+      );
       const rows = document.createElement('ul');
       (receipt.rows || []).forEach(row => {
         const item = document.createElement('li');
@@ -536,6 +652,7 @@ function init() {
     candidate: document.getElementById('personalAssistantFolderSetupCandidate')
   };
   open.addEventListener('click', openChoices);
+  elements.candidate.addEventListener('change', renderChoicePreview);
   document.getElementById('personalAssistantFolderSetupReview').addEventListener('click', () => {
     if (elements.candidate.reportValidity())
       void review(elements.candidate.value, false, undefined, subjectPlacement(choiceSubject));

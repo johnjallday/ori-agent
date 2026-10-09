@@ -71,10 +71,22 @@ planning, confirmation, execution progress or actionable request failures.
 | Supporting folder in existing project | **Not offered by ordinary ReviewOptions**; available only after host placement choice for a verified project | Folder-to-existing-building link, not new workspace. Confirmation adds a supporting directory reference/read access; primary entry, blueprint, mode, roster and tasks stay unchanged. |
 | Missing/unsupported/expired/foreign/pending options | Absent options or conservative read failure | No invented setup action. Saved metadata stays discussable. Existing review is its own canonical handoff, not a replacement suggestion. |
 
-`FolderReviewOption.workspace_type` is prose, not a kind discriminator. Minimal
-closed host-authored display metadata may be added later; it must not become
-input authority. Subject names, folder names and assistant prose never choose
-operation/destination/art. Supporting and destination visuals may wait for
+`FolderReviewOption.workspace_type` remains a compatible human-readable label,
+not a kind discriminator. Its optional host-authored `presentation` version 1
+contains only closed `kind`, `state`, `effect`, `destination_state` and a bounded
+`destination_name`. No IDs, plans, grants, counts, artwork keys or routes are
+added. Missing/unknown metadata uses neutral art; an unknown destination is not
+standalone. Collection/group cues require the plan's machine-readable portfolio
+intent, not a scanned count or a label. A new Home/library and a collection added
+to an existing library have distinct effects; neither promises child workspaces.
+
+Only validated plan/offer destination witnesses supply destination display.
+Binding an explicitly named workspace conservatively withdraws the default
+projection's kind/effects/placement until Review resolves that reference again.
+Model-safe option data still includes only the original folder/whole-folder/type
+labels, never this presentation metadata. Live and latest-atomic-turn hydration
+use the same fresh, read-only projection; there is no new persisted store.
+Subject names, folder names and assistant prose never choose operation/destination/art. Supporting and destination visuals may wait for
 validated placement/Review when facts are not safely available earlier.
 
 Expand/select is local and read-only. Explicit Review uses the established opaque

@@ -66,6 +66,7 @@ type Fixture = {
   observation: ReturnType<typeof observed> | null;
   multi: boolean;
   reviewable?: string[];
+  presentation?: Record<string, any>;
 };
 
 async function installFixture(page: Page): Promise<Fixture> {
@@ -102,7 +103,8 @@ async function installFixture(page: Page): Promise<Fixture> {
             .filter(project => !fixture.reviewable || fixture.reviewable.includes(project.id))
             .map(project => ({
               candidate_id: project.id,
-              workspace_type: 'Blank workspace'
+              workspace_type: 'Blank workspace',
+              presentation: fixture.presentation
             }))
         }
       : null;
@@ -234,6 +236,64 @@ async function installFixture(page: Page): Promise<Fixture> {
   );
   return fixture;
 }
+
+test('Prototype demo: typed collection visuals disclose library effects, never child workspace counts', async ({
+  page,
+  request
+}) => {
+  await ensureAssistant(request);
+  const fixture = await installFixture(page);
+  fixture.multi = true;
+  fixture.reviewable = ['candidate-0'];
+  fixture.presentation = {
+    version: 1,
+    kind: 'group',
+    state: 'proposed',
+    effect: 'home_library',
+    destination_state: 'new',
+    destination_name: 'Prototype Music Home'
+  };
+  await open(page);
+  await choose(page);
+  await page.locator('#personalAssistantInput').fill('Explore this folder');
+  await page.locator('#personalAssistantSend').click();
+  const card = page.locator('[data-folder-setup-suggestion]');
+  await expect(card.locator('[data-proposal-kind="group"]')).toContainText(
+    'Proposed workspace group'
+  );
+  await expect(card).toContainText('not promised child workspaces');
+  await expect(card.locator('svg')).toHaveAttribute('data-building-variant', 'district');
+  const requests = fixture.requests.length;
+  await card.getByRole('button', { name: 'Review collection setup' }).click();
+  await expect(page.locator('#personalAssistantFolderSetupCandidate')).toHaveValue('');
+  await page.locator('#personalAssistantFolderSetupCandidate').selectOption('candidate-0');
+  await expect(page.locator('[data-setup-choice-preview]')).toContainText('Whole folder');
+  expect(fixture.requests.length).toBe(requests);
+  const evidence = process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR;
+  if (evidence) {
+    await mkdir(evidence, { recursive: true });
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, 'prototype-new-home-library.png') });
+  }
+  await page.locator('#personalAssistantFolderSetupCancel').click();
+  fixture.presentation = {
+    ...fixture.presentation,
+    effect: 'library',
+    destination_state: 'existing',
+    destination_name: 'Prototype Existing Home'
+  };
+  await page.locator('#personalAssistantInput').fill('Keep discussing this folder');
+  await page.locator('#personalAssistantSend').click();
+  await expect(card).toContainText('Proposed collection');
+  await expect(card).toContainText('Existing destination · Prototype Existing Home');
+  await expect(card).toContainText('Entries are not new workspaces');
+  if (evidence)
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, 'prototype-existing-home-library.png') });
+  expect(fixture.requests.filter(request => request.stage === 'review')).toHaveLength(0);
+});
 
 async function open(page: Page, path = '/') {
   await page.goto(path);
@@ -477,7 +537,9 @@ test('browser fixture: suggested setup follows the reply, restores on reload and
   await reopen(page);
   await expect(handoff).toHaveCount(1);
   await page.locator('#personalAssistantInput').fill('Keep this draft');
-  const button = handoff.getByRole('button', { name: 'Optional: review setup' });
+  const button = handoff.getByRole('button', {
+    name: /^(Choose setup scope|Review (workspace |collection )?setup)$/
+  });
   expect(
     await button.evaluate(element => {
       const row = element.closest('[data-message-id]');

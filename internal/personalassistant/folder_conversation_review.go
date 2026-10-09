@@ -244,8 +244,9 @@ func (s *FolderObservationService) prepareReviewOffer(ctx context.Context, held 
 
 // FolderReviewOption is a path-free description, never a plan or execution grant.
 type FolderReviewOption struct {
-	CandidateID   string `json:"candidate_id"`
-	WorkspaceType string `json:"workspace_type"`
+	CandidateID   string                    `json:"candidate_id"`
+	WorkspaceType string                    `json:"workspace_type"`
+	Presentation  *FolderReviewPresentation `json:"presentation,omitempty"`
 }
 
 // ReviewOptions reads the same candidate and setup availability as Review. It
@@ -280,7 +281,7 @@ func (s *FolderObservationService) ReviewOptions(ctx context.Context, target fol
 		} else if view.BlueprintLabel != "" {
 			kind = view.BlueprintLabel + " workspace"
 		}
-		options = append(options, FolderReviewOption{CandidateID: project.ID, WorkspaceType: kind})
+		options = append(options, FolderReviewOption{CandidateID: project.ID, WorkspaceType: kind, Presentation: folderReviewPresentation(offer, view)})
 	}
 	return options
 }

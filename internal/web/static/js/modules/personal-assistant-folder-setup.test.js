@@ -41,6 +41,23 @@ test('candidate choices use only disclosed IDs and distinguish the whole root', 
   assert.deepEqual(setupCandidates(null), []);
 });
 
+test('bounded or indistinguishable candidate names retain separate opaque choices', () => {
+  const names = setupCandidates({
+    projects: [
+      { id: 'first', name: 'Same' },
+      { id: 'second', name: 'Same' },
+      { id: 'long', name: '<svg onload=confirm()>' + '界'.repeat(300) }
+    ]
+  });
+  assert.deepEqual(names.slice(0, 2), [
+    { id: 'first', label: 'Same · Choice 1' },
+    { id: 'second', label: 'Same · Choice 2' }
+  ]);
+  assert.equal(names[2].id, 'long');
+  assert.ok(Array.from(names[2].label).length < 200);
+  assert.match(names[2].label, /^<svg/);
+});
+
 test('only the current conversation and exact canonical offer get live controls', () => {
   assert.equal(currentReview({ conversationId: 'chat-a', offerId: 'offer-a' }, offer), true);
   assert.equal(currentReview({ conversationId: 'chat-b', offerId: 'offer-a' }, offer), false);

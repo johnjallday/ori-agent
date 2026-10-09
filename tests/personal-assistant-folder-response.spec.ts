@@ -291,7 +291,7 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-draft-protected.png`) });
     const setup = page
       .locator('[data-folder-setup-suggestion]')
-      .getByRole('button', { name: 'Optional: review setup' });
+      .getByRole('button', { name: 'Choose setup scope' });
     await setup.click();
     await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeVisible();
     await page

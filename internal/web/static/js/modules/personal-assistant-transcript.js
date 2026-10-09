@@ -172,12 +172,13 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
     pending?.remove();
     pending = null;
   };
-  const revealControl = control => {
+  const revealControl = (control, atStart = false) => {
     if (!isOpen() || !pane.contains(control)) return;
     const bounds = control.getBoundingClientRect();
     const top = offset(control);
     const height = bounds.height / scale();
-    if (top < 0) move(pane.scrollTop + top - 1);
+    if (atStart) move(pane.scrollTop + top - 8);
+    else if (top < 0) move(pane.scrollTop + top - 1);
     else if (top + height > pane.clientHeight)
       move(pane.scrollTop + top + height - pane.clientHeight + 1);
     following = false;
