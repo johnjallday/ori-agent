@@ -92,6 +92,35 @@ validated placement/Review when facts are not safely available earlier.
 Expand/select is local and read-only. Explicit Review uses the established opaque
 references; only canonical reviewed confirmation executes. Completed links come
 from verified receipts. One authoritative renderer moves into chronological
-review slots; it is never cloned. No plugin/SDK/manifest changes are required.
+review slots; it is never cloned.
+
+## Local choice and canonical review lifecycle
+
+The existing singleton chooser is moved beside the originating proposal. Its
+native select begins empty when multiple candidates are valid; its “Setting up”
+heading distinguishes it from next-message discussion topics. A direct composer
+Review instead opens a labelled local handoff at the end of the same scroll pane,
+without creating an assistant message or making idle shared routing targets visible.
+The chooser and folder notice are parked before reset, trimming or hydration.
+
+Local choices bind the exact conversation, observation and revision, not tree
+checks or names. The existing context controller still validates every Review;
+a UI epoch additionally rejects obsolete placement responses. Cancel/Escape
+restores a connected trigger or the composer, never `scrollIntoView` ancestors.
+Explicit Review moves its existing concise notice alongside the handoff while
+waiting. Completion may focus the canonical card only if the user has not moved
+focus while waiting; newly typed text is never replaced.
+
+A later reply can retire choice authority while a native control remains focused.
+That shell becomes visibly inactive, its original handlers cannot Review, and it
+is parked on blur. Returning to setup controls during a request is reader intent:
+the viewport owner preserves the focused control's within-row offset. Resize
+recovery waits for the owned render batch rather than replacing that anchor.
+Canonical card updates retain an already-focused action's keyboard continuation,
+without focusing a card when the reader is elsewhere. Existing/closed/history
+and completed receipt states still come from the canonical review renderer;
+placement choices and pending-elsewhere navigation do not create another one.
+
+No plugin/SDK/manifest changes are required.
 Live specialized Home/portfolio execution needs separately verified candidates;
 host fixtures are not evidence of that integration being activated.

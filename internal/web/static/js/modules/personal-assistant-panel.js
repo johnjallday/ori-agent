@@ -723,11 +723,16 @@ function revealFocusedControl() {
     !active ||
     !scroll?.contains(active) ||
     !active.closest(
-      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderDiscussionChooser'
+      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup'
     )
   )
     return;
   if (window.PersonalAssistantTranscript) {
+    // Resize recovery must not replace the owner's pre-mutation reading anchor.
+    if (!window.PersonalAssistantTranscript.isSettled()) {
+      requestAnimationFrame(revealFocusedControl);
+      return;
+    }
     window.PersonalAssistantTranscript.revealControl(active);
     return;
   }

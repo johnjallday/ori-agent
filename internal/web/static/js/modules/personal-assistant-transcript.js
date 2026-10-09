@@ -33,6 +33,14 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
       row => row.getBoundingClientRect().bottom > pane.getBoundingClientRect().top
     );
     anchors = rows.slice(Math.max(0, first)).map(row => ({ row, offset: offset(row) }));
+    const active = transcript.ownerDocument?.activeElement;
+    if (
+      pane.contains(active) &&
+      active?.closest?.(
+        '#personalAssistantFolderSetupChoices, #personalAssistantFolderOffer, .personal-assistant-message__setup'
+      )
+    )
+      anchors.unshift({ row: active, offset: offset(active) });
   };
   const move = top => {
     pane.scrollTop = Math.max(0, Math.min(bottom(), top));
@@ -73,7 +81,7 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
     } else if (following) {
       move(bottom());
     } else {
-      const anchor = survivingAnchor(anchors, connected);
+      const anchor = survivingAnchor(anchors, row => pane.contains(row));
       move(anchor ? pane.scrollTop + offset(anchor.row) - anchor.offset : savedTop);
     }
     dirty = false;
@@ -110,6 +118,19 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
   const intent = () => {
     expectedTop = null;
     userIntent = true;
+  };
+  const focusReading = event => {
+    const control = event.target;
+    if (
+      !control?.closest?.(
+        '#personalAssistantFolderSetupChoices, #personalAssistantFolderOffer, .personal-assistant-message__setup'
+      )
+    )
+      return;
+    // Returning to a native setup control while waiting is reader intent too.
+    following = false;
+    target = null;
+    remember();
   };
   const reply = row => {
     if (!row || hydrating || !connected(row)) return;
@@ -186,6 +207,7 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
     updateUnread();
   };
   pane.addEventListener('scroll', onScroll);
+  pane.addEventListener('focusin', focusReading);
   pane.addEventListener('wheel', intent, { passive: true });
   pane.addEventListener('touchstart', intent, { passive: true });
   pane.addEventListener('keydown', intent);
@@ -229,6 +251,7 @@ export function createTranscript({ pane, transcript, jump, announce, frame, canc
     dispose() {
       reset();
       pane.removeEventListener('scroll', onScroll);
+      pane.removeEventListener('focusin', focusReading);
       pane.removeEventListener('wheel', intent);
       pane.removeEventListener('touchstart', intent);
       pane.removeEventListener('keydown', intent);

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   setupCandidates,
+  choiceIsCurrent,
   currentReview,
   currentSuggestion,
   subjectPlacement,
@@ -24,6 +25,27 @@ const offer = {
   create_available: true,
   remember: true
 };
+
+test('local choice binding uses exact conversation, observation and revision, never discussion topics', () => {
+  const binding = { conversationId: 'one', observationId: 'picked', revision: 'turn' };
+  const state = {
+    conversationId: 'one',
+    observation: { id: 'picked' },
+    revision: 'turn',
+    focus: ['child'],
+    pending: true
+  };
+  assert.equal(choiceIsCurrent(binding, state), true);
+  for (const changed of [
+    { conversationId: 'other' },
+    { observation: { id: 'replaced' } },
+    { revision: 'later' },
+    { authority: 'expired' }
+  ])
+    assert.equal(choiceIsCurrent(binding, { ...state, ...changed }), false);
+  assert.equal(choiceIsCurrent(null, state), false);
+  assert.equal(choiceIsCurrent(binding, null), false);
+});
 
 test('candidate choices use only disclosed IDs and distinguish the whole root', () => {
   assert.deepEqual(

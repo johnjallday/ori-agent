@@ -26,7 +26,7 @@ function fixture(heights = [100, 100]) {
     scrollTop: 0,
     clientHeight: 300,
     offsetHeight: 300,
-    contains: row => transcript.contains(row),
+    contains: row => transcript.contains(row) || transcript.contains(row?.ownerRow),
     get scrollHeight() {
       return prefix + transcript.children.reduce((sum, row) => sum + row.height, 0);
     },
@@ -167,6 +167,35 @@ test('intentional scroll-away preserves a row/offset and focus; only a reply bec
   assert.equal(f.jump.hidden, true);
   assert.equal(f.doc.activeElement, answer);
   assert.equal(f.pane.scrollTop, 750);
+});
+
+test('native setup focus while waiting preserves its within-row offset through metadata reflow', () => {
+  const f = fixture(Array(8).fill(100));
+  f.owner.send();
+  f.flush();
+  const ownerRow = f.transcript.children[6];
+  let inset = 20;
+  const control = {
+    ownerRow,
+    closest: () => ({}),
+    getBoundingClientRect() {
+      const top = ownerRow.getBoundingClientRect().top + inset;
+      return { top, bottom: top + 30, height: 30 };
+    }
+  };
+  f.doc.activeElement = control;
+  f.listeners.get('pane:focusin')({ target: control });
+  const position = control.getBoundingClientRect().top;
+  f.owner.beforeChange();
+  inset += 50;
+  ownerRow.height += 50;
+  const answer = f.row();
+  f.transcript.append(answer);
+  f.owner.reply(answer);
+  f.flush();
+  assert.equal(control.getBoundingClientRect().top, position);
+  assert.equal(f.doc.activeElement, control);
+  assert.equal(f.jump.hidden, false);
 });
 
 test('history trimming uses a surviving neighbour, not a removed anchor or a bottom snap', () => {

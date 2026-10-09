@@ -1785,6 +1785,24 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   }
 }
 
+.personal-assistant-setup-heading {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.personal-assistant-panel #personalAssistantFolderSetupChoices {
+  width: 100%;
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
+  background: var(--ori-paper);
+}
+.personal-assistant-panel [data-inactive-setup] {
+  border-left: 2px dashed var(--ori-line);
+  padding-left: 8px;
+}
+
 /* The optional setup handoff sits below the reply, never beside its bubble. */
 .personal-assistant-panel .personal-assistant-message__setup {
   display: grid;

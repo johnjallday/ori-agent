@@ -106,6 +106,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
     await expect(page.locator('#personalAssistantFolderPreview')).toBeVisible();
   };
   const chooseCandidate = async (name: string) => {
+    await expect(page.locator('#personalAssistantFolderSetupCandidate')).toBeVisible();
     await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: name });
     await page.getByRole('button', { name: 'Review selection', exact: true }).click();
   };

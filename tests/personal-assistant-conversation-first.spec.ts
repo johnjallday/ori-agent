@@ -282,6 +282,8 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
     const beforeChoice = await audit();
     await proposal.getByRole('button', { name: 'Choose setup scope', exact: true }).click();
     const localChoice = page.locator('#personalAssistantFolderSetupCandidate');
+    await expect(proposal.locator('#personalAssistantFolderSetupChoices')).toBeVisible();
+    await expect(proposal.getByRole('heading', { name: 'Setting up', exact: true })).toBeVisible();
     await expect(localChoice).toHaveValue('');
     await localChoice.selectOption(
       selected.projects.find((project: any) => project.name === 'Albums').id
@@ -344,6 +346,11 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
       .folder_digest;
     expect(offersBefore.offer).toBeFalsy();
     await directReview.click();
+    await expect(
+      page.locator(
+        '#personalAssistantScroll [data-setup-composer-origin] #personalAssistantFolderSetupChoices'
+      )
+    ).toBeVisible();
     const chooser = page.locator('#personalAssistantFolderSetupCandidate');
     await expect(chooser).toHaveValue('');
     const candidate = selected.projects.find((p: any) => p.name === 'Albums');
