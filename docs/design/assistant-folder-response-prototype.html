@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Folder response · fixture-backed prototype (not production)</title>
+  <style>
+    :root { color-scheme: light; --paper:#fffdf9; --surface:#f7f4ee; --ink:#292722; --dim:#5f5a50; --line:#d6d0c4; --accent:#855d27; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#e9e5dd; color:var(--ink); font-family:ui-sans-serif,system-ui,sans-serif; }
+    .label { margin:24px; max-width:520px; line-height:1.5; }
+    .drawer { position:fixed; right:24px; bottom:24px; display:flex; flex-direction:column; gap:12px; padding:18px; width:min(640px,calc(100vw - 48px)); height:min(760px,calc(100dvh - 92px)); border:1px solid var(--line); border-radius:22px; background:var(--surface); box-shadow:0 20px 56px #0003; }
+    header { display:flex; align-items:center; gap:12px; }
+    .avatar { display:grid; place-items:center; flex:none; width:40px; height:40px; border-radius:50%; background:#e2d6bc; font-family:Georgia,serif; font-size:24px; }
+    h2 { margin:0; font-size:20px; } h3 { margin:0; font-size:16px; }
+    p { margin:6px 0; line-height:1.5; } .dim { color:var(--dim); font-size:13px; }
+    .scroll { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; padding:2px; }
+    .bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; font-size:13px; }
+    .card { border-left:2px solid var(--accent); padding:8px 0 8px 14px; font-size:14px; }
+    .rows { list-style:none; padding:0; margin:8px 0 0; }
+    .rows li { display:flex; justify-content:space-between; gap:12px; padding:6px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+    .rows span:last-child { flex:none; color:var(--dim); font-size:12px; }
+    summary { min-height:44px; align-content:center; cursor:pointer; color:var(--accent); }
+    .question { max-width:85%; margin:12px 0 12px auto; border-radius:10px; border:1px solid var(--line); padding:9px 12px; background:#eee2cb; font-size:14px; }
+    .reply { max-width:85%; font-size:15px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--paper); }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    button,select { min-height:44px; font:inherit; color:var(--ink); }
+    button { padding:0 12px; border:1px solid var(--line); border-radius:10px; background:var(--paper); cursor:pointer; }
+    .secondary { border:0; background:none; color:var(--accent); padding-left:0; text-decoration:underline; text-underline-offset:3px; }
+    .chooser { border:1px solid var(--line); padding:12px; margin-top:12px; border-radius:10px; }
+    label { display:block; margin-bottom:8px; } select { width:100%; padding:8px; background:var(--paper); border:1px solid var(--line); border-radius:8px; }
+    form { flex:none; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:10px; }
+    .attachment { grid-column:1/-1; font-size:13px; }
+    textarea { width:100%; min-height:72px; padding:12px 14px; resize:none; font:inherit; border:1px solid var(--line); border-radius:14px; background:var(--paper); color:var(--ink); }
+    #send { border:0; background:var(--accent); color:white; font-weight:700; }
+    :focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    [hidden] { display:none!important; }
+    #status:empty { display:none; }
+    @media(max-width:600px) { .label { display:none; } .drawer { right:12px; bottom:12px; width:calc(100vw - 24px); padding:14px; height:calc(100dvh - 84px); } .reply { max-width:100%; } }
+    @media(prefers-color-scheme:dark) { :root { color-scheme:dark; --paper:#292923; --surface:#24241f; --ink:#eee9df; --dim:#c0b9ac; --line:#575348; --accent:#dfbb7f; } body { background:#171714; } .avatar,.question { background:#453b2c; } #send { color:#24241f; } }
+  </style>
+</head>
+<body>
+  <p class="label"><strong>Prototype demo · synthetic fixtures only</strong><br>Not a production endpoint. No provider, filesystem, setup or persistence operations. Same drawer width and pinned-composer structure as Ori.</p>
+  <section class="drawer" role="dialog" aria-labelledby="title">
+    <header><span class="avatar" aria-hidden="true">A</span><div><h2 id="title">Atlas</h2><p class="dim">Personal Assistant · Prototype</p></div></header>
+    <div class="scroll">
+      <div class="bar"><span>Folder discussion</span><span>Fixture-backed · not saved</span></div>
+      <section class="card" aria-label="Folder observations">
+        <h3>Album collection</h3>
+        <p class="dim">Snapshot · Oct 5, 2026 · Bounded look</p>
+        <p>Attached folder: contents not read.</p>
+        <ul class="rows"><li><span>Aurora</span><span>REAPER marker</span></li><li><span>Tide</span><span>Logic Pro marker</span></li><li><span>Artwork</span><span>Observed folder</span></li></ul>
+        <details id="more"><summary>Show 1 more observed folder</summary><ul class="rows"><li><span>Notes</span><span>Observed folder</span></li></ul></details>
+        <details id="details"><summary>Scan details</summary><p>12 files, 18 entries observed. File kinds: 1 .rpp, 1 .logicx, 10 .txt.</p><p>Whole folder: 12 files. Aurora: 4; Tide: 3; Artwork: 2; Notes: 3. Parent and child counts overlap; do not add them.</p><p>October 5, 2026 at 10:00 UTC. Up to 3 levels, 5000 entries and 3 seconds. Hidden/tooling folders, links and unreadable entries may be skipped. Not a complete tree. Markers do not prove contents or available integrations.</p></details>
+      </section>
+      <p class="question">Explore this folder</p>
+      <div class="reply"><p>The names and markers suggest several projects alongside shared artwork and notes. That is a useful starting point for discussing the collection, but it does not tell me what is finished. What would you like to work out first?</p></div>
+      <div class="actions" aria-label="Folder conversation choices"><button id="discuss" type="button">Discuss the collection</button><button id="choose" type="button" aria-expanded="false" aria-controls="chooser">Choose a project…</button></div>
+      <section class="chooser" id="chooser" aria-label="Choose a discussion target" hidden>
+        <label for="project">Which observed folder would you like to discuss?</label>
+        <select id="project"><option value="">Choose a folder…</option><option>Aurora</option><option>Tide</option><option>Artwork</option><option>Notes</option></select>
+        <p class="dim">Only prepares editable text. Does not change the attachment or select setup.</p>
+        <div class="actions"><button id="draft" type="button">Draft question</button><button id="cancel" type="button">Cancel</button></div>
+      </section>
+      <details><summary>Optional setup review</summary><p class="dim">Choose scope and review exact effects in Ori. This prototype cannot open a real review or grant access.</p><button type="button" disabled>Review setup (prototype only)</button></details>
+    </div>
+    <p id="status" class="dim" role="status" aria-live="polite"></p>
+    <form><span class="attachment">Add folder · Album collection · Review setup</span><label for="input" hidden>Ask Atlas</label><textarea id="input" rows="2" maxlength="2000" aria-label="Ask Atlas" placeholder="Ask a question or describe what you want help with"></textarea><button id="send" type="submit">Send</button></form>
+  </section>
+  <script>
+    const input=document.getElementById('input'), chooser=document.getElementById('chooser'), trigger=document.getElementById('choose'), status=document.getElementById('status');
+    function closeChooser(){chooser.hidden=true;trigger.setAttribute('aria-expanded','false');trigger.focus();}
+    function draft(text){if(input.value!==''){status.textContent='Send or clear your draft before using a suggestion.';input.focus();return;}input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();status.textContent='Review, then Send. Prototype only; nothing will be transmitted.';}
+    trigger.onclick=()=>{chooser.hidden=false;trigger.setAttribute('aria-expanded','true');document.getElementById('project').focus();};
+    document.getElementById('cancel').onclick=closeChooser;
+    chooser.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeChooser();}};
+    document.getElementById('discuss').onclick=()=>draft('Let’s discuss the collection “Album collection” from these observations, without setting anything up.');
+    document.getElementById('draft').onclick=()=>{const name=document.getElementById('project').value;if(!name)return;closeChooser();draft('Let’s discuss the observed folder “'+name+'” in “Album collection”, without setting anything up.');};
+    document.querySelector('form').onsubmit=event=>{event.preventDefault();status.textContent='Prototype only — no message sent.';};
+  </script>
+</body>
+</html>

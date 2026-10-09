@@ -31,6 +31,12 @@ class DemoProviderTests(unittest.TestCase):
                      ["demo", "--reaper-source", "/candidate"],
                      ["demo", "--placement", "--new-home"],
                      ["demo", "--placement", "--reaper-source", "/reaper", "--music-source", "/music"],
+                     ["demo", "--folder-response", "--folder-response-baseline"],
+                     ["demo", "--folder-response", "--reaper-source", "/reaper", "--music-source", "/music"],
+                     ["demo", "--folder-response-baseline", "--files"],
+                     ["demo", "--folder-response-evidence-stage", "final"],
+                     ["demo", "--folder-response", "--folder-response-evidence-stage", "../outside"],
+                     ["demo", "--folder-response-baseline", "--reaper-source", "/reaper", "--music-source", "/music"],
                      ["demo", "--sources", "--placement"], ["demo", "--sources", "--portfolio"],
                      ["demo", "--files", "--sources"], ["demo", "--files", "--new-home"],
                      ["demo", "--accessibility", "--files"], ["demo", "--accessibility", "--portfolio"],
@@ -51,6 +57,16 @@ class DemoProviderTests(unittest.TestCase):
             self.assertTrue(log.endswith(".log"))
         for column in range(3):
             self.assertEqual(len({run[column] for run in runs}), len(runs), "two runs share a spec, variable or log")
+
+    def test_folder_response_fixture_requires_the_current_typed_snapshot(self):
+        self.assertIsNone(demo.folder_response_step("Hello, no attachment"))
+        prompt = "Explore this folder\n<folder_observation>" + json.dumps({"folder": "Synthetic collection"}) + "</folder_observation>"
+        reply = demo.folder_response_step(prompt)["answer"]
+        self.assertIn("Fixture interpretation", reply)
+        self.assertNotIn("set up", reply)
+        self.assertLessEqual(len(reply.split()), 80)
+        with self.assertRaises(ValueError):
+            demo.folder_response_step("<folder_observation>{}</folder_observation>")
 
     def test_current_user_projection_not_history(self):
         projection = demo.workspace_projection([message("Old"), message("Current")])

@@ -1,27 +1,21 @@
 // One local folder preview per personal conversation. No paths, observations or
 // authority are recovered from browser storage. Only Send shares a reference.
+import { folderFocusView, folderTreeView } from './personal-assistant-folder-tree.js';
+import { initFolderExplorer } from './personal-assistant-folder-explorer.js';
 import { folderChooserView } from './personal-assistant-folder-chooser.js';
 import { collectWorkspaceContext } from './personal-assistant-workspace-context.js';
+import {
+  currentFolderDiscussion,
+  folderDiscussionOptions,
+  folderDiscussionText,
+  folderPresentation,
+  renderFolderSummary
+} from './personal-assistant-folder-presentation.js';
+export { observationSummary, coverageSummary } from './personal-assistant-folder-presentation.js';
 
 const ENDPOINT = '/api/home-assistant/folder-context';
 export const FOLDER_DISCLOSURE =
-  'File contents have not been read. Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.';
-
-export function observationSummary(observation) {
-  if (!observation) return '';
-  const kinds = (observation.kinds || []).map(kind => `${kind.count} ${kind.name}`).join(' · ');
-  const partial = observation.coverage?.partial ? 'Partial look' : 'Bounded look';
-  const files = observation.files || 0;
-  return `${partial}: ${files} ${files === 1 ? 'file' : 'files'} observed${kinds ? ` · ${kinds}` : ''}.`;
-}
-
-export function coverageSummary(observation) {
-  const coverage = observation?.coverage || {};
-  const date = new Date(observation?.scanned_at || '');
-  const when = Number.isNaN(date.getTime()) ? 'Unknown scan time' : date.toLocaleString();
-  const omissions = (coverage.projects_omitted || 0) + (coverage.kinds_omitted || 0);
-  return `${when}. Up to ${coverage.max_depth || 3} levels, ${coverage.max_entries || 5000} entries and ${coverage.budget_seconds || 3} seconds. Hidden/tooling folders, links and unreadable entries may be skipped; this is not a complete tree.${omissions ? ` ${omissions} additional summaries omitted.` : ''}`;
-}
+  'File contents have not been read. Send shares the recorded file/folder and project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.';
 
 /** Pure state machine with injected I/O: stale picker/network results cannot
  * cross a conversation switch, removal or replacement. */
@@ -37,6 +31,7 @@ export function createFolderContextController({
     draftId: uuid(),
     revision: '',
     observation: null,
+    focusIDs: [],
     accepted: null,
     offerId: '',
     authority: '',
@@ -64,6 +59,7 @@ export function createFolderContextController({
       draftId: uuid(),
       revision: saved.revision || '',
       observation: saved.observation || null,
+      focusIDs: [],
       accepted: saved.observation || null,
       offerId: saved.offer_id || '',
       authority: saved.authority || (saved.historical ? state.authority || 'historical' : ''),
@@ -98,6 +94,7 @@ export function createFolderContextController({
         return false;
       }
       state.observation = result.observation;
+      state.focusIDs = [];
       if (typeof result.revision === 'string' && result.revision !== state.revision) {
         state.revision = result.revision;
         state.accepted = null; // server retired the previous binding/reviews
@@ -142,6 +139,7 @@ export function createFolderContextController({
         state.revision = result.revision;
       }
       state.observation = null;
+      state.focusIDs = [];
       state.accepted = null;
       state.offerId = '';
       state.preview = false;
@@ -170,12 +168,38 @@ export function createFolderContextController({
       selection_id: state.observation.id,
       revision: state.revision,
       ...(state.conversationId ? {} : { draft_id: state.draftId }),
-      ...(state.authority ? { historical: true } : {})
+      ...(state.authority ? { historical: true } : {}),
+      ...(state.focusIDs.length ? { focus_ids: [...state.focusIDs] } : {})
     };
+  }
+  function setFocus(ids, binding) {
+    if (
+      !state.observation ||
+      state.pending ||
+      state.conversationId !== currentId() ||
+      (binding &&
+        (binding.observationId !== state.observation.id ||
+          binding.generation !== state.generation ||
+          binding.conversationId !== state.conversationId)) ||
+      !folderFocusView(state.observation, ids)
+    )
+      return false;
+    state.focusIDs = [...ids];
+    changed(state);
+    return true;
   }
   function accepted(id, saved) {
     if (!saved) return;
+    // Checks changed while the model replied apply only to the NEXT turn. Do
+    // not replace them with the already-frozen sent turn's focus.
+    const focusIDs =
+      state.observation?.id === saved.observation?.id &&
+      (!state.conversationId || state.conversationId === id)
+        ? [...state.focusIDs]
+        : [];
     reset(id, saved);
+    state.focusIDs = focusIDs;
+    changed(state);
   }
   // A turn without a folder can be the one that saves the conversation. The
   // next Add folder must then target that conversation, not the draft it was
@@ -253,7 +277,7 @@ export function createFolderContextController({
       }
     }
   }
-  return { state, select, remove, reset, request, accepted, adopt, review, notify };
+  return { state, select, remove, reset, request, setFocus, accepted, adopt, review, notify };
 }
 
 async function jsonRequest(url, body) {
@@ -274,9 +298,147 @@ async function jsonRequest(url, body) {
 }
 
 let controller;
+let explorer;
 let elements;
 let chooserGeneration = 0;
 let lastEventKey;
+let discussionBinding = null;
+let discussionTrigger = null;
+let discussionChoiceBinding = null;
+
+function closeDiscussionChooser({ restoreFocus = true } = {}) {
+  if (elements?.discussionChooser) elements.discussionChooser.hidden = true;
+  discussionTrigger?.setAttribute('aria-expanded', 'false');
+  if (restoreFocus && discussionTrigger?.isConnected) discussionTrigger.focus();
+  discussionTrigger = null;
+  discussionChoiceBinding = null;
+}
+
+function discussionRow(value) {
+  if (
+    !currentFolderDiscussion(
+      controller?.state,
+      value,
+      window.PersonalAssistantConversation?.currentId?.()
+    ) ||
+    window.PersonalAssistantConversation?.isLoading?.() ||
+    window.OriAskRouting?.getState?.().busy ||
+    window.PersonalAssistantPanel?._state?.view?.available === false
+  )
+    return null;
+  return (
+    Array.from(document.querySelectorAll('#homeAssistantConversation [data-message-id]')).find(
+      row =>
+        row.dataset.messageId === value.messageId &&
+        row.dataset.conversationId === value.conversationId &&
+        row.dataset.messageRole === 'assistant'
+    ) || null
+  );
+}
+
+function discussionDraft(value, projectId = '') {
+  if (!discussionRow(value)) return false;
+  const text = folderDiscussionText(controller.state.observation, projectId, {
+    historical: Boolean(controller.state.authority) || value.restored === true
+  });
+  const accepted = Boolean(text && window.PersonalAssistantPanel?.suggestReply?.(text));
+  // Legacy draft shortcuts must not conflict with a different checkbox focus.
+  // A rejected suggestion preserves both the exact text AND the next focus.
+  if (accepted) controller.setFocus([]);
+  return accepted;
+}
+
+function renderDiscussion() {
+  const existing = document.querySelector('[data-folder-discussion]');
+  // A cancelled selection may restore the same canonical snapshot. Recapture
+  // its new generation, rebuilding the strip; old captured callbacks still fail.
+  if (
+    discussionBinding &&
+    currentFolderDiscussion(
+      controller?.state,
+      { ...discussionBinding, generation: controller?.state.generation },
+      window.PersonalAssistantConversation?.currentId?.()
+    )
+  ) {
+    discussionBinding = { ...discussionBinding, generation: controller.state.generation };
+  }
+  const row = discussionRow(discussionBinding);
+  if (!row) {
+    existing?.remove();
+    closeDiscussionChooser({ restoreFocus: false });
+    return;
+  }
+  if (
+    existing?.parentElement === row.firstElementChild &&
+    existing.dataset.folderGeneration === String(discussionBinding.generation)
+  )
+    return;
+  existing?.remove();
+  const value = { ...discussionBinding };
+  const strip = node('div', '', 'personal-assistant-folder-discussion');
+  strip.dataset.folderDiscussion = value.messageId;
+  strip.dataset.folderGeneration = String(value.generation);
+  strip.setAttribute('role', 'group');
+  strip.setAttribute('aria-label', 'Folder conversation choices');
+  const children = folderDiscussionOptions(controller.state.observation);
+  const historical = Boolean(controller.state.authority) || value.restored === true;
+  const whole = node(
+    'button',
+    historical
+      ? 'Discuss saved observations'
+      : children.length > 1
+        ? 'Discuss the collection'
+        : 'Discuss this folder',
+    'personal-assistant-conversation__button'
+  );
+  whole.type = 'button';
+  whole.addEventListener('click', () => discussionDraft(value));
+  strip.append(whole);
+  if (children.length) {
+    const choose = node(
+      'button',
+      children.some(
+        child =>
+          controller.state.observation.projects.find(project => project.id === child.id)?.marker
+      )
+        ? 'Choose a project…'
+        : 'Choose a folder…',
+      'personal-assistant-conversation__button'
+    );
+    choose.type = 'button';
+    choose.setAttribute('aria-controls', 'personalAssistantFolderDiscussionChooser');
+    choose.setAttribute('aria-expanded', 'false');
+    choose.addEventListener('click', () => {
+      if (!discussionRow(value)) return;
+      discussionTrigger = choose;
+      discussionChoiceBinding = value;
+      elements.discussionCandidate.replaceChildren(new Option('Choose an observed folder…', ''));
+      for (const candidate of folderDiscussionOptions(controller.state.observation)) {
+        const option = new Option(
+          candidate.label + (candidate.ambiguous ? ' (indistinguishable name)' : ''),
+          candidate.id
+        );
+        option.disabled = candidate.ambiguous;
+        elements.discussionCandidate.add(option);
+      }
+      choose.setAttribute('aria-expanded', 'true');
+      elements.discussionChooser.hidden = false;
+      elements.discussionCandidate.focus();
+    });
+    strip.append(choose);
+  }
+  const bubble = row.firstElementChild;
+  bubble?.insertBefore(
+    strip,
+    bubble.querySelector('.personal-assistant-message__setup, .personal-assistant-message__actions')
+  );
+}
+
+function bindDiscussion(value) {
+  discussionBinding = value ? { ...value, generation: controller?.state.generation } : null;
+  closeDiscussionChooser({ restoreFocus: false });
+  renderDiscussion();
+}
 
 function updateSendHint() {
   if (!elements?.hint) return;
@@ -298,25 +460,33 @@ function render(state) {
   elements.remove.disabled = state.pending;
   elements.preview.hidden = !state.observation || !state.preview;
   if (state.observation) {
-    elements.summary.textContent = observationSummary(state.observation);
-    elements.coverage.textContent = coverageSummary(state.observation);
-    elements.projects.textContent = (state.observation.projects || [])
-      .map(
-        project =>
-          `${project.name}${project.marker ? ` (${project.marker})` : ''}: ${project.files} observed files`
-      )
-      .join(' · ');
+    renderFolderSummary(elements.summary, state.observation, { local: true });
   }
   elements.history.hidden = !state.authority;
   elements.history.textContent = state.authority
     ? `Discussing saved observations only (${state.authority}). Pick again for fresh inspection or setup. File contents have not been read.`
     : '';
+  for (const row of document.querySelectorAll('[data-folder-observation-id]')) {
+    const status = row.querySelector('.personal-assistant-folder-context__status');
+    if (status)
+      status.textContent = folderPresentation(
+        { coverage: { partial: row.dataset.folderPartial === 'true' } },
+        {
+          historical:
+            row.dataset.folderHistorical === 'true' ||
+            Boolean(state.authority) ||
+            state.observation?.id !== row.dataset.folderObservationId
+        }
+      ).status;
+  }
   elements.status.textContent = state.notice;
   updateSendHint();
   window.PersonalAssistantPanel?.setFolderBusy?.(state.pending, 'context');
   window.PersonalAssistantConversation?.refresh?.();
   window.PersonalAssistantFolder?.contextProgress?.(state);
   window.PersonalAssistantFolderSetup?.contextChanged?.(state);
+  renderDiscussion();
+  explorer?.refresh();
 }
 
 function closeChooser({ restoreFocus = true } = {}) {
@@ -351,7 +521,9 @@ async function open() {
       button.addEventListener('click', async () => {
         closeChooser();
         const selectedGeneration = chooserGeneration;
-        await controller.select(choice.mode, choice.chip);
+        const selected = await controller.select(choice.mode, choice.chip);
+        if (selected && folderTreeView(controller.state.observation))
+          explorer?.explore({ automatic: true });
         // Disabling Add during selection can move focus to body. Restore it
         // only if the user has not moved elsewhere or left this conversation.
         if (selectedGeneration === chooserGeneration && document.activeElement === document.body)
@@ -370,12 +542,13 @@ async function open() {
 function reset(id = '', saved = {}) {
   closeChooser({ restoreFocus: false });
   lastEventKey = undefined;
+  bindDiscussion(null);
   controller?.reset(id, saved);
 }
 
 // Only the server's typed event channel reaches here. Ordinary model prose
 // never becomes a card or an executable setup control.
-function renderEvent(id, event, beforeRow) {
+function renderEvent(id, event, beforeRow, { historical = false } = {}) {
   if (!id || !event) return null;
   const observation = event.observation;
   const key = `${observation?.id || 'removed'}:${event.offer_id || ''}`;
@@ -408,35 +581,9 @@ function renderEvent(id, event, beforeRow) {
     );
   } else if (observation) {
     row.dataset.folderObservationId = observation.id;
-    row.append(
-      node(
-        'p',
-        `${observation.folder} · saved observations`,
-        'personal-assistant-folder-context__eyebrow'
-      )
-    );
-    row.append(node('p', observationSummary(observation)));
-    row.append(
-      node(
-        'p',
-        'File contents have not been read. These are dated observations, not permission to inspect again.'
-      )
-    );
-    const detail = node('details', '');
-    detail.append(node('summary', 'Observed projects and coverage'));
-    detail.append(
-      node(
-        'p',
-        (observation.projects || [])
-          .map(
-            project =>
-              `${project.name}${project.marker ? ` (${project.marker})` : ''}: ${project.files} observed files`
-          )
-          .join(' · ')
-      )
-    );
-    detail.append(node('p', coverageSummary(observation)));
-    row.append(detail);
+    row.dataset.folderHistorical = String(historical);
+    row.dataset.folderPartial = String(observation.coverage?.partial === true);
+    renderFolderSummary(row, observation, { historical });
   } else {
     row.append(
       node(
@@ -465,11 +612,11 @@ function init() {
     remove: document.getElementById('personalAssistantRemoveFolder'),
     preview: document.getElementById('personalAssistantFolderPreview'),
     summary: document.getElementById('personalAssistantFolderSummary'),
-    projects: document.getElementById('personalAssistantFolderProjects'),
-    coverage: document.getElementById('personalAssistantFolderCoverage'),
     history: document.getElementById('personalAssistantFolderHistorical'),
     status: document.getElementById('personalAssistantContextStatus'),
-    hint: document.getElementById('personalAssistantFolderSendHint')
+    hint: document.getElementById('personalAssistantFolderSendHint'),
+    discussionChooser: document.getElementById('personalAssistantFolderDiscussionChooser'),
+    discussionCandidate: document.getElementById('personalAssistantFolderDiscussionCandidate')
   };
   controller = createFolderContextController({
     post: jsonRequest,
@@ -480,8 +627,40 @@ function init() {
       window.OriAskRouting?.getState?.().busy === true ||
       window.PersonalAssistantConversation?.isLoading?.() === true
   });
+  explorer = initFolderExplorer({
+    current: () => controller.state,
+    setFocus: (ids, binding) =>
+      !window.PersonalAssistantConversation?.isLoading?.() && controller.setFocus(ids, binding),
+    notify: message => controller.notify(message)
+  });
   document.getElementById('personalAssistantInput')?.addEventListener('input', updateSendHint);
-  document.addEventListener('personal-assistant:sent', updateSendHint);
+  document.addEventListener('personal-assistant:status', renderDiscussion);
+  document.addEventListener('personal-assistant:sent', () => {
+    updateSendHint();
+    bindDiscussion(null);
+  });
+  document
+    .getElementById('personalAssistantFolderDiscussionDraft')
+    ?.addEventListener('click', () => {
+      const value = discussionChoiceBinding;
+      if (!discussionRow(value) || !elements.discussionCandidate.reportValidity()) return;
+      const candidate = elements.discussionCandidate.value;
+      closeDiscussionChooser({ restoreFocus: false });
+      discussionDraft(value, candidate);
+    });
+  document
+    .getElementById('personalAssistantFolderDiscussionCancel')
+    ?.addEventListener('click', () => closeDiscussionChooser());
+  document.addEventListener(
+    'keydown',
+    event => {
+      if (event.key !== 'Escape' || elements.discussionChooser.hidden) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeDiscussionChooser();
+    },
+    true
+  );
   elements.remove.addEventListener('click', async () => {
     const saved = controller.state.accepted;
     if (await controller.remove()) {
@@ -503,11 +682,22 @@ function init() {
 
 const api = {
   open,
-  close: () => closeChooser({ restoreFocus: false }),
+  close: () => {
+    closeChooser({ restoreFocus: false });
+    closeDiscussionChooser({ restoreFocus: false });
+  },
+  bindDiscussion,
+  refreshDiscussion: () => {
+    renderDiscussion();
+    explorer?.refresh();
+  },
+  explore: () => explorer?.explore() || false,
+  showChat: () => explorer?.showChat(),
   reset,
   hydrate: (id, saved) => {
     // Resume has already rendered canonical events; keep their deduplication key.
     closeChooser({ restoreFocus: false });
+    explorer?.collapse({ focus: false });
     controller?.reset(id, saved);
   },
   renderEvent,

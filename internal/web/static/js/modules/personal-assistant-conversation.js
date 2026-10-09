@@ -6,6 +6,8 @@
 // share a thread by accident.
 
 import { renderTurnWorkspace, renderTurnSources } from './personal-assistant-workspace-context.js';
+import { renderFolderFocus } from './personal-assistant-folder-tree.js';
+import { folderDiscussionBinding } from './personal-assistant-folder-presentation.js';
 
 const LIST_ENDPOINT = '/api/home-assistant/conversations';
 const STORAGE_KEY = 'ori.personalAssistant.conversation';
@@ -222,6 +224,7 @@ async function resume(id, options = {}) {
   const target = String(id || '').trim();
   if (!target || state.loading) return false;
   state.loading = true;
+  window.PersonalAssistantFolderContext?.refreshDiscussion?.();
   const generation = ++state.generation;
   try {
     const result = await readJSON(`${LIST_ENDPOINT}/${encodeURIComponent(target)}`);
@@ -251,11 +254,18 @@ async function resume(id, options = {}) {
     const messages = result.body.messages || [];
     for (const message of messages) {
       if (message.role === 'folder_context' && message.folder_context) {
-        window.PersonalAssistantFolderContext?.renderEvent?.(message.id, message.folder_context);
+        window.PersonalAssistantFolderContext?.renderEvent?.(
+          message.id,
+          message.folder_context,
+          null,
+          { historical: true }
+        );
         continue;
       }
       const row = window.OriAskRouting?.appendMessage?.(message.role, message.content);
       renderTurnWorkspace(row, message.workspace_context, { historical: true });
+      if (message.role === 'user' && !message.imported)
+        renderFolderFocus(row, message.folder_focus);
       // A saved reply lists what it read then; reloading reads nothing again.
       if (message.role === 'assistant')
         renderTurnSources(row, message.workspace_context, { historical: true });
@@ -287,6 +297,14 @@ async function resume(id, options = {}) {
       result.body.folder_review_context || null,
       result.body.folder_review_elsewhere || null
     );
+    const discussion = folderDiscussionBinding(
+      messages,
+      conversation.id,
+      result.body.folder_context
+    );
+    window.PersonalAssistantFolderContext?.bindDiscussion?.(
+      discussion ? { ...discussion, restored: true } : null
+    );
     setNote(
       partial
         ? 'Showing the most recent messages of this conversation. Earlier ones are still stored.'
@@ -298,6 +316,7 @@ async function resume(id, options = {}) {
     return false;
   } finally {
     state.loading = false;
+    window.PersonalAssistantFolderContext?.refreshDiscussion?.();
   }
 }
 
@@ -394,6 +413,7 @@ function request(routeContext) {
  * with their canonical message IDs and returns what the controller should do.
  */
 function applyReply(data, rows = {}) {
+  window.PersonalAssistantFolderContext?.bindDiscussion?.(null);
   if (data?.workspace_context) {
     renderTurnWorkspace(rows.userRow, data.workspace_context);
     renderTurnWorkspace(rows.assistantRow, data.workspace_context);
@@ -404,6 +424,7 @@ function applyReply(data, rows = {}) {
   const nextId = nextConversationId(state.id, reply);
   if (reply.stored) {
     attachMessage(rows.userRow, nextId, reply.user_message_id);
+    renderFolderFocus(rows.userRow, reply.folder_focus);
     attachMessage(rows.assistantRow, nextId, reply.assistant_message_id);
     if (reply.assistant_message_id) window.PersonalAssistantDrafts?.replyAdded?.();
   }
@@ -416,7 +437,11 @@ function applyReply(data, rows = {}) {
         observation: data.folder_context.observation,
         offer_id: data.folder_context.offer_id
       },
-      rows.userRow
+      rows.userRow,
+      {
+        historical:
+          Boolean(data.folder_context.authority) || data.folder_context.historical === true
+      }
     );
     window.PersonalAssistantFolderContext?.accepted?.(nextId, data.folder_context);
   } else if (reply.stored) {
@@ -431,6 +456,23 @@ function applyReply(data, rows = {}) {
     data.folder_review_context || null,
     data.folder_review_elsewhere || null
   );
+  if (reply.stored && data.folder_context && rows.assistantRow) {
+    window.PersonalAssistantFolderContext?.bindDiscussion?.(
+      folderDiscussionBinding(
+        [
+          {
+            id: data.folder_context.revision,
+            role: 'folder_context',
+            folder_context: { version: 1, observation: data.folder_context.observation }
+          },
+          { id: reply.user_message_id, role: 'user' },
+          { id: reply.assistant_message_id, role: 'assistant', content: data.response }
+        ],
+        nextId,
+        data.folder_context
+      )
+    );
+  }
   const notice = conversationNotice(data);
   setNote(notice);
   return { notice, stored: reply.stored === true, restoreInput: shouldRestoreInput(data) };

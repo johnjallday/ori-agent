@@ -206,10 +206,32 @@ function setStatus(message) {
 
 function syncPanelViewport() {
   if (!state.els?.root) return;
+  const panel = state.els.panel;
+  const scale = panel?.offsetWidth
+    ? Math.max(1, Math.round((panel.getBoundingClientRect().width / panel.offsetWidth) * 100) / 100)
+    : 1;
+  state.els.root.style.setProperty('--pa-viewport-width', `${window.innerWidth / scale}px`);
+  state.els.root.style.setProperty('--pa-viewport-height', `${window.innerHeight / scale}px`);
+  panel?.classList.toggle(
+    'personal-assistant-panel--explorer-narrow',
+    window.innerWidth / scale <= 760
+  );
   const navbar = document.querySelector?.('nav.navbar');
   const bottom = navbar?.getBoundingClientRect?.().bottom;
+  const inlineToolbar =
+    window.innerWidth / scale >= 600 && (window.innerHeight - (bottom || 0)) / scale <= 520;
+  panel?.classList.toggle('personal-assistant-panel--inline-toolbar', inlineToolbar);
+  const clear = document.getElementById('personalAssistantFolderFocusClear');
+  const clearMount =
+    inlineToolbar && panel?.classList.contains('personal-assistant-panel--exploring')
+      ? state.els.chips
+      : document.getElementById('personalAssistantFolderFocus');
+  if (clear && clearMount && clear.parentElement !== clearMount) clearMount.append(clear);
   if (Number.isFinite(bottom)) {
-    state.els.root.style.setProperty('--ori-navbar-bottom', `${Math.max(0, Math.ceil(bottom))}px`);
+    state.els.root.style.setProperty(
+      '--ori-navbar-bottom',
+      `${Math.max(0, Math.ceil(bottom / scale))}px`
+    );
   }
 }
 
@@ -469,6 +491,75 @@ function open(trigger, options = {}) {
   return true;
 }
 
+export function suggestedReplyDraft({
+  current = '',
+  text = '',
+  maxLength = 2000,
+  available,
+  pending,
+  busy,
+  loading,
+  folderPending
+} = {}) {
+  const draft = String(current);
+  const suggestion = String(text);
+  if (!available)
+    return {
+      draft,
+      accepted: false,
+      notice: 'The assistant is unavailable. Your draft is unchanged.'
+    };
+  if (pending || busy || loading || folderPending)
+    return {
+      draft,
+      accepted: false,
+      notice:
+        'Wait for the current reply, folder selection or conversation to finish. Your draft is unchanged.'
+    };
+  if (draft !== '')
+    return {
+      draft,
+      accepted: false,
+      notice: 'Send or clear your draft before using a suggestion. Your text is unchanged.'
+    };
+  if (!suggestion.trim() || suggestion.length > maxLength)
+    return {
+      draft,
+      accepted: false,
+      notice:
+        'This suggestion does not fit the composer. Write your question directly; nothing was inserted.'
+    };
+  return {
+    draft: suggestion,
+    accepted: true,
+    notice: 'Review, then Send. Nothing has been transmitted.'
+  };
+}
+
+// Unlike prefill(), a contextual shortcut never replaces an existing draft,
+// appends text, opens a second draft, or transmits a message.
+function suggestReply(text) {
+  if (!state.els?.input || !state.open) return false;
+  const result = suggestedReplyDraft({
+    current: state.els.input.value,
+    text,
+    maxLength: state.els.input.maxLength > 0 ? state.els.input.maxLength : 2000,
+    available: state.view.available,
+    pending: state.pending,
+    busy: window.OriAskRouting?.getState?.().busy === true,
+    loading: window.PersonalAssistantConversation?.isLoading?.() === true,
+    folderPending: window.PersonalAssistantFolderContext?.isPending?.() === true
+  });
+  if (result.accepted) {
+    state.draft = result.draft;
+    state.els.input.value = result.draft;
+    state.els.input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  state.els.input.focus();
+  setStatus(result.notice);
+  return result.accepted;
+}
+
 function prefill(text) {
   if (!state.view.available) return false;
   if (!open(state.els?.launcher)) return false;
@@ -616,6 +707,35 @@ function submit(event) {
   return true;
 }
 
+export function assistantFocusNeedsScroll(viewport, target) {
+  return Boolean(
+    viewport && target && (target.top < viewport.top || target.bottom > viewport.bottom)
+  );
+}
+
+function revealFocusedControl() {
+  const scroll = document.getElementById('personalAssistantScroll');
+  const active = document.activeElement;
+  if (
+    !state.open ||
+    !active ||
+    !scroll?.contains(active) ||
+    !active.closest(
+      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderDiscussionChooser'
+    )
+  )
+    return;
+  const viewport = scroll.getBoundingClientRect();
+  const target = active.getBoundingClientRect();
+  if (!assistantFocusNeedsScroll(viewport, target)) return;
+  // Move only our scroll container. Native scrollIntoView may leave a few
+  // clipped pixels under the pinned footer, or scroll outer page ancestors.
+  const scale = viewport.height / scroll.offsetHeight || 1;
+  const offset =
+    target.top < viewport.top ? target.top - viewport.top - 1 : target.bottom - viewport.bottom + 1;
+  scroll.scrollTop += offset / scale;
+}
+
 function init() {
   const panel = document.getElementById('personalAssistantPanel');
   const launcher = document.getElementById('personalAssistantLauncher');
@@ -703,6 +823,24 @@ function init() {
     if (event.detail?.personalAssistant) applyPersonalAssistant(event.detail.personalAssistant);
   });
   window.addEventListener('resize', syncPanelViewport);
+  // Resize/reflow can leave an already-focused folder control outside the one
+  // scroll viewport. Recover only this feature's keyboard position; do not
+  // interfere with existing message, saved-draft or memory focus lifecycles.
+  const scroll = document.getElementById('personalAssistantScroll');
+  if (scroll && typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => requestAnimationFrame(revealFocusedControl)).observe(scroll);
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(syncPanelViewport).observe(panel);
+  }
+  // CSS zoom changes rendered geometry without a content-box resize. Native
+  // zoom uses the resize listener; this also covers app/style reflow honestly.
+  if (typeof MutationObserver !== 'undefined') {
+    const observer = new MutationObserver(syncPanelViewport);
+    for (const root of [document.documentElement, document.body]) {
+      if (root) observer.observe(root, { attributes: true, attributeFilter: ['style', 'class'] });
+    }
+  }
   syncPanelViewport();
   renderHeader();
   // `/?panel=today` opens the drawer on Home. Wait for the server-owned
@@ -724,11 +862,13 @@ const api = {
   open,
   close,
   prefill,
+  suggestReply,
   restoreDraft,
   refresh,
   applyPersonalAssistant,
   setToday,
   setFolderBusy,
+  syncViewport: syncPanelViewport,
   refreshWorkspaceContext,
   _state: state
 };

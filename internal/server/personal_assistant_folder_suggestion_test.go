@@ -45,8 +45,10 @@ func TestAssistantFolderSuggestion_RealSendHydrationAndExplicitReview(t *testing
 	if strings.Contains(prompt, selected["selection_id"].(string)) || strings.Contains(prompt, selected["candidate_id"].(string)) {
 		t.Fatal("opaque reference sent to model")
 	}
-	if !strings.Contains(call.Messages[0].Content, "Explore first") {
-		t.Fatal("no recommendation guidance")
+	for _, required := range []string{"about 80 words", "not a repeated inventory", "optional background", "Do not prefer a child", "no earlier locally saved answered turn"} {
+		if !strings.Contains(call.Messages[0].Content, required) {
+			t.Fatalf("missing conversational presentation guidance %q", required)
+		}
 	}
 	for range 2 {
 		status, history := f.call(t, http.MethodGet, "/api/home-assistant/conversations/"+id, nil)

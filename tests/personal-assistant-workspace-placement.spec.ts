@@ -99,6 +99,8 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
       .locator('#personalAssistantFolderChoices')
       .getByRole('button', { name: 'Documents', exact: true })
       .click();
+    await expect(page.locator('#personalAssistantFolderExplorer')).toBeVisible();
+    await page.locator('#personalAssistantExplorerBack').click();
     await expect(page.locator('#personalAssistantFolderPreview')).toBeVisible();
   };
   const chooseCandidate = async (name: string) => {
@@ -135,7 +137,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
   expect(asked.folder_setup_suggestion.subject).toBeUndefined();
   expect(asked.folder_review_context).toBeUndefined();
   expect(await workspaces()).toHaveLength(initial.length);
-  await page.getByRole('button', { name: 'Review suggested setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Optional: review setup', exact: true }).click();
   await chooseCandidate('Album-5 placement fixture');
   await expect(card).toBeVisible();
   await expect(card).toContainText(
@@ -317,7 +319,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
   await expect(page.locator('[data-folder-setup-suggestion]')).toContainText(
     'reviews placement in Renamed portfolio placement fixture, the workspace you named'
   );
-  await page.getByRole('button', { name: 'Review suggested setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Optional: review setup', exact: true }).click();
   await chooseCandidate('Documents (whole folder)');
   await expect(card).toBeVisible();
   await expect(card).toContainText(

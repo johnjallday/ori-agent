@@ -20,6 +20,9 @@ func observationFixture(t *testing.T) (*folderDigestFixture, *FolderObservationS
 	f.service.deps.Scan = func(root string) (folderdigest.Result, error) {
 		return folderdigest.Scan(root, folderdigest.Options{Now: func() time.Time { return f.now }})
 	}
+	f.service.deps.ScanObservation = func(root string) (folderdigest.Result, error) {
+		return folderdigest.Scan(root, folderdigest.Options{CaptureTree: true, Now: func() time.Time { return f.now }})
+	}
 	binding, err := f.store.Binding(context.Background(), "local")
 	if err != nil {
 		t.Fatal(err)
@@ -61,18 +64,22 @@ func TestFolderObservation_LocalOnlyAndBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{f.home, "todo.txt", "photo.png", "folder_key", "identity"} {
+	for _, forbidden := range []string{f.home, "folder_key", "identity"} {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("private metadata leaked: %s", forbidden)
 		}
+	}
+	if observation.Tree == nil || len(observation.Tree.Nodes) != 2 || !strings.Contains(string(encoded), "todo.txt") || !strings.Contains(string(encoded), "photo.png") {
+		t.Fatal("explicit attachment did not retain genuine bounded metadata names")
 	}
 	resolved, err := service.Resolve(ctx, target, observation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resolved.Kinds[0].Name = "tampered"
+	resolved.Tree.Nodes[0].Name = "tampered"
 	resolved, err = service.Resolve(ctx, target, observation.ID)
-	if err != nil || resolved.Kinds[0].Name == "tampered" {
+	if err != nil || resolved.Kinds[0].Name == "tampered" || resolved.Tree.Nodes[0].Name == "tampered" {
 		t.Fatal("caller mutated held observation")
 	}
 }
@@ -155,8 +162,8 @@ func TestFolderObservation_ReplacementAndCancellationPreservePrevious(t *testing
 func TestFolderObservation_BudgetsPartialAndPruning(t *testing.T) {
 	f, service, target := observationFixture(t)
 	ctx := context.Background()
-	f.service.deps.Scan = func(root string) (folderdigest.Result, error) {
-		return folderdigest.Scan(root, folderdigest.Options{MaxEntries: 5, Now: func() time.Time { return f.now }})
+	f.service.deps.ScanObservation = func(root string) (folderdigest.Result, error) {
+		return folderdigest.Scan(root, folderdigest.Options{CaptureTree: true, MaxEntries: 5, Now: func() time.Time { return f.now }})
 	}
 	for range folderSelectionsPerOwner {
 		observation, err := service.Observe(ctx, target, "chip", "documents")
@@ -178,8 +185,8 @@ func TestFolderObservation_BudgetsPartialAndPruning(t *testing.T) {
 
 func TestFolderObservation_ChangedDuringScanRefusesSnapshot(t *testing.T) {
 	f, service, target := observationFixture(t)
-	f.service.deps.Scan = func(root string) (folderdigest.Result, error) {
-		result, err := folderdigest.Scan(root, folderdigest.Options{Now: func() time.Time { return f.now }})
+	f.service.deps.ScanObservation = func(root string) (folderdigest.Result, error) {
+		result, err := folderdigest.Scan(root, folderdigest.Options{CaptureTree: true, Now: func() time.Time { return f.now }})
 		if err != nil {
 			return result, err
 		}

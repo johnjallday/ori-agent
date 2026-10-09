@@ -6,6 +6,7 @@ import {
   EXPLORE_FOLDER_URL,
   NEEDS_YOU_URL,
   assistantCheckInLine,
+  assistantFocusNeedsScroll,
   assistantChipView,
   assistantMoreLinks,
   assistantNeedsLine,
@@ -16,8 +17,61 @@ import {
   personalAssistantPanelView,
   restoreAssistantPanelFocus,
   restoredDraft,
-  safeTodayRoute
+  safeTodayRoute,
+  suggestedReplyDraft
 } from './personal-assistant-panel.js';
+
+test('only a focused control outside the scroll viewport needs reflow recovery', () => {
+  const viewport = { top: 100, bottom: 500 };
+  assert.equal(assistantFocusNeedsScroll(viewport, { top: 100, bottom: 500 }), false);
+  assert.equal(assistantFocusNeedsScroll(viewport, { top: 99, bottom: 140 }), true);
+  assert.equal(assistantFocusNeedsScroll(viewport, { top: 480, bottom: 524 }), true);
+  assert.equal(assistantFocusNeedsScroll(null, null), false);
+});
+
+test('suggested replies fill only an empty composer and preserve exact existing text', () => {
+  const text = 'Discuss “同じ名前 🎼”';
+  const result = suggestedReplyDraft({ available: true, text });
+  assert.equal(result.accepted, true);
+  assert.equal(result.draft, text);
+  assert.match(result.notice, /Review, then Send/);
+  for (const current of ['My exact draft', '  ', '\n🎼  ']) {
+    const rejected = suggestedReplyDraft({ available: true, text, current });
+    assert.equal(rejected.accepted, false);
+    assert.equal(rejected.draft, current);
+    assert.match(rejected.notice, /Send or clear/);
+  }
+});
+
+test('suggested reply length uses the composer UTF-16 bound without splitting a name', () => {
+  assert.equal(suggestedReplyDraft({ available: true, text: '🎼'.repeat(1000) }).accepted, true);
+  const tooLong = suggestedReplyDraft({ available: true, text: '🎼'.repeat(1001) });
+  assert.equal(tooLong.accepted, false);
+  assert.equal(tooLong.draft, '');
+  assert.equal(
+    suggestedReplyDraft({ available: true, text: 'Question', maxLength: 4 }).accepted,
+    false
+  );
+});
+
+test('suggested replies reject unavailable, busy, pending selection and loading history without draft loss', () => {
+  for (const block of [
+    { available: false },
+    { pending: true },
+    { busy: true },
+    { loading: true },
+    { folderPending: true }
+  ]) {
+    const result = suggestedReplyDraft({
+      available: true,
+      current: 'Keep this',
+      text: 'Suggestion',
+      ...block
+    });
+    assert.equal(result.accepted, false);
+    assert.equal(result.draft, 'Keep this');
+  }
+});
 
 test('personal assistant panel covers unavailable, pre-hire, active, paused, and repair states', () => {
   assert.equal(personalAssistantPanelView(null).known, false);
@@ -198,7 +252,10 @@ test('Add folder sits inside the composer, on every page', () => {
   // The attachment row remains outside the scrolling region.
   assert.ok(drawer.indexOf('id="personalAssistantPanelStatus"') < chips);
   assert.ok(drawer.indexOf('id="personalAssistantThread"') < chips);
-  assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 1);
+  assert.equal((drawer.match(/class="personal-assistant-panel__chip"/g) || []).length, 2);
+  assert.match(drawer, /id="personalAssistantExploreAttachedFolder"[^>]+hidden>Tree \+ Chat/);
+  assert.equal((drawer.match(/id="personalAssistantInput"/g) || []).length, 1);
+  assert.equal((drawer.match(/id="personalAssistantForm"/g) || []).length, 1);
   assert.match(drawer, /id="personalAssistantFolderChip"[\s\S]{0,350}Add folder/);
   assert.match(drawer, /id="personalAssistantRemoveFolder" aria-label="Remove folder context"/);
   // Not inside a part of the drawer that only some pages render: the last

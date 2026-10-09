@@ -10,7 +10,8 @@
   depth 3, 5,000 entries and three seconds. It skips links and tooling/OS
   directories. Depth and unreadable subdirectories are coverage limitations
   even when the entry/time budget did not trip. Candidate names are root and
-  immediate subfolders; this is not a complete tree or document inventory.
+  immediate subfolders. Explicit attachments additionally capture a bounded
+  metadata tree during the same walk; neither projection is a complete inventory.
 - Picked paths in the existing digest are process-local; chip paths can be
   reconstructed by the old offer path. Conversation selections must **not**
   reconstruct either kind after restart. The existing portfolio continuation's
@@ -56,8 +57,11 @@ summaries (observed counts and known marker labels only). Names are limited to
 96 Unicode characters/384 UTF-8 bytes; the encoded snapshot is at most 8 KiB.
 Counts never exceed the 5,000-entry scan budget. Coverage always states depth,
 entry/time limits, skipped links and omissions; partial does not mean complete
-otherwise. File bytes, absolute/relative paths, arbitrary filenames and directory
-identity witnesses are excluded. Names are untrusted data, not instructions.
+otherwise. Explicit attachments may additionally contain a genuine bounded tree
+of recorded file/folder display names and parent relationships. File bytes,
+filesystem paths and directory identity witnesses are excluded. Names are
+untrusted data, not instructions; Send discloses metadata sharing with the
+configured model.
 
 A saved snapshot is discussable, not a filesystem grant. Current authority is
 checked independently. Lost (restart), expired and changed selections retain
@@ -106,7 +110,8 @@ history. No import/reset/read path recreates a live selection. Omitted folder
 fields keep legacy text-only behavior; a supplied invalid reference fails
 closed. Existing history limits remain 40 messages / 24,000 characters with
 6,000 characters per message; folder snapshot adds at most 8 KiB per turn and
-is never reconstructed by parsing prose.
+is never reconstructed by parsing prose. Optional version-1 tree/focus fields
+use those existing envelopes; they require no migration or new preference.
 
 ### UI and routing
 
@@ -119,16 +124,119 @@ resetting context invalidates late choice loads; selection restores Add folder
 focus only when the user has not moved elsewhere. No path is stored in the browser.
 
 Send displays any attachment-only default request (`Explore this folder`) and
-carries only opaque references. The validated personal-folder route bypasses
+carries only opaque references, including optional next-turn focus node IDs. The validated personal-folder route bypasses
 specialist/generic-create detection, not intentional workspace routing. Reviewed
 memory/backlog actions retain their own gates. Prompt context is escaped,
 delimited reference data with explicit contents/coverage limits and historical
 status. A provider cannot invent trusted setup buttons.
 
+### Compact folder reply and discussion choices
+
+Local preview and canonical events share a text-node-only presentation helper.
+The heading is the folder, followed by a localized snapshot date, bounded/partial
+or saved-historical status, and **Attached folder: contents not read**. That
+statement concerns the attachment, not other separately authorized workspace
+sources on the turn. At most three non-root observed folders/markers appear
+initially; a native disclosure reveals the remaining recorded rows. The root
+is not an independent project total. Omitted summaries have a visible warning;
+Show more cannot recover them. Scan details contains counts, overlap explanation,
+precise time and coverage/marker limits. Replay retains chronological placement
+and unchanged saved prose, with one factual card per unchanged observation.
+
+The folder prompt adds a short interpretation rather than a repeated inventory.
+Initial exploration targets two or three sentences, normally about 80 words or
+less; explicit questions and detail requests take priority. Follow-ups avoid a
+new introduction or repeated setup pitch. A locally authored typed event/user/
+answer triple for the same snapshot qualifies only when both chat rows are in
+the actual bounded provider history. Internal events use the system role with
+version-1 typed context; viewer events serialize as `folder_context`. Transient
+history message IDs establish eligibility, not a browser flag or model prose.
+Text-only callers still get relevant facts. This is guidance, not a response
+schema, renderer truncation or cross-model quality guarantee.
+
+One current strip offers whole-folder discussion and, when there are observed
+children, an explicit local chooser. It binds the successfully saved assistant
+row to its conversation, observation, revision and UI generation, rechecking
+ownership and DOM presence on activation. Imported/legacy or unsaved prose,
+event-only reviews, detached context and trimmed-away answers cannot create it.
+Saved snapshots use saved-observation wording; lost/expired authority uses only
+the existing historical request path. No pick, rescan or setup is revived.
+
+Discussion candidates come from all typed non-root observations, independently
+of setup compatibility. Names and markers remain literal text. Identical
+names/markers cannot identify distinct targets and are disabled rather than
+silently resolved by opaque IDs. The chooser changes neither attachment nor
+persistent scope; it prepares a plain-text question only. A dedicated
+`suggestReply` entry fills an empty composer within its UTF-16 maxlength, never
+cuts a name or overwrites/appends to an existing draft, focuses and announces
+**Review, then Send**. Cancel/Escape returns to the trigger. Only ordinary Send
+transmits references through the existing validated route. Other `prefill`
+callers keep their original semantics.
+
+Ordinary chat retains one transcript viewport and pinned composer. Native
+headings, lists, disclosures/selects, labelled 44px controls and polite statuses
+preserve keyboard order. Reflow recovery scrolls only the relevant assistant
+pane, without changing existing saved-draft/memory focus lifecycles.
+
+### Bounded Tree + Chat exploration
+
+`CaptureTree` is attachment-only: the existing metadata walk records at most 64
+real entries, opaque `entry-N` IDs, kind and actual parent ID. Files at the last
+visited directory level can have four name segments under the existing depth-3
+walk. Background digest scans remain tree-free. Exclusions, links, entry/time
+limits and unreadable-directory behavior are unchanged; no second scan or file
+reader is added. Entries whose parent was omitted are omitted too, not falsely
+reparented. Sanitization and a parent-before-child prefix trim keep the snapshot
+inside 8 KiB, with declared omissions. Held evidence is cloned on return/resolve.
+Legacy snapshots get no invented hierarchy.
+
+After a successful explicit attachment with a valid tree, the existing drawer
+opens Tree + Chat. Desktop has independently scrolling side-by-side tree and
+transcript panes; narrow layouts offer Tree/Chat controls, initially Tree. There
+is still one conversation, form, textarea and pinned composer. Back to chat
+collapses only the layout, preserving attachment, exact draft and next-turn
+focus. A real tree can be reopened locally. Replies, reload and failed/cancelled
+selections do not automatically reopen it. Expanding or checking reads/sends
+nothing; coverage details retain scan time, bounds, omissions and exclusions.
+
+Independent native checkboxes choose up to eight distinguishable discussion
+topics. Checking a folder never checks its descendants. **Select all** explicitly
+checks every recorded entry, including collapsed children, when all topics fit
+the existing count/byte/distinguishability bounds. Otherwise the control says
+**Select all · Whole folder** and uses whole-folder discussion, clearing individual
+checks and announcing that result. It never silently selects a subset, invents
+omitted entries or bypasses the host limits. Empty trees disable it; legacy
+summary-only snapshots have no bulk tree action. Empty focus means the
+whole recorded folder, not additional permission. Focus is neither a file-read
+grant, descendant scope nor a privacy filter: the bounded observation remains
+shared on Send. Ambiguous sanitized names are disabled. Expansion and next-turn
+focus are ephemeral; New/reload/replacement/detach clear them, while cancellation
+preserves them. Existing textual shortcuts clear focus only after a draft is
+successfully accepted; they cannot overwrite an existing draft.
+
+The host resolves submitted IDs against the exact live or canonical historical
+snapshot before provider calls or writes. Missing, duplicate, foreign, ambiguous
+or oversized focus is rejected. Resolved topics contain names as segments and
+kinds, not filesystem paths or opaque IDs; their encoded bound is 4 KiB. The
+provider receives escaped entry relationships as parent indices and explicit
+current discussion focus. Earlier focus is labelled untrusted historical data,
+not current instruction. The metadata projection is bounded to 16 KiB.
+
+The atomic event freezes optional `focus_ids`. Only validated, locally authored
+system-event/user/answered-assistant triples produce server-projected
+`folder_focus` badges on canonical user rows. Sent badges remain immutable on
+live/replay views; changing checks during a reply affects only the next message.
+Imported prose and model output cannot fabricate badges; legacy tree-less
+snapshots cannot supply specific entry topics.
+Saved snapshots remain discussable without rescanning or reviving setup/read
+rights. Tree focus never supplies a reviewed-setup candidate or confirmation.
+
 ### Optional setup handoff
 
-After Send, the folder conversation prompt explores the observed structure and
-recommends a fitting next step, rather than waiting for a setup phrase. A read-only
+New setup options are optional background, not a required recommendation or
+final paragraph. A lone compatible child must not become the preferred scope
+merely because other observed children cannot be set up. Existing review state
+remains separately discoverable even when no new options are available. A read-only
 `ReviewOptions` projection reuses candidate preparation and capability/plan
 availability from the existing setup service. It does not rescan, allocate an
 offer, or execute a journey. Names and supported workspace types reach the model
@@ -137,13 +245,15 @@ historical, or pending-review cases have no suggested action.
 
 A successfully saved metadata turn can return `folder_setup_suggestion`, bound to
 its conversation, revision, observation and canonical assistant-message ID. The
-reply shows **Review suggested setup**, opening the existing candidate selector;
-multiple scopes start unselected. The suggestion is not persisted authority:
-reload projects it only for the latest locally authored atomic folder turn and
-rechecks availability. Imported prose, unsaved/model-failure replies, content
+reply shows secondary **Optional: review setup**, after discussion choices,
+opening the existing candidate selector; multiple scopes start unselected. The
+suggestion is not persisted authority: reload projects it only for the latest
+locally authored atomic folder turn and rechecks availability. Imported prose, unsaved/model-failure replies, content
 refusals, replacement/detach, closed reviews and old answers cannot revive it.
 Clicking still uses the existing explicit review endpoint and confirmation gates.
-The composer review entry remains available for direct/no-model review.
+The composer **Review setup** entry remains available for direct/no-model review.
+An existing review retains its status and **Show existing setup review** action;
+discussion choices never supply its candidate default or confirmation.
 
 Only explicit Review workspace setup mints a canonical digest offer. The handoff
 checks current conversation revision, selection owner/expiry/directory identity,
@@ -251,3 +361,17 @@ configuration. Final delivery evidence is in `final/README.md` under that local
 archive. Full CI, same-environment README capture, controlled-provider browser
 captures and scoped accessibility checks are distinct from those unrun live
 integrations. The checklist records actual validation separately from design.
+
+Folder-response UX evidence is separately indexed under
+`tasks/evidence/assistant-folder-response-ux/`. The maintained real-host scenario
+is `python3 scripts/assistant-workspace-demo.py --folder-response`; it uses the
+actual selection/Route/Ask/provider adapter/atomic history/reload path with
+synthetic unread-content sentinels and scripted loopback prose. Browser fixture
+stress checks cover stale identities, failed/delayed turns, literal names,
+Chromium accessibility semantics, themes and reflow. These do not prove vendor
+model concision, native picker use, native browser zoom or assistive-technology
+behavior. The `--folder-response-evidence-stage explorer` variant additionally
+checks genuine tree relationships, independent focus, exact drafts, immutable
+sent/replayed badges and collapsed reload. Its source/run evidence is separate
+from the original compact-response validation. See [folder-first manual testing](../testing/folder-first-manual.md)
+for the separate discussion and explicit setup journeys.

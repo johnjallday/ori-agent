@@ -74,6 +74,10 @@ func TestAssistantFolderTurn_RealPromptBoundaryAcrossFollowupsAndContentsRefusal
 	if len(f.provider.requests[1].Messages) != 4 || f.provider.requests[1].Messages[1].Content != "What kinds of projects are here?" {
 		t.Fatalf("wrong history: %+v", f.provider.requests[1].Messages)
 	}
+	if !strings.Contains(f.provider.requests[0].Messages[0].Content, "no earlier locally saved answered turn") ||
+		!strings.Contains(f.provider.requests[1].Messages[0].Content, "Treat this as a follow-up") {
+		t.Fatal("actual provider did not receive canonical initial/follow-up context")
+	}
 	request = nextFolderTurn(request, second, "Summarize these documents")
 	third := f.handler.Ask(context.Background(), request)
 	if !third.Conversation.Stored || !strings.Contains(third.Response, "File contents have not been read") || len(f.provider.requests) != 2 {
@@ -96,6 +100,32 @@ func TestAssistantFolderTurn_RealPromptBoundaryAcrossFollowupsAndContentsRefusal
 	}
 	if len(body.Messages) != 9 || body.Messages[0].Role != "folder_context" || body.Messages[0].ID != first.FolderContext.Revision || body.Folder.Revision != third.FolderContext.Revision {
 		t.Fatalf("canonical hydration: %+v", body)
+	}
+}
+
+func TestAssistantFolderTurn_ActualProviderPresentationForExplicitQuestions(t *testing.T) {
+	for _, prompt := range []string{"Explore this folder", "What does the structure suggest?", "Explain the scan coverage in detail", "Just discuss this folder; do not set anything up", "Review a setup for this folder"} {
+		t.Run(prompt, func(t *testing.T) {
+			f := newConversationServerFixture(t)
+			request, _ := stageFolderTurn(t, f)
+			request.Prompt = prompt
+			response := f.handler.Ask(context.Background(), request)
+			if response.Conversation == nil || !response.Conversation.Stored || len(f.provider.requests) != 1 {
+				t.Fatalf("turn did not reach the provider and canonical save: %+v", response)
+			}
+			call := f.provider.requests[0]
+			if !strings.HasPrefix(call.Messages[len(call.Messages)-1].Content, prompt) {
+				t.Fatal("explicit request was rewritten")
+			}
+			for _, required := range []string{"about 80 words", "Answer explicit questions directly", "give requested detail", "optional background", "not a required recommendation", "never choose a candidate", "File contents have NOT been read"} {
+				if !strings.Contains(call.Messages[0].Content, required) {
+					t.Fatalf("missing guidance %q", required)
+				}
+			}
+			if response.RequiresConfirmation || response.Response == "" {
+				t.Fatal("text-only question became setup or lost useful prose")
+			}
+		})
 	}
 }
 

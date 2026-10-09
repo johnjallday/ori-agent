@@ -163,6 +163,9 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-memory.js',
       'internal/web/static/js/modules/personal-assistant-message-actions.js',
       'internal/web/static/js/modules/personal-assistant-folder-context.js',
+      'internal/web/static/js/modules/personal-assistant-folder-presentation.js',
+      'internal/web/static/js/modules/personal-assistant-folder-tree.js',
+      'internal/web/static/js/modules/personal-assistant-folder-explorer.js',
       'internal/web/static/js/modules/personal-assistant-folder-setup.js',
       'internal/web/static/js/modules/personal-hq-fact.js',
       'internal/web/static/js/modules/personal-assistant-continuity.js',
@@ -258,7 +261,11 @@ export default defineConfig([
     }
   },
   {
-    files: ['scripts/demo-folder-first.mjs', 'scripts/demo-assistant-drawer.mjs'],
+    files: [
+      'scripts/demo-folder-first.mjs',
+      'scripts/demo-assistant-drawer.mjs',
+      'tests/fixtures/assistant-folder-response*.js'
+    ],
     languageOptions: { sourceType: 'module', globals: { ...globals.node } }
   },
   {

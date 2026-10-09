@@ -148,7 +148,27 @@
       </button>
     </header>
 
-    <!-- Everything above the composer scrolls here when it does not fit. -->
+    <div id="personalAssistantExplorerToolbar" class="personal-assistant-explorer__toolbar" hidden>
+      <button type="button" id="personalAssistantExplorerBack" class="personal-assistant-conversation__button">← Back to chat</button>
+      <div class="personal-assistant-explorer__tabs" role="group" aria-label="Folder exploration view">
+        <button type="button" id="personalAssistantExplorerTreeTab" aria-pressed="true" aria-controls="personalAssistantFolderExplorer">Tree</button>
+        <button type="button" id="personalAssistantExplorerChatTab" aria-pressed="false" aria-controls="personalAssistantScroll">Chat</button>
+      </div>
+    </div>
+    <div class="personal-assistant-explorer__workbench">
+      <aside id="personalAssistantFolderExplorer" class="personal-assistant-explorer__pane" aria-labelledby="personalAssistantFolderExplorerName" hidden>
+        <p id="personalAssistantFolderExplorerStatus" class="personal-assistant-explorer__eyebrow"></p>
+        <h3 id="personalAssistantFolderExplorerName"></h3>
+        <p class="personal-assistant-explorer__hint">Contents not read. Send shares metadata with your model. Checks set topics—not access, a privacy filter or descendants.</p>
+        <details class="personal-assistant-explorer__coverage">
+          <summary id="personalAssistantFolderExplorerCoverageSummary">Bounded snapshot</summary>
+          <p id="personalAssistantFolderExplorerCoverage" class="personal-assistant-explorer__hint"></p>
+        </details>
+        <button type="button" id="personalAssistantFolderSelectAll" class="personal-assistant-conversation__button personal-assistant-folder-tree__select-all" aria-controls="personalAssistantFolderTree" disabled>Select all</button>
+        <p id="personalAssistantExplorerNotice" class="personal-assistant-explorer__hint" role="status" aria-live="polite"></p>
+        <ul id="personalAssistantFolderTree" class="personal-assistant-folder-tree" aria-label="Recorded folder and file discussion topics"></ul>
+      </aside>
+    <!-- The existing conversation scrolls here; no second transcript/composer. -->
     <div id="personalAssistantScroll" class="personal-assistant-panel__scroll">
       {{if eq .CurrentPage "index"}}
       {{template "personal-assistant-today.tmpl" .}}
@@ -275,22 +295,21 @@
       </div>
       <section id="personalAssistantContextChooser" class="personal-assistant-folder-context" aria-labelledby="personalAssistantFolderChooserTitle" hidden>
         <h3 id="personalAssistantFolderChooserTitle">Add folder context</h3>
-        <p>Ori takes a bounded local look at names, kinds, counts and project markers. File contents are not read. Nothing goes to your configured model until Send.</p>
+        <p>Ori locally records bounded file/folder names, relationships, kinds, counts, project markers, scan time and coverage. File contents are not read. Send shares this metadata with your configured model; selecting stays local.</p>
         <div id="personalAssistantFolderChoices" class="personal-assistant-panel__chips"></div>
         <button type="button" id="personalAssistantFolderChooserCancel" class="personal-assistant-conversation__button">Cancel</button>
       </section>
       <div id="personalAssistantContextProgress"></div>
       <section id="personalAssistantFolderPreview" class="personal-assistant-folder-context" aria-label="Local folder preview" hidden>
-        <p class="personal-assistant-folder-context__eyebrow">Local preview · not sent</p>
-        <p>File contents have not been read.</p>
-        <p id="personalAssistantFolderSummary"></p>
-        <p id="personalAssistantFolderProjects"></p>
-        <details>
-          <summary>Coverage and what Send shares</summary>
-          <p id="personalAssistantFolderCoverage"></p>
-          <p>Send shares the observed folder/project names, kinds, counts, project markers, scan time and coverage with your configured model. Selecting a folder stays local.</p>
-        </details>
+        <div id="personalAssistantFolderSummary"></div>
         <p>Send your question, or send “Explore this folder” to discuss this snapshot. No workspace is created.</p>
+      </section>
+      <section id="personalAssistantFolderDiscussionChooser" class="personal-assistant-folder-context" aria-labelledby="personalAssistantFolderDiscussionLabel" hidden>
+        <label id="personalAssistantFolderDiscussionLabel" for="personalAssistantFolderDiscussionCandidate">Which observed folder would you like to discuss?</label>
+        <select id="personalAssistantFolderDiscussionCandidate" class="form-select" required></select>
+        <p class="personal-assistant-folder-context__note">Only prepares an editable question. Does not change the attachment, choose setup or read files. Identical names and markers cannot identify a distinct folder here.</p>
+        <button type="button" id="personalAssistantFolderDiscussionDraft" class="personal-assistant-conversation__button">Draft question</button>
+        <button type="button" id="personalAssistantFolderDiscussionCancel" class="personal-assistant-conversation__button">Cancel</button>
       </section>
       <section id="personalAssistantFolderSetupChoices" class="personal-assistant-folder-context" aria-label="Choose what to set up" hidden>
         <label for="personalAssistantFolderSetupCandidate">Which observed folder should the workspace use?</label>
@@ -304,7 +323,12 @@
       <p id="personalAssistantContextStatus" class="personal-assistant-folder-context__note" role="status" aria-live="polite"></p>
     </div>
 
-    <!-- The composer stays pinned; Add folder is part of this form on every page. -->
+    </div><!-- explorer workbench -->
+    <!-- The composer stays pinned and shared by Tree/Chat on every page. -->
+    <div id="personalAssistantFolderFocus" class="personal-assistant-folder-focus" hidden>
+      <span id="personalAssistantFolderFocusText" role="status" aria-live="polite"></span>
+      <button type="button" id="personalAssistantFolderFocusClear" class="personal-assistant-conversation__button" hidden>Clear focus</button>
+    </div>
     <p id="personalAssistantWorkspaceContext" class="personal-assistant-panel__context" role="status" aria-live="polite" aria-atomic="true">Checking workspace context…</p>
     <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
     <form id="personalAssistantForm" class="personal-assistant-panel__form">
@@ -317,6 +341,7 @@
           <span id="personalAssistantActiveFolderName"></span>
           <button type="button" id="personalAssistantRemoveFolder" aria-label="Remove folder context">×</button>
         </span>
+        <button type="button" id="personalAssistantExploreAttachedFolder" class="personal-assistant-panel__chip" aria-expanded="false" aria-controls="personalAssistantFolderExplorer" hidden>Tree + Chat</button>
         <button type="button" id="personalAssistantReviewFolderSetup" class="btn btn-sm btn-link" aria-label="Review workspace setup" aria-controls="personalAssistantFolderSetupChoices" aria-expanded="false" hidden>Review setup</button>
         <span id="personalAssistantFolderSendHint" class="personal-assistant-folder-context__note" hidden>Empty Send: “Explore this folder”</span>
       </div>
