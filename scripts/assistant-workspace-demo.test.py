@@ -37,6 +37,9 @@ class DemoProviderTests(unittest.TestCase):
                      ["demo", "--folder-response-evidence-stage", "final"],
                      ["demo", "--folder-response", "--folder-response-evidence-stage", "../outside"],
                      ["demo", "--folder-response-baseline", "--reaper-source", "/reaper", "--music-source", "/music"],
+                     ["demo", "--conversation-first", "--folder-response"],
+                     ["demo", "--conversation-first", "--new-home"],
+                     ["demo", "--evidence-dir", "/tmp/outside"],
                      ["demo", "--sources", "--placement"], ["demo", "--sources", "--portfolio"],
                      ["demo", "--files", "--sources"], ["demo", "--files", "--new-home"],
                      ["demo", "--accessibility", "--files"], ["demo", "--accessibility", "--portfolio"],
@@ -67,6 +70,41 @@ class DemoProviderTests(unittest.TestCase):
         self.assertLessEqual(len(reply.split()), 80)
         with self.assertRaises(ValueError):
             demo.folder_response_step("<folder_observation>{}</folder_observation>")
+
+    def test_evidence_override_is_worktree_local_and_rejects_traversal_and_symlinks(self):
+        import argparse
+        self.assertEqual(demo.evidence_directory("tasks/evidence/assistant-conversation-first/baseline"),
+                         demo.ROOT / "tasks/evidence/assistant-conversation-first/baseline")
+        with tempfile.TemporaryDirectory() as temp:
+            from unittest.mock import patch
+            root = Path(temp)
+            (root / "tasks/evidence").mkdir(parents=True)
+            (root / "outside").mkdir()
+            (root / "tasks/evidence/escape").symlink_to(root / "outside", target_is_directory=True)
+            with patch.object(demo, "ROOT", root):
+                for path in ["tasks/evidence/../../outside", "tasks/evidence/escape", "/tmp/outside"]:
+                    with self.assertRaises(argparse.ArgumentTypeError):
+                        demo.evidence_directory(path)
+
+    def test_evidence_root_itself_cannot_redirect_writes_outside_the_worktree(self):
+        import argparse
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as checkout, tempfile.TemporaryDirectory() as outside:
+            root = Path(checkout)
+            (root / "tasks").mkdir()
+            (root / "tasks/evidence").symlink_to(outside, target_is_directory=True)
+            with patch.object(demo, "ROOT", root):
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    demo.evidence_directory("tasks/evidence/run")
+
+    def test_long_reply_is_explicit_bounded_and_has_a_readable_beginning(self):
+        self.assertIsNone(demo.conversation_reply("Ordinary question about a long reply"))
+        self.assertIsNone(demo.conversation_reply("Metadata: Conversation fixture: long answer"))
+        reply = demo.conversation_reply("Conversation fixture: long answer. Explain next steps.")
+        self.assertTrue(reply.startswith("Beginning of the long fixture reply."))
+        self.assertTrue(reply.endswith("End of the long fixture reply."))
+        self.assertLess(len(reply), 6000, "canonical message bound")
+        self.assertEqual(reply.count("Section "), 20)
 
     def test_current_user_projection_not_history(self):
         projection = demo.workspace_projection([message("Old"), message("Current")])

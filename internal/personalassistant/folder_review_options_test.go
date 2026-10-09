@@ -2,11 +2,59 @@ package personalassistant
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
+
+func TestFolderReviewOptions_DescribingChoicesDoesNotRescanOrChooseScope(t *testing.T) {
+	ctx := context.Background()
+	f, service, target := observationFixture(t)
+	creator := &fakeFolderCreator{}
+	f.service.deps.Creator = creator
+	observation, err := service.Observe(ctx, target, "chip", "documents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.store.Read(ctx, target.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := f.ids
+	noScan := func(string) (folderdigest.Result, error) {
+		t.Fatal("describing options rescanned the source")
+		return folderdigest.Result{}, nil
+	}
+	f.service.deps.Scan, f.service.deps.ScanObservation = noScan, noScan
+	// Missing and empty specialized plans both withdraw that option; plain
+	// folders remain independently reviewable. No preferred or selected scope
+	// is encoded merely because only some observed folders can be set up.
+	baseline := service.ReviewOptions(ctx, target, observation.ID)
+	f.service.deps.Setup = &fakeFolderSetup{}
+	withEmptyPlan := service.ReviewOptions(ctx, target, observation.ID)
+	if len(baseline) == 0 || len(withEmptyPlan) != len(baseline) {
+		t.Fatalf("empty plan changed compatible choices: %+v / %+v", baseline, withEmptyPlan)
+	}
+	for _, option := range withEmptyPlan {
+		data, err := json.Marshal(option)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{f.home, "offer_id", "destination_id", "recommended", "selected", "plan_digest"} {
+			if strings.Contains(string(data), forbidden) {
+				t.Fatalf("description invented private/executable/default scope: %s", data)
+			}
+		}
+	}
+	after, err := f.store.Read(ctx, target.UserID)
+	if err != nil || after.Version != before.Version || f.ids != ids || len(after.Offers) != len(before.Offers) || len(creator.requests) != 0 {
+		t.Fatal("read-only choices allocated or executed setup")
+	}
+}
 
 func TestFolderReviewOptions_ReadOnlyAvailabilityAndScope(t *testing.T) {
 	ctx := context.Background()

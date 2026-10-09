@@ -28,6 +28,8 @@ MODEL = "ori-workspace-fixture"
 # The runs on plain wt demo, by flag: the spec, the variable that hands it the
 # sandbox path, and the log kept with the evidence. No flag runs DEFAULT_DEMO.
 PLAIN_DEMOS = {
+    "conversation_first": ("tests/personal-assistant-conversation-first.spec.ts",
+                           "ORI_WORKSPACE_CONVERSATIONFIRST_SANDBOX", "conversation-first.log"),
     "folder_response": ("tests/personal-assistant-folder-response.spec.ts",
                         "ORI_WORKSPACE_FOLDERRESPONSE_SANDBOX", "folder-response.log"),
     "folder_response_baseline": ("tests/personal-assistant-folder-response-prototype.spec.ts",
@@ -300,6 +302,26 @@ def folder_response_step(content):
                       "They do not establish contents or progress. What would you like to work out first?"}
 
 
+def conversation_reply(prompt):
+    """Explicit synthetic scenario only; never infer it from workspace metadata."""
+    if prompt.startswith("Conversation fixture: long answer"):
+        return "Beginning of the long fixture reply.\n\n" + "\n\n".join(
+            f"Section {index + 1}. This is synthetic discussion, not a setup plan. "
+            "Consider one next step at a time. No source contents were read and no resources were created."
+            for index in range(20)
+        ) + "\n\nEnd of the long fixture reply."
+    return None
+
+
+def evidence_directory(value):
+    """Keep an explicit override inside this worktree's ignored evidence root."""
+    path = (ROOT / value).resolve()
+    root = (ROOT / "tasks/evidence").resolve()
+    if not root.is_relative_to(ROOT.resolve()) or not path.is_relative_to(root):
+        raise argparse.ArgumentTypeError("evidence directory must be inside this worktree's tasks/evidence")
+    return path
+
+
 def provider_handler(state_dir, folder_response=False):
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -339,21 +361,13 @@ def provider_handler(state_dir, folder_response=False):
                 step = ((folder_response_step(user["content"]) if folder_response else None) or
                         reader_step(own_words, results, offered) or file_step(own_words, results, offered))
                 trace_reader_turn(state_dir, results, offered, step)
-                if step:
-                    message = {"role": "assistant", "content": step.get("answer", "")}
-                    if "tool" in step:
-                        message["tool_calls"] = [{"function": {"name": step["tool"], "arguments": step["arguments"]}}]
-                    self.reply(200, {"model": MODEL, "message": message, "done": True,
-                                     "prompt_eval_count": 1, "eval_count": 1})
-                    return
-                # A spec can hold the next plain reply whatever its wording by
-                # leaving a hold-next file, so a real question can be the one held.
+                # Hold generation, including folder replies, rather than mocking
+                # the browser's HTTP response. Only our private state releases it.
                 hold_next = state_dir / "hold-next"
                 held = hold_next.exists()
                 if held:
                     hold_next.unlink()
-                if held or "Hold this workspace reply" in user["content"]:
-                    # Metadata only; do not retain source bodies or model input.
+                if held or "Hold this workspace reply" in own_words:
                     accepted = {"subject_id": subject.get("id"), "subject_name": subject.get("name")}
                     (state_dir / "accepted.json").write_text(json.dumps(accepted))
                     deadline = time.monotonic() + 60
@@ -361,6 +375,16 @@ def provider_handler(state_dir, folder_response=False):
                         if time.monotonic() >= deadline:
                             raise ValueError("fixture hold timed out")
                         time.sleep(0.02)
+                scenario = conversation_reply(own_words)
+                if scenario:
+                    step = {"answer": scenario}
+                if step:
+                    message = {"role": "assistant", "content": step.get("answer", "")}
+                    if "tool" in step:
+                        message["tool_calls"] = [{"function": {"name": step["tool"], "arguments": step["arguments"]}}]
+                    self.reply(200, {"model": MODEL, "message": message, "done": True,
+                                     "prompt_eval_count": 1, "eval_count": 1})
+                    return
                 self.reply(200, {
                     "model": MODEL,
                     "message": {"role": "assistant", "content":
@@ -400,6 +424,10 @@ def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8954)
+    parser.add_argument("--evidence-dir", type=evidence_directory,
+                        help="Keep runner logs and compatible captures inside this worktree's tasks/evidence")
+    parser.add_argument("--conversation-first", action="store_true",
+                        help="wt demo: chronology, passive reply geometry, delayed generation and inline setup")
     parser.add_argument("--reaper-source")
     parser.add_argument("--music-source")
     parser.add_argument("--new-home", action="store_true", help="Confirm a declared new Home with exact staged candidates")
@@ -440,7 +468,8 @@ def main():
         parser.error("choose new-Home project or portfolio acceptance, not both")
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
-    evidence = (ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
+    evidence = args.evidence_dir or (ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
+                ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else
                 ROOT / "tasks/evidence/assistant-folder-response-ux" / (args.folder_response_evidence_stage or "group-3") if args.folder_response else
                 ROOT / "tasks/evidence-assistant-workspace-awareness")
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
@@ -454,6 +483,7 @@ def main():
                if not key.endswith("_API_KEY") and key not in {
                    "CODEX_HOME", "AGENT_STORE_PATH", "ORI_KEEP_DEMO_SANDBOX", "ORI_DEMO_OPEN"}}
         env.update(ORI_DEMO_NO_CODEX="1", ORI_DEMO_OPEN="0",
+                   ORI_ASSISTANT_EVIDENCE_DIR=str(evidence),
                    OLLAMA_BASE_URL=f"http://127.0.0.1:{provider.server_port}")
         if args.folder_response:
             env["ORI_FOLDER_RESPONSE_EVIDENCE_DIR"] = str(evidence)
