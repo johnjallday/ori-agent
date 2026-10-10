@@ -200,6 +200,16 @@ test('local and saved cards build headings, semantic lists and disclosures from 
     const nodes = allNodes(container);
     assert.equal(nodes.find(node => node.tag === 'h3').textContent, fixtures.hostile.folder);
     assert.equal(nodes.filter(node => node.tag === 'li').length, 4);
+    assert.equal(
+      container.children.some(node => node.tag === 'ul'),
+      false,
+      'no expanded inventory beside Tree + Chat'
+    );
+    const disclosure = container.children.find(node => node.tag === 'details');
+    assert.ok(
+      allNodes(disclosure).some(node => node.tag === 'ul'),
+      'recorded rows remain reachable'
+    );
     assert.ok(nodes.some(node => node.tag === 'summary' && node.textContent === 'Scan details'));
     assert.equal(nodes.filter(node => 'innerHTML' in node).length, 0);
     assert.equal(

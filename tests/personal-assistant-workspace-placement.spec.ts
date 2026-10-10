@@ -16,7 +16,9 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
   test.setTimeout(180_000);
   expect(basename(sandbox!)).toMatch(/^ori-demo\./);
   expect(basename(provider!)).toMatch(/^ori-awareness-provider\./);
-  const evidence = join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
+  const evidence =
+    process.env.ORI_ASSISTANT_EVIDENCE_DIR ||
+    join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   const album = join(sandbox!, 'Documents', 'Album-5 placement fixture');
   const references = join(sandbox!, 'Documents', 'Supporting references fixture');
@@ -104,6 +106,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
     await expect(page.locator('#personalAssistantFolderPreview')).toBeVisible();
   };
   const chooseCandidate = async (name: string) => {
+    await expect(page.locator('#personalAssistantFolderSetupCandidate')).toBeVisible();
     await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: name });
     await page.getByRole('button', { name: 'Review selection', exact: true }).click();
   };
@@ -137,7 +140,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
   expect(asked.folder_setup_suggestion.subject).toBeUndefined();
   expect(asked.folder_review_context).toBeUndefined();
   expect(await workspaces()).toHaveLength(initial.length);
-  await page.getByRole('button', { name: 'Optional: review setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Choose setup scope', exact: true }).click();
   await chooseCandidate('Album-5 placement fixture');
   await expect(card).toBeVisible();
   await expect(card).toContainText(
@@ -317,9 +320,9 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
     kind: 'group'
   });
   await expect(page.locator('[data-folder-setup-suggestion]')).toContainText(
-    'reviews placement in Renamed portfolio placement fixture, the workspace you named'
+    'Workspace you named: Renamed portfolio placement fixture. Placement and operation are rechecked in Review'
   );
-  await page.getByRole('button', { name: 'Optional: review setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Choose setup scope', exact: true }).click();
   await chooseCandidate('Documents (whole folder)');
   await expect(card).toBeVisible();
   await expect(card).toContainText(

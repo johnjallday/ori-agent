@@ -66,6 +66,7 @@ type Fixture = {
   observation: ReturnType<typeof observed> | null;
   multi: boolean;
   reviewable?: string[];
+  presentation?: Record<string, any>;
 };
 
 async function installFixture(page: Page): Promise<Fixture> {
@@ -102,7 +103,8 @@ async function installFixture(page: Page): Promise<Fixture> {
             .filter(project => !fixture.reviewable || fixture.reviewable.includes(project.id))
             .map(project => ({
               candidate_id: project.id,
-              workspace_type: 'Blank workspace'
+              workspace_type: 'Blank workspace',
+              presentation: fixture.presentation
             }))
         }
       : null;
@@ -235,6 +237,64 @@ async function installFixture(page: Page): Promise<Fixture> {
   return fixture;
 }
 
+test('Prototype demo: typed collection visuals disclose library effects, never child workspace counts', async ({
+  page,
+  request
+}) => {
+  await ensureAssistant(request);
+  const fixture = await installFixture(page);
+  fixture.multi = true;
+  fixture.reviewable = ['candidate-0'];
+  fixture.presentation = {
+    version: 1,
+    kind: 'group',
+    state: 'proposed',
+    effect: 'home_library',
+    destination_state: 'new',
+    destination_name: 'Prototype Music Home'
+  };
+  await open(page);
+  await choose(page);
+  await page.locator('#personalAssistantInput').fill('Explore this folder');
+  await page.locator('#personalAssistantSend').click();
+  const card = page.locator('[data-folder-setup-suggestion]');
+  await expect(card.locator('[data-proposal-kind="group"]')).toContainText(
+    'Proposed workspace group'
+  );
+  await expect(card).toContainText('not promised child workspaces');
+  await expect(card.locator('svg')).toHaveAttribute('data-building-variant', 'district');
+  const requests = fixture.requests.length;
+  await card.getByRole('button', { name: 'Review collection setup' }).click();
+  await expect(page.locator('#personalAssistantFolderSetupCandidate')).toHaveValue('');
+  await page.locator('#personalAssistantFolderSetupCandidate').selectOption('candidate-0');
+  await expect(page.locator('[data-setup-choice-preview]')).toContainText('Whole folder');
+  expect(fixture.requests.length).toBe(requests);
+  const evidence = process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR;
+  if (evidence) {
+    await mkdir(evidence, { recursive: true });
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, 'prototype-new-home-library.png') });
+  }
+  await page.locator('#personalAssistantFolderSetupCancel').click();
+  fixture.presentation = {
+    ...fixture.presentation,
+    effect: 'library',
+    destination_state: 'existing',
+    destination_name: 'Prototype Existing Home'
+  };
+  await page.locator('#personalAssistantInput').fill('Keep discussing this folder');
+  await page.locator('#personalAssistantSend').click();
+  await expect(card).toContainText('Proposed collection');
+  await expect(card).toContainText('Existing destination · Prototype Existing Home');
+  await expect(card).toContainText('Entries are not new workspaces');
+  if (evidence)
+    await page
+      .locator('#personalAssistantPanel')
+      .screenshot({ path: join(evidence, 'prototype-existing-home-library.png') });
+  expect(fixture.requests.filter(request => request.stage === 'review')).toHaveLength(0);
+});
+
 async function open(page: Page, path = '/') {
   await page.goto(path);
   await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
@@ -287,12 +347,43 @@ test('real host: local review, Keep chatting, adjusted setup and canonical recei
   await open(page);
   await choose(page);
   await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
+  const setupChoice = page.locator(
+    '#personalAssistantScroll [data-setup-composer-origin] #personalAssistantFolderSetupChoices'
+  );
+  await expect(setupChoice).toBeVisible();
+  await expect(setupChoice.getByRole('heading', { name: 'Setting up', exact: true })).toBeVisible();
+  await expect(page.locator('#personalAssistantFolderSetupCandidate')).toBeFocused();
   await expect(page.locator('#personalAssistantFolderSetupCandidate')).toHaveValue('');
+  await page.keyboard.press('Escape');
+  await expect(setupChoice).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Review workspace setup', exact: true })
+  ).toBeFocused();
+  expect(posts.some(path => path.endsWith('/review') || path.endsWith('/decide'))).toBe(false);
+  await page.getByRole('button', { name: 'Review workspace setup', exact: true }).click();
   await page.locator('#personalAssistantFolderSetupCandidate').selectOption({ label: 'Chosen' });
   await page.getByRole('button', { name: 'Review selection', exact: true }).click();
   const card = page.locator('#homeAssistantConversation #personalAssistantFolderOffer');
   await expect(card).toBeVisible();
   await expect(card).toContainText('Chosen');
+  // Exercise the same canonical renderer update used by status/polling. This
+  // is renderer evidence, not a claim of a live specialized setup run.
+  const keepChatting = card.getByRole('button', { name: 'Keep chatting', exact: true });
+  await keepChatting.focus();
+  await page.evaluate(() => {
+    const folder = (window as any).PersonalAssistantFolder;
+    folder.updateConversationReview(folder.current());
+  });
+  await expect(keepChatting).toBeFocused();
+  const input = page.locator('#personalAssistantInput');
+  await input.fill('Preserve my exact review draft 🎼  ');
+  await page.evaluate(() => {
+    const folder = (window as any).PersonalAssistantFolder;
+    folder.updateConversationReview(folder.current());
+  });
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue('Preserve my exact review draft 🎼  ');
+  await expect(page.locator('#personalAssistantFolderOffer')).toHaveCount(1);
   await expect(page.locator('[data-folder-discussion]')).toHaveCount(0);
   const evidence = process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR;
   if (evidence) {
@@ -477,7 +568,9 @@ test('browser fixture: suggested setup follows the reply, restores on reload and
   await reopen(page);
   await expect(handoff).toHaveCount(1);
   await page.locator('#personalAssistantInput').fill('Keep this draft');
-  const button = handoff.getByRole('button', { name: 'Optional: review setup' });
+  const button = handoff.getByRole('button', {
+    name: /^(Choose setup scope|Review (workspace |collection )?setup)$/
+  });
   expect(
     await button.evaluate(element => {
       const row = element.closest('[data-message-id]');
@@ -515,6 +608,126 @@ test('browser fixture: suggested setup follows the reply, restores on reload and
   expect(fixture.requests.filter(request => request.stage === 'ask')).toHaveLength(2);
   await choose(page, 'Desktop');
   await expect(handoff).toHaveCount(0);
+});
+
+test('browser fixture: a new turn retires setup authority without hiding its focused native choice', async ({
+  page
+}) => {
+  const fixture = await installFixture(page);
+  fixture.multi = true;
+  const reviews: unknown[] = [];
+  await page.route('**/api/home-assistant/folder-context/review', route => {
+    reviews.push(route.request().postDataJSON());
+    return route.fulfill({ status: 409, json: { message: 'Stale fixture review rejected.' } });
+  });
+  await open(page, '/settings');
+  await choose(page);
+  await say(page, 'First topic');
+  const original = page.locator('[data-folder-setup-suggestion]');
+  await original.getByRole('button', { name: 'Choose setup scope', exact: true }).click();
+  const candidate = page.locator('#personalAssistantFolderSetupCandidate');
+  await expect(original.locator('#personalAssistantFolderSetupChoices')).toBeVisible();
+  await candidate.selectOption('candidate-1');
+  fixture.mode = 'delay';
+  await page.locator('#personalAssistantInput').fill('Later topic');
+  await page.locator('#personalAssistantSend').click();
+  await expect.poll(() => Boolean(fixture.releaseReply)).toBe(true);
+  await candidate.focus();
+  await page.waitForFunction(() => (window as any).PersonalAssistantTranscript.isSettled());
+  const source = await page.evaluate(() => {
+    (window as any).staleSetupReview = document.getElementById(
+      'personalAssistantFolderSetupReview'
+    );
+    return {
+      top: document.activeElement!.getBoundingClientRect().top,
+      pane: document.getElementById('personalAssistantScroll')!.getBoundingClientRect().top,
+      scroll: document.getElementById('personalAssistantScroll')!.scrollTop,
+      page: window.scrollY
+    };
+  });
+  fixture.releaseReply!();
+  await page.waitForFunction(() => !(window as any).OriAskRouting.getState().busy);
+  await page.waitForFunction(() => (window as any).PersonalAssistantTranscript.isSettled());
+  await expect(candidate).toBeFocused();
+  await expect(candidate).toBeVisible();
+  await expect(page.locator('[data-inactive-setup]')).toContainText('no setup is authorized here');
+  expect(await candidate.evaluate(element => element.getBoundingClientRect().top)).toBeCloseTo(
+    source.top,
+    0
+  );
+  expect(await page.evaluate(() => window.scrollY)).toBe(source.page);
+  await page.evaluate(() => (window as any).staleSetupReview.click());
+  expect(reviews).toHaveLength(0);
+  await page.locator('#personalAssistantInput').focus();
+  await expect(page.locator('[data-inactive-setup]')).toHaveCount(0);
+  await expect(candidate).toBeHidden();
+  const latest = page.locator('[data-folder-setup-suggestion]');
+  await latest.getByRole('button', { name: 'Choose setup scope', exact: true }).click();
+  await expect(candidate).toHaveValue('');
+  await expect(candidate).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(
+    latest.getByRole('button', { name: 'Choose setup scope', exact: true })
+  ).toBeFocused();
+});
+
+test('browser fixture: a late placement response cannot reopen after New or replace newer typing', async ({
+  page
+}) => {
+  const fixture = await installFixture(page);
+  fixture.multi = true;
+  let release: (() => Promise<void>) | undefined;
+  await page.route('**/api/home-assistant/folder-context/review', route => {
+    release = () =>
+      route.fulfill({
+        json: {
+          folder_placement_choice: {
+            candidate_id: 'candidate-1',
+            subject: 'Project A',
+            options: [
+              {
+                operation: 'create_project_workspace',
+                destination_id: 'fixture',
+                label: 'Review separate project'
+              }
+            ]
+          }
+        }
+      });
+  });
+  await open(page, '/settings');
+  await choose(page);
+  await say(page, 'Discuss setup');
+  await page.getByRole('button', { name: 'Choose setup scope', exact: true }).click();
+  await page.locator('#personalAssistantFolderSetupCandidate').selectOption('candidate-1');
+  await page.locator('#personalAssistantFolderSetupReview').click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  const input = page.locator('#personalAssistantInput');
+  await input.fill('Keep my newer 🎼 typing exactly  ');
+  await release!();
+  const placement = page.getByRole('region', { name: 'Choose folder placement' });
+  await expect(placement).toBeVisible();
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue('Keep my newer 🎼 typing exactly  ');
+  await placement.getByRole('button', { name: 'Review separate project', exact: true }).focus();
+  await page.keyboard.press('Escape');
+  await expect(placement).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Choose setup scope', exact: true })).toBeFocused();
+  release = undefined;
+  await page.getByRole('button', { name: 'Choose setup scope', exact: true }).click();
+  await page.locator('#personalAssistantFolderSetupCandidate').selectOption('candidate-1');
+  await page.locator('#personalAssistantFolderSetupReview').click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await input.focus();
+  await page.locator('#personalAssistantConversationNew').click();
+  await expect(page.locator('#personalAssistantConversationTitle')).toHaveText('New conversation');
+  await release!();
+  await expect(page.getByRole('region', { name: 'Choose folder placement' })).toHaveCount(0);
+  await expect(page.locator('#personalAssistantFolderSetupChoices')).toBeHidden();
+  await expect(page.locator('#personalAssistantInput')).toHaveValue(
+    'Keep my newer 🎼 typing exactly  '
+  );
+  expect(fixture.requests.filter(request => request.stage === 'ask')).toHaveLength(1);
 });
 
 test('browser fixture: non-Home cancel/error/replacement retains drafts and late scan cannot follow New', async ({
@@ -687,7 +900,9 @@ test('browser fixture: current choices survive cancellation but reject stale cal
   await input.fill('');
   await page.evaluate(() => (window as any).retiredFolderChoice.click());
   await expect(input).toHaveValue('');
-  const evidence = join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
+  const evidence =
+    process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR ||
+    join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   await page
     .locator('#personalAssistantPanel')
@@ -786,7 +1001,9 @@ for (const theme of ['light', 'dark']) {
   test(`browser fixture: ${theme} explorer focus, limits, keyboard and snapshot retirement`, async ({
     page
   }) => {
-    const evidence = 'tasks/evidence/assistant-folder-response-ux/select-all';
+    const evidence =
+      process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR ||
+      'tasks/evidence/assistant-folder-response-ux/select-all';
     await mkdir(evidence, { recursive: true });
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
     const fixture = await installFixture(page);
@@ -965,7 +1182,9 @@ for (const theme of ['light', 'dark']) {
     const fixture = await installFixture(page);
     fixture.reviewable = [];
     await open(page, '/settings');
-    const evidence = join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
+    const evidence =
+      process.env.ORI_FOLDER_RESPONSE_EVIDENCE_DIR ||
+      join(process.cwd(), 'tasks/evidence/assistant-folder-response-ux/group-4');
     await mkdir(evidence, { recursive: true, mode: 0o750 });
     const accessibility: any[] = [];
     const ax = await page.context().newCDPSession(page);
@@ -1098,6 +1317,7 @@ for (const theme of ['light', 'dark']) {
       for (const [width, height, zoom] of [
         [1440, 900, 1],
         [390, 844, 1],
+        [320, 740, 1],
         [780, 1688, 2]
       ]) {
         await page.setViewportSize({ width, height });

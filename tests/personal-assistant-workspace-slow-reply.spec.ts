@@ -18,7 +18,9 @@ test('wt demo: a reply slower than 30 seconds still arrives, and a failure names
   test.skip(!sandbox || !provider, 'Use python3 scripts/assistant-workspace-demo.py --slow-reply');
   test.setTimeout(180_000);
   expect(basename(sandbox!)).toMatch(/^ori-demo\./);
-  const evidence = join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
+  const evidence =
+    process.env.ORI_ASSISTANT_EVIDENCE_DIR ||
+    join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
 
   await request.post('/api/onboarding/skip');

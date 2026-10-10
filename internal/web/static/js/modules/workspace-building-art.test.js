@@ -73,6 +73,23 @@ test('GitHub Ops and Travels use distinct repository and flight emblems', () => 
   assert.doesNotMatch(travelSVG, /data-building-emblem="travel"/);
 });
 
+test('chat cues are curated, decorative and independent of counts or blueprint inference', () => {
+  const art = loadBuildingArt();
+  for (const variant of ['neutral', 'district', 'support']) {
+    const svg = art.svgForVariant(variant, { context: 'chat' });
+    assert.match(svg, /class="personal-assistant-proposal__art-svg"/);
+    assert.match(svg, /aria-hidden="true" focusable="false"/);
+    assert.match(svg, /viewBox="0 0 120 88"/);
+    assert.doesNotMatch(
+      svg,
+      /<script|on\w+=|href=|<animate|data-building-emblem|data-child-workspace/
+    );
+  }
+  assert.equal(art.variantForBlueprint('district', true), '');
+  assert.equal(art.variantForBlueprint('neutral', true), '');
+  assert.equal(art.svgForVariant('<svg onload=confirm()>', { context: 'chat' }), '');
+});
+
 test('renders catalog, map, and station contexts from the same inert artwork', () => {
   const art = loadBuildingArt();
   const mapSVG = art.svgForVariant('research', { context: 'map' });

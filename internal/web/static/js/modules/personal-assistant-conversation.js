@@ -226,6 +226,7 @@ async function resume(id, options = {}) {
   state.loading = true;
   window.PersonalAssistantFolderContext?.refreshDiscussion?.();
   const generation = ++state.generation;
+  let hydrationBatch = false;
   try {
     const result = await readJSON(`${LIST_ENDPOINT}/${encodeURIComponent(target)}`);
     if (generation !== state.generation) return false;
@@ -252,6 +253,8 @@ async function resume(id, options = {}) {
     window.PersonalAssistantFolderContext?.resetEvents?.();
     const conversation = result.body.conversation;
     const messages = result.body.messages || [];
+    window.PersonalAssistantTranscript?.beginHydration?.();
+    hydrationBatch = true;
     for (const message of messages) {
       if (message.role === 'folder_context' && message.folder_context) {
         window.PersonalAssistantFolderContext?.renderEvent?.(
@@ -316,6 +319,8 @@ async function resume(id, options = {}) {
     return false;
   } finally {
     state.loading = false;
+    if (hydrationBatch && generation === state.generation)
+      window.PersonalAssistantTranscript?.endHydration?.();
     window.PersonalAssistantFolderContext?.refreshDiscussion?.();
   }
 }

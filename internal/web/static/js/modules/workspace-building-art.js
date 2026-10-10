@@ -19,6 +19,32 @@
   });
 
   const VARIANTS = Object.freeze({
+    // Chat-only neutral cues: no blueprint identity, member count or live state.
+    neutral: Object.freeze({
+      color: '#789188',
+      markup: `
+      <path d="M60 22l32 16v36L60 88 28 74V38z" fill="currentColor" opacity=".18"/>
+      <path d="M28 38l32 16 32-16M60 54v34M28 38v36l32 14 32-14V38L60 22z" fill="none" stroke="currentColor" stroke-width="2"/>
+      <path d="M43 51v10M77 51v10M43 65v8M77 65v8" stroke="currentColor" stroke-width="3"/>
+    `
+    }),
+    district: Object.freeze({
+      color: '#789188',
+      markup: `
+      <path d="M60 8l52 28v28L60 86 8 64V36z" fill="currentColor" opacity=".12"/>
+      <path d="M60 8l52 28v28L60 86 8 64V36z" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3"/>
+      <path d="M38 29h21l7 7h23v29H38z" fill="currentColor" opacity=".28" stroke="currentColor" stroke-width="2"/>
+      <path d="M46 45h34M46 52h34M46 59h22" stroke="currentColor" stroke-width="2"/>
+    `
+    }),
+    support: Object.freeze({
+      color: '#789188',
+      markup: `
+      <path d="M4 22h20l6 6h24v33H4z" fill="currentColor" opacity=".22" stroke="currentColor" stroke-width="2"/>
+      <path d="M88 18l24 12v39L88 81 64 69V30zM64 30l24 12 24-12M88 42v39" fill="none" stroke="currentColor" stroke-width="2"/>
+      <path d="M39 58h36M61 51l8 7-8 7" stroke="currentColor" stroke-width="3" fill="none"/>
+    `
+    }),
     hq: Object.freeze({
       color: '#e8b54b',
       markup: `
@@ -200,18 +226,26 @@
     const definition = VARIANTS[normalized];
 
     const requestedContext = options && options.context;
-    const context =
-      requestedContext === 'catalog' || requestedContext === 'station' ? requestedContext : 'map';
+    const context = ['catalog', 'station', 'chat'].includes(requestedContext)
+      ? requestedContext
+      : 'map';
     const className =
-      context === 'catalog'
-        ? 'workspace-template-building-art'
-        : context === 'station'
-          ? 'ws-cmd-map-station-art'
-          : 'ws-map-struct ws-map-struct--blueprint';
+      context === 'chat'
+        ? 'personal-assistant-proposal__art-svg'
+        : context === 'catalog'
+          ? 'workspace-template-building-art'
+          : context === 'station'
+            ? 'ws-cmd-map-station-art'
+            : 'ws-map-struct ws-map-struct--blueprint';
     // A station is already inside Workspace Command's theme token scope. Its
     // depot art therefore inherits the keeper accent instead of freezing the
     // catalog's curated swatch into both light and dark map themes.
-    const color = context === 'station' ? 'var(--ws-keeper)' : definition.color;
+    const color =
+      context === 'chat'
+        ? 'inherit'
+        : context === 'station'
+          ? 'var(--ws-keeper)'
+          : definition.color;
 
     return `<svg class="${className}" data-building-variant="${normalized}" viewBox="0 0 120 88" width="112" height="92" style="color:${color}" aria-hidden="true" focusable="false">${definition.markup}</svg>`;
   }
