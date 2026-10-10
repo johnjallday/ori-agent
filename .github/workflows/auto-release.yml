@@ -39,7 +39,7 @@ jobs:
   evaluate:
     name: Evaluate candidate readiness
     if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_run'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: release-lifecycle
       cancel-in-progress: false
@@ -67,7 +67,7 @@ jobs:
     name: Prepare RC for ${{ needs.evaluate.outputs.version }}
     needs: evaluate
     if: needs.evaluate.outputs.ready == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: release-lifecycle
       cancel-in-progress: false
@@ -102,7 +102,7 @@ jobs:
       && (github.event.workflow_run.head_branch == 'dev'
           || startsWith(github.event.workflow_run.head_branch, 'release/')
           || contains(github.event.workflow_run.head_branch, '-rc.'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: release-lifecycle
       cancel-in-progress: false

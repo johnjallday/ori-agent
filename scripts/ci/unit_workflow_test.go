@@ -42,7 +42,7 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 		t.Fatal("unit cache must not add privileged triggers/promotion")
 	}
 	job := workflow.Jobs["test-unit"]
-	if job.Name != "Unit Tests" || job.RunsOn != "${{ matrix.os }}" {
+	if job.Name != "Unit Tests" || job.RunsOn != pinnedUbuntuMatrixRunner {
 		t.Fatal("required-check identity changed")
 	}
 	wantMatrix := map[string][]string{"os": {"ubuntu-latest", "macos-latest"}, "go-version": {"1.25.12"}}
