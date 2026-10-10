@@ -27,7 +27,7 @@ jobs:
   # the jobs that install and execute the builds receive them as artifacts.
   fetch:
     name: Fetch draft ${{ matrix.installer }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -98,7 +98,8 @@ jobs:
   test-linux-deb:
     name: Linux DEB (amd64)
     needs: fetch
-    runs-on: ubuntu-latest
+    # Retain 24.04 compatibility coverage even when ubuntu-latest moves on.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -118,7 +119,7 @@ jobs:
   test-linux-rpm:
     name: Linux RPM (amd64)
     needs: fetch
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -172,7 +173,7 @@ jobs:
 
   summary:
     name: Installer gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [fetch, test-macos, test-linux-deb, test-linux-rpm, test-windows]
     if: always()
     steps:
