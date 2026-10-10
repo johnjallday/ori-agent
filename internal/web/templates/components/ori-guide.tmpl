@@ -1,42 +1,7 @@
 {{define "ori-guide.tmpl"}}
-<!--
-  Ask Ori — the one assistance surface, mounted once for every authenticated page.
-
-  It used to be deliberately separate from the Home command box, which was a
-  second assistant called Workspace Manager. That split made users learn an
-  internal product distinction before they could decide where to type, so
-  Issue #350 merged them: one launcher, one panel, one composer, and automatic
-  routing behind it.
-
-  Automatic routing is not automatic authorization. Navigation still goes
-  through the structurally read-only guide contract, and work still goes through
-  the existing planning, confirmation, and agent paths (FR27/FR36).
-
-  The panel is non-modal on wide layouts so the destination Ori is describing
-  stays visible behind it (FR66).
--->
+<!-- Help explains the app. The Personal Assistant owns conversations and work.
+     Mounted once through the navbar, including standalone authenticated shells. -->
 <div class="ori-guide" id="oriGuideRoot">
-  <button
-    type="button"
-    class="ori-guide__launcher"
-    id="oriGuideLauncher"
-    aria-expanded="false"
-    aria-controls="oriGuidePanel"
-    aria-label="Ask Ori">
-    <img
-      class="ori-guide__sprite"
-      src="/characters/ori-guide/sprite.svg"
-      alt=""
-      width="32"
-      height="32"
-      decoding="async">
-    <span class="ori-guide__launcher-text">
-      <span class="ori-guide__launcher-name">Ask Ori</span>
-      <!-- Busy/attention state lives on the launcher so running work is visible
-           without creating a second prompt entry point (FR14). -->
-      <span class="ori-guide__launcher-status" id="oriGuideLauncherStatus" hidden></span>
-    </span>
-  </button>
 
   <section
     class="ori-guide__panel"
@@ -46,45 +11,56 @@
     data-state="ready"
     hidden>
     <header class="ori-guide__header">
+      <!-- Ori's character belongs to fixed walkthroughs, not ordinary Help. -->
       <img
+        id="oriGuideQuestPortrait"
         class="ori-guide__portrait"
+        hidden
         src="/characters/ori-guide/static.svg"
         alt=""
         width="40"
         height="40"
         decoding="async">
       <div class="ori-guide__ident">
-        <h2 class="ori-guide__title" id="oriGuideTitle">Ask Ori</h2>
-        <p class="ori-guide__role" id="oriGuideRole" hidden>App Guide</p>
-        <!-- Context, not a competing role name. Conveyed as text so it does not
-             depend on color alone (FR64). Filled in by the controller from the
-             current page, workspace, or task. -->
-        <p class="ori-guide__context" id="oriGuideContext">All workspaces</p>
+        <h2 class="ori-guide__title" id="oriGuideTitle">Help</h2>
+        <p class="ori-guide__context" id="oriGuideContext">This screen</p>
       </div>
       <button
         type="button"
         class="ori-guide__close"
         id="oriGuideClose"
-        aria-label="Close Ask Ori">&times;</button>
+        aria-label="Close Help">&times;</button>
     </header>
 
-    <!-- The ordered record of this conversation: prompts, routing summaries,
-         confirmations, and outcomes in the order they happened (FR40). It is not
-         a live region — the bounded status line below is what gets announced, so
-         a screen reader is never read the whole transcript again (FR73). -->
-    <ol class="ori-guide__activity" id="oriGuideActivity" hidden></ol>
+    <div id="oriGuideOverview" class="ori-guide__overview">
+      <section aria-labelledby="oriGuideAboutTitle">
+        <h3 id="oriGuideAboutTitle" class="ori-guide__section-title">About this screen</h3>
+        <p id="oriGuideAbout">Loading screen guidance…</p>
+      </section>
+      <section aria-labelledby="oriGuideCommonTitle">
+        <h3 id="oriGuideCommonTitle" class="ori-guide__section-title">Common questions</h3>
+        <div id="oriGuideTopics" class="ori-guide__topics"></div>
+      </section>
+      <section aria-labelledby="oriGuideWalkthroughTitle">
+        <h3 id="oriGuideWalkthroughTitle" class="ori-guide__section-title">Walkthroughs</h3>
+        <div id="oriGuideWalkthroughs">Checking available walkthroughs…</div>
+      </section>
+    </div>
 
     <form class="ori-guide__form" id="oriGuideForm">
-      <label class="visually-hidden" for="oriGuideInput">Ask a question or describe what you want done</label>
+      <label class="ori-guide__search-label" for="oriGuideInput">Search help</label>
       <input
         type="text"
         class="ori-guide__input"
         id="oriGuideInput"
         maxlength="400"
         autocomplete="off"
-        placeholder="Ask Ori about the app">
-      <button type="submit" class="ori-guide__send" id="oriGuideSend">Send</button>
+        aria-describedby="oriGuideSearchHint"
+        placeholder="Search app topics">
+      <button type="submit" class="ori-guide__send" id="oriGuideSend">Search</button>
     </form>
+
+    <p id="oriGuideSearchHint" class="ori-guide__hint">Reviewed topics, not full-text documentation search.</p>
 
     <!-- aria-live so an answer arriving without a focus change is still
          announced (FR70). -->
@@ -94,16 +70,11 @@
       role="status"
       aria-live="polite"></div>
 
-    <!-- The work-path render targets. Real planning, confirmations, and the
-         workspace conversation land here through the existing controller, in
-         the same panel as the question that started them (FR39). -->
-    {{template "ask-ori-activity.tmpl" .}}
   </section>
 
-  <!-- The personal assistant gets one separate primary work composer. The
-       existing work activity node above is moved into this host after the
-       authoritative relationship read, so routing, planning, and confirmation
-       logic are reused rather than copied.
+  <!-- The Personal Assistant owns the primary work composer and the single
+       activity host from initial render, even before relationship status loads.
+       Routing, planning, and confirmation logic are reused rather than copied.
 
        The drawer is ONE view, on every page: header, then a region that
        scrolls (what needs you, then the conversation), then the composer, which
@@ -290,7 +261,9 @@
            as a turn of its own. Nothing is shown while it is idle. Whichever
            of the two was used last is kept nearest the composer. -->
       <div id="personalAssistantThread" class="personal-assistant-panel__thread">
-        <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
+        <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity">
+          {{template "ask-ori-activity.tmpl" .}}
+        </div>
         {{template "personal-assistant-folder.tmpl" .}}
       </div>
       <section id="personalAssistantContextChooser" class="personal-assistant-folder-context" aria-labelledby="personalAssistantFolderChooserTitle" hidden>

@@ -87,6 +87,11 @@
 
         <!-- Right: Location, Actions, Theme -->
         <div class="ori-navbar-actions">
+          <button id="oriGuideLauncher" class="modern-btn modern-btn-secondary ori-help-trigger"
+                  type="button" aria-label="Help" aria-expanded="false" aria-controls="oriGuidePanel">
+            <span class="ori-help-trigger__icon" aria-hidden="true">?</span>
+            <span>Help</span>
+          </button>
           <!-- Location Indicator (optional) -->
           {{if .ShowLocationIndicator}}
           <span id="locationIndicator" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Current location">

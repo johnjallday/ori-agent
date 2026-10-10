@@ -187,6 +187,7 @@ function load({ route = '/', elements = {}, session = {} } = {}) {
     Error,
     Event: function Event() {},
     JSON,
+    URL,
     fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
   };
   sandbox.globalThis = sandbox;
@@ -228,6 +229,96 @@ function load({ route = '/', elements = {}, session = {} } = {}) {
   };
 }
 
+/* ---- intrinsic Help boundary (independent of relationship status) ---------- */
+
+for (const workController of [false, true]) {
+  for (const relationship of [
+    'initial',
+    'loading',
+    'failed',
+    'needs_hire',
+    'needs_hq',
+    'repair_needed',
+    'active',
+    'paused'
+  ]) {
+    test(`Help cannot route work: ${relationship}, controller=${workController}`, async () => {
+      const { guide, sandbox } = load({ elements: guideEls() });
+      let submissions = 0;
+      const requests = [];
+      if (workController) {
+        sandbox.window.OriAskRouting = {
+          submit() {
+            submissions += 1;
+            return Promise.resolve();
+          }
+        };
+      }
+      // Initial, slow and failed reads never deliver authoritative status.
+      // Successful reads exercise the existing status seam, not an authority grant.
+      if (!['initial', 'loading', 'failed'].includes(relationship)) {
+        guide.setHelpOnly({
+          available: ['active', 'paused'].includes(relationship),
+          needsHQ: relationship === 'needs_hq',
+          assistantName: 'Nova'
+        });
+      }
+      sandbox.fetch = async (url, options) => {
+        requests.push({ url, body: JSON.parse(options.body) });
+        const question = JSON.parse(options.body).question || '';
+        return {
+          ok: true,
+          json: async () => ({
+            status: question === 'unrecognized question' ? 'unknown' : 'answered',
+            topic_key: question === 'unrecognized question' ? '' : 'workspace-manager',
+            answer: 'Help does not execute work.',
+            actions: [{ type: 'handoff', handoff_text: question }]
+          })
+        };
+      };
+      for (const text of [
+        'unrecognized question',
+        'draft the launch notes',
+        '/ask what is a workspace',
+        '/task build this',
+        '/note private idea'
+      ]) {
+        await guide.ask(text);
+        assert.equal(submissions, 0, `${text} must not submit work`);
+        assert.equal(requests.at(-1)?.url, '/api/ori-guide', `${text} stays in Help`);
+        assert.deepEqual(Object.keys(requests.at(-1).body).sort(), ['question', 'route']);
+      }
+      assert.equal(requests.length, 5);
+      assert.equal(requests.filter(request => request.url !== '/api/ori-guide').length, 0);
+      assert.equal(guide._state.els.activity, undefined, 'Help has no transcript target');
+    });
+  }
+}
+
+test('a successful relationship read after a slow Help search cannot escalate its reply', async () => {
+  const { guide, sandbox } = load({ elements: guideEls() });
+  let reply;
+  let submissions = 0;
+  const urls = [];
+  sandbox.window.OriAskRouting = {
+    submit: () => {
+      submissions += 1;
+    }
+  };
+  sandbox.fetch = url => {
+    urls.push(url);
+    return new Promise(resolve => {
+      reply = resolve;
+    });
+  };
+  const search = guide.ask('draft a note');
+  guide.setHelpOnly({ available: true, assistantName: 'Nova' });
+  reply({ ok: true, json: async () => ({ status: 'unknown', answer: 'No matching help topic.' }) });
+  await search;
+  assert.deepEqual(urls, ['/api/ori-guide']);
+  assert.equal(submissions, 0);
+});
+
 /* ---- action validation (FR-36/FR-49) ---------------------------------------- */
 
 test('unknown action types are dropped rather than rendered', () => {
@@ -246,7 +337,10 @@ test('PAF Help-only handoff names the assistant and only prefills without submit
   let prefilled = '';
   let submits = 0;
   sandbox.window.PersonalAssistantPanel = {
-    prefill(text) {
+    open() {
+      return true;
+    },
+    suggestReply(text) {
       prefilled = text;
       return true;
     },
@@ -264,7 +358,7 @@ test('PAF Help-only handoff names the assistant and only prefills without submit
     label: 'Send this as work',
     handoff_text: 'send the launch notes'
   });
-  assert.equal(action.label, 'Send to Nova');
+  assert.equal(action.label, 'Open Nova');
   assert.equal(guide._handoff(action.handoffText), true);
   assert.equal(prefilled, 'send the launch notes');
   assert.equal(submits, 0);
@@ -340,7 +434,7 @@ test('needsHQ never changes the ready-for-work handoff, and clears on the next r
   guide.setHelpOnly({ available: true, assistantName: 'Atlas', needsHQ: true });
   const ready = guide._validateAction({ type: 'handoff', handoff_text: 'plan today' });
   assert.equal(ready.type, 'handoff');
-  assert.equal(ready.label, 'Send to Atlas');
+  assert.equal(ready.label, 'Open Atlas');
 
   // A subsequent read that omits needsHQ must not leave a stale flag behind.
   guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
@@ -378,6 +472,15 @@ test('isSafeHref rejects anything that is not an absolute internal path', () => 
   assert.ok(!guide._isSafeHref('http://x'));
   assert.ok(!guide._isSafeHref('/a b'));
   assert.ok(!guide._isSafeHref('x/y'));
+  for (const href of [
+    '/\\\\evil.example',
+    '/%5Cevil.example',
+    '/%2e%2e/vaults',
+    '/agents/%00',
+    '/%ZZ'
+  ]) {
+    assert.equal(guide._isSafeHref(href), false, href);
+  }
   // Hyphens must survive — /action-center is a real registered route.
   assert.ok(guide._isSafeHref('/action-center'));
 });
@@ -1250,49 +1353,46 @@ function guideEls() {
   };
 }
 
-// Issue #350 removed the separate work surface. A handoff no longer travels
-// anywhere: the composer that receives it is the one already open on this page.
-test('a handoff fills the universal composer but never submits it', () => {
+test('a rejected assistant transition keeps Help text and explains why', () => {
   const els = guideEls();
-  const { guide } = load({ route: '/', elements: els });
-
-  const ok = guide._handoff('summarize the launch notes');
-  assert.equal(ok, true);
+  const { guide, sandbox } = load({ route: '/', elements: els });
+  guide.open(null, { skipGreeting: true });
+  els.oriGuideInput.value = 'summarize the launch notes';
+  guide.setHelpOnly({ available: true, assistantName: 'Nova' });
+  sandbox.window.PersonalAssistantPanel = {
+    open() {
+      guide.close();
+      return true;
+    },
+    suggestReply() {
+      return false;
+    },
+    close() {}
+  };
+  assert.equal(guide._handoff(els.oriGuideInput.value), false);
+  assert.equal(guide.isOpen(), true);
   assert.equal(els.oriGuideInput.value, 'summarize the launch notes');
-  assert.ok(els.oriGuideInput.focused, 'the composer should be focused for the user to send');
+  assert.match(els.oriGuideReply.innerHTML, /draft are kept/);
 });
 
-// The property that mattered about the old handoff — it never runs anything on
-// the user's behalf — still holds, and now holds without a navigation at all.
-test('a handoff off Home stays on the page instead of navigating to Home', () => {
+test('an unavailable transition never navigates or inserts work in Help', () => {
   const els = guideEls();
   const ctx = load({ route: '/agents', elements: els });
-
   const ok = ctx.guide._handoff('do the thing');
-  assert.equal(ok, true, 'the panel is present on every page, so there is nowhere to send them');
-  assert.equal(els.oriGuideInput.value, 'do the thing');
-  assert.notEqual(
-    ctx.sandbox.window.location.href,
-    '/',
-    'a handoff must no longer yank the user to Home'
-  );
+  assert.equal(ok, false);
+  assert.equal(els.oriGuideInput.value, '');
+  assert.equal(ctx.sandbox.window.location.href, undefined);
 });
 
-// A request parked by an older build (which still navigated) must not be lost
-// when that user upgrades mid-flight.
-test('a handoff parked by an older build is restored into the composer once', () => {
+test('Help leaves a legacy work handoff recoverable without searching or deleting it', () => {
   const els = guideEls();
   const ctx = load({
     route: '/',
     elements: els,
     session: { 'ori-guide-handoff': 'summarize the launch notes' }
   });
-
-  // init() runs on load and drains the parked request.
-  assert.equal(els.oriGuideInput.value, 'summarize the launch notes');
-
-  // Drained, so a later reload does not resurrect it.
-  assert.equal(ctx.sandbox._session[ctx.guide.HANDOFF_KEY], undefined);
+  assert.equal(els.oriGuideInput.value, '');
+  assert.equal(ctx.sandbox._session[ctx.guide.HANDOFF_KEY], 'summarize the launch notes');
 });
 
 // The user's words are their own: they must never reach history, the address
@@ -1319,7 +1419,7 @@ test('storage being unavailable never breaks a handoff', () => {
   };
 
   assert.doesNotThrow(() => ctx.guide._handoff('do the thing'));
-  assert.equal(els.oriGuideInput.value, 'do the thing');
+  assert.equal(els.oriGuideInput.value, '');
 });
 
 /* ---- stale coachmarks across route changes (FR-43) ---------------------------- */
@@ -1614,30 +1714,17 @@ test('the context label is repainted into the header', () => {
   els.oriGuideContext = makeElement('oriGuideContext');
   const { guide } = load({ route: '/workspaces/launch', elements: els });
   guide._refreshContextLabel();
-  assert.equal(els.oriGuideContext.textContent, 'Workspace: launch');
+  assert.equal(
+    els.oriGuideContext.textContent,
+    'This screen',
+    'Help waits for reviewed route metadata, not private work labels'
+  );
 });
 
 /* ---- universal panel: intent dispatch (FR22-FR27) ----------------------------- */
 
-// The guide owns navigation and says so itself; the client never guesses with a
-// keyword list of its own.
-test('a navigation answer is not escalated to routing', () => {
-  const { guide } = load();
-  assert.equal(guide._needsWorkRouting({ status: 'answered', topic_key: 'workspaces' }), false);
-});
-
-test('a work request and an honest miss both escalate to routing', () => {
-  const { guide } = load();
-  assert.equal(
-    guide._needsWorkRouting({ status: 'answered', topic_key: 'workspace-manager' }),
-    true,
-    'the guide identifying work must escalate'
-  );
-  assert.equal(
-    guide._needsWorkRouting({ status: 'unknown' }),
-    true,
-    'an honest miss must escalate rather than render as "I do not know"'
-  );
+test('Help has no work dispatch capability or routing endpoint', () => {
+  assert.doesNotMatch(guideSrc, /OriAskRouting|\/api\/home-assistant\/(route|ask)/);
 });
 
 test('a navigation question uses only the read-only guide endpoint', async () => {
@@ -1658,40 +1745,33 @@ test('a navigation question uses only the read-only guide endpoint', async () =>
   assert.match(els.oriGuideReply.innerHTML, /Here/);
 });
 
-test('a work request escalates to routing and shows where it is going', async () => {
+test('a work-shaped search renders only the guide-owned transition', async () => {
   const els = guideEls();
-  const ctx = load({ route: '/workspaces/launch', elements: els });
+  const { guide, sandbox } = load({ route: '/workspaces/launch', elements: els });
   const calls = [];
-  let routedBody = null;
-  ctx.sandbox.fetch = (url, opts) => {
-    calls.push(url);
-    if (url === '/api/ori-guide') {
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({ status: 'answered', topic_key: 'workspace-manager', answer: 'work' })
-      });
-    }
-    routedBody = JSON.parse(opts.body);
+  guide.setHelpOnly({ available: true, assistantName: 'Nova' });
+  sandbox.fetch = (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
     return Promise.resolve({
       ok: true,
-      json: () =>
-        Promise.resolve({
-          intent: 'travel_planning',
-          intent_label: 'travel planning',
-          matched_agent: 'Travel Planner'
-        })
+      json: async () => ({
+        status: 'answered',
+        topic_key: 'workspace-manager',
+        answer: 'Nothing has been sent.',
+        actions: [{ type: 'handoff', handoff_text: 'plan the launch party' }]
+      })
     });
   };
-
-  await ctx.guide.ask('plan the launch party');
-
-  assert.deepEqual(calls, ['/api/ori-guide', '/api/home-assistant/route']);
-  assert.equal(routedBody.context.workspace_id, 'launch', 'routing must receive the page context');
-  assert.match(els.oriGuideReply.innerHTML, /travel planning/);
-  assert.match(els.oriGuideReply.innerHTML, /Travel Planner/);
-  // Classification is not execution (FR35).
-  assert.match(els.oriGuideReply.innerHTML, /Nothing has run yet/);
+  await guide.ask('plan the launch party');
+  assert.deepEqual(calls, [
+    {
+      url: '/api/ori-guide',
+      body: { question: 'plan the launch party', route: '/workspaces/launch' }
+    }
+  ]);
+  assert.equal(els.oriGuideReply.dataset.status, 'answered');
+  assert.match(els.oriGuideReply.innerHTML, /Open Nova/);
+  assert.match(els.oriGuideReply.innerHTML, /Nothing has been sent/);
 });
 
 test('a failed routing call says routing failed rather than faking a guide answer', async () => {
@@ -1830,10 +1910,8 @@ test('reopening over a walkthrough step does not greet over it', () => {
 
 /* ---- acceptance matrix (FR16-FR39) ---------------------------------------------- */
 
-// One representative case per fulfilment family, driven through the single
-// composer. The point is not to re-test each backend — they have their own
-// suites — but to prove that one composer reaches each of them, and that the
-// safe/ambiguous cases stay safe.
+// Every former work family remains in Help until an explicit transition.
+// Canonical workspace/assistant work routing has its own regression suites.
 function matrixSandbox({ route = '/', guide = {}, routed = {}, elements } = {}) {
   const els = elements || guideEls();
   const ctx = load({ route, elements: els });
@@ -1857,139 +1935,30 @@ function matrixSandbox({ route = '/', guide = {}, routed = {}, elements } = {}) 
 
 const MATRIX = [
   {
-    name: 'navigation/setup stays on the read-only guide path',
+    name: 'navigation',
     route: '/',
-    guide: { status: 'answered', topic_key: 'agents', answer: 'Agents live here' },
-    expect: ({ els, seen }) => {
-      assert.equal(seen.route, 0, 'navigation must not reach the routing contract');
-      assert.equal(els.oriGuideReply.dataset.status, 'answered');
-    }
+    prompt: 'what is an agent',
+    guide: { status: 'answered', topic_key: 'agent', answer: 'Agents live here' }
   },
-  {
-    name: 'direct utility routes and names its agent',
-    route: '/',
-    routed: {
-      intent: 'utility_direct',
-      intent_label: 'daily utility',
-      matched_agent: 'Utility Assistant'
-    },
-    expect: ({ els }) => {
-      assert.match(els.oriGuideReply.innerHTML, /daily utility/);
-      assert.match(els.oriGuideReply.innerHTML, /Utility Assistant/);
-    }
-  },
-  {
-    name: 'specialist handoff names the specialist without running it',
-    route: '/',
-    routed: {
-      intent: 'email_check',
-      intent_label: 'email triage',
-      matched_agent: 'Email Assistant',
-      routing_policy: 'specialist_required'
-    },
-    expect: ({ els }) => {
-      assert.match(els.oriGuideReply.innerHTML, /Email Assistant/);
-      assert.match(els.oriGuideReply.innerHTML, /Nothing has run yet/);
-    }
-  },
-  {
-    name: 'personal calendar routes to its own agent',
-    route: '/',
-    routed: {
-      intent: 'calendar_check',
-      intent_label: 'calendar or schedule',
-      matched_agent: 'Calendar Ops'
-    },
-    expect: ({ els }) => assert.match(els.oriGuideReply.innerHTML, /Calendar Ops/)
-  },
-  {
-    name: 'app launch routes without inventing a destination',
-    route: '/',
-    routed: {
-      intent: 'app_launch',
-      intent_label: 'app launch',
-      suggested_agent_name: 'Desktop Launcher'
-    },
-    expect: ({ els }) => assert.match(els.oriGuideReply.innerHTML, /Desktop Launcher/)
-  },
-  {
-    name: 'workspace creation offers a way to create rather than guessing one',
-    route: '/',
-    routed: {
-      intent: 'workspace_create',
-      intent_label: 'workspace creation',
-      workspace_recommended: true,
-      workspace_resolution: { state: 'no_fit' }
-    },
-    expect: ({ els }) => {
-      assert.match(els.oriGuideReply.innerHTML, /Choose or create a workspace/);
-      assert.match(els.oriGuideReply.innerHTML, /href="\/workspaces"/);
-    }
-  },
-  {
-    name: 'an ambiguous target offers the candidates instead of picking one',
-    route: '/',
-    routed: {
-      intent: 'general_task',
-      intent_label: 'general task',
-      workspace_recommended: true,
-      workspace_resolution: {
-        state: 'ambiguous',
-        candidates: [
-          { id: 'workspace-uuid-1', slug: 'launch', name: 'Launch' },
-          { id: 'workspace-uuid-2', slug: 'research', name: 'Research' }
-        ]
-      }
-    },
-    expect: ({ els }) => {
-      assert.match(els.oriGuideReply.innerHTML, /More than one workspace/);
-      assert.match(els.oriGuideReply.innerHTML, /Open Launch/);
-      assert.match(els.oriGuideReply.innerHTML, /Open Research/);
-      // It must not claim a target it has not got.
-      assert.ok(!els.oriGuideReply.innerHTML.includes('Target:'));
-    }
-  },
-  {
-    name: 'a confidently resolved workspace is named before anything runs',
-    route: '/',
-    routed: {
-      intent: 'general_task',
-      intent_label: 'general task',
-      workspace_recommended: true,
-      workspace_resolution: {
-        state: 'confident',
-        selected_workspace_id: 'launch',
-        selected_workspace_name: 'Launch'
-      }
-    },
-    expect: ({ els }) => assert.match(els.oriGuideReply.innerHTML, /Target:.*Launch/)
-  },
-  {
-    name: 'a workspace page request carries and shows its own context',
-    route: '/workspaces/launch',
-    routed: { intent: 'general_task', intent_label: 'general task' },
-    expect: ({ els, seen }) => {
-      assert.equal(seen.payloads[0].context.workspace_id, 'launch');
-      assert.equal(seen.payloads[0].context.surface, 'workspace_detail');
-      assert.match(els.oriGuideReply.innerHTML, /Target:/);
-    }
-  },
-  {
-    name: 'a task page carries its task id',
-    route: '/workspaces/launch/tasks/t-42',
-    routed: { intent: 'general_task', intent_label: 'general task' },
-    expect: ({ seen }) => {
-      assert.equal(seen.payloads[0].context.task_id, 't-42');
-      assert.equal(seen.payloads[0].context.surface, 'workspace_task');
-    }
-  }
+  { name: 'daily utility', route: '/', prompt: 'plan my day' },
+  { name: 'specialist work', route: '/', prompt: 'send an email' },
+  { name: 'calendar', route: '/', prompt: 'schedule a meeting' },
+  { name: 'app launch', route: '/', prompt: 'open my app' },
+  { name: 'workspace creation', route: '/', prompt: 'create a workspace' },
+  { name: 'ambiguous workspace', route: '/', prompt: 'summarize the project' },
+  { name: 'named workspace', route: '/', prompt: 'summarize Launch' },
+  { name: 'workspace page', route: '/workspaces/launch', prompt: 'run this' },
+  { name: 'task page', route: '/workspaces/launch/tasks/t-42', prompt: '/task start this' }
 ];
 
 for (const row of MATRIX) {
   test(`acceptance matrix: ${row.name}`, async () => {
     const harness = matrixSandbox({ route: row.route, guide: row.guide, routed: row.routed });
-    await harness.ctx.guide.ask('do the thing');
-    row.expect(harness);
+    await harness.ctx.guide.ask(row.prompt);
+    assert.equal(harness.seen.guide, 1);
+    assert.equal(harness.seen.route, 0, 'Help must not classify or execute any work family');
+    assert.equal(harness.els.oriGuideReply.dataset.status, row.guide?.status || 'unknown');
+    assert.doesNotMatch(harness.els.oriGuideReply.innerHTML, /Target:|data-routing-intent/);
   });
 }
 
@@ -2010,120 +1979,53 @@ test('no routed outcome produces a mutating control', async () => {
   }
 });
 
-/* ---- explicit overrides (FR24) ------------------------------------------------- */
+/* ---- search/quest ownership --------------------------------------------------- */
 
-test('explicit commands are recognized, ordinary prompts are not', () => {
-  const { guide } = load();
-  for (const text of ['/task ship it', '/ask what is this', '/note buy milk', '  /NOTE x  ']) {
-    assert.equal(guide._isExplicitCommand(text), true, `${text} should be an explicit command`);
-  }
-  for (const text of [
-    'task: ship it',
-    'ask about the launch',
-    'note that this is fine',
-    'what/ask means',
-    ''
-  ]) {
-    assert.equal(guide._isExplicitCommand(text), false, `${text} should not be a command`);
-  }
-});
-
-// The bug this guards: "/ask what is a workspace" matches the guide's own
-// workspace topic, so asking the guide first answered it as navigation and
-// silently discarded the override.
-test('an explicit command bypasses the guide entirely', async () => {
+test('a pending search cannot overwrite a fixed walkthrough step', async () => {
   const els = guideEls();
-  const ctx = load({ route: '/workspaces/launch', elements: els });
-  const calls = [];
-  ctx.sandbox.fetch = url => {
-    calls.push(url);
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-  };
-
-  const submitted = [];
-  ctx.sandbox.window.OriAskRouting = {
-    submit: (prompt, options) => {
-      submitted.push({ prompt, options });
-      return Promise.resolve({ handled: true });
-    }
-  };
-
-  await ctx.guide.ask('/ask what is a workspace');
-
-  assert.deepEqual(calls, [], 'no guide or route request should be made');
-  assert.equal(submitted.length, 1);
-  assert.equal(
-    submitted[0].prompt,
-    '/ask what is a workspace',
-    'the command must pass through intact'
-  );
-  assert.equal(submitted[0].options.routeContext.workspace_id, 'launch');
-});
-
-test('an explicit command off a workspace page explains instead of guessing', async () => {
-  const els = guideEls();
-  const ctx = load({ route: '/agents', elements: els });
-  const calls = [];
-  ctx.sandbox.fetch = url => {
-    calls.push(url);
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-  };
-
-  await ctx.guide.ask('/note remember this');
-
-  assert.deepEqual(calls, [], 'it must not fall back to the guide');
-  assert.equal(els.oriGuideReply.dataset.status, 'unavailable');
-  assert.match(els.oriGuideReply.innerHTML, /inside a workspace/);
-});
-
-/* ---- work delegation (FR31/FR36) ----------------------------------------------- */
-
-test('work is handed to the existing controller with the page context', async () => {
-  const els = guideEls();
-  const ctx = load({ route: '/workspaces/launch', elements: els });
-  ctx.sandbox.fetch = () =>
-    Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ status: 'answered', topic_key: 'workspace-manager' })
+  const { guide, sandbox } = load({ elements: els });
+  let resolve;
+  sandbox.fetch = () =>
+    new Promise(done => {
+      resolve = done;
     });
-
-  const submitted = [];
-  ctx.sandbox.window.OriAskRouting = {
-    submit: (prompt, options) => {
-      submitted.push({ prompt, options });
-      return Promise.resolve({ handled: true });
-    }
-  };
-
-  await ctx.guide.ask('plan the launch');
-
-  assert.equal(submitted.length, 1);
-  assert.equal(submitted[0].prompt, 'plan the launch');
-  assert.equal(submitted[0].options.routeContext.workspace_id, 'launch');
-  // The controller renders into the panel's own activity host, so it must not
-  // also pop its old modal.
-  assert.equal(submitted[0].options.openThinkingModal, false);
-  assert.equal(els.oriGuideReply.dataset.status, 'delegated');
+  const pending = guide.ask('agent');
+  guide.presentQuestStep({ quest: 'meet-assistant', answer: 'Fixed reviewed step' });
+  resolve({ ok: true, json: async () => ({ status: 'answered', answer: 'Late search answer' }) });
+  await pending;
+  assert.equal(els.oriGuideReply.dataset.status, 'quest');
+  assert.match(els.oriGuideReply.innerHTML, /Fixed reviewed step/);
+  assert.doesNotMatch(els.oriGuideReply.innerHTML, /Late search answer/);
 });
 
-// Handing over must not wait on completion: a confirmation may sit unanswered
-// indefinitely, and the composer is where the user answers it.
-test('delegation acknowledges immediately and leaves the composer usable', async () => {
+test('app-wide route changes invalidate pending Help even with no workspace ID', async () => {
   const els = guideEls();
-  const ctx = load({ route: '/workspaces/launch', elements: els });
-  ctx.sandbox.fetch = () =>
-    Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ status: 'answered', topic_key: 'workspace-manager' })
+  const { guide, sandbox } = load({ route: '/agents', elements: els });
+  let resolve;
+  sandbox.fetch = () =>
+    new Promise(done => {
+      resolve = done;
     });
+  const pending = guide.ask('agent');
+  sandbox.window.location.pathname = '/settings';
+  resolve({ ok: true, json: async () => ({ status: 'answered', answer: 'OLD AGENTS CONTENT' }) });
+  await pending;
+  assert.equal(els.oriGuideReply.dataset.status, 'context-changed');
+  assert.doesNotMatch(els.oriGuideReply.innerHTML, /OLD AGENTS CONTENT/);
+  assert.equal(guide._state.actions.length, 0);
+});
 
-  // A controller that never settles, like a pending confirmation.
-  ctx.sandbox.window.OriAskRouting = { submit: () => new ctx.sandbox.Promise(() => {}) };
-
-  await ctx.guide.ask('do something that needs confirming');
-
-  assert.equal(els.oriGuideReply.dataset.status, 'delegated');
-  assert.equal(els.oriGuideSend.disabled, false, 'the composer must stay usable');
+test('ordinary Search exits fixed presentation without completing a quest', async () => {
+  const els = guideEls();
+  const { guide, sandbox } = load({ elements: els });
+  guide.presentQuestStep({ quest: 'meet-assistant', answer: 'Fixed step' });
+  sandbox.fetch = async () => ({
+    ok: true,
+    json: async () => ({ status: 'unknown', answer: 'No matching topic' })
+  });
+  await guide.ask('unknown question');
+  assert.equal(guide._state.quest, null);
+  assert.equal(els.oriGuideReply.dataset.status, 'unknown');
 });
 
 /* ---- context races (FR17/FR46) -------------------------------------------------- */

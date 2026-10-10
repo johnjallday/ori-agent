@@ -73,33 +73,6 @@
           </div>
         </div>
         <div class="cockpit-area-utility">
-          <!--
-            Ori in the cockpit (PRD FR-21). A second entry point to the *same*
-            guide: it drives the one controller and the one panel, so the two
-            can never disagree about open state. It is never used to represent
-            a running workspace agent (FR-78), and it is not the personal
-            assistant, which keeps its own launcher in the bottom-right corner.
-
-            It leads this row, on the LEFT, on purpose: the personal assistant's
-            non-modal panel opens over the right-hand side of Home, and switching
-            from it to the App Guide must never mean hunting under that panel.
-            It also sits in the header rather than floating over the map — an
-            absolutely-positioned character there covers the map's own empty and
-            error controls and silently eats their clicks.
-          -->
-          <button
-            type="button"
-            class="cockpit-map-ori"
-            id="oriGuideMapTrigger"
-            aria-label="Ask Ori — app guide">
-            <img src="/characters/ori-guide/sprite.svg" alt="" width="22" height="22" decoding="async">
-            <span class="cockpit-map-ori__label">Ask Ori</span>
-            <!-- Home hides the floating launcher, which was the only place that
-                 spelled out Ori's role. The boundary between the guide and
-                 the personal assistant has to be readable BEFORE anything is
-                 asked (FR-22/FR-27), so the role stays on this entry point. -->
-            <span class="cockpit-map-ori__role">App Guide</span>
-          </button>
           <!-- Map-only signal filters. Single-select and keyboard-operable;
                counts come from the same authoritative state Map and Summary
                read, and an unavailable count renders as an em dash rather than

@@ -357,6 +357,34 @@ func TestUnknownTopicsSaySoAndOfferApprovedTopics(t *testing.T) {
 	}
 }
 
+func TestGuideAboutThisScreenIsReviewedRouteMetadata(t *testing.T) {
+	cases := map[string]string{
+		"/": "workspace map", "/agents": "manage your agents", "/settings": "Global configuration",
+		"/workspaces/fictional/canvas": "workspace canvas", "/workspaces/fictional/task/42": "workspace task",
+		"/unknown": "not available", "/agents-imposter": "not available",
+	}
+	for route, want := range cases {
+		for _, question := range []string{"", "agent", "zzzzz"} {
+			resp := askGuide(t, newGuide(), question, route)
+			if !strings.Contains(resp.About, want) {
+				t.Errorf("route %q question %q: about=%q, want %q", route, question, resp.About, want)
+			}
+		}
+	}
+}
+
+func TestGuideSlashCommandsOnlyOfferUnsentAssistantTransition(t *testing.T) {
+	for _, question := range []string{"/ask what is a workspace", "/task start this", "/note private idea"} {
+		resp := askGuide(t, newGuide(), question, "/")
+		if resp.TopicKey != "workspace-manager" || len(resp.Actions) != 1 || resp.Actions[0].Type != GuideActionHandoff {
+			t.Fatalf("command %q: %+v", question, resp)
+		}
+		if resp.Actions[0].HandoffText != question || !strings.Contains(resp.Answer, "nothing has been sent") {
+			t.Errorf("command lost unsent boundary: %+v", resp)
+		}
+	}
+}
+
 func TestEmptyQuestionIsAnInvitationNotAnError(t *testing.T) {
 	resp := askGuide(t, newGuide(), "", "/")
 	if resp.Answer == "" {
@@ -376,6 +404,7 @@ func TestHostileRoutesAreDiscarded(t *testing.T) {
 	for _, route := range []string{
 		"https://evil.example.com", "//evil.example.com", "/../../etc/passwd",
 		"javascript:alert(1)", strings.Repeat("/a", 300),
+		"/\\\\evil.example.com", "/%5cevil.example.com", "/%2e%2e/vaults", "/agents/%00", "/%ZZ",
 	} {
 		resp := askGuide(t, h, "agent", route)
 		for _, a := range resp.Actions {

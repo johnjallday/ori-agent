@@ -751,7 +751,7 @@ test('the folder turn and work controller mount once on every drawer host', () =
   assert.doesNotMatch(today, /personalAssistantFolder/);
   assert.match(
     drawer,
-    /id="personalAssistantThread"[^>]*>\s*<div[^>]*personalAssistantActivityMount[^>]*><\/div>\s*\{\{template "personal-assistant-folder\.tmpl" \.\}\}/
+    /id="personalAssistantThread"[^>]*>\s*<div[^>]*personalAssistantActivityMount[^>]*>\s*\{\{template "ask-ori-activity\.tmpl" \.\}\}\s*<\/div>\s*\{\{template "personal-assistant-folder\.tmpl" \.\}\}/
   );
   const head = read('../layout/head.tmpl');
   assert.equal((head.match(/src="\/js\/modules\/dashboard.js"/g) || []).length, 1);
