@@ -2,7 +2,14 @@ name: Auto Release
 
 # Cadence prepares an RC, NEVER stable. One active release branch at a time;
 # feature PRs continue to dev while that branch is tested. See docs/RELEASE_CHECKLIST.md.
-# RELEASE_PAT must be able to push release branches/tags and trigger workflows.
+# RELEASE_PAT must be able to push release branches/tags, merge PRs and trigger workflows.
+#
+# Finished CI and Release runs land here too (workflow_run fires for main's copy
+# of this file only). The react job re-cuts a candidate whose branch turned
+# green, lands the release watcher's dev→release sync PR once dev CI is green
+# for that exact commit, and requests promotion once an RC has every automated
+# check green. Publishing stable still needs a person to approve the `release`
+# environment review on the dispatched Promote Release run.
 on:
   schedule:
     - cron: '30 18 * * *'
@@ -16,20 +23,26 @@ on:
         description: 'Existing release version to rebuild after fixes, e.g. v0.0.112 (blank = new batch)'
         type: string
         default: ''
+  workflow_run:
+    workflows: [CI, Release]
+    types: [completed]
 
 permissions:
   contents: read
 
-# Shared with promotion: no overlapping lifecycle mutations. Does not lock dev.
-concurrency:
-  group: release-lifecycle
-  cancel-in-progress: false
-
+# The lifecycle lock is per job and shared with promotion: no overlapping
+# lifecycle mutations, and dev is never locked. It must not sit at workflow
+# level: every finished PR CI run creates a workflow_run fire here, and a fire
+# whose only job is skipped would still enter a workflow-level group and cancel
+# the scheduled evaluation queued behind a promotion waiting for approval.
 jobs:
   evaluate:
     name: Evaluate candidate readiness
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_run'
     runs-on: ubuntu-24.04
+    concurrency:
+      group: release-lifecycle
+      cancel-in-progress: false
     permissions:
       contents: read
       actions: read
@@ -55,6 +68,9 @@ jobs:
     needs: evaluate
     if: needs.evaluate.outputs.ready == 'true'
     runs-on: ubuntu-24.04
+    concurrency:
+      group: release-lifecycle
+      cancel-in-progress: false
     permissions:
       contents: write
       actions: read
@@ -73,3 +89,44 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           python3 scripts/release-candidate.py prepare --version "$VERSION" --sha "$SHA"
+
+  react:
+    name: React to ${{ github.event.workflow_run.name }} on ${{ github.event.workflow_run.head_branch }}
+    # Successful push runs only. Failures belong to the release watcher routine,
+    # and a pull_request run never authorizes a lifecycle step.
+    if: >-
+      github.event_name == 'workflow_run'
+      && github.ref == 'refs/heads/main'
+      && github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+      && (github.event.workflow_run.head_branch == 'dev'
+          || startsWith(github.event.workflow_run.head_branch, 'release/')
+          || contains(github.event.workflow_run.head_branch, '-rc.'))
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: release-lifecycle
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+      - name: Re-cut, land a sync PR or request promotion
+        env:
+          # The PAT's tag pushes, merges and dispatches trigger CI/Release; GITHUB_TOKEN's would not.
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          AUTO_RELEASE_HOLD: ${{ vars.AUTO_RELEASE_HOLD }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 scripts/release-candidate.py react --workflow "$WORKFLOW" --event "$EVENT" \
+            --branch "$BRANCH" --sha "$SHA" --conclusion "$CONCLUSION"

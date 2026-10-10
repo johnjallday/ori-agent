@@ -48,7 +48,8 @@ workflows and Ori's worktree provisioning adapter.
   stable tagging.
 - `release-ready.sh`: read readiness without pushing/publishing.
 - `release-candidate.py`: Actions lifecycle, exact refs, green workflow evidence,
-  atomic tagging/promotion and release merge-back PR.
+  atomic tagging/promotion, the auto-merged release merge-back PR, and `react`
+  (re-cut, sync-PR merge and promotion request on finished workflow runs).
 - `rc_test_report.py`: generate the pinned RC's blank manual test card without
   overwriting evidence or awarding PASS. Follow `docs/RC_TEST_PROTOCOL.md`.
 - `smoke-installed.py`: verify a downloaded installer's health/exact version

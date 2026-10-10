@@ -169,6 +169,18 @@ A moved branch or a newer candidate invalidates promotion of an older RC.
 
 ## Promote the tested candidate
 
+Normally nobody runs this by hand. `auto-release.yml` reacts to finished
+workflow runs on `main`'s behalf: a `release/*` branch whose CI turns green is
+tagged as the next RC; the release watcher's `release-sync/*` PR into the
+release branch is merged once dev CI is green for that exact commit; and an RC
+with green branch CI, a published prerelease and passing installer checks gets a
+Promote Release dispatch. The one human action is approving the `release`
+environment review on that run (GitHub emails the request). Red CI on `dev` or
+on the release branch is the release watcher routine's job: it opens a
+`release-fix/*` PR to `dev` with auto-merge, then the sync PR. Stable's
+merge-back PR auto-merges with a merge commit. `AUTO_RELEASE_HOLD=1` stops every
+automatic step. To promote by hand instead:
+
 ```bash
 ./scripts/release.sh promote vX.Y.Z-rc.2
 # Compatibility spelling:
