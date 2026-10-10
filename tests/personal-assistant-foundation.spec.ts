@@ -1184,9 +1184,9 @@ test.describe('Personal Assistant Foundation first value', () => {
     await expect(page.locator('#personalAssistantPanel')).toBeHidden();
     await expect(page.locator('#personalAssistantLauncher')).toBeFocused();
 
-    await page.locator('#oriGuideMapTrigger').click();
+    await page.locator('#oriGuideLauncher').click();
     await expect(page.locator('#oriGuidePanel')).toBeVisible();
-    await expect(page.locator('#oriGuideRole')).toHaveText('App Guide');
+    await expect(page.locator('#oriGuideTitle')).toHaveText('Help');
     await expect(page.locator('#personalAssistantPanel')).toBeHidden();
 
     await page.locator('#oriGuideInput').fill('Where are global settings?');
@@ -1196,9 +1196,9 @@ test.describe('Personal Assistant Foundation first value', () => {
     const handoffText = 'Create a launch review for Friday';
     await page.locator('#oriGuideInput').fill(handoffText);
     await page.locator('#oriGuideSend').click();
-    await expect(page.getByRole('button', { name: 'Send to Atlas' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Atlas', exact: true })).toBeVisible();
     expect(routeCalls).toBe(0);
-    await page.getByRole('button', { name: 'Send to Atlas' }).click();
+    await page.getByRole('button', { name: 'Open Atlas', exact: true }).click();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
     await expect(page.locator('#oriGuidePanel')).toBeHidden();
     await expect(page.locator('#personalAssistantInput')).toBeFocused();
@@ -1206,7 +1206,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     expect(routeCalls).toBe(0);
 
     // Cancel once: closing the panel keeps this only as an assistant draft and
-    // never routes it. Ori's Help composer/transcript stay in Ori's own panel.
+    // never routes it. Help's search and reviewed answer stay in Help.
     await page.locator('#personalAssistantClose').click();
     expect(routeCalls).toBe(0);
     await page.locator('#personalAssistantLauncher').click();
@@ -1297,7 +1297,9 @@ test.describe('Personal Assistant Foundation first value', () => {
     // card or silently presenting the section as fully healthy.
     emailOpsReadPartial = true;
     await page.reload();
-    await page.locator('#personalAssistantLauncher').click();
+    // The tab-local open presentation is restored; the launcher is hidden
+    // while the same drawer is open, including on narrow screens.
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
     await expect(page.locator('#personalAssistantTodayFooter')).toContainText(
       "Couldn't read: follow-ups, decisions."
     );

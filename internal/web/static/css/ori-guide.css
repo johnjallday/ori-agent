@@ -1,13 +1,6 @@
-/*
- * Ask Ori — the one launcher and panel, on every authenticated page.
- *
- * This used to be styled to look deliberately unlike the Home command box,
- * because that box was a second assistant that did the real work. Issue #350
- * merged them, so the warm paper tones and character portrait now mark the
- * single assistance surface rather than one half of a pair.
- *
- * Wide layouts get a non-blocking panel so the destination Ori is describing
- * stays visible; narrow layouts get a bottom sheet (FR66/FR67).
+/* Contextual Help and Personal Assistant presentation.
+ * Help is a quiet app utility; the assistant and fixed walkthroughs keep the
+ * existing paper palette. Both panels are non-modal and leave the navbar usable.
  */
 
 /*
@@ -48,6 +41,7 @@
      which fails WCAG AA; this darker amber reaches 5.9:1. Anything that puts
      light text on the accent must use this one (FR-119). */
   --ori-accent-strong: #8a5a15;
+  --ori-accent-text: #8a5a15;
   --ori-line: #d8c19b;
   --ori-surface: #fffaf1;
 }
@@ -76,24 +70,26 @@
 
 /* ---- launcher -------------------------------------------------------------- */
 
-.ori-guide__launcher {
-  display: flex;
+.ori-help-trigger {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px 8px 10px;
-  border: 1px solid var(--ori-line);
-  border-radius: 999px;
-  background: var(--ori-paper);
-  color: var(--ori-ink);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
-  cursor: pointer;
+  gap: 6px;
+  min-height: 44px;
+  white-space: nowrap;
 }
 
-.ori-guide__launcher:hover {
-  background: var(--ori-surface);
+.ori-help-trigger__icon {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.ori-guide__launcher:focus-visible,
+.ori-help-trigger:focus-visible,
 .ori-guide__close:focus-visible,
 .ori-guide__send:focus-visible,
 .ori-guide__action:focus-visible,
@@ -104,7 +100,7 @@
 .personal-assistant-panel a:focus-visible,
 .personal-assistant-panel button:focus-visible,
 .personal-assistant-panel summary:focus-visible {
-  outline: 3px solid var(--ori-accent);
+  outline: 3px solid var(--ori-accent, var(--focus-ring, #bd7c24));
   outline-offset: 2px;
 }
 
@@ -114,44 +110,88 @@
   flex: none;
 }
 
-.ori-guide__launcher-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.15;
-}
-
-.ori-guide__launcher-name {
-  font-weight: 700;
-}
-
-/* Busy state, so running work is visible from the launcher without adding a
-   second place to type (FR14). */
-.ori-guide__launcher-status {
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  opacity: 0.75;
-}
-
-.ori-guide__launcher-status[hidden] {
+.ori-guide__portrait[hidden] {
   display: none;
 }
 
 /* ---- panel ------------------------------------------------------------------- */
 
 .ori-guide__panel {
-  width: min(380px, calc(100vw - 40px));
-  max-height: min(560px, calc(100vh - 120px));
+  --ori-surface: var(--bg-primary, #fffaf1);
+  --ori-paper: var(--bg-secondary, #f6ead6);
+  --ori-paper-deep: var(--bg-tertiary, #e8d6b4);
+  --ori-ink: var(--text-primary, #3b2a12);
+  --ori-line: var(--border-color, #d8c19b);
+  position: fixed;
+  top: calc(var(--ori-navbar-bottom, 72px) + 12px);
+  right: 20px;
+  bottom: calc(var(--ori-launcher-clearance-y, 88px) + 12px);
+  width: min(360px, calc(100vw - 40px));
+  max-height: calc(
+    var(--pa-viewport-height, 100dvh) - var(--ori-navbar-bottom, 72px) -
+      var(--ori-launcher-clearance-y, 88px) - 24px
+  );
   overflow-y: auto;
-  padding: 16px;
+  overscroll-behavior: contain;
+  scroll-padding-top: 64px;
+  padding: 20px max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
   border: 1px solid var(--ori-line);
-  border-radius: 14px;
+  border-radius: var(--radius-lg, 14px);
   background: var(--ori-surface);
   color: var(--ori-ink);
-  box-shadow: 0 14px 40px rgb(0 0 0 / 26%);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 18%);
 }
 
-.ori-guide__panel[hidden] {
+/* Fixed walkthroughs stay compact near the bottom: the full-height Help side
+   panel would cover the very app controls the walkthrough asks users to open. */
+.ori-guide__panel:has(.ori-guide__reply[data-status="quest"]) {
+  top: auto;
+  max-height: min(
+    440px,
+    calc(
+      var(--pa-viewport-height, 100dvh) - var(--ori-navbar-bottom, 72px) -
+        var(--ori-launcher-clearance-y, 88px) - 24px
+    )
+  );
+}
+
+.ori-guide__overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  margin: 20px 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ori-guide__overview p {
+  margin: 0;
+}
+
+.ori-guide__section-title,
+.ori-guide__search-label {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ori-guide__hint {
+  margin: 0 0 16px;
+  color: var(--ori-ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ori-guide__walkthrough {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+.ori-guide__panel[hidden],
+.ori-guide__form[hidden],
+.ori-guide__overview[hidden],
+.ori-guide__hint[hidden] {
   display: none;
 }
 
@@ -160,6 +200,22 @@
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ori-surface);
+}
+
+.ori-guide__panel :is(button, a, input) {
+  scroll-margin-block: 64px 12px;
+}
+
+.ori-guide__answer,
+.ori-guide__action,
+.ori-guide__topic,
+.ori-guide__walkthrough {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .ori-guide__ident {
@@ -173,9 +229,7 @@
   line-height: 1.2;
 }
 
-/* The contextual subtitle: what Ask Ori is pointed at right now. Not uppercased
-   like the old role line was — it carries a real value (a workspace or task
-   name), not a fixed label (FR4/FR64). */
+/* The reviewed screen title, never private work/page content. */
 .ori-guide__context {
   margin: 0;
   font-size: 12px;
@@ -187,8 +241,8 @@
 
 .ori-guide__close {
   flex: none;
-  width: 30px;
-  height: 30px;
+  width: 44px;
+  height: 44px;
   border: 1px solid var(--ori-line);
   border-radius: 8px;
   background: transparent;
@@ -245,9 +299,20 @@
 }
 
 .ori-guide__form {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
+}
+
+.ori-guide__search-label {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.ori-guide__input:focus-visible {
+  outline: 3px solid var(--ori-accent);
+  outline-offset: 2px;
 }
 
 .ori-guide__input {
@@ -256,9 +321,18 @@
   padding: 8px 10px;
   border: 1px solid var(--ori-line);
   border-radius: 9px;
-  background: #fff;
+  background: var(--ori-surface);
   color: var(--ori-ink);
   font: inherit;
+}
+
+.ori-guide__input::placeholder {
+  color: var(--text-secondary, #75654e);
+  opacity: 1;
+}
+
+.ori-guide__close:hover {
+  background: var(--ori-paper);
 }
 
 .ori-guide__send {
@@ -351,75 +425,6 @@
   background: var(--ori-paper);
 }
 
-/* ---- Ori on the Home map -------------------------------------------------------- */
-
-/* A second door to the same guide, sitting in the cockpit header beside the
-   view toggle (PRD FR-21).
-
-   Deliberately in normal flow rather than floating over the map: an absolutely
-   positioned character there sits on top of the map's own empty-state and
-   retry controls and silently swallows their clicks. */
-.cockpit-map-ori {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px 4px 5px;
-  border: 1px solid var(--ori-line, #d8c19b);
-  border-radius: 999px;
-  background: var(--ori-paper, #f6ead6);
-  color: var(--ori-ink, #3b2a12);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.cockpit-map-ori:hover {
-  background: var(--ori-surface, #fffaf1);
-}
-
-.cockpit-map-ori:focus-visible {
-  outline: 3px solid var(--ori-accent, #bd7c24);
-  outline-offset: 2px;
-}
-
-.cockpit-map-ori img {
-  display: block;
-}
-
-/* Ori's role, carried here because Home no longer renders the fixed launcher
-   that used to be the only surface naming it. The separator is generated so the
-   accessible name stays "Ask Ori App Guide" rather than picking up punctuation
-   (FR-22/FR-27). */
-.cockpit-map-ori__role {
-  color: var(--ori-ink-dim, #7a6647);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.cockpit-map-ori__role::before {
-  content: "·";
-  margin-right: 5px;
-}
-
-[data-bs-theme="dark"] .cockpit-map-ori__role {
-  color: #bfae94;
-}
-
-[data-bs-theme="dark"] .cockpit-map-ori {
-  border-color: #574a38;
-  background: #2f2820;
-  color: #f2e7d5;
-}
-
-/* The Home header wraps its groups onto new lines instead of squeezing them, so
-   this keeps "Ask Ori · App Guide" visible at every width: on Home the personal
-   assistant launcher shares the screen, and the role is what tells the two
-   apart. It shares the header's control height. */
-.cockpit-map-ori {
-  min-height: var(--cockpit-control-h, 32px);
-  white-space: nowrap;
-}
-
 /* ---- coachmark ---------------------------------------------------------------- */
 
 /* Marks a control without touching it. The outline plus offset reads on any
@@ -488,6 +493,7 @@
   --ori-paper: #2f2820;
   --ori-paper-deep: #3b3227;
   --ori-ink: #f2e7d5;
+  --ori-accent-text: #e0a85a;
   --ori-line: #574a38;
   --ori-surface: #241f19;
 }
@@ -502,7 +508,7 @@
 .ori-guide__role,
 .personal-assistant-launcher__role {
   margin: 2px 0 0;
-  color: var(--ori-accent-strong);
+  color: var(--ori-accent-text);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -524,6 +530,7 @@
 }
 
 .personal-assistant-launcher[hidden],
+.personal-assistant-panel__avatar[hidden],
 .personal-assistant-panel[hidden] {
   display: none;
 }
@@ -1616,6 +1623,21 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   font-weight: 600;
 }
 
+#personalAssistantModelSetup {
+  display: flex;
+  align-items: center;
+  flex: none;
+  min-height: 44px;
+  margin: 0 20px 8px;
+  padding: 8px 10px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+#personalAssistantModelSetup[hidden] {
+  display: none;
+}
+
 .personal-assistant-conversation__button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -2314,7 +2336,6 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
     align-items: stretch;
   }
 
-  .ori-guide__launcher,
   .personal-assistant-launcher {
     align-self: flex-end;
     margin-right: 12px;
@@ -2322,9 +2343,15 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   }
 
   .ori-guide__panel {
-    width: calc(100% - 24px);
-    max-height: min(70dvh, calc(100dvh - 100px));
-    margin: 0 12px 12px;
+    top: calc(var(--ori-navbar-bottom, 72px) + 8px);
+    right: 0;
+    bottom: var(--ori-launcher-clearance-y, 88px);
+    left: 0;
+    width: 100%;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 16px 16px 0 0;
   }
 
   .personal-assistant-panel {

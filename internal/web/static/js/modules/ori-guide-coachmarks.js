@@ -37,8 +37,8 @@
   var REGISTRY = {
     workspace_manager: {
       routes: ['/'],
-      selector: '#homeAssistantInput',
-      label: 'Ask Ori composer'
+      selector: '#personalAssistantLauncher',
+      label: 'Open your Personal Assistant'
     },
     quick_capture: {
       routes: ['/'],

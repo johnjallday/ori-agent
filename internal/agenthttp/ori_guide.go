@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -37,8 +38,8 @@ const (
 	// GuideActionCoachmark visually marks a control by typed key. It never
 	// activates the control (FR-42).
 	GuideActionCoachmark GuideActionType = "coachmark"
-	// GuideActionHandoff opens the Workspace Manager command surface and
-	// populates the user's text without submitting it (FR-40/FR-84).
+	// GuideActionHandoff offers an explicit transition to the Personal Assistant.
+	// It is never a submission or approval to execute work.
 	GuideActionHandoff GuideActionType = "handoff"
 	// GuideActionSetup opens one of the enumerated setup surfaces.
 	GuideActionSetup GuideActionType = "setup"
@@ -91,6 +92,7 @@ type GuideResponse struct {
 	// TopicKey is the approved topic this answer came from, when there is one.
 	TopicKey  string              `json:"topic_key,omitempty"`
 	Location  string              `json:"location,omitempty"`
+	About     string              `json:"about"`
 	Answer    string              `json:"answer"`
 	Actions   []GuideAction       `json:"actions,omitempty"`
 	Suggested []GuideTopicSummary `json:"suggested,omitempty"`
@@ -147,6 +149,7 @@ func (h *GuideHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	route := sanitizeGuideRoute(req.Route)
 
 	resp := h.answer(question, route)
+	resp.About = aboutThisScreen(route)
 
 	// Phrasing runs last, on the finished response, and can only replace answer
 	// prose. Topic, actions, location, and suggestions are already decided and
@@ -167,11 +170,18 @@ func sanitizeGuideRoute(raw string) string {
 	if route == "" || !strings.HasPrefix(route, "/") {
 		return "/"
 	}
-	if strings.HasPrefix(route, "//") || strings.Contains(route, "://") || strings.Contains(route, "..") {
+	if len(route) > 200 || strings.HasPrefix(route, "//") || strings.Contains(route, "://") {
 		return "/"
 	}
-	if len(route) > 200 {
+	route = strings.SplitN(strings.SplitN(route, "?", 2)[0], "#", 2)[0]
+	decoded, err := url.PathUnescape(route)
+	if err != nil || strings.Contains(decoded, "..") || strings.Contains(decoded, "\\") || strings.HasPrefix(decoded, "//") {
 		return "/"
+	}
+	for _, r := range decoded {
+		if r <= 32 || r == 127 {
+			return "/"
+		}
 	}
 	return route
 }
@@ -188,25 +198,22 @@ func (h *GuideHandler) answer(question, route string) GuideResponse {
 	}
 
 	if question == "" {
-		resp.Answer = "Ask me where something lives, or what a term means. I can point you at the right " +
-			"page and explain what happens there."
+		resp.Answer = "Search reviewed help topics to understand the app. This is a bounded topic search, not full-text documentation search."
 		return resp
 	}
 
 	// A work request is recognized before topic matching, so "send the summary
 	// to marketing" gets an honest handoff rather than being bent into whichever
 	// topic shares a word with it (FR-40).
-	if isWorkRequest(question) {
+	if isWorkRequest(question) || isGuideWorkCommand(question) {
 		resp.Status = "answered"
 		resp.TopicKey = "workspace-manager"
-		// The topic key stays "workspace-manager": it is the client's signal that
-		// this is work rather than navigation, and renaming it would break that
-		// dispatch. Only the copy is user-visible (FR62).
-		resp.Answer = "That is work rather than navigation, so I will route it to the right agent. " +
-			"You stay in control of whether it runs."
+		// Preserve the stable topic key for compatibility, not execution dispatch.
+		resp.Answer = "This looks like work for your Personal Assistant. Help only explains the app. " +
+			"You can open your assistant to review the request; nothing has been sent."
 		resp.Actions = []GuideAction{{
 			Type:        GuideActionHandoff,
-			Label:       "Send this as work",
+			Label:       "Open your assistant",
 			HandoffText: question,
 		}}
 		return resp
@@ -223,7 +230,7 @@ func (h *GuideHandler) answer(question, route string) GuideResponse {
 	topic, ok := FindGuideTopic(question)
 	if !ok {
 		// An honest miss. The approved topics are offered instead of a guess.
-		resp.Answer = "I do not have an answer for that one. Here is what I can explain or help you find."
+		resp.Answer = "No matching help topic. Try one of the common questions below or search for an app term."
 		return resp
 	}
 
@@ -321,11 +328,41 @@ func locationLabelFor(route string) string {
 		if entry.Href == "/" {
 			continue
 		}
-		if strings.HasPrefix(route, entry.Href) && len(entry.Href) > bestLen {
+		if strings.HasPrefix(route, entry.Href+"/") && len(entry.Href) > bestLen {
 			best, bestLen = entry.Label, len(entry.Href)
 		}
 	}
 	return best
+}
+
+// aboutThisScreen uses only reviewed route/topic metadata, never page contents.
+func aboutThisScreen(route string) string {
+	if strings.HasPrefix(route, "/workspaces/") {
+		parts := strings.Split(strings.TrimPrefix(route, "/workspaces/"), "/")
+		if len(parts) > 1 && parts[1] == "canvas" {
+			return "The workspace canvas shows agents, tasks, and their connections. Select a node to inspect it; workspace work stays in the workspace or your Personal Assistant."
+		}
+		if len(parts) > 1 && (parts[1] == "task" || parts[1] == "tasks") {
+			return "This workspace task page shows the task, its progress, and results. Review the task here; Help never starts or changes it."
+		}
+	}
+	label := locationLabelFor(route)
+	for _, entry := range HomeNavCatalog() {
+		if entry.Label == label {
+			return entry.Description
+		}
+	}
+	return "A specific overview is not available for this screen. Search the reviewed app topics below to find related guidance."
+}
+
+func isGuideWorkCommand(question string) bool {
+	q := strings.ToLower(strings.TrimSpace(question))
+	for _, command := range []string{"/ask", "/task", "/note"} {
+		if q == command || strings.HasPrefix(q, command+" ") || strings.HasPrefix(q, command+"\n") || strings.HasPrefix(q, command+"\t") {
+			return true
+		}
+	}
+	return false
 }
 
 // workVerbs are the openings that mean "do something", as opposed to "where is"

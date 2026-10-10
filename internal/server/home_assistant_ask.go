@@ -420,12 +420,8 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		}
 	}
 
-	// Ori Guide reuses the same system model, but only to reword an answer it
-	// has already decided. Wired here because this is where the system-model
-	// reader is resolved; the guide keeps working unchanged when it is absent.
-	if s.Handlers != nil && s.Handlers.OriGuide != nil && llmFactory != nil && systemModel != nil {
-		s.Handlers.OriGuide.SetPhraser(agenthttp.NewLLMGuidePhraser(llmFactory, systemModel))
-	}
+	// Help uses reviewed deterministic copy only. The model remains wired to
+	// this work handler, never to the guide's optional legacy phrasing seam.
 	if s.Storage != nil {
 		mutator := homeActionMutator{
 			admissionGate: s.resetWork,

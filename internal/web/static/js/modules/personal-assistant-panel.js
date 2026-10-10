@@ -1,10 +1,11 @@
 import {
-  collectWorkspaceContext,
+  collectCurrentWorkspaceContext,
   workspaceContextLabel
 } from './personal-assistant-workspace-context.js';
 
 const PANEL_DRAFT_KEY = 'ori.personalAssistant.panelDraft';
 const PANEL_OPEN_KEY = 'ori.personalAssistant.panelOpen';
+export const LEGACY_ASSISTANT_HANDOFF_KEY = 'ori-guide-handoff';
 
 function tabValue(key) {
   try {
@@ -26,10 +27,23 @@ const TODAY_ENDPOINT = '/api/personal-assistant/today';
 const HANDOFF_LIMIT = 400;
 
 export function personalAssistantPanelView(personalAssistant) {
-  const state = String(personalAssistant?.state || 'unavailable');
-  const known = state !== 'unavailable';
+  const state =
+    typeof personalAssistant?.state === 'string' ? personalAssistant.state : 'unavailable';
+  const known = [
+    'needs_hire',
+    'hiring',
+    'needs_hq',
+    'provisioning_hq',
+    'active',
+    'paused',
+    'repair_needed'
+  ].includes(state);
   const available = state === 'active' || state === 'paused';
-  const name = String(personalAssistant?.display_name || '').trim() || 'Personal assistant';
+  const named = known && !['needs_hire', 'hiring'].includes(state);
+  const name =
+    (named && typeof personalAssistant?.display_name === 'string'
+      ? personalAssistant.display_name.trim()
+      : '') || 'Personal assistant';
   return {
     state,
     known,
@@ -61,6 +75,28 @@ export function boundedAssistantHandoff(value) {
   return Array.from(String(value || '').trim())
     .slice(0, HANDOFF_LIMIT)
     .join('');
+}
+
+export function readLegacyAssistantHandoff(storage) {
+  try {
+    const original = storage.getItem(LEGACY_ASSISTANT_HANDOFF_KEY);
+    const text = boundedAssistantHandoff(original);
+    return text ? { original, text } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function clearLegacyAssistantHandoff(storage, original) {
+  try {
+    // Do not delete a different request another consumer published meanwhile.
+    const current = storage.getItem(LEGACY_ASSISTANT_HANDOFF_KEY);
+    if (current !== null && current !== original) return false;
+    storage.removeItem(LEGACY_ASSISTANT_HANDOFF_KEY);
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 export function canSubmitAssistantWork({ available, pending, busy, text }) {
@@ -194,6 +230,10 @@ const state = {
   open: false,
   draft: '',
   workspaceSequence: 0,
+  legacyHandoff: null,
+  suggestionNotice: '',
+  workActivityOnly: false,
+  relationshipSequence: 0,
   lastTrigger: null,
   // True while Home's folder flow is waiting for a folder or exploring one.
   folderBusy: false,
@@ -247,13 +287,18 @@ function renderIdentity() {
   if (!els) return;
   els.launcher.hidden = !view.visible;
   els.launcherName.textContent = view.name;
-  els.title.textContent = view.name;
+  els.title.textContent = state.workActivityOnly && !view.visible ? 'Work activity' : view.name;
   els.input.placeholder = view.placeholder;
   els.input.disabled = !view.available;
   els.send.disabled = !view.available || state.pending;
+  if (els.modelSetup)
+    els.modelSetup.hidden = !(
+      view.available && personalAssistant?.availability?.model?.available === false
+    );
   const avatar = assistantAvatarMarkup(view.name, personalAssistant?.appearance);
   els.launcherAvatar.innerHTML = avatar;
   els.panelAvatar.innerHTML = avatar;
+  els.panelAvatar.hidden = !view.visible;
   els.panel.dataset.relationshipState = view.state;
   renderChip();
   // Home says these in the banner under the header. A page without that banner
@@ -381,23 +426,22 @@ async function readTodayForThisPage() {
 }
 
 function moveSharedWorkActivity() {
+  // Compatibility name: markup permanently owns this node from initial render.
+  // Never reparent on relationship refresh or put confirmations in Help.
   const activity = document.getElementById('homeAssistantThinkingModal');
-  if (!activity || !state.els?.activityMount || !state.view.available) return;
-  if (activity.parentElement !== state.els.activityMount) {
-    state.els.activityMount.appendChild(activity);
-  }
-  activity.hidden = false;
-  activity.dataset.homeAssistantPanelScope = 'personal-assistant';
+  if (activity && state.els?.activityMount) activity.hidden = false;
 }
 
 function applyPersonalAssistant(personalAssistant) {
+  state.relationshipSequence += 1;
   state.personalAssistant = personalAssistant || null;
   state.view = personalAssistantPanelView(personalAssistant);
-  if (state.view.helpOnly && window.OriGuide?.setHelpOnly) {
+  if (window.OriGuide?.setHelpOnly) {
     window.OriGuide.setHelpOnly({
       available: state.view.available,
       assistantName: state.view.name,
-      needsHQ: state.view.needsHQ
+      needsHQ: state.view.needsHQ,
+      state: state.view.known ? state.view.state : 'unavailable'
     });
   }
   renderIdentity();
@@ -418,14 +462,21 @@ function applyPersonalAssistant(personalAssistant) {
 }
 
 async function refresh() {
+  const sequence = ++state.relationshipSequence;
   try {
     const response = await fetch(STATUS_ENDPOINT, { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`status ${response.status}`);
     const payload = await response.json();
+    if (sequence !== state.relationshipSequence) return state.view;
     return applyPersonalAssistant(payload?.personal_assistant || null);
   } catch (_) {
-    // Keep the existing Help surface intact until relationship status is known.
-    setStatus('Personal assistant status is unavailable. Reload to try again.');
+    if (sequence !== state.relationshipSequence) return state.view;
+    // A failed refresh is not authority to keep accepting work as a cached identity.
+    // Drafts and submitted activity remain owned by this host.
+    applyPersonalAssistant(null);
+    setStatus(
+      'Personal assistant status is unavailable. Retry assistant status from Help. Nothing was sent.'
+    );
     return state.view;
   }
 }
@@ -468,8 +519,10 @@ function focusOnOpen() {
  * that is about to put focus somewhere of its own passes `{ focus: false }`.
  */
 function open(trigger, options = {}) {
-  if (!state.view.visible || !state.els) return false;
-  if (window.OriGuide?.close) window.OriGuide.close();
+  if (!state.els || (!state.view.visible && options.workActivity !== true)) return false;
+  state.workActivityOnly = options.workActivity === true;
+  if (window.OriGuide?.close) window.OriGuide.close({ restoreFocus: false });
+  renderIdentity();
   moveSharedWorkActivity();
   syncPanelViewport();
   state.open = true;
@@ -557,8 +610,41 @@ function suggestReply(text) {
     state.els.input.dispatchEvent(new Event('input', { bubbles: true }));
   }
   state.els.input.focus();
+  state.suggestionNotice = result.notice;
   setStatus(result.notice);
   return result.accepted;
+}
+
+function renderLegacyHandoff() {
+  const els = state.els;
+  if (!els?.legacyHandoff) return;
+  els.legacyHandoff.hidden = !state.legacyHandoff;
+  if (els.legacyText) els.legacyText.textContent = state.legacyHandoff?.text || '';
+}
+
+function dismissLegacyHandoff() {
+  if (!state.legacyHandoff) return false;
+  let cleared = false;
+  try {
+    cleared = clearLegacyAssistantHandoff(window.sessionStorage, state.legacyHandoff.original);
+  } catch (_) {
+    /* Disabled storage. */
+  }
+  if (!cleared) {
+    setStatus(
+      'The saved request could not be cleared from this tab. It is kept for recovery; nothing was sent.'
+    );
+    return false;
+  }
+  state.legacyHandoff = null;
+  renderLegacyHandoff();
+  return true;
+}
+
+function recoverLegacyHandoff() {
+  if (!state.legacyHandoff || !suggestReply(state.legacyHandoff.text)) return false;
+  // Safe acceptance is an editable, unsent draft, never execution approval.
+  return dismissLegacyHandoff();
 }
 
 function prefill(text) {
@@ -623,15 +709,7 @@ async function refreshWorkspaceContext() {
 }
 
 function routeContext() {
-  if (window.OriGuide?._collectContext) {
-    const context = window.OriGuide._collectContext();
-    return { ...context, origin: 'personal_assistant_panel' };
-  }
-  return collectWorkspaceContext({
-    pathname: window.location.pathname,
-    workspaceId: document.body?.dataset?.workspaceId,
-    workspaceSlug: document.body?.dataset?.workspaceSlug
-  });
+  return collectCurrentWorkspaceContext();
 }
 
 function submit(event) {
@@ -766,7 +844,10 @@ function init() {
     input: document.getElementById('personalAssistantInput'),
     send: document.getElementById('personalAssistantSend'),
     status: document.getElementById('personalAssistantPanelStatus'),
+    modelSetup: document.getElementById('personalAssistantModelSetup'),
     workspaceContext: document.getElementById('personalAssistantWorkspaceContext'),
+    legacyHandoff: document.getElementById('personalAssistantRecoveredHandoff'),
+    legacyText: document.getElementById('personalAssistantRecoveredHandoffText'),
     chips: document.getElementById('personalAssistantChips'),
     folderChip: document.getElementById('personalAssistantFolderChip'),
     activityMount: document.getElementById('personalAssistantActivityMount'),
@@ -786,13 +867,26 @@ function init() {
   launcher.addEventListener('click', () => (state.open ? close() : open(launcher)));
   state.els.close?.addEventListener('click', close);
   state.els.form?.addEventListener('submit', submit);
+  // A legacy work handoff is an explicit recovery offer, not a Help search.
+  try {
+    state.legacyHandoff = readLegacyAssistantHandoff(window.sessionStorage);
+  } catch (_) {
+    /* Storage access itself may throw. */
+  }
+  renderLegacyHandoff();
+  document
+    .getElementById('personalAssistantRecoverHandoff')
+    ?.addEventListener('click', recoverLegacyHandoff);
+  document
+    .getElementById('personalAssistantDismissHandoff')
+    ?.addEventListener('click', dismissLegacyHandoff);
   state.draft = tabValue(PANEL_DRAFT_KEY);
   if (state.draft) state.els.input.value = state.draft;
   state.els.input?.addEventListener('input', () => {
     state.draft = state.els.input.value;
     saveTabValue(PANEL_DRAFT_KEY, state.draft);
   });
-  document.addEventListener('ori-guide:context', () => void refreshWorkspaceContext());
+  document.addEventListener('ori:workspace-context', () => void refreshWorkspaceContext());
   window.addEventListener('popstate', () => void refreshWorkspaceContext());
   window.addEventListener('beforeunload', () => {
     saveTabValue(PANEL_DRAFT_KEY, state.els.input.value);
@@ -812,10 +906,17 @@ function init() {
     if (more?.open && !more.contains(event.target)) more.open = false;
   });
   document.addEventListener('keydown', event => {
+    if (event.defaultPrevented) return;
     // Bootstrap removes `.show` before this bubbling listener runs, so the
     // event target is also part of the topmost-modal check.
     const modalOpen = Boolean(
-      event.target?.closest?.('.modal') || document.querySelector?.('.modal.show')
+      event.target?.closest?.('.modal, .dropdown-menu, .offcanvas') ||
+      document.querySelector?.('.modal.show, .dropdown-menu.show, .offcanvas.show, dialog[open]') ||
+      Array.from(document.querySelectorAll?.('[role="dialog"][aria-modal="true"]') || []).some(
+        overlay =>
+          overlay.getClientRects?.().length > 0 && overlay.getAttribute('aria-hidden') !== 'true'
+      ) ||
+      window.OriSpotlight?.isOpen?.()
     );
     if (assistantPanelShouldCloseOnKey(event.key, state.open, modalOpen)) {
       // Tab may have moved outside an open message disclosure. Escape still
@@ -871,9 +972,19 @@ function init() {
 const api = {
   init,
   open,
+  openActivity: (trigger, options = {}) => {
+    if (state.open) {
+      if (options.focus === true) focusOnOpen();
+      return true;
+    }
+    return open(trigger, { workActivity: true, focus: options.focus === true });
+  },
+  isOpen: () => state.open,
+  hasLauncher: () => state.view.visible,
   close,
   prefill,
   suggestReply,
+  suggestionNotice: () => state.suggestionNotice,
   restoreDraft,
   refresh,
   applyPersonalAssistant,

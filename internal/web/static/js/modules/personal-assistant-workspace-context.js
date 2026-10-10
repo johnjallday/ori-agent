@@ -56,6 +56,29 @@ export function collectWorkspaceContext({
   return out;
 }
 
+// One shared publication seam for page/selection metadata. It is available to
+// work without opening or initializing Help; no page contents are collected.
+export function publishWorkspaceContext(partial = {}) {
+  if (typeof window === 'undefined') return;
+  window.oriWorkPageContext = { ...window.oriWorkPageContext, ...partial };
+  if (typeof document !== 'undefined' && typeof CustomEvent === 'function')
+    document.dispatchEvent(new CustomEvent('ori:workspace-context'));
+}
+
+export function collectCurrentWorkspaceContext({ origin = 'personal_assistant_panel' } = {}) {
+  if (typeof window === 'undefined') return collectWorkspaceContext({ origin });
+  const page = window.oriWorkPageContext || {};
+  return collectWorkspaceContext({
+    pathname: window.location?.pathname,
+    workspaceId: document.body?.dataset?.workspaceId || '',
+    workspaceSlug: document.body?.dataset?.workspaceSlug || '',
+    selectionWorkspaceId: window.oriHomeRouteContext?.selection_workspace_id ?? page.workspaceId,
+    taskId: page.taskId,
+    sessionId: page.sessionId,
+    origin
+  });
+}
+
 export function workspaceContextLabel(context, { historical = false } = {}) {
   if (!context || context.version !== 1)
     return historical ? 'Earlier workspace unknown' : 'Checking workspace context…';
@@ -231,6 +254,8 @@ export function askFailureView(error, { timeoutMs = ASK_REPLY_TIMEOUT_MS } = {})
 if (typeof window !== 'undefined')
   window.PersonalAssistantWorkspaceContext = {
     collect: collectWorkspaceContext,
+    current: collectCurrentWorkspaceContext,
+    publish: publishWorkspaceContext,
     label: workspaceContextLabel,
     renderTurn: renderTurnWorkspace,
     renderSources: renderTurnSources,

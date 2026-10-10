@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs';
 
 import {
   EXPLORE_FOLDER_URL,
+  LEGACY_ASSISTANT_HANDOFF_KEY,
+  readLegacyAssistantHandoff,
+  clearLegacyAssistantHandoff,
   NEEDS_YOU_URL,
   assistantCheckInLine,
   assistantFocusNeedsScroll,
@@ -124,6 +127,65 @@ test('a hired assistant with no HQ is named but disabled, unlike needsHire', () 
 test('handoff text is exact, trimmed, unicode-safe, and bounded without submitting', () => {
   assert.equal(boundedAssistantHandoff('  send the notes  '), 'send the notes');
   assert.equal(Array.from(boundedAssistantHandoff('🦊'.repeat(500))).length, 400);
+});
+
+test('legacy handoff reads are bounded, unsent, and never consume storage', () => {
+  const original = '🦊'.repeat(500);
+  let removes = 0;
+  const storage = {
+    getItem: key => {
+      assert.equal(key, LEGACY_ASSISTANT_HANDOFF_KEY);
+      return original;
+    },
+    removeItem: () => {
+      removes += 1;
+    }
+  };
+  const recovered = readLegacyAssistantHandoff(storage);
+  assert.equal(Array.from(recovered.text).length, 400);
+  assert.equal(recovered.original, original);
+  assert.equal(removes, 0);
+  assert.deepEqual(
+    readLegacyAssistantHandoff(storage),
+    recovered,
+    'reloads retain the offer until explicitly accepted or dismissed'
+  );
+  assert.equal(clearLegacyAssistantHandoff(storage, original), true);
+  assert.equal(removes, 1);
+});
+
+test('legacy recovery handles disabled storage and does not delete a newer request', () => {
+  const denied = {
+    getItem() {
+      throw new Error('denied');
+    },
+    removeItem() {
+      throw new Error('denied');
+    }
+  };
+  assert.equal(readLegacyAssistantHandoff(denied), null);
+  assert.equal(clearLegacyAssistantHandoff(denied, 'old'), false);
+  let removed = false;
+  const replaced = {
+    getItem: () => 'new',
+    removeItem: () => {
+      removed = true;
+    }
+  };
+  assert.equal(clearLegacyAssistantHandoff(replaced, 'old'), false);
+  assert.equal(removed, false);
+});
+
+test('malformed relationship state is unavailable, never a confirmed identity', () => {
+  const view = personalAssistantPanelView({ state: 'unexpected', display_name: 'Unconfirmed' });
+  assert.equal(view.known, false);
+  assert.equal(view.visible, false);
+  assert.equal(view.available, false);
+  assert.equal(view.name, 'Personal assistant');
+  assert.equal(
+    personalAssistantPanelView({ state: ['active'], display_name: 'Unconfirmed' }).known,
+    false
+  );
 });
 
 test('assistant composer refuses empty, unavailable, pending, and double-click states', () => {

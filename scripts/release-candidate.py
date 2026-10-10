@@ -432,7 +432,100 @@ def sync_pr(repo, version):
               "**Use Create a merge commit, NOT squash/rebase.** Release ancestry is required by the next RC gate. "
               "Resolve conflicts without dropping newer dev work. New feature PRs can continue throughout.\n\n"
               "After CI passes and this PR is merge-committed, the release branch can be deleted. Keep all release tags.")
-    summary(f"Merge-back PR: {url}\nUse a merge commit, not squash/rebase. dev remains open.")
+    # dev's required status checks make auto-merge wait for this PR's CI, and the
+    # merge commit keeps release ancestry for the next cut. A conflict leaves the
+    # PR open for a person instead of failing the stable publication.
+    try:
+        run("gh", "pr", "merge", url, "--merge", "--auto")
+    except Refusal as error:
+        summary(f"Merge-back PR: {url}\nAuto-merge could not be enabled ({error}); merge it with a merge commit by hand.")
+        return
+    summary(f"Merge-back PR: {url}\nAuto-merge (merge commit) is enabled; it lands once dev's checks pass. dev remains open.")
+
+
+def request_promotion(repo, tag):
+    """Ask for the human approval once an RC has every automated check green.
+
+    Nothing is published here: the dispatched Promote Release run stops at the
+    `release` environment review, which a person approves.
+    """
+    version = RC.fullmatch(tag)[1]
+    sha = repo.tags[tag]
+    try:
+        repo.successful_workflow("ci.yml", sha, f"release/{version}")
+        repo.successful_workflow("release.yml", sha, tag)
+    except NotReady as error:
+        summary(f"Not yet: {error}")
+        return
+    # Every other promotion precondition; failing one here is a real inconsistency.
+    repo.promotion(tag)
+    pending = {"requested", "queued", "waiting", "pending", "in_progress"}
+    runs = gh("run", "list", "--workflow", "promote-release.yml", "--limit", "50",
+              "--json", "status,displayTitle")
+    if any(item["status"] in pending and f" {tag} " in f" {item['displayTitle']} " for item in runs):
+        summary(f"Promotion of {tag} is already awaiting approval.")
+        return
+    run("gh", "workflow", "run", "promote-release.yml", "--ref", "main",
+        "-f", f"rc_tag={tag}", "-f", "confirm_tested=true")
+    summary(f"Promotion of **{tag}** requested. Approve the `release` environment review in Actions "
+            f"to publish {version}; nothing is published until then.")
+
+
+def merge_sync_prs(repo, sha):
+    """Land the release watcher's dev→release sync PR once dev CI is green for that exact commit."""
+    active = repo.active()
+    if not active:
+        summary("Nothing to do: no active release branch.")
+        return
+    branch = f"release/{active[0]}"
+    if not repo.ancestor(sha, repo.branches["dev"]):
+        summary(f"Nothing to do: {sha[:7]} is not on dev.")
+        return
+    merged = []
+    for pr in gh("pr", "list", "--state", "open", "--base", branch, "--json", "number,url,headRefName,headRefOid"):
+        if pr.get("headRefName", "").startswith("release-sync/") and pr.get("headRefOid") == sha:
+            # GH_TOKEN is RELEASE_PAT, so this merge's push runs CI on the release branch.
+            run("gh", "pr", "merge", str(pr["number"]), "--merge")
+            merged.append(pr["url"])
+    if merged:
+        summary(f"Merged into {branch} with a merge commit: {', '.join(merged)}. Its CI run re-cuts the candidate.")
+    else:
+        summary(f"Nothing to do: no release-sync PR into {branch} at {sha[:7]}.")
+
+
+def react(repo, workflow, event, branch, sha, conclusion):
+    """Act on a finished CI or Release run: re-cut, land a sync PR or request promotion.
+
+    Failures are left alone; the release watcher routine investigates those.
+    """
+    check_hold()
+    if conclusion != "success" or event != "push":
+        summary(f"Nothing to do: {workflow} ({event}) on {branch} ended {conclusion}.")
+        return
+    if not SHA.fullmatch(sha):
+        raise Refusal("Invalid full commit SHA")
+    if workflow == "CI" and branch == "dev":
+        merge_sync_prs(repo, sha)
+    elif workflow == "CI" and branch.startswith("release/"):
+        version = branch.removeprefix("release/")
+        if not STABLE.fullmatch(version):
+            raise Refusal(f"Unrecognized release branch: {branch}")
+        if repo.branches.get(branch) != sha:
+            summary(f"Nothing to do: {branch} has moved past {sha[:7]}; its newer run decides.")
+        elif version in repo.tags:
+            summary(f"Nothing to do: {version} is already stable.")
+        else:
+            tags = repo.candidates(version)
+            if tags and repo.tags[tags[-1]] == sha:
+                request_promotion(repo, tags[-1])
+            else:
+                prepare(repo, version, sha)
+    elif workflow == "Release" and RC.fullmatch(branch):
+        if repo.tags.get(branch) != sha:
+            raise Refusal(f"{branch} no longer points at the built commit")
+        request_promotion(repo, branch)
+    else:
+        summary(f"Nothing to do: {workflow} on {branch}.")
 
 
 def main():
@@ -456,6 +549,9 @@ def main():
     report_parser.add_argument("--rc", required=True)
     report_parser.add_argument("--previous", required=True)
     report_parser.add_argument("--repository", required=True)
+    react_parser = commands.add_parser("react")
+    for name in ("workflow", "event", "branch", "sha", "conclusion"):
+        react_parser.add_argument(f"--{name}", required=True)
     args = parser.parse_args()
     try:
         repo = Repository()
@@ -476,8 +572,10 @@ def main():
             sync_pr(repo, args.version)
         elif args.command == "attach-test-report":
             attach_test_report(repo, args.rc, args.previous, args.repository)
+        elif args.command == "react":
+            react(repo, args.workflow, args.event, args.branch, args.sha, args.conclusion)
     except NotReady as error:
-        if args.command == "evaluate":
+        if args.command in ("evaluate", "react"):
             summary(f"HOLD — {error}")
             return 0
         summary(f"REFUSED — {error}")

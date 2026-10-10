@@ -419,7 +419,10 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       .getByRole('button', { name: 'Documents', exact: true });
     await expect(chooser).toBeVisible();
     await expect(documents).toBeFocused();
-    await expect(chooser).toContainText('Nothing goes to your configured model until Send');
+    await expect(chooser).toContainText('File contents are not read.');
+    await expect(chooser).toContainText(
+      'Send shares this metadata with your configured model; selecting stays local.'
+    );
     await page.keyboard.press('Escape');
     await expect(chooser).toBeHidden();
     await expect(chip).toBeFocused();

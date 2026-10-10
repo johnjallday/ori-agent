@@ -537,7 +537,7 @@ export function updatesBadgeView(flattened, scheduleIndex, pluginUpdateCount = 0
  *
  * Context kind and visibility are deliberately separate. A selected workspace
  * remains selected after dismissal, so background renders cannot infer "show"
- * merely from `railState`. Ask Ori is independently owned by the universal,
+ * merely from `railState`. Work is independently owned by the assistant's
  * non-modal activity panel and is never valid context-modal content.
  */
 export function contextModalShouldShow({
@@ -903,7 +903,7 @@ export function panelTriggerId(panel) {
 }
 
 /**
- * How the rail should describe Ask Ori's current target workspace (FR97).
+ * How the rail should describe the assistant's current work target (FR97).
  *
  * The wording distinguishes a workspace the USER selected, one Ori has merely
  * RECOMMENDED, and one work was actually routed to. A recommendation must never
@@ -1275,7 +1275,7 @@ export function renderWorkspaceRailHTML(view) {
     '<div class="cockpit-rail-actions">' +
     `<a class="modern-btn modern-btn-primary cockpit-rail-open" href="${escapeHtml(view.openHref)}" data-cockpit-rail-open data-workspace-id="${escapeHtml(view.id)}">Open Workspace</a>` +
     (view.canAskCommander
-      ? `<button type="button" class="modern-btn modern-btn-secondary" data-cockpit-rail-ask data-workspace-id="${escapeHtml(view.id)}">Ask ${escapeHtml(view.commander)}</button>`
+      ? `<button type="button" class="modern-btn modern-btn-secondary" data-cockpit-rail-ask data-workspace-id="${escapeHtml(view.id)}">Open assistant</button>`
       : `<p class="cockpit-rail-note">${escapeHtml(view.commanderUnavailableReason)}</p>`) +
     '</div>' +
     '<div class="cockpit-rail-metrics" aria-label="Workspace metrics">' +
@@ -3394,9 +3394,7 @@ import {
       ask.addEventListener('click', () => {
         publishRouteContext();
         handoffAfterContextHide(() => {
-          if (window.OriGuide && typeof window.OriGuide.open === 'function') {
-            window.OriGuide.open();
-          }
+          window.PersonalAssistantPanel?.open(ask);
         });
       });
     }
@@ -3743,9 +3741,9 @@ import {
     updateContextTrigger();
   }
 
-  // ---- Ask Ori activity (universal non-modal owner) ----
+  // ---- Work activity (Personal Assistant presentation owner) ----
   //
-  // Ask Ori start/finish may refresh its route label, but it never becomes a
+  // Work start/finish may refresh its route label, but it never becomes a
   // context kind and never opens, closes, or reserves space for this modal.
   function syncAskActivity() {
     renderAskTarget();
@@ -3790,7 +3788,7 @@ import {
     // the panel treats an explicitly named workspace as the stronger signal, and
     // the server still decides what any request may touch.
     //
-    // Clearing the selection clears the hint too, rather than leaving Ask Ori
+    // Clearing the selection clears the hint too, rather than leaving work
     // aimed at a workspace the user has navigated away from.
     if (window.OriGuide && typeof window.OriGuide.setContext === 'function') {
       window.OriGuide.setContext({
@@ -4865,7 +4863,7 @@ import {
 
   wireTodaySelection();
 
-  // Ask Ori's activity panel is observed only to keep its selected-route copy
+  // The assistant's work activity is observed only to keep selected-route copy
   // current. It has no authority over context-modal visibility.
   if (els.askPanel && typeof MutationObserver === 'function') {
     new MutationObserver(syncAskActivity).observe(els.askPanel, {
@@ -4968,7 +4966,7 @@ import {
     if (canHydrateWorkspaceData()) void refreshQuietly();
   });
 
-  // Expose a narrow seam so later cockpit surfaces (Tree, Today, Ask Ori) and
+  // Expose a narrow seam so later cockpit surfaces (Tree, Today, work) and
   // realtime refreshes drive the SAME state rather than forking their own.
   window.OriHomeCockpit = {
     refresh,

@@ -50,6 +50,8 @@ class GitFixture(unittest.TestCase):
         self.source = rc.git("rev-parse", "HEAD")
         self.releases = {"v1.2.3": {"isDraft": False, "isPrerelease": False}}
         self.runs = {}
+        self.prs = [{"url": "https://example.invalid/merge-back"}]
+        self.promote_runs = []
         self.env = patch.dict(os.environ, {"GITHUB_OUTPUT": str(self.root / "output"),
                                           "GITHUB_STEP_SUMMARY": "", "AUTO_RELEASE_HOLD": "",
                                           "FORCE_RELEASE": "false", "RELEASE_MIN_PRS": "10"})
@@ -81,7 +83,9 @@ class GitFixture(unittest.TestCase):
             tags = [tag for tag, target in refs.tags.items() if target == sha]
             return [{"workflow_runs": [self.workflow_run(sha, branch) for branch in branches + tags]}]
         if args[:2] == ("pr", "list"):
-            return [{"url": "https://example.invalid/merge-back"}]
+            return self.prs
+        if args[:2] == ("run", "list"):
+            return self.promote_runs
         raise AssertionError(args)
 
     @staticmethod
@@ -108,6 +112,23 @@ class GitFixture(unittest.TestCase):
         self.releases[self.tag] = {"isDraft": False, "isPrerelease": True}
         self.candidate_sha = rc.Repository().tags[self.tag]
         return self.candidate_sha
+
+    @contextlib.contextmanager
+    def gh_writes(self):
+        """Run git for real; record gh mutations instead of executing them."""
+        calls, real = [], rc.run
+
+        def side_effect(*args, **kwargs):
+            if args[0] == "gh":
+                calls.append(args)
+                return ""
+            return real(*args, **kwargs)
+
+        with patch.object(rc, "run", side_effect=side_effect):
+            yield calls
+
+    def react(self, workflow, branch, sha, event="push", conclusion="success"):
+        rc.react(rc.Repository(), workflow, event, branch, sha, conclusion)
 
 
 class LifecycleTests(GitFixture):
@@ -407,10 +428,84 @@ class LifecycleTests(GitFixture):
             return [] if args[:2] == ("pr", "list") else github(*args)
         with patch.object(rc, "gh", side_effect=without_pr), patch.object(rc, "run", return_value="https://example.invalid/new") as runner:
             rc.sync_pr(repo, "v1.2.4")
-            args = runner.call_args.args
-            self.assertEqual(args[:7], ("gh", "pr", "create", "--base", "dev", "--head", "release/v1.2.4"))
-            self.assertIn("NOT squash/rebase", args[-1])
+            create, merge = [call.args for call in runner.call_args_list]
+            self.assertEqual(create[:7], ("gh", "pr", "create", "--base", "dev", "--head", "release/v1.2.4"))
+            self.assertIn("NOT squash/rebase", create[-1])
+            # dev's required checks make auto-merge wait for CI; the merge commit keeps ancestry.
+            self.assertEqual(merge, ("gh", "pr", "merge", "https://example.invalid/new", "--merge", "--auto"))
         self.assertEqual(before, self.refs())
+
+    def test_react_recuts_a_fixed_release_head_and_ignores_stale_red_or_pr_runs(self):
+        old_sha = self.prepare()
+        rc.git("checkout", "-qb", "release/v1.2.4", old_sha)
+        fixed = self.commit("fix: release blocker", "fix")
+        rc.git("push", "origin", "release/v1.2.4")
+        before = self.refs()
+        with self.gh_writes() as calls:
+            self.react("CI", "release/v1.2.4", fixed, conclusion="failure")  # the watcher's job
+            self.react("CI", "release/v1.2.4", old_sha)  # a stale head
+            self.react("CI", "release/v1.2.4", fixed, event="pull_request")
+            self.assertEqual(before, self.refs())
+            self.react("CI", "release/v1.2.4", fixed)
+            self.assertEqual(calls, [])
+        repo = rc.Repository()
+        self.assertEqual(repo.tags["v1.2.4-rc.2"], fixed)
+        self.assertEqual(repo.tags[self.tag], old_sha)
+        self.assertEqual(repo.branches["dev"], self.source)
+
+    def test_react_requests_promotion_once_when_every_check_is_green(self):
+        sha = self.prepare()
+        dispatch = ("gh", "workflow", "run", "promote-release.yml", "--ref", "main",
+                    "-f", f"rc_tag={self.tag}", "-f", "confirm_tested=true")
+        main_before = rc.Repository().branches["main"]
+        with self.gh_writes() as calls:
+            # Branch CI finished first; the installers are still building.
+            self.runs["release.yml", sha] = [self.workflow_run(sha, self.tag, None, "in_progress")]
+            self.react("CI", "release/v1.2.4", sha)
+            self.assertEqual(calls, [])
+            self.runs.pop(("release.yml", sha))
+            self.react("Release", self.tag, sha)
+            self.assertEqual(calls, [dispatch])
+            # A promotion already awaiting approval is not requested twice.
+            self.promote_runs = [{"status": "waiting", "displayTitle": f"Promote {self.tag} to stable"}]
+            self.react("Release", self.tag, sha)
+            self.react("CI", "release/v1.2.4", sha)
+            self.assertEqual(calls, [dispatch])
+            # An unpublished candidate is an inconsistency, not a request.
+            self.promote_runs = []
+            self.releases[self.tag] = {"isDraft": True, "isPrerelease": True}
+            with self.assertRaises(rc.Refusal):
+                self.react("Release", self.tag, sha)
+            self.assertEqual(calls, [dispatch])
+        self.assertEqual(rc.Repository().branches["main"], main_before)
+
+    def test_react_merges_a_sync_pr_only_for_the_exact_green_dev_commit(self):
+        with self.gh_writes() as calls:
+            self.react("CI", "dev", self.source)  # no active release: nothing to land
+            self.assertEqual(calls, [])
+        self.prepare()
+        dev = self.commit("fix: release blocker (#11)", "fix")
+        rc.git("push", "-q", "origin", "dev")
+        self.prs = [{"number": 7, "url": "https://example.invalid/sync",
+                     "headRefName": "release-sync/v1.2.4-abc1234", "headRefOid": dev},
+                    {"number": 8, "url": "https://example.invalid/feature",
+                     "headRefName": "feature/not-a-sync", "headRefOid": dev}]
+        with self.gh_writes() as calls:
+            self.react("CI", "dev", self.source)  # an older green dev commit
+            self.assertEqual(calls, [])
+            with self.assertRaises(rc.Refusal):
+                self.react("CI", "dev", "f" * 40)  # a commit nobody knows
+            self.react("CI", "dev", dev)
+            self.assertEqual(calls, [("gh", "pr", "merge", "7", "--merge")])
+
+    def test_react_leaves_stable_builds_to_the_merge_back_and_respects_the_hold(self):
+        sha = self.prepare()
+        with self.gh_writes() as calls:
+            self.react("Release", "v1.2.4", sha)
+            with patch.dict(os.environ, {"AUTO_RELEASE_HOLD": "1"}):
+                with self.assertRaises(rc.NotReady):
+                    self.react("Release", self.tag, sha)
+            self.assertEqual(calls, [])
 
     def test_fetch_failure_never_uses_stale_remote_tracking_refs(self):
         repo = rc.Repository()
@@ -457,6 +552,12 @@ class EntryPointTests(unittest.TestCase):
         self.assertIn("inputs.confirm_tested", promote)
         self.assertIn("environment: release", promote)
         self.assertIn('promote --rc "$RC_TAG" --sha "$SHA"', promote)
+        self.assertIn("workflow_run:", auto)
+        self.assertIn('react --workflow "$WORKFLOW"', auto)
+        self.assertNotIn("workflow_run:", promote)
+        # The lifecycle lock is per job: a skipped react job must not cancel a queued evaluation.
+        self.assertNotIn("\nconcurrency:\n  group: release-lifecycle", auto)
+        self.assertEqual(auto.count("group: release-lifecycle"), 3)
         self.assertIn("needs: [verify, smoke]", release)
         self.assertIn("draft: true", (ROOT / ".goreleaser.yaml").read_text())
         self.assertNotIn("softprops/action-gh-release", release)

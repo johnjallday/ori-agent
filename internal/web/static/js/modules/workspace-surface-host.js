@@ -626,7 +626,7 @@ export class WorkspaceSurfaceHost {
     try {
       const intent = await this._intent('ask_ori', context);
       if (!this.window?.OriAskRouting || typeof this.window.OriAskRouting.submit !== 'function') {
-        return this._bridgeError('ask_ori_unavailable', 'Ask Ori is not available.');
+        return this._bridgeError('ask_ori_unavailable', 'The work controller is not available.');
       }
       await this.window.OriAskRouting.submit(context, {
         routeContext: {

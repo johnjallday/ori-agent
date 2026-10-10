@@ -1,16 +1,19 @@
 name: Promote Release
 run-name: Promote ${{ inputs.rc_tag }} to stable
 
-# No schedule and no workflow_run trigger: promotion is a separate human action.
+# No schedule and no workflow_run trigger here. The dispatch comes from a person,
+# or from auto-release.yml's react job once an RC has green branch CI, a published
+# prerelease and passing installer checks. Approving the `release` environment
+# review below is the human action that publishes stable.
 on:
   workflow_dispatch:
     inputs:
       rc_tag:
-        description: 'Exact candidate you installed and tested, e.g. v0.0.112-rc.2'
+        description: 'Exact candidate to promote, e.g. v0.0.112-rc.2'
         required: true
         type: string
       confirm_tested:
-        description: 'I completed and reviewed the test report for this exact RC and approve stable release'
+        description: 'Automated checks are green for this exact RC (branch CI, published prerelease, installers). By approving the release environment review you confirm you completed and reviewed the test report for this exact RC and approve stable release'
         required: true
         type: boolean
         default: false
@@ -27,7 +30,7 @@ jobs:
   validate:
     name: Validate tested candidate
     if: github.ref == 'refs/heads/main' && inputs.confirm_tested
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       sha: ${{ steps.candidate.outputs.sha }}
       version: ${{ steps.candidate.outputs.version }}
@@ -46,9 +49,9 @@ jobs:
   promote:
     name: Approve ${{ inputs.rc_tag }} → ${{ needs.validate.outputs.version }}
     needs: validate
-    runs-on: ubuntu-latest
-    # Configure required reviewers for a second, platform-enforced approval.
-    # Even without reviewers, the explicit manual dispatch/checkbox is required.
+    runs-on: ubuntu-24.04
+    # Configure required reviewers: when auto-release.yml dispatched this run,
+    # their approval is the only human step between a green RC and stable.
     environment: release
     permissions:
       contents: write

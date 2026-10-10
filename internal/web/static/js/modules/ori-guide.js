@@ -1,52 +1,16 @@
 /*
- * Ask Ori controller — the one assistance surface, on every authenticated page.
+ * Contextual Help — deterministic app explanations, never work execution.
  *
- * It answers questions AND takes work. There used to be two surfaces for that,
- * and users had to know which was which before typing; Issue #350 merged them.
- * Intent is inferred rather than chosen:
- *
- *   1. Ask the guide. It answers navigation and setup deterministically, with
- *      no model, and identifies a work request as such itself.
- *   2. Anything it does not own — a work request, or an honest miss — escalates
- *      to the routing contract, or straight to the full work controller where
- *      that is loaded (dashboard.js owns planning, agent selection,
- *      confirmations, and workspace sessions; none of it is reimplemented here).
- *   3. An explicit /task, /ask, or /note bypasses step 1 entirely, so an
- *      override is never reinterpreted as navigation.
- *
- * Automatic routing is not automatic authorization. Everything rendered here is
- * escaped text or a typed action validated against a client-side allowlist; the
- * guide's action union still cannot express a mutation, and every existing
- * confirmation still applies (FR27/FR35/FR36).
- *
- * Opening and closing is presentation only. It never clears Map/Tree selection,
- * checked agents, filters, or form drafts, and never cancels submitted work.
+ * Every search, including unknown questions and slash commands, goes only to
+ * the bounded guide endpoint. Relationship readiness affects an explicit
+ * assistant transition, never this controller's authority. Fixed walkthroughs
+ * reuse the registered coachmarks without calling the guide or a provider.
+ * Closing is presentation only: it does not reset page selection or cancel work.
  */
 (function () {
   'use strict';
 
   var ENDPOINT = '/api/ori-guide';
-  var ROUTE_ENDPOINT = '/api/home-assistant/route';
-
-  // The guide answers navigation deterministically and without a model. Anything
-  // it identifies as work, or honestly cannot answer, escalates to the routing
-  // contract instead — which is how one composer serves both without the guide
-  // ever gaining a mutation path (FR22/FR27).
-  var GUIDE_WORK_TOPIC = 'workspace-manager';
-
-  // Explicit power-user overrides. Ordinary requests never need them — intent is
-  // inferred — but where one is typed it must win outright (FR24).
-  //
-  // These have to bypass the guide entirely rather than merely being escalated
-  // after it: "/ask what is a workspace" matches the guide's own workspace
-  // topic, so asking the guide first would answer it as navigation and silently
-  // discard the override.
-  var EXPLICIT_COMMAND_RE = /^\/(task|ask|note)\b/i;
-
-  function isExplicitCommand(text) {
-    return EXPLICIT_COMMAND_RE.test(String(text || '').trim());
-  }
-
   // The action types this controller will render. Anything else is dropped and
   // never becomes a control.
   var ALLOWED_ACTIONS = {
@@ -82,17 +46,21 @@
     // The active deterministic walkthrough step, if any: { quest, choices }.
     // Presentation only — the server owns whether the quest is done or deferred.
     quest: null,
-    // PAF turns this controller into Help-only. Work remains a typed handoff
-    // preview and is never delegated from Ori's draft/transcript.
-    helpOnly: false,
+    // Compatibility flag only; there is no non-Help execution mode.
+    helpOnly: true,
+    greeted: false,
+    screenRoute: '',
+    screenTitle: '',
+    contextKey: '',
+    response: null,
+    responseKey: '',
+    assistantState: 'loading',
     assistantAvailable: false,
     // A hired assistant with no Personal HQ yet: distinct from "never hired" so
     // the handoff decline can route to the guided quest instead of Hire.
     needsHQ: false,
     assistantName: 'your personal assistant',
-    // Survives close/reopen: closing the panel is presentation only and must
-    // never cancel submitted work or lose what the user had typed (FR13/FR45).
-    activity: [],
+    // Search text survives close/reopen; Help has no transcript.
     draft: '',
     els: null
   };
@@ -149,7 +117,19 @@
     if (h.startsWith('//')) return false;
     if (h.indexOf('://') !== -1) return false;
     if (hasUnsafeChar(h)) return false;
-    return true;
+    try {
+      var path = decodeURIComponent(h.split(/[?#]/, 1)[0]);
+      if (path.indexOf('\\') !== -1 || hasUnsafeChar(path)) return false;
+      if (
+        path.split('/').some(function (part) {
+          return part === '.' || part === '..';
+        })
+      )
+        return false;
+      return new URL(h, 'http://ori.local').origin === 'http://ori.local';
+    } catch (_) {
+      return false;
+    }
   }
 
   function validateAction(action) {
@@ -176,39 +156,50 @@
 
     if (type === 'handoff') {
       var handoffText = String(action.handoff_text || action.handoffText || '').slice(0, 400);
-      // A hired assistant with no home base yet is not "hire" — it already has
-      // an identity. Route to the guided quest instead of offering a second
-      // hire or silently submitting the work nowhere.
-      if (state.helpOnly && !state.assistantAvailable && state.needsHQ) {
-        return { type: 'navigate', label: 'Build Personal HQ', href: '/?quest=build-hq' };
-      }
-      // No assistant to send it to yet: the way forward is Mission 01, which
-      // walks the user to the Agents page and hires one there (or repairs
-      // one). Already on the Agents page, it skips the step that points there.
-      // The routes are MEET_ASSISTANT_QUEST_ROUTE and MEET_ASSISTANT_AGENTS_ROUTE
-      // in personal-assistant-hire.js; this classic script cannot import them,
-      // and a test pins them together.
-      if (state.helpOnly && !state.assistantAvailable) {
-        return {
-          type: 'navigate',
-          label: 'Meet your assistant',
-          href: /^\/agents(\/|$)/.test(currentRoute())
-            ? '/agents?quest=meet-assistant'
-            : '/?quest=meet-assistant'
-        };
+      if (!state.assistantAvailable) {
+        var setup = assistantSetupAction();
+        if (setup) return setup;
+        // Unknown/loading status is not proof of an unhired relationship.
+        return { type: type, label: 'Retry assistant status', handoffText: handoffText };
       }
       return {
         type: type,
-        label: state.helpOnly
-          ? state.assistantAvailable
-            ? 'Send to ' + state.assistantName
-            : 'Hire your personal assistant'
-          : String(action.label || 'Send this as work'),
+        label: 'Open ' + state.assistantName,
         handoffText: handoffText
       };
     }
 
     return { type: type, label: String(action.label || '') };
+  }
+
+  function assistantSetupAction() {
+    if (state.needsHQ)
+      return {
+        type: 'navigate',
+        label:
+          state.assistantState === 'provisioning_hq'
+            ? 'Resume Personal HQ setup'
+            : 'Build Personal HQ',
+        href: '/?quest=build-hq'
+      };
+    if (state.assistantState === 'repair_needed')
+      return {
+        type: 'navigate',
+        label: 'Repair personal assistant',
+        href: '/agents?quest=meet-assistant'
+      };
+    if (state.assistantState === 'needs_hire' || state.assistantState === 'hiring')
+      return {
+        type: 'navigate',
+        label:
+          state.assistantState === 'hiring'
+            ? 'Resume meeting your assistant'
+            : 'Meet your assistant',
+        href: /^\/agents(\/|$)/.test(currentRoute())
+          ? '/agents?quest=meet-assistant'
+          : '/?quest=meet-assistant'
+      };
+    return null;
   }
 
   function currentRoute() {
@@ -270,6 +261,9 @@
   function collectContext() {
     var route = currentRoute();
     var derived = contextFromRoute(route);
+    if (window.PersonalAssistantWorkspaceContext?.current) {
+      return window.PersonalAssistantWorkspaceContext.current({ origin: 'ask_ori_panel' });
+    }
     if (window.PersonalAssistantWorkspaceContext?.collect) {
       return window.PersonalAssistantWorkspaceContext.collect({
         pathname: route,
@@ -316,7 +310,8 @@
     var els = state.els;
     if (!els || !els.context) return collectContext();
     var ctx = collectContext();
-    els.context.textContent = contextLabel(ctx);
+    els.context.textContent =
+      state.screenRoute === currentRoute() ? state.screenTitle || 'This screen' : 'This screen';
     return ctx;
   }
 
@@ -329,32 +324,57 @@
   // the user switched to workspace B would render as actionable B content
   // (FR17/FR46). Changing target invalidates the question that was asked about
   // the old one.
-  function invalidateInFlightForContextChange(previousWorkspaceID) {
-    var nextWorkspaceID = collectContext().workspace_id;
-    if (previousWorkspaceID === nextWorkspaceID) return;
-    if (!state.pending) return;
+  function helpContextKey() {
+    var ctx = collectContext();
+    return JSON.stringify([
+      currentRoute(),
+      ctx.surface,
+      ctx.workspace_id,
+      ctx.selection_workspace_id,
+      ctx.task_id,
+      ctx.session_id
+    ]);
+  }
 
-    state.seq += 1; // any reply already in flight is now stale
+  function invalidateInFlightForContextChange(previousKey) {
+    if (previousKey === helpContextKey()) return;
+    state.seq += 1;
     setPending(false, false);
+    state.actions = [];
+    state.response = null;
+    if (state.quest) return;
+    state.greeted = false;
     if (state.els) {
       state.els.reply.dataset.status = 'context-changed';
       state.els.reply.innerHTML =
-        '<p class="ori-guide__answer">The workspace changed while I was working, ' +
-        'so I stopped rather than answer about a different one. Ask again here.</p>';
+        '<p class="ori-guide__answer">The screen or selection changed. Search again for current guidance. Your text is kept.</p>';
     }
-    emit('context-invalidated', { from: previousWorkspaceID, to: nextWorkspaceID });
+    if (state.screenRoute !== currentRoute()) {
+      state.screenTitle = '';
+      if (state.els?.about)
+        state.els.about.textContent = 'Open Help or Search again to load guidance for this screen.';
+      if (state.els?.topics) state.els.topics.innerHTML = '';
+    }
+    emit('context-invalidated', {});
   }
 
   function setContext(partial) {
     var next = partial || {};
-    var previousWorkspaceID = collectContext().workspace_id;
+    var previousKey = helpContextKey();
 
     if ('workspaceId' in next) pageContext.workspaceId = String(next.workspaceId || '');
     if ('taskId' in next) pageContext.taskId = String(next.taskId || '');
     if ('sessionId' in next) pageContext.sessionId = String(next.sessionId || '');
     if ('label' in next) pageContext.label = String(next.label || '');
 
-    invalidateInFlightForContextChange(previousWorkspaceID);
+    if (window.PersonalAssistantWorkspaceContext?.publish) {
+      window.PersonalAssistantWorkspaceContext.publish(next);
+    } else {
+      // Module initialization may follow classic script publication.
+      window.oriWorkPageContext = { ...window.oriWorkPageContext, ...next };
+    }
+    invalidateInFlightForContextChange(previousKey);
+    state.contextKey = helpContextKey();
     refreshContextLabel();
     emit('context', { surface: collectContext().surface });
   }
@@ -390,10 +410,24 @@
     );
   }
 
+  // Metadata can grow above an already-focused search, and a wrapped navbar
+  // can shorten the panel on resize. Keep that existing focus visible; never
+  // focus a new control, scroll the Map/Tree, or reset its state.
+  function keepFocusedSearchVisible() {
+    if (!state.open || document.activeElement !== state.els?.input) return;
+    state.els.input.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }
+
   function render(resp) {
     var els = state.els;
     if (!els) return;
+    state.response = resp;
+    state.responseKey = helpContextKey();
 
+    if (typeof resp.about === 'string' && els.about) els.about.textContent = resp.about;
+    state.screenRoute = currentRoute();
+    state.screenTitle = String(resp.location || 'This screen');
+    refreshContextLabel();
     var actions = [];
     var raw = Array.isArray(resp.actions) ? resp.actions : [];
     for (var i = 0; i < raw.length; i++) {
@@ -416,163 +450,25 @@
     }
 
     var suggested = Array.isArray(resp.suggested) ? resp.suggested : [];
-    if (suggested.length) {
-      html +=
-        '<p class="ori-guide__suggest-label">I can explain:</p><div class="ori-guide__topics">';
-      for (var k = 0; k < suggested.length; k++) {
-        html +=
-          '<button type="button" class="ori-guide__topic" data-ori-topic="' +
-          esc(suggested[k].label) +
-          '">' +
-          esc(suggested[k].label) +
-          '</button>';
-      }
-      html += '</div>';
+    var topicsHTML = '';
+    for (var k = 0; k < suggested.length; k++) {
+      topicsHTML +=
+        '<button type="button" class="ori-guide__topic" data-ori-topic="' +
+        esc(suggested[k].label) +
+        '">' +
+        esc(suggested[k].label) +
+        '</button>';
     }
+    if (els.topics) els.topics.innerHTML = topicsHTML;
+    else if (topicsHTML) html += '<div class="ori-guide__topics">' + topicsHTML + '</div>';
 
     els.reply.innerHTML = html;
     els.reply.dataset.status = String(resp.status || '');
     els.reply.dataset.topic = String(resp.topic_key || '');
+    keepFocusedSearchVisible();
   }
 
-  /* ---- activity ---------------------------------------------------------------- */
-
-  // One ordered record of the conversation: what was asked, and what came back
-  // (FR40). Deliberately not a live region — the reply below it is what gets
-  // announced, so a screen reader is not re-read the whole transcript on every
-  // update (FR73).
-  function recordActivity(kind, text) {
-    // State first, and unconditionally: the panel's own "have we greeted yet"
-    // and restore-on-reopen behaviour keys off this, so it must not depend on
-    // whether the optional activity element happens to be present.
-    state.activity.push({ kind: kind, text: String(text || '') });
-
-    var els = state.els;
-    if (!els || !els.activity || typeof document.createElement !== 'function') return;
-    var entry = document.createElement('li');
-    entry.className = 'ori-guide__activity-entry ori-guide__activity-entry--' + kind;
-    entry.textContent = String(text || '');
-    els.activity.appendChild(entry);
-    els.activity.hidden = false;
-    els.activity.scrollTop = els.activity.scrollHeight;
-  }
-
-  // Renders a routed (non-navigation) result: a human-readable summary of where
-  // the request is going, plus the target, so the user sees the chosen workspace
-  // or agent before anything consequential happens (FR34/FR86).
-  // Builds the choices offered when a request needs a workspace it does not
-  // have.
-  //
-  // These are ordinary validated navigate actions — the same allowlist every
-  // other action goes through — so offering a choice cannot widen what the panel
-  // is able to do. Picking one takes the user to that workspace, where the
-  // request can be made in a context that is visible to them (FR32/FR33).
-  function workspaceChoiceActions(routed) {
-    var resolution = routed && routed.workspace_resolution;
-    var actions = [];
-
-    var candidates = (resolution && resolution.candidates) || [];
-    for (var i = 0; i < candidates.length && actions.length < 3; i++) {
-      var candidate = candidates[i];
-      if (!candidate || !candidate.id || !candidate.slug) continue;
-      actions.push({
-        type: 'navigate',
-        label: 'Open ' + String(candidate.name || candidate.id),
-        href: '/workspaces/' + encodeURIComponent(String(candidate.slug))
-      });
-    }
-
-    // Nothing fit, so the honest next step is making somewhere for it to live.
-    if (!actions.length && routed && routed.workspace_recommended) {
-      actions.push({
-        type: 'navigate',
-        label: 'Choose or create a workspace',
-        href: '/workspaces'
-      });
-    }
-    return actions;
-  }
-
-  function renderRouted(routed, guideResp) {
-    var els = state.els;
-    if (!els) return;
-
-    var label = String(routed.intent_label || 'work request');
-    var target = String(routed.matched_agent || routed.suggested_agent_name || '');
-    var ctx = collectContext();
-    var resolution = routed.workspace_resolution || null;
-    var resolutionState = String((resolution && resolution.state) || '');
-    var needsTarget = routed.workspace_recommended && !ctx.workspace_id;
-
-    var summary = 'I read that as a ' + label + '.';
-    if (needsTarget && resolutionState === 'ambiguous') {
-      summary += ' More than one workspace could be the right home for it, so I have not picked.';
-    } else if (needsTarget) {
-      summary += ' It needs a workspace — pick one, or create one, and I will take it from there.';
-    } else if (target) {
-      summary += ' ' + target + ' is the best fit for it.';
-    }
-
-    // Validate the offered choices through the same gate as any other action, so
-    // a malformed or unexpected candidate never becomes a control.
-    var choices = [];
-    var raw = workspaceChoiceActions(routed);
-    for (var i = 0; i < raw.length; i++) {
-      var valid = validateAction(raw[i]);
-      if (valid) choices.push(valid);
-    }
-    state.actions = choices;
-
-    var html =
-      '<p class="ori-guide__routing" data-routing-intent="' +
-      esc(String(routed.intent || '')) +
-      '" data-workspace-state="' +
-      esc(resolutionState) +
-      '">' +
-      esc(summary) +
-      '</p>';
-
-    // The chosen target has to be visible before anything consequential runs —
-    // whether it came from the page or from resolving a name in the request
-    // (FR34/FR86).
-    var resolvedName = String((resolution && resolution.selected_workspace_name) || '');
-    if (ctx.workspace_id) {
-      html +=
-        '<p class="ori-guide__target">Target: <strong>' + esc(contextLabel(ctx)) + '</strong></p>';
-    } else if (resolvedName && resolutionState === 'confident') {
-      html +=
-        '<p class="ori-guide__target">Target: <strong>Workspace: ' +
-        esc(resolvedName) +
-        '</strong></p>';
-    }
-
-    // Routing plans; it does not run. Say so, so nobody reads a routing summary
-    // as work already underway (FR35).
-    html +=
-      '<p class="ori-guide__answer ori-guide__answer--note">' + 'Nothing has run yet.' + '</p>';
-
-    if (choices.length) {
-      html += '<div class="ori-guide__actions">';
-      for (var j = 0; j < choices.length; j++) html += actionHTML(choices[j], j);
-      html += '</div>';
-    }
-
-    els.reply.innerHTML = html;
-    els.reply.dataset.status = 'routed';
-    els.reply.dataset.topic = '';
-    // The reply below already shows this turn in full. Repeating it in the
-    // activity log renders the same sentence twice on screen; the log's job is
-    // the record of what was asked, not a second copy of the current answer.
-
-    emit('routed', {
-      intent: String(routed.intent || ''),
-      policy: String(routed.routing_policy || ''),
-      workspace: ctx.workspace_id ? 'present' : 'absent',
-      workspaceState: resolutionState,
-      choices: choices.length,
-      guideStatus: String((guideResp && guideResp.status) || '')
-    });
-  }
+  /* ---- search status ---------------------------------------------------------- */
 
   // `silent` marks the request the panel fires for itself when it opens.
   //
@@ -584,12 +480,12 @@
     state.pending = pending;
     var els = state.els;
     if (!els) return;
-    if (!silent) {
+    if (!silent && els.send) {
       els.send.disabled = pending;
     }
     els.panel.dataset.state = pending ? 'pending' : 'ready';
     if (pending && !silent) {
-      els.reply.innerHTML = '<p class="ori-guide__answer is-pending">Working…</p>';
+      els.reply.innerHTML = '<p class="ori-guide__answer is-pending">Searching help…</p>';
     }
     // The launcher shows that something is running even while the panel is
     // closed, without becoming a second place to type (FR14).
@@ -604,156 +500,22 @@
 
   /* ---- requests ----------------------------------------------------------------- */
 
-  // A newer question always supersedes an older one.
-  //
-  // Dropping a request while another is in flight looked like duplicate-submit
-  // protection, but it silently discarded the user's actual question whenever
-  // they typed faster than the panel's own opening request returned. Sequencing
-  // instead means the latest question always wins and stale replies are
-  // ignored, which is the property that actually matters.
-  // Whether the guide's reply means "this was not a navigation question".
-  //
-  // The guide recognises a work request itself and answers with a handoff, and
-  // reports an honest miss as `unknown`. Both are escalation signals, so the
-  // client never has to guess at intent with its own keyword list.
-  function needsWorkRouting(resp) {
-    if (!resp) return false;
-    if (String(resp.topic_key || '') === GUIDE_WORK_TOPIC) return true;
-    return String(resp.status || '') === 'unknown';
-  }
-
-  // Whether the full work controller is on this page.
-  //
-  // dashboard.js owns the real planning, task-creation, agent-selection,
-  // confirmation, and workspace-session flows, and renders them into the
-  // activity host inside this panel. Where it is loaded we hand off to it
-  // rather than reimplementing any of that here (FR31/FR36).
-  function hasWorkController() {
-    return Boolean(
-      typeof window !== 'undefined' &&
-      window.OriAskRouting &&
-      typeof window.OriAskRouting.submit === 'function'
-    );
-  }
-
-  // Hands a work request to the existing controller with this page's context.
-  //
-  // It renders into the activity host below the composer, so the request and
-  // everything it produces stay in one panel (FR39).
-  function delegateWork(question, seq) {
-    var ctx = collectContext();
-
-    // Acknowledge the handoff immediately, before awaiting the controller.
-    //
-    // Some fulfilment paths — a specialist handoff, a confirmation the user has
-    // to answer — deliberately do not settle for a long time, and one of them
-    // may never settle at all if the user walks away. Feedback that waits on
-    // completion therefore leaves the panel looking like the request vanished.
-    // The activity host below renders the real progress as it arrives.
-    showActivityHost(true);
-    var els = state.els;
-    if (els) {
-      els.reply.dataset.status = 'delegated';
-      els.reply.innerHTML =
-        '<p class="ori-guide__routing">' +
-        esc('Working on it' + (ctx.workspace_id ? ' in ' + contextLabel(ctx) : '') + '.') +
-        '</p><p class="ori-guide__answer ori-guide__answer--note">' +
-        'Anything consequential still asks you to confirm below.</p>';
-    }
-
-    emit('routed', {
-      intent: 'delegated',
-      workspace: ctx.workspace_id ? 'present' : 'absent',
-      via: 'work-controller'
-    });
-
-    return Promise.resolve(
-      window.OriAskRouting.submit(question, {
-        routeContext: ctx,
-        openThinkingModal: false
-      })
-    ).then(function () {
-      if (seq !== state.seq) return null;
-      return true;
-    });
-  }
-
-  // Reports a delegated request that failed, without making the caller wait on
-  // it.
-  //
-  // ask() must not return the controller's promise: a fulfilment path can stay
-  // unsettled indefinitely (an unanswered confirmation), and awaiting that would
-  // hang every caller — including the panel's own request bookkeeping.
-  function reportWorkFailure(promise, seq, reason) {
-    promise.catch(function () {
-      if (seq !== state.seq) return;
-      var failedEls = state.els;
-      if (failedEls) {
-        failedEls.reply.dataset.status = 'unavailable';
-        failedEls.reply.innerHTML =
-          '<p class="ori-guide__answer">I could not finish that just now. ' +
-          'Check the activity below — nothing runs without your confirmation.</p>';
-      }
-      emit('fallback', { reason: reason });
-    });
-  }
-
-  function showActivityHost(visible) {
-    var els = state.els;
-    if (!els || !els.activityHost) return;
-    els.activityHost.hidden = !visible;
-  }
-
-  // Escalates a non-navigation request to the routing contract.
-  //
-  // Routing only classifies and plans; it does not execute. Whatever comes back
-  // is rendered as a summary plus the same validated actions, so a classification
-  // can never become a state change on its own (FR35).
-  function routeWork(question, seq) {
-    return fetch(ROUTE_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: question, context: collectContext() })
-    })
-      .then(function (r) {
-        if (!r.ok) throw new Error('route ' + r.status);
-        return r.json();
-      })
-      .then(function (routed) {
-        if (seq !== state.seq) return null; // superseded
-        return routed;
-      });
-  }
-
+  // Latest search wins. There is deliberately no routing endpoint or work
+  // controller dependency here, including for unknown text and slash commands.
   function ask(question, options) {
     var silent = !!(options && options.silent);
+    if (!silent && state.quest) clearQuestStep({ keepOpen: true });
+    if (!silent) clearCoachmark();
     var seq = ++state.seq;
+    state.response = null;
+    var contextKey = helpContextKey();
+    state.contextKey = contextKey;
+    question = Array.from(String(question || '').trim())
+      .slice(0, 400)
+      .join('');
     setPending(true, silent);
-    if (!silent && question) {
-      recordActivity('you', question);
-    }
-
-    // An explicit command goes straight to the work controller: the user has
-    // already said what they want, so nothing may reinterpret it (FR24).
-    if (!state.helpOnly && !silent && question && isExplicitCommand(question)) {
-      if (hasWorkController()) {
-        reportWorkFailure(delegateWork(question, seq), seq, 'explicit-command-failed');
-        setPending(false, silent);
-        return Promise.resolve();
-      }
-
-      // The commands operate on a workspace, and this page has no work
-      // controller — say so rather than silently answering something else.
-      setPending(false, silent);
-      if (state.els) {
-        state.els.reply.dataset.status = 'unavailable';
-        state.els.reply.innerHTML =
-          '<p class="ori-guide__answer">That command works inside a workspace. ' +
-          'Open a workspace and try it there.</p>';
-      }
-      emit('fallback', { reason: 'explicit-command-unavailable' });
-      return Promise.resolve();
-    }
+    state.greeted = true;
+    if (!silent) state.draft = String(question || '').slice(0, 400);
 
     return fetch(ENDPOINT, {
       method: 'POST',
@@ -765,48 +527,10 @@
         return r.json();
       })
       .then(function (resp) {
-        if (seq !== state.seq) return; // superseded
-
-        // A real question the guide did not own goes to routing instead of being
-        // rendered as "I don't know" (FR22/FR38).
-        if (!silent && question && needsWorkRouting(resp)) {
-          // In PAF, Ori is Help-only. Render the guide-owned handoff preview;
-          // never route, plan, or submit from this draft/transcript.
-          if (state.helpOnly) {
-            setPending(false, silent);
-            render(resp);
-            emit('handoff-preview', {
-              available: state.assistantAvailable,
-              chars: String(question).length
-            });
-            return Promise.resolve();
-          }
-          // Where the full work controller exists, it does the real thing:
-          // planning, agent selection, confirmations, workspace sessions.
-          if (hasWorkController()) {
-            // The panel's own turn is over once the request is handed over; the
-            // activity host owns the busy state from here. Holding the composer
-            // disabled until a confirmation is answered would lock the user out
-            // of the very panel they need to answer it in.
-            reportWorkFailure(delegateWork(question, seq), seq, 'work-controller-failed');
-            setPending(false, silent);
-            return Promise.resolve();
-          }
-
-          return routeWork(question, seq)
-            .then(function (routed) {
-              if (routed === null || seq !== state.seq) return;
-              setPending(false, silent);
-              renderRouted(routed, resp);
-            })
-            .catch(function () {
-              if (seq !== state.seq) return;
-              // Routing is what failed, so say so and offer the guide's own
-              // answer rather than pretending the request was navigation.
-              setPending(false, silent);
-              render(resp);
-              emit('fallback', { reason: 'route-unavailable' });
-            });
+        if (seq !== state.seq) return;
+        if (contextKey !== helpContextKey()) {
+          invalidateInFlightForContextChange(contextKey);
+          return;
         }
 
         setPending(false, silent);
@@ -819,14 +543,18 @@
         });
       })
       .catch(function () {
-        if (seq !== state.seq) return; // superseded
+        if (seq !== state.seq) return;
+        if (contextKey !== helpContextKey()) {
+          invalidateInFlightForContextChange(contextKey);
+          return;
+        }
         setPending(false, silent);
         // The guide failing must never block the page underneath it (FR-50).
         if (state.els) {
           state.els.reply.dataset.status = 'unavailable';
           state.els.reply.innerHTML =
-            '<p class="ori-guide__answer">I could not reach the guide just now. ' +
-            'The page behind me still works — try again in a moment.</p>';
+            '<p class="ori-guide__answer">Help is unavailable right now. ' +
+            'Your search text is kept. The page still works — try Search again.</p>';
         }
         emit('fallback', { reason: 'unreachable' });
       });
@@ -1098,102 +826,59 @@
 
   /* ---- work handoff ---------------------------------------------------------------- */
 
-  // Where a pending handoff is parked while the browser navigates to Home.
-  //
-  // sessionStorage rather than a query parameter: the user's words are their
-  // own, and a URL would put them in history, in the address bar, and in any
-  // referrer. It is read once and cleared.
+  // Compatibility key: recovery belongs to the assistant. Help never consumes
+  // stored work text, searches it, or puts private text into a URL.
   var HANDOFF_KEY = 'ori-guide-handoff';
 
-  function prefillWorkSurface(input, text) {
-    input.value = text || '';
-    input.focus();
-    // An input event so any listener bound to the work surface sees the change
-    // exactly as if the user had typed it.
+  // Only a user's explicit action reaches this seam. The assistant's existing
+  // suggestion API refuses non-empty drafts, busy replies and loading context.
+  async function retryAssistantStatus(panel) {
+    // Retry only readiness. A subsequent explicit Open click is still
+    // required to move text; retry is never execution approval.
     try {
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    } catch (err) {
-      /* older browsers: the value is set either way */
+      await panel?.refresh?.();
+    } catch (_) {
+      /* Readiness is unavailable. */
     }
+    if (!state.open || state.quest) return;
+    if (state.els?.reply)
+      state.els.reply.insertAdjacentHTML(
+        'beforeend',
+        '<p class="ori-guide__answer ori-guide__answer--note">Assistant status was checked. Use an available setup or Open action to continue. Your search is kept; nothing was sent.</p>'
+      );
   }
 
-  // Prefills the work request without submitting it: the user presses send, so
-  // nothing is ever routed or executed on their behalf (FR36).
-  //
-  // The universal composer is the target now. There is no separate work surface
-  // to travel to, so a handoff no longer navigates anywhere — which also means
-  // it can no longer strand the request on a page that lacks the old Home input.
   function handoff(text) {
-    if (state.helpOnly) {
-      if (
-        state.assistantAvailable &&
-        window.PersonalAssistantPanel &&
-        typeof window.PersonalAssistantPanel.prefill === 'function'
-      ) {
-        close();
-        window.PersonalAssistantPanel.prefill(String(text || '').slice(0, 400));
-        emit('handoff', { assistant: state.assistantName, submitted: false });
-        return true;
-      }
-      if (state.els && state.els.reply) {
-        state.els.reply.insertAdjacentHTML(
-          'beforeend',
-          '<p class="ori-guide__answer ori-guide__answer--note">Hire or repair your personal assistant before sending work. Nothing was submitted.</p>'
-        );
-      }
-      emit('handoff', { available: false, submitted: false });
+    var panel = window.PersonalAssistantPanel;
+    var accepted = false;
+    if (!state.assistantAvailable && !assistantSetupAction()) {
+      void retryAssistantStatus(panel);
       return false;
     }
-
-    var els = state.els;
-    if (els && els.input) {
-      prefillWorkSurface(els.input, text);
-      emit('handoff', { onHome: true, inPanel: true });
-      return true;
+    if (state.assistantAvailable && panel?.open && panel?.suggestReply) {
+      if (panel.open(state.els?.launcher)) {
+        accepted =
+          panel.suggestReply(
+            Array.from(String(text || '').trim())
+              .slice(0, 400)
+              .join('')
+          ) === true;
+        if (!accepted) open(state.els?.launcher, { skipGreeting: true });
+      }
     }
-
-    var input = document.getElementById('homeAssistantInput');
-    if (input) {
-      close();
-      prefillWorkSurface(input, text);
-      emit('handoff', { onHome: true });
-      return true;
+    if (!accepted && state.els?.reply) {
+      var reason =
+        panel?.suggestionNotice?.() ||
+        'Finish setup or the current reply, then open your assistant to review it.';
+      state.els.reply.insertAdjacentHTML(
+        'beforeend',
+        '<p class="ori-guide__answer ori-guide__answer--note">The request could not be inserted. Your search text and assistant draft are kept. ' +
+          esc(reason) +
+          ' Nothing was sent.</p>'
+      );
     }
-
-    // Not on Home. Carry the request across the navigation rather than dropping
-    // it and making the user retype — still without submitting anything.
-    try {
-      window.sessionStorage.setItem(HANDOFF_KEY, String(text || ''));
-    } catch (err) {
-      /* private mode or storage disabled: the user retypes, nothing breaks */
-    }
-    emit('handoff', { onHome: false });
-    window.location.href = '/';
-    return false;
-  }
-
-  // Consumes a handoff parked by a previous page. Runs once on load; the value
-  // is removed immediately so a later reload does not resurrect it.
-  function consumePendingHandoff() {
-    var text = null;
-    try {
-      text = window.sessionStorage.getItem(HANDOFF_KEY);
-      if (text !== null) window.sessionStorage.removeItem(HANDOFF_KEY);
-    } catch (err) {
-      return;
-    }
-    if (!text) return;
-
-    // Parked by an older build that still navigated to Home. Restore it into the
-    // universal composer as a draft so the request is not lost mid-upgrade.
-    state.draft = String(text);
-    if (state.els && state.els.input) {
-      prefillWorkSurface(state.els.input, text);
-      return;
-    }
-
-    var input = document.getElementById('homeAssistantInput');
-    if (input) prefillWorkSurface(input, text);
+    emit('handoff', { accepted: accepted, submitted: false });
+    return accepted;
   }
 
   /* ---- open / close ------------------------------------------------------------------ */
@@ -1204,7 +889,7 @@
       window.PersonalAssistantPanel &&
       typeof window.PersonalAssistantPanel.close === 'function'
     ) {
-      window.PersonalAssistantPanel.close();
+      window.PersonalAssistantPanel.close({ restoreFocus: false });
     }
     state.open = true;
     state.lastTrigger = trigger || document.activeElement || null;
@@ -1227,23 +912,20 @@
     // A walkthrough step already on the panel is the same fixed content: the
     // user reopening a panel they closed mid-walkthrough must find the step,
     // not a greeting that replaced it.
-    if (
-      !state.activity.length &&
-      !state.pending &&
-      !state.quest &&
-      !(options && options.skipGreeting)
-    ) {
+    if (!state.greeted && !state.pending && !state.quest && !(options && options.skipGreeting)) {
       // Silent: this is the panel greeting itself, not a question the user asked.
       ask('', { silent: true });
     }
 
     // Focus the input rather than the close button: the user opened this to ask
     // something.
-    if (typeof els.input.focus === 'function') els.input.focus();
+    if (state.quest) els.reply.querySelector?.('[data-ori-quest-choice]')?.focus();
+    else if (typeof els.input.focus === 'function') els.input.focus();
+    keepFocusedSearchVisible();
     emit('open', { route: currentRoute() });
   }
 
-  function close() {
+  function close(options) {
     if (!state.open) return;
     state.open = false;
     clearCoachmark();
@@ -1259,10 +941,12 @@
     // Return focus to whatever opened the guide, when it still exists (FR-26).
     var trigger = state.lastTrigger;
     state.lastTrigger = null;
-    if (trigger && document.contains(trigger) && typeof trigger.focus === 'function') {
-      trigger.focus();
-    } else if (els.launcher && typeof els.launcher.focus === 'function') {
-      els.launcher.focus();
+    if (!options || options.restoreFocus !== false) {
+      if (trigger && document.contains(trigger) && typeof trigger.focus === 'function') {
+        trigger.focus();
+      } else if (els.launcher && typeof els.launcher.focus === 'function') {
+        els.launcher.focus();
+      }
     }
     emit('dismiss', {});
   }
@@ -1276,21 +960,45 @@
 
   function setHelpOnly(options) {
     var opts = options || {};
+    var previous =
+      state.assistantState + ':' + state.assistantName + ':' + state.assistantAvailable;
     state.helpOnly = true;
-    state.assistantAvailable = opts.available === true;
-    state.needsHQ = opts.needsHQ === true;
+    // Options without a state retain the established context-only API contract.
+    state.assistantState = String(
+      opts.state ||
+        (opts.available === true ? 'active' : opts.needsHQ === true ? 'needs_hq' : 'needs_hire')
+    );
+    state.assistantAvailable =
+      opts.available === true && ['active', 'paused'].indexOf(state.assistantState) !== -1;
+    state.needsHQ = ['needs_hq', 'provisioning_hq'].indexOf(state.assistantState) !== -1;
     state.assistantName = String(opts.assistantName || 'your personal assistant').trim();
     var els = state.els;
     if (!els) return;
-    if (els.title) els.title.textContent = 'Ori';
-    if (els.role) els.role.hidden = false;
-    if (els.launcherName) els.launcherName.textContent = 'Ori Help';
-    if (els.input) {
-      els.input.placeholder = 'Ask Ori about the app';
-      els.input.maxLength = 400;
-      els.input.setAttribute('aria-label', 'Ask Ori about the app');
+    if (els.walkthroughs) {
+      var setup = assistantSetupAction();
+      if (setup) {
+        els.walkthroughs.innerHTML =
+          '<a class="ori-guide__walkthrough" href="' +
+          esc(setup.href) +
+          '">' +
+          esc(setup.label) +
+          '</a>';
+      } else {
+        els.walkthroughs.textContent = state.assistantAvailable
+          ? 'No setup walkthrough is currently available.'
+          : state.assistantState === 'loading'
+            ? 'Checking walkthrough availability…'
+            : 'Walkthrough availability could not be checked. Retry assistant status from a work-related result.';
+      }
     }
-    if (els.launcher) els.launcher.setAttribute('aria-label', 'Open Ori Help — App Guide');
+    if (
+      previous !==
+        state.assistantState + ':' + state.assistantName + ':' + state.assistantAvailable &&
+      state.response &&
+      !state.quest &&
+      state.responseKey === helpContextKey()
+    )
+      render(state.response);
     emit('help-only', { assistantAvailable: state.assistantAvailable });
   }
 
@@ -1359,9 +1067,16 @@
       html += '<div class="ori-guide__actions">' + choicesHTML + '</div>';
     }
 
-    // A fixed step owns the panel body, so any leftover answer or action from an
-    // earlier turn cannot be mistaken for part of the walkthrough.
+    // Fixed content invalidates pending searches before taking ownership.
+    state.seq += 1;
+    setPending(false, false);
+    if (els.overview) els.overview.hidden = true;
+    if (els.form) els.form.hidden = true;
+    if (els.hint) els.hint.hidden = true;
+    if (els.portrait) els.portrait.hidden = false;
+    if (els.title) els.title.textContent = 'Ori walkthrough';
     state.actions = [];
+    state.response = null;
     els.reply.innerHTML = html;
     els.reply.dataset.status = 'quest';
     els.reply.dataset.topic = '';
@@ -1388,14 +1103,25 @@
   // clearQuestStep ends the presentation: the mark goes away and the panel stops
   // claiming to be mid-walkthrough. It says nothing about the server-side quest,
   // which is only ever completed by a real designation or skipped explicitly.
-  function clearQuestStep() {
+  function clearQuestStep(options) {
+    var hadQuest = Boolean(state.quest);
     clearCoachmark();
     state.quest = null;
+    if (state.els) {
+      if (state.els.overview) state.els.overview.hidden = false;
+      if (state.els.form) state.els.form.hidden = false;
+      if (state.els.hint) state.els.hint.hidden = false;
+      if (state.els.portrait) state.els.portrait.hidden = true;
+      if (state.els.title) state.els.title.textContent = 'Help';
+    }
     if (state.els && state.els.reply && state.els.reply.dataset.status === 'quest') {
       state.els.reply.innerHTML = '';
       state.els.reply.dataset.status = '';
       state.els.reply.dataset.quest = '';
     }
+    // A finished/deferred fixed sheet must not cover the next real app control.
+    // Ordinary Help remains available from its navbar entry; no quest is mutated.
+    if (hadQuest && !options?.keepOpen) close();
   }
 
   /* ---- wiring ------------------------------------------------------------------------- */
@@ -1443,7 +1169,19 @@
   }
 
   function onKeydown(event) {
-    if (event.key !== 'Escape' || !state.open) return;
+    if (event.key !== 'Escape' || !state.open || event.defaultPrevented) return;
+    // Upper overlays own Escape, including a Bootstrap modal whose .show class
+    // was removed by its own handler before this bubbling listener runs.
+    if (
+      event.target?.closest?.('.modal, .dropdown-menu, .offcanvas') ||
+      document.querySelector?.('.modal.show, .dropdown-menu.show, .offcanvas.show, dialog[open]') ||
+      Array.from(document.querySelectorAll?.('[role="dialog"][aria-modal="true"]') || []).some(
+        overlay =>
+          overlay.getClientRects?.().length > 0 && overlay.getAttribute('aria-hidden') !== 'true'
+      ) ||
+      window.OriSpotlight?.isOpen?.()
+    )
+      return;
     // First Escape clears a coachmark, second closes the guide — so dismissing
     // guidance does not also lose the panel the user is reading (FR-24).
     if (state.coachmarkEl) {
@@ -1470,18 +1208,21 @@
       close: document.getElementById('oriGuideClose'),
       context: document.getElementById('oriGuideContext'),
       title: document.getElementById('oriGuideTitle'),
-      role: document.getElementById('oriGuideRole'),
-      launcherName:
-        typeof launcher.querySelector === 'function'
-          ? launcher.querySelector('.ori-guide__launcher-name')
-          : null,
-      activity: document.getElementById('oriGuideActivity'),
-      launcherStatus: document.getElementById('oriGuideLauncherStatus'),
-      // The work controller's render target, hidden until there is work to show.
-      activityHost: document.getElementById('homeAssistantThinkingModal')
+      overview: document.getElementById('oriGuideOverview'),
+      about: document.getElementById('oriGuideAbout'),
+      topics: document.getElementById('oriGuideTopics'),
+      walkthroughs: document.getElementById('oriGuideWalkthroughs'),
+      portrait: document.getElementById('oriGuideQuestPortrait'),
+      hint: document.getElementById('oriGuideSearchHint')
     };
 
     refreshContextLabel();
+    setHelpOnly({
+      available: state.assistantAvailable,
+      needsHQ: state.needsHQ,
+      assistantName: state.assistantName,
+      state: state.assistantState
+    });
 
     launcher.addEventListener('click', function () {
       toggle(launcher);
@@ -1501,24 +1242,21 @@
     panel.addEventListener('click', onTopicClick);
     panel.addEventListener('click', onQuestChoiceClick);
     document.addEventListener('keydown', onKeydown);
+    window.addEventListener('resize', function () {
+      // The assistant's shared viewport seam measures navbar wrapping first.
+      window.requestAnimationFrame(keepFocusedSearchVisible);
+    });
     window.addEventListener('popstate', clearCoachmarkIfRouteChanged);
     // A route change must repaint the visible context before the next request is
     // accepted, so a stale workspace or task is never submitted invisibly (FR46).
-    window.addEventListener('popstate', refreshContextLabel);
-
-    // A work request made on another page is prefilled here, once, without
-    // being submitted.
-    consumePendingHandoff();
-
-    // Home also shows Ori on the map. Both entry points drive this one
-    // controller and one panel, so they can never disagree about open state
-    // (FR-21).
-    var mapOri = document.getElementById('oriGuideMapTrigger');
-    if (mapOri) {
-      mapOri.addEventListener('click', function () {
-        toggle(mapOri);
-      });
+    state.contextKey = helpContextKey();
+    function onContextChange() {
+      invalidateInFlightForContextChange(state.contextKey);
+      state.contextKey = helpContextKey();
+      refreshContextLabel();
     }
+    window.addEventListener('popstate', onContextChange);
+    document.addEventListener('ori:workspace-context', onContextChange);
   }
 
   var api = {
@@ -1557,9 +1295,6 @@
     _collectContext: collectContext,
     _contextFromRoute: contextFromRoute,
     _contextLabel: contextLabel,
-    _needsWorkRouting: needsWorkRouting,
-    _hasWorkController: hasWorkController,
-    _isExplicitCommand: isExplicitCommand,
     _refreshContextLabel: refreshContextLabel,
     _state: state,
     _validateAction: validateAction,
@@ -1568,7 +1303,6 @@
     _handoff: handoff,
     _applyCoachmark: applyCoachmark,
     _clearCoachmarkIfRouteChanged: clearCoachmarkIfRouteChanged,
-    _consumePendingHandoff: consumePendingHandoff,
     _esc: esc,
     HANDOFF_KEY: HANDOFF_KEY
   };

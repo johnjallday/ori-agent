@@ -1,8 +1,7 @@
 // home-dashboard.js — adaptive home page behavior.
 //
-// Wires the suggested prompt chips (populate-and-focus the Ask Ori input,
-// no auto-submit), the global Cmd+J / Ctrl+J shortcut that focuses the
-// hero input, and the Today rail's Recent Activity section from its API
+// Wires work suggestions and Home's Cmd+J / Ctrl+J shortcut to the Personal
+// Assistant (draft-safe, no auto-submit), and the Today rail's Recent Activity section from its API
 // endpoint. Also instruments time-to-first-action (TTfA) for Home — the
 // primary success metric from the PRD.
 //
@@ -81,7 +80,7 @@
   function wireChips() {
     const chips = document.querySelectorAll('.home-prompt-chip');
     if (!chips.length) return;
-    const input = document.getElementById('homeAssistantInput');
+    const input = document.getElementById('personalAssistantInput');
     if (!input) return;
     chips.forEach(chip => {
       chip.addEventListener('click', e => {
@@ -89,7 +88,8 @@
         fireTTFA('chip');
         const prompt = (chip.getAttribute('data-prompt') || chip.textContent || '').trim();
         if (!prompt) return;
-        input.value = prompt;
+        const panel = window.PersonalAssistantPanel;
+        if (!panel?.open(chip) || !panel.suggestReply?.(prompt)) return;
         input.focus();
         try {
           const len = input.value.length;
@@ -103,7 +103,7 @@
     // Hero submit and ⌘J focus are first-class actions too — observe them
     // at the surface level so TTfA fires regardless of which path the user
     // takes. dashboard.js owns the actual submit handler.
-    const form = document.getElementById('homeAssistantForm');
+    const form = document.getElementById('personalAssistantForm');
     if (form) {
       form.addEventListener('submit', () => fireTTFA('hero-submit'), { capture: true });
     }
@@ -114,25 +114,25 @@
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
       if (e.key !== 'j' && e.key !== 'J') return;
 
-      // Home's own composer was retired by Issue #350; the shortcut now opens
-      // the one universal Ask Ori panel rather than a page-local input (FR8).
-      const input = document.getElementById('oriGuideInput');
+      // This is a work shortcut, not a Help search shortcut.
+      const input = document.getElementById('personalAssistantInput');
       if (!input) return;
 
       const target = e.target;
       if (
         target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
       ) {
         if (target !== input) return;
       }
 
       e.preventDefault();
       fireTTFA('cmd-j');
-      if (window.OriGuide && typeof window.OriGuide.open === 'function') {
-        window.OriGuide.open();
-      }
-      input.focus();
+      if (!window.PersonalAssistantPanel?.open(target)) return;
+      if (!input.disabled) input.focus();
       try {
         const len = input.value.length;
         input.setSelectionRange(len, len);
@@ -252,14 +252,14 @@
   // ----- Init -----
 
   async function init() {
-    // Ask Ori chips and the ⌘J shortcut live above the cockpit and are wired on
+    // Work suggestions and the assistant's ⌘J shortcut are wired on
     // every Home render.
     wireChips();
     wireFocusShortcut();
     wireCockpitTTFA();
 
     // Today's sections. Each loads independently, so one failing source leaves
-    // the others — and Map, Tree, and Ask Ori — usable (FR85, FR113).
+    // the others — and Map, Tree, and the assistant — usable (FR85, FR113).
     if (!document.getElementById('cockpitRailToday')) return;
     wireTodayActions();
     // The gate deciding we must not hydrate yet is a real answer, not a reason
