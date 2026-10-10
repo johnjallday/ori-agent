@@ -28,6 +28,8 @@ MODEL = "ori-workspace-fixture"
 # The runs on plain wt demo, by flag: the spec, the variable that hands it the
 # sandbox path, and the log kept with the evidence. No flag runs DEFAULT_DEMO.
 PLAIN_DEMOS = {
+    "discovery_interface": ("tests/personal-assistant-discovery-interface.spec.ts",
+                            "ORI_DISCOVERY_INTERFACE_SANDBOX", "discovery-interface.log"),
     "discovery_continuity": ("tests/personal-assistant-discovery-continuity.spec.ts",
                              "ORI_DISCOVERY_CONTINUITY_SANDBOX", "discovery-continuity.log"),
     "discovery_research": ("tests/personal-assistant-discovery.spec.ts",
@@ -336,6 +338,14 @@ def evidence_directory(value):
     return path
 
 
+def browser_spec(value):
+    """An explicit regression file, not a glob or an external script."""
+    path = (ROOT / value).resolve()
+    if not path.is_relative_to(ROOT / 'tests') or not path.is_file() or not path.name.endswith('.spec.ts'):
+        raise argparse.ArgumentTypeError('extra spec must be an existing worktree-local tests/*.spec.ts file')
+    return str(path.relative_to(ROOT))
+
+
 def research_step(user, results, tools_offered):
     """Fixture decisions only; public reads still run through production owners."""
     content = user["content"]
@@ -357,8 +367,10 @@ def research_step(user, results, tools_offered):
             return {"tool": "assistant_propose_research_lookup", "arguments": {"operation": "public_document", "url": target.group(0)}}
     if tools_offered and "telegram" in content.lower():
         return {"tool": "assistant_propose_research_lookup", "arguments": {"operation": "skills_catalog", "query": "Telegram community management"}}
+    if tools_offered and "installed capability metadata" in content.lower():
+        return {"tool": "assistant_installed_capabilities", "arguments": {"query": ""}}
     if tools_offered and "cached mcp" in content.lower():
-        return {"tool": "assistant_mcp_catalog", "arguments": {"query": "filesystem"}}
+        return {"tool": "assistant_mcp_catalog", "arguments": {"query": "" if "two cached mcp" in content.lower() else "filesystem"}}
     return None
 
 
@@ -518,8 +530,12 @@ def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8954)
+    parser.add_argument("--extra-spec", action="append", type=browser_spec, default=[],
+                        help="Also run an explicit worktree-local browser regression against this same isolated host")
     parser.add_argument("--evidence-dir", type=evidence_directory,
                         help="Keep runner logs and compatible captures inside this worktree's tasks/evidence")
+    parser.add_argument("--discovery-interface", action="store_true",
+                        help="wt demo: Help/draft transitions, candidate navigation and exact reviewed lookup, no integration install")
     parser.add_argument("--discovery-continuity", action="store_true",
                         help="wt demo: bounded long thread, exact recap and same-sandbox server restart, deterministic model only")
     parser.add_argument("--discovery-research", action="store_true",
@@ -553,6 +569,8 @@ def main():
     parser.add_argument("--folder-response-baseline", action="store_true",
                         help="wt demo: built drawer controller baseline vs standalone synthetic prototype; no model")
     args = parser.parse_args()
+    if args.extra_spec and (args.reaper_source or args.music_source):
+        parser.error('--extra-spec supports only plain isolated host demos, not companion candidate runs')
     if args.folder_response_evidence_stage and not args.folder_response:
         parser.error("--folder-response-evidence-stage requires --folder-response")
     plain = ["--" + name.replace("_", "-") for name in PLAIN_DEMOS if getattr(args, name)]
@@ -575,7 +593,7 @@ def main():
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
         state = Path(temp)
-        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research, discovery_continuity=args.discovery_continuity))
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research or args.discovery_interface, discovery_continuity=args.discovery_continuity))
         thread = threading.Thread(target=provider.serve_forever, daemon=True)
         thread.start()
         # Child-only isolation. Do not read or alter user credential files.
@@ -624,7 +642,7 @@ def main():
                            ORI_WORKSPACE_PROVIDER_FIXTURE=str(state))
                 env[sandbox_env] = str(sandbox)
                 result = subprocess.run(
-                    ["npx", "playwright", "test", spec, "--workers=1"], cwd=ROOT, env=env, check=False,
+                    ["npx", "playwright", "test", spec, *args.extra_spec, "--workers=1"], cwd=ROOT, env=env, check=False,
                 )
                 if args.discovery_continuity and result.returncode == 0:
                     # Preserve only this invocation's verified wt sandbox, stop

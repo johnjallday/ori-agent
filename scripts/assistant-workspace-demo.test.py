@@ -51,6 +51,13 @@ class DemoProviderTests(unittest.TestCase):
                     demo.main()
                 self.assertEqual(failure.exception.code, 2)
 
+    def test_extra_browser_specs_are_existing_worktree_local_files_not_globs(self):
+        import argparse
+        self.assertEqual(demo.browser_spec('tests/contextual-help-assistant.spec.ts'), 'tests/contextual-help-assistant.spec.ts')
+        for path in ['/tmp/outside.spec.ts', 'tests/../scripts/wt.sh', 'tests/*.spec.ts', 'tests/missing.spec.ts']:
+            with self.assertRaises(argparse.ArgumentTypeError):
+                demo.browser_spec(path)
+
     def test_every_plain_demo_names_an_existing_spec_and_its_own_sandbox_variable_and_log(self):
         runs = list(demo.PLAIN_DEMOS.values()) + [demo.DEFAULT_DEMO]
         for spec, variable, log in runs:

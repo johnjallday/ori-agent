@@ -22,7 +22,9 @@ export function publicResearchLink(value) {
     const text = String(value || '');
     if (
       text.length > 2000 ||
-      /\s/.test(text) ||
+      !/^https?:\/\//i.test(text) ||
+      /[\s\p{Cf}]/u.test(text) ||
+      /%(?:0[0-9a-f]|1[0-9a-f]|7f)/i.test(text) ||
       Array.from(text).some(ch => ch.codePointAt(0) < 32)
     )
       return '';
@@ -32,13 +34,16 @@ export function publicResearchLink(value) {
     const host = url.hostname.toLowerCase();
     if (
       !host.includes('.') ||
+      host.includes(':') ||
       /(?:^|\.)(?:localhost|local|internal|lan|home|test|invalid)$/.test(host)
     )
       return '';
     if (/^(?:0|10|127|169\.254|192\.168|172\.(?:1[6-9]|2\d|3[01]))\./.test(host)) return '';
     if (
       /^(?:file|javascript|data):/i.test(text) ||
-      /(?:api[_-]?key|token|password|secret|signature|auth|session)=/i.test(url.search)
+      Array.from(url.searchParams.keys()).some(key =>
+        /(?:api[_-]?key|token|password|secret|signature|auth|session|x-amz|x-goog)/i.test(key)
+      )
     )
       return '';
     return text;
@@ -131,20 +136,64 @@ export function researchReviewView(review, now = Date.now()) {
   };
 }
 
+// These are navigation only. The existing owners have no safe exact-candidate
+// review handoff, so never preselect a package, credentials, agent or workspace.
+// No result ID is dispatched to an installer or encoded in a destination.
+export function researchCandidateNavigation(candidate, now = Date.now()) {
+  const receipt = candidate?.receipt;
+  if (
+    !/^[a-f0-9]{32}$/.test(candidate?.id || '') ||
+    receipt?.candidate_id !== candidate.id ||
+    !/^[a-f0-9]{32}$/.test(receipt.source_id || '') ||
+    !['metadata', 'document'].includes(receipt.level) ||
+    !['available', 'partial'].includes(receipt.availability) ||
+    ['stale', 'cached'].includes(receipt.freshness)
+  )
+    return null;
+  const read = Date.parse(receipt.read_at);
+  if (!Number.isFinite(read) || read > now + 30000 || now - read > 300000) return null;
+  if (['skill_catalog', 'installed_skill'].includes(candidate.kind))
+    return { href: '/skills', label: 'Browse Skills setup' };
+  if (['mcp_catalog', 'configured_mcp'].includes(candidate.kind))
+    return { href: '/mcp', label: 'Browse MCP configuration' };
+  return null;
+}
+
+export function researchCapabilityView(capability) {
+  if (!capability) return '';
+  if (!capability.provider || !capability.model)
+    return 'No system conversation model is available. Choose one in Settings; agent profile settings do not select it.';
+  const model = `${String(capability.provider).slice(0, 64)} / ${String(capability.model).slice(0, 128)}`;
+  const tools = capability.broker_tools
+    ? 'brokered metadata tools; public lookups require exact review'
+    : 'snapshot-only; automatic catalog tools are unavailable';
+  const search =
+    capability.broader_search === 'configured_review_required'
+      ? 'Broader search requires a separate exact review.'
+      : 'Broader search is disabled/unconfigured.';
+  return `System conversation model: ${model} — ${tools}. ${search}`;
+}
+
 export function renderResearchResponse(row, data, { post, approve, isCurrent = () => false } = {}) {
   if (!row?.ownerDocument) return;
   const bubble = row.firstElementChild || row;
   const doc = row.ownerDocument;
   const capability = data?.research_capability;
-  if (capability && !capability.broker_tools) {
+  if (capability) {
     const note = doc.createElement('p');
-    note.className = 'personal-assistant-research__note';
-    note.textContent = `${capability.provider || 'Current provider'} / ${capability.model || 'no model'}: snapshot-only; automatic catalog tools are unavailable. `;
+    note.className = 'personal-assistant-research__note personal-assistant-research__capability';
+    note.textContent = researchCapabilityView(capability) + ' ';
     if (capability.manual_discovery_href === '/skills') {
       const link = doc.createElement('a');
       link.href = '/skills';
       link.textContent = 'Browse capabilities';
       note.append(link);
+    }
+    if (!capability.provider || !capability.model) {
+      const settings = doc.createElement('a');
+      settings.href = '/settings';
+      settings.textContent = 'Choose system model';
+      note.append(' ', settings);
     }
     bubble.append(note);
   }
@@ -153,17 +202,72 @@ export function renderResearchResponse(row, data, { post, approve, isCurrent = (
     const note = doc.createElement('p');
     note.className = 'personal-assistant-research__note';
     const state = String(result.availability || 'unavailable').replaceAll('_', ' ');
+    note.setAttribute('role', 'status');
     note.textContent = `Research: ${state}${result.reason ? ' · ' + String(result.reason).replaceAll('_', ' ') : ''}. ${result.scope || ''}`;
     bubble.append(note);
-    for (const candidate of (result.candidates || []).slice(0, 8)) {
-      const item = doc.createElement('p');
+    const candidates = Array.isArray(result.candidates)
+      ? result.candidates
+          .filter(candidate => candidate && typeof candidate === 'object')
+          .slice(0, 8)
+      : [];
+    const list = doc.createElement('ul');
+    list.className = 'personal-assistant-research__candidates';
+    list.setAttribute('aria-label', 'Candidate evidence and independent readiness');
+    const navigationScopes = new Set();
+    for (const candidate of candidates) {
+      const item = doc.createElement('li');
       item.className = 'personal-assistant-research__candidate';
       const ready = candidate.readiness || {};
+      const observation = value =>
+        ['observed', 'not_observed'].includes(value) ? value.replaceAll('_', ' ') : 'unknown';
       const values = ['installed', 'configured', 'enabled', 'granted', 'verified'].map(
-        key => `${key}: ${ready[key] || 'unknown'}`
+        key => `${key}: ${observation(ready[key])}`
       );
-      item.textContent = `${String(candidate.name || 'Candidate').slice(0, 120)} — ${values.join(' · ')}. Dependencies: ${ready.dependencies?.state || 'unknown'}.`;
-      bubble.append(item);
+      item.textContent = `${String(candidate.name || 'Candidate').slice(0, 120)} — ${values.join(' · ')}. Dependencies: ${ready.dependencies?.state === 'declared' ? 'declared, not verified' : 'unknown'}.`;
+      const dependencies = ready.dependencies || {};
+      const names = [
+        ...(Array.isArray(dependencies.mcp_servers) ? dependencies.mcp_servers : []),
+        ...(Array.isArray(dependencies.tools) ? dependencies.tools : [])
+      ].slice(0, 6);
+      if (names.length) {
+        const declared = doc.createElement('small');
+        declared.textContent =
+          'Declared requirements: ' +
+          names.map(name => String(name).slice(0, 80)).join(', ') +
+          '. A declaration is not operational verification.';
+        item.append(declared);
+      }
+      const navigation = researchCandidateNavigation(candidate);
+      if (navigation) {
+        const handoff = doc.createElement('p');
+        handoff.className = 'personal-assistant-research__handoff';
+        const link = doc.createElement('a');
+        link.href = navigation.href;
+        link.textContent = navigation.label + ' (new tab)';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        navigationScopes.add(navigation.href);
+        handoff.append(link, ' — manual only; no package or access target chosen.');
+        item.append(handoff);
+      }
+      list.append(item);
+    }
+    if (candidates.length) bubble.append(list);
+    if (navigationScopes.size) {
+      const boundaries = doc.createElement('details');
+      boundaries.className = 'personal-assistant-research__setup';
+      const heading = doc.createElement('summary');
+      heading.textContent = 'Setup stays separate — no action approved';
+      const disclosure = doc.createElement('p');
+      const storage = navigationScopes.has('/skills')
+        ? ' Skill files would be stored in Workspace Directory / Skills; no workspace or agent receives access here.'
+        : ' Connection configuration and credentials are reviewed on the MCP page; no workspace or agent access is selected here.';
+      disclosure.textContent =
+        'Manual navigation, not an exact-candidate review. Nothing is preselected or confirmed.' +
+        storage +
+        ' Installation, enablement, script trust, credentials and workspace/agent access remain separate decisions on that page; no target is inferred from this discussion. Keep this conversation and draft here.';
+      boundaries.append(heading, disclosure);
+      bubble.append(boundaries);
     }
   }
   let review = data?.research_review;
@@ -205,6 +309,12 @@ export function renderResearchResponse(row, data, { post, approve, isCurrent = (
     ...(folder ? { folder_context: folder } : {})
   });
   const validContext = () => isCurrent() && row.isConnected !== false;
+  const restoreFocus = trigger => {
+    if (!validContext()) return;
+    if (doc.activeElement && doc.activeElement !== trigger && doc.activeElement !== doc.body)
+      return;
+    doc.getElementById?.('personalAssistantInput')?.focus?.({ preventScroll: true });
+  };
   input.addEventListener('input', () => {
     if (review) {
       const old = review;
@@ -249,10 +359,12 @@ export function renderResearchResponse(row, data, { post, approve, isCurrent = (
         review = null;
         input.disabled = true;
         confirm.hidden = cancel.hidden = true;
-        status.textContent = 'Looking up the approved source and preparing a comparison…';
+        status.textContent = 'Preparing the reviewed lookup and a comparison…';
         await approve({ review: current, context: refs, folder, conversation });
-        status.textContent =
-          'Lookup review submitted. The reply below reports the actual outcome; no installation was approved.';
+        status.textContent = validContext()
+          ? 'Review submitted. Only the saved reply establishes an actual source outcome; no installation was approved.'
+          : 'The context changed. Reopen the original conversation for its saved outcome; nothing was retargeted.';
+        restoreFocus(confirm);
       }
     } catch (_) {
       status.textContent =
@@ -279,6 +391,7 @@ export function renderResearchResponse(row, data, { post, approve, isCurrent = (
     status.textContent = 'Cancelled. Nothing was sent; keep discussing.';
     input.disabled = true;
     actions.hidden = true;
+    restoreFocus(cancel);
   });
   actions.append(confirm, cancel);
   box.append(heading, disclosure, label, status, actions);

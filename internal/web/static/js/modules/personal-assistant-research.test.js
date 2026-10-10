@@ -76,7 +76,12 @@ test('public research links reject credentials, schemes and private destinations
     'http://10.0.0.1/',
     'https://example.com/?token=secret',
     'https://example.com:444/',
-    'https://example.com/with space'
+    'https://example.com/with space',
+    'https:example.com/path',
+    'https://example.com/?%61pi_key=private',
+    'https://example.com/%0a',
+    'https://[::ffff:8.8.8.8]/',
+    'https://example.com/\u200bhidden'
   ])
     assert.equal(publicResearchLink(bad), '', bad);
   assert.equal(publicResearchLink('https://example.com/docs'), 'https://example.com/docs');

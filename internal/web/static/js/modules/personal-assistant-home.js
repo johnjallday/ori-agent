@@ -37,6 +37,13 @@ export function personalAssistantTodayView(today) {
   };
 }
 
+export function partialTodaySummary(today) {
+  const summary = String(today?.brief?.opening_summary || '').trim();
+  return (
+    'Some Today sources are unavailable; no all-clear is implied.' + (summary ? ' ' + summary : '')
+  );
+}
+
 // needsHireBanner is everything Today says before the assistant is hired (PRD
 // FR8): one sentence, and its only link is Mission 01. Today has nothing else
 // to offer until there is an assistant to prepare it.
@@ -789,7 +796,8 @@ function syncSummary(els = elements()) {
         inProgress: state.progress.inProgress,
         doneToday: state.progress.doneToday,
         unavailable:
-          Boolean(state.today?.unavailable_sources?.length) || state.today?.state === 'unavailable'
+          Boolean(state.today?.unavailable_sources?.length) ||
+          ['partial', 'unavailable'].includes(state.today?.state)
       })
     : '';
   // Do not collapse a prerequisite or a form the user is currently editing.
@@ -926,7 +934,7 @@ function renderToday(today) {
   } else if (view.paused) {
     els.banner.textContent = `${view.displayName} is paused proactively. Your records and prior briefs are unchanged.`;
   } else if (view.partial) {
-    els.banner.textContent = String(today?.brief?.opening_summary || '');
+    els.banner.textContent = partialTodaySummary(today);
   } else if (view.modelUnavailable) {
     els.banner.textContent =
       'Conversational answers are paused until a model is configured. Deterministic Today records remain available.';
