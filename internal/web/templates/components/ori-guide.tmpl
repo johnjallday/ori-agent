@@ -47,16 +47,17 @@
       </section>
     </div>
 
-    <form class="ori-guide__form" id="oriGuideForm">
+    <form class="ori-guide__form" id="oriGuideForm" method="post">
       <label class="ori-guide__search-label" for="oriGuideInput">Search help</label>
       <input
         type="text"
         class="ori-guide__input"
         id="oriGuideInput"
+        name="question"
         maxlength="400"
         autocomplete="off"
         aria-describedby="oriGuideSearchHint"
-        placeholder="Search app topics">
+        placeholder="Search app topics…">
       <button type="submit" class="ori-guide__send" id="oriGuideSend">Search</button>
     </form>
 
@@ -68,7 +69,9 @@
       class="ori-guide__reply"
       id="oriGuideReply"
       role="status"
-      aria-live="polite"></div>
+      aria-label="Help result"
+      aria-live="polite"
+      aria-atomic="true"></div>
 
   </section>
 

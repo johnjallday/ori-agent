@@ -1628,7 +1628,7 @@
       button.addEventListener('click', function (event) {
         event.preventDefault();
         if (window.PersonalAssistantPanel?.openActivity) {
-          window.PersonalAssistantPanel.openActivity(button);
+          window.PersonalAssistantPanel.openActivity(button, { focus: true });
         } else if (window.hubSupportChat?.open) {
           window.hubSupportChat.open({ focus: 'input' });
         }

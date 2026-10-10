@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { mockHiredAssistant } from './helpers/hired-assistant';
 
-// Accessibility regression for the Ori Guide launcher and panel
-// (PRD cozy-character-experience FR-115–FR-123, FR-127–FR-128).
+// Accessibility regression for contextual Help and its separate work surface.
 //
 // Not part of CI — run against an isolated demo server:
 //   source scripts/wt.sh; wt demo 8931
@@ -12,10 +12,8 @@ import { installLocalCdn } from './helpers/offline-cdn';
 // sidebar) cannot mask a regression introduced here — the same approach the
 // roster suite uses.
 //
-// These run against /agents rather than Home. Home hides the floating launcher
-// and uses the map character as its single entry point (#332), so asserting on
-// #oriGuideLauncher there had been failing since that change; /agents is an
-// authenticated page where the shared launcher itself is the way in.
+// Home, standalone Agents, and other authenticated shells share one navbar
+// Help trigger. The Personal Assistant remains a separate work composer.
 
 const baseUrl = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';
 
@@ -30,6 +28,7 @@ async function runAxe(page, target) {
 
 async function preparePage(page, { theme = 'light', reducedMotion = 'reduce' } = {}) {
   await installLocalCdn(page);
+  await mockHiredAssistant(page);
   await page.emulateMedia({ reducedMotion });
   await page.addInitScript(selectedTheme => {
     window.localStorage.setItem('ori-theme', selectedTheme);
@@ -66,7 +65,9 @@ for (const theme of ['light', 'dark']) {
 
     await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
 
-    // Closed: the launcher alone must be clean.
+    // Help's navbar trigger is outside the shared panel positioning root.
+    const trigger = await runAxe(page, '#oriGuideLauncher');
+    expect(trigger.violations, JSON.stringify(trigger.violations, null, 2)).toEqual([]);
     const closed = await runAxe(page, '#oriGuideRoot');
     expect(closed.violations, JSON.stringify(closed.violations, null, 2)).toEqual([]);
 
@@ -102,10 +103,16 @@ test('the guide is fully operable without a pointer', async ({ page }) => {
   await expect(page.locator('#oriGuidePanel')).toBeVisible();
   await expect(page.locator('#oriGuideInput')).toBeFocused();
 
-  await page.keyboard.type('what is a workspace');
+  await page.keyboard.type('what is an agent');
   await page.keyboard.press('Enter');
   await expect(page.locator('#oriGuideReply')).toHaveAttribute('data-status', 'answered');
-
+  const show = page.locator('.ori-guide__action', { hasText: 'Show me where' });
+  await show.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#newAgentBtn')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#oriGuidePanel')).toBeVisible();
+  await expect(page.locator('#newAgentBtn')).not.toHaveClass(/is-ori-coachmark/);
   await page.keyboard.press('Escape');
   await expect(page.locator('#oriGuidePanel')).toBeHidden();
   await expect(page.locator('#oriGuideLauncher')).toBeFocused();
@@ -125,9 +132,8 @@ test('no guide control is pointer-only', async ({ page }) => {
     const bad = [];
     for (const el of controls) {
       if (el.disabled) continue;
-      // Only controls the user is actually being offered. The panel hosts the
-      // work-activity region, whose controls stay hidden until there is work to
-      // show; an unrendered button is not a pointer-only control.
+      // Only currently offered Help controls count. Work is permanently owned
+      // by the separate assistant host; it is never a hidden Help composer.
       if (el.hidden || el.closest('[hidden]') || el.offsetParent === null) continue;
       if (el.getAttribute('tabindex') === '-1') {
         bad.push(el.id || el.className);
@@ -181,7 +187,7 @@ test('the panel is usable at 200% zoom without horizontal page scroll', async ({
   await openAndAsk(page, 'what is a workspace');
 
   await expect(page.locator('#oriGuideSend')).toBeVisible();
-  await expect(page.locator('.ori-guide__answer')).toBeVisible();
+  await expect(page.locator('.ori-guide__answer').first()).toBeVisible();
 
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - window.innerWidth
@@ -198,10 +204,15 @@ test('the narrow sheet keeps its actions reachable', async ({ page }) => {
   const action = page.locator('.ori-guide__action').first();
   await expect(action).toBeVisible();
 
-  // Fully inside the viewport, not clipped off the right edge (FR-13/FR-119).
+  await action.scrollIntoViewIfNeeded();
   const box = await action.boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390 + 1);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(845);
+  const close = await page.locator('#oriGuideClose').boundingBox();
+  expect(close.y).toBeGreaterThanOrEqual(0);
+  expect(close.y + close.height).toBeLessThanOrEqual(845);
 });
 
 // Issue #350 FR69. The panel is mounted on every authenticated page now, so an
@@ -216,7 +227,8 @@ test('nothing the panel adds intercepts clicks on the page beneath it', async ({
     await page.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(500);
 
-    // Panel CLOSED: only the launcher itself may own any point on the page.
+    // Closed panels must not intercept the app; only the real assistant
+    // launcher (Help is in the navbar) may own its visible button area.
     const intercepting = await page.evaluate(() => {
       const hits = [];
       for (const x of [0.25, 0.5, 0.75]) {
@@ -226,7 +238,7 @@ test('nothing the panel adds intercepts clicks on the page beneath it', async ({
             Math.round(window.innerHeight * y)
           );
           if (!el || !el.closest) continue;
-          if (el.closest('#oriGuideRoot') && !el.closest('#oriGuideLauncher')) {
+          if (el.closest('#oriGuideRoot') && !el.closest('#personalAssistantLauncher')) {
             hits.push(el.className || el.tagName);
           }
         }
@@ -234,21 +246,27 @@ test('nothing the panel adds intercepts clicks on the page beneath it', async ({
       return hits;
     });
 
-    expect(intercepting, `${route} has Ask Ori chrome over the page`).toEqual([]);
+    expect(intercepting, `${route} has hidden panel chrome over the page`).toEqual([]);
   }
 });
 
-// Every authenticated page gets exactly one of each control (FR1/FR10), and no
-// retired page-native composer survives anywhere (FR6).
-test('every page has one launcher, one panel, one composer, and no retired one', async ({
+// One Help utility and one Personal Assistant work composer, not two chats.
+test('every page has one Help search and one assistant composer, with no retired entry', async ({
   page
 }) => {
   await preparePage(page);
 
   for (const route of ['/', '/agents', '/vaults', '/settings']) {
     await page.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#oriGuideLauncher')).toHaveCount(1);
     await expect(page.locator('#oriGuidePanel')).toHaveCount(1);
     await expect(page.locator('#oriGuideInput')).toHaveCount(1);
+    await expect(page.locator('#personalAssistantInput')).toHaveCount(1);
+    await expect(
+      page.locator('#personalAssistantActivityMount #homeAssistantThinkingModal')
+    ).toHaveCount(1);
+    await expect(page.locator('#oriGuidePanel #homeAssistantThinkingModal')).toHaveCount(0);
+    await expect(page.locator('#oriGuideMapTrigger')).toHaveCount(0);
     await expect(page.locator('#homeAssistantInput')).toHaveCount(0);
     await expect(page.locator('#hubSupportChat')).toHaveCount(0);
   }

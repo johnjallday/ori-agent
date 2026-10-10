@@ -2126,3 +2126,33 @@ test('a context change that keeps the same workspace does not disturb a request'
 
   assert.match(els.oriGuideReply.innerHTML, /STILL VALID/);
 });
+
+test('metadata and resize keep an already-focused Help search visible without stealing focus', async () => {
+  const els = guideEls();
+  const ctx = load({ elements: els });
+  let scrolls = 0;
+  els.oriGuideInput.scrollIntoView = () => {
+    scrolls++;
+  };
+  ctx.guide.open(null, { skipGreeting: true });
+  ctx.sandbox.document.activeElement = els.oriGuideInput;
+  await ctx.guide.ask('model setup');
+  assert.equal(scrolls, 1, 'updated metadata keeps the existing focus visible');
+  const resize = ctx.windowListeners.find(listener => listener.type === 'resize');
+  resize.fn();
+  ctx.runFrame();
+  assert.equal(scrolls, 2, 'resize waits for shared viewport measurement');
+
+  const otherControl = makeElement('unrelated-app-control');
+  ctx.sandbox.document.activeElement = otherControl;
+  await ctx.guide.ask('vault');
+  resize.fn();
+  ctx.runFrame();
+  assert.equal(scrolls, 2, 'do not scroll or focus Help while another control owns focus');
+  assert.equal(ctx.sandbox.document.activeElement, otherControl);
+  ctx.guide.close();
+  ctx.sandbox.document.activeElement = els.oriGuideInput;
+  resize.fn();
+  ctx.runFrame();
+  assert.equal(scrolls, 2, 'closed Help does not scroll');
+});

@@ -410,6 +410,14 @@
     );
   }
 
+  // Metadata can grow above an already-focused search, and a wrapped navbar
+  // can shorten the panel on resize. Keep that existing focus visible; never
+  // focus a new control, scroll the Map/Tree, or reset its state.
+  function keepFocusedSearchVisible() {
+    if (!state.open || document.activeElement !== state.els?.input) return;
+    state.els.input.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }
+
   function render(resp) {
     var els = state.els;
     if (!els) return;
@@ -457,6 +465,7 @@
     els.reply.innerHTML = html;
     els.reply.dataset.status = String(resp.status || '');
     els.reply.dataset.topic = String(resp.topic_key || '');
+    keepFocusedSearchVisible();
   }
 
   /* ---- search status ---------------------------------------------------------- */
@@ -496,6 +505,7 @@
   function ask(question, options) {
     var silent = !!(options && options.silent);
     if (!silent && state.quest) clearQuestStep({ keepOpen: true });
+    if (!silent) clearCoachmark();
     var seq = ++state.seq;
     state.response = null;
     var contextKey = helpContextKey();
@@ -911,6 +921,7 @@
     // something.
     if (state.quest) els.reply.querySelector?.('[data-ori-quest-choice]')?.focus();
     else if (typeof els.input.focus === 'function') els.input.focus();
+    keepFocusedSearchVisible();
     emit('open', { route: currentRoute() });
   }
 
@@ -1158,7 +1169,19 @@
   }
 
   function onKeydown(event) {
-    if (event.key !== 'Escape' || !state.open) return;
+    if (event.key !== 'Escape' || !state.open || event.defaultPrevented) return;
+    // Upper overlays own Escape, including a Bootstrap modal whose .show class
+    // was removed by its own handler before this bubbling listener runs.
+    if (
+      event.target?.closest?.('.modal, .dropdown-menu, .offcanvas') ||
+      document.querySelector?.('.modal.show, .dropdown-menu.show, .offcanvas.show, dialog[open]') ||
+      Array.from(document.querySelectorAll?.('[role="dialog"][aria-modal="true"]') || []).some(
+        overlay =>
+          overlay.getClientRects?.().length > 0 && overlay.getAttribute('aria-hidden') !== 'true'
+      ) ||
+      window.OriSpotlight?.isOpen?.()
+    )
+      return;
     // First Escape clears a coachmark, second closes the guide — so dismissing
     // guidance does not also lose the panel the user is reading (FR-24).
     if (state.coachmarkEl) {
@@ -1219,6 +1242,10 @@
     panel.addEventListener('click', onTopicClick);
     panel.addEventListener('click', onQuestChoiceClick);
     document.addEventListener('keydown', onKeydown);
+    window.addEventListener('resize', function () {
+      // The assistant's shared viewport seam measures navbar wrapping first.
+      window.requestAnimationFrame(keepFocusedSearchVisible);
+    });
     window.addEventListener('popstate', clearCoachmarkIfRouteChanged);
     // A route change must repaint the visible context before the next request is
     // accepted, so a stale workspace or task is never submitted invisibly (FR46).

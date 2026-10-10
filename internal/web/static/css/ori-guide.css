@@ -41,6 +41,7 @@
      which fails WCAG AA; this darker amber reaches 5.9:1. Anything that puts
      light text on the accent must use this one (FR-119). */
   --ori-accent-strong: #8a5a15;
+  --ori-accent-text: #8a5a15;
   --ori-line: #d8c19b;
   --ori-surface: #fffaf1;
 }
@@ -73,6 +74,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 44px;
   white-space: nowrap;
 }
 
@@ -98,7 +100,7 @@
 .personal-assistant-panel a:focus-visible,
 .personal-assistant-panel button:focus-visible,
 .personal-assistant-panel summary:focus-visible {
-  outline: 3px solid var(--ori-accent);
+  outline: 3px solid var(--ori-accent, var(--focus-ring, #bd7c24));
   outline-offset: 2px;
 }
 
@@ -125,9 +127,15 @@
   right: 20px;
   bottom: calc(var(--ori-launcher-clearance-y, 88px) + 12px);
   width: min(360px, calc(100vw - 40px));
+  max-height: calc(
+    var(--pa-viewport-height, 100dvh) - var(--ori-navbar-bottom, 72px) -
+      var(--ori-launcher-clearance-y, 88px) - 24px
+  );
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 20px;
+  scroll-padding-top: 64px;
+  padding: 20px max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
   border: 1px solid var(--ori-line);
   border-radius: var(--radius-lg, 14px);
   background: var(--ori-surface);
@@ -135,11 +143,26 @@
   box-shadow: 0 12px 36px rgb(0 0 0 / 18%);
 }
 
+/* Fixed walkthroughs stay compact near the bottom: the full-height Help side
+   panel would cover the very app controls the walkthrough asks users to open. */
+.ori-guide__panel:has(.ori-guide__reply[data-status="quest"]) {
+  top: auto;
+  max-height: min(
+    440px,
+    calc(
+      var(--pa-viewport-height, 100dvh) - var(--ori-navbar-bottom, 72px) -
+        var(--ori-launcher-clearance-y, 88px) - 24px
+    )
+  );
+}
+
 .ori-guide__overview {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   margin: 20px 0;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .ori-guide__overview p {
@@ -155,7 +178,7 @@
 
 .ori-guide__hint {
   margin: 0 0 16px;
-  color: var(--text-secondary, inherit);
+  color: var(--ori-ink);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -177,6 +200,22 @@
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ori-surface);
+}
+
+.ori-guide__panel :is(button, a, input) {
+  scroll-margin-block: 64px 12px;
+}
+
+.ori-guide__answer,
+.ori-guide__action,
+.ori-guide__topic,
+.ori-guide__walkthrough {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .ori-guide__ident {
@@ -190,9 +229,7 @@
   line-height: 1.2;
 }
 
-/* The contextual subtitle: what Ask Ori is pointed at right now. Not uppercased
-   like the old role line was — it carries a real value (a workspace or task
-   name), not a fixed label (FR4/FR64). */
+/* The reviewed screen title, never private work/page content. */
 .ori-guide__context {
   margin: 0;
   font-size: 12px;
@@ -204,8 +241,8 @@
 
 .ori-guide__close {
   flex: none;
-  width: 30px;
-  height: 30px;
+  width: 44px;
+  height: 44px;
   border: 1px solid var(--ori-line);
   border-radius: 8px;
   background: transparent;
@@ -284,9 +321,18 @@
   padding: 8px 10px;
   border: 1px solid var(--ori-line);
   border-radius: 9px;
-  background: #fff;
+  background: var(--ori-surface);
   color: var(--ori-ink);
   font: inherit;
+}
+
+.ori-guide__input::placeholder {
+  color: var(--text-secondary, #75654e);
+  opacity: 1;
+}
+
+.ori-guide__close:hover {
+  background: var(--ori-paper);
 }
 
 .ori-guide__send {
@@ -516,6 +562,7 @@
   --ori-paper: #2f2820;
   --ori-paper-deep: #3b3227;
   --ori-ink: #f2e7d5;
+  --ori-accent-text: #e0a85a;
   --ori-line: #574a38;
   --ori-surface: #241f19;
 }
@@ -530,7 +577,7 @@
 .ori-guide__role,
 .personal-assistant-launcher__role {
   margin: 2px 0 0;
-  color: var(--ori-accent-strong);
+  color: var(--ori-accent-text);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1643,6 +1690,21 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   color: var(--ori-ink);
   font-size: 12px;
   font-weight: 600;
+}
+
+#personalAssistantModelSetup {
+  display: flex;
+  align-items: center;
+  flex: none;
+  min-height: 44px;
+  margin: 0 20px 8px;
+  padding: 8px 10px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+#personalAssistantModelSetup[hidden] {
+  display: none;
 }
 
 .personal-assistant-conversation__button:disabled {

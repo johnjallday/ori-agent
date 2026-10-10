@@ -906,10 +906,17 @@ function init() {
     if (more?.open && !more.contains(event.target)) more.open = false;
   });
   document.addEventListener('keydown', event => {
+    if (event.defaultPrevented) return;
     // Bootstrap removes `.show` before this bubbling listener runs, so the
     // event target is also part of the topmost-modal check.
     const modalOpen = Boolean(
-      event.target?.closest?.('.modal') || document.querySelector?.('.modal.show')
+      event.target?.closest?.('.modal, .dropdown-menu, .offcanvas') ||
+      document.querySelector?.('.modal.show, .dropdown-menu.show, .offcanvas.show, dialog[open]') ||
+      Array.from(document.querySelectorAll?.('[role="dialog"][aria-modal="true"]') || []).some(
+        overlay =>
+          overlay.getClientRects?.().length > 0 && overlay.getAttribute('aria-hidden') !== 'true'
+      ) ||
+      window.OriSpotlight?.isOpen?.()
     );
     if (assistantPanelShouldCloseOnKey(event.key, state.open, modalOpen)) {
       // Tab may have moved outside an open message disclosure. Escape still
@@ -965,7 +972,13 @@ function init() {
 const api = {
   init,
   open,
-  openActivity: trigger => state.open || open(trigger, { workActivity: true, focus: false }),
+  openActivity: (trigger, options = {}) => {
+    if (state.open) {
+      if (options.focus === true) focusOnOpen();
+      return true;
+    }
+    return open(trigger, { workActivity: true, focus: options.focus === true });
+  },
   isOpen: () => state.open,
   hasLauncher: () => state.view.visible,
   close,
