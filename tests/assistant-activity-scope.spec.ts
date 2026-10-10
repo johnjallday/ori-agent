@@ -76,9 +76,16 @@ test('native work keeps one activity host outside Help after relationship failur
   await page.locator('#oriGuideLauncher').click();
   finish!();
   await expect(page.locator('#oriGuidePanel')).toBeVisible();
+  await expect(page.locator('#homeAssistantReopenBtn')).toHaveAttribute(
+    'title',
+    /^(Open|Reopen) work activity$/
+  );
   await page.locator('#homeAssistantReopenBtn').click();
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   await expect(page.locator('#oriGuidePanel')).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => !!document.activeElement?.closest('#personalAssistantPanel')))
+    .toBe(true);
   const actions = page.locator('#homeAssistantActions');
   await expect(actions.getByRole('button', { name: 'Confirm', exact: true })).toBeVisible();
   await expect(page.locator('#homeAssistantConversation')).toContainText(

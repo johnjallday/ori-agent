@@ -252,14 +252,14 @@
   // ----- Init -----
 
   async function init() {
-    // Ask Ori chips and the ⌘J shortcut live above the cockpit and are wired on
+    // Work suggestions and the assistant's ⌘J shortcut are wired on
     // every Home render.
     wireChips();
     wireFocusShortcut();
     wireCockpitTTFA();
 
     // Today's sections. Each loads independently, so one failing source leaves
-    // the others — and Map, Tree, and Ask Ori — usable (FR85, FR113).
+    // the others — and Map, Tree, and the assistant — usable (FR85, FR113).
     if (!document.getElementById('cockpitRailToday')) return;
     wireTodayActions();
     // The gate deciding we must not hydrate yet is a real answer, not a reason
