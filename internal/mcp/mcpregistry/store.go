@@ -19,17 +19,20 @@ type sourcesFileData struct {
 }
 
 type cacheFileData struct {
-	FetchedAt time.Time       `json:"fetched_at"`
-	Entries   []RegistryEntry `json:"entries"`
+	FetchedAt    time.Time                    `json:"fetched_at"`
+	Entries      []RegistryEntry              `json:"entries"`
+	Observations map[string]sourceObservation `json:"source_observations,omitempty"`
 }
 
 // Store manages persistence of registry sources and fetched entry cache.
 type Store struct {
-	mu      sync.RWMutex
-	baseDir string
-	sources []RegistrySource
-	cache   []RegistryEntry
-	cacheAt time.Time
+	mu               sync.RWMutex
+	baseDir          string
+	sources          []RegistrySource
+	cache            []RegistryEntry
+	cacheAt          time.Time
+	cacheInvalidated bool
+	observations     map[string]sourceObservation
 }
 
 // NewStore creates a Store and loads persisted data from disk.
@@ -67,6 +70,7 @@ func (s *Store) load() {
 		if json.Unmarshal(cacheData, &cd) == nil {
 			s.cache = cd.Entries
 			s.cacheAt = cd.FetchedAt
+			s.observations = cd.Observations
 		}
 	}
 }
@@ -133,7 +137,8 @@ func (s *Store) RemoveSource(id string) error {
 func (s *Store) IsCacheValid() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return len(s.cache) > 0 && time.Since(s.cacheAt) < cacheTTL
+	age := time.Since(s.cacheAt)
+	return !s.cacheInvalidated && !s.cacheAt.IsZero() && age >= 0 && age < cacheTTL
 }
 
 // GetCachedEntries returns a copy of the currently cached entries.
@@ -141,7 +146,9 @@ func (s *Store) GetCachedEntries() []RegistryEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]RegistryEntry, len(s.cache))
-	copy(out, s.cache)
+	for i, entry := range s.cache {
+		out[i] = cloneEntry(entry)
+	}
 	return out
 }
 
@@ -149,10 +156,18 @@ func (s *Store) GetCachedEntries() []RegistryEntry {
 func (s *Store) SetCache(entries []RegistryEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
-	s.cache = entries
+	now := time.Now().UTC()
+	s.cache = make([]RegistryEntry, len(entries))
+	for i, entry := range entries {
+		s.cache[i] = cloneEntry(entry)
+	}
 	s.cacheAt = now
-	cd := cacheFileData{FetchedAt: now, Entries: entries}
+	s.cacheInvalidated = false
+	s.observations = nil // legacy all-source refresh cannot prove per-source emptiness
+	return s.writeCache(cacheFileData{FetchedAt: now, Entries: s.cache})
+}
+
+func (s *Store) writeCache(cd cacheFileData) error {
 	data, err := json.MarshalIndent(cd, "", "  ")
 	if err != nil {
 		return err
@@ -161,9 +176,10 @@ func (s *Store) SetCache(entries []RegistryEntry) error {
 	return os.WriteFile(cachePath, data, 0o600)
 }
 
-// InvalidateCache clears the in-memory cache timestamp, forcing a re-fetch on next access.
+// InvalidateCache marks the cache stale while retaining its observation time.
 func (s *Store) InvalidateCache() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cacheAt = time.Time{}
+	s.cacheInvalidated = true
+	s.observations = nil
 }

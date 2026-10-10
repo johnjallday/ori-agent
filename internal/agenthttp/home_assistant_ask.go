@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/assistantcontext"
+	"github.com/johnjallday/ori-agent/internal/assistantdiscovery"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -91,6 +92,8 @@ type HomeAssistantAskRequest struct {
 	// Draft names the saved draft the conversation is working on, so the turn
 	// sees its current text. It is read, never written, by a turn.
 	Draft *HomeAssistantDraftRef `json:"draft,omitempty"`
+	// Supplied only by the user's exact lookup-review submission, never tools.
+	ResearchApproval *assistantdiscovery.Review `json:"research_approval,omitempty"`
 }
 
 // HomeAssistantAskResponse is the response for POST /api/home-assistant/ask.
@@ -128,7 +131,12 @@ type HomeAssistantAskResponse struct {
 	DraftContext *HomeAssistantDraftContext `json:"draft_context,omitempty"`
 	// MemoryReview opens the editable fact review for a typed "remember…"
 	// request. Nothing has been written when it is set.
-	MemoryReview *PersonalAssistantMemoryReview `json:"memory_review,omitempty"`
+	MemoryReview          *PersonalAssistantMemoryReview `json:"memory_review,omitempty"`
+	ResearchReview        *assistantdiscovery.Review     `json:"research_review,omitempty"`
+	ResearchContext       *HomeAssistantRouteContext     `json:"research_context,omitempty"`
+	ResearchFolderContext *HomeAssistantFolderRef        `json:"research_folder_context,omitempty"`
+	ResearchResult        *assistantdiscovery.Result     `json:"research_result,omitempty"`
+	ResearchCapability    *AssistantResearchCapability   `json:"research_capability,omitempty"`
 }
 
 // HomeActionMutator executes confirmed state-changing actions. The server wires a
@@ -184,6 +192,11 @@ type HomeAssistantAskHandler struct {
 	// Notes is the canonical note store narrowed to two reads, for the panel's
 	// brokered readers. Nil leaves note reading unsupported, and says so.
 	Notes AssistantNoteReader
+	// Discovery shares installed/catalog metadata owners. External tools are
+	// not registered until the exact research-review broker is wired.
+	Discovery AssistantDiscoveryReader
+	// Ephemeral research offers belong to this handler, not saved history.
+	ResearchReviews *assistantdiscovery.ReviewGate
 	// Files resolves the host-owned folders of a workspace's readable files, for
 	// the panel's file readers. Nil leaves file reading unsupported.
 	Files       AssistantFileSource
@@ -212,7 +225,9 @@ func NewHomeAssistantAskHandler(sources HomeSnapshotSources, factory *llm.Factor
 	if now == nil {
 		now = time.Now
 	}
-	return &HomeAssistantAskHandler{Sources: sources, LLMFactory: factory, SystemModel: systemModel, now: now}
+	handler := &HomeAssistantAskHandler{Sources: sources, LLMFactory: factory, SystemModel: systemModel, now: now}
+	handler.ResearchReviews = handler.NewResearchReviewGate()
+	return handler
 }
 
 // SetMutator wires the confirmed-action executor.
@@ -280,6 +295,8 @@ func (h *HomeAssistantAskHandler) AskHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	resp := h.Ask(r.Context(), req)
+	// Offers/receipts contain tab-local current state, never reusable grants.
+	w.Header().Set("Cache-Control", "no-store")
 	orihttp.WriteJSON(w, resp)
 }
 
@@ -290,6 +307,13 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	intent := strings.TrimSpace(req.Intent)
 	if intent == "" {
 		intent = homeAssistantAppIntrospectionIntent.Key
+	}
+	if req.ResearchApproval != nil {
+		if req.ConfirmedAction != nil {
+			return HomeAssistantAskResponse{Response: "Research approval cannot confirm an action. Nothing was sent or changed.", Intent: homeAssistantConversationIntent.Key, ModelUnavailable: true}
+		}
+		prompt = "Compare the results of this exact user-approved public lookup. Explain evidence limits, missing dependencies and useful reviewed next steps; do not execute anything."
+		intent = homeAssistantConversationIntent.Key
 	}
 
 	workContext, contextErr := h.resolvePersonalAssistantContext(ctx)
@@ -345,6 +369,20 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		ctx = context.WithValue(ctx, workspaceTurnContextKey{}, scope)
 		if conversation != nil {
 			conversation.turn = scope
+		}
+	}
+
+	var research *assistantResearchTurn
+	if scope != nil && conversation != nil && h.Discovery != nil && h.ResearchReviews != nil {
+		research = &assistantResearchTurn{handler: h, turn: scope, conversation: conversation, refs: *refs, budget: assistantdiscovery.NewTurnBudget(ctx, scope.ledger.charge), folder: req.FolderContext != nil, folderRef: req.FolderContext}
+		defer research.budget.Close()
+		defer func() { research.finalize(ctx, &response) }()
+		ctx = context.WithValue(research.budget.Context(), researchTurnKey{}, research)
+	}
+	defer func() { response.ResearchCapability = h.researchCapability() }()
+	if req.ResearchApproval != nil {
+		if research == nil || research.approve(ctx, *req.ResearchApproval) != nil {
+			return HomeAssistantAskResponse{Response: "That research review expired, changed, or became unavailable. Nothing was installed or granted; review the exact lookup again.", Intent: intent, Identity: identity, Conversation: unstoredConversation(conversation), ModelUnavailable: true}
 		}
 	}
 
@@ -531,14 +569,21 @@ func (h *HomeAssistantAskHandler) conversationModelUnavailable(ctx context.Conte
 		name = "Your assistant"
 	}
 	msg := fmt.Sprintf("%s could not reach the system model, so there is no answer yet. Your message was not sent; try again in a moment.", name)
+	state := unstoredConversation(conversation)
 	if errors.Is(err, errHomeModelNotConfigured) {
 		msg = fmt.Sprintf("%s needs a system model to answer. Choose one in Settings, then send your message again.", name)
+	}
+	if errors.Is(err, assistantdiscovery.ErrReviewRefused) || errors.Is(err, errAssistantWorkspaceScopeChanged) {
+		msg = "The conversation or its permissions changed while this reply was being prepared. No answer was saved and no setup ran; reopen the context before trying again."
+		if state != nil {
+			state.Error = "context_save_failed"
+		}
 	}
 	h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "model_unavailable", ActionCount: 1})
 	return HomeAssistantAskResponse{
 		Response: msg, Intent: intent, Identity: homeAssistantIdentity(workContext),
 		Actions:          []HomeAction{{ID: "nav-settings", Type: HomeActionNavigate, Label: "Go to Settings", Href: "/settings"}},
-		Conversation:     unstoredConversation(conversation),
+		Conversation:     state,
 		ModelUnavailable: true,
 	}
 }
@@ -611,6 +656,10 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	if scope != nil {
 		registry = &panelToolRegistry{handler: h, turn: scope, home: newHomeToolRegistry(h.scopedPanelSources(ctx, turn.sources, scope)), ledger: scope.ledger}
 	}
+	research := researchTurnFromContext(ctx)
+	if research != nil {
+		registry = &assistantResearchRegistry{base: registry, research: research}
+	}
 	// A reader is offered only on a path that can run it; the prompt then says
 	// exactly which readers exist, so no path claims a read it cannot make.
 	var tools []llm.Tool
@@ -629,14 +678,21 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	}
 
 	conversation := make([]llm.Message, 0, len(turn.history)+2)
-	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies))
+	conversation = append(conversation, llm.NewSystemMessage(turn.system+plainTextReplies+researchSystemPrompt(research, provider.Capabilities().SupportsTools)))
 	conversation = append(conversation, turn.history...)
-	conversation = append(conversation, llm.NewUserMessage(turn.user+overview))
+	researchEvidence := ""
+	if research != nil && research.result != nil {
+		researchEvidence = researchReferencePrompt(*research.result)
+	}
+	conversation = append(conversation, llm.NewUserMessage(turn.user+overview+researchEvidence))
 	if len(tools) == 0 && scope != nil {
 		conversation[0].Content += "\nThis configured provider cannot execute Ori-brokered readers. Use the validated overview and review controls only; explain any deeper-read limitation without claiming a read happened."
 	}
 
 	for round := 0; round < homeMaxToolRounds; round++ {
+		if research != nil && research.revalidate(ctx) != nil {
+			return "", assistantdiscovery.ErrReviewRefused
+		}
 		if err := h.revalidateWorkspaceTurn(ctx, scope); err != nil {
 			return "", err
 		}
@@ -648,6 +704,12 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 		})
 		if chatErr != nil {
 			return "", chatErr
+		}
+		if len(resp.ToolCalls) > 8 {
+			return "", errors.New("tool call batch exceeds bounded turn limit")
+		}
+		if research != nil && research.revalidate(ctx) != nil {
+			return "", assistantdiscovery.ErrReviewRefused
 		}
 		if len(resp.ToolCalls) == 0 {
 			if strings.TrimSpace(resp.Content) == "" {
@@ -687,6 +749,9 @@ func (h *HomeAssistantAskHandler) runModel(ctx context.Context, turn modelTurn) 
 	resp, chatErr := provider.Chat(ctx, llm.ChatRequest{Model: model, Messages: conversation, Temperature: turn.temperature})
 	if chatErr != nil {
 		return "", chatErr
+	}
+	if research != nil && research.revalidate(ctx) != nil {
+		return "", assistantdiscovery.ErrReviewRefused
 	}
 	if strings.TrimSpace(resp.Content) == "" {
 		return "I gathered some data but couldn't compose a final summary. Try narrowing the question.", nil

@@ -60,11 +60,16 @@ func (s *SQLiteStore) AppendAttributedTurn(ctx context.Context, id string, owner
 	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
 		var actualWorkspace sql.NullString
 		var actualAgent string
-		if err := tx.QueryRowContext(ctx, `SELECT workspace_id,agent_name FROM sessions WHERE id=?`, id).Scan(&actualWorkspace, &actualAgent); err != nil {
+		var actualCount int
+		var actualUpdated time.Time
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id,agent_name,message_count,updated_at FROM sessions WHERE id=?`, id).Scan(&actualWorkspace, &actualAgent, &actualCount, &actualUpdated); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrSessionNotFound
 			}
 			return err
+		}
+		if owner.ExpectedConversationRevision != "" && owner.ExpectedConversationRevision != assistantcontext.ConversationRevision(actualUpdated, actualCount) {
+			return ErrFolderContextConflict
 		}
 		if actualWorkspace.String != owner.WorkspaceID || !strings.EqualFold(actualAgent, owner.AgentName) {
 			return ErrFolderContextConflict

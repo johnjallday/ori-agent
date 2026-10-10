@@ -18,6 +18,7 @@ type RegistryEntry struct {
 	License     string            `json:"license,omitempty"`
 	EnvRequired map[string]string `json:"env_required,omitempty"`
 	Source      string            `json:"source"` // display name of the source registry
+	SourceID    string            `json:"source_id,omitempty"`
 }
 
 // RegistrySource represents a configured registry source URL.

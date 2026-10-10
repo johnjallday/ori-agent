@@ -445,7 +445,7 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 	if context != nil && context.Origin == "personal_assistant_panel" && workContext != nil && workContext.ReadyForWork() && isCompositionRequest(prompt) && (match == nil || isAssistantOwnAgent(match.Name, workContext)) {
 		return assistantConversationRoute(workContext), nil
 	}
-	if !(context != nil && context.Origin == "personal_assistant_panel" && panelExplicitExecution(prompt)) &&
+	if (context == nil || context.Origin != "personal_assistant_panel" || !panelExplicitExecution(prompt)) &&
 		routesToAssistantConversation(workContext, prompt, intent, routeContext, workspaceRecommended, match) {
 		return assistantConversationRoute(workContext), nil
 	}

@@ -10435,7 +10435,8 @@
       (conversations && typeof conversations.request === 'function'
         ? conversations.request(normalizedContext)
         : null);
-    var userRow = confirmedAction ? null : homeAssistantState.lastUserRow;
+    var userRow =
+      confirmedAction || options.researchApproval ? null : homeAssistantState.lastUserRow;
     // With a conversation reference this is a turn in the hired assistant's
     // own conversation; its progress and any failure carry that assistant's
     // name, not the name of an agent that belongs to the page.
@@ -10463,6 +10464,8 @@
       if (confirmedAction) {
         payload.confirmed_action = confirmedAction;
       }
+      if (options.researchApproval && !confirmedAction)
+        payload.research_approval = options.researchApproval;
       if (conversationRef) {
         payload.conversation = conversationRef;
         if (options.folderRef && !confirmedAction) payload.folder_context = options.folderRef;
@@ -10488,6 +10491,13 @@
         );
         return;
       }
+      if (options.researchContextMatches && !options.researchContextMatches()) {
+        conversations &&
+          conversations.notify(
+            'That research reply belongs to the earlier context. Reopen the conversation to see its saved history.'
+          );
+        return;
+      }
       if (conversationRef) window.PersonalAssistantTranscript?.beforeChange?.();
       var responseText = String((data && data.response) || '').trim();
       var assistantRow = responseText
@@ -10509,8 +10519,72 @@
       }
       // A refused or unanswered turn was not sent: put the text back so it can
       // be sent again instead of retyped.
-      if (conversationResult && conversationResult.restoreInput && !confirmedAction) {
+      if (
+        conversationResult &&
+        conversationResult.restoreInput &&
+        !confirmedAction &&
+        !options.researchApproval
+      ) {
         restorePersonalAssistantDraft(text);
+      }
+      if (assistantRow && window.PersonalAssistantResearch) {
+        var researchRefs = data.research_context || normalizedContext;
+        var researchFolder = data.research_folder_context;
+        var researchConversationId = String((data.conversation && data.conversation.id) || '');
+        var researchContextMatches = function () {
+          if (
+            !researchConversationId ||
+            !conversations ||
+            conversations.currentId() !== researchConversationId
+          )
+            return false;
+          if (String(window.location.pathname || '/') !== String(researchRefs.page_path || '/'))
+            return false;
+          var currentPage = buildHomeRouteContext();
+          if (
+            (researchRefs.page_path === '/' ||
+              /^\/workspaces\//.test(researchRefs.page_path || '')) &&
+            String(currentPage.workspace_id || '') !== String(researchRefs.workspace_id || '')
+          )
+            return false;
+          var currentFolder =
+            window.PersonalAssistantFolderContext &&
+            window.PersonalAssistantFolderContext.request();
+          if (researchFolder)
+            return (
+              currentFolder &&
+              currentFolder.selection_id === researchFolder.selection_id &&
+              currentFolder.revision === researchFolder.revision &&
+              JSON.stringify(currentFolder.focus_ids || []) ===
+                JSON.stringify(researchFolder.focus_ids || [])
+            );
+          return !currentFolder;
+        };
+        var researchIsCurrent = function () {
+          return !homeAssistantState.busy && researchContextMatches();
+        };
+        window.PersonalAssistantResearch.renderResponse(assistantRow, data, {
+          post: function (path, body) {
+            return API.post(path, body);
+          },
+          isCurrent: researchIsCurrent,
+          approve: async function (offer) {
+            if (!researchIsCurrent()) throw new Error('Research context changed');
+            // A review never submits/clears the composer's unsent text and does
+            // not pass through routing or ordinary mutation confirmation.
+            await runHomeAssistantInline(
+              'Compare the exact approved public lookup.',
+              offer.context,
+              'assistant_conversation',
+              {
+                conversationRef: offer.conversation,
+                folderRef: offer.folder,
+                researchApproval: offer.review,
+                researchContextMatches: researchContextMatches
+              }
+            );
+          }
+        });
       }
 
       if (data && data.requires_confirmation && data.confirmation) {
@@ -10591,7 +10665,7 @@
             };
       assistantRow = appendHomeAssistantMessage('assistant', failure.message);
       setHomeAssistantRoutingSummary(summaryLabel + ' Failed', failure.summary);
-      if (conversationRef && !confirmedAction) {
+      if (conversationRef && !confirmedAction && !options.researchApproval) {
         restorePersonalAssistantDraft(text);
       }
       if (options.folderRef) {

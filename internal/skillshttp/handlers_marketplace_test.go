@@ -1,6 +1,9 @@
 package skillshttp
 
-import "testing"
+import (
+	"github.com/johnjallday/ori-agent/internal/skills"
+	"testing"
+)
 
 func TestIsValidMarketplacePackageSpec(t *testing.T) {
 	tests := []struct {
@@ -57,11 +60,9 @@ func TestNormalizeMarketplaceSkillName(t *testing.T) {
 	}
 }
 
-func TestSanitizeMarketplaceQuery(t *testing.T) {
-	raw := "   find    skills   for  ui   "
-	got := sanitizeMarketplaceQuery(raw)
-	if got != "find skills for ui" {
-		t.Fatalf("sanitizeMarketplaceQuery() = %q", got)
+func TestMarketplaceQueryValidationKeepsExactReviewText(t *testing.T) {
+	if err := skills.ValidateMarketplaceQuery("   find    skills   for  ui   "); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -72,7 +73,7 @@ func TestParseSkillsFindOutput(t *testing.T) {
 		"\x1b[38;5;145mmcp-hub.momenta.works/finder@find-skills-ai\x1b[0m \x1b[36m74 installs\x1b[0m\n" +
 		"\x1b[38;5;102m└ https://skills.sh/mcp-hub.momenta.works/finder/find-skills-ai\x1b[0m\n"
 
-	results := parseSkillsFindOutput(output, 10)
+	results := skills.ParseMarketplaceSearchOutput(output, 8).Results
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}

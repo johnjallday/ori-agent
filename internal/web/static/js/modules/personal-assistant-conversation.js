@@ -6,6 +6,7 @@
 // share a thread by accident.
 
 import { renderTurnWorkspace, renderTurnSources } from './personal-assistant-workspace-context.js';
+import { renderResearchSources } from './personal-assistant-research.js';
 import { renderFolderFocus } from './personal-assistant-folder-tree.js';
 import { folderDiscussionBinding } from './personal-assistant-folder-presentation.js';
 
@@ -270,8 +271,10 @@ async function resume(id, options = {}) {
       if (message.role === 'user' && !message.imported)
         renderFolderFocus(row, message.folder_focus);
       // A saved reply lists what it read then; reloading reads nothing again.
-      if (message.role === 'assistant')
+      if (message.role === 'assistant') {
         renderTurnSources(row, message.workspace_context, { historical: true });
+        renderResearchSources(row, message.workspace_context, { historical: true });
+      }
       attachMessage(row, conversation.id, message.id);
     }
     // The panel keeps a bounded number of rows, so a long conversation shows
@@ -423,6 +426,7 @@ function applyReply(data, rows = {}) {
     renderTurnWorkspace(rows.userRow, data.workspace_context);
     renderTurnWorkspace(rows.assistantRow, data.workspace_context);
     renderTurnSources(rows.assistantRow, data.workspace_context);
+    renderResearchSources(rows.assistantRow, data.workspace_context);
   }
   const reply = data?.conversation;
   if (!reply) return { notice: '', stored: false, restoreInput: shouldRestoreInput(data) };

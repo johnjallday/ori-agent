@@ -5,9 +5,18 @@ import (
 	"errors"
 
 	"github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/assistantcontext"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/session"
 )
+
+func (a personalAssistantConversationAdapter) ReadResearchFolder(ctx context.Context, id string, owner assistantcontext.SaveOwner) (assistantcontext.ResearchFolderRef, error) {
+	store, ok := a.store.(session.AssistantResearchFolderStore)
+	if !ok {
+		return assistantcontext.ResearchFolderRef{}, foldercontext.ErrInvalid
+	}
+	return store.ReadAssistantResearchFolder(ctx, id, owner)
+}
 
 func folderConversationMessages(messages []session.Message) []agenthttp.PersonalAssistantConversationMessage {
 	out := make([]agenthttp.PersonalAssistantConversationMessage, 0, len(messages))

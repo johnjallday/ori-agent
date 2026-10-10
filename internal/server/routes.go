@@ -336,6 +336,10 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	homeAssistantRouteHandler.PanelContext = homeAssistantAskHandler.ResolvePanelRouteContext
 	homeAssistantRouteHandler.ConversationRoute = homeAssistantAskHandler.ValidateRouteConversation
 	mux.HandleFunc("/api/home-assistant/ask", homeAssistantAskHandler.AskHandler)
+	// Review/cancel are data-only. Only Ask consumes a canonical exact approval,
+	// through the dedicated budgeted research broker; there is no URL proxy.
+	mux.HandleFunc("POST /api/home-assistant/research/review", homeAssistantAskHandler.ResearchReviewHandler)
+	mux.HandleFunc("POST /api/home-assistant/research/cancel", homeAssistantAskHandler.CancelResearchReviewHandler)
 	mux.HandleFunc("POST /api/home-assistant/context", homeAssistantAskHandler.WorkspaceContextHandler)
 	mux.HandleFunc("GET /api/home-assistant/conversations", homeAssistantAskHandler.ConversationsHandler)
 	mux.HandleFunc("GET /api/home-assistant/conversations/{id}", homeAssistantAskHandler.ConversationHandler)

@@ -47,7 +47,9 @@ type assistantWorkspaceTurn struct {
 	ledger *evidenceLedger
 	// sources are the sources the finished answer may show, set once the
 	// model's citations have been checked against the ledger.
-	sources []assistantcontext.SourceRef
+	sources          []assistantcontext.SourceRef
+	researchSources  []assistantcontext.ResearchRef
+	researchRevision string
 	// prepared is how long resolving the context and its overview took.
 	prepared time.Duration
 }
@@ -93,7 +95,7 @@ func (t *assistantWorkspaceTurn) logDiagnostics(ctx context.Context, readers, fi
 // the response reports and what is saved with the turn.
 func (t *assistantWorkspaceTurn) attribution() *assistantcontext.Attribution {
 	out := t.projection.Attribution()
-	out.Sources = t.sources
+	out.Sources, out.Research = t.sources, t.researchSources
 	return out
 }
 
@@ -104,6 +106,9 @@ func (t *assistantWorkspaceTurn) finishAnswer(answer string) string {
 		return answer
 	}
 	answer, t.sources = t.ledger.cite(answer)
+	t.researchSources = t.ledger.researchReferences()
+	answer, bounded := boundedTurnSources(answer, t.attribution())
+	t.sources, t.researchSources = bounded.Sources, bounded.Research
 	return answer
 }
 
@@ -195,7 +200,7 @@ func (h *HomeAssistantAskHandler) ResolvePanelRouteContext(ctx context.Context, 
 }
 
 func (t *assistantWorkspaceTurn) saveOwner() assistantcontext.SaveOwner {
-	owner := assistantcontext.SaveOwner{UserID: t.userID, WorkspaceID: t.hq, AgentName: t.profile, StateVersion: t.relationshipVersion}
+	owner := assistantcontext.SaveOwner{UserID: t.userID, WorkspaceID: t.hq, AgentName: t.profile, StateVersion: t.relationshipVersion, ExpectedConversationRevision: t.researchRevision}
 	for _, ref := range []*assistantcontext.WorkspaceRef{t.projection.Location, t.projection.Subject} {
 		if ref != nil {
 			owner.ContextWorkspaceIDs = append(owner.ContextWorkspaceIDs, ref.ID)

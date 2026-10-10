@@ -330,6 +330,10 @@ func (h *HomeAssistantAskHandler) storeTurn(ctx context.Context, conversation *o
 	if userText == "" && assistantText == "" {
 		return state
 	}
+	if research := researchTurnFromContext(ctx); research != nil && research.revalidate(ctx) != nil {
+		state.Error = "context_save_failed"
+		return state
+	}
 	if err := h.revalidateWorkspaceTurn(ctx, conversation.turn); err != nil {
 		state.Error = "context_save_failed"
 		return state

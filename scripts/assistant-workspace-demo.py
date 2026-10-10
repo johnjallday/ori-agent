@@ -28,6 +28,8 @@ MODEL = "ori-workspace-fixture"
 # The runs on plain wt demo, by flag: the spec, the variable that hands it the
 # sandbox path, and the log kept with the evidence. No flag runs DEFAULT_DEMO.
 PLAIN_DEMOS = {
+    "discovery_research": ("tests/personal-assistant-discovery.spec.ts",
+                           "ORI_DISCOVERY_RESEARCH_SANDBOX", "discovery-research.log"),
     "discovery_discussion": ("tests/personal-assistant-discovery-discussion.spec.ts",
                              "ORI_DISCOVERY_DISCUSSION_SANDBOX", "discovery-discussion.log"),
     "conversation_first": ("tests/personal-assistant-conversation-first.spec.ts",
@@ -332,7 +334,33 @@ def evidence_directory(value):
     return path
 
 
-def provider_handler(state_dir, folder_response=False):
+def research_step(user, results, tools_offered):
+    """Fixture decisions only; public reads still run through production owners."""
+    content = user["content"]
+    reference = re.search(r"<research_reference>(.*?)</research_reference>", content, re.S)
+    if reference:
+        result = json.loads(reference.group(1))
+        candidates = result.get("candidates", [])
+        names = [c.get("name", "Candidate") + (" [" + c["receipt"]["key"] + "]" if c.get("receipt", {}).get("key") else "") for c in candidates]
+        return {"answer": "Deterministic research comparison fixture: " + str(result.get("availability", "unavailable")) + ". " + "; ".join(names) + ". Listings and bounded documents are not operational verification; grants, configuration and undeclared dependencies remain unknown. No installation ran."}
+    if results:
+        result = json.loads(results[-1])
+        if result.get("status") == "review_required":
+            return {"answer": "Deterministic research fixture: review the exact public lookup below. Nothing has been sent or installed."}
+        candidates = result.get("candidates", [])
+        return {"answer": "Deterministic cached-catalog fixture: " + "; ".join(c.get("name", "Candidate") + " [" + c.get("receipt", {}).get("key", "S999") + "]" for c in candidates) + ". Metadata only, not a tested integration."}
+    if tools_offered and "public document" in content.lower():
+        target = re.search(r"https?://[^\s<>]+", content)
+        if target:
+            return {"tool": "assistant_propose_research_lookup", "arguments": {"operation": "public_document", "url": target.group(0)}}
+    if tools_offered and "telegram" in content.lower():
+        return {"tool": "assistant_propose_research_lookup", "arguments": {"operation": "skills_catalog", "query": "Telegram community management"}}
+    if tools_offered and "cached mcp" in content.lower():
+        return {"tool": "assistant_mcp_catalog", "arguments": {"query": "filesystem"}}
+    return None
+
+
+def provider_handler(state_dir, folder_response=False, discovery_research=False):
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass  # Never print prompt bodies, paths or credentials.
@@ -368,7 +396,8 @@ def provider_handler(state_dir, folder_response=False):
                 # Only the user's own words choose a demo; the overview Ori
                 # appends (which lists note titles) never does.
                 own_words, offered = user["content"].split("\n\n##", 1)[0], bool(request.get("tools"))
-                step = ((folder_response_step(user["content"]) if folder_response else None) or
+                step = ((research_step(user, results, offered) if discovery_research else None) or
+                        (folder_response_step(user["content"]) if folder_response else None) or
                         reader_step(own_words, results, offered) or file_step(own_words, results, offered))
                 trace_reader_turn(state_dir, results, offered, step)
                 # Hold generation, including folder replies, rather than mocking
@@ -385,7 +414,7 @@ def provider_handler(state_dir, folder_response=False):
                         if time.monotonic() >= deadline:
                             raise ValueError("fixture hold timed out")
                         time.sleep(0.02)
-                scenario = conversation_reply(own_words)
+                scenario = None if discovery_research else conversation_reply(own_words)
                 if scenario:
                     step = {"answer": scenario}
                 if step:
@@ -436,6 +465,8 @@ def main():
     parser.add_argument("--port", type=int, default=8954)
     parser.add_argument("--evidence-dir", type=evidence_directory,
                         help="Keep runner logs and compatible captures inside this worktree's tasks/evidence")
+    parser.add_argument("--discovery-research", action="store_true",
+                        help="wt demo: exact reviewed public catalog/document smoke, actual source owners, no install or live model")
     parser.add_argument("--discovery-discussion", action="store_true",
                         help="wt demo: exploratory discussion, same canonical thread and an unconfirmed setup review")
     parser.add_argument("--conversation-first", action="store_true",
@@ -487,7 +518,7 @@ def main():
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
         state = Path(temp)
-        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response))
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research))
         thread = threading.Thread(target=provider.serve_forever, daemon=True)
         thread.start()
         # Child-only isolation. Do not read or alter user credential files.

@@ -28,9 +28,10 @@ func writeConversationRouteRefusal(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	status := http.StatusConflict
-	if refusal.code == PersonalAssistantConversationNotFound {
+	switch refusal.code {
+	case PersonalAssistantConversationNotFound:
 		status = http.StatusNotFound
-	} else if refusal.code == PersonalAssistantConversationUnavailable {
+	case PersonalAssistantConversationUnavailable:
 		status = http.StatusServiceUnavailable
 	}
 	message := conversationRefusal(refusal.code, "", nil).Response

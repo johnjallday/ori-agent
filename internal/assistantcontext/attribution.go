@@ -12,11 +12,12 @@ const AttributionLimit = 8000
 // SaveOwner supplies expected canonical identity for an atomic save CAS. It
 // is constructed only by the server and is neither serialized nor a grant.
 type SaveOwner struct {
-	UserID              string
-	WorkspaceID         string
-	AgentName           string
-	StateVersion        int64
-	ContextWorkspaceIDs []string
+	UserID                       string
+	WorkspaceID                  string
+	AgentName                    string
+	StateVersion                 int64
+	ContextWorkspaceIDs          []string
+	ExpectedConversationRevision string
 }
 
 // Attribution retains references/versions only, never an overview or source
@@ -35,7 +36,8 @@ type Attribution struct {
 	ReadAt          time.Time     `json:"read_at"`
 	Historical      bool          `json:"historical,omitempty"`
 	// Sources are the sources whose content that turn delivered to the model.
-	Sources []SourceRef `json:"sources,omitempty"`
+	Sources  []SourceRef   `json:"sources,omitempty"`
+	Research []ResearchRef `json:"research,omitempty"`
 }
 
 func (t Turn) Attribution() *Attribution {
@@ -61,6 +63,12 @@ func EncodeAttribution(value *Attribution) (string, error) {
 	if len(bounded.Sources) > SourceLimit {
 		bounded.Sources = bounded.Sources[:SourceLimit]
 	}
+	bounded.Research = nil
+	for _, ref := range value.Research {
+		if validResearchRef(ref) && len(bounded.Sources)+len(bounded.Research) < SourceLimit {
+			bounded.Research = append(bounded.Research, ref)
+		}
+	}
 	for {
 		data, err := json.Marshal(bounded)
 		if err != nil {
@@ -69,21 +77,24 @@ func EncodeAttribution(value *Attribution) (string, error) {
 		if utf8.RuneCount(data) <= AttributionLimit {
 			return string(data), nil
 		}
-		if len(bounded.Sources) == 0 {
+		if len(bounded.Research) > 0 {
+			bounded.Research = bounded.Research[:len(bounded.Research)-1]
+		} else if len(bounded.Sources) > 0 {
+			bounded.Sources = bounded.Sources[:len(bounded.Sources)-1]
+		} else {
 			return "", errors.New("invalid turn attribution size")
 		}
-		bounded.Sources = bounded.Sources[:len(bounded.Sources)-1]
 	}
 }
 
 // WithoutSources is the scope alone, for places that restate where an earlier
 // turn was asked but must not restate what it read.
 func (a *Attribution) WithoutSources() *Attribution {
-	if a == nil || len(a.Sources) == 0 {
+	if a == nil || len(a.Sources)+len(a.Research) == 0 {
 		return a
 	}
 	scope := *a
-	scope.Sources = nil
+	scope.Sources, scope.Research = nil, nil
 	return &scope
 }
 func DecodeAttribution(data string) *Attribution {
@@ -95,5 +106,12 @@ func DecodeAttribution(data string) *Attribution {
 		return nil
 	}
 	value.Historical = true
+	refs := []ResearchRef{}
+	for _, ref := range value.Research {
+		if validResearchRef(ref) && len(refs) < SourceLimit {
+			refs = append(refs, ref)
+		}
+	}
+	value.Research = refs
 	return &value
 }

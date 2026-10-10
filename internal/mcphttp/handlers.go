@@ -45,6 +45,10 @@ func (h *Handler) SetRegistryStore(s *mcpregistry.Store) {
 	h.regFetcher = mcpregistry.NewFetcher()
 }
 
+// CatalogStore returns the existing registry metadata/cache owner for the
+// assistant's read-only adapter. No second registry cache is constructed.
+func (h *Handler) CatalogStore() *mcpregistry.Store { return h.regStore }
+
 // SetVaultOAuthStore wires the vault store used to read safe (secret-free)
 // OAuth status for remote servers. Set once the vault store exists, later
 // than NewHandler (see internal/server/builder_handlers.go).
@@ -59,8 +63,9 @@ func (h *Handler) ListServersHandler(w http.ResponseWriter, r *http.Request) {
 	stats := h.registry.GetServerStats()
 
 	response := map[string]any{
-		"servers": servers,
-		"stats":   stats,
+		"servers":             servers,
+		"stats":               stats,
+		"discovery_inventory": h.registry.CapabilityInventory(r.Context(), 200),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -466,28 +471,14 @@ func (h *Handler) SearchServersHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	entries := h.regStore.GetCachedEntries()
-
-	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	category := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("category")))
-	source := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source")))
-
-	filtered := make([]mcpregistry.RegistryEntry, 0, len(entries))
-	for _, e := range entries {
-		if q != "" {
-			haystack := strings.ToLower(e.Name + " " + e.Description + " " + e.Category + " " + strings.Join(e.Tags, " "))
-			if !strings.Contains(haystack, q) {
-				continue
-			}
-		}
-		if category != "" && category != "all" && strings.ToLower(e.Category) != category {
-			continue
-		}
-		if source != "" && source != "all" && strings.ToLower(e.Source) != source {
-			continue
-		}
-		filtered = append(filtered, e)
+	result := h.regStore.SearchCached(r.Context(), mcpregistry.SearchQuery{
+		Text: r.URL.Query().Get("q"), Category: r.URL.Query().Get("category"), Source: r.URL.Query().Get("source"),
+	})
+	filtered := make([]mcpregistry.RegistryEntry, 0, len(result.Matches))
+	for _, match := range result.Matches {
+		filtered = append(filtered, match.Entry)
 	}
+	w.Header().Set("X-Ori-Catalog-Availability", result.State)
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(filtered); encErr != nil {
