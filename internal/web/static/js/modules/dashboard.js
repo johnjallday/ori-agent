@@ -10515,7 +10515,12 @@
 
       if (data && data.requires_confirmation && data.confirmation) {
         inlineReview = true;
-        confirmHomeAction(data.confirmation, routeContext, intent);
+        confirmHomeAction(
+          data.confirmation,
+          routeContext,
+          intent,
+          String(data.response || '').trim() === String(data.confirmation.summary || '').trim()
+        );
         return;
       }
 
@@ -10740,8 +10745,12 @@
   // state-changing action; on confirm it re-calls /ask with confirmed_action.
   // A build_workspace confirmation is the exception: the server never runs it,
   // and Confirm opens the assistant's build in this browser (FR41).
-  function confirmHomeAction(confirmation, routeContext, intent) {
-    appendHomeAssistantMessage('assistant', String(confirmation.summary || 'Confirm this change?'));
+  function confirmHomeAction(confirmation, routeContext, intent, summaryShown) {
+    if (!summaryShown)
+      appendHomeAssistantMessage(
+        'assistant',
+        String(confirmation.summary || 'Confirm this change?')
+      );
     setHomeAssistantRoutingSummary('Confirm', 'Review and confirm this change.');
     var args = confirmation.arguments || {};
     renderHomeAssistantActions([
@@ -13309,17 +13318,28 @@
     clearHomeAssistantPlanning();
     clearHomeAssistantInlineReply();
     var userRow = appendHomeAssistantMessage('user', text);
-    setHomeAssistantBusy(true, 'Checking workspace context…');
+    setHomeAssistantBusy(true, 'Preparing your request…');
     try {
       var route = await API.post('/api/home-assistant/route', {
         prompt: text,
         context: routeContext,
         conversation: conversationRef
       });
-      if (!route) throw new Error('Panel routing unavailable');
+      if (!route || typeof route.intent !== 'string') throw new Error('Panel routing unavailable');
+      if (conversationRef && conversations.currentId() !== String(conversationRef.id || '')) {
+        conversations.notify(
+          'The conversation changed while routing. Your draft is kept; send it in the intended conversation.'
+        );
+        restorePersonalAssistantDraft(text);
+        return true;
+      }
+      // Explicit workspace creation opens Ask's real server-owned review,
+      // never the legacy create-by-name shortcut. Setup gates are deterministic.
+      var reviewedInline = ['workspace_create', 'personal_assistant_setup'].includes(route.intent);
       if (
-        route.route_mode !== 'home_inline' ||
-        !['assistant_conversation', 'app_introspection', 'app_navigation'].includes(route.intent)
+        !reviewedInline &&
+        (route.route_mode !== 'home_inline' ||
+          !['assistant_conversation', 'app_introspection', 'app_navigation'].includes(route.intent))
       ) {
         // The non-inline route retains its existing progress/confirmation UI.
         // Retire only this provisional unsaved row before the shared path adds it.
@@ -13327,7 +13347,9 @@
         userRow?.remove();
         window.PersonalAssistantTranscript?.pendingReply?.(false);
         homeAssistantState.personalConversation = false;
-        return false;
+        // Preserve the accepted server route for utility/specialist/review
+        // handling; no second route request or local project reclassification.
+        return { route: route };
       }
       clearHomeAssistantPlanning();
       clearHomeAssistantInlineReply();
@@ -13363,7 +13385,9 @@
       await runPersonalFolderTurn(text, folderRouteContext, folderRef);
       return;
     }
-    if (await runPersonalPanelTurn(text, folderRouteContext)) return;
+    var panelTurn = await runPersonalPanelTurn(text, folderRouteContext);
+    if (panelTurn === true) return;
+    var acceptedPanelRoute = panelTurn && panelTurn.route;
     // From here the request is for the page's own agent or a specialist, so
     // the hired assistant's name no longer labels it.
     homeAssistantState.hiredAssistantTurn = false;
@@ -13378,6 +13402,7 @@
     var workspaceSlashCommand = parseWorkspaceSlashCommand(text);
     var inferredWorkspaceModeCommand = false;
     if (
+      !acceptedPanelRoute &&
       !workspaceSlashCommand &&
       inWorkspaceContext &&
       !(options && options.skipWorkspacePromptMode)
@@ -13386,14 +13411,22 @@
       inferredWorkspaceModeCommand = Boolean(workspaceSlashCommand);
     }
 
-    if (homeAssistantState.awaitingCreateConfirmation && isAffirmativeConfirmation(text)) {
+    if (
+      !acceptedPanelRoute &&
+      homeAssistantState.awaitingCreateConfirmation &&
+      isAffirmativeConfirmation(text)
+    ) {
       appendHomeAssistantMessage('user', text);
       setHomeAssistantRoutingSummary('Agent Creation', 'Confirmed. Creating a new agent…');
       await createAgentForPendingTask();
       return;
     }
 
-    if (homeAssistantState.awaitingCreateConfirmation && isNegativeConfirmation(text)) {
+    if (
+      !acceptedPanelRoute &&
+      homeAssistantState.awaitingCreateConfirmation &&
+      isNegativeConfirmation(text)
+    ) {
       appendHomeAssistantMessage('user', text);
       homeAssistantState.awaitingCreateConfirmation = false;
       appendHomeAssistantMessage('assistant', 'No problem. Ask another task when you are ready.');
@@ -13430,7 +13463,7 @@
       if (slashHandled) return;
     }
 
-    if (directWorkspaceCommand && directWorkspaceCommand.name) {
+    if (!acceptedPanelRoute && directWorkspaceCommand && directWorkspaceCommand.name) {
       // The assistant builds it with the user when it can (FR40); the whole
       // sentence is its first turn. Otherwise the seeded dialog opens as before.
       if (await openBuildWithAssistant(text)) return;
@@ -13439,6 +13472,7 @@
     }
 
     if (
+      !acceptedPanelRoute &&
       inWorkspaceContext &&
       !promptRequestsWorkspaceSwitch(text) &&
       homeAssistantState.pendingIntent.key !== 'utility_direct'
@@ -13523,7 +13557,7 @@
     setHomeAssistantRoutingSummary('Routing', 'Analyzing task and selecting the best agent…');
 
     try {
-      var routeData = await routePromptWithBackend(text, routeContext);
+      var routeData = acceptedPanelRoute || (await routePromptWithBackend(text, routeContext));
       homeAssistantState.pendingRouteData = routeData;
       var match = null;
       var useFallbackRouting = !routeData;
@@ -13531,7 +13565,11 @@
 
       if (routeData) {
         homeAssistantState.pendingIntent = HOME_INTENTS[routeData.intent] || detectHomeIntent(text);
-        if (appLaunchRequest && homeAssistantState.pendingIntent.key === 'general_task') {
+        if (
+          !acceptedPanelRoute &&
+          appLaunchRequest &&
+          homeAssistantState.pendingIntent.key === 'general_task'
+        ) {
           homeAssistantState.pendingIntent = HOME_INTENTS.app_launch;
         }
         if (typeof routeData.suggested_agent_name === 'string') {

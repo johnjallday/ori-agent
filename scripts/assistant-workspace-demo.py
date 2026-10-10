@@ -28,6 +28,8 @@ MODEL = "ori-workspace-fixture"
 # The runs on plain wt demo, by flag: the spec, the variable that hands it the
 # sandbox path, and the log kept with the evidence. No flag runs DEFAULT_DEMO.
 PLAIN_DEMOS = {
+    "discovery_discussion": ("tests/personal-assistant-discovery-discussion.spec.ts",
+                             "ORI_DISCOVERY_DISCUSSION_SANDBOX", "discovery-discussion.log"),
     "conversation_first": ("tests/personal-assistant-conversation-first.spec.ts",
                            "ORI_WORKSPACE_CONVERSATIONFIRST_SANDBOX", "conversation-first.log"),
     "folder_response": ("tests/personal-assistant-folder-response.spec.ts",
@@ -304,6 +306,14 @@ def folder_response_step(content):
 
 def conversation_reply(prompt):
     """Explicit synthetic scenario only; never infer it from workspace metadata."""
+    if prompt in {
+        "Should we build a community platform for musicians?",
+        "No, I don't want to develop anyone's talent. Let's compare community ideas.",
+        "Could Ori help people build communities?",
+        "Is there a Telegram skill?",
+    }:
+        return ("Deterministic discussion fixture: compare community options, not talent coaching. "
+                "No external catalog or document was read and no setup was performed.")
     if prompt.startswith("Conversation fixture: long answer"):
         return "Beginning of the long fixture reply.\n\n" + "\n\n".join(
             f"Section {index + 1}. This is synthetic discussion, not a setup plan. "
@@ -426,6 +436,8 @@ def main():
     parser.add_argument("--port", type=int, default=8954)
     parser.add_argument("--evidence-dir", type=evidence_directory,
                         help="Keep runner logs and compatible captures inside this worktree's tasks/evidence")
+    parser.add_argument("--discovery-discussion", action="store_true",
+                        help="wt demo: exploratory discussion, same canonical thread and an unconfirmed setup review")
     parser.add_argument("--conversation-first", action="store_true",
                         help="wt demo: chronology, passive reply geometry, delayed generation and inline setup")
     parser.add_argument("--reaper-source")

@@ -334,6 +334,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	homeAssistantAskHandler := s.newHomeAssistantAskHandler()
 	homeAssistantRouteHandler.FolderConversation = homeAssistantAskHandler.FolderConversationRoute
 	homeAssistantRouteHandler.PanelContext = homeAssistantAskHandler.ResolvePanelRouteContext
+	homeAssistantRouteHandler.ConversationRoute = homeAssistantAskHandler.ValidateRouteConversation
 	mux.HandleFunc("/api/home-assistant/ask", homeAssistantAskHandler.AskHandler)
 	mux.HandleFunc("POST /api/home-assistant/context", homeAssistantAskHandler.WorkspaceContextHandler)
 	mux.HandleFunc("GET /api/home-assistant/conversations", homeAssistantAskHandler.ConversationsHandler)
