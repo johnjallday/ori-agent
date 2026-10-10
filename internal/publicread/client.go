@@ -98,7 +98,13 @@ func ValidateURL(raw string) (string, error) {
 	if ContainsCredentialMaterial(u.Path) {
 		return "", ErrUnsafeURL
 	}
-	for key, values := range u.Query() {
+	// URL.Query silently drops malformed pairs (notably raw semicolons), which
+	// could hide a credential/signed key from the guard. Refuse, never recover.
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", ErrUnsafeURL
+	}
+	for key, values := range query {
 		if credentialKey.MatchString(key) {
 			return "", ErrUnsafeURL
 		}

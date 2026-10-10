@@ -11,6 +11,70 @@ Implementation proceeds in that order with one writer. This document records
 non-sensitive decisions; local runs/screenshots and exact source inventory are
 in `tasks/findings-assistant-workspace-awareness.md` and its evidence directory.
 
+## Conversation discovery amendment
+
+Implemented on `feature/assistant-conversation-discovery`; delivery gates and
+live-model quality are separate. The historical staged notes below are not a
+new permission boundary.
+
+- Exploratory questions, hypotheticals, corrections and writing remain in the
+  current assistant conversation on Home **and** workspace pages. An explicit
+  supported action still uses its existing reviewed owner; neither keywords nor
+  old history authorize setup. Route checks canonical ownership metadata; Ask
+  independently reads bounded owned history and pins its mutation revision.
+- Installed Skills-folder metadata and registered MCP configuration are narrow
+  read-only observations. Compiled/cached MCP catalog reads use the existing
+  source store, never an implicit refresh/server start. The same inventory,
+  parsers and caches serve existing UI owners; no local HTTP recursion, copied
+  installer or inherited agent execution bundle is used.
+- Every public operation requires its own exact five-minute single-use review:
+  skills.sh fixed catalog query, bounded public document URL, one enabled
+  versioned public MCP registry refresh, or an explicitly enabled/selected
+  `utility/duckduckgo-public-v1` instance. Editing prepares a new review and
+  separately requires approval. Context, owner, relationship, conversation
+  revision and folder focus are rebound by the host at approval/read/save.
+  Revocation, replay, restart and changed scope refuse; no inferred follow-ups.
+- External GETs send only the reviewed minimal query/URL, never transcript,
+  Profile/HQ memory, files, cookies or credentials. Strict public DNS/IP dial
+  validation, no environment proxy, standard ports, credential/query checks
+  (malformed query pairs are refused, never silently dropped), 1 MiB decoded-body bounds, approved text types and deadlines apply. Catalogs
+  do not redirect; documents allow at most three exact-origin redirects.
+  Failed, secret-shaped, empty or non-text document reads create no evidence.
+- Listing metadata, inspected document excerpts, installation, configuration,
+  enablement, grants, declared dependencies and verified operation are different
+  observations. Unknown remains unknown. Source IDs, read/observation time,
+  hash/revision, freshness and shared citation keys identify completed reads.
+  Prior receipts are historical references, not current readiness or approval.
+  Receipts persist references only, not fetched excerpts, credentials or tokens.
+- Workspace and research readers share the evidence ledger and four tool rounds
+  (eight calls per batch). Research additionally allows four external operations,
+  eight candidates, 16,000 serialized runes, 4,000 excerpt runes and a 45-second
+  aggregate deadline. HTTP calls have a ten-second deadline. A cache hit grants
+  no second budget, and ordinary discussion performs no discovery scan.
+- The actual **configured system model** determines broker-tool support.
+  Snapshot-only/CLI providers receive no unavailable tools or native fallback;
+  native workspace/execution fields remain empty. Broader search stays disabled
+  unless explicitly configured; no provider switch, paid-service requirement,
+  environment-credential adoption or generic MCP method inference exists.
+- Existing Skills/MCP pages lack a safe exact-candidate setup handoff. Current
+  typed evidence may therefore offer only labelled **manual navigation** to
+  static `/skills` or `/mcp`, in a new tab, with no package/target/approval in the
+  URL. Nothing is preselected or confirmed. Skills storage is Workspace Directory
+  / Skills; installation, enablement, script trust, credentials and workspace/
+  agent access remain separate decisions. The original thread/draft stays here;
+  any later success/readiness claim requires a fresh read-only inventory.
+- Help remains deterministic, read-only and provider-free. Panel switching,
+  canonical draft/Ticket and reviewed-memory owners are unchanged. Status is
+  neutral until an actual saved result; old/late responses cannot retarget or
+  steal focus. Partial Today always states a source limitation, including when
+  no generated opening or per-source detail is available.
+
+[Disposable conversation context](assistant-conversation-context.md) specifies
+Session-owned recap/retrieval, quote validation, current-correction precedence,
+transactional revision/epoch/range CAS, deletion/reset/import behavior and the
+single 24,000-rune answer-history allowance. It does not change workspace source
+permissions or turn historical context into global memory.
+
 ## Characterized baseline
 
 The original `TestAssistantWorkspaceContext_BaselinePendingReviewMissingFromModel`

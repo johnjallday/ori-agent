@@ -91,6 +91,7 @@ test('wt demo: bounded historical context survives an actual isolated server res
   };
   let id: string;
   if (phase === 'seed') {
+    await send('Would a SaaS be useful? Could Ori help people build communities?');
     const first = await send(
       "My goal is community membership. No, I do not want to develop anyone's talent."
     );

@@ -41,8 +41,11 @@ export function publicResearchLink(value) {
     if (/^(?:0|10|127|169\.254|192\.168|172\.(?:1[6-9]|2\d|3[01]))\./.test(host)) return '';
     if (
       /^(?:file|javascript|data):/i.test(text) ||
+      url.search.includes(';') ||
       Array.from(url.searchParams.keys()).some(key =>
-        /(?:api[_-]?key|token|password|secret|signature|auth|session|x-amz|x-goog)/i.test(key)
+        /(?:^key$|^sig$|api[_-]?key|token|password|secret|signature|auth|session|x-amz|x-goog)/i.test(
+          key
+        )
       )
     )
       return '';

@@ -462,8 +462,8 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                 # Only the user's own words choose a demo; the overview Ori
                 # appends (which lists note titles) never does.
                 own_words, offered = user["content"].split("\n\n##", 1)[0], bool(request.get("tools"))
-                step = ((continuity_answer(state_dir, request["messages"]) if discovery_continuity else None) or
-                        (research_step(user, results, offered) if discovery_research else None) or
+                step = ((research_step(user, results, offered) if discovery_research or discovery_continuity else None) or
+                        (continuity_answer(state_dir, request["messages"]) if discovery_continuity else None) or
                         (folder_response_step(user["content"]) if folder_response else None) or
                         reader_step(own_words, results, offered) or file_step(own_words, results, offered))
                 trace_reader_turn(state_dir, results, offered, step)
@@ -481,7 +481,7 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False,
                         if time.monotonic() >= deadline:
                             raise ValueError("fixture hold timed out")
                         time.sleep(0.02)
-                scenario = None if discovery_research else conversation_reply(own_words)
+                scenario = None if discovery_research or discovery_continuity else conversation_reply(own_words)
                 if scenario:
                     step = {"answer": scenario}
                 if step:
@@ -654,7 +654,7 @@ def main():
                                                start_new_session=True)
                     wait_for_demo(process, log, args.port)
                     env["ORI_DISCOVERY_CONTINUITY_PHASE"] = "reopen"
-                    result = subprocess.run(["npx", "playwright", "test", spec, "--workers=1"],
+                    result = subprocess.run(["npx", "playwright", "test", spec, *args.extra_spec, "--workers=1"],
                                             cwd=ROOT, env=env, check=False)
                 output.flush()
                 audit = audit_server_log(log, state)

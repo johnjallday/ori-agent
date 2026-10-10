@@ -79,6 +79,9 @@ test('public research links reject credentials, schemes and private destinations
     'https://example.com/with space',
     'https:example.com/path',
     'https://example.com/?%61pi_key=private',
+    'https://example.com/?a;sig=private',
+    'https://example.com/?sig=private',
+    'https://example.com/?key=private',
     'https://example.com/%0a',
     'https://[::ffff:8.8.8.8]/',
     'https://example.com/\u200bhidden'

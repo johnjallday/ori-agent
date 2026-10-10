@@ -47,7 +47,7 @@ func TestPublicReadRejectsUnsafeURLBeforeNetwork(t *testing.T) {
 		t.Fatal("unsafe URL reached transport")
 		return nil, errors.New("not reached")
 	})}
-	for _, target := range []string{"file:///tmp/private", "https://name:password@example.com/doc", "http://127.0.0.1/doc", "http://192.0.2.1/doc", "http://100.64.0.1/doc", "http://[::ffff:127.0.0.1]/doc", "https://example.com:8443/doc", "https://example.com:/doc", "https://foo.localhost/doc", "https://example.com/?%61pi_key=secret", "https://example.com/?q=api_key%3Dsecret", "https://example.com/sk-privatecredential123456", "https://example.com/\n", "example.com", strings.Repeat("x", 2001)} {
+	for _, target := range []string{"file:///tmp/private", "https://name:password@example.com/doc", "http://127.0.0.1/doc", "http://192.0.2.1/doc", "http://100.64.0.1/doc", "http://[::ffff:127.0.0.1]/doc", "https://example.com:8443/doc", "https://example.com:/doc", "https://foo.localhost/doc", "https://example.com/?%61pi_key=secret", "https://example.com/?a;sig=untrusted", "https://example.com/?a;x-amz-signature=untrusted", "https://example.com/?q=api_key%3Dsecret", "https://example.com/sk-privatecredential123456", "https://example.com/\n", "example.com", strings.Repeat("x", 2001)} {
 		if _, err := client.Read(context.Background(), Request{URL: target, ContentTypes: []string{"text/plain"}}); !errors.Is(err, ErrUnsafeURL) {
 			t.Fatalf("unsafe %q: %v", target, err)
 		}

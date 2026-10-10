@@ -46,6 +46,15 @@ App Guide entry. This is presentation and a stricter Help boundary, not an
 identity, history, runtime, or permissions migration. Ori's character remains
 in fixed onboarding/walkthroughs; protected internal names remain unchanged.
 
+Amendment 5 — Conversation discovery and disposable continuity: open-ended
+ideas and corrections remain in the same canonical conversation, including on
+workspace pages. Exact reviewed public lookups add evidence, not installation
+or execution authority. Session-owned source-grounded historical references
+supplement bounded recent history; they are not Profile/HQ memory. See
+[conversation context](assistant-conversation-context.md) for lifecycle and
+bounds and [workspace awareness](assistant-workspace-awareness.md#conversation-discovery-amendment)
+for source, provider and manual-setup boundaries.
+
 ## Purpose
 
 Ori exposes one user-chosen, durable personal-assistant relationship. The
@@ -869,16 +878,22 @@ project workspace, connection, or setup mission.
 mode `home_inline` only when all of these hold:
 
 - the relationship is `active` or `paused`;
-- the request carries no workspace context (a workspace page, or a workspace
-  selected on the Home Map, keeps its existing workspace route);
-- the request is not a complex project build that recommends a workspace;
-- the request is either a general request with no more specific intent, or a
-  composition request (it opens with a writing verb such as write, draft,
-  rewrite, translate, or a follow-up such as “make it …”); and
+- the current request is discussion, advice, a correction, a hypothetical or
+  composition, not an explicit supported action; workspace context pins the
+  subject of a conversation, not an execution target;
+- a build keyword, a platform name, a quotation, an earlier approval or a bare
+  “yes” does not establish current creation/installation intent; uncertain
+  referents need clarification; and
 - no specialist agent matched it. The protected system assistant and the hired
   profile itself are not specialists for this rule.
 
-Everything else keeps its route: utility lookups, app activity and navigation,
+An optional conversation reference is independently checked against current
+canonical user/relationship/HQ/profile ownership before routing, using metadata
+only. Ask independently validates bodies and revisions; browser history is not
+accepted. A saved conversational route is not reinterpreted by old browser build
+heuristics. Explicit creation opens the existing unconfirmed review.
+
+Explicit supported actions keep their route: utility lookups, app activity and navigation,
 workspace creation, and email, calendar, or app-launch requests that a
 specialist can take. A composition request never forces the user to create an
 agent or a connection, so "write an email to my landlord" is drafted in the
@@ -946,6 +961,7 @@ reply the user can point at, and no stored text ever stands in for an approval.
 |---|---|---|
 | Unsent input | The composer only | No one until Send |
 | Conversation history | The session's messages in Personal HQ, until the user deletes the session with the existing session controls | That conversation's own turns, and whatever already reads Personal HQ's sessions (below) |
+| Disposable historical context | Session-owned `assistant_conversation_checkpoints`, bound to canonical source range, ownership and mutation epoch | Only eligible bounded reads of the same conversation; not Help, other sessions, Profile, or reviewed memory |
 | Long-term memory | Reviewed Personal HQ memory and the global Profile | Every eligible assistant turn |
 
 Conversation history is never copied into reviewed memory or the Profile, never
@@ -974,10 +990,15 @@ here.
 
 A turn's prompt holds the system prompt, a window of the current conversation,
 the current request, and the existing eligible personal context (working
-agreement, Profile, reviewed HQ memory). The window is the most recent 40
-messages within 24,000 characters; one message contributes at most 6,000.
-Older turns stay stored and are left out of the prompt, and the response says
-so. Only user and assistant messages are replayed. A stored system-role message
+agreement, Profile, reviewed HQ memory). Recent selection is at most 40 text rows with bounded message projections.
+Recent history plus eligible recap and same-thread older excerpts share one
+24,000-Unicode-rune answer-history allowance. The configured system model may
+select a compact, host-validated recap of complete exact role-grounded quotes
+through a separate tool-free bounded call. It can fail without blocking an
+ordinary bounded reply. Only a bounded older range is searched; this is not
+exhaustive or cross-conversation retrieval. Earlier messages remain stored;
+omission, unavailable/stale recap and bounded display are stated honestly.
+See [the implemented bounds and lifecycle](assistant-conversation-context.md). Only user and assistant messages are replayed. A stored system-role message
 is never replayed. A message from an imported history is not replayed as
 something the user or the assistant said here: it is given to the model as
 escaped reference data inside one quoting element, labelled as untrusted and
@@ -1713,7 +1734,7 @@ Its exact Personal Assistant Foundation effects are:
 |---|---|
 | Settings | Removes provider/preferences configuration only. The relationship, assistant profile, Personal HQ, and records remain; model readiness can become `not_configured`. |
 | Agents | Removes global agent profiles but not the relationship, Personal HQ, or its persisted entry-agent instance. The relationship read therefore keeps the same stable binding; profile-dependent management such as rename can report the missing profile and must never silently rebind by name. |
-| Conversation & app records | Clears the enumerated shared-database domains, including relationship, HQ registration, chats, follow-ups and briefs, and removes owned uploads. Retains workspace backing files and suppresses automatic workspace adoption, profile seeding and external MCP import. Retained provenance alone is not startup consent to restore. Explicit portable import can restore only an individually reviewed directory; it must not clear global suppression or overwrite its retained checkpoint with empty backfill. |
+| Conversation & app records | Clears the enumerated shared-database domains, including relationship, HQ registration, chats, disposable assistant checkpoints, follow-ups and briefs, and removes owned uploads. Retains workspace backing files and suppresses automatic workspace adoption, profile seeding and external MCP import. Retained provenance alone is not startup consent to restore. Explicit portable import can restore only an individually reviewed directory; it must not clear global suppression or overwrite its retained checkpoint with empty backfill. |
 | Setup steps | Resets only onboarding progress. It preserves the relationship, stable IDs, agent, Personal HQ, records, and history. A `needs_hq` relationship survives the reset and resumes at the HQ quest rather than offering a second hire or creating another profile. |
 | All categories | Applies every selected deletion. If no PAF provenance survives, restarted onboarding offers a fresh hire. Any surviving incomplete or contradictory provenance blocks automatic recovery and hire rather than guessing or creating a duplicate. |
 
