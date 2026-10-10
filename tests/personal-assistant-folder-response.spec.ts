@@ -132,27 +132,26 @@ test('real host: compact metadata on Home/Settings, follow-up and canonical relo
     await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
     expect((await audit()).requests).toBe(beforeAttachment);
     const selectAll = page.locator('#personalAssistantFolderSelectAll');
-    const allFits = observation.tree.nodes.length <= 8;
-    let expectedFocusIDs = [folderNode.id, fileNode.id];
-    await expect(selectAll).toHaveText(allFits ? 'Select all' : 'Select all · Whole folder');
+    const expectedFocusIDs = observation.tree.nodes.map((node: any) => node.id);
+    await expect(selectAll).toHaveAccessibleName('Select all');
     await selectAll.focus();
-    await selectAll.press('Enter');
-    await expect(explorer.locator('input:checked')).toHaveCount(
-      allFits ? observation.tree.nodes.length : 0
+    await selectAll.press('Space');
+    await expect(selectAll).toBeChecked();
+    await expect(explorer.locator('[data-tree-focus]:checked')).toHaveCount(
+      observation.tree.nodes.length
     );
     await expect(page.locator('#personalAssistantInput')).toHaveValue(protectedDraft);
     expect((await audit()).requests).toBe(beforeAttachment);
     await page
       .locator('#personalAssistantPanel')
       .screenshot({ path: join(evidence, `${chip.toLowerCase()}-select-all.png`) });
-    if (allFits) expectedFocusIDs = observation.tree.nodes.map((node: any) => node.id);
-    else {
-      await expect(page.locator('#personalAssistantFolderFocusText')).toHaveText(
-        'Next message · Whole folder'
-      );
-      await folderCheck.check();
-      await fileCheck.check();
-    }
+    await fileCheck.uncheck();
+    await expect(selectAll).toBeChecked({ indeterminate: true });
+    expect(
+      await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request().focus_ids)
+    ).toEqual(expectedFocusIDs.filter((id: string) => id !== fileNode.id));
+    await fileCheck.check();
+    await expect(selectAll).toBeChecked();
     expect(
       await page.evaluate(() => (window as any).PersonalAssistantFolderContext.request().focus_ids)
     ).toEqual(expectedFocusIDs);

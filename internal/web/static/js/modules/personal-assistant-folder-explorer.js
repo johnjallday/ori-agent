@@ -1,5 +1,5 @@
 import {
-  folderFocusView,
+  folderSelectionFocus,
   folderSelectAllFocus,
   folderTreeView
 } from './personal-assistant-folder-tree.js';
@@ -17,8 +17,9 @@ export function initFolderExplorer({ current, setFocus, notify }) {
   const get = id => document.getElementById(`personalAssistant${id}`);
   const panel = get('Panel'),
     pane = get('FolderExplorer'),
+    header = get('FolderExplorerHeader'),
     list = get('FolderTree');
-  if (!panel || !pane || !list) return null;
+  if (!panel || !pane || !header || !list) return null;
   const toolbar = get('ExplorerToolbar'),
     launch = get('ExploreAttachedFolder');
   const treeTab = get('ExplorerTreeTab'),
@@ -121,7 +122,7 @@ export function initFolderExplorer({ current, setFocus, notify }) {
         if (!setFocus(ids, captured)) {
           check.checked = current().focusIDs.includes(entry.id);
           const message =
-            'Choose up to 8 distinguishable topics; long labels may require fewer. Your draft is unchanged.';
+            'These topics cannot be distinguished in this snapshot. Clear the checks and choose distinguishable entries, or pick the folder again. Your draft is unchanged.';
           get('ExplorerNotice').textContent = message;
           notify(message);
         } else {
@@ -162,12 +163,20 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     launch.hidden = !folderTreeView(observation);
     launch.disabled = Boolean(state?.pending || loading);
     const all = folderSelectAllFocus(observation);
-    selectAll.hidden = launch.hidden;
+    get('FolderSelection').hidden = launch.hidden;
+    get('FolderSelectionStatus').hidden = launch.hidden;
     selectAll.disabled = !all || state?.pending || loading;
-    selectAll.textContent = all?.wholeFolder ? 'Select all · Whole folder' : 'Select all';
+    const selectedCount = state?.focusIDs.length || 0;
+    selectAll.checked = Boolean(all && selectedCount === all.count);
+    selectAll.indeterminate = selectedCount > 0 && !selectAll.checked;
     selectAll.title = all?.wholeFolder
-      ? 'Uses whole-folder discussion because all entries cannot fit as distinguishable individual topics. No partial selection.'
+      ? 'Some recorded names are indistinguishable. Select all uses whole-folder discussion.'
       : 'Select every recorded entry, including entries in collapsed folders, for the next message.';
+    get('FolderSelectionStatus').textContent = selectAll.checked
+      ? `All ${all.count} recorded items selected${all.wholeFolder ? ' · Whole folder' : ''}`
+      : selectedCount
+        ? `${selectedCount} ${selectedCount === 1 ? 'topic' : 'topics'} selected`
+        : 'Whole folder · no individual topics';
     get('FolderFocus').hidden = !observation?.tree || (!open && !state.focusIDs.length);
     if (!observation || loading) {
       collapse({ focus: false });
@@ -180,7 +189,7 @@ export function initFolderExplorer({ current, setFocus, notify }) {
       return;
     }
     const tree = folderTreeView(observation);
-    const focus = folderFocusView(observation, state.focusIDs);
+    const focus = folderSelectionFocus(observation, state.focusIDs);
     const labels = focus?.topics.map(topic => topic.names.join(' › ')) || [];
     const focusText = get('FolderFocusText');
     focusText.textContent =
@@ -194,7 +203,7 @@ export function initFolderExplorer({ current, setFocus, notify }) {
       `Next message discussion focus: ${labels.length ? labels.join('; ') : 'Whole folder'}`
     );
     focusText.title = labels.join('; ') || 'Whole folder';
-    get('FolderFocusClear').hidden = !labels.length;
+    get('FolderFocusClear').hidden = !state.focusIDs.length;
     get('FolderFocusClear').disabled = state.pending || loading;
     get('FolderExplorerName').textContent = observation.folder;
     get('FolderExplorerName').title = observation.folder;
@@ -259,15 +268,21 @@ export function initFolderExplorer({ current, setFocus, notify }) {
     layout();
   });
   chatTab.addEventListener('click', showChat);
-  selectAll.addEventListener('click', () => {
+  selectAll.addEventListener('change', () => {
     if (!selectAll.isConnected || selectAll.disabled) return;
     const state = current();
     if (state?.pending || window.PersonalAssistantConversation?.isLoading?.()) return;
     const all = folderSelectAllFocus(state?.observation);
-    if (!all || !setFocus(all.ids, binding(state))) return;
-    const message = all.wholeFolder
-      ? 'Whole-folder focus selected; individual checks cleared. Nothing read or sent.'
-      : `All ${all.count} recorded entries selected for the next message. Nothing read or sent.`;
+    const selecting = selectAll.checked;
+    if (!all || !setFocus(selecting ? all.ids : [], binding(state))) {
+      refresh();
+      return;
+    }
+    const message = !selecting
+      ? 'Checks cleared. The next message will discuss the whole folder. Nothing read or sent.'
+      : all.wholeFolder
+        ? `All ${all.count} recorded items selected. The next message will discuss the whole folder. Nothing read or sent.`
+        : `All ${all.count} recorded items selected for the next message. Nothing read or sent.`;
     get('ExplorerNotice').textContent = message;
     notify(message);
   });
@@ -279,19 +294,26 @@ export function initFolderExplorer({ current, setFocus, notify }) {
       get('Input')?.focus();
     }
   });
+  function revealFocusedControl() {
+    if (!open || !pane.getClientRects().length) return;
+    const compact = pane.clientHeight < header.offsetHeight + 60;
+    pane.classList.toggle('personal-assistant-explorer__pane--compact', compact);
+    const active = document.activeElement;
+    if (!pane.contains(active)) return;
+    const viewport = pane.getBoundingClientRect();
+    const target = active.getBoundingClientRect();
+    const scale = viewport.height / pane.offsetHeight || 1;
+    const top =
+      !compact && !header.contains(active) ? header.getBoundingClientRect().bottom : viewport.top;
+    if (target.top < top) pane.scrollTop += (target.top - top - 2) / scale;
+    else if (target.bottom > viewport.bottom)
+      pane.scrollTop += (target.bottom - viewport.bottom + 2) / scale;
+  }
+  pane.addEventListener('focusin', () => requestAnimationFrame(revealFocusedControl));
   if (typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(() =>
-      requestAnimationFrame(() => {
-        const active = document.activeElement;
-        if (!open || !pane.contains(active) || !pane.getClientRects().length) return;
-        const viewport = pane.getBoundingClientRect();
-        const target = active.getBoundingClientRect();
-        const scale = viewport.height / pane.offsetHeight || 1;
-        if (target.top < viewport.top) pane.scrollTop += (target.top - viewport.top - 2) / scale;
-        else if (target.bottom > viewport.bottom)
-          pane.scrollTop += (target.bottom - viewport.bottom + 2) / scale;
-      })
-    ).observe(pane);
+    const resize = new ResizeObserver(() => requestAnimationFrame(revealFocusedControl));
+    resize.observe(pane);
+    resize.observe(header);
   }
   // Shared footer review still opens the actual reviewed setup in Chat.
   get('ReviewFolderSetup')?.addEventListener('click', showChat, true);

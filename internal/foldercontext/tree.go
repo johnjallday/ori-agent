@@ -6,8 +6,12 @@ import (
 )
 
 const MaxTreeNodes = 64
-const MaxFocusNodes = 8
-const MaxFocusBytes = 4096
+
+// Every recorded entry can be independently checked or unchecked. Resolved
+// topics repeat up to four 96-rune name segments (six JSON bytes per escaped
+// rune), so the byte ceiling must also fit the entire bounded tree.
+const MaxFocusNodes = MaxTreeNodes
+const MaxFocusBytes = 160 * 1024
 
 // Tree is an optional, bounded projection of genuine observed relationships.
 // It is not a full inventory, a pathname resolver, or a source of read authority.

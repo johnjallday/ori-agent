@@ -1,6 +1,6 @@
 // One local folder preview per personal conversation. No paths, observations or
 // authority are recovered from browser storage. Only Send shares a reference.
-import { folderFocusView, folderTreeView } from './personal-assistant-folder-tree.js';
+import { folderSelectionFocus, folderTreeView } from './personal-assistant-folder-tree.js';
 import { initFolderExplorer } from './personal-assistant-folder-explorer.js';
 import { folderChooserView } from './personal-assistant-folder-chooser.js';
 import { collectCurrentWorkspaceContext } from './personal-assistant-workspace-context.js';
@@ -164,12 +164,16 @@ export function createFolderContextController({
   }
   function request() {
     if (!state.observation || state.pending || state.conversationId !== currentId()) return null;
+    const focus = folderSelectionFocus(state.observation, state.focusIDs);
+    if (!focus) return null;
     return {
       selection_id: state.observation.id,
       revision: state.revision,
       ...(state.conversationId ? {} : { draft_id: state.draftId }),
       ...(state.authority ? { historical: true } : {}),
-      ...(state.focusIDs.length ? { focus_ids: [...state.focusIDs] } : {})
+      // All checked entries may resolve to whole-folder discussion. Never send
+      // an invalid list or silently truncate the user's selected topics.
+      ...(focus.topics.length ? { focus_ids: [...state.focusIDs] } : {})
     };
   }
   function setFocus(ids, binding) {
@@ -181,7 +185,7 @@ export function createFolderContextController({
         (binding.observationId !== state.observation.id ||
           binding.generation !== state.generation ||
           binding.conversationId !== state.conversationId)) ||
-      !folderFocusView(state.observation, ids)
+      !folderSelectionFocus(state.observation, ids)
     )
       return false;
     state.focusIDs = [...ids];

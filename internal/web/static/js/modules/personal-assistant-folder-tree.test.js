@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   folderTreeView,
   folderFocusView,
-  folderSelectAllFocus
+  folderSelectionFocus,
+  folderSelectAllFocus,
+  MAX_FOLDER_FOCUS,
+  MAX_FOLDER_FOCUS_BYTES
 } from './personal-assistant-folder-tree.js';
 import { createFolderContextController } from './personal-assistant-folder-context.js';
 
@@ -91,7 +94,11 @@ test('malformed graphs, duplicate/missing/over-limit topics and indistinguishabl
     mutate(observation);
     assert.equal(folderTreeView(observation), null);
   }
-  for (const ids of [['entry-99'], ['entry-0', 'entry-0'], Array(9).fill('entry-0')])
+  for (const ids of [
+    ['entry-99'],
+    ['entry-0', 'entry-0'],
+    Array(MAX_FOLDER_FOCUS + 1).fill('entry-0')
+  ])
     assert.equal(folderFocusView(snapshot(), ids), null);
   const duplicate = snapshot();
   duplicate.tree.nodes[2].name = 'Aurora 🎼';
@@ -99,7 +106,7 @@ test('malformed graphs, duplicate/missing/over-limit topics and indistinguishabl
   assert.equal(folderTreeView(duplicate).roots[0].ambiguous, true);
   assert.equal(folderFocusView(duplicate, ['entry-0']), null);
   // Go escapes Unicode line/paragraph separators as well as HTML characters.
-  // Eight individually valid labels must not bypass its resolved byte bound.
+  // Escaped labels that exceeded the old four-KiB ceiling remain selectable.
   for (const separator of ['\u2028', '\u2029', '<']) {
     const bounded = snapshot();
     bounded.tree.nodes = Array.from({ length: 8 }, (_, index) => ({
@@ -111,10 +118,11 @@ test('malformed graphs, duplicate/missing/over-limit topics and indistinguishabl
       folderFocusView(
         bounded,
         bounded.tree.nodes.map(node => node.id)
-      ),
-      null
+      ).topics.length,
+      8
     );
   }
+  assert.equal(folderFocusView({ folder: 'x'.repeat(MAX_FOLDER_FOCUS_BYTES + 1) }, []), null);
 });
 
 test('Select all includes collapsed descendants or explicitly uses whole-folder focus, never a subset', () => {
@@ -131,9 +139,12 @@ test('Select all includes collapsed descendants or explicitly uses whole-folder 
       kind: 'file'
     }));
     const all = folderSelectAllFocus(observation);
-    assert.equal(all.wholeFolder, count > 8);
+    assert.equal(all.wholeFolder, false);
     assert.equal(all.count, count);
-    assert.equal(all.ids.length, count > 8 ? 0 : count);
+    assert.equal(all.ids.length, count);
+    const focus = folderSelectionFocus(observation, all.ids);
+    assert.equal(focus.topics.length, count);
+    assert.equal(folderFocusView(observation, all.ids).topics.length, count);
   }
   const ambiguous = snapshot();
   ambiguous.tree.nodes[2].name = ambiguous.tree.nodes[0].name;
@@ -144,9 +155,114 @@ test('Select all includes collapsed descendants or explicitly uses whole-folder 
     name: `a${index}${'<'.repeat(92)}z`,
     kind: 'file'
   }));
-  assert.deepEqual(folderSelectAllFocus(bounded), { ids: [], wholeFolder: true, count: 8 });
+  assert.deepEqual(folderSelectAllFocus(bounded), {
+    ids: bounded.tree.nodes.map(node => node.id),
+    wholeFolder: false,
+    count: 8
+  });
+  const ambiguousIDs = folderSelectAllFocus(ambiguous).ids;
+  assert.deepEqual(folderSelectionFocus(ambiguous, ambiguousIDs).topics, []);
+  assert.equal(folderSelectionFocus(ambiguous, ambiguousIDs.slice(0, -1)), null);
   assert.equal(folderSelectAllFocus({ tree: { nodes: [] } }), null);
   assert.equal(folderSelectAllFocus({ projects: [{ name: 'Legacy' }] }), null);
+});
+
+test('full and partial selections preserve every topic without broadening or accepting invalid IDs', () => {
+  const observation = snapshot();
+  observation.tree.nodes = Array.from({ length: 10 }, (_, index) => ({
+    id: `entry-${index}`,
+    name: `Topic ${index}`,
+    kind: 'file'
+  }));
+  const ids = folderSelectAllFocus(observation).ids;
+  assert.equal(folderSelectionFocus(observation, [...ids].reverse()).topics.length, 10);
+  assert.equal(folderSelectionFocus(observation, ids.slice(0, 9)).topics.length, 9);
+  for (const invalid of [
+    [...ids.slice(0, 9), 'entry-0'],
+    [...ids.slice(0, 9), 'entry-unknown'],
+    [...ids, 'entry-unknown'],
+    null,
+    'all'
+  ])
+    assert.equal(folderSelectionFocus(observation, invalid), null);
+  assert.equal(folderSelectionFocus(observation, ids.slice(0, 8)).topics.length, 8);
+  assert.equal(folderSelectionFocus({ tree: { nodes: [] } }, ids), null);
+});
+
+test('bulk selection can be narrowed above eight topics and Send keeps the exact remaining IDs', async () => {
+  const f = fixture();
+  const observation = snapshot();
+  observation.tree.nodes = Array.from({ length: MAX_FOLDER_FOCUS }, (_, index) => ({
+    id: `entry-${index}`,
+    name: `Topic ${index}`,
+    kind: 'file'
+  }));
+  f.result({ observation });
+  await f.controller.select('chip', 'documents');
+  const ids = folderSelectAllFocus(observation).ids;
+  assert.equal(f.controller.setFocus(ids, f.binding()), true);
+  assert.deepEqual(f.controller.state.focusIDs, ids);
+  const sent = f.controller.request();
+  assert.deepEqual(sent.focus_ids, ids);
+  assert.equal(f.calls.length, 1);
+  const remaining = ids.filter(id => !['entry-0', 'entry-9', 'entry-63'].includes(id));
+  assert.equal(f.controller.setFocus(remaining, f.binding()), true);
+  assert.deepEqual(f.controller.state.focusIDs, remaining);
+  assert.deepEqual(f.controller.request().focus_ids, remaining);
+  assert.deepEqual(sent.focus_ids, ids);
+
+  f.result({ cancelled: true });
+  await f.controller.select('picker');
+  assert.deepEqual(f.controller.state.focusIDs, remaining);
+  f.setId('saved');
+  f.controller.accepted('saved', { revision: 'r1', observation });
+  assert.deepEqual(f.controller.state.focusIDs, remaining);
+  assert.deepEqual(f.controller.request().focus_ids, remaining);
+
+  // Clearing or replacing the selection still behaves independently of history.
+  assert.equal(f.controller.setFocus([], f.binding()), true);
+  assert.equal(f.controller.setFocus(['entry-0'], f.binding()), true);
+  assert.deepEqual(f.controller.request().focus_ids, ['entry-0']);
+  assert.deepEqual(sent.focus_ids, ids);
+  f.controller.reset('saved', { revision: 'r1', observation });
+  assert.deepEqual(f.controller.state.focusIDs, []);
+});
+
+test('long escaped ancestor labels do not prevent unchecking entries from a full snapshot', () => {
+  const observation = snapshot();
+  observation.tree.nodes = Array.from({ length: MAX_FOLDER_FOCUS }, (_, index) => ({
+    id: `entry-${index}`,
+    parent_id: index ? `entry-${Math.min(index - 1, 2)}` : '',
+    name: index < 3 ? '<'.repeat(96) : `Topic ${index}`,
+    kind: index < 3 ? 'folder' : 'file'
+  }));
+  const all = folderSelectAllFocus(observation);
+  assert.equal(all.wholeFolder, false);
+  const remaining = all.ids.filter(id => id !== 'entry-9');
+  const focus = folderSelectionFocus(observation, remaining);
+  assert.equal(focus.topics.length, 63);
+  assert.equal(focus.topics.at(-1).names.length, 4);
+  assert.equal(
+    focus.topics.some(topic => topic.names.at(-1) === 'Topic 9'),
+    false
+  );
+});
+
+test('unchecking one of nine selected entries becomes eight explicit host topics', async () => {
+  const f = fixture();
+  const observation = snapshot();
+  observation.tree.nodes = Array.from({ length: 9 }, (_, index) => ({
+    id: `entry-${index}`,
+    name: `Topic ${index}`,
+    kind: 'file'
+  }));
+  f.result({ observation });
+  await f.controller.select('chip', 'documents');
+  const ids = folderSelectAllFocus(observation).ids;
+  f.controller.setFocus(ids, f.binding());
+  assert.deepEqual(f.controller.request().focus_ids, ids);
+  assert.equal(f.controller.setFocus(ids.slice(1), f.binding()), true);
+  assert.deepEqual(f.controller.request().focus_ids, ids.slice(1));
 });
 
 test('checkbox changes are local; Send receives a frozen opaque reference and no metadata or paths', async () => {

@@ -310,7 +310,7 @@ func (s *SQLiteStore) GetMessages(ctx context.Context, sessionID string) ([]Mess
 		msg.WorkspaceContext = assistantcontext.DecodeAttribution(turnJSON.String)
 		if folderJSON.Valid && !msg.Imported {
 			var event foldercontext.Event
-			if len(folderJSON.String) > foldercontext.MaxBytes+256 || json.Unmarshal([]byte(folderJSON.String), &event) != nil || event.Validate() != nil {
+			if len(folderJSON.String) > foldercontext.MaxEventBytes || json.Unmarshal([]byte(folderJSON.String), &event) != nil || event.Validate() != nil {
 				return nil, foldercontext.ErrInvalid
 			}
 			msg.FolderContext = &event
