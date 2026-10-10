@@ -166,6 +166,13 @@ PRs plus green CI) prepares a frozen `release/vX.Y.Z` and `vX.Y.Z-rc.N` prerelea
 it never publishes stable automatically. Feature PRs target `dev`. Stable
 promotion needs approval of the exact tested RC and successful candidate
 CI/installer checks; stable installers are tested again before publication.
+Red CI on `dev` or on the active release branch is the release watcher
+routine's job: it opens a `release-fix/*` PR to `dev` (auto-merge on green) and
+then a `release-sync/*` PR into the release branch. `auto-release.yml` reacts to
+finished runs: it merges that sync PR once dev CI is green for the exact commit,
+re-cuts the RC when the release branch turns green, and dispatches Promote
+Release once every automated check is green. The one human step is approving
+the `release` environment review on that run.
 
 Each prerelease includes `rc-test-report-<tag>.md`. Follow
 `docs/RC_TEST_PROTOCOL.md`, leave observations NOT RUN until exercised, and share
