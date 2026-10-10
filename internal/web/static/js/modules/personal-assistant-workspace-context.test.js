@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   collectWorkspaceContext,
+  collectCurrentWorkspaceContext,
+  publishWorkspaceContext,
   workspaceContextLabel,
   renderTurnWorkspace,
   turnSourcesView,
@@ -9,6 +11,36 @@ import {
   ASK_REPLY_TIMEOUT_MS,
   askFailureView
 } from './personal-assistant-workspace-context.js';
+
+test('work context publication and collection do not require Help to exist or initialize', () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  try {
+    globalThis.window = {
+      location: { pathname: '/' },
+      oriHomeRouteContext: { selection_workspace_id: 'group-id' }
+    };
+    globalThis.document = { body: { dataset: {} }, dispatchEvent() {} };
+    publishWorkspaceContext({ taskId: 'selected-task', sessionId: 'session-id' });
+    const context = collectCurrentWorkspaceContext();
+    assert.equal(context.origin, 'personal_assistant_panel');
+    assert.equal(context.selection_workspace_id, 'group-id');
+    assert.equal(context.task_id, 'selected-task');
+    assert.equal(context.session_id, 'session-id');
+    assert.equal(globalThis.window.OriGuide, undefined);
+    globalThis.window.location.pathname = '/settings';
+    assert.equal(collectCurrentWorkspaceContext().workspace_id, '');
+    globalThis.window.location.pathname = '/workspaces/album/task/current-task';
+    globalThis.document.body.dataset = { workspaceId: 'uuid-a', workspaceSlug: 'album' };
+    assert.equal(collectCurrentWorkspaceContext().workspace_id, 'uuid-a');
+    assert.equal(collectCurrentWorkspaceContext().task_id, 'current-task');
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});
 
 const page = {
   pathname: '/workspaces/album-1/assistant',

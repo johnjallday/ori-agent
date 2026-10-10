@@ -552,6 +552,7 @@
 }
 
 .personal-assistant-launcher[hidden],
+.personal-assistant-panel__avatar[hidden],
 .personal-assistant-panel[hidden] {
   display: none;
 }

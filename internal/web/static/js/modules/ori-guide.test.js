@@ -782,6 +782,11 @@ test('clearing a quest step drops the coachmark without touching the server ques
   assert.equal(site.classList.contains('is-ori-coachmark'), false);
   assert.equal(reply.dataset.status, '');
   assert.equal(guide._state.quest, null);
+  assert.equal(
+    guide._state.open,
+    false,
+    'completed/deferred walkthrough sheets stop covering the app'
+  );
 });
 
 /* ---- pointer (game-style "click here" affordance) --------------------------- */

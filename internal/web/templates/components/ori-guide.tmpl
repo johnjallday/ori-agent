@@ -88,6 +88,7 @@
       <span id="personalAssistantLauncherName" class="personal-assistant-launcher__name">Personal assistant</span>
       <span class="personal-assistant-launcher__role">Personal Assistant</span>
       <span id="personalAssistantLauncherStatus" class="personal-assistant-launcher__status" hidden></span>
+      <span id="personalAssistantWorkStatus" class="personal-assistant-launcher__status" hidden></span>
     </span>
   </button>
   <section id="personalAssistantPanel" class="personal-assistant-panel" role="dialog"
@@ -253,6 +254,14 @@
         </div>
         <p id="personalAssistantMemoryStatus" class="personal-assistant-review__status" role="status" aria-live="polite"></p>
       </form>
+      <section id="personalAssistantRecoveredHandoff" class="personal-assistant-folder-context"
+               aria-labelledby="personalAssistantRecoveredHandoffTitle" hidden>
+        <h3 id="personalAssistantRecoveredHandoffTitle">Unsent request from an earlier visit</h3>
+        <p id="personalAssistantRecoveredHandoffText"></p>
+        <p>Review it in an empty composer, then Send when ready. Nothing has been sent.</p>
+        <button type="button" id="personalAssistantRecoverHandoff" class="personal-assistant-conversation__button">Review request</button>
+        <button type="button" id="personalAssistantDismissHandoff" class="personal-assistant-conversation__button">Dismiss request</button>
+      </section>
       {{if ne .CurrentPage "index"}}
       {{template "assistant-led-setup.tmpl" .}}
       {{end}}

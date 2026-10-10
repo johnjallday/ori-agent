@@ -1271,7 +1271,9 @@
         show: function () {
           els.thinkingModal.classList.add('show');
           els.thinkingModal.classList.remove('is-idle');
-          if (window.hubSupportChat && typeof window.hubSupportChat.open === 'function') {
+          // Progress can arrive while Help is being read. Only explicit work
+          // entry/reopen actions switch panels; this update never steals it.
+          if (!window.PersonalAssistantPanel && window.hubSupportChat?.open) {
             window.hubSupportChat.open({ focus: 'input' });
           }
         },
@@ -1394,7 +1396,7 @@
       return homeAssistantState.personalAssistantDisplayName;
     }
     if (homeAssistantState.workspaceEntryAgentName) return getWorkspaceHomeAssistantDisplayName();
-    return 'Ask Ori';
+    return 'Work activity';
   }
 
   function syncHomeAssistantModalHeading() {
@@ -1603,7 +1605,9 @@
     // where the floating Workspace Assistant button already opens the chat;
     // hide it there so it doesn't widen the nav bar. It remains the
     // "Task Activity" launcher on other pages.
-    var visible = available && !embeddedPanel;
+    var active = shouldKeepHomeAssistantThinkingModalOpen() || hasHomeAssistantConversation();
+    var visible =
+      available && (!embeddedPanel || (active && !window.PersonalAssistantPanel?.hasLauncher?.()));
     button.classList.toggle('d-none', !visible);
     button.disabled = !visible;
 
@@ -1623,25 +1627,18 @@
       button.removeAttribute('data-bs-target');
       button.addEventListener('click', function (event) {
         event.preventDefault();
-        if (window.hubSupportChat && typeof window.hubSupportChat.open === 'function') {
+        if (window.PersonalAssistantPanel?.openActivity) {
+          window.PersonalAssistantPanel.openActivity(button);
+        } else if (window.hubSupportChat?.open) {
           window.hubSupportChat.open({ focus: 'input' });
         }
       });
     }
 
-    var active = Boolean(
-      homeAssistantState.busy ||
-      (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) ||
-      hasVisibleHomeAssistantPlanning() ||
-      hasVisibleHomeAssistantInlineReply() ||
-      hasVisibleHomeAssistantActions() ||
-      hasHomeAssistantConversation()
-    );
-
     button.classList.toggle('modern-btn-primary', active);
     button.classList.toggle('modern-btn-secondary', !active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
-    button.setAttribute('title', active ? 'Reopen Ask Ori activity' : 'Open Ask Ori activity');
+    button.setAttribute('title', active ? 'Reopen work activity' : 'Open work activity');
 
     var label = button.querySelector('[data-home-assistant-launcher-label]');
     if (label) {
@@ -1655,12 +1652,21 @@
         embeddedPanel && !homeScopedPanel
           ? homeAssistantState.busy
             ? 'Assistant Working'
-            : 'Ask Ori'
+            : 'Work activity'
           : homeAssistantState.busy
             ? 'Live Activity'
             : 'Task Activity';
     }
 
+    var workStatus = document.getElementById('personalAssistantWorkStatus');
+    if (workStatus) {
+      var review =
+        hasVisibleHomeAssistantActions() ||
+        hasVisibleHomeAssistantPlanning() ||
+        hasVisibleHomeAssistantInlineReply();
+      workStatus.hidden = !homeAssistantState.busy && !review;
+      workStatus.textContent = homeAssistantState.busy ? 'Working…' : review ? 'Needs review' : '';
+    }
     syncHomeAssistantModalHeading();
     syncHomeAssistantConversationSection();
   }
@@ -14041,6 +14047,7 @@
       setHomeAssistantWorkspacePromptMode(options.workspacePromptMode);
     }
     if (!options || options.openThinkingModal !== false) {
+      window.PersonalAssistantPanel?.openActivity?.();
       openHomeAssistantThinkingModal();
     }
 
@@ -14050,10 +14057,15 @@
 
   window.OriAskRouting = window.OriAskRouting || {};
   window.OriAskRouting.open = function () {
+    window.PersonalAssistantPanel?.openActivity?.();
     openHomeAssistantThinkingModal();
-    focusHomeAssistantInput();
+    if (!window.PersonalAssistantPanel) focusHomeAssistantInput();
   };
   window.OriAskRouting.close = function () {
+    if (window.PersonalAssistantPanel) {
+      window.PersonalAssistantPanel.close();
+      return;
+    }
     if (window.hubSupportChat && typeof window.hubSupportChat.close === 'function') {
       window.hubSupportChat.close();
       return;

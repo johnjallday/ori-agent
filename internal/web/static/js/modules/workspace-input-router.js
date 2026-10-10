@@ -1,6 +1,6 @@
 /**
  * Workspace Input Router
- * Bridges Workspace Hub smart input with Ask Ori routing.
+ * Bridges workspace smart input with the canonical work routing contract.
  *
  * @module workspace-input-router
  */
@@ -47,7 +47,7 @@
 
   async function dispatchToAskOri(input, options = {}) {
     if (!canUseAskOri()) {
-      throw new Error('Ask Ori routing is unavailable');
+      throw new Error('Work routing is unavailable');
     }
 
     const prompt = extractAskPrompt(input);

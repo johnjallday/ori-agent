@@ -51,6 +51,7 @@
     greeted: false,
     screenRoute: '',
     screenTitle: '',
+    contextKey: '',
     assistantAvailable: false,
     // A hired assistant with no Personal HQ yet: distinct from "never hired" so
     // the handoff decline can route to the guided quest instead of Hire.
@@ -242,6 +243,9 @@
   function collectContext() {
     var route = currentRoute();
     var derived = contextFromRoute(route);
+    if (window.PersonalAssistantWorkspaceContext?.current) {
+      return window.PersonalAssistantWorkspaceContext.current({ origin: 'ask_ori_panel' });
+    }
     if (window.PersonalAssistantWorkspaceContext?.collect) {
       return window.PersonalAssistantWorkspaceContext.collect({
         pathname: route,
@@ -344,7 +348,14 @@
     if ('sessionId' in next) pageContext.sessionId = String(next.sessionId || '');
     if ('label' in next) pageContext.label = String(next.label || '');
 
+    if (window.PersonalAssistantWorkspaceContext?.publish) {
+      window.PersonalAssistantWorkspaceContext.publish(next);
+    } else {
+      // Module initialization may follow classic script publication.
+      window.oriWorkPageContext = { ...window.oriWorkPageContext, ...next };
+    }
     invalidateInFlightForContextChange(previousKey);
+    state.contextKey = helpContextKey();
     refreshContextLabel();
     emit('context', { surface: collectContext().surface });
   }
@@ -463,9 +474,10 @@
   // controller dependency here, including for unknown text and slash commands.
   function ask(question, options) {
     var silent = !!(options && options.silent);
-    if (!silent && state.quest) clearQuestStep();
+    if (!silent && state.quest) clearQuestStep({ keepOpen: true });
     var seq = ++state.seq;
     var contextKey = helpContextKey();
+    state.contextKey = contextKey;
     question = Array.from(String(question || '').trim())
       .slice(0, 400)
       .join('');
@@ -803,9 +815,14 @@
       }
     }
     if (!accepted && state.els?.reply) {
+      var reason =
+        panel?.suggestionNotice?.() ||
+        'Finish setup or the current reply, then open your assistant to review it.';
       state.els.reply.insertAdjacentHTML(
         'beforeend',
-        '<p class="ori-guide__answer ori-guide__answer--note">The request could not be inserted. Your search text and assistant draft are kept. Finish setup or the current reply, then open your assistant to review it. Nothing was sent.</p>'
+        '<p class="ori-guide__answer ori-guide__answer--note">The request could not be inserted. Your search text and assistant draft are kept. ' +
+          esc(reason) +
+          ' Nothing was sent.</p>'
       );
     }
     emit('handoff', { accepted: accepted, submitted: false });
@@ -820,7 +837,7 @@
       window.PersonalAssistantPanel &&
       typeof window.PersonalAssistantPanel.close === 'function'
     ) {
-      window.PersonalAssistantPanel.close();
+      window.PersonalAssistantPanel.close({ restoreFocus: false });
     }
     state.open = true;
     state.lastTrigger = trigger || document.activeElement || null;
@@ -855,7 +872,7 @@
     emit('open', { route: currentRoute() });
   }
 
-  function close() {
+  function close(options) {
     if (!state.open) return;
     state.open = false;
     clearCoachmark();
@@ -871,10 +888,12 @@
     // Return focus to whatever opened the guide, when it still exists (FR-26).
     var trigger = state.lastTrigger;
     state.lastTrigger = null;
-    if (trigger && document.contains(trigger) && typeof trigger.focus === 'function') {
-      trigger.focus();
-    } else if (els.launcher && typeof els.launcher.focus === 'function') {
-      els.launcher.focus();
+    if (!options || options.restoreFocus !== false) {
+      if (trigger && document.contains(trigger) && typeof trigger.focus === 'function') {
+        trigger.focus();
+      } else if (els.launcher && typeof els.launcher.focus === 'function') {
+        els.launcher.focus();
+      }
     }
     emit('dismiss', {});
   }
@@ -1012,7 +1031,8 @@
   // clearQuestStep ends the presentation: the mark goes away and the panel stops
   // claiming to be mid-walkthrough. It says nothing about the server-side quest,
   // which is only ever completed by a real designation or skipped explicitly.
-  function clearQuestStep() {
+  function clearQuestStep(options) {
+    var hadQuest = Boolean(state.quest);
     clearCoachmark();
     state.quest = null;
     if (state.els) {
@@ -1027,6 +1047,9 @@
       state.els.reply.dataset.status = '';
       state.els.reply.dataset.quest = '';
     }
+    // A finished/deferred fixed sheet must not cover the next real app control.
+    // Ordinary Help remains available from its navbar entry; no quest is mutated.
+    if (hadQuest && !options?.keepOpen) close();
   }
 
   /* ---- wiring ------------------------------------------------------------------------- */
@@ -1132,12 +1155,14 @@
     window.addEventListener('popstate', clearCoachmarkIfRouteChanged);
     // A route change must repaint the visible context before the next request is
     // accepted, so a stale workspace or task is never submitted invisibly (FR46).
-    var lastContextKey = helpContextKey();
-    window.addEventListener('popstate', function () {
-      invalidateInFlightForContextChange(lastContextKey);
-      lastContextKey = helpContextKey();
+    state.contextKey = helpContextKey();
+    function onContextChange() {
+      invalidateInFlightForContextChange(state.contextKey);
+      state.contextKey = helpContextKey();
       refreshContextLabel();
-    });
+    }
+    window.addEventListener('popstate', onContextChange);
+    document.addEventListener('ori:workspace-context', onContextChange);
   }
 
   var api = {

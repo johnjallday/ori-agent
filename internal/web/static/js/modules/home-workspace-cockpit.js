@@ -1275,7 +1275,7 @@ export function renderWorkspaceRailHTML(view) {
     '<div class="cockpit-rail-actions">' +
     `<a class="modern-btn modern-btn-primary cockpit-rail-open" href="${escapeHtml(view.openHref)}" data-cockpit-rail-open data-workspace-id="${escapeHtml(view.id)}">Open Workspace</a>` +
     (view.canAskCommander
-      ? `<button type="button" class="modern-btn modern-btn-secondary" data-cockpit-rail-ask data-workspace-id="${escapeHtml(view.id)}">Ask ${escapeHtml(view.commander)}</button>`
+      ? `<button type="button" class="modern-btn modern-btn-secondary" data-cockpit-rail-ask data-workspace-id="${escapeHtml(view.id)}">Open assistant</button>`
       : `<p class="cockpit-rail-note">${escapeHtml(view.commanderUnavailableReason)}</p>`) +
     '</div>' +
     '<div class="cockpit-rail-metrics" aria-label="Workspace metrics">' +
@@ -3394,9 +3394,7 @@ import {
       ask.addEventListener('click', () => {
         publishRouteContext();
         handoffAfterContextHide(() => {
-          if (window.OriGuide && typeof window.OriGuide.open === 'function') {
-            window.OriGuide.open();
-          }
+          window.PersonalAssistantPanel?.open(ask);
         });
       });
     }
@@ -3743,7 +3741,7 @@ import {
     updateContextTrigger();
   }
 
-  // ---- Ask Ori activity (universal non-modal owner) ----
+  // ---- Work activity (Personal Assistant presentation owner) ----
   //
   // Ask Ori start/finish may refresh its route label, but it never becomes a
   // context kind and never opens, closes, or reserves space for this modal.
