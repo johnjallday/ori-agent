@@ -3,7 +3,7 @@
 import { folderFocusView, folderTreeView } from './personal-assistant-folder-tree.js';
 import { initFolderExplorer } from './personal-assistant-folder-explorer.js';
 import { folderChooserView } from './personal-assistant-folder-chooser.js';
-import { collectWorkspaceContext } from './personal-assistant-workspace-context.js';
+import { collectCurrentWorkspaceContext } from './personal-assistant-workspace-context.js';
 import {
   currentFolderDiscussion,
   folderDiscussionOptions,
@@ -238,16 +238,7 @@ export function createFolderContextController({
               ...(typeof window !== 'undefined'
                 ? {
                     context: {
-                      ...(window.OriGuide?._collectContext
-                        ? {
-                            ...window.OriGuide._collectContext(),
-                            origin: 'personal_assistant_panel'
-                          }
-                        : collectWorkspaceContext({
-                            pathname: window.location?.pathname,
-                            workspaceId: document.body?.dataset?.workspaceId,
-                            workspaceSlug: document.body?.dataset?.workspaceSlug
-                          })),
+                      ...collectCurrentWorkspaceContext(),
                       // The workspace the user named for this suggestion. The host
                       // resolves it again; the page stays the location.
                       ...(placement.subject_workspace_id

@@ -1441,19 +1441,6 @@ body.home-command-page {
   overflow-x: hidden;
 }
 
-/* Home already names Ori in the workspace-area header (#oriGuideMapTrigger),
-   and both entry points drive the SAME controller and the same panel — so the
-   floating launcher is a second button for one thing, sitting permanently over
-   the bottom-right corner of the page.
-
-   Hidden rather than removed from the template: the guide is included for every
-   page from navbar.tmpl, and ori-guide.js still owns this element's open/close
-   state. `display: none` also takes it out of the focus order, so the duplicate
-   does not survive as an invisible tab stop. */
-body.home-command-page .ori-guide__launcher {
-  display: none;
-}
-
 /* Every interactive cockpit control keeps a visible focus ring and a target
    large enough to hit (FR124, FR132). */
 .home-cockpit button:focus-visible,

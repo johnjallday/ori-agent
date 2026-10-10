@@ -89,9 +89,10 @@ func TestGuideIsMountedExactlyOnce(t *testing.T) {
 func TestGuideMarkupHasOneOfEachControl(t *testing.T) {
 	body := readTemplate(t, "templates/components/ori-guide.tmpl")
 	for _, id := range []string{
-		`id="oriGuideLauncher"`, `id="oriGuidePanel"`, `id="oriGuideInput"`,
+		`id="oriGuidePanel"`, `id="oriGuideInput"`,
 		`id="oriGuideSend"`, `id="oriGuideForm"`, `id="oriGuideReply"`, `id="oriGuideClose"`,
-		`id="oriGuideContext"`, `id="oriGuideActivity"`,
+		`id="oriGuideContext"`, `id="oriGuideAbout"`, `id="oriGuideTopics"`,
+		`id="oriGuideWalkthroughs"`,
 	} {
 		if got := strings.Count(body, id); got != 1 {
 			t.Errorf("%s appears %d times, want 1", id, got)
@@ -298,7 +299,7 @@ func TestPAFPanelOnOtherPagesIsTheConversationAndComposer(t *testing.T) {
 func TestPAFPanelPresentsGuideAndAssistantRolesBeforeInput(t *testing.T) {
 	body := stripHTMLComments(readTemplate(t, "templates/components/ori-guide.tmpl"))
 	for _, want := range []string{
-		`id="oriGuideTitle">Ask Ori<`, `id="oriGuideRole" hidden>App Guide<`,
+		`id="oriGuideTitle">Help<`, `for="oriGuideInput">Search help<`,
 		// The line under the assistant's name says "Personal Assistant" until
 		// the next check-in is known, and the launcher always carries the role.
 		`class="personal-assistant-panel__checkin">Personal Assistant<`,
@@ -317,7 +318,7 @@ func TestPAFPanelPresentsGuideAndAssistantRolesBeforeInput(t *testing.T) {
 
 func TestPAFComposersStateTheirSeparatePurposes(t *testing.T) {
 	body := readTemplate(t, "templates/components/ori-guide.tmpl")
-	if !strings.Contains(body, "Ask Ori about the app") ||
+	if !strings.Contains(body, "Search app topics") ||
 		!strings.Contains(body, "Ask a question or describe what you want help with") {
 		t.Error("Help and hired-assistant composers must state separate purposes")
 	}
@@ -342,7 +343,7 @@ func stripHTMLComments(body string) string {
 }
 
 func TestGuideMarkupCarriesDialogSemantics(t *testing.T) {
-	body := readTemplate(t, "templates/components/ori-guide.tmpl")
+	body := readTemplate(t, "templates/components/ori-guide.tmpl") + readTemplate(t, "templates/components/navbar.tmpl")
 	for _, attr := range []string{
 		`role="dialog"`, `aria-labelledby="oriGuideTitle"`,
 		`aria-expanded="false"`, `aria-controls="oriGuidePanel"`,
@@ -354,12 +355,46 @@ func TestGuideMarkupCarriesDialogSemantics(t *testing.T) {
 	}
 }
 
-// Ori's art is decorative here — the panel states its name and role as text —
-// so it must not add noise for a screen reader (FR-117).
-func TestGuideArtIsDecorative(t *testing.T) {
-	body := readTemplate(t, "templates/components/ori-guide.tmpl")
-	if strings.Count(body, `alt=""`) < 2 {
-		t.Error("the launcher sprite and panel portrait should both be decorative")
+func TestHelpHasOneNavbarEntryAndNoCompetingCharacterLauncher(t *testing.T) {
+	nav := stripHTMLComments(readTemplate(t, "templates/components/navbar.tmpl"))
+	body := stripHTMLComments(readTemplate(t, "templates/components/ori-guide.tmpl"))
+	if strings.Count(nav, `id="oriGuideLauncher"`) != 1 || !strings.Contains(nav, `aria-label="Help"`) {
+		t.Error("Help must have exactly one labelled navbar trigger")
+	}
+	if strings.Contains(body, `id="oriGuideLauncher"`) || strings.Contains(body, `id="oriGuideActivity"`) {
+		t.Error("Help must not have a character launcher or conversational transcript")
+	}
+	if strings.Contains(readTemplate(t, "templates/components/dashboard.tmpl"), `id="oriGuideMapTrigger"`) {
+		t.Error("Home must not retain a competing Ask Ori entry")
+	}
+	if !strings.Contains(body, `id="oriGuideQuestPortrait"`) || !strings.Contains(body, "hidden\n        src=\"/characters/ori-guide/static.svg\"") || !strings.Contains(body, `alt=""`) {
+		t.Error("Ori's decorative portrait must be hidden until a fixed walkthrough owns the panel")
+	}
+}
+
+func TestWorkActivityStartsInTheAssistantNotHelp(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	for _, page := range []string{"index", "agents-roster", "settings"} {
+		data := GetDefaultData()
+		data.CurrentPage = page
+		html, err := r.RenderTemplate(page, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(html, `id="homeAssistantThinkingModal"`) != 1 {
+			t.Fatal("work must retain exactly one activity target")
+		}
+		if !strings.Contains(assistantDrawerMarkup(t, html), `id="homeAssistantThinkingModal"`) {
+			t.Errorf("%s: activity is not statically owned by the assistant", page)
+		}
+		helpStart := strings.Index(html, `id="oriGuidePanel"`)
+		helpEnd := strings.Index(html[helpStart:], "</section>\n\n")
+		if helpEnd < 0 || strings.Contains(html[helpStart:helpStart+helpEnd], `id="homeAssistantThinkingModal"`) {
+			t.Errorf("%s: Help includes work activity", page)
+		}
 	}
 }
 

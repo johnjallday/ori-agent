@@ -1,38 +1,35 @@
 import { test, expect } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
 
-// Browser-fixtured service replies exercise the actual universal Ask controller
-// when the personal relationship cannot be read. No model or mutation is run.
-test('shared Ask keeps its progress and explicit confirmation outside the personal drawer', async ({
+// Fixture-backed native work replies, failed relationship read, real Help.
+// Help never starts work; native work still owns progress and explicit review.
+test('native work keeps one activity host outside Help after relationship failure', async ({
   page
 }) => {
+  await installLocalCdn(page);
   await page.route('**/api/onboarding/status', route =>
-    route.fulfill({
-      json: { needs_onboarding: false, completed: true, skipped: true }
-    })
+    route.fulfill({ json: { needs_onboarding: false, completed: true, skipped: true } })
   );
   await page.route('**/api/personal-assistant', route => route.fulfill({ status: 503, json: {} }));
   await page.route('**/api/progression', route =>
     route.fulfill({ json: { dismissed: true, missions: [] } })
   );
-  await page.route('**/api/ori-guide', route =>
-    route.fulfill({
-      json: { status: 'unknown', answer: 'This request needs the work controller.', actions: [] }
-    })
-  );
-  await page.route('**/api/home-assistant/route', route =>
-    route.fulfill({
+  let routes = 0;
+  await page.route('**/api/home-assistant/route', route => {
+    routes += 1;
+    return route.fulfill({
       json: {
         intent: 'app_introspection',
         route_mode: 'home_inline',
         target_surface: 'current',
         requires_creation: false
       }
-    })
-  );
+    });
+  });
   let calls = 0;
   let finish: (() => void) | undefined;
   await page.route('**/api/home-assistant/ask', async route => {
-    calls++;
+    calls += 1;
     await new Promise<void>(resolve => {
       finish = resolve;
     });
@@ -44,26 +41,53 @@ test('shared Ask keeps its progress and explicit confirmation outside the person
           action_id: 'scope-review',
           action_type: 'remember',
           summary: 'Remember the reviewed fact?',
-          arguments: { text: 'A fixture fact' }
+          arguments: { text: 'A fictional fixture fact' }
         }
       }
     });
   });
   await page.goto('/');
-  await page.locator('#oriGuideMapTrigger').click();
-  await expect(page.locator('#oriGuideReply')).toHaveAttribute('data-status', 'unknown');
-  await page.locator('#oriGuideInput').fill('What needs my attention?');
+  await page.locator('#oriGuideLauncher').click();
+  await page.locator('#oriGuideInput').fill('/note a fictional request');
   await page.locator('#oriGuideSend').click();
-  await expect.poll(() => calls).toBe(1);
+  await expect(page.locator('#oriGuideReply')).toHaveAttribute('data-status', 'answered');
+  await expect(page.locator('#oriGuideReply')).toContainText('Personal Assistant');
+  expect(routes).toBe(0);
+  expect(calls).toBe(0);
   const activity = page.locator('#homeAssistantThinkingModal');
-  await expect(activity).toHaveAttribute('data-home-assistant-panel-scope', 'universal');
-  await expect(activity).toBeVisible();
+  await expect(
+    page.locator('#personalAssistantActivityMount #homeAssistantThinkingModal')
+  ).toHaveCount(1);
+  await expect(page.locator('#oriGuidePanel #homeAssistantThinkingModal')).toHaveCount(0);
+
+  // Exercise the retained public native-work contract, not a Help escalation.
+  await page.evaluate(() => {
+    void (window as any).OriAskRouting.submit('What needs my attention?', {
+      context: { page_path: '/', surface: 'home', origin: 'workspace_surface' }
+    });
+  });
+  await expect.poll(() => calls).toBe(1);
+  expect(routes).toBe(1);
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  await expect(page.locator('#personalAssistantPanelTitle')).toHaveText('Work activity');
+  await expect(page.locator('#oriGuidePanel')).toBeHidden();
+  await expect(activity).toHaveAttribute('data-home-assistant-panel-scope', 'personal-assistant');
   await expect(page.locator('#homeAssistantThinkingStatus')).toContainText('Reviewing');
-  await expect(page.locator('#homeAssistantThinkingModalLabel')).toBeVisible();
+  await page.locator('#oriGuideLauncher').click();
   finish!();
+  await expect(page.locator('#oriGuidePanel')).toBeVisible();
+  await expect(page.locator('#homeAssistantReopenBtn')).toHaveAttribute(
+    'title',
+    /^(Open|Reopen) work activity$/
+  );
+  await page.locator('#homeAssistantReopenBtn').click();
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  await expect(page.locator('#oriGuidePanel')).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => !!document.activeElement?.closest('#personalAssistantPanel')))
+    .toBe(true);
   const actions = page.locator('#homeAssistantActions');
   await expect(actions.getByRole('button', { name: 'Confirm', exact: true })).toBeVisible();
-  await expect(page.locator('.home-assistant-conversation-section-header')).toBeVisible();
   await expect(page.locator('#homeAssistantConversation')).toContainText(
     'Remember the reviewed fact?'
   );
@@ -72,4 +96,5 @@ test('shared Ask keeps its progress and explicit confirmation outside the person
     'I will not make that change'
   );
   expect(calls).toBe(1);
+  expect(routes).toBe(1);
 });

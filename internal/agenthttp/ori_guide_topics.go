@@ -7,9 +7,8 @@ import "strings"
 // comes from a model: a topic exists because it was written down, reviewed, and
 // bound to a route that home_nav_catalog_test.go proves is registered.
 //
-// That is the whole safety story for explanations. A model may later rephrase
-// one of these answers, but it cannot introduce a topic, a destination, or a
-// coachmark target that is not already in this file (PRD FR-34/FR-41/FR-46).
+// Production Help returns this reviewed copy verbatim, without a provider.
+// A search cannot invent a topic, destination, or coachmark target.
 
 // CoachmarkKey names a control the guide may visually mark. It is a typed token,
 // never a CSS selector: the browser maps a key to a local element through its own
@@ -116,7 +115,7 @@ var guideTopics = []GuideTopic{
 		Key:   "home",
 		Label: "Home",
 		Explanation: "Home is your workspace map. It shows every workspace you can open and " +
-			"what needs attention today. Ask Ori is available on every page for questions and work alike.",
+			"what needs attention today. Help explains the app; your Personal Assistant handles conversations and work.",
 		NavKey:  "home",
 		Aliases: []string{"home", "dashboard", "the map", "workspace map", "start page"},
 	},
@@ -133,26 +132,23 @@ var guideTopics = []GuideTopic{
 		Key:   "agent",
 		Label: "Agent",
 		Explanation: "An agent is a configured worker: a model, a system prompt, a set of tools, and " +
-			"the workspaces it belongs to. When you describe work here, I route it to the right agent and " +
-			"ask you to confirm anything consequential.",
+			"the workspaces it belongs to. Your Personal Assistant and workspace controls handle work, " +
+			"with the existing confirmation gates for consequential actions.",
 		NavKey:    "agents",
 		Coachmark: CoachmarkNewAgent,
 		Aliases:   []string{"agent", "agents", "what is an agent", "workers"},
 	},
 	{
-		// The topic key stays "workspace-manager" on purpose: the controller uses
-		// it as the signal that a request is work rather than navigation, and the
-		// aliases keep answering for users who still call it by its old name.
-		// Only the rendered copy changed (FR61/FR62).
+		// Keep the stable key and old aliases for callers and historical names.
 		Key:   "workspace-manager",
-		Label: "Getting work done",
-		Explanation: "Ask Ori plans work, routes it to the right agent or workspace, and asks you to " +
-			"confirm anything consequential. Describe what you want done in the same box you ask questions in — " +
-			"nothing runs until you say so.",
+		Label: "Personal Assistant",
+		Explanation: "Your Personal Assistant keeps conversations and drafts, helps plan work, and routes it " +
+			"to the appropriate workspace or agent. Open the assistant, review your request, then press Send. " +
+			"Opening Help or the assistant is not approval to execute work; existing confirmation gates still apply.",
 		NavKey:    "home",
 		Coachmark: CoachmarkWorkspaceManger,
 		Aliases: []string{
-			"workspace manager", "the work surface", "command box",
+			"workspace manager", "the work surface", "command box", "personal assistant",
 			"how do i run something", "who does the work",
 		},
 	},
@@ -230,7 +226,7 @@ var guideTopics = []GuideTopic{
 		Key:   "model-setup",
 		Label: "Model setup",
 		Explanation: "Ori needs a model provider and API key before agents can run. Settings is where you " +
-			"choose the provider, add the key, and pick the system model.",
+			"choose the provider, add the key, and pick the system model. Help and fixed walkthroughs work without a model.",
 		NavKey: "settings",
 		Setup:  SetupOpenModelSettings,
 		Aliases: []string{

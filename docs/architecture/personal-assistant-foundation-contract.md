@@ -39,12 +39,19 @@ stable entry instance, never a same-named global roster entry. The global-profil
 lookup and rename descriptions below remain the native-hire path, not permission
 to promote an imported agent or rename unrelated sessions.
 
+Amendment 4 — Contextual Help and work ownership: **Personal Assistant =
+conversations and work; Help = understand the app.** The navbar's single
+**? Help** replaces the persistent character-led Ask Ori launcher and Home's
+App Guide entry. This is presentation and a stricter Help boundary, not an
+identity, history, runtime, or permissions migration. Ori's character remains
+in fixed onboarding/walkthroughs; protected internal names remain unchanged.
+
 ## Purpose
 
 Ori exposes one user-chosen, durable personal-assistant relationship. The
 assistant is hired during onboarding, lives as the entry-agent instance of the
 user's designated Personal HQ workspace, and remains the same identity across
-Home, Ask Ori, Personal HQ, and project handoffs.
+Home, the Personal Assistant drawer, Personal HQ, and project handoffs.
 
 This contract makes that relationship a product boundary instead of a UI label.
 It does not create a second agent runtime, a new workspace kind, or a parallel
@@ -55,10 +62,10 @@ Brief generation, workspace memory, and user-profile services remain canonical.
 
 | Surface | Current owner | Dependencies and consequence boundary |
 |---|---|---|
-| `Ask Ori` Home composer and activity | `dashboard.js`, `/api/home-assistant/ask`, and `/api/home-assistant/route` | Resolves a plan and target workspace/agent, displays confirmation for consequential work, then starts the existing execution path. |
-| Ori Guide panel | `ori-guide.js` and `agenthttp.OriGuideHandler` | Deterministic, structurally read-only help. Work-shaped requests escalate to Home routing; the guide itself cannot mutate. |
+| Personal Assistant composer and work activity | `personal-assistant-panel.js`, `dashboard.js`, `/api/home-assistant/ask`, and `/api/home-assistant/route` | Owns conversations, drafts, the single activity/history host, and consequential-work confirmations; reuses the existing execution path. |
+| Contextual Help panel | `ori-guide.js` and `agenthttp.OriGuideHandler` | Deterministic, structurally read-only and provider-free from initial load. Work-shaped searches never route or execute; only an explicit user transition may open the assistant with unsent text. |
 | Protected system assistant | `systemassistant.Identity` plus agent-store lookup | Canonical internal `Ask Ori` record used by infrastructure. It is never a user hire or display-name source. |
-| Global launcher/navbar/help | navbar/dashboard templates and `app.js` | Opens the Home composer or guide panel; it does not choose or persist identity. |
+| Assistant launcher and navbar Help | navbar/guide templates, `personal-assistant-panel.js` and `ori-guide.js` | Separate work and Help entry points; switches presentation without choosing identity, discarding drafts, cancelling work, or submitting anything. |
 | Onboarding guide name | `onboarding.Manager` and `onboarding.js` | `app_state.json` defaults the app guide name to `Ori`; PAF never treats this presentation field as the hired assistant's stable identity. |
 | Personal HQ setup | `personalhq.SetupCoordinator` through `sessionhttp.Handler.CreateFromTemplate` | Creates `personal-ops`, seeds global profiles plus stable workspace agent instances, designates the HQ, and stores provisional brief input. Partial failures return the created workspace ID. Unchanged for legacy/non-PAF builds. |
 | Post-hire HQ setup | `personalassistant.HQSetupCoordinator` over the same canonical services | The PAF-owned consequence of the guided Map quest. Reuses the already-hired global profile as entry agent, designates HQ, saves Daily Brief, and activates the relationship. Versioned and idempotent; partial failures stay resumable. |
@@ -97,14 +104,48 @@ report `repair_needed`, and must not be fabricated as healthy-and-empty.
 deterministic validation proves that the recorded profile/HQ can no longer be
 resumed, in which case it maps to `repair_needed`.
 
-Ori Help is always available from the global Help menu and contextual **Ask Ori
-about this screen** action. Both open the same guide-only panel. Help may read
-only bounded route/screen/topic metadata. It cannot receive the hired
-assistant's mandate, profile memory, workspace memory, source content, or chat
-history, and it cannot create a task, follow-up, brief, workspace, connection,
-or run. The hired assistant may receive the canonical user profile, its
-Personal HQ memory/working agreement, approved source snapshots, and the
-current request subject to existing access and confirmation gates.
+Help is always available from the navbar's **? Help** and contextual
+**Explain this screen** actions, where offered. Both open the same non-modal
+panel (a full-width non-modal sheet on narrow screens). Opening focuses the
+labelled search; closing returns to its actual invoker. The referenced screen
+remains interactive, with no false `aria-modal` claim or background inertness.
+
+Ordinary Help contains **About this screen**, **Common questions**, eligible
+existing **Walkthroughs**, and **Search help** / **Search**. Reviewed route/topic
+metadata and the existing bounded matcher provide deterministic answers or an
+honest no-match/error state, not full-text or fuzzy documentation search.
+Production Help makes no provider call, even with a configured model. It sends
+only a bounded `{question, route}`; it cannot receive the hired assistant's
+mandate, profile/memory, history, page contents, or folder/source/workspace
+content. It cannot create a task, follow-up, brief, workspace, connection, or
+run. Slash commands and unknown/work-shaped searches have no execution path,
+including while relationship status is loading, failed, or incomplete.
+
+A work-shaped search may offer an explicit, unsent transition. Confirmed
+active/paused identity may open the assistant and suggest text only without
+overwriting its draft. Loading/unavailable status offers retry, not a guessed
+name or hire; hire, HQ/resume and repair states use their existing setup paths.
+Retry refreshes readiness only: another explicit Open action is required.
+Legacy `ori-guide-handoff` text is bounded, recoverable and unsent in the
+assistant; acceptance/dismissal does not overwrite a draft or delete a newer
+request. For a Help transition, only pressing the assistant's Send invokes the
+canonical work controller. Workspace-native commands/inputs retain their
+existing direct work-controller contracts.
+
+The hired assistant may receive the canonical user profile, its Personal HQ
+memory/working agreement, approved source snapshots, and the current request
+subject to existing access and confirmation gates. Its work context uses the
+shared canonical collector independently of Help. The single work activity node
+belongs to the assistant from initial render, including relationship failure;
+Help never reparents it or displays a work transcript. Background work does not
+steal Help, while explicit reopening uses the work host.
+
+Fixed quests retain Ori's character, registered coachmarks and explicit choices,
+not an ordinary Help conversation. Their provider-free presentation never
+advances a quest or activates a target by itself. Late search replies cannot
+replace fixed steps or restore actionable content from an old screen/selection.
+Escape dismisses the topmost overlay or coachmark before the underlying panel;
+closing/switching presentation neither cancels work nor changes quest progress.
 
 ## Identity and ownership
 
@@ -124,8 +165,8 @@ never identity inputs. Renaming changes presentation only. A Personal HQ rename
 or restart does not change the binding.
 
 The canonical protected system assistant (`Ask Ori`, marker
-`ori:system-assistant`) remains an internal implementation detail. It may answer
-structural help or execute existing Home routing internals, but it must never be
+`ori:system-assistant`) remains an internal implementation detail. It may execute
+existing Home routing internals, but it must never be
 returned as the hired identity, shown as an alternative relationship, or share
 an agent-instance ID with the personal assistant.
 
@@ -219,12 +260,12 @@ with the Mission 01 card, its six steps, its reward and what it unlocks, and
 Start mission or Not now. Start mission opens step 1. Every other entry starts
 at step 1 directly, `/?quest=meet-assistant` (`MEET_ASSISTANT_QUEST_ROUTE`,
 `progression.MeetAssistantActionURL`): Home's mission card, Today's `needs_hire`
-banner, Ask Ori's hand-off, and the retired `/?hire=1`, which redirects there.
+banner, Help's explicit setup transition, and the retired `/?hire=1`, which redirects there.
 Pressing Agents from step 1 sets `ori:meet-assistant-guided` in
 sessionStorage, so the Agents page carries on in the same layer. Entries already
 about the Agents page start at step 2, `/agents?quest=meet-assistant`
 (`MEET_ASSISTANT_AGENTS_ROUTE`): `/agents/create`'s pointer, the repair banners,
-and Ask Ori's hand-off on `/agents`. A plain `/agents` visit before the hire
+and Help's explicit setup transition on `/agents`. A plain `/agents` visit before the hire
 also continues at step 2, in Ori's docked panel, and so does any step when there
 is no room beside the form (a phone-width sheet). A plain Home visit shows
 nothing and makes no request. `/?quest=meet-assistant` on an install that needs
@@ -716,11 +757,11 @@ not erase healthy results.
 
 ## Surfaces and routing
 
-Home, Ask Ori, and Personal HQ resolve the same binding. If it is healthy they
-show the chosen assistant name and route work through the existing
-`/api/home-assistant/route` and execution pipeline. Ori Guide remains a
-structurally read-only deterministic guide and may escalate to that same route;
-it is not a peer assistant.
+Home, the Personal Assistant drawer, and Personal HQ resolve the same binding.
+If it is healthy they show the chosen assistant name and route work through the
+existing `/api/home-assistant/route` and execution pipeline. Contextual Help is
+structurally read-only, deterministic and provider-free. It never escalates to
+routing; an explicit transition opens the assistant with unsent text instead.
 
 Home is Map-first: the Workspace Map/Tree occupies the available cockpit
 viewport without an always-visible Today row. Its primary header action is
@@ -768,8 +809,8 @@ Decisions/Priorities/Remembered/FollowUps/Results JSON fields remain available
 for one release but do not render as sections.
 
 The conversation is empty until something happens: the shared work activity's
-idle text is not shown in the drawer (the Ask Ori guide panel, which uses the
-same activity block, is unchanged). When the user starts something (Send, or
+idle text is not shown in the drawer. The activity block is permanently owned
+by the assistant, not shared or reparented into Help. When the user starts something (Send, or
 "Explore a folder") Needs you and the two rows fold into one **summary strip**
 ("Needs you 2 · Brief ready · 2 in progress") with a Show/Hide control.
 Folding only hides them, so anything typed into a card is still there. A
@@ -1586,11 +1627,11 @@ The package/API/browser suites must pin at least these cases:
 | Missing relationship with ambiguous or contradictory PAF provenance | `repair_needed` / `relationship_recovery_blocked`; no automatic repair and no hire |
 | Blocked recovery, HQ marker names an earlier hire | diagnosis `assistant_mismatch` with one recommended `link_hq`; applying it rewrites the marker in both stores and reconnects `paused`, creating nothing |
 | Recovery fix reviewed against changed evidence | `409`; nothing written |
-| Active binding | same chosen identity on Home, Ask Ori, and HQ |
+| Active binding | same chosen identity on Home, the Personal Assistant drawer, and HQ |
 | Active binding with no model | “Hired — choose a model to chat”; deterministic assignment/brief actions enabled |
 | Paused binding | reads/profile edits allowed; proactive runs suppressed |
 | Missing/foreign HQ or missing bound agent ID | `repair_needed`; no name-based fallback and no memory leakage |
-| Ori Help request | guide-only response; zero PAF/Ticket/follow-up/brief mutations |
+| Help request | deterministic response or honest miss/error; zero provider, routing/execution calls or PAF/Ticket/follow-up/brief mutations in every relationship state |
 | Fresh confirmed hire | one owned global profile; `needs_hq`; zero workspaces, zero HQ designation, zero Journal profile, zero Daily Brief config |
 | `needs_hq` projection | named identity readable; Personal HQ, agent instance, and Daily Brief `not_configured` with reason `hq_not_built`; `next_action` is `build_hq` only |
 | Quest opened, site selected, or modal opened | no workspace, designation, brief, or quest completion; Build My HQ still featured |
