@@ -442,6 +442,7 @@ function close(options = {}) {
   saveTabValue(PANEL_DRAFT_KEY, state.draft);
   closeMoreMenu();
   window.PersonalAssistantFolderContext?.close?.();
+  window.PersonalAssistantTranscript?.closed?.();
   state.els.panel.hidden = true;
   state.els.launcher.setAttribute('aria-expanded', 'false');
   const trigger = state.lastTrigger;
@@ -669,6 +670,7 @@ function submit(event) {
   if (window.OriAskRouting.setPersonalAssistantIdentity) {
     window.OriAskRouting.setPersonalAssistantIdentity(state.view.name);
   }
+  window.PersonalAssistantTranscript?.send?.();
   state.pending = true;
   // Disabling a focused button drops focus to the page at once, even when it is
   // enabled again a moment later. Remember it, so Send from the keyboard does
@@ -721,10 +723,19 @@ function revealFocusedControl() {
     !active ||
     !scroll?.contains(active) ||
     !active.closest(
-      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderDiscussionChooser'
+      '[data-folder-discussion], [data-folder-event-id], #personalAssistantFolderDiscussionChooser, #personalAssistantFolderSetupChoices, .personal-assistant-message__setup'
     )
   )
     return;
+  if (window.PersonalAssistantTranscript) {
+    // Resize recovery must not replace the owner's pre-mutation reading anchor.
+    if (!window.PersonalAssistantTranscript.isSettled()) {
+      requestAnimationFrame(revealFocusedControl);
+      return;
+    }
+    window.PersonalAssistantTranscript.revealControl(active);
+    return;
+  }
   const viewport = scroll.getBoundingClientRect();
   const target = active.getBoundingClientRect();
   if (!assistantFocusNeedsScroll(viewport, target)) return;

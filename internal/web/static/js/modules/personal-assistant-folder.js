@@ -1636,6 +1636,11 @@ export function conversationFolderOfferView(offer, options = {}) {
 function renderOffer(place) {
   const els = elements();
   if (!els?.offer) return;
+  const focusedAction =
+    state.reviewSlot && els.actions?.contains(document.activeElement)
+      ? document.activeElement.dataset.folderAction
+      : '';
+  if (state.reviewSlot) window.PersonalAssistantTranscript?.beforeChange?.();
   const view = conversationFolderOfferView(state.offer, { confirm: state.confirm });
   const receipt = folderReceiptView(state.offer, {
     busy: state.firstLookBusy,
@@ -1781,6 +1786,19 @@ function renderOffer(place) {
       }
     }
   }
+  if (
+    focusedAction &&
+    !els.actions.contains(document.activeElement) &&
+    !document.getElementById('personalAssistantPanel')?.hidden
+  ) {
+    const replacement = Array.from(els.actions.querySelectorAll('[data-folder-action]')).find(
+      control => control.dataset.folderAction === focusedAction
+    );
+    const control = replacement || els.offer;
+    if (!replacement) control.tabIndex = -1;
+    control.focus({ preventScroll: true });
+  }
+  if (state.reviewSlot) window.PersonalAssistantTranscript?.changed?.();
 }
 
 function render() {

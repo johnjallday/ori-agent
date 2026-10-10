@@ -191,20 +191,20 @@ export function renderFolderSummary(container, observation, options = {}) {
     node('span', view.status, 'personal-assistant-folder-context__status')
   );
   container.append(meta, node('p', view.disclosure));
+  const details = node('details', '', 'personal-assistant-folder-context__details');
+  details.append(node('summary', 'Scan details'));
   if (view.rootMarker)
-    container.append(node('p', view.rootMarker, 'personal-assistant-folder-context__note'));
-  if (view.visibleRows.length) container.append(rows(view.visibleRows));
+    details.append(node('p', view.rootMarker, 'personal-assistant-folder-context__note'));
+  if (view.visibleRows.length) details.append(rows(view.visibleRows));
   if (view.empty)
     container.append(node('p', view.empty, 'personal-assistant-folder-context__note'));
   if (view.moreRows.length) {
     const more = node('details', '', 'personal-assistant-folder-context__more');
     more.append(node('summary', view.moreLabel), rows(view.moreRows));
-    container.append(more);
+    details.append(more);
   }
   if (view.omission)
     container.append(node('p', view.omission, 'personal-assistant-folder-context__note'));
-  const details = node('details', '', 'personal-assistant-folder-context__details');
-  details.append(node('summary', 'Scan details'));
   for (const line of view.details) details.append(node('p', line));
   if (options.local)
     details.append(

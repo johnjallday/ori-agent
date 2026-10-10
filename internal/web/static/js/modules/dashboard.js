@@ -404,6 +404,7 @@
     pendingCapabilityBrief: '',
     pendingRouteData: null,
     awaitingCreateConfirmation: false,
+    personalConversation: false,
     busy: false,
     recentSessions: [],
     mode: 'new_task',
@@ -1400,6 +1401,12 @@
     var els = getHomeAssistantElements();
     if (!els.thinkingModalLabel) return;
 
+    if (
+      hasVisibleHomeAssistantPlanning() ||
+      hasVisibleHomeAssistantInlineReply() ||
+      (!homeAssistantState.personalConversation && homeAssistantState.busy)
+    )
+      parkPersonalTurnStatus();
     // A completed chat needs no second identity/ready heading. Keep the shared
     // header for real progress, failures and structured review on every surface.
     els.thinkingModal.classList.toggle(
@@ -1954,6 +1961,16 @@
 
   function setHomeAssistantBusy(isBusy, busyLabel) {
     homeAssistantState.busy = Boolean(isBusy);
+    var personalPending =
+      Boolean(window.PersonalAssistantTranscript) &&
+      homeAssistantState.personalConversation &&
+      getHomeAssistantElements().thinkingModal?.dataset.homeAssistantPanelScope ===
+        'personal-assistant';
+    getHomeAssistantElements().thinkingModal?.classList.toggle(
+      'is-personal-chat-pending',
+      Boolean(personalPending && isBusy)
+    );
+    if (personalPending) window.PersonalAssistantTranscript?.pendingReply?.(Boolean(isBusy));
     window.PersonalAssistantFolderContext?.refreshDiscussion?.();
     var els = getHomeAssistantElements();
     if (els.sendBtn && els.input) {
@@ -1986,17 +2003,59 @@
     renderHomeAssistantInlineReply();
   }
 
+  // Move (never clone) existing status/action targets beside an ordinary
+  // personal answer. Structured confirmation/progress keeps the shared layout.
+  var personalTurnSlots = null;
+  function parkPersonalTurnStatus(removing) {
+    if (!personalTurnSlots) return;
+    if (
+      removing &&
+      !personalTurnSlots.some(function (slot) {
+        return removing.contains(slot.node);
+      })
+    )
+      return;
+    personalTurnSlots.forEach(function (slot) {
+      if (slot.marker.parentNode) slot.marker.parentNode.insertBefore(slot.node, slot.marker);
+    });
+    getHomeAssistantElements().thinkingModal?.classList.remove('is-personal-turn-status');
+  }
+  function mountPersonalTurnStatus(row) {
+    var els = getHomeAssistantElements();
+    if (
+      !row?.firstElementChild ||
+      els.thinkingModal?.dataset.homeAssistantPanelScope !== 'personal-assistant'
+    )
+      return;
+    if (!personalTurnSlots) {
+      personalTurnSlots = [els.routingSummary, els.actions].filter(Boolean).map(function (node) {
+        var marker = document.createComment('personal turn status parking slot');
+        node.after(marker);
+        return { node: node, marker: marker };
+      });
+    }
+    personalTurnSlots.forEach(function (slot) {
+      row.firstElementChild.append(slot.node);
+    });
+    els.thinkingModal.classList.add('is-personal-turn-status');
+  }
+
   // Returns the rendered row so a caller can mark it with the canonical message
   // ID once the server has stored the turn.
   function appendHomeAssistantMessage(role, text) {
+    if (role === 'user') parkPersonalTurnStatus();
     var els = getHomeAssistantElements();
     var conversation = els.conversation;
     if (!conversation) return null;
     var scroll = conversation.closest('.personal-assistant-panel__scroll') || conversation;
+    var transcriptOwner = scroll !== conversation && window.PersonalAssistantTranscript;
+    transcriptOwner?.prepareAppend?.();
+    conversation.setAttribute('aria-live', transcriptOwner ? 'off' : 'polite');
     var followLatest =
-      scroll === conversation ||
-      role === 'user' ||
-      scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
+      !transcriptOwner &&
+      (scroll === conversation ||
+        role === 'user' ||
+        scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48);
 
     if (!conversation.dataset.initialized) {
       conversation.innerHTML = '';
@@ -2053,11 +2112,13 @@
 
     while (conversation.children.length > HOME_ASSISTANT_MESSAGE_LIMIT) {
       window.PersonalAssistantFolderSetup?.park?.(conversation.firstChild);
+      parkPersonalTurnStatus(conversation.firstChild);
       conversation.removeChild(conversation.firstChild);
     }
     syncHomeAssistantConversationSection();
     syncHomeAssistantLauncher();
-    if (followLatest) scroll.scrollTop = scroll.scrollHeight;
+    if (transcriptOwner) transcriptOwner.changed();
+    else if (followLatest) scroll.scrollTop = scroll.scrollHeight;
     try {
       var routeContext = buildHomeRouteContext();
       window.dispatchEvent(
@@ -10313,6 +10374,7 @@
     homeAssistantState.awaitingCreateConfirmation = false;
     homeAssistantState.pendingPrompt = text;
     homeAssistantState.pendingIntent = HOME_INTENTS.assistant_conversation;
+    homeAssistantState.personalConversation = true;
     appendHomeAssistantMessage('user', text);
     setHomeAssistantBusy(true, 'Checking folder context…');
     renderHomeAssistantActions([]);
@@ -10337,7 +10399,8 @@
     } catch (_) {
       var notice =
         'The folder context could not be validated. Nothing was sent to the model. Your draft is kept; reopen the conversation or pick again before sending.';
-      appendHomeAssistantMessage('assistant', notice);
+      var failedRow = appendHomeAssistantMessage('assistant', notice);
+      window.PersonalAssistantTranscript?.reply?.(failedRow);
       conversations && conversations.notify(notice);
       restorePersonalAssistantDraft(text);
       setHomeAssistantRoutingSummary('', '');
@@ -10355,6 +10418,7 @@
     if (!text) return;
     options = options || {};
     var confirmedAction = options.confirmedAction || null;
+    var inlineReview = false;
     var isConversation = intent === 'assistant_conversation';
     var summaryLabel = isConversation
       ? getHomeAssistantActivityLabel()
@@ -10376,6 +10440,7 @@
     // own conversation; its progress and any failure carry that assistant's
     // name, not the name of an agent that belongs to the page.
     homeAssistantState.hiredAssistantTurn = Boolean(conversationRef);
+    if (conversationRef) homeAssistantState.personalConversation = !confirmedAction;
     if (isConversation) summaryLabel = getHomeAssistantActivityLabel();
 
     setHomeAssistantBusy(true, confirmedAction ? 'Applying…' : 'Thinking…');
@@ -10423,10 +10488,7 @@
         );
         return;
       }
-      var personalScroll = conversationRef && document.getElementById('personalAssistantScroll');
-      var followPersonalReply =
-        personalScroll &&
-        personalScroll.scrollHeight - personalScroll.scrollTop - personalScroll.clientHeight < 48;
+      if (conversationRef) window.PersonalAssistantTranscript?.beforeChange?.();
       var responseText = String((data && data.response) || '').trim();
       var assistantRow = responseText
         ? appendHomeAssistantMessage('assistant', responseText)
@@ -10435,9 +10497,8 @@
         conversationRef && conversations && typeof conversations.applyReply === 'function'
           ? conversations.applyReply(data, { userRow: userRow, assistantRow: assistantRow })
           : null;
-      // Message menus, typed observation rows and preview retirement are one
-      // render batch. Follow the batch only if the user was already at the end.
-      if (followPersonalReply) personalScroll.scrollTop = personalScroll.scrollHeight;
+      // The viewport owner settles once, after decorations AND final busy/status
+      // teardown. No second near-bottom sample in the middle of this batch.
       if (
         data &&
         data.draft_context &&
@@ -10453,6 +10514,7 @@
       }
 
       if (data && data.requires_confirmation && data.confirmation) {
+        inlineReview = true;
         confirmHomeAction(data.confirmation, routeContext, intent);
         return;
       }
@@ -10466,6 +10528,7 @@
         typeof window.PersonalAssistantDrafts.open === 'function'
       ) {
         setHomeAssistantRoutingSummary('', '');
+        inlineReview = true;
         window.PersonalAssistantDrafts.open(data.draft_review, {});
         return;
       }
@@ -10479,6 +10542,7 @@
         typeof window.PersonalAssistantMemory.open === 'function'
       ) {
         setHomeAssistantRoutingSummary('', '');
+        inlineReview = true;
         window.PersonalAssistantMemory.open({ text: String(data.memory_review.text || '') }, {});
         return;
       }
@@ -10520,7 +10584,7 @@
               message: 'I could not answer that right now. Please retry.',
               summary: 'Could not complete the request.'
             };
-      appendHomeAssistantMessage('assistant', failure.message);
+      assistantRow = appendHomeAssistantMessage('assistant', failure.message);
       setHomeAssistantRoutingSummary(summaryLabel + ' Failed', failure.summary);
       if (conversationRef && !confirmedAction) {
         restorePersonalAssistantDraft(text);
@@ -10550,6 +10614,10 @@
       ]);
     } finally {
       setHomeAssistantBusy(false);
+      if (conversationRef && assistantRow) {
+        if (!confirmedAction && !inlineReview) mountPersonalTurnStatus(assistantRow);
+        window.PersonalAssistantTranscript?.reply?.(assistantRow);
+      }
     }
   }
 
@@ -13237,6 +13305,10 @@
     if (routeContext.origin !== 'personal_assistant_panel') return false;
     var conversations = window.PersonalAssistantConversation;
     var conversationRef = conversations && conversations.request(routeContext);
+    homeAssistantState.personalConversation = true;
+    clearHomeAssistantPlanning();
+    clearHomeAssistantInlineReply();
+    var userRow = appendHomeAssistantMessage('user', text);
     setHomeAssistantBusy(true, 'Checking workspace context…');
     try {
       var route = await API.post('/api/home-assistant/route', {
@@ -13248,13 +13320,19 @@
       if (
         route.route_mode !== 'home_inline' ||
         !['assistant_conversation', 'app_introspection', 'app_navigation'].includes(route.intent)
-      )
+      ) {
+        // The non-inline route retains its existing progress/confirmation UI.
+        // Retire only this provisional unsaved row before the shared path adds it.
+        window.PersonalAssistantTranscript?.beforeChange?.();
+        userRow?.remove();
+        window.PersonalAssistantTranscript?.pendingReply?.(false);
+        homeAssistantState.personalConversation = false;
         return false;
+      }
       clearHomeAssistantPlanning();
       clearHomeAssistantInlineReply();
       homeAssistantState.awaitingCreateConfirmation = false;
       homeAssistantState.pendingPrompt = text;
-      appendHomeAssistantMessage('user', text);
       await runHomeAssistantInline(text, routeContext, route.intent, {
         conversationRef: conversationRef
       });
@@ -13262,7 +13340,9 @@
     } catch (_) {
       var notice =
         'The workspace context could not be validated. Nothing was sent to the model; your draft is kept. Refresh the context or ask from an app-wide page.';
-      appendHomeAssistantMessage('assistant', notice);
+      var failedRow = appendHomeAssistantMessage('assistant', notice);
+      mountPersonalTurnStatus(failedRow);
+      window.PersonalAssistantTranscript?.reply?.(failedRow);
       conversations && conversations.notify(notice);
       restorePersonalAssistantDraft(text);
       return true;
@@ -13287,6 +13367,7 @@
     // From here the request is for the page's own agent or a specialist, so
     // the hired assistant's name no longer labels it.
     homeAssistantState.hiredAssistantTurn = false;
+    homeAssistantState.personalConversation = false;
     clearHomeAssistantPlanning();
     clearHomeAssistantInlineReply();
     setHomeAssistantMode('new_task');
@@ -14000,7 +14081,10 @@
     var conversation = getHomeAssistantElements().conversation;
     if (!conversation || !row) return null;
     var scroll = conversation.closest('.personal-assistant-panel__scroll') || conversation;
-    var followLatest = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
+    var transcriptOwner = scroll !== conversation && window.PersonalAssistantTranscript;
+    transcriptOwner?.beforeChange?.();
+    var followLatest =
+      !transcriptOwner && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
     if (!conversation.dataset.initialized) conversation.replaceChildren();
     conversation.dataset.initialized = 'true';
     conversation.insertBefore(
@@ -14009,16 +14093,20 @@
     );
     while (conversation.children.length > HOME_ASSISTANT_MESSAGE_LIMIT) {
       window.PersonalAssistantFolderSetup?.park?.(conversation.firstChild);
+      parkPersonalTurnStatus(conversation.firstChild);
       conversation.removeChild(conversation.firstChild);
     }
     syncHomeAssistantConversationSection();
     syncHomeAssistantLauncher();
-    if (followLatest) scroll.scrollTop = scroll.scrollHeight;
+    if (transcriptOwner) transcriptOwner.changed();
+    else if (followLatest) scroll.scrollTop = scroll.scrollHeight;
     return row;
   };
   window.OriAskRouting.resetConversation = function () {
     if (homeAssistantState.busy) return false;
     window.PersonalAssistantFolderSetup?.park?.();
+    parkPersonalTurnStatus();
+    window.PersonalAssistantTranscript?.reset?.();
     var els = getHomeAssistantElements();
     if (els.conversation) {
       els.conversation.replaceChildren();

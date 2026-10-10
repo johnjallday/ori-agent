@@ -1,12 +1,27 @@
 // Presentation of server-authored canonical review references. Model prose never
 // supplies a control, offer ID, candidate, route, or confirmation here.
 import { folderReceiptView } from './personal-assistant-folder.js';
+import {
+  proposalView,
+  placementProposalView,
+  renderProposal
+} from './personal-assistant-proposal.js';
 
 export function setupCandidates(observation) {
-  return (observation?.projects || []).map(project => ({
-    id: project.id,
-    label: `${project.name}${project.root ? ' (whole folder)' : ''}${project.marker ? ` · ${project.marker}` : ''}`
-  }));
+  const projects = observation?.projects || [];
+  const labels = projects.map(
+    project =>
+      `${project.name}${project.root ? ' (whole folder)' : ''}${project.marker ? ` · ${project.marker}` : ''}`
+  );
+  return projects.map((project, index) => {
+    const text = Array.from(labels[index]);
+    const long = text.length > 180;
+    const duplicate = labels.filter(label => label === labels[index]).length > 1;
+    return {
+      id: project.id,
+      label: `${long ? text.slice(0, 179).join('') + '…' : labels[index]}${long || duplicate ? ` · Choice ${index + 1}` : ''}`
+    };
+  });
 }
 
 export function currentReview(state, offer) {
@@ -20,6 +35,12 @@ let current;
 let reviews = {};
 let owner = '';
 let candidateObservation = '';
+let choiceOptions = [];
+let choiceOrigin = null;
+let choicesMarker = null;
+let noticeMarker = null;
+let composerOrigin = null;
+let uiEpoch = 0;
 let suggestion = null;
 let choiceTrigger = null;
 let choiceSubject = '';
@@ -31,6 +52,47 @@ let reviewElsewhere = null;
 // reference: Review resolves and checks it again on the server.
 export function subjectPlacement(subjectId, option = {}) {
   return subjectId ? { ...option, subject_workspace_id: String(subjectId) } : option;
+}
+
+export function choiceIsCurrent(binding, state) {
+  return Boolean(
+    binding &&
+    state &&
+    !state.authority &&
+    binding.conversationId === state.conversationId &&
+    binding.observationId === state.observation?.id &&
+    binding.revision === state.revision
+  );
+}
+
+function focusLocal(control, atStart = false) {
+  if (!control?.isConnected || document.getElementById('personalAssistantPanel')?.hidden) return;
+  window.PersonalAssistantTranscript?.revealControl?.(control, atStart);
+  control.focus({ preventScroll: true });
+}
+function fallbackOrigin() {
+  if (composerOrigin?.isConnected) return composerOrigin;
+  composerOrigin = document.createElement('section');
+  composerOrigin.dataset.setupComposerOrigin = 'true';
+  composerOrigin.className = 'personal-assistant-message__setup';
+  composerOrigin.setAttribute('aria-label', 'Setup from attached folder');
+  const note = document.createElement('p');
+  note.textContent =
+    'Setup from your attached folder — no assistant reply or model is required. Choose scope explicitly; discussion topics are separate.';
+  composerOrigin.append(note);
+  // Idle shared routing targets remain hidden. This is a local UI handoff at
+  // the composer's end of the same pane, not a fabricated transcript message.
+  document.getElementById('personalAssistantScroll')?.append(composerOrigin);
+  return composerOrigin;
+}
+function originParent() {
+  return choiceOrigin?.parent?.isConnected ? choiceOrigin.parent : fallbackOrigin();
+}
+function parkChoices() {
+  if (!elements) return;
+  elements.choices.hidden = true;
+  if (choicesMarker?.parentNode)
+    choicesMarker.parentNode.insertBefore(elements.choices, choicesMarker);
 }
 
 const STOPPED_BECAUSE = {
@@ -166,10 +228,44 @@ export function currentSuggestion(state, value, offer = null) {
   );
 }
 
+function flowHasFocus() {
+  return Boolean(choiceOrigin?.parent?.contains(document.activeElement));
+}
+
+function retireSuggestion(node) {
+  if (!node) return;
+  window.PersonalAssistantTranscript?.beforeChange?.();
+  if (node.contains(document.activeElement)) {
+    // Retire authority, never the reader's focused native control. Its old
+    // handlers still validate the original binding; blur retires this shell.
+    node.removeAttribute('data-folder-setup-suggestion');
+    if (!node.dataset.inactiveSetup) {
+      uiEpoch++;
+      node.dataset.inactiveSetup = 'true';
+      const note = document.createElement('p');
+      note.textContent =
+        'These setup choices are no longer current. Use the current proposal or pick the folder again; no setup is authorized here.';
+      node.append(note);
+      node.addEventListener('focusout', () =>
+        queueMicrotask(() => {
+          if (node.contains(document.activeElement)) return;
+          if (choiceOrigin?.parent === node) closeChoices(false);
+          node.remove();
+        })
+      );
+    }
+    window.PersonalAssistantTranscript?.changed?.();
+    return;
+  }
+  if (node === choiceOrigin?.parent) closeChoices(false);
+  node.remove();
+  window.PersonalAssistantTranscript?.changed?.();
+}
+
 function renderSuggestion() {
   const existing = document.querySelector('[data-folder-setup-suggestion]');
   if (!currentSuggestion(current, suggestion, reviews[suggestion?.offer_id])) {
-    existing?.remove();
+    retireSuggestion(existing);
     return;
   }
   const row = Array.from(
@@ -181,7 +277,7 @@ function renderSuggestion() {
       row.dataset.messageRole === 'assistant'
   );
   if (!row) {
-    existing?.remove();
+    retireSuggestion(existing);
     return;
   }
   const bubble = row.firstElementChild;
@@ -190,10 +286,39 @@ function renderSuggestion() {
     existing.querySelector('button').disabled = Boolean(current.pending);
     return;
   }
-  existing?.remove();
+  retireSuggestion(existing);
   const handoff = document.createElement('div');
   handoff.dataset.folderSetupSuggestion = suggestion.message_id;
   handoff.className = 'personal-assistant-message__setup';
+  const options = suggestion.options || [];
+  const project = current.observation?.projects?.find(
+    project => project.id === options[0]?.candidate_id
+  );
+  let view = proposalView(
+    options.length === 1 ? options[0] : {},
+    options.length === 1 ? project : { name: current.observation?.folder, root: true }
+  );
+  if (suggestion.offer_id)
+    view = {
+      ...view,
+      state: 'existing',
+      label: 'Existing setup review',
+      scope: 'Canonical review',
+      subject: proposalView(
+        {},
+        { name: reviews[suggestion.offer_id]?.subject?.name || 'Reviewed folder' }
+      ).subject,
+      description: 'Show the stored review; do not prepare or repeat setup.',
+      destination: ''
+    };
+  else if (options.length > 1)
+    view = {
+      ...view,
+      label: 'Choose setup scope',
+      scope: 'No folder selected',
+      description: `Choose one of ${options.length} compatible folders. Discussion checks do not choose setup scope.`
+    };
+  handoff.append(renderProposal(view, document, window.OriWorkspaceBuildingArt));
   const button = document.createElement('button');
   button.type = 'button';
   button.className = suggestion.offer_id
@@ -201,7 +326,9 @@ function renderSuggestion() {
     : 'personal-assistant-message__action personal-assistant-message__setup-secondary';
   button.textContent = suggestion.offer_id
     ? 'Show existing setup review'
-    : 'Optional: review setup';
+    : options.length > 1
+      ? 'Choose setup scope'
+      : view.action;
   button.disabled = Boolean(current.pending);
   button.setAttribute(
     'aria-controls',
@@ -213,10 +340,9 @@ function renderSuggestion() {
     if (!currentSuggestion(current, value, reviews[value.offer_id])) return;
     if (value.offer_id) {
       const card = document.getElementById('personalAssistantFolderOffer');
-      card?.scrollIntoView?.({ block: 'nearest' });
       if (card) {
         card.tabIndex = -1;
-        card.focus();
+        focusLocal(card, true);
       }
       return;
     }
@@ -227,14 +353,34 @@ function renderSuggestion() {
   note.textContent = suggestion.offer_id
     ? 'Focuses the existing canonical review only. Setup still requires its reviewed confirmation.'
     : suggestion.subject?.name
-      ? `Optional — reviews placement in ${String(suggestion.subject.name)}, the workspace you named. Setup requires your confirmation.`
+      ? `Workspace you named: ${String(suggestion.subject.name)}. Placement and operation are rechecked in Review; setup still requires confirmation.`
       : 'Choose scope and review effects before confirming. Nothing is set up here.';
   handoff.append(button, note);
-  bubble.insertBefore(handoff, bubble.querySelector('.personal-assistant-message__actions'));
+  bubble.append(handoff);
+}
+
+function renderChoicePreview() {
+  elements?.choices.querySelector('[data-setup-choice-preview]')?.remove();
+  if (!elements || !elements.candidate.value || !choiceIsCurrent(choiceOrigin?.binding, current))
+    return;
+  const project = current.observation.projects.find(
+    project => project.id === elements.candidate.value
+  );
+  if (!project) return;
+  const option = choiceOptions.find(option => option.candidate_id === project.id) || {};
+  const preview = renderProposal(
+    proposalView(option, project),
+    document,
+    window.OriWorkspaceBuildingArt
+  );
+  preview.dataset.setupChoicePreview = 'true';
+  elements.candidate.after(preview);
+  // Explicit choice is local navigation, not an incoming reply or new consent.
+  window.PersonalAssistantTranscript?.revealControl?.(elements.candidate, true);
 }
 
 function applySuggestion(value) {
-  document.querySelector('[data-folder-setup-suggestion]')?.remove();
+  retireSuggestion(document.querySelector('[data-folder-setup-suggestion]'));
   suggestion = currentSuggestion(current, value, reviews[value?.offer_id]) ? value : null;
   renderSuggestion();
 }
@@ -266,35 +412,74 @@ function applyReviewContext(context, elsewhere = null) {
   renderReviewStatus();
 }
 
-function closeChoices() {
+function closeChoices(returnFocus = true, forget = true) {
   if (!elements) return;
-  elements.choices.hidden = true;
+  window.PersonalAssistantTranscript?.beforeChange?.();
+  parkChoices();
+  if (noticeMarker?.parentNode) noticeMarker.parentNode.insertBefore(elements.notice, noticeMarker);
   elements.open.setAttribute('aria-expanded', 'false');
   choiceTrigger?.setAttribute('aria-expanded', 'false');
-  (choiceTrigger?.isConnected ? choiceTrigger : elements.open).focus();
-  choiceTrigger = null;
-  choiceSubject = '';
+  if (returnFocus)
+    focusLocal(
+      choiceTrigger?.isConnected ? choiceTrigger : document.getElementById('personalAssistantInput')
+    );
+  if (forget) {
+    uiEpoch++;
+    placementNode?.remove();
+    composerOrigin?.remove();
+    composerOrigin = null;
+    choiceOrigin = null;
+    choiceTrigger = null;
+    choiceSubject = '';
+  }
+  window.PersonalAssistantTranscript?.changed?.();
 }
 
-// Show one server-authored handoff under the chooser. Nothing was prepared, so
-// the "preparing" notice is cleared, and the whole section is brought into view
-// before its first control takes focus.
-function showPlacement(focus) {
+// Continue beside the originating proposal, not a top-panel results surface.
+function showPlacement(focus, shouldFocus) {
   window.PersonalAssistantFolderContext?.notify?.('');
-  elements.choices.after(placementNode);
-  placementNode.scrollIntoView?.({ block: 'nearest' });
-  focus?.focus?.({ preventScroll: true });
+  window.PersonalAssistantTranscript?.beforeChange?.();
+  const heading = document.createElement('h3');
+  heading.className = 'personal-assistant-setup-heading';
+  heading.textContent = 'Setting up';
+  placementNode.prepend(heading);
+  placementNode.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeChoices();
+  });
+  originParent().append(placementNode);
+  window.PersonalAssistantTranscript?.changed?.();
+  if (shouldFocus) focusLocal(focus, true);
 }
 
 async function review(candidateId, close = false, offerId, placement) {
-  closeChoices();
+  if (!close && choiceOrigin && !choiceIsCurrent(choiceOrigin.binding, current)) return;
+  const ticket = ++uiEpoch;
+  const actionHadFocus =
+    choiceOrigin?.parent?.contains(document.activeElement) ||
+    document.getElementById('personalAssistantFolderOffer')?.contains(document.activeElement);
+  closeChoices(false, false);
   placementNode?.remove();
-  const result = await window.PersonalAssistantFolderContext?.review?.(
+  const statusHome = choiceOrigin
+    ? originParent()
+    : document.getElementById('personalAssistantFolderOffer')?.parentElement;
+  if (statusHome && elements.notice) statusHome.append(elements.notice);
+  const pendingRequest = window.PersonalAssistantFolderContext?.review?.(
     candidateId,
     close,
     offerId,
     placement
   );
+  if (actionHadFocus && elements.notice) {
+    elements.notice.tabIndex = -1;
+    focusLocal(elements.notice, true);
+  }
+  const requestFocus = document.activeElement;
+  const result = await pendingRequest;
+  if (ticket !== uiEpoch) return;
+  const shouldFocus = document.activeElement === requestFocus;
   if (result?.folder_pending_elsewhere) {
     const pending = result.folder_pending_elsewhere;
     placementNode = document.createElement('section');
@@ -311,7 +496,7 @@ async function review(candidateId, close = false, offerId, placement) {
       void window.PersonalAssistantConversation?.resume?.(pending.conversation_id);
     });
     placementNode.append(message, open);
-    showPlacement(open);
+    showPlacement(open, shouldFocus);
     return;
   }
   if (result?.folder_existing_project) {
@@ -321,7 +506,23 @@ async function review(candidateId, close = false, offerId, placement) {
     placementNode.setAttribute('aria-label', 'Existing project');
     const message = document.createElement('p');
     message.textContent = existing.message;
-    placementNode.append(message);
+    placementNode.append(
+      renderProposal(
+        {
+          ...proposalView({}, { name: result.folder_existing_project.subject }),
+          kind: 'workspace',
+          art: 'neutral',
+          state: 'existing',
+          label: 'Existing workspace',
+          scope: 'Already set up',
+          description: 'Nothing new has been prepared.',
+          destination: ''
+        },
+        document,
+        window.OriWorkspaceBuildingArt
+      ),
+      message
+    );
     if (existing.route) {
       const open = document.createElement('a');
       open.className = 'btn btn-sm btn-outline-secondary';
@@ -334,11 +535,10 @@ async function review(candidateId, close = false, offerId, placement) {
     cancel.className = 'btn btn-sm btn-link';
     cancel.textContent = 'Keep chatting';
     cancel.addEventListener('click', () => {
-      placementNode?.remove();
-      elements.open.focus();
+      closeChoices();
     });
     placementNode.append(cancel);
-    showPlacement(placementNode.querySelector('a') || cancel);
+    showPlacement(placementNode.querySelector('a') || cancel, shouldFocus);
     return;
   }
   if (result?.folder_placement_choice) {
@@ -366,18 +566,23 @@ async function review(candidateId, close = false, offerId, placement) {
             subjectPlacement(placement?.subject_workspace_id, option)
           )
       );
-      placementNode.append(button);
+      const preview = renderProposal(
+        placementProposalView(option, choice.subject),
+        document,
+        window.OriWorkspaceBuildingArt
+      );
+      preview.append(button);
+      placementNode.append(preview);
     }
     const cancel = document.createElement('button');
     cancel.type = 'button';
     cancel.className = 'btn btn-sm btn-link';
     cancel.textContent = 'Keep chatting';
     cancel.addEventListener('click', () => {
-      placementNode?.remove();
-      elements.open.focus();
+      closeChoices();
     });
     placementNode.append(cancel);
-    showPlacement(placementNode.querySelector('button'));
+    showPlacement(placementNode.querySelector('button'), shouldFocus);
     return;
   }
   if (result?.review_closed) {
@@ -390,14 +595,29 @@ async function review(candidateId, close = false, offerId, placement) {
       );
     return;
   }
-  if (!result?.conversation?.stored) return;
+  if (!result?.conversation?.stored) {
+    closeChoices(shouldFocus);
+    return;
+  }
+  const focusBeforeHydration = document.activeElement;
   window.PersonalAssistantConversation?.applyReply?.(result);
   // Reload only canonical data. This never scans, calls a model, or confirms.
   if (await window.PersonalAssistantConversation?.resume?.(result.conversation.id)) {
-    const slots = Array.from(document.querySelectorAll('[data-folder-review-id]'));
-    slots
-      .findLast(slot => slot.dataset.folderReviewId === result.folder_context?.offer_id)
-      ?.scrollIntoView({ block: 'nearest' });
+    if (window.PersonalAssistantConversation.currentId() !== result.conversation.id) return;
+    const card = document.getElementById('personalAssistantFolderOffer');
+    if (
+      card?.closest('[data-folder-review-id]')?.dataset.folderReviewId ===
+      result.folder_context?.offer_id
+    ) {
+      if (
+        shouldFocus &&
+        (document.activeElement === focusBeforeHydration ||
+          (!focusBeforeHydration.isConnected && document.activeElement === document.body))
+      ) {
+        card.tabIndex = -1;
+        focusLocal(card, true);
+      }
+    }
   }
 }
 
@@ -407,8 +627,18 @@ function openChoices(options, trigger = elements.open, subjectId = '') {
       !Array.isArray(options) || options.some(option => option.candidate_id === candidate.id)
   );
   if (!candidates.length || current?.pending || current?.authority) return;
+  closeChoices(false);
   choiceTrigger = trigger;
   choiceSubject = String(subjectId || '');
+  choiceOrigin = {
+    parent: trigger.closest('[data-folder-setup-suggestion]') || fallbackOrigin(),
+    trigger,
+    binding: {
+      conversationId: current.conversationId,
+      observationId: current.observation.id,
+      revision: current.revision
+    }
+  };
   if (candidates.length === 1 && setupCandidates(current.observation).length === 1) {
     void review(candidates[0].id, false, undefined, subjectPlacement(choiceSubject));
     return;
@@ -418,13 +648,26 @@ function openChoices(options, trigger = elements.open, subjectId = '') {
     elements.candidate.add(new Option(candidate.label, candidate.id))
   );
   candidateObservation = current.observation.id;
+  choiceOptions = Array.isArray(options) ? options : [];
+  renderChoicePreview();
+  choiceOrigin.parent.append(elements.choices);
   elements.choices.hidden = false;
   elements.open.setAttribute('aria-expanded', 'true');
   trigger.setAttribute('aria-expanded', 'true');
-  elements.candidate.focus();
+  if (window.PersonalAssistantTranscript) {
+    window.PersonalAssistantTranscript.revealControl(elements.candidate);
+    elements.candidate.focus({ preventScroll: true });
+  } else elements.candidate.focus();
 }
 
 function park(node) {
+  if (
+    !node ||
+    node.contains(elements?.choices) ||
+    node.contains(placementNode) ||
+    node.contains(choiceOrigin?.trigger)
+  )
+    closeChoices(false);
   const card = document.getElementById('personalAssistantFolderOffer');
   if (!node || (card && node.contains(card))) window.PersonalAssistantFolder?.parkConversation?.();
 }
@@ -467,6 +710,28 @@ function renderReferences() {
       slot.append(close);
     }
     if (receipt.visible) {
+      const kind =
+        offer.outcome?.kind === 'home'
+          ? 'group'
+          : offer.outcome?.kind === 'project'
+            ? 'workspace'
+            : 'unknown';
+      slot.prepend(
+        renderProposal(
+          {
+            ...proposalView({}, { name: offer.subject?.name }),
+            kind,
+            art: kind === 'group' ? 'district' : 'neutral',
+            state: 'completed',
+            label: 'Completed setup',
+            scope: 'Verified receipt',
+            description: 'The receipt below records what actually finished.',
+            destination: ''
+          },
+          document,
+          window.OriWorkspaceBuildingArt
+        )
+      );
       const rows = document.createElement('ul');
       (receipt.rows || []).forEach(row => {
         const item = document.createElement('li');
@@ -487,6 +752,7 @@ function renderReferences() {
 function contextChanged(state) {
   if (!elements || !state) return;
   if (owner !== state.conversationId) {
+    closeChoices(false);
     placementNode?.remove();
     park();
     reviews = {};
@@ -494,14 +760,19 @@ function contextChanged(state) {
     if (owner) applyReviewContext(null);
     owner = state.conversationId;
   }
-  if (current?.offerId !== state.offerId || !state.offerId) park();
+  if (current?.offerId !== state.offerId || !state.offerId)
+    window.PersonalAssistantFolder?.parkConversation?.();
   current = { ...state };
+  if (choiceOrigin && !choiceIsCurrent(choiceOrigin.binding, current)) {
+    if (flowHasFocus()) retireSuggestion(choiceOrigin.parent);
+    else closeChoices(false);
+  }
   const available = setupCandidates(state.observation).length > 0;
   elements.open.hidden = !available;
   elements.open.disabled = state.pending || Boolean(state.authority);
   elements.open.title = state.authority ? 'Pick the folder again for a current setup review.' : '';
-  if (!available || candidateObservation !== state.observation?.id) {
-    elements.choices.hidden = true;
+  if ((!available || candidateObservation !== state.observation?.id) && !flowHasFocus()) {
+    parkChoices();
     elements.open.setAttribute('aria-expanded', 'false');
   }
   if (!currentSuggestion(current, suggestion, reviews[suggestion?.offer_id])) suggestion = null;
@@ -533,9 +804,30 @@ function init() {
   elements = {
     open,
     choices: document.getElementById('personalAssistantFolderSetupChoices'),
-    candidate: document.getElementById('personalAssistantFolderSetupCandidate')
+    candidate: document.getElementById('personalAssistantFolderSetupCandidate'),
+    notice: document.getElementById('personalAssistantContextStatus')
   };
-  open.addEventListener('click', openChoices);
+  if (elements.notice) {
+    noticeMarker = document.createComment('folder notice parking slot');
+    elements.notice.after(noticeMarker);
+  }
+  choicesMarker = document.createComment('single setup chooser parking slot');
+  elements.choices.after(choicesMarker);
+  open.addEventListener('click', () => openChoices());
+  elements.candidate.addEventListener('change', renderChoicePreview);
+  elements.choices.addEventListener('focusout', () =>
+    queueMicrotask(() => {
+      if (
+        !choiceOrigin ||
+        choiceIsCurrent(choiceOrigin.binding, current) ||
+        elements.choices.contains(document.activeElement)
+      )
+        return;
+      const stale = choiceOrigin.parent;
+      closeChoices(false);
+      if (stale?.dataset.inactiveSetup) stale.remove();
+    })
+  );
   document.getElementById('personalAssistantFolderSetupReview').addEventListener('click', () => {
     if (elements.candidate.reportValidity())
       void review(elements.candidate.value, false, undefined, subjectPlacement(choiceSubject));

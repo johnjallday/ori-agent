@@ -1116,6 +1116,42 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   max-width: none;
 }
 
+/* Conversation-first viewport: browser anchoring cannot also own this pane. */
+#personalAssistantScroll {
+  overflow-anchor: none;
+}
+
+.personal-assistant-transcript__pending {
+  margin: 8px 0 12px;
+  color: var(--pa-ink-dim);
+  font-size: 13px;
+}
+
+.personal-assistant-transcript__jump {
+  flex: none;
+  align-self: flex-end;
+  min-height: 44px;
+  margin: 0 20px;
+  padding: 6px 14px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: var(--ori-paper);
+  color: var(--pa-accent-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.personal-assistant-transcript__jump:focus-visible {
+  outline: 2px solid var(--ori-accent);
+  outline-offset: 3px;
+}
+
+.personal-assistant-panel .is-personal-turn-status > .ask-ori-activity__head,
+.personal-assistant-panel .is-personal-chat-pending > .ask-ori-activity__head,
+.personal-assistant-panel .is-personal-chat-pending > .home-assistant-routing-summary {
+  display: none;
+}
+
 /* Only quiet personal chat loses the redundant status header. Planning,
    progress, error and confirmation still use the shared activity normally. */
 .personal-assistant-panel .ask-ori-activity.is-quiet-chat > .ask-ori-activity__head,
@@ -1693,6 +1729,78 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   color: var(--ori-ink);
   font-size: 12px;
   font-weight: 600;
+}
+
+/* Inert, labelled proposal cues; no map controls or count-implying child art. */
+.personal-assistant-panel .personal-assistant-proposal {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 12px;
+  background: var(--ori-surface);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.personal-assistant-proposal__art {
+  color: var(--pa-ink-dim);
+  align-self: start;
+}
+.personal-assistant-proposal__art-svg {
+  display: block;
+  width: 72px;
+  height: 54px;
+  aspect-ratio: 120 / 88;
+}
+.personal-assistant-panel .personal-assistant-proposal p {
+  margin: 0 0 4px;
+}
+.personal-assistant-proposal__label {
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+.personal-assistant-proposal__subject {
+  font-weight: 600;
+}
+.personal-assistant-proposal__scope,
+.personal-assistant-proposal__destination {
+  color: var(--pa-ink-dim);
+  font-size: 12px;
+}
+.personal-assistant-proposal > button {
+  grid-column: 2;
+  justify-self: start;
+}
+@media (max-width: 390px) {
+  .personal-assistant-panel .personal-assistant-proposal {
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 6px;
+  }
+  .personal-assistant-proposal__art-svg {
+    width: 52px;
+    height: 39px;
+  }
+}
+
+.personal-assistant-setup-heading {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.personal-assistant-panel #personalAssistantFolderSetupChoices {
+  width: 100%;
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid var(--ori-line);
+  border-radius: 10px;
+  background: var(--ori-paper);
+}
+.personal-assistant-panel [data-inactive-setup] {
+  border-left: 2px dashed var(--ori-line);
+  padding-left: 8px;
 }
 
 /* The optional setup handoff sits below the reply, never beside its bubble. */

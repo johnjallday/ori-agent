@@ -20,7 +20,9 @@ test('wt demo: one conversation from setup review through notes, files, a delaye
   test.setTimeout(240_000);
   expect(basename(sandbox!)).toMatch(/^ori-demo\./);
   expect(basename(provider!)).toMatch(/^ori-awareness-provider\./);
-  const evidence = join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
+  const evidence =
+    process.env.ORI_ASSISTANT_EVIDENCE_DIR ||
+    join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
 
   // The folder that is attached and reviewed, never linked before confirmation.
@@ -178,7 +180,7 @@ test('wt demo: one conversation from setup review through notes, files, a delaye
   await expect(page.locator('#personalAssistantFolderPreview')).toBeVisible();
   const asked = await send('Add this to my workspace');
   expect(asked.workspace_context.subject.id).toBe(group.id);
-  await page.getByRole('button', { name: 'Optional: review setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Choose setup scope', exact: true }).click();
   await page
     .locator('#personalAssistantFolderSetupCandidate')
     .selectOption({ label: 'Album-5 integrated fixture' });

@@ -312,7 +312,9 @@
         <button type="button" id="personalAssistantFolderDiscussionCancel" class="personal-assistant-conversation__button">Cancel</button>
       </section>
       <section id="personalAssistantFolderSetupChoices" class="personal-assistant-folder-context" aria-label="Choose what to set up" hidden>
-        <label for="personalAssistantFolderSetupCandidate">Which observed folder should the workspace use?</label>
+        <h3 class="personal-assistant-setup-heading">Setting up</h3>
+        <label for="personalAssistantFolderSetupCandidate">Choose one observed folder for this setup review</label>
+        <p class="personal-assistant-folder-context__note">Discussion topics do not select this scope. Whole folder and one observed child are different choices; no descendants or batch of workspaces are selected.</p>
         <select id="personalAssistantFolderSetupCandidate" class="form-select form-select-sm" required></select>
         <p class="personal-assistant-folder-context__note">This saves a setup review in this conversation. It sends nothing to a model and creates nothing until you confirm.</p>
         <button type="button" id="personalAssistantFolderSetupReview" class="btn btn-sm btn-outline-secondary">Review selection</button>
@@ -329,6 +331,9 @@
       <span id="personalAssistantFolderFocusText" role="status" aria-live="polite"></span>
       <button type="button" id="personalAssistantFolderFocusClear" class="personal-assistant-conversation__button" hidden>Clear focus</button>
     </div>
+    <button type="button" id="personalAssistantNewReply" class="personal-assistant-transcript__jump"
+            aria-controls="homeAssistantConversation" hidden>New reply</button>
+    <span id="personalAssistantReplyAnnouncement" class="visually-hidden" role="status" aria-live="polite"></span>
     <p id="personalAssistantWorkspaceContext" class="personal-assistant-panel__context" role="status" aria-live="polite" aria-atomic="true">Checking workspace context…</p>
     <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
     <form id="personalAssistantForm" class="personal-assistant-panel__form">

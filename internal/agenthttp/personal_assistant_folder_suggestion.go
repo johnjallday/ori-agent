@@ -51,6 +51,17 @@ func (h *HomeAssistantAskHandler) bindSuggestionSubject(ctx context.Context, sug
 	}
 	ref := contextWorkspaceRef(ws)
 	suggestion.Subject = &folderSuggestionSubject{WorkspaceID: ref.ID, Name: ref.Name, Kind: ref.Kind}
+	// Default placement was projected before the named subject was resolved.
+	// That reference can lead to a different operation/destination at Review;
+	// do not display the default's effects as its approved placement.
+	for i := range suggestion.Options {
+		if p := suggestion.Options[i].Presentation; p != nil {
+			copy := *p
+			copy.Kind, copy.Effect = "unknown", "unknown"
+			copy.DestinationState, copy.DestinationName = "unknown", ""
+			suggestion.Options[i].Presentation = &copy
+		}
+	}
 	return suggestion
 }
 

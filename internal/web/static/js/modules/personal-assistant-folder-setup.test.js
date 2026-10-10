@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   setupCandidates,
+  choiceIsCurrent,
   currentReview,
   currentSuggestion,
   subjectPlacement,
@@ -25,6 +26,27 @@ const offer = {
   remember: true
 };
 
+test('local choice binding uses exact conversation, observation and revision, never discussion topics', () => {
+  const binding = { conversationId: 'one', observationId: 'picked', revision: 'turn' };
+  const state = {
+    conversationId: 'one',
+    observation: { id: 'picked' },
+    revision: 'turn',
+    focus: ['child'],
+    pending: true
+  };
+  assert.equal(choiceIsCurrent(binding, state), true);
+  for (const changed of [
+    { conversationId: 'other' },
+    { observation: { id: 'replaced' } },
+    { revision: 'later' },
+    { authority: 'expired' }
+  ])
+    assert.equal(choiceIsCurrent(binding, { ...state, ...changed }), false);
+  assert.equal(choiceIsCurrent(null, state), false);
+  assert.equal(choiceIsCurrent(binding, null), false);
+});
+
 test('candidate choices use only disclosed IDs and distinguish the whole root', () => {
   assert.deepEqual(
     setupCandidates({
@@ -39,6 +61,23 @@ test('candidate choices use only disclosed IDs and distinguish the whole root', 
     ]
   );
   assert.deepEqual(setupCandidates(null), []);
+});
+
+test('bounded or indistinguishable candidate names retain separate opaque choices', () => {
+  const names = setupCandidates({
+    projects: [
+      { id: 'first', name: 'Same' },
+      { id: 'second', name: 'Same' },
+      { id: 'long', name: '<svg onload=confirm()>' + '界'.repeat(300) }
+    ]
+  });
+  assert.deepEqual(names.slice(0, 2), [
+    { id: 'first', label: 'Same · Choice 1' },
+    { id: 'second', label: 'Same · Choice 2' }
+  ]);
+  assert.equal(names[2].id, 'long');
+  assert.ok(Array.from(names[2].label).length < 200);
+  assert.match(names[2].label, /^<svg/);
 });
 
 test('only the current conversation and exact canonical offer get live controls', () => {

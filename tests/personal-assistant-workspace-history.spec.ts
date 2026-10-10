@@ -15,7 +15,9 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
   test.setTimeout(120_000);
   expect(basename(sandbox!)).toMatch(/^ori-demo\./);
   expect(basename(provider!)).toMatch(/^ori-awareness-provider\./);
-  const evidence = join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
+  const evidence =
+    process.env.ORI_ASSISTANT_EVIDENCE_DIR ||
+    join(process.cwd(), 'tasks', 'evidence-assistant-workspace-awareness');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   const folder = join(sandbox!, 'Documents', 'Album-5 history fixture');
   await mkdir(folder, { recursive: true, mode: 0o750 });
