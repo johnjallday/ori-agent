@@ -29,7 +29,7 @@ jobs:
   evaluate:
     name: Evaluate candidate readiness
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -54,7 +54,7 @@ jobs:
     name: Prepare RC for ${{ needs.evaluate.outputs.version }}
     needs: evaluate
     if: needs.evaluate.outputs.ready == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: read

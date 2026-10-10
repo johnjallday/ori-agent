@@ -27,7 +27,7 @@ jobs:
   validate:
     name: Validate tested candidate
     if: github.ref == 'refs/heads/main' && inputs.confirm_tested
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       sha: ${{ steps.candidate.outputs.sha }}
       version: ${{ steps.candidate.outputs.version }}
@@ -46,7 +46,7 @@ jobs:
   promote:
     name: Approve ${{ inputs.rc_tag }} → ${{ needs.validate.outputs.version }}
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Configure required reviewers for a second, platform-enforced approval.
     # Even without reviewers, the explicit manual dispatch/checkbox is required.
     environment: release

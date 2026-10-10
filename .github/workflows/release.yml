@@ -18,7 +18,7 @@ env:
 jobs:
   verify:
     name: Verify release authorization
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -41,7 +41,8 @@ jobs:
   release:
     name: Create Draft (Linux/Windows)
     needs: verify
-    runs-on: ubuntu-latest
+    # Keep the native GTK/WebKit helper's build baseline stable; see ci.yml.
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     outputs:
@@ -254,7 +255,7 @@ jobs:
   publish:
     name: Publish verified release
     needs: [verify, smoke]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -292,7 +293,7 @@ jobs:
     name: Open release merge-back PR
     needs: [verify, publish]
     if: needs.verify.outputs.prerelease == 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: write
