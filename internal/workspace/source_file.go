@@ -314,7 +314,10 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 			case !entry.Type().IsRegular():
 				item.Kind = "other"
 			}
-			if info, err := entry.Info(); err == nil {
+			// Read through the verified handle, not entry.Info(): on Go 1.26.0
+			// that re-resolves the folder's path, so a folder swapped for a link
+			// in between would describe an excluded entry under a visible name.
+			if info, err := current.Lstat(name); err == nil {
 				item.ModTime = info.ModTime()
 				if item.Kind == "file" {
 					item.Size = info.Size()
