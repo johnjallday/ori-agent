@@ -52,6 +52,9 @@
     screenRoute: '',
     screenTitle: '',
     contextKey: '',
+    response: null,
+    responseKey: '',
+    assistantState: 'loading',
     assistantAvailable: false,
     // A hired assistant with no Personal HQ yet: distinct from "never hired" so
     // the handoff decline can route to the guided quest instead of Hire.
@@ -153,26 +156,11 @@
 
     if (type === 'handoff') {
       var handoffText = String(action.handoff_text || action.handoffText || '').slice(0, 400);
-      // A hired assistant with no home base yet is not "hire" — it already has
-      // an identity. Route to the guided quest instead of offering a second
-      // hire or silently submitting the work nowhere.
-      if (!state.assistantAvailable && state.needsHQ) {
-        return { type: 'navigate', label: 'Build Personal HQ', href: '/?quest=build-hq' };
-      }
-      // No assistant to send it to yet: the way forward is Mission 01, which
-      // walks the user to the Agents page and hires one there (or repairs
-      // one). Already on the Agents page, it skips the step that points there.
-      // The routes are MEET_ASSISTANT_QUEST_ROUTE and MEET_ASSISTANT_AGENTS_ROUTE
-      // in personal-assistant-hire.js; this classic script cannot import them,
-      // and a test pins them together.
       if (!state.assistantAvailable) {
-        return {
-          type: 'navigate',
-          label: 'Meet your assistant',
-          href: /^\/agents(\/|$)/.test(currentRoute())
-            ? '/agents?quest=meet-assistant'
-            : '/?quest=meet-assistant'
-        };
+        var setup = assistantSetupAction();
+        if (setup) return setup;
+        // Unknown/loading status is not proof of an unhired relationship.
+        return { type: type, label: 'Retry assistant status', handoffText: handoffText };
       }
       return {
         type: type,
@@ -182,6 +170,36 @@
     }
 
     return { type: type, label: String(action.label || '') };
+  }
+
+  function assistantSetupAction() {
+    if (state.needsHQ)
+      return {
+        type: 'navigate',
+        label:
+          state.assistantState === 'provisioning_hq'
+            ? 'Resume Personal HQ setup'
+            : 'Build Personal HQ',
+        href: '/?quest=build-hq'
+      };
+    if (state.assistantState === 'repair_needed')
+      return {
+        type: 'navigate',
+        label: 'Repair personal assistant',
+        href: '/agents?quest=meet-assistant'
+      };
+    if (state.assistantState === 'needs_hire' || state.assistantState === 'hiring')
+      return {
+        type: 'navigate',
+        label:
+          state.assistantState === 'hiring'
+            ? 'Resume meeting your assistant'
+            : 'Meet your assistant',
+        href: /^\/agents(\/|$)/.test(currentRoute())
+          ? '/agents?quest=meet-assistant'
+          : '/?quest=meet-assistant'
+      };
+    return null;
   }
 
   function currentRoute() {
@@ -323,6 +341,7 @@
     state.seq += 1;
     setPending(false, false);
     state.actions = [];
+    state.response = null;
     if (state.quest) return;
     state.greeted = false;
     if (state.els) {
@@ -394,6 +413,8 @@
   function render(resp) {
     var els = state.els;
     if (!els) return;
+    state.response = resp;
+    state.responseKey = helpContextKey();
 
     if (typeof resp.about === 'string' && els.about) els.about.textContent = resp.about;
     state.screenRoute = currentRoute();
@@ -476,6 +497,7 @@
     var silent = !!(options && options.silent);
     if (!silent && state.quest) clearQuestStep({ keepOpen: true });
     var seq = ++state.seq;
+    state.response = null;
     var contextKey = helpContextKey();
     state.contextKey = contextKey;
     question = Array.from(String(question || '').trim())
@@ -800,9 +822,29 @@
 
   // Only a user's explicit action reaches this seam. The assistant's existing
   // suggestion API refuses non-empty drafts, busy replies and loading context.
+  async function retryAssistantStatus(panel) {
+    // Retry only readiness. A subsequent explicit Open click is still
+    // required to move text; retry is never execution approval.
+    try {
+      await panel?.refresh?.();
+    } catch (_) {
+      /* Readiness is unavailable. */
+    }
+    if (!state.open || state.quest) return;
+    if (state.els?.reply)
+      state.els.reply.insertAdjacentHTML(
+        'beforeend',
+        '<p class="ori-guide__answer ori-guide__answer--note">Assistant status was checked. Use an available setup or Open action to continue. Your search is kept; nothing was sent.</p>'
+      );
+  }
+
   function handoff(text) {
     var panel = window.PersonalAssistantPanel;
     var accepted = false;
+    if (!state.assistantAvailable && !assistantSetupAction()) {
+      void retryAssistantStatus(panel);
+      return false;
+    }
     if (state.assistantAvailable && panel?.open && panel?.suggestReply) {
       if (panel.open(state.els?.launcher)) {
         accepted =
@@ -907,27 +949,45 @@
 
   function setHelpOnly(options) {
     var opts = options || {};
+    var previous =
+      state.assistantState + ':' + state.assistantName + ':' + state.assistantAvailable;
     state.helpOnly = true;
-    state.assistantAvailable = opts.available === true;
-    state.needsHQ = opts.needsHQ === true;
+    // Options without a state retain the established context-only API contract.
+    state.assistantState = String(
+      opts.state ||
+        (opts.available === true ? 'active' : opts.needsHQ === true ? 'needs_hq' : 'needs_hire')
+    );
+    state.assistantAvailable =
+      opts.available === true && ['active', 'paused'].indexOf(state.assistantState) !== -1;
+    state.needsHQ = ['needs_hq', 'provisioning_hq'].indexOf(state.assistantState) !== -1;
     state.assistantName = String(opts.assistantName || 'your personal assistant').trim();
     var els = state.els;
     if (!els) return;
     if (els.walkthroughs) {
-      if (state.needsHQ) {
-        els.walkthroughs.innerHTML =
-          '<a class="ori-guide__walkthrough" href="/?quest=build-hq">Build Personal HQ</a>';
-      } else if (!state.assistantAvailable) {
+      var setup = assistantSetupAction();
+      if (setup) {
         els.walkthroughs.innerHTML =
           '<a class="ori-guide__walkthrough" href="' +
-          (/^\/agents(\/|$)/.test(currentRoute())
-            ? '/agents?quest=meet-assistant'
-            : '/?quest=meet-assistant') +
-          '">Meet your assistant</a>';
+          esc(setup.href) +
+          '">' +
+          esc(setup.label) +
+          '</a>';
       } else {
-        els.walkthroughs.textContent = 'No setup walkthrough is currently available.';
+        els.walkthroughs.textContent = state.assistantAvailable
+          ? 'No setup walkthrough is currently available.'
+          : state.assistantState === 'loading'
+            ? 'Checking walkthrough availability…'
+            : 'Walkthrough availability could not be checked. Retry assistant status from a work-related result.';
       }
     }
+    if (
+      previous !==
+        state.assistantState + ':' + state.assistantName + ':' + state.assistantAvailable &&
+      state.response &&
+      !state.quest &&
+      state.responseKey === helpContextKey()
+    )
+      render(state.response);
     emit('help-only', { assistantAvailable: state.assistantAvailable });
   }
 
@@ -1005,6 +1065,7 @@
     if (els.portrait) els.portrait.hidden = false;
     if (els.title) els.title.textContent = 'Ori walkthrough';
     state.actions = [];
+    state.response = null;
     els.reply.innerHTML = html;
     els.reply.dataset.status = 'quest';
     els.reply.dataset.topic = '';
@@ -1133,6 +1194,12 @@
     };
 
     refreshContextLabel();
+    setHelpOnly({
+      available: state.assistantAvailable,
+      needsHQ: state.needsHQ,
+      assistantName: state.assistantName,
+      state: state.assistantState
+    });
 
     launcher.addEventListener('click', function () {
       toggle(launcher);

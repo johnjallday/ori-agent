@@ -176,6 +176,18 @@ test('legacy recovery handles disabled storage and does not delete a newer reque
   assert.equal(removed, false);
 });
 
+test('malformed relationship state is unavailable, never a confirmed identity', () => {
+  const view = personalAssistantPanelView({ state: 'unexpected', display_name: 'Unconfirmed' });
+  assert.equal(view.known, false);
+  assert.equal(view.visible, false);
+  assert.equal(view.available, false);
+  assert.equal(view.name, 'Personal assistant');
+  assert.equal(
+    personalAssistantPanelView({ state: ['active'], display_name: 'Unconfirmed' }).known,
+    false
+  );
+});
+
 test('assistant composer refuses empty, unavailable, pending, and double-click states', () => {
   assert.equal(canSubmitAssistantWork({ available: true, pending: false, text: 'help' }), true);
   assert.equal(canSubmitAssistantWork({ available: false, pending: false, text: 'help' }), false);

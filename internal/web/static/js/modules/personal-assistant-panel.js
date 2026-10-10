@@ -27,10 +27,23 @@ const TODAY_ENDPOINT = '/api/personal-assistant/today';
 const HANDOFF_LIMIT = 400;
 
 export function personalAssistantPanelView(personalAssistant) {
-  const state = String(personalAssistant?.state || 'unavailable');
-  const known = state !== 'unavailable';
+  const state =
+    typeof personalAssistant?.state === 'string' ? personalAssistant.state : 'unavailable';
+  const known = [
+    'needs_hire',
+    'hiring',
+    'needs_hq',
+    'provisioning_hq',
+    'active',
+    'paused',
+    'repair_needed'
+  ].includes(state);
   const available = state === 'active' || state === 'paused';
-  const name = String(personalAssistant?.display_name || '').trim() || 'Personal assistant';
+  const named = known && !['needs_hire', 'hiring'].includes(state);
+  const name =
+    (named && typeof personalAssistant?.display_name === 'string'
+      ? personalAssistant.display_name.trim()
+      : '') || 'Personal assistant';
   return {
     state,
     known,
@@ -220,6 +233,7 @@ const state = {
   legacyHandoff: null,
   suggestionNotice: '',
   workActivityOnly: false,
+  relationshipSequence: 0,
   lastTrigger: null,
   // True while Home's folder flow is waiting for a folder or exploring one.
   folderBusy: false,
@@ -277,10 +291,14 @@ function renderIdentity() {
   els.input.placeholder = view.placeholder;
   els.input.disabled = !view.available;
   els.send.disabled = !view.available || state.pending;
+  if (els.modelSetup)
+    els.modelSetup.hidden = !(
+      view.available && personalAssistant?.availability?.model?.available === false
+    );
   const avatar = assistantAvatarMarkup(view.name, personalAssistant?.appearance);
   els.launcherAvatar.innerHTML = avatar;
   els.panelAvatar.innerHTML = avatar;
-  els.panelAvatar.hidden = state.workActivityOnly && !view.visible;
+  els.panelAvatar.hidden = !view.visible;
   els.panel.dataset.relationshipState = view.state;
   renderChip();
   // Home says these in the banner under the header. A page without that banner
@@ -415,13 +433,15 @@ function moveSharedWorkActivity() {
 }
 
 function applyPersonalAssistant(personalAssistant) {
+  state.relationshipSequence += 1;
   state.personalAssistant = personalAssistant || null;
   state.view = personalAssistantPanelView(personalAssistant);
-  if (state.view.helpOnly && window.OriGuide?.setHelpOnly) {
+  if (window.OriGuide?.setHelpOnly) {
     window.OriGuide.setHelpOnly({
       available: state.view.available,
       assistantName: state.view.name,
-      needsHQ: state.view.needsHQ
+      needsHQ: state.view.needsHQ,
+      state: state.view.known ? state.view.state : 'unavailable'
     });
   }
   renderIdentity();
@@ -442,14 +462,21 @@ function applyPersonalAssistant(personalAssistant) {
 }
 
 async function refresh() {
+  const sequence = ++state.relationshipSequence;
   try {
     const response = await fetch(STATUS_ENDPOINT, { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`status ${response.status}`);
     const payload = await response.json();
+    if (sequence !== state.relationshipSequence) return state.view;
     return applyPersonalAssistant(payload?.personal_assistant || null);
   } catch (_) {
-    // Keep the existing Help surface intact until relationship status is known.
-    setStatus('Personal assistant status is unavailable. Reload to try again.');
+    if (sequence !== state.relationshipSequence) return state.view;
+    // A failed refresh is not authority to keep accepting work as a cached identity.
+    // Drafts and submitted activity remain owned by this host.
+    applyPersonalAssistant(null);
+    setStatus(
+      'Personal assistant status is unavailable. Retry assistant status from Help. Nothing was sent.'
+    );
     return state.view;
   }
 }
@@ -817,6 +844,7 @@ function init() {
     input: document.getElementById('personalAssistantInput'),
     send: document.getElementById('personalAssistantSend'),
     status: document.getElementById('personalAssistantPanelStatus'),
+    modelSetup: document.getElementById('personalAssistantModelSetup'),
     workspaceContext: document.getElementById('personalAssistantWorkspaceContext'),
     legacyHandoff: document.getElementById('personalAssistantRecoveredHandoff'),
     legacyText: document.getElementById('personalAssistantRecoveredHandoffText'),

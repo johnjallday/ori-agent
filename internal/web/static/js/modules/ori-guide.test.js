@@ -319,6 +319,45 @@ test('a successful relationship read after a slow Help search cannot escalate it
   assert.equal(submissions, 0);
 });
 
+test('authoritative readiness chooses only existing setup, repair, or unsent Open paths', () => {
+  for (const [state, available, label, href] of [
+    ['loading', false, 'Retry assistant status', undefined],
+    ['unavailable', false, 'Retry assistant status', undefined],
+    ['unexpected', false, 'Retry assistant status', undefined],
+    ['needs_hire', false, 'Meet your assistant', '/?quest=meet-assistant'],
+    ['hiring', false, 'Resume meeting your assistant', '/?quest=meet-assistant'],
+    ['needs_hq', false, 'Build Personal HQ', '/?quest=build-hq'],
+    ['provisioning_hq', false, 'Resume Personal HQ setup', '/?quest=build-hq'],
+    ['repair_needed', false, 'Repair personal assistant', '/agents?quest=meet-assistant'],
+    ['active', true, 'Open Atlas', undefined],
+    ['paused', true, 'Open Atlas', undefined]
+  ]) {
+    const { guide } = load();
+    guide.setHelpOnly({ state, available, assistantName: 'Atlas' });
+    const action = guide._validateAction({ type: 'handoff', handoff_text: 'draft a note' });
+    assert.equal(action.label, label, state);
+    assert.equal(action.href, href, state);
+    assert.equal(guide._state.helpOnly, true);
+  }
+});
+
+test('relationship changes cannot resurrect an older answer after Help becomes unavailable', async () => {
+  const elements = guideEls();
+  const { guide, sandbox } = load({ elements });
+  sandbox.fetch = async () => ({
+    ok: true,
+    json: async () => ({ status: 'answered', answer: 'Old reviewed answer' })
+  });
+  await guide.ask('agents');
+  sandbox.fetch = async () => {
+    throw new Error('offline');
+  };
+  await guide.ask('model setup');
+  guide.setHelpOnly({ state: 'active', available: true, assistantName: 'Atlas' });
+  assert.match(elements.oriGuideReply.innerHTML, /Help is unavailable/);
+  assert.doesNotMatch(elements.oriGuideReply.innerHTML, /Old reviewed answer/);
+});
+
 /* ---- action validation (FR-36/FR-49) ---------------------------------------- */
 
 test('unknown action types are dropped rather than rendered', () => {
