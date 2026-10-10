@@ -24,7 +24,7 @@ func (s *SQLiteStore) ReadAssistantConversationOwner(ctx context.Context, id str
 	var result Session
 	err := s.db.InTransaction(ctx, func(tx *sql.Tx) error {
 		var workspaceID sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT id,workspace_id,agent_name,message_count,updated_at FROM sessions WHERE id=?`, id).Scan(&result.ID, &workspaceID, &result.AgentName, &result.MessageCount, &result.UpdatedAt); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT id,workspace_id,agent_name,message_count,updated_at,assistant_context_epoch FROM sessions WHERE id=?`, id).Scan(&result.ID, &workspaceID, &result.AgentName, &result.MessageCount, &result.UpdatedAt, &result.ContextEpoch); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrSessionNotFound
 			}

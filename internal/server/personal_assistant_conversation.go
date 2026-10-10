@@ -36,6 +36,7 @@ func conversationRecord(id, workspaceID, agentName, title string, count int, ses
 	}
 	if sess != nil {
 		record.UpdatedAt = sess.UpdatedAt
+		record.ContextEpoch = sess.ContextEpoch
 	}
 	return record
 }
@@ -74,7 +75,7 @@ func (a personalAssistantConversationAdapter) ReadConversationOwner(ctx context.
 	if err != nil || sess == nil {
 		return agenthttp.PersonalAssistantConversationRecord{}, errors.New("canonical conversation owner unavailable")
 	}
-	return agenthttp.PersonalAssistantConversationRecord{ID: sess.ID, WorkspaceID: sess.FolderID, AgentName: sess.AgentName, MessageCount: sess.MessageCount, UpdatedAt: sess.UpdatedAt}, nil
+	return agenthttp.PersonalAssistantConversationRecord{ID: sess.ID, WorkspaceID: sess.FolderID, AgentName: sess.AgentName, MessageCount: sess.MessageCount, UpdatedAt: sess.UpdatedAt, ContextEpoch: sess.ContextEpoch}, nil
 }
 
 func (a personalAssistantConversationAdapter) Messages(ctx context.Context, id string) ([]agenthttp.PersonalAssistantConversationMessage, error) {

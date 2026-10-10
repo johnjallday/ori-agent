@@ -22,7 +22,7 @@ func folderConversationMessages(messages []session.Message) []agenthttp.Personal
 	out := make([]agenthttp.PersonalAssistantConversationMessage, 0, len(messages))
 	for _, message := range messages {
 		out = append(out, agenthttp.PersonalAssistantConversationMessage{
-			ID: message.ID, Role: string(message.Role), Content: message.Content,
+			ID: message.ID, Role: string(message.Role), Content: message.Content, ContentTruncated: message.ContentTruncated,
 			CreatedAt: message.CreatedAt, Imported: message.Imported, FolderContext: message.FolderContext, WorkspaceContext: message.WorkspaceContext,
 		})
 	}

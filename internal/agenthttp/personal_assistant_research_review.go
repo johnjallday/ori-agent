@@ -83,7 +83,7 @@ func (h *HomeAssistantAskHandler) researchRelationship(ctx context.Context) (*Pe
 }
 
 func researchConversationRevision(record PersonalAssistantConversationRecord) string {
-	return assistantcontext.ConversationRevision(record.UpdatedAt, record.MessageCount)
+	return assistantcontext.ConversationRevision(record.UpdatedAt, record.MessageCount, record.ContextEpoch)
 }
 
 func researchDigest(text string) string {

@@ -62,13 +62,14 @@ func (s *SQLiteStore) AppendAttributedTurn(ctx context.Context, id string, owner
 		var actualAgent string
 		var actualCount int
 		var actualUpdated time.Time
-		if err := tx.QueryRowContext(ctx, `SELECT workspace_id,agent_name,message_count,updated_at FROM sessions WHERE id=?`, id).Scan(&actualWorkspace, &actualAgent, &actualCount, &actualUpdated); err != nil {
+		var actualEpoch int64
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id,agent_name,message_count,updated_at,assistant_context_epoch FROM sessions WHERE id=?`, id).Scan(&actualWorkspace, &actualAgent, &actualCount, &actualUpdated, &actualEpoch); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrSessionNotFound
 			}
 			return err
 		}
-		if owner.ExpectedConversationRevision != "" && owner.ExpectedConversationRevision != assistantcontext.ConversationRevision(actualUpdated, actualCount) {
+		if owner.ExpectedConversationRevision != "" && owner.ExpectedConversationRevision != assistantcontext.ConversationRevision(actualUpdated, actualCount, actualEpoch) {
 			return ErrFolderContextConflict
 		}
 		if actualWorkspace.String != owner.WorkspaceID || !strings.EqualFold(actualAgent, owner.AgentName) {

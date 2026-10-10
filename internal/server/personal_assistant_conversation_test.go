@@ -45,6 +45,9 @@ func newConversationServerFixture(t *testing.T) *conversationServerFixture {
 	if err := sessions.CreateWorkspace(ctx, hq); err != nil {
 		t.Fatalf("create HQ workspace: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO personal_assistant_state(user_id,assistant_id,status,hq_workspace_id,global_agent_profile_name,state_version,created_at,updated_at) VALUES('local','fixture','active',?,'Atlas',3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, hq.ID); err != nil {
+		t.Fatal(err)
+	}
 	provider := &capturingChatProvider{}
 	factory := llm.NewFactory()
 	factory.Register("claude_code", provider)
@@ -68,9 +71,6 @@ func (f *conversationServerFixture) say(prompt, conversationID string) agenthttp
 func TestAssistantConversationRoute_ProductionAdapterChecksCanonicalOwner(t *testing.T) {
 	f := newConversationServerFixture(t)
 	ctx := context.Background()
-	if _, err := f.sessions.DB().ExecContext(ctx, `INSERT INTO personal_assistant_state(user_id,assistant_id,status,hq_workspace_id,global_agent_profile_name,state_version,created_at,updated_at) VALUES('local','fixture','active',?,'Atlas',3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, f.hq); err != nil {
-		t.Fatal(err)
-	}
 	chat := &session.Session{AgentName: "Atlas", FolderID: f.hq}
 	if err := f.sessions.CreateSession(ctx, chat); err != nil {
 		t.Fatal(err)
@@ -167,7 +167,12 @@ func TestAssistantConversation_IsACanonicalSessionInPersonalHQ(t *testing.T) {
 	if stale := f.say("still there?", id); stale.Conversation == nil || stale.Conversation.Error != agenthttp.PersonalAssistantConversationOutOfScope {
 		t.Fatalf("old profile key kept the thread: %+v", stale.Conversation)
 	}
-	f.context.ConversationAgent, f.context.DisplayName = "Aria", "Aria"
+	f.context.ConversationAgent, f.context.DisplayName, f.context.StateVersion = "Aria", "Aria", 4
+	// The production rename owner updates the relationship as well as Sessions;
+	// this fixture's context stand-in must reflect that canonical binding.
+	if _, err := f.sessions.DB().ExecContext(ctx, `UPDATE personal_assistant_state SET global_agent_profile_name='Aria',state_version=4 WHERE user_id='local'`); err != nil {
+		t.Fatal(err)
+	}
 	if renamed := f.say("still there?", id); renamed.Conversation == nil || renamed.Conversation.ID != id || !renamed.Conversation.Stored {
 		t.Fatalf("renamed assistant lost its thread: %+v", renamed.Conversation)
 	}

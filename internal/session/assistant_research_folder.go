@@ -3,12 +3,10 @@ package session
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/assistantcontext"
-	"github.com/johnjallday/ori-agent/internal/foldercontext"
 )
 
 // AssistantResearchFolder is canonical reference/focus metadata, not contents,
@@ -38,21 +36,16 @@ func (s *SQLiteStore) ReadAssistantResearchFolder(ctx context.Context, id string
 		if err := validateAssistantSaveOwner(ctx, tx, owner); err != nil {
 			return err
 		}
-		var raw string
-		// Inspect at most one bounded typed event. A malformed/oversized latest row
-		// is a refusal, never permission to fall back to an older event.
-		err := tx.QueryRowContext(ctx, `SELECT id,CASE WHEN length(CAST(folder_context_json AS BLOB))<=? THEN folder_context_json ELSE '' END FROM messages WHERE session_id=? AND role='system' AND folder_context_json IS NOT NULL AND continuity_source_sequence IS NULL ORDER BY rowid DESC LIMIT 1`, foldercontext.MaxBytes+256, id).Scan(&result.Revision, &raw)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
+		// Shared bounded typed-event owner; malformed latest rows fail closed.
+		message, err := readContextFolderEvent(ctx, tx, id, "", "")
 		if err != nil {
 			return err
 		}
-		var event foldercontext.Event
-		if raw == "" || json.Unmarshal([]byte(raw), &event) != nil || event.Validate() != nil {
-			return ErrFolderContextConflict
+		if message == nil {
+			return nil
 		}
-		if event.Observation != nil {
+		result.Revision = message.ID
+		if event := message.FolderContext; event.Observation != nil {
 			result.SelectionID = event.Observation.ID
 			result.FocusIDs = append([]string(nil), event.FocusIDs...)
 		}

@@ -369,6 +369,10 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		ctx = context.WithValue(ctx, workspaceTurnContextKey{}, scope)
 		if conversation != nil {
 			conversation.turn = scope
+			if conversation.context != nil {
+				scope.researchRevision = conversation.context.Pin.Revision
+				conversation.owner = scope.saveOwner()
+			}
 		}
 	}
 
@@ -441,7 +445,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	// "Save this draft…" opens a review of a reply already in the conversation.
 	// It runs before backlog capture so a draft is never captured as the
 	// literal words of the request, and before any model call.
-	if resp, handled := h.handleDraftSaveRequest(prompt, intent, identity, workContext, conversation); handled {
+	if resp, handled := h.handleDraftSaveRequest(ctx, prompt, intent, identity, workContext, conversation); handled {
 		return resp
 	}
 
@@ -455,6 +459,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	}
 
 	if folderTurn != nil {
+		h.prepareContinuity(ctx, prompt, conversation)
 		return h.answerFolderTurn(ctx, prompt, req.Draft, identity, workContext, conversation, folderTurn)
 	}
 
@@ -489,6 +494,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		}
 	}
 
+	h.prepareContinuity(ctx, prompt, conversation)
 	promptSources := h.scopedPanelSources(ctx, personalAssistantPromptSources(h.Sources, workContext), scope)
 	var history []llm.Message
 	if conversation != nil {
@@ -557,7 +563,7 @@ func unstoredConversation(conversation *openConversation) *HomeAssistantConversa
 	if conversation == nil {
 		return nil
 	}
-	return &HomeAssistantConversationState{ID: conversation.id, Title: conversation.title, HistoryTruncated: conversation.truncated}
+	return &HomeAssistantConversationState{ID: conversation.id, Title: conversation.title, HistoryTruncated: conversation.truncated, Continuity: conversation.continuity}
 }
 
 // conversationModelUnavailable is the honest "no answer" for a conversation

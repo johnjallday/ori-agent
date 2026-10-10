@@ -49,14 +49,16 @@ type PersonalAssistantConversationRecord struct {
 	Title        string
 	MessageCount int
 	UpdatedAt    time.Time
+	ContextEpoch int64
 }
 
 // PersonalAssistantConversationMessage is one canonical session message.
 type PersonalAssistantConversationMessage struct {
-	ID        string
-	Role      string
-	Content   string
-	CreatedAt time.Time
+	ID               string
+	Role             string
+	Content          string
+	CreatedAt        time.Time
+	ContentTruncated bool
 	// Imported marks a message copied in from another install. It is history,
 	// never a turn the assistant itself took here.
 	Imported         bool
@@ -91,15 +93,16 @@ type HomeAssistantConversationRef struct {
 // HomeAssistantConversationState reports what happened to the conversation in
 // one turn, by canonical session and message ID.
 type HomeAssistantConversationState struct {
-	ID                 string               `json:"id,omitempty"`
-	Title              string               `json:"title,omitempty"`
-	Started            bool                 `json:"started,omitempty"`
-	Stored             bool                 `json:"stored"`
-	UserMessageID      string               `json:"user_message_id,omitempty"`
-	AssistantMessageID string               `json:"assistant_message_id,omitempty"`
-	HistoryTruncated   bool                 `json:"history_truncated,omitempty"`
-	Error              string               `json:"error,omitempty"`
-	FolderFocus        *foldercontext.Focus `json:"folder_focus,omitempty"`
+	ID                 string                    `json:"id,omitempty"`
+	Title              string                    `json:"title,omitempty"`
+	Started            bool                      `json:"started,omitempty"`
+	Stored             bool                      `json:"stored"`
+	UserMessageID      string                    `json:"user_message_id,omitempty"`
+	AssistantMessageID string                    `json:"assistant_message_id,omitempty"`
+	HistoryTruncated   bool                      `json:"history_truncated,omitempty"`
+	Continuity         *AssistantContinuityState `json:"continuity,omitempty"`
+	Error              string                    `json:"error,omitempty"`
+	FolderFocus        *foldercontext.Focus      `json:"folder_focus,omitempty"`
 }
 
 // personalAssistantConversationScope is the server-derived owner of a
@@ -138,6 +141,9 @@ type openConversation struct {
 	history           []llm.Message
 	historyMessageIDs map[string]bool // canonical rows actually included in the provider window
 	truncated         bool
+	context           *PersonalAssistantConversationContext
+	owner             assistantcontext.SaveOwner
+	continuity        *AssistantContinuityState
 }
 
 // SetConversationStore wires the canonical session store for assistant
@@ -176,7 +182,26 @@ func (h *HomeAssistantAskHandler) openConversation(ctx context.Context, ref *Hom
 	if id == "" {
 		return conversation, ""
 	}
-	record, messages, err := h.readConversation(ctx, id)
+	var record PersonalAssistantConversationRecord
+	var messages []PersonalAssistantConversationMessage
+	var err error
+	if store, ok := h.Conversations.(PersonalAssistantContinuityStore); ok {
+		user, userErr := h.currentAssistantUser(ctx)
+		if userErr != nil {
+			return nil, PersonalAssistantConversationUnavailable
+		}
+		conversation.owner = assistantcontext.SaveOwner{UserID: user, WorkspaceID: scope.workspaceID, AgentName: scope.agentName, StateVersion: workContext.StateVersion}
+		conversation.context, err = store.ReadContinuity(ctx, id, conversation.owner)
+		if err == nil && conversation.context != nil {
+			record, messages = conversation.context.Record, conversation.context.Messages
+			conversation.truncated = conversation.context.HasOlder
+		}
+	} else {
+		record, messages, err = h.readConversation(ctx, id)
+	}
+	if errors.Is(err, ErrPersonalAssistantConversationOwnerChanged) {
+		return nil, PersonalAssistantConversationOutOfScope
+	}
 	if errors.Is(err, ErrPersonalAssistantConversationNotFound) {
 		return nil, PersonalAssistantConversationNotFound
 	}
@@ -189,7 +214,9 @@ func (h *HomeAssistantAskHandler) openConversation(ctx context.Context, ref *Hom
 	conversation.id = record.ID
 	conversation.title = record.Title
 	conversation.messages = messages
-	conversation.history, conversation.truncated, conversation.historyMessageIDs = conversationHistoryWindowWithIDs(messages)
+	var truncated bool
+	conversation.history, truncated, conversation.historyMessageIDs = conversationHistoryWindowWithIDs(messages)
+	conversation.truncated = conversation.truncated || truncated
 	return conversation, ""
 }
 
@@ -203,9 +230,12 @@ func conversationHistoryWindow(messages []PersonalAssistantConversationMessage) 
 }
 
 func conversationHistoryWindowWithIDs(messages []PersonalAssistantConversationMessage) ([]llm.Message, bool, map[string]bool) {
+	return conversationHistoryWindowAtBudget(messages, personalAssistantConversationHistoryChars)
+}
+
+func conversationHistoryWindowAtBudget(messages []PersonalAssistantConversationMessage, budget int) ([]llm.Message, bool, map[string]bool) {
 	window := make([]llm.Message, 0, personalAssistantConversationHistoryMessages)
 	ids := make([]string, 0, personalAssistantConversationHistoryMessages)
-	budget := personalAssistantConversationHistoryChars
 	focusByUser := canonicalFolderFocus(messages)
 	truncated := false
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -324,7 +354,7 @@ func (h *HomeAssistantAskHandler) storeTurn(ctx context.Context, conversation *o
 		return nil
 	}
 	state := &HomeAssistantConversationState{
-		ID: conversation.id, Title: conversation.title, HistoryTruncated: conversation.truncated,
+		ID: conversation.id, Title: conversation.title, HistoryTruncated: conversation.truncated, Continuity: conversation.continuity,
 	}
 	userText, assistantText = strings.TrimSpace(userText), strings.TrimSpace(assistantText)
 	if userText == "" && assistantText == "" {
@@ -438,6 +468,7 @@ type personalAssistantConversationMessageView struct {
 	Content          string                        `json:"content"`
 	CreatedAt        time.Time                     `json:"created_at"`
 	Imported         bool                          `json:"imported,omitempty"`
+	ContentTruncated bool                          `json:"content_truncated,omitempty"`
 	FolderContext    *foldercontext.Event          `json:"folder_context,omitempty"`
 	WorkspaceContext *assistantcontext.Attribution `json:"workspace_context,omitempty"`
 	FolderFocus      *foldercontext.Focus          `json:"folder_focus,omitempty"`
@@ -514,7 +545,24 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 	if !ok {
 		return
 	}
-	record, messages, err := h.readConversation(r.Context(), strings.TrimSpace(r.PathValue("id")))
+	var record PersonalAssistantConversationRecord
+	var messages []PersonalAssistantConversationMessage
+	var err error
+	truncated := false
+	if reader, ready := h.Conversations.(PersonalAssistantConversationDisplayReader); ready {
+		owner, ownerErr := h.canonicalConversationOwner(r.Context())
+		if ownerErr != nil || owner.WorkspaceID != scope.workspaceID || !strings.EqualFold(owner.AgentName, scope.agentName) {
+			writeConversationError(w, http.StatusConflict, PersonalAssistantConversationOutOfScope, "The conversation owner changed. Nothing was read.")
+			return
+		}
+		record, messages, truncated, err = reader.ReadConversationDisplay(r.Context(), strings.TrimSpace(r.PathValue("id")), owner)
+	} else {
+		record, messages, err = h.readConversation(r.Context(), strings.TrimSpace(r.PathValue("id")))
+	}
+	if errors.Is(err, ErrPersonalAssistantConversationOwnerChanged) {
+		writeConversationError(w, http.StatusConflict, PersonalAssistantConversationOutOfScope, "That conversation does not belong to your assistant's Personal HQ.")
+		return
+	}
 	if errors.Is(err, ErrPersonalAssistantConversationNotFound) {
 		writeConversationError(w, http.StatusNotFound, PersonalAssistantConversationNotFound, "That conversation no longer exists.")
 		return
@@ -536,7 +584,6 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 		}
 	}
 	focusByUser := canonicalFolderFocus(messages)
-	truncated := false
 	if len(messages) > personalAssistantConversationReadMessages {
 		messages = messages[len(messages)-personalAssistantConversationReadMessages:]
 		truncated = true
@@ -552,7 +599,7 @@ func (h *HomeAssistantAskHandler) ConversationHandler(w http.ResponseWriter, r *
 			continue
 		}
 		views = append(views, personalAssistantConversationMessageView{
-			ID: message.ID, Role: role, Content: message.Content, CreatedAt: message.CreatedAt, Imported: message.Imported, WorkspaceContext: message.WorkspaceContext, FolderFocus: focusByUser[message.ID],
+			ID: message.ID, Role: role, Content: message.Content, CreatedAt: message.CreatedAt, Imported: message.Imported, ContentTruncated: message.ContentTruncated, WorkspaceContext: message.WorkspaceContext, FolderFocus: focusByUser[message.ID],
 		})
 	}
 	body := map[string]any{

@@ -28,6 +28,8 @@ MODEL = "ori-workspace-fixture"
 # The runs on plain wt demo, by flag: the spec, the variable that hands it the
 # sandbox path, and the log kept with the evidence. No flag runs DEFAULT_DEMO.
 PLAIN_DEMOS = {
+    "discovery_continuity": ("tests/personal-assistant-discovery-continuity.spec.ts",
+                             "ORI_DISCOVERY_CONTINUITY_SANDBOX", "discovery-continuity.log"),
     "discovery_research": ("tests/personal-assistant-discovery.spec.ts",
                            "ORI_DISCOVERY_RESEARCH_SANDBOX", "discovery-research.log"),
     "discovery_discussion": ("tests/personal-assistant-discovery-discussion.spec.ts",
@@ -360,7 +362,54 @@ def research_step(user, results, tools_offered):
     return None
 
 
-def provider_handler(state_dir, folder_response=False, discovery_research=False):
+def continuity_summary(request):
+    """Fixture selection only: exact known sentences from host-owned sources."""
+    if not any(m.get("role") == "system" and "Select a compact conversation recap" in m.get("content", "")
+               for m in request.get("messages", [])):
+        return None
+    if request.get("tools"):
+        raise ValueError("summary fixture must be tool-free")
+    data = json.loads(request["messages"][-1]["content"])
+    items = list((data.get("prior") or {}).get("items", []))
+    wanted = [("user_goal", "My goal is community membership."),
+              ("user_correction", "No, I do not want to develop anyone's talent."),
+              ("user_correction", "No, I want recurring membership only, not one-off sales or talent coaching.")]
+    for source in data.get("sources", []):
+        if source.get("role") != "user" or source.get("imported"):
+            continue
+        for kind, quote in wanted:
+            if quote in source.get("content", "") and not any(item.get("quote") == quote for item in items):
+                items.append({"kind": kind, "message_id": source["id"], "quote": quote})
+    return json.dumps({"version": 1, "items": items[:16]})
+
+
+def continuity_answer(state_dir, messages):
+    """Record bounded-input facts, not a fabricated pleasant-answer quality score."""
+    text = "\n".join(m.get("content", "") for m in messages)
+    recap_roles = [m.get("role") for m in messages if "<conversation_reference>" in m.get("content", "")]
+    outcome = {"recap_present": bool(recap_roles), "recap_user_role": all(role == "user" for role in recap_roles),
+               "early_correction_present": "No, I do not want to develop anyone's talent." in text,
+               "latest_correction_present": "No, I want recurring membership only, not one-off sales or talent coaching." in text,
+               "history_runes": sum(len(m.get("content", "")) for m in messages[1:-1])}
+    (state_dir / "continuity-input.json").write_text(json.dumps(outcome))
+    topic = ("community membership is present in the actual bounded input, not talent coaching. "
+             if outcome["early_correction_present"] else "no early community correction is present in this input. ")
+    history = "Historical references are bounded and not current source truth. " if outcome["recap_present"] else "No historical recap is being used. "
+    return {"answer": "Deterministic continuity fixture: " + topic + history +
+                      "No setup or remembered fact was saved. This is wiring evidence, not a reasoning-quality claim."}
+
+
+def stop_owned_process(process):
+    if process and process.poll() is None:
+        os.killpg(process.pid, signal.SIGINT)
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=10)
+
+
+def provider_handler(state_dir, folder_response=False, discovery_research=False, discovery_continuity=False):
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass  # Never print prompt bodies, paths or credentials.
@@ -390,13 +439,19 @@ def provider_handler(state_dir, folder_response=False, discovery_research=False)
                 raw = self.rfile.read(size)
                 audit_provider_input(state_dir, raw.decode("utf-8", "replace"))
                 request = json.loads(raw)
+                summary = continuity_summary(request) if discovery_continuity else None
+                if summary is not None:
+                    self.reply(200, {"model": MODEL, "message": {"role": "assistant", "content": summary}, "done": True,
+                                     "prompt_eval_count": 1, "eval_count": 1})
+                    return
                 projection = workspace_projection(request.get("messages", []))
                 subject = projection.get("subject") or {}
                 user, results = current_turn(request["messages"])
                 # Only the user's own words choose a demo; the overview Ori
                 # appends (which lists note titles) never does.
                 own_words, offered = user["content"].split("\n\n##", 1)[0], bool(request.get("tools"))
-                step = ((research_step(user, results, offered) if discovery_research else None) or
+                step = ((continuity_answer(state_dir, request["messages"]) if discovery_continuity else None) or
+                        (research_step(user, results, offered) if discovery_research else None) or
                         (folder_response_step(user["content"]) if folder_response else None) or
                         reader_step(own_words, results, offered) or file_step(own_words, results, offered))
                 trace_reader_turn(state_dir, results, offered, step)
@@ -465,6 +520,8 @@ def main():
     parser.add_argument("--port", type=int, default=8954)
     parser.add_argument("--evidence-dir", type=evidence_directory,
                         help="Keep runner logs and compatible captures inside this worktree's tasks/evidence")
+    parser.add_argument("--discovery-continuity", action="store_true",
+                        help="wt demo: bounded long thread, exact recap and same-sandbox server restart, deterministic model only")
     parser.add_argument("--discovery-research", action="store_true",
                         help="wt demo: exact reviewed public catalog/document smoke, actual source owners, no install or live model")
     parser.add_argument("--discovery-discussion", action="store_true",
@@ -518,7 +575,7 @@ def main():
     evidence.mkdir(parents=True, exist_ok=True, mode=0o750)
     with tempfile.TemporaryDirectory(prefix="ori-awareness-provider.") as temp:
         state = Path(temp)
-        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research))
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), provider_handler(state, folder_response=args.folder_response, discovery_research=args.discovery_research, discovery_continuity=args.discovery_continuity))
         thread = threading.Thread(target=provider.serve_forever, daemon=True)
         thread.start()
         # Child-only isolation. Do not read or alter user credential files.
@@ -528,6 +585,8 @@ def main():
         env.update(ORI_DEMO_NO_CODEX="1", ORI_DEMO_OPEN="0",
                    ORI_ASSISTANT_EVIDENCE_DIR=str(evidence),
                    OLLAMA_BASE_URL=f"http://127.0.0.1:{provider.server_port}")
+        if args.discovery_continuity:
+            env.update(ORI_KEEP_DEMO_SANDBOX="1", ORI_DISCOVERY_CONTINUITY_PHASE="seed")
         if args.folder_response:
             env["ORI_FOLDER_RESPONSE_EVIDENCE_DIR"] = str(evidence)
         candidate = bool(args.reaper_source)
@@ -567,6 +626,18 @@ def main():
                 result = subprocess.run(
                     ["npx", "playwright", "test", spec, "--workers=1"], cwd=ROOT, env=env, check=False,
                 )
+                if args.discovery_continuity and result.returncode == 0:
+                    # Preserve only this invocation's verified wt sandbox, stop
+                    # its owned process group, then restart the built production
+                    # host with the checked-in isolation entrypoint and same data.
+                    stop_owned_process(process)
+                    process = subprocess.Popen([str(ROOT / "scripts/demo-server.sh"), str(args.port), str(sandbox)],
+                                               cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT,
+                                               start_new_session=True)
+                    wait_for_demo(process, log, args.port)
+                    env["ORI_DISCOVERY_CONTINUITY_PHASE"] = "reopen"
+                    result = subprocess.run(["npx", "playwright", "test", spec, "--workers=1"],
+                                            cwd=ROOT, env=env, check=False)
                 output.flush()
                 audit = audit_server_log(log, state)
                 (evidence / (log.stem + "-server-log-audit.json")).write_text(json.dumps(audit))
@@ -575,16 +646,11 @@ def main():
                     return 1
                 return result.returncode
         finally:
-            # Release only our hold, then stop only our process group. wt demo's
-            # own finally block removes its sandbox; never remove an external HOME.
+            # Release only our hold, then stop only our process group. Ordinary
+            # wt runs clean themselves; a restart run preserves only this
+            # invocation's verified sandbox for the guarded cleanup below.
             (state / "release").touch()
-            if process and process.poll() is None:
-                os.killpg(process.pid, signal.SIGINT)
-                try:
-                    process.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=10)
+            stop_owned_process(process)
             provider.shutdown()
             provider.server_close()
             thread.join(timeout=5)
